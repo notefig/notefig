@@ -155,7 +155,7 @@ export class InitCommand extends ConfigAwareCommand {
   protected shouldIncludeChapterFile(filePath: string) {
     return (
       this.shouldIncludeFile(filePath) &&
-      !filePath.endsWith(InitCommand.metaFileName) &&
+      !filePath.endsWith(InitCommand.getMetaFileName()) &&
       this.getChangedFileType(filePath) === 'content'
     );
   }
