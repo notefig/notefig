@@ -1,10 +1,12 @@
 import { readFileInJsonIfExists } from './fs.util';
+import type { hostHelpers } from './hosts.util';
 
 export interface IRcFileComplete {
   outDir: string;
   template: {
     name: string;
   };
+  hosts?: Partial<Record<keyof typeof hostHelpers, any>>;
 }
 
 export type IRcFile = Partial<IRcFileComplete>;

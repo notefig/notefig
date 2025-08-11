@@ -18,36 +18,77 @@ export class PublishCommand extends InitCommand {
   public async handle(
     command: ReturnType<typeof PublishCommand.prototype.load>,
   ) {
-    await super.handle(command);
     const platform = command.args[0];
-    await this.createHostingConfig(platform);
-  }
 
-  protected async createHostingConfig(hostingPlatform) {
-    if (!hostingPlatform) {
+    // Validate platform and get host helper upfront
+    if (!platform) {
       throw new HostNotProvidedException({
         supportedHosts: this.getSupportedHosts(),
       });
     }
-    const outDir = 'dist';
-    const command = `npx ${name} build -o ${outDir}`;
 
-    const hostHelper = getHostHelper(hostingPlatform);
+    const hostHelper = getHostHelper(platform);
     if (!hostHelper) {
       throw new UnsupportedHostException({
-        host: hostingPlatform,
+        host: platform,
         supportedHosts: this.getSupportedHosts(),
       });
     }
 
+    // Build the template first
+    await super.handle(command);
+    const outDir = this.getRc((rc) => rc?.outDir);
+    const buildCommand = `npx ${name} build -o ${outDir}`;
+
+    // Then create hosting config and execute side effects independently
+    await Promise.all([
+      this.createHostingConfig(platform, hostHelper, buildCommand),
+      this.executeHostSideEffects(platform, hostHelper, buildCommand),
+    ]);
+  }
+
+  protected async createHostingConfig(
+    hostingPlatform: string,
+    hostHelper: any,
+    buildCommand: string,
+  ) {
+    // Only create config file if the host needs one
+    if (!hostHelper.configFileName || !hostHelper.getConfigFileContent) {
+      return;
+    }
+
+    const outDir = this.getRc((rc) => rc?.outDir);
     return await createFileIfNotExists(
       hostHelper.configFileName,
-      hostHelper.getConfigFileContent({ outDir, command }),
+      hostHelper.getConfigFileContent({ outDir, buildCommand }),
     );
   }
 
   protected getSupportedHosts() {
     const hosts = getSupportedHosts();
     return hosts.join(', ');
+  }
+
+  protected async executeHostSideEffects(
+    hostingPlatform: string,
+    hostHelper: any,
+    buildCommand: string,
+  ) {
+    if (!hostHelper.sideEffect) {
+      return;
+    }
+
+    const outDir = this.getRc((rc) => rc?.outDir);
+
+    try {
+      const rcConfig = this.getRc((rc) => rc);
+      await hostHelper.sideEffect(rcConfig, { outDir });
+    } catch (error) {
+      console.error(
+        `Error executing ${hostingPlatform} sideeffect:`,
+        error.message,
+      );
+      throw error;
+    }
   }
 }
