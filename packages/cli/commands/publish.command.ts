@@ -1,18 +1,17 @@
+import { Command } from 'commander';
+import { InitCommand } from './init.command';
 import { BuildCommand } from './build.command';
 import { createFileIfNotExists } from '../lib/utils/fs.util';
 import { getHostHelper, getSupportedHosts } from '../lib/utils/hosts.util';
 import { name } from '../package.json';
 import { UnsupportedHostException } from '../exceptions/unsupported-host.exception';
 import { HostNotProvidedException } from '../exceptions/host-not-provided.exception';
-import { Command } from 'commander';
-import { InitCommand } from './init.command';
 
 export class PublishCommand extends InitCommand {
   public load(program: Command) {
     return program
       .command('publish')
       .alias('p')
-      .option('-o, --out <path>', 'Output directory for the production build')
       .argument('[platform]', 'Platform where the book will be published')
       .description('Publish a production build of the book');
   }
