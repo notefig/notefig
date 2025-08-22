@@ -42,11 +42,7 @@ export class BuildCommand extends InitCommand {
   }
 
   protected async copyBuiltContentToOutputDir(finalOutDir: string) {
-    const templateOutputDir = this.getTemplateConfig((rc) => rc);
-    const templateOutFullPath = combinePaths([
-      this.templatePath,
-      templateOutputDir.outDir,
-    ]);
+    const templateOutFullPath = this.getFinalTemplateOutputPath();
     return await copyAllFilesFromOneDirectoryToAnother(
       templateOutFullPath,
       finalOutDir,

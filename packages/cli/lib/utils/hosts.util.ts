@@ -11,6 +11,7 @@ interface Host {
     config: any,
     options: { outDir: string; buildCommand: string },
   ) => Promise<void>;
+  requiresBuild?: boolean;
 }
 
 const nixpacks = {
@@ -43,6 +44,7 @@ command = "${command}"
 };
 
 const s3 = {
+  requiresBuild: true,
   sideEffect: async (config: any, options: { outDir: string }) => {
     const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
     const { Upload } = await import('@aws-sdk/lib-storage');
@@ -107,11 +109,12 @@ const s3 = {
     };
 
     const allFiles = getAllFiles(options.outDir);
-    const uploadPromises = allFiles.map(({ filePath, key }) =>
-      uploadFile(filePath, key),
-    );
+    console.log(allFiles);
+    // const uploadPromises = allFiles.map(({ filePath, key }) =>
+    //   uploadFile(filePath, key),
+    // );
 
-    await Promise.all(uploadPromises);
+    // await Promise.all(uploadPromises);
     console.log(
       `Successfully uploaded ${allFiles.length} files to S3 bucket: ${s3Config.bucket}`,
     );

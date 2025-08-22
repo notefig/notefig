@@ -1,16 +1,17 @@
-import { InitCommand } from './init.command';
+import { BuildCommand } from './build.command';
 import { createFileIfNotExists } from '../lib/utils/fs.util';
 import { getHostHelper, getSupportedHosts } from '../lib/utils/hosts.util';
 import { name } from '../package.json';
 import { UnsupportedHostException } from '../exceptions/unsupported-host.exception';
 import { HostNotProvidedException } from '../exceptions/host-not-provided.exception';
-import type { Command } from 'commander';
+import { Command } from 'commander';
 
-export class PublishCommand extends InitCommand {
+export class PublishCommand extends BuildCommand {
   public load(program: Command) {
     return program
       .command('publish')
       .alias('p')
+      .option('-o, --out <path>', 'Output directory for the production build')
       .argument('[platform]', 'Platform where the book will be published')
       .description('Publish a production build of the book');
   }
@@ -39,6 +40,12 @@ export class PublishCommand extends InitCommand {
     await super.handle(command);
     const outDir = this.getRc((rc) => rc?.outDir);
     const buildCommand = `npx ${name} build -o ${outDir}`;
+
+    if (hostHelper.requiresBuild) {
+      command.setOptionValue('out', outDir);
+      console.log(command.opts().out);
+      await super.handle(command);
+    }
 
     // Then create hosting config and execute side effects independently
     await Promise.all([
@@ -78,11 +85,11 @@ export class PublishCommand extends InitCommand {
       return;
     }
 
-    const outDir = this.getRc((rc) => rc?.outDir);
+    const templateOutputPath = this.getFinalTemplateOutputPath();
 
     try {
       const rcConfig = this.getRc((rc) => rc);
-      await hostHelper.sideEffect(rcConfig, { outDir });
+      await hostHelper.sideEffect(rcConfig, { outDir: templateOutputPath });
     } catch (error) {
       console.error(
         `Error executing ${hostingPlatform} sideeffect:`,
