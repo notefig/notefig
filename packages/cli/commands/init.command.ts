@@ -6,6 +6,7 @@ import {
   pathExists,
   createDirectory,
   performOnAllFilesInDirectory,
+  combinePaths,
 } from '../lib/utils/fs.util';
 import { addToGitIgnore } from '../lib/utils/gitignore.util';
 import {
@@ -243,5 +244,10 @@ export class InitCommand extends ConfigAwareCommand {
         this.shouldIncludeChapterFile.bind(this),
       ),
     ]);
+  }
+
+  protected getFinalTemplateOutputPath() {
+    const templateOutputDir = this.getTemplateConfig((rc) => rc);
+    return combinePaths([this.templatePath, templateOutputDir.outDir]);
   }
 }

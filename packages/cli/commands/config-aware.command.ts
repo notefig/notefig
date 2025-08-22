@@ -51,4 +51,17 @@ export abstract class ConfigAwareCommand extends AbstractCommand {
 
     return this._getTemplateConfig(cb, defaultValue);
   }
+
+  protected getHostConfig<TData>(hostName: string, cb: (hostConfig: any) => TData, defaultValue?: TData): TData {
+    if (!this._getConfig) {
+      throw new Error('Config is not loaded. Please call loadRcConfig() before getHostConfig()');
+    }
+
+    const hostConfig = this.getRc((rc) => rc?.hosts?.[hostName]);
+    if (!hostConfig && defaultValue === undefined) {
+      throw new Error(`Host configuration for '${hostName}' not found in .metristsrc file`);
+    }
+    
+    return hostConfig ? cb(hostConfig) : defaultValue!;
+  }
 }
