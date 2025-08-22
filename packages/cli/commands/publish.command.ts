@@ -5,8 +5,9 @@ import { name } from '../package.json';
 import { UnsupportedHostException } from '../exceptions/unsupported-host.exception';
 import { HostNotProvidedException } from '../exceptions/host-not-provided.exception';
 import { Command } from 'commander';
+import { InitCommand } from './init.command';
 
-export class PublishCommand extends BuildCommand {
+export class PublishCommand extends InitCommand {
   public load(program: Command) {
     return program
       .command('publish')
@@ -19,6 +20,7 @@ export class PublishCommand extends BuildCommand {
   public async handle(
     command: ReturnType<typeof PublishCommand.prototype.load>,
   ) {
+    await super.handle(command);
     const platform = command.args[0];
 
     // Validate platform and get host helper upfront
@@ -42,9 +44,11 @@ export class PublishCommand extends BuildCommand {
     const buildCommand = `npx ${name} build -o ${outDir}`;
 
     if (hostHelper.requiresBuild) {
-      command.setOptionValue('out', outDir);
-      console.log(command.opts().out);
-      await super.handle(command);
+      const buildCommand = new BuildCommand();
+      buildCommand.setServices(this.services);
+      const buildProgram = buildCommand.load(new Command());
+      buildProgram.setOptionValue('out', outDir);
+      await buildCommand.handle(buildProgram);
     }
 
     // Then create hosting config and execute side effects independently

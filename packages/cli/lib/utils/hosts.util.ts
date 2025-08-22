@@ -109,12 +109,11 @@ const s3 = {
     };
 
     const allFiles = getAllFiles(options.outDir);
-    console.log(allFiles);
-    // const uploadPromises = allFiles.map(({ filePath, key }) =>
-    //   uploadFile(filePath, key),
-    // );
+    const uploadPromises = allFiles.map(({ filePath, key }) =>
+      uploadFile(filePath, key),
+    );
 
-    // await Promise.all(uploadPromises);
+    await Promise.all(uploadPromises);
     console.log(
       `Successfully uploaded ${allFiles.length} files to S3 bucket: ${s3Config.bucket}`,
     );
