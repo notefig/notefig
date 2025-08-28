@@ -4,12 +4,12 @@ import { describe, expect, it, afterAll, beforeAll } from '@jest/globals';
 import execa = require('execa');
 
 describe('prune_command_deletes_the_right_files', () => {
-  const temp = join(__dirname, 'tmp');
+  const temp = join(__dirname, 'tmp-prune');
   let tempDir: string;
   const timeout = 100000;
 
   beforeAll(async () => {
-    tempDir = join(temp, `test-${Date.now()}`);
+    tempDir = join(temp, `test-prune-${Date.now()}-${Math.random().toString(36).substring(7)}`);
     mkdirSync(tempDir, { recursive: true });
 
     const markdownFilePath = join(tempDir, 'test.md');

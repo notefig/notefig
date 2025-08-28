@@ -4,13 +4,13 @@ import { describe, expect, it, afterAll, beforeAll } from '@jest/globals';
 import execa = require('execa');
 
 describe('init_command_creates_the_right_files', () => {
-  const temp = join(__dirname, 'tmp');
+  const temp = join(__dirname, 'tmp-init');
   let tempDirName: string;
   let tempDir: string;
   const timeout = 100000;
 
   beforeAll(async () => {
-    tempDirName = `test-${Date.now()}`;
+    tempDirName = `test-init-${Date.now()}-${Math.random().toString(36).substring(7)}`;
     tempDir = join(temp, tempDirName);
     mkdirSync(tempDir, { recursive: true });
     await execa('node', ['../../../../dist/bin/metrists.js', 'init'], {
@@ -59,7 +59,9 @@ describe('init_command_creates_the_right_files', () => {
       expect(metaExists).toBe(true);
 
       const fileContent = readFileSync(metaPath, 'utf-8');
-      expect(fileContent).toContain(`title: ${tempDirName.replace('-', ' ')}`);
+      expect(fileContent).toContain(`title: ${tempDirName.replace(new RegExp(
+        '-', 'g'
+      ), ' ')}`);
     },
     timeout,
   );

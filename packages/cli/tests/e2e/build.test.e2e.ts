@@ -4,7 +4,7 @@ import { describe, expect, it, afterAll, beforeAll } from '@jest/globals';
 import execa = require('execa');
 
 describe('build_command_creates_the_right_files', () => {
-  const temp = join(__dirname, 'tmp');
+  const temp = join(__dirname, 'tmp-build');
   let tempDirName: string;
   let tempDir: string;
   const timeout = 100000;
@@ -21,7 +21,7 @@ describe('build_command_creates_the_right_files', () => {
   ];
 
   beforeAll(async () => {
-    tempDirName = `test-${Date.now()}`;
+    tempDirName = `test-build-${Date.now()}-${Math.random().toString(36).substring(7)}`;
     tempDir = join(temp, tempDirName);
     mkdirSync(tempDir, { recursive: true });
 
