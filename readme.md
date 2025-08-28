@@ -9,7 +9,7 @@ Metrists acts as a Continuous Deployment pipeline for your books. It makes publi
 Create a new directory and execute the following command:
 
 ```bash
-npx metrists watch --example --noob
+npx metrists watch --noob
 ```
 
 Modify the markdown files. You can then publish your book:
@@ -22,7 +22,7 @@ That's it. You can push your files to a repository and connect your CI/CD pipeli
 
 ### Documentation
 
-Follow [the full documentation](https://metrists.com/docs/documentation) to get started building your own project.
+Follow [the full documentation](https://metrists.com/docs) to get started building your own project.
 
 ## Features
 
