@@ -55,7 +55,9 @@ export function Sidebar({
               actions={[
                 {
                   label: "Download",
-                  action: () => {},
+                  action: () => {
+                    console.log("Download not implemented yet.")
+                  },
                   buttonProps: { size: "sm", disabled: true },
                 },
                 {

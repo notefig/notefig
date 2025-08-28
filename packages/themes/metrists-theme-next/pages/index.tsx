@@ -50,16 +50,18 @@ export default function Home({
             actions={[
               ...(firstChapter
                 ? [
-                    {
-                      label: "Start Reading",
-                      action: `/${firstChapter.slug}`,
-                      buttonProps: {},
-                    },
-                  ]
+                  {
+                    label: "Start Reading",
+                    action: `/${firstChapter.slug}`,
+                    buttonProps: {},
+                  },
+                ]
                 : []),
               {
                 label: "Download Epub",
-                action: () => {},
+                action: () => {
+                  console.log("Download not implemented yet.");
+                },
                 buttonProps: { variant: "secondary", disabled: true },
               },
               {
