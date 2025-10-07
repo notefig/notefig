@@ -1,4 +1,4 @@
-import type { Markdown } from "contentlayer/core";
+import type { Markdown } from "contentlayer2/core";
 import styles from "./reader.module.css";
 
 export type ReaderProps = {

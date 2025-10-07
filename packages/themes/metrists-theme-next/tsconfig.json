@@ -24,7 +24,8 @@
       "contentlayer/generated": [
         "./.contentlayer/generated"
       ]
-    }
+    },
+    "target": "ES2017"
   },
   "include": [
     "next-env.d.ts",
