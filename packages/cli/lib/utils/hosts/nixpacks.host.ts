@@ -15,7 +15,7 @@ cmds = ['${metristsBuildCommand}']
 cmd = 'cd ${outDir} && npx serve -s'
 `;
 
-    const configPath = join(process.cwd(), 'netlify.toml');
+    const configPath = join(process.cwd(), 'nixpacks.toml');
     writeFileSync(configPath, configContent);
 
     return {
