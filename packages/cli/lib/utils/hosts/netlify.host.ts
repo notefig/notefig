@@ -1,9 +1,25 @@
-import { Host } from '../host.interface';
+import { Host, HostDeployParams, HostDeployResult } from '../host.interface';
+import { writeFileSync } from 'fs';
+import { join } from 'path';
 
 export const netlify: Host = {
-  configFileName: 'netlify.toml',
-  getConfigFileContent: ({ outDir, command }) => `[build]
+  async deploy(params: HostDeployParams): Promise<HostDeployResult> {
+    const { outDir, metristsBuildCommand } = params;
+    
+    const configContent = `[build]
 publish = "${outDir}"
-command = "${command}"
-`,
+command = "${metristsBuildCommand}"
+`;
+    
+    const configPath = join(process.cwd(), 'netlify.toml');
+    writeFileSync(configPath, configContent);
+    
+    return {
+      createdFiles: ['netlify.toml']
+    };
+  },
+  
+  getConfigFilePaths(): string[] {
+    return ['netlify.toml'];
+  }
 };

@@ -42,19 +42,25 @@ export class PublishCommand extends InitCommand {
     const outDir = this.getRc((rc) => rc?.outDir);
     const buildCommand = `npx ${name} build -o ${outDir}`;
 
-    if (hostHelper.requiresBuild) {
-      const buildCommand = new BuildCommand();
-      buildCommand.setServices(this.services);
-      const buildProgram = buildCommand.load(new Command());
-      buildProgram.setOptionValue('out', outDir);
-      await buildCommand.handle(buildProgram);
-    }
+    const createdFiles = await hostHelper.deploy({
+      outDir,
+      metristsBuildCommand: buildCommand,
+      hostOptions: this.getRc((rc) => rc?.hosts?.[platform] || {}),
+    });
+
+    // if (hostHelper.requiresBuild) {
+    //   const buildCommand = new BuildCommand();
+    //   buildCommand.setServices(this.services);
+    //   const buildProgram = buildCommand.load(new Command());
+    //   buildProgram.setOptionValue('out', outDir);
+    //   await buildCommand.handle(buildProgram);
+    // }
 
     // Then create hosting config and execute side effects independently
-    await Promise.all([
-      this.createHostingConfig(platform, hostHelper, buildCommand),
-      this.executeHostSideEffects(platform, hostHelper, buildCommand),
-    ]);
+    // await Promise.all([
+    //   this.createHostingConfig(platform, hostHelper, buildCommand),
+    //   this.executeHostSideEffects(platform, hostHelper, buildCommand),
+    // ]);
   }
 
   protected async createHostingConfig(

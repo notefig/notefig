@@ -10,39 +10,66 @@ describe('build_command_creates_the_right_files', () => {
   const timeout = 100000;
   const outputDir = 'dist';
   const testChapters = [
-    { filename: 'chapter1.md', title: 'Getting Started', content: '# Getting Started\n\nThis is the introduction chapter.' },
-    { filename: 'chapter2.md', title: 'Advanced Topics', content: '# Advanced Topics\n\nThis covers advanced concepts.' },
-    { filename: 'conclusion.md', title: 'Conclusion', content: '# Conclusion\n\nFinal thoughts and summary.' }
+    {
+      filename: 'chapter1.md',
+      title: 'Getting Started',
+      content: '# Getting Started\n\nThis is the introduction chapter.',
+    },
+    {
+      filename: 'chapter2.md',
+      title: 'Advanced Topics',
+      content: '# Advanced Topics\n\nThis covers advanced concepts.',
+    },
+    {
+      filename: 'conclusion.md',
+      title: 'Conclusion',
+      content: '# Conclusion\n\nFinal thoughts and summary.',
+    },
   ];
   const testAssets = [
     { filename: 'logo.png', content: 'fake-png-content' },
     { filename: 'styles.css', content: 'body { margin: 0; }' },
-    { filename: 'script.js', content: 'console.log("test");' }
+    { filename: 'script.js', content: 'console.log("test");' },
   ];
 
   beforeAll(async () => {
-    tempDirName = `test-build-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    tempDirName = `test-build-${Date.now()}-${Math.random()
+      .toString(36)
+      .substring(7)}`;
     tempDir = join(temp, tempDirName);
     mkdirSync(tempDir, { recursive: true });
 
     // Create test markdown chapters
-    testChapters.forEach(chapter => {
+    testChapters.forEach((chapter) => {
       const filePath = join(tempDir, chapter.filename);
       writeFileSync(filePath, chapter.content, 'utf-8');
     });
 
     // Create test assets
-    testAssets.forEach(asset => {
+    testAssets.forEach((asset) => {
       const filePath = join(tempDir, asset.filename);
       writeFileSync(filePath, asset.content, 'utf-8');
     });
 
-    await execa('node', ['../../../../dist/bin/metrists.js', 'init'], {
-      cwd: tempDir,
-    });
+    console.log('before init');
     await execa(
       'node',
-      ['../../../../dist/bin/metrists.js', 'build', '-o', outputDir],
+      ['../../../../dist/bin/metrists.js', 'init', '--verbose'],
+      {
+        cwd: tempDir,
+      },
+    );
+    console.log('after init');
+
+    await execa(
+      'node',
+      [
+        '../../../../dist/bin/metrists.js',
+        'build',
+        '-o',
+        outputDir,
+        '--verbose',
+      ],
       {
         cwd: tempDir,
       },
@@ -54,170 +81,76 @@ describe('build_command_creates_the_right_files', () => {
   }, timeout);
 
   it(
-    `Should have created a ${outputDir} directory`,
+    'Should build complete static site with all expected files and structure',
     async () => {
       const outputDirPath = join(tempDir, outputDir);
-      const directoryExists = existsSync(outputDirPath);
-
-      expect(directoryExists).toBe(true);
-    },
-    timeout,
-  );
-
-  it(
-    'Index.html should exist in the output directory with correct content',
-    async () => {
-      const indexPath = join(tempDir, outputDir, 'index.html');
-      const indexExists = existsSync(indexPath);
-
-      expect(indexExists).toBe(true);
-
       const titleBasedOnDirName = tempDirName.replace(/-/g, ' ');
 
-      const fileContent = readFileSync(indexPath, 'utf-8');
-      expect(fileContent).toContain(`<title>${titleBasedOnDirName}</title>`);
-    },
-    timeout,
-  );
+      // Verify output directory was created
+      expect(existsSync(outputDirPath)).toBe(true);
 
-  it(
-    'Should generate HTML files for each chapter',
-    async () => {
-      testChapters.forEach(chapter => {
+      // Verify index.html exists with correct content
+      const indexPath = join(tempDir, outputDir, 'index.html');
+      expect(existsSync(indexPath)).toBe(true);
+
+      const indexContent = readFileSync(indexPath, 'utf-8');
+      // Use regex to match title with possible Next.js attributes
+      expect(indexContent).toMatch(
+        new RegExp(
+          `<title[^>]*>${titleBasedOnDirName.replace(
+            /[.*+?^${}()|[\]\\]/g,
+            '\\$&',
+          )}</title>`,
+        ),
+      );
+      expect(indexContent).toMatch(/<html[^>]*>/);
+      expect(indexContent).toContain('</html>');
+
+      // Verify chapter HTML files exist with correct structure and content
+      testChapters.forEach((chapter) => {
         const chapterSlug = chapter.filename.replace('.md', '');
         const chapterHtmlPath = join(tempDir, outputDir, `${chapterSlug}.html`);
-        const chapterExists = existsSync(chapterHtmlPath);
-        
-        expect(chapterExists).toBe(true);
-      });
-    },
-    timeout,
-  );
 
-  it(
-    'Chapter HTML files should contain correct titles and content',
-    async () => {
-      testChapters.forEach(chapter => {
-        const chapterSlug = chapter.filename.replace('.md', '');
-        const chapterHtmlPath = join(tempDir, outputDir, `${chapterSlug}.html`);
-        
-        if (existsSync(chapterHtmlPath)) {
-          const htmlContent = readFileSync(chapterHtmlPath, 'utf-8');
-          
-          // Check that HTML structure exists
-          expect(htmlContent).toContain('<html');
-          expect(htmlContent).toContain('</html>');
-          expect(htmlContent).toContain('<head>');
-          expect(htmlContent).toContain('<body>');
-          
-          // Check that chapter title appears in the HTML
-          expect(htmlContent).toContain(chapter.title);
-        }
-      });
-    },
-    timeout,
-  );
+        expect(existsSync(chapterHtmlPath)).toBe(true);
 
-  it(
-    'Should copy all assets to the public directory in output',
-    async () => {
-      const publicDir = join(tempDir, outputDir);
-      
-      testAssets.forEach(asset => {
-        // Assets might be copied to various locations, check if they exist somewhere in the build
-        const assetInPublic = join(publicDir, asset.filename);
-        
-        // For Next.js builds, static assets might be in different locations
-        // We'll check if the asset exists in the build output
-        const buildHasAsset = existsSync(assetInPublic);
-        
-        // Note: In a real Next.js build, assets might be processed/hashed
-        // This is a basic check - in production you might need to check _next/static
-        if (buildHasAsset) {
-          expect(buildHasAsset).toBe(true);
-        }
+        const htmlContent = readFileSync(chapterHtmlPath, 'utf-8');
+        expect(htmlContent).toMatch(/<html[^>]*>/);
+        expect(htmlContent).toContain('</html>');
+        expect(htmlContent).toMatch(/<head[^>]*>/);
+        expect(htmlContent).toMatch(/<body[^>]*>/);
+        expect(htmlContent).toContain(chapter.title);
       });
-    },
-    timeout,
-  );
 
-  it(
-    'Should generate _next directory with static assets',
-    async () => {
+      // Verify Next.js _next directory exists
       const nextDir = join(tempDir, outputDir, '_next');
-      const nextDirExists = existsSync(nextDir);
-      
-      expect(nextDirExists).toBe(true);
-      
-      // Check for typical Next.js static directories
+      expect(existsSync(nextDir)).toBe(true);
+
       const staticDir = join(nextDir, 'static');
       if (existsSync(staticDir)) {
         expect(existsSync(staticDir)).toBe(true);
       }
-    },
-    timeout,
-  );
 
-  it(
-    'Should preserve meta.md file information in the build',
-    async () => {
+      // Verify meta.md file exists and contains correct information
       const metaPath = join(tempDir, 'meta.md');
-      const metaExists = existsSync(metaPath);
-      
-      expect(metaExists).toBe(true);
-      
-      if (metaExists) {
-        const metaContent = readFileSync(metaPath, 'utf-8');
-        const titleBasedOnDirName = tempDirName.replace(/-/g, ' ');
-        expect(metaContent).toContain(`title: ${titleBasedOnDirName}`);
-      }
-    },
-    timeout,
-  );
+      expect(existsSync(metaPath)).toBe(true);
 
-  it(
-    'Should create proper navigation structure',
-    async () => {
-      const indexPath = join(tempDir, outputDir, 'index.html');
-      
-      if (existsSync(indexPath)) {
-        const indexContent = readFileSync(indexPath, 'utf-8');
-        
-        // Check that the index page contains some form of navigation or chapter listing
-        // This will depend on the theme implementation
-        expect(indexContent).toContain('<html');
-        expect(indexContent).toContain('</html>');
-      }
-    },
-    timeout,
-  );
+      const metaContent = readFileSync(metaPath, 'utf-8');
+      expect(metaContent).toContain(`title: ${titleBasedOnDirName}`);
 
-  it(
-    'Should fail gracefully when output directory is not provided',
-    async () => {
+      // Verify assets are handled (check if they exist in build output)
+      testAssets.forEach((asset) => {
+        const assetInPublic = join(outputDirPath, asset.filename);
+        if (existsSync(assetInPublic)) {
+          expect(existsSync(assetInPublic)).toBe(true);
+        }
+      });
+
+      // Verify build fails when output directory is not provided
       await expect(
         execa('node', ['../../../../dist/bin/metrists.js', 'build'], {
           cwd: tempDir,
-        })
+        }),
       ).rejects.toThrow();
-    },
-    timeout,
-  );
-
-  it(
-    'Should create a complete static site structure',
-    async () => {
-      const outputPath = join(tempDir, outputDir);
-      const outputExists = existsSync(outputPath);
-      
-      expect(outputExists).toBe(true);
-      
-      // Check that essential files exist
-      const essentialFiles = ['index.html'];
-      essentialFiles.forEach(file => {
-        const filePath = join(outputPath, file);
-        expect(existsSync(filePath)).toBe(true);
-      });
     },
     timeout,
   );
