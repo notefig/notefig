@@ -1,13 +1,29 @@
-import { Host } from '../host.interface';
+import { Host, HostDeployParams, HostDeployResult } from '../host.interface';
+import { writeFileSync } from 'fs';
+import { join } from 'path';
 
 export const nixpacks: Host = {
-  configFileName: 'nixpacks.toml',
-  getConfigFileContent: ({ outDir, command }) => `providers = ['node']
+  async deploy(params: HostDeployParams): Promise<HostDeployResult> {
+    const { outDir, metristsBuildCommand } = params;
+
+    const configContent = `providers = ['node']
 
 [phases.build]
-cmds = ['${command}']
+cmds = ['${metristsBuildCommand}']
 
 [start]
 cmd = 'cd ${outDir} && npx serve -s'
-`,
+`;
+
+    const configPath = join(process.cwd(), 'netlify.toml');
+    writeFileSync(configPath, configContent);
+
+    return {
+      createdFiles: ['nixpacks.toml'],
+    };
+  },
+
+  getConfigFilePaths(): string[] {
+    return ['nixpacks.toml'];
+  },
 };

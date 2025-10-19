@@ -1,96 +1,92 @@
+import { join } from 'path';
 import { Host } from '../host.interface';
-
-function getContentType(filePath: string): string {
-  const ext = filePath.split('.').pop()?.toLowerCase();
-  const contentTypes: Record<string, string> = {
-    'html': 'text/html',
-    'css': 'text/css',
-    'js': 'text/javascript',
-    'json': 'application/json',
-    'png': 'image/png',
-    'jpg': 'image/jpeg',
-    'jpeg': 'image/jpeg',
-    'gif': 'image/gif',
-    'svg': 'image/svg+xml',
-    'pdf': 'application/pdf',
-    'txt': 'text/plain',
-  };
-  return contentTypes[ext || ''] || 'application/octet-stream';
-}
+import { createDirectoryIfNotExists, writeToFile } from '../fs.util';
 
 export const s3: Host = {
-  requiresBuild: true,
-  sideEffect: async (config: any, options: { outDir: string }) => {
-    const { S3Client } = await import('@aws-sdk/client-s3');
-    const { Upload } = await import('@aws-sdk/lib-storage');
-    const fs = await import('fs');
-    const path = await import('path');
+  'deploy': async ({ outDir, metristsBuildCommand }) => {
+    const sstConfigPath = join(process.cwd(), 'sst.config.ts');
+    const githubWorkflowsDir = join(process.cwd(), '.github', 'workflows');
+    const githubActionConfig = join(githubWorkflowsDir, 'deploy.yml');
 
-    if (!config?.hosts?.s3) {
-      throw new Error('S3 configuration not found in .metristsrc file');
-    }
+    await createDirectoryIfNotExists(githubWorkflowsDir);
 
-    const s3Config = config.hosts.s3;
+    await Promise.all([
+      writeToFile(sstConfigPath, getSstConfig(metristsBuildCommand, outDir)),
+      writeToFile(githubActionConfig, getGithubAction()),
+    ]);
 
-    const clientConfig: any = {
-      region: s3Config.region,
+    return {
+      createdFiles: [
+        'sst.config.ts',
+        join('.github', 'workflows', 'deploy.yml'),
+      ],
     };
+  },
+  'getConfigFilePaths': () => [
+    'sst.config.ts',
+    join('.github', 'workflows', 'deploy.yml'),
+  ],
+};
 
-    if (s3Config.accessKeyId && s3Config.secretAccessKey) {
-      clientConfig.credentials = {
-        accessKeyId: s3Config.accessKeyId,
-        secretAccessKey: s3Config.secretAccessKey,
-      };
-    } else if (s3Config.profile) {
-      clientConfig.credentials = { profile: s3Config.profile };
-    }
+function getGithubAction() {
+  return `name: Deploy to Production
+on:
+  push:
+    branches:
+      - main
 
-    const s3Client = new S3Client(clientConfig);
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: \$\{\{ secrets.AWS_ACCESS_KEY_ID \}\}
+          aws-secret-access-key: \$\{{ secrets.AWS_SECRET_ACCESS_KEY \}\}
+          aws-region: us-east-1
+          
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Install SST CLI
+        run: npm install -g sst
+        
+      - name: Deploy to production
+        run: sst deploy --stage production
+`;
+}
 
-    const uploadFile = async (filePath: string, key: string) => {
-      const fileStream = fs.createReadStream(filePath);
-      const upload = new Upload({
-        client: s3Client,
-        params: {
-          Bucket: s3Config.bucket,
-          Key: key,
-          Body: fileStream,
-          ContentType: getContentType(filePath),
+function getSstConfig(buildCommand: string, outDir: string) {
+  return `/// <reference path="./.sst/platform/config.d.ts" />
+
+export default $config({
+  app(input) {
+    return {
+      name: "aws-static-site",
+      home: "aws",
+      removal: input?.stage === "production" ? "retain" : "remove",
+    };
+  },
+  async run() {
+    try {
+      return new sst.aws.StaticSite("MySite", {
+        build: {
+          command: "${buildCommand}",
+          output: "${outDir}",
         },
       });
-
-      await upload.done();
-    };
-
-    const getAllFiles = (
-      dirPath: string,
-      prefix = '',
-    ): Array<{ filePath: string; key: string }> => {
-      const items = fs.readdirSync(dirPath);
-      const files: Array<{ filePath: string; key: string }> = [];
-
-      for (const item of items) {
-        const itemPath = path.join(dirPath, item);
-        const key = prefix ? `${prefix}/${item}` : item;
-
-        if (fs.statSync(itemPath).isDirectory()) {
-          files.push(...getAllFiles(itemPath, key));
-        } else {
-          files.push({ filePath: itemPath, key });
-        }
-      }
-
-      return files;
-    };
-
-    const allFiles = getAllFiles(options.outDir);
-    const uploadPromises = allFiles.map(({ filePath, key }) =>
-      uploadFile(filePath, key),
-    );
-
-    await Promise.all(uploadPromises);
-    console.log(
-      `Successfully uploaded ${allFiles.length} files to S3 bucket: ${s3Config.bucket}`,
-    );
+    } catch (e) {
+      console.error(e);
+      throw e;
+    }
   },
-};
+});
+`;
+}

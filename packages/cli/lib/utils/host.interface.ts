@@ -1,15 +1,14 @@
+export interface HostDeployResult {
+  createdFiles: string[];
+}
+
+export interface HostDeployParams {
+  metristsBuildCommand: string;
+  outDir: string;
+  hostOptions: any;
+}
+
 export interface Host {
-  configFileName?: string;
-  getConfigFileContent?: ({
-    outDir,
-    command,
-  }: {
-    outDir: string;
-    command: string;
-  }) => string;
-  sideEffect?: (
-    config: any,
-    options: { outDir: string; buildCommand: string },
-  ) => Promise<void>;
-  requiresBuild?: boolean;
+  deploy: (params: HostDeployParams) => Promise<HostDeployResult>;
+  getConfigFilePaths: () => string[];
 }
