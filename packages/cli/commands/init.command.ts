@@ -104,13 +104,16 @@ export class InitCommand extends ConfigAwareCommand {
       this.logger.noob(
         `Copying the markdown files into the content path of the template.`,
       );
-      createGitIGnoreAndCopyFilesPromise.concat(
+      createGitIGnoreAndCopyFilesPromise.push(
         this.copyAssetsAndContentFilesToTemplate(),
       );
-      createGitIGnoreAndCopyFilesPromise.push(this.initializeTemplate());
     }
 
     await Promise.all(createGitIGnoreAndCopyFilesPromise);
+
+    if (isFirstRun) {
+      await this.initializeTemplate();
+    }
   }
 
   protected async spawnAndWaitAndStopIfError(
