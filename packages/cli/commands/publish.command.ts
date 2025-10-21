@@ -1,8 +1,16 @@
+import { join } from 'path';
 import { Command } from 'commander';
 import { InitCommand } from './init.command';
 import { BuildCommand } from './build.command';
-import { createFileIfNotExists } from '../lib/utils/fs.util';
+import {
+  createFileIfNotExists,
+  pathExists,
+  readFile,
+} from '../lib/utils/fs.util';
 import { getHostHelper, getSupportedHosts } from '../lib/utils/hosts.util';
+import { parseFrontmatter } from '../lib/utils/frontmatter.util';
+import { validateMetaDocumentFrontmatter } from '../lib/utils/content-layer.util';
+import { ProjectMetadata } from '../lib/utils/host.interface';
 import { name } from '../package.json';
 import { UnsupportedHostException } from '../exceptions/unsupported-host.exception';
 import { HostNotProvidedException } from '../exceptions/host-not-provided.exception';
@@ -39,28 +47,17 @@ export class PublishCommand extends InitCommand {
 
     // Build the template first
     await super.handle(command);
-    const outDir = this.getRc((rc) => rc?.outDir);
+    const outDir = 'out';
     const buildCommand = `npx ${name} build -o ${outDir}`;
+
+    const projectMetadata = await this.extractProjectMetadata();
 
     const createdFiles = await hostHelper.deploy({
       outDir,
       metristsBuildCommand: buildCommand,
       hostOptions: this.getRc((rc) => rc?.hosts?.[platform] || {}),
+      projectMetadata,
     });
-
-    // if (hostHelper.requiresBuild) {
-    //   const buildCommand = new BuildCommand();
-    //   buildCommand.setServices(this.services);
-    //   const buildProgram = buildCommand.load(new Command());
-    //   buildProgram.setOptionValue('out', outDir);
-    //   await buildCommand.handle(buildProgram);
-    // }
-
-    // Then create hosting config and execute side effects independently
-    // await Promise.all([
-    //   this.createHostingConfig(platform, hostHelper, buildCommand),
-    //   this.executeHostSideEffects(platform, hostHelper, buildCommand),
-    // ]);
   }
 
   protected async createHostingConfig(
@@ -85,26 +82,33 @@ export class PublishCommand extends InitCommand {
     return hosts.join(', ');
   }
 
-  protected async executeHostSideEffects(
-    hostingPlatform: string,
-    hostHelper: any,
-    buildCommand: string,
-  ) {
-    if (!hostHelper.sideEffect) {
-      return;
+  protected async extractProjectMetadata(): Promise<
+    ProjectMetadata | undefined
+  > {
+    const metaFilePath = join(this.workingDirectory, this.metaFileName);
+
+    if (!pathExists(metaFilePath)) {
+      return undefined;
     }
 
-    const templateOutputPath = this.getFinalTemplateOutputPath();
+    const fileContent = await readFile(metaFilePath);
+    const frontmatter = parseFrontmatter(fileContent);
 
-    try {
-      const rcConfig = this.getRc((rc) => rc);
-      await hostHelper.sideEffect(rcConfig, { outDir: templateOutputPath });
-    } catch (error) {
-      console.error(
-        `Error executing ${hostingPlatform} sideeffect:`,
-        error.message,
-      );
-      throw error;
+    if (!frontmatter) {
+      return undefined;
     }
+
+    const validationResult = validateMetaDocumentFrontmatter(frontmatter);
+    if (!validationResult.success) {
+      return undefined;
+    }
+
+    const meta = validationResult.data;
+    const title = meta.title;
+    const sanitizedName = title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+    return {
+      title: sanitizedName,
+    };
   }
 }

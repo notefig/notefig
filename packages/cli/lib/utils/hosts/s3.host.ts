@@ -1,9 +1,10 @@
 import { join } from 'path';
-import { Host } from '../host.interface';
+import { name } from '../../../package.json';
 import { createDirectoryIfNotExists, writeToFile } from '../fs.util';
+import type { Host, ProjectMetadata } from '../host.interface';
 
 export const s3: Host = {
-  'deploy': async ({ outDir, metristsBuildCommand }) => {
+  deploy: async ({ outDir, metristsBuildCommand, projectMetadata }) => {
     const sstConfigPath = join(process.cwd(), 'sst.config.ts');
     const githubWorkflowsDir = join(process.cwd(), '.github', 'workflows');
     const githubActionConfig = join(githubWorkflowsDir, 'deploy.yml');
@@ -11,7 +12,10 @@ export const s3: Host = {
     await createDirectoryIfNotExists(githubWorkflowsDir);
 
     await Promise.all([
-      writeToFile(sstConfigPath, getSstConfig(metristsBuildCommand, outDir)),
+      writeToFile(
+        sstConfigPath,
+        getSstConfig(metristsBuildCommand, outDir, projectMetadata),
+      ),
       writeToFile(githubActionConfig, getGithubAction()),
     ]);
 
@@ -58,28 +62,43 @@ jobs:
       - name: Install SST CLI
         run: npm install -g sst
         
+      - name: Initialize metrists template
+        run: npx metrists@0.5.0 init
+        
       - name: Deploy to production
         run: sst deploy --stage production
 `;
 }
 
-function getSstConfig(buildCommand: string, outDir: string) {
+function getSstConfig(
+  buildCommand: string,
+  outDir: string,
+  projectMetadata?: ProjectMetadata,
+) {
+  const titleEscaped = projectMetadata
+    ? `${projectMetadata.title.replace(/-/g, '')}`
+    : 'MetristsSite';
+
   return `/// <reference path="./.sst/platform/config.d.ts" />
 
 export default $config({
   app(input) {
     return {
-      name: "aws-static-site",
+      name: "${titleEscaped}",
       home: "aws",
       removal: input?.stage === "production" ? "retain" : "remove",
     };
   },
   async run() {
     try {
-      return new sst.aws.StaticSite("MySite", {
+      return new sst.aws.StaticSite("${titleEscaped}", {
         build: {
           command: "${buildCommand}",
           output: "${outDir}",
+        },
+        invalidation: {
+          paths: "all",
+          wait: true,
         },
       });
     } catch (e) {
