@@ -1,10 +1,14 @@
 import { join } from 'path';
-import { name } from '../../../package.json';
-import { createDirectoryIfNotExists, writeToFile } from '../fs.util';
+import {
+  createDirectoryIfNotExists,
+  writeToFile,
+  pathExists,
+} from '../fs.util';
+import { spawnAndWait } from '../process.util';
 import type { Host, ProjectMetadata } from '../host.interface';
 
 export const s3: Host = {
-  deploy: async ({ outDir, metristsBuildCommand, projectMetadata }) => {
+  deploy: async ({ outDir, metristsBuildCommand, projectMetadata, logger }) => {
     const sstConfigPath = join(process.cwd(), 'sst.config.ts');
     const githubWorkflowsDir = join(process.cwd(), '.github', 'workflows');
     const githubActionConfig = join(githubWorkflowsDir, 'deploy.yml');
@@ -19,6 +23,15 @@ export const s3: Host = {
       writeToFile(githubActionConfig, getGithubAction()),
     ]);
 
+    logger.info('Running SST deployment...');
+    await spawnAndWait(
+      logger,
+      'sst',
+      ['deploy', '--stage', 'production'],
+      { cwd: process.cwd() },
+      { logLevel: 'info' },
+    );
+
     return {
       createdFiles: [
         'sst.config.ts',
@@ -30,6 +43,21 @@ export const s3: Host = {
     'sst.config.ts',
     join('.github', 'workflows', 'deploy.yml'),
   ],
+  isHostUsed: (workingDirectory) => {
+    const sstFolder = join(workingDirectory, '.sst');
+    return pathExists(sstFolder);
+  },
+  pruneHost: async ({ workingDirectory, logger }) => {
+    logger.info('Running SST remove...');
+    await spawnAndWait(
+      logger,
+      'sst',
+      ['remove', '--stage', 'production'],
+      { cwd: workingDirectory },
+      { logLevel: 'info' },
+    );
+    logger.info('SST resources removed');
+  },
 };
 
 function getGithubAction() {

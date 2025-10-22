@@ -39,12 +39,7 @@ export class InitCommand extends ConfigAwareCommand {
   protected templatePath: string;
   protected templateContentPath: string;
   protected templateAssetsPath: string;
-  protected ignoredFiles = [
-    '.gitignore',
-    '.metristsrc',
-    'sst.config.ts',
-    '.sst',
-  ];
+  protected ignoredFiles = ['.gitignore', '.metristsrc'];
   protected ignoredDirectories = ['.git'];
   protected metaFileName = 'meta.md';
 
