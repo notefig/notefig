@@ -56,6 +56,11 @@ export class PruneCommand extends ConfigAwareCommand {
 
     const deletionPromises = [];
     for (const [hostName, host] of Object.entries(hostHelpers)) {
+      // Skip hosts that handle their own cleanup via pruneHost
+      if (host.pruneHost) {
+        continue;
+      }
+
       const configFilePaths = host.getConfigFilePaths();
       for (const configPath of configFilePaths) {
         const fullPath = join(workingDirectory, configPath);
