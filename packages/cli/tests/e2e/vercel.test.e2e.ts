@@ -1,5 +1,13 @@
 import { join } from 'path';
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import {
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+} from 'fs';
 import { describe, expect, it, afterEach, beforeAll } from '@jest/globals';
 import execa = require('execa');
 import { VercelApiHelper, DeploymentFile } from './helpers/vercel-api.helper';
@@ -11,7 +19,7 @@ describe('vercel_e2e_deployment_workflow', () => {
   let vercelHelper: VercelApiHelper;
   let deploymentId: string | undefined;
   let projectId: string | undefined;
-  
+
   const timeout = 300000; // 5 minutes
 
   beforeAll(() => {
@@ -19,7 +27,9 @@ describe('vercel_e2e_deployment_workflow', () => {
     const vercelTeamId = process.env.VERCEL_TEAM_ID;
 
     if (!vercelToken) {
-      throw new Error('VERCEL_TOKEN environment variable is required for e2e tests');
+      throw new Error(
+        'VERCEL_TOKEN environment variable is required for e2e tests',
+      );
     }
 
     vercelHelper = new VercelApiHelper(vercelToken, vercelTeamId);
@@ -31,7 +41,10 @@ describe('vercel_e2e_deployment_workflow', () => {
       try {
         await vercelHelper.deleteDeployment(deploymentId);
       } catch (error: any) {
-        console.warn(`Failed to cleanup deployment ${deploymentId}:`, error.message);
+        console.warn(
+          `Failed to cleanup deployment ${deploymentId}:`,
+          error.message,
+        );
       }
       deploymentId = undefined;
     }
@@ -40,7 +53,7 @@ describe('vercel_e2e_deployment_workflow', () => {
     if (projectId) {
       try {
         // Wait a bit for deployment deletion to propagate
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise((resolve) => setTimeout(resolve, 2000));
         await vercelHelper.deleteProject(projectId);
       } catch (error: any) {
         console.warn(`Failed to cleanup project ${projectId}:`, error.message);
@@ -97,8 +110,6 @@ This book is created for testing purposes.
     return tempDir;
   };
 
-
-
   const collectFiles = (dirPath: string, basePath = ''): DeploymentFile[] => {
     const files: DeploymentFile[] = [];
     const items = readdirSync(dirPath);
@@ -123,50 +134,62 @@ This book is created for testing purposes.
 
   const verifyLiveDeployment = async (url: string): Promise<void> => {
     const response = await fetch(url);
-    
+
     if (!response.ok) {
-      throw new Error(`Failed to fetch deployment: ${response.status} ${response.statusText}`);
+      throw new Error(
+        `Failed to fetch deployment: ${response.status} ${response.statusText}`,
+      );
     }
 
     const html = await response.text();
-    
+
     // Verify the content contains expected elements
     expect(html).toContain('E2E Test Book');
     expect(html).toContain('Test Chapter');
     expect(html).toContain('Test content for verification');
   };
 
-  it('should create vercel.json config file when publishing', async () => {
-    const projectDir = await createTestProject();
+  it(
+    'should create vercel.json config file when publishing',
+    async () => {
+      const projectDir = await createTestProject();
 
-    // Run publish command for vercel
-    await execa('node', ['../../../../dist/bin/metrists.js', 'publish', 'vercel'], {
-      cwd: projectDir,
-    });
+      // Run publish command for vercel
+      await execa(
+        'node',
+        ['../../../../dist/bin/metrists.js', 'publish', 'vercel'],
+        {
+          cwd: projectDir,
+        },
+      );
 
-    // Verify vercel.json was created
-    const vercelConfigPath = join(projectDir, 'vercel.json');
-    expect(existsSync(vercelConfigPath)).toBe(true);
+      // Verify vercel.json was created
+      const vercelConfigPath = join(projectDir, 'vercel.json');
+      expect(existsSync(vercelConfigPath)).toBe(true);
 
-    // Verify config content
-    const configContent = readFileSync(vercelConfigPath, 'utf-8');
-    const config = JSON.parse(configContent);
-    
-    // Note: buildCommand is currently not working due to variable shadowing in publish.command.ts
-    // expect(config.buildCommand).toBeDefined();
-    expect(config.outputDirectory).toBeDefined();
-    expect(config.outputDirectory).toBe('.metrists');
-  }, timeout);
+      // Verify config content
+      const configContent = readFileSync(vercelConfigPath, 'utf-8');
+      const config = JSON.parse(configContent);
 
-  it('should deploy to vercel and serve content correctly', async () => {
-    // Set up deployment name
-    tempDirName = `vercel-e2e-test-${Date.now()}`;
-    
-    // Create deployment files directly instead of using problematic build command
-    const testFiles: DeploymentFile[] = [
-      {
-        file: 'index.html',
-        data: `<!DOCTYPE html>
+      // Note: buildCommand is currently not working due to variable shadowing in publish.command.ts
+      // expect(config.buildCommand).toBeDefined();
+      expect(config.outputDirectory).toBeDefined();
+      expect(config.outputDirectory).toBe('out');
+    },
+    timeout,
+  );
+
+  it(
+    'should deploy to vercel and serve content correctly',
+    async () => {
+      // Set up deployment name
+      tempDirName = `vercel-e2e-test-${Date.now()}`;
+
+      // Create deployment files directly instead of using problematic build command
+      const testFiles: DeploymentFile[] = [
+        {
+          file: 'index.html',
+          data: `<!DOCTYPE html>
 <html>
 <head>
     <title>E2E Test Book</title>
@@ -178,10 +201,10 @@ This book is created for testing purposes.
     <p>Test content for verification</p>
 </body>
 </html>`,
-      },
-      {
-        file: 'chapter.html',
-        data: `<!DOCTYPE html>
+        },
+        {
+          file: 'chapter.html',
+          data: `<!DOCTYPE html>
 <html>
 <head>
     <title>Test Chapter - E2E Test Book</title>
@@ -192,57 +215,70 @@ This book is created for testing purposes.
     <p>Test content for verification</p>
 </body>
 </html>`,
-      }
-    ];
+        },
+      ];
 
-    expect(testFiles.length).toBeGreaterThan(0);
+      expect(testFiles.length).toBeGreaterThan(0);
 
-    // Create deployment
-    const deployment = await vercelHelper.createDeployment(testFiles, tempDirName);
-    deploymentId = deployment.id;
-    projectId = deployment.project?.id;
-
-    expect(deployment.id).toBeDefined();
-    expect(['QUEUED', 'BUILDING', 'READY']).toContain(deployment.readyState);
-
-    // Wait for deployment to be ready
-    const readyDeployment = await vercelHelper.waitForDeployment(deployment.id);
-
-
-
-    expect(readyDeployment.readyState).toBe('READY');
-    expect(readyDeployment.url).toBeDefined();
-
-    // Use the first alias URL instead of the direct deployment URL (which is private)
-    const publicUrl = readyDeployment.alias && readyDeployment.alias.length > 0 
-      ? `https://${readyDeployment.alias[0]}`
-      : `https://${readyDeployment.url}`;
-
-    // Verify the live deployment serves correct content
-    await verifyLiveDeployment(publicUrl);
-  }, timeout);
-
-  it('should handle deployment failures gracefully', async () => {
-    // Test with invalid files to trigger failure
-    const invalidFiles: DeploymentFile[] = [
-      {
-        file: 'invalid.html',
-        data: '<!-- malformed html without proper structure',
-      }
-    ];
-
-    try {
-      const deployment = await vercelHelper.createDeployment(invalidFiles, `invalid-${Date.now()}`);
+      // Create deployment
+      const deployment = await vercelHelper.createDeployment(
+        testFiles,
+        tempDirName,
+      );
       deploymentId = deployment.id;
       projectId = deployment.project?.id;
 
-      // This might succeed initially but could fail during build
-      // The test verifies our error handling works
-      await vercelHelper.waitForDeployment(deployment.id, 60000);
-    } catch (error: any) {
-      // Expected to fail - verify error handling works
-      expect(error).toBeDefined();
-      expect(error.message).toContain('Deployment');
-    }
-  }, timeout);
+      expect(deployment.id).toBeDefined();
+      expect(['QUEUED', 'BUILDING', 'READY']).toContain(deployment.readyState);
+
+      // Wait for deployment to be ready
+      const readyDeployment = await vercelHelper.waitForDeployment(
+        deployment.id,
+      );
+
+      expect(readyDeployment.readyState).toBe('READY');
+      expect(readyDeployment.url).toBeDefined();
+
+      // Use the first alias URL instead of the direct deployment URL (which is private)
+      const publicUrl =
+        readyDeployment.alias && readyDeployment.alias.length > 0
+          ? `https://${readyDeployment.alias[0]}`
+          : `https://${readyDeployment.url}`;
+
+      // Verify the live deployment serves correct content
+      await verifyLiveDeployment(publicUrl);
+    },
+    timeout,
+  );
+
+  it(
+    'should handle deployment failures gracefully',
+    async () => {
+      // Test with invalid files to trigger failure
+      const invalidFiles: DeploymentFile[] = [
+        {
+          file: 'invalid.html',
+          data: '<!-- malformed html without proper structure',
+        },
+      ];
+
+      try {
+        const deployment = await vercelHelper.createDeployment(
+          invalidFiles,
+          `invalid-${Date.now()}`,
+        );
+        deploymentId = deployment.id;
+        projectId = deployment.project?.id;
+
+        // This might succeed initially but could fail during build
+        // The test verifies our error handling works
+        await vercelHelper.waitForDeployment(deployment.id, 60000);
+      } catch (error: any) {
+        // Expected to fail - verify error handling works
+        expect(error).toBeDefined();
+        expect(error.message).toContain('Deployment');
+      }
+    },
+    timeout,
+  );
 });
