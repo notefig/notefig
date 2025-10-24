@@ -1,10 +1,15 @@
 import { join } from 'path';
-import { name } from '../../../package.json';
-import { createDirectoryIfNotExists, writeToFile } from '../fs.util';
+import {
+  createDirectoryIfNotExists,
+  writeToFile,
+  pathExists,
+  deleteFile,
+} from '../fs.util';
+import { spawnAndWait } from '../process.util';
 import type { Host, ProjectMetadata } from '../host.interface';
 
 export const s3: Host = {
-  deploy: async ({ outDir, metristsBuildCommand, projectMetadata }) => {
+  deploy: async ({ outDir, metristsBuildCommand, projectMetadata, logger }) => {
     const sstConfigPath = join(process.cwd(), 'sst.config.ts');
     const githubWorkflowsDir = join(process.cwd(), '.github', 'workflows');
     const githubActionConfig = join(githubWorkflowsDir, 'deploy.yml');
@@ -19,6 +24,15 @@ export const s3: Host = {
       writeToFile(githubActionConfig, getGithubAction()),
     ]);
 
+    logger.info('Running SST deployment...');
+    await spawnAndWait(
+      logger,
+      'sst',
+      ['deploy', '--stage', 'production'],
+      { cwd: process.cwd() },
+      { logLevel: 'info' },
+    );
+
     return {
       createdFiles: [
         'sst.config.ts',
@@ -30,6 +44,75 @@ export const s3: Host = {
     'sst.config.ts',
     join('.github', 'workflows', 'deploy.yml'),
   ],
+  isHostUsed: (workingDirectory) => {
+    const sstFolder = join(workingDirectory, '.sst');
+    return pathExists(sstFolder);
+  },
+  pruneHost: async ({ workingDirectory, logger }) => {
+    logger.info('Running SST remove...');
+
+    // Track if SST remove was successful by spying on stdout
+    let sstRemoveSuccessful = false;
+    // TODO: Replace with actual SST success pattern once we know the exact output
+    const sstSuccessRegexes = [
+      /removed successfully/i,
+      /stack deleted/i,
+      /removal completed/i,
+      /✓.*removed/i,
+    ];
+
+    try {
+      await spawnAndWait(
+        logger,
+        'sst',
+        ['remove', '--stage', 'production'],
+        { cwd: workingDirectory },
+        {
+          logLevel: 'info',
+          stdOutListener: (data, next) => {
+            const output = data.toString();
+            // Check if any success pattern matches
+            const isSuccessful = sstSuccessRegexes.some((regex) =>
+              regex.test(output),
+            );
+            if (isSuccessful) {
+              sstRemoveSuccessful = true;
+            }
+            next(data);
+          },
+        },
+      );
+
+      logger.info('SST resources removed');
+
+      // Only delete config files if SST remove was successful
+      if (sstRemoveSuccessful) {
+        logger.verbose('SST remove successful, deleting config files...');
+        const configFilePaths = s3.getConfigFilePaths();
+        const deletionPromises = configFilePaths.map(async (configPath) => {
+          const fullPath = join(workingDirectory, configPath);
+          if (pathExists(fullPath)) {
+            try {
+              await deleteFile(fullPath);
+              logger.verbose(`Deleted S3 config file: ${configPath}`);
+            } catch (error) {
+              logger.verbose(
+                `Failed to delete ${configPath}: ${error.message}`,
+              );
+            }
+          }
+        });
+        await Promise.all(deletionPromises);
+      } else {
+        logger.warn(
+          'SST remove may not have completed successfully, keeping config files',
+        );
+      }
+    } catch (error) {
+      logger.error('SST remove failed, keeping config files');
+      throw error;
+    }
+  },
 };
 
 function getGithubAction() {

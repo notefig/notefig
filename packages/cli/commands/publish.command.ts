@@ -1,7 +1,6 @@
 import { join } from 'path';
 import { Command } from 'commander';
 import { InitCommand } from './init.command';
-import { BuildCommand } from './build.command';
 import {
   createFileIfNotExists,
   pathExists,
@@ -52,16 +51,17 @@ export class PublishCommand extends InitCommand {
 
     const projectMetadata = await this.extractProjectMetadata();
 
-    const createdFiles = await hostHelper.deploy({
+    await hostHelper.deploy({
       outDir,
       metristsBuildCommand: buildCommand,
       hostOptions: this.getRc((rc) => rc?.hosts?.[platform] || {}),
       projectMetadata,
+      logger: this.logger,
     });
   }
 
   protected async createHostingConfig(
-    hostingPlatform: string,
+    _hostingPlatform: string,
     hostHelper: any,
     buildCommand: string,
   ) {

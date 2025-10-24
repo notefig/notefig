@@ -4,14 +4,28 @@ import type { Logger } from './logger.util';
 
 type SpawnParams = Parameters<typeof spawn>;
 
-function getDefaultOutHandler(logger) {
-  return (data) => {
-    logger.verbose(gray(data.toString()));
+function getDefaultOutHandler(
+  logger: any,
+  logLevel: 'info' | 'verbose' = 'verbose',
+) {
+  return (data: any) => {
+    if (logLevel === 'info') {
+      logger.info(gray(data.toString()));
+    } else {
+      logger.verbose(gray(data.toString()));
+    }
   };
 }
-function getDefaultErrHandler(logger) {
-  return (data) => {
-    logger.verbose(gray(data.toString()));
+function getDefaultErrHandler(
+  logger: any,
+  logLevel: 'info' | 'verbose' = 'verbose',
+) {
+  return (data: any) => {
+    if (logLevel === 'info') {
+      logger.info(gray(data.toString()));
+    } else {
+      logger.verbose(gray(data.toString()));
+    }
   };
 }
 
@@ -29,10 +43,12 @@ export async function spawnAndWait(
       data: Buffer,
       next: ReturnType<typeof getDefaultOutHandler>,
     ) => void;
+    logLevel?: 'info' | 'verbose';
   },
 ): Promise<ChildProcess> {
-  const defaultErrHandler = getDefaultErrHandler(logger);
-  const defaultOutHandler = getDefaultOutHandler(logger);
+  const logLevel = options?.logLevel ?? 'verbose';
+  const defaultErrHandler = getDefaultErrHandler(logger, logLevel);
+  const defaultOutHandler = getDefaultOutHandler(logger, logLevel);
   const stdErrListener = options?.stdErrListener ?? defaultErrHandler;
   const stdOutListener = options?.stdOutListener ?? defaultOutHandler;
 

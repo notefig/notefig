@@ -14,8 +14,7 @@ export class PruneCommand extends ConfigAwareCommand {
       .description('Prune the previous version of the build');
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  public async handle(command: Command) {
+  public async handle(_command: Command) {
     await this.loadRcConfig();
 
     const workingDirectory = process.cwd();
@@ -24,7 +23,29 @@ export class PruneCommand extends ConfigAwareCommand {
 
     let prunedItems = 0;
 
-    // Delete build output directory
+    for (const [hostName, host] of Object.entries(hostHelpers)) {
+      if (
+        host.isHostUsed &&
+        host.pruneHost &&
+        host.isHostUsed(workingDirectory)
+      ) {
+        try {
+          this.logger.info(`Running ${hostName} cleanup...`);
+          await host.pruneHost({
+            workingDirectory,
+            outDir,
+            hostOptions: this.getRc((rc) => rc?.hosts?.[hostName] || {}),
+            logger: this.logger,
+          });
+          prunedItems++;
+        } catch (error) {
+          this.logger.verbose(
+            `Failed to run ${hostName} cleanup, continuing with file cleanup`,
+          );
+        }
+      }
+    }
+
     if (pathExists(templatePath)) {
       await deleteDirectory(templatePath);
       this.logger.info('Pruned the previous build');
@@ -33,9 +54,13 @@ export class PruneCommand extends ConfigAwareCommand {
       this.logger.verbose('No previous build found to prune');
     }
 
-    // Delete host configuration files
     const deletionPromises = [];
     for (const [hostName, host] of Object.entries(hostHelpers)) {
+      // Skip hosts that handle their own cleanup via pruneHost
+      if (host.pruneHost) {
+        continue;
+      }
+
       const configFilePaths = host.getConfigFilePaths();
       for (const configPath of configFilePaths) {
         const fullPath = join(workingDirectory, configPath);

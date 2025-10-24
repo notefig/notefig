@@ -1,4 +1,4 @@
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { describe, expect, it, afterAll, beforeAll } from '@jest/globals';
 import execa = require('execa');
@@ -45,7 +45,7 @@ describe('prune_command_deletes_the_right_files', () => {
 
           // Create directory if needed (e.g., for .github/workflows/deploy.yml)
           const fullPath = join(tempDir, configPath);
-          const dirPath = join(fullPath, '..');
+          const dirPath = dirname(fullPath);
 
           if (!existsSync(dirPath)) {
             mkdirSync(dirPath, { recursive: true });
@@ -75,10 +75,24 @@ describe('prune_command_deletes_the_right_files', () => {
 
       expect(directoryExists).toBe(false);
 
-      // Verify all host config files are deleted
+      // Verify host config files are deleted appropriately
       allConfigFilePaths.forEach((configPath) => {
         const fullPath = join(tempDir, configPath);
-        expect(existsSync(fullPath)).toBe(false);
+        const exists = existsSync(fullPath);
+
+        // S3 host files should only be deleted when .sst folder exists
+        const isS3File =
+          configPath === 'sst.config.ts' ||
+          configPath.includes('.github/workflows/deploy.yml');
+        const sstFolderExists = existsSync(join(tempDir, '.sst'));
+
+        if (isS3File && !sstFolderExists) {
+          // S3 files should be preserved when SST is not in use
+          expect(exists).toBe(true);
+        } else {
+          // Other host files should be deleted
+          expect(exists).toBe(false);
+        }
       });
     },
     timeout,

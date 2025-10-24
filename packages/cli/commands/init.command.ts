@@ -39,13 +39,8 @@ export class InitCommand extends ConfigAwareCommand {
   protected templatePath: string;
   protected templateContentPath: string;
   protected templateAssetsPath: string;
-  protected ignoredFiles = [
-    '.gitignore',
-    '.metristsrc',
-    'sst.config.ts',
-    '.sst',
-  ];
-  protected ignoredDirectories = ['.git'];
+  protected ignoredFiles = ['.gitignore', '.metristsrc'];
+  protected ignoredDirectories = ['.git', '.sst'];
   protected metaFileName = 'meta.md';
 
   public load(program: Command) {
@@ -156,7 +151,7 @@ export class InitCommand extends ConfigAwareCommand {
   }
 
   protected async createGitIgnoreFile() {
-    const itemsToIgnore = [this.getRc((rc) => rc?.outDir)];
+    const itemsToIgnore = [this.getRc((rc) => rc?.outDir), 'out'];
     await addToGitIgnore(this.workingDirectory, itemsToIgnore);
   }
 
