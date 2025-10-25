@@ -49,7 +49,7 @@ export class PublishCommand extends InitCommand {
     const outDir = 'out';
     const buildCommand = `npx ${name} build -o ${outDir}`;
 
-    const projectMetadata = await this.extractProjectMetadata();
+    const [projectMetadata] = await this.extractProjectMetadata();
 
     await hostHelper.deploy({
       outDir,
@@ -80,35 +80,5 @@ export class PublishCommand extends InitCommand {
   protected getSupportedHosts() {
     const hosts = getSupportedHosts();
     return hosts.join(', ');
-  }
-
-  protected async extractProjectMetadata(): Promise<
-    ProjectMetadata | undefined
-  > {
-    const metaFilePath = join(this.workingDirectory, this.metaFileName);
-
-    if (!pathExists(metaFilePath)) {
-      return undefined;
-    }
-
-    const fileContent = await readFile(metaFilePath);
-    const frontmatter = parseFrontmatter(fileContent);
-
-    if (!frontmatter) {
-      return undefined;
-    }
-
-    const validationResult = validateMetaDocumentFrontmatter(frontmatter);
-    if (!validationResult.success) {
-      return undefined;
-    }
-
-    const meta = validationResult.data;
-    const title = meta.title;
-    const sanitizedName = title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-
-    return {
-      title: sanitizedName,
-    };
   }
 }

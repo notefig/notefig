@@ -7,6 +7,7 @@ import {
   createDirectory,
   performOnAllFilesInDirectory,
   combinePaths,
+  readFile,
 } from '../lib/utils/fs.util';
 import { addToGitIgnore } from '../lib/utils/gitignore.util';
 import {
@@ -14,6 +15,15 @@ import {
   createOrModifyChapterFile,
 } from '../lib/utils/meta-filler.util';
 import type { Command } from 'commander';
+import {
+  parseFrontmatter,
+  stripFrontmatter,
+} from '../lib/utils/frontmatter.util';
+import {
+  validateMetaDocumentFrontmatter,
+  MetaDocumentFrontmatterInterface,
+} from '../lib/utils/content-layer.util';
+import type { ProjectMetadata } from '../lib/utils/host.interface';
 
 type UndefIndex<T extends any[], I extends number> = {
   [P in keyof T]: P extends Exclude<keyof T, keyof any[]>
@@ -252,5 +262,30 @@ export class InitCommand extends ConfigAwareCommand {
   protected getFinalTemplateOutputPath() {
     const templateOutputDir = this.getTemplateConfig((rc) => rc);
     return combinePaths([this.templatePath, templateOutputDir.outDir]);
+  }
+
+  protected async extractProjectMetadata(): Promise<
+    [MetaDocumentFrontmatterInterface | undefined, string | undefined]
+  > {
+    const metaFilePath = join(this.workingDirectory, this.metaFileName);
+
+    if (!pathExists(metaFilePath)) {
+      return [undefined, undefined];
+    }
+
+    const fileContent = await readFile(metaFilePath);
+    const frontmatter = parseFrontmatter(fileContent);
+
+    if (!frontmatter) {
+      return [undefined, fileContent];
+    }
+
+    const validattionResults = validateMetaDocumentFrontmatter(frontmatter);
+
+    if (validattionResults.success) {
+      return [validattionResults.data, stripFrontmatter(fileContent)];
+    }
+
+    return [undefined, fileContent];
   }
 }

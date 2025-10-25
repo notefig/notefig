@@ -3,13 +3,13 @@ import { EOL } from 'os';
 
 export type Frontmatter = Record<string, any> | Array<any>;
 
+const FRONTMATTER_REGEX = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
 export function serializeFrontmatter(frontmatter: Frontmatter) {
   return `---${EOL}${dump(frontmatter)}---${EOL}`;
 }
 
 export function parseFrontmatter(content: string): Frontmatter | null {
-  const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
-  const match = content.match(frontmatterRegex);
+  const match = content.match(FRONTMATTER_REGEX);
   if (!match) {
     return null;
   }
@@ -21,9 +21,13 @@ export function parseFrontmatter(content: string): Frontmatter | null {
 
 export function replaceFrontmatter(content: string, frontmatter: Frontmatter) {
   const frontmatterString = serializeFrontmatter(frontmatter);
-  return content.replace(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/, frontmatterString);
+  return content.replace(FRONTMATTER_REGEX, frontmatterString);
 }
 
 export function hasFrontmatter(fileContent: string) {
   return fileContent.startsWith('---');
+}
+
+export function stripFrontmatter(content: string): string {
+  return content.replace(FRONTMATTER_REGEX, '');
 }

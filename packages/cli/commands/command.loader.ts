@@ -6,6 +6,7 @@ import { InitCommand } from './init.command';
 import { PublishCommand } from './publish.command';
 import { BuildCommand } from './build.command';
 import { PruneCommand } from './prune.command';
+import { EpubCommand } from './epub.command';
 import {
   ConsoleLogger,
   type Logger,
@@ -26,6 +27,7 @@ export class CommandLoader {
     this.loadCommandAndAction(new PublishCommand(), program);
     this.loadCommandAndAction(new BuildCommand(), program);
     this.loadCommandAndAction(new PruneCommand(), program);
+    this.loadCommandAndAction(new EpubCommand(), program);
     this.handleInvalidCommand(program);
   }
 

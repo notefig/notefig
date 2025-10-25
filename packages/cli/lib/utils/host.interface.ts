@@ -1,10 +1,10 @@
+import type { MetaDocumentFrontmatterInterface } from './content-layer.util';
+
 export interface HostDeployResult {
   createdFiles: string[];
 }
 
-export interface ProjectMetadata {
-  title: string;
-}
+export type ProjectMetadata = MetaDocumentFrontmatterInterface;
 
 export interface HostDeployParams {
   metristsBuildCommand: string;
