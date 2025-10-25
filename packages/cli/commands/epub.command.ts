@@ -8,11 +8,19 @@ export class EpubCommand extends InitCommand {
   protected templatePath: string;
 
   public load(program: Command) {
-    return program.command('epub').description('Generate a Epub Documents');
+    return program
+      .command('epub')
+      .description('Generate a Epub Documents')
+      .option('-o, --out <path>', 'Output file path for the epub build');
   }
 
   public async handle(command: Command) {
     await super.handle(command);
+    const outFileRelative: string = command.opts().out;
+    if (!outFileRelative) {
+      throw new Error('Output directory is required');
+    }
+    const extension = outFileRelative.endsWith('.epub') ? '' : '.epub';
 
     const workingDirectory = process.cwd();
     const metadata = await this.getBookMetadata();
@@ -21,6 +29,7 @@ export class EpubCommand extends InitCommand {
       ...metadata,
       bookDirectory: workingDirectory,
       ignoredFiles: [this.metaFileName],
+      outputPath: join(workingDirectory, outFileRelative + extension),
     });
   }
 

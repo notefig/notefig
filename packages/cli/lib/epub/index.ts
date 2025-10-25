@@ -34,6 +34,7 @@ interface BookOptions {
   verbose?: boolean;
   bookDirectory: string;
   ignoredFiles: string[];
+  outputPath: string;
 }
 
 const home = homedir();
@@ -458,8 +459,6 @@ export function makeBook(opts: Partial<BookOptions> = {}) {
 
   const files = readdirSync(options.bookDirectory);
 
-  // if (!files.includes('metadata.json')) {
-  //   console.error('Generating default metadata.json');
   metadata = {
     title: options.title,
     author: options.author,
@@ -471,16 +470,6 @@ export function makeBook(opts: Partial<BookOptions> = {}) {
     status: '',
     modified: '',
   };
-  //   writeFileSync(
-  //     join(options.bookDirectory, 'metadata.json'),
-  //     JSON.stringify(metadata, null, 2),
-  //   );
-  // }
-
-  // metadata = JSON.parse(
-  //   readFileSync(join(options.bookDirectory, './metadata.json'), 'utf8'),
-  // );
-  console.log('metadata: ', JSON.stringify(metadata, null, 2));
 
   /**
    * By default, markdown-it renders newlines ('\n') in the output for each
@@ -549,19 +538,16 @@ export function makeBook(opts: Partial<BookOptions> = {}) {
   addStylesheet();
 
   zip.generateAsync({ type: 'nodebuffer' }).then((content) => {
-    writeFileSync(
-      join(options.bookDirectory, 'book-' + metadata.title + '.epub'),
-      content as Buffer,
-    );
+    writeFileSync(opts.outputPath, content as Buffer);
   });
 
-  if (options.verbose) {
-    console.log('chapters: ', chapters);
-    console.log('files: ', fileNames);
-    console.log('images: ', images);
-  }
+  // if (options.verbose) {
+  //   console.log('chapters: ', chapters);
+  //   console.log('files: ', fileNames);
+  //   console.log('images: ', images);
+  // }
 
-  console.log(
-    'epub: ' + join(options.bookDirectory, 'book-' + metadata.title + '.epub'),
-  );
+  // console.log(
+  //   'epub: ' + join(options.bookDirectory, 'book-' + metadata.title + '.epub'),
+  // );
 }
