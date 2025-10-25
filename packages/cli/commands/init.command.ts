@@ -23,7 +23,7 @@ import {
   validateMetaDocumentFrontmatter,
   MetaDocumentFrontmatterInterface,
 } from '../lib/utils/content-layer.util';
-import type { ProjectMetadata } from '../lib/utils/host.interface';
+import type { BookMetadata } from '../lib/epub';
 
 type UndefIndex<T extends any[], I extends number> = {
   [P in keyof T]: P extends Exclude<keyof T, keyof any[]>
@@ -287,5 +287,17 @@ export class InitCommand extends ConfigAwareCommand {
     }
 
     return [undefined, fileContent];
+  }
+
+  protected async getEpubMetadata(): Promise<BookMetadata> {
+    const [metadata, description] = await this.extractProjectMetadata();
+    return {
+      author: metadata.author,
+      title: metadata.title,
+      description: description,
+      language: 'en',
+      tags: metadata.tags,
+      cover_image: join(this.workingDirectory, 'cover.jpg'),
+    };
   }
 }

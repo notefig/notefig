@@ -1,9 +1,10 @@
 import { InitCommand } from './init.command';
-import { spawnAndWait } from '../lib/utils/process.util';
+import { join } from 'path';
 import {
   copyAllFilesFromOneDirectoryToAnother,
   combinePaths,
 } from '../lib/utils/fs.util';
+import { makeBook } from '../lib/epub';
 import type { Command } from 'commander';
 
 export class BuildCommand extends InitCommand {
@@ -24,6 +25,7 @@ export class BuildCommand extends InitCommand {
     }
 
     await this.buildContentLayer()
+      .then(this.buildEpubFile.bind(this))
       .then(this.buildTemplate.bind(this))
       .then(() => this.copyBuiltContentToOutputDir(outputDirRelative));
   }
@@ -66,5 +68,16 @@ export class BuildCommand extends InitCommand {
       );
     }
     return Promise.resolve();
+  }
+
+  protected async buildEpubFile(finalOutDir: string) {
+    const metadata = await this.getEpubMetadata();
+
+    makeBook({
+      ...metadata,
+      bookDirectory: this.workingDirectory,
+      ignoredFiles: [this.metaFileName],
+      outputPath: combinePaths([this.templateAssetsPath, 'book.epub']),
+    });
   }
 }

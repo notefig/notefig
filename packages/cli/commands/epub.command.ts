@@ -23,7 +23,7 @@ export class EpubCommand extends InitCommand {
     const extension = outFileRelative.endsWith('.epub') ? '' : '.epub';
 
     const workingDirectory = process.cwd();
-    const metadata = await this.getBookMetadata();
+    const metadata = await this.getEpubMetadata();
 
     makeBook({
       ...metadata,
@@ -31,17 +31,5 @@ export class EpubCommand extends InitCommand {
       ignoredFiles: [this.metaFileName],
       outputPath: join(workingDirectory, outFileRelative + extension),
     });
-  }
-
-  protected async getBookMetadata(): Promise<BookMetadata> {
-    const [metadata, description] = await this.extractProjectMetadata();
-    return {
-      author: metadata.author,
-      title: metadata.title,
-      description: description,
-      language: 'en',
-      tags: metadata.tags,
-      cover_image: join(this.workingDirectory, 'cover.jpg'),
-    };
   }
 }
