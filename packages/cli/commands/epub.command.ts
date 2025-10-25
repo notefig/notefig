@@ -17,9 +17,11 @@ export class EpubCommand extends InitCommand {
     const workingDirectory = process.cwd();
     const metadata = await this.getBookMetadata();
 
-    console.log(metadata);
-
-    makeBook({ ...metadata, bookDirectory: workingDirectory });
+    makeBook({
+      ...metadata,
+      bookDirectory: workingDirectory,
+      ignoredFiles: [this.metaFileName],
+    });
   }
 
   protected async getBookMetadata(): Promise<BookMetadata> {
@@ -31,8 +33,6 @@ export class EpubCommand extends InitCommand {
       language: 'en',
       tags: metadata.tags,
       cover_image: join(this.workingDirectory, 'cover.jpg'),
-      // verbose: true,
-      // bookDirectory: join(__dirname, 'sample-book'),
     };
   }
 }

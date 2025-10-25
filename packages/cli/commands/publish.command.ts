@@ -1,15 +1,7 @@
-import { join } from 'path';
 import { Command } from 'commander';
 import { InitCommand } from './init.command';
-import {
-  createFileIfNotExists,
-  pathExists,
-  readFile,
-} from '../lib/utils/fs.util';
+import { createFileIfNotExists } from '../lib/utils/fs.util';
 import { getHostHelper, getSupportedHosts } from '../lib/utils/hosts.util';
-import { parseFrontmatter } from '../lib/utils/frontmatter.util';
-import { validateMetaDocumentFrontmatter } from '../lib/utils/content-layer.util';
-import { ProjectMetadata } from '../lib/utils/host.interface';
 import { name } from '../package.json';
 import { UnsupportedHostException } from '../exceptions/unsupported-host.exception';
 import { HostNotProvidedException } from '../exceptions/host-not-provided.exception';

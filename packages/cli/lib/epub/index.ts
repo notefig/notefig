@@ -4,6 +4,7 @@ import { join, basename as pathBasename } from 'path';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
 import * as JSZip from 'jszip';
+import { stripFrontmatter } from '../utils/frontmatter.util';
 
 interface Chapter {
   path: string;
@@ -32,6 +33,7 @@ interface BookOptions {
   tags?: string[];
   verbose?: boolean;
   bookDirectory: string;
+  ignoredFiles: string[];
 }
 
 const home = homedir();
@@ -77,6 +79,7 @@ function extension(filePath: string): string {
 function processMarkdown(file: string, files: string[]) {
   const image = file.slice(0, -3);
   let content = readFileSync(join(options.bookDirectory, file)).toString();
+  content = stripFrontmatter(content);
   const match = content.match(/^#\s+(.*)/m);
   const title = match ? match[1] : undefined;
   if (files.includes(image + '.jpg')) {
@@ -455,28 +458,28 @@ export function makeBook(opts: Partial<BookOptions> = {}) {
 
   const files = readdirSync(options.bookDirectory);
 
-  if (!files.includes('metadata.json')) {
-    console.error('Generating default metadata.json');
-    const metadata = {
-      title: options.title,
-      author: options.author,
-      language: options.language,
-      cover_image: options.cover,
-      description: options.description,
-      tags: options.tags,
-      source: '',
-      status: '',
-      modified: '',
-    };
-    writeFileSync(
-      join(options.bookDirectory, 'metadata.json'),
-      JSON.stringify(metadata, null, 2),
-    );
-  }
+  // if (!files.includes('metadata.json')) {
+  //   console.error('Generating default metadata.json');
+  metadata = {
+    title: options.title,
+    author: options.author,
+    language: options.language,
+    cover_image: options.cover,
+    description: options.description,
+    tags: options.tags,
+    source: '',
+    status: '',
+    modified: '',
+  };
+  //   writeFileSync(
+  //     join(options.bookDirectory, 'metadata.json'),
+  //     JSON.stringify(metadata, null, 2),
+  //   );
+  // }
 
-  metadata = JSON.parse(
-    readFileSync(join(options.bookDirectory, './metadata.json'), 'utf8'),
-  );
+  // metadata = JSON.parse(
+  //   readFileSync(join(options.bookDirectory, './metadata.json'), 'utf8'),
+  // );
   console.log('metadata: ', JSON.stringify(metadata, null, 2));
 
   /**
@@ -516,7 +519,9 @@ export function makeBook(opts: Partial<BookOptions> = {}) {
 
   files.forEach((file) => {
     if (file.endsWith('.md')) {
-      processMarkdown(file, files);
+      if (!opts.ignoredFiles || !opts?.ignoredFiles?.includes(file)) {
+        processMarkdown(file, files);
+      }
     } else if (
       file.endsWith('jpg') ||
       file.endsWith('jpeg') ||
