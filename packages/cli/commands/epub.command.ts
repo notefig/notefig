@@ -32,6 +32,7 @@ export class EpubCommand extends InitCommand {
         outputPath: join(workingDirectory, outFileRelative + extension),
       },
       metadata,
+      this.logger,
     );
   }
 }

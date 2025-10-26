@@ -5,6 +5,7 @@ import { homedir } from 'os';
 import { randomUUID } from 'crypto';
 import * as JSZip from 'jszip';
 import { stripFrontmatter } from '../utils/frontmatter.util';
+import type { Logger } from '../utils/logger.util';
 
 interface Chapter {
   path: string;
@@ -31,7 +32,6 @@ interface BookOptions {
   language?: string;
   title?: string;
   tags?: string[];
-  verbose?: boolean;
 }
 
 interface MakeBookParams {
@@ -54,21 +54,13 @@ const md = mdit({
 });
 const zip = new JSZip();
 
-const defaultConfig = {
-  defaultCover: 'cover.jpg',
-  defaultTitle: 'Unknown',
-};
-
-const config = getConfig();
-
 const options = {
-  author: config.defaultAuthor,
-  cover: config.defaultCover,
-  description: config.defaultDescription,
-  language: config.defaultLanguage,
-  title: config.defaultTitle,
-  tags: config.defaultTags,
-  verbose: !!config.defaultVerbose,
+  author: '',
+  cover: 'cover.jpg',
+  description: '',
+  language: '',
+  title: '',
+  tags: [],
   bookDirectory: process.cwd(),
 };
 
@@ -403,61 +395,10 @@ function isCJK(c: string): boolean {
   );
 }
 
-function getConfig(): any {
-  const config = defaultConfig;
-  [
-    '/etc/md2epub.json',
-    join(home, '.md2epub.json'),
-    join(home, '.config', 'md2epub.json'),
-  ].forEach((configPath) => {
-    try {
-      const conf = JSON.parse(readFileSync(configPath, 'utf8'));
-      Object.assign(config, conf);
-    } catch (e) {
-      if (e.code !== 'ENOENT') console.log(configPath, e);
-    }
-  });
-  return config;
-}
-
-function usage(optionsConfig: any): string {
-  const name = pathBasename(process.argv[1]);
-  let usage = 'Usage: ' + name + ' [OPTIONS]\n';
-  let maxOptionLength = 0;
-  Object.keys(optionsConfig.options).forEach((key) => {
-    if (key.length > maxOptionLength) maxOptionLength = key.length;
-  });
-  Object.keys(optionsConfig.options).forEach((key) => {
-    const opt = optionsConfig.options[key];
-    let option =
-      '  ' +
-      '--' +
-      key +
-      (opt.type === 'string' ? '=ARG' : '') +
-      (opt.multiple ? '*' : '');
-    if (opt.short) {
-      option += ',';
-      option = option.padEnd(maxOptionLength + 12, ' ');
-      option += '-' + opt.short;
-    }
-    if (opt.default) {
-      option = option.padEnd(maxOptionLength + 16, ' ');
-      option +=
-        ' (default: ' +
-        (opt.multiple ? opt.default.join(',') : opt.default) +
-        ')';
-    }
-    if (opt.description) {
-      option += '\n      ' + opt.description;
-    }
-    usage += option + '\n\n';
-  });
-  return usage;
-}
-
 export function makeBook(
   { workingDirectory, ignoredFiles, outputPath }: MakeBookParams,
-  opts: Partial<BookOptions> = {},
+  opts: Partial<BookOptions>,
+  logger: Logger,
 ) {
   Object.assign(options, opts);
   options.bookDirectory = workingDirectory;
@@ -525,7 +466,7 @@ export function makeBook(
       file.endsWith('gif') ||
       file.endsWith('webp')
     ) {
-      console.log('process: ' + file);
+      logger.verbose(`Adding asset to epub ${file}`);
       processImage(file);
     }
   });
@@ -548,13 +489,5 @@ export function makeBook(
     writeFileSync(outputPath, content as Buffer);
   });
 
-  // if (options.verbose) {
-  //   console.log('chapters: ', chapters);
-  //   console.log('files: ', fileNames);
-  //   console.log('images: ', images);
-  // }
-
-  // console.log(
-  //   'epub: ' + join(options.bookDirectory, 'book-' + metadata.title + '.epub'),
-  // );
+  logger.verbose('Created epub output at ' + outputPath);
 }

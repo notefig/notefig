@@ -70,7 +70,7 @@ export class BuildCommand extends InitCommand {
     return Promise.resolve();
   }
 
-  protected async buildEpubFile(finalOutDir: string) {
+  protected async buildEpubFile() {
     const metadata = await this.getEpubMetadata();
 
     makeBook(
@@ -80,6 +80,7 @@ export class BuildCommand extends InitCommand {
         outputPath: combinePaths([this.templateAssetsPath, 'book.epub']),
       },
       metadata,
+      this.logger,
     );
   }
 }
