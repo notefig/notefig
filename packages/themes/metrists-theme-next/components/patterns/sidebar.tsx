@@ -55,10 +55,8 @@ export function Sidebar({
               actions={[
                 {
                   label: "Download",
-                  action: () => {
-                    console.log("Download not implemented yet.");
-                  },
-                  buttonProps: { size: "sm", disabled: true },
+                  action: "/book.epub",
+                  buttonProps: { size: "sm" },
                 },
                 {
                   label: <Share size={16} />,

@@ -59,10 +59,8 @@ export default function Home({
                 : []),
               {
                 label: "Download Epub",
-                action: () => {
-                  console.log("Download not implemented yet.");
-                },
-                buttonProps: { variant: "secondary", disabled: true },
+                action: "/book.epub",
+                buttonProps: { variant: "secondary" },
               },
               {
                 label: <Share size={16} />,
