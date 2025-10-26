@@ -25,11 +25,13 @@ export class EpubCommand extends InitCommand {
     const workingDirectory = process.cwd();
     const metadata = await this.getEpubMetadata();
 
-    makeBook({
-      ...metadata,
-      bookDirectory: workingDirectory,
-      ignoredFiles: [this.metaFileName],
-      outputPath: join(workingDirectory, outFileRelative + extension),
-    });
+    makeBook(
+      {
+        workingDirectory,
+        ignoredFiles: [this.metaFileName],
+        outputPath: join(workingDirectory, outFileRelative + extension),
+      },
+      metadata,
+    );
   }
 }

@@ -32,7 +32,10 @@ interface BookOptions {
   title?: string;
   tags?: string[];
   verbose?: boolean;
-  bookDirectory: string;
+}
+
+interface MakeBookParams {
+  workingDirectory: string;
   ignoredFiles: string[];
   outputPath: string;
 }
@@ -452,8 +455,12 @@ function usage(optionsConfig: any): string {
   return usage;
 }
 
-export function makeBook(opts: Partial<BookOptions> = {}) {
+export function makeBook(
+  { workingDirectory, ignoredFiles, outputPath }: MakeBookParams,
+  opts: Partial<BookOptions> = {},
+) {
   Object.assign(options, opts);
+  options.bookDirectory = workingDirectory;
   date = new Date().toISOString();
   uuid = randomUUID();
 
@@ -508,7 +515,7 @@ export function makeBook(opts: Partial<BookOptions> = {}) {
 
   files.forEach((file) => {
     if (file.endsWith('.md')) {
-      if (!opts.ignoredFiles || !opts?.ignoredFiles?.includes(file)) {
+      if (!ignoredFiles || !ignoredFiles?.includes(file)) {
         processMarkdown(file, files);
       }
     } else if (
@@ -538,7 +545,7 @@ export function makeBook(opts: Partial<BookOptions> = {}) {
   addStylesheet();
 
   zip.generateAsync({ type: 'nodebuffer' }).then((content) => {
-    writeFileSync(opts.outputPath, content as Buffer);
+    writeFileSync(outputPath, content as Buffer);
   });
 
   // if (options.verbose) {

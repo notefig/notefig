@@ -73,11 +73,13 @@ export class BuildCommand extends InitCommand {
   protected async buildEpubFile(finalOutDir: string) {
     const metadata = await this.getEpubMetadata();
 
-    makeBook({
-      ...metadata,
-      bookDirectory: this.workingDirectory,
-      ignoredFiles: [this.metaFileName],
-      outputPath: combinePaths([this.templateAssetsPath, 'book.epub']),
-    });
+    makeBook(
+      {
+        workingDirectory: this.workingDirectory,
+        ignoredFiles: [this.metaFileName],
+        outputPath: combinePaths([this.templateAssetsPath, 'book.epub']),
+      },
+      metadata,
+    );
   }
 }
