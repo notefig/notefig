@@ -4,7 +4,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
 import * as JSZip from 'jszip';
-import { stripFrontmatter } from '../utils/frontmatter.util';
+import { stripFrontmatter, parseFrontmatter } from '../utils/frontmatter.util';
 import type { Logger } from '../utils/logger.util';
 
 interface Chapter {
@@ -75,9 +75,25 @@ function extension(filePath: string): string {
 function processMarkdown(file: string, files: string[]) {
   const image = file.slice(0, -3);
   let content = readFileSync(join(options.bookDirectory, file)).toString();
+
+  // Extract title from frontmatter first, fallback to H1 header
+  const frontmatter = parseFrontmatter(content);
+  let title: string | undefined;
+
+  if (
+    frontmatter &&
+    typeof frontmatter === 'object' &&
+    'title' in frontmatter
+  ) {
+    title = frontmatter.title as string;
+  } else {
+    // Fallback to extracting from H1 header in content
+    const strippedContent = stripFrontmatter(content);
+    const match = strippedContent.match(/^#\s+(.*)/m);
+    title = match ? match[1] : undefined;
+  }
+
   content = stripFrontmatter(content);
-  const match = content.match(/^#\s+(.*)/m);
-  const title = match ? match[1] : undefined;
   if (files.includes(image + '.jpg')) {
     if (content.indexOf(image + '.jpg') === -1) {
       content = '![](' + image + '.jpg)\n' + content;
@@ -185,9 +201,11 @@ function addContentOpf() {
       webp: 'image/webp',
     };
     const isCoverImage = basename(image) === metadata.cover_image;
-    const imageId = isCoverImage ? 'cover-image' : basename(image).replace(/\./g, '_');
+    const imageId = isCoverImage
+      ? 'cover-image'
+      : basename(image).replace(/\./g, '_');
     const properties = isCoverImage ? ' properties="cover-image"' : '';
-    
+
     content +=
       '      <item id="' +
       imageId +
@@ -244,8 +262,7 @@ function addNavXhtml() {
       '"><a href="' +
       basename(chapter.xhtmlPath) +
       '">' +
-      basename(chapter.xhtmlPath).slice(0, -6) +
-      (chapter.title ? ' - ' + chapter.title : '') +
+      chapter.title +
       '</a></li>\n';
   });
   nav += '</ol>\n';
@@ -337,8 +354,6 @@ function addTitlePageXhtml() {
 
   zip.file('EPUB/title_page.xhtml', title_page);
 }
-
-
 
 function addStylesheet() {
   const stylesheet = `
