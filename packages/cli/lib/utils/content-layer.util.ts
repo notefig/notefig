@@ -1,12 +1,16 @@
 import { userInfo } from 'os';
 import { z } from 'zod';
 
-const MetaDocumentFrontmatter = z.object({
+export const MetaDocumentFrontmatter = z.object({
   title: z.string(),
   author: z.string(),
   date: z.string().optional(),
   tags: z.array(z.string()).optional(),
 });
+
+export type MetaDocumentFrontmatterInterface = z.infer<
+  typeof MetaDocumentFrontmatter
+>;
 
 const ChapterDocumentFrontmatter = z.object({
   title: z.string(),
@@ -16,7 +20,9 @@ const ChapterDocumentFrontmatter = z.object({
   updated: z.string().date().optional(),
 });
 
-export function getArbitraryMeta(directoryName: string): z.infer<typeof MetaDocumentFrontmatter> {
+export function getArbitraryMeta(
+  directoryName: string,
+): z.infer<typeof MetaDocumentFrontmatter> {
   return {
     title: getSanitizedTitle(directoryName),
     author: getCurrentUsername(),
