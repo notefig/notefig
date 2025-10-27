@@ -1,6 +1,6 @@
 import * as mdit from 'markdown-it';
 import { readFileSync, readdirSync, writeFileSync } from 'fs';
-import { join, basename as pathBasename } from 'path';
+import { join } from 'path';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
 import * as JSZip from 'jszip';
@@ -121,9 +121,13 @@ ${html}
 
 function processImage(file: string) {
   const content = readFileSync(join(options.bookDirectory, file));
-  zip.file('EPUB/' + file, content);
+  zip.file('EPUB/' + file, content as any);
   fileNames.push('EPUB/' + file);
   images.push('EPUB/' + file);
+}
+
+function addMimeType() {
+  zip.file('mimetype', 'application/epub+zip');
 }
 
 function addContainerXml() {
@@ -139,13 +143,14 @@ function addContainerXml() {
 function addContentOpf() {
   let content = `<?xml version="1.0" encoding="UTF-8"?>
   <package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="epub-id" prefix="ibooks: http://vocabulary.itunes.apple.com/rdf/ibooks/vocabulary-extensions-1.0/">
-    <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:ofp="http://www.idpf.org/2007/opf">
+    <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/">
       <dc:title id="epub-title-1">${metadata.title}</dc:title>
       <dc:creator id="id">${metadata.author}</dc:creator>
       <dc:identifier id="epub-id">uuid:${uuid}</dc:identifier>
       <dc:language>${metadata.language}</dc:language>
       <dc:date>${date}</dc:date>
-      <dc:description>${metadata.description}</dc:description>`;
+      <dc:description>${metadata.description}</dc:description>
+      <meta property="dcterms:modified">${date}</meta>`;
   if (metadata.tags) {
     metadata.tags.forEach((tag) => {
       content += `
@@ -153,10 +158,9 @@ function addContentOpf() {
     });
   }
   content += `
-      <meta name="cover" content="cover_jpg"/>
+      <meta name="cover" content="cover-image"/>
     </metadata>
     <manifest>
-      <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml" />
       <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav" />
       <item id="stylesheet" href="stylesheet.css" media-type="text/css" />
       <item id="cover_xhtml" href="cover.xhtml" media-type="application/xhtml+xml" properties="svg" />
@@ -178,19 +182,26 @@ function addContentOpf() {
       jpeg: 'image/jpeg',
       png: 'image/png',
       gif: 'image/gif',
+      webp: 'image/webp',
     };
+    const isCoverImage = basename(image) === metadata.cover_image;
+    const imageId = isCoverImage ? 'cover-image' : basename(image).replace(/\./g, '_');
+    const properties = isCoverImage ? ' properties="cover-image"' : '';
+    
     content +=
       '      <item id="' +
-      basename(image).replace(/\./g, '_') +
+      imageId +
       '" href="' +
       basename(image) +
       '" media-type="' +
       mimeTypes[extension(image) as keyof typeof mimeTypes] +
-      '" />\n';
+      '"' +
+      properties +
+      ' />\n';
   });
 
   content += '  </manifest>\n';
-  content += '  <spine toc="ncx">\n';
+  content += '  <spine>\n';
   content += '    <itemref idref="cover_xhtml" />\n';
   content += '    <itemref idref="title_page_xhtml" linear="yes" />\n';
   content += '    <itemref idref="nav" />\n';
@@ -201,14 +212,6 @@ function addContentOpf() {
       '" />\n';
   });
   content += '  </spine>\n';
-  content += '  <guide>\n';
-  content +=
-    '    <reference type="toc" title="' +
-    metadata.title +
-    '" href="nav.xhtml" />\n';
-  content +=
-    '    <reference type="cover" title="Cover" href="cover.xhtml" />\n';
-  content += '  </guide>\n';
   content += '</package>\n';
 
   zip.file('EPUB/content.opf', content);
@@ -234,7 +237,6 @@ function addNavXhtml() {
   nav += '<ol class="toc">\n';
   nav += '  <li id="toc-li-cover"><a href="cover.xhtml">Cover</a></li>\n';
   nav += '  <li id="toc-li-title"><a href="title_page.xhtml">Title</a></li>\n';
-  nav += '  <li id="toc-li-nav"><a href="nav.xhtml">TOC</a></li>\n';
   chapters.forEach((chapter, i) => {
     nav +=
       '  <li id="toc-li-' +
@@ -336,39 +338,7 @@ function addTitlePageXhtml() {
   zip.file('EPUB/title_page.xhtml', title_page);
 }
 
-function addTocNcx() {
-  let toc = '<?xml version="1.0" encoding="UTF-8"?>\n';
-  toc +=
-    '<ncx version="2005-1" xmlns="http://www.daisy.org/z3986/2005/ncx/">\n';
-  toc += '  <head>\n';
-  toc += '    <meta name="dtb:uid" content="uuid:' + uuid + '" />\n';
-  toc += '    <meta name="dtb:depth" content="1" />\n';
-  toc += '    <meta name="dtb:totalPageCount" content="0" />\n';
-  toc += '    <meta name="dtb:maxPageNumber" content="0" />\n';
-  toc += '    <meta name="cover" content="cover_jpg" />\n';
-  toc += '  </head>\n';
-  toc += '  <docTitle>\n';
-  toc += '    <text>女友</text>\n';
-  toc += '  </docTitle>\n';
-  toc += '  <navMap>\n';
-  chapters.forEach((chapter, i) => {
-    toc += '    <navPoint id="navPoint-' + i + '">\n';
-    toc += '      <navLabel>\n';
-    toc +=
-      '        <text>' +
-      basename(chapter.xhtmlPath).slice(0, -6) +
-      (chapter.title ? ' - ' + chapter.title : '') +
-      '</text>\n';
-    toc += '      </navLabel>\n';
-    toc += '      <content src="' + basename(chapter.xhtmlPath) + '" />\n';
-    toc += '    </navPoint>\n';
-  });
 
-  toc += '  </navMap>\n';
-  toc += '</ncx>\n';
-
-  zip.file('EPUB/toc.ncx', toc);
-}
 
 function addStylesheet() {
   const stylesheet = `
@@ -471,6 +441,8 @@ export function makeBook(
     }
   });
 
+  addMimeType();
+
   addContainerXml();
 
   addContentOpf();
@@ -481,12 +453,10 @@ export function makeBook(
 
   addTitlePageXhtml();
 
-  addTocNcx();
-
   addStylesheet();
 
   zip.generateAsync({ type: 'nodebuffer' }).then((content) => {
-    writeFileSync(outputPath, content as Buffer);
+    writeFileSync(outputPath, content as any);
   });
 
   logger.verbose('Created epub output at ' + outputPath);
