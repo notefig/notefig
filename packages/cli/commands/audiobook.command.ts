@@ -1,10 +1,9 @@
 import { InitCommand } from './init.command';
-import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
-import type { Command } from 'commander';
 import { join } from 'path';
 import { createWriteStream } from 'fs';
 import { Readable } from 'stream';
-import { ElevenLabsException } from '../exceptions/elevenlabs.exception';
+import { getElevenLabsService } from '../lib/utils/elevenlabs.util';
+import type { Command } from 'commander';
 
 export class AudiobookCommand extends InitCommand {
   protected outputPath?: string;
@@ -26,43 +25,10 @@ export class AudiobookCommand extends InitCommand {
     }
     await super.handle(command);
 
-    const apiKey = process.env.ELEVENLABS_API_KEY;
-    const voiceId = process.env.ELEVENLABS_VOICE_ID;
-
-    if (!apiKey) {
-      throw new ElevenLabsException(
-        'ELEVENLABS_API_KEY environment variable is required',
-      );
-    }
-
-    if (!voiceId) {
-      throw new ElevenLabsException(
-        'ELEVENLABS_VOICE_ID environment variable is required',
-      );
-    }
-
-    const elevenlabs = new ElevenLabsClient({
-      apiKey,
-    });
-
-    let audio: any;
-    try {
-      audio = await elevenlabs.textToSpeech.convert(voiceId, {
-        outputFormat: 'mp3_44100_128',
-        text: 'Sample Content',
-        modelId: 'eleven_multilingual_v2',
-      });
-    } catch (error: any) {
-      if (error.statusCode && error.body?.detail?.message) {
-        throw new ElevenLabsException(
-          error.body.detail.message,
-          error.statusCode,
-        );
-      }
-      throw new ElevenLabsException(
-        error.message || 'Unknown ElevenLabs API error',
-      );
-    }
+    const elevenLabsService = getElevenLabsService();
+    const audio = await elevenLabsService.convertTextToSpeech(
+      'The first move is what sets everything in motion.',
+    );
 
     const outputFilePath = join(
       this.workingDirectory,

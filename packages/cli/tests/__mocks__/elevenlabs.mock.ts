@@ -1,7 +1,3 @@
-export interface MockHttpResponsePromise<T> extends Promise<T> {
-  asResponse(): Promise<Response>;
-}
-
 export class MockElevenLabsClient {
   constructor(_config: { apiKey: string }) {}
 
@@ -13,7 +9,7 @@ export class MockElevenLabsClient {
         text: string;
         modelId?: string;
       },
-    ): MockHttpResponsePromise<any> => {
+    ): Promise<any> => {
       // Create a Web ReadableStream (not Node.js Readable)
       const mockStream = new (globalThis as any).ReadableStream({
         start(controller: any) {
@@ -24,12 +20,7 @@ export class MockElevenLabsClient {
         }
       });
 
-      const promise = Promise.resolve(
-        mockStream,
-      ) as MockHttpResponsePromise<any>;
-
-      promise.asResponse = () => Promise.resolve(new Response());
-      return promise;
+      return Promise.resolve(mockStream);
     },
 
     stream: (
@@ -40,7 +31,20 @@ export class MockElevenLabsClient {
         modelId?: string;
       },
     ): any => {
-      return {};
+      // Create a Web ReadableStream for streaming audio
+      return new (globalThis as any).ReadableStream({
+        start(controller: any) {
+          // Push some mock audio data chunks for streaming
+          const mockChunk1 = new Uint8Array([1, 2, 3, 4, 5]);
+          const mockChunk2 = new Uint8Array([6, 7, 8, 9, 10]);
+          const mockChunk3 = new Uint8Array([11, 12, 13, 14, 15]);
+          
+          controller.enqueue(mockChunk1);
+          controller.enqueue(mockChunk2);
+          controller.enqueue(mockChunk3);
+          controller.close();
+        }
+      });
     },
   };
 }
