@@ -5,7 +5,7 @@ import type { ReadableStream } from 'stream/web';
 
 class ElevenLabsService {
   private static instance: ElevenLabsService;
-  private client: ElevenLabsClientMock;
+  private client: ElevenLabsClient | ElevenLabsClientMock;
 
   private constructor() {
     const apiKey = process.env.ELEVENLABS_API_KEY;
@@ -17,7 +17,6 @@ class ElevenLabsService {
     }
 
     if (process.env.TEST) {
-      console.log('testing testing');
       this.client = new ElevenLabsClientMock({
         apiKey,
       });

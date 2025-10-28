@@ -3,10 +3,7 @@ import { join } from 'path';
 import { createWriteStream } from 'fs';
 import { Readable } from 'stream';
 import { getElevenLabsService } from '../lib/utils/elevenlabs.util';
-import {
-  validateMetaDocumentFrontmatter,
-  validateChapterDocumentFrontmatter,
-} from '../lib/utils/content-layer.util';
+import { validateChapterDocumentFrontmatter } from '../lib/utils/content-layer.util';
 import { getContentsRecursively, readFile } from '../lib/utils/fs.util';
 import {
   parseFrontmatter,
@@ -43,11 +40,16 @@ export class AudiobookCommand extends InitCommand {
 
     this.logger.log(
       ['verbose', 'noob'],
-      `Converting ${entireContent.length} characters to audiobook...`,
+      `Streaming ${entireContent.length} characters to audiobook...`,
     );
 
     const elevenLabsService = getElevenLabsService();
-    const audio = await elevenLabsService.convertTextToSpeech(entireContent);
+
+    this.logger.log(
+      ['verbose', 'noob'],
+      'Initiating streaming connection to ElevenLabs...',
+    );
+    const audio = await elevenLabsService.streamTextToSpeech(entireContent);
 
     const outputFilePath = join(
       this.workingDirectory,
@@ -55,11 +57,30 @@ export class AudiobookCommand extends InitCommand {
     );
     const writeStream = createWriteStream(outputFilePath);
 
+    this.logger.log(['verbose', 'noob'], 'Starting audio stream processing...');
     const readable = Readable.fromWeb(audio);
     readable.pipe(writeStream);
 
+    let bytesWritten = 0;
+    readable.on('data', (chunk) => {
+      bytesWritten += chunk.length;
+      if (bytesWritten % 10240 === 0) {
+        this.logger.log(
+          ['verbose'],
+          `Streaming progress: ${Math.round(bytesWritten / 1024)}KB processed`,
+        );
+      }
+    });
+
     await new Promise((resolve, reject) => {
-      writeStream.on('finish', resolve);
+      readable.on('end', () => {
+        this.logger.log(
+          ['verbose', 'noob'],
+          `Stream completed. Total size: ${Math.round(bytesWritten / 1024)}KB`,
+        );
+        resolve(undefined);
+      });
+      readable.on('error', reject);
       writeStream.on('error', reject);
     });
 
