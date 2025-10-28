@@ -1,5 +1,9 @@
+import { config } from 'dotenv';
+import { join } from 'path';
 import { readFileInJsonIfExists } from './fs.util';
 import type { hostHelpers } from './hosts.util';
+
+type ISecretValue = `$${string}`;
 
 export interface IRcFileComplete {
   outDir: string;
@@ -7,6 +11,10 @@ export interface IRcFileComplete {
     name: string;
   };
   hosts?: Partial<Record<keyof typeof hostHelpers, any>>;
+  elevenLabs?: {
+    apiKey: string | Omit<string, ISecretValue>;
+    voiceId: string | Omit<string, ISecretValue>;
+  };
 }
 
 export type IRcFile = Partial<IRcFileComplete>;
@@ -27,7 +35,11 @@ export type GetFieldValue<TData, TResult> = (data: TData) => TResult;
 
 export type GetRcFieldValue<TData> = GetFieldValue<IRcFile, TData>;
 
+//TODO: Make sure this gets called only once per execution
 export async function getConfigGetter(...basePath: string[]) {
+  config({
+    'path': join(process.cwd(), '.env'),
+  });
   const data = await readRcFile(...basePath);
 
   function getConfig<TResult>(
