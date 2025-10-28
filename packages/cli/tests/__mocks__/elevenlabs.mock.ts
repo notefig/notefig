@@ -1,5 +1,21 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
 export class MockElevenLabsClient {
   constructor(_config: { apiKey: string }) {}
+
+  private getAudioFileData(): Uint8Array {
+    const audioFilePath = join(
+      __dirname,
+      '..',
+      '..',
+      '..',
+      'assets',
+      'book.mp3',
+    );
+    const audioBuffer = readFileSync(audioFilePath);
+    return new Uint8Array(audioBuffer);
+  }
 
   public textToSpeech = {
     convert: (
@@ -10,14 +26,13 @@ export class MockElevenLabsClient {
         modelId?: string;
       },
     ): Promise<any> => {
-      // Create a Web ReadableStream (not Node.js Readable)
+      console.log('Generating audio file for ', _options.text);
+      const audioData = this.getAudioFileData();
       const mockStream = new (globalThis as any).ReadableStream({
         start(controller: any) {
-          // Push some mock audio data
-          const mockData = new Uint8Array([1, 2, 3, 4, 5]);
-          controller.enqueue(mockData);
+          controller.enqueue(audioData);
           controller.close();
-        }
+        },
       });
 
       return Promise.resolve(mockStream);
@@ -31,19 +46,18 @@ export class MockElevenLabsClient {
         modelId?: string;
       },
     ): any => {
-      // Create a Web ReadableStream for streaming audio
+      console.log('Generating audio file for ', _options.text);
+      const audioData = this.getAudioFileData();
+      const chunkSize = Math.ceil(audioData.length / 3);
+
       return new (globalThis as any).ReadableStream({
         start(controller: any) {
-          // Push some mock audio data chunks for streaming
-          const mockChunk1 = new Uint8Array([1, 2, 3, 4, 5]);
-          const mockChunk2 = new Uint8Array([6, 7, 8, 9, 10]);
-          const mockChunk3 = new Uint8Array([11, 12, 13, 14, 15]);
-          
-          controller.enqueue(mockChunk1);
-          controller.enqueue(mockChunk2);
-          controller.enqueue(mockChunk3);
+          for (let i = 0; i < audioData.length; i += chunkSize) {
+            const chunk = audioData.slice(i, i + chunkSize);
+            controller.enqueue(chunk);
+          }
           controller.close();
-        }
+        },
       });
     },
   };
