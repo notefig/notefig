@@ -13,12 +13,14 @@ export function Sidebar({
   chapters,
   navigation,
   currentChapter,
+  epubDownloadLink,
   children,
 }: {
   meta: Meta;
   chapters: Chapter[];
   navigation: ChapterNavigationProps["navigation"];
   currentChapter?: ChapterLike;
+  epubDownloadLink?: string | null;
   children: React.ReactNode;
 }) {
   const shareMeta = useShare(meta);
@@ -55,13 +57,19 @@ export function Sidebar({
               actions={[
                 {
                   label: "Download",
-                  action: "/book.epub",
-                  buttonProps: { size: "sm" },
+                  action: epubDownloadLink!,
+                  buttonProps: {
+                    size: "sm" as const,
+                    disabled: !epubDownloadLink,
+                  },
                 },
                 {
                   label: <Share size={16} />,
                   action: shareMeta,
-                  buttonProps: { size: "sm", variant: "secondary" },
+                  buttonProps: {
+                    size: "sm" as const,
+                    variant: "secondary" as const,
+                  },
                 },
               ]}
               twoToneImageProps={{
