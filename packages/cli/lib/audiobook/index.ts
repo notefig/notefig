@@ -21,6 +21,10 @@ interface MakeAudiobookParams {
   outputPath: string;
 }
 
+export function canMakeAudiobook() {
+  return !!process.env.ELEVENLABS_API_KEY;
+}
+
 export async function makeAudiobook(
   makeAudiobookParams: MakeAudiobookParams,
   logger: Logger,

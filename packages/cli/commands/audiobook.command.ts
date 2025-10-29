@@ -29,10 +29,10 @@ export class AudiobookCommand extends InitCommand {
     );
     await makeAudiobook(
       {
-        'outputPath': outputFilePath,
-        'workingDirectory': this.workingDirectory,
-        'extractProjectMetadata': this.extractProjectMetadata.bind(this),
-        'shouldIncludeChapterFile': this.shouldIncludeChapterFile.bind(this),
+        outputPath: outputFilePath,
+        workingDirectory: this.workingDirectory,
+        extractProjectMetadata: this.extractProjectMetadata.bind(this),
+        shouldIncludeChapterFile: this.shouldIncludeChapterFile.bind(this),
       },
       this.logger,
     );
