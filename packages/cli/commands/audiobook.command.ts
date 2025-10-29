@@ -1,17 +1,6 @@
 import { InitCommand } from './init.command';
 import { join } from 'path';
-import { createWriteStream } from 'fs';
-import { Readable, pipeline } from 'stream';
-import { promisify } from 'util';
-import { EOL } from 'os';
-import { getElevenLabsService } from '../lib/utils/elevenlabs.util';
-import { validateChapterDocumentFrontmatter } from '../lib/utils/content-layer.util';
-import { getContentsRecursively, readFile } from '../lib/utils/fs.util';
-import { languages } from '../lib/utils/transcriptions.util';
-import {
-  parseFrontmatter,
-  stripFrontmatter,
-} from '../lib/utils/frontmatter.util';
+import { makeAudiobook } from '../lib/audiobook';
 import type { Command } from 'commander';
 
 export class AudiobookCommand extends InitCommand {
@@ -33,130 +22,19 @@ export class AudiobookCommand extends InitCommand {
       process.exit(1);
     }
     await super.handle(command);
-
-    const entireContent = await this.getTheEntireContent();
-
-    if (!entireContent.trim()) {
-      this.logger.error('No chapter content found to convert to audiobook');
-      process.exit(1);
-    }
-
-    this.logger.log(
-      ['verbose', 'noob'],
-      `Streaming ${entireContent.length} characters to audiobook...`,
-    );
-
-    const elevenLabsService = getElevenLabsService();
-
-    this.logger.log(
-      ['verbose', 'noob'],
-      'Initiating streaming connection to ElevenLabs...',
-    );
-    const audio = await elevenLabsService.streamTextToSpeech(entireContent);
-
+    const extension = this.outputPath.endsWith('.mp3') ? '' : '.mp3';
     const outputFilePath = join(
       this.workingDirectory,
-      this.outputPath + '.mp3',
+      this.outputPath + extension,
     );
-    const writeStream = createWriteStream(outputFilePath);
-
-    this.logger.log(['verbose', 'noob'], 'Starting audio stream processing...');
-    const readable = Readable.fromWeb(audio);
-
-    let bytesWritten = 0;
-    readable.on('data', (chunk) => {
-      bytesWritten += chunk.length;
-      if (bytesWritten % 10240 === 0) {
-        this.logger.log(
-          ['verbose'],
-          `Streaming progress: ${Math.round(bytesWritten / 1024)}KB processed`,
-        );
-      }
-    });
-
-    const pipelineAsync = promisify(pipeline);
-    await pipelineAsync(readable, writeStream);
-
-    this.logger.log(
-      ['verbose', 'noob'],
-      `Stream completed. Total size: ${Math.round(bytesWritten / 1024)}KB`,
+    await makeAudiobook(
+      {
+        'outputPath': outputFilePath,
+        'workingDirectory': this.workingDirectory,
+        'extractProjectMetadata': this.extractProjectMetadata.bind(this),
+        'shouldIncludeChapterFile': this.shouldIncludeChapterFile.bind(this),
+      },
+      this.logger,
     );
-
-    this.logger.log(
-      ['verbose', 'noob'],
-      `Audiobook saved to: ${outputFilePath}`,
-    );
-  }
-
-  protected async getTheEntireContent(): Promise<string> {
-    interface ChapterData {
-      content: string;
-      metadata: ReturnType<
-        typeof AudiobookCommand.prototype.getChapterMetadata
-      >;
-    }
-
-    //TODO: read from metadata
-    const lang = 'en';
-    const transcription = languages[lang];
-    const chapters: ChapterData[] = [];
-
-    for await (const file of getContentsRecursively(this.workingDirectory)) {
-      if (this.shouldIncludeChapterFile(file)) {
-        const fileContent = await readFile(file);
-        const metadata = this.getChapterMetadata(fileContent);
-        const chapterTranscription = this.substituteTranscription(
-          transcription.chapter,
-          metadata,
-        );
-
-        const content =
-          chapterTranscription + EOL + stripFrontmatter(fileContent);
-
-        chapters.push({
-          content,
-          metadata,
-        });
-      }
-    }
-
-    chapters.sort((a, b) => a.metadata.index - b.metadata.index);
-
-    let metaTranscription = '';
-    const [metadata] = await this.extractProjectMetadata();
-    if (metadata) {
-      metaTranscription = this.substituteTranscription(
-        transcription.metadata,
-        metadata as Record<string, string>,
-      );
-      metaTranscription += '\n\n';
-    }
-
-    return (
-      metaTranscription +
-      chapters.map((chapter) => chapter.content).join('\n\n')
-    );
-  }
-
-  protected getChapterMetadata(content: string) {
-    const frontmatter = parseFrontmatter(content);
-    const validationResult = validateChapterDocumentFrontmatter(frontmatter);
-    if (validationResult.success) {
-      if (validationResult.data.index !== undefined) {
-        validationResult.data.index++;
-      }
-      return validationResult.data;
-    }
-    //TODO: register a custom error
-    throw new Error('Malformed chapter file');
-  }
-
-  protected substituteTranscription(
-    content: string,
-    substitutions: Record<string, string | number>,
-  ) {
-    return content.replace(/\{\{(\w+)\}\}/g, (match, key) => {
-      return substitutions[key]?.toString() || match;
-    });
   }
 }
