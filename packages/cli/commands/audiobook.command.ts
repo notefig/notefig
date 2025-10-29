@@ -1,10 +1,13 @@
 import { InitCommand } from './init.command';
 import { join } from 'path';
 import { createWriteStream } from 'fs';
-import { Readable } from 'stream';
+import { Readable, pipeline } from 'stream';
+import { promisify } from 'util';
+import { EOL } from 'os';
 import { getElevenLabsService } from '../lib/utils/elevenlabs.util';
 import { validateChapterDocumentFrontmatter } from '../lib/utils/content-layer.util';
 import { getContentsRecursively, readFile } from '../lib/utils/fs.util';
+import { languages } from '../lib/utils/transcriptions.util';
 import {
   parseFrontmatter,
   stripFrontmatter,
@@ -59,7 +62,6 @@ export class AudiobookCommand extends InitCommand {
 
     this.logger.log(['verbose', 'noob'], 'Starting audio stream processing...');
     const readable = Readable.fromWeb(audio);
-    readable.pipe(writeStream);
 
     let bytesWritten = 0;
     readable.on('data', (chunk) => {
@@ -72,17 +74,13 @@ export class AudiobookCommand extends InitCommand {
       }
     });
 
-    await new Promise((resolve, reject) => {
-      readable.on('end', () => {
-        this.logger.log(
-          ['verbose', 'noob'],
-          `Stream completed. Total size: ${Math.round(bytesWritten / 1024)}KB`,
-        );
-        resolve(undefined);
-      });
-      readable.on('error', reject);
-      writeStream.on('error', reject);
-    });
+    const pipelineAsync = promisify(pipeline);
+    await pipelineAsync(readable, writeStream);
+
+    this.logger.log(
+      ['verbose', 'noob'],
+      `Stream completed. Total size: ${Math.round(bytesWritten / 1024)}KB`,
+    );
 
     this.logger.log(
       ['verbose', 'noob'],
@@ -98,14 +96,22 @@ export class AudiobookCommand extends InitCommand {
       >;
     }
 
+    //TODO: read from metadata
+    const lang = 'en';
+    const transcription = languages[lang];
     const chapters: ChapterData[] = [];
 
     for await (const file of getContentsRecursively(this.workingDirectory)) {
       if (this.shouldIncludeChapterFile(file)) {
         const fileContent = await readFile(file);
-
         const metadata = this.getChapterMetadata(fileContent);
-        const content = stripFrontmatter(fileContent);
+        const chapterTranscription = this.substituteTranscription(
+          transcription.chapter,
+          metadata,
+        );
+
+        const content =
+          chapterTranscription + EOL + stripFrontmatter(fileContent);
 
         chapters.push({
           content,
@@ -116,16 +122,41 @@ export class AudiobookCommand extends InitCommand {
 
     chapters.sort((a, b) => a.metadata.index - b.metadata.index);
 
-    return chapters.map((chapter) => chapter.content).join('\n\n');
+    let metaTranscription = '';
+    const [metadata] = await this.extractProjectMetadata();
+    if (metadata) {
+      metaTranscription = this.substituteTranscription(
+        transcription.metadata,
+        metadata as Record<string, string>,
+      );
+      metaTranscription += '\n\n';
+    }
+
+    return (
+      metaTranscription +
+      chapters.map((chapter) => chapter.content).join('\n\n')
+    );
   }
 
   protected getChapterMetadata(content: string) {
     const frontmatter = parseFrontmatter(content);
     const validationResult = validateChapterDocumentFrontmatter(frontmatter);
     if (validationResult.success) {
+      if (validationResult.data.index !== undefined) {
+        validationResult.data.index++;
+      }
       return validationResult.data;
     }
     //TODO: register a custom error
     throw new Error('Malformed chapter file');
+  }
+
+  protected substituteTranscription(
+    content: string,
+    substitutions: Record<string, string | number>,
+  ) {
+    return content.replace(/\{\{(\w+)\}\}/g, (match, key) => {
+      return substitutions[key]?.toString() || match;
+    });
   }
 }

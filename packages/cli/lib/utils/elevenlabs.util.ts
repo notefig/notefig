@@ -41,7 +41,7 @@ class ElevenLabsService {
       outputFormat?: any;
       modelId?: string;
     },
-  ): Promise<any> {
+  ) {
     const finalVoiceId = voiceId || process.env.ELEVENLABS_VOICE_ID;
 
     if (!finalVoiceId) {
