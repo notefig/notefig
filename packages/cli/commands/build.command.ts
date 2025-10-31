@@ -115,6 +115,7 @@ export class BuildCommand extends InitCommand {
       this.logger.info(
         'No Audiobook Coniguration. Skipping Audiobook generation.',
       );
+      return Promise.resolve();
     }
   }
 }
