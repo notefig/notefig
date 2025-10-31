@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Share } from "lucide-react";
+import { Podcast, BookDown, Share } from "lucide-react";
 import { BookOverview } from "./book-overview";
 import { Button } from "@/components/ui/button";
 import { ChapterNavigation } from "./chapter-navigation";
@@ -13,19 +13,23 @@ export function Sidebar({
   chapters,
   navigation,
   currentChapter,
+  epubDownloadLink,
+  audiobookDownloadLink,
   children,
 }: {
   meta: Meta;
   chapters: Chapter[];
   navigation: ChapterNavigationProps["navigation"];
   currentChapter?: ChapterLike;
+  epubDownloadLink?: string | null;
+  audiobookDownloadLink?: string | null;
   children: React.ReactNode;
 }) {
   const shareMeta = useShare(meta);
 
   return (
     <div className="relative max-w-4xl m-auto flex flex-col">
-      <div className="w-full grid grid-cols-7">
+      <div className="w-full grid grid-cols-7 md:min-h-[calc(100vh-80px)]">
         <div className="p-4 pb-0 col-span-7 m-auto w-full md:h-full md:col-span-5 md:p-8">
           {children}
           <div className="sticky z-10 w-full bottom-0 space-y-4 bg-background py-2 md:hidden">
@@ -54,14 +58,30 @@ export function Sidebar({
               datePublished={meta.date}
               actions={[
                 {
-                  label: "Download",
-                  action: "/book.epub",
-                  buttonProps: { size: "sm" },
+                  label: (
+                    <span className="flex">
+                      <BookDown size={16} />
+                      &nbsp;eBook
+                    </span>
+                  ),
+                  action: epubDownloadLink!,
+                  buttonProps: {
+                    size: "sm" as const,
+                    disabled: !epubDownloadLink,
+                  },
                 },
                 {
-                  label: <Share size={16} />,
-                  action: shareMeta,
-                  buttonProps: { size: "sm", variant: "secondary" },
+                  label: (
+                    <span className="flex">
+                      <Podcast size={16} />
+                      &nbsp;Audiobook
+                    </span>
+                  ),
+                  action: audiobookDownloadLink!,
+                  buttonProps: {
+                    size: "sm" as const,
+                    variant: "secondary",
+                  },
                 },
               ]}
               twoToneImageProps={{

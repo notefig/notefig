@@ -15,4 +15,5 @@ export const MESSAGES = {
   AUTHOR_NOT_SAVED: `${EMOJIS.SMIRK}  Trying to create avatar for an author that is not saved yet. [author]`,
   MISSING_PARAMETER: `Required parameters [parameters] are missing ${EMOJIS.EYES}`,
   WATCH_MODE_START: `Starting Metrists in watch mode...`,
+  ELEVENLABS_API_ERROR: `ElevenLabs API error: [message]`,
 };

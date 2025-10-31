@@ -6,14 +6,19 @@ import {
   getChapterNavigation,
   getCoverPath,
   getGeneralMetadata,
+  getEpubDownloadLink,
+  getAudiobookDownloadLink,
   useShare,
 } from "@/lib/utils";
 import { BookOverview } from "@/components/patterns/book-overview";
 import { Reader } from "@/components/patterns/reader";
-import { Share } from "lucide-react";
+import { BookDown, Podcast, Share } from "lucide-react";
 
 export async function getStaticProps() {
   const navigation = getChapterNavigation(undefined, allChapters);
+  const epubDownloadLink = await getEpubDownloadLink();
+  const audiobookDownloadLink = await getAudiobookDownloadLink();
+
   return {
     props: {
       meta: allMeta[0],
@@ -21,6 +26,8 @@ export async function getStaticProps() {
       navigation,
       coverPath: await getCoverPath(),
       metadata: getGeneralMetadata(allMeta[0]),
+      epubDownloadLink,
+      audiobookDownloadLink,
     },
   };
 }
@@ -31,6 +38,8 @@ export default function Home({
   navigation,
   coverPath,
   metadata,
+  epubDownloadLink,
+  audiobookDownloadLink,
 }: Awaited<ReturnType<typeof getStaticProps>>["props"]) {
   const shareMeta = useShare(meta);
   const firstChapter = chapters[0];
@@ -42,7 +51,13 @@ export default function Home({
         <meta name="description" content={metadata.description} />
       </Head>
       <Header meta={meta} coverPath={coverPath}>
-        <Sidebar meta={meta} chapters={chapters} navigation={navigation}>
+        <Sidebar
+          meta={meta}
+          chapters={chapters}
+          navigation={navigation}
+          epubDownloadLink={epubDownloadLink}
+          audiobookDownloadLink={audiobookDownloadLink}
+        >
           <BookOverview
             title={meta.title}
             cover={coverPath}
@@ -50,22 +65,38 @@ export default function Home({
             actions={[
               ...(firstChapter
                 ? [
-                  {
-                    label: "Start Reading",
-                    action: `/${firstChapter.slug}`,
-                    buttonProps: {},
-                  },
-                ]
+                    {
+                      label: "Start Reading",
+                      action: `/${firstChapter.slug}`,
+                      buttonProps: {},
+                    },
+                  ]
                 : []),
-              {
-                label: "Download Epub",
-                action: "/book.epub",
-                buttonProps: { variant: "secondary" },
-              },
               {
                 label: <Share size={16} />,
                 action: shareMeta,
-                buttonProps: { variant: "secondary", className: "px-3" },
+                buttonProps: {
+                  size: "sm" as const,
+                  variant: "secondary" as const,
+                  className: "hidden md:flex",
+                },
+              },
+              {
+                label: <BookDown size={22} />,
+                action: epubDownloadLink!,
+                buttonProps: {
+                  variant: "secondary" as const,
+                  disabled: !epubDownloadLink,
+                  className: "md:hidden",
+                },
+              },
+              {
+                label: <Podcast size={22} />,
+                action: audiobookDownloadLink!,
+                buttonProps: {
+                  disabled: !audiobookDownloadLink,
+                  className: "md:hidden",
+                },
               },
             ]}
             twoToneImageProps={{

@@ -6,6 +6,8 @@ import {
   getChapterMetadata,
   getChapterNavigation,
   getCoverPath,
+  getEpubDownloadLink,
+  getAudiobookDownloadLink,
   invariant,
   useShare,
 } from "@/lib/utils";
@@ -27,6 +29,8 @@ export async function getStaticProps({
   );
   invariant(chapter, `Chapter not found for slug: ${params.chapter}`);
   const navigation = getChapterNavigation(chapter, allChapters);
+  const epubDownloadLink = await getEpubDownloadLink();
+  const audiobookDownloadLink = await getAudiobookDownloadLink();
 
   return {
     props: {
@@ -36,6 +40,8 @@ export async function getStaticProps({
       chapter,
       coverPath: await getCoverPath(),
       metadata: getChapterMetadata(allMeta[0], chapter),
+      epubDownloadLink,
+      audiobookDownloadLink,
     },
   };
 }
@@ -47,6 +53,8 @@ export default function Index({
   chapter,
   coverPath,
   metadata,
+  epubDownloadLink,
+  audiobookDownloadLink,
 }: Awaited<ReturnType<typeof getStaticProps>>["props"]) {
   const shareMeta = useShare(meta);
   return (
@@ -56,7 +64,7 @@ export default function Index({
         <meta name="description" content={metadata.description} />
       </Head>
       <Header meta={meta} coverPath={coverPath}>
-        <Sidebar meta={meta} chapters={chapters} navigation={navigation}>
+        <Sidebar meta={meta} chapters={chapters} navigation={navigation} epubDownloadLink={epubDownloadLink} audiobookDownloadLink={audiobookDownloadLink} currentChapter={chapter}>
           <div className="my-4">
             <Reader markdown={chapter.body} />
           </div>

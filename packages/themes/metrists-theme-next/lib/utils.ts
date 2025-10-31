@@ -377,3 +377,11 @@ export function getChapterMetadata(meta: Meta, chapter: Chapter) {
     description: meta.body.raw.slice(0, 160), //TODO: strip markdown
   };
 }
+
+export async function getEpubDownloadLink(): Promise<string | null> {
+  return "/book.epub";
+}
+
+export async function getAudiobookDownloadLink(): Promise<string | null> {
+  return "/book.mp3";
+}
