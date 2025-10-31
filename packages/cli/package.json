@@ -37,7 +37,8 @@
     "markdown-it": "^14.1.0",
     "node-emoji": "1.11.0",
     "rimraf": "3.0.2",
-    "zod": "3.23.0"
+    "zod": "3.23.0",
+    "dotenv": "16.6.1"
   },
   "devDependencies": {
     "@types/jest": "^29.5.5",
@@ -48,7 +49,6 @@
     "@types/webpack-node-externals": "2.5.3",
     "@typescript-eslint/eslint-plugin": "5.38.1",
     "@typescript-eslint/parser": "5.38.1",
-    "dotenv": "16.6.1",
     "eslint": "8.24.0",
     "eslint-config-prettier": "8.5.0",
     "eslint-plugin-import": "2.26.0",
