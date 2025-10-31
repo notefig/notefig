@@ -146,7 +146,7 @@ jobs:
         run: npm install -g sst
         
       - name: Initialize metrists template
-        run: npx metrists@0.5.0 init
+        run: npx metrists init
         
       - name: Deploy to production
         run: sst deploy --stage production

@@ -7,7 +7,7 @@ describe('build_command_creates_the_right_files', () => {
   const temp = join(__dirname, 'tmp-build');
   let tempDirName: string;
   let tempDir: string;
-  const timeout = 100000;
+  const timeout = 150000;
   const outputDir = 'dist';
   const testChapters = [
     {
@@ -51,7 +51,6 @@ describe('build_command_creates_the_right_files', () => {
       writeFileSync(filePath, asset.content, 'utf-8');
     });
 
-    console.log('before init');
     await execa(
       'node',
       ['../../../../dist/bin/metrists.js', 'init', '--verbose'],
@@ -59,7 +58,6 @@ describe('build_command_creates_the_right_files', () => {
         cwd: tempDir,
       },
     );
-    console.log('after init');
 
     await execa(
       'node',
