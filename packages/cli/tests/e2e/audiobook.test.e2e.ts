@@ -34,6 +34,10 @@ describe('audiobook_command_creates_the_right_files', () => {
       ['../../../../dist/bin/metrists.js', 'audiobook', '-o', outputPath],
       {
         cwd: tempDir,
+        env: {
+          TEST: 'true',
+          'ELEVENLABS_API_KEY': '123',
+        },
       },
     );
   }, timeout);

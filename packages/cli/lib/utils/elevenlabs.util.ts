@@ -42,13 +42,7 @@ class ElevenLabsService {
       modelId?: string;
     },
   ) {
-    const finalVoiceId = voiceId || process.env.ELEVENLABS_VOICE_ID;
-
-    if (!finalVoiceId) {
-      throw new ElevenLabsException(
-        'ELEVENLABS_VOICE_ID environment variable is required or voiceId must be provided',
-      );
-    }
+    const finalVoiceId = voiceId || process.env.ELEVENLABS_VOICE_ID || 'pqHfZKP75CvOlQylNhV4';
 
     try {
       return await this.client.textToSpeech.convert(finalVoiceId, {
@@ -77,13 +71,7 @@ class ElevenLabsService {
       modelId?: string;
     },
   ): Promise<ReadableStream<Uint8Array>> {
-    const finalVoiceId = voiceId || process.env.ELEVENLABS_VOICE_ID;
-
-    if (!finalVoiceId) {
-      throw new ElevenLabsException(
-        'ELEVENLABS_VOICE_ID environment variable is required or voiceId must be provided',
-      );
-    }
+    const finalVoiceId = voiceId || process.env.ELEVENLABS_VOICE_ID || 'pqHfZKP75CvOlQylNhV4';
 
     try {
       return await this.client.textToSpeech.stream(finalVoiceId, {
