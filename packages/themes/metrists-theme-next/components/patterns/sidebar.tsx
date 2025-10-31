@@ -14,6 +14,7 @@ export function Sidebar({
   navigation,
   currentChapter,
   epubDownloadLink,
+  audiobookDownloadLink,
   children,
 }: {
   meta: Meta;
@@ -21,6 +22,7 @@ export function Sidebar({
   navigation: ChapterNavigationProps["navigation"];
   currentChapter?: ChapterLike;
   epubDownloadLink?: string | null;
+  audiobookDownloadLink?: string | null;
   children: React.ReactNode;
 }) {
   const shareMeta = useShare(meta);
@@ -56,11 +58,19 @@ export function Sidebar({
               datePublished={meta.date}
               actions={[
                 {
-                  label: "Download",
+                  label: "Download Epub",
                   action: epubDownloadLink!,
                   buttonProps: {
                     size: "sm" as const,
                     disabled: !epubDownloadLink,
+                  },
+                },
+                {
+                  label: "Download Audio",
+                  action: audiobookDownloadLink!,
+                  buttonProps: {
+                    size: "sm" as const,
+                    disabled: !audiobookDownloadLink,
                   },
                 },
                 {

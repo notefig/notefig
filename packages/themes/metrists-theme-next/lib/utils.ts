@@ -1,8 +1,7 @@
 import { type ClassValue, clsx } from "clsx";
 import { ChapterNavigationProps } from "@/components/patterns/chapter-navigation";
-import { readdir, access } from "fs/promises";
+import { readdir } from "fs/promises";
 import { join } from "path";
-import { constants } from "fs";
 import { twMerge } from "tailwind-merge";
 import { coverPath, acceptedCoverFormats, defaultCoverPath } from "@/constants";
 import type { Meta, Chapter } from ".contentlayer/generated";
@@ -380,16 +379,9 @@ export function getChapterMetadata(meta: Meta, chapter: Chapter) {
 }
 
 export async function getEpubDownloadLink(): Promise<string | null> {
-  try {
-    // Check if we're in development (files in /public) or production (files in root)
-    const isDev = process.env.NODE_ENV === 'development';
-    const epubPath = isDev 
-      ? join(process.cwd(), 'public', 'book.epub')
-      : join(process.cwd(), 'book.epub');
-    
-    await access(epubPath, constants.F_OK);
-    return '/book.epub';
-  } catch {
-    return null;
-  }
+  return "/book.epub";
+}
+
+export async function getAudiobookDownloadLink(): Promise<string | null> {
+  return "/book.mp3";
 }

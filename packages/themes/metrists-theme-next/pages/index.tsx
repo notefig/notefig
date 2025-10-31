@@ -7,15 +7,17 @@ import {
   getCoverPath,
   getGeneralMetadata,
   getEpubDownloadLink,
+  getAudiobookDownloadLink,
   useShare,
 } from "@/lib/utils";
 import { BookOverview } from "@/components/patterns/book-overview";
 import { Reader } from "@/components/patterns/reader";
-import { Share } from "lucide-react";
+import { BookDown, Podcast } from "lucide-react";
 
 export async function getStaticProps() {
   const navigation = getChapterNavigation(undefined, allChapters);
   const epubDownloadLink = await getEpubDownloadLink();
+  const audiobookDownloadLink = await getAudiobookDownloadLink();
 
   return {
     props: {
@@ -25,6 +27,7 @@ export async function getStaticProps() {
       coverPath: await getCoverPath(),
       metadata: getGeneralMetadata(allMeta[0]),
       epubDownloadLink,
+      audiobookDownloadLink,
     },
   };
 }
@@ -36,6 +39,7 @@ export default function Home({
   coverPath,
   metadata,
   epubDownloadLink,
+  audiobookDownloadLink,
 }: Awaited<ReturnType<typeof getStaticProps>>["props"]) {
   const shareMeta = useShare(meta);
   const firstChapter = chapters[0];
@@ -52,6 +56,7 @@ export default function Home({
           chapters={chapters}
           navigation={navigation}
           epubDownloadLink={epubDownloadLink}
+          audiobookDownloadLink={audiobookDownloadLink}
         >
           <BookOverview
             title={meta.title}
@@ -68,20 +73,19 @@ export default function Home({
                   ]
                 : []),
               {
-                label: "Download Epub",
+                label: <BookDown size={22} />,
                 action: epubDownloadLink!,
                 buttonProps: {
                   variant: "secondary" as const,
                   disabled: !epubDownloadLink,
                 },
               },
-
               {
-                label: <Share size={16} />,
-                action: shareMeta,
+                label: <Podcast size={22} />,
+                action: audiobookDownloadLink!,
                 buttonProps: {
                   variant: "secondary" as const,
-                  className: "px-3",
+                  disabled: !audiobookDownloadLink,
                 },
               },
             ]}
