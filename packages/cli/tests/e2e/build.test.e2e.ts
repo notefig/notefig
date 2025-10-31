@@ -147,9 +147,13 @@ describe('build_command_creates_the_right_files', () => {
 
       // Verify build fails when output directory is not provided
       await expect(
-        execa('node', ['../../../../dist/bin/metrists.js', 'build'], {
-          cwd: tempDir,
-        }),
+        execa(
+          'node',
+          ['../../../../dist/bin/metrists.js', 'build', '--skip-audiobook'],
+          {
+            cwd: tempDir,
+          },
+        ),
       ).rejects.toThrow();
     },
     timeout,
