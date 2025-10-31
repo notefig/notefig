@@ -12,7 +12,7 @@ import {
 } from "@/lib/utils";
 import { BookOverview } from "@/components/patterns/book-overview";
 import { Reader } from "@/components/patterns/reader";
-import { BookDown, Podcast } from "lucide-react";
+import { BookDown, Podcast, Share } from "lucide-react";
 
 export async function getStaticProps() {
   const navigation = getChapterNavigation(undefined, allChapters);
@@ -73,19 +73,29 @@ export default function Home({
                   ]
                 : []),
               {
+                label: <Share size={16} />,
+                action: shareMeta,
+                buttonProps: {
+                  size: "sm" as const,
+                  variant: "secondary" as const,
+                  className: "hidden md:flex",
+                },
+              },
+              {
                 label: <BookDown size={22} />,
                 action: epubDownloadLink!,
                 buttonProps: {
                   variant: "secondary" as const,
                   disabled: !epubDownloadLink,
+                  className: "md:hidden",
                 },
               },
               {
                 label: <Podcast size={22} />,
                 action: audiobookDownloadLink!,
                 buttonProps: {
-                  variant: "secondary" as const,
                   disabled: !audiobookDownloadLink,
+                  className: "md:hidden",
                 },
               },
             ]}
