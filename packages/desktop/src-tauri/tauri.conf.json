@@ -1,0 +1,40 @@
+{
+  "$schema": "https://v2.tauri.app/schemas/config.json",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "productName": "Metrists",
+  "version": "0.0.0",
+  "identifier": "com.metrists.dev",
+  "plugins": {
+    "shell": {
+      "open": true
+    }
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Metrists",
+        "width": 800,
+        "height": 600
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
