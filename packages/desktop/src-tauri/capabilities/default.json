@@ -6,6 +6,7 @@
   "permissions": [
     "fs:default",
     "dialog:default",
+    "core:default",
     {
       "identifier": "fs:scope",
       "allow": [

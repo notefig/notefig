@@ -2,6 +2,7 @@ import "./App.css";
 import * as React from "react";
 import { DirectoryPicker } from "@/components/directory-picker";
 import { DynamicFileTree } from "@/components/dynamic-file-tree";
+import { useMenuEvents } from "@/hooks/useMenuEvents";
 import { EditorToolbar } from "@/components/editor-toolbar";
 import { TopNav } from "@/components/top-nav";
 import { SettingsDialog } from "@/components/settings-dialog";
@@ -41,6 +42,11 @@ export const App = () => {
     setSelectedFilePath(path);
     // TODO: Load file content into editor
   };
+
+  // Listen for native menu events
+  useMenuEvents({
+    onFolderSelected: handleDirectorySelect,
+  });
 
   return (
     <ThemeProvider>

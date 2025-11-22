@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Icons } from "@/components/icons";
-import { pickDirectory } from "@/utils/fs";
+import { invoke } from "@tauri-apps/api/core";
 
 interface DirectoryPickerProps {
   onDirectorySelect: (path: string) => void;
@@ -17,9 +17,8 @@ export function DirectoryPicker({
   const handlePickDirectory = async () => {
     setLoading(true);
     try {
-      const selectedPath = await pickDirectory(
-        "Select your workspace directory",
-      );
+      // Use the native command instead of the frontend dialog
+      const selectedPath = await invoke<string | null>("open_folder_dialog");
 
       if (selectedPath) {
         onDirectorySelect(selectedPath);
@@ -45,12 +44,13 @@ export function DirectoryPicker({
       </Button>
 
       {currentDirectory && (
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 flex items-center gap-1">
+          <Icons.folder className="h-3 w-3 text-muted-foreground shrink-0" />
           <p
             className="text-xs text-muted-foreground truncate"
             title={currentDirectory}
           >
-            {currentDirectory}
+            {currentDirectory.split("/").pop() || currentDirectory}
           </p>
         </div>
       )}
