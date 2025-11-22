@@ -1,6 +1,7 @@
 import "./App.css";
 import * as React from "react";
-import { FileTree } from "@/components/file-tree";
+import { DirectoryPicker } from "@/components/directory-picker";
+import { DynamicFileTree } from "@/components/dynamic-file-tree";
 import { EditorToolbar } from "@/components/editor-toolbar";
 import { TopNav } from "@/components/top-nav";
 import { SettingsDialog } from "@/components/settings-dialog";
@@ -17,12 +18,29 @@ import { Editor, EditorContainer } from "@/components/ui/editor";
 import { BasicNodesKit } from "@/components/editor/plugins/basic-nodes-kit";
 
 export const App = () => {
-  const [selectedFileId, setSelectedFileId] = React.useState("2");
   const [showSettings, setShowSettings] = React.useState(false);
+
+  // Directory management state
+  const [currentDirectory, setCurrentDirectory] = React.useState<
+    string | undefined
+  >();
+  const [selectedFilePath, setSelectedFilePath] = React.useState<
+    string | undefined
+  >();
 
   const editor = usePlateEditor({
     plugins: BasicNodesKit,
   });
+
+  const handleDirectorySelect = (path: string) => {
+    setCurrentDirectory(path);
+    setSelectedFilePath(undefined);
+  };
+
+  const handleFileSelect = (path: string) => {
+    setSelectedFilePath(path);
+    // TODO: Load file content into editor
+  };
 
   return (
     <ThemeProvider>
@@ -46,11 +64,16 @@ export const App = () => {
                     <Icons.moreHorizontal className="h-4 w-4" />
                   </button>
                 </div>
+                <DirectoryPicker
+                  currentDirectory={currentDirectory}
+                  onDirectorySelect={handleDirectorySelect}
+                />
                 <ScrollArea className="flex-1">
                   <div className="p-2">
-                    <FileTree
-                      selectedId={selectedFileId}
-                      onSelect={setSelectedFileId}
+                    <DynamicFileTree
+                      selectedPath={selectedFilePath}
+                      onSelect={handleFileSelect}
+                      rootDirectory={currentDirectory}
                     />
                   </div>
                 </ScrollArea>
