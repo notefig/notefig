@@ -1,0 +1,138 @@
+import { useParams, useSearchParams, useNavigate } from "react-router-dom";
+import { DirectoryPicker } from "@/components/directory-picker";
+import { DynamicFileTree } from "@/components/dynamic-file-tree";
+import { useMenuEvents } from "@/hooks/useMenuEvents";
+import { EditorToolbar } from "@/components/editor-toolbar";
+import { TopNav } from "@/components/top-nav";
+import { SettingsDialog } from "@/components/settings-dialog";
+import { DebugPanel } from "@/components/debug-panel";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Icons } from "@/components/icons";
+import { Plate, usePlateEditor } from "platejs/react";
+import { Editor, EditorContainer } from "@/components/ui/editor";
+import { BasicNodesKit } from "@/components/editor/plugins/basic-nodes-kit";
+import { Welcome } from "@/components/welcome";
+
+export const WorkspaceLayout = () => {
+  const { basePath, "*": filePath } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  // Decode the base path from URL
+  const currentDirectory = basePath ? decodeURIComponent(basePath) : undefined;
+
+  // Decode the file path from URL
+  const selectedFilePath = filePath
+    ? currentDirectory + "/" + decodeURIComponent(filePath)
+    : undefined;
+
+  // Check if settings modal should be open
+  const showSettings = searchParams.get("settings") === "true";
+
+  const editor = usePlateEditor({
+    plugins: BasicNodesKit,
+  });
+
+  const handleDirectorySelect = (path: string) => {
+    // Navigate to base path only (no file selected)
+    const encodedBasePath = encodeURIComponent(path);
+    navigate(`/${encodedBasePath}`);
+  };
+
+  const handleSettingsToggle = (open: boolean) => {
+    if (open) {
+      searchParams.set("settings", "true");
+    } else {
+      searchParams.delete("settings");
+    }
+    setSearchParams(searchParams);
+  };
+
+  // Listen for native menu events
+  useMenuEvents({
+    onFolderSelected: handleDirectorySelect,
+  });
+
+  // Determine if we're on an edit route
+  const isEditRoute = window.location.pathname.includes("/edit/");
+
+  return (
+    <>
+      <TopNav />
+      <DebugPanel
+        currentDirectory={currentDirectory}
+        selectedFilePath={selectedFilePath}
+        isEditRoute={isEditRoute}
+      />
+      <SettingsDialog open={showSettings} onOpenChange={handleSettingsToggle} />
+      <div className="flex-1 overflow-hidden">
+        <ResizablePanelGroup direction="horizontal">
+          <ResizablePanel
+            defaultSize={20}
+            minSize={15}
+            maxSize={30}
+            className="bg-sidebar min-w-[200px]"
+          >
+            <div className="flex h-full flex-col">
+              <div className="flex h-10 items-center justify-between px-4 border-b border-sidebar-border">
+                <span className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
+                  Explorer
+                </span>
+                <button className="text-muted-foreground hover:text-foreground">
+                  <Icons.moreHorizontal className="h-4 w-4" />
+                </button>
+              </div>
+              <DirectoryPicker
+                currentDirectory={currentDirectory}
+                onDirectorySelect={handleDirectorySelect}
+              />
+              <ScrollArea className="flex-1">
+                <div className="p-2">
+                  <DynamicFileTree
+                    selectedPath={selectedFilePath}
+                    rootDirectory={currentDirectory}
+                  />
+                </div>
+              </ScrollArea>
+              <div className="border-t border-sidebar-border p-2">
+                <button
+                  onClick={() => handleSettingsToggle(true)}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                >
+                  <Icons.settings className="h-4 w-4" />
+                  <span>Settings</span>
+                </button>
+              </div>
+            </div>
+          </ResizablePanel>
+
+          <ResizableHandle withHandle />
+
+          <ResizablePanel defaultSize={80}>
+            <div className="flex h-full flex-col bg-background">
+              {isEditRoute && <EditorToolbar />}
+              <ScrollArea className="flex-1">
+                <div className="mx-auto max-w-3xl px-8 py-12 min-h-[calc(100vh-8rem)]">
+                  {isEditRoute && selectedFilePath ? (
+                    <Plate editor={editor}>
+                      <EditorContainer>
+                        <Editor placeholder="# Start writing..." />
+                      </EditorContainer>
+                    </Plate>
+                  ) : (
+                    <Welcome />
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </div>
+    </>
+  );
+};

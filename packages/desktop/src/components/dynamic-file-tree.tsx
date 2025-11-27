@@ -1,25 +1,32 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Icons } from "./icons";
 import { cn } from "../lib/utils";
 import { FileEntry, listAbsoluteDirectory } from "../utils/fs";
+import { buildEditFileUrl } from "../utils/routing";
 
 interface DynamicFileTreeProps {
   className?: string;
   selectedPath?: string;
-  onSelect?: (path: string) => void;
   rootDirectory?: string;
 }
 
 export function DynamicFileTree({
   className,
   selectedPath,
-  onSelect,
   rootDirectory,
 }: DynamicFileTreeProps) {
+  const navigate = useNavigate();
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
     new Set(),
+  );
+
+  console.log(
+    "🐛 DynamicFileTree navigate function:",
+    typeof navigate,
+    navigate,
   );
 
   useEffect(() => {
@@ -95,9 +102,10 @@ export function DynamicFileTree({
           key={file.path}
           file={file}
           selectedPath={selectedPath}
-          onSelect={onSelect}
+          rootDirectory={rootDirectory}
           onToggleFolder={toggleFolder}
           isExpanded={expandedFolders.has(file.path)}
+          navigate={navigate}
         />
       ))}
     </div>
@@ -107,17 +115,19 @@ export function DynamicFileTree({
 interface FileTreeItemProps {
   file: FileEntry;
   selectedPath?: string;
-  onSelect?: (path: string) => void;
+  rootDirectory?: string;
   onToggleFolder: (path: string) => void;
   isExpanded: boolean;
+  navigate: (url: string) => void;
 }
 
 function FileTreeItem({
   file,
   selectedPath,
-  onSelect,
+  rootDirectory,
   onToggleFolder,
   isExpanded,
+  navigate,
 }: FileTreeItemProps) {
   const isSelected = file.path === selectedPath;
   const isFolder = file.isDirectory;
@@ -131,8 +141,13 @@ function FileTreeItem({
   const handleClick = () => {
     if (isFolder) {
       onToggleFolder(file.path);
-    } else {
-      onSelect?.(file.path);
+    } else if (rootDirectory) {
+      try {
+        const editUrl = buildEditFileUrl(rootDirectory, file.path);
+        navigate(editUrl);
+      } catch (error) {
+        console.error("Error building edit URL:", error);
+      }
     }
   };
 
