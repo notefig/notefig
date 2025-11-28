@@ -1,18 +1,64 @@
 import { Icons } from "@/components/icons";
 
-export function TopNav() {
+interface TopNavProps {
+  currentDirectory?: string;
+  selectedFile?: string;
+  isEditRoute?: boolean;
+}
+
+export function TopNav({
+  currentDirectory,
+  selectedFile,
+  isEditRoute,
+}: TopNavProps) {
+  const renderBreadcrumbs = () => {
+    const parts = [];
+
+    // Always start with Metrists
+    parts.push(
+      <span key="metrists" className="text-foreground font-medium">
+        Metrists
+      </span>,
+    );
+
+    // Add directory name if available
+    if (currentDirectory) {
+      const directoryName =
+        currentDirectory.split("/").pop() || currentDirectory;
+      parts.push(<Icons.chevronRight key="dir-chevron" className="h-4 w-4" />);
+      parts.push(
+        <span key="directory" className="text-muted-foreground">
+          {directoryName}
+        </span>,
+      );
+    }
+
+    // Add file name if editing
+    if (isEditRoute && selectedFile) {
+      const fileName = selectedFile.split("/").pop() || selectedFile;
+      parts.push(<Icons.chevronRight key="file-chevron" className="h-4 w-4" />);
+      parts.push(
+        <span key="file" className="text-foreground">
+          {fileName}
+        </span>,
+      );
+    }
+
+    return parts;
+  };
+
   return (
     <header className="flex h-14 items-center justify-between border-b bg-background px-4">
       <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-          <span>documentation</span>
-          <Icons.chevronRight className="h-4 w-4" />
-          <span className="text-foreground">introduction.md</span>
+        <div className="flex items-center gap-2 text-sm font-medium">
+          {renderBreadcrumbs()}
         </div>
-        <div className="ml-2 hidden items-center gap-2 text-xs text-muted-foreground md:flex">
-          <span className="flex h-1.5 w-1.5 rounded-full bg-green-500" />
-          Saved
-        </div>
+        {isEditRoute && (
+          <div className="ml-2 hidden items-center gap-2 text-xs text-muted-foreground md:flex">
+            <span className="flex h-1.5 w-1.5 rounded-full bg-green-500" />
+            Saved
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-2">

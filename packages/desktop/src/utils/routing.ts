@@ -19,39 +19,61 @@ export function getFilePathFromUrl(
   const decodedBasePath = decodePathFromUrl(basePath);
   const decodedRelativePath = decodePathFromUrl(relativePath);
 
-  return `${decodedBasePath}/${decodedRelativePath}`;
+  // Ensure proper path joining with leading slash
+  const normalizedBasePath = decodedBasePath.startsWith("/")
+    ? decodedBasePath
+    : "/" + decodedBasePath;
+  return `${normalizedBasePath}/${decodedRelativePath}`;
 }
 
 export function getRelativePathForUrl(
   basePath: string,
   fullPath: string,
 ): string {
-  if (!basePath || !fullPath.startsWith(basePath)) {
+  // Normalize both paths to ensure consistent comparison
+  const normalizedBasePath = basePath.startsWith("/")
+    ? basePath
+    : "/" + basePath;
+  const normalizedFullPath = fullPath.startsWith("/")
+    ? fullPath
+    : "/" + fullPath;
+
+  if (!normalizedFullPath.startsWith(normalizedBasePath)) {
     throw new Error(
-      `Invalid paths: fullPath "${fullPath}" must start with basePath "${basePath}"`,
+      `Invalid paths: fullPath "${normalizedFullPath}" must start with basePath "${normalizedBasePath}"`,
     );
   }
 
-  const relativePath = fullPath.slice(basePath.length);
+  const relativePath = normalizedFullPath.slice(normalizedBasePath.length);
   return relativePath.startsWith("/") ? relativePath.slice(1) : relativePath;
 }
 
 export function buildDirectoryUrl(basePath: string): string {
-  return `/${encodePathForUrl(basePath)}`;
+  // Ensure we maintain the leading slash in the path
+  const normalizedPath = basePath.startsWith("/") ? basePath : "/" + basePath;
+  return `/${encodePathForUrl(normalizedPath)}`;
 }
 
 export function buildEditFileUrl(
   basePath: string,
   fullFilePath: string,
 ): string {
+  // Ensure we maintain the leading slash in the base path
+  const normalizedBasePath = basePath.startsWith("/")
+    ? basePath
+    : "/" + basePath;
   const relativePath = getRelativePathForUrl(basePath, fullFilePath);
-  return `/${encodePathForUrl(basePath)}/edit/${encodePathForUrl(relativePath)}`;
+  return `/${encodePathForUrl(normalizedBasePath)}/edit/${encodePathForUrl(relativePath)}`;
 }
 
 export function buildPreviewFileUrl(
   basePath: string,
   fullFilePath: string,
 ): string {
+  // Ensure we maintain the leading slash in the base path
+  const normalizedBasePath = basePath.startsWith("/")
+    ? basePath
+    : "/" + basePath;
   const relativePath = getRelativePathForUrl(basePath, fullFilePath);
-  return `/${encodePathForUrl(basePath)}/preview/${encodePathForUrl(relativePath)}`;
+  return `/${encodePathForUrl(normalizedBasePath)}/preview/${encodePathForUrl(relativePath)}`;
 }
