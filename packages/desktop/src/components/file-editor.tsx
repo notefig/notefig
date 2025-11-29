@@ -115,14 +115,14 @@ export const FileEditor = () => {
   }
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="flex flex-1 flex-col bg-background overflow-hidden">
       <EditorToolbar
         isModified={isActiveFileModified}
         isSaving={isActiveFileSaving}
         onSave={saveActiveFile}
         fileName={activeFilePath.split("/").pop() || "Untitled"}
       />
-      <div className="flex-1 h-full overflow-hidden">
+      <div className="flex-1 overflow-hidden">
         <Plate
           editor={editor}
           onChange={({ value }) => {

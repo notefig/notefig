@@ -32,6 +32,7 @@ import {
   Share,
   Strikethrough,
   Type,
+  X,
 } from "lucide-react";
 
 export const Icons = {
@@ -68,4 +69,5 @@ export const Icons = {
   strikethrough: Strikethrough,
   type: Type,
   unknown: FileIcon,
+  x: X,
 };

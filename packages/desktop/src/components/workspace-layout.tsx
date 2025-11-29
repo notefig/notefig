@@ -4,10 +4,12 @@ import { SettingsDialog } from "@/components/settings-dialog";
 import { DebugPanel } from "@/components/debug-panel";
 import { FileExplorer } from "@/components/file-explorer";
 import { FileEditor } from "@/components/file-editor";
+import { TabBar } from "@/components/tab-bar";
 import { Welcome } from "@/components/welcome";
 import { useMenuEvents } from "@/hooks/useMenuEvents";
 import { useFileManager } from "@/hooks/useFileManager";
 import { useTabNavigation } from "@/hooks/useTabNavigation";
+import { useTabKeyboardShortcuts } from "@/hooks/useTabKeyboardShortcuts";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -19,11 +21,25 @@ export const WorkspaceLayout = () => {
   const { basePath } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { hasOpenTabs } = useFileManager();
+  const {
+    hasOpenTabs,
+    tabs,
+    activeTabIndex,
+    switchToTabIndex,
+    closeTab,
+    allFiles,
+  } = useFileManager();
   const tabNavigation = useTabNavigation();
 
   // Decode the base path from URL
   const currentDirectory = basePath ? decodeURIComponent(basePath) : undefined;
+
+  const currentActiveFile =
+    hasOpenTabs && tabNavigation.activeIndex >= 0
+      ? tabNavigation.getAbsolutePath(
+          tabNavigation.tabs[tabNavigation.activeIndex],
+        )
+      : undefined;
 
   // Check if settings modal should be open
   const showSettings = searchParams.get("settings") === "true";
@@ -50,12 +66,13 @@ export const WorkspaceLayout = () => {
     onFolderSelected: handleDirectorySelect,
   });
 
-  const currentActiveFile =
-    hasOpenTabs && tabNavigation.activeIndex >= 0
-      ? tabNavigation.getAbsolutePath(
-          tabNavigation.tabs[tabNavigation.activeIndex],
-        )
-      : undefined;
+  // Enable keyboard shortcuts for tab navigation
+  useTabKeyboardShortcuts({
+    hasOpenTabs,
+    activeTabIndex,
+    totalTabs: tabs.length,
+    onTabSwitch: switchToTabIndex,
+  });
 
   return (
     <>
@@ -86,7 +103,16 @@ export const WorkspaceLayout = () => {
 
           <ResizablePanel defaultSize={80}>
             {hasOpenTabs ? (
-              <FileEditor />
+              <div className="flex h-full flex-col">
+                <TabBar
+                  tabs={tabs}
+                  activeTabIndex={activeTabIndex}
+                  onTabSwitch={switchToTabIndex}
+                  onTabClose={closeTab}
+                  allFiles={allFiles}
+                />
+                <FileEditor />
+              </div>
             ) : (
               <div className="h-full bg-background">
                 <ScrollArea className="h-full">
