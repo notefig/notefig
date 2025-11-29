@@ -180,14 +180,16 @@ function FileTreeItem({
       )}
       title={file.path}
     >
-      <Icon className="h-4 w-4 shrink-0" />
-      <span className="truncate flex-1">{file.name}</span>
+      <Icon className="h-4 w-4 shrink-0 ltr:order-1 rtl:order-4" />
+      <span className="truncate flex-1 ltr:order-2 rtl:order-3 text-start">
+        {file.name}
+      </span>
 
       {/* Unsaved changes indicator dot - only for files with unsaved changes */}
       {hasUnsavedChanges && !isFolder && (
         <div
           className={cn(
-            "h-1.5 w-1.5 rounded-full shrink-0 ml-1",
+            "h-1.5 w-1.5 rounded-full shrink-0 ltr:order-3 rtl:order-2 ltr:ms-1 rtl:me-1",
             openState === "active" ? "bg-primary" : "bg-primary/60",
           )}
           title="Unsaved changes"
@@ -197,13 +199,13 @@ function FileTreeItem({
       {isFolder && (
         <Icons.chevronRight
           className={cn(
-            "ml-auto h-3.5 w-3.5 shrink-0 transition-transform",
+            "h-3.5 w-3.5 shrink-0 transition-transform ltr:order-4 rtl:order-1 ltr:ms-auto rtl:me-auto",
             isExpanded && "rotate-90",
           )}
         />
       )}
       {!isFolder && file.size !== undefined && (
-        <span className="text-xs text-muted-foreground shrink-0">
+        <span className="text-xs text-muted-foreground shrink-0 ltr:order-4 rtl:order-1">
           {formatFileSize(file.size)}
         </span>
       )}
