@@ -65,13 +65,13 @@ export const TabBar: React.FC<TabBarProps> = ({
 
   return (
     <div className="border-b border-border bg-background">
-      <div className="w-full overflow-x-auto overflow-y-hidden">
+      <div className="w-full overflow-x-auto overflow-y-hidden" dir="ltr">
         <Tabs
           value={activeTabIndex.toString()}
           onValueChange={(value) => onTabSwitch(parseInt(value, 10))}
           className="w-full"
         >
-          <TabsList className="h-10 bg-transparent p-0 w-max rounded-none justify-start">
+          <TabsList className="h-10 bg-transparent p-0 w-max rounded-none ltr:justify-start rtl:justify-end ltr:flex-row rtl:flex-row-reverse">
             {tabs.map((tab) => {
               const fileName = getFileName(tab.relativePath);
               const FileIcon = getFileIcon(fileName);
@@ -89,19 +89,19 @@ export const TabBar: React.FC<TabBarProps> = ({
                   <TabsTrigger
                     value={tab.index.toString()}
                     className={cn(
-                      "relative flex items-center gap-2 h-10 px-3 py-2 rounded-none border-r border-border",
+                      "relative flex items-center gap-2 h-10 px-3 py-2 rounded-none ltr:border-r rtl:border-l border-border",
                       "bg-transparent hover:bg-muted/50",
-                      "data-[state=active]:bg-background data-[state=active]:border-b-2 data-[state=active]:border-b-primary data-[state=active]:border-r",
+                      "data-[state=active]:bg-background data-[state=active]:border-b-2 data-[state=active]:border-b-primary data-[state=active]:ltr:border-r data-[state=active]:rtl:border-l",
                       "max-w-[200px] min-w-[120px]", // Set max width for ellipsis, min width for usability
                       "transition-all duration-200",
-                      "group-hover:pr-8", // Add padding when close button appears
+                      "group-hover:ltr:pr-8 group-hover:rtl:pl-8", // Add padding when close button appears
                     )}
                   >
                     {/* File Icon */}
                     <FileIcon className="h-4 w-4 shrink-0" />
 
                     {/* File Name with flex grow and ellipsis - this will shrink when close button appears */}
-                    <span className="truncate text-sm font-medium flex-1 min-w-0">
+                    <span className="truncate text-sm font-medium flex-1 min-w-0 text-start">
                       {fileName}
                     </span>
 
@@ -129,7 +129,7 @@ export const TabBar: React.FC<TabBarProps> = ({
                         onTabClose(tab.filePath);
                       }}
                       className={cn(
-                        "absolute right-1 top-1/2 -translate-y-1/2 z-10",
+                        "absolute ltr:right-1 rtl:left-1 top-1/2 -translate-y-1/2 z-10",
                         "h-5 w-5 rounded-sm flex items-center justify-center",
                         "opacity-0 group-hover:opacity-100 transition-opacity duration-200",
                         "hover:bg-muted-foreground/20 hover:text-foreground",
