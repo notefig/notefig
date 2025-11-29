@@ -1,6 +1,10 @@
 import { useAtom } from "jotai";
 import { fileSystemAtom, activeFileContentAtom } from "@/atoms/fileSystem";
-import { readAbsoluteTextFile, writeAbsoluteTextFile } from "@/utils/fs";
+import {
+  readAbsoluteTextFile,
+  writeAbsoluteTextFile,
+  normalizePath,
+} from "@/utils/fs";
 import { useTabNavigation } from "@/hooks/useTabNavigation";
 import { useEffect } from "react";
 
@@ -15,14 +19,15 @@ export function useFileManager(options: UseFileManagerOptions = {}) {
   const tabNavigation = useTabNavigation();
 
   const loadFile = async (path: string) => {
+    const normalizedPath = normalizePath(path);
     // Set loading state
     setFileSystem((prev) => ({
       ...prev,
       files: {
         ...prev.files,
-        [path]: {
-          content: prev.files[path]?.content ?? "",
-          originalContent: prev.files[path]?.originalContent ?? "",
+        [normalizedPath]: {
+          content: prev.files[normalizedPath]?.content ?? "",
+          originalContent: prev.files[normalizedPath]?.originalContent ?? "",
           state: "loading",
         },
       },
@@ -34,7 +39,7 @@ export function useFileManager(options: UseFileManagerOptions = {}) {
         ...prev,
         files: {
           ...prev.files,
-          [path]: {
+          [normalizedPath]: {
             content,
             originalContent: content,
             state: "loaded",
@@ -61,7 +66,8 @@ export function useFileManager(options: UseFileManagerOptions = {}) {
   };
 
   const saveFile = async (path: string, content?: string) => {
-    const targetContent = content || fileSystem.files[path]?.content;
+    const normalizedPath = normalizePath(path);
+    const targetContent = content || fileSystem.files[normalizedPath]?.content;
 
     if (!path || targetContent === undefined) {
       options.onError?.("No file path or content specified for save");
@@ -73,8 +79,8 @@ export function useFileManager(options: UseFileManagerOptions = {}) {
       ...prev,
       files: {
         ...prev.files,
-        [path]: {
-          ...prev.files[path],
+        [normalizedPath]: {
+          ...prev.files[normalizedPath],
           state: "saving",
         },
       },
@@ -86,7 +92,7 @@ export function useFileManager(options: UseFileManagerOptions = {}) {
         ...prev,
         files: {
           ...prev.files,
-          [path]: {
+          [normalizedPath]: {
             content: targetContent,
             originalContent: targetContent,
             state: "loaded",
@@ -94,7 +100,7 @@ export function useFileManager(options: UseFileManagerOptions = {}) {
           },
         },
       }));
-      options.onSave?.(path);
+      options.onSave?.(normalizedPath);
       return true;
     } catch (error) {
       const errorMessage = `Failed to save file: ${error}`;
@@ -102,8 +108,8 @@ export function useFileManager(options: UseFileManagerOptions = {}) {
         ...prev,
         files: {
           ...prev.files,
-          [path]: {
-            ...prev.files[path],
+          [normalizedPath]: {
+            ...prev.files[normalizedPath],
             state: "error",
             error: errorMessage,
           },
@@ -126,13 +132,14 @@ export function useFileManager(options: UseFileManagerOptions = {}) {
   };
 
   const discardChanges = (path: string) => {
-    if (fileSystem.files[path]) {
-      const file = fileSystem.files[path];
+    const normalizedPath = normalizePath(path);
+    if (fileSystem.files[normalizedPath]) {
+      const file = fileSystem.files[normalizedPath];
       setFileSystem((prev) => ({
         ...prev,
         files: {
           ...prev.files,
-          [path]: {
+          [normalizedPath]: {
             ...file,
             content: file.originalContent,
             state: "loaded",

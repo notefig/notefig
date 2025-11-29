@@ -182,7 +182,7 @@ export async function listDirectory(
 
         fileEntries.push({
           name: entry.name,
-          path: entryPath,
+          path: normalizePath(entryPath),
           isFile: entry.isFile,
           isDirectory: entry.isDirectory,
           size: entry.isFile ? metadata.size : undefined,
@@ -192,7 +192,7 @@ export async function listDirectory(
         // If we can't get metadata, still include the entry with basic info
         fileEntries.push({
           name: entry.name,
-          path: entryPath,
+          path: normalizePath(entryPath),
           isFile: entry.isFile,
           isDirectory: entry.isDirectory,
         });
@@ -388,13 +388,27 @@ export function joinPaths(...paths: string[]): string {
 }
 
 /**
- * Normalize a file path
+ * Normalize a file path by ensuring it starts with a leading slash
+ * and removing duplicate slashes and trailing slashes
  */
 export function normalizePath(filePath: string): string {
-  return filePath
+  if (!filePath) return "/";
+
+  let normalized = filePath
     .replace(/\\/g, "/") // Convert backslashes to forward slashes
-    .replace(/\/+/g, "/") // Remove duplicate slashes
-    .replace(/\/$/, ""); // Remove trailing slash
+    .replace(/\/+/g, "/"); // Remove duplicate slashes
+
+  // Ensure leading slash
+  if (!normalized.startsWith("/")) {
+    normalized = "/" + normalized;
+  }
+
+  // Remove trailing slash unless it's the root
+  if (normalized.length > 1 && normalized.endsWith("/")) {
+    normalized = normalized.slice(0, -1);
+  }
+
+  return normalized;
 }
 
 /**
@@ -464,7 +478,7 @@ export async function listAbsoluteDirectory(
 
         fileEntries.push({
           name: entry.name,
-          path: entryPath,
+          path: normalizePath(entryPath),
           isFile: entry.isFile,
           isDirectory: entry.isDirectory,
           size: entry.isFile ? metadata.size : undefined,
@@ -474,7 +488,7 @@ export async function listAbsoluteDirectory(
         // If we can't get metadata, still include the entry with basic info
         fileEntries.push({
           name: entry.name,
-          path: entryPath,
+          path: normalizePath(entryPath),
           isFile: entry.isFile,
           isDirectory: entry.isDirectory,
         });
