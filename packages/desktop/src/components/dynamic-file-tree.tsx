@@ -160,6 +160,9 @@ function FileTreeItem({
       onClick={handleClick}
       className={cn(
         "flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
+        // Add transparent border to all items to prevent layout shift when activated
+        "border-s-2 border-transparent",
+
         isFolder
           ? "font-medium text-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
@@ -167,13 +170,12 @@ function FileTreeItem({
         // Active tab styling (most prominent)
         openState === "active" && [
           "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
-          "ring-1 ring-primary/50 border-l-2 border-l-primary",
+          "border-s-primary/80",
         ],
 
         // Open tab styling (subtle highlighting)
         openState === "open" && [
           "bg-sidebar-accent/30 text-sidebar-accent-foreground/90 font-medium",
-          "border-l-2 border-l-primary/30",
         ],
       )}
       title={file.path}
