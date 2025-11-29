@@ -13,7 +13,7 @@ export function DynamicFileTree({
   className,
   rootDirectory,
 }: DynamicFileTreeProps) {
-  const { openTab, activeFilePath } = useFileManager();
+  const { openTab, activeFilePath, tabs } = useFileManager();
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
@@ -86,6 +86,9 @@ export function DynamicFileTree({
     );
   }
 
+  // Get list of all open tab file paths for highlighting
+  const openTabPaths = tabs.map((tab) => tab.filePath);
+
   return (
     <div className={cn("flex flex-col gap-1 text-sm", className)}>
       {files.map((file) => (
@@ -93,6 +96,7 @@ export function DynamicFileTree({
           key={file.path}
           file={file}
           selectedPath={activeFilePath || undefined}
+          openTabPaths={openTabPaths}
           onToggleFolder={toggleFolder}
           isExpanded={expandedFolders.has(file.path)}
           onFileSelect={openTab}
@@ -105,6 +109,7 @@ export function DynamicFileTree({
 interface FileTreeItemProps {
   file: FileEntry;
   selectedPath?: string;
+  openTabPaths: string[];
   onToggleFolder: (path: string) => void;
   isExpanded: boolean;
   onFileSelect: (filePath: string) => Promise<void>;
@@ -113,12 +118,19 @@ interface FileTreeItemProps {
 function FileTreeItem({
   file,
   selectedPath,
+  openTabPaths,
   onToggleFolder,
   isExpanded,
   onFileSelect,
 }: FileTreeItemProps) {
   const isSelected = file.path === selectedPath;
   const isFolder = file.isDirectory;
+
+  // Check if this file is open in a tab (but not necessarily active)
+  const isOpenInTab = !isFolder && openTabPaths.includes(file.path);
+
+  // Check if this file is the currently active tab
+  const isActiveTab = isSelected && isOpenInTab;
 
   const Icon = isFolder
     ? isExpanded
@@ -138,15 +150,45 @@ function FileTreeItem({
     <button
       onClick={handleClick}
       className={cn(
-        "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-        isSelected &&
+        "flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
+        // Base styles for files and folders
+        isFolder
+          ? "font-medium text-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+
+        // Active tab styling (most prominent)
+        isActiveTab && [
           "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
-        isFolder && "font-medium text-foreground",
+          "ring-1 ring-primary/50 border-l-2 border-l-primary",
+        ],
+
+        // Open tab styling (subtle highlighting)
+        isOpenInTab &&
+          !isActiveTab && [
+            "bg-sidebar-accent/50 text-sidebar-accent-foreground/80 font-medium",
+          ],
+
+        // Regular selected file (when not in a tab)
+        isSelected &&
+          !isOpenInTab && [
+            "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
+          ],
       )}
       title={file.path}
     >
       <Icon className="h-4 w-4 shrink-0" />
       <span className="truncate flex-1">{file.name}</span>
+
+      {/* Small indicator dot for open tabs */}
+      {isOpenInTab && !isFolder && (
+        <div
+          className={cn(
+            "h-1.5 w-1.5 rounded-full shrink-0 ml-1",
+            isActiveTab ? "bg-primary" : "bg-primary/60",
+          )}
+          title={isActiveTab ? "Active tab" : "Open in tab"}
+        />
+      )}
       {isFolder && (
         <Icons.chevronRight
           className={cn(

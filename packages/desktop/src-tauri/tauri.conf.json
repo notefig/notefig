@@ -17,7 +17,7 @@
   "app": {
     "windows": [
       {
-        "title": "Metrists - Markdown Editor",
+        "title": "Metrists",
         "width": 1200,
         "height": 800,
         "zoomHotkeysEnabled": true,
