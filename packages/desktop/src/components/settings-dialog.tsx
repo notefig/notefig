@@ -5,6 +5,7 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Icons } from "@/components/icons";
+import { useTheme } from "@/components/theme-provider";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -13,6 +14,7 @@ interface SettingsDialogProps {
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [activeTab, setActiveTab] = React.useState("general");
+  const { theme, setTheme } = useTheme();
 
   const menuItems = [
     { id: "general", label: "General", icon: Icons.settings },
@@ -120,16 +122,58 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
               {activeTab === "appearance" && (
                 <div className="space-y-6">
-                  <div className="flex items-center justify-between rounded-lg border p-4">
-                    <div className="space-y-0.5">
-                      <Label className="text-base">Dark Mode</Label>
-                      <p className="text-sm text-muted-foreground">
-                        Use dark theme for the application interface.
-                      </p>
+                  {/* Theme Selection */}
+                  <div className="rounded-lg border p-4">
+                    <div className="space-y-4">
+                      <div>
+                        <Label className="text-base font-medium">Theme</Label>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Choose your preferred theme or sync with your system
+                          settings.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-3">
+                        <Button
+                          variant={theme === "light" ? "default" : "outline"}
+                          onClick={() => setTheme("light")}
+                          className="flex flex-col gap-2 h-auto p-4"
+                        >
+                          <Icons.sun className="h-5 w-5" />
+                          <span className="text-sm font-medium">Light</span>
+                        </Button>
+
+                        <Button
+                          variant={theme === "dark" ? "default" : "outline"}
+                          onClick={() => setTheme("dark")}
+                          className="flex flex-col gap-2 h-auto p-4"
+                        >
+                          <Icons.moon className="h-5 w-5" />
+                          <span className="text-sm font-medium">Dark</span>
+                        </Button>
+
+                        <Button
+                          variant={theme === "system" ? "default" : "outline"}
+                          onClick={() => setTheme("system")}
+                          className="flex flex-col gap-2 h-auto p-4"
+                        >
+                          <Icons.settings className="h-5 w-5" />
+                          <span className="text-sm font-medium">System</span>
+                        </Button>
+                      </div>
+
+                      {theme === "system" && (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 p-3 rounded-md">
+                          <Icons.check className="h-4 w-4" />
+                          Automatically switches between light and dark based on
+                          your system preferences.
+                        </div>
+                      )}
                     </div>
-                    <Switch defaultChecked />
                   </div>
-                  <div className="flex items-center justify-between rounded-lg border">
+
+                  {/* Transparent Sidebar */}
+                  <div className="flex items-center justify-between rounded-lg border p-4">
                     <div className="space-y-0.5">
                       <Label className="text-base">Transparent Sidebar</Label>
                       <p className="text-sm text-muted-foreground">
