@@ -3,6 +3,7 @@ import { Icons } from "./icons";
 import { cn } from "../lib/utils";
 import { FileEntry, listAbsoluteDirectory } from "../utils/fs";
 import { useFileManager } from "@/hooks/useFileManager";
+import { pathsEqual, pathExistsIn } from "@/utils/path";
 
 interface DynamicFileTreeProps {
   className?: string;
@@ -86,51 +87,55 @@ export function DynamicFileTree({
     );
   }
 
-  // Get list of all open tab file paths for highlighting
+  // Create array of open tab file paths for comparison
   const openTabPaths = tabs.map((tab) => tab.filePath);
+  const activeTabPath = activeFilePath;
 
   return (
     <div className={cn("flex flex-col gap-1 text-sm", className)}>
-      {files.map((file) => (
-        <FileTreeItem
-          key={file.path}
-          file={file}
-          selectedPath={activeFilePath || undefined}
-          openTabPaths={openTabPaths}
-          onToggleFolder={toggleFolder}
-          isExpanded={expandedFolders.has(file.path)}
-          onFileSelect={openTab}
-        />
-      ))}
+      {files.map((file) => {
+        // Determine the open state for this file using normalized path comparison
+        let openState: "open" | "active" | null = null;
+
+        if (!file.isDirectory && pathExistsIn(file.path, openTabPaths)) {
+          // File is open in a tab, check if it's the active one
+          openState =
+            activeTabPath && pathsEqual(file.path, activeTabPath)
+              ? "active"
+              : "open";
+        }
+
+        return (
+          <FileTreeItem
+            openState={openState}
+            key={file.path}
+            file={file}
+            onToggleFolder={toggleFolder}
+            isExpanded={expandedFolders.has(file.path)}
+            onFileSelect={openTab}
+          />
+        );
+      })}
     </div>
   );
 }
 
 interface FileTreeItemProps {
+  openState: "open" | "active" | null;
   file: FileEntry;
-  selectedPath?: string;
-  openTabPaths: string[];
   onToggleFolder: (path: string) => void;
   isExpanded: boolean;
   onFileSelect: (filePath: string) => Promise<void>;
 }
 
 function FileTreeItem({
+  openState,
   file,
-  selectedPath,
-  openTabPaths,
   onToggleFolder,
   isExpanded,
   onFileSelect,
 }: FileTreeItemProps) {
-  const isSelected = file.path === selectedPath;
   const isFolder = file.isDirectory;
-
-  // Check if this file is open in a tab (but not necessarily active)
-  const isOpenInTab = !isFolder && openTabPaths.includes(file.path);
-
-  // Check if this file is the currently active tab
-  const isActiveTab = isSelected && isOpenInTab;
 
   const Icon = isFolder
     ? isExpanded
@@ -151,28 +156,21 @@ function FileTreeItem({
       onClick={handleClick}
       className={cn(
         "flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
-        // Base styles for files and folders
         isFolder
           ? "font-medium text-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
 
         // Active tab styling (most prominent)
-        isActiveTab && [
+        openState === "active" && [
           "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
           "ring-1 ring-primary/50 border-l-2 border-l-primary",
         ],
 
         // Open tab styling (subtle highlighting)
-        isOpenInTab &&
-          !isActiveTab && [
-            "bg-sidebar-accent/50 text-sidebar-accent-foreground/80 font-medium",
-          ],
-
-        // Regular selected file (when not in a tab)
-        isSelected &&
-          !isOpenInTab && [
-            "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
-          ],
+        openState === "open" && [
+          "bg-sidebar-accent/30 text-sidebar-accent-foreground/90 font-medium",
+          "border-l-2 border-l-primary/30",
+        ],
       )}
       title={file.path}
     >
@@ -180,13 +178,13 @@ function FileTreeItem({
       <span className="truncate flex-1">{file.name}</span>
 
       {/* Small indicator dot for open tabs */}
-      {isOpenInTab && !isFolder && (
+      {openState && !isFolder && (
         <div
           className={cn(
             "h-1.5 w-1.5 rounded-full shrink-0 ml-1",
-            isActiveTab ? "bg-primary" : "bg-primary/60",
+            openState === "active" ? "bg-primary" : "bg-primary/50",
           )}
-          title={isActiveTab ? "Active tab" : "Open in tab"}
+          title={openState === "active" ? "Active tab" : "Open in tab"}
         />
       )}
       {isFolder && (
