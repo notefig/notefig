@@ -1,33 +1,23 @@
-import { useEffect } from "react";
 import { useAtom } from "jotai";
-import { fileSystemAtom, currentFileContentAtom } from "@/atoms/fileSystem";
+import { fileSystemAtom, activeFileContentAtom } from "@/atoms/fileSystem";
 import { readAbsoluteTextFile, writeAbsoluteTextFile } from "@/utils/fs";
+import { useTabNavigation } from "@/hooks/useTabNavigation";
+import { useEffect } from "react";
 
 export interface UseFileManagerOptions {
-  autoLoad?: boolean;
   onError?: (error: string) => void;
   onSave?: (filePath: string) => void;
 }
 
-export function useFileManager(
-  filePath: string | null | undefined,
-  options: UseFileManagerOptions = {},
-) {
+export function useFileManager(options: UseFileManagerOptions = {}) {
   const [fileSystem, setFileSystem] = useAtom(fileSystemAtom);
-  const [, setCurrentFileContent] = useAtom(currentFileContentAtom);
-
-  // Auto-load file when path changes
-  useEffect(() => {
-    if (filePath && options.autoLoad !== false) {
-      loadFile(filePath);
-    }
-  }, [filePath, options.autoLoad]);
+  const [, setActiveFileContent] = useAtom(activeFileContentAtom);
+  const tabNavigation = useTabNavigation();
 
   const loadFile = async (path: string) => {
-    // Set loading state and make this the current file
+    // Set loading state
     setFileSystem((prev) => ({
       ...prev,
-      currentFile: path,
       files: {
         ...prev.files,
         [path]: {
@@ -70,12 +60,10 @@ export function useFileManager(
     }
   };
 
-  const saveFile = async (path?: string, content?: string) => {
-    const targetPath = path || filePath;
-    const targetContent =
-      content || fileSystem.files[targetPath || ""]?.content;
+  const saveFile = async (path: string, content?: string) => {
+    const targetContent = content || fileSystem.files[path]?.content;
 
-    if (!targetPath || targetContent === undefined) {
+    if (!path || targetContent === undefined) {
       options.onError?.("No file path or content specified for save");
       return false;
     }
@@ -85,20 +73,20 @@ export function useFileManager(
       ...prev,
       files: {
         ...prev.files,
-        [targetPath]: {
-          ...prev.files[targetPath],
+        [path]: {
+          ...prev.files[path],
           state: "saving",
         },
       },
     }));
 
     try {
-      await writeAbsoluteTextFile(targetPath, targetContent);
+      await writeAbsoluteTextFile(path, targetContent);
       setFileSystem((prev) => ({
         ...prev,
         files: {
           ...prev.files,
-          [targetPath]: {
+          [path]: {
             content: targetContent,
             originalContent: targetContent,
             state: "loaded",
@@ -106,7 +94,7 @@ export function useFileManager(
           },
         },
       }));
-      options.onSave?.(targetPath);
+      options.onSave?.(path);
       return true;
     } catch (error) {
       const errorMessage = `Failed to save file: ${error}`;
@@ -114,8 +102,8 @@ export function useFileManager(
         ...prev,
         files: {
           ...prev.files,
-          [targetPath]: {
-            ...prev.files[targetPath],
+          [path]: {
+            ...prev.files[path],
             state: "error",
             error: errorMessage,
           },
@@ -126,29 +114,25 @@ export function useFileManager(
     }
   };
 
-  const saveCurrentFile = () => {
-    if (filePath) {
-      return saveFile(filePath);
+  const saveActiveFile = () => {
+    if (fileSystem.activeTabPath) {
+      return saveFile(fileSystem.activeTabPath);
     }
     return Promise.resolve(false);
   };
 
-  const reloadFile = (path?: string) => {
-    const targetPath = path || filePath;
-    if (targetPath) {
-      return loadFile(targetPath);
-    }
+  const reloadFile = (path: string) => {
+    return loadFile(path);
   };
 
-  const discardChanges = (path?: string) => {
-    const targetPath = path || filePath;
-    if (targetPath && fileSystem.files[targetPath]) {
-      const file = fileSystem.files[targetPath];
+  const discardChanges = (path: string) => {
+    if (fileSystem.files[path]) {
+      const file = fileSystem.files[path];
       setFileSystem((prev) => ({
         ...prev,
         files: {
           ...prev.files,
-          [targetPath]: {
+          [path]: {
             ...file,
             content: file.originalContent,
             state: "loaded",
@@ -158,25 +142,100 @@ export function useFileManager(
     }
   };
 
-  const currentFile = filePath ? fileSystem.files[filePath] : null;
+  // Sync file system state with URL-based tab navigation
+  const currentActiveTabPath =
+    tabNavigation.tabs.length > 0 && tabNavigation.activeIndex >= 0
+      ? tabNavigation.getAbsolutePath(
+          tabNavigation.tabs[tabNavigation.activeIndex],
+        )
+      : null;
+
+  useEffect(() => {
+    // Update file system state to match URL state
+    setFileSystem((prev) => ({
+      ...prev,
+      activeTabPath: currentActiveTabPath,
+    }));
+  }, [currentActiveTabPath, setFileSystem]);
+
+  // Load active file when it changes and isn't already loaded
+  useEffect(() => {
+    if (currentActiveTabPath && !fileSystem.files[currentActiveTabPath]) {
+      loadFile(currentActiveTabPath);
+    }
+  }, [currentActiveTabPath, fileSystem.files]);
+
+  // Tab operations (now delegate to URL navigation)
+  const openTab = async (path: string) => {
+    // Use URL navigation to manage tab state
+    tabNavigation.openTab(path);
+
+    // Load the file if it's not already loaded
+    if (!fileSystem.files[path]) {
+      await loadFile(path);
+    }
+  };
+
+  const closeTab = (path: string) => {
+    tabNavigation.closeTab(path);
+  };
+
+  const switchTab = (path: string) => {
+    tabNavigation.switchToTabByPath(path);
+  };
+
+  const switchToTabIndex = (index: number) => {
+    tabNavigation.switchToTab(index);
+  };
+
+  const closeAllTabs = () => {
+    tabNavigation.closeAllTabs();
+  };
+
+  const activeFile = currentActiveTabPath
+    ? fileSystem.files[currentActiveTabPath]
+    : null;
+
+  // Create tab objects for compatibility
+  const tabs = tabNavigation.tabs.map((relativePath, index) => ({
+    index,
+    filePath: tabNavigation.getAbsolutePath(relativePath) || "",
+    relativePath,
+  }));
 
   return {
-    // File state
-    currentFile,
-    isLoading: currentFile?.state === "loading",
-    isSaving: currentFile?.state === "saving",
-    isModified: currentFile?.state === "loaded_modified",
-    hasError: currentFile?.state === "error",
+    // Active tab state
+    activeFile,
+    activeFilePath: currentActiveTabPath,
+    isActiveFileLoading: activeFile?.state === "loading",
+    isActiveFileSaving: activeFile?.state === "saving",
+    isActiveFileModified: activeFile?.state === "loaded_modified",
+    hasActiveFileError: activeFile?.state === "error",
+
+    // Tab operations
+    openTab,
+    closeTab,
+    switchTab,
+    switchToTabIndex,
+    closeAllTabs,
+
+    // Tab state (URL-driven)
+    tabs,
+    activeTabIndex: tabNavigation.activeIndex,
+    hasOpenTabs: tabNavigation.tabs.length > 0,
+
+    // Tab navigation state
+    tabNavigation,
 
     // File operations
     loadFile,
     saveFile,
-    saveCurrentFile,
+    saveActiveFile,
     reloadFile,
     discardChanges,
 
     // Content management
-    setCurrentFile: setCurrentFileContent,
+    setActiveFile: setActiveFileContent,
 
     // File system state
     allFiles: fileSystem.files,

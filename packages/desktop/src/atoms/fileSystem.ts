@@ -10,34 +10,33 @@ export interface FileState {
 
 export interface FileSystemState {
   files: Record<string, FileState>;
-  currentFile: string | null;
+  activeTabPath: string | null; // Synced from URL state
 }
 
 export const fileSystemAtom = atom<FileSystemState>({
   files: {},
-  currentFile: null,
+  activeTabPath: null,
 });
 
-// Derived atoms for easier access
-export const currentFileAtom = atom((get) => {
+export const activeFileAtom = atom((get) => {
   const fs = get(fileSystemAtom);
-  return fs.currentFile ? fs.files[fs.currentFile] : null;
+  return fs.activeTabPath ? fs.files[fs.activeTabPath] : null;
 });
 
-export const currentFileContentAtom = atom(
-  (get) => get(currentFileAtom)?.content ?? "",
+export const activeFileContentAtom = atom(
+  (get) => get(activeFileAtom)?.content ?? "",
   (get, set, newContent: string) => {
     const fs = get(fileSystemAtom);
-    if (fs.currentFile && fs.files[fs.currentFile]) {
-      const currentFile = fs.files[fs.currentFile];
-      const isModified = newContent !== currentFile.originalContent;
+    if (fs.activeTabPath && fs.files[fs.activeTabPath]) {
+      const activeFile = fs.files[fs.activeTabPath];
+      const isModified = newContent !== activeFile.originalContent;
 
       set(fileSystemAtom, {
         ...fs,
         files: {
           ...fs.files,
-          [fs.currentFile]: {
-            ...currentFile,
+          [fs.activeTabPath]: {
+            ...activeFile,
             content: newContent,
             state: isModified ? "loaded_modified" : "loaded",
           },
@@ -47,7 +46,6 @@ export const currentFileContentAtom = atom(
   },
 );
 
-// Helper atom to check if any files have unsaved changes
 export const hasUnsavedChangesAtom = atom((get) => {
   const fs = get(fileSystemAtom);
   return Object.values(fs.files).some(

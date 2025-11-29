@@ -6,7 +6,8 @@ import { FileExplorer } from "@/components/file-explorer";
 import { FileEditor } from "@/components/file-editor";
 import { Welcome } from "@/components/welcome";
 import { useMenuEvents } from "@/hooks/useMenuEvents";
-import { getFilePathFromUrl } from "@/utils/routing";
+import { useFileManager } from "@/hooks/useFileManager";
+import { useTabNavigation } from "@/hooks/useTabNavigation";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -15,21 +16,14 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 export const WorkspaceLayout = () => {
-  const { basePath, "*": filePath } = useParams();
+  const { basePath } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { hasOpenTabs } = useFileManager();
+  const tabNavigation = useTabNavigation();
 
   // Decode the base path from URL
   const currentDirectory = basePath ? decodeURIComponent(basePath) : undefined;
-
-  // Determine if we're on an edit route
-  const isEditRoute = window.location.pathname.includes("/edit/");
-
-  // Decode the file path from URL (only for edit routes)
-  const selectedFilePath =
-    isEditRoute && filePath && basePath
-      ? getFilePathFromUrl(basePath, filePath) || undefined
-      : undefined;
 
   // Check if settings modal should be open
   const showSettings = searchParams.get("settings") === "true";
@@ -56,17 +50,24 @@ export const WorkspaceLayout = () => {
     onFolderSelected: handleDirectorySelect,
   });
 
+  const currentActiveFile =
+    hasOpenTabs && tabNavigation.activeIndex >= 0
+      ? tabNavigation.getAbsolutePath(
+          tabNavigation.tabs[tabNavigation.activeIndex],
+        )
+      : undefined;
+
   return (
     <>
       <TopNav
         currentDirectory={currentDirectory}
-        selectedFile={selectedFilePath}
-        isEditRoute={isEditRoute}
+        selectedFile={currentActiveFile || undefined}
+        isEditRoute={hasOpenTabs}
       />
       <DebugPanel
         currentDirectory={currentDirectory}
-        selectedFilePath={selectedFilePath}
-        isEditRoute={isEditRoute}
+        selectedFilePath={currentActiveFile || undefined}
+        isEditRoute={hasOpenTabs}
       />
       <SettingsDialog open={showSettings} onOpenChange={handleSettingsToggle} />
 
@@ -78,17 +79,14 @@ export const WorkspaceLayout = () => {
             maxSize={30}
             className="bg-sidebar"
           >
-            <FileExplorer
-              currentDirectory={currentDirectory}
-              selectedPath={selectedFilePath}
-            />
+            <FileExplorer currentDirectory={currentDirectory} />
           </ResizablePanel>
 
           <ResizableHandle withHandle />
 
           <ResizablePanel defaultSize={80}>
-            {isEditRoute && selectedFilePath ? (
-              <FileEditor filePath={selectedFilePath} />
+            {hasOpenTabs ? (
+              <FileEditor />
             ) : (
               <div className="h-full bg-background">
                 <ScrollArea className="h-full">

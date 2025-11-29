@@ -7,21 +7,17 @@ import { EditorToolbar } from "@/components/editor-toolbar";
 import { Icons } from "@/components/icons";
 import { useFileManager } from "@/hooks/useFileManager";
 
-interface FileEditorProps {
-  filePath: string;
-}
-
-export const FileEditor = ({ filePath }: FileEditorProps) => {
+export const FileEditor = () => {
   const {
-    currentFile,
-    isLoading,
-    isSaving,
-    isModified,
-    hasError,
-    setCurrentFile,
-    saveCurrentFile,
-  } = useFileManager(filePath, {
-    autoLoad: true,
+    activeFile,
+    activeFilePath,
+    isActiveFileLoading,
+    isActiveFileSaving,
+    isActiveFileModified,
+    hasActiveFileError,
+    setActiveFile,
+    saveActiveFile,
+  } = useFileManager({
     onError: (error) => console.error("File operation failed:", error),
     onSave: (savedPath) => console.log("File saved:", savedPath),
   });
@@ -46,33 +42,33 @@ export const FileEditor = ({ filePath }: FileEditorProps) => {
   // Initialize Plate editor
   const editor = usePlateEditor({
     plugins: BasicNodesKit,
-    value: textToPlateValue(currentFile?.content || ""),
+    value: textToPlateValue(activeFile?.content || ""),
   });
 
-  // Update editor when file content changes
+  // Update editor when active file content changes
   useEffect(() => {
-    if (editor && currentFile?.content !== undefined) {
-      const newValue = textToPlateValue(currentFile.content);
+    if (editor && activeFile?.content !== undefined) {
+      const newValue = textToPlateValue(activeFile.content);
       editor.tf.setValue(newValue);
     }
-  }, [editor, currentFile?.content]);
+  }, [editor, activeFile?.content]);
 
   // Handle save shortcut (Ctrl/Cmd + S)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
-        if (isModified) {
-          saveCurrentFile();
+        if (isActiveFileModified && activeFilePath) {
+          saveActiveFile();
         }
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isModified, saveCurrentFile]);
+  }, [isActiveFileModified, activeFilePath, saveActiveFile]);
 
-  if (isLoading) {
+  if (isActiveFileLoading) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="animate-spin">
@@ -83,14 +79,14 @@ export const FileEditor = ({ filePath }: FileEditorProps) => {
     );
   }
 
-  if (hasError) {
+  if (hasActiveFileError) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
           <Icons.alertCircle className="h-12 w-12 text-destructive mx-auto mb-4" />
           <h3 className="text-lg font-semibold mb-2">Error Loading File</h3>
           <p className="text-sm text-muted-foreground mb-4">
-            {currentFile?.error}
+            {activeFile?.error}
           </p>
           <button
             onClick={() => window.location.reload()}
@@ -103,20 +99,35 @@ export const FileEditor = ({ filePath }: FileEditorProps) => {
     );
   }
 
+  // Show welcome message if no active tab
+  if (!activeFilePath) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <Icons.folder className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
+          <h3 className="text-lg font-semibold mb-2">No File Selected</h3>
+          <p className="text-sm text-muted-foreground">
+            Select a file from the explorer to start editing
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col bg-background">
       <EditorToolbar
-        isModified={isModified}
-        isSaving={isSaving}
-        onSave={saveCurrentFile}
-        fileName={filePath.split("/").pop() || "Untitled"}
+        isModified={isActiveFileModified}
+        isSaving={isActiveFileSaving}
+        onSave={saveActiveFile}
+        fileName={activeFilePath.split("/").pop() || "Untitled"}
       />
       <div className="flex-1 h-full overflow-hidden">
         <Plate
           editor={editor}
           onChange={({ value }) => {
             const text = extractTextFromPlateValue(value);
-            setCurrentFile(text);
+            setActiveFile(text);
           }}
         >
           <EditorContainer className="h-full">

@@ -5,13 +5,9 @@ import { DynamicFileTree } from "@/components/dynamic-file-tree";
 
 interface FileExplorerProps {
   currentDirectory?: string;
-  selectedPath?: string;
 }
 
-export const FileExplorer = ({
-  currentDirectory,
-  selectedPath,
-}: FileExplorerProps) => {
+export const FileExplorer = ({ currentDirectory }: FileExplorerProps) => {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const handleSettingsToggle = (open: boolean) => {
@@ -37,10 +33,7 @@ export const FileExplorer = ({
       <ScrollArea className="flex-1">
         <div className="p-2">
           {currentDirectory ? (
-            <DynamicFileTree
-              selectedPath={selectedPath}
-              rootDirectory={currentDirectory}
-            />
+            <DynamicFileTree rootDirectory={currentDirectory} />
           ) : (
             <div className="text-center text-sm text-muted-foreground py-8">
               <Icons.folder className="h-8 w-8 mx-auto mb-3 opacity-50" />
