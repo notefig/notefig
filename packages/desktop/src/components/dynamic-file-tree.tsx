@@ -137,15 +137,9 @@ function FileTreeItem({
       onToggleFolder(file.path);
     } else if (rootDirectory) {
       try {
-        console.log("🐛 Building edit URL:", {
-          rootDirectory,
-          filePath: file.path,
-        });
         const editUrl = buildEditFileUrl(rootDirectory, file.path);
-        console.log("🐛 Generated URL:", editUrl);
         navigate(editUrl);
       } catch (error) {
-        alert((error as any).message);
         console.error("Error building edit URL:", error);
       }
     }

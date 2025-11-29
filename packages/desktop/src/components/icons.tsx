@@ -1,4 +1,5 @@
 import {
+  AlertCircle,
   Bold,
   Check,
   ChevronDown,
@@ -34,6 +35,7 @@ import {
 } from "lucide-react";
 
 export const Icons = {
+  alertCircle: AlertCircle,
   bold: Bold,
   check: Check,
   chevronDown: ChevronDown,
