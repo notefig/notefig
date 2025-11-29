@@ -3,7 +3,6 @@ import { Icons } from "./icons";
 import { cn } from "../lib/utils";
 import { FileEntry, listAbsoluteDirectory } from "../utils/fs";
 import { useFileManager } from "@/hooks/useFileManager";
-import { pathsEqual, pathExistsIn } from "@/utils/path";
 
 interface DynamicFileTreeProps {
   className?: string;
@@ -14,7 +13,7 @@ export function DynamicFileTree({
   className,
   rootDirectory,
 }: DynamicFileTreeProps) {
-  const { openTab, activeFilePath, tabs } = useFileManager();
+  const { openTab, activeFilePath, tabs, allFiles } = useFileManager();
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
@@ -97,17 +96,20 @@ export function DynamicFileTree({
         // Determine the open state for this file using normalized path comparison
         let openState: "open" | "active" | null = null;
 
-        if (!file.isDirectory && pathExistsIn(file.path, openTabPaths)) {
+        if (!file.isDirectory && openTabPaths.includes(file.path)) {
           // File is open in a tab, check if it's the active one
           openState =
-            activeTabPath && pathsEqual(file.path, activeTabPath)
-              ? "active"
-              : "open";
+            activeTabPath && file.path === activeTabPath ? "active" : "open";
         }
+
+        // Check if this file has unsaved changes
+        const fileState = allFiles[file.path];
+        const hasUnsavedChanges = fileState?.state === "loaded_modified";
 
         return (
           <FileTreeItem
             openState={openState}
+            hasUnsavedChanges={hasUnsavedChanges}
             key={file.path}
             file={file}
             onToggleFolder={toggleFolder}
@@ -122,6 +124,7 @@ export function DynamicFileTree({
 
 interface FileTreeItemProps {
   openState: "open" | "active" | null;
+  hasUnsavedChanges: boolean;
   file: FileEntry;
   onToggleFolder: (path: string) => void;
   isExpanded: boolean;
@@ -130,6 +133,7 @@ interface FileTreeItemProps {
 
 function FileTreeItem({
   openState,
+  hasUnsavedChanges,
   file,
   onToggleFolder,
   isExpanded,
@@ -177,16 +181,17 @@ function FileTreeItem({
       <Icon className="h-4 w-4 shrink-0" />
       <span className="truncate flex-1">{file.name}</span>
 
-      {/* Small indicator dot for open tabs */}
-      {openState && !isFolder && (
+      {/* Unsaved changes indicator dot - only for files with unsaved changes */}
+      {hasUnsavedChanges && !isFolder && (
         <div
           className={cn(
             "h-1.5 w-1.5 rounded-full shrink-0 ml-1",
-            openState === "active" ? "bg-primary" : "bg-primary/50",
+            openState === "active" ? "bg-primary" : "bg-primary/60",
           )}
-          title={openState === "active" ? "Active tab" : "Open in tab"}
+          title="Unsaved changes"
         />
       )}
+
       {isFolder && (
         <Icons.chevronRight
           className={cn(
