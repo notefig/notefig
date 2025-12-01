@@ -1,6 +1,11 @@
 "use client";
 
+import { MarkdownPlugin } from "@platejs/markdown";
 import { BasicBlocksKit } from "./basic-blocks-kit";
 import { BasicMarksKit } from "./basic-marks-kit";
 
-export const BasicNodesKit = [...BasicBlocksKit, ...BasicMarksKit];
+export const BasicNodesKit = [
+  ...BasicBlocksKit,
+  ...BasicMarksKit,
+  MarkdownPlugin,
+];

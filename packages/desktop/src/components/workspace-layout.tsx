@@ -3,7 +3,7 @@ import { TopNav } from "@/components/top-nav";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { DebugPanel } from "@/components/debug-panel";
 import { FileExplorer } from "@/components/file-explorer";
-import { FileEditor } from "@/components/file-editor";
+import { TabManager } from "@/components/tabs";
 import { TabBar } from "@/components/tab-bar";
 import { Welcome } from "@/components/welcome";
 import { useMenuEvents } from "@/hooks/useMenuEvents";
@@ -111,7 +111,7 @@ export const WorkspaceLayout = () => {
                   onTabClose={closeTab}
                   allFiles={allFiles}
                 />
-                <FileEditor />
+                <TabManager />
               </div>
             ) : (
               <div className="h-full bg-background">

@@ -17,6 +17,7 @@
     "@platejs/code-block": "^51.0.0",
     "@platejs/indent": "^51.0.0",
     "@platejs/list": "^51.0.0",
+    "@platejs/markdown": "^51.0.0",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slot": "^1.0.2",
@@ -40,6 +41,8 @@
     "remark-breaks": "^4.0.0",
     "remark-emoji": "^4.0.1",
     "remark-gfm": "^4.0.0",
+    "remark-math": "^6.0.0",
+    "remark-mdx": "^3.1.1",
     "tailwind-merge": "^2.2.2",
     "tailwind-scrollbar-hide": "^4.0.0",
     "tailwindcss-animate": "^1.0.7"
