@@ -8,6 +8,7 @@ import remarkMath from "remark-math";
 import remarkMdx from "remark-mdx";
 import { useAtom } from "jotai";
 import { fileSystemAtom } from "@/atoms/fileSystem";
+import { isContentModified } from "@/utils/hash";
 import { Editor, EditorContainer } from "@/components/ui/editor";
 import { BasicNodesKit } from "@/components/editor/plugins/basic-nodes-kit";
 import { EditorToolbar } from "@/components/editor-toolbar";
@@ -133,8 +134,11 @@ export const MarkdownEditorContent: React.FC<TabContentProps> = ({
 
       // Update file content in the file system
       if (fileSystem.files[filePath]) {
-        const isContentModified =
-          markdownText !== fileSystem.files[filePath].originalContent;
+        const currentFile = fileSystem.files[filePath];
+        const isModifiedFromSaved = isContentModified(
+          markdownText,
+          currentFile.savedContentHash,
+        );
 
         setFileSystem((prev) => ({
           ...prev,
@@ -143,7 +147,7 @@ export const MarkdownEditorContent: React.FC<TabContentProps> = ({
             [filePath]: {
               ...prev.files[filePath],
               content: markdownText,
-              state: isContentModified ? "loaded_modified" : "loaded",
+              state: isModifiedFromSaved ? "loaded_modified" : "loaded",
             },
           },
         }));

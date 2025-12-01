@@ -1,5 +1,9 @@
 import { useAtom } from "jotai";
-import { fileSystemAtom, activeFileContentAtom } from "@/atoms/fileSystem";
+import {
+  fileSystemAtom,
+  activeFileContentAtom,
+  createFileState,
+} from "@/atoms/fileSystem";
 import {
   readAbsoluteTextFile,
   writeAbsoluteTextFile,
@@ -7,6 +11,7 @@ import {
 } from "@/utils/fs";
 import { useTabNavigation } from "@/hooks/useTabNavigation";
 import { useEffect } from "react";
+import { calculateContentHash } from "@/utils/hash";
 
 export interface UseFileManagerOptions {
   onError?: (error: string) => void;
@@ -26,8 +31,8 @@ export function useFileManager(options: UseFileManagerOptions = {}) {
       files: {
         ...prev.files,
         [normalizedPath]: {
-          content: prev.files[normalizedPath]?.content ?? "",
-          originalContent: prev.files[normalizedPath]?.originalContent ?? "",
+          ...createFileState("", "loading"),
+          ...prev.files[normalizedPath], // Preserve existing data if any
           state: "loading",
         },
       },
@@ -35,28 +40,26 @@ export function useFileManager(options: UseFileManagerOptions = {}) {
 
     try {
       const content = await readAbsoluteTextFile(path);
+      const fileState = createFileState(content, "loaded");
       setFileSystem((prev) => ({
         ...prev,
         files: {
           ...prev.files,
           [normalizedPath]: {
-            content,
-            originalContent: content,
-            state: "loaded",
+            ...fileState,
             lastModified: new Date(),
           },
         },
       }));
     } catch (error) {
       const errorMessage = `Failed to load file: ${error}`;
+      const errorFileState = createFileState("", "error");
       setFileSystem((prev) => ({
         ...prev,
         files: {
           ...prev.files,
-          [path]: {
-            content: "",
-            originalContent: "",
-            state: "error",
+          [normalizedPath]: {
+            ...errorFileState,
             error: errorMessage,
           },
         },
@@ -88,6 +91,8 @@ export function useFileManager(options: UseFileManagerOptions = {}) {
 
     try {
       await writeAbsoluteTextFile(path, targetContent);
+      // Update with new hash after successful save
+      const newHash = calculateContentHash(targetContent);
       setFileSystem((prev) => ({
         ...prev,
         files: {
@@ -95,6 +100,7 @@ export function useFileManager(options: UseFileManagerOptions = {}) {
           [normalizedPath]: {
             content: targetContent,
             originalContent: targetContent,
+            savedContentHash: newHash,
             state: "loaded",
             lastModified: new Date(),
           },

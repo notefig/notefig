@@ -1,8 +1,10 @@
 import { atom } from "jotai";
+import { calculateContentHash, isContentModified } from "@/utils/hash";
 
 export interface FileState {
   content: string;
   originalContent: string; // Track original for modification detection
+  savedContentHash: string; // Hash of the saved content on disk
   state: "loading" | "loaded" | "loaded_modified" | "error" | "saving";
   lastModified?: Date;
   error?: string;
@@ -29,7 +31,10 @@ export const activeFileContentAtom = atom(
     const fs = get(fileSystemAtom);
     if (fs.activeTabPath && fs.files[fs.activeTabPath]) {
       const activeFile = fs.files[fs.activeTabPath];
-      const isModified = newContent !== activeFile.originalContent;
+      const isModified = isContentModified(
+        newContent,
+        activeFile.savedContentHash,
+      );
 
       set(fileSystemAtom, {
         ...fs,
@@ -53,10 +58,35 @@ export const hasUnsavedChangesAtom = atom((get) => {
   );
 });
 
-// Helper atom to get all modified files
+// Helper atom to get all modified files (using hash comparison)
 export const modifiedFilesAtom = atom((get) => {
   const fs = get(fileSystemAtom);
   return Object.entries(fs.files)
-    .filter(([, file]) => file.state === "loaded_modified")
+    .filter(([, file]) => isFileModified(file))
     .map(([path]) => path);
 });
+
+// Helper function to check if a file is modified using hash comparison
+export function isFileModified(file: FileState): boolean {
+  return isContentModified(file.content, file.savedContentHash);
+}
+
+// Derived atom that checks modification status using hash (more accurate than state)
+export const hasUnsavedChangesHashAtom = atom((get) => {
+  const fs = get(fileSystemAtom);
+  return Object.values(fs.files).some(isFileModified);
+});
+
+// Helper function to create initial file state with hash
+export function createFileState(
+  content: string,
+  state: FileState["state"] = "loaded",
+): Omit<FileState, "lastModified" | "error"> {
+  const hash = calculateContentHash(content);
+  return {
+    content,
+    originalContent: content,
+    savedContentHash: hash,
+    state,
+  };
+}
