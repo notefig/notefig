@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Icons } from "@/components/icons";
-import { invoke } from "@tauri-apps/api/core";
+import { fs } from "@/utils/fs";
 
 interface DirectoryPickerProps {
   onDirectorySelect: (path: string) => void;
@@ -17,8 +17,7 @@ export function DirectoryPicker({
   const handlePickDirectory = async () => {
     setLoading(true);
     try {
-      // Use the native command instead of the frontend dialog
-      const selectedPath = await invoke<string | null>("open_folder_dialog");
+      const selectedPath = await fs.pickDirectory();
 
       if (selectedPath) {
         onDirectorySelect(selectedPath);

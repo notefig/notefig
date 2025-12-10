@@ -14,6 +14,10 @@ import {
 } from "@tauri-apps/plugin-fs";
 import { open } from "@tauri-apps/plugin-dialog";
 
+// ============================================================================
+// Types & Interfaces
+// ============================================================================
+
 export interface FileEntry {
   name: string;
   path: string;
@@ -42,138 +46,148 @@ export interface FileOperationOptions {
   toBaseDir?: BaseDirectory;
 }
 
-/**
- * Read a text file
- */
-export async function readTextFileContent(
-  filePath: string,
-  options: ReadOptions = {},
-): Promise<string> {
-  try {
-    return await readTextFile(filePath, {
-      baseDir: options.baseDir,
-    });
-  } catch (error) {
-    throw new Error(`Failed to read file ${filePath}: ${error}`);
-  }
+// ============================================================================
+// FileSystem Interface
+// ============================================================================
+
+export interface IFileSystem {
+  // Text file operations (absolute paths)
+  readTextFile(absolutePath: string, options?: ReadOptions): Promise<string>;
+  writeTextFile(
+    absolutePath: string,
+    content: string,
+    options?: WriteOptions,
+  ): Promise<void>;
+
+  // Binary file operations (absolute paths)
+  readBinaryFile(
+    absolutePath: string,
+    options?: ReadOptions,
+  ): Promise<Uint8Array>;
+  writeBinaryFile(
+    absolutePath: string,
+    content: Uint8Array,
+    options?: WriteOptions,
+  ): Promise<void>;
+
+  // Directory operations (absolute paths)
+  listDirectory(
+    absolutePath: string,
+    options?: ListOptions,
+  ): Promise<FileEntry[]>;
+  createDirectory(
+    absolutePath: string,
+    options?: WriteOptions & { recursive?: boolean },
+  ): Promise<void>;
+
+  // File/Directory checks & metadata (absolute paths)
+  exists(absolutePath: string, options?: ReadOptions): Promise<boolean>;
+  getMetadata(
+    absolutePath: string,
+    options?: ReadOptions,
+  ): Promise<{
+    size: number;
+    isFile: boolean;
+    isDirectory: boolean;
+    modified: Date | null;
+    accessed: Date | null;
+    created: Date | null;
+  }>;
+
+  // File/Directory manipulation (absolute paths)
+  rename(
+    oldPath: string,
+    newPath: string,
+    options?: FileOperationOptions,
+  ): Promise<void>;
+  copy(
+    sourcePath: string,
+    destinationPath: string,
+    options?: FileOperationOptions,
+  ): Promise<void>;
+  move(
+    sourcePath: string,
+    destinationPath: string,
+    options?: FileOperationOptions,
+  ): Promise<void>;
+  delete(
+    absolutePath: string,
+    options?: ReadOptions & { recursive?: boolean },
+  ): Promise<void>;
+
+  // Dialog operations
+  pickDirectory(title?: string): Promise<string | null>;
+  pickFiles(options?: {
+    title?: string;
+    multiple?: boolean;
+    filters?: Array<{ name: string; extensions: string[] }>;
+  }): Promise<string | string[] | null>;
 }
 
-/**
- * Read a binary file
- */
-export async function readBinaryFile(
-  filePath: string,
-  options: ReadOptions = {},
-): Promise<Uint8Array> {
-  try {
-    return await readFile(filePath, {
+// ============================================================================
+// Tauri FileSystem Implementation
+// ============================================================================
+
+class TauriFileSystem implements IFileSystem {
+  // Text file operations
+  async readTextFile(
+    absolutePath: string,
+    options: ReadOptions = {},
+  ): Promise<string> {
+    return await readTextFile(absolutePath, {
       baseDir: options.baseDir,
     });
-  } catch (error) {
-    throw new Error(`Failed to read binary file ${filePath}: ${error}`);
   }
-}
 
-/**
- * Write a text file
- */
-export async function writeTextFileContent(
-  filePath: string,
-  content: string,
-  options: WriteOptions = {},
-): Promise<void> {
-  try {
-    await writeTextFile(filePath, content, {
+  async writeTextFile(
+    absolutePath: string,
+    content: string,
+    options: WriteOptions = {},
+  ): Promise<void> {
+    await writeTextFile(absolutePath, content, {
       baseDir: options.baseDir,
       append: options.append,
     });
-  } catch (error) {
-    throw new Error(`Failed to write file ${filePath}: ${error}`);
   }
-}
 
-/**
- * Write a binary file
- */
-export async function writeBinaryFile(
-  filePath: string,
-  content: Uint8Array,
-  options: WriteOptions = {},
-): Promise<void> {
-  try {
-    await writeFile(filePath, content, {
+  // Binary file operations
+  async readBinaryFile(
+    absolutePath: string,
+    options: ReadOptions = {},
+  ): Promise<Uint8Array> {
+    return await readFile(absolutePath, {
+      baseDir: options.baseDir,
+    });
+  }
+
+  async writeBinaryFile(
+    absolutePath: string,
+    content: Uint8Array,
+    options: WriteOptions = {},
+  ): Promise<void> {
+    await writeFile(absolutePath, content, {
       baseDir: options.baseDir,
       append: options.append,
     });
-  } catch (error) {
-    throw new Error(`Failed to write binary file ${filePath}: ${error}`);
-  }
-}
-
-/**
- * List files and directories in a directory recursively
- */
-async function listDirectoryRecursive(
-  dirPath: string,
-  baseDir?: BaseDirectory,
-): Promise<FileEntry[]> {
-  const entries = await readDir(dirPath, { baseDir });
-  const fileEntries: FileEntry[] = [];
-
-  for (const entry of entries) {
-    const entryPath = joinPaths(dirPath, entry.name);
-
-    try {
-      const metadata = await stat(entryPath, { baseDir });
-
-      fileEntries.push({
-        name: entry.name,
-        path: entryPath,
-        isFile: entry.isFile,
-        isDirectory: entry.isDirectory,
-        size: entry.isFile ? metadata.size : undefined,
-        modified: metadata.mtime ? new Date(metadata.mtime) : undefined,
-      });
-
-      // If this is a directory, recursively get its contents
-      if (entry.isDirectory) {
-        const subEntries = await listDirectoryRecursive(entryPath, baseDir);
-        fileEntries.push(...subEntries);
-      }
-    } catch (error) {
-      // If we can't get metadata, still include the entry with basic info
-      fileEntries.push({
-        name: entry.name,
-        path: entryPath,
-        isFile: entry.isFile,
-        isDirectory: entry.isDirectory,
-      });
-    }
   }
 
-  return fileEntries;
-}
-
-/**
- * List files and directories in a directory
- */
-export async function listDirectory(
-  dirPath: string,
-  options: ListOptions = {},
-): Promise<FileEntry[]> {
-  try {
+  // Directory operations
+  async listDirectory(
+    absolutePath: string,
+    options: ListOptions = {},
+  ): Promise<FileEntry[]> {
     if (options.recursive) {
-      return await listDirectoryRecursive(dirPath, options.baseDir);
+      return await this.listDirectoryRecursive(absolutePath, options.baseDir);
     }
 
-    const entries = await readDir(dirPath, {
+    const entries = await readDir(absolutePath, {
       baseDir: options.baseDir,
     });
 
     const fileEntries: FileEntry[] = [];
 
     for (const entry of entries) {
-      const entryPath = joinPaths(dirPath, entry.name);
+      const entryPath = joinPaths(absolutePath, entry.name);
 
       try {
         const metadata = await stat(entryPath, {
@@ -200,141 +214,44 @@ export async function listDirectory(
     }
 
     return fileEntries;
-  } catch (error) {
-    throw new Error(`Failed to list directory ${dirPath}: ${error}`);
   }
-}
 
-/**
- * Check if a file or directory exists
- */
-export async function fileExists(
-  filePath: string,
-  options: ReadOptions = {},
-): Promise<boolean> {
-  try {
-    return await exists(filePath, {
-      baseDir: options.baseDir,
-    });
-  } catch (error) {
-    return false;
-  }
-}
-
-/**
- * Rename a file or directory
- */
-export async function renameFile(
-  oldPath: string,
-  newPath: string,
-  options: FileOperationOptions = {},
-): Promise<void> {
-  try {
-    await tauriRename(oldPath, newPath, {
-      oldPathBaseDir: options.fromBaseDir,
-      newPathBaseDir: options.toBaseDir || options.fromBaseDir,
-    });
-  } catch (error) {
-    throw new Error(`Failed to rename ${oldPath} to ${newPath}: ${error}`);
-  }
-}
-
-/**
- * Move a file by copying and then removing the original
- */
-export async function moveFile(
-  sourcePath: string,
-  destinationPath: string,
-  options: FileOperationOptions = {},
-): Promise<void> {
-  try {
-    // Copy the file to the new location
-    await copyFile(sourcePath, destinationPath, {
-      fromPathBaseDir: options.fromBaseDir,
-      toPathBaseDir: options.toBaseDir || options.fromBaseDir,
-    });
-
-    // Remove the original file
-    await remove(sourcePath, {
-      baseDir: options.fromBaseDir,
-    });
-  } catch (error) {
-    throw new Error(
-      `Failed to move ${sourcePath} to ${destinationPath}: ${error}`,
-    );
-  }
-}
-
-/**
- * Copy a file
- */
-export async function copyFileToPath(
-  sourcePath: string,
-  destinationPath: string,
-  options: FileOperationOptions = {},
-): Promise<void> {
-  try {
-    await copyFile(sourcePath, destinationPath, {
-      fromPathBaseDir: options.fromBaseDir,
-      toPathBaseDir: options.toBaseDir || options.fromBaseDir,
-    });
-  } catch (error) {
-    throw new Error(
-      `Failed to copy ${sourcePath} to ${destinationPath}: ${error}`,
-    );
-  }
-}
-
-/**
- * Delete a file or directory
- */
-export async function deleteFile(
-  filePath: string,
-  options: ReadOptions & { recursive?: boolean } = {},
-): Promise<void> {
-  try {
-    await remove(filePath, {
-      baseDir: options.baseDir,
-      recursive: options.recursive,
-    });
-  } catch (error) {
-    throw new Error(`Failed to delete ${filePath}: ${error}`);
-  }
-}
-
-/**
- * Create a directory (and parent directories if they don't exist)
- */
-export async function createDirectory(
-  dirPath: string,
-  options: WriteOptions & { recursive?: boolean } = {},
-): Promise<void> {
-  try {
-    await mkdir(dirPath, {
+  async createDirectory(
+    absolutePath: string,
+    options: WriteOptions & { recursive?: boolean } = {},
+  ): Promise<void> {
+    await mkdir(absolutePath, {
       baseDir: options.baseDir,
       recursive: options.recursive !== false, // Default to true
     });
-  } catch (error) {
-    throw new Error(`Failed to create directory ${dirPath}: ${error}`);
   }
-}
 
-/**
- * Get file or directory metadata
- */
-export async function getFileMetadata(
-  filePath: string,
-  options: ReadOptions = {},
-): Promise<{
-  size: number;
-  isFile: boolean;
-  isDirectory: boolean;
-  modified: Date | null;
-  accessed: Date | null;
-  created: Date | null;
-}> {
-  try {
-    const metadata = await stat(filePath, {
+  // File/Directory checks & metadata
+  async exists(
+    absolutePath: string,
+    options: ReadOptions = {},
+  ): Promise<boolean> {
+    try {
+      return await exists(absolutePath, {
+        baseDir: options.baseDir,
+      });
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async getMetadata(
+    absolutePath: string,
+    options: ReadOptions = {},
+  ): Promise<{
+    size: number;
+    isFile: boolean;
+    isDirectory: boolean;
+    modified: Date | null;
+    accessed: Date | null;
+    created: Date | null;
+  }> {
+    const metadata = await stat(absolutePath, {
       baseDir: options.baseDir,
     });
 
@@ -346,10 +263,139 @@ export async function getFileMetadata(
       accessed: metadata.atime ? new Date(metadata.atime) : null,
       created: metadata.birthtime ? new Date(metadata.birthtime) : null,
     };
-  } catch (error) {
-    throw new Error(`Failed to get metadata for ${filePath}: ${error}`);
+  }
+
+  // File/Directory manipulation
+  async rename(
+    oldPath: string,
+    newPath: string,
+    options: FileOperationOptions = {},
+  ): Promise<void> {
+    await tauriRename(oldPath, newPath, {
+      oldPathBaseDir: options.fromBaseDir,
+      newPathBaseDir: options.toBaseDir || options.fromBaseDir,
+    });
+  }
+
+  async copy(
+    sourcePath: string,
+    destinationPath: string,
+    options: FileOperationOptions = {},
+  ): Promise<void> {
+    await copyFile(sourcePath, destinationPath, {
+      fromPathBaseDir: options.fromBaseDir,
+      toPathBaseDir: options.toBaseDir || options.fromBaseDir,
+    });
+  }
+
+  async move(
+    sourcePath: string,
+    destinationPath: string,
+    options: FileOperationOptions = {},
+  ): Promise<void> {
+    // Copy the file to the new location
+    await copyFile(sourcePath, destinationPath, {
+      fromPathBaseDir: options.fromBaseDir,
+      toPathBaseDir: options.toBaseDir || options.fromBaseDir,
+    });
+
+    // Remove the original file
+    await remove(sourcePath, {
+      baseDir: options.fromBaseDir,
+    });
+  }
+
+  async delete(
+    absolutePath: string,
+    options: ReadOptions & { recursive?: boolean } = {},
+  ): Promise<void> {
+    await remove(absolutePath, {
+      baseDir: options.baseDir,
+      recursive: options.recursive,
+    });
+  }
+
+  // Dialog operations
+  async pickDirectory(title?: string): Promise<string | null> {
+    const result = await open({
+      title: title || "Select Directory",
+      directory: true,
+      multiple: false,
+    });
+
+    return Array.isArray(result) ? result[0] : result;
+  }
+
+  async pickFiles(
+    options: {
+      title?: string;
+      multiple?: boolean;
+      filters?: Array<{ name: string; extensions: string[] }>;
+    } = {},
+  ): Promise<string | string[] | null> {
+    return await open({
+      title: options.title || "Select Files",
+      directory: false,
+      multiple: options.multiple || false,
+      filters: options.filters,
+    });
+  }
+
+  // Private helper methods
+  private async listDirectoryRecursive(
+    dirPath: string,
+    baseDir?: BaseDirectory,
+  ): Promise<FileEntry[]> {
+    const entries = await readDir(dirPath, { baseDir });
+    const fileEntries: FileEntry[] = [];
+
+    for (const entry of entries) {
+      const entryPath = joinPaths(dirPath, entry.name);
+
+      try {
+        const metadata = await stat(entryPath, { baseDir });
+
+        fileEntries.push({
+          name: entry.name,
+          path: entryPath,
+          isFile: entry.isFile,
+          isDirectory: entry.isDirectory,
+          size: entry.isFile ? metadata.size : undefined,
+          modified: metadata.mtime ? new Date(metadata.mtime) : undefined,
+        });
+
+        // If this is a directory, recursively get its contents
+        if (entry.isDirectory) {
+          const subEntries = await this.listDirectoryRecursive(
+            entryPath,
+            baseDir,
+          );
+          fileEntries.push(...subEntries);
+        }
+      } catch (error) {
+        // If we can't get metadata, still include the entry with basic info
+        fileEntries.push({
+          name: entry.name,
+          path: entryPath,
+          isFile: entry.isFile,
+          isDirectory: entry.isDirectory,
+        });
+      }
+    }
+
+    return fileEntries;
   }
 }
+
+// ============================================================================
+// Singleton Export
+// ============================================================================
+
+export const fs = new TauriFileSystem();
+
+// ============================================================================
+// Pure Utility Functions (separate from singleton)
+// ============================================================================
 
 /**
  * Get the file extension from a file path
@@ -411,177 +457,8 @@ export function normalizePath(filePath: string): string {
   return normalized;
 }
 
-/**
- * Open a directory picker dialog and return the selected directory path
- */
-export async function pickDirectory(title?: string): Promise<string | null> {
-  try {
-    const result = await open({
-      title: title || "Select Directory",
-      directory: true,
-      multiple: false,
-    });
+// ============================================================================
+// Re-exports
+// ============================================================================
 
-    return Array.isArray(result) ? result[0] : result;
-  } catch (error) {
-    console.error("Failed to pick directory:", error);
-    return null;
-  }
-}
-
-/**
- * Open a file picker dialog and return the selected file path(s)
- */
-export async function pickFiles(
-  options: {
-    title?: string;
-    multiple?: boolean;
-    filters?: Array<{ name: string; extensions: string[] }>;
-  } = {},
-): Promise<string | string[] | null> {
-  try {
-    const result = await open({
-      title: options.title || "Select Files",
-      directory: false,
-      multiple: options.multiple || false,
-      filters: options.filters,
-    });
-
-    return result;
-  } catch (error) {
-    console.error("Failed to pick files:", error);
-    return null;
-  }
-}
-
-/**
- * List files in any directory using absolute path
- * This bypasses BaseDirectory restrictions for user-selected directories
- */
-export async function listAbsoluteDirectory(
-  absolutePath: string,
-  recursive: boolean = false,
-): Promise<FileEntry[]> {
-  try {
-    if (recursive) {
-      return await listDirectoryRecursiveAbsolute(absolutePath);
-    }
-
-    const entries = await readDir(absolutePath);
-    const fileEntries: FileEntry[] = [];
-
-    for (const entry of entries) {
-      const entryPath = joinPaths(absolutePath, entry.name);
-
-      try {
-        const metadata = await stat(entryPath);
-
-        fileEntries.push({
-          name: entry.name,
-          path: normalizePath(entryPath),
-          isFile: entry.isFile,
-          isDirectory: entry.isDirectory,
-          size: entry.isFile ? metadata.size : undefined,
-          modified: metadata.mtime ? new Date(metadata.mtime) : undefined,
-        });
-      } catch (error) {
-        // If we can't get metadata, still include the entry with basic info
-        fileEntries.push({
-          name: entry.name,
-          path: normalizePath(entryPath),
-          isFile: entry.isFile,
-          isDirectory: entry.isDirectory,
-        });
-      }
-    }
-
-    return fileEntries;
-  } catch (error) {
-    throw new Error(
-      `Failed to list absolute directory ${absolutePath}: ${error}`,
-    );
-  }
-}
-
-/**
- * Recursive helper for absolute directory listing
- */
-async function listDirectoryRecursiveAbsolute(
-  dirPath: string,
-): Promise<FileEntry[]> {
-  const entries = await readDir(dirPath);
-  const fileEntries: FileEntry[] = [];
-
-  for (const entry of entries) {
-    const entryPath = joinPaths(dirPath, entry.name);
-
-    try {
-      const metadata = await stat(entryPath);
-
-      fileEntries.push({
-        name: entry.name,
-        path: entryPath,
-        isFile: entry.isFile,
-        isDirectory: entry.isDirectory,
-        size: entry.isFile ? metadata.size : undefined,
-        modified: metadata.mtime ? new Date(metadata.mtime) : undefined,
-      });
-
-      // If this is a directory, recursively get its contents
-      if (entry.isDirectory) {
-        const subEntries = await listDirectoryRecursiveAbsolute(entryPath);
-        fileEntries.push(...subEntries);
-      }
-    } catch (error) {
-      // If we can't get metadata, still include the entry with basic info
-      fileEntries.push({
-        name: entry.name,
-        path: entryPath,
-        isFile: entry.isFile,
-        isDirectory: entry.isDirectory,
-      });
-    }
-  }
-
-  return fileEntries;
-}
-
-/**
- * Read a text file using absolute path
- */
-export async function readAbsoluteTextFile(
-  absolutePath: string,
-): Promise<string> {
-  try {
-    return await readTextFile(absolutePath);
-  } catch (error) {
-    throw new Error(`Failed to read absolute file ${absolutePath}: ${error}`);
-  }
-}
-
-/**
- * Write a text file using absolute path
- */
-export async function writeAbsoluteTextFile(
-  absolutePath: string,
-  content: string,
-): Promise<void> {
-  try {
-    await writeTextFile(absolutePath, content);
-  } catch (error) {
-    throw new Error(`Failed to write absolute file ${absolutePath}: ${error}`);
-  }
-}
-
-/**
- * Check if an absolute path exists
- */
-export async function absolutePathExists(
-  absolutePath: string,
-): Promise<boolean> {
-  try {
-    return await exists(absolutePath);
-  } catch (error) {
-    return false;
-  }
-}
+export { BaseDirectory };

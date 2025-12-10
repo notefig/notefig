@@ -4,11 +4,7 @@ import {
   activeFileContentAtom,
   createFileState,
 } from "@/atoms/fileSystem";
-import {
-  readAbsoluteTextFile,
-  writeAbsoluteTextFile,
-  normalizePath,
-} from "@/utils/fs";
+import { fs, normalizePath } from "@/utils/fs";
 import { useTabNavigation } from "@/hooks/useTabNavigation";
 import { useEffect } from "react";
 import { calculateContentHash } from "@/utils/hash";
@@ -39,7 +35,7 @@ export function useFileManager(options: UseFileManagerOptions = {}) {
     }));
 
     try {
-      const content = await readAbsoluteTextFile(path);
+      const content = await fs.readTextFile(path);
       const fileState = createFileState(content, "loaded");
       setFileSystem((prev) => ({
         ...prev,
@@ -90,7 +86,7 @@ export function useFileManager(options: UseFileManagerOptions = {}) {
     }));
 
     try {
-      await writeAbsoluteTextFile(path, targetContent);
+      await fs.writeTextFile(path, targetContent);
       // Update with new hash after successful save
       const newHash = calculateContentHash(targetContent);
       setFileSystem((prev) => ({

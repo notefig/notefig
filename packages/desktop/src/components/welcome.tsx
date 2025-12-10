@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Icons } from "./icons";
 import { Button } from "@/components/ui/button";
-import { invoke } from "@tauri-apps/api/core";
+import { fs } from "@/utils/fs";
 
 interface WelcomeProps {
   onDirectorySelect: (path: string) => void;
@@ -13,7 +13,7 @@ export function Welcome({ onDirectorySelect }: WelcomeProps) {
   const handleOpenFolder = async () => {
     setLoading(true);
     try {
-      const selectedPath = await invoke<string | null>("open_folder_dialog");
+      const selectedPath = await fs.pickDirectory();
       if (selectedPath) {
         onDirectorySelect(selectedPath);
       }

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Icons } from "./icons";
 import { cn } from "../lib/utils";
-import { FileEntry, listAbsoluteDirectory } from "../utils/fs";
+import { fs, type FileEntry } from "../utils/fs";
 import { useFileManager } from "@/hooks/useFileManager";
 
 interface DynamicFileTreeProps {
@@ -29,7 +29,7 @@ export function DynamicFileTree({
   const loadDirectory = async (path: string) => {
     setLoading(true);
     try {
-      const entries = await listAbsoluteDirectory(path, false);
+      const entries = await fs.listDirectory(path, { recursive: false });
       // Sort: directories first, then files, both alphabetically
       const sorted = entries.sort((a, b) => {
         if (a.isDirectory && !b.isDirectory) return -1;
