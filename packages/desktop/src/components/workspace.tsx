@@ -8,6 +8,7 @@ import { TextEditor } from "@/components/editor/text-editor";
 import { StatusBar } from "@/components/editor/status-bar";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
+import { getSingltonStore } from "../utils/tinybase";
 
 const initialFiles: FileNode[] = [
   {
@@ -50,16 +51,18 @@ const initialContents: Record<string, string> = {
 export const Workspace = () => {
   const { basePath } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const navigate = useNavigate();
+
+  useEffect(() => {
+    const store = getSingltonStore();
+    store.setValue("setting.direction", "rtl");
+    store.setRow("files", "/file/chapter.md", {
+      content: "123",
+    });
+    //load files
+  }, []);
 
   // Decode the base path from URL
   const currentDirectory = basePath ? decodeURIComponent(basePath) : undefined;
-
-  const handleDirectorySelect = (path: string) => {
-    const normalizedPath = path.startsWith("/") ? path : "/" + path;
-    const encodedBasePath = encodeURIComponent(normalizedPath);
-    navigate(`/${encodedBasePath}`);
-  };
 
   const handleSettingsToggle = (open: boolean) => {
     if (open) {
