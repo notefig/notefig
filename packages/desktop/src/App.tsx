@@ -1,7 +1,7 @@
 import "./App.css";
 import { Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
-import { WorkspaceLayout } from "@/components/workspace-layout";
+import { Workspace } from "@/components/workspace";
 
 export const App = () => {
   return (
@@ -9,11 +9,11 @@ export const App = () => {
       <div className="flex h-screen flex-col bg-background text-foreground overflow-hidden">
         <Routes>
           {/* Edit route - file selected for editing (most specific first) */}
-          <Route path="/:basePath/edit/*" element={<WorkspaceLayout />} />
+          <Route path="/:basePath/edit/*" element={<Workspace />} />
           {/* Base path route - no file selected */}
-          <Route path="/:basePath" element={<WorkspaceLayout />} />
+          <Route path="/:basePath" element={<Workspace />} />
           {/* Root route - no directory selected */}
-          <Route path="/" element={<WorkspaceLayout />} />
+          <Route path="/" element={<Workspace />} />
         </Routes>
       </div>
     </ThemeProvider>
