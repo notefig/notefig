@@ -3,11 +3,7 @@
 import React from "react";
 
 import { useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import {
   Select,
@@ -41,6 +37,7 @@ import {
   FileCode,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useTheme } from "../theme-provider";
 
 interface SettingsModalProps {
   open: boolean;
@@ -96,7 +93,12 @@ interface SettingsState {
   notifySlowStartup: boolean;
 }
 
-export function SettingsModal({ open, onOpenChange, direction, onDirectionChange }: SettingsModalProps) {
+export function SettingsModal({
+  open,
+  onOpenChange,
+  direction,
+  onDirectionChange,
+}: SettingsModalProps) {
   const [activeSection, setActiveSection] = useState("general");
   const [settings, setSettings] = useState<SettingsState>({
     automaticUpdates: true,
@@ -151,7 +153,7 @@ export function SettingsModal({ open, onOpenChange, direction, onDirectionChange
                             "w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md transition-colors",
                             activeSection === item.id
                               ? "bg-accent text-accent-foreground"
-                              : "text-foreground/80 hover:bg-accent/50"
+                              : "text-foreground/80 hover:bg-accent/50",
                           )}
                         >
                           <item.icon className="h-4 w-4 shrink-0" />
@@ -180,9 +182,7 @@ export function SettingsModal({ open, onOpenChange, direction, onDirectionChange
 
             {/* Scrollable content */}
             <ScrollArea className="flex-1">
-              <div className="p-6">
-                {renderSettingsContent()}
-              </div>
+              <div className="p-6">{renderSettingsContent()}</div>
             </ScrollArea>
           </div>
         </div>
@@ -210,8 +210,12 @@ function GeneralSettings({
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h3 className="text-base font-medium">Version 1.11.4</h3>
-            <p className="text-sm text-muted-foreground">(Installer version: 1.8.9)</p>
-            <p className="text-sm text-muted-foreground">A new version is ready to be installed.</p>
+            <p className="text-sm text-muted-foreground">
+              (Installer version: 1.8.9)
+            </p>
+            <p className="text-sm text-muted-foreground">
+              A new version is ready to be installed.
+            </p>
             <button className="text-sm text-primary hover:underline">
               Read the changelog.
             </button>
@@ -381,14 +385,17 @@ function EditorSettings() {
 
 // Appearance Settings Panel
 function AppearanceSettings() {
-  const [theme, setTheme] = useState("dark");
+  const { setTheme, theme } = useTheme();
   const [accentColor, setAccentColor] = useState("purple");
 
   return (
     <div className="space-y-8 max-w-3xl">
       <h2 className="text-lg font-semibold">Appearance</h2>
 
-      <SettingRow title="Theme" description="Choose a color theme for the interface.">
+      <SettingRow
+        title="Theme"
+        description="Choose a color theme for the interface."
+      >
         <Select value={theme} onValueChange={setTheme}>
           <SelectTrigger className="w-32">
             <SelectValue />
@@ -401,7 +408,10 @@ function AppearanceSettings() {
         </Select>
       </SettingRow>
 
-      <SettingRow title="Accent color" description="Choose an accent color for highlights and interactive elements.">
+      <SettingRow
+        title="Accent color"
+        description="Choose an accent color for highlights and interactive elements."
+      >
         <Select value={accentColor} onValueChange={setAccentColor}>
           <SelectTrigger className="w-32">
             <SelectValue />
@@ -421,9 +431,9 @@ function AppearanceSettings() {
 
 // Placeholder for other settings
 function PlaceholderSettings({ section }: { section: string }) {
-  const title = settingsSections
-    .flatMap((s) => s.items)
-    .find((i) => i.id === section)?.label || section;
+  const title =
+    settingsSections.flatMap((s) => s.items).find((i) => i.id === section)
+      ?.label || section;
 
   return (
     <div className="space-y-4 max-w-3xl">
@@ -451,12 +461,11 @@ function SettingRow({
     <div className="flex items-start justify-between gap-4 py-3 border-b border-border last:border-0">
       <div className="min-w-0 flex-1">
         <h3 className="text-sm font-medium">{title}</h3>
-        <p className="text-sm text-muted-foreground break-words">{description}</p>
+        <p className="text-sm text-muted-foreground break-words">
+          {description}
+        </p>
         {link && (
-          <a
-            href={link.href}
-            className="text-sm text-primary hover:underline"
-          >
+          <a href={link.href} className="text-sm text-primary hover:underline">
             {link.text}
           </a>
         )}

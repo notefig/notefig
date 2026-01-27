@@ -6,11 +6,7 @@ import Logo from "./logo";
 import { useTranslation, Trans } from "react-i18next";
 import { useNavigate } from "react-router";
 
-interface WelcomeProps {
-  onDirectorySelect: (path: string) => void;
-}
-
-export function Welcome({ onDirectorySelect }: WelcomeProps) {
+export function Welcome() {
   const [loading, setLoading] = useState(false);
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -34,7 +30,7 @@ export function Welcome({ onDirectorySelect }: WelcomeProps) {
     <div className="flex flex-col items-center justify-center text-center max-w-md h-full mx-auto px-4">
       <Logo
         size={96}
-        animated={true}
+        animated={loading}
         showBackground={false}
         fill="currentColor"
         className="text-foreground mx-auto mb-6"
