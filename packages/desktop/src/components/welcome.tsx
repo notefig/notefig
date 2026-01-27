@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Icons } from "./icons";
 import { Button } from "@/components/ui/button";
-import { pickDirectory } from "@/utils/fs";
+import { normalizePath, pickDirectory } from "@/utils/fs";
 import Logo from "./logo";
+import { useNavigate } from "react-router";
 
 interface WelcomeProps {
   onDirectorySelect: (path: string) => void;
@@ -10,13 +11,15 @@ interface WelcomeProps {
 
 export function Welcome({ onDirectorySelect }: WelcomeProps) {
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
   const handleOpenFolder = async () => {
     setLoading(true);
     try {
       const selectedPath = await pickDirectory();
       if (selectedPath) {
-        onDirectorySelect(selectedPath);
+        const encodedPath = encodeURIComponent(normalizePath(selectedPath));
+        navigate(`/${encodedPath}`);
       }
     } catch (error) {
       console.error("Failed to pick directory:", error);
@@ -26,7 +29,7 @@ export function Welcome({ onDirectorySelect }: WelcomeProps) {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center text-center max-w-md mx-auto px-4">
+    <div className="flex flex-col items-center justify-center text-center max-w-md h-full mx-auto px-4">
       <Logo
         size={96}
         animated={false}

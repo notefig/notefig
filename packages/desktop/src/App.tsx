@@ -14,14 +14,7 @@ export const App = () => {
           {/* Base path route - no file selected */}
           <Route path="/:basePath" element={<Workspace />} />
           {/* Root route - no directory selected */}
-          <Route
-            path="/"
-            element={
-              <Welcome
-                onDirectorySelect={(path: string) => console.log(path)}
-              />
-            }
-          />
+          <Route path="/" element={<Welcome />} />
         </Routes>
       </div>
     </ThemeProvider>
