@@ -9,6 +9,7 @@ import { StatusBar } from "@/components/editor/status-bar";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { getSingltonStore } from "../utils/tinybase";
+import { useTranslation } from "react-i18next";
 
 const initialFiles: FileNode[] = [
   {
@@ -51,6 +52,7 @@ const initialContents: Record<string, string> = {
 export const Workspace = () => {
   const { basePath } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { t } = useTranslation();
 
   useEffect(() => {
     const store = getSingltonStore();
@@ -184,13 +186,13 @@ export const Workspace = () => {
     const newId = `new-${Date.now()}`;
     const newTab: Tab = {
       id: newId,
-      name: "Untitled",
+      name: t("untitled"),
       isModified: true,
     };
     setTabs((prev) => [...prev, newTab]);
     setActiveTabId(newId);
     setFileContents((prev) => ({ ...prev, [newId]: "" }));
-  }, []);
+  }, [t]);
 
   const handleNewFile = useCallback(() => {
     handleNewTab();
@@ -294,8 +296,7 @@ export const Workspace = () => {
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground p-4">
                 <p className="text-center">
-                  No file selected. Open a file from the sidebar or create a new
-                  one.
+                  {t("noFileSelected")}
                 </p>
               </div>
             )}

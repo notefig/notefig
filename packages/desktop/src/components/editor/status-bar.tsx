@@ -2,6 +2,7 @@
 
 import { Cloud, CloudOff, Type } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 interface StatusBarProps {
   wordCount: number;
@@ -12,6 +13,7 @@ interface StatusBarProps {
 
 export function StatusBar({ wordCount, characterCount, isSynced, direction = "ltr" }: StatusBarProps) {
   const isRtl = direction === "rtl";
+  const { t } = useTranslation();
   
   return (
     <div 
@@ -28,15 +30,15 @@ export function StatusBar({ wordCount, characterCount, isSynced, direction = "lt
         ) : (
           <CloudOff className="w-3.5 h-3.5 text-amber-500" />
         )}
-        <span>{isSynced ? "Synced" : "Not synced"}</span>
+        <span>{isSynced ? t("synced") : t("notSynced")}</span>
       </div>
       <div className="flex items-center gap-1.5">
         <Type className="w-3.5 h-3.5" />
         <span>
-          {wordCount} {wordCount === 1 ? "word" : "words"}
+          {wordCount} {wordCount === 1 ? t("word") : t("words")}
         </span>
       </div>
-      <span>{characterCount} characters</span>
+      <span>{characterCount} {t("characters")}</span>
     </div>
   );
 }

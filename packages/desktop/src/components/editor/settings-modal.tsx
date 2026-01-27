@@ -40,6 +40,7 @@ import {
   RefreshCw,
   FileCode,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 interface SettingsModalProps {
   open: boolean;

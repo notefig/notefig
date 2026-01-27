@@ -3,6 +3,7 @@
 import { X, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useTranslation } from "react-i18next";
 
 export interface Tab {
   id: string;
@@ -28,6 +29,7 @@ export function TabBar({
   direction = "ltr",
 }: TabBarProps) {
   const isRtl = direction === "rtl";
+  const { t } = useTranslation();
   
   return (
     <div className={cn(
@@ -62,7 +64,7 @@ export function TabBar({
                 className="p-0.5 rounded hover:bg-accent opacity-0 group-hover:opacity-100 transition-opacity"
               >
                 <X className="w-3.5 h-3.5" />
-                <span className="sr-only">Close tab</span>
+                <span className="sr-only">{t("closeTab")}</span>
               </button>
             </div>
           ))}
@@ -73,7 +75,7 @@ export function TabBar({
         className="flex items-center justify-center w-9 h-9 hover:bg-accent transition-colors shrink-0 border-s border-border"
       >
         <Plus className="w-4 h-4 text-muted-foreground" />
-        <span className="sr-only">New tab</span>
+        <span className="sr-only">{t("newTab")}</span>
       </button>
     </div>
   );

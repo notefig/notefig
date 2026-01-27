@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Icons } from "@/components/icons";
-import { fs } from "@/utils/fs";
+import { pickDirectory } from "@/utils/fs";
+import { useTranslation } from "react-i18next";
 
 interface DirectoryPickerProps {
   onDirectorySelect: (path: string) => void;
@@ -13,11 +14,12 @@ export function DirectoryPicker({
   currentDirectory,
 }: DirectoryPickerProps) {
   const [loading, setLoading] = useState(false);
+  const { t } = useTranslation();
 
   const handlePickDirectory = async () => {
     setLoading(true);
     try {
-      const selectedPath = await fs.pickDirectory();
+      const selectedPath = await pickDirectory();
 
       if (selectedPath) {
         onDirectorySelect(selectedPath);
@@ -39,7 +41,7 @@ export function DirectoryPicker({
         className="flex items-center gap-2"
       >
         <Icons.folder className="h-4 w-4" />
-        {loading ? "Loading..." : "Open Folder"}
+        {loading ? t("loading") : t("openFolder")}
       </Button>
 
       {currentDirectory && (
