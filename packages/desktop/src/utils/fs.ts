@@ -84,7 +84,9 @@ export function normalizePath(filePath: string): string {
   return normalized;
 }
 
-async function pickDirectory(pickParam?: string): Promise<string | null> {
+export async function pickDirectory(
+  pickParam?: string,
+): Promise<string | null> {
   const result = await open({
     title: pickParam || "Select Directory",
     directory: true,

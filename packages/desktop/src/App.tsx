@@ -2,6 +2,7 @@ import "./App.css";
 import { Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Workspace } from "@/components/workspace";
+import { Welcome } from "@/components/welcome";
 
 export const App = () => {
   return (
@@ -13,7 +14,14 @@ export const App = () => {
           {/* Base path route - no file selected */}
           <Route path="/:basePath" element={<Workspace />} />
           {/* Root route - no directory selected */}
-          <Route path="/" element={<Workspace />} />
+          <Route
+            path="/"
+            element={
+              <Welcome
+                onDirectorySelect={(path: string) => console.log(path)}
+              />
+            }
+          />
         </Routes>
       </div>
     </ThemeProvider>
