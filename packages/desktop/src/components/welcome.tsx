@@ -3,6 +3,7 @@ import { Icons } from "./icons";
 import { Button } from "@/components/ui/button";
 import { normalizePath, pickDirectory } from "@/utils/fs";
 import Logo from "./logo";
+import { useTranslation, Trans } from "react-i18next";
 import { useNavigate } from "react-router";
 
 interface WelcomeProps {
@@ -11,6 +12,7 @@ interface WelcomeProps {
 
 export function Welcome({ onDirectorySelect }: WelcomeProps) {
   const [loading, setLoading] = useState(false);
+  const { t } = useTranslation();
   const navigate = useNavigate();
 
   const handleOpenFolder = async () => {
@@ -37,7 +39,7 @@ export function Welcome({ onDirectorySelect }: WelcomeProps) {
         fill="currentColor"
         className="text-foreground mx-auto mb-6"
       />
-      <h2 className="text-xl font-semibold mb-3">Welcome to Metrists</h2>
+      <h2 className="text-xl font-semibold mb-3">{t("welcome")}</h2>
       <p className="text-muted-foreground mb-6">
         Open a folder to start browsing and editing your files.
       </p>
