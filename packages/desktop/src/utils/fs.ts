@@ -14,6 +14,7 @@ import {
 } from "@tauri-apps/plugin-fs";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { Content } from "tinybase";
+import { isTauri } from "./platform";
 
 export interface FileEntry {
   name: string;
@@ -84,9 +85,34 @@ export function normalizePath(filePath: string): string {
   return normalized;
 }
 
+/**
+ * Mock implementation of pickDirectory for web/non-Tauri environments
+ * Returns a promise that resolves when user provides a path via prompt
+ */
+async function mockPickDirectory(
+  pickParam?: string,
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    // For web mode, we'll trigger a custom event that the UI can listen to
+    const event = new CustomEvent("mock-pick-directory", {
+      detail: {
+        title: pickParam || "Select Directory",
+        callback: (path: string | null) => resolve(path),
+      },
+    });
+    window.dispatchEvent(event);
+  });
+}
+
 export async function pickDirectory(
   pickParam?: string,
 ): Promise<string | null> {
+  // Use mock implementation in web environment
+  if (!isTauri()) {
+    return mockPickDirectory(pickParam);
+  }
+
+  // Use real Tauri dialog in Tauri environment
   const result = await open({
     title: pickParam || "Select Directory",
     directory: true,
