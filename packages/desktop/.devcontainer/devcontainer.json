@@ -1,7 +1,13 @@
 {
   "name": "Metrists Desktop",
-  "image": "mcr.microsoft.com/devcontainers/javascript-node:20",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-20-bookworm",
   
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    }
+  },
+
   "customizations": {
     "vscode": {
       "extensions": [
