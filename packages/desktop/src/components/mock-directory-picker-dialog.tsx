@@ -8,7 +8,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { isWeb } from "@/utils/platform";
 import { cn } from "@/lib/utils";
 
 interface MockPickDirectoryEvent extends CustomEvent {
@@ -22,6 +21,7 @@ interface MockPickDirectoryEvent extends CustomEvent {
  * Mock Directory Picker Dialog
  * This component listens for mock-pick-directory events and displays a dialog
  * where users can enter a directory path for testing in web/non-Tauri environments
+ * Used by the BrowserPlatformAdapter
  */
 export function MockDirectoryPickerDialog() {
   const [isOpen, setIsOpen] = useState(false);
@@ -32,9 +32,6 @@ export function MockDirectoryPickerDialog() {
   >(null);
 
   useEffect(() => {
-    // Only set up the listener in web mode
-    if (!isWeb()) return;
-
     const handlePickDirectory = (event: Event) => {
       const customEvent = event as MockPickDirectoryEvent;
       setTitle(customEvent.detail.title);
@@ -64,9 +61,6 @@ export function MockDirectoryPickerDialog() {
     setIsOpen(false);
     setPath("/workspace/demo-content"); // Reset for next time
   };
-
-  // Don't render in Tauri mode
-  if (!isWeb()) return null;
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
