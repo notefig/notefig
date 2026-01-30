@@ -147,10 +147,10 @@ export function SettingsModal({
           {/* Settings Sidebar */}
           <div className="w-56 shrink-0 border-e border-border bg-sidebar">
             <ScrollArea className="h-full p-0">
-              <div className="py-4">
+              <div className="py-1">
                 {settingsSections.map((section) => (
                   <div key={section.label} className="mb-4">
-                    <div className="px-4 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    <div className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       {section.label}
                     </div>
                     <div className="space-y-0.5 px-2">
