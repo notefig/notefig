@@ -51,7 +51,6 @@ const initialContents: Record<string, string> = {
 
 export const Workspace = () => {
   const { basePath } = useParams();
-  const [searchParams, setSearchParams] = useSearchParams();
   const { t } = useTranslation();
 
   useEffect(() => {
@@ -66,15 +65,6 @@ export const Workspace = () => {
   // Decode the base path from URL
   const currentDirectory = basePath ? decodeURIComponent(basePath) : undefined;
 
-  const handleSettingsToggle = (open: boolean) => {
-    if (open) {
-      searchParams.set("settings", "true");
-    } else {
-      searchParams.delete("settings");
-    }
-    setSearchParams(searchParams);
-  };
-
   const [activeSidebarItem, setActiveSidebarItem] = useState("files");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(240);
@@ -88,7 +78,6 @@ export const Workspace = () => {
     useState<Record<string, string>>(initialContents);
   const [isSynced, setIsSynced] = useState(true);
   const [isResizing, setIsResizing] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [direction, setDirection] = useState<"ltr" | "rtl">("ltr");
   const resizeRef = useRef<HTMLDivElement>(null);
@@ -225,7 +214,6 @@ export const Workspace = () => {
       <IconSidebar
         activeItem={activeSidebarItem}
         onItemClick={setActiveSidebarItem}
-        onSettingsClick={() => setIsSettingsOpen(true)}
         onCommandPaletteClick={() => setIsCommandPaletteOpen(true)}
       />
 
@@ -295,9 +283,7 @@ export const Workspace = () => {
               />
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground p-4">
-                <p className="text-center">
-                  {t("noFileSelected")}
-                </p>
+                <p className="text-center">{t("noFileSelected")}</p>
               </div>
             )}
           </div>
@@ -312,12 +298,7 @@ export const Workspace = () => {
       />
 
       {/* Settings Modal */}
-      <SettingsModal
-        open={isSettingsOpen}
-        onOpenChange={setIsSettingsOpen}
-        direction={direction}
-        onDirectionChange={setDirection}
-      />
+      <SettingsModal direction={direction} onDirectionChange={setDirection} />
 
       {/* Command Palette */}
       <CommandPalette

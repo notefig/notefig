@@ -38,10 +38,9 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme-provider";
+import { useSearchParams } from "react-router";
 
 interface SettingsModalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   direction: "ltr" | "rtl";
   onDirectionChange: (direction: "ltr" | "rtl") => void;
 }
@@ -94,11 +93,18 @@ interface SettingsState {
 }
 
 export function SettingsModal({
-  open,
-  onOpenChange,
   direction,
   onDirectionChange,
 }: SettingsModalProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const handleSettingsToggle = (open: boolean) => {
+    if (open) {
+      searchParams.set("settings", "true");
+    } else {
+      searchParams.delete("settings");
+    }
+    setSearchParams(searchParams);
+  };
   const [activeSection, setActiveSection] = useState("general");
   const [settings, setSettings] = useState<SettingsState>({
     automaticUpdates: true,
@@ -127,7 +133,10 @@ export function SettingsModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={searchParams.get("settings") === "true"}
+      onOpenChange={(open) => handleSettingsToggle(open)}
+    >
       <DialogContent
         showCloseButton={false}
         className="max-w-6xl w-[95vw] h-[85vh] p-0 gap-0 overflow-hidden bg-card border-border"

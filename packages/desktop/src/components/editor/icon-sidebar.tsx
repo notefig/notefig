@@ -1,6 +1,16 @@
 "use client";
 
-import { FileText, Search, Bookmark, LayoutGrid, Clock, GitBranch, Settings, HelpCircle, Command } from "lucide-react";
+import {
+  FileText,
+  Search,
+  Bookmark,
+  LayoutGrid,
+  Clock,
+  GitBranch,
+  Settings,
+  HelpCircle,
+  Command,
+} from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -8,11 +18,11 @@ import {
   TooltipProvider,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useSearchParams } from "react-router";
 
 interface IconSidebarProps {
   activeItem: string;
   onItemClick: (item: string) => void;
-  onSettingsClick: () => void;
   onCommandPaletteClick: () => void;
 }
 
@@ -31,7 +41,21 @@ const bottomIcons = [
   { id: "settings", icon: Settings, label: "Settings" },
 ];
 
-export function IconSidebar({ activeItem, onItemClick, onSettingsClick, onCommandPaletteClick }: IconSidebarProps) {
+export function IconSidebar({
+  activeItem,
+  onItemClick,
+  onCommandPaletteClick,
+}: IconSidebarProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const handleSettingsToggle = (open: boolean) => {
+    if (open) {
+      searchParams.set("settings", "true");
+    } else {
+      searchParams.delete("settings");
+    }
+    setSearchParams(searchParams);
+  };
+
   return (
     <TooltipProvider>
       <div className="flex flex-col items-center justify-between h-full w-12 bg-sidebar border-r border-sidebar-border py-2">
@@ -49,7 +73,8 @@ export function IconSidebar({ activeItem, onItemClick, onSettingsClick, onComman
                   }}
                   className={cn(
                     "p-2 rounded-md transition-colors hover:bg-sidebar-accent",
-                    activeItem === item.id && "bg-sidebar-accent text-sidebar-primary"
+                    activeItem === item.id &&
+                      "bg-sidebar-accent text-sidebar-primary",
                   )}
                 >
                   <item.icon className="w-5 h-5 text-muted-foreground" />
@@ -69,14 +94,15 @@ export function IconSidebar({ activeItem, onItemClick, onSettingsClick, onComman
                 <button
                   onClick={() => {
                     if (item.id === "settings") {
-                      onSettingsClick();
+                      handleSettingsToggle(true);
                     } else {
                       onItemClick(item.id);
                     }
                   }}
                   className={cn(
                     "p-2 rounded-md transition-colors hover:bg-sidebar-accent",
-                    activeItem === item.id && "bg-sidebar-accent text-sidebar-primary"
+                    activeItem === item.id &&
+                      "bg-sidebar-accent text-sidebar-primary",
                   )}
                 >
                   <item.icon className="w-5 h-5 text-muted-foreground" />
