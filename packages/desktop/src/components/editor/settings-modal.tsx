@@ -146,7 +146,7 @@ export function SettingsModal({
         <div dir={direction} className="flex h-full overflow-hidden">
           {/* Settings Sidebar */}
           <div className="w-56 shrink-0 border-e border-border bg-sidebar">
-            <ScrollArea className="h-full">
+            <ScrollArea className="h-full p-0">
               <div className="py-4">
                 {settingsSections.map((section) => (
                   <div key={section.label} className="mb-4">
@@ -179,9 +179,9 @@ export function SettingsModal({
           {/* Settings Content */}
           <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
             {/* Header with close button */}
-            <div className="flex items-center justify-end p-3 border-b border-border shrink-0">
+            <div className="flex items-center justify-end p-1 border-b border-border shrink-0">
               <button
-                onClick={() => onOpenChange(false)}
+                onClick={() => handleSettingsToggle(false)}
                 className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
               >
                 <X className="h-5 w-5" />

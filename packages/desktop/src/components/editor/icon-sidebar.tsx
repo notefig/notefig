@@ -58,7 +58,7 @@ export function IconSidebar({
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col items-center justify-between h-full w-12 bg-sidebar border-r border-sidebar-border py-2">
+      <div className="flex flex-col items-center justify-between h-full w-12 bg-sidebar border-r rtl:border-r-0 rtl:border-l border-sidebar-border py-2">
         <div className="flex flex-col items-center gap-1">
           {topIcons.map((item) => (
             <Tooltip key={item.id}>
@@ -81,7 +81,10 @@ export function IconSidebar({
                   <span className="sr-only">{item.label}</span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="right" sideOffset={8}>
+              <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>
+                {item.label}
+              </TooltipContent>
+              <TooltipContent side="left" className="ltr:hidden" sideOffset={8}>
                 {item.label}
               </TooltipContent>
             </Tooltip>
@@ -108,8 +111,11 @@ export function IconSidebar({
                   <item.icon className="w-5 h-5 text-muted-foreground" />
                   <span className="sr-only">{item.label}</span>
                 </button>
-              </TooltipTrigger>
-              <TooltipContent side="right" sideOffset={8}>
+               </TooltipTrigger>
+              <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>
+                {item.label}
+              </TooltipContent>
+              <TooltipContent side="left" className="ltr:hidden" sideOffset={8}>
                 {item.label}
               </TooltipContent>
             </Tooltip>

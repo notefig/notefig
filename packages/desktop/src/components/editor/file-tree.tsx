@@ -23,7 +23,6 @@ interface FileTreeProps {
   files: FileNode[];
   selectedFileId: string | null;
   onFileSelect: (file: FileNode) => void;
-  direction?: "ltr" | "rtl";
 }
 
 interface FileTreeItemProps {
@@ -31,7 +30,6 @@ interface FileTreeItemProps {
   depth: number;
   selectedFileId: string | null;
   onFileSelect: (file: FileNode) => void;
-  direction: "ltr" | "rtl";
 }
 
 function FileTreeItem({
@@ -39,10 +37,8 @@ function FileTreeItem({
   depth,
   selectedFileId,
   onFileSelect,
-  direction,
 }: FileTreeItemProps) {
   const [isExpanded, setIsExpanded] = useState(true);
-  const isRtl = direction === "rtl";
 
   const handleClick = () => {
     if (node.type === "folder") {
@@ -72,9 +68,9 @@ function FileTreeItem({
           {node.type === "folder" ? (
             <>
               {isExpanded ? (
-                <ChevronDown className={cn("w-4 h-4 shrink-0 text-muted-foreground", isRtl && "-scale-x-100")} />
+                <ChevronDown className="w-4 h-4 shrink-0 text-muted-foreground rtl:-scale-x-100" />
               ) : (
-                <ChevronRight className={cn("w-4 h-4 shrink-0 text-muted-foreground", isRtl && "-scale-x-100")} />
+                <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground rtl:-scale-x-100" />
               )}
               {isExpanded ? (
                 <FolderOpen className="w-4 h-4 shrink-0 text-muted-foreground" />
@@ -106,7 +102,6 @@ function FileTreeItem({
               depth={depth + 1}
               selectedFileId={selectedFileId}
               onFileSelect={onFileSelect}
-              direction={direction}
             />
           ))}
         </div>
@@ -115,7 +110,7 @@ function FileTreeItem({
   );
 }
 
-export function FileTree({ files, selectedFileId, onFileSelect, direction = "ltr" }: FileTreeProps) {
+export function FileTree({ files, selectedFileId, onFileSelect }: FileTreeProps) {
   return (
     <ScrollArea className="flex-1">
       <div className="py-1">
@@ -126,7 +121,6 @@ export function FileTree({ files, selectedFileId, onFileSelect, direction = "ltr
             depth={0}
             selectedFileId={selectedFileId}
             onFileSelect={onFileSelect}
-            direction={direction}
           />
         ))}
       </div>

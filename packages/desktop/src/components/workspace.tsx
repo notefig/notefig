@@ -62,7 +62,6 @@ export const Workspace = () => {
     //load files
   }, []);
 
-  // Decode the base path from URL
   const currentDirectory = basePath ? decodeURIComponent(basePath) : undefined;
 
   const [activeSidebarItem, setActiveSidebarItem] = useState("files");
@@ -223,7 +222,7 @@ export const Workspace = () => {
         <div className="flex items-stretch border-b border-border shrink-0">
           {/* File Controls - synced width with file tree */}
           <div
-            className="shrink-0 border-r border-border"
+            className="shrink-0 border-r rtl:border-r-0 rtl:border-l border-border"
             style={{ width: isSidebarCollapsed ? "auto" : sidebarWidth }}
           >
             <FileControls
@@ -261,7 +260,6 @@ export const Workspace = () => {
                   files={files}
                   selectedFileId={selectedFileId}
                   onFileSelect={handleFileSelect}
-                  direction={direction}
                 />
               </div>
               {/* Resize Handle */}

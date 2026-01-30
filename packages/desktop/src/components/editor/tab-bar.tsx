@@ -17,7 +17,6 @@ interface TabBarProps {
   onTabSelect: (tabId: string) => void;
   onTabClose: (tabId: string) => void;
   onNewTab: () => void;
-  direction?: "ltr" | "rtl";
 }
 
 export function TabBar({
@@ -26,26 +25,19 @@ export function TabBar({
   onTabSelect,
   onTabClose,
   onNewTab,
-  direction = "ltr",
 }: TabBarProps) {
-  const isRtl = direction === "rtl";
   const { t } = useTranslation();
   
   return (
-    <div className={cn(
-      "flex items-center h-9 bg-secondary/50 border-b border-border",
-      isRtl && "flex-row-reverse"
-    )}>
+    <div className="flex items-center h-9 bg-secondary/50 border-b border-border">
       <ScrollArea className="flex-1">
-        <div className={cn(
-          "flex items-center",
-          isRtl && "flex-row-reverse"
-        )}>
+        <div className="flex items-center">
           {tabs.map((tab) => (
             <div
               key={tab.id}
               className={cn(
-                "group flex items-center gap-2 h-9 px-3 border-e border-border cursor-pointer transition-colors",
+                "group flex items-center gap-2 h-9 px-3 cursor-pointer transition-colors",
+                "border-e rtl:border-e-0 rtl:border-s border-border",
                 activeTabId === tab.id
                   ? "bg-background text-foreground"
                   : "bg-secondary/30 text-muted-foreground hover:bg-secondary/60"
@@ -72,7 +64,7 @@ export function TabBar({
       </ScrollArea>
       <button
         onClick={onNewTab}
-        className="flex items-center justify-center w-9 h-9 hover:bg-accent transition-colors shrink-0 border-s border-border"
+        className="flex items-center justify-center w-9 h-9 hover:bg-accent transition-colors shrink-0 border-s rtl:border-s-0 rtl:border-e border-border"
       >
         <Plus className="w-4 h-4 text-muted-foreground" />
         <span className="sr-only">{t("newTab")}</span>
