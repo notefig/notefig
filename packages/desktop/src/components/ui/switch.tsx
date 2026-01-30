@@ -44,7 +44,7 @@ function Switch({
       <div
         className={cn(
           "pointer-events-none block size-4 rounded-full bg-background transition-transform",
-          isChecked ? "translate-x-[calc(100%-2px)]" : "translate-x-0",
+          isChecked ? "translate-x-[calc(100%-2px)] rtl:-translate-x-[calc(100%-2px)]" : "translate-x-0",
         )}
       />
     </button>
