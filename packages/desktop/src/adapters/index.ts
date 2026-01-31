@@ -16,24 +16,21 @@ class PlatformAdapterFactory {
   static getInstance(): IPlatformAdapter {
     if (!this.instance) {
       const platform = getPlatform();
-      
+
       switch (platform) {
         case Platform.TAURI:
           this.instance = new TauriPlatformAdapter();
-          console.log("[PlatformAdapter] Using TauriPlatformAdapter");
           break;
         case Platform.BROWSER:
           this.instance = new BrowserPlatformAdapter();
-          console.log("[PlatformAdapter] Using BrowserPlatformAdapter");
           break;
         default:
           // Fallback to browser adapter
           this.instance = new BrowserPlatformAdapter();
-          console.warn("[PlatformAdapter] Unknown platform, falling back to BrowserPlatformAdapter");
       }
     }
 
-    return this.instance;
+    return this.instance!;
   }
 
   /**

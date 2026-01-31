@@ -305,7 +305,6 @@ export const Workspace = () => {
         onNewFile={handleNewFile}
         onOpenSettings={() => {
           setIsCommandPaletteOpen(false);
-          setIsSettingsOpen(true);
         }}
         onToggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
         direction={direction}

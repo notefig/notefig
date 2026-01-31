@@ -137,10 +137,7 @@ export function SettingsModal({
       open={searchParams.get("settings") === "true"}
       onOpenChange={(open) => handleSettingsToggle(open)}
     >
-      <DialogContent
-        showCloseButton={false}
-        className="max-w-6xl w-[95vw] h-[85vh] p-0 gap-0 overflow-hidden bg-card border-border"
-      >
+      <DialogContent className="max-w-6xl w-[95vw] h-[85vh] p-0 gap-0 overflow-hidden bg-card border-border">
         <DialogTitle className="sr-only">Settings</DialogTitle>
 
         <div dir={direction} className="flex h-full overflow-hidden">

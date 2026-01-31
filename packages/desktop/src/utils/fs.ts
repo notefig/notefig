@@ -1,27 +1,12 @@
-import {
-  readTextFile,
-  writeTextFile,
-  readFile,
-  writeFile,
-  readDir,
-  exists,
-  rename as tauriRename,
-  copyFile,
-  remove,
-  mkdir,
-  stat,
-  BaseDirectory,
-} from "@tauri-apps/plugin-fs";
-import type { Content } from "tinybase";
 import { platformAdapter } from "@/adapters";
 
 export interface FileEntry {
-  name: string;
   path: string;
-  isFile: boolean;
-  isDirectory: boolean;
-  size?: number;
+  type: "file" | "directory";
   modified?: Date;
+  size?: number;
+  contentHash: string;
+  content: string;
 }
 
 /**

@@ -10,10 +10,8 @@ import { isWeb } from "@/utils/platform";
 
 export const App = () => {
   const { setTheme } = useTheme();
-  
+
   useEffect(() => {
-    // Set up theme listener using platform adapter
-    // The adapter will handle platform-specific implementation
     const cleanup = platformAdapter.addThemeListener((theme) => {
       setTheme(theme);
     });

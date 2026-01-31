@@ -1,4 +1,6 @@
 import type { Theme } from "@/components/theme-provider";
+import type { Store } from "tinybase";
+import type { Persister } from "tinybase/persisters";
 
 /**
  * Platform adapter interface
@@ -25,4 +27,6 @@ export interface IPlatformAdapter {
    * @param callback - The callback function to remove
    */
   removeThemeListener(callback: (theme: Theme) => void): void;
+
+  getPersister(store: Store): Persister;
 }

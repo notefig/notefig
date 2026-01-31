@@ -2,16 +2,24 @@ import type { IPlatformAdapter } from "./platform-adapter.interface";
 import type { Theme } from "@/components/theme-provider";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { Content, Store } from "tinybase";
+import {
+  PersistedChanges,
+  PersistedContent,
+  Persister,
+  createCustomPersister,
+} from "tinybase/persisters";
+import { FileEntry } from "../utils/fs";
 
 /**
  * Tauri platform adapter
  * Implements platform-specific operations for Tauri desktop environment
  */
 export class TauriPlatformAdapter implements IPlatformAdapter {
-  private themeListeners: Map<
-    (theme: Theme) => void,
-    Promise<UnlistenFn>
-  > = new Map();
+  protected persister: Persister | undefined;
+
+  private themeListeners: Map<(theme: Theme) => void, Promise<UnlistenFn>> =
+    new Map();
 
   /**
    * Opens a native directory picker dialog using Tauri
@@ -53,5 +61,26 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       unlistenPromise.then((unlisten) => unlisten());
       this.themeListeners.delete(callback);
     }
+  }
+
+  getPersister(store: Store) {
+    if (this.persister) {
+      return this.persister;
+    }
+    this.persister = createCustomPersister(
+      store,
+      //Get Persisted
+      async () => {
+        return undefined;
+      },
+      //Load Persisted
+      async (
+        getContent: () => PersistedContent,
+        changes?: PersistedChanges,
+      ) => {},
+      () => {},
+      () => {},
+    );
+    return this.persister;
   }
 }

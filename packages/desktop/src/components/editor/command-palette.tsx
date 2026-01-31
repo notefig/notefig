@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react"
+import React from "react";
 
 import { useEffect, useState } from "react";
 import {
@@ -37,7 +37,13 @@ import {
   CommandSeparator,
   CommandShortcut,
 } from "@/components/ui/command";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
 interface CommandPaletteProps {
   open: boolean;
@@ -286,10 +292,18 @@ export function CommandPalette({
       acc[command.group].push(command);
       return acc;
     },
-    {} as Record<string, CommandType[]>
+    {} as Record<string, CommandType[]>,
   );
 
-  const groupOrder = ["File", "Edit", "View", "Navigation", "Tools", "Settings", "Help"];
+  const groupOrder = [
+    "File",
+    "Edit",
+    "View",
+    "Navigation",
+    "Tools",
+    "Settings",
+    "Help",
+  ];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -297,11 +311,7 @@ export function CommandPalette({
         <DialogTitle>Command Palette</DialogTitle>
         <DialogDescription>Search for a command to run...</DialogDescription>
       </DialogHeader>
-      <DialogContent 
-        className="overflow-hidden p-0 max-w-lg" 
-        showCloseButton={false}
-        dir={direction}
-      >
+      <DialogContent className="overflow-hidden p-0 max-w-lg" dir={direction}>
         <Command className="[&_[cmdk-group-heading]]:text-muted-foreground **:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5">
           <div className="flex items-center border-b px-3 h-12">
             <Search className="size-5 shrink-0 opacity-50 me-2" />
@@ -328,7 +338,7 @@ export function CommandPalette({
               // Filter by search
               const filteredCommands = search
                 ? groupCommands.filter((cmd) =>
-                    cmd.label.toLowerCase().includes(search.toLowerCase())
+                    cmd.label.toLowerCase().includes(search.toLowerCase()),
                   )
                 : groupCommands;
 
@@ -347,7 +357,9 @@ export function CommandPalette({
                         <command.icon className="w-4 h-4 text-muted-foreground shrink-0" />
                         <span className="flex-1">{command.label}</span>
                         {command.shortcut && (
-                          <CommandShortcut className="ms-auto">{command.shortcut}</CommandShortcut>
+                          <CommandShortcut className="ms-auto">
+                            {command.shortcut}
+                          </CommandShortcut>
                         )}
                       </CommandItem>
                     ))}

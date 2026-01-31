@@ -56,11 +56,11 @@ function FileTreeItem({
         onClick={handleClick}
         className={cn(
           "w-full flex items-center gap-1 px-2 py-1 text-sm hover:bg-accent/50 transition-colors",
-          selectedFileId === node.id && node.type === "file" && "bg-accent"
+          selectedFileId === node.id && node.type === "file" && "bg-accent",
         )}
-        style={{ 
+        style={{
           paddingInlineStart: `${paddingValue}px`,
-          paddingInlineEnd: "8px"
+          paddingInlineEnd: "8px",
         }}
       >
         {/* Icons and name container - reverses in RTL */}
@@ -110,7 +110,11 @@ function FileTreeItem({
   );
 }
 
-export function FileTree({ files, selectedFileId, onFileSelect }: FileTreeProps) {
+export function FileTree({
+  files,
+  selectedFileId,
+  onFileSelect,
+}: FileTreeProps) {
   return (
     <ScrollArea className="flex-1">
       <div className="py-1">
