@@ -16,7 +16,8 @@ i18n
         translation: {
           // Welcome
           welcome: "Welcome to Metrists",
-          welcomeDescription: "Open a folder to start browsing and editing your files.",
+          welcomeDescription:
+            "Open a folder to start browsing and editing your files.",
           openFolder: "Open Folder",
           opening: "Opening...",
           loading: "Loading...",
@@ -48,7 +49,8 @@ i18n
           characters: "characters",
 
           // Workspace
-          noFileSelected: "No file selected. Open a file from the sidebar or create a new one.",
+          noFileSelected:
+            "No file selected. Open a file from the sidebar or create a new one.",
           untitled: "Untitled",
 
           // Debug Panel
@@ -65,6 +67,7 @@ i18n
           settings: "Settings",
           close: "Close",
           options: "Options",
+          projectSettings: "Project Settings",
           general: "General",
           editor: "Editor",
           filesAndLinks: "Files and links",
@@ -83,7 +86,7 @@ i18n
           quickSwitcher: "Quick switcher",
           sync: "Sync",
           templates: "Templates",
-          
+
           // General Settings
           version: "Version",
           installerVersion: "Installer version:",
@@ -91,20 +94,24 @@ i18n
           readChangelog: "Read the changelog.",
           relaunch: "Relaunch",
           automaticUpdates: "Automatic updates",
-          automaticUpdatesDesc: "Turn this off to prevent the app from checking for updates.",
+          automaticUpdatesDesc:
+            "Turn this off to prevent the app from checking for updates.",
           language: "Language",
           languageDesc: "Change the display language.",
           learnAddLanguage: "Learn how to add a new language.",
           textDirection: "Text direction",
-          textDirectionDesc: "Control the layout direction of the entire application.",
+          textDirectionDesc:
+            "Control the layout direction of the entire application.",
           leftToRight: "Left to Right",
           rightToLeft: "Right to Left",
           help: "Help",
-          helpDesc: "Learn how to use the editor and get help from the community.",
+          helpDesc:
+            "Learn how to use the editor and get help from the community.",
           open: "Open",
           account: "Account",
           yourAccount: "Your account",
-          notLoggedIn: "You're not logged in right now. An account is only needed for Sync, Publish, and early access versions.",
+          notLoggedIn:
+            "You're not logged in right now. An account is only needed for Sync, Publish, and early access versions.",
           logIn: "Log in",
           signUp: "Sign up",
           commercialLicense: "Commercial license",
@@ -114,7 +121,8 @@ i18n
           purchase: "Purchase",
           advanced: "Advanced",
           notifySlowStartup: "Notify if startup takes longer than expected",
-          notifySlowStartupDesc: "Diagnose issues with your app by seeing what is causing the app to load slowly.",
+          notifySlowStartupDesc:
+            "Diagnose issues with your app by seeing what is causing the app to load slowly.",
 
           // Editor Settings
           spellcheck: "Spellcheck",
@@ -128,7 +136,8 @@ i18n
           theme: "Theme",
           themeDesc: "Choose a color theme for the interface.",
           accentColor: "Accent color",
-          accentColorDesc: "Choose an accent color for highlights and interactive elements.",
+          accentColorDesc:
+            "Choose an accent color for highlights and interactive elements.",
 
           // Languages
           english: "English",
@@ -154,7 +163,7 @@ i18n
           commandPaletteDesc: "Search for a command to run...",
           typeCommand: "Type a command or search...",
           noResults: "No results found.",
-          
+
           // Command Groups
           file: "File",
           edit: "Edit",

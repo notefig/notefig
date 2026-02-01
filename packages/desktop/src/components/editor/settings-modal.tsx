@@ -56,7 +56,7 @@ interface SettingsSection {
 
 const settingsSections: SettingsSection[] = [
   {
-    label: "Options",
+    label: "projectSettings",
     items: [
       { id: "general", label: "General", icon: Settings },
       { id: "editor", label: "Editor", icon: Pencil },
@@ -96,6 +96,7 @@ export function SettingsModal({
   direction,
   onDirectionChange,
 }: SettingsModalProps) {
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const handleSettingsToggle = (open: boolean) => {
     if (open) {
@@ -148,7 +149,7 @@ export function SettingsModal({
                 {settingsSections.map((section) => (
                   <div key={section.label} className="mb-4">
                     <div className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      {section.label}
+                      {t(section.label)}
                     </div>
                     <div className="space-y-0.5 px-2">
                       {section.items.map((item) => (
