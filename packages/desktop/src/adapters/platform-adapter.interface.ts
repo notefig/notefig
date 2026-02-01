@@ -13,7 +13,7 @@ export interface IPlatformAdapter {
    * @param title - Optional title for the picker dialog
    * @returns Promise that resolves to the selected directory path or null if cancelled
    */
-  pickDirectory(title?: string): Promise<string | null>;
+  pickDirectory(title: string): Promise<string | null>;
 
   /**
    * Adds a theme change listener
@@ -28,5 +28,5 @@ export interface IPlatformAdapter {
    */
   removeThemeListener(callback: (theme: Theme) => void): void;
 
-  getPersister(store: Store): Persister;
+  getPersister(store: Store, basePath: string): Persister;
 }

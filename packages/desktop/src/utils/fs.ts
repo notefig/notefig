@@ -75,6 +75,6 @@ export function normalizePath(filePath: string): string {
  * @param title - Optional title for the picker dialog
  * @returns Promise that resolves to the selected directory path or null if cancelled
  */
-export async function pickDirectory(title?: string): Promise<string | null> {
+export async function pickDirectory(title: string): Promise<string | null> {
   return platformAdapter.pickDirectory(title);
 }

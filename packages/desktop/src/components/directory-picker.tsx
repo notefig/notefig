@@ -19,7 +19,8 @@ export function DirectoryPicker({
   const handlePickDirectory = async () => {
     setLoading(true);
     try {
-      const selectedPath = await pickDirectory();
+      const selectDirectoryTitle = t("pickDirectory");
+      const selectedPath = await pickDirectory(selectDirectoryTitle);
 
       if (selectedPath) {
         onDirectorySelect(selectedPath);

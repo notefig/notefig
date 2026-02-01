@@ -18,12 +18,12 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
    * Opens a mock directory picker dialog in the browser
    * Dispatches a custom event that the MockDirectoryPickerDialog component listens to
    */
-  async pickDirectory(title?: string): Promise<string | null> {
+  async pickDirectory(title: string): Promise<string | null> {
     return new Promise((resolve) => {
       // Dispatch custom event that the UI component will listen to
       const event = new CustomEvent("mock-pick-directory", {
         detail: {
-          title: title || "Select Directory",
+          title: title,
           callback: (path: string | null) => resolve(path),
         },
       });
@@ -50,7 +50,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     // No-op in browser - theme changes are handled by ThemeProvider
   }
 
-  getPersister(store: Store) {
+  getPersister(store: Store, basePath: string) {
     if (this.persister) {
       return this.persister;
     }

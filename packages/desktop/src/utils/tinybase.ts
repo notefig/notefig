@@ -21,29 +21,3 @@ export function getSingltonStore() {
   setTimeout(() => persister.save(), 10000);
   return store;
 }
-
-const initialFiles = [
-  {
-    id: "5",
-    name: "Welcome",
-    type: "file",
-  },
-  {
-    id: "folder-1",
-    name: "Projects",
-    type: "folder",
-    children: [
-      { id: "6", name: "Project A", type: "file" },
-      { id: "7", name: "Project B", type: "file" },
-    ],
-  },
-  {
-    id: "folder-2",
-    name: "Notes",
-    type: "folder",
-    children: [
-      { id: "8", name: "Meeting Notes", type: "file" },
-      { id: "9", name: "Ideas", type: "file" },
-    ],
-  },
-];

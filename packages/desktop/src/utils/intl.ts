@@ -23,6 +23,7 @@ i18n
           loading: "Loading...",
           chooseFolderHint: "Choose a folder to browse your files",
           clickFileHint: "Click any file to start editing",
+          pickDirectory: "Select Directory",
 
           // Theme
           light: "Light",

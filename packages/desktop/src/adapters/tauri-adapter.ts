@@ -24,9 +24,9 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   /**
    * Opens a native directory picker dialog using Tauri
    */
-  async pickDirectory(title?: string): Promise<string | null> {
+  async pickDirectory(title: string): Promise<string | null> {
     const result = await open({
-      title: title || "Select Directory",
+      title: title,
       directory: true,
       multiple: false,
     });
@@ -63,7 +63,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  getPersister(store: Store) {
+  getPersister(store: Store, basePath: string) {
     if (this.persister) {
       return this.persister;
     }
