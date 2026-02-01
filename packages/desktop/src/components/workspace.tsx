@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { IconSidebar } from "@/components/editor/icon-sidebar";
 import { FileTree, type FileNode } from "@/components/editor/file-tree";
 import { FileControls } from "@/components/editor/file-controls";
@@ -9,6 +8,7 @@ import { StatusBar } from "@/components/editor/status-bar";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { getSingltonStore } from "../utils/tinybase";
+import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import { useTranslation } from "react-i18next";
 
 const initialFiles: FileNode[] = [
@@ -50,19 +50,17 @@ const initialContents: Record<string, string> = {
 };
 
 export const Workspace = () => {
-  const { basePath } = useParams();
+  const { workspacePath } = useWorkspaceParams();
   const { t } = useTranslation();
 
   useEffect(() => {
-    const store = getSingltonStore();
-    store.setValue("setting.direction", "rtl");
-    store.setRow("files", "/file/chapter.md", {
-      content: "123",
-    });
-    //load files
-  }, []);
-
-  const currentDirectory = basePath ? decodeURIComponent(basePath) : undefined;
+    (async () => {
+      if (!workspacePath) {
+        return;
+      }
+      await getSingltonStore(workspacePath);
+    })();
+  }, [workspacePath]);
 
   const [activeSidebarItem, setActiveSidebarItem] = useState("files");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -99,13 +97,8 @@ export const Workspace = () => {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
-
-      // Calculate new width based on mouse position
-      // Account for the icon sidebar width (48px)
       const iconSidebarWidth = 48;
       const newWidth = e.clientX - iconSidebarWidth;
-
-      // Clamp between min and max
       const clampedWidth = Math.max(150, Math.min(400, newWidth));
       setSidebarWidth(clampedWidth);
     };

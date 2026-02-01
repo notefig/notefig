@@ -7,6 +7,7 @@ export interface FileEntry {
   size?: number;
   contentHash: string;
   content: string;
+  error?: string;
 }
 
 /**

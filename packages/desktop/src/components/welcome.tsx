@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Icons } from "./icons";
 import { Button } from "@/components/ui/button";
-import { normalizePath, pickDirectory } from "@/utils/fs";
+import { pickDirectory } from "@/utils/fs";
 import Logo from "./logo";
-import { useTranslation, Trans } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 
 export function Welcome() {
@@ -14,13 +14,11 @@ export function Welcome() {
   const handleOpenFolder = async () => {
     setLoading(true);
     try {
-      const selectedPath = await pickDirectory();
+      const selectedPath = await pickDirectory("Select a folder");
       if (selectedPath) {
-        const encodedPath = encodeURIComponent(normalizePath(selectedPath));
+        const encodedPath = encodeURIComponent(selectedPath);
         navigate(`/${encodedPath}`);
       }
-    } catch (error) {
-      console.error("Failed to pick directory:", error);
     } finally {
       setLoading(false);
     }

@@ -2,14 +2,14 @@ import type { IPlatformAdapter } from "./platform-adapter.interface";
 import type { Theme } from "@/components/theme-provider";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { Content, Store } from "tinybase";
+import { invoke } from "@tauri-apps/api/core";
+import type { Store } from "tinybase";
 import {
   PersistedChanges,
   PersistedContent,
   Persister,
   createCustomPersister,
 } from "tinybase/persisters";
-import { FileEntry } from "../utils/fs";
 
 /**
  * Tauri platform adapter
@@ -67,19 +67,36 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     if (this.persister) {
       return this.persister;
     }
+
     this.persister = createCustomPersister(
       store,
-      //Get Persisted
-      async () => {
-        return undefined;
+      async (): Promise<PersistedContent | undefined> => {
+        try {
+          const content = await invoke<{ files: Record<string, any> }>(
+            "load_directory_files",
+            { basePath: basePath },
+          );
+          return [content, {}];
+        } catch (error) {
+          return undefined;
+        }
       },
-      //Load Persisted
+      // setPersisted - Save changes (no-op for now)
       async (
-        getContent: () => PersistedContent,
-        changes?: PersistedChanges,
-      ) => {},
-      () => {},
-      () => {},
+        _getContent: () => PersistedContent,
+        _changes?: PersistedChanges,
+      ) => {
+        // TODO: Implement save logic later
+      },
+      // addPersisterListener - Listen for changes
+      (_listener) => {
+        // TODO: Set up file watcher if needed
+        return () => {};
+      },
+      // delPersisterListener - Clean up listener
+      () => {
+        // TODO: Clean up file watcher
+      },
     );
     return this.persister;
   }

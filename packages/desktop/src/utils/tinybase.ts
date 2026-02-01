@@ -1,23 +1,19 @@
 import { createStore, type Store } from "tinybase";
-import { createCustomPersister } from "tinybase/persisters";
+import { Persister, createCustomPersister } from "tinybase/persisters";
+import { platformAdapter } from "../adapters";
 
-let store: Store | null;
-let interval: NodeJS.Timeout | undefined;
-export function getSingltonStore() {
-  if (store) {
-    return store;
+let store: Store | null = null;
+let persister: Persister | null = null;
+
+export async function getSingltonStore(
+  basePath: string,
+): Promise<[Store, Persister]> {
+  if (store && persister) {
+    return [store, persister];
   }
   store = createStore();
-  const persister = createCustomPersister(
-    store!,
-    async () => {
-      return undefined;
-    },
-    async (getContent) => console.log(getContent()),
-    (listener) => (interval = setInterval(listener, 1000)),
-    () => clearInterval(interval),
-  );
-  persister.load();
-  setTimeout(() => persister.save(), 10000);
-  return store;
+  persister = platformAdapter.getPersister(store, basePath);
+  await persister.load();
+  await persister.startAutoLoad();
+  return [store, persister];
 }
