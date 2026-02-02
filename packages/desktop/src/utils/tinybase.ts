@@ -7,6 +7,11 @@ let persister: Persister | null = null;
 let currentBasePath: string | null = null;
 
 export function getStore() {
+  if (!store) {
+    throw new Error(
+      "Store not initialized. Please use getSingltonStore with a basePath first.",
+    );
+  }
   return store;
 }
 
