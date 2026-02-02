@@ -71,3 +71,44 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Prevent text selection throughout the app except in editors */
+@layer base {
+  /* Disable selection by default */
+  * {
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+  }
+
+  /* Enable selection in text inputs and textareas */
+  input,
+  textarea,
+  [contenteditable="true"] {
+    user-select: text;
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+  }
+
+  /* Enable selection in editor areas */
+  .plate-editor,
+  .editor-content,
+  [role="textbox"],
+  [data-slate-editor="true"] {
+    user-select: text;
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+  }
+
+  /* Allow selection in code blocks and pre elements */
+  pre,
+  code {
+    user-select: text;
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+  }
+}
