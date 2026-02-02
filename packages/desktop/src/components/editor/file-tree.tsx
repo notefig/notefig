@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   FileText,
   Folder,
@@ -8,10 +8,16 @@ import {
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { FileTreeNode, getFileName } from "@/utils/fs";
+import {
+  FileEntries,
+  FileTreeNode,
+  flatEntriesToTree,
+  getFileName,
+} from "@/utils/fs";
+import { getStore } from "../../utils/tinybase";
+import { useTable } from "tinybase/ui-react";
 
 interface FileTreeProps {
-  files: FileTreeNode[];
   selectedFilePath: string | null;
   onFileSelect: (file: FileTreeNode) => void;
 }
@@ -102,15 +108,20 @@ function FileTreeItem({
   );
 }
 
-export function FileTree({
-  files,
-  selectedFilePath,
-  onFileSelect,
-}: FileTreeProps) {
+export function FileTree({ selectedFilePath, onFileSelect }: FileTreeProps) {
+  console.log("this got called");
+  const store = getStore();
+  const files = useTable("files", store!);
+  console.log(JSON.stringify(files, null, 2));
+  const filesTree = useMemo(() => {
+    const tree = flatEntriesToTree(files as any);
+    console.log(tree);
+    return tree;
+  }, [files]);
   return (
     <ScrollArea className="flex-1">
       <div className="py-1">
-        {files.map((node) => (
+        {filesTree.map((node) => (
           <FileTreeItem
             key={node.path}
             node={node}

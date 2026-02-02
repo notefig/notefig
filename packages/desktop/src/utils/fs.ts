@@ -90,6 +90,89 @@ export function normalizePath(filePath: string): string {
   return normalized;
 }
 
+export function flatEntriesToTree(flatFiles: FileEntries): FileTreeNode[] {
+  const pathMap = new Map<string, FileTreeNode>();
+  const rootNodes: FileTreeNode[] = [];
+
+  // First pass: Create all directory nodes that might not exist in flatFiles
+  // This ensures parent directories exist even if they weren't explicitly added
+  const allPaths = Object.keys(flatFiles);
+  const directoriesNeeded = new Set<string>();
+
+  allPaths.forEach((path) => {
+    const parts = path.split("/").filter((p) => p.length > 0);
+    for (let i = 1; i < parts.length; i++) {
+      directoriesNeeded.add(parts.slice(0, i).join("/"));
+    }
+  });
+
+  directoriesNeeded.forEach((dirPath) => {
+    if (!flatFiles[dirPath]) {
+      const dirNode: FileTreeNode = {
+        path: dirPath,
+        type: "directory",
+        contentHash: "",
+        content: "",
+        children: [],
+      };
+      pathMap.set(dirPath, dirNode);
+    }
+  });
+
+  Object.entries(flatFiles).forEach(([path, entry]) => {
+    const node: FileTreeNode = {
+      ...entry,
+      children: entry.type === "directory" ? [] : undefined,
+    };
+    pathMap.set(path, node);
+  });
+
+  const sortedPaths = Array.from(pathMap.keys()).sort((a, b) => {
+    const depthA = a.split("/").filter((p) => p.length > 0).length;
+    const depthB = b.split("/").filter((p) => p.length > 0).length;
+    return depthA - depthB;
+  });
+
+  sortedPaths.forEach((path) => {
+    const node = pathMap.get(path)!;
+    const parts = path.split("/").filter((p) => p.length > 0);
+
+    if (parts.length === 1) {
+      rootNodes.push(node);
+    } else {
+      const parentPath = parts.slice(0, -1).join("/");
+      const parent = pathMap.get(parentPath);
+
+      if (parent && parent.children) {
+        parent.children.push(node);
+      } else {
+        rootNodes.push(node);
+      }
+    }
+  });
+
+  const sortChildren = (nodes: FileTreeNode[]) => {
+    nodes.sort((a, b) => {
+      if (a.type === "directory" && b.type === "file") return -1;
+      if (a.type === "file" && b.type === "directory") return 1;
+
+      const nameA = getFileName(a.path).toLowerCase();
+      const nameB = getFileName(b.path).toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+
+    nodes.forEach((node) => {
+      if (node.children && node.children.length > 0) {
+        sortChildren(node.children);
+      }
+    });
+  };
+
+  sortChildren(rootNodes);
+
+  return rootNodes;
+}
+
 /**
  * Opens a directory picker dialog
  * Delegates to the platform adapter for platform-specific implementation

@@ -72,18 +72,7 @@ const initialContents: Record<string, string> = {
 };
 
 export const Workspace = () => {
-  const { workspacePath } = useWorkspaceParams();
   const { t } = useTranslation();
-
-  useEffect(() => {
-    (async () => {
-      if (!workspacePath) {
-        return;
-      }
-      const [store] = await getSingltonStore(workspacePath);
-      console.log(store.getTables());
-    })();
-  }, [workspacePath]);
 
   const [activeSidebarItem, setActiveSidebarItem] = useState("files");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -276,7 +265,6 @@ export const Workspace = () => {
                 style={{ width: sidebarWidth }}
               >
                 <FileTree
-                  files={files}
                   selectedFilePath={selectedFilePath}
                   onFileSelect={handleFileSelect}
                 />

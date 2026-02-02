@@ -21,6 +21,7 @@ i18n
           openFolder: "Open Folder",
           opening: "Opening...",
           loading: "Loading...",
+          loadingWorkspace: "Loading workspace files...",
           chooseFolderHint: "Choose a folder to browse your files",
           clickFileHint: "Click any file to start editing",
           pickDirectory: "Select Directory",
