@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Plate, usePlateEditor } from "platejs/react";
 import type { Value } from "platejs";
 import {
@@ -10,6 +10,8 @@ import {
   H2Plugin,
   H3Plugin,
 } from "@platejs/basic-nodes/react";
+import { MarkdownPlugin } from "@platejs/markdown";
+import { MarkdownKit } from "@/components/editor/plugins/markdown-kit";
 import { FixedToolbar } from "@/components/ui/fixed-toolbar";
 import { MarkToolbarButton } from "@/components/ui/mark-toolbar-button";
 import { Editor, EditorContainer } from "@/components/ui/editor";
@@ -27,6 +29,7 @@ export function TextEditor({ onChange, file }: TextEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const editor = usePlateEditor({
     plugins: [
+      ...MarkdownKit,
       BoldPlugin,
       ItalicPlugin,
       UnderlinePlugin,
@@ -35,17 +38,30 @@ export function TextEditor({ onChange, file }: TextEditorProps) {
       H3Plugin.withComponent(H3Element),
       BlockquotePlugin.withComponent(BlockquoteElement),
     ], // Add the mark plugins
-    // value: initialValue,
+    value: (editor) =>
+      editor.getApi(MarkdownPlugin).markdown.deserialize(file.content || ""),
   }); // Initializes the editor instance
 
-  // useEffect(() => {
-  //   if (textareaRef.current) {
-  //     textareaRef.current.focus();
-  //   }
-  // }, []);
+  // Deserialize markdown when file changes
+  useEffect(() => {
+    if (editor && file.content !== undefined) {
+      const deserializedValue = editor
+        .getApi(MarkdownPlugin)
+        .markdown.deserialize(file.content);
+      editor.tf.setValue(deserializedValue);
+    }
+  }, [editor, file.path, file.content]);
+
+  // Handle editor changes and serialize to markdown
+  const handleChange = () => {
+    if (editor) {
+      const markdown = editor.getApi(MarkdownPlugin).markdown.serialize();
+      onChange(markdown);
+    }
+  };
 
   return (
-    <Plate editor={editor}>
+    <Plate editor={editor} onValueChange={handleChange}>
       <FixedToolbar className="justify-start rounded-t-lg">
         <ToolbarButton onClick={() => editor.tf.h1.toggle()}>H1</ToolbarButton>
         <ToolbarButton onClick={() => editor.tf.h2.toggle()}>H2</ToolbarButton>
