@@ -7,6 +7,8 @@ import {
   type Persister,
   createCustomPersister,
 } from "tinybase/persisters";
+import { IndexedDBStorage } from "@/utils/indexdb-storage";
+import { generateDemoFiles } from "@/utils/demo-data";
 
 /**
  * Browser platform adapter
@@ -14,6 +16,7 @@ import {
  */
 export class BrowserPlatformAdapter implements IPlatformAdapter {
   protected persister: Persister | undefined;
+  protected currentBasePath: string | null = null;
   /**
    * Opens a mock directory picker dialog in the browser
    * Dispatches a custom event that the MockDirectoryPickerDialog component listens to
@@ -50,24 +53,76 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     // No-op in browser - theme changes are handled by ThemeProvider
   }
 
-  getPersister(store: Store, basePath: string) {
+  getPersister(store: Store, basePath: string): Persister {
+    // Reset persister if basePath changed
+    if (this.currentBasePath !== null && this.currentBasePath !== basePath) {
+      console.log(`[BrowserAdapter] Base path changed, resetting persister`);
+      this.persister = undefined;
+      this.currentBasePath = null;
+    }
+
     if (this.persister) {
       return this.persister;
     }
+
+    this.currentBasePath = basePath;
+    const storage = new IndexedDBStorage(basePath);
+
     this.persister = createCustomPersister(
       store,
-      //Get Persisted
-      async () => {
-        return undefined;
+      // getPersisted - Load from IndexedDB
+      async (): Promise<PersistedContent | undefined> => {
+        try {
+          console.log(
+            `[BrowserAdapter] Loading workspace from IndexedDB: ${basePath}`,
+          );
+
+          await storage.initialize();
+
+          const hasData = await storage.hasData();
+
+          if (!hasData) {
+            // First time loading this workspace - populate with demo data
+            console.log(
+              "[BrowserAdapter] No existing data found, creating demo workspace",
+            );
+            const demoFiles = generateDemoFiles();
+            await storage.saveAllFiles(demoFiles);
+          }
+
+          // Load all files from IndexedDB
+          const files = await storage.loadAllFiles();
+
+          // Return in TinyBase format: [tables, values]
+          // tables = { files: Record<path, FileRowData> }
+          // values = {} (empty for now)
+          // Cast to any to avoid type issues with optional fields
+          return [{ files: files as any }, {}];
+        } catch (error) {
+          console.error(
+            "[BrowserAdapter] Failed to load from IndexedDB:",
+            error,
+          );
+          return undefined;
+        }
       },
-      //Load Persisted
+      // setPersisted - Save changes to IndexedDB (no-op for now)
       async (
-        getContent: () => PersistedContent,
-        changes?: PersistedChanges,
-      ) => {},
-      () => {},
+        _getContent: () => PersistedContent,
+        _changes?: PersistedChanges,
+      ) => {
+        // TODO: Implement incremental saves later
+        console.log("[BrowserAdapter] Save requested (not yet implemented)");
+      },
+      // addPersisterListener - Listen for changes (no-op in browser)
+      (_listener) => {
+        // No file watching in browser
+        return () => {};
+      },
+      // delPersisterListener - Clean up listener (no-op in browser)
       () => {},
     );
+
     return this.persister;
   }
 }
