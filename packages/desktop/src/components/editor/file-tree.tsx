@@ -84,12 +84,7 @@ function FileTreeItem({
           )}
           <span className="truncate text-foreground">{name}</span>
         </div>
-        {/* Label stays at the opposite end */}
-        {node.label && (
-          <span className="shrink-0 text-xs text-muted-foreground uppercase tracking-wider">
-            {node.label}
-          </span>
-        )}
+        <span className="shrink-0 text-xs text-muted-foreground uppercase tracking-wider"></span>
       </button>
       {node.type === "directory" && isExpanded && node.children && (
         <div>
@@ -109,14 +104,10 @@ function FileTreeItem({
 }
 
 export function FileTree({ selectedFilePath, onFileSelect }: FileTreeProps) {
-  console.log("this got called");
   const store = getStore();
   const files = useTable("files", store!);
-  console.log(JSON.stringify(files, null, 2));
   const filesTree = useMemo(() => {
-    const tree = flatEntriesToTree(files as any);
-    console.log(tree);
-    return tree;
+    return flatEntriesToTree(files as any);
   }, [files]);
   return (
     <ScrollArea className="flex-1">

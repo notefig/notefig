@@ -122,6 +122,7 @@ export function flatEntriesToTree(flatFiles: FileEntries): FileTreeNode[] {
   Object.entries(flatFiles).forEach(([path, entry]) => {
     const node: FileTreeNode = {
       ...entry,
+      path: path,
       children: entry.type === "directory" ? [] : undefined,
     };
     pathMap.set(path, node);
