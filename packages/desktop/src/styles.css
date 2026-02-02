@@ -67,6 +67,7 @@
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
   }
@@ -74,6 +75,7 @@
 
 /* Prevent text selection throughout the app except in editors */
 @layer base {
+
   /* Disable selection by default */
   * {
     user-select: none;

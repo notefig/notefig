@@ -1,4 +1,21 @@
 import { useCallback, useEffect, useRef } from "react";
+import { Plate, usePlateEditor } from "platejs/react";
+import type { Value } from "platejs";
+import {
+  BoldPlugin,
+  ItalicPlugin,
+  UnderlinePlugin,
+  BlockquotePlugin,
+  H1Plugin,
+  H2Plugin,
+  H3Plugin,
+} from "@platejs/basic-nodes/react";
+import { FixedToolbar } from "@/components/ui/fixed-toolbar";
+import { MarkToolbarButton } from "@/components/ui/mark-toolbar-button";
+import { Editor, EditorContainer } from "@/components/ui/editor";
+import { BlockquoteElement } from "@/components/ui/blockquote-node";
+import { H1Element, H2Element, H3Element } from "@/components/ui/heading-node";
+import { ToolbarButton } from "@/components/ui/toolbar"; // Generic toolbar button
 import type { FileEntry } from "../../utils/fs";
 
 interface TextEditorProps {
@@ -8,36 +25,47 @@ interface TextEditorProps {
 
 export function TextEditor({ onChange, file }: TextEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editor = usePlateEditor({
+    plugins: [
+      BoldPlugin,
+      ItalicPlugin,
+      UnderlinePlugin,
+      H1Plugin.withComponent(H1Element),
+      H2Plugin.withComponent(H2Element),
+      H3Plugin.withComponent(H3Element),
+      BlockquotePlugin.withComponent(BlockquoteElement),
+    ], // Add the mark plugins
+    // value: initialValue,
+  }); // Initializes the editor instance
 
-  const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      onChange(e.target.value);
-    },
-    [onChange],
-  );
-
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.focus();
-    }
-  }, []);
+  // useEffect(() => {
+  //   if (textareaRef.current) {
+  //     textareaRef.current.focus();
+  //   }
+  // }, []);
 
   return (
-    <div className="flex flex-col h-full w-full bg-background overflow-hidden">
-      <div className="flex items-center justify-center py-6 shrink-0">
-        <h1 className="text-2xl font-semibold text-foreground">{file.path}</h1>
-      </div>
-      <div className="flex-1 px-8 pb-8 overflow-y-auto overflow-x-hidden">
-        <textarea
-          ref={textareaRef}
-          value={file.content}
-          onChange={handleChange}
-          className="w-full h-full min-h-full bg-transparent text-foreground text-base leading-relaxed resize-none focus:outline-none placeholder:text-muted-foreground font-sans break-words whitespace-pre-wrap overflow-hidden"
-          placeholder="Start writing..."
-          spellCheck={false}
-          style={{ wordBreak: "break-word", overflowWrap: "break-word" }}
-        />
-      </div>
-    </div>
+    <Plate editor={editor}>
+      <FixedToolbar className="justify-start rounded-t-lg">
+        <ToolbarButton onClick={() => editor.tf.h1.toggle()}>H1</ToolbarButton>
+        <ToolbarButton onClick={() => editor.tf.h2.toggle()}>H2</ToolbarButton>
+        <ToolbarButton onClick={() => editor.tf.h3.toggle()}>H3</ToolbarButton>
+        <ToolbarButton onClick={() => editor.tf.blockquote.toggle()}>
+          Quote
+        </ToolbarButton>
+        <MarkToolbarButton nodeType="bold" tooltip="Bold (⌘+B)">
+          B
+        </MarkToolbarButton>
+        <MarkToolbarButton nodeType="italic" tooltip="Italic (⌘+I)">
+          I
+        </MarkToolbarButton>
+        <MarkToolbarButton nodeType="underline" tooltip="Underline (⌘+U)">
+          U
+        </MarkToolbarButton>
+      </FixedToolbar>
+      <EditorContainer>
+        <Editor placeholder="Type your amazing content here..." />
+      </EditorContainer>
+    </Plate>
   );
 }
