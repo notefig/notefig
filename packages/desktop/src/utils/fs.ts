@@ -10,6 +10,26 @@ export interface FileEntry {
   error?: string;
 }
 
+export type FileEntries = Record<FileEntry["path"], FileEntry>;
+
+/**
+ * Extended FileEntry interface for tree structure representation
+ * Adds children array for hierarchical display and optional UI properties
+ */
+export interface FileTreeNode extends FileEntry {
+  children?: FileTreeNode[];
+  label?: string;
+}
+
+/**
+ * Get the file or directory name from a file path
+ */
+export function getFileName(filePath: string): string {
+  if (!filePath) return "";
+  const parts = filePath.split("/").filter((p) => p.length > 0);
+  return parts.length > 0 ? parts[parts.length - 1] : filePath;
+}
+
 /**
  * Get the file extension from a file path
  */

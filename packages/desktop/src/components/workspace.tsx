@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { IconSidebar } from "@/components/editor/icon-sidebar";
-import { FileTree, type FileNode } from "@/components/editor/file-tree";
+import { FileTree } from "@/components/editor/file-tree";
 import { FileControls } from "@/components/editor/file-controls";
 import { TabBar, type Tab } from "@/components/editor/tab-bar";
 import { TextEditor } from "@/components/editor/text-editor";
@@ -10,43 +10,65 @@ import { CommandPalette } from "@/components/editor/command-palette";
 import { getSingltonStore } from "../utils/tinybase";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import { useTranslation } from "react-i18next";
+import { FileTreeNode } from "@/utils/fs";
 
-const initialFiles: FileNode[] = [
+const initialFiles: FileTreeNode[] = [
   {
-    id: "5",
-    name: "Welcome",
+    path: "Welcome.md",
     type: "file",
+    contentHash: "",
+    content: "",
   },
   {
-    id: "folder-1",
-    name: "Projects",
-    type: "folder",
+    path: "Projects",
+    type: "directory",
+    contentHash: "",
+    content: "",
     children: [
-      { id: "6", name: "Project A", type: "file" },
-      { id: "7", name: "Project B", type: "file" },
+      {
+        path: "Projects/Project A.md",
+        type: "file",
+        contentHash: "",
+        content: "",
+      },
+      {
+        path: "Projects/Project B.md",
+        type: "file",
+        contentHash: "",
+        content: "",
+      },
     ],
   },
   {
-    id: "folder-2",
-    name: "Notes",
-    type: "folder",
+    path: "Notes",
+    type: "directory",
+    contentHash: "",
+    content: "",
     children: [
-      { id: "8", name: "Meeting Notes", type: "file" },
-      { id: "9", name: "Ideas", type: "file" },
+      {
+        path: "Notes/Meeting Notes.md",
+        type: "file",
+        contentHash: "",
+        content: "",
+      },
+      {
+        path: "Notes/Ideas.md",
+        type: "file",
+        contentHash: "",
+        content: "",
+      },
     ],
   },
 ];
 
 const initialContents: Record<string, string> = {
-  "1": "# 2026-01-17\n\nThis is my daily note for January 17th, 2026.\n\n## Tasks\n- [ ] Review project proposals\n- [ ] Team meeting at 2pm\n- [ ] Complete documentation\n\n## Notes\nStart typing here...",
-  "2": "",
-  "3": "",
-  "4": "",
-  "5": "# Welcome to the Editor\n\nThis is a simple file editor with a collapsible file tree, tab bar, and text editing experience.\n\n## Features\n- Collapsible and resizable file tree\n- Tab management with close buttons\n- Word and character count\n- Sync status indicator\n\nStart by selecting a file from the sidebar or creating a new one!",
-  "6": "# Project A\n\nProject description goes here...",
-  "7": "# Project B\n\nProject description goes here...",
-  "8": "# Meeting Notes\n\n## Attendees\n- Person 1\n- Person 2\n\n## Agenda\n1. Item 1\n2. Item 2",
-  "9": "# Ideas\n\n- Idea 1\n- Idea 2\n- Idea 3",
+  "Welcome.md":
+    "# Welcome to the Editor\n\nThis is a simple file editor with a collapsible file tree, tab bar, and text editing experience.\n\n## Features\n- Collapsible and resizable file tree\n- Tab management with close buttons\n- Word and character count\n- Sync status indicator\n\nStart by selecting a file from the sidebar or creating a new one!",
+  "Projects/Project A.md": "# Project A\n\nProject description goes here...",
+  "Projects/Project B.md": "# Project B\n\nProject description goes here...",
+  "Notes/Meeting Notes.md":
+    "# Meeting Notes\n\n## Attendees\n- Person 1\n- Person 2\n\n## Agenda\n1. Item 1\n2. Item 2",
+  "Notes/Ideas.md": "# Ideas\n\n- Idea 1\n- Idea 2\n- Idea 3",
 };
 
 export const Workspace = () => {
@@ -58,19 +80,22 @@ export const Workspace = () => {
       if (!workspacePath) {
         return;
       }
-      await getSingltonStore(workspacePath);
+      const [store] = await getSingltonStore(workspacePath);
+      console.log(store.getTables());
     })();
   }, [workspacePath]);
 
   const [activeSidebarItem, setActiveSidebarItem] = useState("files");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(240);
-  const [files] = useState<FileNode[]>(initialFiles);
-  const [selectedFileId, setSelectedFileId] = useState<string | null>("1");
+  const [files] = useState<FileTreeNode[]>(initialFiles);
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(
+    "Welcome.md",
+  );
   const [tabs, setTabs] = useState<Tab[]>([
-    { id: "1", name: "2026-01-17", isModified: false },
+    { id: "Welcome.md", name: "Welcome", isModified: false },
   ]);
-  const [activeTabId, setActiveTabId] = useState<string | null>("1");
+  const [activeTabId, setActiveTabId] = useState<string | null>("Welcome.md");
   const [fileContents, setFileContents] =
     useState<Record<string, string>>(initialContents);
   const [isSynced, setIsSynced] = useState(true);
@@ -127,23 +152,24 @@ export const Workspace = () => {
     setIsResizing(true);
   }, []);
 
-  const handleFileSelect = useCallback((file: FileNode) => {
+  const handleFileSelect = useCallback((file: FileTreeNode) => {
     if (file.type === "file") {
-      setSelectedFileId(file.id);
+      setSelectedFilePath(file.path);
       setTabs((prev) => {
-        const existingTab = prev.find((t) => t.id === file.id);
+        const existingTab = prev.find((t) => t.id === file.path);
         if (existingTab) {
           return prev;
         }
-        return [...prev, { id: file.id, name: file.name, isModified: false }];
+        const fileName = file.path.split("/").pop() || file.path;
+        return [...prev, { id: file.path, name: fileName, isModified: false }];
       });
-      setActiveTabId(file.id);
+      setActiveTabId(file.path);
     }
   }, []);
 
   const handleTabSelect = useCallback((tabId: string) => {
     setActiveTabId(tabId);
-    setSelectedFileId(tabId);
+    setSelectedFilePath(tabId);
   }, []);
 
   const handleTabClose = useCallback(
@@ -152,10 +178,10 @@ export const Workspace = () => {
         const newTabs = prev.filter((t) => t.id !== tabId);
         if (activeTabId === tabId && newTabs.length > 0) {
           setActiveTabId(newTabs[newTabs.length - 1].id);
-          setSelectedFileId(newTabs[newTabs.length - 1].id);
+          setSelectedFilePath(newTabs[newTabs.length - 1].id);
         } else if (newTabs.length === 0) {
           setActiveTabId(null);
-          setSelectedFileId(null);
+          setSelectedFilePath(null);
         }
         return newTabs;
       });
@@ -251,7 +277,7 @@ export const Workspace = () => {
               >
                 <FileTree
                   files={files}
-                  selectedFileId={selectedFileId}
+                  selectedFilePath={selectedFilePath}
                   onFileSelect={handleFileSelect}
                 />
               </div>

@@ -1,9 +1,14 @@
 import { createStore, type Store } from "tinybase";
-import { Persister, createCustomPersister } from "tinybase/persisters";
+import { useTable } from "tinybase/ui-react";
 import { platformAdapter } from "../adapters";
+import type { Persister } from "tinybase/persisters";
 
 let store: Store | null = null;
 let persister: Persister | null = null;
+
+export function getStore() {
+  return store;
+}
 
 export async function getSingltonStore(
   basePath: string,
