@@ -8,12 +8,7 @@ import {
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import {
-  FileEntries,
-  FileTreeNode,
-  flatEntriesToTree,
-  getFileName,
-} from "@/utils/fs";
+import { FileTreeNode, flatEntriesToTree, getFileName } from "@/utils/fs";
 import { getStore } from "../../utils/tinybase";
 import { useTable } from "tinybase/ui-react";
 
@@ -110,7 +105,7 @@ export function FileTree({ selectedFilePath, onFileSelect }: FileTreeProps) {
     return flatEntriesToTree(files as any);
   }, [files]);
   return (
-    <ScrollArea className="flex-1">
+    <ScrollArea className="h-full w-full">
       <div className="py-1">
         {filesTree.map((node) => (
           <FileTreeItem

@@ -261,7 +261,7 @@ export const Workspace = () => {
           {!isSidebarCollapsed && (
             <>
               <div
-                className="shrink-0 bg-sidebar overflow-hidden"
+                className="shrink-0 bg-sidebar flex flex-col"
                 style={{ width: sidebarWidth }}
               >
                 <FileTree
