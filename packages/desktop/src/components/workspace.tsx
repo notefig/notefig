@@ -16,21 +16,12 @@ export const Workspace = () => {
   const store = getStore();
   const { t } = useTranslation();
   const files: FileEntries = useTable("files", store) as any;
-  const firstFileIfAny = Object.values(files)[0] || null;
   const [activeSidebarItem, setActiveSidebarItem] = useState("files");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(240);
 
-  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(
-    firstFileIfAny?.path,
-  );
-  const [tabs, setTabs] = useState<Tab[]>([
-    {
-      id: firstFileIfAny?.path,
-      name: firstFileIfAny?.path,
-      isModified: false,
-    },
-  ]);
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>();
+  const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>("Welcome.md");
   const [isSynced, setIsSynced] = useState(true);
   const [isResizing, setIsResizing] = useState(false);
