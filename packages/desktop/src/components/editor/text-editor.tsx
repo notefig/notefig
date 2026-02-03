@@ -55,7 +55,8 @@ export function TextEditor({ file }: TextEditorProps) {
     // Debounce save by 300ms
     saveTimeoutRef.current = setTimeout(() => {
       const markdown = editor.getApi(MarkdownPlugin).markdown.serialize();
-      store.setCell("files", file.path, "content", markdown);
+      const normalizedMarkdown = markdown.replace(/\&\#x20\;/, "");
+      store.setCell("files", file.path, "content", normalizedMarkdown);
     }, 300);
   }, [editor, file.path, store]);
 
