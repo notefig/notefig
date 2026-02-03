@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useRef } from "react";
 import { Plate, usePlateEditor } from "platejs/react";
 import type { Value } from "platejs";
 import {
@@ -19,14 +19,16 @@ import { BlockquoteElement } from "@/components/ui/blockquote-node";
 import { H1Element, H2Element, H3Element } from "@/components/ui/heading-node";
 import { ToolbarButton } from "@/components/ui/toolbar"; // Generic toolbar button
 import type { FileEntry } from "../../utils/fs";
+import { getStore } from "../../utils/tinybase";
 
 interface TextEditorProps {
-  onChange: (content: string) => void;
   file: FileEntry;
 }
 
-export function TextEditor({ onChange, file }: TextEditorProps) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+export function TextEditor({ file }: TextEditorProps) {
+  const store = getStore();
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   const editor = usePlateEditor({
     plugins: [
       ...MarkdownKit,
@@ -37,28 +39,25 @@ export function TextEditor({ onChange, file }: TextEditorProps) {
       H2Plugin.withComponent(H2Element),
       H3Plugin.withComponent(H3Element),
       BlockquotePlugin.withComponent(BlockquoteElement),
-    ], // Add the mark plugins
+    ],
     value: (editor) =>
       editor.getApi(MarkdownPlugin).markdown.deserialize(file.content || ""),
-  }); // Initializes the editor instance
+  });
 
-  // Deserialize markdown when file changes
-  useEffect(() => {
-    if (editor && file.content !== undefined) {
-      const deserializedValue = editor
-        .getApi(MarkdownPlugin)
-        .markdown.deserialize(file.content);
-      editor.tf.setValue(deserializedValue);
+  const handleChange = useCallback(() => {
+    if (!editor) return;
+
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
     }
-  }, [editor, file.path, file.content]);
 
-  // Handle editor changes and serialize to markdown
-  const handleChange = () => {
-    if (editor) {
+    // Debounce save by 300ms
+    saveTimeoutRef.current = setTimeout(() => {
       const markdown = editor.getApi(MarkdownPlugin).markdown.serialize();
-      onChange(markdown);
-    }
-  };
+      store.setCell("files", file.path, "content", markdown);
+    }, 300);
+  }, [editor, file.path, store]);
 
   return (
     <Plate editor={editor} onValueChange={handleChange}>

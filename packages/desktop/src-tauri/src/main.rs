@@ -7,9 +7,10 @@ use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+use tokio::io::AsyncWriteExt;
 
 // Structs for TinyBase format
-#[derive(serde::Serialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 struct FileRowData {
     #[serde(rename = "type")]
     entry_type: String,
@@ -27,6 +28,16 @@ struct FileRowData {
 #[derive(serde::Serialize)]
 struct TinyBaseContent {
     files: HashMap<String, FileRowData>,
+}
+
+// Save response structure
+#[derive(serde::Serialize, Debug)]
+struct SaveResponse {
+    saved: usize,
+    skipped: usize,
+    deleted: usize,
+    failed: usize,
+    errors: Vec<String>,
 }
 
 // Helper function: Check if file is binary based on extension blacklist
@@ -60,6 +71,27 @@ fn is_binary_file(path: &Path) -> bool {
     false
 }
 
+// Helper function: Check if path should be skipped during traversal
+fn should_skip_path(path: &Path) -> bool {
+    // Skip hidden files (starting with .)
+    if let Some(file_name) = path.file_name() {
+        if let Some(name_str) = file_name.to_str() {
+            if name_str.starts_with('.') {
+                return true;
+            }
+        }
+    }
+    
+    // Skip if any parent directory is .git or .metrists
+    let path_str = path.to_string_lossy();
+    if path_str.contains("/.git/") || path_str.contains("\\.git\\") ||
+       path_str.contains("/.metrists/") || path_str.contains("\\.metrists\\") {
+        return true;
+    }
+    
+    false
+}
+
 // Helper function: Compute hash of content using DefaultHasher
 fn compute_hash(content: &str) -> String {
     let mut hasher = DefaultHasher::new();
@@ -78,6 +110,216 @@ fn get_relative_path(absolute_path: &Path, base_path: &Path) -> Result<String, S
         Ok(relative) => Ok(path_to_forward_slash(relative)),
         Err(e) => Err(format!("Failed to get relative path: {}", e)),
     }
+}
+
+// Helper function: Validate path for security (prevent directory traversal)
+fn validate_path(path: &str) -> Result<(), String> {
+    if path.contains("..") || path.starts_with("/") || path.starts_with("\\") {
+        return Err(format!("Invalid path: directory traversal not allowed: {}", path));
+    }
+    Ok(())
+}
+
+// Helper function: Load current filesystem state (paths + hashes only)
+fn load_filesystem_state(base_path: &str) -> Result<HashMap<String, String>, String> {
+    let base = PathBuf::from(base_path);
+    let mut state = HashMap::new();
+    
+    for entry_result in WalkDir::new(&base).follow_links(true) {
+        match entry_result {
+            Ok(entry) => {
+                let path = entry.path();
+                
+                // Skip hidden files, .git, .metrists
+                if should_skip_path(path) {
+                    continue;
+                }
+                
+                // Skip the base directory itself
+                if path == base {
+                    continue;
+                }
+                
+                // Get relative path
+                let relative_path = match get_relative_path(path, &base) {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                };
+                
+                if relative_path.is_empty() {
+                    continue;
+                }
+                
+                // Compute hash based on type
+                let hash = if path.is_file() {
+                    if is_binary_file(path) {
+                        // Binary files: empty hash (we don't track content)
+                        String::new()
+                    } else {
+                        // Text files: compute hash
+                        match std::fs::read_to_string(path) {
+                            Ok(content) => compute_hash(&content),
+                            Err(_) => String::new(),
+                        }
+                    }
+                } else {
+                    // Directories: empty hash
+                    String::new()
+                };
+                
+                state.insert(relative_path, hash);
+            }
+            Err(_) => continue,
+        }
+    }
+    
+    Ok(state)
+}
+
+// Helper function: Atomic write for small files
+async fn atomic_write_file(path: &Path, content: &str) -> Result<(), String> {
+    use std::ffi::OsStr;
+    use std::path::PathBuf;
+    
+    // Create temp file path
+    let mut temp_path = PathBuf::from(path);
+    let original_name = temp_path.file_name().unwrap_or(OsStr::new("file")).to_string_lossy();
+    let temp_name = format!(".metrists_tmp_{}", original_name);
+    temp_path.set_file_name(temp_name);
+    
+    // Write to temp file
+    tokio::fs::write(&temp_path, content)
+        .await
+        .map_err(|e| format!("Write failed: {}", e))?;
+    
+    // Sync to disk
+    let file = tokio::fs::File::open(&temp_path)
+        .await
+        .map_err(|e| format!("Open for sync failed: {}", e))?;
+    file.sync_all()
+        .await
+        .map_err(|e| format!("Sync failed: {}", e))?;
+    
+    // Close file
+    drop(file);
+    
+    // Atomic rename
+    tokio::fs::rename(&temp_path, path)
+        .await
+        .map_err(|e| format!("Rename failed: {}", e))?;
+    
+    Ok(())
+}
+
+// Helper function: Stream write for large files (>2MB)
+async fn stream_write_file(path: &Path, content: &str) -> Result<(), String> {
+    use std::ffi::OsStr;
+    use std::path::PathBuf;
+    
+    // Create temp file path
+    let mut temp_path = PathBuf::from(path);
+    let original_name = temp_path.file_name().unwrap_or(OsStr::new("file")).to_string_lossy();
+    let temp_name = format!(".metrists_tmp_{}", original_name);
+    temp_path.set_file_name(temp_name);
+    
+    // Open file for writing
+    let mut file = tokio::fs::File::create(&temp_path)
+        .await
+        .map_err(|e| format!("Create failed: {}", e))?;
+    
+    // Write in chunks (64KB at a time)
+    const CHUNK_SIZE: usize = 64 * 1024;
+    let bytes = content.as_bytes();
+    
+    for chunk in bytes.chunks(CHUNK_SIZE) {
+        file.write_all(chunk)
+            .await
+            .map_err(|e| format!("Write chunk failed: {}", e))?;
+    }
+    
+    // Sync to disk
+    file.sync_all()
+        .await
+        .map_err(|e| format!("Sync failed: {}", e))?;
+    
+    // Close file
+    drop(file);
+    
+    // Atomic rename
+    tokio::fs::rename(&temp_path, path)
+        .await
+        .map_err(|e| format!("Rename failed: {}", e))?;
+    
+    Ok(())
+}
+
+// Helper function: Save a single entry (file or directory)
+async fn save_single_entry(
+    base_path: String,
+    relative_path: String,
+    data: FileRowData,
+) -> Result<(), String> {
+    let absolute_path = PathBuf::from(&base_path).join(&relative_path);
+    
+    match data.entry_type.as_str() {
+        "directory" => {
+            // Create directory
+            tokio::fs::create_dir_all(&absolute_path)
+                .await
+                .map_err(|e| format!("{}: {}", relative_path, e))?;
+            Ok(())
+        }
+        "file" => {
+            // Skip binary files (don't save binary content)
+            if is_binary_file(&absolute_path) {
+                return Ok(());
+            }
+            
+            // Ensure parent directory exists
+            if let Some(parent) = absolute_path.parent() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| format!("{}: Failed to create parent dir: {}", relative_path, e))?;
+            }
+            
+            // Check content size
+            let content_size = data.content.len();
+            
+            if content_size > 2 * 1024 * 1024 {
+                // Large file (>2MB): Stream write
+                stream_write_file(&absolute_path, &data.content).await?;
+            } else {
+                // Small file: Atomic write
+                atomic_write_file(&absolute_path, &data.content).await?;
+            }
+            
+            Ok(())
+        }
+        _ => Err(format!("Unknown entry type: {}", data.entry_type))
+    }
+}
+
+// Helper function: Delete an entry (file or directory)
+async fn delete_entry(base_path: String, relative_path: String) -> Result<(), String> {
+    let absolute_path = PathBuf::from(&base_path).join(&relative_path);
+    
+    if !absolute_path.exists() {
+        return Ok(()); // Already deleted
+    }
+    
+    if absolute_path.is_dir() {
+        // Delete directory recursively
+        tokio::fs::remove_dir_all(&absolute_path)
+            .await
+            .map_err(|e| format!("{}: {}", relative_path, e))?;
+    } else {
+        // Delete file
+        tokio::fs::remove_file(&absolute_path)
+            .await
+            .map_err(|e| format!("{}: {}", relative_path, e))?;
+    }
+    
+    Ok(())
 }
 
 // Tauri command: Load all files from directory
@@ -102,20 +344,8 @@ async fn load_directory_files(base_path: String) -> Result<TinyBaseContent, Stri
             Ok(entry) => {
                 let path = entry.path();
                 
-                // Skip hidden files (starting with .)
-                // Also skip .git and .metrists directories
-                if let Some(file_name) = path.file_name() {
-                    if let Some(name_str) = file_name.to_str() {
-                        if name_str.starts_with('.') {
-                            continue;
-                        }
-                    }
-                }
-                
-                // Skip if any parent directory is .git or .metrists
-                let path_str = path.to_string_lossy();
-                if path_str.contains("/.git/") || path_str.contains("\\.git\\") ||
-                   path_str.contains("/.metrists/") || path_str.contains("\\.metrists\\") {
+                // Skip hidden files, .git, .metrists
+                if should_skip_path(path) {
                     continue;
                 }
                 
@@ -211,6 +441,101 @@ async fn load_directory_files(base_path: String) -> Result<TinyBaseContent, Stri
     }
     
     Ok(TinyBaseContent { files: files_map })
+}
+
+// Tauri command: Save files to filesystem
+#[tauri::command]
+async fn save_files(
+    base_path: String,
+    files: HashMap<String, FileRowData>,
+) -> Result<SaveResponse, String> {
+    // Validate base path exists
+    let base = PathBuf::from(&base_path);
+    if !base.exists() {
+        return Err(format!("Base path does not exist: {}", base_path));
+    }
+    if !base.is_dir() {
+        return Err(format!("Base path is not a directory: {}", base_path));
+    }
+    
+    // Step 1: Load current filesystem state (paths + hashes only)
+    let fs_state = load_filesystem_state(&base_path)?;
+    
+    // Step 2: Determine operations
+    let mut to_save = Vec::new();
+    let mut to_delete = Vec::new();
+    let mut skipped = 0;
+    
+    for (path, row_data) in files.iter() {
+        // Validate path (security check)
+        if let Err(e) = validate_path(path) {
+            eprintln!("Invalid path {}: {}", path, e);
+            continue;
+        }
+        
+        let fs_hash = fs_state.get(path);
+        
+        // Skip if hash matches (no change)
+        if let Some(existing_hash) = fs_hash {
+            if existing_hash == &row_data.content_hash {
+                skipped += 1;
+                continue;
+            }
+        }
+        
+        // Needs save (new or modified)
+        to_save.push((path.clone(), row_data.clone()));
+    }
+    
+    // Step 3: Find deletions (in filesystem but not in store)
+    for fs_path in fs_state.keys() {
+        if !files.contains_key(fs_path) {
+            to_delete.push(fs_path.clone());
+        }
+    }
+    
+    // Step 4: Execute saves in parallel
+    let save_futures: Vec<_> = to_save
+        .into_iter()
+        .map(|(path, data)| save_single_entry(base_path.clone(), path, data))
+        .collect();
+    
+    let save_results = futures::future::join_all(save_futures).await;
+    
+    // Step 5: Execute deletes in parallel
+    let delete_futures: Vec<_> = to_delete
+        .into_iter()
+        .map(|path| delete_entry(base_path.clone(), path))
+        .collect();
+    
+    let delete_results = futures::future::join_all(delete_futures).await;
+    
+    // Step 6: Aggregate results
+    let saved = save_results.iter().filter(|r| r.is_ok()).count();
+    let deleted = delete_results.iter().filter(|r| r.is_ok()).count();
+    let failed = save_results.iter().filter(|r| r.is_err()).count()
+        + delete_results.iter().filter(|r| r.is_err()).count();
+    
+    let mut errors = Vec::new();
+    for result in save_results.iter().chain(delete_results.iter()) {
+        if let Err(e) = result {
+            errors.push(e.to_string());
+        }
+    }
+    
+    // Log summary
+    eprintln!(
+        "[Save] Saved: {}, Skipped: {}, Deleted: {}, Failed: {}",
+        saved, skipped, deleted, failed
+    );
+    
+    Ok(SaveResponse {
+        saved,
+        skipped,
+        deleted,
+        failed,
+        errors,
+    })
 }
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
@@ -311,7 +636,7 @@ fn main() {
                 _ => {}
             }
         })
-        .invoke_handler(tauri::generate_handler![greet, open_folder_dialog, load_directory_files])
+        .invoke_handler(tauri::generate_handler![greet, open_folder_dialog, load_directory_files, save_files])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

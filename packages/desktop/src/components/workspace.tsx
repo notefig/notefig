@@ -30,6 +30,7 @@ export const Workspace = () => {
   const resizeRef = useRef<HTMLDivElement>(null);
 
   const activeTabId = searchParams.get("activeTab");
+  const openTabs = searchParams.getAll("tab");
   const currentContent = activeTabId ? files[activeTabId]?.content || "" : "";
 
   const { wordCount, characterCount } = useMemo(() => {
@@ -82,15 +83,10 @@ export const Workspace = () => {
         setSearchParams((prev) => {
           const currentTabs = prev.getAll("tab");
           const newParams = new URLSearchParams(prev);
-
-          // Add tab if not already present
           if (!currentTabs.includes(file.path)) {
             newParams.append("tab", file.path);
           }
-
-          // Set as active tab
           newParams.set("activeTab", file.path);
-
           return newParams;
         });
       }
@@ -105,13 +101,6 @@ export const Workspace = () => {
   const handleNewFile = useCallback(() => {
     //TODO: handle new tab + new file creation
   }, [handleNewTab]);
-
-  const handleContentChange = useCallback(
-    (content: string) => {
-      //TODO: handle content change
-    },
-    [activeTabId],
-  );
 
   return (
     <div
@@ -166,15 +155,29 @@ export const Workspace = () => {
           )}
 
           <div className="flex-1 min-w-0 overflow-hidden">
-            {files[activeTabId ?? ""] ? (
-              <TextEditor
-                file={files[activeTabId ?? ""]}
-                onChange={handleContentChange}
-              />
-            ) : (
+            {openTabs.length === 0 ? (
               <div className="flex items-center justify-center h-full text-muted-foreground p-4">
                 <p className="text-center">{t("noFileSelected")}</p>
               </div>
+            ) : (
+              <>
+                {openTabs.map((tabPath) => {
+                  const file = files[tabPath];
+                  if (!file) return null;
+
+                  return (
+                    <div
+                      key={tabPath}
+                      style={{
+                        display: activeTabId === tabPath ? "block" : "none",
+                      }}
+                      className="h-full"
+                    >
+                      <TextEditor file={file} />
+                    </div>
+                  );
+                })}
+              </>
             )}
           </div>
         </div>

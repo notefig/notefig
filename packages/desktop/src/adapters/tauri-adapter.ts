@@ -81,12 +81,35 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
           return undefined;
         }
       },
-      // setPersisted - Save changes (no-op for now)
       async (
-        _getContent: () => PersistedContent,
+        getContent: () => PersistedContent,
         _changes?: PersistedChanges,
       ) => {
-        // TODO: Implement save logic later
+        try {
+          const [tables, _values] = getContent();
+          const filesTable = (tables as any).files || {};
+
+          const result = await invoke<{
+            saved: number;
+            skipped: number;
+            deleted: number;
+            failed: number;
+            errors: string[];
+          }>("save_files", {
+            basePath: basePath,
+            files: filesTable,
+          });
+
+          console.log(
+            `[Persister] Saved: ${result.saved}, Skipped: ${result.skipped}, Deleted: ${result.deleted}, Failed: ${result.failed}`,
+          );
+
+          if (result.failed > 0 && result.errors.length > 0) {
+            console.error("[Persister] Save errors:", result.errors);
+          }
+        } catch (error) {
+          console.error("[Persister] Failed to save files:", error);
+        }
       },
       // addPersisterListener - Listen for changes
       (_listener) => {
