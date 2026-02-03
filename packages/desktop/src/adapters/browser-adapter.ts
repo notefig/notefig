@@ -8,7 +8,8 @@ import {
   createCustomPersister,
 } from "tinybase/persisters";
 import { IndexedDBStorage } from "@/utils/indexdb-storage";
-import { generateDemoFiles } from "@/utils/demo-data";
+import { generateDemoFiles, type FileRowData } from "@/utils/demo-data";
+import { calculateContentHash } from "@/utils/hash";
 
 /**
  * Browser platform adapter
@@ -106,13 +107,59 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
           return undefined;
         }
       },
-      // setPersisted - Save changes to IndexedDB (no-op for now)
+      // setPersisted - Save changes to IndexedDB
       async (
-        _getContent: () => PersistedContent,
+        getContent: () => PersistedContent,
         _changes?: PersistedChanges,
       ) => {
-        // TODO: Implement incremental saves later
-        console.log("[BrowserAdapter] Save requested (not yet implemented)");
+        try {
+          const [tables, _values] = getContent();
+          const filesTable = (tables as Record<string, any>).files || {};
+
+          // Load current IndexedDB state to detect changes
+          const currentFiles = await storage.loadAllFiles();
+
+          let saved = 0;
+          let skipped = 0;
+          let deleted = 0;
+
+          // Process each file in TinyBase
+          for (const [path, fileData] of Object.entries(filesTable) as [
+            string,
+            FileRowData,
+          ][]) {
+            // Recompute hash from actual content (don't trust persisted hash)
+            const currentContentHash = calculateContentHash(fileData.content);
+            const existingFile = currentFiles[path];
+
+            // Skip if hash matches (no change)
+            if (
+              existingFile &&
+              calculateContentHash(existingFile.content) === currentContentHash
+            ) {
+              skipped++;
+              continue;
+            }
+
+            // Save file (new or modified)
+            await storage.saveFile(fileData);
+            saved++;
+          }
+
+          // Delete files that exist in IndexedDB but not in TinyBase
+          for (const path of Object.keys(currentFiles)) {
+            if (!filesTable[path]) {
+              await storage.deleteFile(path);
+              deleted++;
+            }
+          }
+
+          console.log(
+            `[BrowserAdapter] Saved: ${saved}, Skipped: ${skipped}, Deleted: ${deleted}`,
+          );
+        } catch (error) {
+          console.error("[BrowserAdapter] Failed to save to IndexedDB:", error);
+        }
       },
       // addPersisterListener - Listen for changes (no-op in browser)
       (_listener) => {
