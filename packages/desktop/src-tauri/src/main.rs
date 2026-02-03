@@ -475,11 +475,14 @@ async fn save_files(
             continue;
         }
         
+        // Recompute hash from actual content (don't trust the persisted hash)
+        // This ensures we detect changes even if the contentHash field in TinyBase is stale
+        let current_content_hash = compute_hash(&row_data.content);
         let fs_hash = fs_state.get(path);
         
         // Skip if hash matches (no change)
         if let Some(existing_hash) = fs_hash {
-            if existing_hash == &row_data.content_hash {
+            if existing_hash == &current_content_hash {
                 skipped += 1;
                 continue;
             }

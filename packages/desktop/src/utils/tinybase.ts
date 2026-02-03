@@ -34,5 +34,6 @@ export async function getSingltonStore(
   persister = platformAdapter.getPersister(store, basePath);
   await persister.load();
   await persister.startAutoLoad();
+  await persister.startAutoSave();
   return [store, persister];
 }
