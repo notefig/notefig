@@ -12,6 +12,7 @@ use tokio::io::AsyncWriteExt;
 // Structs for TinyBase format
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 struct FileRowData {
+    path: String,
     #[serde(rename = "type")]
     entry_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -421,8 +422,9 @@ async fn load_directory_files(base_path: String) -> Result<TinyBaseContent, Stri
                 
                 // Add to map
                 files_map.insert(
-                    relative_path,
+                    relative_path.clone(),
                     FileRowData {
+                        path: relative_path,
                         entry_type: entry_type.to_string(),
                         modified,
                         size,
