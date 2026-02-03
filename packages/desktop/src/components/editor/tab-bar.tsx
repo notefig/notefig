@@ -1,9 +1,12 @@
 "use client";
 
+import { useMemo, useCallback } from "react";
+import { useSearchParams } from "react-router";
 import { X, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTranslation } from "react-i18next";
+import type { FileEntries } from "@/utils/fs";
 
 export interface Tab {
   id: string;
@@ -12,22 +15,69 @@ export interface Tab {
 }
 
 interface TabBarProps {
-  tabs: Tab[];
-  activeTabId: string | null;
-  onTabSelect: (tabId: string) => void;
-  onTabClose: (tabId: string) => void;
+  files: FileEntries;
   onNewTab: () => void;
 }
 
-export function TabBar({
-  tabs,
-  activeTabId,
-  onTabSelect,
-  onTabClose,
-  onNewTab,
-}: TabBarProps) {
+export function TabBar({ files, onNewTab }: TabBarProps) {
   const { t } = useTranslation();
-  
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Derive tabs from URL search params
+  const tabs = useMemo<Tab[]>(() => {
+    const tabIds = searchParams.getAll("tab");
+    return tabIds.map((id) => ({
+      id,
+      name: id.split("/").pop() || id,
+      isModified: false, // TODO: Track modifications
+    }));
+  }, [searchParams]);
+
+  const activeTabId = searchParams.get("activeTab");
+
+  const handleTabSelect = useCallback(
+    (tabId: string) => {
+      setSearchParams((prev) => {
+        const newParams = new URLSearchParams(prev);
+        newParams.set("activeTab", tabId);
+        return newParams;
+      });
+    },
+    [setSearchParams],
+  );
+
+  const handleTabClose = useCallback(
+    (tabId: string) => {
+      setSearchParams((prev) => {
+        const currentTabs = prev.getAll("tab");
+        const newTabs = currentTabs.filter((id) => id !== tabId);
+        const isActiveTab = prev.get("activeTab") === tabId;
+
+        const newParams = new URLSearchParams();
+
+        // Copy all non-tab params
+        prev.forEach((value, key) => {
+          if (key !== "tab" && key !== "activeTab") {
+            newParams.append(key, value);
+          }
+        });
+
+        // Add new tabs
+        newTabs.forEach((tab) => newParams.append("tab", tab));
+
+        // Set new active tab if needed
+        if (isActiveTab && newTabs.length > 0) {
+          newParams.set("activeTab", newTabs[newTabs.length - 1]);
+        } else if (!isActiveTab && prev.get("activeTab")) {
+          newParams.set("activeTab", prev.get("activeTab")!);
+        }
+
+        return newParams;
+      });
+    },
+    [setSearchParams],
+  );
+
   return (
     <div className="flex items-center h-9 bg-secondary/50 border-b border-border">
       <ScrollArea className="flex-1">
@@ -40,9 +90,9 @@ export function TabBar({
                 "border-e rtl:border-e-0 rtl:border-s border-border",
                 activeTabId === tab.id
                   ? "bg-background text-foreground"
-                  : "bg-secondary/30 text-muted-foreground hover:bg-secondary/60"
+                  : "bg-secondary/30 text-muted-foreground hover:bg-secondary/60",
               )}
-              onClick={() => onTabSelect(tab.id)}
+              onClick={() => handleTabSelect(tab.id)}
             >
               <span className="text-sm truncate max-w-32">{tab.name}</span>
               {tab.isModified && (
@@ -51,7 +101,7 @@ export function TabBar({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  onTabClose(tab.id);
+                  handleTabClose(tab.id);
                 }}
                 className="p-0.5 rounded hover:bg-accent opacity-0 group-hover:opacity-100 transition-opacity"
               >

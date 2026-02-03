@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useSearchParams } from "react-router";
 import { IconSidebar } from "@/components/editor/icon-sidebar";
 import { FileTree } from "@/components/editor/file-tree";
 import { FileControls } from "@/components/editor/file-controls";
-import { TabBar, type Tab } from "@/components/editor/tab-bar";
+import { TabBar } from "@/components/editor/tab-bar";
 import { TextEditor } from "@/components/editor/text-editor";
 import { StatusBar } from "@/components/editor/status-bar";
 import { SettingsModal } from "@/components/editor/settings-modal";
@@ -15,20 +16,20 @@ import type { FileEntries, FileTreeNode } from "@/utils/fs";
 export const Workspace = () => {
   const store = getStore();
   const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const files: FileEntries = useTable("files", store) as any;
   const [activeSidebarItem, setActiveSidebarItem] = useState("files");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(240);
 
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>();
-  const [tabs, setTabs] = useState<Tab[]>([]);
-  const [activeTabId, setActiveTabId] = useState<string | null>("Welcome.md");
   const [isSynced, setIsSynced] = useState(true);
   const [isResizing, setIsResizing] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [direction, setDirection] = useState<"ltr" | "rtl">("ltr");
   const resizeRef = useRef<HTMLDivElement>(null);
 
+  const activeTabId = searchParams.get("activeTab");
   const currentContent = activeTabId ? files[activeTabId]?.content || "" : "";
 
   const { wordCount, characterCount } = useMemo(() => {
@@ -75,70 +76,39 @@ export const Workspace = () => {
     setIsResizing(true);
   }, []);
 
-  const handleFileSelect = useCallback((file: FileTreeNode) => {
-    if (file.type === "file") {
-      setSelectedFilePath(file.path);
-      setTabs((prev) => {
-        const existingTab = prev.find((t) => t.id === file.path);
-        if (existingTab) {
-          return prev;
-        }
-        const fileName = file.path.split("/").pop() || file.path;
-        return [...prev, { id: file.path, name: fileName, isModified: false }];
-      });
-      setActiveTabId(file.path);
-    }
-  }, []);
+  const handleFileSelect = useCallback(
+    (file: FileTreeNode) => {
+      if (file.type === "file") {
+        setSearchParams((prev) => {
+          const currentTabs = prev.getAll("tab");
+          const newParams = new URLSearchParams(prev);
 
-  const handleTabSelect = useCallback((tabId: string) => {
-    setActiveTabId(tabId);
-    setSelectedFilePath(tabId);
-  }, []);
+          // Add tab if not already present
+          if (!currentTabs.includes(file.path)) {
+            newParams.append("tab", file.path);
+          }
 
-  const handleTabClose = useCallback(
-    (tabId: string) => {
-      setTabs((prev) => {
-        const newTabs = prev.filter((t) => t.id !== tabId);
-        if (activeTabId === tabId && newTabs.length > 0) {
-          setActiveTabId(newTabs[newTabs.length - 1].id);
-          setSelectedFilePath(newTabs[newTabs.length - 1].id);
-        } else if (newTabs.length === 0) {
-          setActiveTabId(null);
-          setSelectedFilePath(null);
-        }
-        return newTabs;
-      });
+          // Set as active tab
+          newParams.set("activeTab", file.path);
+
+          return newParams;
+        });
+      }
     },
-    [activeTabId],
+    [setSearchParams],
   );
 
   const handleNewTab = useCallback(() => {
-    const newId = `new-${Date.now()}`;
-    const newTab: Tab = {
-      id: newId,
-      name: t("untitled"),
-      isModified: true,
-    };
-    setTabs((prev) => [...prev, newTab]);
-    setActiveTabId(newId);
+    //TODO: handle new tab + new file creation
   }, [t]);
 
   const handleNewFile = useCallback(() => {
-    handleNewTab();
+    //TODO: handle new tab + new file creation
   }, [handleNewTab]);
 
   const handleContentChange = useCallback(
     (content: string) => {
-      if (!activeTabId) return;
-
-      setTabs((prev) =>
-        prev.map((t) =>
-          t.id === activeTabId ? { ...t, isModified: true } : t,
-        ),
-      );
-      setIsSynced(false);
-
-      setTimeout(() => setIsSynced(true), 1500);
+      //TODO: handle content change
     },
     [activeTabId],
   );
@@ -171,13 +141,7 @@ export const Workspace = () => {
           </div>
 
           <div className="flex-1 min-w-0 overflow-hidden">
-            <TabBar
-              tabs={tabs}
-              activeTabId={activeTabId}
-              onTabSelect={handleTabSelect}
-              onTabClose={handleTabClose}
-              onNewTab={handleNewTab}
-            />
+            <TabBar files={files} onNewTab={handleNewTab} />
           </div>
         </div>
 
@@ -189,7 +153,7 @@ export const Workspace = () => {
                 style={{ width: sidebarWidth }}
               >
                 <FileTree
-                  selectedFilePath={selectedFilePath}
+                  selectedFilePath={selectedFilePath ?? null}
                   onFileSelect={handleFileSelect}
                 />
               </div>
