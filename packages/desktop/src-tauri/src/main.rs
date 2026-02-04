@@ -1,7 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tauri::menu::{Menu, MenuBuilder, MenuItem, SubmenuBuilder};
+use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, AppHandle};
 use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
@@ -591,13 +591,13 @@ fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
     let open_folder = MenuItem::with_id(app, "open_folder", "Open Folder...", true, Some("cmd+o"))?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, Some("cmd+q"))?;
 
-    // Edit menu items
-    let undo = MenuItem::with_id(app, "undo", "Undo", true, Some("cmd+z"))?;
-    let redo = MenuItem::with_id(app, "redo", "Redo", true, Some("cmd+shift+z"))?;
-    let cut = MenuItem::with_id(app, "cut", "Cut", true, Some("cmd+x"))?;
-    let copy = MenuItem::with_id(app, "copy", "Copy", true, Some("cmd+c"))?;
-    let paste = MenuItem::with_id(app, "paste", "Paste", true, Some("cmd+v"))?;
-    let select_all = MenuItem::with_id(app, "select_all", "Select All", true, Some("cmd+a"))?;
+    // Edit menu items - using predefined items for native OS behavior
+    let undo = PredefinedMenuItem::undo(app, None)?;
+    let redo = PredefinedMenuItem::redo(app, None)?;
+    let cut = PredefinedMenuItem::cut(app, None)?;
+    let copy = PredefinedMenuItem::copy(app, None)?;
+    let paste = PredefinedMenuItem::paste(app, None)?;
+    let select_all = PredefinedMenuItem::select_all(app, None)?;
 
     // Theme menu items
     let theme_light = MenuItem::with_id(app, "theme_light", "Light", true, None::<&str>)?;
@@ -669,25 +669,6 @@ fn main() {
                 }
                 "quit" => {
                     app.exit(0);
-                }
-                // Edit menu items - emit events for the frontend to handle
-                "undo" => {
-                    let _ = app.emit("edit-action", "undo");
-                }
-                "redo" => {
-                    let _ = app.emit("edit-action", "redo");
-                }
-                "cut" => {
-                    let _ = app.emit("edit-action", "cut");
-                }
-                "copy" => {
-                    let _ = app.emit("edit-action", "copy");
-                }
-                "paste" => {
-                    let _ = app.emit("edit-action", "paste");
-                }
-                "select_all" => {
-                    let _ = app.emit("edit-action", "select_all");
                 }
                 // Theme menu items
                 "theme_light" => {

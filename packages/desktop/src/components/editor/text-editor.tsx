@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect } from "react";
+import { useCallback, useRef } from "react";
 import { Plate, usePlateEditor } from "platejs/react";
 import type { Value } from "platejs";
 import {
@@ -20,7 +20,6 @@ import { H1Element, H2Element, H3Element } from "@/components/ui/heading-node";
 import { ToolbarButton } from "@/components/ui/toolbar"; // Generic toolbar button
 import type { FileEntry } from "../../utils/fs";
 import { getStore } from "../../utils/tinybase";
-import { platformAdapter } from "@/adapters";
 
 interface TextEditorProps {
   file: FileEntry;
@@ -60,39 +59,6 @@ export function TextEditor({ file }: TextEditorProps) {
       store.setCell("files", file.path, "content", normalizedMarkdown);
     }, 300);
   }, [editor, file.path, store]);
-
-  // Listen for edit actions from Tauri menu (macOS Edit menu)
-  useEffect(() => {
-    if (!editor) return;
-
-    const unlisten = platformAdapter.addEditActionListener?.(
-      (action: string) => {
-        switch (action) {
-          case "select_all":
-            // Use native browser select all command
-            document.execCommand("selectAll");
-            break;
-          case "undo":
-            document.execCommand("undo");
-            break;
-          case "redo":
-            document.execCommand("redo");
-            break;
-          case "cut":
-            document.execCommand("cut");
-            break;
-          case "copy":
-            document.execCommand("copy");
-            break;
-          case "paste":
-            document.execCommand("paste");
-            break;
-        }
-      },
-    );
-
-    return unlisten;
-  }, [editor]);
 
   return (
     <Plate editor={editor} onValueChange={handleChange}>
