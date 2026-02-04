@@ -22,6 +22,11 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   private themeListeners: Map<(theme: Theme) => void, Promise<UnlistenFn>> =
     new Map();
 
+  private editActionListeners: Map<
+    (action: string) => void,
+    Promise<UnlistenFn>
+  > = new Map();
+
   /**
    * Opens a native directory picker dialog using Tauri
    */
@@ -62,6 +67,28 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       unlistenPromise.then((unlisten) => unlisten());
       this.themeListeners.delete(callback);
     }
+  }
+
+  /**
+   * Adds an edit action listener that listens to Tauri edit-action events
+   */
+  addEditActionListener(callback: (action: string) => void): () => void {
+    const unlistenPromise = listen("edit-action", (event) => {
+      const action = event.payload as string;
+      callback(action);
+    });
+
+    // Store the unlisten promise so we can clean up later
+    this.editActionListeners.set(callback, unlistenPromise);
+
+    // Return cleanup function
+    return () => {
+      const unlistenPromise = this.editActionListeners.get(callback);
+      if (unlistenPromise) {
+        unlistenPromise.then((unlisten) => unlisten());
+        this.editActionListeners.delete(callback);
+      }
+    };
   }
 
   getPersister(store: Store, basePath: string) {

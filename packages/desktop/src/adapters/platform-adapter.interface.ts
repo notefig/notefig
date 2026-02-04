@@ -28,5 +28,14 @@ export interface IPlatformAdapter {
    */
   removeThemeListener(callback: (theme: Theme) => void): void;
 
+  /**
+   * Adds an edit action listener (for menu commands like Select All, Undo, etc.)
+   * @param callback - Function to call when an edit action is triggered
+   * @returns Cleanup function to remove the listener (optional for browser)
+   */
+  addEditActionListener?(
+    callback: (action: string) => void,
+  ): (() => void) | void;
+
   getPersister(store: Store, basePath: string): Persister;
 }

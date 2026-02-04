@@ -591,6 +591,14 @@ fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
     let open_folder = MenuItem::with_id(app, "open_folder", "Open Folder...", true, Some("cmd+o"))?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, Some("cmd+q"))?;
 
+    // Edit menu items
+    let undo = MenuItem::with_id(app, "undo", "Undo", true, Some("cmd+z"))?;
+    let redo = MenuItem::with_id(app, "redo", "Redo", true, Some("cmd+shift+z"))?;
+    let cut = MenuItem::with_id(app, "cut", "Cut", true, Some("cmd+x"))?;
+    let copy = MenuItem::with_id(app, "copy", "Copy", true, Some("cmd+c"))?;
+    let paste = MenuItem::with_id(app, "paste", "Paste", true, Some("cmd+v"))?;
+    let select_all = MenuItem::with_id(app, "select_all", "Select All", true, Some("cmd+a"))?;
+
     // Theme menu items
     let theme_light = MenuItem::with_id(app, "theme_light", "Light", true, None::<&str>)?;
     let theme_dark = MenuItem::with_id(app, "theme_dark", "Dark", true, None::<&str>)?;
@@ -601,6 +609,17 @@ fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
         .item(&open_folder)
         .separator()
         .item(&quit)
+        .build()?;
+
+    let edit_submenu = SubmenuBuilder::new(app, "Edit")
+        .item(&undo)
+        .item(&redo)
+        .separator()
+        .item(&cut)
+        .item(&copy)
+        .item(&paste)
+        .separator()
+        .item(&select_all)
         .build()?;
 
     let theme_submenu = SubmenuBuilder::new(app, "Theme")
@@ -616,6 +635,7 @@ fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
     // Build main menu
     let menu = MenuBuilder::new(app)
         .item(&file_submenu)
+        .item(&edit_submenu)
         .item(&view_submenu)
         .build()?;
 
@@ -650,6 +670,26 @@ fn main() {
                 "quit" => {
                     app.exit(0);
                 }
+                // Edit menu items - emit events for the frontend to handle
+                "undo" => {
+                    let _ = app.emit("edit-action", "undo");
+                }
+                "redo" => {
+                    let _ = app.emit("edit-action", "redo");
+                }
+                "cut" => {
+                    let _ = app.emit("edit-action", "cut");
+                }
+                "copy" => {
+                    let _ = app.emit("edit-action", "copy");
+                }
+                "paste" => {
+                    let _ = app.emit("edit-action", "paste");
+                }
+                "select_all" => {
+                    let _ = app.emit("edit-action", "select_all");
+                }
+                // Theme menu items
                 "theme_light" => {
                     let _ = app.emit("theme-changed", "light");
                 }
