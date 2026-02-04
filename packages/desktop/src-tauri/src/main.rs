@@ -21,6 +21,8 @@ struct FileRowData {
     size: Option<u64>,
     #[serde(rename = "contentHash")]
     content_hash: String,
+    #[serde(rename = "savedContentHash")]
+    saved_content_hash: String,
     content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
@@ -39,6 +41,7 @@ struct SaveResponse {
     deleted: usize,
     failed: usize,
     errors: Vec<String>,
+    saved_paths: Vec<String>, // Paths that were successfully saved
 }
 
 // Helper function: Check if file is binary based on extension blacklist
@@ -428,7 +431,8 @@ async fn load_directory_files(base_path: String) -> Result<TinyBaseContent, Stri
                         entry_type: entry_type.to_string(),
                         modified,
                         size,
-                        content_hash,
+                        content_hash: content_hash.clone(),
+                        saved_content_hash: content_hash, // Initially same as content_hash
                         content,
                         error,
                     },
@@ -475,20 +479,17 @@ async fn save_files(
             continue;
         }
         
-        // Recompute hash from actual content (don't trust the persisted hash)
-        // This ensures we detect changes even if the contentHash field in TinyBase is stale
+        // Compute hash from current content in TinyBase state
         let current_content_hash = compute_hash(&row_data.content);
-        let fs_hash = fs_state.get(path);
         
-        // Skip if hash matches (no change)
-        if let Some(existing_hash) = fs_hash {
-            if existing_hash == &current_content_hash {
-                skipped += 1;
-                continue;
-            }
+        // Compare with savedContentHash to detect changes
+        // Skip if content hasn't changed since last save
+        if current_content_hash == row_data.saved_content_hash {
+            skipped += 1;
+            continue;
         }
         
-        // Needs save (new or modified)
+        // Content has changed, needs save
         to_save.push((path.clone(), row_data.clone()));
     }
     
@@ -500,12 +501,19 @@ async fn save_files(
     }
     
     // Step 4: Execute saves in parallel
-    let save_futures: Vec<_> = to_save
+    let base_path_clone = base_path.clone();
+    let save_tasks: Vec<_> = to_save
         .into_iter()
-        .map(|(path, data)| save_single_entry(base_path.clone(), path, data))
+        .map(|(path, data)| {
+            let base = base_path_clone.clone();
+            async move {
+                let result = save_single_entry(base, path.clone(), data).await;
+                (path, result)
+            }
+        })
         .collect();
     
-    let save_results = futures::future::join_all(save_futures).await;
+    let save_results = futures::future::join_all(save_tasks).await;
     
     // Step 5: Execute deletes in parallel
     let delete_futures: Vec<_> = to_delete
@@ -516,13 +524,25 @@ async fn save_files(
     let delete_results = futures::future::join_all(delete_futures).await;
     
     // Step 6: Aggregate results
-    let saved = save_results.iter().filter(|r| r.is_ok()).count();
+    let mut saved_paths = Vec::new();
+    for (path, result) in &save_results {
+        if result.is_ok() {
+            saved_paths.push(path.clone());
+        }
+    }
+    
+    let saved = saved_paths.len();
     let deleted = delete_results.iter().filter(|r| r.is_ok()).count();
-    let failed = save_results.iter().filter(|r| r.is_err()).count()
+    let failed = save_results.iter().filter(|(_, r)| r.is_err()).count()
         + delete_results.iter().filter(|r| r.is_err()).count();
     
     let mut errors = Vec::new();
-    for result in save_results.iter().chain(delete_results.iter()) {
+    for (_, result) in save_results.iter() {
+        if let Err(e) = result {
+            errors.push(e.to_string());
+        }
+    }
+    for result in delete_results.iter() {
         if let Err(e) = result {
             errors.push(e.to_string());
         }
@@ -540,6 +560,7 @@ async fn save_files(
         deleted,
         failed,
         errors,
+        saved_paths,
     })
 }
 

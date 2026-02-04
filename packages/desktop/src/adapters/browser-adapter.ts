@@ -116,27 +116,21 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
           const [tables, _values] = getContent();
           const filesTable = (tables as Record<string, any>).files || {};
 
-          // Load current IndexedDB state to detect changes
-          const currentFiles = await storage.loadAllFiles();
-
           let saved = 0;
           let skipped = 0;
           let deleted = 0;
+          const savedPaths: string[] = [];
 
           // Process each file in TinyBase
           for (const [path, fileData] of Object.entries(filesTable) as [
             string,
             FileRowData,
           ][]) {
-            // Recompute hash from actual content (don't trust persisted hash)
+            // Compute hash from current content
             const currentContentHash = calculateContentHash(fileData.content);
-            const existingFile = currentFiles[path];
 
-            // Skip if hash matches (no change)
-            if (
-              existingFile &&
-              calculateContentHash(existingFile.content) === currentContentHash
-            ) {
+            // Skip if content hasn't changed since last save
+            if (currentContentHash === fileData.savedContentHash) {
               skipped++;
               continue;
             }
@@ -144,7 +138,11 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
             // Save file (new or modified)
             await storage.saveFile(fileData);
             saved++;
+            savedPaths.push(path);
           }
+
+          // Load current IndexedDB state to detect deletions
+          const currentFiles = await storage.loadAllFiles();
 
           // Delete files that exist in IndexedDB but not in TinyBase
           for (const path of Object.keys(currentFiles)) {
@@ -152,6 +150,24 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
               await storage.deleteFile(path);
               deleted++;
             }
+          }
+
+          // Update savedContentHash for successfully saved files
+          if (savedPaths.length > 0) {
+            store.transaction(() => {
+              for (const path of savedPaths) {
+                const content = store.getCell(
+                  "files",
+                  path,
+                  "content",
+                ) as string;
+                if (content !== undefined) {
+                  const hash = calculateContentHash(content);
+                  store.setCell("files", path, "savedContentHash", hash);
+                  store.setCell("files", path, "contentHash", hash);
+                }
+              }
+            });
           }
 
           console.log(

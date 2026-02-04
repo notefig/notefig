@@ -10,6 +10,7 @@ import {
   Persister,
   createCustomPersister,
 } from "tinybase/persisters";
+import { calculateContentHash } from "@/utils/hash";
 
 /**
  * Tauri platform adapter
@@ -95,6 +96,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
             deleted: number;
             failed: number;
             errors: string[];
+            saved_paths: string[];
           }>("save_files", {
             basePath: basePath,
             files: filesTable,
@@ -103,6 +105,25 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
           console.log(
             `[Persister] Saved: ${result.saved}, Skipped: ${result.skipped}, Deleted: ${result.deleted}, Failed: ${result.failed}`,
           );
+
+          // Update savedContentHash for successfully saved files
+          if (result.saved_paths && result.saved_paths.length > 0) {
+            store.transaction(() => {
+              for (const path of result.saved_paths) {
+                const content = store.getCell(
+                  "files",
+                  path,
+                  "content",
+                ) as string;
+                if (content !== undefined) {
+                  // Calculate hash and update savedContentHash
+                  const hash = calculateContentHash(content);
+                  store.setCell("files", path, "savedContentHash", hash);
+                  store.setCell("files", path, "contentHash", hash);
+                }
+              }
+            });
+          }
 
           if (result.failed > 0 && result.errors.length > 0) {
             console.error("[Persister] Save errors:", result.errors);

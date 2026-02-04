@@ -4,7 +4,6 @@ import { X, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTranslation } from "react-i18next";
-import type { FileEntries } from "@/utils/fs";
 import {
   DndContext,
   closestCenter,

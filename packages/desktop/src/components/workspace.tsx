@@ -130,7 +130,7 @@ export const Workspace = () => {
           </div>
 
           <div className="flex-1 min-w-0 overflow-hidden">
-            <TabBar files={files} onNewTab={handleNewTab} />
+            <TabBar onNewTab={handleNewTab} />
           </div>
         </div>
 
