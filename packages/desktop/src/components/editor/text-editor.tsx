@@ -1,23 +1,21 @@
 import { useCallback, useRef } from "react";
 import { Plate, usePlateEditor } from "platejs/react";
-import type { Value } from "platejs";
-import {
-  BoldPlugin,
-  ItalicPlugin,
-  UnderlinePlugin,
-  BlockquotePlugin,
-  H1Plugin,
-  H2Plugin,
-  H3Plugin,
-} from "@platejs/basic-nodes/react";
 import { MarkdownPlugin } from "@platejs/markdown";
-import { MarkdownKit } from "@/components/editor/plugins/markdown-kit";
+import { MarkdownEditorKit } from "@/components/editor/markdown-editor-kit";
 import { FixedToolbar } from "@/components/ui/fixed-toolbar";
 import { MarkToolbarButton } from "@/components/ui/mark-toolbar-button";
 import { Editor, EditorContainer } from "@/components/ui/editor";
-import { BlockquoteElement } from "@/components/ui/blockquote-node";
-import { H1Element, H2Element, H3Element } from "@/components/ui/heading-node";
-import { ToolbarButton } from "@/components/ui/toolbar"; // Generic toolbar button
+import { ToolbarButton } from "@/components/ui/toolbar";
+import { Separator } from "@/components/ui/separator";
+import {
+  Code2Icon,
+  ListIcon,
+  ListOrderedIcon,
+  Link2Icon,
+  StrikethroughIcon,
+  HighlighterIcon,
+} from "lucide-react";
+import { toggleList, ListStyleType } from "@platejs/list";
 import type { FileEntry } from "../../utils/fs";
 import { getStore } from "../../utils/tinybase";
 
@@ -30,16 +28,7 @@ export function TextEditor({ file }: TextEditorProps) {
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const editor = usePlateEditor({
-    plugins: [
-      ...MarkdownKit,
-      BoldPlugin,
-      ItalicPlugin,
-      UnderlinePlugin,
-      H1Plugin.withComponent(H1Element),
-      H2Plugin.withComponent(H2Element),
-      H3Plugin.withComponent(H3Element),
-      BlockquotePlugin.withComponent(BlockquoteElement),
-    ],
+    plugins: MarkdownEditorKit,
     value: (editor) =>
       editor.getApi(MarkdownPlugin).markdown.deserialize(file.content || ""),
   });
@@ -47,12 +36,10 @@ export function TextEditor({ file }: TextEditorProps) {
   const handleChange = useCallback(() => {
     if (!editor) return;
 
-    // Clear existing timeout
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
 
-    // Debounce save by 300ms
     saveTimeoutRef.current = setTimeout(() => {
       const markdown = editor.getApi(MarkdownPlugin).markdown.serialize();
       const normalizedMarkdown = markdown.replace(/\&\#x20\;/, "");
@@ -62,22 +49,89 @@ export function TextEditor({ file }: TextEditorProps) {
 
   return (
     <Plate editor={editor} onValueChange={handleChange}>
-      <FixedToolbar className="justify-start rounded-t-lg">
-        <ToolbarButton onClick={() => editor.tf.h1.toggle()}>H1</ToolbarButton>
-        <ToolbarButton onClick={() => editor.tf.h2.toggle()}>H2</ToolbarButton>
-        <ToolbarButton onClick={() => editor.tf.h3.toggle()}>H3</ToolbarButton>
-        <ToolbarButton onClick={() => editor.tf.blockquote.toggle()}>
-          Quote
+      <FixedToolbar className="justify-start rounded-t-lg gap-1 flex-wrap">
+        <ToolbarButton
+          onClick={() => editor.tf.h1.toggle()}
+          tooltip="Heading 1"
+        >
+          H1
         </ToolbarButton>
+        <ToolbarButton
+          onClick={() => editor.tf.h2.toggle()}
+          tooltip="Heading 2"
+        >
+          H2
+        </ToolbarButton>
+        <ToolbarButton
+          onClick={() => editor.tf.h3.toggle()}
+          tooltip="Heading 3"
+        >
+          H3
+        </ToolbarButton>
+
+        <Separator orientation="vertical" className="h-6" />
+
         <MarkToolbarButton nodeType="bold" tooltip="Bold (⌘+B)">
-          B
+          <strong>B</strong>
         </MarkToolbarButton>
         <MarkToolbarButton nodeType="italic" tooltip="Italic (⌘+I)">
-          I
+          <em>I</em>
         </MarkToolbarButton>
         <MarkToolbarButton nodeType="underline" tooltip="Underline (⌘+U)">
-          U
+          <span className="underline">U</span>
         </MarkToolbarButton>
+        <MarkToolbarButton
+          nodeType="strikethrough"
+          tooltip="Strikethrough (⌘+Shift+X)"
+        >
+          <StrikethroughIcon className="h-4 w-4" />
+        </MarkToolbarButton>
+        <MarkToolbarButton nodeType="code" tooltip="Inline Code (⌘+E)">
+          <Code2Icon className="h-4 w-4" />
+        </MarkToolbarButton>
+
+        <Separator orientation="vertical" className="h-6" />
+
+        <ToolbarButton
+          onClick={() =>
+            toggleList(editor, { listStyleType: ListStyleType.Disc })
+          }
+          tooltip="Bullet List"
+        >
+          <ListIcon className="h-4 w-4" />
+        </ToolbarButton>
+        <ToolbarButton
+          onClick={() =>
+            toggleList(editor, { listStyleType: ListStyleType.Decimal })
+          }
+          tooltip="Numbered List"
+        >
+          <ListOrderedIcon className="h-4 w-4" />
+        </ToolbarButton>
+
+        <Separator orientation="vertical" className="h-6" />
+
+        <ToolbarButton
+          onClick={() => editor.tf.blockquote.toggle()}
+          tooltip="Blockquote"
+        >
+          Quote
+        </ToolbarButton>
+        <ToolbarButton
+          onClick={() => editor.tf.codeBlock.toggle()}
+          tooltip="Code Block (⌘+Alt+8)"
+        >
+          {"</>"}
+        </ToolbarButton>
+
+        <Separator orientation="vertical" className="h-6" />
+
+        <ToolbarButton
+          onClick={() => editor.tf.link.toggle()}
+          tooltip="Toggle Link"
+        >
+          <Link2Icon className="h-4 w-4" />
+        </ToolbarButton>
       </FixedToolbar>
       <EditorContainer>
         <Editor placeholder="Type your amazing content here..." />
