@@ -9,12 +9,21 @@ import { StatusBar } from "@/components/editor/status-bar";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
-import { getStore } from "../utils/tinybase";
+import { getOrCreateStore } from "@/utils/tinybase";
 import { useTable } from "tinybase/ui-react";
 import type { FileEntries, FileTreeNode } from "@/utils/fs";
+import { DebugPanel } from "./debug-panel";
+import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 
 export const Workspace = () => {
-  const store = getStore();
+  const { workspacePath } = useWorkspaceParams();
+
+  // Early return if no workspace path
+  if (!workspacePath) {
+    return null;
+  }
+
+  const store = getOrCreateStore(workspacePath);
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const files: FileEntries = useTable("files", store) as any;
@@ -22,7 +31,6 @@ export const Workspace = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(240);
 
-  const [selectedFilePath, setSelectedFilePath] = useState<string | null>();
   const [isSynced, setIsSynced] = useState(true);
   const [isResizing, setIsResizing] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -114,6 +122,7 @@ export const Workspace = () => {
       />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <DebugPanel isEditRoute={true} />
         <div className="flex items-stretch border-b border-border shrink-0">
           <div
             className="shrink-0 border-r rtl:border-r-0 rtl:border-l border-border"
@@ -142,8 +151,9 @@ export const Workspace = () => {
                 style={{ width: sidebarWidth }}
               >
                 <FileTree
-                  selectedFilePath={selectedFilePath ?? null}
+                  selectedFilePath={null}
                   onFileSelect={handleFileSelect}
+                  basePath={workspacePath!}
                 />
               </div>
               <div
@@ -173,7 +183,7 @@ export const Workspace = () => {
                       }}
                       className="h-full"
                     >
-                      <TextEditor file={file} />
+                      <TextEditor file={file} basePath={workspacePath} />
                     </div>
                   );
                 })}

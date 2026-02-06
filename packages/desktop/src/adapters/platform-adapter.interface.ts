@@ -3,6 +3,18 @@ import type { Store } from "tinybase";
 import type { Persister } from "tinybase/persisters";
 
 /**
+ * Platform events that can be emitted
+ */
+export type PlatformEvent =
+  | { type: "theme-changed"; payload: Theme }
+  | { type: "folder-selected"; payload: string };
+
+/**
+ * Generic event listener callback
+ */
+export type PlatformEventListener = (event: PlatformEvent) => void;
+
+/**
  * Platform adapter interface
  * Provides a unified interface for platform-specific operations
  * (Tauri vs Browser)
@@ -16,17 +28,17 @@ export interface IPlatformAdapter {
   pickDirectory(title: string): Promise<string | null>;
 
   /**
-   * Adds a theme change listener
-   * @param callback - Function to call when theme changes
+   * Adds a generic platform event listener
+   * @param callback - Function to call when events are emitted
    * @returns Cleanup function to remove the listener
    */
-  addThemeListener(callback: (theme: Theme) => void): () => void;
+  addEventListener(callback: PlatformEventListener): () => void;
 
   /**
-   * Removes a theme change listener
+   * Removes a platform event listener
    * @param callback - The callback function to remove
    */
-  removeThemeListener(callback: (theme: Theme) => void): void;
+  removeEventListener(callback: PlatformEventListener): void;
 
   getPersister(store: Store, basePath: string): Persister;
 }

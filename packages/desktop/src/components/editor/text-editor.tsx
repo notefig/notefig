@@ -13,18 +13,18 @@ import {
   ListOrderedIcon,
   Link2Icon,
   StrikethroughIcon,
-  HighlighterIcon,
 } from "lucide-react";
 import { toggleList, ListStyleType } from "@platejs/list";
 import type { FileEntry } from "../../utils/fs";
-import { getStore } from "../../utils/tinybase";
+import { getOrCreateStore } from "@/utils/tinybase";
 
 interface TextEditorProps {
   file: FileEntry;
+  basePath: string;
 }
 
-export function TextEditor({ file }: TextEditorProps) {
-  const store = getStore();
+export function TextEditor({ file, basePath }: TextEditorProps) {
+  const store = getOrCreateStore(basePath);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const editor = usePlateEditor({

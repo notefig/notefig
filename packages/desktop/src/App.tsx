@@ -1,5 +1,5 @@
 import "./App.css";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, useNavigate } from "react-router-dom";
 import { Workspace } from "@/components/workspace";
 import { Welcome } from "@/components/welcome";
 import { MockDirectoryPickerDialog } from "@/components/mock-directory-picker-dialog";
@@ -11,14 +11,25 @@ import { Loader } from "./components/loader";
 
 export const App = () => {
   const { setTheme } = useTheme();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    const cleanup = platformAdapter.addThemeListener((theme) => {
-      setTheme(theme);
+    // Register platform event listener
+    const cleanup = platformAdapter.addEventListener((event) => {
+      switch (event.type) {
+        case "theme-changed":
+          setTheme(event.payload);
+          break;
+        case "folder-selected":
+          // Navigate to the selected folder
+          const encodedPath = encodeURIComponent(event.payload);
+          navigate(`/${encodedPath}`);
+          break;
+      }
     });
 
     return cleanup;
-  }, [setTheme]);
+  }, [setTheme, navigate]);
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground overflow-hidden">

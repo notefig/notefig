@@ -9,12 +9,13 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { FileTreeNode, flatEntriesToTree, getFileName } from "@/utils/fs";
-import { getStore } from "../../utils/tinybase";
+import { getOrCreateStore } from "@/utils/tinybase";
 import { useTable } from "tinybase/ui-react";
 
 interface FileTreeProps {
   selectedFilePath: string | null;
   onFileSelect: (file: FileTreeNode) => void;
+  basePath: string;
 }
 
 interface FileTreeItemProps {
@@ -47,6 +48,7 @@ function FileTreeItem({
     <div>
       <button
         onClick={handleClick}
+        onMouseDown={handleClick}
         className={cn(
           "w-full flex items-center gap-1 px-2 py-1 text-sm hover:bg-accent/50 transition-colors",
           selectedFilePath === node.path && node.type === "file" && "bg-accent",
@@ -98,9 +100,13 @@ function FileTreeItem({
   );
 }
 
-export function FileTree({ selectedFilePath, onFileSelect }: FileTreeProps) {
-  const store = getStore();
-  const files = useTable("files", store!);
+export function FileTree({
+  selectedFilePath,
+  onFileSelect,
+  basePath,
+}: FileTreeProps) {
+  const store = getOrCreateStore(basePath);
+  const files = useTable("files", store);
   const filesTree = useMemo(() => {
     return flatEntriesToTree(files as any);
   }, [files]);

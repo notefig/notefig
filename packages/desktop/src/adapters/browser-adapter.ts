@@ -1,6 +1,8 @@
 import { Store } from "tinybase";
-import type { IPlatformAdapter } from "./platform-adapter.interface";
-import type { Theme } from "@/components/theme-provider";
+import type {
+  IPlatformAdapter,
+  PlatformEventListener,
+} from "./platform-adapter.interface";
 import {
   type PersistedChanges,
   type PersistedContent,
@@ -36,11 +38,10 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
   }
 
   /**
-   * Adds a theme change listener (no-op in browser)
-   * In browser mode, theme changes are handled by the ThemeProvider component
-   * and don't come from external sources like Tauri menu events
+   * Adds a generic platform event listener (no-op in browser)
+   * In browser mode, events are handled through custom DOM events
    */
-  addThemeListener(_callback: (theme: Theme) => void): () => void {
+  addEventListener(_callback: PlatformEventListener): () => void {
     // No-op in browser - return empty cleanup function
     return () => {
       // Nothing to clean up
@@ -48,10 +49,10 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
   }
 
   /**
-   * Removes a theme change listener (no-op in browser)
+   * Removes a platform event listener (no-op in browser)
    */
-  removeThemeListener(_callback: (theme: Theme) => void): void {
-    // No-op in browser - theme changes are handled by ThemeProvider
+  removeEventListener(_callback: PlatformEventListener): void {
+    // No-op in browser
   }
 
   getPersister(store: Store, basePath: string): Persister {
@@ -124,7 +125,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
           // Process each file in TinyBase
           for (const [path, fileData] of Object.entries(filesTable) as [
             string,
-            FileRowData,
+            any,
           ][]) {
             // Compute hash from current content
             const currentContentHash = calculateContentHash(fileData.content);

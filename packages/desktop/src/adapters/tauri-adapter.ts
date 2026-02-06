@@ -1,5 +1,7 @@
-import type { IPlatformAdapter } from "./platform-adapter.interface";
-import type { Theme } from "@/components/theme-provider";
+import type {
+  IPlatformAdapter,
+  PlatformEventListener,
+} from "./platform-adapter.interface";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -18,9 +20,10 @@ import { calculateContentHash } from "@/utils/hash";
  */
 export class TauriPlatformAdapter implements IPlatformAdapter {
   protected persister: Persister | undefined;
+  protected currentBasePath: string | null = null;
 
-  private themeListeners: Map<(theme: Theme) => void, Promise<UnlistenFn>> =
-    new Map();
+  private eventListeners: Set<PlatformEventListener> = new Set();
+  private unlistenFns: Promise<UnlistenFn>[] = [];
 
   /**
    * Opens a native directory picker dialog using Tauri
@@ -36,38 +39,80 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   }
 
   /**
-   * Adds a theme change listener that listens to Tauri events
+   * Adds a generic platform event listener
    */
-  addThemeListener(callback: (theme: Theme) => void): () => void {
-    const unlistenPromise = listen("theme-changed", (event) => {
-      const theme = event.payload as Theme;
-      callback(theme);
-    });
+  addEventListener(callback: PlatformEventListener): () => void {
+    this.eventListeners.add(callback);
 
-    // Store the unlisten promise so we can clean up later
-    this.themeListeners.set(callback, unlistenPromise);
+    // Set up listeners if this is the first callback
+    if (this.eventListeners.size === 1) {
+      this.setupListeners();
+    }
 
     // Return cleanup function
     return () => {
-      this.removeThemeListener(callback);
+      this.removeEventListener(callback);
     };
   }
 
   /**
-   * Removes a theme change listener
+   * Removes a platform event listener
    */
-  removeThemeListener(callback: (theme: Theme) => void): void {
-    const unlistenPromise = this.themeListeners.get(callback);
-    if (unlistenPromise) {
-      unlistenPromise.then((unlisten) => unlisten());
-      this.themeListeners.delete(callback);
+  removeEventListener(callback: PlatformEventListener): void {
+    this.eventListeners.delete(callback);
+
+    // Clean up listeners if no more callbacks
+    if (this.eventListeners.size === 0) {
+      this.cleanupListeners();
     }
   }
 
+  /**
+   * Set up Tauri event listeners
+   */
+  private setupListeners(): void {
+    // Listen for theme changes
+    const themeUnlisten = listen("theme-changed", (event) => {
+      const theme = event.payload as any;
+      this.eventListeners.forEach((callback) => {
+        callback({ type: "theme-changed", payload: theme });
+      });
+    });
+    this.unlistenFns.push(themeUnlisten);
+
+    // Listen for folder selection
+    const folderUnlisten = listen("folder-selected", (event) => {
+      const folderPath = event.payload as string;
+      this.eventListeners.forEach((callback) => {
+        callback({ type: "folder-selected", payload: folderPath });
+      });
+    });
+    this.unlistenFns.push(folderUnlisten);
+  }
+
+  /**
+   * Clean up Tauri event listeners
+   */
+  private cleanupListeners(): void {
+    this.unlistenFns.forEach((unlistenPromise) => {
+      unlistenPromise.then((unlisten) => unlisten());
+    });
+    this.unlistenFns = [];
+  }
+
   getPersister(store: Store, basePath: string) {
+    // Reset persister if basePath changed
+    if (this.currentBasePath !== null && this.currentBasePath !== basePath) {
+      console.log(`[TauriAdapter] Base path changed, resetting persister`);
+      this.persister = undefined;
+      this.currentBasePath = null;
+    }
+
     if (this.persister) {
       return this.persister;
     }
+
+    this.currentBasePath = basePath;
 
     this.persister = createCustomPersister(
       store,

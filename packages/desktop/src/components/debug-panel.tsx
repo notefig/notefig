@@ -1,19 +1,15 @@
-import { useLocation, useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 
 interface DebugPanelProps {
-  currentDirectory?: string;
-  selectedFilePath?: string;
   isEditRoute: boolean;
 }
 
-export function DebugPanel({
-  currentDirectory,
-  selectedFilePath,
-  isEditRoute,
-}: DebugPanelProps) {
-  const location = useLocation();
+export function DebugPanel({ isEditRoute }: DebugPanelProps) {
+  const currentDirectory = useParams().basePath || null;
   const { basePath, "*": filePath } = useParams();
   const [searchParams] = useSearchParams();
+
+  const selectedFilePath = searchParams.get("activeTab") || null;
 
   // Only show if debug environment variable is set
   if (import.meta.env.VITE_DEBUG !== "true") {
@@ -22,9 +18,6 @@ export function DebugPanel({
 
   return (
     <div className="bg-red-100 border-2 border-red-500 p-2 text-xs font-mono text-black">
-      <div>
-        <strong>🐛 DEBUG ROUTE INFO:</strong>
-      </div>
       <div>
         <strong>Current URL:</strong> {location.pathname}
         {location.search}
