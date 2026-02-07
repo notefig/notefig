@@ -183,7 +183,11 @@ export const Workspace = () => {
                       }}
                       className="h-full"
                     >
-                      <TextEditor file={file} basePath={workspacePath} />
+                      <TextEditor
+                        key={tabPath}
+                        file={file}
+                        basePath={workspacePath}
+                      />
                     </div>
                   );
                 })}
