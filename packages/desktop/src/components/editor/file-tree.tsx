@@ -108,8 +108,8 @@ export function FileTree({
   const store = getOrCreateStore(basePath);
   const files = useTable("files", store);
   const filesTree = useMemo(() => {
-    return flatEntriesToTree(files as any);
-  }, [files]);
+    return flatEntriesToTree(files as any, basePath);
+  }, [files, basePath]);
   return (
     <ScrollArea className="h-full w-full">
       <div className="py-1">

@@ -1,7 +1,8 @@
 import { platformAdapter } from "@/adapters";
 
 export interface FileEntry {
-  path: string;
+  path: string; // Absolute path
+  relativePath?: string; // Relative path to basePath (optional - not all files are inside basePath)
   type: "file" | "directory";
   modified?: Date;
   size?: number;
@@ -90,68 +91,96 @@ export function normalizePath(filePath: string): string {
   return normalized;
 }
 
-export function flatEntriesToTree(flatFiles: FileEntries): FileTreeNode[] {
+export function flatEntriesToTree(
+  flatFiles: FileEntries,
+  basePath: string,
+): FileTreeNode[] {
   const pathMap = new Map<string, FileTreeNode>();
   const rootNodes: FileTreeNode[] = [];
 
+  // Normalize basePath for comparison
+  const normalizedBasePath = normalizePath(basePath);
+
   // First pass: Create all directory nodes that might not exist in flatFiles
   // This ensures parent directories exist even if they weren't explicitly added
-  const allPaths = Object.keys(flatFiles);
+  // We work with relativePath for tree structure
+  const allRelativePaths = Object.values(flatFiles)
+    .map((entry) => entry.relativePath)
+    .filter((rp): rp is string => rp !== undefined);
+
   const directoriesNeeded = new Set<string>();
 
-  allPaths.forEach((path) => {
-    const parts = path.split("/").filter((p) => p.length > 0);
+  allRelativePaths.forEach((relativePath) => {
+    const parts = relativePath.split("/").filter((p) => p.length > 0);
     for (let i = 1; i < parts.length; i++) {
       directoriesNeeded.add(parts.slice(0, i).join("/"));
     }
   });
 
-  directoriesNeeded.forEach((dirPath) => {
-    if (!flatFiles[dirPath]) {
+  // Create missing directory nodes
+  directoriesNeeded.forEach((relPath) => {
+    const absolutePath = `${normalizedBasePath}/${relPath}`;
+    if (!flatFiles[absolutePath]) {
       const dirNode: FileTreeNode = {
-        path: dirPath,
+        path: absolutePath,
+        relativePath: relPath,
         type: "directory",
         contentHash: "",
         content: "",
         children: [],
       };
-      pathMap.set(dirPath, dirNode);
+      pathMap.set(absolutePath, dirNode);
     }
   });
 
-  Object.entries(flatFiles).forEach(([path, entry]) => {
+  // Add all existing file entries
+  Object.entries(flatFiles).forEach(([absolutePath, entry]) => {
     const node: FileTreeNode = {
       ...entry,
-      path: path,
+      path: absolutePath,
       children: entry.type === "directory" ? [] : undefined,
     };
-    pathMap.set(path, node);
+    pathMap.set(absolutePath, node);
   });
 
-  const sortedPaths = Array.from(pathMap.keys()).sort((a, b) => {
-    const depthA = a.split("/").filter((p) => p.length > 0).length;
-    const depthB = b.split("/").filter((p) => p.length > 0).length;
+  // Sort by relative path depth for hierarchical processing
+  const sortedEntries = Array.from(pathMap.values()).sort((a, b) => {
+    const depthA = (a.relativePath || "")
+      .split("/")
+      .filter((p) => p.length > 0).length;
+    const depthB = (b.relativePath || "")
+      .split("/")
+      .filter((p) => p.length > 0).length;
     return depthA - depthB;
   });
 
-  sortedPaths.forEach((path) => {
-    const node = pathMap.get(path)!;
-    const parts = path.split("/").filter((p) => p.length > 0);
+  sortedEntries.forEach((node) => {
+    if (!node.relativePath) {
+      // Files without relativePath (outside workspace) - skip for now
+      return;
+    }
+
+    const parts = node.relativePath.split("/").filter((p) => p.length > 0);
 
     if (parts.length === 1) {
+      // Top-level entry
       rootNodes.push(node);
     } else {
-      const parentPath = parts.slice(0, -1).join("/");
-      const parent = pathMap.get(parentPath);
+      // Nested entry - find parent
+      const parentRelativePath = parts.slice(0, -1).join("/");
+      const parentAbsolutePath = `${normalizedBasePath}/${parentRelativePath}`;
+      const parent = pathMap.get(parentAbsolutePath);
 
       if (parent && parent.children) {
         parent.children.push(node);
       } else {
+        // Parent not found, add to root (shouldn't happen but be safe)
         rootNodes.push(node);
       }
     }
   });
 
+  // Sort children: directories first, then alphabetically
   const sortChildren = (nodes: FileTreeNode[]) => {
     nodes.sort((a, b) => {
       if (a.type === "directory" && b.type === "file") return -1;

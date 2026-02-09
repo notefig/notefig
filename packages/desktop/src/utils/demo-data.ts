@@ -4,7 +4,8 @@
  */
 
 export interface FileRowData {
-  path: string;
+  path: string; // Absolute path
+  relativePath?: string; // Relative path to basePath (optional - not all files are inside basePath)
   type: "file" | "directory";
   modified?: number;
   size?: number;
@@ -30,10 +31,36 @@ function computeHash(content: string): string {
 /**
  * Generate demo workspace files
  * Returns a flat Record of files matching Rust backend format
+ * Keys are absolute paths, values contain both absolute and relative paths
  */
-export function generateDemoFiles(): Record<string, FileRowData> {
+export function generateDemoFiles(
+  basePath: string,
+): Record<string, FileRowData> {
   const now = Date.now();
   const files: Record<string, FileRowData> = {};
+
+  // Normalize basePath to remove trailing slash for consistency
+  const normalizedBasePath = basePath.endsWith("/")
+    ? basePath.slice(0, -1)
+    : basePath;
+
+  // Helper to create file entry
+  const createEntry = (
+    relativePath: string,
+    type: "file" | "directory",
+    content: string,
+  ): FileRowData => {
+    const absolutePath = `${normalizedBasePath}/${relativePath}`;
+    return {
+      path: absolutePath,
+      relativePath,
+      type,
+      content,
+      contentHash: computeHash(content),
+      modified: now,
+      size: type === "file" ? content.length : undefined,
+    };
+  };
 
   // README.md
   const readmeContent = `# Welcome to Metrists
@@ -57,14 +84,8 @@ This is your demo workspace. Metrists is a local-first note-taking and file mana
 Happy note-taking!
 `;
 
-  files["README.md"] = {
-    path: "README.md",
-    type: "file",
-    content: readmeContent,
-    contentHash: computeHash(readmeContent),
-    modified: now,
-    size: readmeContent.length,
-  };
+  const readmeEntry = createEntry("README.md", "file", readmeContent);
+  files[readmeEntry.path] = readmeEntry;
 
   // metrists.json
   const metristsConfig = {
@@ -79,24 +100,12 @@ Happy note-taking!
     },
   };
   const configContent = JSON.stringify(metristsConfig, null, 2);
-
-  files["metrists.json"] = {
-    path: "metrists.json",
-    type: "file",
-    content: configContent,
-    contentHash: computeHash(configContent),
-    modified: now,
-    size: configContent.length,
-  };
+  const configEntry = createEntry("metrists.json", "file", configContent);
+  files[configEntry.path] = configEntry;
 
   // docs directory
-  files["docs"] = {
-    path: "docs",
-    type: "directory",
-    content: "",
-    contentHash: "",
-    modified: now,
-  };
+  const docsEntry = createEntry("docs", "directory", "");
+  files[docsEntry.path] = docsEntry;
 
   // docs/getting-started.md
   const gettingStartedContent = `# Getting Started
@@ -123,14 +132,12 @@ Metrists supports full Markdown syntax:
 Start writing and see your formatted text come to life!
 `;
 
-  files["docs/getting-started.md"] = {
-    path: "docs/getting-started.md",
-    type: "file",
-    content: gettingStartedContent,
-    contentHash: computeHash(gettingStartedContent),
-    modified: now,
-    size: gettingStartedContent.length,
-  };
+  const gettingStartedEntry = createEntry(
+    "docs/getting-started.md",
+    "file",
+    gettingStartedContent,
+  );
+  files[gettingStartedEntry.path] = gettingStartedEntry;
 
   // docs/features.md
   const featuresContent = `# Features
@@ -160,23 +167,16 @@ Easy on the eyes with built-in dark mode support.
 Stay tuned for updates!
 `;
 
-  files["docs/features.md"] = {
-    path: "docs/features.md",
-    type: "file",
-    content: featuresContent,
-    contentHash: computeHash(featuresContent),
-    modified: now,
-    size: featuresContent.length,
-  };
+  const featuresEntry = createEntry(
+    "docs/features.md",
+    "file",
+    featuresContent,
+  );
+  files[featuresEntry.path] = featuresEntry;
 
   // notes directory
-  files["notes"] = {
-    path: "notes",
-    type: "directory",
-    content: "",
-    contentHash: "",
-    modified: now,
-  };
+  const notesEntry = createEntry("notes", "directory", "");
+  files[notesEntry.path] = notesEntry;
 
   // notes/2026-02-01.md (daily note)
   const dailyNoteContent = `# 2026-02-01
@@ -196,14 +196,12 @@ Started using Metrists today. The interface is clean and responsive. Looking for
 - Export functionality would be useful
 `;
 
-  files["notes/2026-02-01.md"] = {
-    path: "notes/2026-02-01.md",
-    type: "file",
-    content: dailyNoteContent,
-    contentHash: computeHash(dailyNoteContent),
-    modified: now,
-    size: dailyNoteContent.length,
-  };
+  const dailyNoteEntry = createEntry(
+    "notes/2026-02-01.md",
+    "file",
+    dailyNoteContent,
+  );
+  files[dailyNoteEntry.path] = dailyNoteEntry;
 
   // notes/meeting-notes.md
   const meetingNotesContent = `# Meeting Notes
@@ -231,14 +229,12 @@ Started using Metrists today. The interface is clean and responsive. Looking for
 - [ ] Carol: UI mockups for export flow
 `;
 
-  files["notes/meeting-notes.md"] = {
-    path: "notes/meeting-notes.md",
-    type: "file",
-    content: meetingNotesContent,
-    contentHash: computeHash(meetingNotesContent),
-    modified: now,
-    size: meetingNotesContent.length,
-  };
+  const meetingNotesEntry = createEntry(
+    "notes/meeting-notes.md",
+    "file",
+    meetingNotesContent,
+  );
+  files[meetingNotesEntry.path] = meetingNotesEntry;
 
   // notes/ideas.md
   const ideasContent = `# Ideas
@@ -264,23 +260,12 @@ Random thoughts and ideas worth capturing.
 Remember: not all ideas need to be implemented. Some are just fun to think about!
 `;
 
-  files["notes/ideas.md"] = {
-    path: "notes/ideas.md",
-    type: "file",
-    content: ideasContent,
-    contentHash: computeHash(ideasContent),
-    modified: now,
-    size: ideasContent.length,
-  };
+  const ideasEntry = createEntry("notes/ideas.md", "file", ideasContent);
+  files[ideasEntry.path] = ideasEntry;
 
   // projects directory
-  files["projects"] = {
-    path: "projects",
-    type: "directory",
-    content: "",
-    contentHash: "",
-    modified: now,
-  };
+  const projectsEntry = createEntry("projects", "directory", "");
+  files[projectsEntry.path] = projectsEntry;
 
   // projects/project-alpha.md
   const projectContent = `# Project Alpha
@@ -315,14 +300,12 @@ A new initiative to improve the user onboarding experience.
 Last updated: 2026-02-01
 `;
 
-  files["projects/project-alpha.md"] = {
-    path: "projects/project-alpha.md",
-    type: "file",
-    content: projectContent,
-    contentHash: computeHash(projectContent),
-    modified: now,
-    size: projectContent.length,
-  };
+  const projectEntry = createEntry(
+    "projects/project-alpha.md",
+    "file",
+    projectContent,
+  );
+  files[projectEntry.path] = projectEntry;
 
   return files;
 }

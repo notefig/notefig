@@ -12,7 +12,10 @@ use tokio::io::AsyncWriteExt;
 // Structs for TinyBase format
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 struct FileRowData {
-    path: String,
+    path: String, // Absolute path
+    #[serde(rename = "relativePath")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    relative_path: Option<String>, // Relative path to basePath (optional - not all files are inside basePath)
     #[serde(rename = "type")]
     entry_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -117,14 +120,16 @@ fn get_relative_path(absolute_path: &Path, base_path: &Path) -> Result<String, S
 }
 
 // Helper function: Validate path for security (prevent directory traversal)
-fn validate_path(path: &str) -> Result<(), String> {
-    if path.contains("..") || path.starts_with("/") || path.starts_with("\\") {
-        return Err(format!("Invalid path: directory traversal not allowed: {}", path));
+// Now checks relative path to ensure it's inside the workspace
+fn validate_relative_path(relative_path: &str) -> Result<(), String> {
+    if relative_path.contains("..") || relative_path.starts_with("/") || relative_path.starts_with("\\") {
+        return Err(format!("Invalid path: directory traversal not allowed: {}", relative_path));
     }
     Ok(())
 }
 
 // Helper function: Load current filesystem state (paths + hashes only)
+// Returns a map of absolute path -> content hash
 fn load_filesystem_state(base_path: &str) -> Result<HashMap<String, String>, String> {
     let base = PathBuf::from(base_path);
     let mut state = HashMap::new();
@@ -144,15 +149,14 @@ fn load_filesystem_state(base_path: &str) -> Result<HashMap<String, String>, Str
                     continue;
                 }
                 
-                // Get relative path
-                let relative_path = match get_relative_path(path, &base) {
+                // Get relative path (for validation)
+                let _relative_path = match get_relative_path(path, &base) {
                     Ok(p) => p,
                     Err(_) => continue,
                 };
                 
-                if relative_path.is_empty() {
-                    continue;
-                }
+                // Get absolute path as key
+                let absolute_path = path_to_forward_slash(path);
                 
                 // Compute hash based on type
                 let hash = if path.is_file() {
@@ -171,7 +175,7 @@ fn load_filesystem_state(base_path: &str) -> Result<HashMap<String, String>, Str
                     String::new()
                 };
                 
-                state.insert(relative_path, hash);
+                state.insert(absolute_path, hash);
             }
             Err(_) => continue,
         }
@@ -260,10 +264,14 @@ async fn stream_write_file(path: &Path, content: &str) -> Result<(), String> {
 // Helper function: Save a single entry (file or directory)
 async fn save_single_entry(
     base_path: String,
-    relative_path: String,
     data: FileRowData,
 ) -> Result<(), String> {
-    let absolute_path = PathBuf::from(&base_path).join(&relative_path);
+    // Use relativePath if available (file is inside basePath)
+    // Otherwise, reject the save (for security - only save files inside workspace)
+    let relative_path = data.relative_path.as_ref()
+        .ok_or_else(|| format!("Cannot save file outside workspace: {}", data.path))?;
+    
+    let absolute_path = PathBuf::from(&base_path).join(relative_path);
     
     match data.entry_type.as_str() {
         "directory" => {
@@ -304,23 +312,23 @@ async fn save_single_entry(
 }
 
 // Helper function: Delete an entry (file or directory)
-async fn delete_entry(base_path: String, relative_path: String) -> Result<(), String> {
-    let absolute_path = PathBuf::from(&base_path).join(&relative_path);
+async fn delete_entry(absolute_path: String) -> Result<(), String> {
+    let path = PathBuf::from(&absolute_path);
     
-    if !absolute_path.exists() {
+    if !path.exists() {
         return Ok(()); // Already deleted
     }
     
-    if absolute_path.is_dir() {
+    if path.is_dir() {
         // Delete directory recursively
-        tokio::fs::remove_dir_all(&absolute_path)
+        tokio::fs::remove_dir_all(&path)
             .await
-            .map_err(|e| format!("{}: {}", relative_path, e))?;
+            .map_err(|e| format!("{}: {}", absolute_path, e))?;
     } else {
         // Delete file
-        tokio::fs::remove_file(&absolute_path)
+        tokio::fs::remove_file(&path)
             .await
-            .map_err(|e| format!("{}: {}", relative_path, e))?;
+            .map_err(|e| format!("{}: {}", absolute_path, e))?;
     }
     
     Ok(())
@@ -423,11 +431,15 @@ async fn load_directory_files(base_path: String) -> Result<TinyBaseContent, Stri
                 // Compute hash
                 let content_hash = compute_hash(&content);
                 
-                // Add to map
+                // Get absolute path
+                let absolute_path = path_to_forward_slash(path);
+                
+                // Add to map - use absolute path as key
                 files_map.insert(
-                    relative_path.clone(),
+                    absolute_path.clone(),
                     FileRowData {
-                        path: relative_path,
+                        path: absolute_path,
+                        relative_path: Some(relative_path),
                         entry_type: entry_type.to_string(),
                         modified,
                         size,
@@ -472,10 +484,17 @@ async fn save_files(
     let mut to_delete = Vec::new();
     let mut skipped = 0;
     
-    for (path, row_data) in files.iter() {
-        // Validate path (security check)
-        if let Err(e) = validate_path(path) {
-            eprintln!("Invalid path {}: {}", path, e);
+    for (absolute_path, row_data) in files.iter() {
+        // Validate relative path if present (security check)
+        if let Some(relative_path) = &row_data.relative_path {
+            if let Err(e) = validate_relative_path(relative_path) {
+                eprintln!("Invalid relative path {}: {}", relative_path, e);
+                continue;
+            }
+        } else {
+            // Skip files without relative path (not inside workspace)
+            eprintln!("Skipping file outside workspace: {}", absolute_path);
+            skipped += 1;
             continue;
         }
         
@@ -490,7 +509,7 @@ async fn save_files(
         }
         
         // Content has changed, needs save
-        to_save.push((path.clone(), row_data.clone()));
+        to_save.push((absolute_path.clone(), row_data.clone()));
     }
     
     // Step 3: Find deletions (in filesystem but not in store)
@@ -504,11 +523,11 @@ async fn save_files(
     let base_path_clone = base_path.clone();
     let save_tasks: Vec<_> = to_save
         .into_iter()
-        .map(|(path, data)| {
+        .map(|(absolute_path, data)| {
             let base = base_path_clone.clone();
             async move {
-                let result = save_single_entry(base, path.clone(), data).await;
-                (path, result)
+                let result = save_single_entry(base, data).await;
+                (absolute_path, result)
             }
         })
         .collect();
@@ -518,7 +537,7 @@ async fn save_files(
     // Step 5: Execute deletes in parallel
     let delete_futures: Vec<_> = to_delete
         .into_iter()
-        .map(|path| delete_entry(base_path.clone(), path))
+        .map(|absolute_path| delete_entry(absolute_path))
         .collect();
     
     let delete_results = futures::future::join_all(delete_futures).await;

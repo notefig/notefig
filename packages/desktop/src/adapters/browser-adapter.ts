@@ -88,7 +88,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
             console.log(
               "[BrowserAdapter] No existing data found, creating demo workspace",
             );
-            const demoFiles = generateDemoFiles();
+            const demoFiles = generateDemoFiles(basePath);
             await storage.saveAllFiles(demoFiles);
           }
 
