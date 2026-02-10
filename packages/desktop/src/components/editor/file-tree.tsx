@@ -48,7 +48,6 @@ function FileTreeItem({
     <div>
       <button
         onClick={handleClick}
-        onMouseDown={handleClick}
         className={cn(
           "w-full flex items-center gap-1 px-2 py-1 text-sm hover:bg-accent/50 transition-colors",
           selectedFilePath === node.path && node.type === "file" && "bg-accent",

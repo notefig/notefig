@@ -7,7 +7,8 @@ import type { Persister } from "tinybase/persisters";
  */
 export type PlatformEvent =
   | { type: "theme-changed"; payload: Theme }
-  | { type: "folder-selected"; payload: string };
+  | { type: "folder-selected"; payload: string }
+  | { type: "file-dropped"; payload: string[] };
 
 /**
  * Generic event listener callback

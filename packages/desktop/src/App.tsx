@@ -25,6 +25,9 @@ export const App = () => {
           const encodedPath = encodeURIComponent(event.payload);
           navigate(`/${encodedPath}`);
           break;
+        case "file-dropped":
+          console.log({ app: event.payload });
+          break;
       }
     });
 

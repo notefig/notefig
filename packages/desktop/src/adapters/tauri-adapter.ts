@@ -3,6 +3,7 @@ import type {
   PlatformEventListener,
 } from "./platform-adapter.interface";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type { Store } from "tinybase";
@@ -88,6 +89,20 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       });
     });
     this.unlistenFns.push(folderUnlisten);
+
+    //TODO: deal with potential race condition
+    getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (event.payload.type === "drop") {
+          this.eventListeners.forEach((callback) => {
+            callback({
+              type: "file-dropped",
+              payload: (event.payload as any as { paths: string[] }).paths,
+            });
+          });
+        }
+      })
+      .then((unlisten) => this.unlistenFns.push(Promise.resolve(unlisten)));
   }
 
   /**
