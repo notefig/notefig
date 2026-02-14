@@ -20,7 +20,10 @@
  */
 
 import { createCollection } from "@tanstack/react-db";
-import { queryCollectionOptions } from "@tanstack/query-db-collection";
+import {
+  queryCollectionOptions,
+  parseLoadSubsetOptions,
+} from "@tanstack/query-db-collection";
 import { QueryClient } from "@tanstack/query-core";
 import { platformAdapter } from "@/adapters";
 import type { FileEntry } from "./fs";
@@ -62,7 +65,7 @@ function computeContentHash(content: string): string {
   for (let i = 0; i < content.length; i++) {
     const char = content.charCodeAt(i);
     hash = (hash << 5) - hash + char;
-    hash = hash & hash; // Convert to 32bit integer
+    hash = hash & hash;
   }
   return hash.toString(36);
 }
@@ -229,32 +232,81 @@ export function createFileMetadataCollection(workspaceId: string) {
  * Create a file content collection for a workspace
  *
  * This collection stores file contents separately from metadata.
- * Content is loaded on-demand when files are opened.
+ * Content is loaded on-demand when queried via TanStack DB's automatic loading.
  *
- * Uses a query collection but with enabled: false, so content is loaded manually.
+ * How it works:
+ * - Uses syncMode: "on-demand" to load only requested files
+ * - When a query includes a where clause on the 'path' field, TanStack DB triggers queryFn
+ * - queryFn uses parseLoadSubsetOptions to extract requested paths from the query
+ * - Only those specific files are loaded from the file system
+ *
+ * Example query that triggers loading:
+ * ```ts
+ * q.from({ content })
+ *   .where(({ content }) => inArray(content.path, ['/path/to/file.md']))
+ * ```
  *
  * @param workspaceId - Unique identifier for the workspace (typically the basePath)
  */
 export function createFileContentCollection(workspaceId: string) {
   return createCollection(
-    queryCollectionOptions<FileContent, string>({
+    queryCollectionOptions<FileContent>({
       queryKey: ["file-content", workspaceId],
       queryClient,
 
-      // Don't auto-fetch - content is loaded on-demand via loadFileContent()
-      queryFn: async (): Promise<FileContent[]> => {
-        // Return empty array - content is loaded manually
-        return [];
+      syncMode: "on-demand",
+
+      queryFn: async (context): Promise<FileContent[]> => {
+        const parsed = parseLoadSubsetOptions(context.meta?.loadSubsetOptions);
+
+        // Extract path filters (eq or in operators on 'path' field)
+        const pathFilters = parsed.filters.filter(
+          (f) =>
+            f.field.join(".") === "path" &&
+            (f.operator === "eq" || f.operator === "in"),
+        );
+
+        // Collect all requested paths
+        const requestedPaths = pathFilters.flatMap((f) =>
+          Array.isArray(f.value) ? f.value : [f.value],
+        );
+
+        if (requestedPaths.length === 0) return [];
+
+        // Load file contents from file system
+        const result = await platformAdapter.readFiles(requestedPaths);
+
+        if (result.failed.length > 0) {
+          console.warn(
+            "Failed to read some files:",
+            result.failed.map((f) => f.message).join(", "),
+          );
+        }
+
+        // Map to FileContent format
+        return result.succeeded.map((file) => ({
+          path: file.path,
+          content: file.content,
+          contentHash: computeContentHash(file.content),
+        }));
       },
 
       getKey: (item) => item.path,
+
+      onUpdate: async ({ transaction }) => {
+        const files = transaction.mutations.map((m) => ({
+          path: String(m.key),
+          content: m.modified.content,
+        }));
+
+        await platformAdapter.writeFiles(files);
+      },
 
       enabled: true,
 
       // Mutation handlers - write content changes back to file system
 
       onInsert: async ({ transaction }) => {
-        // Insert new file content
         const files = transaction.mutations.map((m) => ({
           path: m.modified.path,
           content: m.modified.content,
@@ -268,25 +320,8 @@ export function createFileContentCollection(workspaceId: string) {
         }
       },
 
-      onUpdate: async ({ transaction }) => {
-        // Update file content
-        const files = transaction.mutations.map((m) => ({
-          path: String(m.key),
-          content: m.modified.content,
-        }));
-
-        const result = await platformAdapter.writeFiles(files);
-        if (result.failed.length > 0) {
-          throw new Error(
-            `Failed to update files: ${result.failed.map((f) => f.message).join(", ")}`,
-          );
-        }
-      },
-
       onDelete: async () => {
-        // Content deletion is handled by metadata collection
-        // This just removes from the content collection
-        // No file system operation needed here
+        // No-op
       },
     }),
   );
@@ -341,74 +376,6 @@ export async function refreshDirectoryMetadata(
 ): Promise<void> {
   const collections = getOrCreateWorkspaceCollections(workspaceId);
   await collections.metadata.utils.refetch();
-}
-
-/**
- * Load file content into the content collection
- *
- * Reads file content from the file system and stores it in the content collection.
- * Also updates the contentHash in the metadata collection.
- *
- * @param workspaceId - Unique identifier for the workspace
- * @param filePath - Absolute path to the file
- */
-export async function loadFileContent(
-  workspaceId: string,
-  filePath: string,
-): Promise<void> {
-  console.log(`[loadFileContent] Starting load for: ${filePath}`);
-  const collections = getOrCreateWorkspaceCollections(workspaceId);
-  const result = await platformAdapter.readFiles([filePath]);
-
-  console.log(`[loadFileContent] Read result:`, {
-    succeeded: result.succeeded.length,
-    failed: result.failed.length,
-  });
-
-  if (result.succeeded.length === 0) {
-    console.error(`Failed to read file ${filePath}:`, result.failed);
-    throw new Error(
-      `Failed to read file: ${result.failed.length > 0 ? result.failed[0].message : "Unknown error"}`,
-    );
-  }
-
-  const fileData = result.succeeded[0];
-  const contentHash = computeContentHash(fileData.content);
-
-  console.log(`[loadFileContent] File data:`, {
-    path: fileData.path,
-    contentLength: fileData.content.length,
-    contentHash,
-    contentPreview: fileData.content.substring(0, 100),
-  });
-
-  // Insert/update content in the collection
-  const existingContent = collections.content.get(filePath);
-  if (existingContent) {
-    console.log(`[loadFileContent] Updating existing content for: ${filePath}`);
-    collections.content.update(filePath, () => ({
-      path: filePath,
-      content: fileData.content,
-      contentHash,
-    }));
-  } else {
-    console.log(`[loadFileContent] Inserting new content for: ${filePath}`);
-    collections.content.insert({
-      path: filePath,
-      content: fileData.content,
-      contentHash,
-    });
-  }
-
-  // Update metadata with hash
-  const existingMetadata = collections.metadata.get(filePath);
-  if (existingMetadata) {
-    collections.metadata.update(filePath, (draft) => {
-      draft.contentHash = contentHash;
-    });
-  }
-
-  console.log(`[loadFileContent] Completed load for: ${filePath}`);
 }
 
 /**

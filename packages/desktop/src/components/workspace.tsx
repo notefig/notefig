@@ -12,11 +12,12 @@ import { useTranslation } from "react-i18next";
 import {
   getOrCreateWorkspaceCollections,
   getFileEntry,
+  loadFileContent,
 } from "@/utils/collections";
-import { useLiveQuery, eq } from "@tanstack/react-db";
+import { useLiveQuery, eq, inArray, or } from "@tanstack/react-db";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
-import type { FileTreeNode } from "@/utils/fs";
+import type { FileTreeNode, FileEntry } from "@/utils/fs";
 
 export const Workspace = () => {
   const { workspacePath } = useWorkspaceParams();
@@ -30,47 +31,37 @@ export const Workspace = () => {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Query file metadata and content for open tabs
-  const { data: fileMetadataList = [] } = useLiveQuery((q) =>
-    q.from({ file: metadata }).select(({ file }) => ({
-      path: file.path,
-      relativePath: file.relativePath,
-      type: file.type,
-      modified: file.modified,
-      size: file.size,
-      contentHash: file.contentHash,
-      error: file.error,
-    })),
-  );
-
   const activeTabId = searchParams.get("activeTab");
   const openTabs = searchParams.getAll("tab");
 
-  // Query content for active file (reactive)
-  const { data: activeFileContentArray = [] } = useLiveQuery((q) =>
-    activeTabId
-      ? q
-          .from({ c: content })
-          .where(({ c }) => eq(c.path, activeTabId))
-          .select(({ c }) => ({
-            path: c.path,
-            content: c.content,
-          }))
-      : q
-          .from({ c: content })
-          .select(({ c }) => ({ path: c.path, content: c.content }))
-          .orderBy(({ c }) => c.path)
-          .limit(0),
+  // Single reactive query: Join metadata + content for open tabs
+  // The where clause on content triggers on-demand loading via queryFn
+  const { data: fileDataWithContent = [], isError: isQueryError } =
+    useLiveQuery(
+      (q) =>
+        openTabs.length === 0
+          ? undefined // No tabs open - useLiveQuery handles undefined gracefully
+          : q
+              .from({ file: metadata })
+              .where(({ file }) => inArray(file.path, openTabs))
+              // ✅ Explicitly constrain content to trigger on-demand loading
+              .join({ content }, ({ file, content }) =>
+                eq(file.path, content.path),
+              )
+              .where(({ content }) => inArray(content?.path, openTabs))
+              .select(({ file, content }) => ({
+                ...file,
+                content: content?.content,
+                contentHash: content?.contentHash,
+              })),
+      [...openTabs, activeTabId],
+    );
+
+  // Get current content for status bar from active tab
+  const activeFileData = fileDataWithContent.find(
+    (f) => f.path === activeTabId,
   );
-
-  const activeFileContent = activeFileContentArray[0];
-
-  // Get file entry for active tab (includes content if loaded)
-  const activeFile = activeTabId
-    ? getFileEntry(workspacePath, activeTabId)
-    : null;
-  const currentContent =
-    activeFileContent?.content || activeFile?.content || "";
+  const currentContent = activeFileData?.content || "";
 
   const [activeSidebarItem, setActiveSidebarItem] = useState("files");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -212,26 +203,28 @@ export const Workspace = () => {
               </div>
             ) : (
               <>
-                {openTabs.map((tabPath) => {
-                  const file = getFileEntry(workspacePath, tabPath);
-                  if (!file) return null;
+                {fileDataWithContent
+                  .filter((item) => item.content)
+                  .map((fileWithContent) => {
+                    const fileEntry = fileWithContent as FileEntry;
 
-                  return (
-                    <div
-                      key={tabPath}
-                      style={{
-                        display: activeTabId === tabPath ? "block" : "none",
-                      }}
-                      className="h-full"
-                    >
-                      <TextEditor
-                        key={tabPath}
-                        file={file}
-                        basePath={workspacePath}
-                      />
-                    </div>
-                  );
-                })}
+                    return (
+                      <div
+                        key={fileEntry.path}
+                        style={{
+                          display:
+                            activeTabId === fileEntry.path ? "block" : "none",
+                        }}
+                        className="h-full"
+                      >
+                        <TextEditor
+                          key={fileEntry.path}
+                          file={fileEntry}
+                          basePath={workspacePath}
+                        />
+                      </div>
+                    );
+                  })}
               </>
             )}
           </div>

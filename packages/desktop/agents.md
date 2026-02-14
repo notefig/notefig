@@ -66,37 +66,153 @@ We have **three distinct storage layers**:
 - **Contains**: Application-level preferences
 - **Examples**: Theme, window size, recent workspaces, global shortcuts
 
-### State Management with TinyBase
+### State Management with TanStack DB + Query
 
-TinyBase is our **persistence layer and state manager**. It provides a local-first reactive store.
+We use **TanStack DB** with **TanStack Query** for reactive collections and data synchronization.
+
+**Key concepts:**
+
+- **Collections**: Reactive data stores (like tables) that hold items
+- **Query Collections**: Collections backed by TanStack Query's `queryFn`
+- **Automatic loading**: Data is fetched automatically via `queryFn`
+- **Reactive queries**: Use `useLiveQuery` to reactively query collections
+- **Sync modes**: `eager` (load all data upfront) or `on-demand` (load as queried)
+
+**Architecture pattern:**
+
+```typescript
+// 1. Define collection with queryCollectionOptions
+const metadataCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["file-metadata", workspaceId],
+    queryFn: async () => {
+      // Fetch all metadata from file system
+      return await platformAdapter.readDirectory(workspaceId);
+    },
+    queryClient,
+    getKey: (item) => item.path,
+    syncMode: "eager", // Load all data immediately
+  }),
+);
+
+// 2. Query reactively in components
+const { data } = useLiveQuery((q) =>
+  q
+    .from({ file: metadataCollection })
+    .where(({ file }) => eq(file.type, "file"))
+    .select(),
+);
+```
+
+**Two Collection Pattern (Metadata + Content):**
+
+We split file data into two collections for performance:
+
+1. **Metadata Collection** (`eager` mode)
+
+   - Contains: path, type, size, modified, contentHash
+   - Excludes: file content
+   - Loads: All files in workspace immediately
+   - Why: Metadata is small, needed for file tree
+
+2. **Content Collection** (`on-demand` mode)
+   - Contains: path, content, contentHash
+   - Loads: Only when queried via `useLiveQuery`
+   - Why: Content is large, only load what's visible
+
+**On-Demand Loading Pattern:**
+
+```typescript
+import { parseLoadSubsetOptions } from "@tanstack/query-db-collection";
+
+// Content collection with on-demand loading
+const contentCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["file-content", workspaceId],
+    queryFn: async (context) => {
+      // IMPORTANT: Use parseLoadSubsetOptions to extract query filters
+      const parsed = parseLoadSubsetOptions(context.meta?.loadSubsetOptions);
+
+      // Extract path filters (eq or in operators on 'path' field)
+      const pathFilters = parsed.filters.filter(
+        (f) =>
+          f.field.join(".") === "path" &&
+          (f.operator === "eq" || f.operator === "in"),
+      );
+
+      // Collect all requested paths
+      const requestedPaths = pathFilters.flatMap((f) =>
+        Array.isArray(f.value) ? f.value : [f.value],
+      );
+
+      if (requestedPaths.length === 0) return [];
+
+      // Load only requested files
+      const result = await platformAdapter.readFiles(requestedPaths);
+      return result.succeeded.map((file) => ({
+        path: file.path,
+        content: file.content,
+        contentHash: computeContentHash(file.content),
+      }));
+    },
+    queryClient,
+    getKey: (item) => item.path,
+    syncMode: "on-demand", // Only load when queried
+  }),
+);
+
+// Component queries for specific files - triggers automatic loading
+const { data } = useLiveQuery((q) =>
+  q
+    .from({ c: contentCollection })
+    .where(({ c }) => inArray(c.path, openTabs))
+    .select(),
+);
+// ☝️ This query triggers queryFn with loadSubsetOptions containing the where clause
+```
 
 **Key principles:**
 
-- **Don't think about persistence**: TinyBase handles auto-save/auto-load for you
-- **Store access**: Use `getOrCreateStore(basePath)` from `src/utils/tinybase.ts`
-- **Workspace concept**: Each workspace (directory) has its own TinyBase store
-- **Async loading**: Stores return immediately but load data in the background
-- **Reactivity**: Components can subscribe to store changes for reactive updates
+- **Don't manually load data**: `queryFn` handles it automatically
+- **Trust the query system**: When you query for data, it loads automatically
+- **Use joins**: Combine metadata + content via `leftJoin`
+- **Sync modes**: Choose `eager` for small datasets, `on-demand` for large ones
+- **Reactivity**: `useLiveQuery` re-renders when collection data changes
 
-**Pattern:**
+**Mutation handlers:**
+
+Collections can write back to the source (file system) via mutation handlers:
 
 ```typescript
-// Get or create store for a workspace
-const store = getOrCreateStore(basePath);
-
-// TinyBase handles:
-// - Loading data from disk
-// - Auto-saving changes
-// - Auto-loading updates
-// - Persistence layer selection (IndexedDB for web, file system for Tauri)
+queryCollectionOptions({
+  // ... other options
+  onInsert: async ({ transaction }) => {
+    // Write new items to file system
+    await platformAdapter.writeFiles(
+      transaction.mutations.map((m) => m.modified),
+    );
+  },
+  onUpdate: async ({ transaction }) => {
+    // Update items in file system
+    await platformAdapter.writeFiles(
+      transaction.mutations.map((m) => m.modified),
+    );
+  },
+  onDelete: async ({ transaction }) => {
+    // Delete items from file system
+    await platformAdapter.deleteFiles(transaction.mutations.map((m) => m.key));
+  },
+});
 ```
 
-**When working with the app:**
+**When working with collections:**
 
-- Rarely think about persistence directly
-- Trust that TinyBase will sync changes
-- Use the store as your source of truth
-- Don't manually call save/load (auto-save/auto-load handles it)
+- Use `useLiveQuery` for reactive queries in components
+- Never manually call load functions - queries trigger loading
+- Use `collection.insert/update/delete` to modify data (triggers mutation handlers)
+- Use `collection.utils.writeInsert/writeUpdate/writeDelete` for direct writes (bypasses mutations)
+- Join collections to combine data (e.g., metadata + content)
+- Choose appropriate `syncMode` based on data size and access patterns
 
 ### Workspace vs Loose Files
 
