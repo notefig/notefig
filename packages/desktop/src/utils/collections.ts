@@ -27,12 +27,7 @@ import type { FileEntry } from "./fs";
 
 // Global QueryClient instance for TanStack Query
 const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      staleTime: Infinity, // Never consider data stale - we control refetching manually
-    },
-  },
+  defaultOptions: {},
 });
 
 /**
@@ -254,8 +249,7 @@ export function createFileContentCollection(workspaceId: string) {
 
       getKey: (item) => item.path,
 
-      // Never auto-fetch
-      enabled: false,
+      enabled: true,
 
       // Mutation handlers - write content changes back to file system
 
