@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useEffect } from "react";
 import { Plate, usePlateEditor } from "platejs/react";
 import { MarkdownPlugin } from "@platejs/markdown";
 import { MarkdownEditorKit } from "@/components/editor/markdown-editor-kit";
@@ -16,7 +16,12 @@ import {
 } from "lucide-react";
 import { toggleList, ListStyleType } from "@platejs/list";
 import type { FileEntry } from "../../utils/fs";
-import { getOrCreateStore } from "@/utils/tinybase";
+import {
+  loadFileContent,
+  writeFileContent,
+  getOrCreateWorkspaceCollections,
+} from "@/utils/collections";
+import { useLiveQuery, eq } from "@tanstack/react-db";
 
 interface TextEditorProps {
   file: FileEntry;
@@ -24,17 +29,107 @@ interface TextEditorProps {
 }
 
 export function TextEditor({ file, basePath }: TextEditorProps) {
-  const store = getOrCreateStore(basePath);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastLoadedPathRef = useRef<string | null>(null);
+  const contentLoadedRef = useRef<boolean>(false);
+
+  // Get the content collection
+  const { content } = getOrCreateWorkspaceCollections(basePath);
+
+  // Query file content reactively
+  const { data: fileContentArray = [] } = useLiveQuery((q) =>
+    q
+      .from({ c: content })
+      .where(({ c }) => eq(c.path, file.path))
+      .select(({ c }) => ({
+        path: c.path,
+        content: c.content,
+      })),
+  );
+
+  const fileContent = fileContentArray[0]?.content;
+
+  // Load file content when file path changes
+  useEffect(() => {
+    // Reset content loaded flag when file changes
+    if (lastLoadedPathRef.current !== file.path) {
+      contentLoadedRef.current = false;
+    }
+
+    // Skip if we already loaded this exact file path
+    if (lastLoadedPathRef.current === file.path) {
+      console.log(`[TextEditor] Content already loaded for: ${file.path}`);
+      return;
+    }
+
+    console.log(`[TextEditor] Loading content for: ${file.path}`);
+
+    // Load the content
+    loadFileContent(basePath, file.path)
+      .then(() => {
+        console.log(
+          `[TextEditor] Content loaded successfully for: ${file.path}`,
+        );
+        lastLoadedPathRef.current = file.path;
+      })
+      .catch((error) => {
+        console.error(
+          `[TextEditor] Failed to load content for: ${file.path}`,
+          error,
+        );
+      });
+  }, [basePath, file.path]);
 
   const editor = usePlateEditor({
     plugins: MarkdownEditorKit,
     value: (editor) =>
-      editor.getApi(MarkdownPlugin).markdown.deserialize(file.content || ""),
+      editor
+        .getApi(MarkdownPlugin)
+        .markdown.deserialize(fileContent || "Loading..."),
   });
+
+  // Update editor value when file content changes
+  useEffect(() => {
+    if (editor && fileContent !== undefined) {
+      const currentMarkdown = editor
+        .getApi(MarkdownPlugin)
+        .markdown.serialize();
+      const normalizedCurrent = currentMarkdown.replace(/\&\#x20\;/, "");
+
+      console.log(`[TextEditor] Content changed:`, {
+        path: file.path,
+        currentLength: normalizedCurrent.length,
+        newLength: fileContent.length,
+        currentPreview: normalizedCurrent.substring(0, 50),
+        newPreview: fileContent.substring(0, 50),
+      });
+
+      // Only update if content actually changed to avoid infinite loops
+      if (normalizedCurrent !== fileContent) {
+        console.log(`[TextEditor] Updating editor value for: ${file.path}`);
+        const newValue = editor
+          .getApi(MarkdownPlugin)
+          .markdown.deserialize(fileContent);
+
+        // Use Plate's setValue API to properly update editor state
+        editor.tf.setValue(newValue);
+
+        // Mark content as loaded so we can start saving changes
+        contentLoadedRef.current = true;
+      }
+    }
+  }, [editor, fileContent, file.path]);
 
   const handleChange = useCallback(() => {
     if (!editor) return;
+
+    // Don't save until initial content is loaded
+    if (!contentLoadedRef.current) {
+      console.log(
+        `[TextEditor] Skipping save - content not loaded yet for: ${file.path}`,
+      );
+      return;
+    }
 
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -43,9 +138,12 @@ export function TextEditor({ file, basePath }: TextEditorProps) {
     saveTimeoutRef.current = setTimeout(() => {
       const markdown = editor.getApi(MarkdownPlugin).markdown.serialize();
       const normalizedMarkdown = markdown.replace(/\&\#x20\;/, "");
-      store.setCell("files", file.path, "content", normalizedMarkdown);
+
+      console.log(`[TextEditor] Saving content for: ${file.path}`);
+      // Write content using TanStack DB mutation
+      writeFileContent(basePath, file.path, normalizedMarkdown);
     }, 300);
-  }, [editor, file.path, store]);
+  }, [editor, file.path, basePath]);
 
   return (
     <Plate editor={editor} onValueChange={handleChange}>

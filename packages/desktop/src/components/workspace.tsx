@@ -9,11 +9,14 @@ import { StatusBar } from "@/components/editor/status-bar";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
-import { getOrCreateStore } from "@/utils/tinybase";
-import { useTable } from "tinybase/ui-react";
-import type { FileEntries, FileTreeNode } from "@/utils/fs";
+import {
+  getOrCreateWorkspaceCollections,
+  getFileEntry,
+} from "@/utils/collections";
+import { useLiveQuery, eq } from "@tanstack/react-db";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
+import type { FileTreeNode } from "@/utils/fs";
 
 export const Workspace = () => {
   const { workspacePath } = useWorkspaceParams();
@@ -23,10 +26,52 @@ export const Workspace = () => {
     return null;
   }
 
-  const store = getOrCreateStore(workspacePath);
+  const { metadata, content } = getOrCreateWorkspaceCollections(workspacePath);
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const files: FileEntries = useTable("files", store) as any;
+
+  // Query file metadata and content for open tabs
+  const { data: fileMetadataList = [] } = useLiveQuery((q) =>
+    q.from({ file: metadata }).select(({ file }) => ({
+      path: file.path,
+      relativePath: file.relativePath,
+      type: file.type,
+      modified: file.modified,
+      size: file.size,
+      contentHash: file.contentHash,
+      error: file.error,
+    })),
+  );
+
+  const activeTabId = searchParams.get("activeTab");
+  const openTabs = searchParams.getAll("tab");
+
+  // Query content for active file (reactive)
+  const { data: activeFileContentArray = [] } = useLiveQuery((q) =>
+    activeTabId
+      ? q
+          .from({ c: content })
+          .where(({ c }) => eq(c.path, activeTabId))
+          .select(({ c }) => ({
+            path: c.path,
+            content: c.content,
+          }))
+      : q
+          .from({ c: content })
+          .select(({ c }) => ({ path: c.path, content: c.content }))
+          .orderBy(({ c }) => c.path)
+          .limit(0),
+  );
+
+  const activeFileContent = activeFileContentArray[0];
+
+  // Get file entry for active tab (includes content if loaded)
+  const activeFile = activeTabId
+    ? getFileEntry(workspacePath, activeTabId)
+    : null;
+  const currentContent =
+    activeFileContent?.content || activeFile?.content || "";
+
   const [activeSidebarItem, setActiveSidebarItem] = useState("files");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(240);
@@ -36,10 +81,6 @@ export const Workspace = () => {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [direction, setDirection] = useState<"ltr" | "rtl">("ltr");
   const resizeRef = useRef<HTMLDivElement>(null);
-
-  const activeTabId = searchParams.get("activeTab");
-  const openTabs = searchParams.getAll("tab");
-  const currentContent = activeTabId ? files[activeTabId]?.content || "" : "";
 
   const { wordCount, characterCount } = useMemo(() => {
     const words = currentContent
@@ -172,7 +213,7 @@ export const Workspace = () => {
             ) : (
               <>
                 {openTabs.map((tabPath) => {
-                  const file = files[tabPath];
+                  const file = getFileEntry(workspacePath, tabPath);
                   if (!file) return null;
 
                   return (

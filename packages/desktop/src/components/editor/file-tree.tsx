@@ -8,9 +8,14 @@ import {
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { FileTreeNode, flatEntriesToTree, getFileName } from "@/utils/fs";
-import { getOrCreateStore } from "@/utils/tinybase";
-import { useTable } from "tinybase/ui-react";
+import {
+  FileTreeNode,
+  flatEntriesToTree,
+  getFileName,
+  type FileEntries,
+} from "@/utils/fs";
+import { getOrCreateWorkspaceCollections } from "@/utils/collections";
+import { useLiveQuery } from "@tanstack/react-db";
 
 interface FileTreeProps {
   selectedFilePath: string | null;
@@ -104,11 +109,36 @@ export function FileTree({
   onFileSelect,
   basePath,
 }: FileTreeProps) {
-  const store = getOrCreateStore(basePath);
-  const files = useTable("files", store);
+  const { metadata } = getOrCreateWorkspaceCollections(basePath);
+
+  // Query all file metadata entries
+  const { data: fileMetadataList = [] } = useLiveQuery((q) =>
+    q.from({ file: metadata }).select(({ file }) => ({
+      path: file.path,
+      relativePath: file.relativePath,
+      type: file.type,
+      modified: file.modified,
+      size: file.size,
+      contentHash: file.contentHash,
+      error: file.error,
+    })),
+  );
+
+  // Convert array of metadata to FileEntries object (path -> entry mapping)
+  const files: FileEntries = useMemo(() => {
+    return fileMetadataList.reduce((acc, entry) => {
+      acc[entry.path] = {
+        ...entry,
+        content: "", // Metadata doesn't include content
+      };
+      return acc;
+    }, {} as FileEntries);
+  }, [fileMetadataList]);
+
   const filesTree = useMemo(() => {
-    return flatEntriesToTree(files as any, basePath);
+    return flatEntriesToTree(files, basePath);
   }, [files, basePath]);
+
   return (
     <ScrollArea className="h-full w-full">
       <div className="py-1">
