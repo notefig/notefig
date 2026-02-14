@@ -8,6 +8,7 @@ import { BuildCommand } from './build.command';
 import { PruneCommand } from './prune.command';
 import { EpubCommand } from './epub.command';
 import { AudiobookCommand } from './audiobook.command';
+import { HelloCommand } from './hello.command';
 import {
   ConsoleLogger,
   type Logger,
@@ -30,6 +31,7 @@ export class CommandLoader {
     this.loadCommandAndAction(new PruneCommand(), program);
     this.loadCommandAndAction(new EpubCommand(), program);
     this.loadCommandAndAction(new AudiobookCommand(), program);
+    this.loadCommandAndAction(new HelloCommand(), program);
     this.handleInvalidCommand(program);
   }
 
