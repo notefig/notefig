@@ -1,5 +1,6 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useEffect, useMemo } from "react";
 import { Plate, usePlateEditor } from "platejs/react";
+import { Editor as SlateEditor } from "slate";
 import { MarkdownPlugin } from "@platejs/markdown";
 import { MarkdownEditorKit } from "@/components/editor/markdown-editor-kit";
 import { FixedToolbar } from "@/components/ui/fixed-toolbar";
@@ -16,36 +17,83 @@ import {
 } from "lucide-react";
 import { toggleList, ListStyleType } from "@platejs/list";
 import type { FileEntry } from "../../utils/fs";
-import { getOrCreateStore } from "@/utils/tinybase";
+import { writeFileContent } from "@/utils/collections";
 
 interface TextEditorProps {
   file: FileEntry;
   basePath: string;
+  isActive?: boolean;
 }
 
-export function TextEditor({ file, basePath }: TextEditorProps) {
-  const store = getOrCreateStore(basePath);
+/**
+ * Main TextEditor component
+ * Receives file with content already loaded from workspace-level query
+ */
+export function TextEditor({ file, basePath, isActive }: TextEditorProps) {
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Memoize the initial editor value to avoid re-deserializing on every render
+  // Only deserialize when the file path changes (new file loaded)
+  const initialValue = useMemo(
+    () => (editor: any) =>
+      editor.getApi(MarkdownPlugin).markdown.deserialize(file.content),
+    [file.path], // Only re-deserialize when file path changes, not content
+  );
 
   const editor = usePlateEditor({
     plugins: MarkdownEditorKit,
-    value: (editor) =>
-      editor.getApi(MarkdownPlugin).markdown.deserialize(file.content || ""),
+    value: initialValue,
   });
+
+  // Enable chunking for large documents (Slate performance optimization)
+  // Splits the document into chunks of 1000 nodes to reduce React re-rendering overhead
+  // This is crucial for handling files with thousands of lines like "The Adventures of Pinocchio.md"
+  useEffect(() => {
+    if (editor) {
+      // Type assertion needed as Plate types don't expose getChunkSize yet
+      (editor as any).getChunkSize = (node: any) => {
+        return SlateEditor.isEditor(node) ? 1000 : null;
+      };
+    }
+  }, [editor]);
 
   const handleChange = useCallback(() => {
     if (!editor) return;
 
+    // Cancel any pending save
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
 
+    // Debounce saves by 300ms
     saveTimeoutRef.current = setTimeout(() => {
       const markdown = editor.getApi(MarkdownPlugin).markdown.serialize();
-      const normalizedMarkdown = markdown.replace(/\&\#x20\;/, "");
-      store.setCell("files", file.path, "content", normalizedMarkdown);
-    }, 300);
-  }, [editor, file.path, store]);
+      // Normalize: remove HTML entity for space
+      const normalizedMarkdown = markdown.replace(/&#x20;/g, "");
+
+      writeFileContent(basePath, file.path, normalizedMarkdown);
+    }, 500);
+  }, [editor, file.path, basePath]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Restore focus when tab becomes active
+  // This ensures the cursor position is preserved when switching between tabs
+  useEffect(() => {
+    if (isActive && editor) {
+      // Use setTimeout to ensure DOM is ready (display: block has been applied)
+      setTimeout(() => {
+        editor.tf.focus();
+      }, 0);
+    }
+  }, [isActive, editor]);
 
   return (
     <Plate editor={editor} onValueChange={handleChange}>

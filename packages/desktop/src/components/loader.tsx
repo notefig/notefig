@@ -1,6 +1,9 @@
 import { useEffect } from "react";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
-import { getOrCreateStore } from "../utils/tinybase";
+import {
+  getOrCreateWorkspaceCollections,
+  refreshDirectoryMetadata,
+} from "@/utils/collections";
 
 export function Loader({ children }: { children: React.ReactNode }) {
   const { workspacePath } = useWorkspaceParams();
@@ -11,9 +14,13 @@ export function Loader({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Create/get store synchronously
-    // This ensures the store exists before children render
-    getOrCreateStore(workspacePath);
+    // Create/get collections for this workspace
+    // This ensures the collections exist before children render
+    getOrCreateWorkspaceCollections(workspacePath);
+
+    // Load initial metadata
+    // This will populate the metadata collection with all files in the workspace
+    refreshDirectoryMetadata(workspacePath);
   }, [workspacePath]);
 
   // Don't render children if no workspace path
@@ -21,7 +28,7 @@ export function Loader({ children }: { children: React.ReactNode }) {
     return null;
   }
 
-  // Render children immediately - store is created synchronously
+  // Render children immediately - collections are created synchronously
   // Data will load in the background and components will reactively update
   return <>{children}</>;
 }

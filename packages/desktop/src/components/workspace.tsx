@@ -9,11 +9,15 @@ import { StatusBar } from "@/components/editor/status-bar";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
-import { getOrCreateStore } from "@/utils/tinybase";
-import { useTable } from "tinybase/ui-react";
-import type { FileEntries, FileTreeNode } from "@/utils/fs";
+import {
+  getOrCreateWorkspaceCollections,
+  getFileEntry,
+} from "@/utils/collections";
+import { useLiveQuery, eq, inArray, or } from "@tanstack/react-db";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
+import type { FileTreeNode, FileEntry } from "@/utils/fs";
+import { cn } from "../lib/utils";
 
 export const Workspace = () => {
   const { workspacePath } = useWorkspaceParams();
@@ -23,10 +27,42 @@ export const Workspace = () => {
     return null;
   }
 
-  const store = getOrCreateStore(workspacePath);
+  const { metadata, content } = getOrCreateWorkspaceCollections(workspacePath);
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const files: FileEntries = useTable("files", store) as any;
+
+  const activeTabId = searchParams.get("activeTab");
+  const openTabs = searchParams.getAll("tab");
+
+  // Single reactive query: Join metadata + content for open tabs
+  // The where clause on content triggers on-demand loading via queryFn
+  const { data: fileDataWithContent = [], isError: isQueryError } =
+    useLiveQuery(
+      (q) =>
+        openTabs.length === 0
+          ? undefined // No tabs open - useLiveQuery handles undefined gracefully
+          : q
+              .from({ file: metadata })
+              .where(({ file }) => inArray(file.path, openTabs))
+              // ✅ Explicitly constrain content to trigger on-demand loading
+              .join({ content }, ({ file, content }) =>
+                eq(file.path, content.path),
+              )
+              .where(({ content }) => inArray(content?.path, openTabs))
+              .select(({ file, content }) => ({
+                ...file,
+                content: content?.content,
+                contentHash: content?.contentHash,
+              })),
+      [...openTabs, activeTabId],
+    );
+
+  // Get current content for status bar from active tab
+  const activeFileData = fileDataWithContent.find(
+    (f) => f.path === activeTabId,
+  );
+  const currentContent = activeFileData?.content || "";
+
   const [activeSidebarItem, setActiveSidebarItem] = useState("files");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(240);
@@ -36,10 +72,6 @@ export const Workspace = () => {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [direction, setDirection] = useState<"ltr" | "rtl">("ltr");
   const resizeRef = useRef<HTMLDivElement>(null);
-
-  const activeTabId = searchParams.get("activeTab");
-  const openTabs = searchParams.getAll("tab");
-  const currentContent = activeTabId ? files[activeTabId]?.content || "" : "";
 
   const { wordCount, characterCount } = useMemo(() => {
     const words = currentContent
@@ -171,26 +203,22 @@ export const Workspace = () => {
               </div>
             ) : (
               <>
-                {openTabs.map((tabPath) => {
-                  const file = files[tabPath];
-                  if (!file) return null;
-
-                  return (
-                    <div
-                      key={tabPath}
-                      style={{
-                        display: activeTabId === tabPath ? "block" : "none",
-                      }}
-                      className="h-full"
-                    >
-                      <TextEditor
-                        key={tabPath}
-                        file={file}
-                        basePath={workspacePath}
-                      />
-                    </div>
-                  );
-                })}
+                {fileDataWithContent.map((fileEntry) => (
+                  <div
+                    key={fileEntry.path}
+                    className={cn(
+                      "h-full",
+                      fileEntry.path === activeTabId ? "block" : "hidden",
+                    )}
+                  >
+                    <TextEditor
+                      key={fileEntry.path}
+                      file={fileEntry as FileEntry}
+                      basePath={workspacePath}
+                      isActive={fileEntry.path === activeTabId}
+                    />
+                  </div>
+                ))}
               </>
             )}
           </div>

@@ -1,6 +1,62 @@
 import type { Theme } from "@/components/theme-provider";
-import type { Store } from "tinybase";
-import type { Persister } from "tinybase/persisters";
+
+/**
+ * Error types for file system operations
+ */
+export type FileSystemErrorType =
+  | "not_found"
+  | "permission_denied"
+  | "already_exists"
+  | "invalid_path"
+  | "not_empty"
+  | "is_directory"
+  | "is_file"
+  | "io_error"
+  | "unknown";
+
+/**
+ * File system operation error
+ */
+export type FileSystemError = {
+  path: string;
+  type: FileSystemErrorType;
+  message: string;
+};
+
+/**
+ * Result type for operations that can fail
+ */
+export type Result<T, E = FileSystemError> =
+  | { ok: true; value: T }
+  | { ok: false; error: E };
+
+/**
+ * Batch operation result with partial success/failure
+ */
+export type BatchResult<T> = {
+  succeeded: T[];
+  failed: FileSystemError[];
+};
+
+/**
+ * File system metadata
+ */
+export type FileSystemMetadata = {
+  path: string;
+  type: "file" | "directory";
+  size: number;
+  modifiedAt: Date;
+  createdAt: Date;
+};
+
+/**
+ * File system change event
+ */
+export type FileSystemChangeEvent = {
+  type: "created" | "modified" | "deleted" | "renamed";
+  path: string;
+  oldPath?: string; // For rename events
+};
 
 /**
  * Platform events that can be emitted
@@ -8,7 +64,8 @@ import type { Persister } from "tinybase/persisters";
 export type PlatformEvent =
   | { type: "theme-changed"; payload: Theme }
   | { type: "folder-selected"; payload: string }
-  | { type: "file-dropped"; payload: string[] };
+  | { type: "file-dropped"; payload: string[] }
+  | { type: "fs-changed"; payload: FileSystemChangeEvent };
 
 /**
  * Generic event listener callback
@@ -21,13 +78,119 @@ export type PlatformEventListener = (event: PlatformEvent) => void;
  * (Tauri vs Browser)
  */
 export interface IPlatformAdapter {
+  // ========== Directory Picker ==========
   /**
    * Opens a directory picker dialog
-   * @param title - Optional title for the picker dialog
+   * @param title - Title for the picker dialog
    * @returns Promise that resolves to the selected directory path or null if cancelled
    */
   pickDirectory(title: string): Promise<string | null>;
 
+  // ========== Directory Operations ==========
+  /**
+   * Read directory contents
+   * @returns Result with array of absolute paths
+   */
+  readDirectory(
+    path: string,
+    options?: {
+      recursive?: boolean;
+      includeFiles?: boolean;
+      includeDirectories?: boolean;
+    },
+  ): Promise<Result<string[]>>;
+
+  /**
+   * Create directories (creates parent directories if needed)
+   * @returns Batch result with succeeded paths and failed operations
+   */
+  createDirectories(paths: string[]): Promise<BatchResult<string>>;
+
+  /**
+   * Delete directories
+   * @param options.recursive - If true, delete non-empty directories
+   * @returns Batch result with succeeded paths and failed operations
+   */
+  deleteDirectories(
+    paths: string[],
+    options?: { recursive?: boolean },
+  ): Promise<BatchResult<string>>;
+
+  /**
+   * Move/rename a directory
+   * @returns Result indicating success or failure
+   */
+  moveDirectory(oldPath: string, newPath: string): Promise<Result<void>>;
+
+  // ========== File Operations ==========
+  /**
+   * Read file contents
+   * @returns Batch result with file data for succeeded reads and errors for failures
+   */
+  readFiles(
+    paths: string[],
+  ): Promise<BatchResult<{ path: string; content: string }>>;
+
+  /**
+   * Write/update files (creates or updates)
+   * Creates parent directories if they don't exist
+   * @returns Batch result with succeeded paths and failed operations
+   */
+  writeFiles(
+    files: { path: string; content: string }[],
+  ): Promise<BatchResult<string>>;
+
+  /**
+   * Create empty files
+   * Creates parent directories if they don't exist
+   * @returns Batch result with succeeded paths and failed operations
+   */
+  createFiles(paths: string[]): Promise<BatchResult<string>>;
+
+  /**
+   * Delete files
+   * @returns Batch result with succeeded paths and failed operations
+   */
+  deleteFiles(paths: string[]): Promise<BatchResult<string>>;
+
+  /**
+   * Move/rename a file
+   * @returns Result indicating success or failure
+   */
+  moveFile(oldPath: string, newPath: string): Promise<Result<void>>;
+
+  /**
+   * Copy a file
+   * @returns Result indicating success or failure
+   */
+  copyFile(from: string, to: string): Promise<Result<void>>;
+
+  // ========== Metadata & Existence ==========
+  /**
+   * Check if paths exist
+   * @returns Array of existence results (never fails, returns exists: false for errors)
+   */
+  exists(
+    paths: string[],
+  ): Promise<{ path: string; exists: boolean; type?: "file" | "directory" }[]>;
+
+  /**
+   * Get file/directory metadata
+   * @returns Batch result with metadata for succeeded operations
+   */
+  getMetadata(paths: string[]): Promise<BatchResult<FileSystemMetadata>>;
+
+  // ========== File Watching ==========
+  /**
+   * Watch paths for changes
+   * @returns Cleanup function to stop watching
+   */
+  watchPaths(
+    paths: string[],
+    callback: (event: FileSystemChangeEvent) => void,
+  ): () => void;
+
+  // ========== Event Listeners ==========
   /**
    * Adds a generic platform event listener
    * @param callback - Function to call when events are emitted
@@ -40,6 +203,4 @@ export interface IPlatformAdapter {
    * @param callback - The callback function to remove
    */
   removeEventListener(callback: PlatformEventListener): void;
-
-  getPersister(store: Store, basePath: string): Persister;
 }
