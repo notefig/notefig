@@ -63,6 +63,81 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     return parts.some((part) => part.startsWith(".") && part.length > 1);
   }
 
+  /**
+   * Check if a path is a directory by checking if it has children in IndexedDB
+   * A directory is identified by having at least one file/directory under it
+   */
+  private async isDirectory(db: IDBDatabase, path: string): Promise<boolean> {
+    const transaction = db.transaction([this.STORE_NAME], "readonly");
+    const store = transaction.objectStore(this.STORE_NAME);
+
+    const allKeys: string[] = await new Promise((resolve, reject) => {
+      const request = store.getAllKeys();
+      request.onsuccess = () => resolve(request.result as string[]);
+      request.onerror = () => reject(request.error);
+    });
+
+    const normalizedPath = path.endsWith("/") ? path : path + "/";
+
+    // Check if any key starts with this path (meaning it has children)
+    return allKeys.some(
+      (key) => key.startsWith(normalizedPath) && key !== normalizedPath,
+    );
+  }
+
+  /**
+   * Get all unique directory paths under a given path
+   * This extracts directory paths from file paths by analyzing the path structure
+   */
+  private async getDirectories(
+    db: IDBDatabase,
+    basePath: string,
+    recursive: boolean,
+  ): Promise<string[]> {
+    const transaction = db.transaction([this.STORE_NAME], "readonly");
+    const store = transaction.objectStore(this.STORE_NAME);
+
+    const allKeys: string[] = await new Promise((resolve, reject) => {
+      const request = store.getAllKeys();
+      request.onsuccess = () => resolve(request.result as string[]);
+      request.onerror = () => reject(request.error);
+    });
+
+    const normalizedPath = basePath.endsWith("/") ? basePath : basePath + "/";
+    const directories = new Set<string>();
+
+    for (const key of allKeys) {
+      if (!key.startsWith(normalizedPath)) continue;
+
+      const relativePath = key.slice(normalizedPath.length);
+      if (!relativePath) continue;
+
+      const pathParts = relativePath.split("/");
+
+      if (recursive) {
+        // Add all parent directories
+        let currentPath = normalizedPath;
+        for (let i = 0; i < pathParts.length - 1; i++) {
+          currentPath += pathParts[i] + "/";
+          const dirPath = currentPath.slice(0, -1); // Remove trailing slash
+          if (!this.isHiddenPath(dirPath)) {
+            directories.add(dirPath);
+          }
+        }
+      } else {
+        // Only add direct child directories
+        if (pathParts.length > 1) {
+          const dirPath = normalizedPath + pathParts[0];
+          if (!this.isHiddenPath(dirPath)) {
+            directories.add(dirPath);
+          }
+        }
+      }
+    }
+
+    return Array.from(directories);
+  }
+
   // ========== Directory Picker ==========
 
   async pickDirectory(title: string): Promise<string | null> {
@@ -161,6 +236,25 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
   ): Promise<Result<string[]>> {
     try {
       const db = await this.ensureDB();
+
+      // Auto-seed demo data if accessing demo workspace and DB is empty
+      if (
+        path === "/workspace/demo-content" ||
+        path.startsWith("/workspace/demo-content/")
+      ) {
+        const checkTransaction = db.transaction([this.STORE_NAME], "readonly");
+        const checkStore = checkTransaction.objectStore(this.STORE_NAME);
+        const count = await new Promise<number>((resolve, reject) => {
+          const request = checkStore.count();
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+
+        if (count === 0) {
+          await this.seedDemoData("/workspace/demo-content");
+        }
+      }
+
       const transaction = db.transaction([this.STORE_NAME], "readonly");
       const store = transaction.objectStore(this.STORE_NAME);
 
@@ -177,21 +271,32 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
       // Normalize path for comparison
       const normalizedPath = path.endsWith("/") ? path : path + "/";
 
-      const results = allKeys.filter((key) => {
-        // Check if key is under the target path
-        if (!key.startsWith(normalizedPath)) return false;
+      const results: string[] = [];
 
-        // Filter out hidden files/directories (starting with .)
-        if (this.isHiddenPath(key)) return false;
+      // Get file paths
+      if (includeFiles) {
+        const filePaths = allKeys.filter((key) => {
+          // Check if key is under the target path
+          if (!key.startsWith(normalizedPath)) return false;
 
-        const relativePath = key.slice(normalizedPath.length);
+          // Filter out hidden files/directories (starting with .)
+          if (this.isHiddenPath(key)) return false;
 
-        // Non-recursive: only direct children
-        if (!recursive && relativePath.includes("/")) return false;
+          const relativePath = key.slice(normalizedPath.length);
 
-        // For now, treat all as files in browser (no real directory concept)
-        return includeFiles;
-      });
+          // Non-recursive: only direct children
+          if (!recursive && relativePath.includes("/")) return false;
+
+          return true;
+        });
+        results.push(...filePaths);
+      }
+
+      // Get directory paths
+      if (includeDirectories) {
+        const directoryPaths = await this.getDirectories(db, path, recursive);
+        results.push(...directoryPaths);
+      }
 
       return { ok: true, value: results };
     } catch (error) {
@@ -626,13 +731,24 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
 
       for (const path of paths) {
         try {
-          const exists = await new Promise<boolean>((resolve) => {
+          // Check if it exists as a file in IndexedDB
+          const fileExists = await new Promise<boolean>((resolve) => {
             const request = store.get(path);
             request.onsuccess = () => resolve(!!request.result);
             request.onerror = () => resolve(false);
           });
 
-          results.push({ path, exists, type: exists ? "file" : undefined });
+          if (fileExists) {
+            results.push({ path, exists: true, type: "file" });
+          } else {
+            // Check if it exists as a directory (has children)
+            const isDir = await this.isDirectory(db, path);
+            if (isDir) {
+              results.push({ path, exists: true, type: "directory" });
+            } else {
+              results.push({ path, exists: false });
+            }
+          }
         } catch {
           results.push({ path, exists: false });
         }
@@ -658,30 +774,50 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
 
       for (const path of paths) {
         try {
+          // Try to get as file first
           const data: any = await new Promise((resolve, reject) => {
             const request = store.get(path);
             request.onsuccess = () => {
               if (request.result) {
                 resolve(request.result);
               } else {
-                reject(new Error("File not found"));
+                resolve(null);
               }
             };
             request.onerror = () => reject(request.error);
           });
 
-          succeeded.push({
-            path,
-            type: "file",
-            size: data.content?.length || 0,
-            modifiedAt: data.modifiedAt || new Date(),
-            createdAt: data.createdAt || new Date(),
-          });
+          if (data) {
+            // It's a file
+            succeeded.push({
+              path,
+              type: "file",
+              size: data.content?.length || 0,
+              modifiedAt: data.modifiedAt || new Date(),
+              createdAt: data.createdAt || new Date(),
+            });
+          } else {
+            // Check if it's a directory
+            const isDir = await this.isDirectory(db, path);
+            if (isDir) {
+              succeeded.push({
+                path,
+                type: "directory",
+                size: 0,
+                modifiedAt: new Date(),
+                createdAt: new Date(),
+              });
+            } else {
+              failed.push(
+                this.createError(path, "not_found", "File not found"),
+              );
+            }
+          }
         } catch (error) {
           failed.push(
             this.createError(
               path,
-              "not_found",
+              "io_error",
               error instanceof Error ? error.message : "Unknown error",
             ),
           );

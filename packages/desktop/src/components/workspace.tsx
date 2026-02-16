@@ -12,12 +12,12 @@ import { useTranslation } from "react-i18next";
 import {
   getOrCreateWorkspaceCollections,
   getFileEntry,
-  loadFileContent,
 } from "@/utils/collections";
 import { useLiveQuery, eq, inArray, or } from "@tanstack/react-db";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import type { FileTreeNode, FileEntry } from "@/utils/fs";
+import { cn } from "../lib/utils";
 
 export const Workspace = () => {
   const { workspacePath } = useWorkspaceParams();
@@ -203,28 +203,22 @@ export const Workspace = () => {
               </div>
             ) : (
               <>
-                {fileDataWithContent
-                  .filter((item) => item.content)
-                  .map((fileWithContent) => {
-                    const fileEntry = fileWithContent as FileEntry;
-
-                    return (
-                      <div
-                        key={fileEntry.path}
-                        style={{
-                          display:
-                            activeTabId === fileEntry.path ? "block" : "none",
-                        }}
-                        className="h-full"
-                      >
-                        <TextEditor
-                          key={fileEntry.path}
-                          file={fileEntry}
-                          basePath={workspacePath}
-                        />
-                      </div>
-                    );
-                  })}
+                {fileDataWithContent.map((fileEntry) => (
+                  <div
+                    key={fileEntry.path}
+                    className={cn(
+                      "h-full",
+                      fileEntry.path === activeTabId ? "block" : "hidden",
+                    )}
+                  >
+                    <TextEditor
+                      key={fileEntry.path}
+                      file={fileEntry as FileEntry}
+                      basePath={workspacePath}
+                      isActive={fileEntry.path === activeTabId}
+                    />
+                  </div>
+                ))}
               </>
             )}
           </div>
