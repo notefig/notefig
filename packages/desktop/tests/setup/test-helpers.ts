@@ -73,14 +73,25 @@ export async function seedTestFiles(
 /**
  * Waits for the file tree to be visible and rendered
  * Checks for the presence of file/folder buttons which indicate the tree has loaded
+ * Optionally waits for a specific file to appear
  */
-export async function waitForFileTree(page: Page) {
+export async function waitForFileTree(page: Page, fileName?: string) {
   // Wait for the workspace to load by checking for either:
-  // 1. File buttons (if workspace has files)
-  // 2. The "New file" button (if workspace is empty)
-  await page.waitForSelector('button:has-text("New file")', {
-    timeout: 10000,
-  });
+  // 1. A specific file button (if fileName provided)
+  // 2. Any file/folder button (if workspace has files)
+  // 3. The "New file" button (if workspace is empty)
+
+  if (fileName) {
+    // Wait for specific file to appear in tree
+    await page.waitForSelector(`button:has-text("${fileName}")`, {
+      timeout: 10000,
+    });
+  } else {
+    // Wait for workspace controls to appear
+    await page.waitForSelector('button:has-text("New file")', {
+      timeout: 10000,
+    });
+  }
 }
 
 /**
@@ -96,19 +107,40 @@ export async function openWorkspace(page: Page, workspacePath: string) {
 
 /**
  * Clicks on a file in the file tree to open it
+ * Only clicks on files (not directories) by checking for presence of file icon
  */
 export async function openFileInTree(page: Page, fileName: string) {
-  // Look for a button containing the file name
-  await page.click(`button:has-text("${fileName}")`);
+  // Wait for the file button to be present
+  // Files have a specific structure: button > div > svg (FileText icon) + span (filename)
+  const fileButton = page
+    .locator(`button:has-text("${fileName}")`)
+    .filter({
+      has: page.locator("svg").first(), // Files have an svg icon
+    })
+    .first();
+
+  await fileButton.waitFor({ timeout: 5000 });
+  await fileButton.click();
+
+  // Wait a bit for the navigation/URL update to complete
+  await page.waitForTimeout(300);
 }
 
 /**
  * Gets the content of the currently active editor
  */
 export async function getEditorContent(page: Page): Promise<string> {
+  // Wait for editor to be present
+  await page.waitForSelector('[role="textbox"]', { timeout: 5000 });
+
   return page.evaluate(() => {
-    const editor = document.querySelector('[data-plate-editor="true"]');
-    return editor?.textContent || "";
+    // Get all editors and find the visible one (not display:none)
+    const editors = Array.from(document.querySelectorAll('[role="textbox"]'));
+    const visibleEditor = editors.find((el) => {
+      const style = window.getComputedStyle(el as Element);
+      return style.display !== "none";
+    });
+    return visibleEditor?.textContent || "";
   });
 }
 
@@ -116,7 +148,8 @@ export async function getEditorContent(page: Page): Promise<string> {
  * Types text into the active editor
  */
 export async function typeInEditor(page: Page, text: string) {
-  const editor = page.locator('[data-plate-editor="true"]');
+  // Find the visible editor
+  const editor = page.locator('[role="textbox"]').first();
   await editor.click();
   await editor.pressSequentially(text);
 }
@@ -133,4 +166,144 @@ export async function clearTestDatabase(page: Page) {
       request.onerror = () => reject(request.error);
     });
   });
+}
+
+/**
+ * Waits for content to be saved to IndexedDB
+ * Useful after typing to ensure debounced save completed
+ */
+export async function waitForContentSaved(
+  page: Page,
+  filePath: string,
+  expectedContent: string,
+  timeout: number = 10000,
+) {
+  const startTime = Date.now();
+  while (Date.now() - startTime < timeout) {
+    const content = await getFileContentFromDB(page, filePath);
+    if (content && content.includes(expectedContent)) {
+      return true;
+    }
+    await page.waitForTimeout(100);
+  }
+  throw new Error(
+    `Content not saved to IndexedDB within ${timeout}ms for ${filePath}`,
+  );
+}
+
+/**
+ * Gets file content directly from IndexedDB
+ */
+export async function getFileContentFromDB(
+  page: Page,
+  filePath: string,
+): Promise<string | null> {
+  return page.evaluate(async (path) => {
+    const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "metrists-fs";
+    return new Promise<string | null>((resolve, reject) => {
+      const request = indexedDB.open(dbName, 1);
+
+      request.onerror = () => reject(request.error);
+
+      request.onsuccess = () => {
+        const db = request.result;
+        const transaction = db.transaction(["files"], "readonly");
+        const store = transaction.objectStore("files");
+        const getRequest = store.get(path);
+
+        getRequest.onsuccess = () => {
+          const result = getRequest.result;
+          db.close();
+          resolve(result?.content || null);
+        };
+
+        getRequest.onerror = () => {
+          db.close();
+          reject(getRequest.error);
+        };
+      };
+    });
+  }, filePath);
+}
+
+/**
+ * Expands a directory in the file tree
+ * Directories have Folder/FolderOpen icons (not FileText icons like files)
+ */
+export async function expandDirectory(page: Page, dirName: string) {
+  // Find the directory button - it won't be in a tab bar, just in the file tree
+  // We can't easily distinguish tabs from file tree buttons, so we look for the FIRST match
+  // which should be the file tree (tabs come after in DOM order  typically)
+  const allButtons = page.locator(`button:has-text("${dirName}")`);
+  const count = await allButtons.count();
+
+  // If there's only one, use it. If multiple, use the first (file tree)
+  const dirButton = count > 0 ? allButtons.first() : allButtons;
+
+  // Check if it needs expanding by looking for ChevronRight icon (collapsed state)
+  const isCollapsed =
+    (await dirButton.locator("svg.lucide-chevron-right").count()) > 0;
+
+  if (isCollapsed) {
+    await dirButton.click();
+    // Wait a bit for expansion animation
+    await page.waitForTimeout(200);
+  }
+}
+
+/**
+ * Switches to a specific tab by file name
+ */
+export async function switchToTab(page: Page, fileName: string) {
+  const tab = page.locator(`button[role="tab"]:has-text("${fileName}")`);
+  await tab.click();
+}
+
+/**
+ * Closes a tab by file name
+ */
+export async function closeTab(page: Page, fileName: string) {
+  const closeButton = page.locator(
+    `button[role="tab"]:has-text("${fileName}") ~ button[aria-label="Close"]`,
+  );
+  await closeButton.click();
+}
+
+/**
+ * Gets all open tab names
+ */
+export async function getOpenTabs(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const tabs = Array.from(document.querySelectorAll('button[role="tab"]'));
+    return tabs
+      .map((tab) => {
+        // Get the first generic/div child which contains just the file name
+        const firstChild = tab.querySelector(":scope > *:first-child");
+        return firstChild?.textContent?.trim() || "";
+      })
+      .filter((name) => name.length > 0);
+  });
+}
+
+/**
+ * Clears editor content and types new content
+ */
+export async function replaceEditorContent(page: Page, newContent: string) {
+  // Find the visible editor (not display:none)
+  const editor = page
+    .locator('[role="textbox"]')
+    .locator("visible=true")
+    .first();
+  await editor.waitFor({ state: "visible", timeout: 5000 });
+  await editor.click();
+
+  // Select all and delete
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.press("Backspace");
+
+  // Wait a bit for the deletion to register
+  await page.waitForTimeout(100);
+
+  // Type new content
+  await editor.pressSequentially(newContent, { delay: 10 });
 }
