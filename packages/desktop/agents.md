@@ -400,15 +400,55 @@ We render **all open tab editors** in the DOM simultaneously, using CSS `display
 
 ## Testing
 
-**E2E Testing**: Using browser platform adapter
+### E2E Testing (Playwright)
 
-- Run tests against browser version
-- Browser adapter provides mock file system
-- Tests validate cross-platform behavior
+**Structure**: `tests/e2e/` with fixture-based organization
 
-**Current state**: E2E setup not complete yet
+**Test Isolation Pattern**:
 
-**Future**: Will have comprehensive E2E coverage
+```typescript
+test.beforeEach(async ({ page }) => {
+  // 1. Unique database per test
+  await setupTestDatabase(page, "test-name");
+
+  // 2. Navigate to workspace
+  await openWorkspace(page, "/workspace/test-path");
+
+  // 3. Seed test data into IndexedDB
+  await seedTestFiles(page, testFiles);
+
+  // 4. Reload to load seeded data
+  await page.reload();
+});
+```
+
+**Key Helpers** (`tests/setup/test-helpers.ts`):
+
+- `setupTestDatabase(page, name)` - Isolate tests with unique IndexedDB
+- `seedTestFiles(page, files)` - Pre-seed IndexedDB before app loads
+- `openFileInTree(page, fileName)` - Click file in tree (filters for file icons)
+- `replaceEditorContent(page, content)` - Edit visible editor
+- `getEditorContent(page)` - Get content from visible editor
+- `waitForAutoSave(page)` - Wait for 500ms debounce + buffer
+- `getIndexedDBContent(page, workspace, path)` - Verify persistence
+
+**Fixture Pattern**: Each `.spec.ts` has matching `.fixture.ts`
+
+```typescript
+// workspace-navigation.fixture.ts
+export const workspaceNavigationFixture = {
+  populatedWorkspace: { path: "/workspace/test", files: [...] },
+  emptyWorkspace: { path: "/workspace/empty", files: [] },
+};
+```
+
+**Important Notes**:
+
+- All tabs render simultaneously (use `visible=true` locator for active editor)
+- Tabs are `div.cursor-pointer` elements, not `role="tab"`
+- Use `waitForFileTree(page, fileName?)` after reload
+- Verify persistence via IndexedDB, not just UI
+- Avoid `/workspace/demo-content` (browser adapter auto-seeds)
 
 ## Conventions
 
