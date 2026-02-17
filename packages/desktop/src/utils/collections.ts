@@ -555,6 +555,38 @@ export function getFileEntry(
 }
 
 /**
+ * Prefetch file content for a specific file
+ * This pre-loads file content into the collection cache before the user opens it.
+ * Useful for hover-based prefetching to improve perceived performance.
+ *
+ * @param workspaceId - Unique identifier for the workspace
+ * @param filePath - Absolute path to the file to prefetch
+ */
+export async function prefetchFileContent(
+  workspaceId: string,
+  filePath: string,
+): Promise<void> {
+  const collections = getOrCreateWorkspaceCollections(workspaceId);
+
+  const existingContent = collections.content.get(filePath);
+  if (existingContent) {
+    return;
+  }
+
+  const result = await platformAdapter.readFiles([filePath]);
+
+  if (result.succeeded.length > 0) {
+    const file = result.succeeded[0];
+
+    collections.content.utils.writeInsert({
+      path: file.path,
+      content: file.content,
+      contentHash: computeContentHash(file.content),
+    });
+  }
+}
+
+/**
  * Clear all collections for a workspace
  * Useful when closing a workspace
  *

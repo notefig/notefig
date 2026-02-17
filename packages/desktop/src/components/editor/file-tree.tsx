@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import {
   FileText,
   Folder,
@@ -14,7 +14,10 @@ import {
   getFileName,
   type FileEntries,
 } from "@/utils/fs";
-import { getOrCreateWorkspaceCollections } from "@/utils/collections";
+import {
+  getOrCreateWorkspaceCollections,
+  prefetchFileContent,
+} from "@/utils/collections";
 import { useLiveQuery } from "@tanstack/react-db";
 
 interface FileTreeProps {
@@ -28,6 +31,7 @@ interface FileTreeItemProps {
   depth: number;
   selectedFilePath: string | null;
   onFileSelect: (file: FileTreeNode) => void;
+  onFileHover?: (filePath: string) => void;
 }
 
 function FileTreeItem({
@@ -35,6 +39,7 @@ function FileTreeItem({
   depth,
   selectedFilePath,
   onFileSelect,
+  onFileHover,
 }: FileTreeItemProps) {
   const [isExpanded, setIsExpanded] = useState(true);
 
@@ -46,6 +51,12 @@ function FileTreeItem({
     }
   };
 
+  const handleMouseEnter = () => {
+    if (node.type === "file" && onFileHover) {
+      onFileHover(node.path);
+    }
+  };
+
   const paddingValue = depth * 12 + 8;
   const name = getFileName(node.path);
 
@@ -53,6 +64,7 @@ function FileTreeItem({
     <div>
       <button
         onClick={handleClick}
+        onMouseEnter={handleMouseEnter}
         className={cn(
           "w-full flex items-center gap-1 px-2 py-1 text-sm hover:bg-accent/50 transition-colors",
           selectedFilePath === node.path && node.type === "file" && "bg-accent",
@@ -96,6 +108,7 @@ function FileTreeItem({
               depth={depth + 1}
               selectedFilePath={selectedFilePath}
               onFileSelect={onFileSelect}
+              onFileHover={onFileHover}
             />
           ))}
         </div>
@@ -111,6 +124,15 @@ export function FileTree({
 }: FileTreeProps) {
   const { metadata } = getOrCreateWorkspaceCollections(basePath);
 
+  const handleFileHover = useCallback(
+    (filePath: string) => {
+      prefetchFileContent(basePath, filePath).catch((error: unknown) => {
+        console.debug(`Failed to prefetch ${filePath}:`, error);
+      });
+    },
+    [basePath],
+  );
+
   // Query all file metadata entries
   const { data: fileMetadataList = [] } = useLiveQuery((q) =>
     q.from({ file: metadata }).select(({ file }) => ({
@@ -124,7 +146,6 @@ export function FileTree({
     })),
   );
 
-  // Convert array of metadata to FileEntries object (path -> entry mapping)
   const files: FileEntries = useMemo(() => {
     return fileMetadataList.reduce((acc, entry) => {
       acc[entry.path] = {
@@ -149,6 +170,7 @@ export function FileTree({
             depth={0}
             selectedFilePath={selectedFilePath}
             onFileSelect={onFileSelect}
+            onFileHover={handleFileHover}
           />
         ))}
       </div>
