@@ -130,8 +130,14 @@ export async function openFileInTree(page: Page, fileName: string) {
  * Gets the content of the currently active editor
  */
 export async function getEditorContent(page: Page): Promise<string> {
-  // Wait for editor to be present
-  await page.waitForSelector('[role="textbox"]', { timeout: 5000 });
+  // Wait for at least one editor to exist (they might be display:none)
+  await page.waitForSelector('[role="textbox"]', {
+    state: "attached",
+    timeout: 10000,
+  });
+
+  // Give a moment for visibility state to update
+  await page.waitForTimeout(200);
 
   return page.evaluate(() => {
     // Get all editors and find the visible one (not display:none)
@@ -306,4 +312,57 @@ export async function replaceEditorContent(page: Page, newContent: string) {
 
   // Type new content
   await editor.pressSequentially(newContent, { delay: 10 });
+}
+
+/**
+ * Waits for auto-save debounce to complete
+ * Default: 500ms debounce + 500ms buffer = 1000ms total
+ */
+export async function waitForAutoSave(page: Page, debounceMs: number = 500) {
+  // Wait for debounce delay + extra buffer for IndexedDB write
+  await page.waitForTimeout(debounceMs + 500);
+}
+
+/**
+ * Gets file content from IndexedDB for a specific workspace
+ * Useful for verifying persistence independently of editor UI
+ */
+export async function getIndexedDBContent(
+  page: Page,
+  workspacePath: string,
+  filePath: string,
+): Promise<string> {
+  return page.evaluate(
+    async ({ dbName, path }) => {
+      const request = indexedDB.open(dbName, 1);
+
+      return new Promise<string>((resolve, reject) => {
+        request.onerror = () => reject(request.error);
+
+        request.onsuccess = () => {
+          const db = request.result;
+          const transaction = db.transaction(["files"], "readonly");
+          const store = transaction.objectStore("files");
+          const getRequest = store.get(path);
+
+          getRequest.onsuccess = () => {
+            const result = getRequest.result;
+            db.close();
+            resolve(result?.content || "");
+          };
+
+          getRequest.onerror = () => {
+            db.close();
+            reject(getRequest.error);
+          };
+        };
+      });
+    },
+    {
+      dbName: (await page.evaluate(
+        () => (window as any).__VITE_INDEXEDDB_NAME__ || "metrists-fs",
+      )) as string,
+      path: filePath,
+    },
+  );
 }
