@@ -12,25 +12,44 @@ import type {
  * Browser platform adapter
  * Implements platform-specific operations for browser/web environment
  * Uses IndexedDB for storage simulation
+ *
+ * Database name can be overridden via window.__VITE_INDEXEDDB_NAME__
+ * for testing purposes. Otherwise uses a default database.
  */
 export class BrowserPlatformAdapter implements IPlatformAdapter {
   private db: IDBDatabase | null = null;
-  private readonly DB_NAME = "metrists-fs";
   private readonly DB_VERSION = 1;
   private readonly STORE_NAME = "files";
 
   /**
-   * Initialize IndexedDB connection
+   * Get database name
+   * Checks for test override first, then falls back to default
+   */
+  private getDBName(): string {
+    const testOverride = (window as any).__VITE_INDEXEDDB_NAME__;
+    if (testOverride) {
+      return testOverride;
+    }
+    return "metrists-fs";
+  }
+
+  /**
+   * Get or create IndexedDB connection
    */
   private async ensureDB(): Promise<IDBDatabase> {
-    if (this.db) return this.db;
+    if (this.db) {
+      return this.db;
+    }
+
+    const dbName = this.getDBName();
 
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.DB_NAME, this.DB_VERSION);
+      const request = indexedDB.open(dbName, this.DB_VERSION);
 
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         this.db = request.result;
+        console.log("[BrowserAdapter] Opened database:", dbName);
         resolve(this.db);
       };
 
@@ -323,6 +342,10 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     const succeeded: string[] = [];
     const failed: FileSystemError[] = [];
 
+    if (paths.length === 0) {
+      return { succeeded, failed };
+    }
+
     try {
       const db = await this.ensureDB();
 
@@ -469,6 +492,10 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     const succeeded: Array<{ path: string; content: string }> = [];
     const failed: FileSystemError[] = [];
 
+    if (paths.length === 0) {
+      return { succeeded, failed };
+    }
+
     try {
       const db = await this.ensureDB();
       const transaction = db.transaction([this.STORE_NAME], "readonly");
@@ -522,6 +549,10 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
   ): Promise<BatchResult<string>> {
     const succeeded: string[] = [];
     const failed: FileSystemError[] = [];
+
+    if (files.length === 0) {
+      return { succeeded, failed };
+    }
 
     try {
       const db = await this.ensureDB();
@@ -577,6 +608,10 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
   async deleteFiles(paths: string[]): Promise<BatchResult<string>> {
     const succeeded: string[] = [];
     const failed: FileSystemError[] = [];
+
+    if (paths.length === 0) {
+      return { succeeded, failed };
+    }
 
     try {
       const db = await this.ensureDB();
@@ -724,6 +759,10 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
       type?: "file" | "directory";
     }[] = [];
 
+    if (paths.length === 0) {
+      return results;
+    }
+
     try {
       const db = await this.ensureDB();
       const transaction = db.transaction([this.STORE_NAME], "readonly");
@@ -766,6 +805,10 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
   async getMetadata(paths: string[]): Promise<BatchResult<FileSystemMetadata>> {
     const succeeded: FileSystemMetadata[] = [];
     const failed: FileSystemError[] = [];
+
+    if (paths.length === 0) {
+      return { succeeded, failed };
+    }
 
     try {
       const db = await this.ensureDB();
