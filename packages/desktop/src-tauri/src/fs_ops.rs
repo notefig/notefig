@@ -368,8 +368,7 @@ pub async fn write_files(files: Vec<FileToWrite>) -> BatchResult<String> {
                 return Err(map_io_error(&file.path, err));
             }
 
-            // IMPORTANT: Register the write BEFORE actually writing
-            // This prevents race condition where watcher sees the file change before registration
+            // Register write before writing to prevent race condition with watcher
             let hash = compute_content_hash(&file.content);
             register_app_write(file.path.clone(), hash);
 

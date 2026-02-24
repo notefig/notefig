@@ -67,21 +67,15 @@ lazy_static::lazy_static! {
 
 // ========== Helper Functions ==========
 
-/// Register a write initiated by the app to filter it from file watcher events
-/// This prevents the app from reacting to its own writes as external changes
 pub fn register_app_write(path: String, content_hash: String) {
     let mut writes = APP_WRITES.lock().unwrap();
     
-    println!("[file-watcher] Registering app write: {} with hash {}", path, content_hash);
-    
-    // Add new write
     writes.push(AppWrite {
         path: PathBuf::from(path),
         content_hash,
         timestamp: Instant::now(),
     });
     
-    // Cleanup old entries (> 5 seconds)
     writes.retain(|w| w.timestamp.elapsed().as_secs() < 5);
 }
 
@@ -243,30 +237,21 @@ async fn process_events(events: Vec<Event>, app_handle: &AppHandle) {
                         continue;
                     }
                     
-                    // Only emit content changes for files (not directories)
                     if path.is_file() {
-                        // Read the file content
                         if let Ok(content) = fs::read_to_string(&path).await {
                             let hash = compute_content_hash(&content);
                             
-                            println!("[file-watcher] File modified: {} with hash {}", path.display(), hash);
-                            
-                            // Check if this matches a recent app write
                             let is_app_write = {
                                 let writes = APP_WRITES.lock().unwrap();
                                 writes.iter().any(|w| w.path == path && w.content_hash == hash)
                             };
                             
                             if !is_app_write {
-                                // Only emit if this is an external write
-                                println!("[file-watcher] Emitting external change for {}", path.display());
                                 content_changes.push(ContentChange {
                                     path: path.to_string_lossy().to_string(),
                                     content,
                                     content_hash: hash,
                                 });
-                            } else {
-                                println!("[file-watcher] Ignoring app write for {}", path.display());
                             }
                         }
                     }
