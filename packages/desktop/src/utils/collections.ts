@@ -27,6 +27,7 @@ import {
 import { QueryClient } from "@tanstack/query-core";
 import { platformAdapter } from "@/adapters";
 import type { FileEntry } from "./fs";
+import { calculateContentHash } from "./hash";
 
 // Global QueryClient instance for TanStack Query
 const queryClient = new QueryClient({
@@ -55,19 +56,6 @@ export interface FileContent {
   path: string; // Absolute path - foreign key to metadata
   content: string;
   contentHash: string; // Hash of the content
-}
-
-/**
- * Helper function to compute content hash
- */
-function computeContentHash(content: string): string {
-  let hash = 0;
-  for (let i = 0; i < content.length; i++) {
-    const char = content.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash;
-  }
-  return hash.toString(36);
 }
 
 /**
@@ -287,7 +275,7 @@ export function createFileContentCollection(workspaceId: string) {
         return result.succeeded.map((file) => ({
           path: file.path,
           content: file.content,
-          contentHash: computeContentHash(file.content),
+          contentHash: calculateContentHash(file.content),
         }));
       },
 
@@ -394,7 +382,7 @@ export async function writeFileContent(
   content: string,
 ): Promise<void> {
   const collections = getOrCreateWorkspaceCollections(workspaceId);
-  const contentHash = computeContentHash(content);
+  const contentHash = calculateContentHash(content);
 
   // Update content collection (this triggers onUpdate/onInsert which writes to file system)
   const existingContent = collections.content.get(filePath);
@@ -577,11 +565,12 @@ export async function prefetchFileContent(
 
   if (result.succeeded.length > 0) {
     const file = result.succeeded[0];
+    const contentHash = calculateContentHash(file.content);
 
     collections.content.utils.writeInsert({
       path: file.path,
       content: file.content,
-      contentHash: computeContentHash(file.content),
+      contentHash,
     });
   }
 }

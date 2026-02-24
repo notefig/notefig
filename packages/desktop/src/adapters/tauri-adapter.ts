@@ -5,7 +5,8 @@ import type {
   BatchResult,
   FileSystemError,
   FileSystemMetadata,
-  FileSystemChangeEvent,
+  MetadataChangeEvent,
+  ContentChangeEvent,
 } from "./platform-adapter.interface";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -20,7 +21,6 @@ import { invoke } from "@tauri-apps/api/core";
 export class TauriPlatformAdapter implements IPlatformAdapter {
   private eventListeners: Set<PlatformEventListener> = new Set();
   private unlistenFns: Promise<UnlistenFn>[] = [];
-  private fileWatchers: Map<string, () => void> = new Map();
 
   // ========== Directory Picker ==========
 
@@ -300,35 +300,31 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
 
   // ========== File Watching ==========
 
-  watchPaths(
-    paths: string[],
-    callback: (event: FileSystemChangeEvent) => void,
-  ): () => void {
-    const watchId = Math.random().toString(36);
+  async startWatchingMetadata(paths: string[], watchId: string): Promise<void> {
+    try {
+      await invoke("start_watching_metadata", { paths, watchId });
+    } catch (error) {
+      console.error("Failed to start watching metadata:", error);
+      throw error;
+    }
+  }
 
-    // Set up Tauri file watcher
-    invoke("watch_paths", { paths, watchId })
-      .then(() => {
-        // Listen for file change events
-        const unlisten = listen(`fs-change-${watchId}`, (event) => {
-          callback(event.payload as FileSystemChangeEvent);
-        });
-        this.unlistenFns.push(unlisten);
-      })
-      .catch((error) => {
-        console.error("Failed to set up file watcher:", error);
-      });
+  async startWatchingContent(paths: string[], watchId: string): Promise<void> {
+    try {
+      await invoke("start_watching_content", { paths, watchId });
+    } catch (error) {
+      console.error("Failed to start watching content:", error);
+      throw error;
+    }
+  }
 
-    // Return cleanup function
-    const cleanup = () => {
-      invoke("unwatch_paths", { watchId }).catch((error) => {
-        console.error("Failed to clean up file watcher:", error);
-      });
-      this.fileWatchers.delete(watchId);
-    };
-
-    this.fileWatchers.set(watchId, cleanup);
-    return cleanup;
+  async stopWatching(watchId: string): Promise<void> {
+    try {
+      await invoke("stop_watching", { watchId });
+    } catch (error) {
+      // Silently handle errors - watcher may not exist due to race conditions
+      // This is expected during cleanup when watchers haven't fully initialized
+    }
   }
 
   // ========== Event Listeners ==========
@@ -378,6 +374,24 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     });
     this.unlistenFns.push(folderUnlisten);
 
+    // Listen for metadata changes
+    const metadataUnlisten = listen("fs-metadata-changed", (event) => {
+      const payload = event.payload as MetadataChangeEvent;
+      this.eventListeners.forEach((callback) => {
+        callback({ type: "fs-metadata-changed", payload });
+      });
+    });
+    this.unlistenFns.push(metadataUnlisten);
+
+    // Listen for content changes
+    const contentUnlisten = listen("fs-content-changed", (event) => {
+      const payload = event.payload as ContentChangeEvent;
+      this.eventListeners.forEach((callback) => {
+        callback({ type: "fs-content-changed", payload });
+      });
+    });
+    this.unlistenFns.push(contentUnlisten);
+
     // Listen for file drops
     getCurrentWebview()
       .onDragDropEvent((event) => {
@@ -401,9 +415,5 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       unlistenPromise.then((unlisten) => unlisten());
     });
     this.unlistenFns = [];
-
-    // Clean up file watchers
-    this.fileWatchers.forEach((cleanup) => cleanup());
-    this.fileWatchers.clear();
   }
 }

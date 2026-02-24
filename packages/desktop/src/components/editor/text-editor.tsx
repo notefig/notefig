@@ -31,13 +31,14 @@ interface TextEditorProps {
  */
 export function TextEditor({ file, basePath, isActive }: TextEditorProps) {
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastExternalHashRef = useRef<string>(file.contentHash || "");
 
   // Memoize the initial editor value to avoid re-deserializing on every render
-  // Only deserialize when the file path changes (new file loaded)
+  // Re-deserialize when file path OR contentHash changes (external edits)
   const initialValue = useMemo(
     () => (editor: any) =>
       editor.getApi(MarkdownPlugin).markdown.deserialize(file.content),
-    [file.path], // Only re-deserialize when file path changes, not content
+    [file.path, file.contentHash], // React to external changes via contentHash
   );
 
   const editor = usePlateEditor({
@@ -57,6 +58,30 @@ export function TextEditor({ file, basePath, isActive }: TextEditorProps) {
     }
   }, [editor]);
 
+  // Detect external file changes and update editor content
+  useEffect(() => {
+    if (!editor || !file.contentHash) return;
+
+    // If contentHash changed, it's an external edit (Rust filters out our writes)
+    if (file.contentHash !== lastExternalHashRef.current) {
+      console.log(
+        `[text-editor] External change detected for ${file.path}, updating editor`,
+      );
+
+      // Deserialize new content
+      const newNodes = editor
+        .getApi(MarkdownPlugin)
+        .markdown.deserialize(file.content);
+
+      // Replace editor content
+      editor.children = newNodes;
+      (editor as any).onChange?.();
+
+      // Update ref to track this hash
+      lastExternalHashRef.current = file.contentHash;
+    }
+  }, [editor, file.contentHash, file.content, file.path]);
+
   const handleChange = useCallback(() => {
     if (!editor) return;
 
@@ -65,12 +90,13 @@ export function TextEditor({ file, basePath, isActive }: TextEditorProps) {
       clearTimeout(saveTimeoutRef.current);
     }
 
-    // Debounce saves by 300ms
+    // Debounce saves by 500ms
     saveTimeoutRef.current = setTimeout(() => {
       const markdown = editor.getApi(MarkdownPlugin).markdown.serialize();
       // Normalize: remove HTML entity for space
       const normalizedMarkdown = markdown.replace(/&#x20;/g, "");
 
+      // Save directly - Rust will filter out self-writes from file watcher
       writeFileContent(basePath, file.path, normalizedMarkdown);
     }, 500);
   }, [editor, file.path, basePath]);

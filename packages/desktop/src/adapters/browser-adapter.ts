@@ -5,7 +5,8 @@ import type {
   BatchResult,
   FileSystemError,
   FileSystemMetadata,
-  FileSystemChangeEvent,
+  MetadataChangeEvent,
+  ContentChangeEvent,
 } from "./platform-adapter.interface";
 
 /**
@@ -886,12 +887,25 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
 
   // ========== File Watching ==========
 
-  watchPaths(
+  async startWatchingMetadata(
     _paths: string[],
-    _callback: (event: FileSystemChangeEvent) => void,
-  ): () => void {
-    // No file watching in browser (IndexedDB doesn't support it)
-    return () => {};
+    _watchId: string,
+  ): Promise<void> {
+    // TODO: Implement BroadcastChannel-based watching for cross-tab sync
+    console.log("[BrowserAdapter] Metadata watching not yet implemented");
+  }
+
+  async startWatchingContent(
+    _paths: string[],
+    _watchId: string,
+  ): Promise<void> {
+    // TODO: Implement BroadcastChannel-based watching for cross-tab sync
+    console.log("[BrowserAdapter] Content watching not yet implemented");
+  }
+
+  async stopWatching(_watchId: string): Promise<void> {
+    // TODO: Implement stop watching when BroadcastChannel watching is implemented
+    // Silently handle - no-op in browser for now
   }
 
   // ========== Event Listeners ==========

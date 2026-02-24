@@ -50,12 +50,30 @@ export type FileSystemMetadata = {
 };
 
 /**
- * File system change event
+ * Metadata change event (batched)
  */
-export type FileSystemChangeEvent = {
-  type: "created" | "modified" | "deleted" | "renamed";
+export type MetadataChange = {
+  type: "created" | "deleted" | "renamed";
   path: string;
   oldPath?: string; // For rename events
+  isDirectory: boolean;
+};
+
+export type MetadataChangeEvent = {
+  changes: MetadataChange[];
+};
+
+/**
+ * Content change event (batched)
+ */
+export type ContentChange = {
+  path: string;
+  content: string;
+  contentHash: string;
+};
+
+export type ContentChangeEvent = {
+  changes: ContentChange[];
 };
 
 /**
@@ -65,7 +83,8 @@ export type PlatformEvent =
   | { type: "theme-changed"; payload: Theme }
   | { type: "folder-selected"; payload: string }
   | { type: "file-dropped"; payload: string[] }
-  | { type: "fs-changed"; payload: FileSystemChangeEvent };
+  | { type: "fs-metadata-changed"; payload: MetadataChangeEvent }
+  | { type: "fs-content-changed"; payload: ContentChangeEvent };
 
 /**
  * Generic event listener callback
@@ -182,13 +201,30 @@ export interface IPlatformAdapter {
 
   // ========== File Watching ==========
   /**
-   * Watch paths for changes
-   * @returns Cleanup function to stop watching
+   * Start watching directories for metadata changes (creates, deletes, renames)
+   * Watches recursively - will detect all changes within the directory tree
+   * @param paths - Directory paths to watch
+   * @param watchId - Unique identifier for this watch session
+   * @returns Promise that resolves when watching starts
    */
-  watchPaths(
-    paths: string[],
-    callback: (event: FileSystemChangeEvent) => void,
-  ): () => void;
+  startWatchingMetadata(paths: string[], watchId: string): Promise<void>;
+
+  /**
+   * Start or update watching individual files for content changes
+   * Automatically reconciles changes: adds new files, removes files no longer in list
+   * Pass the complete list of files to watch each time - platform handles reconciliation
+   * @param paths - File paths to watch (absolute paths)
+   * @param watchId - Unique identifier for this watch session
+   * @returns Promise that resolves when watching starts/updates
+   */
+  startWatchingContent(paths: string[], watchId: string): Promise<void>;
+
+  /**
+   * Stop watching paths
+   * @param watchId - Unique identifier for the watch session to stop
+   * @returns Promise that resolves when watching stops
+   */
+  stopWatching(watchId: string): Promise<void>;
 
   // ========== Event Listeners ==========
   /**

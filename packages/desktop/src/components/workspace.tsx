@@ -18,6 +18,11 @@ import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import type { FileTreeNode, FileEntry } from "@/utils/fs";
 import { cn } from "../lib/utils";
+import { platformAdapter } from "@/adapters";
+import {
+  handleMetadataFileSystemChange,
+  handleContentFileSystemChange,
+} from "@/utils/file-sync";
 
 export const Workspace = () => {
   const { workspacePath } = useWorkspaceParams();
@@ -141,6 +146,48 @@ export const Workspace = () => {
   const handleNewFile = useCallback(() => {
     //TODO: handle new tab + new file creation
   }, [handleNewTab]);
+
+  // Setup file watchers for metadata (workspace directory) and content (open tabs)
+  useEffect(() => {
+    const metadataWatchId = `metadata-${workspacePath}`;
+    const contentWatchId = `content-${workspacePath}`;
+    let eventCleanup: (() => void) | undefined;
+    let isCleanedUp = false;
+
+    const setupWatchers = async () => {
+      // Setup event listener for file system events
+      eventCleanup = platformAdapter.addEventListener((event) => {
+        if (event.type === "fs-metadata-changed") {
+          handleMetadataFileSystemChange(event.payload, workspacePath);
+        } else if (event.type === "fs-content-changed") {
+          handleContentFileSystemChange(event.payload, workspacePath);
+        }
+      });
+
+      // Watch workspace directory for metadata changes (creates/deletes/renames)
+      await platformAdapter.startWatchingMetadata(
+        [workspacePath],
+        metadataWatchId,
+      );
+
+      // Watch open tabs for content changes
+      if (openTabs.length > 0) {
+        await platformAdapter.startWatchingContent(openTabs, contentWatchId);
+      }
+    };
+
+    setupWatchers();
+
+    return () => {
+      isCleanedUp = true;
+      eventCleanup?.();
+      // Adapters handle "not found" errors gracefully
+      platformAdapter.stopWatching(metadataWatchId);
+      if (openTabs.length > 0) {
+        platformAdapter.stopWatching(contentWatchId);
+      }
+    };
+  }, [workspacePath, openTabs.join(",")]); // Re-run when tabs change
 
   return (
     <div

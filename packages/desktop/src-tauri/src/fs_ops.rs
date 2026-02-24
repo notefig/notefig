@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use crate::file_watcher::{register_app_write, compute_content_hash};
 
 // ========== Error Types ==========
 
@@ -367,6 +368,11 @@ pub async fn write_files(files: Vec<FileToWrite>) -> BatchResult<String> {
                 return Err(map_io_error(&file.path, err));
             }
 
+            // IMPORTANT: Register the write BEFORE actually writing
+            // This prevents race condition where watcher sees the file change before registration
+            let hash = compute_content_hash(&file.content);
+            register_app_write(file.path.clone(), hash);
+
             // Use atomic write for safety
             match atomic_write(&path_buf, &file.content).await {
                 Ok(_) => Ok(file.path),
@@ -604,20 +610,4 @@ pub async fn get_metadata(paths: Vec<String>) -> BatchResult<FileSystemMetadata>
     }
 
     result
-}
-
-// ========== File Watching ==========
-// Note: File watching implementation would require notify crate
-// For now, providing stub commands
-
-#[tauri::command]
-pub async fn watch_paths(_paths: Vec<String>, _watch_id: String) -> std::result::Result<(), String> {
-    // TODO: Implement file watching with notify crate
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn unwatch_paths(_watch_id: String) -> std::result::Result<(), String> {
-    // TODO: Implement unwatching
-    Ok(())
 }

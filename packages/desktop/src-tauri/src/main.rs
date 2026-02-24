@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod fs_ops;
+mod file_watcher;
 
 use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, AppHandle};
@@ -119,8 +120,10 @@ fn main() {
             fs_ops::copy_file,
             fs_ops::check_exists,
             fs_ops::get_metadata,
-            fs_ops::watch_paths,
-            fs_ops::unwatch_paths,
+            // File watcher commands
+            file_watcher::start_watching_metadata,
+            file_watcher::start_watching_content,
+            file_watcher::stop_watching,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

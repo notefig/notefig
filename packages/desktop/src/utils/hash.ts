@@ -6,23 +6,24 @@
  * a hash of the content. The UI can then compare current content hash vs saved hash
  * to determine modification status.
  *
+ * Uses MD5 for deterministic cross-platform hashing (matches Rust implementation)
+ *
  * Benefits:
  * - Reliable change detection regardless of content
  * - Fast comparison using short hash strings
  * - Consistent across file tree and editor UI
  * - Handles edge cases like whitespace/formatting changes
+ * - Matches Rust hashing for file watcher integration
  */
 
+import md5 from "md5";
+
 /**
- * Calculates a simple hash of a string content
- * Uses a fast djb2 hash algorithm suitable for detecting content changes
+ * Calculates an MD5 hash of string content
+ * This matches the Rust implementation for consistent cross-platform hashing
  */
 export function calculateContentHash(content: string): string {
-  let hash = 5381;
-  for (let i = 0; i < content.length; i++) {
-    hash = (hash * 33) ^ content.charCodeAt(i);
-  }
-  return (hash >>> 0).toString(36); // Convert to base36 for shorter string
+  return md5(content);
 }
 
 /**
@@ -43,5 +44,6 @@ export function isContentModified(
   savedContentHash: string | undefined,
 ): boolean {
   if (!savedContentHash) return true; // No saved hash means it's new/modified
-  return calculateContentHash(currentContent) !== savedContentHash;
+  const currentHash = calculateContentHash(currentContent);
+  return currentHash !== savedContentHash;
 }

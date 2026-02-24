@@ -20,6 +20,10 @@ tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.
 walkdir = "2"
 tokio = { version = "1", features = ["fs", "io-util"] }
 futures = "0.3"
+notify = "6.1"
+notify-debouncer-full = "0.3"
+lazy_static = "1.4"
+md5 = "0.8.0"
 
 
 [features]
