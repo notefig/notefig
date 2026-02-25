@@ -242,8 +242,16 @@ async fn process_events(events: Vec<Event>, app_handle: &AppHandle) {
                             let hash = compute_content_hash(&content);
                             
                             let is_app_write = {
-                                let writes = APP_WRITES.lock().unwrap();
-                                writes.iter().any(|w| w.path == path && w.content_hash == hash)
+                                let mut writes = APP_WRITES.lock().unwrap();
+                                // Garbage-collect stale entries while we have the lock
+                                writes.retain(|w| w.timestamp.elapsed().as_secs() < 5);
+                                // Find and remove the matching entry (consume it)
+                                if let Some(pos) = writes.iter().position(|w| w.path == path && w.content_hash == hash) {
+                                    writes.remove(pos);
+                                    true
+                                } else {
+                                    false
+                                }
                             };
                             
                             if !is_app_write {

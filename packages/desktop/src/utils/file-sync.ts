@@ -114,7 +114,11 @@ export async function handleContentFileSystemChange(
     try {
       const existingContent = collections.content.get(change.path);
 
-      if (!existingContent) {
+      // Skip if file isn't loaded in memory, or content hasn't actually changed
+      if (
+        !existingContent ||
+        existingContent.contentHash === change.contentHash
+      ) {
         continue;
       }
 
@@ -123,6 +127,18 @@ export async function handleContentFileSystemChange(
         content: change.content,
         contentHash: change.contentHash,
       });
+
+      // Keep metadata contentHash in sync so the editor sees the change
+      const existingMetadata = collections.metadata.get(change.path);
+      if (
+        existingMetadata &&
+        existingMetadata.contentHash !== change.contentHash
+      ) {
+        collections.metadata.utils.writeUpdate({
+          ...existingMetadata,
+          contentHash: change.contentHash,
+        });
+      }
     } catch (error) {
       console.error(
         `[file-sync] Error processing content change for ${change.path}:`,
