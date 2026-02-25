@@ -1,8 +1,6 @@
-import { useCallback, useRef, useEffect, useMemo } from "react";
-import { Plate, usePlateEditor } from "platejs/react";
-import { Editor as SlateEditor } from "slate";
+import { useCallback, useRef, useEffect } from "react";
+import { Plate } from "platejs/react";
 import { MarkdownPlugin } from "@platejs/markdown";
-import { MarkdownEditorKit } from "@/components/editor/markdown-editor-kit";
 import { FixedToolbar } from "@/components/ui/fixed-toolbar";
 import { MarkToolbarButton } from "@/components/ui/mark-toolbar-button";
 import { Editor, EditorContainer } from "@/components/ui/editor";
@@ -19,6 +17,7 @@ import { toggleList, ListStyleType } from "@platejs/list";
 import type { FileEntry } from "../../utils/fs";
 import { writeFileContent } from "@/utils/collections";
 import { calculateContentHash } from "@/utils/hash";
+import { getOrCreateEditor } from "@/components/editor/editor-store";
 
 interface TextEditorProps {
   file: FileEntry;
@@ -28,7 +27,11 @@ interface TextEditorProps {
 
 /**
  * Main TextEditor component
- * Receives file with content already loaded from workspace-level query
+ * Receives file with content already loaded from workspace-level query.
+ *
+ * The editor instance is created (or retrieved) from the module-level
+ * editor-store, so undo history, scroll position, and internal Slate state
+ * survive across Dockable tab switches that unmount/remount this component.
  */
 export function TextEditor({ file, basePath, isActive }: TextEditorProps) {
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -41,30 +44,17 @@ export function TextEditor({ file, basePath, isActive }: TextEditorProps) {
   // content we just received from disk — creating a pointless write-back.
   const suppressSaveRef = useRef(false);
 
-  // Memoize the initial editor value to avoid re-deserializing on every render
-  // Re-deserialize when file path OR contentHash changes (external edits)
-  const initialValue = useMemo(
-    () => (editor: any) =>
-      editor.getApi(MarkdownPlugin).markdown.deserialize(file.content),
-    [file.path, file.contentHash], // React to external changes via contentHash
-  );
+  // Get (or create on first mount) the persistent editor instance.
+  // On first call for this file path, the content is deserialized into the editor.
+  // On subsequent mounts (tab switch), the existing instance with its undo history
+  // is returned — the `content` argument is ignored.
+  const editor = getOrCreateEditor(file.path, file.content);
 
-  const editor = usePlateEditor({
-    plugins: MarkdownEditorKit,
-    value: initialValue,
-  });
-
-  // Enable chunking for large documents (Slate performance optimization)
-  // Splits the document into chunks of 1000 nodes to reduce React re-rendering overhead
-  // This is crucial for handling files with thousands of lines like "The Adventures of Pinocchio.md"
-  useEffect(() => {
-    if (editor) {
-      // Type assertion needed as Plate types don't expose getChunkSize yet
-      (editor as any).getChunkSize = (node: any) => {
-        return SlateEditor.isEditor(node) ? 1000 : null;
-      };
-    }
-  }, [editor]);
+  // Plugin-specific transforms (h1, blockquote, link, etc.) are dynamically added
+  // by plugins and not reflected in the base PlateEditor type. Use `tf` as `any`
+  // for toolbar handlers that call these plugin transforms.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tf = editor.tf as any;
 
   // Detect external file changes and update editor content
   useEffect(() => {
@@ -128,7 +118,7 @@ export function TextEditor({ file, basePath, isActive }: TextEditorProps) {
     }, 500);
   }, [editor, file.path, basePath]);
 
-  // Cleanup on unmount
+  // Cleanup pending saves on unmount
   useEffect(() => {
     return () => {
       if (saveTimeoutRef.current) {
@@ -150,24 +140,15 @@ export function TextEditor({ file, basePath, isActive }: TextEditorProps) {
 
   return (
     <Plate editor={editor} onValueChange={handleChange}>
-      <div className="flex flex-col h-full">
+      <div className="flex flex-col flex-1 min-h-0 w-full">
         <FixedToolbar className="shrink-0 justify-start rounded-t-lg gap-1 flex-wrap">
-          <ToolbarButton
-            onClick={() => editor.tf.h1.toggle()}
-            tooltip="Heading 1"
-          >
+          <ToolbarButton onClick={() => tf.h1.toggle()} tooltip="Heading 1">
             H1
           </ToolbarButton>
-          <ToolbarButton
-            onClick={() => editor.tf.h2.toggle()}
-            tooltip="Heading 2"
-          >
+          <ToolbarButton onClick={() => tf.h2.toggle()} tooltip="Heading 2">
             H2
           </ToolbarButton>
-          <ToolbarButton
-            onClick={() => editor.tf.h3.toggle()}
-            tooltip="Heading 3"
-          >
+          <ToolbarButton onClick={() => tf.h3.toggle()} tooltip="Heading 3">
             H3
           </ToolbarButton>
 
@@ -214,13 +195,13 @@ export function TextEditor({ file, basePath, isActive }: TextEditorProps) {
           <Separator orientation="vertical" className="h-6" />
 
           <ToolbarButton
-            onClick={() => editor.tf.blockquote.toggle()}
+            onClick={() => tf.blockquote.toggle()}
             tooltip="Blockquote"
           >
             Quote
           </ToolbarButton>
           <ToolbarButton
-            onClick={() => editor.tf.codeBlock.toggle()}
+            onClick={() => tf.codeBlock.toggle()}
             tooltip="Code Block (⌘+Alt+8)"
           >
             {"</>"}
@@ -228,10 +209,7 @@ export function TextEditor({ file, basePath, isActive }: TextEditorProps) {
 
           <Separator orientation="vertical" className="h-6" />
 
-          <ToolbarButton
-            onClick={() => editor.tf.link.toggle()}
-            tooltip="Toggle Link"
-          >
+          <ToolbarButton onClick={() => tf.link.toggle()} tooltip="Toggle Link">
             <Link2Icon className="h-4 w-4" />
           </ToolbarButton>
         </FixedToolbar>

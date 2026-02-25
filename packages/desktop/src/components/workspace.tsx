@@ -1,28 +1,101 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { useSearchParams } from "react-router";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  useCallback,
+  type ReactElement,
+} from "react";
+import { Dockable } from "@danfessler/react-dockable";
+import type { LayoutNode, TabProps } from "@danfessler/react-dockable";
 import { IconSidebar } from "@/components/editor/icon-sidebar";
 import { FileTree } from "@/components/editor/file-tree";
 import { FileControls } from "@/components/editor/file-controls";
-import { TabBar } from "@/components/editor/tab-bar";
 import { TextEditor } from "@/components/editor/text-editor";
 import { StatusBar } from "@/components/editor/status-bar";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
-import {
-  getOrCreateWorkspaceCollections,
-  getFileEntry,
-} from "@/utils/collections";
-import { useLiveQuery, eq, inArray, or } from "@tanstack/react-db";
+import { getOrCreateWorkspaceCollections } from "@/utils/collections";
+import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
+import { useLayoutSearchParam } from "@/hooks/use-layout-search-param";
 import type { FileTreeNode, FileEntry } from "@/utils/fs";
-import { cn } from "../lib/utils";
 import { platformAdapter } from "@/adapters";
 import {
   handleMetadataFileSystemChange,
   handleContentFileSystemChange,
 } from "@/utils/file-sync";
+import { getFileName } from "@/utils/fs";
+import {
+  disposeEditor,
+  disposeAllEditors,
+} from "@/components/editor/editor-store";
+
+// ── Dockable layout helpers ─────────────────────────────────────────────────
+
+/**
+ * Deep-clone a layout tree, adding a new tab to the first Window and selecting it.
+ * Preserves all panel splits, sizes, and tab ordering.
+ */
+function addTabToLayout(layout: LayoutNode[], tabId: string): LayoutNode[] {
+  let added = false;
+  function walk(nodes: LayoutNode[]): LayoutNode[] {
+    return nodes.map((node) => {
+      if (node.type === "Window" && !added) {
+        added = true;
+        return {
+          ...node,
+          children: [...node.children, tabId],
+          selected: tabId,
+        };
+      }
+      if (node.type === "Panel") {
+        return { ...node, children: walk(node.children) };
+      }
+      return node;
+    });
+  }
+  return walk(layout);
+}
+
+/**
+ * Deep-clone a layout tree, setting `selected` to `tabId` in the Window
+ * that contains it. Other windows are left unchanged.
+ */
+function selectTabInLayout(layout: LayoutNode[], tabId: string): LayoutNode[] {
+  return layout.map((node) => {
+    if (node.type === "Window") {
+      if (node.children.includes(tabId)) {
+        return { ...node, selected: tabId };
+      }
+      return node;
+    }
+    if (node.type === "Panel") {
+      return { ...node, children: selectTabInLayout(node.children, tabId) };
+    }
+    return node;
+  });
+}
+
+/**
+ * Walk the LayoutNode tree and collect all tab IDs.
+ * (Used locally to diff tabs on Dockable onChange.)
+ */
+function extractTabIds(nodes: LayoutNode[]): string[] {
+  const ids: string[] = [];
+  for (const node of nodes) {
+    if (node.type === "Window") {
+      ids.push(...node.children);
+    } else if (node.type === "Panel") {
+      ids.push(...extractTabIds(node.children));
+    }
+  }
+  return ids;
+}
+
+// ── Workspace Component ─────────────────────────────────────────────────────
 
 export const Workspace = () => {
   const { workspacePath } = useWorkspaceParams();
@@ -34,33 +107,50 @@ export const Workspace = () => {
 
   const { metadata, content } = getOrCreateWorkspaceCollections(workspacePath);
   const { t } = useTranslation();
-  const [searchParams, setSearchParams] = useSearchParams();
 
-  const activeTabId = searchParams.get("activeTab");
-  const openTabs = searchParams.getAll("tab");
+  // ── Layout state from URL (single source of truth) ──
+  const { layout, setLayout, openTabs, activeTabId } = useLayoutSearchParam();
+
+  // Track the previous set of open tab IDs so we can detect structural
+  // changes (tab added / removed) vs. selection-only changes.
+  // Dockable.Root reads `layout` only on mount, so we must remount it
+  // (via key change) whenever the set of tabs changes.
+  const prevTabKeyRef = useRef(openTabs.join(","));
+  const dockableKey = useMemo(() => {
+    const key = openTabs.join(",");
+    if (key !== prevTabKeyRef.current) {
+      prevTabKeyRef.current = key;
+    }
+    return key;
+  }, [openTabs]);
+
+  // Dispose all editor instances when this workspace unmounts
+  // (e.g. user navigates to a different workspace)
+  useEffect(() => {
+    return () => {
+      disposeAllEditors();
+    };
+  }, []);
 
   // Single reactive query: Join metadata + content for open tabs
-  // The where clause on content triggers on-demand loading via queryFn
-  const { data: fileDataWithContent = [], isError: isQueryError } =
-    useLiveQuery(
-      (q) =>
-        openTabs.length === 0
-          ? undefined // No tabs open - useLiveQuery handles undefined gracefully
-          : q
-              .from({ file: metadata })
-              .where(({ file }) => inArray(file.path, openTabs))
-              // ✅ Explicitly constrain content to trigger on-demand loading
-              .join({ content }, ({ file, content }) =>
-                eq(file.path, content.path),
-              )
-              .where(({ content }) => inArray(content?.path, openTabs))
-              .select(({ file, content }) => ({
-                ...file,
-                content: content?.content,
-                contentHash: content?.contentHash,
-              })),
-      [...openTabs, activeTabId],
-    );
+  const { data: fileDataWithContent = [] } = useLiveQuery(
+    (q) =>
+      openTabs.length === 0
+        ? undefined
+        : q
+            .from({ file: metadata })
+            .where(({ file }) => inArray(file.path, openTabs))
+            .join({ content }, ({ file, content }) =>
+              eq(file.path, content.path),
+            )
+            .where(({ content }) => inArray(content?.path, openTabs))
+            .select(({ file, content }) => ({
+              ...file,
+              content: content?.content,
+              contentHash: content?.contentHash,
+            })),
+    [...openTabs, activeTabId],
+  );
 
   // Get current content for status bar from active tab
   const activeFileData = fileDataWithContent.find(
@@ -68,10 +158,10 @@ export const Workspace = () => {
   );
   const currentContent = activeFileData?.content || "";
 
+  // ── UI state ──
   const [activeSidebarItem, setActiveSidebarItem] = useState("files");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(240);
-
   const [isSynced, setIsSynced] = useState(true);
   const [isResizing, setIsResizing] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -82,13 +172,14 @@ export const Workspace = () => {
     const words = currentContent
       .trim()
       .split(/\s+/)
-      .filter((word) => word.length > 0);
+      .filter((word: string) => word.length > 0);
     return {
       wordCount: words.length,
       characterCount: currentContent.length,
     };
   }, [currentContent]);
 
+  // ── Sidebar resize ──
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
@@ -122,31 +213,66 @@ export const Workspace = () => {
     setIsResizing(true);
   }, []);
 
+  // ── File selection (updates layout in URL) ──
   const handleFileSelect = useCallback(
     (file: FileTreeNode) => {
-      if (file.type === "file") {
-        setSearchParams((prev) => {
-          const currentTabs = prev.getAll("tab");
-          const newParams = new URLSearchParams(prev);
-          if (!currentTabs.includes(file.path)) {
-            newParams.append("tab", file.path);
-          }
-          newParams.set("activeTab", file.path);
-          return newParams;
-        });
-      }
-    },
-    [setSearchParams],
-  );
+      if (file.type !== "file") return;
 
-  const handleNewTab = useCallback(() => {
-    //TODO: handle new tab + new file creation
-  }, [t]);
+      if (openTabs.includes(file.path)) {
+        // Tab already open — update selection in the layout.
+        // This causes a Dockable remount only if the key changes,
+        // which it won't (same set of tabs). So Dockable picks up
+        // the new `selected` value on its next mount.
+        // NOTE: Dockable doesn't re-read layout after mount, so
+        // selection-only changes update the URL but don't visually
+        // switch the tab inside Dockable. The user switches via
+        // Dockable's own tab bar. We still write to the URL so the
+        // activeTabId derived state is correct (for status bar etc.).
+        setLayout(selectTabInLayout(layout, file.path));
+        return;
+      }
+
+      // New tab: merge into the current layout
+      let nextLayout: LayoutNode[];
+      if (layout.length > 0) {
+        nextLayout = addTabToLayout(layout, file.path);
+      } else {
+        // First tab ever — create a fresh single-window layout
+        nextLayout = [
+          {
+            type: "Window" as const,
+            id: "editor-window",
+            children: [file.path],
+            selected: file.path,
+            size: 1,
+          },
+        ];
+      }
+
+      setLayout(nextLayout);
+    },
+    [layout, openTabs, setLayout],
+  );
 
   const handleNewFile = useCallback(() => {
     //TODO: handle new tab + new file creation
-  }, [handleNewTab]);
+  }, []);
 
+  // ── Dockable onChange: write updated layout back to the URL ──
+  const handleDockableChange = useCallback(
+    (newLayout: LayoutNode[]) => {
+      // Dispose editors for any tabs that Dockable removed (e.g. via drag)
+      const newTabIds = extractTabIds(newLayout);
+      const removed = openTabs.filter((id) => !newTabIds.includes(id));
+      removed.forEach((id) => disposeEditor(id));
+
+      // Write the full layout to the URL
+      setLayout(newLayout);
+    },
+    [openTabs, setLayout],
+  );
+
+  // ── File watchers ──
   useEffect(() => {
     const metadataWatchId = `metadata-${workspacePath}`;
     const contentWatchId = `content-${workspacePath}`;
@@ -182,6 +308,23 @@ export const Workspace = () => {
     };
   }, [workspacePath, openTabs.join(",")]);
 
+  // ── Build Dockable tabs ──
+  const dockableTabs: ReactElement<TabProps>[] = fileDataWithContent.map(
+    (fileEntry) => (
+      <Dockable.Tab
+        key={fileEntry.path}
+        id={fileEntry.path}
+        name={getFileName(fileEntry.path)}
+      >
+        <TextEditor
+          file={fileEntry as FileEntry}
+          basePath={workspacePath}
+          isActive={fileEntry.path === activeTabId}
+        />
+      </Dockable.Tab>
+    ),
+  );
+
   return (
     <div
       dir={direction}
@@ -194,36 +337,31 @@ export const Workspace = () => {
       />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <DebugPanel isEditRoute={true} />
-        <div className="flex items-stretch border-b border-border shrink-0">
-          <div
-            className="shrink-0 border-r rtl:border-r-0 rtl:border-l border-border"
-            style={{ width: isSidebarCollapsed ? "auto" : sidebarWidth }}
-          >
-            <FileControls
-              isCollapsed={isSidebarCollapsed}
-              onToggleCollapse={() =>
-                setIsSidebarCollapsed(!isSidebarCollapsed)
-              }
-              onNewFile={handleNewFile}
-              onNewFolder={() => {}}
-            />
-          </div>
-
-          <div className="flex-1 min-w-0 overflow-hidden">
-            <TabBar onNewTab={handleNewTab} />
-          </div>
-        </div>
+        <DebugPanel
+          isEditRoute={true}
+          openTabs={openTabs}
+          activeTabId={activeTabId}
+          dockableLayout={layout}
+        />
 
         <div className="flex-1 flex min-h-0 overflow-hidden">
+          {/* ── File tree sidebar ── */}
           {!isSidebarCollapsed && (
             <>
               <div
-                className="shrink-0 bg-sidebar flex flex-col"
+                className="shrink-0 bg-sidebar flex flex-col border-r border-border"
                 style={{ width: sidebarWidth }}
               >
+                <FileControls
+                  isCollapsed={isSidebarCollapsed}
+                  onToggleCollapse={() =>
+                    setIsSidebarCollapsed(!isSidebarCollapsed)
+                  }
+                  onNewFile={handleNewFile}
+                  onNewFolder={() => {}}
+                />
                 <FileTree
-                  selectedFilePath={null}
+                  selectedFilePath={activeTabId}
                   onFileSelect={handleFileSelect}
                   basePath={workspacePath!}
                 />
@@ -236,30 +374,21 @@ export const Workspace = () => {
             </>
           )}
 
-          <div className="flex-1 min-w-0 overflow-hidden">
-            {openTabs.length === 0 ? (
+          {/* ── Editor area (Dockable) ── */}
+          <div className="flex-1 min-w-0 h-full overflow-hidden">
+            {openTabs.length === 0 || dockableTabs.length === 0 ? (
               <div className="flex items-center justify-center h-full text-muted-foreground p-4">
                 <p className="text-center">{t("noFileSelected")}</p>
               </div>
             ) : (
-              <>
-                {fileDataWithContent.map((fileEntry) => (
-                  <div
-                    key={fileEntry.path}
-                    className={cn(
-                      "h-full",
-                      fileEntry.path === activeTabId ? "block" : "hidden",
-                    )}
-                  >
-                    <TextEditor
-                      key={fileEntry.path}
-                      file={fileEntry as FileEntry}
-                      basePath={workspacePath}
-                      isActive={fileEntry.path === activeTabId}
-                    />
-                  </div>
-                ))}
-              </>
+              <Dockable.Root
+                key={dockableKey}
+                orientation="row"
+                layout={layout}
+                onChange={handleDockableChange}
+              >
+                {dockableTabs}
+              </Dockable.Root>
             )}
           </div>
         </div>

@@ -71,11 +71,31 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /* Map Dockable CSS variables to our design tokens */
+  :root {
+    --dockable-colors-headers: hsl(var(--muted));
+    --dockable-colors-background: hsl(var(--background));
+    --dockable-colors-gap: hsl(var(--border));
+    --dockable-colors-text: hsl(var(--foreground));
+    --dockable-colors-selected: hsl(var(--primary));
+    --dockable-radius: 0.375rem;
+    --dockable-gap: 1px;
+  }
+
+  .dark {
+    --dockable-colors-headers: hsl(var(--muted));
+    --dockable-colors-background: hsl(var(--background));
+    --dockable-colors-gap: hsl(var(--border));
+    --dockable-colors-text: hsl(var(--foreground));
+    --dockable-colors-selected: hsl(var(--primary));
+    --dockable-radius: 0.375rem;
+    --dockable-gap: 1px;
+  }
 }
 
 /* Prevent text selection throughout the app except in editors */
 @layer base {
-
   /* Disable selection by default */
   * {
     user-select: none;
