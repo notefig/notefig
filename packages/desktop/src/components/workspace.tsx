@@ -1,13 +1,5 @@
-import {
-  useState,
-  useEffect,
-  useRef,
-  useMemo,
-  useCallback,
-  type ReactElement,
-} from "react";
-import { Dockable } from "@danfessler/react-dockable";
-import type { LayoutNode, TabProps } from "@danfessler/react-dockable";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { Dockable } from "@/components/dockable";
 import { IconSidebar } from "@/components/editor/icon-sidebar";
 import { FileTree } from "@/components/editor/file-tree";
 import { FileControls } from "@/components/editor/file-controls";
@@ -20,82 +12,15 @@ import { getOrCreateWorkspaceCollections } from "@/utils/collections";
 import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
-import { useLayoutSearchParam } from "@/hooks/use-layout-search-param";
-import type { FileTreeNode, FileEntry } from "@/utils/fs";
+import { useDockableTabs } from "@/hooks/use-dockable-tabs";
+import type { FileEntry } from "@/utils/fs";
+import { getFileName, isTextFile } from "@/utils/fs";
 import { platformAdapter } from "@/adapters";
 import {
   handleMetadataFileSystemChange,
   handleContentFileSystemChange,
 } from "@/utils/file-sync";
-import { getFileName } from "@/utils/fs";
-import {
-  disposeEditor,
-  disposeAllEditors,
-} from "@/components/editor/editor-store";
-
-// ── Dockable layout helpers ─────────────────────────────────────────────────
-
-/**
- * Deep-clone a layout tree, adding a new tab to the first Window and selecting it.
- * Preserves all panel splits, sizes, and tab ordering.
- */
-function addTabToLayout(layout: LayoutNode[], tabId: string): LayoutNode[] {
-  let added = false;
-  function walk(nodes: LayoutNode[]): LayoutNode[] {
-    return nodes.map((node) => {
-      if (node.type === "Window" && !added) {
-        added = true;
-        return {
-          ...node,
-          children: [...node.children, tabId],
-          selected: tabId,
-        };
-      }
-      if (node.type === "Panel") {
-        return { ...node, children: walk(node.children) };
-      }
-      return node;
-    });
-  }
-  return walk(layout);
-}
-
-/**
- * Deep-clone a layout tree, setting `selected` to `tabId` in the Window
- * that contains it. Other windows are left unchanged.
- */
-function selectTabInLayout(layout: LayoutNode[], tabId: string): LayoutNode[] {
-  return layout.map((node) => {
-    if (node.type === "Window") {
-      if (node.children.includes(tabId)) {
-        return { ...node, selected: tabId };
-      }
-      return node;
-    }
-    if (node.type === "Panel") {
-      return { ...node, children: selectTabInLayout(node.children, tabId) };
-    }
-    return node;
-  });
-}
-
-/**
- * Walk the LayoutNode tree and collect all tab IDs.
- * (Used locally to diff tabs on Dockable onChange.)
- */
-function extractTabIds(nodes: LayoutNode[]): string[] {
-  const ids: string[] = [];
-  for (const node of nodes) {
-    if (node.type === "Window") {
-      ids.push(...node.children);
-    } else if (node.type === "Panel") {
-      ids.push(...extractTabIds(node.children));
-    }
-  }
-  return ids;
-}
-
-// ── Workspace Component ─────────────────────────────────────────────────────
+import { disposeAllEditors } from "@/components/editor/editor-store";
 
 export const Workspace = () => {
   const { workspacePath } = useWorkspaceParams();
@@ -108,31 +33,27 @@ export const Workspace = () => {
   const { metadata, content } = getOrCreateWorkspaceCollections(workspacePath);
   const { t } = useTranslation();
 
-  // ── Layout state from URL (single source of truth) ──
-  const { layout, setLayout, openTabs, activeTabId } = useLayoutSearchParam();
-
-  // Track the previous set of open tab IDs so we can detect structural
-  // changes (tab added / removed) vs. selection-only changes.
-  // Dockable.Root reads `layout` only on mount, so we must remount it
-  // (via key change) whenever the set of tabs changes.
-  const prevTabKeyRef = useRef(openTabs.join(","));
-  const dockableKey = useMemo(() => {
-    const key = openTabs.join(",");
-    if (key !== prevTabKeyRef.current) {
-      prevTabKeyRef.current = key;
-    }
-    return key;
-  }, [openTabs]);
+  // ── Dockable tabs management ──
+  const {
+    layout,
+    openTabs,
+    activeTabId,
+    dockableKey,
+    handleFileSelect,
+    handleLayoutChange,
+  } = useDockableTabs({
+    renderTabs: () => [], // Will render below after querying data
+    canOpenFile: (file) => file.type === "file" && isTextFile(file.path),
+  });
 
   // Dispose all editor instances when this workspace unmounts
-  // (e.g. user navigates to a different workspace)
   useEffect(() => {
     return () => {
       disposeAllEditors();
     };
   }, []);
 
-  // Single reactive query: Join metadata + content for open tabs
+  // Query file data with content for open tabs
   const { data: fileDataWithContent = [] } = useLiveQuery(
     (q) =>
       openTabs.length === 0
@@ -149,7 +70,26 @@ export const Workspace = () => {
               content: content?.content,
               contentHash: content?.contentHash,
             })),
-    [...openTabs, activeTabId],
+    [...openTabs],
+  );
+
+  // Build Dockable tabs
+  const dockableTabs = useMemo(
+    () =>
+      fileDataWithContent.map((fileEntry) => (
+        <Dockable.Tab
+          key={fileEntry.path}
+          id={fileEntry.path}
+          name={getFileName(fileEntry.path)}
+        >
+          <TextEditor
+            file={fileEntry as FileEntry}
+            basePath={workspacePath}
+            isActive={fileEntry.path === activeTabId}
+          />
+        </Dockable.Tab>
+      )),
+    [fileDataWithContent, workspacePath, activeTabId],
   );
 
   // Get current content for status bar from active tab
@@ -162,7 +102,7 @@ export const Workspace = () => {
   const [activeSidebarItem, setActiveSidebarItem] = useState("files");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(240);
-  const [isSynced, setIsSynced] = useState(true);
+  const [isSynced] = useState(true);
   const [isResizing, setIsResizing] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [direction, setDirection] = useState<"ltr" | "rtl">("ltr");
@@ -213,64 +153,9 @@ export const Workspace = () => {
     setIsResizing(true);
   }, []);
 
-  // ── File selection (updates layout in URL) ──
-  const handleFileSelect = useCallback(
-    (file: FileTreeNode) => {
-      if (file.type !== "file") return;
-
-      if (openTabs.includes(file.path)) {
-        // Tab already open — update selection in the layout.
-        // This causes a Dockable remount only if the key changes,
-        // which it won't (same set of tabs). So Dockable picks up
-        // the new `selected` value on its next mount.
-        // NOTE: Dockable doesn't re-read layout after mount, so
-        // selection-only changes update the URL but don't visually
-        // switch the tab inside Dockable. The user switches via
-        // Dockable's own tab bar. We still write to the URL so the
-        // activeTabId derived state is correct (for status bar etc.).
-        setLayout(selectTabInLayout(layout, file.path));
-        return;
-      }
-
-      // New tab: merge into the current layout
-      let nextLayout: LayoutNode[];
-      if (layout.length > 0) {
-        nextLayout = addTabToLayout(layout, file.path);
-      } else {
-        // First tab ever — create a fresh single-window layout
-        nextLayout = [
-          {
-            type: "Window" as const,
-            id: "editor-window",
-            children: [file.path],
-            selected: file.path,
-            size: 1,
-          },
-        ];
-      }
-
-      setLayout(nextLayout);
-    },
-    [layout, openTabs, setLayout],
-  );
-
   const handleNewFile = useCallback(() => {
     //TODO: handle new tab + new file creation
   }, []);
-
-  // ── Dockable onChange: write updated layout back to the URL ──
-  const handleDockableChange = useCallback(
-    (newLayout: LayoutNode[]) => {
-      // Dispose editors for any tabs that Dockable removed (e.g. via drag)
-      const newTabIds = extractTabIds(newLayout);
-      const removed = openTabs.filter((id) => !newTabIds.includes(id));
-      removed.forEach((id) => disposeEditor(id));
-
-      // Write the full layout to the URL
-      setLayout(newLayout);
-    },
-    [openTabs, setLayout],
-  );
 
   // ── File watchers ──
   useEffect(() => {
@@ -307,23 +192,6 @@ export const Workspace = () => {
       }
     };
   }, [workspacePath, openTabs.join(",")]);
-
-  // ── Build Dockable tabs ──
-  const dockableTabs: ReactElement<TabProps>[] = fileDataWithContent.map(
-    (fileEntry) => (
-      <Dockable.Tab
-        key={fileEntry.path}
-        id={fileEntry.path}
-        name={getFileName(fileEntry.path)}
-      >
-        <TextEditor
-          file={fileEntry as FileEntry}
-          basePath={workspacePath}
-          isActive={fileEntry.path === activeTabId}
-        />
-      </Dockable.Tab>
-    ),
-  );
 
   return (
     <div
@@ -377,7 +245,7 @@ export const Workspace = () => {
           {/* ── Editor area (Dockable) ── */}
           <div className="flex-1 min-w-0 h-full overflow-hidden">
             {openTabs.length === 0 || dockableTabs.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-muted-foreground p-4">
+              <div className="flex items-center justify-center h-full text-muted-foreground p-4 ps-0">
                 <p className="text-center">{t("noFileSelected")}</p>
               </div>
             ) : (
@@ -385,7 +253,7 @@ export const Workspace = () => {
                 key={dockableKey}
                 orientation="row"
                 layout={layout}
-                onChange={handleDockableChange}
+                onChange={handleLayoutChange}
               >
                 {dockableTabs}
               </Dockable.Root>

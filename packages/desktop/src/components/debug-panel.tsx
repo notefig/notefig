@@ -1,5 +1,5 @@
 import { useParams, useSearchParams } from "react-router-dom";
-import type { LayoutNode } from "@danfessler/react-dockable";
+import type { LayoutNode } from "@/components/dockable";
 
 interface DebugPanelProps {
   isEditRoute: boolean;

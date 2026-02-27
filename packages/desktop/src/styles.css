@@ -74,22 +74,22 @@
 
   /* Map Dockable CSS variables to our design tokens */
   :root {
-    --dockable-colors-headers: hsl(var(--muted));
-    --dockable-colors-background: hsl(var(--background));
+    --dockable-colors-headers: hsl(var(--background));
+    --dockable-colors-background: transparent;
     --dockable-colors-gap: hsl(var(--border));
     --dockable-colors-text: hsl(var(--foreground));
     --dockable-colors-selected: hsl(var(--primary));
-    --dockable-radius: 0.375rem;
+    --dockable-radius: 0;
     --dockable-gap: 1px;
   }
 
   .dark {
-    --dockable-colors-headers: hsl(var(--muted));
-    --dockable-colors-background: hsl(var(--background));
+    --dockable-colors-headers: hsl(var(--background));
+    --dockable-colors-background: transparent;
     --dockable-colors-gap: hsl(var(--border));
     --dockable-colors-text: hsl(var(--foreground));
     --dockable-colors-selected: hsl(var(--primary));
-    --dockable-radius: 0.375rem;
+    --dockable-radius: 0;
     --dockable-gap: 1px;
   }
 }

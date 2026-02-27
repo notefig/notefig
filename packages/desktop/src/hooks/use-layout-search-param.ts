@@ -1,6 +1,6 @@
 import { useMemo, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import type { LayoutNode } from "@danfessler/react-dockable";
+import type { LayoutNode } from "@/components/dockable";
 
 const LAYOUT_PARAM = "layout";
 

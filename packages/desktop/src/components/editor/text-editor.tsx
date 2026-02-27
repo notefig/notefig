@@ -141,7 +141,7 @@ export function TextEditor({ file, basePath, isActive }: TextEditorProps) {
   return (
     <Plate editor={editor} onValueChange={handleChange}>
       <div className="flex flex-col flex-1 min-h-0 w-full">
-        <FixedToolbar className="shrink-0 justify-start rounded-t-lg gap-1 flex-wrap">
+        <FixedToolbar className="shrink-0 justify-start gap-1 flex-wrap">
           <ToolbarButton onClick={() => tf.h1.toggle()} tooltip="Heading 1">
             H1
           </ToolbarButton>
