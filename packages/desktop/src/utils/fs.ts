@@ -40,6 +40,77 @@ export function getFileExtension(filePath: string): string {
 }
 
 /**
+ * Check if a file is a text file that can be edited in the text editor.
+ * This excludes binary files like images, videos, PDFs, etc.
+ */
+export function isTextFile(filePath: string): boolean {
+  const extension = getFileExtension(filePath);
+
+  // Common text file extensions
+  const textExtensions = new Set([
+    // Markdown
+    "md",
+    "markdown",
+    "mdown",
+    "mkd",
+    // Plain text
+    "txt",
+    "text",
+    // Code
+    "js",
+    "jsx",
+    "ts",
+    "tsx",
+    "json",
+    "html",
+    "css",
+    "scss",
+    "sass",
+    "py",
+    "rb",
+    "java",
+    "c",
+    "cpp",
+    "h",
+    "hpp",
+    "cs",
+    "go",
+    "rs",
+    "php",
+    "swift",
+    "kt",
+    "dart",
+    "scala",
+    "sh",
+    "bash",
+    "zsh",
+    // Config/data
+    "yaml",
+    "yml",
+    "toml",
+    "xml",
+    "ini",
+    "conf",
+    "config",
+    // Documentation
+    "rst",
+    "adoc",
+    "asciidoc",
+    "org",
+    // Other
+    "log",
+    "csv",
+    "tsv",
+    "sql",
+  ]);
+
+  // If no extension, assume it might be a text file (like README, Makefile, etc.)
+  if (!extension) return true;
+
+  return textExtensions.has(extension);
+}
+
+/**
  * Get the file name without extension from a file path
  */
 export function getFileNameWithoutExtension(filePath: string): string {
