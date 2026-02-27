@@ -55,19 +55,24 @@ function PanelView({
       >
         {panels.map((panel, index) => {
           if (panel.type === "Window") {
-            const panelTabs = panel.children.map((tabId) => {
-              const tab = childArray.find(({ props }) => props.id === tabId);
-              if (!tab) {
-                console.log("tabid", tabId);
-                throw new Error(`Tab ${tabId} not found`);
-              }
-              return {
-                id: tab.props.id,
-                name: tab.props.name,
-                content: tab,
-                onClose: tab.props.onClose,
-              };
-            });
+            const panelTabs = panel.children
+              .map((tabId) => {
+                const tab = childArray.find(({ props }) => props.id === tabId);
+                if (!tab) {
+                  // Tab element not yet available — the layout (URL) updates
+                  // synchronously but tab data may still be loading via an
+                  // async query. Skip the missing tab; it will appear on the
+                  // next render once data arrives.
+                  return null;
+                }
+                return {
+                  id: tab.props.id,
+                  name: tab.props.name,
+                  content: tab,
+                  onClose: tab.props.onClose,
+                };
+              })
+              .filter((t): t is NonNullable<typeof t> => t !== null);
             return (
               <TabView
                 id={panel.id}
