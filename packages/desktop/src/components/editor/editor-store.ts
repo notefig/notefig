@@ -14,9 +14,13 @@ import { createPlateEditor, type PlateEditor } from "platejs/react";
 import { MarkdownPlugin } from "@platejs/markdown";
 import { MarkdownEditorKit } from "@/components/editor/markdown-editor-kit";
 import { Editor as SlateEditor } from "slate";
+import type { BaseSelection } from "slate";
 
 /** Module-level store: file path → editor instance */
 const editorInstances = new Map<string, PlateEditor>();
+
+/** Saved selections: file path → last known selection (survives unmount) */
+const savedSelections = new Map<string, BaseSelection>();
 
 /**
  * Get an existing editor for a file path, or create one with the given
@@ -55,6 +59,7 @@ export function getOrCreateEditor(
  */
 export function disposeEditor(filePath: string): void {
   editorInstances.delete(filePath);
+  savedSelections.delete(filePath);
 }
 
 /**
@@ -62,6 +67,7 @@ export function disposeEditor(filePath: string): void {
  */
 export function disposeAllEditors(): void {
   editorInstances.clear();
+  savedSelections.clear();
 }
 
 /**
@@ -69,4 +75,21 @@ export function disposeAllEditors(): void {
  */
 export function hasEditor(filePath: string): boolean {
   return editorInstances.has(filePath);
+}
+
+/**
+ * Save the current selection for an editor so it can be restored after remount.
+ */
+export function saveSelection(
+  filePath: string,
+  selection: BaseSelection,
+): void {
+  savedSelections.set(filePath, selection);
+}
+
+/**
+ * Retrieve a previously saved selection (returns undefined if none saved).
+ */
+export function getSavedSelection(filePath: string): BaseSelection | undefined {
+  return savedSelections.get(filePath);
 }

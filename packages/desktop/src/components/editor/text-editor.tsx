@@ -17,12 +17,15 @@ import { toggleList, ListStyleType } from "@platejs/list";
 import type { FileEntry } from "../../utils/fs";
 import { writeFileContent } from "@/utils/collections";
 import { calculateContentHash } from "@/utils/hash";
-import { getOrCreateEditor } from "@/components/editor/editor-store";
+import {
+  getOrCreateEditor,
+  saveSelection,
+  getSavedSelection,
+} from "@/components/editor/editor-store";
 
 interface TextEditorProps {
   file: FileEntry;
   basePath: string;
-  isActive?: boolean;
 }
 
 /**
@@ -33,7 +36,7 @@ interface TextEditorProps {
  * editor-store, so undo history, scroll position, and internal Slate state
  * survive across Dockable tab switches that unmount/remount this component.
  */
-export function TextEditor({ file, basePath, isActive }: TextEditorProps) {
+export function TextEditor({ file, basePath }: TextEditorProps) {
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   // Single ref tracking the last contentHash we know about — whether from our own
   // save or from the initial load. When file.contentHash differs from this, it's
@@ -127,16 +130,43 @@ export function TextEditor({ file, basePath, isActive }: TextEditorProps) {
     };
   }, []);
 
-  // Restore focus when tab becomes active
-  // This ensures the cursor position is preserved when switching between tabs
+  // Restore focus and selection when this editor mounts.
+  //
+  // Window.tsx only renders the selected tab's content, so this component
+  // unmounts when switching away and remounts when switching back.
+  // We save the selection on unmount and restore it here.
+  //
+  // Timing: useEffect fires after Editable's useLayoutEffect has set
+  // EDITOR_TO_ELEMENT. A single rAF waits for browser paint and focus
+  // events to settle. We blur first to clear stale IS_FOCUSED state
+  // (the tab click may leave it truthy), then focus at the saved position.
   useEffect(() => {
-    if (isActive && editor) {
-      // Use setTimeout to ensure DOM is ready (display: block has been applied)
-      setTimeout(() => {
+    if (!editor) return;
+
+    let cancelled = false;
+    const rafId = requestAnimationFrame(() => {
+      if (cancelled) return;
+
+      // Force-clear IS_FOCUSED so DOMEditor.focus() doesn't bail as no-op
+      editor.tf.blur();
+
+      const saved = getSavedSelection(file.path);
+      if (saved) {
+        editor.tf.focus({ at: saved });
+      } else {
         editor.tf.focus();
-      }, 0);
-    }
-  }, [isActive, editor]);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafId);
+      // Save selection on unmount so it survives the remount cycle
+      if (editor.selection) {
+        saveSelection(file.path, editor.selection);
+      }
+    };
+  }, [editor, file.path]);
 
   return (
     <Plate editor={editor} onValueChange={handleChange}>

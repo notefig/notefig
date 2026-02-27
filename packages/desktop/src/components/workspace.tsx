@@ -86,20 +86,10 @@ export const Workspace = () => {
             handleLayoutChange(nextLayout);
           }}
         >
-          <TextEditor
-            file={fileEntry as FileEntry}
-            basePath={workspacePath}
-            isActive={fileEntry.path === activeTabId}
-          />
+          <TextEditor file={fileEntry as FileEntry} basePath={workspacePath} />
         </Dockable.Tab>
       )),
-    [
-      fileDataWithContent,
-      workspacePath,
-      activeTabId,
-      layout,
-      handleLayoutChange,
-    ],
+    [fileDataWithContent, workspacePath, layout, handleLayoutChange],
   );
 
   // Get current content for status bar from active tab
