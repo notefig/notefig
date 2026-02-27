@@ -35,7 +35,12 @@ import {
   Search,
   RefreshCw,
   FileCode,
+  Download,
+  CheckCircle2,
+  AlertCircle,
+  Loader2,
 } from "lucide-react";
+import { useUpdater } from "@/hooks/use-updater";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme-provider";
 import { useSearchParams } from "react-router";
@@ -87,7 +92,6 @@ const settingsSections: SettingsSection[] = [
 
 // Settings state types
 interface SettingsState {
-  automaticUpdates: boolean;
   language: string;
   notifySlowStartup: boolean;
 }
@@ -108,7 +112,6 @@ export function SettingsModal({
   };
   const [activeSection, setActiveSection] = useState("general");
   const [settings, setSettings] = useState<SettingsState>({
-    automaticUpdates: true,
     language: "english",
     notifySlowStartup: false,
   });
@@ -212,39 +215,8 @@ function GeneralSettings({
 }) {
   return (
     <div className="space-y-8 max-w-3xl">
-      {/* Version Section */}
-      <div className="space-y-1">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <h3 className="text-base font-medium">Version 1.11.4</h3>
-            <p className="text-sm text-muted-foreground">
-              (Installer version: 1.8.9)
-            </p>
-            <p className="text-sm text-muted-foreground">
-              A new version is ready to be installed.
-            </p>
-            <button className="text-sm text-primary hover:underline">
-              Read the changelog.
-            </button>
-          </div>
-          <Button className="shrink-0 bg-primary hover:bg-primary/90 text-primary-foreground">
-            Relaunch
-          </Button>
-        </div>
-      </div>
-
-      {/* Automatic Updates */}
-      <SettingRow
-        title="Automatic updates"
-        description="Turn this off to prevent the app from checking for updates."
-      >
-        <Switch
-          checked={settings.automaticUpdates}
-          onCheckedChange={(checked) =>
-            setSettings((prev) => ({ ...prev, automaticUpdates: checked }))
-          }
-        />
-      </SettingRow>
+      {/* Update Section */}
+      <UpdateSection />
 
       {/* Language */}
       <SettingRow
@@ -432,6 +404,112 @@ function AppearanceSettings() {
           </SelectContent>
         </Select>
       </SettingRow>
+    </div>
+  );
+}
+
+// Update Section Component
+function UpdateSection() {
+  const {
+    status,
+    progress,
+    error,
+    updateInfo,
+    checkForUpdate,
+    downloadAndInstall,
+    relaunch,
+  } = useUpdater();
+
+  const currentVersion = __APP_VERSION__;
+
+  const progressPercent =
+    progress.total && progress.total > 0
+      ? Math.round((progress.downloaded / progress.total) * 100)
+      : null;
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="text-base font-medium">Version {currentVersion}</h3>
+
+          {status === "idle" && (
+            <p className="text-sm text-muted-foreground">
+              Click to check for updates.
+            </p>
+          )}
+          {status === "checking" && (
+            <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Checking for updates...
+            </p>
+          )}
+          {status === "up-to-date" && (
+            <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+              <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+              You're on the latest version.
+            </p>
+          )}
+          {status === "available" && updateInfo && (
+            <p className="text-sm text-muted-foreground">
+              Version {updateInfo.version} is available.
+            </p>
+          )}
+          {status === "downloading" && (
+            <div className="space-y-1.5">
+              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Downloading update...
+                {progressPercent !== null && ` ${progressPercent}%`}
+              </p>
+              <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all duration-200"
+                  style={{ width: `${progressPercent ?? 0}%` }}
+                />
+              </div>
+            </div>
+          )}
+          {status === "ready" && (
+            <p className="text-sm text-muted-foreground">
+              Update downloaded. Restart to apply.
+            </p>
+          )}
+          {status === "error" && (
+            <p className="text-sm text-destructive flex items-center gap-1.5">
+              <AlertCircle className="h-3.5 w-3.5" />
+              {error ?? "Update check failed."}
+            </p>
+          )}
+        </div>
+
+        <div className="shrink-0">
+          {(status === "idle" ||
+            status === "up-to-date" ||
+            status === "error") && (
+            <Button variant="secondary" onClick={checkForUpdate}>
+              Check for updates
+            </Button>
+          )}
+          {status === "available" && (
+            <Button
+              className="bg-primary hover:bg-primary/90 text-primary-foreground"
+              onClick={downloadAndInstall}
+            >
+              <Download className="h-4 w-4 mr-1.5" />
+              Download
+            </Button>
+          )}
+          {status === "ready" && (
+            <Button
+              className="bg-primary hover:bg-primary/90 text-primary-foreground"
+              onClick={relaunch}
+            >
+              Restart
+            </Button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

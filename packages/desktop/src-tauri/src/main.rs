@@ -73,6 +73,14 @@ fn main() {
         .setup(|app| {
             let menu = create_menu(app.handle())?;
             app.set_menu(menu)?;
+
+            // Register updater and process plugins (desktop only)
+            #[cfg(desktop)]
+            {
+                app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+                app.handle().plugin(tauri_plugin_process::init())?;
+            }
+
             Ok(())
         })
         .on_menu_event(|app, event| {
