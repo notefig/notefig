@@ -25,6 +25,9 @@ notify-debouncer-full = "0.3"
 lazy_static = "1.4"
 md5 = "0.8.0"
 
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
