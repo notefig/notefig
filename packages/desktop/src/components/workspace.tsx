@@ -15,6 +15,7 @@ import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
 import type { FileEntry } from "@/utils/fs";
 import { getFileName, isTextFile } from "@/utils/fs";
+import { removeTabFromLayout } from "@/utils/dockable-layout";
 import { platformAdapter } from "@/adapters";
 import {
   handleMetadataFileSystemChange,
@@ -81,6 +82,10 @@ export const Workspace = () => {
           key={fileEntry.path}
           id={fileEntry.path}
           name={getFileName(fileEntry.path)}
+          onClose={() => {
+            const nextLayout = removeTabFromLayout(layout, fileEntry.path);
+            handleLayoutChange(nextLayout);
+          }}
         >
           <TextEditor
             file={fileEntry as FileEntry}
@@ -89,7 +94,13 @@ export const Workspace = () => {
           />
         </Dockable.Tab>
       )),
-    [fileDataWithContent, workspacePath, activeTabId],
+    [
+      fileDataWithContent,
+      workspacePath,
+      activeTabId,
+      layout,
+      handleLayoutChange,
+    ],
   );
 
   // Get current content for status bar from active tab

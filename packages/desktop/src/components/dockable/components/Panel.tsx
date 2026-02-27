@@ -65,6 +65,7 @@ function PanelView({
                 id: tab.props.id,
                 name: tab.props.name,
                 content: tab,
+                onClose: tab.props.onClose,
               };
             });
             return (
@@ -105,6 +106,7 @@ type WindowProps = {
   id: string;
   name: string;
   children: React.ReactNode;
+  onClose?: () => void;
 };
 
 export const View: React.FC<WindowProps> = ({ children }) => <>{children}</>;

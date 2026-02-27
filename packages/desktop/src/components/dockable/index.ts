@@ -17,6 +17,7 @@ export type TabProps = {
   id: string;
   name: string;
   children: React.ReactNode;
+  onClose?: () => void;
 };
 
 export function Tab(props: TabProps) {

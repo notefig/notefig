@@ -12,6 +12,7 @@ export type tabObject = {
   name: string;
   content: React.ReactNode;
   renderTabs?: boolean;
+  onClose?: () => void;
 };
 
 export type tabGroupObject = tabObject[];
@@ -92,6 +93,7 @@ function TabView({
                     address,
                   })
                 }
+                onClose={tab.onClose}
               />
             ))}
           </SortableContext>
