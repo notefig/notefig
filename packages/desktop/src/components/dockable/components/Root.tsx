@@ -1,4 +1,4 @@
-import React, { useReducer, useEffect, useState } from "react";
+import React, { useReducer, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import PanelView from "./Panel";
 import appReducer from "../reducer";
@@ -69,9 +69,24 @@ export function Dockable({
     size: 1,
   });
 
-  // report the layout
+  // Track the last layout we reported to the parent via onChange.
+  // This lets us distinguish "parent sent us a new layout" from
+  // "parent echoed back the layout we just reported".
+  const lastReportedRef = useRef<LayoutNode[] | null>(controledPanels || null);
+
+  // Sync controlled layout prop into internal reducer state.
+  // Only dispatch when the incoming prop differs from what we last reported,
+  // which breaks the onChange → setLayout → prop change → setState loop.
+  useEffect(() => {
+    if (controledPanels && controledPanels !== lastReportedRef.current) {
+      dispatch({ type: "setState", children: controledPanels });
+    }
+  }, [controledPanels]);
+
+  // Report internal state changes to the parent.
   useEffect(() => {
     if (onChange) {
+      lastReportedRef.current = state.children;
       onChange(state.children);
     }
   }, [state, onChange]);

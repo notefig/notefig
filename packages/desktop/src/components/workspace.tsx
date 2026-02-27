@@ -39,7 +39,6 @@ export const Workspace = () => {
     layout,
     openTabs,
     activeTabId,
-    dockableKey,
     handleFileSelect,
     handleLayoutChange,
   } = useDockableTabs({
@@ -261,7 +260,6 @@ export const Workspace = () => {
               </div>
             ) : (
               <Dockable.Root
-                key={dockableKey}
                 orientation="row"
                 layout={layout}
                 onChange={handleLayoutChange}

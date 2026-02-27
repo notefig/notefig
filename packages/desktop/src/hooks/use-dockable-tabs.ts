@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, type ReactElement } from "react";
+import { useCallback, useMemo, type ReactElement } from "react";
 import type { LayoutNode, TabProps } from "@/components/dockable";
 import { useLayoutSearchParam } from "./use-layout-search-param";
 import {
@@ -34,9 +34,6 @@ export interface UseDockableTabsResult {
   /** Currently active tab ID */
   activeTabId: string | null;
 
-  /** Key for Dockable.Root to trigger remount when tabs change */
-  dockableKey: string;
-
   /** Rendered tab elements */
   tabs: ReactElement<TabProps>[];
 
@@ -64,11 +61,10 @@ export interface UseDockableTabsResult {
  * - Tab selection
  * - Layout state synchronization with URL
  * - Editor instance cleanup
- * - Dockable remounting when tab structure changes
  *
  * @example
  * ```tsx
- * const { tabs, dockableKey, layout, handleLayoutChange, handleFileSelect } = useDockableTabs({
+ * const { tabs, layout, handleLayoutChange, handleFileSelect } = useDockableTabs({
  *   renderTabs: (tabIds) => tabIds.map(id => (
  *     <Dockable.Tab key={id} id={id} name={getName(id)}>
  *       <Editor fileId={id} />
@@ -78,7 +74,7 @@ export interface UseDockableTabsResult {
  * });
  *
  * return (
- *   <Dockable.Root key={dockableKey} layout={layout} onChange={handleLayoutChange}>
+ *   <Dockable.Root layout={layout} onChange={handleLayoutChange}>
  *     {tabs}
  *   </Dockable.Root>
  * );
@@ -89,19 +85,6 @@ export function useDockableTabs(
 ): UseDockableTabsResult {
   const { renderTabs, canOpenFile } = options;
   const { layout, setLayout, openTabs, activeTabId } = useLayoutSearchParam();
-
-  // Track the previous set of open tab IDs so we can detect structural
-  // changes (tab added / removed) vs. selection-only changes.
-  // Dockable.Root reads `layout` only on mount, so we must remount it
-  // (via key change) whenever the set of tabs changes.
-  const prevTabKeyRef = useRef(openTabs.join(","));
-  const dockableKey = useMemo(() => {
-    const key = openTabs.join(",");
-    if (key !== prevTabKeyRef.current) {
-      prevTabKeyRef.current = key;
-    }
-    return key;
-  }, [openTabs]);
 
   // Render tabs using the provided render function
   const tabs = useMemo(() => renderTabs(openTabs), [renderTabs, openTabs]);
@@ -206,7 +189,6 @@ export function useDockableTabs(
     layout,
     openTabs,
     activeTabId,
-    dockableKey,
     tabs,
     handleFileSelect,
     handleLayoutChange,
