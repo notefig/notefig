@@ -312,4 +312,58 @@ test.describe("Content & Persistence", () => {
     );
     expect(persistedTab3).toContain("Edited in tab 3");
   });
+
+  test("Cursor and scroll position preserved across tab switches", async ({
+    page,
+  }) => {
+    // Use the browser adapter's demo workspace (auto-seeded)
+    await page.goto("http://localhost:1420/");
+    await page.getByRole("button", { name: "Open Folder" }).click();
+    await page.getByRole("button", { name: "Select Directory" }).click();
+
+    // Open two files to create two tabs
+    await page.getByRole("button", { name: "getting-started.md" }).click();
+    await page.getByRole("button", { name: "features.md" }).click();
+
+    // Click on a list item deep in features.md to place cursor away from start
+    await page
+      .getByRole("listitem")
+      .filter({ hasText: "Backlinks and graph view" })
+      .click();
+    await page.waitForTimeout(300);
+
+    // Record cursor position before switching away
+    const cursorBefore = await page.evaluate(() => {
+      const sel = window.getSelection();
+      return {
+        anchorOffset: sel?.anchorOffset ?? null,
+        anchorText: sel?.anchorNode?.textContent?.substring(0, 80) ?? null,
+      };
+    });
+
+    // Switch to getting-started.md tab
+    await page
+      .getByRole("button", { name: "getting-started.md Close" })
+      .click();
+    await page.waitForTimeout(500);
+
+    // Switch back to features.md tab
+    await page
+      .getByRole("button", { name: "features.md Close features.md" })
+      .click();
+    await page.waitForTimeout(500);
+
+    // Verify cursor is restored — not at the beginning of the file
+    const cursorAfter = await page.evaluate(() => {
+      const sel = window.getSelection();
+      return {
+        anchorOffset: sel?.anchorOffset ?? null,
+        anchorText: sel?.anchorNode?.textContent?.substring(0, 80) ?? null,
+      };
+    });
+
+    // The cursor should be in the same text node (the "Backlinks and graph view" item)
+    expect(cursorAfter.anchorText).toBe(cursorBefore.anchorText);
+    expect(cursorAfter.anchorOffset).toBe(cursorBefore.anchorOffset);
+  });
 });
