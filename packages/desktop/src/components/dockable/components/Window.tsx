@@ -7,6 +7,7 @@ import {
 } from "@dnd-kit/sortable";
 import { useDndContext } from "@dnd-kit/core";
 import { useDockable } from "../store";
+import { ScrollArea } from "@/components/ui/scroll-area";
 export type tabObject = {
   id: string;
   name: string;
@@ -72,32 +73,35 @@ function TabView({
             type: "tab-bar",
             address,
           }}
-          className="relative flex bg-transparent"
+          className="relative flex min-w-0 bg-transparent"
         >
-          <SortableContext
-            items={tabs.map((tab) => tab.id)}
-            strategy={horizontalListSortingStrategy}
-          >
-            {tabs.map((tab) => (
-              <Tab
-                key={tab.id}
-                id={tab.id}
-                parentId={id}
-                name={tab.name}
-                selected={tab.id === selected}
-                address={address}
-                onClick={() =>
-                  dispatch({
-                    type: "selectTab",
-                    tabId: tab.id,
-                    address,
-                  })
-                }
-                onClose={tab.onClose}
-              />
-            ))}
-          </SortableContext>
-          <div style={{ flex: 1 }} />
+          <ScrollArea className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
+            <div className="flex">
+              <SortableContext
+                items={tabs.map((tab) => tab.id)}
+                strategy={horizontalListSortingStrategy}
+              >
+                {tabs.map((tab) => (
+                  <Tab
+                    key={tab.id}
+                    id={tab.id}
+                    parentId={id}
+                    name={tab.name}
+                    selected={tab.id === selected}
+                    address={address}
+                    onClick={() =>
+                      dispatch({
+                        type: "selectTab",
+                        tabId: tab.id,
+                        address,
+                      })
+                    }
+                    onClose={tab.onClose}
+                  />
+                ))}
+              </SortableContext>
+            </div>
+          </ScrollArea>
         </Droppable>
       )}
 
