@@ -177,19 +177,7 @@ export function SettingsModal({
             </ScrollArea>
           </div>
 
-          {/* Settings Content */}
           <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
-            {/* Header with close button */}
-            <div className="flex items-center justify-end p-1 border-b border-border shrink-0">
-              <button
-                onClick={() => handleSettingsToggle(false)}
-                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-              >
-                <X className="h-5 w-5" />
-                <span className="sr-only">Close</span>
-              </button>
-            </div>
-
             {/* Scrollable content */}
             <ScrollArea className="flex-1">
               <div className="p-6">{renderSettingsContent()}</div>
