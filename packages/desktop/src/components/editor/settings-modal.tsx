@@ -427,8 +427,7 @@ function UpdateSection() {
             </p>
           )}
           {status === "checking" && (
-            <p className="text-sm text-muted-foreground flex items-center gap-1.5">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <p className="text-sm text-muted-foreground">
               Checking for updates...
             </p>
           )}
@@ -473,9 +472,17 @@ function UpdateSection() {
 
         <div className="shrink-0">
           {(status === "idle" ||
+            status === "checking" ||
             status === "up-to-date" ||
             status === "error") && (
-            <Button variant="secondary" onClick={checkForUpdate}>
+            <Button
+              variant="secondary"
+              onClick={checkForUpdate}
+              disabled={status === "checking"}
+            >
+              {status === "checking" && (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
               Check for updates
             </Button>
           )}
