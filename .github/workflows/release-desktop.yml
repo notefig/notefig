@@ -1,12 +1,65 @@
 name: Release Desktop App
 
 on:
-  push:
-    tags:
-      - "desktop-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 0.0.3)"
+        required: true
+        type: string
 
 jobs:
-  publish-tauri:
+  bump-and-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate version format
+        run: |
+          if ! echo "${{ inputs.version }}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Error: Version must be in semver format (e.g. 0.0.3)"
+            exit 1
+          fi
+
+      - name: Bump version in package.json
+        working-directory: packages/desktop
+        run: |
+          sed -i 's/"version": "[^"]*"/"version": "${{ inputs.version }}"/' package.json
+
+      - name: Bump version in Cargo.toml
+        working-directory: packages/desktop/src-tauri
+        run: |
+          sed -i '0,/^version = "[^"]*"/s//version = "${{ inputs.version }}"/' Cargo.toml
+
+      - name: Bump version in tauri.conf.json
+        working-directory: packages/desktop/src-tauri
+        run: |
+          sed -i 's/"version": "[^"]*"/"version": "${{ inputs.version }}"/' tauri.conf.json
+
+      - name: Update Cargo.lock
+        working-directory: packages/desktop/src-tauri
+        run: |
+          rustup default stable
+          cargo update --workspace
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add packages/desktop/package.json packages/desktop/src-tauri/Cargo.toml packages/desktop/src-tauri/tauri.conf.json packages/desktop/src-tauri/Cargo.lock
+          git commit -m "desktop: bump to v${{ inputs.version }}"
+          git push origin main
+
+      - name: Create and push tag
+        run: |
+          git tag "desktop-v${{ inputs.version }}"
+          git push origin "desktop-v${{ inputs.version }}"
+
+  build-and-publish:
+    needs: bump-and-tag
     permissions:
       contents: write
     strategy:
@@ -27,6 +80,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: "desktop-v${{ inputs.version }}"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -56,9 +111,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: packages/desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: "Metrists Desktop ${{ github.ref_name }}"
+          tagName: "desktop-v${{ inputs.version }}"
+          releaseName: "Metrists Desktop v${{ inputs.version }}"
           releaseBody: "See the assets to download this version and install."
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
