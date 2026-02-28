@@ -7,14 +7,14 @@
     "frontendDist": "../dist"
   },
   "productName": "Metrists",
-  "version": "0.0.2",
+  "version": "0.0.1",
   "identifier": "com.metrists.dev",
   "plugins": {
     "shell": {
       "open": true
     },
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkxNDc4MjlGMDY3QzkyMjYKUldRbWtud0duNEpIa1I4dXloNnl2U1A4YzVwc3VoMjZ1dGNvOXdxdERxeFkzY3RmNG0yRTNNNXAK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ4RDc3NEY4MzNGQUM2NkQKUldSdHh2b3orSFRYU1A1amkwbUdoZzJ5VkJnSGRaUGJBcGtEeUJ5Z0tWd2hKUTNFTU9NUEdtdTEK",
       "endpoints": [
         "https://github.com/metrists/metrists/releases/latest/download/latest.json"
       ]
