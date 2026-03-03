@@ -491,6 +491,12 @@ export async function createDirectory(
 /**
  * Delete a file or directory
  *
+ * For directories, this cascades the delete to all children:
+ * - All child metadata and content entries are removed from collections via direct writes
+ *   (bypasses mutation handlers since the recursive FS delete handles them on disk)
+ * - The directory entry itself is deleted via the mutation handler which calls
+ *   platformAdapter.deleteDirectories with recursive: true
+ *
  * @param workspaceId - Unique identifier for the workspace
  * @param path - Absolute path to delete
  */
@@ -500,7 +506,29 @@ export async function deleteFileOrDirectory(
 ): Promise<void> {
   const collections = getOrCreateWorkspaceCollections(workspaceId);
 
-  // Delete from metadata collection (triggers onDelete which removes from file system)
+  const entry = collections.metadata.get(path);
+
+  if (entry?.type === "directory") {
+    // For directories, remove all children from collections first.
+    // Use direct writes (utils.writeDelete) to bypass mutation handlers —
+    // the platform adapter's recursive directory delete handles the FS cleanup.
+    const childPrefix = path.endsWith("/") ? path : path + "/";
+    const allMetadata = collections.metadata.toArray;
+
+    for (const child of allMetadata) {
+      if (child.path.startsWith(childPrefix)) {
+        // Remove child content if loaded
+        const childContent = collections.content.get(child.path);
+        if (childContent) {
+          collections.content.utils.writeDelete(child.path);
+        }
+        // Remove child metadata
+        collections.metadata.utils.writeDelete(child.path);
+      }
+    }
+  }
+
+  // Delete the entry itself from metadata (triggers onDelete -> platform adapter)
   collections.metadata.delete(path);
 
   // Also delete content if it exists
@@ -571,6 +599,120 @@ export async function prefetchFileContent(
       path: file.path,
       content: file.content,
       contentHash,
+    });
+  }
+}
+
+/**
+ * Rename (move) a file or directory
+ *
+ * For files: moves the file on disk, then re-keys the metadata and content entries.
+ * For directories: moves the directory on disk, then re-keys the directory entry
+ * and all descendant metadata/content entries.
+ *
+ * All collection writes use direct writes (utils.writeDelete/writeInsert) to bypass
+ * mutation handlers — the FS operation is done directly via the platform adapter.
+ *
+ * @param workspaceId - Unique identifier for the workspace
+ * @param oldPath - Current absolute path
+ * @param newPath - New absolute path
+ */
+export async function renameFileOrDirectory(
+  workspaceId: string,
+  oldPath: string,
+  newPath: string,
+): Promise<void> {
+  if (oldPath === newPath) return;
+
+  const collections = getOrCreateWorkspaceCollections(workspaceId);
+  const entry = collections.metadata.get(oldPath);
+
+  if (!entry) {
+    throw new Error(`Cannot rename: no metadata entry found for ${oldPath}`);
+  }
+
+  // Check for duplicate at target path
+  const existing = collections.metadata.get(newPath);
+  if (existing) {
+    throw new Error(
+      `Cannot rename: a file or directory already exists at ${newPath}`,
+    );
+  }
+
+  const computeRelativePath = (absolutePath: string): string | undefined =>
+    absolutePath.startsWith(workspaceId)
+      ? absolutePath.slice(workspaceId.length + 1)
+      : undefined;
+
+  if (entry.type === "file") {
+    // Move on disk first
+    const moveResult = await platformAdapter.moveFile(oldPath, newPath);
+    if (!moveResult.ok) {
+      throw new Error(
+        `Failed to rename file ${oldPath} to ${newPath}: ${moveResult.error.message}`,
+      );
+    }
+
+    // Re-key metadata: delete old, insert new
+    collections.metadata.utils.writeDelete(oldPath);
+    collections.metadata.utils.writeInsert({
+      ...entry,
+      path: newPath,
+      relativePath: computeRelativePath(newPath),
+    });
+
+    // Re-key content if loaded
+    const contentEntry = collections.content.get(oldPath);
+    if (contentEntry) {
+      collections.content.utils.writeDelete(oldPath);
+      collections.content.utils.writeInsert({
+        ...contentEntry,
+        path: newPath,
+      });
+    }
+  } else {
+    // Directory rename
+    const moveResult = await platformAdapter.moveDirectory(oldPath, newPath);
+    if (!moveResult.ok) {
+      throw new Error(
+        `Failed to rename directory ${oldPath} to ${newPath}: ${moveResult.error.message}`,
+      );
+    }
+
+    // Re-key all children
+    const childPrefix = oldPath.endsWith("/") ? oldPath : oldPath + "/";
+    const allMetadata = collections.metadata.toArray;
+
+    for (const child of allMetadata) {
+      if (child.path.startsWith(childPrefix)) {
+        const newChildPath = newPath + child.path.slice(oldPath.length);
+
+        // Re-key child metadata
+        collections.metadata.utils.writeDelete(child.path);
+        collections.metadata.utils.writeInsert({
+          ...child,
+          path: newChildPath,
+          relativePath: computeRelativePath(newChildPath),
+        });
+
+        // Re-key child content if loaded
+        const childContent = collections.content.get(child.path);
+        if (childContent) {
+          collections.content.utils.writeDelete(child.path);
+          collections.content.utils.writeInsert({
+            ...childContent,
+            path: newChildPath,
+          });
+        }
+      }
+    }
+
+    // Re-key the directory entry itself
+    collections.metadata.utils.writeDelete(oldPath);
+    collections.metadata.utils.writeInsert({
+      ...entry,
+      path: newPath,
+      relativePath: computeRelativePath(newPath),
     });
   }
 }

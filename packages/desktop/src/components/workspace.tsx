@@ -8,13 +8,17 @@ import { StatusBar } from "@/components/editor/status-bar";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
-import { getOrCreateWorkspaceCollections } from "@/utils/collections";
+import {
+  getOrCreateWorkspaceCollections,
+  deleteFileOrDirectory,
+  renameFileOrDirectory,
+} from "@/utils/collections";
 import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
 import type { FileEntry } from "@/utils/fs";
-import { getFileName, isTextFile } from "@/utils/fs";
+import { getFileName, getDirectoryPath, isTextFile } from "@/utils/fs";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
 import { platformAdapter } from "@/adapters";
 import {
@@ -41,6 +45,7 @@ export const Workspace = () => {
     activeTabId,
     handleFileSelect,
     handleLayoutChange,
+    closeTab,
   } = useDockableTabs({
     renderTabs: () => [], // Will render below after querying data
     canOpenFile: (file) => file.type === "file" && isTextFile(file.path),
@@ -157,6 +162,45 @@ export const Workspace = () => {
     //TODO: handle new tab + new file creation
   }, []);
 
+  const handleDeleteFile = useCallback(
+    (path: string) => {
+      // Close any open tabs for the deleted file (or children if directory)
+      const pathPrefix = path.endsWith("/") ? path : path + "/";
+      for (const tabId of openTabs) {
+        if (tabId === path || tabId.startsWith(pathPrefix)) {
+          closeTab(tabId);
+        }
+      }
+
+      // Delete from collections (triggers FS delete via mutation handler)
+      deleteFileOrDirectory(workspacePath, path).catch((error: unknown) => {
+        console.error(`Failed to delete ${path}:`, error);
+      });
+    },
+    [openTabs, closeTab, workspacePath],
+  );
+
+  const handleRenameFile = useCallback(
+    (oldPath: string, newName: string) => {
+      const newPath = getDirectoryPath(oldPath) + "/" + newName;
+      if (oldPath === newPath) return;
+
+      // Duplicate check
+      const existing = metadata.get(newPath);
+      if (existing) {
+        console.error(`Cannot rename: "${newPath}" already exists`);
+        return;
+      }
+
+      renameFileOrDirectory(workspacePath, oldPath, newPath).catch(
+        (error: unknown) => {
+          console.error(`Failed to rename ${oldPath} to ${newPath}:`, error);
+        },
+      );
+    },
+    [workspacePath, metadata],
+  );
+
   // ── File watchers ──
   useEffect(() => {
     const metadataWatchId = `metadata-${workspacePath}`;
@@ -229,6 +273,9 @@ export const Workspace = () => {
                 <FileTree
                   selectedFilePath={activeTabId}
                   onFileSelect={handleFileSelect}
+                  onDelete={handleDeleteFile}
+                  onRename={handleRenameFile}
+                  openTabs={openTabs}
                   basePath={workspacePath!}
                 />
               </div>

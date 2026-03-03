@@ -69,24 +69,32 @@ export function Dockable({
     size: 1,
   });
 
-  // Track the last layout we reported to the parent via onChange.
-  // This lets us distinguish "parent sent us a new layout" from
-  // "parent echoed back the layout we just reported".
-  const lastReportedRef = useRef<LayoutNode[] | null>(controledPanels || null);
+  // Track the last layout JSON we reported to the parent via onChange.
+  // We use a serialised string so that the comparison survives the
+  // URL → JSON.parse round-trip (which always creates new object refs).
+  const lastReportedJsonRef = useRef<string>(
+    controledPanels ? JSON.stringify(controledPanels) : "",
+  );
 
   // Sync controlled layout prop into internal reducer state.
-  // Only dispatch when the incoming prop differs from what we last reported,
-  // which breaks the onChange → setLayout → prop change → setState loop.
+  // Only dispatch when the incoming prop is structurally different from
+  // what we last reported, which breaks the
+  // onChange → setLayout → prop change → setState infinite loop.
   useEffect(() => {
-    if (controledPanels && controledPanels !== lastReportedRef.current) {
+    if (!controledPanels) return;
+    const incoming = JSON.stringify(controledPanels);
+    if (incoming !== lastReportedJsonRef.current) {
+      lastReportedJsonRef.current = incoming;
       dispatch({ type: "setState", children: controledPanels });
     }
   }, [controledPanels]);
 
   // Report internal state changes to the parent.
   useEffect(() => {
-    if (onChange) {
-      lastReportedRef.current = state.children;
+    if (!onChange) return;
+    const current = JSON.stringify(state.children);
+    if (current !== lastReportedJsonRef.current) {
+      lastReportedJsonRef.current = current;
       onChange(state.children);
     }
   }, [state, onChange]);

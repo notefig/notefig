@@ -280,6 +280,19 @@ export function flatEntriesToTree(
  * @param title - Optional title for the picker dialog
  * @returns Promise that resolves to the selected directory path or null if cancelled
  */
+/**
+ * Validate a new file/directory name.
+ * Returns an error message string, or null if valid.
+ */
+export function validateFileName(name: string): string | null {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) return "Name cannot be empty";
+  if (trimmed.includes("/") || trimmed.includes("\\"))
+    return "Name cannot contain / or \\";
+  if (trimmed === "." || trimmed === "..") return "Name cannot be . or ..";
+  return null;
+}
+
 export async function pickDirectory(title: string): Promise<string | null> {
   return platformAdapter.pickDirectory(title);
 }
