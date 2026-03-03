@@ -202,6 +202,8 @@ export const Workspace = () => {
         activeItem={activeSidebarItem}
         onItemClick={setActiveSidebarItem}
         onCommandPaletteClick={() => setIsCommandPaletteOpen(true)}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
       />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -221,10 +223,6 @@ export const Workspace = () => {
                 style={{ width: sidebarWidth }}
               >
                 <FileControls
-                  isCollapsed={isSidebarCollapsed}
-                  onToggleCollapse={() =>
-                    setIsSidebarCollapsed(!isSidebarCollapsed)
-                  }
                   onNewFile={handleNewFile}
                   onNewFolder={() => {}}
                 />

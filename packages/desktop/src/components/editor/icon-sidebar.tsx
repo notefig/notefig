@@ -10,6 +10,8 @@ import {
   Settings,
   HelpCircle,
   Command,
+  PanelLeftClose,
+  PanelLeft,
 } from "lucide-react";
 import {
   Tooltip,
@@ -24,6 +26,8 @@ interface IconSidebarProps {
   activeItem: string;
   onItemClick: (item: string) => void;
   onCommandPaletteClick: () => void;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
 const topIcons = [
@@ -45,6 +49,8 @@ export function IconSidebar({
   activeItem,
   onItemClick,
   onCommandPaletteClick,
+  isCollapsed,
+  onToggleCollapse,
 }: IconSidebarProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const handleSettingsToggle = (open: boolean) => {
@@ -81,7 +87,11 @@ export function IconSidebar({
                   <span className="sr-only">{item.label}</span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>
+              <TooltipContent
+                side="right"
+                className="rtl:hidden"
+                sideOffset={8}
+              >
                 {item.label}
               </TooltipContent>
               <TooltipContent side="left" className="ltr:hidden" sideOffset={8}>
@@ -111,8 +121,12 @@ export function IconSidebar({
                   <item.icon className="w-5 h-5 text-muted-foreground" />
                   <span className="sr-only">{item.label}</span>
                 </button>
-               </TooltipTrigger>
-              <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>
+              </TooltipTrigger>
+              <TooltipContent
+                side="right"
+                className="rtl:hidden"
+                sideOffset={8}
+              >
                 {item.label}
               </TooltipContent>
               <TooltipContent side="left" className="ltr:hidden" sideOffset={8}>
@@ -120,6 +134,29 @@ export function IconSidebar({
               </TooltipContent>
             </Tooltip>
           ))}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={onToggleCollapse}
+                className="p-2 rounded-md transition-colors hover:bg-sidebar-accent"
+              >
+                {isCollapsed ? (
+                  <PanelLeft className="w-5 h-5 text-muted-foreground" />
+                ) : (
+                  <PanelLeftClose className="w-5 h-5 text-muted-foreground" />
+                )}
+                <span className="sr-only">
+                  {isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                </span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>
+              {isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            </TooltipContent>
+            <TooltipContent side="left" className="ltr:hidden" sideOffset={8}>
+              {isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
     </TooltipProvider>
