@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useSearchParams } from "react-router";
+import { PlainLogo } from "@/components/logo";
 
 interface IconSidebarProps {
   onCommandPaletteClick: () => void;
@@ -66,7 +67,21 @@ export function IconSidebar({
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col items-center justify-between h-full w-12 bg-sidebar border-r rtl:border-r-0 rtl:border-l border-sidebar-border py-2">
+      <div className="flex flex-col items-center justify-start h-full w-12 bg-sidebar border-r rtl:border-r-0 rtl:border-l border-sidebar-border py-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="mb-3">
+              <PlainLogo size={20} className="block dark:hidden" />
+              <PlainLogo size={20} fill="white" className="hidden dark:block" />
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>
+            Metrists
+          </TooltipContent>
+          <TooltipContent side="left" className="ltr:hidden" sideOffset={8}>
+            Metrists
+          </TooltipContent>
+        </Tooltip>
         <div className="flex flex-col items-center gap-1">
           {topIcons.map((item) => (
             <Tooltip key={item.id}>
@@ -94,7 +109,7 @@ export function IconSidebar({
             </Tooltip>
           ))}
         </div>
-        <div className="flex flex-col items-center gap-1">
+        <div className="flex flex-col items-center gap-1 mt-auto">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
