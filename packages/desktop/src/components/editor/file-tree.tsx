@@ -236,16 +236,16 @@ function FileTreeItem({
             ) : (
               <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground rtl:-scale-x-100" />
             )}
-            {isExpanded ? (
-              <FolderOpen className="w-4 h-4 shrink-0 text-muted-foreground" />
-            ) : (
-              <Folder className="w-4 h-4 shrink-0 text-muted-foreground" />
-            )}
+            {/* {isExpanded ? ( */}
+            {/*   <FolderOpen className="w-4 h-4 shrink-0 text-muted-foreground" /> */}
+            {/* ) : ( */}
+            {/*   <Folder className="w-4 h-4 shrink-0 text-muted-foreground" /> */}
+            {/* )} */}
           </>
         ) : (
           <>
             <span className="w-4 shrink-0" />
-            <FileText className="w-4 h-4 shrink-0 text-muted-foreground" />
+            {/* <FileText className="w-4 h-4 shrink-0 text-muted-foreground" /> */}
           </>
         )}
         {isRenaming ? (
