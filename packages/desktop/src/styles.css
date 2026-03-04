@@ -133,4 +133,39 @@
     -moz-user-select: text;
     -ms-user-select: text;
   }
+
+  /* Transparent scrollbar track to prevent light background on macOS */
+  * {
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+    scrollbar-width: thin;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}
+
+/* Normalize Lucide icon stroke rendering across zoom levels.
+   Uses absolute stroke width technique from Lucide docs:
+   https://lucide.dev/guide/advanced/global-styling#absolute-stroke-width */
+.lucide {
+  stroke-width: 1.75 !important;
+}
+
+.lucide * {
+  vector-effect: non-scaling-stroke;
 }
