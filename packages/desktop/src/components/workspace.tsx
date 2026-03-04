@@ -241,7 +241,7 @@ export const Workspace = () => {
   return (
     <div
       dir={direction}
-      className="flex h-screen w-screen bg-background overflow-hidden"
+      className="flex h-full w-full bg-background overflow-hidden"
     >
       <IconSidebar
         activeItem={activeSidebarItem}
