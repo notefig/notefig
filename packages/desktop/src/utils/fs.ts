@@ -13,6 +13,8 @@ export interface FileEntry {
 
 export type FileEntries = Record<FileEntry["path"], FileEntry>;
 
+export type SortOrder = "name-asc" | "name-desc" | "date-modified";
+
 /**
  * Extended FileEntry interface for tree structure representation
  * Adds children array for hierarchical display and optional UI properties
@@ -165,6 +167,7 @@ export function normalizePath(filePath: string): string {
 export function flatEntriesToTree(
   flatFiles: FileEntries,
   basePath: string,
+  sortOrder: SortOrder = "name-asc",
 ): FileTreeNode[] {
   const pathMap = new Map<string, FileTreeNode>();
   const rootNodes: FileTreeNode[] = [];
@@ -251,15 +254,28 @@ export function flatEntriesToTree(
     }
   });
 
-  // Sort children: directories first, then alphabetically
+  // Sort children based on sort order
   const sortChildren = (nodes: FileTreeNode[]) => {
     nodes.sort((a, b) => {
-      if (a.type === "directory" && b.type === "file") return -1;
-      if (a.type === "file" && b.type === "directory") return 1;
-
-      const nameA = getFileName(a.path).toLowerCase();
-      const nameB = getFileName(b.path).toLowerCase();
-      return nameA.localeCompare(nameB);
+      switch (sortOrder) {
+        case "name-asc": {
+          const nameA = getFileName(a.path).toLowerCase();
+          const nameB = getFileName(b.path).toLowerCase();
+          return nameA.localeCompare(nameB);
+        }
+        case "name-desc": {
+          const nameA = getFileName(a.path).toLowerCase();
+          const nameB = getFileName(b.path).toLowerCase();
+          return nameB.localeCompare(nameA);
+        }
+        case "date-modified": {
+          const timeA = a.modified ? new Date(a.modified).getTime() : 0;
+          const timeB = b.modified ? new Date(b.modified).getTime() : 0;
+          return timeB - timeA; // Newest first
+        }
+        default:
+          return 0;
+      }
     });
 
     nodes.forEach((node) => {

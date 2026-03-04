@@ -36,7 +36,6 @@ export function IconSidebar({
   const [searchParams, setSearchParams] = useSearchParams();
 
   const topIcons = [
-    { id: "files", icon: FileText, label: "Files", onClick: () => {} },
     { id: "search", icon: Search, label: "Search", onClick: () => {} },
     {
       id: "command",
@@ -44,9 +43,6 @@ export function IconSidebar({
       label: "Command Palette",
       onClick: onCommandPaletteClick,
     },
-    { id: "bookmarks", icon: Bookmark, label: "Bookmarks", onClick: () => {} },
-    { id: "grid", icon: LayoutGrid, label: "Views", onClick: () => {} },
-    { id: "recent", icon: Clock, label: "Recent", onClick: () => {} },
     { id: "git", icon: GitBranch, label: "Git", onClick: () => {} },
   ];
 

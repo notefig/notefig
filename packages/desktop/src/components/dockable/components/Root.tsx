@@ -44,7 +44,7 @@ export function Dockable({
   children,
   layout: controledPanels,
   onChange,
-  gap = 4,
+  gap = 2,
   radius = 0,
 }: DockableProps) {
   const views: React.ReactElement<TabProps>[] = [];

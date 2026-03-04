@@ -15,6 +15,7 @@ import {
   getFileExtension,
   validateFileName,
   type FileEntries,
+  type SortOrder,
 } from "@/utils/fs";
 import {
   getOrCreateWorkspaceCollections,
@@ -30,6 +31,7 @@ interface FileTreeProps {
   onRename?: (oldPath: string, newName: string) => void;
   openTabs?: string[];
   basePath: string;
+  sortOrder?: SortOrder;
 }
 
 interface FileTreeItemProps {
@@ -309,6 +311,7 @@ export function FileTree({
   onRename,
   openTabs,
   basePath,
+  sortOrder = "name-asc",
 }: FileTreeProps) {
   const { metadata } = getOrCreateWorkspaceCollections(basePath);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
@@ -346,8 +349,8 @@ export function FileTree({
   }, [fileMetadataList]);
 
   const filesTree = useMemo(() => {
-    return flatEntriesToTree(files, basePath);
-  }, [files, basePath]);
+    return flatEntriesToTree(files, basePath, sortOrder);
+  }, [files, basePath, sortOrder]);
 
   return (
     <ScrollArea className="h-full w-full">

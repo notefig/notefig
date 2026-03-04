@@ -17,7 +17,7 @@ import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
-import type { FileEntry } from "@/utils/fs";
+import type { FileEntry, SortOrder } from "@/utils/fs";
 import { getFileName, getDirectoryPath, isTextFile } from "@/utils/fs";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
 import { platformAdapter } from "@/adapters";
@@ -111,6 +111,7 @@ export const Workspace = () => {
   const [isResizing, setIsResizing] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [direction, setDirection] = useState<"ltr" | "rtl">("ltr");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("name-asc");
   const resizeRef = useRef<HTMLDivElement>(null);
 
   const { wordCount, characterCount } = useMemo(() => {
@@ -263,12 +264,14 @@ export const Workspace = () => {
           {!isSidebarCollapsed && (
             <>
               <div
-                className="shrink-0 bg-sidebar flex flex-col border-r border-border"
+                className="shrink-0 bg-sidebar flex flex-col border-border"
                 style={{ width: sidebarWidth }}
               >
                 <FileControls
                   onNewFile={handleNewFile}
                   onNewFolder={() => {}}
+                  sortOrder={sortOrder}
+                  onSortChange={setSortOrder}
                 />
                 <FileTree
                   selectedFilePath={activeTabId}
@@ -277,6 +280,7 @@ export const Workspace = () => {
                   onRename={handleRenameFile}
                   openTabs={openTabs}
                   basePath={workspacePath!}
+                  sortOrder={sortOrder}
                 />
               </div>
               <div
