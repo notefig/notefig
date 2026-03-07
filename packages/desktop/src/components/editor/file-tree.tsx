@@ -325,17 +325,18 @@ export function FileTree({
     [basePath],
   );
 
-  // Query all file metadata entries
-  const { data: fileMetadataList = [] } = useLiveQuery((q) =>
-    q.from({ file: metadata }).select(({ file }) => ({
-      path: file.path,
-      relativePath: file.relativePath,
-      type: file.type,
-      modified: file.modified,
-      size: file.size,
-      contentHash: file.contentHash,
-      error: file.error,
-    })),
+  const { data: fileMetadataList = [] } = useLiveQuery(
+    (q) =>
+      q.from({ file: metadata }).select(({ file }) => ({
+        path: file.path,
+        relativePath: file.relativePath,
+        type: file.type,
+        modified: file.modified,
+        size: file.size,
+        contentHash: file.contentHash,
+        error: file.error,
+      })),
+    [basePath],
   );
 
   const files: FileEntries = useMemo(() => {

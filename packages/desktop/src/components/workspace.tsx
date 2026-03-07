@@ -26,11 +26,11 @@ import {
   handleContentFileSystemChange,
 } from "@/utils/file-sync";
 import { disposeAllEditors } from "@/components/editor/editor-store";
+import BaseParser from "pdf-lib/cjs/core/parser/BaseParser";
 
 export const Workspace = () => {
   const { workspacePath } = useWorkspaceParams();
 
-  // Early return if no workspace path
   if (!workspacePath) {
     return null;
   }
@@ -38,7 +38,6 @@ export const Workspace = () => {
   const { metadata, content } = getOrCreateWorkspaceCollections(workspacePath);
   const { t } = useTranslation();
 
-  // ── Dockable tabs management ──
   const {
     layout,
     openTabs,
@@ -47,18 +46,16 @@ export const Workspace = () => {
     handleLayoutChange,
     closeTab,
   } = useDockableTabs({
-    renderTabs: () => [], // Will render below after querying data
+    renderTabs: () => [],
     canOpenFile: (file) => file.type === "file" && isTextFile(file.path),
   });
 
-  // Dispose all editor instances when this workspace unmounts
   useEffect(() => {
     return () => {
       disposeAllEditors();
     };
   }, []);
 
-  // Query file data with content for open tabs
   const { data: fileDataWithContent = [] } = useLiveQuery(
     (q) =>
       openTabs.length === 0
@@ -75,7 +72,7 @@ export const Workspace = () => {
               content: content?.content,
               contentHash: content?.contentHash,
             })),
-    [...openTabs],
+    [workspacePath, ...openTabs],
   );
 
   // Build Dockable tabs
