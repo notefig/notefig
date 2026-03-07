@@ -1,24 +1,19 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Dockable } from "@/components/dockable";
 import { IconSidebar } from "@/components/editor/icon-sidebar";
-import { FileTree } from "@/components/editor/file-tree";
-import { FileControls } from "@/components/editor/file-controls";
+import { Sidebar } from "@/components/editor/sidebar";
 import { TextEditor } from "@/components/editor/text-editor";
 import { StatusBar } from "@/components/editor/status-bar";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
-import {
-  getOrCreateWorkspaceCollections,
-  deleteFileOrDirectory,
-  renameFileOrDirectory,
-} from "@/utils/collections";
+import { getOrCreateWorkspaceCollections } from "@/utils/collections";
 import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
-import type { FileEntry, SortOrder } from "@/utils/fs";
-import { getFileName, getDirectoryPath, isTextFile } from "@/utils/fs";
+import type { FileEntry } from "@/utils/fs";
+import { getFileName, isTextFile } from "@/utils/fs";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
 import { platformAdapter } from "@/adapters";
 import {
@@ -27,6 +22,10 @@ import {
 } from "@/utils/file-sync";
 import { disposeAllEditors } from "@/components/editor/editor-store";
 import { useSearchParams } from "react-router";
+import {
+  type FileTreeMode,
+  FILE_TREE_IDLE,
+} from "@/components/editor/file-tree";
 
 export const Workspace = () => {
   const { workspacePath } = useWorkspaceParams();
@@ -113,26 +112,9 @@ export const Workspace = () => {
       return prev;
     });
   }, [setSearchParams]);
-  const [sidebarWidth, setSidebarWidth] = useState(240);
   const [isSynced] = useState(true);
-  const [isResizing, setIsResizing] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [direction, setDirection] = useState<"ltr" | "rtl">("ltr");
-  const sortOrder = (searchParams.get("sort") as SortOrder) || "name-asc";
-  const setSortOrder = useCallback(
-    (order: SortOrder) => {
-      setSearchParams((prev) => {
-        if (order === "name-asc") {
-          prev.delete("sort");
-        } else {
-          prev.set("sort", order);
-        }
-        return prev;
-      });
-    },
-    [setSearchParams],
-  );
-  const resizeRef = useRef<HTMLDivElement>(null);
 
   const { wordCount, characterCount } = useMemo(() => {
     const words = currentContent
@@ -145,84 +127,17 @@ export const Workspace = () => {
     };
   }, [currentContent]);
 
-  // ── Sidebar resize ──
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing) return;
-      const iconSidebarWidth = 48;
-      const newWidth = e.clientX - iconSidebarWidth;
-      const clampedWidth = Math.max(150, Math.min(400, newWidth));
-      setSidebarWidth(clampedWidth);
-    };
-
-    const handleMouseUp = () => {
-      setIsResizing(false);
-    };
-
-    if (isResizing) {
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-    }
-
-    return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-  }, [isResizing]);
-
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsResizing(true);
-  }, []);
+  const [fileTreeMode, setFileTreeMode] =
+    useState<FileTreeMode>(FILE_TREE_IDLE);
 
   const handleNewFile = useCallback(() => {
-    //TODO: handle new tab + new file creation
-  }, []);
+    setFileTreeMode({
+      type: "creating",
+      parentPath: workspacePath,
+      itemType: "file",
+    });
+  }, [workspacePath]);
 
-  const handleDeleteFile = useCallback(
-    (path: string) => {
-      // Close any open tabs for the deleted file (or children if directory)
-      const pathPrefix = path.endsWith("/") ? path : path + "/";
-      for (const tabId of openTabs) {
-        if (tabId === path || tabId.startsWith(pathPrefix)) {
-          closeTab(tabId);
-        }
-      }
-
-      // Delete from collections (triggers FS delete via mutation handler)
-      deleteFileOrDirectory(workspacePath, path).catch((error: unknown) => {
-        console.error(`Failed to delete ${path}:`, error);
-      });
-    },
-    [openTabs, closeTab, workspacePath],
-  );
-
-  const handleRenameFile = useCallback(
-    (oldPath: string, newName: string) => {
-      const newPath = getDirectoryPath(oldPath) + "/" + newName;
-      if (oldPath === newPath) return;
-
-      // Duplicate check
-      const existing = metadata.get(newPath);
-      if (existing) {
-        console.error(`Cannot rename: "${newPath}" already exists`);
-        return;
-      }
-
-      renameFileOrDirectory(workspacePath, oldPath, newPath).catch(
-        (error: unknown) => {
-          console.error(`Failed to rename ${oldPath} to ${newPath}:`, error);
-        },
-      );
-    },
-    [workspacePath, metadata],
-  );
-
-  // ── File watchers ──
   useEffect(() => {
     const metadataWatchId = `metadata-${workspacePath}`;
     const contentWatchId = `content-${workspacePath}`;
@@ -280,33 +195,15 @@ export const Workspace = () => {
         <div className="flex-1 flex min-h-0 overflow-hidden">
           {/* ── File tree sidebar ── */}
           {!isSidebarCollapsed && (
-            <>
-              <div
-                className="shrink-0 bg-sidebar flex flex-col border-border"
-                style={{ width: sidebarWidth }}
-              >
-                <FileControls
-                  onNewFile={handleNewFile}
-                  onNewFolder={() => {}}
-                  sortOrder={sortOrder}
-                  onSortChange={setSortOrder}
-                />
-                <FileTree
-                  selectedFilePath={activeTabId}
-                  onFileSelect={handleFileSelect}
-                  onDelete={handleDeleteFile}
-                  onRename={handleRenameFile}
-                  openTabs={openTabs}
-                  basePath={workspacePath!}
-                  sortOrder={sortOrder}
-                />
-              </div>
-              <div
-                ref={resizeRef}
-                onMouseDown={handleResizeStart}
-                className="w-1 shrink-0 bg-border hover:bg-primary/50 cursor-col-resize transition-colors"
-              />
-            </>
+            <Sidebar
+              workspacePath={workspacePath}
+              activeTabId={activeTabId}
+              openTabs={openTabs}
+              onFileSelect={handleFileSelect}
+              closeTab={closeTab}
+              mode={fileTreeMode}
+              onModeChange={setFileTreeMode}
+            />
           )}
 
           {/* ── Editor area (Dockable) ── */}

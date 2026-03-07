@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { FilePlus, FolderPlus, Pencil, Trash2 } from "lucide-react";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -17,7 +17,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { getFileName } from "@/utils/fs";
+import { getDirectoryPath, getFileName } from "@/utils/fs";
 import { useTranslation } from "react-i18next";
 
 interface FileTreeContextMenuProps {
@@ -25,6 +25,8 @@ interface FileTreeContextMenuProps {
   type: "file" | "directory";
   onDelete: (path: string) => void;
   onRenameStart: () => void;
+  onNewFile: (parentDirPath: string) => void;
+  onNewFolder: (parentDirPath: string) => void;
   disableRename?: boolean;
   children: React.ReactNode;
 }
@@ -34,18 +36,31 @@ export function FileTreeContextMenu({
   type,
   onDelete,
   onRenameStart,
+  onNewFile,
+  onNewFolder,
   disableRename,
   children,
 }: FileTreeContextMenuProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const { t } = useTranslation();
   const name = getFileName(path);
+  // For files, create in the parent directory. For directories, create inside.
+  const targetDir = type === "directory" ? path : getDirectoryPath(path);
 
   return (
     <>
       <ContextMenu>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
         <ContextMenuContent>
+          <ContextMenuItem onSelect={() => onNewFile(targetDir)}>
+            <FilePlus className="w-4 h-4 mr-2" />
+            {t("newFile", "New File")}
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => onNewFolder(targetDir)}>
+            <FolderPlus className="w-4 h-4 mr-2" />
+            {t("newFolder", "New Folder")}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
           <ContextMenuItem
             disabled={disableRename}
             onSelect={() => onRenameStart()}

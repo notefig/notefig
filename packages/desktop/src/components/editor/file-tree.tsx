@@ -24,14 +24,29 @@ import {
 import { useLiveQuery } from "@tanstack/react-db";
 import { FileTreeContextMenu } from "./file-tree-context-menu";
 
+/** Discriminated union representing the file tree's inline-editing state. */
+export type FileTreeMode =
+  | { type: "idle" }
+  | { type: "renaming"; path: string }
+  | { type: "creating"; parentPath: string; itemType: "file" | "directory" };
+
+export const FILE_TREE_IDLE: FileTreeMode = { type: "idle" };
+
 interface FileTreeProps {
   selectedFilePath: string | null;
   onFileSelect: (file: FileTreeNode) => void;
   onDelete?: (path: string) => void;
   onRename?: (oldPath: string, newName: string) => void;
+  onCreate?: (
+    parentPath: string,
+    name: string,
+    type: "file" | "directory",
+  ) => void;
   openTabs?: string[];
   basePath: string;
   sortOrder?: SortOrder;
+  mode: FileTreeMode;
+  onModeChange: (mode: FileTreeMode) => void;
 }
 
 interface FileTreeItemProps {
@@ -42,9 +57,14 @@ interface FileTreeItemProps {
   onFileHover?: (filePath: string) => void;
   onDelete?: (path: string) => void;
   onRename?: (oldPath: string, newName: string) => void;
-  renamingPath: string | null;
-  onRenamingPathChange: (path: string | null) => void;
+  onCreate?: (
+    parentPath: string,
+    name: string,
+    type: "file" | "directory",
+  ) => void;
   openTabs?: string[];
+  mode: FileTreeMode;
+  onModeChange: (mode: FileTreeMode) => void;
 }
 
 /**
@@ -159,6 +179,116 @@ const RenameInput = memo(function RenameInput({
   );
 });
 
+/**
+ * Input component for creating new files/directories.
+ * Starts with an empty value. On commit, validates the name and calls onSubmit.
+ * On Escape or empty blur, cancels.
+ */
+interface NewFileInputProps {
+  type: "file" | "directory";
+  onSubmit: (name: string) => void;
+  onCancel: () => void;
+  depth: number;
+}
+
+const NewFileInput = memo(function NewFileInput({
+  type,
+  onSubmit,
+  onCancel,
+  depth,
+}: NewFileInputProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const committedRef = useRef(false);
+  const readyRef = useRef(false);
+
+  useEffect(() => {
+    const timerId = setTimeout(() => {
+      readyRef.current = true;
+    }, 150);
+
+    const rafId = requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+
+    return () => {
+      clearTimeout(timerId);
+      cancelAnimationFrame(rafId);
+    };
+  }, []);
+
+  const commit = useCallback(
+    (value: string) => {
+      if (committedRef.current) return;
+      committedRef.current = true;
+
+      const trimmed = value.trim();
+      const error = validateFileName(trimmed);
+      if (error || trimmed.length === 0) {
+        onCancel();
+        return;
+      }
+      onSubmit(trimmed);
+    },
+    [onSubmit, onCancel],
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      e.stopPropagation();
+      if (e.key === "Enter") {
+        e.preventDefault();
+        commit(e.currentTarget.value);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        committedRef.current = true;
+        onCancel();
+      }
+    },
+    [commit, onCancel],
+  );
+
+  const handleBlur = useCallback(
+    (e: React.FocusEvent<HTMLInputElement>) => {
+      if (!readyRef.current) {
+        e.currentTarget.focus();
+        return;
+      }
+      commit(e.currentTarget.value);
+    },
+    [commit],
+  );
+
+  const paddingValue = depth * 12 + 8;
+
+  return (
+    <div
+      className="flex items-center gap-1 px-2 py-1"
+      style={{
+        paddingInlineStart: `${paddingValue}px`,
+        paddingInlineEnd: "8px",
+      }}
+    >
+      <div className="flex items-center gap-1 flex-1 min-w-0">
+        {type === "directory" ? (
+          <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground rtl:-scale-x-100" />
+        ) : (
+          <span className="w-4 shrink-0" />
+        )}
+        <input
+          ref={inputRef}
+          autoFocus
+          placeholder={type === "file" ? "filename.md" : "folder name"}
+          className="flex-1 min-w-0 bg-background text-foreground text-sm outline-none border border-ring rounded px-1"
+          onKeyDown={handleKeyDown}
+          onBlur={handleBlur}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+        />
+      </div>
+    </div>
+  );
+});
+
 function FileTreeItem({
   node,
   depth,
@@ -167,14 +297,27 @@ function FileTreeItem({
   onFileHover,
   onDelete,
   onRename,
-  renamingPath,
-  onRenamingPathChange,
+  onCreate,
   openTabs,
+  mode,
+  onModeChange,
 }: FileTreeItemProps) {
   const [isExpanded, setIsExpanded] = useState(true);
 
-  const isRenaming = renamingPath === node.path;
+  const isRenaming = mode.type === "renaming" && mode.path === node.path;
+  const isCreatingHere =
+    node.type === "directory" &&
+    mode.type === "creating" &&
+    mode.parentPath === node.path;
+  const creatingItemType = mode.type === "creating" ? mode.itemType : null;
   const name = getFileName(node.path);
+
+  // Auto-expand directory when creating inside it
+  useEffect(() => {
+    if (isCreatingHere && !isExpanded) {
+      setIsExpanded(true);
+    }
+  }, [isCreatingHere]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Determine if this item (or its children for directories) has open tabs
   const isOpen = useMemo(() => {
@@ -205,14 +348,46 @@ function FileTreeItem({
   const handleRenameSubmit = useCallback(
     (newName: string) => {
       onRename?.(node.path, newName);
-      onRenamingPathChange(null);
+      onModeChange(FILE_TREE_IDLE);
     },
-    [node.path, onRename, onRenamingPathChange],
+    [node.path, onRename, onModeChange],
   );
 
   const handleRenameCancel = useCallback(() => {
-    onRenamingPathChange(null);
-  }, [onRenamingPathChange]);
+    onModeChange(FILE_TREE_IDLE);
+  }, [onModeChange]);
+
+  const handleCreateSubmit = useCallback(
+    (name: string) => {
+      if (mode.type === "creating") {
+        onCreate?.(mode.parentPath, name, mode.itemType);
+      }
+      onModeChange(FILE_TREE_IDLE);
+    },
+    [mode, onCreate, onModeChange],
+  );
+
+  const handleCreateCancel = useCallback(() => {
+    onModeChange(FILE_TREE_IDLE);
+  }, [onModeChange]);
+
+  const handleNewFileInDir = useCallback(
+    (dirPath: string) => {
+      onModeChange({ type: "creating", parentPath: dirPath, itemType: "file" });
+    },
+    [onModeChange],
+  );
+
+  const handleNewFolderInDir = useCallback(
+    (dirPath: string) => {
+      onModeChange({
+        type: "creating",
+        parentPath: dirPath,
+        itemType: "directory",
+      });
+    },
+    [onModeChange],
+  );
 
   const paddingValue = depth * 12 + 8;
 
@@ -273,7 +448,11 @@ function FileTreeItem({
           path={node.path}
           type={node.type}
           onDelete={onDelete}
-          onRenameStart={() => onRenamingPathChange(node.path)}
+          onRenameStart={() =>
+            onModeChange({ type: "renaming", path: node.path })
+          }
+          onNewFile={handleNewFileInDir}
+          onNewFolder={handleNewFolderInDir}
           disableRename={isOpen}
         >
           {buttonElement}
@@ -281,9 +460,17 @@ function FileTreeItem({
       ) : (
         buttonElement
       )}
-      {node.type === "directory" && isExpanded && node.children && (
+      {node.type === "directory" && isExpanded && (
         <div>
-          {node.children.map((child) => (
+          {isCreatingHere && creatingItemType && (
+            <NewFileInput
+              type={creatingItemType}
+              onSubmit={handleCreateSubmit}
+              onCancel={handleCreateCancel}
+              depth={depth + 1}
+            />
+          )}
+          {node.children?.map((child) => (
             <FileTreeItem
               key={child.path}
               node={child}
@@ -293,9 +480,10 @@ function FileTreeItem({
               onFileHover={onFileHover}
               onDelete={onDelete}
               onRename={onRename}
-              renamingPath={renamingPath}
-              onRenamingPathChange={onRenamingPathChange}
+              onCreate={onCreate}
               openTabs={openTabs}
+              mode={mode}
+              onModeChange={onModeChange}
             />
           ))}
         </div>
@@ -309,12 +497,14 @@ export function FileTree({
   onFileSelect,
   onDelete,
   onRename,
+  onCreate,
   openTabs,
   basePath,
   sortOrder = "name-asc",
+  mode,
+  onModeChange,
 }: FileTreeProps) {
   const { metadata } = getOrCreateWorkspaceCollections(basePath);
-  const [renamingPath, setRenamingPath] = useState<string | null>(null);
 
   const handleFileHover = useCallback(
     (filePath: string) => {
@@ -353,9 +543,35 @@ export function FileTree({
     return flatEntriesToTree(files, basePath, sortOrder);
   }, [files, basePath, sortOrder]);
 
+  const isCreatingAtRoot =
+    mode.type === "creating" && mode.parentPath === basePath;
+  const rootCreatingItemType = mode.type === "creating" ? mode.itemType : null;
+
+  const handleCreateSubmitRoot = useCallback(
+    (name: string) => {
+      if (mode.type === "creating") {
+        onCreate?.(mode.parentPath, name, mode.itemType);
+      }
+      onModeChange(FILE_TREE_IDLE);
+    },
+    [mode, onCreate, onModeChange],
+  );
+
+  const handleCreateCancelRoot = useCallback(() => {
+    onModeChange(FILE_TREE_IDLE);
+  }, [onModeChange]);
+
   return (
     <ScrollArea className="h-full w-full">
       <div className="py-1">
+        {isCreatingAtRoot && rootCreatingItemType && (
+          <NewFileInput
+            type={rootCreatingItemType}
+            onSubmit={handleCreateSubmitRoot}
+            onCancel={handleCreateCancelRoot}
+            depth={0}
+          />
+        )}
         {filesTree.map((node) => (
           <FileTreeItem
             key={node.path}
@@ -366,9 +582,10 @@ export function FileTree({
             onFileHover={handleFileHover}
             onDelete={onDelete}
             onRename={onRename}
-            renamingPath={renamingPath}
-            onRenamingPathChange={setRenamingPath}
+            onCreate={onCreate}
             openTabs={openTabs}
+            mode={mode}
+            onModeChange={onModeChange}
           />
         ))}
       </div>
