@@ -12,6 +12,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { LazyStore } from "@tauri-apps/plugin-store";
 
 /**
  * Tauri platform adapter
@@ -21,6 +22,7 @@ import { invoke } from "@tauri-apps/api/core";
 export class TauriPlatformAdapter implements IPlatformAdapter {
   private eventListeners: Set<PlatformEventListener> = new Set();
   private unlistenFns: Promise<UnlistenFn>[] = [];
+  private settingsStore = new LazyStore("settings.json");
 
   // ========== Directory Picker ==========
 
@@ -415,5 +417,21 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       unlistenPromise.then((unlisten) => unlisten());
     });
     this.unlistenFns = [];
+  }
+
+  // ========== App Settings ==========
+
+  async getSetting<T>(key: string): Promise<T | undefined> {
+    return await this.settingsStore.get<T>(key);
+  }
+
+  async setSetting<T>(key: string, value: T): Promise<void> {
+    await this.settingsStore.set(key, value);
+    await this.settingsStore.save();
+  }
+
+  async getAllSettings(): Promise<Record<string, unknown>> {
+    const entries = await this.settingsStore.entries();
+    return Object.fromEntries(entries);
   }
 }

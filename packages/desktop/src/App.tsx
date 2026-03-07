@@ -9,23 +9,41 @@ import { platformAdapter } from "@/adapters";
 import { isWeb } from "@/utils/platform";
 import { Loader } from "./components/loader";
 import { Titlebar } from "@/components/titlebar";
+import { useAppSettings } from "@/hooks/use-app-settings";
 
 export const App = () => {
   const { setTheme } = useTheme();
   const navigate = useNavigate();
+  const {
+    settings,
+    setTheme: persistTheme,
+    setLastWorkspace,
+  } = useAppSettings();
 
   useEffect(() => {
-    // Register platform event listener
+    setTheme(settings.theme);
+  }, [settings.theme, setTheme]);
+
+  useEffect(() => {
+    if (settings.lastWorkspace) {
+      const encodedPath = encodeURIComponent(settings.lastWorkspace);
+      navigate(`/${encodedPath}`);
+    }
+  }, [settings.lastWorkspace]);
+
+  useEffect(() => {
     const cleanup = platformAdapter.addEventListener((event) => {
       switch (event.type) {
         case "theme-changed":
           setTheme(event.payload);
+          persistTheme(event.payload);
           break;
-        case "folder-selected":
-          // Navigate to the selected folder
+        case "folder-selected": {
           const encodedPath = encodeURIComponent(event.payload);
+          setLastWorkspace(event.payload);
           navigate(`/${encodedPath}`);
           break;
+        }
         case "file-dropped":
           console.log({ app: event.payload });
           break;
@@ -33,7 +51,7 @@ export const App = () => {
     });
 
     return cleanup;
-  }, [setTheme, navigate]);
+  }, [setTheme, persistTheme, setLastWorkspace, navigate]);
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground overflow-hidden">

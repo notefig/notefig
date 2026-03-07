@@ -28,6 +28,7 @@ import { QueryClient } from "@tanstack/query-core";
 import { platformAdapter } from "@/adapters";
 import type { FileEntry } from "./fs";
 import { calculateContentHash } from "./hash";
+import type { Theme } from "@/components/theme-provider";
 
 // Global QueryClient instance for TanStack Query
 const queryClient = new QueryClient({
@@ -725,4 +726,58 @@ export async function renameFileOrDirectory(
  */
 export function clearWorkspaceCollections(workspaceId: string): void {
   workspaceCollectionsRegistry.delete(workspaceId);
+}
+export interface AppSettingRow {
+  key: string;
+  value: unknown;
+}
+
+export interface AppSettings {
+  theme: Theme;
+  lastWorkspace: string | null;
+}
+
+export const SETTING_KEYS: (keyof AppSettings)[] = ["theme", "lastWorkspace"];
+
+export const DEFAULT_APP_SETTINGS: AppSettings = {
+  theme: "dark",
+  lastWorkspace: null,
+};
+
+function createSettingsCollection() {
+  return createCollection(
+    queryCollectionOptions<AppSettingRow, string>({
+      queryKey: ["app-settings"],
+      queryClient,
+
+      queryFn: async (): Promise<AppSettingRow[]> => {
+        const raw = await platformAdapter.getAllSettings();
+        return Object.entries(raw).map(([key, value]) => ({ key, value }));
+      },
+
+      getKey: (item) => item.key,
+
+      onInsert: async ({ transaction }) => {
+        for (const m of transaction.mutations) {
+          await platformAdapter.setSetting(m.modified.key, m.modified.value);
+        }
+      },
+
+      onUpdate: async ({ transaction }) => {
+        for (const m of transaction.mutations) {
+          await platformAdapter.setSetting(m.modified.key, m.modified.value);
+        }
+      },
+    }),
+  );
+}
+
+type SettingsCollection = ReturnType<typeof createSettingsCollection>;
+let _settingsCollection: SettingsCollection | null = null;
+
+export function getOrCreateSettingsCollection(): SettingsCollection {
+  if (!_settingsCollection) {
+    _settingsCollection = createSettingsCollection();
+  }
+  return _settingsCollection;
 }

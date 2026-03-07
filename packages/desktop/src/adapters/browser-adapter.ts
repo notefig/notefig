@@ -9,23 +9,11 @@ import type {
   ContentChangeEvent,
 } from "./platform-adapter.interface";
 
-/**
- * Browser platform adapter
- * Implements platform-specific operations for browser/web environment
- * Uses IndexedDB for storage simulation
- *
- * Database name can be overridden via window.__VITE_INDEXEDDB_NAME__
- * for testing purposes. Otherwise uses a default database.
- */
 export class BrowserPlatformAdapter implements IPlatformAdapter {
   private db: IDBDatabase | null = null;
   private readonly DB_VERSION = 1;
   private readonly STORE_NAME = "files";
 
-  /**
-   * Get database name
-   * Checks for test override first, then falls back to default
-   */
   private getDBName(): string {
     const testOverride = (window as any).__VITE_INDEXEDDB_NAME__;
     if (testOverride) {
@@ -34,9 +22,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     return "metrists-fs";
   }
 
-  /**
-   * Get or create IndexedDB connection
-   */
   private async ensureDB(): Promise<IDBDatabase> {
     if (this.db) {
       return this.db;
@@ -63,9 +48,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     });
   }
 
-  /**
-   * Helper to create error objects
-   */
   private createError(
     path: string,
     type: FileSystemError["type"],
@@ -74,19 +56,11 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     return { path, type, message };
   }
 
-  /**
-   * Check if a path contains any component that starts with a dot (hidden file/directory)
-   * Examples: .git, .vscode, .DS_Store, etc.
-   */
   private isHiddenPath(path: string): boolean {
     const parts = path.split("/");
     return parts.some((part) => part.startsWith(".") && part.length > 1);
   }
 
-  /**
-   * Check if a path is a directory by checking if it has children in IndexedDB
-   * A directory is identified by having at least one file/directory under it
-   */
   private async isDirectory(db: IDBDatabase, path: string): Promise<boolean> {
     const transaction = db.transaction([this.STORE_NAME], "readonly");
     const store = transaction.objectStore(this.STORE_NAME);
@@ -99,16 +73,11 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
 
     const normalizedPath = path.endsWith("/") ? path : path + "/";
 
-    // Check if any key starts with this path (meaning it has children)
     return allKeys.some(
       (key) => key.startsWith(normalizedPath) && key !== normalizedPath,
     );
   }
 
-  /**
-   * Get all unique directory paths under a given path
-   * This extracts directory paths from file paths by analyzing the path structure
-   */
   private async getDirectories(
     db: IDBDatabase,
     basePath: string,
@@ -139,7 +108,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
         let currentPath = normalizedPath;
         for (let i = 0; i < pathParts.length - 1; i++) {
           currentPath += pathParts[i] + "/";
-          const dirPath = currentPath.slice(0, -1); // Remove trailing slash
+          const dirPath = currentPath.slice(0, -1);
           if (!this.isHiddenPath(dirPath)) {
             directories.add(dirPath);
           }
@@ -158,8 +127,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     return Array.from(directories);
   }
 
-  // ========== Directory Picker ==========
-
   async pickDirectory(title: string): Promise<string | null> {
     return new Promise((resolve) => {
       const event = new CustomEvent("mock-pick-directory", {
@@ -167,7 +134,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
           title,
           callback: async (path: string | null) => {
             if (path) {
-              // Seed demo data if this is the demo workspace
               if (path === "/workspace/demo-content") {
                 await this.seedDemoData(path);
               }
@@ -180,10 +146,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     });
   }
 
-  /**
-   * Seed demo data into IndexedDB
-   * This is called when the user picks the /workspace/demo-content directory
-   */
   private async seedDemoData(basePath: string): Promise<void> {
     try {
       const db = await this.ensureDB();
@@ -198,7 +160,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
         request.onerror = () => reject(request.error);
       });
 
-      // If there are already files for this basePath, skip seeding
       const normalizedPath = basePath.endsWith("/") ? basePath : basePath + "/";
       const existingFiles = allKeys.filter((key) =>
         key.startsWith(normalizedPath),
@@ -211,11 +172,9 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
 
       console.log("[BrowserAdapter] Seeding demo data for", basePath);
 
-      // Import demo data generator
       const { generateDemoFiles } = await import("@/utils/demo-data");
       const demoFiles = generateDemoFiles(basePath);
 
-      // Write all demo files to IndexedDB
       const writeTransaction = db.transaction([this.STORE_NAME], "readwrite");
       const writeStore = writeTransaction.objectStore(this.STORE_NAME);
 
@@ -244,8 +203,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  // ========== Directory Operations ==========
-
   async readDirectory(
     path: string,
     options?: {
@@ -257,7 +214,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     try {
       const db = await this.ensureDB();
 
-      // Auto-seed demo data if accessing demo workspace and DB is empty
       if (
         path === "/workspace/demo-content" ||
         path.startsWith("/workspace/demo-content/")
@@ -288,23 +244,18 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
       const includeDirectories = options?.includeDirectories !== false;
       const recursive = options?.recursive ?? false;
 
-      // Normalize path for comparison
       const normalizedPath = path.endsWith("/") ? path : path + "/";
 
       const results: string[] = [];
 
-      // Get file paths
       if (includeFiles) {
         const filePaths = allKeys.filter((key) => {
-          // Check if key is under the target path
           if (!key.startsWith(normalizedPath)) return false;
 
-          // Filter out hidden files/directories (starting with .)
           if (this.isHiddenPath(key)) return false;
 
           const relativePath = key.slice(normalizedPath.length);
 
-          // Non-recursive: only direct children
           if (!recursive && relativePath.includes("/")) return false;
 
           return true;
@@ -312,7 +263,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
         results.push(...filePaths);
       }
 
-      // Get directory paths
       if (includeDirectories) {
         const directoryPaths = await this.getDirectories(db, path, recursive);
         results.push(...directoryPaths);
@@ -332,7 +282,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
   }
 
   async createDirectories(paths: string[]): Promise<BatchResult<string>> {
-    // In browser, directories are virtual (no-op)
     return { succeeded: paths, failed: [] };
   }
 
@@ -354,7 +303,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
         try {
           const normalizedPath = path.endsWith("/") ? path : path + "/";
 
-          // Get all files under this directory
           const transaction = db.transaction([this.STORE_NAME], "readwrite");
           const store = transaction.objectStore(this.STORE_NAME);
 
@@ -375,7 +323,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
             continue;
           }
 
-          // Delete all files
           const deleteTransaction = db.transaction(
             [this.STORE_NAME],
             "readwrite",
@@ -403,7 +350,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
         }
       }
     } catch (error) {
-      // DB-level error - fail all
       paths.forEach((path) => {
         if (!succeeded.includes(path)) {
           failed.push(
@@ -426,7 +372,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
       const normalizedOldPath = oldPath.endsWith("/") ? oldPath : oldPath + "/";
       const normalizedNewPath = newPath.endsWith("/") ? newPath : newPath + "/";
 
-      // Get all files under old path
       const transaction = db.transaction([this.STORE_NAME], "readonly");
       const store = transaction.objectStore(this.STORE_NAME);
 
@@ -440,7 +385,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
         key.startsWith(normalizedOldPath),
       );
 
-      // Read all files
       const readTransaction = db.transaction([this.STORE_NAME], "readonly");
       const readStore = readTransaction.objectStore(this.STORE_NAME);
       const fileData: Array<{ path: string; content: string }> = [];
@@ -454,7 +398,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
         fileData.push(data);
       }
 
-      // Write to new locations and delete old ones
       const writeTransaction = db.transaction([this.STORE_NAME], "readwrite");
       const writeStore = writeTransaction.objectStore(this.STORE_NAME);
 
@@ -484,8 +427,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
       };
     }
   }
-
-  // ========== File Operations ==========
 
   async readFiles(
     paths: string[],
@@ -528,7 +469,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
         }
       }
     } catch (error) {
-      // DB-level error - fail all
       paths.forEach((path) => {
         if (!succeeded.find((s) => s.path === path)) {
           failed.push(
@@ -917,5 +857,42 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
 
   removeEventListener(_callback: PlatformEventListener): void {
     // No-op in browser
+  }
+
+  // ========== App Settings ==========
+
+  private readonly SETTINGS_PREFIX = "metrists-settings:";
+
+  async getSetting<T>(key: string): Promise<T | undefined> {
+    const raw = localStorage.getItem(this.SETTINGS_PREFIX + key);
+    if (raw === null) return undefined;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async setSetting<T>(key: string, value: T): Promise<void> {
+    localStorage.setItem(this.SETTINGS_PREFIX + key, JSON.stringify(value));
+  }
+
+  async getAllSettings(): Promise<Record<string, unknown>> {
+    const settings: Record<string, unknown> = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const storageKey = localStorage.key(i);
+      if (storageKey && storageKey.startsWith(this.SETTINGS_PREFIX)) {
+        const key = storageKey.slice(this.SETTINGS_PREFIX.length);
+        const raw = localStorage.getItem(storageKey);
+        if (raw !== null) {
+          try {
+            settings[key] = JSON.parse(raw);
+          } catch {
+            // skip malformed values
+          }
+        }
+      }
+    }
+    return settings;
   }
 }

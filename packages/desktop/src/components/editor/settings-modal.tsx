@@ -44,6 +44,7 @@ import { useUpdater } from "@/hooks/use-updater";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme-provider";
 import { useSearchParams } from "react-router";
+import { useAppSettings } from "@/hooks/use-app-settings";
 
 interface SettingsModalProps {
   direction: "ltr" | "rtl";
@@ -353,7 +354,14 @@ function EditorSettings() {
 // Appearance Settings Panel
 function AppearanceSettings() {
   const { setTheme, theme } = useTheme();
+  const { setTheme: persistTheme } = useAppSettings();
   const [accentColor, setAccentColor] = useState("purple");
+
+  const handleThemeChange = (value: string) => {
+    const t = value as "dark" | "light" | "system";
+    setTheme(t);
+    persistTheme(t);
+  };
 
   return (
     <div className="space-y-8 max-w-3xl">
@@ -363,7 +371,7 @@ function AppearanceSettings() {
         title="Theme"
         description="Choose a color theme for the interface."
       >
-        <Select value={theme} onValueChange={setTheme}>
+        <Select value={theme} onValueChange={handleThemeChange}>
           <SelectTrigger className="w-32">
             <SelectValue />
           </SelectTrigger>

@@ -5,17 +5,20 @@ import { pickDirectory } from "@/utils/fs";
 import Logo from "./logo";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
+import { useAppSettings } from "@/hooks/use-app-settings";
 
 export function Welcome() {
   const [loading, setLoading] = useState(false);
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { setLastWorkspace } = useAppSettings();
 
   const handleOpenFolder = async () => {
     setLoading(true);
     try {
       const selectedPath = await pickDirectory("Select a folder");
       if (selectedPath) {
+        setLastWorkspace(selectedPath);
         const encodedPath = encodeURIComponent(selectedPath);
         navigate(`/${encodedPath}`);
       }

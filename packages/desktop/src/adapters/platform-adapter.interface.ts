@@ -239,4 +239,20 @@ export interface IPlatformAdapter {
    * @param callback - The callback function to remove
    */
   removeEventListener(callback: PlatformEventListener): void;
+
+  /**
+   * Get a setting value by key.
+   * @returns The stored value, or undefined if not found.
+   */
+  getSetting<T>(key: string): Promise<T | undefined>;
+
+  /**
+   * Set a setting value by key. Persists immediately.
+   */
+  setSetting<T>(key: string, value: T): Promise<void>;
+
+  /**
+   * Get all settings as a flat record.
+   */
+  getAllSettings(): Promise<Record<string, unknown>>;
 }

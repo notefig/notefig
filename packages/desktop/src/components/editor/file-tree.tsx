@@ -302,7 +302,7 @@ function FileTreeItem({
   mode,
   onModeChange,
 }: FileTreeItemProps) {
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const isRenaming = mode.type === "renaming" && mode.path === node.path;
   const isCreatingHere =
@@ -312,20 +312,17 @@ function FileTreeItem({
   const creatingItemType = mode.type === "creating" ? mode.itemType : null;
   const name = getFileName(node.path);
 
-  // Auto-expand directory when creating inside it
   useEffect(() => {
     if (isCreatingHere && !isExpanded) {
       setIsExpanded(true);
     }
-  }, [isCreatingHere]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isCreatingHere]);
 
-  // Determine if this item (or its children for directories) has open tabs
   const isOpen = useMemo(() => {
     if (!openTabs || openTabs.length === 0) return false;
     if (node.type === "file") {
       return openTabs.includes(node.path);
     }
-    // For directories, check if any open tab is underneath
     const prefix = node.path.endsWith("/") ? node.path : node.path + "/";
     return openTabs.some((tab) => tab.startsWith(prefix));
   }, [openTabs, node.path, node.type]);
