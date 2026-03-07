@@ -30,7 +30,7 @@ export function useAppSettings() {
     key: K,
     value: AppSettings[K],
   ) {
-    const existing = rows.find((r) => r.key === key);
+    const existing = collection.get(key as string);
     if (existing) {
       collection.update(key as string, (draft: AppSettingRow) => {
         draft.value = value;
