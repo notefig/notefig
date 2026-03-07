@@ -1,5 +1,5 @@
 import "./App.css";
-import { Routes, Route, useNavigate } from "react-router-dom";
+import { Routes, Route, useNavigate, useLocation } from "react-router-dom";
 import { Workspace } from "@/components/workspace";
 import { Welcome } from "@/components/welcome";
 import { MockDirectoryPickerDialog } from "@/components/mock-directory-picker-dialog";
@@ -14,22 +14,19 @@ import { useAppSettings } from "@/hooks/use-app-settings";
 export const App = () => {
   const { setTheme } = useTheme();
   const navigate = useNavigate();
-  const {
-    settings,
-    setTheme: persistTheme,
-    setLastWorkspace,
-  } = useAppSettings();
+  const location = useLocation();
+  const { settings, setTheme: persistTheme, setLastPath } = useAppSettings();
 
   useEffect(() => {
     setTheme(settings.theme);
   }, [settings.theme, setTheme]);
 
   useEffect(() => {
-    if (settings.lastWorkspace) {
-      const encodedPath = encodeURIComponent(settings.lastWorkspace);
-      navigate(`/${encodedPath}`);
+    if (location.pathname !== "/") {
+      const fullPath = location.pathname + location.search;
+      setLastPath(fullPath);
     }
-  }, [settings.lastWorkspace]);
+  }, [location.pathname, location.search, setLastPath]);
 
   useEffect(() => {
     const cleanup = platformAdapter.addEventListener((event) => {
@@ -40,7 +37,6 @@ export const App = () => {
           break;
         case "folder-selected": {
           const encodedPath = encodeURIComponent(event.payload);
-          setLastWorkspace(event.payload);
           navigate(`/${encodedPath}`);
           break;
         }
@@ -51,7 +47,7 @@ export const App = () => {
     });
 
     return cleanup;
-  }, [setTheme, persistTheme, setLastWorkspace, navigate]);
+  }, [setTheme, persistTheme, navigate]);
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground overflow-hidden">

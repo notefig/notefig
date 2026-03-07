@@ -44,14 +44,14 @@ export function useAppSettings() {
     setSetting("theme", theme);
   }
 
-  function setLastWorkspace(path: string | null) {
-    setSetting("lastWorkspace", path);
+  function setLastPath(path: string | null) {
+    setSetting("lastPath", path);
   }
 
   return {
     settings,
     setSetting,
     setTheme,
-    setLastWorkspace,
+    setLastPath,
   } as const;
 }

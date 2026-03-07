@@ -734,14 +734,14 @@ export interface AppSettingRow {
 
 export interface AppSettings {
   theme: Theme;
-  lastWorkspace: string | null;
+  lastPath: string | null;
 }
 
-export const SETTING_KEYS: (keyof AppSettings)[] = ["theme", "lastWorkspace"];
+export const SETTING_KEYS: (keyof AppSettings)[] = ["theme", "lastPath"];
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   theme: "dark",
-  lastWorkspace: null,
+  lastPath: null,
 };
 
 function createSettingsCollection() {

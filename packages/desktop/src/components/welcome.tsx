@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Icons } from "./icons";
 import { Button } from "@/components/ui/button";
 import { pickDirectory } from "@/utils/fs";
@@ -11,14 +11,19 @@ export function Welcome() {
   const [loading, setLoading] = useState(false);
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { setLastWorkspace } = useAppSettings();
+  const { settings } = useAppSettings();
+
+  useEffect(() => {
+    if (settings.lastPath) {
+      navigate(settings.lastPath, { replace: true });
+    }
+  }, [settings.lastPath]);
 
   const handleOpenFolder = async () => {
     setLoading(true);
     try {
       const selectedPath = await pickDirectory("Select a folder");
       if (selectedPath) {
-        setLastWorkspace(selectedPath);
         const encodedPath = encodeURIComponent(selectedPath);
         navigate(`/${encodedPath}`);
       }
