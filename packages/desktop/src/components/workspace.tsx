@@ -26,7 +26,7 @@ import {
   handleContentFileSystemChange,
 } from "@/utils/file-sync";
 import { disposeAllEditors } from "@/components/editor/editor-store";
-import BaseParser from "pdf-lib/cjs/core/parser/BaseParser";
+import { useSearchParams } from "react-router";
 
 export const Workspace = () => {
   const { workspacePath } = useWorkspaceParams();
@@ -101,14 +101,37 @@ export const Workspace = () => {
   const currentContent = activeFileData?.content || "";
 
   // ── UI state ──
-  const [activeSidebarItem, setActiveSidebarItem] = useState("files");
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const isSidebarCollapsed = searchParams.get("sidebar") === "collapsed";
+  const toggleSidebarCollapsed = useCallback(() => {
+    setSearchParams((prev) => {
+      if (prev.get("sidebar") === "collapsed") {
+        prev.delete("sidebar");
+      } else {
+        prev.set("sidebar", "collapsed");
+      }
+      return prev;
+    });
+  }, [setSearchParams]);
   const [sidebarWidth, setSidebarWidth] = useState(240);
   const [isSynced] = useState(true);
   const [isResizing, setIsResizing] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [direction, setDirection] = useState<"ltr" | "rtl">("ltr");
-  const [sortOrder, setSortOrder] = useState<SortOrder>("name-asc");
+  const sortOrder = (searchParams.get("sort") as SortOrder) || "name-asc";
+  const setSortOrder = useCallback(
+    (order: SortOrder) => {
+      setSearchParams((prev) => {
+        if (order === "name-asc") {
+          prev.delete("sort");
+        } else {
+          prev.set("sort", order);
+        }
+        return prev;
+      });
+    },
+    [setSearchParams],
+  );
   const resizeRef = useRef<HTMLDivElement>(null);
 
   const { wordCount, characterCount } = useMemo(() => {
@@ -241,11 +264,9 @@ export const Workspace = () => {
       className="flex h-full w-full bg-background overflow-hidden"
     >
       <IconSidebar
-        activeItem={activeSidebarItem}
-        onItemClick={setActiveSidebarItem}
         onCommandPaletteClick={() => setIsCommandPaletteOpen(true)}
         isCollapsed={isSidebarCollapsed}
-        onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+        onToggleCollapse={toggleSidebarCollapsed}
       />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -322,7 +343,7 @@ export const Workspace = () => {
         onOpenSettings={() => {
           setIsCommandPaletteOpen(false);
         }}
-        onToggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+        onToggleSidebar={toggleSidebarCollapsed}
         direction={direction}
       />
     </div>
