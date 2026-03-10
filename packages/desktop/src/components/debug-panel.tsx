@@ -44,6 +44,45 @@ const LEVEL_BG: Record<ConsoleLevel, string> = {
 };
 
 const MAX_CONSOLE_ENTRIES = 500;
+const LAYOUT_PARAM = "layout";
+
+// ── Layout parsing (self-sufficient — no props needed) ──
+
+function parseLayout(raw: string | null): LayoutNode[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed as LayoutNode[];
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+function extractTabIds(nodes: LayoutNode[]): string[] {
+  const ids: string[] = [];
+  for (const node of nodes) {
+    if (node.type === "Window") {
+      ids.push(...node.children);
+    } else if (node.type === "Panel") {
+      ids.push(...extractTabIds(node.children));
+    }
+  }
+  return ids;
+}
+
+function findSelectedTab(nodes: LayoutNode[]): string | null {
+  for (const node of nodes) {
+    if (node.type === "Window" && node.selected) {
+      return node.selected;
+    }
+    if (node.type === "Panel") {
+      const found = findSelectedTab(node.children);
+      if (found) return found;
+    }
+  }
+  return null;
+}
 
 // ── Console capture hook ──
 
@@ -142,44 +181,61 @@ function useConsoleCapture(active: boolean) {
 // ── Debug Panel ──
 
 interface DebugPanelProps {
-  openTabs?: string[];
-  activeTabId?: string | null;
-  dockableLayout?: LayoutNode[];
+  /** When true, panel renders regardless of ?debug= search param */
+  forceOpen?: boolean;
+  /** Error to display (from error boundary) */
+  error?: { message: string; stack?: string };
 }
 
-export function DebugPanel({
-  openTabs,
-  activeTabId,
-  dockableLayout,
-}: DebugPanelProps) {
+export function DebugPanel({ forceOpen, error }: DebugPanelProps) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const isOpen = searchParams.get("debug") === "true";
+  const isOpen = forceOpen || searchParams.get("debug") === "true";
 
   if (!isOpen) return null;
 
   return (
     <DebugPanelContent
-      openTabs={openTabs}
-      activeTabId={activeTabId}
-      dockableLayout={dockableLayout}
-      onClose={() => {
-        setSearchParams((prev) => {
-          prev.delete("debug");
-          return prev;
-        });
-      }}
+      error={error}
+      forceOpen={forceOpen}
+      onClose={
+        forceOpen
+          ? undefined
+          : () => {
+              setSearchParams((prev) => {
+                prev.delete("debug");
+                return prev;
+              });
+            }
+      }
     />
   );
 }
 
 function DebugPanelContent({
-  openTabs,
-  activeTabId,
-  dockableLayout,
+  error,
+  forceOpen,
   onClose,
-}: DebugPanelProps & { onClose: () => void }) {
+}: {
+  error?: { message: string; stack?: string };
+  forceOpen?: boolean;
+  onClose?: () => void;
+}) {
   const { basePath, "*": filePath } = useParams();
   const [searchParams] = useSearchParams();
+
+  // ── Derive tab/layout state from URL (self-sufficient) ──
+  const dockableLayout = useMemo(
+    () => parseLayout(searchParams.get(LAYOUT_PARAM)),
+    [searchParams],
+  );
+  const openTabs = useMemo(
+    () => extractTabIds(dockableLayout),
+    [dockableLayout],
+  );
+  const activeTabId = useMemo(
+    () => findSelectedTab(dockableLayout),
+    [dockableLayout],
+  );
 
   // ── Console capture ──
   const [isCapturing, setIsCapturing] = useState(false);
@@ -232,14 +288,9 @@ function DebugPanelContent({
   }, [filteredEntries, autoScroll]);
 
   // ── URL editor ──
-  // We show two representations:
-  // - "raw" (the actual encoded URL) which is what gets set on navigation
-  // - "decoded" for readability
-  // The user edits the raw URL directly; the decoded view updates automatically.
   const currentRawUrl = window.location.pathname + window.location.search;
   const [urlDraft, setUrlDraft] = useState(currentRawUrl);
 
-  // Keep draft in sync when URL changes externally (but not while user is editing)
   const urlInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (document.activeElement !== urlInputRef.current) {
@@ -280,6 +331,16 @@ function DebugPanelContent({
     lines.push(`User Agent: ${navigator.userAgent}`);
     lines.push("");
 
+    // Error (if from error boundary)
+    if (error) {
+      lines.push("── Error ──");
+      lines.push(`Message: ${error.message}`);
+      if (error.stack) {
+        lines.push(`Stack:\n${error.stack}`);
+      }
+      lines.push("");
+    }
+
     // Route state
     lines.push("── Route State ──");
     lines.push(`URL (raw): ${rawUrl}`);
@@ -295,19 +356,17 @@ function DebugPanelContent({
     lines.push("");
 
     // Tabs
-    if (openTabs !== undefined) {
-      lines.push("── Open Tabs ──");
-      lines.push(`Count: ${openTabs.length}`);
-      lines.push(`Active: ${activeTabId || "null"}`);
-      openTabs.forEach((tab) => {
-        const marker = tab === activeTabId ? " (active)" : "";
-        lines.push(`  - ${tab}${marker}`);
-      });
-      lines.push("");
-    }
+    lines.push("── Open Tabs ──");
+    lines.push(`Count: ${openTabs.length}`);
+    lines.push(`Active: ${activeTabId || "null"}`);
+    openTabs.forEach((tab) => {
+      const marker = tab === activeTabId ? " (active)" : "";
+      lines.push(`  - ${tab}${marker}`);
+    });
+    lines.push("");
 
     // Dockable layout
-    if (dockableLayout !== undefined) {
+    if (dockableLayout.length > 0) {
       lines.push("── Dockable Layout ──");
       lines.push(JSON.stringify(dockableLayout, null, 2));
       lines.push("");
@@ -338,6 +397,7 @@ function DebugPanelContent({
     activeTabId,
     dockableLayout,
     consoleEntries,
+    error,
   ]);
 
   const copyDebugReport = useCallback(async () => {
@@ -363,15 +423,57 @@ function DebugPanelContent({
 
   // ── Collapsible sections ──
   const [showLayout, setShowLayout] = useState(false);
-  const [activeTab, setActiveTab] = useState<"state" | "console">("state");
+  const [activeTab, setActiveTab] = useState<"state" | "console">(
+    error ? "state" : "state",
+  );
 
-  // Build search params string without 'debug' for cleaner display
+  // Build search params string without 'debug' and 'layout' for cleaner display
   const displaySearchParams = new URLSearchParams(searchParams);
   displaySearchParams.delete("debug");
   const searchParamsStr = displaySearchParams.toString();
 
   return (
-    <div className="bg-card/95 backdrop-blur-sm border-b border-border text-foreground font-mono text-xs flex flex-col max-h-[40vh] overflow-hidden">
+    <div
+      className={cn(
+        "bg-card/95 backdrop-blur-sm border-b border-border text-foreground font-mono text-xs flex flex-col overflow-hidden",
+        forceOpen ? "h-full" : "max-h-[40vh]",
+      )}
+    >
+      {/* ── Error banner (if from error boundary) ── */}
+      {error && (
+        <div className="px-3 py-2 bg-destructive/10 border-b border-destructive/30 shrink-0">
+          <div className="text-destructive font-semibold text-xs mb-1">
+            Workspace crashed
+          </div>
+          <div className="text-destructive/80 text-[11px] break-all">
+            {error.message}
+          </div>
+          {error.stack && (
+            <pre className="mt-1 text-[10px] text-destructive/60 whitespace-pre-wrap break-all max-h-32 overflow-auto">
+              {error.stack}
+            </pre>
+          )}
+          <div className="mt-2 flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-[11px] border-destructive/30 text-destructive hover:bg-destructive/10"
+              onClick={() => window.location.reload()}
+            >
+              Reload page
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-[11px] border-destructive/30 text-destructive hover:bg-destructive/10"
+              onClick={copyDebugReport}
+            >
+              {copied ? "Copied!" : "Copy debug report"}
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* ── Header ── */}
       <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border bg-muted/50 shrink-0">
         <div className="flex items-center gap-1">
@@ -431,15 +533,17 @@ function DebugPanelContent({
             <RotateCw className="h-3 w-3" />
           </Button>
           {/* Close */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            onClick={onClose}
-            title="Close debug panel"
-          >
-            <X className="h-3 w-3" />
-          </Button>
+          {onClose && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={onClose}
+              title="Close debug panel"
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          )}
         </div>
       </div>
 
@@ -496,39 +600,35 @@ function DebugPanelContent({
             </div>
 
             {/* Tab state */}
-            {openTabs !== undefined && (
-              <>
-                <div className="border-t border-border pt-2">
-                  <Row label={`openTabs (${openTabs.length})`}>
-                    {openTabs.length === 0 ? "(none)" : ""}
-                  </Row>
-                  {openTabs.length > 0 && (
-                    <ul className="ml-4 mt-1 space-y-0.5">
-                      {openTabs.map((tab) => (
-                        <li
-                          key={tab}
-                          className={cn(
-                            "text-[11px] break-all",
-                            tab === activeTabId
-                              ? "text-foreground font-medium"
-                              : "text-muted-foreground",
-                          )}
-                        >
-                          {tab}
-                          {tab === activeTabId && (
-                            <span className="text-primary ml-1">(active)</span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <Row label="activeTabId">{activeTabId || "null"}</Row>
-                </div>
-              </>
-            )}
+            <div className="border-t border-border pt-2">
+              <Row label={`openTabs (${openTabs.length})`}>
+                {openTabs.length === 0 ? "(none)" : ""}
+              </Row>
+              {openTabs.length > 0 && (
+                <ul className="ml-4 mt-1 space-y-0.5">
+                  {openTabs.map((tab) => (
+                    <li
+                      key={tab}
+                      className={cn(
+                        "text-[11px] break-all",
+                        tab === activeTabId
+                          ? "text-foreground font-medium"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {tab}
+                      {tab === activeTabId && (
+                        <span className="text-primary ml-1">(active)</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <Row label="activeTabId">{activeTabId || "null"}</Row>
+            </div>
 
             {/* Dockable layout */}
-            {dockableLayout !== undefined && (
+            {dockableLayout.length > 0 && (
               <div className="border-t border-border pt-2">
                 <button
                   onClick={() => setShowLayout(!showLayout)}

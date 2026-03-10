@@ -185,11 +185,7 @@ export const Workspace = () => {
       />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <DebugPanel
-          openTabs={openTabs}
-          activeTabId={activeTabId}
-          dockableLayout={layout}
-        />
+        <DebugPanel />
 
         <div className="flex-1 flex min-h-0 overflow-hidden">
           {/* ── File tree sidebar ── */}

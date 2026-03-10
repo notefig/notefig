@@ -10,6 +10,7 @@ import { isWeb } from "@/utils/platform";
 import { Loader } from "./components/loader";
 import { Titlebar } from "@/components/titlebar";
 import { useAppSettings } from "@/hooks/use-app-settings";
+import { WorkspaceErrorBoundary } from "@/components/workspace-error-boundary";
 
 export const App = () => {
   const { setTheme } = useTheme();
@@ -61,7 +62,9 @@ export const App = () => {
             path="/:basePath/edit/*"
             element={
               <Loader>
-                <Workspace />
+                <WorkspaceErrorBoundary>
+                  <Workspace />
+                </WorkspaceErrorBoundary>
               </Loader>
             }
           />
@@ -70,7 +73,9 @@ export const App = () => {
             path="/:basePath"
             element={
               <Loader>
-                <Workspace />
+                <WorkspaceErrorBoundary>
+                  <Workspace />
+                </WorkspaceErrorBoundary>
               </Loader>
             }
           />
