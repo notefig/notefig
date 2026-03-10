@@ -186,7 +186,6 @@ export const Workspace = () => {
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <DebugPanel
-          isEditRoute={true}
           openTabs={openTabs}
           activeTabId={activeTabId}
           dockableLayout={layout}

@@ -304,6 +304,8 @@ function GeneralSettings({
             }
           />
         </SettingRow>
+
+        <DebugModeToggle />
       </div>
     </div>
   );
@@ -514,6 +516,32 @@ function UpdateSection() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Debug Mode Toggle
+function DebugModeToggle() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const isDebugActive = searchParams.get("debug") === "true";
+
+  const handleToggle = (checked: boolean) => {
+    setSearchParams((prev) => {
+      if (checked) {
+        prev.set("debug", "true");
+      } else {
+        prev.delete("debug");
+      }
+      return prev;
+    });
+  };
+
+  return (
+    <SettingRow
+      title="Debug mode"
+      description="Show the debug panel with route state, URL editor, and console capture."
+    >
+      <Switch checked={isDebugActive} onCheckedChange={handleToggle} />
+    </SettingRow>
   );
 }
 
