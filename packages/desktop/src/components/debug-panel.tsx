@@ -13,6 +13,8 @@ import {
   Play,
   Square,
   X,
+  Copy,
+  Check,
 } from "lucide-react";
 import type { LayoutNode } from "@/components/dockable";
 
@@ -230,56 +232,134 @@ function DebugPanelContent({
   }, [filteredEntries, autoScroll]);
 
   // ── URL editor ──
-  const [urlDraft, setUrlDraft] = useState(() =>
-    decodeURIComponent(window.location.pathname + window.location.search),
-  );
+  // We show two representations:
+  // - "raw" (the actual encoded URL) which is what gets set on navigation
+  // - "decoded" for readability
+  // The user edits the raw URL directly; the decoded view updates automatically.
+  const currentRawUrl = window.location.pathname + window.location.search;
+  const [urlDraft, setUrlDraft] = useState(currentRawUrl);
 
   // Keep draft in sync when URL changes externally (but not while user is editing)
   const urlInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (document.activeElement !== urlInputRef.current) {
-      setUrlDraft(
-        decodeURIComponent(window.location.pathname + window.location.search),
-      );
+      setUrlDraft(window.location.pathname + window.location.search);
     }
   }, [searchParams]);
 
-  const navigateToUrl = () => {
-    const encoded = urlDraft
-      .split("/")
-      .map((segment) => {
-        if (segment === "") return "";
-        // Don't double-encode already-encoded segments
-        try {
-          const decoded = decodeURIComponent(segment);
-          return encodeURIComponent(decoded);
-        } catch {
-          return encodeURIComponent(segment);
-        }
-      })
-      .join("/");
+  const decodedPreview = useMemo(() => {
+    try {
+      return decodeURIComponent(urlDraft);
+    } catch {
+      return urlDraft;
+    }
+  }, [urlDraft]);
 
-    // Preserve query string if present in draft
-    const qIndex = urlDraft.indexOf("?");
-    if (qIndex !== -1) {
-      const path = urlDraft.slice(0, qIndex);
-      const query = urlDraft.slice(qIndex);
-      const encodedPath = path
-        .split("/")
-        .map((s) => {
-          if (s === "") return "";
-          try {
-            return encodeURIComponent(decodeURIComponent(s));
-          } catch {
-            return encodeURIComponent(s);
-          }
-        })
-        .join("/");
-      window.location.href = encodedPath + query;
-    } else {
-      window.location.href = encoded;
+  const navigateToUrl = () => {
+    const target = urlDraft.trim();
+    if (target && target !== currentRawUrl) {
+      window.location.href = target;
     }
   };
+
+  // ── Copy debug report ──
+  const [copied, setCopied] = useState(false);
+
+  const buildDebugReport = useCallback(() => {
+    const rawUrl = window.location.pathname + window.location.search;
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(rawUrl);
+    } catch {
+      decoded = rawUrl;
+    }
+
+    const lines: string[] = [];
+    lines.push("=== Metrists Debug Report ===");
+    lines.push(`Timestamp: ${new Date().toISOString()}`);
+    lines.push(`User Agent: ${navigator.userAgent}`);
+    lines.push("");
+
+    // Route state
+    lines.push("── Route State ──");
+    lines.push(`URL (raw): ${rawUrl}`);
+    if (decoded !== rawUrl) {
+      lines.push(`URL (decoded): ${decoded}`);
+    }
+    lines.push(`basePath: ${basePath || "undefined"}`);
+    lines.push(`filePath: ${filePath || "undefined"}`);
+
+    const displayParams = new URLSearchParams(searchParams);
+    displayParams.delete("debug");
+    lines.push(`searchParams: ${displayParams.toString() || "(none)"}`);
+    lines.push("");
+
+    // Tabs
+    if (openTabs !== undefined) {
+      lines.push("── Open Tabs ──");
+      lines.push(`Count: ${openTabs.length}`);
+      lines.push(`Active: ${activeTabId || "null"}`);
+      openTabs.forEach((tab) => {
+        const marker = tab === activeTabId ? " (active)" : "";
+        lines.push(`  - ${tab}${marker}`);
+      });
+      lines.push("");
+    }
+
+    // Dockable layout
+    if (dockableLayout !== undefined) {
+      lines.push("── Dockable Layout ──");
+      lines.push(JSON.stringify(dockableLayout, null, 2));
+      lines.push("");
+    }
+
+    // Console entries
+    if (consoleEntries.length > 0) {
+      lines.push(`── Console Output (${consoleEntries.length} entries) ──`);
+      consoleEntries.forEach((entry) => {
+        const time = new Date(entry.timestamp).toLocaleTimeString("en-US", {
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+        lines.push(`[${time}] [${entry.level.toUpperCase()}] ${entry.message}`);
+      });
+      lines.push("");
+    }
+
+    lines.push("=== End Debug Report ===");
+    return lines.join("\n");
+  }, [
+    basePath,
+    filePath,
+    searchParams,
+    openTabs,
+    activeTabId,
+    dockableLayout,
+    consoleEntries,
+  ]);
+
+  const copyDebugReport = useCallback(async () => {
+    const report = buildDebugReport();
+    try {
+      await navigator.clipboard.writeText(report);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback for environments where clipboard API is blocked
+      const textarea = document.createElement("textarea");
+      textarea.value = report;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }, [buildDebugReport]);
 
   // ── Collapsible sections ──
   const [showLayout, setShowLayout] = useState(false);
@@ -326,6 +406,20 @@ function DebugPanelContent({
         </div>
 
         <div className="flex items-center gap-1">
+          {/* Copy debug report */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={copyDebugReport}
+            title="Copy debug report to clipboard"
+          >
+            {copied ? (
+              <Check className="h-3 w-3 text-green-500" />
+            ) : (
+              <Copy className="h-3 w-3" />
+            )}
+          </Button>
           {/* Reload */}
           <Button
             variant="ghost"
@@ -350,28 +444,35 @@ function DebugPanelContent({
       </div>
 
       {/* ── URL Editor ── */}
-      <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border bg-muted/30 shrink-0">
-        <span className="text-muted-foreground text-[10px] uppercase tracking-wider shrink-0">
-          URL
-        </span>
-        <Input
-          ref={urlInputRef}
-          value={urlDraft}
-          onChange={(e) => setUrlDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") navigateToUrl();
-          }}
-          className="h-6 text-xs font-mono bg-background border-border px-1.5 py-0 flex-1"
-        />
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 shrink-0"
-          onClick={navigateToUrl}
-          title="Navigate"
-        >
-          <ArrowRight className="h-3 w-3" />
-        </Button>
+      <div className="px-3 py-1.5 border-b border-border bg-muted/30 shrink-0 space-y-1">
+        <div className="flex items-center gap-1.5">
+          <span className="text-muted-foreground text-[10px] uppercase tracking-wider shrink-0">
+            URL
+          </span>
+          <Input
+            ref={urlInputRef}
+            value={urlDraft}
+            onChange={(e) => setUrlDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") navigateToUrl();
+            }}
+            className="h-6 text-xs font-mono bg-background border-border px-1.5 py-0 flex-1"
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 shrink-0"
+            onClick={navigateToUrl}
+            title="Navigate"
+          >
+            <ArrowRight className="h-3 w-3" />
+          </Button>
+        </div>
+        {decodedPreview !== urlDraft && (
+          <div className="text-[10px] text-muted-foreground truncate pl-7">
+            Decoded: {decodedPreview}
+          </div>
+        )}
       </div>
 
       {/* ── Tab Content ── */}
@@ -380,9 +481,14 @@ function DebugPanelContent({
           <div className="p-3 space-y-2">
             {/* Route state */}
             <div className="space-y-1">
-              <Row label="Current URL">
+              <Row label="Current URL (raw)">
                 {window.location.pathname}
                 {window.location.search}
+              </Row>
+              <Row label="Decoded">
+                {decodeURIComponent(
+                  window.location.pathname + window.location.search,
+                )}
               </Row>
               <Row label="basePath">{basePath || "undefined"}</Row>
               <Row label="filePath (*)">{filePath || "undefined"}</Row>
