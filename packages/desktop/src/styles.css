@@ -68,6 +68,15 @@
     @apply border-border;
   }
 
+  html {
+    @apply bg-background;
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
   body {
     @apply bg-background text-foreground;
   }
@@ -134,28 +143,38 @@
     -ms-user-select: text;
   }
 
-  /* Transparent scrollbar track to prevent light background on macOS */
+  /* Scrollbar styling.
+     color-scheme on html/html.dark handles the hover-expanded track color.
+     scrollbar-color handles thumb/track in standards-compliant browsers.
+     -webkit-scrollbar rules are kept for Tauri/older WebKit but scoped
+     to avoid overriding macOS overlay scrollbar behavior in Safari. */
   * {
     scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
     scrollbar-width: thin;
   }
 
-  ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
+  /* Only apply custom webkit scrollbar styles inside Tauri (non-Safari).
+     Safari on macOS uses overlay scrollbars natively — custom
+     ::-webkit-scrollbar rules force it into legacy mode and break
+     the hover-expand track transparency. */
+  @supports not (-webkit-touch-callout: none) {
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
 
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
 
-  ::-webkit-scrollbar-thumb {
-    background: hsl(var(--muted-foreground) / 0.3);
-    border-radius: 4px;
-  }
+    ::-webkit-scrollbar-thumb {
+      background: hsl(var(--muted-foreground) / 0.3);
+      border-radius: 4px;
+    }
 
-  ::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--muted-foreground) / 0.5);
+    ::-webkit-scrollbar-thumb:hover {
+      background: hsl(var(--muted-foreground) / 0.5);
+    }
   }
 }
 
