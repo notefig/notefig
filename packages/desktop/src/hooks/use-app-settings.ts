@@ -48,10 +48,15 @@ export function useAppSettings() {
     setSetting("lastPath", path);
   }
 
+  function setZoomLevel(zoom: number) {
+    setSetting("zoomLevel", zoom);
+  }
+
   return {
     settings,
     setSetting,
     setTheme,
     setLastPath,
+    setZoomLevel,
   } as const;
 }

@@ -302,7 +302,7 @@ function FileTreeItem({
   mode,
   onModeChange,
 }: FileTreeItemProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(depth === 0);
 
   const isRenaming = mode.type === "renaming" && mode.path === node.path;
   const isCreatingHere =

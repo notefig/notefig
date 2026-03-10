@@ -11,12 +11,15 @@ import { Loader } from "./components/loader";
 import { Titlebar } from "@/components/titlebar";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { WorkspaceErrorBoundary } from "@/components/workspace-error-boundary";
+import { useZoom } from "@/hooks/use-zoom";
 
 export const App = () => {
   const { setTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
   const { settings, setTheme: persistTheme, setLastPath } = useAppSettings();
+
+  useZoom();
 
   useEffect(() => {
     setTheme(settings.theme);
