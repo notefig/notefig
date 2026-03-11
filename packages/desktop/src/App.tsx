@@ -11,15 +11,21 @@ import { Loader } from "./components/loader";
 import { Titlebar } from "@/components/titlebar";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { WorkspaceErrorBoundary } from "@/components/workspace-error-boundary";
-import { useZoom } from "@/hooks/use-zoom";
 
 export const App = () => {
   const { setTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
-  const { settings, setTheme: persistTheme, setLastPath } = useAppSettings();
+  const {
+    settings,
+    setTheme: persistTheme,
+    setLastPath,
+    setZoomLevel,
+  } = useAppSettings();
 
-  useZoom();
+  useEffect(() => {
+    document.documentElement.style.zoom = String(settings.zoomLevel);
+  }, [settings.zoomLevel]);
 
   useEffect(() => {
     setTheme(settings.theme);
@@ -47,11 +53,14 @@ export const App = () => {
         case "file-dropped":
           console.log({ app: event.payload });
           break;
+        case "zoom-changed":
+          setZoomLevel(event.payload);
+          break;
       }
     });
 
     return cleanup;
-  }, [setTheme, persistTheme, navigate]);
+  }, [setTheme, persistTheme, navigate, setZoomLevel]);
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground overflow-hidden">

@@ -394,6 +394,15 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     });
     this.unlistenFns.push(contentUnlisten);
 
+    // Listen for zoom level changes
+    const zoomUnlisten = listen("zoom-changed", (event) => {
+      const zoom = event.payload as number;
+      this.eventListeners.forEach((callback) => {
+        callback({ type: "zoom-changed", payload: zoom });
+      });
+    });
+    this.unlistenFns.push(zoomUnlisten);
+
     // Listen for file drops
     getCurrentWebview()
       .onDragDropEvent((event) => {

@@ -84,7 +84,8 @@ export type PlatformEvent =
   | { type: "folder-selected"; payload: string }
   | { type: "file-dropped"; payload: string[] }
   | { type: "fs-metadata-changed"; payload: MetadataChangeEvent }
-  | { type: "fs-content-changed"; payload: ContentChangeEvent };
+  | { type: "fs-content-changed"; payload: ContentChangeEvent }
+  | { type: "zoom-changed"; payload: number };
 
 /**
  * Generic event listener callback

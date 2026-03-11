@@ -6,6 +6,7 @@ mod file_watcher;
 
 use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, AppHandle};
+use tauri_plugin_store::StoreExt;
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 
@@ -26,6 +27,12 @@ fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
     let theme_light = MenuItem::with_id(app, "theme_light", "Light", true, None::<&str>)?;
     let theme_dark = MenuItem::with_id(app, "theme_dark", "Dark", true, None::<&str>)?;
     let theme_system = MenuItem::with_id(app, "theme_system", "System", true, None::<&str>)?;
+
+    // Zoom level menu items
+    let zoom_75 = MenuItem::with_id(app, "zoom_75", "75%", true, None::<&str>)?;
+    let zoom_100 = MenuItem::with_id(app, "zoom_100", "100%", true, None::<&str>)?;
+    let zoom_125 = MenuItem::with_id(app, "zoom_125", "125%", true, None::<&str>)?;
+    let zoom_150 = MenuItem::with_id(app, "zoom_150", "150%", true, None::<&str>)?;
 
     // Build submenus
     let file_submenu = SubmenuBuilder::new(app, "File")
@@ -51,8 +58,16 @@ fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
         .item(&theme_system)
         .build()?;
 
+    let zoom_submenu = SubmenuBuilder::new(app, "Zoom Level")
+        .item(&zoom_75)
+        .item(&zoom_100)
+        .item(&zoom_125)
+        .item(&zoom_150)
+        .build()?;
+
     let view_submenu = SubmenuBuilder::new(app, "View")
         .item(&theme_submenu)
+        .item(&zoom_submenu)
         .build()?;
 
     // Build main menu
@@ -65,6 +80,39 @@ fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
     Ok(menu)
 }
 
+/// Reads the persisted zoom level from the settings store and emits it to the frontend.
+fn restore_zoom_level(app: &AppHandle) {
+    match app.store("settings.json") {
+        Ok(store) => {
+            if let Some(zoom_value) = store.get("zoomLevel") {
+                if let Some(zoom) = zoom_value.as_f64() {
+                    let _ = app.emit("zoom-changed", zoom);
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Failed to open settings store for zoom restore: {}", e);
+        }
+    }
+}
+
+/// Persists the zoom level to the settings store and emits it to the frontend.
+fn set_zoom_level(app: &AppHandle, zoom: f64) {
+    let _ = app.emit("zoom-changed", zoom);
+
+    match app.store("settings.json") {
+        Ok(store) => {
+            store.set("zoomLevel", serde_json::json!(zoom));
+            if let Err(e) = store.save() {
+                eprintln!("Failed to save settings store: {}", e);
+            }
+        }
+        Err(e) => {
+            eprintln!("Failed to persist zoom level: {}", e);
+        }
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -74,6 +122,9 @@ fn main() {
         .setup(|app| {
             let menu = create_menu(app.handle())?;
             app.set_menu(menu)?;
+
+            // Restore persisted zoom level
+            restore_zoom_level(app.handle());
 
             // Register updater and process plugins (desktop only)
             #[cfg(desktop)]
@@ -111,6 +162,19 @@ fn main() {
                 }
                 "theme_system" => {
                     let _ = app.emit("theme-changed", "system");
+                }
+                // Zoom level menu items
+                "zoom_75" => {
+                    set_zoom_level(app, 0.75);
+                }
+                "zoom_100" => {
+                    set_zoom_level(app, 1.0);
+                }
+                "zoom_125" => {
+                    set_zoom_level(app, 1.25);
+                }
+                "zoom_150" => {
+                    set_zoom_level(app, 1.5);
                 }
                 _ => {}
             }
