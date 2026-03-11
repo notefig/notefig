@@ -7,13 +7,20 @@ import { Editor, EditorContainer } from "@/components/ui/editor";
 import { ToolbarButton } from "@/components/ui/toolbar";
 import { Separator } from "@/components/ui/separator";
 import {
-  Code2Icon,
+  BoldIcon,
+  CodeIcon,
+  Heading1Icon,
+  Heading2Icon,
+  Heading3Icon,
+  ItalicIcon,
   ListIcon,
   ListOrderedIcon,
-  Link2Icon,
+  QuoteIcon,
   StrikethroughIcon,
+  UnderlineIcon,
 } from "lucide-react";
 import { toggleList, ListStyleType } from "@platejs/list";
+import { LinkToolbarButton } from "@/components/ui/link-toolbar-button";
 import type { FileEntry } from "../../utils/fs";
 import { writeFileContent } from "@/utils/collections";
 import { calculateContentHash } from "@/utils/hash";
@@ -58,6 +65,14 @@ export function TextEditor({ file, basePath }: TextEditorProps) {
   // for toolbar handlers that call these plugin transforms.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tf = editor.tf as any;
+
+  // Prevent toolbar mousedown from stealing focus from the editor.
+  // Without this, clicking a toolbar button blurs the editor, and transforms
+  // that rely on the current selection (blockquote, code block, headings) fail.
+  const preventFocusLoss = useCallback(
+    (e: React.MouseEvent) => e.preventDefault(),
+    [],
+  );
 
   // Detect external file changes and update editor content
   useEffect(() => {
@@ -172,76 +187,86 @@ export function TextEditor({ file, basePath }: TextEditorProps) {
     <Plate editor={editor} onValueChange={handleChange}>
       <div className="flex flex-col flex-1 min-h-0 w-full z-0">
         <FixedToolbar className="shrink-0 justify-start gap-1 flex-wrap">
-          <ToolbarButton onClick={() => tf.h1.toggle()} tooltip="Heading 1">
-            H1
+          <ToolbarButton
+            onMouseDown={preventFocusLoss}
+            onClick={() => tf.h1.toggle()}
+            tooltip="Heading 1 (⌘+Alt+1)"
+          >
+            <Heading1Icon />
           </ToolbarButton>
-          <ToolbarButton onClick={() => tf.h2.toggle()} tooltip="Heading 2">
-            H2
+          <ToolbarButton
+            onMouseDown={preventFocusLoss}
+            onClick={() => tf.h2.toggle()}
+            tooltip="Heading 2 (⌘+Alt+2)"
+          >
+            <Heading2Icon />
           </ToolbarButton>
-          <ToolbarButton onClick={() => tf.h3.toggle()} tooltip="Heading 3">
-            H3
+          <ToolbarButton
+            onMouseDown={preventFocusLoss}
+            onClick={() => tf.h3.toggle()}
+            tooltip="Heading 3 (⌘+Alt+3)"
+          >
+            <Heading3Icon />
           </ToolbarButton>
 
           <Separator orientation="vertical" className="h-6" />
 
           <MarkToolbarButton nodeType="bold" tooltip="Bold (⌘+B)">
-            <strong>B</strong>
+            <BoldIcon />
           </MarkToolbarButton>
           <MarkToolbarButton nodeType="italic" tooltip="Italic (⌘+I)">
-            <em>I</em>
+            <ItalicIcon />
           </MarkToolbarButton>
           <MarkToolbarButton nodeType="underline" tooltip="Underline (⌘+U)">
-            <span className="underline">U</span>
+            <UnderlineIcon />
           </MarkToolbarButton>
           <MarkToolbarButton
             nodeType="strikethrough"
-            tooltip="Strikethrough (⌘+Shift+X)"
+            tooltip="Strikethrough (⌘+⇧+X)"
           >
-            <StrikethroughIcon className="h-4 w-4" />
+            <StrikethroughIcon />
           </MarkToolbarButton>
-          <MarkToolbarButton nodeType="code" tooltip="Inline Code (⌘+E)">
-            <Code2Icon className="h-4 w-4" />
-          </MarkToolbarButton>
-
           <Separator orientation="vertical" className="h-6" />
 
           <ToolbarButton
+            onMouseDown={preventFocusLoss}
             onClick={() =>
               toggleList(editor, { listStyleType: ListStyleType.Disc })
             }
             tooltip="Bullet List"
           >
-            <ListIcon className="h-4 w-4" />
+            <ListIcon />
           </ToolbarButton>
           <ToolbarButton
+            onMouseDown={preventFocusLoss}
             onClick={() =>
               toggleList(editor, { listStyleType: ListStyleType.Decimal })
             }
             tooltip="Numbered List"
           >
-            <ListOrderedIcon className="h-4 w-4" />
+            <ListOrderedIcon />
           </ToolbarButton>
 
           <Separator orientation="vertical" className="h-6" />
 
           <ToolbarButton
+            onMouseDown={preventFocusLoss}
             onClick={() => tf.blockquote.toggle()}
-            tooltip="Blockquote"
+            tooltip="Blockquote (⌘+⇧+.)"
           >
-            Quote
+            <QuoteIcon />
           </ToolbarButton>
           <ToolbarButton
-            onClick={() => tf.codeBlock.toggle()}
+            onMouseDown={preventFocusLoss}
+            onClick={() => tf.code_block.toggle()}
             tooltip="Code Block (⌘+Alt+8)"
           >
-            {"</>"}
+            <CodeIcon />
           </ToolbarButton>
 
           <Separator orientation="vertical" className="h-6" />
 
-          <ToolbarButton onClick={() => tf.link.toggle()} tooltip="Toggle Link">
-            <Link2Icon className="h-4 w-4" />
-          </ToolbarButton>
+          <LinkToolbarButton />
         </FixedToolbar>
         <EditorContainer className="!h-auto min-h-0 flex-1">
           <Editor placeholder="Type your amazing content here..." />
