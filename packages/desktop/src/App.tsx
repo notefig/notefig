@@ -92,7 +92,14 @@ export const App = () => {
             }
           />
           {/* Root route - no directory selected */}
-          <Route path="/" element={<Welcome />} />
+          <Route
+            path="/"
+            element={
+              <WorkspaceErrorBoundary>
+                <Welcome />
+              </WorkspaceErrorBoundary>
+            }
+          />
         </Routes>
       </div>
     </div>
