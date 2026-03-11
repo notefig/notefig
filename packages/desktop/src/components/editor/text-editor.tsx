@@ -1,6 +1,7 @@
 import { useCallback, useRef, useEffect } from "react";
 import { Plate } from "platejs/react";
 import { MarkdownPlugin } from "@platejs/markdown";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { FixedToolbar } from "@/components/ui/fixed-toolbar";
 import { MarkToolbarButton } from "@/components/ui/mark-toolbar-button";
 import { Editor, EditorContainer } from "@/components/ui/editor";
@@ -186,87 +187,89 @@ export function TextEditor({ file, basePath }: TextEditorProps) {
   return (
     <Plate editor={editor} onValueChange={handleChange}>
       <div className="flex flex-col flex-1 min-h-0 w-full z-0">
-        <FixedToolbar className="shrink-0 justify-start gap-1 flex-wrap">
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() => tf.h1.toggle()}
-            tooltip="Heading 1 (⌘+Alt+1)"
-          >
-            <Heading1Icon />
-          </ToolbarButton>
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() => tf.h2.toggle()}
-            tooltip="Heading 2 (⌘+Alt+2)"
-          >
-            <Heading2Icon />
-          </ToolbarButton>
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() => tf.h3.toggle()}
-            tooltip="Heading 3 (⌘+Alt+3)"
-          >
-            <Heading3Icon />
-          </ToolbarButton>
+        <FixedToolbar>
+          <ScrollArea className="flex justify-start shrink-0 gap-1 ">
+            <ToolbarButton
+              onMouseDown={preventFocusLoss}
+              onClick={() => tf.h1.toggle()}
+              tooltip="Heading 1 (⌘+Alt+1)"
+            >
+              <Heading1Icon />
+            </ToolbarButton>
+            <ToolbarButton
+              onMouseDown={preventFocusLoss}
+              onClick={() => tf.h2.toggle()}
+              tooltip="Heading 2 (⌘+Alt+2)"
+            >
+              <Heading2Icon />
+            </ToolbarButton>
+            <ToolbarButton
+              onMouseDown={preventFocusLoss}
+              onClick={() => tf.h3.toggle()}
+              tooltip="Heading 3 (⌘+Alt+3)"
+            >
+              <Heading3Icon />
+            </ToolbarButton>
 
-          <Separator orientation="vertical" className="h-6" />
+            <Separator orientation="vertical" className="h-6" />
 
-          <MarkToolbarButton nodeType="bold" tooltip="Bold (⌘+B)">
-            <BoldIcon />
-          </MarkToolbarButton>
-          <MarkToolbarButton nodeType="italic" tooltip="Italic (⌘+I)">
-            <ItalicIcon />
-          </MarkToolbarButton>
-          <MarkToolbarButton nodeType="underline" tooltip="Underline (⌘+U)">
-            <UnderlineIcon />
-          </MarkToolbarButton>
-          <MarkToolbarButton
-            nodeType="strikethrough"
-            tooltip="Strikethrough (⌘+⇧+X)"
-          >
-            <StrikethroughIcon />
-          </MarkToolbarButton>
-          <Separator orientation="vertical" className="h-6" />
+            <MarkToolbarButton nodeType="bold" tooltip="Bold (⌘+B)">
+              <BoldIcon />
+            </MarkToolbarButton>
+            <MarkToolbarButton nodeType="italic" tooltip="Italic (⌘+I)">
+              <ItalicIcon />
+            </MarkToolbarButton>
+            <MarkToolbarButton nodeType="underline" tooltip="Underline (⌘+U)">
+              <UnderlineIcon />
+            </MarkToolbarButton>
+            <MarkToolbarButton
+              nodeType="strikethrough"
+              tooltip="Strikethrough (⌘+⇧+X)"
+            >
+              <StrikethroughIcon />
+            </MarkToolbarButton>
+            <Separator orientation="vertical" className="h-6" />
 
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() =>
-              toggleList(editor, { listStyleType: ListStyleType.Disc })
-            }
-            tooltip="Bullet List"
-          >
-            <ListIcon />
-          </ToolbarButton>
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() =>
-              toggleList(editor, { listStyleType: ListStyleType.Decimal })
-            }
-            tooltip="Numbered List"
-          >
-            <ListOrderedIcon />
-          </ToolbarButton>
+            <ToolbarButton
+              onMouseDown={preventFocusLoss}
+              onClick={() =>
+                toggleList(editor, { listStyleType: ListStyleType.Disc })
+              }
+              tooltip="Bullet List"
+            >
+              <ListIcon />
+            </ToolbarButton>
+            <ToolbarButton
+              onMouseDown={preventFocusLoss}
+              onClick={() =>
+                toggleList(editor, { listStyleType: ListStyleType.Decimal })
+              }
+              tooltip="Numbered List"
+            >
+              <ListOrderedIcon />
+            </ToolbarButton>
 
-          <Separator orientation="vertical" className="h-6" />
+            <Separator orientation="vertical" className="h-6" />
 
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() => tf.blockquote.toggle()}
-            tooltip="Blockquote (⌘+⇧+.)"
-          >
-            <QuoteIcon />
-          </ToolbarButton>
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() => tf.code_block.toggle()}
-            tooltip="Code Block (⌘+Alt+8)"
-          >
-            <CodeIcon />
-          </ToolbarButton>
+            <ToolbarButton
+              onMouseDown={preventFocusLoss}
+              onClick={() => tf.blockquote.toggle()}
+              tooltip="Blockquote (⌘+⇧+.)"
+            >
+              <QuoteIcon />
+            </ToolbarButton>
+            <ToolbarButton
+              onMouseDown={preventFocusLoss}
+              onClick={() => tf.code_block.toggle()}
+              tooltip="Code Block (⌘+Alt+8)"
+            >
+              <CodeIcon />
+            </ToolbarButton>
 
-          <Separator orientation="vertical" className="h-6" />
+            <Separator orientation="vertical" className="h-6" />
 
-          <LinkToolbarButton />
+            <LinkToolbarButton />
+          </ScrollArea>
         </FixedToolbar>
         <EditorContainer className="!h-auto min-h-0 flex-1">
           <Editor placeholder="Type your amazing content here..." />
