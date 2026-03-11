@@ -81,58 +81,55 @@ export function FileControls({
             <TooltipContent side="bottom">{t("newFolder")}</TooltipContent>
           </Tooltip>
         </ButtonGroup>
-
-        <ButtonGroup>
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-muted-foreground"
-                    aria-label={t("sortFiles")}
-                  >
-                    <SortIcon className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{t("sortFiles")}</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                className={cn(
-                  "flex items-center justify-between gap-3",
-                  sortOrder === "name-asc" && "bg-accent",
-                )}
-                onSelect={() => onSortChange("name-asc")}
-              >
-                {t("sortNameAsc")}
-                <ArrowDownAZ className="h-4 w-4 text-muted-foreground" />
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className={cn(
-                  "flex items-center justify-between gap-3",
-                  sortOrder === "name-desc" && "bg-accent",
-                )}
-                onSelect={() => onSortChange("name-desc")}
-              >
-                {t("sortNameDesc")}
-                <ArrowUpZA className="h-4 w-4 text-muted-foreground" />
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className={cn(
-                  "flex items-center justify-between gap-3",
-                  sortOrder === "date-modified" && "bg-accent",
-                )}
-                onSelect={() => onSortChange("date-modified")}
-              >
-                {t("sortDateModified")}
-                <CalendarArrowDown className="h-4 w-4 text-muted-foreground" />
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </ButtonGroup>
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground"
+                  aria-label={t("sortFiles")}
+                >
+                  <SortIcon className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("sortFiles")}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              className={cn(
+                "flex items-center justify-between gap-3",
+                sortOrder === "name-asc" && "bg-accent",
+              )}
+              onSelect={() => onSortChange("name-asc")}
+            >
+              {t("sortNameAsc")}
+              <ArrowDownAZ className="h-4 w-4 text-muted-foreground" />
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className={cn(
+                "flex items-center justify-between gap-3",
+                sortOrder === "name-desc" && "bg-accent",
+              )}
+              onSelect={() => onSortChange("name-desc")}
+            >
+              {t("sortNameDesc")}
+              <ArrowUpZA className="h-4 w-4 text-muted-foreground" />
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className={cn(
+                "flex items-center justify-between gap-3",
+                sortOrder === "date-modified" && "bg-accent",
+              )}
+              onSelect={() => onSortChange("date-modified")}
+            >
+              {t("sortDateModified")}
+              <CalendarArrowDown className="h-4 w-4 text-muted-foreground" />
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </TooltipProvider>
   );

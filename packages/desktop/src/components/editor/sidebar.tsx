@@ -200,7 +200,7 @@ export function Sidebar({
       <div
         ref={resizeRef}
         onMouseDown={handleResizeStart}
-        className="w-1 shrink-0 bg-border hover:bg-primary/50 cursor-col-resize transition-colors"
+        className="w-0.5 shrink-0 bg-border hover:bg-primary/50 cursor-col-resize transition-colors"
       />
     </>
   );
