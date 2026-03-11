@@ -55,18 +55,46 @@ ContextMenuSubContent.displayName = ContextMenuPrimitive.SubContent.displayName
 const ContextMenuContent = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Content>
->(({ className, ...props }, ref) => (
-  <ContextMenuPrimitive.Portal>
-    <ContextMenuPrimitive.Content
-      ref={ref}
-      className={cn(
-        "z-50 max-h-[--radix-context-menu-content-available-height] min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 origin-[--radix-context-menu-content-transform-origin]",
-        className
-      )}
-      {...props}
-    />
-  </ContextMenuPrimitive.Portal>
-))
+>(({ className, alignOffset = -2, ...props }, ref) => {
+  // Fix: Prevent macOS trackpad phantom click.
+  // A two-finger tap fires contextmenu + an orphan pointerup (no preceding pointerdown
+  // on the menu). Radix MenuItem's onPointerUp handler calls .click() when
+  // isPointerDownRef is false, triggering whichever item appears under the cursor.
+  // We intercept pointerup events in the capture phase and preventDefault if no
+  // pointerdown occurred inside this menu content, which is deterministic and
+  // event-based (no timers).
+  const hadPointerDownRef = React.useRef(false)
+
+  const onPointerDownCapture = React.useCallback(() => {
+    hadPointerDownRef.current = true
+  }, [])
+
+  const onPointerUpCapture = React.useCallback(
+    (e: React.PointerEvent) => {
+      if (!hadPointerDownRef.current) {
+        e.preventDefault()
+      }
+      hadPointerDownRef.current = false
+    },
+    [],
+  )
+
+  return (
+    <ContextMenuPrimitive.Portal>
+      <ContextMenuPrimitive.Content
+        ref={ref}
+        alignOffset={alignOffset}
+        className={cn(
+          "z-50 max-h-[--radix-context-menu-content-available-height] min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 origin-[--radix-context-menu-content-transform-origin]",
+          className
+        )}
+        onPointerDownCapture={onPointerDownCapture}
+        onPointerUpCapture={onPointerUpCapture}
+        {...props}
+      />
+    </ContextMenuPrimitive.Portal>
+  )
+})
 ContextMenuContent.displayName = ContextMenuPrimitive.Content.displayName
 
 const ContextMenuItem = React.forwardRef<
