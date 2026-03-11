@@ -75,7 +75,7 @@ const settingsSections: SettingsSection[] = [
     ],
   },
   {
-    label: "Core plugins",
+    label: "corePlugins",
     items: [
       { id: "backlinks", label: "Backlinks", icon: Link2 },
       { id: "canvas", label: "Canvas", icon: LayoutGrid },

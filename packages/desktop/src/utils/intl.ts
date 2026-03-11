@@ -31,6 +31,16 @@ i18n
           dark: "Dark",
           system: "System",
 
+          // File Actions
+          rename: "Rename",
+          delete: "Delete",
+          cancel: "Cancel",
+          deleteConfirmTitle: 'Delete "{{name}}"?',
+          deleteDirectoryConfirm:
+            "This will permanently delete the folder and all its contents. This action cannot be undone.",
+          deleteFileConfirm:
+            "This will permanently delete the file. This action cannot be undone.",
+
           // File Controls
           newFile: "New file",
           newFolder: "New folder",
