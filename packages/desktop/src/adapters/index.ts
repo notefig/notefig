@@ -56,4 +56,3 @@ export { PlatformAdapterFactory };
  * Re-export types for convenience
  */
 export type { IPlatformAdapter } from "./platform-adapter.interface";
-export type { ContextMenuItem } from "./platform-adapter.interface";

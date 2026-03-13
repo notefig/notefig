@@ -1,18 +1,6 @@
 import type { Theme } from "@/components/theme-provider";
 
 /**
- * Context menu item descriptor for platform-native context menus
- */
-export type ContextMenuItem =
-  | {
-      type: "item";
-      id: string;
-      label: string;
-      disabled?: boolean;
-    }
-  | { type: "separator" };
-
-/**
  * Error types for file system operations
  */
 export type FileSystemErrorType =
@@ -268,15 +256,4 @@ export interface IPlatformAdapter {
    * Get all settings as a flat record.
    */
   getAllSettings(): Promise<Record<string, unknown>>;
-
-  /**
-   * Shows a native context menu at the given position.
-   * @param items - Menu item descriptors (items and separators)
-   * @param position - Screen coordinates where the menu should appear
-   * @returns The id of the selected item, or null if dismissed / not supported
-   */
-  showContextMenu(
-    items: ContextMenuItem[],
-    position: { x: number; y: number },
-  ): Promise<string | null>;
 }

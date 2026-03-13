@@ -7,7 +7,6 @@ import type {
   FileSystemMetadata,
   MetadataChangeEvent,
   ContentChangeEvent,
-  ContextMenuItem,
 } from "./platform-adapter.interface";
 
 export class BrowserPlatformAdapter implements IPlatformAdapter {
@@ -860,6 +859,8 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     // No-op in browser
   }
 
+  // ========== App Settings ==========
+
   private readonly SETTINGS_PREFIX = "metrists-settings:";
 
   async getSetting<T>(key: string): Promise<T | undefined> {
@@ -893,12 +894,5 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
       }
     }
     return settings;
-  }
-
-  async showContextMenu(
-    _items: ContextMenuItem[],
-    _position: { x: number; y: number },
-  ): Promise<string | null> {
-    return null;
   }
 }

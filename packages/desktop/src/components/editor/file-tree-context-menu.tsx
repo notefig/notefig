@@ -44,6 +44,7 @@ export function FileTreeContextMenu({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const { t } = useTranslation();
   const name = getFileName(path);
+  // For files, create in the parent directory. For directories, create inside.
   const targetDir = type === "directory" ? path : getDirectoryPath(path);
 
   return (

@@ -7,7 +7,6 @@ import type {
   FileSystemMetadata,
   MetadataChangeEvent,
   ContentChangeEvent,
-  ContextMenuItem,
 } from "./platform-adapter.interface";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -443,52 +442,5 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   async getAllSettings(): Promise<Record<string, unknown>> {
     const entries = await this.settingsStore.entries();
     return Object.fromEntries(entries);
-  }
-
-  async showContextMenu(
-    items: ContextMenuItem[],
-    position: { x: number; y: number },
-  ): Promise<string | null> {
-    const { Menu, MenuItem, PredefinedMenuItem } = await import(
-      "@tauri-apps/api/menu"
-    );
-    const { LogicalPosition } = await import("@tauri-apps/api/dpi");
-
-    return new Promise<string | null>(async (resolve) => {
-      let resolved = false;
-      const safeResolve = (value: string | null) => {
-        if (!resolved) {
-          resolved = true;
-          resolve(value);
-        }
-      };
-
-      try {
-        const menuItems = await Promise.all(
-          items.map(async (item) => {
-            if (item.type === "separator") {
-              return PredefinedMenuItem.new({ item: "Separator" });
-            }
-            return MenuItem.new({
-              id: item.id,
-              text: item.label,
-              enabled: item.disabled !== true,
-              action: () => safeResolve(item.id),
-            });
-          }),
-        );
-
-        const menu = await Menu.new({ items: menuItems });
-        await menu.popup(new LogicalPosition(position.x, position.y));
-
-        // Tauri doesn't fire a "menu dismissed" callback, so we resolve null
-        // after a short delay to handle the case where no item was clicked.
-        // The action callback will resolve first if an item is selected.
-        setTimeout(() => safeResolve(null), 300);
-      } catch (error) {
-        console.error("[TauriAdapter] Failed to show context menu:", error);
-        safeResolve(null);
-      }
-    });
   }
 }
