@@ -5,7 +5,7 @@ mod fs_ops;
 mod file_watcher;
 
 use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
-use tauri::{Emitter, AppHandle};
+use tauri::{Emitter, AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
@@ -80,12 +80,18 @@ fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
     Ok(menu)
 }
 
-/// Reads the persisted zoom level from the settings store and emits it to the frontend.
+/// Reads the persisted zoom level from the settings store and applies native webview zoom.
 fn restore_zoom_level(app: &AppHandle) {
     match app.store("settings.json") {
         Ok(store) => {
             if let Some(zoom_value) = store.get("zoomLevel") {
                 if let Some(zoom) = zoom_value.as_f64() {
+                    // Apply native webview zoom
+                    if let Some(webview_window) = app.get_webview_window("main") {
+                        if let Err(e) = webview_window.set_zoom(zoom) {
+                            eprintln!("Failed to restore native webview zoom: {}", e);
+                        }
+                    }
                     let _ = app.emit("zoom-changed", zoom);
                 }
             }
@@ -96,8 +102,16 @@ fn restore_zoom_level(app: &AppHandle) {
     }
 }
 
-/// Persists the zoom level to the settings store and emits it to the frontend.
+/// Persists the zoom level to the settings store and applies native webview zoom.
 fn set_zoom_level(app: &AppHandle, zoom: f64) {
+    // Apply native webview zoom
+    if let Some(webview_window) = app.get_webview_window("main") {
+        if let Err(e) = webview_window.set_zoom(zoom) {
+            eprintln!("Failed to set native webview zoom: {}", e);
+        }
+    }
+
+    // Emit event so frontend can persist the setting
     let _ = app.emit("zoom-changed", zoom);
 
     match app.store("settings.json") {

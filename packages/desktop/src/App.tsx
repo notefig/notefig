@@ -24,10 +24,6 @@ export const App = () => {
   } = useAppSettings();
 
   useEffect(() => {
-    document.documentElement.style.zoom = String(settings.zoomLevel);
-  }, [settings.zoomLevel]);
-
-  useEffect(() => {
     setTheme(settings.theme);
   }, [settings.theme, setTheme]);
 
