@@ -42,6 +42,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { useHotkey, formatForDisplay } from "@tanstack/react-hotkeys";
+import { useTheme } from "../theme-provider";
 
 interface CommandPaletteProps {
   open: boolean;
@@ -79,6 +80,7 @@ export function CommandPalette({
   onToggleFullscreen,
   direction = "ltr",
 }: CommandPaletteProps) {
+  const { setTheme, theme } = useTheme();
   const [search, setSearch] = useState("");
 
   useHotkey("Mod+K", () => {
@@ -94,6 +96,18 @@ export function CommandPalette({
       setSearch("");
     }
   }, [open]);
+
+  const swapTheme = () => {
+    if (theme === "dark") {
+      setTheme("light");
+      return;
+    }
+    if (theme === "light") {
+      setTheme("dark");
+      return;
+    }
+    setTheme("light");
+  };
 
   const commands: CommandType[] = [
     {
@@ -232,6 +246,7 @@ export function CommandPalette({
       label: "Toggle Dark/Light Theme",
       icon: Moon,
       group: "Settings",
+      action: swapTheme,
     },
     // {
     //   id: "help",
