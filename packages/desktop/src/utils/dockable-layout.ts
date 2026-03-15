@@ -1,4 +1,5 @@
 import type { LayoutNode } from "@/components/dockable";
+import type { WindowNode } from "@/components/dockable/utils/serializeLayout";
 
 /**
  * Deep-clone a layout tree, adding a new tab to the first Window and selecting it.
@@ -63,6 +64,49 @@ export function extractTabIds(nodes: LayoutNode[]): string[] {
     }
   }
   return ids;
+}
+
+/**
+ * Find the first window node in the layout tree.
+ */
+export function findFirstWindow(nodes: LayoutNode[]): WindowNode | null {
+  for (const node of nodes) {
+    if (node.type === "Window") {
+      return node;
+    }
+
+    if (node.type === "Panel") {
+      const childWindow = findFirstWindow(node.children);
+      if (childWindow) {
+        return childWindow;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Find a window node by its id.
+ */
+export function findWindowById(
+  nodes: LayoutNode[],
+  windowId: string,
+): WindowNode | null {
+  for (const node of nodes) {
+    if (node.type === "Window" && node.id === windowId) {
+      return node;
+    }
+
+    if (node.type === "Panel") {
+      const childWindow = findWindowById(node.children, windowId);
+      if (childWindow) {
+        return childWindow;
+      }
+    }
+  }
+
+  return null;
 }
 
 /**

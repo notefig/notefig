@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useSearchParams } from "react-router";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import { PlainLogo } from "@/components/logo";
 
 interface IconSidebarProps {
@@ -35,6 +36,10 @@ export function IconSidebar({
   onToggleCollapse,
 }: IconSidebarProps) {
   const [searchParams, setSearchParams] = useSearchParams();
+
+  useHotkey("Mod+\\", () => {
+    onToggleCollapse();
+  });
 
   const topIcons = [
     { id: "search", icon: Search, label: "Search", onClick: () => {} },

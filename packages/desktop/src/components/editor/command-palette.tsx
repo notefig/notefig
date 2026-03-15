@@ -1,7 +1,4 @@
-"use client";
-
 import React from "react";
-
 import { useEffect, useState } from "react";
 import {
   FileText,
@@ -44,6 +41,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { useHotkey, formatForDisplay } from "@tanstack/react-hotkeys";
 
 interface CommandPaletteProps {
   open: boolean;
@@ -73,7 +71,14 @@ export function CommandPalette({
 }: CommandPaletteProps) {
   const [search, setSearch] = useState("");
 
-  // Reset search when dialog closes
+  useHotkey("Mod+K", () => {
+    onOpenChange(!open);
+  });
+
+  useHotkey("Mod+P", () => {
+    onOpenChange(true);
+  });
+
   useEffect(() => {
     if (!open) {
       setSearch("");
@@ -86,7 +91,7 @@ export function CommandPalette({
       id: "new-file",
       label: "New File",
       icon: Plus,
-      shortcut: "Ctrl+N",
+      shortcut: formatForDisplay("Mod+N"),
       action: onNewFile,
       group: "File",
     },
@@ -94,21 +99,21 @@ export function CommandPalette({
       id: "open-file",
       label: "Open File",
       icon: FolderOpen,
-      shortcut: "Ctrl+O",
+      shortcut: formatForDisplay("Mod+O"),
       group: "File",
     },
     {
       id: "save-file",
       label: "Save File",
       icon: Save,
-      shortcut: "Ctrl+S",
+      shortcut: formatForDisplay("Mod+S"),
       group: "File",
     },
     {
       id: "close-file",
       label: "Close File",
       icon: FileText,
-      shortcut: "Ctrl+W",
+      shortcut: formatForDisplay("Mod+W"),
       group: "File",
     },
 
@@ -117,49 +122,49 @@ export function CommandPalette({
       id: "undo",
       label: "Undo",
       icon: Undo,
-      shortcut: "Ctrl+Z",
+      shortcut: formatForDisplay("Mod+Z"),
       group: "Edit",
     },
     {
       id: "redo",
       label: "Redo",
       icon: Redo,
-      shortcut: "Ctrl+Shift+Z",
+      shortcut: formatForDisplay("Mod+Shift+Z"),
       group: "Edit",
     },
     {
       id: "cut",
       label: "Cut",
       icon: Scissors,
-      shortcut: "Ctrl+X",
+      shortcut: formatForDisplay("Mod+X"),
       group: "Edit",
     },
     {
       id: "copy",
       label: "Copy",
       icon: Copy,
-      shortcut: "Ctrl+C",
+      shortcut: formatForDisplay("Mod+C"),
       group: "Edit",
     },
     {
       id: "paste",
       label: "Paste",
       icon: Clipboard,
-      shortcut: "Ctrl+V",
+      shortcut: formatForDisplay("Mod+V"),
       group: "Edit",
     },
     {
       id: "find",
       label: "Find in File",
       icon: Search,
-      shortcut: "Ctrl+F",
+      shortcut: formatForDisplay("Mod+F"),
       group: "Edit",
     },
     {
       id: "replace",
       label: "Find and Replace",
       icon: Edit3,
-      shortcut: "Ctrl+H",
+      shortcut: formatForDisplay("Mod+H"),
       group: "Edit",
     },
 
@@ -168,7 +173,7 @@ export function CommandPalette({
       id: "toggle-sidebar",
       label: "Toggle Sidebar",
       icon: LayoutGrid,
-      shortcut: "Ctrl+B",
+      shortcut: formatForDisplay("Mod+\\"),
       action: onToggleSidebar,
       group: "View",
     },
@@ -183,14 +188,28 @@ export function CommandPalette({
       id: "zoom-in",
       label: "Zoom In",
       icon: Maximize,
-      shortcut: "Ctrl++",
+      shortcut: formatForDisplay("Mod++"),
       group: "View",
     },
     {
       id: "zoom-out",
       label: "Zoom Out",
       icon: Minimize,
-      shortcut: "Ctrl+-",
+      shortcut: formatForDisplay("Mod+-"),
+      group: "View",
+    },
+    {
+      id: "next-tab",
+      label: "Next Tab",
+      icon: FileText,
+      shortcut: "Ctrl+Tab",
+      group: "View",
+    },
+    {
+      id: "prev-tab",
+      label: "Previous Tab",
+      icon: FileText,
+      shortcut: "Ctrl+Shift+Tab",
       group: "View",
     },
 
@@ -199,14 +218,14 @@ export function CommandPalette({
       id: "go-to-file",
       label: "Go to File",
       icon: FileText,
-      shortcut: "Ctrl+P",
+      shortcut: formatForDisplay("Mod+P"),
       group: "Navigation",
     },
     {
       id: "go-to-line",
       label: "Go to Line",
       icon: Terminal,
-      shortcut: "Ctrl+G",
+      shortcut: formatForDisplay("Mod+G"),
       group: "Navigation",
     },
     {
@@ -233,7 +252,7 @@ export function CommandPalette({
       id: "git-commit",
       label: "Git Commit",
       icon: GitBranch,
-      shortcut: "Ctrl+Shift+G",
+      shortcut: formatForDisplay("Mod+Shift+G"),
       group: "Tools",
     },
 
@@ -242,7 +261,7 @@ export function CommandPalette({
       id: "open-settings",
       label: "Open Settings",
       icon: Settings,
-      shortcut: "Ctrl+,",
+      shortcut: formatForDisplay("Mod+,"),
       action: onOpenSettings,
       group: "Settings",
     },
@@ -250,7 +269,7 @@ export function CommandPalette({
       id: "keyboard-shortcuts",
       label: "Keyboard Shortcuts",
       icon: Keyboard,
-      shortcut: "Ctrl+K Ctrl+S",
+      shortcut: formatForDisplay("Mod+K") + " " + formatForDisplay("Mod+S"),
       group: "Settings",
     },
     {

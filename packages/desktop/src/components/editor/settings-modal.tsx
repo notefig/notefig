@@ -1,7 +1,4 @@
-"use client";
-
 import React from "react";
-
 import { useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
@@ -15,8 +12,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import {
-  X,
   Settings,
   Pencil,
   FileText,
@@ -91,7 +88,6 @@ const settingsSections: SettingsSection[] = [
   },
 ];
 
-// Settings state types
 interface SettingsState {
   language: string;
   notifySlowStartup: boolean;
@@ -115,6 +111,10 @@ export function SettingsModal({
   const [settings, setSettings] = useState<SettingsState>({
     language: "english",
     notifySlowStartup: false,
+  });
+
+  useHotkey("Mod+S", () => {
+    handleSettingsToggle(!searchParams.get("settings"));
   });
 
   const renderSettingsContent = () => {

@@ -1,8 +1,10 @@
-import { useCallback, useMemo, type ReactElement } from "react";
+import { useCallback, useMemo, type ReactElement, type RefObject } from "react";
 import type { LayoutNode, TabProps } from "@/components/dockable";
 import { useLayoutSearchParam } from "./use-layout-search-param";
 import {
   addTabToLayout,
+  findFirstWindow,
+  findWindowById,
   selectTabInLayout,
   createInitialLayout,
   extractTabIds,
@@ -22,6 +24,11 @@ export interface UseDockableTabsOptions {
    * If not provided, all files can be opened.
    */
   canOpenFile?: (file: FileTreeNode) => boolean;
+
+  /**
+   * Optional container ref used to detect the focused dockable window.
+   */
+  dockableRef?: RefObject<HTMLElement | null>;
 }
 
 export interface UseDockableTabsResult {
@@ -51,6 +58,12 @@ export interface UseDockableTabsResult {
 
   /** Programmatically switch to a tab */
   selectTab: (tabId: string) => void;
+
+  /** Switch to the next tab (wraps around) */
+  selectNextTab: () => void;
+
+  /** Switch to the previous tab (wraps around) */
+  selectPrevTab: () => void;
 }
 
 /**
@@ -83,7 +96,7 @@ export interface UseDockableTabsResult {
 export function useDockableTabs(
   options: UseDockableTabsOptions,
 ): UseDockableTabsResult {
-  const { renderTabs, canOpenFile } = options;
+  const { renderTabs, canOpenFile, dockableRef } = options;
   const { layout, setLayout, openTabs, activeTabId } = useLayoutSearchParam();
 
   // Render tabs using the provided render function
@@ -185,6 +198,58 @@ export function useDockableTabs(
     [layout, openTabs, setLayout],
   );
 
+  const getActiveWindow = useCallback(() => {
+    const root = dockableRef?.current;
+    const activeElement = document.activeElement;
+
+    if (
+      root &&
+      activeElement instanceof HTMLElement &&
+      root.contains(activeElement)
+    ) {
+      const windowElement = activeElement.closest<HTMLElement>(
+        "[data-dockable-window-id]",
+      );
+      const windowId = windowElement?.dataset.dockableWindowId;
+
+      if (windowId) {
+        const activeWindow = findWindowById(layout, windowId);
+        if (activeWindow) {
+          return activeWindow;
+        }
+      }
+    }
+
+    return findFirstWindow(layout);
+  }, [dockableRef, layout]);
+
+  const selectNextTab = useCallback(() => {
+    const activeWindow = getActiveWindow();
+    if (!activeWindow || activeWindow.children.length <= 1) return;
+
+    const currentIndex = activeWindow.children.indexOf(activeWindow.selected);
+    if (currentIndex === -1) return;
+
+    const nextTabId =
+      activeWindow.children[(currentIndex + 1) % activeWindow.children.length];
+    setLayout(selectTabInLayout(layout, nextTabId));
+  }, [getActiveWindow, layout, setLayout]);
+
+  const selectPrevTab = useCallback(() => {
+    const activeWindow = getActiveWindow();
+    if (!activeWindow || activeWindow.children.length <= 1) return;
+
+    const currentIndex = activeWindow.children.indexOf(activeWindow.selected);
+    if (currentIndex === -1) return;
+
+    const prevTabId =
+      activeWindow.children[
+        (currentIndex - 1 + activeWindow.children.length) %
+          activeWindow.children.length
+      ];
+    setLayout(selectTabInLayout(layout, prevTabId));
+  }, [getActiveWindow, layout, setLayout]);
+
   return {
     layout,
     openTabs,
@@ -195,5 +260,7 @@ export function useDockableTabs(
     openTab,
     closeTab,
     selectTab,
+    selectNextTab,
+    selectPrevTab,
   };
 }

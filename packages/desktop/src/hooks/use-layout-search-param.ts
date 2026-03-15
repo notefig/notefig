@@ -84,6 +84,7 @@ export function useLayoutSearchParam(): UseLayoutSearchParam {
         } else {
           next.set(LAYOUT_PARAM, JSON.stringify(newLayout));
         }
+
         return next;
       });
     },

@@ -65,7 +65,10 @@ function TabView({
   const isOverAny = overId == id && activeId !== id;
 
   return (
-    <div className={`${styles.container} ${isOverAny ? styles.isOver : ""}`}>
+    <div
+      className={`${styles.container} ${isOverAny ? styles.isOver : ""}`}
+      data-dockable-window-id={id}
+    >
       {!hideTabs && (
         <Droppable
           id={id}

@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import { Dockable } from "@/components/dockable";
 import { IconSidebar } from "@/components/editor/icon-sidebar";
 import { Sidebar } from "@/components/editor/sidebar";
@@ -36,6 +37,7 @@ export const Workspace = () => {
 
   const { metadata, content } = getOrCreateWorkspaceCollections(workspacePath);
   const { t } = useTranslation();
+  const dockableRef = useRef<HTMLDivElement>(null);
 
   const {
     layout,
@@ -44,9 +46,12 @@ export const Workspace = () => {
     handleFileSelect,
     handleLayoutChange,
     closeTab,
+    selectNextTab,
+    selectPrevTab,
   } = useDockableTabs({
     renderTabs: () => [],
     canOpenFile: (file) => file.type === "file" && isTextFile(file.path),
+    dockableRef,
   });
 
   useEffect(() => {
@@ -136,6 +141,27 @@ export const Workspace = () => {
     });
   }, [workspacePath]);
 
+  // Close active tab
+  useHotkey("Mod+W", () => {
+    if (activeTabId) {
+      closeTab(activeTabId);
+    }
+  });
+
+  useHotkey("Control+Tab", () => {
+    selectNextTab();
+  });
+
+  // Previous tab
+  useHotkey("Control+Shift+Tab", () => {
+    selectPrevTab();
+  });
+
+  // New file
+  useHotkey("Mod+N", () => {
+    handleNewFile();
+  });
+
   useEffect(() => {
     const metadataWatchId = `metadata-${workspacePath}`;
     const contentWatchId = `content-${workspacePath}`;
@@ -198,7 +224,10 @@ export const Workspace = () => {
             />
           )}
 
-          <div className="flex-1 min-w-0 h-full overflow-hidden">
+          <div
+            ref={dockableRef}
+            className="flex-1 min-w-0 h-full overflow-hidden"
+          >
             {openTabs.length === 0 || dockableTabs.length === 0 ? (
               <div className="flex items-center justify-center h-full text-muted-foreground p-4 ps-0">
                 <p className="text-center">{t("noFileSelected")}</p>
