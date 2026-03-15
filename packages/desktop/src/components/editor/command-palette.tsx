@@ -105,13 +105,6 @@ export function CommandPalette({
       group: "File",
     },
     {
-      id: "open-file",
-      label: "Open File",
-      icon: FolderOpen,
-      shortcut: formatForDisplay("Mod+O"),
-      group: "File",
-    },
-    {
       id: "close-file",
       label: "Close File",
       icon: FileText,
@@ -126,8 +119,6 @@ export function CommandPalette({
       action: onNewDirectory,
       group: "File",
     },
-
-    // Edit commands
     {
       id: "undo",
       label: "Undo",
@@ -144,43 +135,20 @@ export function CommandPalette({
       action: onRedo,
       group: "Edit",
     },
-    {
-      id: "cut",
-      label: "Cut",
-      icon: Scissors,
-      shortcut: formatForDisplay("Mod+X"),
-      group: "Edit",
-    },
-    {
-      id: "copy",
-      label: "Copy",
-      icon: Copy,
-      shortcut: formatForDisplay("Mod+C"),
-      group: "Edit",
-    },
-    {
-      id: "paste",
-      label: "Paste",
-      icon: Clipboard,
-      shortcut: formatForDisplay("Mod+V"),
-      group: "Edit",
-    },
-    {
-      id: "find",
-      label: "Find in File",
-      icon: Search,
-      shortcut: formatForDisplay("Mod+F"),
-      group: "Edit",
-    },
-    {
-      id: "replace",
-      label: "Find and Replace",
-      icon: Edit3,
-      shortcut: formatForDisplay("Mod+H"),
-      group: "Edit",
-    },
-
-    // View commands
+    // {
+    //   id: "find",
+    //   label: "Find in File",
+    //   icon: Search,
+    //   shortcut: formatForDisplay("Mod+F"),
+    //   group: "Edit",
+    // },
+    // {
+    //   id: "replace",
+    //   label: "Find and Replace",
+    //   icon: Edit3,
+    //   shortcut: formatForDisplay("Mod+H"),
+    //   group: "Edit",
+    // },
     {
       id: "toggle-sidebar",
       label: "Toggle Sidebar",
@@ -197,65 +165,53 @@ export function CommandPalette({
       action: onToggleFullscreen,
       group: "View",
     },
-    {
-      id: "next-tab",
-      label: "Next Tab",
-      icon: FileText,
-      shortcut: "Ctrl+Tab",
-      group: "View",
-    },
-    {
-      id: "prev-tab",
-      label: "Previous Tab",
-      icon: FileText,
-      shortcut: "Ctrl+Shift+Tab",
-      group: "View",
-    },
-
-    // Navigation commands
-    {
-      id: "go-to-file",
-      label: "Go to File",
-      icon: FileText,
-      shortcut: formatForDisplay("Mod+P"),
-      group: "Navigation",
-    },
-    {
-      id: "go-to-line",
-      label: "Go to Line",
-      icon: Terminal,
-      shortcut: formatForDisplay("Mod+G"),
-      group: "Navigation",
-    },
-    {
-      id: "bookmarks",
-      label: "Show Bookmarks",
-      icon: Bookmark,
-      group: "Navigation",
-    },
-    {
-      id: "recent-files",
-      label: "Recent Files",
-      icon: RefreshCw,
-      group: "Navigation",
-    },
-
-    // Tools commands
-    {
-      id: "git-status",
-      label: "Git Status",
-      icon: GitBranch,
-      group: "Tools",
-    },
-    {
-      id: "git-commit",
-      label: "Git Commit",
-      icon: GitBranch,
-      shortcut: formatForDisplay("Mod+Shift+G"),
-      group: "Tools",
-    },
-
-    // Settings commands
+    // {
+    //   id: "next-tab",
+    //   label: "Next Tab",
+    //   icon: FileText,
+    //   shortcut: "Ctrl+Tab",
+    //   group: "View",
+    // },
+    // {
+    //   id: "prev-tab",
+    //   label: "Previous Tab",
+    //   icon: FileText,
+    //   shortcut: "Ctrl+Shift+Tab",
+    //   group: "View",
+    // },
+    // {
+    //   id: "go-to-file",
+    //   label: "Go to File",
+    //   icon: FileText,
+    //   shortcut: formatForDisplay("Mod+P"),
+    //   group: "Navigation",
+    // },
+    // {
+    //   id: "go-to-line",
+    //   label: "Go to Line",
+    //   icon: Terminal,
+    //   shortcut: formatForDisplay("Mod+G"),
+    //   group: "Navigation",
+    // },
+    // {
+    //   id: "bookmarks",
+    //   label: "Show Bookmarks",
+    //   icon: Bookmark,
+    //   group: "Navigation",
+    // },
+    // {
+    //   id: "git-status",
+    //   label: "Git Status",
+    //   icon: GitBranch,
+    //   group: "Tools",
+    // },
+    // {
+    //   id: "git-commit",
+    //   label: "Git Commit",
+    //   icon: GitBranch,
+    //   shortcut: formatForDisplay("Mod+Shift+G"),
+    //   group: "Tools",
+    // },
     {
       id: "open-settings",
       label: "Open Settings",
@@ -264,34 +220,32 @@ export function CommandPalette({
       action: onOpenSettings,
       group: "Settings",
     },
-    {
-      id: "keyboard-shortcuts",
-      label: "Keyboard Shortcuts",
-      icon: Keyboard,
-      shortcut: formatForDisplay("Mod+K") + " " + formatForDisplay("Mod+S"),
-      group: "Settings",
-    },
+    // {
+    //   id: "keyboard-shortcuts",
+    //   label: "Keyboard Shortcuts",
+    //   icon: Keyboard,
+    //   shortcut: formatForDisplay("Mod+K") + " " + formatForDisplay("Mod+S"),
+    //   group: "Settings",
+    // },
     {
       id: "toggle-theme",
       label: "Toggle Dark/Light Theme",
       icon: Moon,
       group: "Settings",
     },
-
-    // Help commands
-    {
-      id: "help",
-      label: "Help",
-      icon: HelpCircle,
-      shortcut: "F1",
-      group: "Help",
-    },
-    {
-      id: "documentation",
-      label: "Documentation",
-      icon: FileText,
-      group: "Help",
-    },
+    // {
+    //   id: "help",
+    //   label: "Help",
+    //   icon: HelpCircle,
+    //   shortcut: "F1",
+    //   group: "Help",
+    // },
+    // {
+    //   id: "documentation",
+    //   label: "Documentation",
+    //   icon: FileText,
+    //   group: "Help",
+    // },
   ];
 
   const handleSelect = (command: CommandType) => {
@@ -303,7 +257,6 @@ export function CommandPalette({
     onOpenChange(false);
   };
 
-  // Group commands by their group
   const groupedCommands = commands.reduce(
     (acc, command) => {
       if (!acc[command.group]) {
