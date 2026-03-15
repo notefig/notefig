@@ -77,6 +77,10 @@ export function hasEditor(filePath: string): boolean {
   return editorInstances.has(filePath);
 }
 
+export function getEditor(filePath: string): PlateEditor | undefined {
+  return editorInstances.get(filePath);
+}
+
 /**
  * Save the current selection for an editor so it can be restored after remount.
  */

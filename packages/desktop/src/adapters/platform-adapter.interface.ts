@@ -256,4 +256,9 @@ export interface IPlatformAdapter {
    * Get all settings as a flat record.
    */
   getAllSettings(): Promise<Record<string, unknown>>;
+
+  /**
+   * Toggle application fullscreen state.
+   */
+  toggleFullscreen(): Promise<void>;
 }

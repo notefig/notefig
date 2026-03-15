@@ -5,6 +5,7 @@ import {
   Settings,
   Search,
   FolderOpen,
+  FolderPlus,
   Plus,
   Save,
   Undo,
@@ -22,7 +23,6 @@ import {
   Edit3,
   Terminal,
   Maximize,
-  Minimize,
   X,
 } from "lucide-react";
 import {
@@ -47,8 +47,13 @@ interface CommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onNewFile?: () => void;
+  onNewDirectory?: () => void;
+  onCloseFile?: () => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
   onOpenSettings?: () => void;
   onToggleSidebar?: () => void;
+  onToggleFullscreen?: () => void | Promise<void>;
   direction?: "ltr" | "rtl";
 }
 
@@ -57,7 +62,7 @@ interface CommandType {
   label: string;
   icon: React.ElementType;
   shortcut?: string;
-  action?: () => void;
+  action?: () => void | Promise<void>;
   group: string;
 }
 
@@ -65,8 +70,13 @@ export function CommandPalette({
   open,
   onOpenChange,
   onNewFile,
+  onNewDirectory,
+  onCloseFile,
+  onUndo,
+  onRedo,
   onOpenSettings,
   onToggleSidebar,
+  onToggleFullscreen,
   direction = "ltr",
 }: CommandPaletteProps) {
   const [search, setSearch] = useState("");
@@ -106,6 +116,14 @@ export function CommandPalette({
       label: "Close File",
       icon: FileText,
       shortcut: formatForDisplay("Mod+W"),
+      action: onCloseFile,
+      group: "File",
+    },
+    {
+      id: "new-directory",
+      label: "New Directory",
+      icon: FolderPlus,
+      action: onNewDirectory,
       group: "File",
     },
 
@@ -115,6 +133,7 @@ export function CommandPalette({
       label: "Undo",
       icon: Undo,
       shortcut: formatForDisplay("Mod+Z"),
+      action: onUndo,
       group: "Edit",
     },
     {
@@ -122,6 +141,7 @@ export function CommandPalette({
       label: "Redo",
       icon: Redo,
       shortcut: formatForDisplay("Mod+Shift+Z"),
+      action: onRedo,
       group: "Edit",
     },
     {
@@ -174,20 +194,7 @@ export function CommandPalette({
       label: "Toggle Fullscreen",
       icon: Maximize,
       shortcut: "F11",
-      group: "View",
-    },
-    {
-      id: "zoom-in",
-      label: "Zoom In",
-      icon: Maximize,
-      shortcut: formatForDisplay("Mod++"),
-      group: "View",
-    },
-    {
-      id: "zoom-out",
-      label: "Zoom Out",
-      icon: Minimize,
-      shortcut: formatForDisplay("Mod+-"),
+      action: onToggleFullscreen,
       group: "View",
     },
     {
@@ -289,7 +296,9 @@ export function CommandPalette({
 
   const handleSelect = (command: CommandType) => {
     if (command.action) {
-      command.action();
+      Promise.resolve(command.action()).catch((error: unknown) => {
+        console.error(`Failed to run command: ${command.id}`, error);
+      });
     }
     onOpenChange(false);
   };

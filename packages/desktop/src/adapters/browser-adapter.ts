@@ -895,4 +895,13 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     }
     return settings;
   }
+
+  async toggleFullscreen(): Promise<void> {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+      return;
+    }
+
+    await document.documentElement.requestFullscreen();
+  }
 }

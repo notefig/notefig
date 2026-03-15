@@ -21,7 +21,7 @@ import {
   handleMetadataFileSystemChange,
   handleContentFileSystemChange,
 } from "@/utils/file-sync";
-import { disposeAllEditors } from "@/components/editor/editor-store";
+import { disposeAllEditors, getEditor } from "@/components/editor/editor-store";
 import { useSearchParams } from "react-router";
 import {
   type FileTreeMode,
@@ -46,6 +46,8 @@ export const Workspace = () => {
     handleFileSelect,
     handleLayoutChange,
     closeTab,
+    closeActiveTab,
+    getFocusedTabId,
   } = useDockableTabs({
     renderTabs: () => [],
     canOpenFile: (file) => file.type === "file" && isTextFile(file.path),
@@ -138,6 +140,45 @@ export const Workspace = () => {
       itemType: "file",
     });
   }, [workspacePath]);
+
+  const handleNewDirectory = useCallback(() => {
+    setFileTreeMode({
+      type: "creating",
+      parentPath: workspacePath,
+      itemType: "directory",
+    });
+  }, [workspacePath]);
+
+  const runEditorHistoryAction = useCallback(
+    (action: "undo" | "redo") => {
+      const focusedTabId = getFocusedTabId();
+      if (!focusedTabId) return;
+
+      const editor = getEditor(focusedTabId) as
+        | { undo?: () => void; redo?: () => void }
+        | undefined;
+
+      if (action === "undo") {
+        editor?.undo?.();
+      } else {
+        editor?.redo?.();
+      }
+    },
+    [getFocusedTabId],
+  );
+
+  const handleToggleFullscreen = useCallback(() => {
+    platformAdapter.toggleFullscreen().catch((error: unknown) => {
+      console.error("Failed to toggle fullscreen:", error);
+    });
+  }, []);
+
+  const handleOpenSettings = useCallback(() => {
+    setSearchParams((prev) => {
+      prev.set("settings", "true");
+      return prev;
+    });
+  }, [setSearchParams]);
 
   useHotkey("Mod+N", () => {
     handleNewFile();
@@ -238,10 +279,13 @@ export const Workspace = () => {
         open={isCommandPaletteOpen}
         onOpenChange={setIsCommandPaletteOpen}
         onNewFile={handleNewFile}
-        onOpenSettings={() => {
-          setIsCommandPaletteOpen(false);
-        }}
+        onNewDirectory={handleNewDirectory}
+        onCloseFile={closeActiveTab}
+        onUndo={() => runEditorHistoryAction("undo")}
+        onRedo={() => runEditorHistoryAction("redo")}
+        onOpenSettings={handleOpenSettings}
         onToggleSidebar={toggleSidebarCollapsed}
+        onToggleFullscreen={handleToggleFullscreen}
         direction={direction}
       />
     </div>

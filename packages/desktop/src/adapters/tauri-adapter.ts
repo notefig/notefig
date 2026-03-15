@@ -12,6 +12,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LazyStore } from "@tauri-apps/plugin-store";
 
 export class TauriPlatformAdapter implements IPlatformAdapter {
@@ -401,6 +402,12 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   async getAllSettings(): Promise<Record<string, unknown>> {
     const entries = await this.settingsStore.entries();
     return Object.fromEntries(entries);
+  }
+
+  async toggleFullscreen(): Promise<void> {
+    const window = getCurrentWindow();
+    const isFullscreen = await window.isFullscreen();
+    await window.setFullscreen(!isFullscreen);
   }
 
   private cleanupListeners(): void {

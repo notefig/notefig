@@ -113,7 +113,7 @@ export function SettingsModal({
     notifySlowStartup: false,
   });
 
-  useHotkey("Mod+S", () => {
+  useHotkey("Mod+,", () => {
     handleSettingsToggle(!searchParams.get("settings"));
   });
 

@@ -58,6 +58,9 @@ export interface UseDockableTabsResult {
   /** Programmatically close a tab */
   closeTab: (tabId: string) => void;
 
+  /** Get the selected tab in the focused window */
+  getFocusedTabId: () => string | null;
+
   /** Close the selected tab in the focused window */
   closeActiveTab: () => void;
 
@@ -216,14 +219,17 @@ export function useDockableTabs(
     return findFirstWindow(layout);
   }, [dockableRef, layout]);
 
+  const getFocusedTabId = useCallback(() => {
+    return getActiveWindow()?.selected ?? activeTabId;
+  }, [getActiveWindow, activeTabId]);
+
   const closeActiveTab = useCallback(() => {
-    const activeWindow = getActiveWindow();
-    const tabId = activeWindow?.selected ?? activeTabId;
+    const tabId = getFocusedTabId();
 
     if (!tabId) return;
 
     closeTab(tabId);
-  }, [getActiveWindow, activeTabId, closeTab]);
+  }, [getFocusedTabId, closeTab]);
 
   const selectTabAtIndex = useCallback(
     (index: number) => {
@@ -377,6 +383,7 @@ export function useDockableTabs(
     handleLayoutChange,
     openTab,
     closeTab,
+    getFocusedTabId,
     closeActiveTab,
     selectTab,
     selectTabAtIndex,
