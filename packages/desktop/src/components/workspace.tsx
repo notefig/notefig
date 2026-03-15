@@ -46,9 +46,6 @@ export const Workspace = () => {
     handleFileSelect,
     handleLayoutChange,
     closeTab,
-    closeActiveTab,
-    selectNextTab,
-    selectPrevTab,
   } = useDockableTabs({
     renderTabs: () => [],
     canOpenFile: (file) => file.type === "file" && isTextFile(file.path),
@@ -142,21 +139,6 @@ export const Workspace = () => {
     });
   }, [workspacePath]);
 
-  // Close active tab
-  useHotkey("Mod+W", () => {
-    closeActiveTab();
-  });
-
-  useHotkey("Control+Tab", () => {
-    selectNextTab();
-  });
-
-  // Previous tab
-  useHotkey("Control+Shift+Tab", () => {
-    selectPrevTab();
-  });
-
-  // New file
   useHotkey("Mod+N", () => {
     handleNewFile();
   });

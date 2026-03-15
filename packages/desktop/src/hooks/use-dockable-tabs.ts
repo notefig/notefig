@@ -1,4 +1,5 @@
 import { useCallback, useMemo, type ReactElement, type RefObject } from "react";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import type { LayoutNode, TabProps } from "@/components/dockable";
 import { useLayoutSearchParam } from "./use-layout-search-param";
 import {
@@ -62,6 +63,9 @@ export interface UseDockableTabsResult {
 
   /** Programmatically switch to a tab */
   selectTab: (tabId: string) => void;
+
+  /** Switch to a tab by index within the focused window */
+  selectTabAtIndex: (index: number) => void;
 
   /** Switch to the next tab (wraps around) */
   selectNextTab: () => void;
@@ -221,6 +225,122 @@ export function useDockableTabs(
     closeTab(tabId);
   }, [getActiveWindow, activeTabId, closeTab]);
 
+  const selectTabAtIndex = useCallback(
+    (index: number) => {
+      const activeWindow = getActiveWindow();
+      const tabId = activeWindow?.children[index];
+
+      if (!tabId) return;
+
+      setLayout(selectTabInLayout(layout, tabId));
+    },
+    [getActiveWindow, layout, setLayout],
+  );
+
+  const dockableHotkeyOptions = useMemo(
+    () => ({
+      enabled: openTabs.length > 0,
+      target: dockableRef,
+    }),
+    [dockableRef, openTabs.length],
+  );
+
+  useHotkey(
+    "Mod+W",
+    () => {
+      closeActiveTab();
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    "Control+Tab",
+    () => {
+      selectNextTab();
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    "Control+Shift+Tab",
+    () => {
+      selectPrevTab();
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    { key: "1", mod: true },
+    () => {
+      selectTabAtIndex(0);
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    { key: "2", mod: true },
+    () => {
+      selectTabAtIndex(1);
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    { key: "3", mod: true },
+    () => {
+      selectTabAtIndex(2);
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    { key: "4", mod: true },
+    () => {
+      selectTabAtIndex(3);
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    { key: "5", mod: true },
+    () => {
+      selectTabAtIndex(4);
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    { key: "6", mod: true },
+    () => {
+      selectTabAtIndex(5);
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    { key: "7", mod: true },
+    () => {
+      selectTabAtIndex(6);
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    { key: "8", mod: true },
+    () => {
+      selectTabAtIndex(7);
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    { key: "9", mod: true },
+    () => {
+      selectTabAtIndex(8);
+    },
+    dockableHotkeyOptions,
+  );
+
   const selectNextTab = useCallback(() => {
     const activeWindow = getActiveWindow();
     if (!activeWindow || activeWindow.children.length <= 1) return;
@@ -259,6 +379,7 @@ export function useDockableTabs(
     closeTab,
     closeActiveTab,
     selectTab,
+    selectTabAtIndex,
     selectNextTab,
     selectPrevTab,
   };
