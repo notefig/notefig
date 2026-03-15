@@ -14,17 +14,10 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { LazyStore } from "@tauri-apps/plugin-store";
 
-/**
- * Tauri platform adapter
- * Implements platform-specific operations for Tauri desktop environment
- * Delegates file operations to Rust backend for performance and native file system access
- */
 export class TauriPlatformAdapter implements IPlatformAdapter {
   private eventListeners: Set<PlatformEventListener> = new Set();
   private unlistenFns: Promise<UnlistenFn>[] = [];
   private settingsStore = new LazyStore("settings.json");
-
-  // ========== Directory Picker ==========
 
   async pickDirectory(title: string): Promise<string | null> {
     const result = await open({
@@ -35,8 +28,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
 
     return Array.isArray(result) ? result[0] : result;
   }
-
-  // ========== Directory Operations ==========
 
   async readDirectory(
     path: string,
@@ -138,8 +129,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       };
     }
   }
-
-  // ========== File Operations ==========
 
   async readFiles(
     paths: string[],
@@ -265,8 +254,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  // ========== Metadata & Existence ==========
-
   async exists(
     paths: string[],
   ): Promise<{ path: string; exists: boolean; type?: "file" | "directory" }[]> {
@@ -300,8 +287,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  // ========== File Watching ==========
-
   async startWatchingMetadata(paths: string[], watchId: string): Promise<void> {
     try {
       await invoke("start_watching_metadata", { paths, watchId });
@@ -329,17 +314,13 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  // ========== Event Listeners ==========
-
   addEventListener(callback: PlatformEventListener): () => void {
     this.eventListeners.add(callback);
 
-    // Set up listeners if this is the first callback
     if (this.eventListeners.size === 1) {
       this.setupListeners();
     }
 
-    // Return cleanup function
     return () => {
       this.removeEventListener(callback);
     };
@@ -348,17 +329,12 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   removeEventListener(callback: PlatformEventListener): void {
     this.eventListeners.delete(callback);
 
-    // Clean up listeners if no more callbacks
     if (this.eventListeners.size === 0) {
       this.cleanupListeners();
     }
   }
 
-  /**
-   * Set up Tauri event listeners
-   */
   private setupListeners(): void {
-    // Listen for theme changes
     const themeUnlisten = listen("theme-changed", (event) => {
       const theme = event.payload as any;
       this.eventListeners.forEach((callback) => {
@@ -367,7 +343,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     });
     this.unlistenFns.push(themeUnlisten);
 
-    // Listen for folder selection
     const folderUnlisten = listen("folder-selected", (event) => {
       const folderPath = event.payload as string;
       this.eventListeners.forEach((callback) => {
@@ -376,7 +351,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     });
     this.unlistenFns.push(folderUnlisten);
 
-    // Listen for metadata changes
     const metadataUnlisten = listen("fs-metadata-changed", (event) => {
       const payload = event.payload as MetadataChangeEvent;
       this.eventListeners.forEach((callback) => {
@@ -385,7 +359,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     });
     this.unlistenFns.push(metadataUnlisten);
 
-    // Listen for content changes
     const contentUnlisten = listen("fs-content-changed", (event) => {
       const payload = event.payload as ContentChangeEvent;
       this.eventListeners.forEach((callback) => {
@@ -394,7 +367,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     });
     this.unlistenFns.push(contentUnlisten);
 
-    // Listen for zoom level changes
     const zoomUnlisten = listen("zoom-changed", (event) => {
       const zoom = event.payload as number;
       this.eventListeners.forEach((callback) => {
@@ -403,7 +375,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     });
     this.unlistenFns.push(zoomUnlisten);
 
-    // Listen for file drops
     getCurrentWebview()
       .onDragDropEvent((event) => {
         if (event.payload.type === "drop") {
@@ -418,18 +389,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       .then((unlisten) => this.unlistenFns.push(Promise.resolve(unlisten)));
   }
 
-  /**
-   * Clean up Tauri event listeners
-   */
-  private cleanupListeners(): void {
-    this.unlistenFns.forEach((unlistenPromise) => {
-      unlistenPromise.then((unlisten) => unlisten());
-    });
-    this.unlistenFns = [];
-  }
-
-  // ========== App Settings ==========
-
   async getSetting<T>(key: string): Promise<T | undefined> {
     return await this.settingsStore.get<T>(key);
   }
@@ -442,5 +401,12 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   async getAllSettings(): Promise<Record<string, unknown>> {
     const entries = await this.settingsStore.entries();
     return Object.fromEntries(entries);
+  }
+
+  private cleanupListeners(): void {
+    this.unlistenFns.forEach((unlistenPromise) => {
+      unlistenPromise.then((unlisten) => unlisten());
+    });
+    this.unlistenFns = [];
   }
 }

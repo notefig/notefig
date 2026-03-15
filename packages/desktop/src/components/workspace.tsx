@@ -93,13 +93,11 @@ export const Workspace = () => {
     [fileDataWithContent, workspacePath, layout, handleLayoutChange],
   );
 
-  // Get current content for status bar from active tab
   const activeFileData = fileDataWithContent.find(
     (f) => f.path === activeTabId,
   );
   const currentContent = activeFileData?.content || "";
 
-  // ── UI state ──
   const [searchParams, setSearchParams] = useSearchParams();
   const isSidebarCollapsed = searchParams.get("sidebar") === "collapsed";
   const toggleSidebarCollapsed = useCallback(() => {
@@ -188,7 +186,6 @@ export const Workspace = () => {
         <DebugPanel />
 
         <div className="flex-1 flex min-h-0 overflow-hidden">
-          {/* ── File tree sidebar ── */}
           {!isSidebarCollapsed && (
             <Sidebar
               workspacePath={workspacePath}
@@ -201,7 +198,6 @@ export const Workspace = () => {
             />
           )}
 
-          {/* ── Editor area (Dockable) ── */}
           <div className="flex-1 min-w-0 h-full overflow-hidden">
             {openTabs.length === 0 || dockableTabs.length === 0 ? (
               <div className="flex items-center justify-center h-full text-muted-foreground p-4 ps-0">
