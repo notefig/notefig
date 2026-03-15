@@ -46,6 +46,7 @@ export const Workspace = () => {
     handleFileSelect,
     handleLayoutChange,
     closeTab,
+    closeActiveTab,
     selectNextTab,
     selectPrevTab,
   } = useDockableTabs({
@@ -143,9 +144,7 @@ export const Workspace = () => {
 
   // Close active tab
   useHotkey("Mod+W", () => {
-    if (activeTabId) {
-      closeTab(activeTabId);
-    }
+    closeActiveTab();
   });
 
   useHotkey("Control+Tab", () => {

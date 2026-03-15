@@ -5,6 +5,7 @@ import {
   addTabToLayout,
   findFirstWindow,
   findWindowById,
+  removeTabFromLayout,
   selectTabInLayout,
   createInitialLayout,
   extractTabIds,
@@ -55,6 +56,9 @@ export interface UseDockableTabsResult {
 
   /** Programmatically close a tab */
   closeTab: (tabId: string) => void;
+
+  /** Close the selected tab in the focused window */
+  closeActiveTab: () => void;
 
   /** Programmatically switch to a tab */
   selectTab: (tabId: string) => void;
@@ -170,22 +174,7 @@ export function useDockableTabs(
 
       disposeEditor(tabId);
 
-      // Remove tab from layout
-      const nextLayout = layout
-        .map((node) => {
-          if (node.type === "Window") {
-            const newChildren = node.children.filter((id) => id !== tabId);
-            if (newChildren.length === 0) return null;
-
-            const newSelected =
-              node.selected === tabId ? newChildren[0] : node.selected;
-            return { ...node, children: newChildren, selected: newSelected };
-          }
-          return node;
-        })
-        .filter((node): node is LayoutNode => node !== null);
-
-      setLayout(nextLayout);
+      setLayout(removeTabFromLayout(layout, tabId));
     },
     [layout, openTabs, setLayout],
   );
@@ -223,6 +212,15 @@ export function useDockableTabs(
     return findFirstWindow(layout);
   }, [dockableRef, layout]);
 
+  const closeActiveTab = useCallback(() => {
+    const activeWindow = getActiveWindow();
+    const tabId = activeWindow?.selected ?? activeTabId;
+
+    if (!tabId) return;
+
+    closeTab(tabId);
+  }, [getActiveWindow, activeTabId, closeTab]);
+
   const selectNextTab = useCallback(() => {
     const activeWindow = getActiveWindow();
     if (!activeWindow || activeWindow.children.length <= 1) return;
@@ -259,6 +257,7 @@ export function useDockableTabs(
     handleLayoutChange,
     openTab,
     closeTab,
+    closeActiveTab,
     selectTab,
     selectNextTab,
     selectPrevTab,

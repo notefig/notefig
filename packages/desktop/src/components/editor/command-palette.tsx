@@ -86,7 +86,6 @@ export function CommandPalette({
   }, [open]);
 
   const commands: CommandType[] = [
-    // File commands
     {
       id: "new-file",
       label: "New File",
@@ -100,13 +99,6 @@ export function CommandPalette({
       label: "Open File",
       icon: FolderOpen,
       shortcut: formatForDisplay("Mod+O"),
-      group: "File",
-    },
-    {
-      id: "save-file",
-      label: "Save File",
-      icon: Save,
-      shortcut: formatForDisplay("Mod+S"),
       group: "File",
     },
     {
