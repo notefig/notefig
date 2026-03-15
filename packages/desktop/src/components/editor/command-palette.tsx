@@ -293,6 +293,11 @@ export function CommandPalette({
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Type a command or search..."
               className="flex-1 h-10 bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              // @ts-ignore
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
             />
             <button
               onClick={() => onOpenChange(false)}
