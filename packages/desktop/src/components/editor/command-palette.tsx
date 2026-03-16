@@ -46,6 +46,7 @@ import { useTheme } from "../theme-provider";
 
 interface CommandPaletteProps {
   open: boolean;
+  sidebarOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onNewFile?: () => void;
   onNewDirectory?: () => void;
@@ -69,6 +70,7 @@ interface CommandType {
 
 export function CommandPalette({
   open,
+  sidebarOpen,
   onOpenChange,
   onNewFile,
   onNewDirectory,
@@ -115,7 +117,12 @@ export function CommandPalette({
       label: "New File",
       icon: Plus,
       shortcut: formatForDisplay("Mod+N"),
-      action: onNewFile,
+      action: () => {
+        if (sidebarOpen) {
+          onToggleSidebar?.();
+        }
+        onNewFile?.();
+      },
       group: "File",
     },
     {
@@ -130,7 +137,12 @@ export function CommandPalette({
       id: "new-directory",
       label: "New Directory",
       icon: FolderPlus,
-      action: onNewDirectory,
+      action: () => {
+        if (sidebarOpen) {
+          onToggleSidebar?.();
+        }
+        onNewDirectory?.();
+      },
       group: "File",
     },
     {
