@@ -15,23 +15,10 @@ import { cn } from "@/lib/utils";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import {
   Settings,
-  Pencil,
-  FileText,
   Palette,
   Keyboard,
-  Key,
-  Package,
-  Puzzle,
-  Link2,
-  LayoutGrid,
-  Terminal,
-  CalendarDays,
-  History,
-  PenTool,
-  Eye,
-  Search,
   RefreshCw,
-  FileCode,
+  GitBranch,
   Download,
   CheckCircle2,
   AlertCircle,
@@ -62,28 +49,15 @@ const settingsSections: SettingsSection[] = [
     label: "projectSettings",
     items: [
       { id: "general", label: "General", icon: Settings },
-      { id: "editor", label: "Editor", icon: Pencil },
-      { id: "files", label: "Files and links", icon: FileText },
       { id: "appearance", label: "Appearance", icon: Palette },
       { id: "hotkeys", label: "Hotkeys", icon: Keyboard },
-      { id: "keychain", label: "Keychain", icon: Key },
-      { id: "core-plugins", label: "Core plugins", icon: Package },
-      { id: "community-plugins", label: "Community plugins", icon: Puzzle },
     ],
   },
   {
     label: "corePlugins",
     items: [
-      { id: "backlinks", label: "Backlinks", icon: Link2 },
-      { id: "canvas", label: "Canvas", icon: LayoutGrid },
-      { id: "command-palette", label: "Command palette", icon: Terminal },
-      { id: "daily-notes", label: "Daily notes", icon: CalendarDays },
-      { id: "file-recovery", label: "File recovery", icon: History },
-      { id: "note-composer", label: "Note composer", icon: PenTool },
-      { id: "page-preview", label: "Page preview", icon: Eye },
-      { id: "quick-switcher", label: "Quick switcher", icon: Search },
+      { id: "Git", label: "Git", icon: GitBranch },
       { id: "sync", label: "Sync", icon: RefreshCw },
-      { id: "templates", label: "Templates", icon: FileCode },
     ],
   },
 ];
@@ -128,8 +102,6 @@ export function SettingsModal({
             onDirectionChange={onDirectionChange}
           />
         );
-      case "editor":
-        return <EditorSettings />;
       case "appearance":
         return <AppearanceSettings />;
       default:
@@ -204,10 +176,8 @@ function GeneralSettings({
 }) {
   return (
     <div className="space-y-8 max-w-3xl">
-      {/* Update Section */}
       <UpdateSection />
 
-      {/* Language */}
       <SettingRow
         title="Language"
         description="Change the display language."
@@ -234,7 +204,6 @@ function GeneralSettings({
         </Select>
       </SettingRow>
 
-      {/* Text Direction */}
       <SettingRow
         title="Text direction"
         description="Control the layout direction of the entire application."
@@ -253,107 +222,14 @@ function GeneralSettings({
         </Select>
       </SettingRow>
 
-      {/* Help */}
-      <SettingRow
-        title="Help"
-        description="Learn how to use the editor and get help from the community."
-      >
-        <Button variant="secondary">Open</Button>
-      </SettingRow>
-
-      {/* Account Section */}
-      <div className="pt-4">
-        <h2 className="text-lg font-semibold mb-4">Account</h2>
-
-        <SettingRow
-          title="Your account"
-          description="You're not logged in right now. An account is only needed for Sync, Publish, and early access versions."
-        >
-          <div className="flex gap-2 shrink-0">
-            <Button variant="secondary">Log in</Button>
-            <Button variant="secondary">Sign up</Button>
-          </div>
-        </SettingRow>
-
-        <SettingRow
-          title="Commercial license"
-          description="Help keep the editor 100% user-supported."
-          link={{ text: "Learn more", href: "#" }}
-        >
-          <div className="flex gap-2 shrink-0">
-            <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">
-              Activate
-            </Button>
-            <Button variant="secondary">Purchase</Button>
-          </div>
-        </SettingRow>
-      </div>
-
-      {/* Advanced Section */}
       <div className="pt-4">
         <h2 className="text-lg font-semibold mb-4">Advanced</h2>
-
-        <SettingRow
-          title="Notify if startup takes longer than expected"
-          description="Diagnose issues with your app by seeing what is causing the app to load slowly."
-        >
-          <Switch
-            checked={settings.notifySlowStartup}
-            onCheckedChange={(checked) =>
-              setSettings((prev) => ({ ...prev, notifySlowStartup: checked }))
-            }
-          />
-        </SettingRow>
-
         <DebugModeToggle />
       </div>
     </div>
   );
 }
 
-// Editor Settings Panel
-function EditorSettings() {
-  const [spellcheck, setSpellcheck] = useState(true);
-  const [lineNumbers, setLineNumbers] = useState(false);
-  const [fontSize, setFontSize] = useState("16");
-
-  return (
-    <div className="space-y-8 max-w-3xl">
-      <h2 className="text-lg font-semibold">Editor</h2>
-
-      <SettingRow
-        title="Spellcheck"
-        description="Enable spellcheck in the editor."
-      >
-        <Switch checked={spellcheck} onCheckedChange={setSpellcheck} />
-      </SettingRow>
-
-      <SettingRow
-        title="Show line numbers"
-        description="Display line numbers in the editor gutter."
-      >
-        <Switch checked={lineNumbers} onCheckedChange={setLineNumbers} />
-      </SettingRow>
-
-      <SettingRow title="Font size" description="Set the editor font size.">
-        <Select value={fontSize} onValueChange={setFontSize}>
-          <SelectTrigger className="w-24">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="12">12px</SelectItem>
-            <SelectItem value="14">14px</SelectItem>
-            <SelectItem value="16">16px</SelectItem>
-            <SelectItem value="18">18px</SelectItem>
-            <SelectItem value="20">20px</SelectItem>
-          </SelectContent>
-        </Select>
-      </SettingRow>
-    </div>
-  );
-}
-
-// Appearance Settings Panel
 function AppearanceSettings() {
   const { setTheme, theme } = useTheme();
   const { setTheme: persistTheme } = useAppSettings();
@@ -384,29 +260,10 @@ function AppearanceSettings() {
           </SelectContent>
         </Select>
       </SettingRow>
-
-      <SettingRow
-        title="Accent color"
-        description="Choose an accent color for highlights and interactive elements."
-      >
-        <Select value={accentColor} onValueChange={setAccentColor}>
-          <SelectTrigger className="w-32">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="purple">Purple</SelectItem>
-            <SelectItem value="blue">Blue</SelectItem>
-            <SelectItem value="green">Green</SelectItem>
-            <SelectItem value="orange">Orange</SelectItem>
-            <SelectItem value="pink">Pink</SelectItem>
-          </SelectContent>
-        </Select>
-      </SettingRow>
     </div>
   );
 }
 
-// Update Section Component
 function UpdateSection() {
   const {
     status,
@@ -459,12 +316,6 @@ function UpdateSection() {
                 Downloading update...
                 {progressPercent !== null && ` ${progressPercent}%`}
               </p>
-              <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                <div
-                  className="h-full bg-primary transition-all duration-200"
-                  style={{ width: `${progressPercent ?? 0}%` }}
-                />
-              </div>
             </div>
           )}
           {status === "ready" && (
@@ -519,7 +370,6 @@ function UpdateSection() {
   );
 }
 
-// Debug Mode Toggle
 function DebugModeToggle() {
   const [searchParams, setSearchParams] = useSearchParams();
   const isDebugActive = searchParams.get("debug") === "true";
@@ -545,7 +395,6 @@ function DebugModeToggle() {
   );
 }
 
-// Placeholder for other settings
 function PlaceholderSettings({ section }: { section: string }) {
   const title =
     settingsSections.flatMap((s) => s.items).find((i) => i.id === section)
@@ -561,7 +410,6 @@ function PlaceholderSettings({ section }: { section: string }) {
   );
 }
 
-// Reusable Setting Row Component
 function SettingRow({
   title,
   description,
