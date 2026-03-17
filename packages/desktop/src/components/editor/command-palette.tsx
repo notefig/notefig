@@ -329,9 +329,10 @@ export function CommandPalette({
         <DialogDescription>Search for a command to run...</DialogDescription>
       </DialogHeader>
       <DialogContent
-        className="overflow-hidden p-0 max-w-lg"
+        className="overflow-hidden p-0 max-w-lg gap-0"
         dir={direction}
         onCloseAutoFocus={handleCloseAutoFocus}
+        showCloseButton={false}
       >
         <Command className="[&_[cmdk-group-heading]]:text-muted-foreground **:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5">
           <div className="flex items-center border-b px-3 h-12">
@@ -350,9 +351,9 @@ export function CommandPalette({
             <button
               onClick={() => onOpenChange(false)}
               className="ms-2 p-1 rounded hover:bg-accent transition-colors"
+              aria-label="Close command palette"
             >
               <X className="size-4 text-muted-foreground" />
-              <span className="sr-only">Close</span>
             </button>
           </div>
           <CommandList>
