@@ -1,6 +1,10 @@
 import type { IPlatformAdapter } from "./platform-adapter.interface";
 import { TauriPlatformAdapter } from "./tauri-adapter";
 import { BrowserPlatformAdapter } from "./browser-adapter";
+import {
+  BrowserFsPlatformAdapter,
+  shouldUseBrowserFsAdapter,
+} from "./browser-fs-adapter";
 import { Platform, getPlatform } from "@/utils/platform";
 
 /**
@@ -22,7 +26,9 @@ class PlatformAdapterFactory {
           this.instance = new TauriPlatformAdapter();
           break;
         case Platform.BROWSER:
-          this.instance = new BrowserPlatformAdapter();
+          this.instance = shouldUseBrowserFsAdapter()
+            ? new BrowserFsPlatformAdapter()
+            : new BrowserPlatformAdapter();
           break;
         default:
           // Fallback to browser adapter

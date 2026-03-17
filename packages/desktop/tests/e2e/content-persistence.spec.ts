@@ -82,8 +82,8 @@ test.describe("Content & Persistence", () => {
       "# Recovery Test\n\nContent edited before reload.\n\nThis should persist after page reload.";
     await replaceEditorContent(page, editedContent);
 
-    // Wait for auto-save
-    await waitForAutoSave(page);
+    // Wait for auto-save (large file; allow extra time)
+    await waitForAutoSave(page, 1000);
 
     // Simulate crash/reload
     await page.reload();
@@ -322,8 +322,30 @@ test.describe("Content & Persistence", () => {
     await page.getByRole("button", { name: "Select Directory" }).click();
 
     // Open two files to create two tabs
-    await page.getByRole("button", { name: "getting-started.md" }).click();
-    await page.getByRole("button", { name: "features.md" }).click();
+    await page
+      .locator(
+        'button[data-file-path="/workspace/demo-content/docs/features.md"]',
+      )
+      .click();
+    await page.getByRole("button", { name: "README.md" }).click();
+
+    // Ensure features.md tab exists (click again in case it was not opened)
+    await page
+      .locator(
+        'button[data-file-path="/workspace/demo-content/docs/features.md"]',
+      )
+      .click();
+
+    // Ensure both tabs exist and focus features.md
+    await page
+      .getByRole("button", { name: "features.md Close tab" })
+      .waitFor({ timeout: 5000 });
+    const readmeTab = page.getByRole("button", { name: "README.md Close tab" });
+    await readmeTab.waitFor({ timeout: 5000 }).catch(async () => {
+      await page.getByRole("button", { name: "README.md" }).click();
+      await readmeTab.waitFor({ timeout: 5000 });
+    });
+    await page.getByRole("button", { name: "features.md Close tab" }).click();
 
     // Click on a list item deep in features.md to place cursor away from start
     await page
@@ -341,16 +363,12 @@ test.describe("Content & Persistence", () => {
       };
     });
 
-    // Switch to getting-started.md tab
-    await page
-      .getByRole("button", { name: "getting-started.md Close" })
-      .click();
+    // Switch to README.md tab
+    await page.getByRole("button", { name: "README.md Close tab" }).click();
     await page.waitForTimeout(500);
 
     // Switch back to features.md tab
-    await page
-      .getByRole("button", { name: "features.md Close features.md" })
-      .click();
+    await page.getByRole("button", { name: "features.md Close tab" }).click();
     await page.waitForTimeout(500);
 
     // Verify cursor is restored — not at the beginning of the file

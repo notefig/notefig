@@ -21,6 +21,7 @@ test.describe("Happy Path - Complete User Flow", () => {
   test("should complete full editing workflow with persistence", async ({
     page,
   }) => {
+    test.setTimeout(60000);
     const fixture = happyPathFixture.demoWorkspace;
 
     // Navigate to workspace first

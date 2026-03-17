@@ -112,12 +112,7 @@ export async function openWorkspace(page: Page, workspacePath: string) {
 export async function openFileInTree(page: Page, fileName: string) {
   // Wait for the file button to be present
   // Files have a specific structure: button > div > svg (FileText icon) + span (filename)
-  const fileButton = page
-    .locator(`button:has-text("${fileName}")`)
-    .filter({
-      has: page.locator("svg").first(), // Files have an svg icon
-    })
-    .first();
+  const fileButton = page.locator(`button:has-text("${fileName}")`).first();
 
   await fileButton.waitFor({ timeout: 5000 });
   await fileButton.click();

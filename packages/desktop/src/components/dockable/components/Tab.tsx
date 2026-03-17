@@ -71,7 +71,7 @@ function Tab({
                 e.stopPropagation();
                 onClose();
               }}
-              aria-label={`Close ${name}`}
+              aria-label="Close tab"
             >
               <svg
                 width="14"
