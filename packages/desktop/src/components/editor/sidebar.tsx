@@ -187,15 +187,9 @@ export function Sidebar({
     <>
       <div
         ref={containerRef}
-        className="shrink-0 bg-sidebar flex flex-col border-border"
+        className="shrink-0 bg-sidebar flex flex-col-reverse border-border"
         style={{ width: sidebarWidth }}
       >
-        <FileControls
-          onNewFile={handleNewFile}
-          onNewFolder={handleNewFolder}
-          sortOrder={sortOrder}
-          onSortChange={setSortOrder}
-        />
         <FileTree
           selectedFilePath={activeTabId}
           onFileSelect={onFileSelect}
@@ -207,6 +201,12 @@ export function Sidebar({
           sortOrder={sortOrder}
           mode={mode}
           onModeChange={onModeChange}
+        />
+        <FileControls
+          onNewFile={handleNewFile}
+          onNewFolder={handleNewFolder}
+          sortOrder={sortOrder}
+          onSortChange={setSortOrder}
         />
       </div>
       <div
