@@ -52,6 +52,7 @@ export function Sidebar({
   const [sidebarWidth, setSidebarWidth] = useState(240);
   const [isResizing, setIsResizing] = useState(false);
   const resizeRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -84,6 +85,16 @@ export function Sidebar({
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setIsResizing(true);
+  }, []);
+
+  useEffect(() => {
+    // When the sidebar mounts (opened), focus the first file item for keyboard nav.
+    const raf = requestAnimationFrame(() => {
+      const firstButton =
+        containerRef.current?.querySelector<HTMLButtonElement>("button");
+      firstButton?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(raf);
   }, []);
 
   const handleNewFile = useCallback(() => {
@@ -175,6 +186,7 @@ export function Sidebar({
   return (
     <>
       <div
+        ref={containerRef}
         className="shrink-0 bg-sidebar flex flex-col border-border"
         style={{ width: sidebarWidth }}
       >

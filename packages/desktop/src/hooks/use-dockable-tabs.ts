@@ -1,4 +1,11 @@
-import { useCallback, useMemo, type ReactElement, type RefObject } from "react";
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  useEffect,
+  type ReactElement,
+  type RefObject,
+} from "react";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import type { LayoutNode, TabProps } from "@/components/dockable";
 import { useLayoutSearchParam } from "./use-layout-search-param";
@@ -11,7 +18,7 @@ import {
   createInitialLayout,
   extractTabIds,
 } from "@/utils/dockable-layout";
-import { disposeEditor } from "@/components/editor/editor-store";
+import { disposeEditor, focusEditor } from "@/components/editor/editor-store";
 import type { FileTreeNode } from "@/utils/fs";
 
 export interface UseDockableTabsOptions {
@@ -75,6 +82,9 @@ export interface UseDockableTabsResult {
 
   /** Switch to the previous tab (wraps around) */
   selectPrevTab: () => void;
+
+  /** Focus the editor of the currently focused tab (last-focused window aware) */
+  focusActiveEditor: () => boolean;
 }
 
 /**
@@ -109,9 +119,30 @@ export function useDockableTabs(
 ): UseDockableTabsResult {
   const { renderTabs, canOpenFile, dockableRef } = options;
   const { layout, setLayout, openTabs, activeTabId } = useLayoutSearchParam();
+  const lastFocusedWindowIdRef = useRef<string | null>(null);
 
   // Render tabs using the provided render function
   const tabs = useMemo(() => renderTabs(openTabs), [renderTabs, openTabs]);
+
+  // Track last-focused window inside dockable area
+  useEffect(() => {
+    const root = dockableRef?.current;
+    if (!root) return;
+
+    const handleFocusIn = (event: FocusEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      const windowEl = target.closest<HTMLElement>("[data-dockable-window-id]");
+      if (windowEl?.dataset.dockableWindowId) {
+        lastFocusedWindowIdRef.current = windowEl.dataset.dockableWindowId;
+      }
+    };
+
+    root.addEventListener("focusin", handleFocusIn);
+    return () => {
+      root.removeEventListener("focusin", handleFocusIn);
+    };
+  }, [dockableRef]);
 
   // Handle file selection from file tree
   const handleFileSelect = useCallback(
@@ -198,6 +229,7 @@ export function useDockableTabs(
     const root = dockableRef?.current;
     const activeElement = document.activeElement;
 
+    // 1) If focus is currently inside dockable, use that window
     if (
       root &&
       activeElement instanceof HTMLElement &&
@@ -216,8 +248,28 @@ export function useDockableTabs(
       }
     }
 
+    // 2) Fallback to last-focused window (if still present)
+    if (lastFocusedWindowIdRef.current) {
+      const rememberedWindow = findWindowById(
+        layout,
+        lastFocusedWindowIdRef.current,
+      );
+      if (rememberedWindow) return rememberedWindow;
+    }
+
+    // 3) Fallback to window containing activeTabId
+    if (activeTabId) {
+      const windowWithActive = layout.find((node) =>
+        "selected" in node ? node.selected === activeTabId : false,
+      );
+      if (windowWithActive && "selected" in windowWithActive) {
+        return windowWithActive as any;
+      }
+    }
+
+    // 4) Fallback to first window
     return findFirstWindow(layout);
-  }, [dockableRef, layout]);
+  }, [dockableRef, layout, activeTabId]);
 
   const getFocusedTabId = useCallback(() => {
     return getActiveWindow()?.selected ?? activeTabId;
@@ -230,6 +282,12 @@ export function useDockableTabs(
 
     closeTab(tabId);
   }, [getFocusedTabId, closeTab]);
+
+  const focusActiveEditor = useCallback(() => {
+    const tabId = getFocusedTabId();
+    if (!tabId) return false;
+    return focusEditor(tabId);
+  }, [getFocusedTabId]);
 
   const selectTabAtIndex = useCallback(
     (index: number) => {
@@ -389,5 +447,6 @@ export function useDockableTabs(
     selectTabAtIndex,
     selectNextTab,
     selectPrevTab,
+    focusActiveEditor,
   };
 }

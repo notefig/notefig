@@ -82,6 +82,25 @@ export function getEditor(filePath: string): PlateEditor | undefined {
 }
 
 /**
+ * Imperatively focus an editor for the given file path.
+ * Restores the last saved selection if available; otherwise focuses at the start.
+ * Returns true if the editor existed and focus was attempted.
+ */
+export function focusEditor(filePath: string): boolean {
+  const editor = editorInstances.get(filePath);
+  if (!editor) return false;
+
+  const saved = savedSelections.get(filePath) ?? editor.selection ?? null;
+  if (saved) {
+    editor.tf.focus({ at: saved });
+  } else {
+    editor.tf.focus();
+  }
+
+  return true;
+}
+
+/**
  * Save the current selection for an editor so it can be restored after remount.
  */
 export function saveSelection(

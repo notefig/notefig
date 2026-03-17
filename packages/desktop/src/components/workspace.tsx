@@ -48,6 +48,7 @@ export const Workspace = () => {
     closeTab,
     closeActiveTab,
     getFocusedTabId,
+    focusActiveEditor,
   } = useDockableTabs({
     renderTabs: () => [],
     canOpenFile: (file) => file.type === "file" && isTextFile(file.path),
@@ -106,6 +107,8 @@ export const Workspace = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const isSidebarCollapsed = searchParams.get("sidebar") === "collapsed";
   const toggleSidebarCollapsed = useCallback(() => {
+    const isClosing = searchParams.get("sidebar") !== "collapsed";
+
     setSearchParams((prev) => {
       if (prev.get("sidebar") === "collapsed") {
         prev.delete("sidebar");
@@ -114,7 +117,13 @@ export const Workspace = () => {
       }
       return prev;
     });
-  }, [setSearchParams]);
+
+    if (isClosing) {
+      requestAnimationFrame(() => {
+        focusActiveEditor();
+      });
+    }
+  }, [searchParams, setSearchParams, focusActiveEditor]);
   const [isSynced] = useState(true);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [direction, setDirection] = useState<"ltr" | "rtl">("ltr");
@@ -249,6 +258,7 @@ export const Workspace = () => {
           <div
             ref={dockableRef}
             className="flex-1 min-w-0 h-full overflow-hidden"
+            tabIndex={-1}
           >
             {openTabs.length === 0 || dockableTabs.length === 0 ? (
               <div className="flex items-center justify-center h-full text-muted-foreground p-4 ps-0">
