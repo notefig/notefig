@@ -257,7 +257,7 @@ export function CommandPalette({
     // },
     {
       id: "toggle-theme",
-      label: "Toggle Dark/Light Theme",
+      label: "Toggle Theme",
       icon: Moon,
       group: "Settings",
       action: swapTheme,

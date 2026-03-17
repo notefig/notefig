@@ -1,4 +1,16 @@
 import { useMemo, useState, useCallback, useRef, useEffect, memo } from "react";
+import { useHotkey } from "@tanstack/react-hotkeys";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useTranslation } from "react-i18next";
 import {
   FileText,
   Folder,
@@ -56,6 +68,7 @@ interface FileTreeItemProps {
   onFileSelect: (file: FileTreeNode) => void;
   onFileHover?: (filePath: string) => void;
   onDelete?: (path: string) => void;
+  onRequestDelete: (path: string, type: "file" | "directory") => void;
   onRename?: (oldPath: string, newName: string) => void;
   onCreate?: (
     parentPath: string,
@@ -296,6 +309,7 @@ function FileTreeItem({
   onFileSelect,
   onFileHover,
   onDelete,
+  onRequestDelete,
   onRename,
   onCreate,
   openTabs,
@@ -390,6 +404,7 @@ function FileTreeItem({
 
   const buttonElement = (
     <button
+      data-file-path={node.path}
       onClick={handleClick}
       onMouseEnter={handleMouseEnter}
       className={cn(
@@ -444,7 +459,7 @@ function FileTreeItem({
         <FileTreeContextMenu
           path={node.path}
           type={node.type}
-          onDelete={onDelete}
+          onRequestDelete={() => onRequestDelete(node.path, node.type)}
           onRenameStart={() =>
             onModeChange({ type: "renaming", path: node.path })
           }
@@ -476,6 +491,7 @@ function FileTreeItem({
               onFileSelect={onFileSelect}
               onFileHover={onFileHover}
               onDelete={onDelete}
+              onRequestDelete={onRequestDelete}
               onRename={onRename}
               onCreate={onCreate}
               openTabs={openTabs}
@@ -501,7 +517,12 @@ export function FileTree({
   mode,
   onModeChange,
 }: FileTreeProps) {
+  const { t } = useTranslation();
   const { metadata } = getOrCreateWorkspaceCollections(basePath);
+  const [pendingDelete, setPendingDelete] = useState<{
+    path: string;
+    type: "file" | "directory";
+  } | null>(null);
 
   const handleFileHover = useCallback(
     (filePath: string) => {
@@ -543,6 +564,7 @@ export function FileTree({
   const isCreatingAtRoot =
     mode.type === "creating" && mode.parentPath === basePath;
   const rootCreatingItemType = mode.type === "creating" ? mode.itemType : null;
+  const treeRootRef = useRef<HTMLDivElement>(null);
 
   const handleCreateSubmitRoot = useCallback(
     (name: string) => {
@@ -558,9 +580,38 @@ export function FileTree({
     onModeChange(FILE_TREE_IDLE);
   }, [onModeChange]);
 
+  const handleHotkeyDelete = useCallback(() => {
+    if (!onDelete) return;
+    if (mode.type !== "idle") return;
+
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLButtonElement &&
+      active.dataset.filePath &&
+      active.closest("[data-file-tree-root]")
+    ) {
+      const filePath = active.dataset.filePath;
+      const entry = files[filePath];
+      const type = entry?.type === "directory" ? "directory" : "file";
+      setPendingDelete({ path: filePath, type });
+    }
+  }, [mode.type, onDelete, files]);
+
+  const handleRequestDelete = useCallback(
+    (path: string, type: "file" | "directory") => {
+      setPendingDelete({ path, type });
+    },
+    [],
+  );
+
+  useHotkey("Mod+Backspace", handleHotkeyDelete, {
+    enabled: Boolean(onDelete),
+    target: treeRootRef,
+  });
+
   return (
     <ScrollArea className="h-full w-full">
-      <div className="py-1">
+      <div className="py-1" data-file-tree-root ref={treeRootRef}>
         {isCreatingAtRoot && rootCreatingItemType && (
           <NewFileInput
             type={rootCreatingItemType}
@@ -578,6 +629,7 @@ export function FileTree({
             onFileSelect={onFileSelect}
             onFileHover={handleFileHover}
             onDelete={onDelete}
+            onRequestDelete={handleRequestDelete}
             onRename={onRename}
             onCreate={onCreate}
             openTabs={openTabs}
@@ -586,6 +638,51 @@ export function FileTree({
           />
         ))}
       </div>
+
+      {pendingDelete && (
+        <AlertDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setPendingDelete(null);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {t("deleteConfirmTitle", 'Delete "{{name}}"?', {
+                  name: getFileName(pendingDelete.path),
+                })}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {pendingDelete.type === "directory"
+                  ? t(
+                      "deleteDirectoryConfirm",
+                      "This will permanently delete the folder and all its contents. This action cannot be undone.",
+                    )
+                  : t(
+                      "deleteFileConfirm",
+                      "This will permanently delete the file. This action cannot be undone.",
+                    )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setPendingDelete(null)}>
+                {t("cancel", "Cancel")}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  if (pendingDelete && onDelete) {
+                    onDelete(pendingDelete.path);
+                  }
+                  setPendingDelete(null);
+                }}
+              >
+                {t("delete", "Delete")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </ScrollArea>
   );
 }
