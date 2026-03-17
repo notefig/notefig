@@ -1,5 +1,5 @@
 import React from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FileText,
   Settings,
@@ -277,7 +277,12 @@ export function CommandPalette({
     // },
   ];
 
+  const skipFocusRestoreRef = useRef(false);
+
   const handleSelect = (command: CommandType) => {
+    if (command.id === "new-file" || command.id === "new-directory") {
+      skipFocusRestoreRef.current = true;
+    }
     if (command.action) {
       Promise.resolve(command.action()).catch((error: unknown) => {
         console.error(`Failed to run command: ${command.id}`, error);
@@ -309,6 +314,9 @@ export function CommandPalette({
 
   const handleCloseAutoFocus = (event: Event) => {
     event.preventDefault();
+    const shouldRestore = !skipFocusRestoreRef.current;
+    skipFocusRestoreRef.current = false;
+    if (!shouldRestore) return;
     requestAnimationFrame(() => {
       onFocusEditor?.();
     });
