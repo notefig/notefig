@@ -33,6 +33,7 @@ import { useAppSettings } from "@/hooks/use-app-settings";
 interface SettingsModalProps {
   direction: "ltr" | "rtl";
   onDirectionChange: (direction: "ltr" | "rtl") => void;
+  onFocusEditor: () => void;
 }
 
 interface SettingsSection {
@@ -70,6 +71,7 @@ interface SettingsState {
 export function SettingsModal({
   direction,
   onDirectionChange,
+  onFocusEditor,
 }: SettingsModalProps) {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -81,13 +83,19 @@ export function SettingsModal({
     }
     setSearchParams(searchParams);
   };
+  const handleCloseAutoFocus = (event: Event) => {
+    event.preventDefault();
+    requestAnimationFrame(() => {
+      onFocusEditor();
+    });
+  };
   const [activeSection, setActiveSection] = useState("general");
   const [settings, setSettings] = useState<SettingsState>({
     language: "english",
     notifySlowStartup: false,
   });
 
-  useHotkey("Mod+,", () => {
+  useHotkey({ key: ",", mod: true, shift: true }, () => {
     handleSettingsToggle(!searchParams.get("settings"));
   });
 
@@ -114,7 +122,10 @@ export function SettingsModal({
       open={searchParams.get("settings") === "true"}
       onOpenChange={(open) => handleSettingsToggle(open)}
     >
-      <DialogContent className="max-w-6xl w-[95vw] h-[85vh] p-0 gap-0 overflow-hidden bg-card border-border">
+      <DialogContent
+        className="max-w-6xl w-[95vw] h-[85vh] p-0 gap-0 overflow-hidden bg-card border-border"
+        onCloseAutoFocus={handleCloseAutoFocus}
+      >
         <DialogTitle className="sr-only">Settings</DialogTitle>
 
         <div dir={direction} className="flex h-full overflow-hidden">

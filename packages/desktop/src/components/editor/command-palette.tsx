@@ -56,6 +56,7 @@ interface CommandPaletteProps {
   onOpenSettings?: () => void;
   onToggleSidebar?: () => void;
   onToggleFullscreen?: () => void | Promise<void>;
+  onFocusEditor?: () => void;
   direction?: "ltr" | "rtl";
 }
 
@@ -80,6 +81,7 @@ export function CommandPalette({
   onOpenSettings,
   onToggleSidebar,
   onToggleFullscreen,
+  onFocusEditor,
   direction = "ltr",
 }: CommandPaletteProps) {
   const { setTheme, theme } = useTheme();
@@ -242,7 +244,7 @@ export function CommandPalette({
       id: "open-settings",
       label: "Open Settings",
       icon: Settings,
-      shortcut: formatForDisplay("Mod+,"),
+      shortcut: formatForDisplay("Mod+Shift+,"),
       action: onOpenSettings,
       group: "Settings",
     },
@@ -305,13 +307,24 @@ export function CommandPalette({
     "Help",
   ];
 
+  const handleCloseAutoFocus = (event: Event) => {
+    event.preventDefault();
+    requestAnimationFrame(() => {
+      onFocusEditor?.();
+    });
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogHeader className="sr-only">
         <DialogTitle>Command Palette</DialogTitle>
         <DialogDescription>Search for a command to run...</DialogDescription>
       </DialogHeader>
-      <DialogContent className="overflow-hidden p-0 max-w-lg" dir={direction}>
+      <DialogContent
+        className="overflow-hidden p-0 max-w-lg"
+        dir={direction}
+        onCloseAutoFocus={handleCloseAutoFocus}
+      >
         <Command className="[&_[cmdk-group-heading]]:text-muted-foreground **:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5">
           <div className="flex items-center border-b px-3 h-12">
             <Search className="size-5 shrink-0 opacity-50 me-2" />

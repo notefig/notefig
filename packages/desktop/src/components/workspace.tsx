@@ -283,7 +283,11 @@ export const Workspace = () => {
         isSynced={isSynced}
       />
 
-      <SettingsModal direction={direction} onDirectionChange={setDirection} />
+      <SettingsModal
+        direction={direction}
+        onDirectionChange={setDirection}
+        onFocusEditor={focusActiveEditor}
+      />
 
       <CommandPalette
         open={isCommandPaletteOpen}
@@ -297,6 +301,7 @@ export const Workspace = () => {
         onOpenSettings={handleOpenSettings}
         onToggleSidebar={toggleSidebarCollapsed}
         onToggleFullscreen={handleToggleFullscreen}
+        onFocusEditor={focusActiveEditor}
         direction={direction}
       />
     </div>
