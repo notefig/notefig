@@ -18,6 +18,13 @@ i18n
           welcome: "Welcome to Metrists",
           welcomeDescription:
             "Open a folder to start browsing and editing your files.",
+          welcomeTitle: "You are a",
+          welcomeTitleHighlight: "Metrists.",
+          newDocument: "Open Workspace",
+          createBlankDocument: "Open a blank workspace",
+          modified: "Modified",
+          noRecentProjects: "No recent projects",
+          startByCreatingNew: "Start by creating a new document",
           openFolder: "Open Folder",
           opening: "Opening...",
           loading: "Loading...",
