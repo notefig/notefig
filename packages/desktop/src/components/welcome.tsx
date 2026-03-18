@@ -1,23 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Icons } from "./icons";
 import { Button } from "@/components/ui/button";
 import { pickDirectory } from "@/utils/fs";
 import Logo from "./logo";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
-import { useAppSettings } from "@/hooks/use-app-settings";
 
 export function Welcome() {
   const [loading, setLoading] = useState(false);
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { settings } = useAppSettings();
-
-  useEffect(() => {
-    if (settings.lastPath) {
-      navigate(settings.lastPath, { replace: true });
-    }
-  }, [settings.lastPath]);
 
   const handleOpenFolder = async () => {
     setLoading(true);

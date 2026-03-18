@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useCallback } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   FileText,
@@ -7,23 +7,13 @@ import {
   FolderOpen,
   FolderPlus,
   Plus,
-  Save,
   Undo,
   Redo,
-  Copy,
-  Clipboard,
-  Scissors,
   Moon,
-  Keyboard,
-  HelpCircle,
   LayoutGrid,
-  Bookmark,
-  GitBranch,
-  RefreshCw,
-  Edit3,
-  Terminal,
   Maximize,
   X,
+  Home,
 } from "lucide-react";
 import {
   Command,
@@ -43,6 +33,8 @@ import {
 } from "@/components/ui/dialog";
 import { useHotkey, formatForDisplay } from "@tanstack/react-hotkeys";
 import { useTheme } from "../theme-provider";
+import { useNavigate } from "react-router";
+import { pickDirectory } from "../../utils/fs";
 
 interface CommandPaletteProps {
   open: boolean;
@@ -86,6 +78,16 @@ export function CommandPalette({
 }: CommandPaletteProps) {
   const { setTheme, theme } = useTheme();
   const [search, setSearch] = useState("");
+
+  const navigate = useNavigate();
+
+  const handleOpenFolder = useCallback(async () => {
+    const selectedPath = await pickDirectory("Select a folder");
+    if (selectedPath) {
+      const encodedPath = encodeURIComponent(selectedPath);
+      navigate(`/${encodedPath}`);
+    }
+  }, [navigate]);
 
   useHotkey("Mod+K", () => {
     onOpenChange(!open);
@@ -144,6 +146,24 @@ export function CommandPalette({
           onToggleSidebar?.();
         }
         onNewDirectory?.();
+      },
+      group: "File",
+    },
+    {
+      id: "open-folder",
+      label: "Open Folder",
+      icon: FolderOpen,
+      action: () => {
+        handleOpenFolder();
+      },
+      group: "File",
+    },
+    {
+      id: "close-workspace",
+      label: "Close Workspace",
+      icon: Home,
+      action: () => {
+        navigate("/");
       },
       group: "File",
     },

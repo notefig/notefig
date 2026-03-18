@@ -3,7 +3,7 @@ import { Routes, Route, useNavigate, useLocation } from "react-router-dom";
 import { Workspace } from "@/components/workspace";
 import { Welcome } from "@/components/welcome";
 import { MockDirectoryPickerDialog } from "@/components/mock-directory-picker-dialog";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useTheme } from "@/components/theme-provider";
 import { platformAdapter } from "@/adapters";
 import { isWeb } from "@/utils/platform";
@@ -16,6 +16,7 @@ export const App = () => {
   const { setTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
+  const hasNavigated = useRef(false);
   const {
     settings,
     setTheme: persistTheme,
@@ -26,6 +27,17 @@ export const App = () => {
   useEffect(() => {
     setTheme(settings.theme);
   }, [settings.theme, setTheme]);
+
+  useEffect(() => {
+    if (
+      !hasNavigated.current &&
+      settings.lastPath &&
+      location.pathname === "/"
+    ) {
+      hasNavigated.current = true;
+      navigate(settings.lastPath, { replace: true });
+    }
+  }, [settings.lastPath, location.pathname, navigate]);
 
   useEffect(() => {
     if (location.pathname !== "/") {

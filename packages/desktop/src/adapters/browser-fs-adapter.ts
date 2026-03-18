@@ -11,7 +11,6 @@ type DirectoryHandle = FileSystemDirectoryHandle;
 type FileHandle = FileSystemFileHandle;
 type FsPermissionMode = "read" | "readwrite";
 
-const WORKSPACE_PREFIX = "/fs/";
 const HANDLE_STORE_NAME = "fs-handles";
 const HANDLE_DB_VERSION = 1;
 
@@ -42,22 +41,37 @@ function isHiddenPath(path: string): boolean {
   return parts.some((part) => part.startsWith(".") && part.length > 1);
 }
 
-function getWorkspaceId(path: string): string | null {
+/**
+ * Normalize a path for use as a workspace identifier.
+ * The File System Access API doesn't expose full paths, so we use the folder name.
+ * We prefix with '/' to make it look like a Unix path (e.g., "/my-folder").
+ */
+function normalizeWorkspacePath(name: string): string {
+  // Remove any leading/trailing slashes and re-add a single leading slash
+  const cleanName = name.replace(/^\/+|\/+$/g, "");
+  return cleanName ? `/${cleanName}` : "/untitled";
+}
+
+/**
+ * Extract the root workspace name from a full path.
+ * For browser FS, the "root" is the first segment (e.g., "/my-folder" from "/my-folder/sub/file.md")
+ */
+function getWorkspaceRoot(path: string): string | null {
   const trimmed = path.replace(/^\/+/, "");
   const parts = trimmed.split("/");
-  if (parts[0] !== "fs" || !parts[1]) return null;
-  return parts[1];
+  if (!parts[0]) return null;
+  return `/${parts[0]}`;
 }
 
-function getWorkspacePrefix(workspaceId: string): string {
-  return `${WORKSPACE_PREFIX}${workspaceId}`;
-}
-
-function getRelativePath(path: string, workspaceId: string): string {
-  const prefix = getWorkspacePrefix(workspaceId);
-  if (path === prefix) return "";
-  if (path.startsWith(prefix + "/")) {
-    return path.slice(prefix.length + 1);
+/**
+ * Get the relative path within a workspace.
+ * E.g., for path "/my-folder/docs/file.md" and root "/my-folder", returns "docs/file.md"
+ */
+function getRelativePath(path: string, workspaceRoot: string): string {
+  if (path === workspaceRoot) return "";
+  const prefix = workspaceRoot + "/";
+  if (path.startsWith(prefix)) {
+    return path.slice(prefix.length);
   }
   return "";
 }
@@ -98,6 +112,11 @@ async function ensurePermission(
  *   IndexedDB-only adapter for tests.
  * - Disabled when showDirectoryPicker is missing; callers get the existing
  *   IndexedDB adapter instead.
+ *
+ * Path handling:
+ * - Uses folder name as workspace identifier (e.g., "/my-folder")
+ * - Mirrors Tauri adapter's path structure where possible
+ * - Stores FileSystemDirectoryHandle in IndexedDB keyed by workspace name
  */
 export class BrowserFsPlatformAdapter implements IPlatformAdapter {
   private handleCache = new Map<string, DirectoryHandle>();
@@ -124,35 +143,37 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
   }
 
   private async storeHandle(
-    id: string,
+    workspacePath: string,
     handle: DirectoryHandle,
   ): Promise<void> {
     const db = await this.ensureDB();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction([HANDLE_STORE_NAME], "readwrite");
       const store = tx.objectStore(HANDLE_STORE_NAME);
-      store.put({ id, handle, createdAt: Date.now() });
+      store.put({ id: workspacePath, handle, createdAt: Date.now() });
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
   }
 
-  private async loadHandle(id: string): Promise<DirectoryHandle | null> {
-    if (this.handleCache.has(id)) {
-      return this.handleCache.get(id)!;
+  private async loadHandle(
+    workspacePath: string,
+  ): Promise<DirectoryHandle | null> {
+    if (this.handleCache.has(workspacePath)) {
+      return this.handleCache.get(workspacePath)!;
     }
 
     const db = await this.ensureDB();
     return new Promise<DirectoryHandle | null>((resolve, reject) => {
       const tx = db.transaction([HANDLE_STORE_NAME], "readonly");
       const store = tx.objectStore(HANDLE_STORE_NAME);
-      const request = store.get(id);
+      const request = store.get(workspacePath);
       request.onsuccess = () => {
         const result = request.result as
           | { handle?: DirectoryHandle }
           | undefined;
         if (result?.handle) {
-          this.handleCache.set(id, result.handle);
+          this.handleCache.set(workspacePath, result.handle);
           resolve(result.handle);
         } else {
           resolve(null);
@@ -168,30 +189,38 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  private async getRootHandle(basePath: string): Promise<DirectoryHandle> {
-    const workspaceId = getWorkspaceId(basePath);
-    if (!workspaceId) {
-      throw new Error(`Invalid workspace path: ${basePath}`);
-    }
-    const existing = await this.loadHandle(workspaceId);
+  /**
+   * Get the root directory handle for a workspace.
+   * The workspacePath should be the normalized folder name (e.g., "/my-folder").
+   */
+  private async getRootHandle(workspacePath: string): Promise<DirectoryHandle> {
+    const existing = await this.loadHandle(workspacePath);
     if (!existing) {
-      throw new Error("Workspace handle not found. Please re-open the folder.");
+      throw new Error(
+        `Workspace handle not found for ${workspacePath}. Please re-open the folder.`,
+      );
     }
     await ensurePermission(existing, "readwrite");
     return existing;
   }
 
+  /**
+   * Resolve a directory handle from a full path.
+   * The path format is "/workspace-name/sub/path".
+   */
   private async resolveDirectory(
-    basePath: string,
+    path: string,
     createMissing: boolean,
   ): Promise<DirectoryHandle> {
-    const workspaceId = getWorkspaceId(basePath);
-    if (!workspaceId) {
-      throw new Error(`Invalid workspace path: ${basePath}`);
+    const workspaceRoot = getWorkspaceRoot(path);
+    if (!workspaceRoot) {
+      throw new Error(`Invalid workspace path: ${path}`);
     }
-    const rel = getRelativePath(basePath, workspaceId);
-    const root = await this.getRootHandle(basePath);
+
+    const rel = getRelativePath(path, workspaceRoot);
+    const root = await this.getRootHandle(workspaceRoot);
     if (!rel) return root;
+
     const parts = rel.split("/").filter(Boolean);
     let current = root;
     for (const part of parts) {
@@ -202,33 +231,38 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
     return current;
   }
 
+  /**
+   * Resolve a file handle from a full path.
+   */
   private async resolveFileHandle(
-    basePath: string,
     filePath: string,
     createDirs: boolean,
     createFile: boolean,
-  ): Promise<{ handle: FileHandle; workspaceId: string }> {
-    const workspaceId = getWorkspaceId(basePath);
-    if (!workspaceId) {
-      throw new Error(`Invalid workspace path: ${basePath}`);
+  ): Promise<FileHandle> {
+    const workspaceRoot = getWorkspaceRoot(filePath);
+    if (!workspaceRoot) {
+      throw new Error(`Invalid file path: ${filePath}`);
     }
-    const rel = getRelativePath(filePath, workspaceId);
+
+    const rel = getRelativePath(filePath, workspaceRoot);
     const segments = rel.split("/").filter(Boolean);
     const fileName = segments.pop();
     if (!fileName) {
       throw new Error(`Invalid file path: ${filePath}`);
     }
-    let dir = await this.getRootHandle(basePath);
+
+    let dir = await this.getRootHandle(workspaceRoot);
     for (const segment of segments) {
       dir = await dir.getDirectoryHandle(segment, { create: createDirs });
     }
-    const handle = await dir.getFileHandle(fileName, { create: createFile });
-    return { handle, workspaceId };
+    return await dir.getFileHandle(fileName, { create: createFile });
   }
 
-  private absolutePath(workspaceId: string, relPath: string): string {
-    const prefix = getWorkspacePrefix(workspaceId);
-    return relPath ? `${prefix}/${relPath}` : prefix;
+  /**
+   * Build an absolute path from workspace root and relative path.
+   */
+  private absolutePath(workspaceRoot: string, relPath: string): string {
+    return relPath ? `${workspaceRoot}/${relPath}` : workspaceRoot;
   }
 
   async pickDirectory(title: string): Promise<string | null> {
@@ -236,12 +270,18 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
       this.ensureSupported();
       // Title is not used by the API, but keep for parity
       void title;
+
       const handle = await (window as any).showDirectoryPicker();
       await ensurePermission(handle, "readwrite");
-      const workspaceId = `fs-${crypto.randomUUID()}`;
-      await this.storeHandle(workspaceId, handle);
-      this.handleCache.set(workspaceId, handle);
-      return getWorkspacePrefix(workspaceId);
+
+      // Use the folder name as the workspace path
+      const workspacePath = normalizeWorkspacePath(handle.name);
+
+      // Store the handle indexed by the workspace path
+      await this.storeHandle(workspacePath, handle);
+      this.handleCache.set(workspacePath, handle);
+
+      return workspacePath;
     } catch (error) {
       console.error("[BrowserFsAdapter] pickDirectory failed", error);
       return null;
@@ -249,6 +289,7 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
   }
 
   // ========== Directory Operations ==========
+
   async readDirectory(
     path: string,
     options?: {
@@ -258,10 +299,11 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
     },
   ): Promise<Result<string[]>> {
     try {
-      const workspaceId = getWorkspaceId(path);
-      if (!workspaceId) {
+      const workspaceRoot = getWorkspaceRoot(path);
+      if (!workspaceRoot) {
         throw new Error("Invalid workspace path");
       }
+
       const dir = await this.resolveDirectory(path, false);
       const includeFiles = options?.includeFiles !== false;
       const includeDirectories = options?.includeDirectories !== false;
@@ -280,11 +322,11 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
           const nextRel = currentRel ? `${currentRel}/${name}` : name;
           if (sub.kind === "file") {
             if (includeFiles) {
-              results.push(this.absolutePath(workspaceId, nextRel));
+              results.push(this.absolutePath(workspaceRoot, nextRel));
             }
           } else {
             if (includeDirectories) {
-              results.push(this.absolutePath(workspaceId, nextRel));
+              results.push(this.absolutePath(workspaceRoot, nextRel));
             }
             if (recursive) {
               await walk(sub, nextRel);
@@ -293,7 +335,7 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
         }
       };
 
-      await walk(dir, getRelativePath(path, workspaceId));
+      await walk(dir, getRelativePath(path, workspaceRoot));
 
       return { ok: true, value: results };
     } catch (error) {
@@ -336,14 +378,16 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
     const failed: FileSystemError[] = [];
     for (const path of paths) {
       try {
-        const workspaceId = getWorkspaceId(path);
-        if (!workspaceId) throw new Error("Invalid workspace path");
-        const rel = getRelativePath(path, workspaceId);
+        const workspaceRoot = getWorkspaceRoot(path);
+        if (!workspaceRoot) throw new Error("Invalid workspace path");
+
+        const rel = getRelativePath(path, workspaceRoot);
         const parentRel = rel.split("/").slice(0, -1).join("/");
         const dirName = rel.split("/").pop();
         if (!dirName) throw new Error("Invalid directory path");
+
         const parent = await this.resolveDirectory(
-          this.absolutePath(workspaceId, parentRel),
+          this.absolutePath(workspaceRoot, parentRel),
           false,
         );
         await parent.removeEntry(dirName, {
@@ -398,6 +442,7 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
   }
 
   // ========== File Operations ==========
+
   async readFiles(
     paths: string[],
   ): Promise<BatchResult<{ path: string; content: string }>> {
@@ -406,14 +451,7 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
 
     for (const path of paths) {
       try {
-        const workspaceId = getWorkspaceId(path);
-        if (!workspaceId) throw new Error("Invalid workspace path");
-        const { handle } = await this.resolveFileHandle(
-          getWorkspacePrefix(workspaceId),
-          path,
-          false,
-          false,
-        );
+        const handle = await this.resolveFileHandle(path, false, false);
         const file = await handle.getFile();
         const content = await file.text();
         succeeded.push({ path, content });
@@ -439,14 +477,7 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
 
     for (const file of files) {
       try {
-        const workspaceId = getWorkspaceId(file.path);
-        if (!workspaceId) throw new Error("Invalid workspace path");
-        const { handle } = await this.resolveFileHandle(
-          getWorkspacePrefix(workspaceId),
-          file.path,
-          true,
-          true,
-        );
+        const handle = await this.resolveFileHandle(file.path, true, true);
         const writable = await handle.createWritable();
         await writable.write(file.content);
         await writable.close();
@@ -475,15 +506,17 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
 
     for (const path of paths) {
       try {
-        const workspaceId = getWorkspaceId(path);
-        if (!workspaceId) throw new Error("Invalid workspace path");
-        const rel = getRelativePath(path, workspaceId);
+        const workspaceRoot = getWorkspaceRoot(path);
+        if (!workspaceRoot) throw new Error("Invalid workspace path");
+
+        const rel = getRelativePath(path, workspaceRoot);
         const segments = rel.split("/").filter(Boolean);
         const fileName = segments.pop();
         if (!fileName) throw new Error("Invalid file path");
+
         const parentRel = segments.join("/");
         const parent = await this.resolveDirectory(
-          this.absolutePath(workspaceId, parentRel),
+          this.absolutePath(workspaceRoot, parentRel),
           false,
         );
         await parent.removeEntry(fileName);
@@ -540,6 +573,7 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
   }
 
   // ========== Metadata & Existence ==========
+
   async exists(
     paths: string[],
   ): Promise<{ path: string; exists: boolean; type?: "file" | "directory" }[]> {
@@ -548,26 +582,32 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
       exists: boolean;
       type?: "file" | "directory";
     }[] = [];
+
     for (const path of paths) {
-      const workspaceId = getWorkspaceId(path);
-      if (!workspaceId) {
+      const workspaceRoot = getWorkspaceRoot(path);
+      if (!workspaceRoot) {
         results.push({ path, exists: false });
         continue;
       }
-      const rel = getRelativePath(path, workspaceId);
+
+      const rel = getRelativePath(path, workspaceRoot);
       const segments = rel.split("/").filter(Boolean);
       const last = segments.pop();
       const parentRel = segments.join("/");
+
       try {
         if (!last) {
-          await this.getRootHandle(path);
+          // This is the root workspace directory
+          await this.getRootHandle(workspaceRoot);
           results.push({ path, exists: true, type: "directory" });
           continue;
         }
+
         const parent = await this.resolveDirectory(
-          this.absolutePath(workspaceId, parentRel),
+          this.absolutePath(workspaceRoot, parentRel),
           false,
         );
+
         try {
           await parent.getFileHandle(last);
           results.push({ path, exists: true, type: "file" });
@@ -583,6 +623,7 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
         results.push({ path, exists: false });
       }
     }
+
     return results;
   }
 
@@ -591,20 +632,23 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
     const failed: FileSystemError[] = [];
 
     for (const path of paths) {
-      const workspaceId = getWorkspaceId(path);
-      if (!workspaceId) {
+      const workspaceRoot = getWorkspaceRoot(path);
+      if (!workspaceRoot) {
         failed.push(
           createError(path, "invalid_path", "Invalid workspace path"),
         );
         continue;
       }
-      const rel = getRelativePath(path, workspaceId);
+
+      const rel = getRelativePath(path, workspaceRoot);
       const segments = rel.split("/").filter(Boolean);
       const name = segments.pop();
       const parentRel = segments.join("/");
+
       try {
         if (!name) {
-          await this.getRootHandle(path);
+          // Root directory
+          await this.getRootHandle(workspaceRoot);
           const now = new Date();
           succeeded.push({
             path,
@@ -615,10 +659,12 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
           });
           continue;
         }
+
         const parent = await this.resolveDirectory(
-          this.absolutePath(workspaceId, parentRel),
+          this.absolutePath(workspaceRoot, parentRel),
           false,
         );
+
         try {
           const fileHandle = await parent.getFileHandle(name);
           const file = await fileHandle.getFile();
@@ -629,20 +675,19 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
             modifiedAt: new Date(file.lastModified),
             createdAt: new Date(file.lastModified),
           });
-          continue;
         } catch {
-          // not a file, check directory
+          // Not a file, check directory
+          const dirHandle = await parent.getDirectoryHandle(name);
+          // Directory metadata is limited; use current time placeholders
+          const now = new Date();
+          succeeded.push({
+            path,
+            type: "directory",
+            size: 0,
+            modifiedAt: now,
+            createdAt: now,
+          });
         }
-        const dirHandle = await parent.getDirectoryHandle(name);
-        // Directory metadata is limited; use current time placeholders
-        const now = new Date();
-        succeeded.push({
-          path,
-          type: "directory",
-          size: 0,
-          modifiedAt: now,
-          createdAt: now,
-        });
       } catch (error) {
         failed.push(
           createError(
@@ -658,6 +703,7 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
   }
 
   // ========== File Watching ==========
+
   async startWatchingMetadata(
     _paths: string[],
     _watchId: string,
@@ -679,6 +725,7 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
   }
 
   // ========== Event Listeners ==========
+
   addEventListener(_callback: PlatformEventListener): () => void {
     // No-op in browser
     return () => {};
@@ -689,6 +736,7 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
   }
 
   // ========== App Settings ==========
+
   private readonly SETTINGS_PREFIX = "metrists-settings:";
 
   async getSetting<T>(key: string): Promise<T | undefined> {

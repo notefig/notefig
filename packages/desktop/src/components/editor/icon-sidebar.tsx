@@ -20,7 +20,7 @@ import {
   TooltipProvider,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { useSearchParams } from "react-router";
+import { useSearchParams, useNavigate } from "react-router";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { PlainLogo } from "@/components/logo";
 
@@ -36,10 +36,15 @@ export function IconSidebar({
   onToggleCollapse,
 }: IconSidebarProps) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   useHotkey("Mod+\\", () => {
     onToggleCollapse();
   });
+
+  const handleLogoClick = () => {
+    navigate("/");
+  };
 
   const topIcons = [
     { id: "search", icon: Search, label: "Search", onClick: () => {} },
@@ -75,16 +80,19 @@ export function IconSidebar({
       <div className="flex flex-col items-center justify-start h-full w-12 bg-sidebar border-r rtl:border-r-0 rtl:border-l border-sidebar-border py-2">
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="mb-3">
+            <button
+              onClick={handleLogoClick}
+              className="mb-3 p-2 rounded-md transition-colors hover:bg-sidebar-accent cursor-pointer"
+            >
               <PlainLogo size={20} className="block dark:hidden" />
               <PlainLogo size={20} fill="white" className="hidden dark:block" />
-            </div>
+            </button>
           </TooltipTrigger>
           <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>
-            Metrists
+            Go to Welcome Page
           </TooltipContent>
           <TooltipContent side="left" className="ltr:hidden" sideOffset={8}>
-            Metrists
+            Go to Welcome Page
           </TooltipContent>
         </Tooltip>
         <div className="flex flex-col items-center gap-1">
