@@ -2,8 +2,9 @@ import "./App.css";
 import { Routes, Route, useNavigate, useLocation } from "react-router-dom";
 import { Workspace } from "@/components/workspace";
 import { Welcome } from "@/components/welcome";
+import { RootRedirect } from "@/components/root-redirect";
 import { MockDirectoryPickerDialog } from "@/components/mock-directory-picker-dialog";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useTheme } from "@/components/theme-provider";
 import { platformAdapter } from "@/adapters";
 import { isWeb } from "@/utils/platform";
@@ -16,7 +17,6 @@ export const App = () => {
   const { setTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
-  const hasNavigated = useRef(false);
   const {
     settings,
     setTheme: persistTheme,
@@ -29,18 +29,7 @@ export const App = () => {
   }, [settings.theme, setTheme]);
 
   useEffect(() => {
-    if (
-      !hasNavigated.current &&
-      settings.lastPath &&
-      location.pathname === "/"
-    ) {
-      hasNavigated.current = true;
-      navigate(settings.lastPath, { replace: true });
-    }
-  }, [settings.lastPath, location.pathname, navigate]);
-
-  useEffect(() => {
-    if (location.pathname !== "/") {
+    if (location.pathname !== "/" && location.pathname !== "/welcome") {
       const fullPath = location.pathname + location.search;
       setLastPath(fullPath);
     }
@@ -73,11 +62,9 @@ export const App = () => {
   return (
     <div className="flex h-screen flex-col bg-background text-foreground overflow-hidden">
       <Titlebar />
-      {/* Only render mock directory picker in browser/web mode */}
       {isWeb() && <MockDirectoryPickerDialog />}
       <div className="flex-1 min-h-0">
         <Routes>
-          {/* Edit route - file selected for editing (most specific first) */}
           <Route
             path="/:basePath/edit/*"
             element={
@@ -88,7 +75,6 @@ export const App = () => {
               </Loader>
             }
           />
-          {/* Base path route - no file selected */}
           <Route
             path="/:basePath"
             element={
@@ -99,12 +85,19 @@ export const App = () => {
               </Loader>
             }
           />
-          {/* Root route - no directory selected */}
+          <Route
+            path="/welcome"
+            element={
+              <WorkspaceErrorBoundary>
+                <Welcome />
+              </WorkspaceErrorBoundary>
+            }
+          />
           <Route
             path="/"
             element={
               <WorkspaceErrorBoundary>
-                <Welcome />
+                <RootRedirect />
               </WorkspaceErrorBoundary>
             }
           />

@@ -80,7 +80,6 @@ export const Workspace = () => {
     [workspacePath, ...openTabs],
   );
 
-  // Build Dockable tabs
   const dockableTabs = useMemo(
     () =>
       fileDataWithContent.map((fileEntry) => (

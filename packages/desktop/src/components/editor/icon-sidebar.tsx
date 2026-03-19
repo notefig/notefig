@@ -43,7 +43,7 @@ export function IconSidebar({
   });
 
   const handleLogoClick = () => {
-    navigate("/");
+    navigate("/welcome");
   };
 
   const topIcons = [

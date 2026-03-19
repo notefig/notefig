@@ -163,7 +163,7 @@ export function CommandPalette({
       label: "Close Workspace",
       icon: Home,
       action: () => {
-        navigate("/");
+        navigate("/welcome");
       },
       group: "File",
     },

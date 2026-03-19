@@ -15,6 +15,7 @@ import { useTheme } from "@/components/theme-provider";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useRecentProjects } from "@/hooks/use-recent-projects";
+import { DebugPanel } from "./debug-panel";
 
 function ThemeToggle() {
   const { setTheme } = useTheme();
@@ -114,13 +115,12 @@ export function Welcome() {
 
   return (
     <div className="relative flex h-screen flex-col bg-background overflow-hidden">
-      {/* Faded Logo Background */}
+      <DebugPanel />
       <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none">
         <PlainLogo size={400} className="block dark:hidden text-foreground" />
         <PlainLogo size={400} fill="white" className="hidden dark:block" />
       </div>
 
-      {/* Top Navigation */}
       <nav className="relative z-10 flex items-center justify-end px-6 py-5 lg:px-8 gap-2">
         <Button
           variant="ghost"
