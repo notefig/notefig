@@ -19,7 +19,7 @@ i18n
           welcomeDescription:
             "Open a folder to start browsing and editing your files.",
           welcomeTitle: "You are a",
-          welcomeTitleHighlight: "Metrists.",
+          welcomeTitleHighlight: "Metrist.",
           newDocument: "Open Workspace",
           createBlankDocument: "Open a blank workspace",
           modified: "Modified",

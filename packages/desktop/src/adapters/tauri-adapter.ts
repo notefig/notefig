@@ -18,7 +18,7 @@ import { LazyStore } from "@tauri-apps/plugin-store";
 export class TauriPlatformAdapter implements IPlatformAdapter {
   private eventListeners: Set<PlatformEventListener> = new Set();
   private unlistenFns: Promise<UnlistenFn>[] = [];
-  private settingsStore = new LazyStore("settings.json");
+  private kvStore = new LazyStore("kv.json");
 
   async pickDirectory(title: string): Promise<string | null> {
     const result = await open({
@@ -390,18 +390,38 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       .then((unlisten) => this.unlistenFns.push(Promise.resolve(unlisten)));
   }
 
-  async getSetting<T>(key: string): Promise<T | undefined> {
-    return await this.settingsStore.get<T>(key);
+  private buildKvKey(namespace: string, key: string): string {
+    return `${namespace}:${key}`;
   }
 
-  async setSetting<T>(key: string, value: T): Promise<void> {
-    await this.settingsStore.set(key, value);
-    await this.settingsStore.save();
+  async getKv<T>(namespace: string, key: string): Promise<T | undefined> {
+    const fullKey = this.buildKvKey(namespace, key);
+    const value = await this.kvStore.get<T>(fullKey);
+    return value ?? undefined;
   }
 
-  async getAllSettings(): Promise<Record<string, unknown>> {
-    const entries = await this.settingsStore.entries();
-    return Object.fromEntries(entries);
+  async setKv<T>(namespace: string, key: string, value: T): Promise<void> {
+    const fullKey = this.buildKvKey(namespace, key);
+    await this.kvStore.set(fullKey, value);
+  }
+
+  async deleteKv(namespace: string, key: string): Promise<void> {
+    const fullKey = this.buildKvKey(namespace, key);
+    await this.kvStore.delete(fullKey);
+  }
+
+  async getAllKv<T>(namespace: string): Promise<Record<string, T>> {
+    const allEntries = await this.kvStore.entries<T>();
+    const prefix = `${namespace}:`;
+    const result: Record<string, T> = {};
+
+    for (const [key, value] of allEntries) {
+      if (key.startsWith(prefix)) {
+        const shortKey = key.slice(prefix.length);
+        result[shortKey] = value;
+      }
+    }
+    return result;
   }
 
   async toggleFullscreen(): Promise<void> {

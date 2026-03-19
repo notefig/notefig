@@ -2,14 +2,23 @@ import type {
   BatchResult,
   FileSystemError,
   FileSystemMetadata,
-  IPlatformAdapter,
-  PlatformEventListener,
   Result,
 } from "./platform-adapter.interface";
+import {
+  BaseBrowserAdapter,
+  createError,
+  isHiddenPath,
+} from "./base-browser-adapter";
+import {
+  normalizeWorkspacePath,
+  getWorkspaceRoot,
+  getRelativePath,
+  ensurePermission,
+  buildAbsolutePath,
+} from "./browser-fs-utils";
 
 type DirectoryHandle = FileSystemDirectoryHandle;
 type FileHandle = FileSystemFileHandle;
-type FsPermissionMode = "read" | "readwrite";
 
 const HANDLE_STORE_NAME = "fs-handles";
 const HANDLE_DB_VERSION = 1;
@@ -28,97 +37,7 @@ function supportsFsAccess(): boolean {
   return typeof window !== "undefined" && "showDirectoryPicker" in window;
 }
 
-function createError(
-  path: string,
-  type: FileSystemError["type"],
-  message: string,
-): FileSystemError {
-  return { path, type, message };
-}
-
-function isHiddenPath(path: string): boolean {
-  const parts = path.split("/");
-  return parts.some((part) => part.startsWith(".") && part.length > 1);
-}
-
-/**
- * Normalize a path for use as a workspace identifier.
- * The File System Access API doesn't expose full paths, so we use the folder name.
- * We prefix with '/' to make it look like a Unix path (e.g., "/my-folder").
- */
-function normalizeWorkspacePath(name: string): string {
-  // Remove any leading/trailing slashes and re-add a single leading slash
-  const cleanName = name.replace(/^\/+|\/+$/g, "");
-  return cleanName ? `/${cleanName}` : "/untitled";
-}
-
-/**
- * Extract the root workspace name from a full path.
- * For browser FS, the "root" is the first segment (e.g., "/my-folder" from "/my-folder/sub/file.md")
- */
-function getWorkspaceRoot(path: string): string | null {
-  const trimmed = path.replace(/^\/+/, "");
-  const parts = trimmed.split("/");
-  if (!parts[0]) return null;
-  return `/${parts[0]}`;
-}
-
-/**
- * Get the relative path within a workspace.
- * E.g., for path "/my-folder/docs/file.md" and root "/my-folder", returns "docs/file.md"
- */
-function getRelativePath(path: string, workspaceRoot: string): string {
-  if (path === workspaceRoot) return "";
-  const prefix = workspaceRoot + "/";
-  if (path.startsWith(prefix)) {
-    return path.slice(prefix.length);
-  }
-  return "";
-}
-
-async function ensurePermission(
-  handle: DirectoryHandle | FileHandle,
-  mode: FsPermissionMode,
-): Promise<void> {
-  const permissionHandle = handle as FileSystemHandle & {
-    queryPermission?: (options: {
-      mode: FsPermissionMode;
-    }) => Promise<PermissionState>;
-    requestPermission?: (options: {
-      mode: FsPermissionMode;
-    }) => Promise<PermissionState>;
-  };
-
-  if (
-    !permissionHandle.queryPermission ||
-    !permissionHandle.requestPermission
-  ) {
-    return; // Browser without permission APIs; assume ok
-  }
-
-  const state = await permissionHandle.queryPermission({ mode });
-  if (state === "granted") return;
-  const request = await permissionHandle.requestPermission({ mode });
-  if (request !== "granted") {
-    throw new Error("Permission denied");
-  }
-}
-
-/**
- * Browser adapter backed by the File System Access API (Chromium-only).
- *
- * Fallback behavior:
- * - Disabled when __VITE_INDEXEDDB_NAME__ is set (E2E harness) to keep the
- *   IndexedDB-only adapter for tests.
- * - Disabled when showDirectoryPicker is missing; callers get the existing
- *   IndexedDB adapter instead.
- *
- * Path handling:
- * - Uses folder name as workspace identifier (e.g., "/my-folder")
- * - Mirrors Tauri adapter's path structure where possible
- * - Stores FileSystemDirectoryHandle in IndexedDB keyed by workspace name
- */
-export class BrowserFsPlatformAdapter implements IPlatformAdapter {
+export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
   private handleCache = new Map<string, DirectoryHandle>();
   private db: IDBDatabase | null = null;
 
@@ -189,10 +108,6 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  /**
-   * Get the root directory handle for a workspace.
-   * The workspacePath should be the normalized folder name (e.g., "/my-folder").
-   */
   private async getRootHandle(workspacePath: string): Promise<DirectoryHandle> {
     const existing = await this.loadHandle(workspacePath);
     if (!existing) {
@@ -204,10 +119,6 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
     return existing;
   }
 
-  /**
-   * Resolve a directory handle from a full path.
-   * The path format is "/workspace-name/sub/path".
-   */
   private async resolveDirectory(
     path: string,
     createMissing: boolean,
@@ -231,9 +142,6 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
     return current;
   }
 
-  /**
-   * Resolve a file handle from a full path.
-   */
   private async resolveFileHandle(
     filePath: string,
     createDirs: boolean,
@@ -258,23 +166,14 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
     return await dir.getFileHandle(fileName, { create: createFile });
   }
 
-  /**
-   * Build an absolute path from workspace root and relative path.
-   */
-  private absolutePath(workspaceRoot: string, relPath: string): string {
-    return relPath ? `${workspaceRoot}/${relPath}` : workspaceRoot;
-  }
-
   async pickDirectory(title: string): Promise<string | null> {
     try {
       this.ensureSupported();
-      // Title is not used by the API, but keep for parity
       void title;
 
       const handle = await (window as any).showDirectoryPicker();
       await ensurePermission(handle, "readwrite");
 
-      // Use the folder name as the workspace path
       const workspacePath = normalizeWorkspacePath(handle.name);
 
       // Store the handle indexed by the workspace path
@@ -287,8 +186,6 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
       return null;
     }
   }
-
-  // ========== Directory Operations ==========
 
   async readDirectory(
     path: string,
@@ -322,11 +219,11 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
           const nextRel = currentRel ? `${currentRel}/${name}` : name;
           if (sub.kind === "file") {
             if (includeFiles) {
-              results.push(this.absolutePath(workspaceRoot, nextRel));
+              results.push(buildAbsolutePath(workspaceRoot, nextRel));
             }
           } else {
             if (includeDirectories) {
-              results.push(this.absolutePath(workspaceRoot, nextRel));
+              results.push(buildAbsolutePath(workspaceRoot, nextRel));
             }
             if (recursive) {
               await walk(sub, nextRel);
@@ -387,7 +284,7 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
         if (!dirName) throw new Error("Invalid directory path");
 
         const parent = await this.resolveDirectory(
-          this.absolutePath(workspaceRoot, parentRel),
+          buildAbsolutePath(workspaceRoot, parentRel),
           false,
         );
         await parent.removeEntry(dirName, {
@@ -409,9 +306,7 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
 
   async moveDirectory(oldPath: string, newPath: string): Promise<Result<void>> {
     try {
-      // Create target root
       await this.createDirectories([newPath]);
-      // Copy files
       const filesResult = await this.readDirectory(oldPath, {
         recursive: true,
         includeFiles: true,
@@ -440,8 +335,6 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
       };
     }
   }
-
-  // ========== File Operations ==========
 
   async readFiles(
     paths: string[],
@@ -496,10 +389,6 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
     return { succeeded, failed };
   }
 
-  async createFiles(paths: string[]): Promise<BatchResult<string>> {
-    return this.writeFiles(paths.map((p) => ({ path: p, content: "" })));
-  }
-
   async deleteFiles(paths: string[]): Promise<BatchResult<string>> {
     const succeeded: string[] = [];
     const failed: FileSystemError[] = [];
@@ -516,7 +405,7 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
 
         const parentRel = segments.join("/");
         const parent = await this.resolveDirectory(
-          this.absolutePath(workspaceRoot, parentRel),
+          buildAbsolutePath(workspaceRoot, parentRel),
           false,
         );
         await parent.removeEntry(fileName);
@@ -534,45 +423,6 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
 
     return { succeeded, failed };
   }
-
-  async moveFile(oldPath: string, newPath: string): Promise<Result<void>> {
-    const readResult = await this.readFiles([oldPath]);
-    if (readResult.failed.length > 0 || readResult.succeeded.length === 0) {
-      return {
-        ok: false,
-        error: createError(oldPath, "not_found", "File not found"),
-      };
-    }
-    const content = readResult.succeeded[0].content;
-    const writeResult = await this.writeFiles([{ path: newPath, content }]);
-    if (writeResult.failed.length > 0) {
-      return {
-        ok: false,
-        error: writeResult.failed[0],
-      };
-    }
-    await this.deleteFiles([oldPath]);
-    return { ok: true, value: undefined };
-  }
-
-  async copyFile(from: string, to: string): Promise<Result<void>> {
-    const readResult = await this.readFiles([from]);
-    if (readResult.failed.length > 0 || readResult.succeeded.length === 0) {
-      return {
-        ok: false,
-        error: createError(from, "not_found", "File not found"),
-      };
-    }
-    const writeResult = await this.writeFiles([
-      { path: to, content: readResult.succeeded[0].content },
-    ]);
-    if (writeResult.failed.length > 0) {
-      return { ok: false, error: writeResult.failed[0] };
-    }
-    return { ok: true, value: undefined };
-  }
-
-  // ========== Metadata & Existence ==========
 
   async exists(
     paths: string[],
@@ -604,7 +454,7 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
         }
 
         const parent = await this.resolveDirectory(
-          this.absolutePath(workspaceRoot, parentRel),
+          buildAbsolutePath(workspaceRoot, parentRel),
           false,
         );
 
@@ -661,7 +511,7 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
         }
 
         const parent = await this.resolveDirectory(
-          this.absolutePath(workspaceRoot, parentRel),
+          buildAbsolutePath(workspaceRoot, parentRel),
           false,
         );
 
@@ -676,9 +526,7 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
             createdAt: new Date(file.lastModified),
           });
         } catch {
-          // Not a file, check directory
           const dirHandle = await parent.getDirectoryHandle(name);
-          // Directory metadata is limited; use current time placeholders
           const now = new Date();
           succeeded.push({
             path,
@@ -700,84 +548,6 @@ export class BrowserFsPlatformAdapter implements IPlatformAdapter {
     }
 
     return { succeeded, failed };
-  }
-
-  // ========== File Watching ==========
-
-  async startWatchingMetadata(
-    _paths: string[],
-    _watchId: string,
-  ): Promise<void> {
-    // TODO: implement polling + BroadcastChannel; no-op for now
-    console.log("[BrowserFsAdapter] Metadata watching not yet implemented");
-  }
-
-  async startWatchingContent(
-    _paths: string[],
-    _watchId: string,
-  ): Promise<void> {
-    // TODO: implement polling + BroadcastChannel; no-op for now
-    console.log("[BrowserFsAdapter] Content watching not yet implemented");
-  }
-
-  async stopWatching(_watchId: string): Promise<void> {
-    // No-op
-  }
-
-  // ========== Event Listeners ==========
-
-  addEventListener(_callback: PlatformEventListener): () => void {
-    // No-op in browser
-    return () => {};
-  }
-
-  removeEventListener(_callback: PlatformEventListener): void {
-    // No-op in browser
-  }
-
-  // ========== App Settings ==========
-
-  private readonly SETTINGS_PREFIX = "metrists-settings:";
-
-  async getSetting<T>(key: string): Promise<T | undefined> {
-    const raw = localStorage.getItem(this.SETTINGS_PREFIX + key);
-    if (raw === null) return undefined;
-    try {
-      return JSON.parse(raw) as T;
-    } catch {
-      return undefined;
-    }
-  }
-
-  async setSetting<T>(key: string, value: T): Promise<void> {
-    localStorage.setItem(this.SETTINGS_PREFIX + key, JSON.stringify(value));
-  }
-
-  async getAllSettings(): Promise<Record<string, unknown>> {
-    const settings: Record<string, unknown> = {};
-    for (let i = 0; i < localStorage.length; i++) {
-      const storageKey = localStorage.key(i);
-      if (storageKey && storageKey.startsWith(this.SETTINGS_PREFIX)) {
-        const key = storageKey.slice(this.SETTINGS_PREFIX.length);
-        const raw = localStorage.getItem(storageKey);
-        if (raw !== null) {
-          try {
-            settings[key] = JSON.parse(raw);
-          } catch {
-            // skip malformed values
-          }
-        }
-      }
-    }
-    return settings;
-  }
-
-  async toggleFullscreen(): Promise<void> {
-    if (document.fullscreenElement) {
-      await document.exitFullscreen();
-      return;
-    }
-    await document.documentElement.requestFullscreen();
   }
 }
 

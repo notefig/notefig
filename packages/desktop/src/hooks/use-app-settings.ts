@@ -1,43 +1,35 @@
-import { useLiveQuery } from "@tanstack/react-db";
-import {
-  getOrCreateSettingsCollection,
-  DEFAULT_APP_SETTINGS,
-  type AppSettings,
-  type AppSettingRow,
-} from "@/utils/collections";
+import { useKv } from "@/utils/kv-store";
+import { SETTINGS_NAMESPACE } from "../utils/collections";
 import type { Theme } from "@/components/theme-provider";
 
+export interface AppSettings {
+  theme: Theme;
+  lastPath: string | null;
+  zoomLevel: number;
+}
+
+const DEFAULT_APP_SETTINGS: AppSettings = {
+  theme: "dark",
+  lastPath: null,
+  zoomLevel: 1,
+};
+
 export function useAppSettings() {
-  const collection = getOrCreateSettingsCollection();
+  const { values, set } = useKv<unknown>(SETTINGS_NAMESPACE);
 
-  const { data: rows = [] } = useLiveQuery(
-    (q) =>
-      q.from({ s: collection }).select(({ s }) => ({
-        key: s.key,
-        value: s.value,
-      })),
-    [],
-  );
-
-  const settings: AppSettings = { ...DEFAULT_APP_SETTINGS };
-  for (const row of rows) {
-    if (row.key in DEFAULT_APP_SETTINGS) {
-      (settings as unknown as Record<string, unknown>)[row.key] = row.value;
-    }
-  }
+  const settings: AppSettings = {
+    theme: (values["theme"] as Theme) ?? DEFAULT_APP_SETTINGS.theme,
+    lastPath:
+      (values["lastPath"] as string | null) ?? DEFAULT_APP_SETTINGS.lastPath,
+    zoomLevel:
+      (values["zoomLevel"] as number) ?? DEFAULT_APP_SETTINGS.zoomLevel,
+  };
 
   function setSetting<K extends keyof AppSettings>(
     key: K,
     value: AppSettings[K],
   ) {
-    const existing = collection.get(key as string);
-    if (existing) {
-      collection.update(key as string, (draft: AppSettingRow) => {
-        draft.value = value;
-      });
-    } else {
-      collection.insert({ key: key as string, value });
-    }
+    set(key as string, value);
   }
 
   function setTheme(theme: Theme) {

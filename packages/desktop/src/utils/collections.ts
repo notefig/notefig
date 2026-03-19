@@ -31,7 +31,7 @@ import { calculateContentHash } from "./hash";
 import type { Theme } from "@/components/theme-provider";
 
 // Global QueryClient instance for TanStack Query
-const queryClient = new QueryClient({
+export const queryClient = new QueryClient({
   defaultOptions: {},
 });
 
@@ -750,6 +750,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   zoomLevel: 1,
 };
 
+export const SETTINGS_NAMESPACE = "settings";
+
 function createSettingsCollection() {
   return createCollection(
     queryCollectionOptions<AppSettingRow, string>({
@@ -757,7 +759,7 @@ function createSettingsCollection() {
       queryClient,
 
       queryFn: async (): Promise<AppSettingRow[]> => {
-        const raw = await platformAdapter.getAllSettings();
+        const raw = await platformAdapter.getAllKv<unknown>(SETTINGS_NAMESPACE);
         return Object.entries(raw).map(([key, value]) => ({ key, value }));
       },
 
@@ -765,13 +767,21 @@ function createSettingsCollection() {
 
       onInsert: async ({ transaction }) => {
         for (const m of transaction.mutations) {
-          await platformAdapter.setSetting(m.modified.key, m.modified.value);
+          await platformAdapter.setKv(
+            SETTINGS_NAMESPACE,
+            m.modified.key,
+            m.modified.value,
+          );
         }
       },
 
       onUpdate: async ({ transaction }) => {
         for (const m of transaction.mutations) {
-          await platformAdapter.setSetting(m.modified.key, m.modified.value);
+          await platformAdapter.setKv(
+            SETTINGS_NAMESPACE,
+            m.modified.key,
+            m.modified.value,
+          );
         }
       },
     }),

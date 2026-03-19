@@ -14,45 +14,7 @@ import { useNavigate, useSearchParams } from "react-router";
 import { useTheme } from "@/components/theme-provider";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { ScrollArea } from "@/components/ui/scroll-area";
-
-// Placeholder data for recent projects - will be replaced with real data later
-const RECENT_PROJECTS: Array<{
-  id: string;
-  name: string;
-  lastModified: string;
-  path: string;
-}> = [
-  {
-    id: "1",
-    name: "Q1 Marketing Strategy",
-    lastModified: "2 hours ago",
-    path: "/marketing-q1",
-  },
-  {
-    id: "2",
-    name: "Product Roadmap 2024",
-    lastModified: "1 day ago",
-    path: "/roadmap-2024",
-  },
-  {
-    id: "3",
-    name: "Design System Documentation",
-    lastModified: "3 days ago",
-    path: "/design-system",
-  },
-  {
-    id: "4",
-    name: "Team Meeting Notes",
-    lastModified: "1 week ago",
-    path: "/meetings",
-  },
-  {
-    id: "5",
-    name: "API Integration Guide",
-    lastModified: "2 weeks ago",
-    path: "/api-docs",
-  },
-];
+import { useRecentProjects } from "@/hooks/use-recent-projects";
 
 function ThemeToggle() {
   const { setTheme } = useTheme();
@@ -85,12 +47,9 @@ function ThemeToggle() {
 }
 
 function openExternalLink(url: string) {
-  // Use window.open which works in both browser and Tauri
-  // Tauri intercepts window.open and handles it properly
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
-// Shared button styles for hover and focus
 const projectButtonStyles = `
   group flex w-full items-center justify-between 
   rounded-lg border px-4 py-3 
@@ -103,14 +62,13 @@ const projectButtonStyles = `
 
 export function Welcome() {
   const [loading, setLoading] = useState(false);
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [_, setSearchParams] = useSearchParams();
   const { t } = useTranslation();
   const navigate = useNavigate();
   const newProjectRef = useRef<HTMLButtonElement>(null);
+  const { addRecentProject, recentProjects } = useRecentProjects();
 
-  // Pre-focus the new project button on mount
   useEffect(() => {
-    // Small delay to ensure DOM is ready
     const timer = setTimeout(() => {
       newProjectRef.current?.focus();
     }, 100);
@@ -122,6 +80,7 @@ export function Welcome() {
     try {
       const selectedPath = await pickDirectory("Select a folder");
       if (selectedPath) {
+        addRecentProject(selectedPath);
         const encodedPath = encodeURIComponent(selectedPath);
         navigate(`/${encodedPath}`);
       }
@@ -131,7 +90,9 @@ export function Welcome() {
   };
 
   const handleOpenProject = (path: string) => {
-    navigate(path);
+    addRecentProject(path);
+    const encodedPath = encodeURIComponent(path);
+    navigate(`/${encodedPath}`);
   };
 
   const handleOpenSettings = () => {
@@ -235,10 +196,10 @@ export function Welcome() {
                 </button>
 
                 {/* Recent Projects */}
-                {RECENT_PROJECTS.length > 0 ? (
-                  RECENT_PROJECTS.map((project) => (
+                {recentProjects.length > 0 ? (
+                  recentProjects.map((project) => (
                     <button
-                      key={project.id}
+                      key={project.path}
                       onClick={() => handleOpenProject(project.path)}
                       className={`
                         ${projectButtonStyles}

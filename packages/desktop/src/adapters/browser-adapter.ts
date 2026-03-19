@@ -1,15 +1,16 @@
 import type {
-  IPlatformAdapter,
-  PlatformEventListener,
   Result,
   BatchResult,
   FileSystemError,
   FileSystemMetadata,
-  MetadataChangeEvent,
-  ContentChangeEvent,
 } from "./platform-adapter.interface";
+import {
+  BaseBrowserAdapter,
+  isHiddenPath,
+  createError,
+} from "./base-browser-adapter";
 
-export class BrowserPlatformAdapter implements IPlatformAdapter {
+export class BrowserPlatformAdapter extends BaseBrowserAdapter {
   private db: IDBDatabase | null = null;
   private readonly DB_VERSION = 1;
   private readonly STORE_NAME = "files";
@@ -46,19 +47,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
         }
       };
     });
-  }
-
-  private createError(
-    path: string,
-    type: FileSystemError["type"],
-    message: string,
-  ): FileSystemError {
-    return { path, type, message };
-  }
-
-  private isHiddenPath(path: string): boolean {
-    const parts = path.split("/");
-    return parts.some((part) => part.startsWith(".") && part.length > 1);
   }
 
   private async isDirectory(db: IDBDatabase, path: string): Promise<boolean> {
@@ -109,7 +97,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
         for (let i = 0; i < pathParts.length - 1; i++) {
           currentPath += pathParts[i] + "/";
           const dirPath = currentPath.slice(0, -1);
-          if (!this.isHiddenPath(dirPath)) {
+          if (!isHiddenPath(dirPath)) {
             directories.add(dirPath);
           }
         }
@@ -117,7 +105,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
         // Only add direct child directories
         if (pathParts.length > 1) {
           const dirPath = normalizedPath + pathParts[0];
-          if (!this.isHiddenPath(dirPath)) {
+          if (!isHiddenPath(dirPath)) {
             directories.add(dirPath);
           }
         }
@@ -252,7 +240,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
         const filePaths = allKeys.filter((key) => {
           if (!key.startsWith(normalizedPath)) return false;
 
-          if (this.isHiddenPath(key)) return false;
+          if (isHiddenPath(key)) return false;
 
           const relativePath = key.slice(normalizedPath.length);
 
@@ -272,7 +260,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     } catch (error) {
       return {
         ok: false,
-        error: this.createError(
+        error: createError(
           path,
           "io_error",
           error instanceof Error ? error.message : "Unknown error",
@@ -317,9 +305,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
           );
 
           if (keysToDelete.length > 0 && !options?.recursive) {
-            failed.push(
-              this.createError(path, "not_empty", "Directory not empty"),
-            );
+            failed.push(createError(path, "not_empty", "Directory not empty"));
             continue;
           }
 
@@ -341,7 +327,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
           succeeded.push(path);
         } catch (error) {
           failed.push(
-            this.createError(
+            createError(
               path,
               "io_error",
               error instanceof Error ? error.message : "Unknown error",
@@ -353,7 +339,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
       paths.forEach((path) => {
         if (!succeeded.includes(path)) {
           failed.push(
-            this.createError(
+            createError(
               path,
               "io_error",
               error instanceof Error ? error.message : "Unknown error",
@@ -419,7 +405,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     } catch (error) {
       return {
         ok: false,
-        error: this.createError(
+        error: createError(
           oldPath,
           "io_error",
           error instanceof Error ? error.message : "Unknown error",
@@ -460,7 +446,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
           succeeded.push({ path, content: data.content || "" });
         } catch (error) {
           failed.push(
-            this.createError(
+            createError(
               path,
               "not_found",
               error instanceof Error ? error.message : "Unknown error",
@@ -472,7 +458,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
       paths.forEach((path) => {
         if (!succeeded.find((s) => s.path === path)) {
           failed.push(
-            this.createError(
+            createError(
               path,
               "io_error",
               error instanceof Error ? error.message : "Unknown error",
@@ -516,7 +502,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
           succeeded.push(file.path);
         } catch (error) {
           failed.push(
-            this.createError(
+            createError(
               file.path,
               "io_error",
               error instanceof Error ? error.message : "Unknown error",
@@ -529,7 +515,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
       files.forEach((file) => {
         if (!succeeded.includes(file.path)) {
           failed.push(
-            this.createError(
+            createError(
               file.path,
               "io_error",
               error instanceof Error ? error.message : "Unknown error",
@@ -540,10 +526,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     }
 
     return { succeeded, failed };
-  }
-
-  async createFiles(paths: string[]): Promise<BatchResult<string>> {
-    return this.writeFiles(paths.map((path) => ({ path, content: "" })));
   }
 
   async deleteFiles(paths: string[]): Promise<BatchResult<string>> {
@@ -570,7 +552,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
           succeeded.push(path);
         } catch (error) {
           failed.push(
-            this.createError(
+            createError(
               path,
               "io_error",
               error instanceof Error ? error.message : "Unknown error",
@@ -583,7 +565,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
       paths.forEach((path) => {
         if (!succeeded.includes(path)) {
           failed.push(
-            this.createError(
+            createError(
               path,
               "io_error",
               error instanceof Error ? error.message : "Unknown error",
@@ -595,101 +577,6 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
 
     return { succeeded, failed };
   }
-
-  async moveFile(oldPath: string, newPath: string): Promise<Result<void>> {
-    try {
-      const db = await this.ensureDB();
-      const transaction = db.transaction([this.STORE_NAME], "readwrite");
-      const store = transaction.objectStore(this.STORE_NAME);
-
-      // Read old file
-      const data: any = await new Promise((resolve, reject) => {
-        const request = store.get(oldPath);
-        request.onsuccess = () => {
-          if (request.result) {
-            resolve(request.result);
-          } else {
-            reject(new Error("File not found"));
-          }
-        };
-        request.onerror = () => reject(request.error);
-      });
-
-      // Write to new location
-      await new Promise<void>((resolve, reject) => {
-        const request = store.put({ ...data, path: newPath });
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-      });
-
-      // Delete old file
-      await new Promise<void>((resolve, reject) => {
-        const request = store.delete(oldPath);
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-      });
-
-      return { ok: true, value: undefined };
-    } catch (error) {
-      return {
-        ok: false,
-        error: this.createError(
-          oldPath,
-          error instanceof Error && error.message === "File not found"
-            ? "not_found"
-            : "io_error",
-          error instanceof Error ? error.message : "Unknown error",
-        ),
-      };
-    }
-  }
-
-  async copyFile(from: string, to: string): Promise<Result<void>> {
-    try {
-      const db = await this.ensureDB();
-      const transaction = db.transaction([this.STORE_NAME], "readwrite");
-      const store = transaction.objectStore(this.STORE_NAME);
-
-      // Read source file
-      const data: any = await new Promise((resolve, reject) => {
-        const request = store.get(from);
-        request.onsuccess = () => {
-          if (request.result) {
-            resolve(request.result);
-          } else {
-            reject(new Error("File not found"));
-          }
-        };
-        request.onerror = () => reject(request.error);
-      });
-
-      // Write to new location
-      await new Promise<void>((resolve, reject) => {
-        const request = store.put({
-          ...data,
-          path: to,
-          createdAt: new Date(),
-        });
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-      });
-
-      return { ok: true, value: undefined };
-    } catch (error) {
-      return {
-        ok: false,
-        error: this.createError(
-          from,
-          error instanceof Error && error.message === "File not found"
-            ? "not_found"
-            : "io_error",
-          error instanceof Error ? error.message : "Unknown error",
-        ),
-      };
-    }
-  }
-
-  // ========== Metadata & Existence ==========
 
   async exists(
     paths: string[],
@@ -792,14 +679,12 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
                 createdAt: new Date(),
               });
             } else {
-              failed.push(
-                this.createError(path, "not_found", "File not found"),
-              );
+              failed.push(createError(path, "not_found", "File not found"));
             }
           }
         } catch (error) {
           failed.push(
-            this.createError(
+            createError(
               path,
               "io_error",
               error instanceof Error ? error.message : "Unknown error",
@@ -812,7 +697,7 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
       paths.forEach((path) => {
         if (!succeeded.find((s) => s.path === path)) {
           failed.push(
-            this.createError(
+            createError(
               path,
               "io_error",
               error instanceof Error ? error.message : "Unknown error",
@@ -823,85 +708,5 @@ export class BrowserPlatformAdapter implements IPlatformAdapter {
     }
 
     return { succeeded, failed };
-  }
-
-  // ========== File Watching ==========
-
-  async startWatchingMetadata(
-    _paths: string[],
-    _watchId: string,
-  ): Promise<void> {
-    // TODO: Implement BroadcastChannel-based watching for cross-tab sync
-    console.log("[BrowserAdapter] Metadata watching not yet implemented");
-  }
-
-  async startWatchingContent(
-    _paths: string[],
-    _watchId: string,
-  ): Promise<void> {
-    // TODO: Implement BroadcastChannel-based watching for cross-tab sync
-    console.log("[BrowserAdapter] Content watching not yet implemented");
-  }
-
-  async stopWatching(_watchId: string): Promise<void> {
-    // TODO: Implement stop watching when BroadcastChannel watching is implemented
-    // Silently handle - no-op in browser for now
-  }
-
-  // ========== Event Listeners ==========
-
-  addEventListener(_callback: PlatformEventListener): () => void {
-    // No-op in browser - return empty cleanup function
-    return () => {};
-  }
-
-  removeEventListener(_callback: PlatformEventListener): void {
-    // No-op in browser
-  }
-
-  // ========== App Settings ==========
-
-  private readonly SETTINGS_PREFIX = "metrists-settings:";
-
-  async getSetting<T>(key: string): Promise<T | undefined> {
-    const raw = localStorage.getItem(this.SETTINGS_PREFIX + key);
-    if (raw === null) return undefined;
-    try {
-      return JSON.parse(raw) as T;
-    } catch {
-      return undefined;
-    }
-  }
-
-  async setSetting<T>(key: string, value: T): Promise<void> {
-    localStorage.setItem(this.SETTINGS_PREFIX + key, JSON.stringify(value));
-  }
-
-  async getAllSettings(): Promise<Record<string, unknown>> {
-    const settings: Record<string, unknown> = {};
-    for (let i = 0; i < localStorage.length; i++) {
-      const storageKey = localStorage.key(i);
-      if (storageKey && storageKey.startsWith(this.SETTINGS_PREFIX)) {
-        const key = storageKey.slice(this.SETTINGS_PREFIX.length);
-        const raw = localStorage.getItem(storageKey);
-        if (raw !== null) {
-          try {
-            settings[key] = JSON.parse(raw);
-          } catch {
-            // skip malformed values
-          }
-        }
-      }
-    }
-    return settings;
-  }
-
-  async toggleFullscreen(): Promise<void> {
-    if (document.fullscreenElement) {
-      await document.exitFullscreen();
-      return;
-    }
-
-    await document.documentElement.requestFullscreen();
   }
 }

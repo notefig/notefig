@@ -242,20 +242,34 @@ export interface IPlatformAdapter {
   removeEventListener(callback: PlatformEventListener): void;
 
   /**
-   * Get a setting value by key.
+   * Get a value from a namespaced key-value store.
+   * @param namespace - The namespace/category for the key
+   * @param key - The key within the namespace
    * @returns The stored value, or undefined if not found.
    */
-  getSetting<T>(key: string): Promise<T | undefined>;
+  getKv<T>(namespace: string, key: string): Promise<T | undefined>;
 
   /**
-   * Set a setting value by key. Persists immediately.
+   * Set a value in a namespaced key-value store.
+   * @param namespace - The namespace/category for the key
+   * @param key - The key within the namespace
+   * @param value - The value to store
    */
-  setSetting<T>(key: string, value: T): Promise<void>;
+  setKv<T>(namespace: string, key: string, value: T): Promise<void>;
 
   /**
-   * Get all settings as a flat record.
+   * Delete a key from a namespaced key-value store.
+   * @param namespace - The namespace/category for the key
+   * @param key - The key to delete
    */
-  getAllSettings(): Promise<Record<string, unknown>>;
+  deleteKv(namespace: string, key: string): Promise<void>;
+
+  /**
+   * Get all values from a namespaced key-value store.
+   * @param namespace - The namespace/category
+   * @returns Record of all key-value pairs in the namespace
+   */
+  getAllKv<T>(namespace: string): Promise<Record<string, T>>;
 
   /**
    * Toggle application fullscreen state.

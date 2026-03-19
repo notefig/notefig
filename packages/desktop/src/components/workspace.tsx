@@ -197,29 +197,36 @@ export const Workspace = () => {
     const metadataWatchId = `metadata-${workspacePath}`;
     const contentWatchId = `content-${workspacePath}`;
     let eventCleanup: (() => void) | undefined;
+    let isActive = true;
 
     const setupWatchers = async () => {
-      eventCleanup = platformAdapter.addEventListener((event) => {
-        if (event.type === "fs-metadata-changed") {
-          handleMetadataFileSystemChange(event.payload, workspacePath);
-        } else if (event.type === "fs-content-changed") {
-          handleContentFileSystemChange(event.payload, workspacePath);
+      try {
+        eventCleanup = platformAdapter.addEventListener((event) => {
+          if (!isActive) return;
+          if (event.type === "fs-metadata-changed") {
+            handleMetadataFileSystemChange(event.payload, workspacePath);
+          } else if (event.type === "fs-content-changed") {
+            handleContentFileSystemChange(event.payload, workspacePath);
+          }
+        });
+
+        await platformAdapter.startWatchingMetadata(
+          [workspacePath],
+          metadataWatchId,
+        );
+
+        if (openTabs.length > 0) {
+          await platformAdapter.startWatchingContent(openTabs, contentWatchId);
         }
-      });
-
-      await platformAdapter.startWatchingMetadata(
-        [workspacePath],
-        metadataWatchId,
-      );
-
-      if (openTabs.length > 0) {
-        await platformAdapter.startWatchingContent(openTabs, contentWatchId);
+      } catch (error) {
+        console.error("Failed to setup watchers:", error);
       }
     };
 
     setupWatchers();
 
     return () => {
+      isActive = false;
       eventCleanup?.();
       platformAdapter.stopWatching(metadataWatchId);
       if (openTabs.length > 0) {
@@ -260,7 +267,7 @@ export const Workspace = () => {
             className="flex-1 min-w-0 h-full overflow-hidden"
             tabIndex={-1}
           >
-            {openTabs.length === 0 || dockableTabs.length === 0 ? (
+            {openTabs.length === 0 ? (
               <div className="flex items-center justify-center h-full text-muted-foreground p-4 ps-0">
                 <p className="text-center">{t("noFileSelected")}</p>
               </div>
