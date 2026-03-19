@@ -109,6 +109,13 @@ const appReducer = createReducer<State, Action>({
       size: 1,
     };
     sourceWindow.children.splice(tabIndex, 1);
+
+    // If window is now empty, cleanup immediately and don't try to set selected
+    if (sourceWindow.children.length === 0) {
+      cleanup(state);
+      return;
+    }
+
     sourceWindow.selected = sourceWindow.children[0];
     targetParent.children.splice(targetIndex + 1, 0, newPanel);
     cleanup(state);
@@ -156,6 +163,12 @@ const appReducer = createReducer<State, Action>({
     // Remove tab from active parent
     sourceWindow.children.splice(activeIndex, 1);
 
+    // If window is now empty, cleanup immediately without setting selected
+    if (sourceWindow.children.length === 0) {
+      cleanup(state);
+      return;
+    }
+
     // Insert tab into over parent
     targetWindow.children.splice(overIndex, 0, tabId);
     targetWindow.selected = tabId;
@@ -163,11 +176,6 @@ const appReducer = createReducer<State, Action>({
     // If active tab was selected, select first remaining tab
     if (sourceWindow.selected === tabId) {
       sourceWindow.selected = sourceWindow.children[0];
-    }
-
-    // clean up the tree of empty nodes
-    if (sourceWindow.children.length === 0) {
-      cleanup(state);
     }
   },
 
@@ -197,8 +205,13 @@ const appReducer = createReducer<State, Action>({
     const tabIndex = sourceWindow.children.indexOf(tabId);
     sourceWindow.children.splice(tabIndex, 1);
 
-    // select the first tab in the window since we (likely) removed the selected tab
-    sourceWindow.selected = sourceWindow.children[0];
+    // If source window is now empty after removing the tab, don't try to set selected
+    if (sourceWindow.children.length === 0) {
+      sourceWindow.selected = "";
+    } else {
+      // select the first tab in the window since we (likely) removed the selected tab
+      sourceWindow.selected = sourceWindow.children[0];
+    }
 
     // create new window
     const newWindow: WindowNode = {

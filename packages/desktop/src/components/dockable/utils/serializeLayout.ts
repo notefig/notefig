@@ -75,18 +75,19 @@ function serializeLayout(
       id: `window-${idNonce++}`,
       children: tabIds,
       size: props.size || 1,
-      selected: tabIds[props.selected || 0],
+      selected: tabIds[props.selected ?? 0],
     };
   }
 
   // automatically wrap a <Tab> in a <Window> if it is not already a <Window>
   if (element.type === Tab) {
+    const tabId = parseTab(element);
     return {
       type: "Window",
       id: `window-${idNonce++}`,
-      children: [parseTab(element)],
+      children: [tabId],
       size: 1,
-      selected: parseTab(element),
+      selected: tabId,
     };
   }
 
