@@ -82,7 +82,7 @@ export function IconSidebar({
           <TooltipTrigger asChild>
             <button
               onClick={handleLogoClick}
-              className="mb-3 p-2 rounded-md transition-colors hover:bg-sidebar-accent cursor-pointer"
+              className="mb-3 p-0.3 rounded-md transition-colors hover:bg-sidebar-accent cursor-pointer"
             >
               <PlainLogo size={20} className="block dark:hidden" />
               <PlainLogo size={20} fill="white" className="hidden dark:block" />
