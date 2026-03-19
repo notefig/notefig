@@ -1,11 +1,11 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod fs_ops;
 mod file_watcher;
+mod fs_ops;
 
 use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
-use tauri::{Emitter, AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_store::StoreExt;
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
@@ -129,6 +129,7 @@ fn set_zoom_level(app: &AppHandle, zoom: f64) {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -143,7 +144,8 @@ fn main() {
             // Register updater and process plugins (desktop only)
             #[cfg(desktop)]
             {
-                app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
                 app.handle().plugin(tauri_plugin_process::init())?;
             }
 
@@ -153,16 +155,15 @@ fn main() {
             match event.id().as_ref() {
                 "open_folder" => {
                     use tauri_plugin_dialog::DialogExt;
-                    
+
                     let app_handle = app.clone();
-                    app.dialog()
-                        .file()
-                        .set_title("Select Folder")
-                        .pick_folder(move |folder_path| {
+                    app.dialog().file().set_title("Select Folder").pick_folder(
+                        move |folder_path| {
                             if let Some(path) = folder_path {
                                 let _ = app_handle.emit("folder-selected", path.to_string());
                             }
-                        });
+                        },
+                    );
                 }
                 "quit" => {
                     app.exit(0);
