@@ -27,8 +27,8 @@ import {
 import { useUpdater } from "@/hooks/use-updater";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme-provider";
-import { useSearchParams } from "react-router";
 import { useAppSettings } from "@/hooks/use-app-settings";
+import { useSearchParams } from "react-router";
 
 interface SettingsModalProps {
   direction: "ltr" | "rtl";
@@ -244,7 +244,6 @@ function GeneralSettings({
 function AppearanceSettings() {
   const { setTheme, theme } = useTheme();
   const { setTheme: persistTheme } = useAppSettings();
-  const [accentColor, setAccentColor] = useState("purple");
 
   const handleThemeChange = (value: string) => {
     const t = value as "dark" | "light" | "system";

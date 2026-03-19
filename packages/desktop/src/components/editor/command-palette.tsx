@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { useHotkey, formatForDisplay } from "@tanstack/react-hotkeys";
 import { useTheme } from "../theme-provider";
+import { useAppSettings } from "@/hooks/use-app-settings";
 import { useNavigate } from "react-router";
 import { pickDirectory } from "../../utils/fs";
 
@@ -77,6 +78,7 @@ export function CommandPalette({
   direction = "ltr",
 }: CommandPaletteProps) {
   const { setTheme, theme } = useTheme();
+  const { setTheme: persistTheme } = useAppSettings();
   const [search, setSearch] = useState("");
 
   const navigate = useNavigate();
@@ -106,13 +108,16 @@ export function CommandPalette({
   const swapTheme = () => {
     if (theme === "dark") {
       setTheme("light");
+      persistTheme("light");
       return;
     }
     if (theme === "light") {
       setTheme("dark");
+      persistTheme("dark");
       return;
     }
     setTheme("light");
+    persistTheme("light");
   };
 
   const commands: CommandType[] = [

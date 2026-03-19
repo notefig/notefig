@@ -12,6 +12,7 @@ import { PlainLogo } from "@/components/logo";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router";
 import { useTheme } from "@/components/theme-provider";
+import { useAppSettings } from "@/hooks/use-app-settings";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useRecentProjects } from "@/hooks/use-recent-projects";
@@ -19,6 +20,12 @@ import { DebugPanel } from "./debug-panel";
 
 function ThemeToggle() {
   const { setTheme } = useTheme();
+  const { setTheme: persistTheme } = useAppSettings();
+
+  const handleThemeChange = (theme: "light" | "dark" | "system") => {
+    setTheme(theme);
+    persistTheme(theme);
+  };
 
   return (
     <DropdownMenu>
@@ -30,15 +37,15 @@ function ThemeToggle() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => setTheme("light")}>
+        <DropdownMenuItem onClick={() => handleThemeChange("light")}>
           <Sun className="h-4 w-4 mr-2" />
           Light
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("dark")}>
+        <DropdownMenuItem onClick={() => handleThemeChange("dark")}>
           <Moon className="h-4 w-4 mr-2" />
           Dark
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("system")}>
+        <DropdownMenuItem onClick={() => handleThemeChange("system")}>
           <Monitor className="h-4 w-4 mr-2" />
           System
         </DropdownMenuItem>
