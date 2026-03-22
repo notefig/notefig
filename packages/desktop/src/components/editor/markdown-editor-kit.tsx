@@ -8,6 +8,7 @@ import { BasicMarksKit } from "@/components/editor/plugins/basic-marks-kit";
 import { CodeBlockKit } from "@/components/editor/plugins/code-block-kit";
 import { CommentKit } from "@/components/editor/plugins/comment-kit";
 import { DiscussionKit } from "@/components/editor/plugins/discussion-kit";
+import { DndKit } from "@/components/editor/plugins/dnd-kit";
 import { ExitBreakKit } from "@/components/editor/plugins/exit-break-kit";
 import { LinkKit } from "@/components/editor/plugins/link-kit";
 import { ListKit } from "@/components/editor/plugins/list-kit";
@@ -34,6 +35,9 @@ export const MarkdownEditorKit = [
   ...AutoformatKit, // Markdown shortcuts like **bold**, * lists, # headings
   ...ExitBreakKit, // Better enter key behavior
   TrailingBlockPlugin, // Always have a trailing paragraph
+
+  // Drag and drop for blocks
+  ...DndKit,
 
   // Markdown serialization
   ...MarkdownKit,
