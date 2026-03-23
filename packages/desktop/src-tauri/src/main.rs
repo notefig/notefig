@@ -141,6 +141,59 @@ fn main() {
             // Restore persisted zoom level
             restore_zoom_level(app.handle());
 
+            // Set the app icon programmatically so it renders at full size in the Dock.
+            // Without this, macOS applies additional scaling to .app bundle icons.
+            // Tauri only does this in dev builds, so we do it ourselves for production.
+            // We draw the icon at ~83% within a 1024x1024 canvas to match the macOS
+            // icon grid (consistent with how Chrome, Slack, Finder etc. appear).
+            #[cfg(target_os = "macos")]
+            {
+                use objc2::AllocAnyThread;
+                use objc2_app_kit::{NSApplication, NSImage, NSCompositingOperation, NSGraphicsContext, NSImageInterpolation};
+                use objc2_foundation::{MainThreadMarker, NSData, NSSize, NSRect, NSPoint};
+
+                let icon_bytes = include_bytes!("../icons/icon.icns");
+                let mtm = unsafe { MainThreadMarker::new_unchecked() };
+                let ns_app = NSApplication::sharedApplication(mtm);
+                let data = NSData::with_bytes(icon_bytes);
+                let source_icon = NSImage::initWithData(NSImage::alloc(), &data)
+                    .expect("Failed to create app icon");
+
+                let canvas_size = 1024.0_f64;
+                let icon_scale = 0.83;
+                let icon_size = canvas_size * icon_scale;
+                let padding = (canvas_size - icon_size) / 2.0;
+
+                // Create a new 1024x1024 image and draw the icon centered at 83%
+                let final_icon = NSImage::initWithSize(
+                    NSImage::alloc(),
+                    NSSize::new(canvas_size, canvas_size),
+                );
+                final_icon.lockFocus();
+
+                if let Some(ctx) = unsafe { NSGraphicsContext::currentContext() } {
+                    ctx.setImageInterpolation(NSImageInterpolation::High);
+                }
+
+                unsafe {
+                    source_icon.drawInRect_fromRect_operation_fraction(
+                        NSRect::new(
+                            NSPoint::new(padding, padding),
+                            NSSize::new(icon_size, icon_size),
+                        ),
+                        NSRect::new(
+                            NSPoint::new(0.0, 0.0),
+                            source_icon.size(),
+                        ),
+                        NSCompositingOperation::SourceOver,
+                        1.0,
+                    );
+                }
+
+                final_icon.unlockFocus();
+                unsafe { ns_app.setApplicationIconImage(Some(&final_icon)) };
+            }
+
             // Register updater and process plugins (desktop only)
             #[cfg(desktop)]
             {
