@@ -1,3 +1,14 @@
+/** Helper: oklch CSS variable color with Tailwind opacity modifier support.
+ *  Uses color-mix() so that utilities like bg-brand/50 produce correct alpha. */
+function oklchVar(varName) {
+  return ({ opacityValue }) => {
+    if (opacityValue !== undefined) {
+      return `color-mix(in oklch, var(${varName}) ${Math.round(opacityValue * 100)}%, transparent)`;
+    }
+    return `var(${varName})`;
+  };
+}
+
 /** @type {import("tailwindcss").Config} */
 module.exports = {
   darkMode: ["class"],
@@ -91,6 +102,8 @@ module.exports = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        brand: oklchVar("--brand"),
+        highlight: oklchVar("--highlight"),
       },
       borderRadius: {
         lg: "var(--radius)",
