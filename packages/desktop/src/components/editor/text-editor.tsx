@@ -18,9 +18,11 @@ import {
   ListOrderedIcon,
   QuoteIcon,
   StrikethroughIcon,
+  TableIcon,
   UnderlineIcon,
 } from "lucide-react";
 import { toggleList, ListStyleType } from "@platejs/list";
+import { TablePlugin } from "@platejs/table/react";
 import { LinkToolbarButton } from "@/components/ui/link-toolbar-button";
 import type { FileEntry } from "../../utils/fs";
 import { writeFileContent } from "@/utils/collections";
@@ -264,6 +266,17 @@ export function TextEditor({ file, basePath }: TextEditorProps) {
               tooltip="Code Block (⌘+Alt+8)"
             >
               <CodeIcon />
+            </ToolbarButton>
+            <ToolbarButton
+              onMouseDown={preventFocusLoss}
+              onClick={() =>
+                editor
+                  .getTransforms(TablePlugin)
+                  .insert.table({ colCount: 3, rowCount: 3 }, { select: true })
+              }
+              tooltip="Insert Table"
+            >
+              <TableIcon />
             </ToolbarButton>
 
             <Separator orientation="vertical" className="h-6" />

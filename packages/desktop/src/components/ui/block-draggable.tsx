@@ -13,6 +13,9 @@ import {
   useElement,
   usePluginOption,
 } from "platejs/react";
+import { useSelected } from "platejs/react";
+
+import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
@@ -97,28 +100,9 @@ function Draggable(props: PlateElementProps) {
   React.useEffect(() => {
     if (!isDragging) {
       resetPreview();
-      // Force clear drop target when drag ends to remove drop line
-      editor.setOption(DndPlugin, "dropTarget", undefined);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDragging]);
-
-  // Global mouseup handler to ensure drop line clears even if drag ends outside drop target
-  React.useEffect(() => {
-    const handleGlobalMouseUp = () => {
-      if (!isDragging) {
-        editor.setOption(DndPlugin, "dropTarget", undefined);
-      }
-    };
-
-    window.addEventListener("mouseup", handleGlobalMouseUp);
-    window.addEventListener("touchend", handleGlobalMouseUp);
-
-    return () => {
-      window.removeEventListener("mouseup", handleGlobalMouseUp);
-      window.removeEventListener("touchend", handleGlobalMouseUp);
-    };
-  }, [isDragging, editor]);
 
   React.useEffect(() => {
     if (isAboutToDrag) {
@@ -133,8 +117,7 @@ function Draggable(props: PlateElementProps) {
     <div
       className={cn(
         "relative",
-        // Removed opacity-50 during drag as it may cause drag cancellation in Safari
-        // See: https://github.com/react-dnd/react-dnd/issues/3649
+        isDragging && "opacity-50",
         getPluginByType(editor, element.type)?.node.isContainer
           ? "group/container"
           : "group",
@@ -145,40 +128,35 @@ function Draggable(props: PlateElementProps) {
       }}
     >
       {!isInTable && (
-        <Gutter isDragging={isDragging}>
+        <Gutter>
           <div
             className={cn(
               "slate-blockToolbarWrapper",
-              "flex h-[1.5em] w-full",
+              "flex h-[1.5em]",
               isInColumn && "h-4",
             )}
           >
             <div
               className={cn(
-                "slate-blockToolbar relative w-6 shrink-0",
+                "slate-blockToolbar relative w-[18px]",
                 "pointer-events-auto mr-1 flex items-center",
                 isInColumn && "mr-1.5",
               )}
             >
-              {/* Simplified drag handle for Safari - no nested components */}
-              <div
+              <Button
                 ref={handleRef}
-                className="-left-0 absolute h-6 w-full cursor-grab active:cursor-grabbing flex items-center justify-center hover:bg-accent/50 rounded select-none touch-none"
-                style={{
-                  top: `${dragButtonTop + 3}px`,
-                  WebkitUserSelect: "none",
-                  userSelect: "none",
-                  WebkitTouchCallout: "none",
-                  touchAction: "none",
-                }}
-                onMouseDown={(e) => {
-                  // Prevent text selection during drag in Safari
-                  e.preventDefault();
-                }}
+                variant="ghost"
+                className="-left-0 absolute h-6 w-full p-0"
+                style={{ top: `${dragButtonTop + 3}px` }}
                 data-plate-prevent-deselect
               >
-                <GripVertical className="text-muted-foreground" />
-              </div>
+                <DragHandle
+                  isDragging={isDragging}
+                  previewRef={previewRef}
+                  resetPreview={resetPreview}
+                  setPreviewTop={setPreviewTop}
+                />
+              </Button>
             </div>
           </div>
         </Gutter>
@@ -197,10 +175,9 @@ function Draggable(props: PlateElementProps) {
         onContextMenu={(event) =>
           editor
             .getApi(BlockSelectionPlugin)
-            ?.blockSelection?.addOnContextMenu?.({ element, event })
+            .blockSelection.addOnContextMenu({ element, event })
         }
       >
-        {" "}
         <MemoizedChildren>{children}</MemoizedChildren>
         <DropLine />
       </div>
@@ -211,29 +188,27 @@ function Draggable(props: PlateElementProps) {
 function Gutter({
   children,
   className,
-  isDragging: _isDragging,
   ...props
-}: React.ComponentProps<"div"> & { isDragging?: boolean }) {
+}: React.ComponentProps<"div">) {
   const editor = useEditorRef();
   const element = useElement();
   const isSelectionAreaVisible = usePluginOption(
     BlockSelectionPlugin,
     "isSelectionAreaVisible",
   );
+  const selected = useSelected();
 
   return (
     <div
       {...props}
       className={cn(
         "slate-gutterLeft",
-        "-translate-x-full absolute top-0 z-50 flex h-full cursor-text w-12",
+        "-translate-x-full absolute top-0 z-50 flex h-full cursor-text hover:opacity-100 sm:opacity-0",
+        getPluginByType(editor, element.type)?.node.isContainer
+          ? "group-hover/container:opacity-100"
+          : "group-hover:opacity-100",
         isSelectionAreaVisible && "hidden",
-        // Show on hover for any block in the group
-        // isDragging is already deferred when passed in, so use it directly
-        !_isDragging && "opacity-0 pointer-events-none",
-        _isDragging && "opacity-100 pointer-events-auto",
-        // Always allow hover interaction when not dragging
-        "group-hover:opacity-100 group-hover:pointer-events-auto",
+        !selected && "opacity-0",
         className,
       )}
       contentEditable={false}
@@ -261,32 +236,19 @@ const DragHandle = React.memo(function DragHandle({
     <Tooltip>
       <TooltipTrigger asChild>
         <div
-          className="flex size-full items-center justify-center cursor-grab active:cursor-grabbing"
-          style={{
-            WebkitUserSelect: "none",
-            userSelect: "none",
-            WebkitTouchCallout: "none",
-            touchAction: "none",
-          }}
+          className="flex size-full items-center justify-center"
           onClick={(e) => {
             e.preventDefault();
-            editor.getApi(BlockSelectionPlugin)?.blockSelection?.focus();
+            editor.getApi(BlockSelectionPlugin).blockSelection.focus();
           }}
           onMouseDown={(e) => {
-            // Prevent default to avoid text selection in Safari
-            e.preventDefault();
-
             resetPreview();
 
-            if ((e.button !== 0 && e.button !== 2) || e.shiftKey) {
-              return;
-            }
+            if ((e.button !== 0 && e.button !== 2) || e.shiftKey) return;
 
-            // Safely get block selection API if available
-            const blockSelectionApi =
-              editor.getApi(BlockSelectionPlugin)?.blockSelection;
-            const blockSelection =
-              blockSelectionApi?.getNodes({ sort: true }) ?? [];
+            const blockSelection = editor
+              .getApi(BlockSelectionPlugin)
+              .blockSelection.getNodes({ sort: true });
 
             let selectionNodes =
               blockSelection.length > 0
@@ -315,16 +277,16 @@ const DragHandle = React.memo(function DragHandle({
             previewRef.current?.classList.add("opacity-0");
             editor.setOption(DndPlugin, "multiplePreviewRef", previewRef);
 
-            blockSelectionApi?.set(blocks.map((block) => block.id as string));
+            editor
+              .getApi(BlockSelectionPlugin)
+              .blockSelection.set(blocks.map((block) => block.id as string));
           }}
           onMouseEnter={() => {
             if (isDragging) return;
 
-            // Safely get block selection API if available
-            const blockSelectionApi =
-              editor.getApi(BlockSelectionPlugin)?.blockSelection;
-            const blockSelection =
-              blockSelectionApi?.getNodes({ sort: true }) ?? [];
+            const blockSelection = editor
+              .getApi(BlockSelectionPlugin)
+              .blockSelection.getNodes({ sort: true });
 
             let selectedBlocks =
               blockSelection.length > 0
@@ -381,11 +343,10 @@ const DropLine = React.memo(function DropLine({
       {...props}
       className={cn(
         "slate-dropLine",
-        "absolute inset-x-0 h-1 opacity-100 transition-opacity z-50",
-        "bg-primary",
-        "dark:bg-primary",
-        dropLine === "top" && "-top-0.5",
-        dropLine === "bottom" && "-bottom-0.5",
+        "absolute inset-x-0 h-0.5 opacity-100 transition-opacity",
+        "bg-brand/50",
+        dropLine === "top" && "-top-px",
+        dropLine === "bottom" && "-bottom-px",
         className,
       )}
     />

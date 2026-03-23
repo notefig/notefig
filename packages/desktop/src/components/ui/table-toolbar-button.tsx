@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import * as React from 'react';
+import * as React from "react";
 
-import type { DropdownMenuProps } from '@radix-ui/react-dropdown-menu';
+import type { DropdownMenuProps } from "@radix-ui/react-dropdown-menu";
 
-import { TablePlugin, useTableMergeState } from '@platejs/table/react';
+import { TablePlugin, useTableMergeState } from "@platejs/table/react";
 import {
   ArrowDown,
   ArrowLeft,
@@ -16,9 +16,9 @@ import {
   Trash2Icon,
   Ungroup,
   XIcon,
-} from 'lucide-react';
-import { KEYS } from 'platejs';
-import { useEditorPlugin, useEditorSelector } from 'platejs/react';
+} from "lucide-react";
+import { KEYS } from "platejs";
+import { useEditorPlugin, useEditorSelector } from "platejs/react";
 
 import {
   DropdownMenu,
@@ -29,15 +29,15 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 
-import { ToolbarButton } from './toolbar';
+import { ToolbarButton } from "./toolbar";
 
 export function TableToolbarButton(props: DropdownMenuProps) {
   const tableSelected = useEditorSelector(
     (editor) => editor.api.some({ match: { type: KEYS.table } }),
-    []
+    [],
   );
 
   const { editor, tf } = useEditorPlugin(TablePlugin);
@@ -234,7 +234,7 @@ function TablePicker() {
 
   return (
     <div
-      className="flex! m-0 flex-col p-0"
+      className="!flex m-0 flex-col p-0"
       onClick={() => {
         tf.insert.table(tablePicker.size, { select: true });
         editor.tf.focus();
@@ -247,14 +247,14 @@ function TablePicker() {
             <div
               key={`(${rowIndex},${columIndex})`}
               className={cn(
-                'col-span-1 size-3 border border-solid bg-secondary',
-                !!value && 'border-current'
+                "col-span-1 size-3 border border-solid bg-secondary",
+                !!value && "border-current",
               )}
               onMouseMove={() => {
                 onCellMove(rowIndex, columIndex);
               }}
             />
-          ))
+          )),
         )}
       </div>
 

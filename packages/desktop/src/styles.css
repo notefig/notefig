@@ -79,6 +79,8 @@
 
   body {
     @apply bg-background text-foreground;
+    font-synthesis-weight: none;
+    text-rendering: optimizeLegibility;
   }
 
   /* Map Dockable CSS variables to our design tokens */
