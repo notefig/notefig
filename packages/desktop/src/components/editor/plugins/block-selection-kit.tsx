@@ -4,6 +4,7 @@ import { BlockSelectionPlugin } from "@platejs/selection/react";
 import { getPluginTypes, KEYS } from "platejs";
 
 import { BlockSelection } from "@/components/ui/block-selection";
+import { BlockSelectionAfterEditable } from "@/components/ui/block-selection-after-editable";
 
 export const BlockSelectionKit = [
   BlockSelectionPlugin.configure(({ editor }) => ({
@@ -15,6 +16,10 @@ export const BlockSelectionKit = [
         ),
     },
     render: {
+      // Custom afterEditable component that fixes clipboard operations.
+      // The original uses deprecated document.execCommand("copy") which doesn't
+      // work in Tauri. Our version uses the native ClipboardEvent API.
+      afterEditable: BlockSelectionAfterEditable,
       belowRootNodes: (props) => {
         if (!props.attributes.className?.includes("slate-selectable"))
           return null;
