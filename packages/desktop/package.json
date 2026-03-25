@@ -1,7 +1,7 @@
 {
   "name": "metrists",
   "private": true,
-  "version": "0.0.35",
+  "version": "0.0.36",
   "type": "module",
   "scripts": {
     "format": "prettier --write \"src/**/*.ts\" && prettier --write \"src/**/*.tsx\" && prettier --write *.json && prettier --write .*.json && prettier --write *.ts && prettier --write *.js",
