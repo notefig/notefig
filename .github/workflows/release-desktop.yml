@@ -85,7 +85,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name=metrists-app --commit-dirty=true
+          command: pages deploy dist --project-name=metrists-app --branch=main --commit-dirty=true
           workingDirectory: packages/desktop
 
   build-and-publish:
