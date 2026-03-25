@@ -3,7 +3,6 @@
 import * as React from "react";
 
 import {
-  ArrowUpToLineIcon,
   BaselineIcon,
   BoldIcon,
   Code2Icon,
@@ -12,7 +11,6 @@ import {
   PaintBucketIcon,
   StrikethroughIcon,
   UnderlineIcon,
-  WandSparklesIcon,
 } from "lucide-react";
 import { KEYS } from "platejs";
 import { useEditorReadOnly } from "platejs/react";
@@ -20,11 +18,9 @@ import { useEditorReadOnly } from "platejs/react";
 import { AlignToolbarButton } from "./align-toolbar-button";
 import { CommentToolbarButton } from "./comment-toolbar-button";
 import { EmojiToolbarButton } from "./emoji-toolbar-button";
-import { ExportToolbarButton } from "./export-toolbar-button";
 import { FontColorToolbarButton } from "./font-color-toolbar-button";
 import { FontSizeToolbarButton } from "./font-size-toolbar-button";
 import { RedoToolbarButton, UndoToolbarButton } from "./history-toolbar-button";
-import { ImportToolbarButton } from "./import-toolbar-button";
 import {
   IndentToolbarButton,
   OutdentToolbarButton,
@@ -56,14 +52,6 @@ export function FixedToolbarButtons() {
           <ToolbarGroup>
             <UndoToolbarButton />
             <RedoToolbarButton />
-          </ToolbarGroup>
-
-          <ToolbarGroup>
-            <ExportToolbarButton>
-              <ArrowUpToLineIcon />
-            </ExportToolbarButton>
-
-            <ImportToolbarButton />
           </ToolbarGroup>
 
           <ToolbarGroup>

@@ -163,14 +163,14 @@ function Draggable(props: PlateElementProps) {
       )}
 
       <div
-        ref={previewRef}
+        ref={previewRef as React.RefObject<HTMLDivElement>}
         className={cn("-left-0 absolute hidden w-full")}
         style={{ top: `${-previewTop}px` }}
         contentEditable={false}
       />
 
       <div
-        ref={nodeRef}
+        ref={nodeRef as React.RefObject<HTMLDivElement>}
         className="slate-blockWrapper flow-root"
         onContextMenu={(event) =>
           editor
