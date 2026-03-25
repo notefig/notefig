@@ -110,14 +110,15 @@ const appReducer = createReducer<State, Action>({
     };
     sourceWindow.children.splice(tabIndex, 1);
 
-    // If window is now empty, cleanup immediately and don't try to set selected
+    targetParent.children.splice(targetIndex + 1, 0, newPanel);
+
+    // Update source window's selected tab
     if (sourceWindow.children.length === 0) {
-      cleanup(state);
-      return;
+      sourceWindow.selected = "";
+    } else {
+      sourceWindow.selected = sourceWindow.children[0];
     }
 
-    sourceWindow.selected = sourceWindow.children[0];
-    targetParent.children.splice(targetIndex + 1, 0, newPanel);
     cleanup(state);
   },
 
@@ -163,20 +164,19 @@ const appReducer = createReducer<State, Action>({
     // Remove tab from active parent
     sourceWindow.children.splice(activeIndex, 1);
 
-    // If window is now empty, cleanup immediately without setting selected
-    if (sourceWindow.children.length === 0) {
-      cleanup(state);
-      return;
-    }
-
-    // Insert tab into over parent
+    // Insert tab into target window BEFORE cleanup (so tab is not lost)
     targetWindow.children.splice(overIndex, 0, tabId);
     targetWindow.selected = tabId;
 
-    // If active tab was selected, select first remaining tab
-    if (sourceWindow.selected === tabId) {
+    // If source window is now empty, cleanup will remove it
+    if (sourceWindow.children.length === 0) {
+      sourceWindow.selected = "";
+    } else if (sourceWindow.selected === tabId) {
+      // If active tab was selected, select first remaining tab
       sourceWindow.selected = sourceWindow.children[0];
     }
+
+    cleanup(state);
   },
 
   splitWindow: (
