@@ -3,6 +3,7 @@ import type {
   FileSystemError,
   FileSystemMetadata,
   Result,
+  PlatformEventListener,
 } from "./platform-adapter.interface";
 import {
   BaseBrowserAdapter,
@@ -16,6 +17,8 @@ import {
   ensurePermission,
   buildAbsolutePath,
 } from "./browser-fs-utils";
+import { BrowserFileWatcher } from "./browser-file-watcher";
+import { calculateContentHash } from "@/utils/hash";
 
 type DirectoryHandle = FileSystemDirectoryHandle;
 type FileHandle = FileSystemFileHandle;
@@ -40,6 +43,17 @@ function supportsFsAccess(): boolean {
 export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
   private handleCache = new Map<string, DirectoryHandle>();
   private db: IDBDatabase | null = null;
+  private fileWatcher: BrowserFileWatcher;
+
+  constructor() {
+    super();
+    // Initialize file watcher with bound methods
+    this.fileWatcher = new BrowserFileWatcher(
+      this.readDirectory.bind(this),
+      this.readFiles.bind(this),
+      this.getMetadata.bind(this),
+    );
+  }
 
   private async ensureDB(): Promise<IDBDatabase> {
     if (this.db) return this.db;
@@ -370,6 +384,10 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
 
     for (const file of files) {
       try {
+        // Register app write before writing to prevent re-emitting our own change
+        const contentHash = calculateContentHash(file.content);
+        this.fileWatcher.registerAppWrite(file.path, contentHash);
+
         const handle = await this.resolveFileHandle(file.path, true, true);
         const writable = await handle.createWritable();
         await writable.write(file.content);
@@ -548,6 +566,26 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     }
 
     return { succeeded, failed };
+  }
+
+  async startWatchingMetadata(paths: string[], watchId: string): Promise<void> {
+    await this.fileWatcher.startWatchingMetadata(paths, watchId);
+  }
+
+  async startWatchingContent(paths: string[], watchId: string): Promise<void> {
+    await this.fileWatcher.startWatchingContent(paths, watchId);
+  }
+
+  async stopWatching(watchId: string): Promise<void> {
+    this.fileWatcher.stopWatching(watchId);
+  }
+
+  addEventListener(callback: PlatformEventListener): () => void {
+    return this.fileWatcher.addEventListener(callback);
+  }
+
+  removeEventListener(callback: PlatformEventListener): void {
+    this.fileWatcher.removeEventListener(callback);
   }
 }
 

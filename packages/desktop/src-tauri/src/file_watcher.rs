@@ -69,13 +69,13 @@ lazy_static::lazy_static! {
 
 pub fn register_app_write(path: String, content_hash: String) {
     let mut writes = APP_WRITES.lock().unwrap();
-    
+
     writes.push(AppWrite {
         path: PathBuf::from(path),
         content_hash,
         timestamp: Instant::now(),
     });
-    
+
     writes.retain(|w| w.timestamp.elapsed().as_secs() < 5);
 }
 
@@ -121,18 +121,18 @@ fn collect_directory_paths(
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<(PathBuf, bool)>> + Send>> {
     Box::pin(async move {
         let mut results = Vec::new();
-        
+
         if let Ok(mut entries) = fs::read_dir(&dir_path).await {
             while let Ok(Some(entry)) = entries.next_entry().await {
                 let path = entry.path();
-                
+
                 if should_filter_path(&path) {
                     continue;
                 }
-                
+
                 let is_directory = path.is_dir();
                 results.push((path.clone(), is_directory));
-                
+
                 // Recurse into subdirectories
                 if is_directory {
                     let sub_results = collect_directory_paths(path).await;
@@ -140,7 +140,7 @@ fn collect_directory_paths(
                 }
             }
         }
-        
+
         results
     })
 }
@@ -151,7 +151,7 @@ fn collect_directory_paths(
 async fn process_events(events: Vec<Event>, app_handle: &AppHandle) {
     let mut metadata_changes = Vec::new();
     let mut content_changes = Vec::new();
-    
+
     for event in events {
         match event.kind {
             // CREATE events
@@ -160,7 +160,7 @@ async fn process_events(events: Vec<Event>, app_handle: &AppHandle) {
                     if should_filter_path(&path) {
                         continue;
                     }
-                    
+
                     metadata_changes.push(MetadataChange {
                         change_type: "created".to_string(),
                         path: path.to_string_lossy().to_string(),
@@ -174,10 +174,10 @@ async fn process_events(events: Vec<Event>, app_handle: &AppHandle) {
                     if should_filter_path(&path) {
                         continue;
                     }
-                    
+
                     // Collect all files in the new directory
                     let dir_contents = collect_directory_paths(path.clone()).await;
-                    
+
                     // Emit directory creation
                     metadata_changes.push(MetadataChange {
                         change_type: "created".to_string(),
@@ -185,7 +185,7 @@ async fn process_events(events: Vec<Event>, app_handle: &AppHandle) {
                         old_path: None,
                         is_directory: true,
                     });
-                    
+
                     // Emit all child files/directories
                     for (child_path, is_dir) in dir_contents {
                         metadata_changes.push(MetadataChange {
@@ -197,14 +197,14 @@ async fn process_events(events: Vec<Event>, app_handle: &AppHandle) {
                     }
                 }
             }
-            
+
             // DELETE events
             EventKind::Remove(RemoveKind::File) => {
                 for path in event.paths {
                     if should_filter_path(&path) {
                         continue;
                     }
-                    
+
                     metadata_changes.push(MetadataChange {
                         change_type: "deleted".to_string(),
                         path: path.to_string_lossy().to_string(),
@@ -218,7 +218,7 @@ async fn process_events(events: Vec<Event>, app_handle: &AppHandle) {
                     if should_filter_path(&path) {
                         continue;
                     }
-                    
+
                     // For directory deletion, we only emit the directory itself
                     // The frontend should handle cascade deletion of children
                     metadata_changes.push(MetadataChange {
@@ -229,31 +229,38 @@ async fn process_events(events: Vec<Event>, app_handle: &AppHandle) {
                     });
                 }
             }
-            
+
             // MODIFY events (content changes)
-            EventKind::Modify(ModifyKind::Data(_)) => {
+            // Handle Data(_), Any, and Other - macOS FSEvents often emits Any for atomic writes
+            // (like those from Chrome's File System Access API)
+            EventKind::Modify(ModifyKind::Data(_))
+            | EventKind::Modify(ModifyKind::Any)
+            | EventKind::Modify(ModifyKind::Other) => {
                 for path in event.paths {
                     if should_filter_path(&path) {
                         continue;
                     }
-                    
+
                     if path.is_file() {
                         if let Ok(content) = fs::read_to_string(&path).await {
                             let hash = compute_content_hash(&content);
-                            
+
                             let is_app_write = {
                                 let mut writes = APP_WRITES.lock().unwrap();
                                 // Garbage-collect stale entries while we have the lock
                                 writes.retain(|w| w.timestamp.elapsed().as_secs() < 5);
                                 // Find and remove the matching entry (consume it)
-                                if let Some(pos) = writes.iter().position(|w| w.path == path && w.content_hash == hash) {
+                                if let Some(pos) = writes
+                                    .iter()
+                                    .position(|w| w.path == path && w.content_hash == hash)
+                                {
                                     writes.remove(pos);
                                     true
                                 } else {
                                     false
                                 }
                             };
-                            
+
                             if !is_app_write {
                                 content_changes.push(ContentChange {
                                     path: path.to_string_lossy().to_string(),
@@ -265,24 +272,62 @@ async fn process_events(events: Vec<Event>, app_handle: &AppHandle) {
                     }
                 }
             }
-            
-            // RENAME events
+
+            // RENAME events with Name(Any) - Chrome's File System Access API uses atomic writes
+            // which emit Name(Any) with a single path when the temp file is renamed to the target
+            EventKind::Modify(ModifyKind::Name(RenameMode::Any)) => {
+                // Single path means atomic write completion (temp renamed to target)
+                // We treat this as a content change
+                for path in event.paths {
+                    if should_filter_path(&path) {
+                        continue;
+                    }
+
+                    if path.is_file() && !path.to_string_lossy().ends_with(".crswap") {
+                        if let Ok(content) = fs::read_to_string(&path).await {
+                            let hash = compute_content_hash(&content);
+
+                            let is_app_write = {
+                                let mut writes = APP_WRITES.lock().unwrap();
+                                writes.retain(|w| w.timestamp.elapsed().as_secs() < 5);
+                                if let Some(pos) = writes
+                                    .iter()
+                                    .position(|w| w.path == path && w.content_hash == hash)
+                                {
+                                    writes.remove(pos);
+                                    true
+                                } else {
+                                    false
+                                }
+                            };
+
+                            if !is_app_write {
+                                content_changes.push(ContentChange {
+                                    path: path.to_string_lossy().to_string(),
+                                    content,
+                                    content_hash: hash,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
             EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => {
-                // notify gives us both paths in event.paths: [old_path, new_path]
                 if event.paths.len() == 2 {
                     let old_path = &event.paths[0];
                     let new_path = &event.paths[1];
-                    
+
                     if should_filter_path(old_path) || should_filter_path(new_path) {
                         continue;
                     }
-                    
+
                     let is_directory = new_path.is_dir();
-                    
+
                     if is_directory {
                         // For directory renames, collect all affected files
                         let dir_contents = collect_directory_paths(new_path.clone()).await;
-                        
+
                         // Emit the directory rename
                         metadata_changes.push(MetadataChange {
                             change_type: "renamed".to_string(),
@@ -290,18 +335,19 @@ async fn process_events(events: Vec<Event>, app_handle: &AppHandle) {
                             old_path: Some(old_path.to_string_lossy().to_string()),
                             is_directory: true,
                         });
-                        
+
                         // Emit renames for all children
                         let old_path_str = old_path.to_string_lossy();
                         let new_path_str = new_path.to_string_lossy();
-                        
+
                         for (child_new_path, is_dir) in dir_contents {
                             let child_new_str = child_new_path.to_string_lossy();
-                            
+
                             // Compute old path by replacing prefix
-                            if let Some(suffix) = child_new_str.strip_prefix(new_path_str.as_ref()) {
+                            if let Some(suffix) = child_new_str.strip_prefix(new_path_str.as_ref())
+                            {
                                 let child_old_path = format!("{}{}", old_path_str, suffix);
-                                
+
                                 metadata_changes.push(MetadataChange {
                                     change_type: "renamed".to_string(),
                                     path: child_new_str.to_string(),
@@ -321,13 +367,13 @@ async fn process_events(events: Vec<Event>, app_handle: &AppHandle) {
                     }
                 }
             }
-            
+
             _ => {
                 // Ignore other event types
             }
         }
     }
-    
+
     // Emit events if we have changes
     if !metadata_changes.is_empty() {
         let event = MetadataChangeEvent {
@@ -335,7 +381,7 @@ async fn process_events(events: Vec<Event>, app_handle: &AppHandle) {
         };
         let _ = app_handle.emit("fs-metadata-changed", event);
     }
-    
+
     if !content_changes.is_empty() {
         let event = ContentChangeEvent {
             changes: content_changes,
@@ -355,19 +401,20 @@ pub async fn start_watching_metadata(
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let app_handle_clone = app_handle.clone();
-    
+
     // Create debounced watcher (100ms debounce)
     let mut debouncer = new_debouncer(
         Duration::from_millis(100),
         None,
         move |result: DebounceEventResult| {
             let app_handle = app_handle_clone.clone();
-            
+
             match result {
                 Ok(events) => {
                     // Process events asynchronously
                     tauri::async_runtime::spawn(async move {
-                        let notify_events: Vec<Event> = events.into_iter().map(|e| e.event).collect();
+                        let notify_events: Vec<Event> =
+                            events.into_iter().map(|e| e.event).collect();
                         process_events(notify_events, &app_handle).await;
                     });
                 }
@@ -378,9 +425,9 @@ pub async fn start_watching_metadata(
         },
     )
     .map_err(|e| format!("Failed to create watcher: {}", e))?;
-    
+
     let path_bufs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
-    
+
     // Watch all requested paths recursively
     for path in &path_bufs {
         debouncer
@@ -388,14 +435,17 @@ pub async fn start_watching_metadata(
             .watch(path, RecursiveMode::Recursive)
             .map_err(|e| format!("Failed to watch path {}: {}", path.display(), e))?;
     }
-    
+
     // Store the watcher with paths
     let mut watchers = WATCHERS.lock().unwrap();
-    watchers.insert(watch_id, WatcherState {
-        debouncer,
-        watched_paths: path_bufs,
-    });
-    
+    watchers.insert(
+        watch_id,
+        WatcherState {
+            debouncer,
+            watched_paths: path_bufs,
+        },
+    );
+
     Ok(())
 }
 
@@ -410,46 +460,48 @@ pub async fn start_watching_content(
 ) -> Result<(), String> {
     let mut watchers = WATCHERS.lock().unwrap();
     let new_paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
-    
+
     // Check if watcher already exists
     if let Some(state) = watchers.get_mut(&watch_id) {
         // Reconcile: determine which paths to add and which to remove
         let old_paths_set: std::collections::HashSet<_> = state.watched_paths.iter().collect();
         let new_paths_set: std::collections::HashSet<_> = new_paths.iter().collect();
-        
+
         // Paths to stop watching (in old but not in new)
         for old_path in &state.watched_paths {
             if !new_paths_set.contains(old_path) {
                 let _ = state.debouncer.watcher().unwatch(old_path);
             }
         }
-        
+
         // Paths to start watching (in new but not in old)
         for new_path in &new_paths {
             if !old_paths_set.contains(new_path) {
-                state.debouncer
+                state
+                    .debouncer
                     .watcher()
                     .watch(new_path, RecursiveMode::NonRecursive)
                     .map_err(|e| format!("Failed to watch path {}: {}", new_path.display(), e))?;
             }
         }
-        
+
         // Update tracked paths
         state.watched_paths = new_paths;
     } else {
         // Create new watcher for content changes
         let app_handle_clone = app_handle.clone();
-        
+
         let mut debouncer = new_debouncer(
             Duration::from_millis(100),
             None,
             move |result: DebounceEventResult| {
                 let app_handle = app_handle_clone.clone();
-                
+
                 match result {
                     Ok(events) => {
                         tauri::async_runtime::spawn(async move {
-                            let notify_events: Vec<Event> = events.into_iter().map(|e| e.event).collect();
+                            let notify_events: Vec<Event> =
+                                events.into_iter().map(|e| e.event).collect();
                             process_events(notify_events, &app_handle).await;
                         });
                     }
@@ -460,7 +512,7 @@ pub async fn start_watching_content(
             },
         )
         .map_err(|e| format!("Failed to create watcher: {}", e))?;
-        
+
         // Watch all files (non-recursively, these are individual files)
         for path in &new_paths {
             debouncer
@@ -468,13 +520,16 @@ pub async fn start_watching_content(
                 .watch(path, RecursiveMode::NonRecursive)
                 .map_err(|e| format!("Failed to watch path {}: {}", path.display(), e))?;
         }
-        
-        watchers.insert(watch_id, WatcherState {
-            debouncer,
-            watched_paths: new_paths,
-        });
+
+        watchers.insert(
+            watch_id,
+            WatcherState {
+                debouncer,
+                watched_paths: new_paths,
+            },
+        );
     }
-    
+
     Ok(())
 }
 
@@ -482,7 +537,7 @@ pub async fn start_watching_content(
 #[tauri::command]
 pub async fn stop_watching(watch_id: String) -> Result<(), String> {
     let mut watchers = WATCHERS.lock().unwrap();
-    
+
     if watchers.remove(&watch_id).is_some() {
         Ok(())
     } else {
