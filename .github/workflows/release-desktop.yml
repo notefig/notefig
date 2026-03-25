@@ -58,6 +58,36 @@ jobs:
           git tag "desktop-v${{ inputs.version }}"
           git push origin "desktop-v${{ inputs.version }}"
 
+  deploy-web:
+    needs: bump-and-tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: "desktop-v${{ inputs.version }}"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Install dependencies
+        working-directory: packages/desktop
+        run: npm install
+
+      - name: Build web version
+        working-directory: packages/desktop
+        run: npm run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=metrists-app --commit-dirty=true
+          workingDirectory: packages/desktop
+
   build-and-publish:
     needs: bump-and-tag
     permissions:
