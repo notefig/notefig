@@ -57,13 +57,13 @@ export function StatusBar({
         )}
         <span>{debouncedSynced ? t("synced") : t("syncing")}</span>
       </div>
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 min-w-[4.5rem]">
         <Type className="w-3.5 h-3.5" />
         <span>
           {wordCount} {wordCount === 1 ? t("word") : t("words")}
         </span>
       </div>
-      <span>
+      <span className="min-w-[5rem] flex">
         {characterCount} {t("characters")}
       </span>
     </div>
