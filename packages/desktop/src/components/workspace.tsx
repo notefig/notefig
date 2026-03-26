@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useHotkey } from "@tanstack/react-hotkeys";
+import { useIsFetching } from "@tanstack/react-query";
 import { Dockable } from "@/components/dockable";
 import { IconSidebar } from "@/components/editor/icon-sidebar";
 import { Sidebar } from "@/components/editor/sidebar";
@@ -8,7 +9,10 @@ import { StatusBar } from "@/components/editor/status-bar";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
-import { getOrCreateWorkspaceCollections } from "@/utils/collections";
+import {
+  getOrCreateWorkspaceCollections,
+  queryClient,
+} from "@/utils/collections";
 import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
@@ -123,10 +127,14 @@ export const Workspace = () => {
       });
     }
   }, [searchParams, setSearchParams, focusActiveEditor]);
-  const [isSynced] = useState(true);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [direction, setDirection] = useState<"ltr" | "rtl">("ltr");
 
+  const isFetchingContent = useIsFetching(
+    { queryKey: ["file-content", workspacePath] },
+    queryClient,
+  );
+  const isSynced = isFetchingContent === 0;
   const { wordCount, characterCount } = useMemo(() => {
     const words = currentContent
       .trim()
