@@ -4,7 +4,10 @@ import { useIsFetching } from "@tanstack/react-query";
 import { Dockable } from "@/components/dockable";
 import { IconSidebar } from "@/components/editor/icon-sidebar";
 import { Sidebar } from "@/components/editor/sidebar";
-import { TextEditor } from "@/components/editor/text-editor";
+import {
+  PolymorphicEditor,
+  canOpenFile as canOpenInEditor,
+} from "@/components/editor/polymorphic-editor";
 import { StatusBar } from "@/components/editor/status-bar";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
@@ -18,7 +21,7 @@ import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
 import type { FileEntry } from "@/utils/fs";
-import { getFileName, isTextFile } from "@/utils/fs";
+import { getFileName } from "@/utils/fs";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
 import { platformAdapter } from "@/adapters";
 import {
@@ -55,7 +58,7 @@ export const Workspace = () => {
     focusActiveEditor,
   } = useDockableTabs({
     renderTabs: () => [],
-    canOpenFile: (file) => file.type === "file" && isTextFile(file.path),
+    canOpenFile: (file) => file.type === "file" && canOpenInEditor(file.path),
     dockableRef,
   });
 
@@ -65,6 +68,7 @@ export const Workspace = () => {
     };
   }, []);
 
+  // Query metadata and content for all open tabs
   const { data: fileDataWithContent = [] } = useLiveQuery(
     (q) =>
       openTabs.length === 0
@@ -75,11 +79,10 @@ export const Workspace = () => {
             .join({ content }, ({ file, content }) =>
               eq(file.path, content.path),
             )
-            .where(({ content }) => inArray(content?.path, openTabs))
             .select(({ file, content }) => ({
               ...file,
-              content: content?.content,
-              contentHash: content?.contentHash,
+              content: content!.content,
+              contentHash: content!.contentHash,
             })),
     [workspacePath, ...openTabs],
   );
@@ -96,7 +99,10 @@ export const Workspace = () => {
             handleLayoutChange(nextLayout);
           }}
         >
-          <TextEditor file={fileEntry as FileEntry} basePath={workspacePath} />
+          <PolymorphicEditor
+            file={fileEntry as FileEntry}
+            basePath={workspacePath}
+          />
         </Dockable.Tab>
       )),
     [fileDataWithContent, workspacePath, layout, handleLayoutChange],

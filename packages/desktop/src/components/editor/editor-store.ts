@@ -1,13 +1,9 @@
 /**
- * Editor Instance Store
+ * Polymorphic Editor Instance Store
  *
- * Maintains a module-level Map of PlateEditor instances keyed by file path.
- * This allows editor instances (with their undo history, internal state, etc.)
- * to survive across component mount/unmount cycles — e.g. when Dockable
- * unmounts a tab that isn't currently selected and remounts it later.
- *
- * Editors are created via `createPlateEditor` (a plain function, not a hook),
- * so they have no React lifecycle tied to them.
+ * Maintains a unified registry of all editor types (markdown, code, image viewers).
+ * Each editor type implements a common interface with polymorphic methods.
+ * Irrelevant operations are no-ops for each type.
  */
 
 import { createPlateEditor, type PlateEditor } from "platejs/react";
@@ -15,27 +11,62 @@ import { MarkdownPlugin } from "@platejs/markdown";
 import { MarkdownEditorKit } from "@/components/editor/markdown-editor-kit";
 import { Editor as SlateEditor } from "slate";
 import type { BaseSelection } from "slate";
+import type { RefObject } from "react";
 
-/** Module-level store: file path → editor instance */
-const editorInstances = new Map<string, PlateEditor>();
-
-/** Saved selections: file path → last known selection (survives unmount) */
-const savedSelections = new Map<string, BaseSelection>();
+export type EditorType = "markdown" | "code" | "image";
 
 /**
- * Get an existing editor for a file path, or create one with the given
- * initial markdown content.
- *
- * If an editor already exists for the path, the `content` argument is
- * ignored — the existing instance (with its undo history, etc.) is returned.
+ * Base interface that all editor instances must implement
  */
-export function getOrCreateEditor(
-  filePath: string,
-  content: string,
-): PlateEditor {
-  const existing = editorInstances.get(filePath);
-  if (existing) return existing;
+export interface EditorInstance {
+  readonly type: EditorType;
+  /**
+   * Focus this editor. Returns true if focus was attempted, false if not applicable.
+   * For non-focusable editors (images), this is a no-op that returns false.
+   */
+  focus(): boolean;
+  /**
+   * Dispose of this editor instance. Cleans up any resources.
+   */
+  dispose(): void;
+  /**
+   * Returns true if this editor type supports focus operations.
+   */
+  isFocusable(): boolean;
+}
 
+/**
+ * Markdown editor instance using Plate.js
+ */
+export interface MarkdownInstance extends EditorInstance {
+  readonly type: "markdown";
+  readonly editor: PlateEditor;
+  selection: BaseSelection | null;
+}
+
+/**
+ * Code editor instance using plain textarea
+ * editorState is nested to allow easy migration to Plate-based code editor later
+ */
+export interface CodeInstance extends EditorInstance {
+  readonly type: "code";
+  editorState: {
+    textareaRef: RefObject<HTMLTextAreaElement | null>;
+    content: string;
+  };
+}
+
+/**
+ * Image viewer instance (stateless, read-only)
+ */
+export interface ImageInstance extends EditorInstance {
+  readonly type: "image";
+}
+
+/** Module-level store: file path → editor instance */
+const editorInstances = new Map<string, EditorInstance>();
+
+function createMarkdownInstance(content: string): MarkdownInstance {
   const editor = createPlateEditor({
     plugins: MarkdownEditorKit,
     value: (e) =>
@@ -43,76 +74,274 @@ export function getOrCreateEditor(
   });
 
   // Enable chunking for large documents (Slate performance optimization).
-  // Splits the document into chunks of 1000 nodes to reduce React
-  // re-rendering overhead for files with thousands of lines.
   (editor as any).getChunkSize = (node: any) => {
     return SlateEditor.isEditor(node) ? 1000 : null;
   };
 
-  editorInstances.set(filePath, editor);
-  return editor;
+  const instance: MarkdownInstance = {
+    type: "markdown",
+    editor,
+    selection: null,
+    focus(): boolean {
+      const saved = this.selection ?? this.editor.selection;
+      if (saved) {
+        this.editor.tf.focus({ at: saved });
+      } else {
+        this.editor.tf.focus();
+      }
+      return true;
+    },
+    dispose(): void {
+      // Plate editors clean up automatically when GC'd
+      this.selection = null;
+    },
+    isFocusable(): boolean {
+      return true;
+    },
+  };
+
+  return instance;
+}
+
+function createCodeInstance(
+  textareaRef: RefObject<HTMLTextAreaElement | null>,
+): CodeInstance {
+  const instance: CodeInstance = {
+    type: "code",
+    editorState: {
+      textareaRef,
+      content: "",
+    },
+    focus(): boolean {
+      this.editorState.textareaRef.current?.focus();
+      return true;
+    },
+    dispose(): void {
+      // Cleanup any textarea listeners if needed
+      this.editorState.content = "";
+    },
+    isFocusable(): boolean {
+      return true;
+    },
+  };
+
+  return instance;
+}
+
+function createImageInstance(): ImageInstance {
+  const instance: ImageInstance = {
+    type: "image",
+    focus(): boolean {
+      // No-op: images are not focusable
+      return false;
+    },
+    dispose(): void {
+      // No-op: stateless viewer
+    },
+    isFocusable(): boolean {
+      return false;
+    },
+  };
+
+  return instance;
+}
+
+interface MarkdownConfig {
+  type: "markdown";
+  content: string;
+}
+
+interface CodeConfig {
+  type: "code";
+  textareaRef: RefObject<HTMLTextAreaElement | null>;
+}
+
+interface ImageConfig {
+  type: "image";
+}
+
+type EditorConfig = MarkdownConfig | CodeConfig | ImageConfig;
+
+/**
+ * Register an editor instance for a file path.
+ * If an instance already exists, returns the existing one.
+ * Type-specific configuration is passed based on the editor type.
+ */
+export function registerEditor(
+  filePath: string,
+  config: EditorConfig,
+): EditorInstance {
+  const existing = editorInstances.get(filePath);
+  if (existing) {
+    // If types match, return existing
+    if (existing.type === config.type) {
+      return existing;
+    }
+    // If types don't match, dispose old and create new
+    existing.dispose();
+  }
+
+  let instance: EditorInstance;
+
+  switch (config.type) {
+    case "markdown":
+      instance = createMarkdownInstance(config.content);
+      break;
+    case "code":
+      instance = createCodeInstance(config.textareaRef);
+      break;
+    case "image":
+      instance = createImageInstance();
+      break;
+    default:
+      throw new Error(`Unknown editor type: ${(config as any).type}`);
+  }
+
+  editorInstances.set(filePath, instance);
+  return instance;
+}
+
+/**
+ * Type guard for markdown instances
+ */
+export function isMarkdownInstance(
+  instance: EditorInstance | undefined,
+): instance is MarkdownInstance {
+  return instance?.type === "markdown";
+}
+
+/**
+ * Type guard for code instances
+ */
+export function isCodeInstance(
+  instance: EditorInstance | undefined,
+): instance is CodeInstance {
+  return instance?.type === "code";
+}
+
+/**
+ * Type guard for image instances
+ */
+export function isImageInstance(
+  instance: EditorInstance | undefined,
+): instance is ImageInstance {
+  return instance?.type === "image";
+}
+
+/**
+ * Get an existing editor instance by file path.
+ */
+export function getEditor(filePath: string): EditorInstance | undefined {
+  return editorInstances.get(filePath);
+}
+
+/**
+ * Get the editor type for a file path.
+ */
+export function getEditorType(filePath: string): EditorType | undefined {
+  return editorInstances.get(filePath)?.type;
+}
+
+/**
+ * Check if an editor instance exists for a file path.
+ */
+export function hasEditor(filePath: string): boolean {
+  return editorInstances.has(filePath);
+}
+
+/**
+ * Check if an editor is focusable.
+ */
+export function isEditorFocusable(filePath: string): boolean {
+  return editorInstances.get(filePath)?.isFocusable() ?? false;
 }
 
 /**
  * Dispose an editor instance when a tab is permanently closed.
- * This frees the memory held by the Slate document tree and undo history.
+ * This frees the memory held by the editor.
  */
 export function disposeEditor(filePath: string): void {
-  editorInstances.delete(filePath);
-  savedSelections.delete(filePath);
+  const instance = editorInstances.get(filePath);
+  if (instance) {
+    instance.dispose();
+    editorInstances.delete(filePath);
+  }
 }
 
 /**
  * Dispose all editors (e.g. when switching workspaces).
  */
 export function disposeAllEditors(): void {
+  editorInstances.forEach((instance) => instance.dispose());
   editorInstances.clear();
-  savedSelections.clear();
 }
 
 /**
- * Check if an editor instance exists for a given file path.
- */
-export function hasEditor(filePath: string): boolean {
-  return editorInstances.has(filePath);
-}
-
-export function getEditor(filePath: string): PlateEditor | undefined {
-  return editorInstances.get(filePath);
-}
-
-/**
- * Imperatively focus an editor for the given file path.
- * Restores the last saved selection if available; otherwise focuses at the start.
- * Returns true if the editor existed and focus was attempted.
+ * Focus an editor by file path.
+ * Returns true if focus was attempted/applicable, false otherwise.
+ * For non-focusable editors (images), returns false without doing anything.
  */
 export function focusEditor(filePath: string): boolean {
-  const editor = editorInstances.get(filePath);
-  if (!editor) return false;
-
-  const saved = savedSelections.get(filePath) ?? editor.selection ?? null;
-  if (saved) {
-    editor.tf.focus({ at: saved });
-  } else {
-    editor.tf.focus();
-  }
-
-  return true;
+  const instance = editorInstances.get(filePath);
+  if (!instance) return false;
+  return instance.focus();
 }
 
 /**
- * Save the current selection for an editor so it can be restored after remount.
+ * Get a markdown editor instance (type-safe accessor).
+ * Returns undefined if the editor doesn't exist or isn't a markdown editor.
+ */
+export function getMarkdownEditor(filePath: string): PlateEditor | undefined {
+  const instance = editorInstances.get(filePath);
+  if (isMarkdownInstance(instance)) {
+    return instance.editor;
+  }
+  return undefined;
+}
+
+/**
+ * Get code editor state (type-safe accessor).
+ * Returns undefined if the editor doesn't exist or isn't a code editor.
+ */
+export function getCodeState(
+  filePath: string,
+): CodeInstance["editorState"] | undefined {
+  const instance = editorInstances.get(filePath);
+  if (isCodeInstance(instance)) {
+    return instance.editorState;
+  }
+  return undefined;
+}
+
+/**
+ * Save the current selection for a markdown editor.
+ * No-op for other editor types.
  */
 export function saveSelection(
   filePath: string,
   selection: BaseSelection,
 ): void {
-  savedSelections.set(filePath, selection);
+  const instance = editorInstances.get(filePath);
+  if (isMarkdownInstance(instance)) {
+    instance.selection = selection;
+  }
 }
 
 /**
- * Retrieve a previously saved selection (returns undefined if none saved).
+ * Retrieve a previously saved selection for a markdown editor.
+ * Returns undefined for other editor types or if none saved.
  */
 export function getSavedSelection(filePath: string): BaseSelection | undefined {
-  return savedSelections.get(filePath);
+  const instance = editorInstances.get(filePath);
+  if (isMarkdownInstance(instance)) {
+    return instance.selection ?? undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Get all registered editor paths.
+ */
+export function getAllEditorPaths(): string[] {
+  return Array.from(editorInstances.keys());
 }

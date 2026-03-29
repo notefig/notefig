@@ -265,19 +265,31 @@ export function createFileContentCollection(workspaceId: string) {
         // Load file contents from file system
         const result = await platformAdapter.readFiles(requestedPaths);
 
-        if (result.failed.length > 0) {
-          console.warn(
-            "Failed to read some files:",
-            result.failed.map((f) => f.message).join(", "),
-          );
+        // Create entries for all requested paths
+        const contentMap = new Map<string, FileContent>();
+
+        // Add succeeded reads
+        for (const file of result.succeeded) {
+          contentMap.set(file.path, {
+            path: file.path,
+            content: file.content,
+            contentHash: calculateContentHash(file.content),
+          });
         }
 
-        // Map to FileContent format
-        return result.succeeded.map((file) => ({
-          path: file.path,
-          content: file.content,
-          contentHash: calculateContentHash(file.content),
-        }));
+        // Add empty entries for failed reads (binary files like images)
+        for (const failure of result.failed) {
+          console.warn(
+            `Failed to read file ${failure.path}: ${failure.message}`,
+          );
+          contentMap.set(failure.path, {
+            path: failure.path,
+            content: "",
+            contentHash: calculateContentHash(failure.path), // Use path as hash for failed reads
+          });
+        }
+
+        return Array.from(contentMap.values());
       },
 
       getKey: (item) => item.path,

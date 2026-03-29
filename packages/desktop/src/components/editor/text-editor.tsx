@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect } from "react";
+import { useCallback, useRef, useEffect, useMemo } from "react";
 import { Plate } from "platejs/react";
 import { MarkdownPlugin } from "@platejs/markdown";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -28,9 +28,10 @@ import type { FileEntry } from "../../utils/fs";
 import { writeFileContent } from "@/utils/collections";
 import { calculateContentHash } from "@/utils/hash";
 import {
-  getOrCreateEditor,
+  registerEditor,
   saveSelection,
   getSavedSelection,
+  isMarkdownInstance,
 } from "@/components/editor/editor-store";
 
 interface TextEditorProps {
@@ -61,7 +62,16 @@ export function TextEditor({ file, basePath }: TextEditorProps) {
   // On first call for this file path, the content is deserialized into the editor.
   // On subsequent mounts (tab switch), the existing instance with its undo history
   // is returned — the `content` argument is ignored.
-  const editor = getOrCreateEditor(file.path, file.content);
+  const editor = useMemo(() => {
+    const instance = registerEditor(file.path, {
+      type: "markdown",
+      content: file.content,
+    });
+    if (isMarkdownInstance(instance)) {
+      return instance.editor;
+    }
+    throw new Error("Failed to create markdown editor");
+  }, [file.path, file.content]);
 
   // Plugin-specific transforms (h1, blockquote, link, etc.) are dynamically added
   // by plugins and not reflected in the base PlateEditor type. Use `tf` as `any`
