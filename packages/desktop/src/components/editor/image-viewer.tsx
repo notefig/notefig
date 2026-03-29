@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { FileEntry } from "@/utils/fs";
-import { registerEditor } from "@/components/editor/editor-store";
+import { getOrCreateEditor } from "@/components/editor/editor-store";
 import { platformAdapter } from "@/adapters";
 import { cn } from "@/lib/utils";
 import { ImageIcon } from "lucide-react";
@@ -23,7 +23,7 @@ export function ImageViewer({ file, basePath }: ImageViewerProps) {
 
   // Register this viewer instance (stateless)
   useEffect(() => {
-    registerEditor(file.path, { type: "image" });
+    getOrCreateEditor(file.path, { type: "image" });
   }, [file.path]);
 
   // Resolve the image URL

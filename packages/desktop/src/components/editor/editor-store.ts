@@ -163,11 +163,19 @@ interface ImageConfig {
 type EditorConfig = MarkdownConfig | CodeConfig | ImageConfig;
 
 /**
- * Register an editor instance for a file path.
- * If an instance already exists, returns the existing one.
- * Type-specific configuration is passed based on the editor type.
+ * Get an existing editor for a file path, or create one with the given configuration.
+ * This is the main singleton pattern entry point - editors are cached by file path
+ * and survive across component mount/unmount cycles.
+ *
+ * If an editor already exists for the path:
+ * - And the type matches, returns the existing instance
+ * - And the type doesn't match, disposes the old and creates new
+ *
+ * @param filePath - The absolute file path (used as the cache key)
+ * @param config - Editor configuration including type and type-specific options
+ * @returns The editor instance (cast to appropriate type by caller)
  */
-export function registerEditor(
+export function getOrCreateEditor(
   filePath: string,
   config: EditorConfig,
 ): EditorInstance {

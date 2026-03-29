@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FileEntry } from "@/utils/fs";
 import { writeFileContent } from "@/utils/collections";
-import { registerEditor } from "@/components/editor/editor-store";
+import { getOrCreateEditor } from "@/components/editor/editor-store";
 import { cn } from "@/lib/utils";
 
 interface CodeEditorProps {
@@ -15,7 +15,7 @@ export function CodeEditor({ file, basePath }: CodeEditorProps) {
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    registerEditor(file.path, {
+    getOrCreateEditor(file.path, {
       type: "code",
       textareaRef,
     });

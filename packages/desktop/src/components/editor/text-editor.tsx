@@ -28,7 +28,7 @@ import type { FileEntry } from "../../utils/fs";
 import { writeFileContent } from "@/utils/collections";
 import { calculateContentHash } from "@/utils/hash";
 import {
-  registerEditor,
+  getOrCreateEditor,
   saveSelection,
   getSavedSelection,
   isMarkdownInstance,
@@ -58,20 +58,19 @@ export function TextEditor({ file, basePath }: TextEditorProps) {
   // content we just received from disk — creating a pointless write-back.
   const suppressSaveRef = useRef(false);
 
-  // Get (or create on first mount) the persistent editor instance.
-  // On first call for this file path, the content is deserialized into the editor.
-  // On subsequent mounts (tab switch), the existing instance with its undo history
-  // is returned — the `content` argument is ignored.
-  const editor = useMemo(() => {
-    const instance = registerEditor(file.path, {
-      type: "markdown",
-      content: file.content,
-    });
-    if (isMarkdownInstance(instance)) {
-      return instance.editor;
-    }
+  // Get (or create) the persistent editor instance.
+  // Uses singleton pattern - editor is cached by file path in editor-store.
+  // On tab switches, retrieves the existing instance with its undo history.
+  const instance = getOrCreateEditor(file.path, {
+    type: "markdown",
+    content: file.content ?? "",
+  });
+
+  if (!isMarkdownInstance(instance)) {
     throw new Error("Failed to create markdown editor");
-  }, [file.path, file.content]);
+  }
+
+  const editor = instance.editor;
 
   // Plugin-specific transforms (h1, blockquote, link, etc.) are dynamically added
   // by plugins and not reflected in the base PlateEditor type. Use `tf` as `any`
