@@ -1,620 +1,222 @@
 # AI Agent Guidelines for Metrists
 
-This document outlines conventions, architectural principles, and patterns that AI assistants should follow when working on the Metrists project.
-
-## Project Overview
-
-Metrists is a **markdown-first, local-first text editor** that allows users to create workspaces and edit files within them. It's built as a cross-platform application using React, Tauri, and TinyBase.
+Metrists is a **markdown-first, local-first text editor** built with React, Tauri, and TanStack DB.
 
 ## Core Principles
 
 ### 1. Performance First
 
-Everything we build must prioritize both **perceived** and **real** performance:
+- **Perceived**: UI feels instant
+- **Real**: File open, typing latency, sync speed
+- **Not priority**: Initial load time
+- **Use**: Virtualization, lazy loading, memoization, debouncing
 
-- **Perceived performance**: UI should feel instant and responsive
-- **Real performance**: Focus on file open time, typing latency, and sync speed
-- **Not a priority**: Initial application load time (acceptable to be slower)
-- **Always consider**: Virtualization, lazy loading, memoization, and debouncing
-- **Bundle size**: Be mindful but not restrictive
+**Critical ops**: File opening/switching, editor reactivity, TanStack Query loading, file tree rendering
 
-**Performance-critical operations:**
+### 2. Cross-Platform
 
-- File opening and switching
-- Editor reactivity and typing response
-- TinyBase sync operations
-- File tree rendering (virtualize large directories)
-
-### 2. Cross-Platform Support
-
-This is a **web + Tauri** application that must work on:
-
-- macOS (Tauri)
-- Linux (Tauri)
-- Windows (Tauri)
-- Web browsers (for development and e2e testing)
-
-**Never** write platform-specific code directly. Always use the platform adapter pattern.
+Works on macOS, Linux, Windows (Tauri), and web browsers. **Always use platform adapters** - never platform-specific code in components.
 
 ## Architecture
 
-### Storage Architecture
+### Three Storage Layers
 
-We have **three distinct storage layers**:
+**A. Project Files**
 
-#### A. Project Files
+- Location: User directory on disk
+- Contains: File content + project settings (text direction, project name, metadata)
+- Access: TanStack DB collections (on-demand loading)
 
-- **Location**: User-selected directory on disk
-- **Contains**: Actual file content + project-specific settings
-- **Settings stored here**: Text direction, project name, metadata tags, etc.
-- **Accessed via**: TinyBase store (persisted to disk)
+**B. URL/Route State** (React Router 7)
 
-#### B. URL/Route State
+- `basePath` → Route param
+- Open tabs, dockable layout, sidebar state, settings modal → Search params
+- File paths → URL-encoded absolute paths
+- Utilities: `src/utils/routing.ts`
 
-- **Location**: Browser URL (React Router 7)
-- **Contains**: Navigation and UI state
-- **What goes here**:
-  - `basePath` (workspace directory) → Route parameter
-  - Open tabs → Search params
-  - Open modals → Search params
-  - File paths → URL-encoded, **absolute paths** (e.g., `/Users/name/workspace/file.md`)
-- **Key utilities**: Use helpers in `src/utils/routing.ts` for encoding/decoding
+**C. Application Settings**
 
-#### C. Application Settings
+- Location: Local storage (browser) / Tauri config plugin (desktop)
+- Contains: Theme, window size, recent workspaces, shortcuts
+- Sync: Automatic between browser and Tauri
 
-- **Location**: Tauri stores (OS-specific locations)
-- **Contains**: Application-level preferences
-- **Examples**: Theme, window size, recent workspaces, global shortcuts
-
-### State Management with TanStack DB + Query
-
-We use **TanStack DB** with **TanStack Query** for reactive collections and data synchronization.
-
-**Key concepts:**
-
-- **Collections**: Reactive data stores (like tables) that hold items
-- **Query Collections**: Collections backed by TanStack Query's `queryFn`
-- **Automatic loading**: Data is fetched automatically via `queryFn`
-- **Reactive queries**: Use `useLiveQuery` to reactively query collections
-- **Sync modes**: `eager` (load all data upfront) or `on-demand` (load as queried)
-
-**Architecture pattern:**
+### State Management: TanStack DB + Query
 
 ```typescript
-// 1. Define collection with queryCollectionOptions
+// Define collection
 const metadataCollection = createCollection(
   queryCollectionOptions({
     queryKey: ["file-metadata", workspaceId],
-    queryFn: async () => {
-      // Fetch all metadata from file system
-      return await platformAdapter.readDirectory(workspaceId);
-    },
+    queryFn: () => platformAdapter.readDirectory(workspaceId),
     queryClient,
     getKey: (item) => item.path,
-    syncMode: "eager", // Load all data immediately
+    syncMode: "eager", // or "on-demand"
   }),
 );
 
-// 2. Query reactively in components
+// Query in components
 const { data } = useLiveQuery((q) =>
-  q
-    .from({ file: metadataCollection })
-    .where(({ file }) => eq(file.type, "file"))
-    .select(),
+  q.from({ file: metadataCollection }).where(...).select()
 );
 ```
 
-**Two Collection Pattern (Metadata + Content):**
+**Two Collection Pattern:**
 
-We split file data into two collections for performance:
+1. **Metadata Collection** (`eager`): path, type, size, modified, contentHash. Loads all files immediately for file tree.
+2. **Content Collection** (`on-demand`): path, content, contentHash. Loads only when queried for open tabs.
 
-1. **Metadata Collection** (`eager` mode)
-
-   - Contains: path, type, size, modified, contentHash
-   - Excludes: file content
-   - Loads: All files in workspace immediately
-   - Why: Metadata is small, needed for file tree
-
-2. **Content Collection** (`on-demand` mode)
-   - Contains: path, content, contentHash
-   - Loads: Only when queried via `useLiveQuery`
-   - Why: Content is large, only load what's visible
-
-**On-Demand Loading Pattern:**
+**On-Demand Loading:**
 
 ```typescript
-import { parseLoadSubsetOptions } from "@tanstack/query-db-collection";
-
-// Content collection with on-demand loading
 const contentCollection = createCollection(
   queryCollectionOptions({
     queryKey: ["file-content", workspaceId],
     queryFn: async (context) => {
-      // IMPORTANT: Use parseLoadSubsetOptions to extract query filters
       const parsed = parseLoadSubsetOptions(context.meta?.loadSubsetOptions);
-
-      // Extract path filters (eq or in operators on 'path' field)
-      const pathFilters = parsed.filters.filter(
-        (f) =>
-          f.field.join(".") === "path" &&
-          (f.operator === "eq" || f.operator === "in"),
-      );
-
-      // Collect all requested paths
-      const requestedPaths = pathFilters.flatMap((f) =>
-        Array.isArray(f.value) ? f.value : [f.value],
-      );
-
+      const requestedPaths = extractPathsFromFilters(parsed.filters);
       if (requestedPaths.length === 0) return [];
-
-      // Load only requested files
       const result = await platformAdapter.readFiles(requestedPaths);
-      return result.succeeded.map((file) => ({
-        path: file.path,
-        content: file.content,
-        contentHash: computeContentHash(file.content),
-      }));
+      return result.succeeded.map(...);
     },
-    queryClient,
-    getKey: (item) => item.path,
-    syncMode: "on-demand", // Only load when queried
+    syncMode: "on-demand",
   }),
 );
-
-// Component queries for specific files - triggers automatic loading
-const { data } = useLiveQuery((q) =>
-  q
-    .from({ c: contentCollection })
-    .where(({ c }) => inArray(c.path, openTabs))
-    .select(),
-);
-// ☝️ This query triggers queryFn with loadSubsetOptions containing the where clause
 ```
 
-**Key principles:**
+**Key Principles:**
 
-- **Don't manually load data**: `queryFn` handles it automatically
-- **Trust the query system**: When you query for data, it loads automatically
-- **Use joins**: Combine metadata + content via `leftJoin`
-- **Sync modes**: Choose `eager` for small datasets, `on-demand` for large ones
-- **Reactivity**: `useLiveQuery` re-renders when collection data changes
+- Don't manually load data - `queryFn` handles it
+- Use joins (`leftJoin`) to combine collections
 
-**Mutation handlers:**
+### TanStack CLI Documentation
 
-Collections can write back to the source (file system) via mutation handlers:
+Use the TanStack CLI to query documentation:
 
-```typescript
-queryCollectionOptions({
-  // ... other options
-  onInsert: async ({ transaction }) => {
-    // Write new items to file system
-    await platformAdapter.writeFiles(
-      transaction.mutations.map((m) => m.modified),
-    );
-  },
-  onUpdate: async ({ transaction }) => {
-    // Update items in file system
-    await platformAdapter.writeFiles(
-      transaction.mutations.map((m) => m.modified),
-    );
-  },
-  onDelete: async ({ transaction }) => {
-    // Delete items from file system
-    await platformAdapter.deleteFiles(transaction.mutations.map((m) => m.key));
-  },
-});
+```bash
+# List add-ons
+tanstack create --list-add-ons --framework React --json
+
+# Get addon details
+tanstack create --addon-details tanstack-query --framework React --json
+
+# List libraries
+tanstack libraries --json
+
+# Search docs
+tanstack search-docs "loaders" --library router --framework react --json
+
+# Ecosystem
+tanstack ecosystem --category auth --json
 ```
 
-**When working with collections:**
-
-- Use `useLiveQuery` for reactive queries in components
-- Never manually call load functions - queries trigger loading
-- Use `collection.insert/update/delete` to modify data (triggers mutation handlers)
-- Use `collection.utils.writeInsert/writeUpdate/writeDelete` for direct writes (bypasses mutations)
-- Join collections to combine data (e.g., metadata + content)
-- Choose appropriate `syncMode` based on data size and access patterns
-
-### Workspace vs Loose Files
-
-**Current state:**
-
-- We require a workspace directory to be selected
-- Loose files are not yet fully supported (coming later)
-- It's okay to assume a workspace always exists for now
-
-**Future state:**
-
-- Will support opening loose files without a workspace
-- Still need a "virtual workspace" concept even for loose files
+- `useLiveQuery` re-renders when data changes
+- Mutations: `collection.insert/update/delete` (triggers handlers)
+- Direct writes: `collection.utils.writeInsert/writeUpdate/writeDelete` (bypasses handlers)
 
 ### Platform Adapters
 
-For **all platform-specific operations**, use the adapter pattern:
+**Location:** `src/adapters/`
 
-**Location**: `src/adapters/` and `src/utils/platform.ts`
+**Adapters:**
 
-**Pattern:**
+- `BrowserAdapter`: File System Access API
+- `BrowserIndexedDBAdapter`: IndexedDB for testing
+- `TauriAdapter`: Tauri native APIs
+
+**Guardrails (High-Friction Changes):**
+
+- Weight additions heavily - adds maintenance burden across all 3 adapters
+- Must implement cleanly in **all 3 adapters**
+- **All Tauri and Browser FS surfaces require unit tests**
+- Adapters must behave identically - no platform-specific quirks
+- Prefer composing existing methods over adding new ones
+- Keep platform details internal - never expose outside adapter layer
+- **When in doubt, discuss first**
+
+**Usage:**
 
 ```typescript
 import { platformAdapter } from "@/adapters";
-import { isTauri, isWeb } from "@/utils/platform";
-
-// Use adapter for platform operations
 const dirPath = await platformAdapter.pickDirectory("Select workspace");
-const persister = platformAdapter.getPersister(store, basePath);
-
-// Check platform if needed (rare)
-if (isTauri()) {
-  // Tauri-specific logic
-}
 ```
 
-**Never:**
-
-- Import Tauri APIs directly in components
-- Use `window.__TAURI__` checks
-- Write platform-specific conditional logic outside of adapters
-
-**Current adapters:**
-
-- `BrowserAdapter`: For web/development
-- `TauriAdapter`: For native desktop apps
-
-## Routing with React Router 7
-
-**Library**: React Router 7
-
-**URL structure:**
-
-```
-/:basePath/edit/:absolutePath?tabs=...&modal=...
-/:basePath/preview/:absolutePath?tabs=...&modal=...
-```
-
-**Key patterns:**
-
-- `basePath`: Route parameter (workspace directory, URL-encoded)
-- `absolutePath`: Absolute file path (URL-encoded) - e.g., `/Users/name/workspace/file.md`
-- Tab state, modals: Search params
-- Use utilities from `src/utils/routing.ts` for encoding/decoding
-
-**File Entry Structure:**
-
-- Every `FileEntry` has a `path` (absolute path) and optional `relativePath`
-- `relativePath` is only present for files inside the workspace
-- Files outside the workspace (future: loose files) will only have `path`
-
-## Code Organization
-
-### Directory Structure
-
-```
-src/
-├── adapters/          # Platform abstraction layer
-├── components/
-│   ├── editor/        # Editor-specific components
-│   └── ui/            # shadcn/ui components
-├── hooks/             # React hooks
-├── lib/               # Third-party library configs
-├── utils/             # Pure utility functions
-└── ...
-```
-
-### When to use what:
-
-**`adapters/`**: Platform-specific implementations (file system, storage)
-**`components/`**: React components (UI + logic)
-**`hooks/`**: React hooks (reusable stateful logic)
-**`lib/`**: Configuration for external libraries
-**`utils/`**: Pure functions, no React dependencies
-
-**Hooks vs Utils:**
-
-- **Hook**: Needs React context, state, or lifecycle (use- prefix)
-- **Util**: Pure function, no React dependencies
+**Never:** Import Tauri APIs directly, use `window.__TAURI__` checks, platform logic outside adapters
 
 ## Editor (Plate)
 
-We use **Plate** as our rich text editor foundation.
-
-**Current approach:**
-
-- Stick to base Plate configuration
-- Don't over-customize unless necessary
-- Keep editor simple and performant
-
-**File locations:**
-
-- Editor components: `src/components/editor/`
-- Editor plugins: `src/components/editor/plugins/`
-
-### Multi-Tab Editor Architecture
-
-**Rendering Strategy: All Tabs Rendered Simultaneously**
-
-We render **all open tab editors** in the DOM simultaneously, using CSS `display: none` to hide inactive tabs. This architectural decision prioritizes user experience over memory optimization.
-
-**Why render all tabs?**
-
-1. **Automatic state preservation**: Cursor position, scroll position, and undo/redo history are automatically preserved when switching tabs
-2. **Instant tab switching**: No re-initialization or re-rendering delay
-3. **Simplified architecture**: No need for complex state serialization/deserialization
-4. **Plate compatibility**: Works seamlessly with Plate's internal state management
-
-**Performance considerations:**
-
-- ✅ **Acceptable overhead**: Each tab uses ~5-10MB of memory
-- ✅ **Single query**: Only one `useLiveQuery` at workspace level loads all content
-- ✅ **Chunking enabled**: Large files (1000+ lines) are chunked for rendering efficiency
-- ✅ **Memoized deserialization**: Markdown only parsed once per file
-- ⚠️ **Memory scaling**: ~50-100MB for 10 open tabs (acceptable for most use cases)
-
-**Trade-offs accepted:**
-
-- Memory usage scales with number of open tabs (not an issue for typical usage of <10 tabs)
-- Initial render of multiple large files takes slightly longer (mitigated by chunking)
-- Browser memory limits apply (tested safe up to 20+ tabs with large files)
-
-**Implementation pattern:**
+**Multi-Tab Architecture:** All tabs render simultaneously (hidden via `display: none`). Preserves cursor, scroll, undo/redo. ~5-10MB per tab.
 
 ```typescript
-// workspace.tsx
 {fileDataWithContent.map((fileEntry) => (
-  <div
-    key={fileEntry.path}
-    style={{ display: fileEntry.path === activeTabId ? 'block' : 'none' }}
-  >
-    <TextEditor file={fileEntry} basePath={workspacePath} />
+  <div key={fileEntry.path} style={{ display: fileEntry.path === activeTabId ? 'block' : 'none' }}>
+    <TextEditor file={fileEntry} />
   </div>
 ))}
 ```
 
-**Alternative considered and rejected:**
+## Testing (Playwright)
 
-- ❌ **Single editor with state persistence**: Complex state management, serialization overhead, loss of undo/redo
-- ❌ **Lazy rendering**: Tab switching lag, poor UX
-- ❌ **URL-based state**: URL length limits, complex encode/decode, doesn't preserve undo/redo
+**Structure:** `tests/e2e/` with fixture-based organization
 
-**When to reconsider:**
-
-- If users regularly open 50+ tabs (currently out of scope)
-- If memory profiling shows issues on low-end devices (mitigate with tab limit warning)
-- If browser crashes due to memory (add max tab limit)
-
-## Dependencies
-
-**Policy**: No new dependencies without explicit approval.
-
-**Rationale:**
-
-- Keep bundle size manageable
-- Reduce security surface
-- Minimize maintenance burden
-
-**When proposing a dependency:**
-
-1. Explain why existing solutions won't work
-2. Show bundle size impact
-3. Demonstrate active maintenance
-4. Provide alternatives considered
-
-## Testing
-
-### E2E Testing (Playwright)
-
-**Structure**: `tests/e2e/` with fixture-based organization
-
-**Test Isolation Pattern**:
+**Pattern:**
 
 ```typescript
 test.beforeEach(async ({ page }) => {
-  // 1. Unique database per test
   await setupTestDatabase(page, "test-name");
-
-  // 2. Navigate to workspace
   await openWorkspace(page, "/workspace/test-path");
-
-  // 3. Seed test data into IndexedDB
   await seedTestFiles(page, testFiles);
-
-  // 4. Reload to load seeded data
   await page.reload();
 });
 ```
 
-**Key Helpers** (`tests/setup/test-helpers.ts`):
+**Helpers:** `setupTestDatabase`, `seedTestFiles`, `openFileInTree`, `replaceEditorContent`, `getEditorContent`, `waitForAutoSave`, `getIndexedDBContent`
 
-- `setupTestDatabase(page, name)` - Isolate tests with unique IndexedDB
-- `seedTestFiles(page, files)` - Pre-seed IndexedDB before app loads
-- `openFileInTree(page, fileName)` - Click file in tree (filters for file icons)
-- `replaceEditorContent(page, content)` - Edit visible editor
-- `getEditorContent(page)` - Get content from visible editor
-- `waitForAutoSave(page)` - Wait for 500ms debounce + buffer
-- `getIndexedDBContent(page, workspace, path)` - Verify persistence
+## Code Organization
 
-**Fixture Pattern**: Each `.spec.ts` has matching `.fixture.ts`
-
-```typescript
-// workspace-navigation.fixture.ts
-export const workspaceNavigationFixture = {
-  populatedWorkspace: { path: "/workspace/test", files: [...] },
-  emptyWorkspace: { path: "/workspace/empty", files: [] },
-};
+```
+src/
+├── adapters/          # Platform abstraction
+├── components/        # React components
+│   ├── editor/        # Editor-specific
+│   └── ui/            # shadcn/ui
+├── hooks/             # React hooks
+├── lib/               # Library configs
+└── utils/             # Pure functions
 ```
 
-**Important Notes**:
-
-- All tabs render simultaneously (use `visible=true` locator for active editor)
-- Tabs are `div.cursor-pointer` elements, not `role="tab"`
-- Use `waitForFileTree(page, fileName?)` after reload
-- Verify persistence via IndexedDB, not just UI
-- Avoid `/workspace/demo-content` (browser adapter auto-seeds)
+**Hooks vs Utils:** Hook = React context/state/lifecycle. Util = Pure function, no React.
 
 ## Conventions
 
-### TypeScript
-
-- Use TypeScript strictly (no `any` without good reason)
-- Prefer interfaces for public APIs
-- Use types for internal shapes
-- Always type component props
-
-### React Patterns
-
-- Functional components only
-- Hooks for state and effects
-- Prefer composition over inheritance
-- Keep components small and focused
-- Use React.memo for expensive renders
-
-### Naming
-
-- Components: PascalCase (`FileTree.tsx`)
-- Utilities/hooks: camelCase (`useWorkspaceParams.ts`)
-- Types/interfaces: PascalCase with I prefix for interfaces
-- Constants: UPPER_SNAKE_CASE
-
-### File Structure
-
-```typescript
-// 1. Imports (external, then internal)
-import { useState } from "react";
-import { getOrCreateStore } from "@/utils/tinybase";
-
-// 2. Types/interfaces
-interface MyComponentProps {
-  basePath: string;
-}
-
-// 3. Component
-export function MyComponent({ basePath }: MyComponentProps) {
-  // Component logic
-}
-```
-
-## Common Patterns
-
-### Opening/Loading a Workspace
-
-```typescript
-// 1. User selects directory
-const basePath = await platformAdapter.pickDirectory("Select workspace");
-
-// 2. Navigate to workspace route
-navigate(`/${encodePathForUrl(basePath)}`);
-
-// 3. Get/create store (TinyBase handles loading)
-const store = getOrCreateStore(basePath);
-
-// 4. Store populates asynchronously - UI can subscribe to changes
-```
-
-### Working with Files
-
-```typescript
-// Reading current workspace from URL
-const { basePath } = useParams();
-const decodedBasePath = getBasePathFromUrl(basePath);
-
-// Building file URLs with absolute paths
-const fileUrl = buildEditFileUrl(basePath, absoluteFilePath);
-
-// Getting absolute path from URL
-const absolutePath = getAbsolutePathFromUrl(encodedAbsolutePath);
-
-// File entries always have absolute path
-const file: FileEntry = {
-  path: "/Users/name/workspace/file.md", // Absolute path
-  relativePath: "file.md", // Optional - only for files in workspace
-  type: "file",
-  // ... other properties
-};
-```
-
-### Platform-Specific Operations
-
-```typescript
-// Always use adapter
-const result = await platformAdapter.pickDirectory("Choose folder");
-
-// Never do this:
-if (window.__TAURI__) {
-  /* ... */
-} // ❌ Wrong
-```
-
-### Performance Optimization
-
-```typescript
-// Memoize expensive computations
-const sortedFiles = useMemo(() =>
-  files.sort((a, b) => a.name.localeCompare(b.name)),
-  [files]
-);
-
-// Debounce rapid updates
-const debouncedSave = useDebounce(saveContent, 500);
-
-// Virtualize long lists
-<VirtualizedList items={files} />
-```
-
-## Error Handling
-
-- Always handle async errors (try/catch or .catch())
-- Provide user-friendly error messages
-- Log errors to console with context
-- Don't let errors crash the app
-
-## Accessibility
-
-- Use semantic HTML
-- Provide keyboard shortcuts for key actions
-- Ensure focus management in modals
-- Test with keyboard-only navigation
-
-## Questions to Ask
-
-When implementing a feature, ask yourself:
-
-1. **Performance**: Will this feel instant? Will it scale to 10,000 files?
-2. **Cross-platform**: Does this work in both browser and Tauri?
-3. **Storage**: Where should this data live? (Project/URL/App settings)
-4. **Local-first**: Does this work offline? Does it sync properly?
-5. **Dependencies**: Can I do this without adding a new package?
+- TypeScript strictly, no `any`
+- Functional components, hooks for state
+- PascalCase components, camelCase hooks/utils
+- File order: Imports → Types → Component
 
 ## Anti-Patterns
 
 **Don't:**
 
 - ❌ Import Tauri APIs directly
-- ❌ Manually save/load TinyBase stores
-- ❌ Put navigation state in TinyBase (use URL)
-- ❌ Put ephemeral UI state in TinyBase (use React state)
+- ❌ Manually load TanStack DB collections
+- ❌ Put ephemeral UI state in URL
 - ❌ Add dependencies without asking
-- ❌ Block the UI thread with heavy computation
-- ❌ Assume files are small (virtualize lists)
+- ❌ Block UI thread
 - ❌ Hard-code platform checks outside adapters
 
 **Do:**
 
 - ✅ Use platform adapters
-- ✅ Trust TinyBase auto-save/auto-load
+- ✅ Trust TanStack Query auto-fetch
 - ✅ Put navigation state in URL
 - ✅ Use React state for UI-only state
-- ✅ Ask before adding dependencies
-- ✅ Use web workers for heavy computation
 - ✅ Virtualize large lists
 - ✅ Keep platform logic in adapters
 
 ## Summary
 
-When working on Metrists:
-
-1. **Think performance**: File operations must be fast and responsive
-2. **Think cross-platform**: Use adapters, never platform-specific code
-3. **Think storage**: Know what goes where (Project/URL/App)
-4. **Think local-first**: Trust TinyBase, work offline
-5. **Think simple**: Don't over-engineer, keep it maintainable
-
-This is a markdown editor. Keep the focus on making file editing fast, reliable, and delightful across all platforms.
+1. **Performance**: Fast file operations, responsive UI
+2. **Cross-platform**: Use adapters, never platform-specific code
+3. **Storage**: Know what goes where (Project/URL/App)
+4. **Local-first**: Trust TanStack Query, work offline
+5. **Simple**: Don't over-engineer
