@@ -614,10 +614,10 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     relativePath: string,
     workspacePath: string,
   ): Promise<string> {
-    const absolutePath = `${workspacePath}/${relativePath}`.replace(
-      /\/\/+/g,
-      "/",
-    );
+    // If path is already absolute, use it directly; otherwise join with workspace
+    const absolutePath = relativePath.startsWith("/")
+      ? relativePath
+      : `${workspacePath}/${relativePath}`.replace(/\/+/g, "/");
 
     try {
       const fileHandle = await this.resolveFileHandle(

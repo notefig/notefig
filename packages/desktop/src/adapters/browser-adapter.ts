@@ -592,10 +592,10 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     relativePath: string,
     workspacePath: string,
   ): Promise<string> {
-    const absolutePath = `${workspacePath}/${relativePath}`.replace(
-      /\/\/+/g,
-      "/",
-    );
+    // If path is already absolute, use it directly; otherwise join with workspace
+    const absolutePath = relativePath.startsWith("/")
+      ? relativePath
+      : `${workspacePath}/${relativePath}`.replace(/\/+/g, "/");
 
     try {
       const db = await this.ensureDB();

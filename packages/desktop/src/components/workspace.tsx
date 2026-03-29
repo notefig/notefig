@@ -69,6 +69,8 @@ export const Workspace = () => {
   }, []);
 
   // Query metadata and content for all open tabs
+  // Uses left join so files appear immediately (metadata loads eagerly)
+  // Content loads on-demand; Suspense in PolymorphicEditor handles loading state
   const { data: fileDataWithContent = [] } = useLiveQuery(
     (q) =>
       openTabs.length === 0
@@ -76,13 +78,13 @@ export const Workspace = () => {
         : q
             .from({ file: metadata })
             .where(({ file }) => inArray(file.path, openTabs))
-            .join({ content }, ({ file, content }) =>
+            .leftJoin({ content }, ({ file, content }) =>
               eq(file.path, content.path),
             )
             .select(({ file, content }) => ({
               ...file,
-              content: content!.content,
-              contentHash: content!.contentHash,
+              content: content?.content ?? "",
+              contentHash: content?.contentHash ?? "",
             })),
     [workspacePath, ...openTabs],
   );
