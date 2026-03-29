@@ -568,6 +568,70 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
+  async writeBinaryFiles(
+    files: { path: string; data: Uint8Array }[],
+  ): Promise<BatchResult<string>> {
+    const succeeded: string[] = [];
+    const failed: FileSystemError[] = [];
+
+    for (const file of files) {
+      const workspaceRoot = getWorkspaceRoot(file.path);
+      if (!workspaceRoot) {
+        failed.push(
+          createError(file.path, "invalid_path", "Invalid workspace path"),
+        );
+        continue;
+      }
+
+      try {
+        const parentPath = file.path.substring(0, file.path.lastIndexOf("/"));
+        const parentHandle = await this.resolveDirectory(parentPath, true);
+        const fileName = file.path.split("/").pop() || "";
+
+        const fileHandle = await parentHandle.getFileHandle(fileName, {
+          create: true,
+        });
+        const writable = await fileHandle.createWritable();
+        await writable.write(file.data);
+        await writable.close();
+
+        succeeded.push(file.path);
+      } catch (error) {
+        failed.push(
+          createError(
+            file.path,
+            "io_error",
+            error instanceof Error ? error.message : "Unknown error",
+          ),
+        );
+      }
+    }
+
+    return { succeeded, failed };
+  }
+
+  async resolveAssetUrl(
+    relativePath: string,
+    workspacePath: string,
+  ): Promise<string> {
+    const absolutePath = `${workspacePath}/${relativePath}`.replace(
+      /\/\/+/g,
+      "/",
+    );
+
+    try {
+      const fileHandle = await this.resolveFileHandle(
+        absolutePath,
+        false,
+        false,
+      );
+      const file = await fileHandle.getFile();
+      return URL.createObjectURL(file);
+    } catch {
+      return relativePath;
+    }
+  }
+
   async startWatchingMetadata(paths: string[], watchId: string): Promise<void> {
     await this.fileWatcher.startWatchingMetadata(paths, watchId);
   }

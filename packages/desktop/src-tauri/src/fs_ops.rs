@@ -610,3 +610,42 @@ pub async fn get_metadata(paths: Vec<String>) -> BatchResult<FileSystemMetadata>
 
     result
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct BinaryFileWriteRequest {
+    pub path: String,
+    pub data: Vec<u8>,
+}
+
+#[tauri::command]
+pub async fn write_binary_files(
+    files: Vec<BinaryFileWriteRequest>,
+) -> BatchResult<String> {
+    let mut result = BatchResult::new();
+
+    for file in files {
+        let path = PathBuf::from(&file.path);
+        
+        // Ensure parent directory exists
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                if let Err(err) = fs::create_dir_all(parent).await {
+                    result.failed.push(map_io_error(&file.path, err));
+                    continue;
+                }
+            }
+        }
+
+        // Write binary data
+        match fs::write(&path, file.data).await {
+            Ok(_) => {
+                result.succeeded.push(file.path);
+            }
+            Err(err) => {
+                result.failed.push(map_io_error(&file.path, err));
+            }
+        }
+    }
+
+    result
+}

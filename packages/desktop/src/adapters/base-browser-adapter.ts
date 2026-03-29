@@ -46,6 +46,13 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     files: { path: string; content: string }[],
   ): Promise<BatchResult<string>>;
   abstract deleteFiles(paths: string[]): Promise<BatchResult<string>>;
+  abstract writeBinaryFiles(
+    files: { path: string; data: Uint8Array }[],
+  ): Promise<BatchResult<string>>;
+  abstract resolveAssetUrl(
+    relativePath: string,
+    workspacePath: string,
+  ): Promise<string>;
   abstract exists(
     paths: string[],
   ): Promise<{ path: string; exists: boolean; type?: "file" | "directory" }[]>;

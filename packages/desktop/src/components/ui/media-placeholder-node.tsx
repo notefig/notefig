@@ -16,15 +16,8 @@ import { PlateElement, useEditorPlugin, withHOC } from "platejs/react";
 import { useFilePicker } from "use-file-picker";
 
 import { cn } from "@/lib/utils";
-
-// Stub for removed uploadthing functionality
-const useUploadFile = () => ({
-  isUploading: false,
-  progress: 0,
-  uploadedFile: null as { name: string; url: string; size: number } | null,
-  uploadFile: (file: File) => Promise.resolve(),
-  uploadingFile: null as File | null,
-});
+import { useMediaUpload } from "@/hooks/use-media-upload";
+import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 
 const CONTENT: Record<
   string,
@@ -63,10 +56,10 @@ export const PlaceholderElement = withHOC(
 
     const { api } = useEditorPlugin(PlaceholderPlugin);
 
-    const { isUploading, progress, uploadedFile, uploadFile, uploadingFile } =
-      useUploadFile();
-
-    const loading = isUploading && uploadingFile;
+    const { workspacePath } = useWorkspaceParams();
+    const { isUploading, uploadedFile, uploadFile } = useMediaUpload({
+      workspacePath: workspacePath || "",
+    });
 
     const currentContent = CONTENT[element.mediaType];
 
@@ -84,7 +77,11 @@ export const PlaceholderElement = withHOC(
         replaceCurrentPlaceholder(firstFile);
 
         if (restFiles.length > 0) {
-          editor.getTransforms(PlaceholderPlugin).insert.media(restFiles);
+          // Use editor.tf.insert.media (added by PlaceholderPlugin via extendEditorTransforms)
+          const editorWithMedia = editor as unknown as {
+            tf: { insert?: { media?: (files: File[]) => void } };
+          };
+          editorWithMedia.tf.insert?.media?.(restFiles);
         }
       },
     });
@@ -146,43 +143,24 @@ export const PlaceholderElement = withHOC(
 
     return (
       <PlateElement className="my-1" {...props}>
-        {(!loading || !isImage) && (
+        {(!isUploading || !isImage) && (
           <div
             className={cn(
               "flex cursor-pointer select-none items-center rounded-sm bg-muted p-3 pr-9 hover:bg-primary/10",
             )}
-            onClick={() => !loading && openFilePicker()}
+            onClick={() => !isUploading && openFilePicker()}
             contentEditable={false}
           >
             <div className="relative mr-3 flex text-muted-foreground/80 [&_svg]:size-6">
               {currentContent.icon}
             </div>
             <div className="whitespace-nowrap text-muted-foreground text-sm">
-              <div>
-                {loading ? uploadingFile?.name : currentContent.content}
-              </div>
-
-              {loading && !isImage && (
-                <div className="mt-1 flex items-center gap-1.5">
-                  <div>{formatBytes(uploadingFile?.size ?? 0)}</div>
-                  <div>–</div>
-                  <div className="flex items-center">
-                    <Loader2Icon className="mr-1 size-3.5 animate-spin text-muted-foreground" />
-                    {progress ?? 0}%
-                  </div>
-                </div>
-              )}
+              {currentContent.content}
             </div>
           </div>
         )}
 
-        {isImage && loading && (
-          <ImageProgress
-            file={uploadingFile}
-            imageRef={imageRef}
-            progress={progress}
-          />
-        )}
+        {isImage && isUploading && <ImageProgress imageRef={imageRef} />}
 
         {props.children}
       </PlateElement>
@@ -192,67 +170,29 @@ export const PlaceholderElement = withHOC(
 
 export function ImageProgress({
   className,
-  file,
   imageRef,
-  progress = 0,
 }: {
-  file: File;
   className?: string;
   imageRef?: React.RefObject<HTMLImageElement | null>;
-  progress?: number;
 }) {
-  const [objectUrl, setObjectUrl] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    const url = URL.createObjectURL(file);
-    setObjectUrl(url);
-
-    return () => {
-      URL.revokeObjectURL(url);
-    };
-  }, [file]);
-
-  if (!objectUrl) {
-    return null;
-  }
-
   return (
-    <div className={cn("relative", className)} contentEditable={false}>
+    <div
+      className={cn(
+        "relative flex h-32 items-center justify-center rounded-sm bg-muted",
+        className,
+      )}
+      contentEditable={false}
+    >
       <img
         ref={imageRef as React.LegacyRef<HTMLImageElement>}
-        className="h-auto w-full rounded-sm object-cover"
-        alt={file.name}
-        src={objectUrl}
+        className="hidden"
+        alt=""
+        src=""
       />
-      {progress < 100 && (
-        <div className="absolute right-1 bottom-1 flex items-center space-x-2 rounded-full bg-black/50 px-1 py-0.5">
-          <Loader2Icon className="size-3.5 animate-spin text-muted-foreground" />
-          <span className="font-medium text-white text-xs">
-            {Math.round(progress)}%
-          </span>
-        </div>
-      )}
+      <div className="flex items-center gap-2">
+        <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+        <span className="text-muted-foreground text-sm">Uploading...</span>
+      </div>
     </div>
   );
-}
-
-function formatBytes(
-  bytes: number,
-  opts: {
-    decimals?: number;
-    sizeType?: "accurate" | "normal";
-  } = {},
-) {
-  const { decimals = 0, sizeType = "normal" } = opts;
-
-  const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
-  const accurateSizes = ["Bytes", "KiB", "MiB", "GiB", "TiB"];
-
-  if (bytes === 0) return "0 Byte";
-
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-
-  return `${(bytes / 1024 ** i).toFixed(decimals)} ${
-    sizeType === "accurate" ? accurateSizes[i] ?? "Bytest" : sizes[i] ?? "Bytes"
-  }`;
 }

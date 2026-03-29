@@ -261,6 +261,7 @@ fn main() {
             fs_ops::copy_file,
             fs_ops::check_exists,
             fs_ops::get_metadata,
+            fs_ops::write_binary_files,
             // File watcher commands
             file_watcher::start_watching_metadata,
             file_watcher::start_watching_content,

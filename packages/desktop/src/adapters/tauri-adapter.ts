@@ -11,7 +11,7 @@ import type {
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LazyStore } from "@tauri-apps/plugin-store";
 
@@ -253,6 +253,40 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
         },
       };
     }
+  }
+
+  async writeBinaryFiles(
+    files: { path: string; data: Uint8Array }[],
+  ): Promise<BatchResult<string>> {
+    try {
+      const result = await invoke<BatchResult<string>>("write_binary_files", {
+        files: files.map((f) => ({
+          path: f.path,
+          data: Array.from(f.data),
+        })),
+      });
+      return result;
+    } catch (error) {
+      return {
+        succeeded: [],
+        failed: files.map((f) => ({
+          path: f.path,
+          type: "io_error",
+          message: error instanceof Error ? error.message : "Unknown error",
+        })),
+      };
+    }
+  }
+
+  async resolveAssetUrl(
+    relativePath: string,
+    workspacePath: string,
+  ): Promise<string> {
+    const absolutePath = `${workspacePath}/${relativePath}`.replace(
+      /\/+/g,
+      "/",
+    );
+    return convertFileSrc(absolutePath);
   }
 
   async exists(

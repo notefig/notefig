@@ -185,6 +185,26 @@ export interface IPlatformAdapter {
    */
   copyFile(from: string, to: string): Promise<Result<void>>;
 
+  /**
+   * Write binary files (images, videos, audio, etc.)
+   * Creates parent directories if they don't exist
+   * @param files - Array of objects containing path and binary data
+   * @returns Batch result with succeeded paths and failed operations
+   */
+  writeBinaryFiles(
+    files: { path: string; data: Uint8Array }[],
+  ): Promise<BatchResult<string>>;
+
+  /**
+   * Resolve a relative asset path to a displayable URL
+   * In Tauri: converts to asset:// protocol
+   * In Browser: creates blob URL from IndexedDB
+   * @param relativePath - Relative path from workspace root
+   * @param workspacePath - Absolute path to the workspace directory
+   * @returns Resolved URL for display (absolute URL or blob URL)
+   */
+  resolveAssetUrl(relativePath: string, workspacePath: string): Promise<string>;
+
   // ========== Metadata & Existence ==========
   /**
    * Check if paths exist

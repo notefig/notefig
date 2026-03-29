@@ -39,6 +39,12 @@ class TestBrowserAdapter extends BaseBrowserAdapter {
   async getMetadata(): Promise<BatchResult<FileSystemMetadata>> {
     return { succeeded: [], failed: [] };
   }
+  async writeBinaryFiles(): Promise<BatchResult<string>> {
+    return { succeeded: [], failed: [] };
+  }
+  async resolveAssetUrl(): Promise<string> {
+    return "";
+  }
 }
 
 describe("BaseBrowserAdapter KV Store", () => {

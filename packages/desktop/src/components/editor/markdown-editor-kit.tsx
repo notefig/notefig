@@ -15,6 +15,7 @@ import { ExitBreakKit } from "@/components/editor/plugins/exit-break-kit";
 import { LinkKit } from "@/components/editor/plugins/link-kit";
 import { ListKit } from "@/components/editor/plugins/list-kit";
 import { MarkdownKit } from "@/components/editor/plugins/markdown-kit";
+import { MediaKit } from "@/components/editor/plugins/media-kit";
 import { SuggestionKit } from "@/components/editor/plugins/suggestion-kit";
 
 // Minimal editor kit focused on markdown compatibility
@@ -47,4 +48,7 @@ export const MarkdownEditorKit = [
 
   // Markdown serialization
   ...MarkdownKit,
+
+  // Media support (images, video, audio, files)
+  ...MediaKit,
 ];

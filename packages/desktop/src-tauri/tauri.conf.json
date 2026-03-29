@@ -38,7 +38,11 @@
     ],
     "security": {
       "csp": null,
-      "capabilities": ["main-capability"]
+      "capabilities": ["main-capability"],
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$HOME/**", "$DOCUMENT/**", "$DOWNLOAD/**", "$DESKTOP/**"]
+      }
     }
   },
   "bundle": {

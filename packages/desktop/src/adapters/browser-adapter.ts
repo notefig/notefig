@@ -528,6 +528,142 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
+  async writeBinaryFiles(
+    files: { path: string; data: Uint8Array }[],
+  ): Promise<BatchResult<string>> {
+    const succeeded: string[] = [];
+    const failed: FileSystemError[] = [];
+
+    if (files.length === 0) {
+      return { succeeded, failed };
+    }
+
+    try {
+      const db = await this.ensureDB();
+      const transaction = db.transaction([this.STORE_NAME], "readwrite");
+      const store = transaction.objectStore(this.STORE_NAME);
+
+      for (const file of files) {
+        try {
+          const base64 = this.uint8ArrayToBase64(file.data);
+
+          await new Promise<void>((resolve, reject) => {
+            const request = store.put({
+              path: file.path,
+              content: "", // No text content for binary files
+              binaryData: base64,
+              mimeType: this.guessMimeType(file.path),
+              modifiedAt: new Date(),
+              createdAt: new Date(),
+            });
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+          });
+
+          succeeded.push(file.path);
+        } catch (error) {
+          failed.push(
+            createError(
+              file.path,
+              "io_error",
+              error instanceof Error ? error.message : "Unknown error",
+            ),
+          );
+        }
+      }
+    } catch (error) {
+      files.forEach((file) => {
+        if (!succeeded.includes(file.path)) {
+          failed.push(
+            createError(
+              file.path,
+              "io_error",
+              error instanceof Error ? error.message : "Unknown error",
+            ),
+          );
+        }
+      });
+    }
+
+    return { succeeded, failed };
+  }
+
+  async resolveAssetUrl(
+    relativePath: string,
+    workspacePath: string,
+  ): Promise<string> {
+    const absolutePath = `${workspacePath}/${relativePath}`.replace(
+      /\/\/+/g,
+      "/",
+    );
+
+    try {
+      const db = await this.ensureDB();
+      const transaction = db.transaction([this.STORE_NAME], "readonly");
+      const store = transaction.objectStore(this.STORE_NAME);
+
+      const result: {
+        binaryData?: string;
+        mimeType?: string;
+      } | null = await new Promise((resolve, reject) => {
+        const request = store.get(absolutePath);
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+      });
+
+      if (result && result.binaryData) {
+        const binaryString = atob(result.binaryData);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], {
+          type: result.mimeType || "image/png",
+        });
+        return URL.createObjectURL(blob);
+      }
+
+      // Fallback: return relative path (won't display but won't crash)
+      return relativePath;
+    } catch {
+      return relativePath;
+    }
+  }
+
+  private uint8ArrayToBase64(bytes: Uint8Array): string {
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  }
+
+  private guessMimeType(path: string): string {
+    const ext = path.split(".").pop()?.toLowerCase() || "";
+    const mimeTypes: Record<string, string> = {
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      png: "image/png",
+      gif: "image/gif",
+      webp: "image/webp",
+      svg: "image/svg+xml",
+      bmp: "image/bmp",
+      ico: "image/x-icon",
+      mp4: "video/mp4",
+      webm: "video/webm",
+      mov: "video/quicktime",
+      avi: "video/x-msvideo",
+      mp3: "audio/mpeg",
+      wav: "audio/wav",
+      ogg: "audio/ogg",
+      flac: "audio/flac",
+      pdf: "application/pdf",
+      doc: "application/msword",
+      docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    };
+    return mimeTypes[ext] || "application/octet-stream";
+  }
+
   async deleteFiles(paths: string[]): Promise<BatchResult<string>> {
     const succeeded: string[] = [];
     const failed: FileSystemError[] = [];
