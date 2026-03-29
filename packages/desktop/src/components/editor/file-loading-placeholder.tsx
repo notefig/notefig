@@ -15,7 +15,6 @@ export function FileLoadingPlaceholder({
       <div className="flex flex-col items-center gap-4">
         <div className="relative">
           <FileText className="size-12 text-muted-foreground/50" />
-          <Loader2 className="size-5 text-muted-foreground animate-spin absolute -bottom-1 -right-1" />
         </div>
         <div className="text-center">
           <p className="text-muted-foreground font-medium">{name}</p>
