@@ -7,7 +7,7 @@
     "frontendDist": "../dist"
   },
   "productName": "Metrists",
-  "version": "0.0.38",
+  "version": "0.0.39",
   "identifier": "com.metrists.dev",
   "plugins": {
     "shell": {
