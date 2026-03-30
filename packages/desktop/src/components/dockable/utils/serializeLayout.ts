@@ -28,7 +28,6 @@ function serializeLayout(
   element: React.ReactElement,
   tabs: React.ReactElement[],
 ): LayoutNode {
-  console.log({ element, type: element.type });
   if (!React.isValidElement(element)) {
     console.log(element);
     throw new Error("Invalid element");

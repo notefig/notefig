@@ -18,7 +18,7 @@ interface ImageViewerProps {
  * Must be wrapped in a Suspense boundary.
  */
 export function ImageViewer({ file, basePath }: ImageViewerProps) {
-  // Register this viewer instance (stateless)
+  // Register this viewer instance
   useEffect(() => {
     getOrCreateEditor(file.path, { type: "image" });
   }, [file.path]);
@@ -33,11 +33,12 @@ export function ImageViewer({ file, basePath }: ImageViewerProps) {
 
   return (
     <div
-      className="flex flex-col flex-1 min-h-0 w-full overflow-auto bg-muted/30"
+      data-editor-container={file.path}
+      className="flex flex-col flex-1 min-h-0 w-full overflow-auto"
       tabIndex={-1}
       onMouseDown={handleMouseDown}
     >
-      <div className="flex-1 flex items-center justify-center p-8">
+      <div className="flex-1 flex items-center justify-center p-4">
         <img
           src={imageUrl}
           alt={file.path}

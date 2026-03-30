@@ -124,7 +124,6 @@ export function useDockableTabs(
   // Render tabs using the provided render function
   const tabs = useMemo(() => renderTabs(openTabs), [renderTabs, openTabs]);
 
-  // Track last-focused window inside dockable area
   useEffect(() => {
     const root = dockableRef?.current;
     if (!root) return;
@@ -143,6 +142,19 @@ export function useDockableTabs(
       root.removeEventListener("focusin", handleFocusIn);
     };
   }, [dockableRef]);
+
+  useEffect(() => {
+    if (!activeTabId) return;
+
+    // Use rAF to ensure DOM is ready and component has mounted
+    const rafId = requestAnimationFrame(() => {
+      focusEditor(activeTabId);
+    });
+
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
+  }, [activeTabId]);
 
   // Handle file selection from file tree
   const handleFileSelect = useCallback(

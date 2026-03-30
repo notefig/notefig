@@ -50,8 +50,8 @@ export interface MarkdownInstance extends EditorInstance {
  */
 export interface CodeInstance extends EditorInstance {
   readonly type: "code";
+  readonly filePath: string;
   editorState: {
-    textareaRef: RefObject<HTMLTextAreaElement | null>;
     content: string;
   };
 }
@@ -61,6 +61,7 @@ export interface CodeInstance extends EditorInstance {
  */
 export interface ImageInstance extends EditorInstance {
   readonly type: "image";
+  readonly filePath: string;
 }
 
 /** Module-level store: file path → editor instance */
@@ -103,18 +104,23 @@ function createMarkdownInstance(content: string): MarkdownInstance {
   return instance;
 }
 
-function createCodeInstance(
-  textareaRef: RefObject<HTMLTextAreaElement | null>,
-): CodeInstance {
+function createCodeInstance(filePath: string): CodeInstance {
   const instance: CodeInstance = {
     type: "code",
+    filePath,
     editorState: {
-      textareaRef,
       content: "",
     },
     focus(): boolean {
-      this.editorState.textareaRef.current?.focus();
-      return true;
+      // Look up the textarea by data attribute since we don't store a ref
+      const el = document.querySelector(
+        `[data-editor-container="${this.filePath}"] textarea`,
+      );
+      if (el instanceof HTMLTextAreaElement) {
+        el.focus();
+        return true;
+      }
+      return false;
     },
     dispose(): void {
       // Cleanup any textarea listeners if needed
@@ -128,18 +134,26 @@ function createCodeInstance(
   return instance;
 }
 
-function createImageInstance(): ImageInstance {
+function createImageInstance(filePath: string): ImageInstance {
   const instance: ImageInstance = {
     type: "image",
+    filePath,
     focus(): boolean {
-      // No-op: images are not focusable
+      // Look up the container by data attribute since we don't store a ref
+      const el = document.querySelector(
+        `[data-editor-container="${this.filePath}"]`,
+      );
+      if (el instanceof HTMLElement) {
+        el.focus();
+        return true;
+      }
       return false;
     },
     dispose(): void {
       // No-op: stateless viewer
     },
     isFocusable(): boolean {
-      return false;
+      return true;
     },
   };
 
@@ -153,7 +167,6 @@ interface MarkdownConfig {
 
 interface CodeConfig {
   type: "code";
-  textareaRef: RefObject<HTMLTextAreaElement | null>;
 }
 
 interface ImageConfig {
@@ -196,10 +209,10 @@ export function getOrCreateEditor(
       instance = createMarkdownInstance(config.content);
       break;
     case "code":
-      instance = createCodeInstance(config.textareaRef);
+      instance = createCodeInstance(filePath);
       break;
     case "image":
-      instance = createImageInstance();
+      instance = createImageInstance(filePath);
       break;
     default:
       throw new Error(`Unknown editor type: ${(config as any).type}`);
@@ -291,6 +304,7 @@ export function disposeAllEditors(): void {
  */
 export function focusEditor(filePath: string): boolean {
   const instance = editorInstances.get(filePath);
+  console.log(instance, filePath);
   if (!instance) return false;
   return instance.focus();
 }
