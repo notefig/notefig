@@ -11,11 +11,19 @@ interface CodeEditorProps {
 
 export function CodeEditor({ file, basePath }: CodeEditorProps) {
   const [content, setContent] = useState(file.content);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     getOrCreateEditor(file.path, { type: "code" });
   }, [file.path]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 0);
+    return () => clearTimeout(timeoutId);
+  }, []);
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -48,6 +56,7 @@ export function CodeEditor({ file, basePath }: CodeEditorProps) {
     >
       <div className="flex-1 overflow-auto p-4">
         <textarea
+          ref={textareaRef}
           value={content}
           onChange={handleChange}
           className={cn(

@@ -112,11 +112,11 @@ function createCodeInstance(filePath: string): CodeInstance {
       content: "",
     },
     focus(): boolean {
-      // Look up the textarea by data attribute since we don't store a ref
+      // Look up the container by data attribute since we don't store a ref
       const el = document.querySelector(
-        `[data-editor-container="${this.filePath}"] textarea`,
+        `[data-editor-container="${this.filePath}"]`,
       );
-      if (el instanceof HTMLTextAreaElement) {
+      if (el instanceof HTMLElement) {
         el.focus();
         return true;
       }
@@ -139,10 +139,8 @@ function createImageInstance(filePath: string): ImageInstance {
     type: "image",
     filePath,
     focus(): boolean {
-      // Look up the container by data attribute since we don't store a ref
-      const el = document.querySelector(
-        `[data-editor-container="${this.filePath}"]`,
-      );
+      const selector = `[data-editor-container="${this.filePath}"]`;
+      const el = document.querySelector(selector);
       if (el instanceof HTMLElement) {
         el.focus();
         return true;
@@ -304,7 +302,6 @@ export function disposeAllEditors(): void {
  */
 export function focusEditor(filePath: string): boolean {
   const instance = editorInstances.get(filePath);
-  console.log(instance, filePath);
   if (!instance) return false;
   return instance.focus();
 }

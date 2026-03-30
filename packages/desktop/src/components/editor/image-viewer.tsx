@@ -2,7 +2,10 @@
 
 import { useEffect } from "react";
 import type { FileEntry } from "@/utils/fs";
-import { getOrCreateEditor } from "@/components/editor/editor-store";
+import {
+  getOrCreateEditor,
+  focusEditor,
+} from "@/components/editor/editor-store";
 import { useImageUrl } from "@/hooks/use-image-url";
 import { cn } from "@/lib/utils";
 
@@ -23,20 +26,22 @@ export function ImageViewer({ file, basePath }: ImageViewerProps) {
     getOrCreateEditor(file.path, { type: "image" });
   }, [file.path]);
 
+  // Auto-focus when this component mounts (handles panel 1+ timing issues)
+  useEffect(() => {
+    const rafId = requestAnimationFrame(() => {
+      focusEditor(file.path);
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [file.path]);
+
   // This will suspend while loading
   const imageUrl = useImageUrl(file.path, basePath);
-
-  // Prevent mousedown from stealing focus - keeps keyboard shortcuts working
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    e.currentTarget.focus();
-  };
 
   return (
     <div
       data-editor-container={file.path}
       className="flex flex-col flex-1 min-h-0 w-full overflow-auto"
       tabIndex={-1}
-      onMouseDown={handleMouseDown}
     >
       <div className="flex-1 flex items-center justify-center p-4">
         <img
