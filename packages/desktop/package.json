@@ -10,9 +10,12 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "dev-debug": "npm run tauri build -- --debug && open \"src-tauri/target/debug/bundle/macos/Metrists.app\"",
-    "test": "vitest run",
+    "test": "npm run test:unit && npm run test:tauri",
     "test:watch": "vitest",
     "test:unit": "vitest run",
+    "test:tauri": "cd src-tauri && cargo test",
+    "test:tauri:watch": "cd src-tauri && cargo test -- --watch",
+    "test:all": "npm run test:unit && npm run test:tauri && npm run test:e2e",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:debug": "playwright test --debug"

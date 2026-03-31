@@ -1,13 +1,8 @@
-// File system operations module
-// Provides high-performance file system operations with error-as-values pattern
-
+use crate::file_watcher::{compute_content_hash, register_app_write};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use crate::file_watcher::{register_app_write, compute_content_hash};
-
-// ========== Error Types ==========
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -70,8 +65,6 @@ impl<T> BatchResult<T> {
     }
 }
 
-// ========== Metadata Types ==========
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct FileSystemMetadata {
     pub path: String,
@@ -92,8 +85,6 @@ pub struct ExistsResult {
     #[serde(rename = "type")]
     pub entry_type: Option<String>,
 }
-
-// ========== Helper Functions ==========
 
 fn map_io_error(path: &str, err: std::io::Error) -> FileSystemError {
     let error_type = match err.kind() {
@@ -130,7 +121,26 @@ fn is_hidden_path(path: &Path) -> bool {
     })
 }
 
-// ========== Directory Operations ==========
+/// Check if a path is hidden relative to a base path
+/// This is used in read_directory to avoid filtering out files
+/// just because the temp directory starts with "."
+fn is_hidden_relative_to(path: &Path, base: &Path) -> bool {
+    // Get the relative path from base to path
+    if let Ok(relative) = path.strip_prefix(base) {
+        // Check if any component of the relative path is hidden
+        relative.components().any(|component| {
+            if let std::path::Component::Normal(os_str) = component {
+                if let Some(name) = os_str.to_str() {
+                    return name.starts_with('.') && name.len() > 1;
+                }
+            }
+            false
+        })
+    } else {
+        // Can't get relative path, fall back to full path check
+        is_hidden_path(path)
+    }
+}
 
 #[tauri::command]
 pub async fn read_directory(
@@ -160,7 +170,6 @@ pub async fn read_directory(
     let mut results = Vec::new();
 
     if recursive {
-        // Use walkdir for recursive traversal
         use walkdir::WalkDir;
         for entry in WalkDir::new(&path_buf).follow_links(true) {
             match entry {
@@ -170,8 +179,7 @@ pub async fn read_directory(
                         continue; // Skip root
                     }
 
-                    // Filter out hidden files/directories (starting with .)
-                    if is_hidden_path(entry_path) {
+                    if is_hidden_relative_to(entry_path, &path_buf) {
                         continue;
                     }
 
@@ -191,7 +199,7 @@ pub async fn read_directory(
                     let entry_path = entry.path();
 
                     // Filter out hidden files/directories (starting with .)
-                    if is_hidden_path(&entry_path) {
+                    if is_hidden_relative_to(&entry_path, &path_buf) {
                         continue;
                     }
 
@@ -246,7 +254,7 @@ pub async fn delete_directories(paths: Vec<String>, recursive: bool) -> BatchRes
             let path_buf = PathBuf::from(&path);
 
             if !path_buf.exists() {
-                return Ok(path); // Already deleted
+                return Ok(path);
             }
 
             if !path_buf.is_dir() {
@@ -303,7 +311,6 @@ pub async fn move_directory(old_path: String, new_path: String) -> Result<()> {
         );
     }
 
-    // Ensure parent of new path exists
     if let Err(err) = ensure_parent_dir(&new_path_buf).await {
         return Result::err(new_path, FileSystemErrorType::IoError, err.to_string());
     }
@@ -313,8 +320,6 @@ pub async fn move_directory(old_path: String, new_path: String) -> Result<()> {
         Err(err) => Result::err(old_path, FileSystemErrorType::IoError, err.to_string()),
     }
 }
-
-// ========== File Operations ==========
 
 #[tauri::command]
 pub async fn read_files(paths: Vec<String>) -> BatchResult<FileContent> {
@@ -392,17 +397,14 @@ pub async fn write_files(files: Vec<FileToWrite>) -> BatchResult<String> {
     result
 }
 
-// Atomic write helper
 async fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
     let temp_path = path.with_extension("tmp");
 
-    // Write to temp file
     let mut file = fs::File::create(&temp_path).await?;
     file.write_all(content.as_bytes()).await?;
     file.sync_all().await?;
     drop(file);
 
-    // Atomic rename
     fs::rename(&temp_path, path).await?;
 
     Ok(())
@@ -517,8 +519,6 @@ pub async fn copy_file(from: String, to: String) -> Result<()> {
     }
 }
 
-// ========== Metadata & Existence ==========
-
 #[tauri::command]
 pub async fn check_exists(paths: Vec<String>) -> Vec<ExistsResult> {
     let tasks: Vec<_> = paths
@@ -618,14 +618,12 @@ pub struct BinaryFileWriteRequest {
 }
 
 #[tauri::command]
-pub async fn write_binary_files(
-    files: Vec<BinaryFileWriteRequest>,
-) -> BatchResult<String> {
+pub async fn write_binary_files(files: Vec<BinaryFileWriteRequest>) -> BatchResult<String> {
     let mut result = BatchResult::new();
 
     for file in files {
         let path = PathBuf::from(&file.path);
-        
+
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
             if !parent.exists() {
@@ -648,4 +646,706 @@ pub async fn write_binary_files(
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn setup_test_dir() -> TempDir {
+        tempfile::tempdir().expect("Failed to create temp directory")
+    }
+
+    async fn create_test_file(dir: &TempDir, path: &str, content: &str) -> String {
+        let file_path = dir.path().join(path);
+        if let Some(parent) = file_path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .expect("Failed to create parent directory");
+        }
+        tokio::fs::write(&file_path, content)
+            .await
+            .expect("Failed to write file");
+        file_path.to_string_lossy().to_string()
+    }
+
+    #[tokio::test]
+    async fn test_read_directory_lists_files_recursively() {
+        let temp_dir = setup_test_dir();
+        let root_path = temp_dir.path().to_string_lossy().to_string();
+
+        // Create test structure
+        create_test_file(&temp_dir, "file1.txt", "content1").await;
+        create_test_file(&temp_dir, "subdir/file2.txt", "content2").await;
+        create_test_file(&temp_dir, "subdir/nested/file3.txt", "content3").await;
+
+        let result = read_directory(root_path.clone(), true, true, false).await;
+
+        assert!(matches!(result, Result::Ok { .. }));
+        if let Result::Ok { value, .. } = result {
+            assert_eq!(value.len(), 3);
+            assert!(value.iter().any(|p| p.contains("file1.txt")));
+            assert!(value.iter().any(|p| p.contains("file2.txt")));
+            assert!(value.iter().any(|p| p.contains("file3.txt")));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_directory_lists_files_non_recursively() {
+        let temp_dir = setup_test_dir();
+        let root_path = temp_dir.path().to_string_lossy().to_string();
+
+        create_test_file(&temp_dir, "file1.txt", "content1").await;
+        create_test_file(&temp_dir, "subdir/file2.txt", "content2").await;
+
+        let result = read_directory(root_path.clone(), false, true, false).await;
+
+        assert!(matches!(result, Result::Ok { .. }));
+        if let Result::Ok { value, .. } = result {
+            assert_eq!(value.len(), 1);
+            assert!(value[0].contains("file1.txt"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_directory_filters_hidden_files() {
+        let temp_dir = setup_test_dir();
+        let root_path = temp_dir.path().to_string_lossy().to_string();
+
+        create_test_file(&temp_dir, "file1.txt", "content1").await;
+        create_test_file(&temp_dir, ".hidden.txt", "hidden").await;
+        create_test_file(&temp_dir, ".git/config", "git config").await;
+
+        let result = read_directory(root_path.clone(), true, true, true).await;
+
+        assert!(matches!(result, Result::Ok { .. }));
+        if let Result::Ok { value, .. } = result {
+            assert!(value.iter().any(|p| p.contains("file1.txt")));
+            assert!(!value.iter().any(|p| p.contains(".hidden.txt")));
+            assert!(!value.iter().any(|p| p.contains(".git")));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_directory_handles_paths_with_trailing_slashes() {
+        let temp_dir = setup_test_dir();
+        let mut root_path = temp_dir.path().to_string_lossy().to_string();
+        root_path.push('/');
+
+        create_test_file(&temp_dir, "file1.txt", "content1").await;
+
+        let result = read_directory(root_path, false, true, false).await;
+
+        assert!(matches!(result, Result::Ok { .. }));
+        if let Result::Ok { value, .. } = result {
+            assert_eq!(value.len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_directory_returns_error_for_invalid_workspace_path() {
+        let result = read_directory("".to_string(), false, true, true).await;
+
+        assert!(matches!(result, Result::Err { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_read_directory_handles_include_files_option() {
+        let temp_dir = setup_test_dir();
+        let root_path = temp_dir.path().to_string_lossy().to_string();
+
+        create_test_file(&temp_dir, "file1.txt", "content1").await;
+        tokio::fs::create_dir(temp_dir.path().join("subdir"))
+            .await
+            .expect("Failed to create dir");
+
+        let result = read_directory(root_path.clone(), false, true, false).await;
+
+        assert!(matches!(result, Result::Ok { .. }));
+        if let Result::Ok { value, .. } = result {
+            assert!(value.iter().all(|p| !p.contains("subdir")));
+            assert!(value.iter().any(|p| p.contains("file1.txt")));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_directory_handles_include_directories_option() {
+        let temp_dir = setup_test_dir();
+        let root_path = temp_dir.path().to_string_lossy().to_string();
+
+        create_test_file(&temp_dir, "file1.txt", "content1").await;
+        tokio::fs::create_dir(temp_dir.path().join("subdir"))
+            .await
+            .expect("Failed to create dir");
+
+        let result = read_directory(root_path.clone(), false, false, true).await;
+
+        assert!(matches!(result, Result::Ok { .. }));
+        if let Result::Ok { value, .. } = result {
+            assert!(value.iter().all(|p| !p.contains("file1.txt")));
+            assert!(value.iter().any(|p| p.contains("subdir")));
+        }
+    }
+
+    // ========== read_files Tests ==========
+
+    #[tokio::test]
+    async fn test_read_files_reads_multiple_files_in_batch() {
+        let temp_dir = setup_test_dir();
+        let file1 = create_test_file(&temp_dir, "file1.txt", "content1").await;
+        let file2 = create_test_file(&temp_dir, "file2.txt", "content2").await;
+
+        let result = read_files(vec![file1.clone(), file2.clone()]).await;
+
+        assert_eq!(result.succeeded.len(), 2);
+        assert!(result
+            .succeeded
+            .iter()
+            .any(|f| f.path == file1 && f.content == "content1"));
+        assert!(result
+            .succeeded
+            .iter()
+            .any(|f| f.path == file2 && f.content == "content2"));
+        assert!(result.failed.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_read_files_returns_partial_success() {
+        let temp_dir = setup_test_dir();
+        let file1 = create_test_file(&temp_dir, "file1.txt", "content1").await;
+        let missing_file = temp_dir
+            .path()
+            .join("missing.txt")
+            .to_string_lossy()
+            .to_string();
+
+        let result = read_files(vec![file1.clone(), missing_file.clone()]).await;
+
+        assert_eq!(result.succeeded.len(), 1);
+        assert_eq!(result.failed.len(), 1);
+        assert_eq!(result.failed[0].path, missing_file);
+        assert!(matches!(
+            result.failed[0].error_type,
+            FileSystemErrorType::NotFound
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_read_files_returns_empty_content_for_empty_files() {
+        let temp_dir = setup_test_dir();
+        let file1 = create_test_file(&temp_dir, "empty.txt", "").await;
+
+        let result = read_files(vec![file1.clone()]).await;
+
+        assert_eq!(result.succeeded.len(), 1);
+        assert_eq!(result.succeeded[0].content, "");
+    }
+
+    #[tokio::test]
+    async fn test_write_files_writes_multiple_files_atomically() {
+        let temp_dir = setup_test_dir();
+        let file1 = temp_dir
+            .path()
+            .join("file1.txt")
+            .to_string_lossy()
+            .to_string();
+        let file2 = temp_dir
+            .path()
+            .join("file2.txt")
+            .to_string_lossy()
+            .to_string();
+
+        let files = vec![
+            FileToWrite {
+                path: file1.clone(),
+                content: "content1".to_string(),
+            },
+            FileToWrite {
+                path: file2.clone(),
+                content: "content2".to_string(),
+            },
+        ];
+
+        let result = write_files(files).await;
+
+        assert_eq!(result.succeeded.len(), 2);
+        assert!(result.failed.is_empty());
+
+        let content1 = tokio::fs::read_to_string(&file1)
+            .await
+            .expect("Failed to read file1");
+        let content2 = tokio::fs::read_to_string(&file2)
+            .await
+            .expect("Failed to read file2");
+        assert_eq!(content1, "content1");
+        assert_eq!(content2, "content2");
+    }
+
+    #[tokio::test]
+    async fn test_write_files_handles_special_characters_in_content() {
+        let temp_dir = setup_test_dir();
+        let file1 = temp_dir
+            .path()
+            .join("special.txt")
+            .to_string_lossy()
+            .to_string();
+
+        let files = vec![FileToWrite {
+            path: file1.clone(),
+            content: "<>&\"'\n\t".to_string(),
+        }];
+
+        let result = write_files(files).await;
+
+        assert_eq!(result.succeeded.len(), 1);
+
+        let content = tokio::fs::read_to_string(&file1)
+            .await
+            .expect("Failed to read file");
+        assert_eq!(content, "<>&\"'\n\t");
+    }
+
+    #[tokio::test]
+    async fn test_write_files_returns_failed_array_for_errors() {
+        let invalid_file = "/nonexistent/invalid/path/file.txt".to_string();
+
+        let files = vec![FileToWrite {
+            path: invalid_file.clone(),
+            content: "content".to_string(),
+        }];
+
+        let result = write_files(files).await;
+
+        assert!(result.succeeded.is_empty());
+        assert_eq!(result.failed.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_create_directories_creates_directories() {
+        let temp_dir = setup_test_dir();
+        let dir1 = temp_dir.path().join("newdir").to_string_lossy().to_string();
+        let dir2 = temp_dir
+            .path()
+            .join("nested/dir")
+            .to_string_lossy()
+            .to_string();
+
+        let result = create_directories(vec![dir1.clone(), dir2.clone()]).await;
+
+        assert_eq!(result.succeeded.len(), 2);
+        assert!(result.failed.is_empty());
+
+        assert!(tokio::fs::metadata(&dir1).await.unwrap().is_dir());
+        assert!(tokio::fs::metadata(&dir2).await.unwrap().is_dir());
+    }
+
+    #[tokio::test]
+    async fn test_create_directories_handles_failures() {
+        let invalid_dir = "/nonexistent/invalid/path".to_string();
+
+        let result = create_directories(vec![invalid_dir.clone()]).await;
+
+        assert!(result.succeeded.is_empty());
+        assert_eq!(result.failed.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_delete_directories_deletes_directories_and_all_children_with_recursive_option() {
+        let temp_dir = setup_test_dir();
+        let dir = temp_dir
+            .path()
+            .join("testdir")
+            .to_string_lossy()
+            .to_string();
+        tokio::fs::create_dir(&dir)
+            .await
+            .expect("Failed to create directory");
+        create_test_file(&temp_dir, "testdir/file.txt", "content").await;
+        tokio::fs::create_dir(temp_dir.path().join("testdir/subdir"))
+            .await
+            .expect("Failed to create subdirectory");
+
+        let result = delete_directories(vec![dir.clone()], true).await;
+
+        assert_eq!(result.succeeded.len(), 1);
+        assert!(result.failed.is_empty());
+        assert!(!PathBuf::from(&dir).exists());
+    }
+
+    #[tokio::test]
+    async fn test_delete_directories_fails_non_recursively_if_directory_not_empty() {
+        let temp_dir = setup_test_dir();
+        let dir = temp_dir
+            .path()
+            .join("testdir")
+            .to_string_lossy()
+            .to_string();
+        tokio::fs::create_dir(&dir)
+            .await
+            .expect("Failed to create directory");
+        create_test_file(&temp_dir, "testdir/file.txt", "content").await;
+
+        let result = delete_directories(vec![dir.clone()], false).await;
+
+        assert!(result.succeeded.is_empty());
+        assert_eq!(result.failed.len(), 1);
+        assert!(PathBuf::from(&dir).exists());
+    }
+
+    #[tokio::test]
+    async fn test_delete_directories_handles_multiple_directories_in_batch() {
+        let temp_dir = setup_test_dir();
+        let dir1 = temp_dir.path().join("dir1").to_string_lossy().to_string();
+        let dir2 = temp_dir.path().join("dir2").to_string_lossy().to_string();
+        tokio::fs::create_dir(&dir1)
+            .await
+            .expect("Failed to create dir1");
+        tokio::fs::create_dir(&dir2)
+            .await
+            .expect("Failed to create dir2");
+
+        let result = delete_directories(vec![dir1.clone(), dir2.clone()], true).await;
+
+        assert_eq!(result.succeeded.len(), 2);
+        assert!(!PathBuf::from(&dir1).exists());
+        assert!(!PathBuf::from(&dir2).exists());
+    }
+
+    #[tokio::test]
+    async fn test_move_directory_moves_directory_and_all_children() {
+        let temp_dir = setup_test_dir();
+        let old_dir = temp_dir.path().join("old").to_string_lossy().to_string();
+        let new_dir = temp_dir.path().join("new").to_string_lossy().to_string();
+
+        tokio::fs::create_dir(&old_dir)
+            .await
+            .expect("Failed to create directory");
+        create_test_file(&temp_dir, "old/file.txt", "content").await;
+
+        let result = move_directory(old_dir.clone(), new_dir.clone()).await;
+
+        assert!(matches!(result, Result::Ok { .. }));
+        assert!(!PathBuf::from(&old_dir).exists());
+        assert!(PathBuf::from(&new_dir).exists());
+        assert!(PathBuf::from(&new_dir).join("file.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_move_directory_updates_all_file_paths() {
+        let temp_dir = setup_test_dir();
+        let old_dir = temp_dir.path().join("old").to_string_lossy().to_string();
+        let new_dir = temp_dir.path().join("new").to_string_lossy().to_string();
+
+        tokio::fs::create_dir(&old_dir)
+            .await
+            .expect("Failed to create directory");
+        tokio::fs::create_dir(temp_dir.path().join("old/sub"))
+            .await
+            .expect("Failed to create subdirectory");
+        create_test_file(&temp_dir, "old/a.txt", "a").await;
+        create_test_file(&temp_dir, "old/sub/b.txt", "b").await;
+
+        let result = move_directory(old_dir.clone(), new_dir.clone()).await;
+
+        assert!(matches!(result, Result::Ok { .. }));
+        assert!(PathBuf::from(&new_dir).join("a.txt").exists());
+        assert!(PathBuf::from(&new_dir).join("sub/b.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_move_directory_fails_if_source_does_not_exist() {
+        let temp_dir = setup_test_dir();
+        let old_dir = temp_dir
+            .path()
+            .join("nonexistent")
+            .to_string_lossy()
+            .to_string();
+        let new_dir = temp_dir.path().join("new").to_string_lossy().to_string();
+
+        let result = move_directory(old_dir.clone(), new_dir.clone()).await;
+
+        assert!(matches!(result, Result::Err { .. }));
+        if let Result::Err { error, .. } = result {
+            assert!(matches!(error.error_type, FileSystemErrorType::NotFound));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_move_directory_handles_nested_directory_moves() {
+        let temp_dir = setup_test_dir();
+        let old_dir = temp_dir.path().join("a").to_string_lossy().to_string();
+        let new_dir = temp_dir.path().join("x").to_string_lossy().to_string();
+
+        tokio::fs::create_dir(&old_dir)
+            .await
+            .expect("Failed to create directory");
+        tokio::fs::create_dir_all(temp_dir.path().join("a/b/c"))
+            .await
+            .expect("Failed to create nested directories");
+        create_test_file(&temp_dir, "a/b/c/file.txt", "deep").await;
+
+        let result = move_directory(old_dir.clone(), new_dir.clone()).await;
+
+        assert!(matches!(result, Result::Ok { .. }));
+        assert!(PathBuf::from(&new_dir).join("b/c/file.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_delete_files_deletes_multiple_files() {
+        let temp_dir = setup_test_dir();
+        let file1 = create_test_file(&temp_dir, "file1.txt", "content1").await;
+        let file2 = create_test_file(&temp_dir, "file2.txt", "content2").await;
+
+        let result = delete_files(vec![file1.clone(), file2.clone()]).await;
+
+        assert_eq!(result.succeeded.len(), 2);
+        assert!(!PathBuf::from(&file1).exists());
+        assert!(!PathBuf::from(&file2).exists());
+    }
+
+    #[tokio::test]
+    async fn test_delete_files_handles_non_existent_files() {
+        let temp_dir = setup_test_dir();
+        let missing_file = temp_dir
+            .path()
+            .join("missing.txt")
+            .to_string_lossy()
+            .to_string();
+
+        let result = delete_files(vec![missing_file.clone()]).await;
+
+        assert_eq!(result.succeeded.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_move_file_renames_file_in_place() {
+        let temp_dir = setup_test_dir();
+        let old_file = create_test_file(&temp_dir, "old.txt", "content").await;
+        let new_file = temp_dir
+            .path()
+            .join("new.txt")
+            .to_string_lossy()
+            .to_string();
+
+        let result = move_file(old_file.clone(), new_file.clone()).await;
+
+        assert!(matches!(result, Result::Ok { .. }));
+        assert!(!PathBuf::from(&old_file).exists());
+        assert!(PathBuf::from(&new_file).exists());
+        assert_eq!(
+            tokio::fs::read_to_string(&new_file).await.unwrap(),
+            "content"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_move_file_moves_file_between_directories() {
+        let temp_dir = setup_test_dir();
+        tokio::fs::create_dir(temp_dir.path().join("a"))
+            .await
+            .expect("Failed to create dir a");
+        tokio::fs::create_dir(temp_dir.path().join("b"))
+            .await
+            .expect("Failed to create dir b");
+
+        let old_file = create_test_file(&temp_dir, "a/file.txt", "data").await;
+        let new_file = temp_dir
+            .path()
+            .join("b/file.txt")
+            .to_string_lossy()
+            .to_string();
+
+        let result = move_file(old_file.clone(), new_file.clone()).await;
+
+        assert!(matches!(result, Result::Ok { .. }));
+        assert!(!PathBuf::from(&old_file).exists());
+        assert!(PathBuf::from(&new_file).exists());
+    }
+
+    #[tokio::test]
+    async fn test_move_file_fails_if_source_does_not_exist() {
+        let temp_dir = setup_test_dir();
+        let old_file = temp_dir
+            .path()
+            .join("missing.txt")
+            .to_string_lossy()
+            .to_string();
+        let new_file = temp_dir
+            .path()
+            .join("new.txt")
+            .to_string_lossy()
+            .to_string();
+
+        let result = move_file(old_file.clone(), new_file.clone()).await;
+
+        assert!(matches!(result, Result::Err { .. }));
+        if let Result::Err { error, .. } = result {
+            assert!(matches!(error.error_type, FileSystemErrorType::NotFound));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_check_exists_checks_if_files_exist() {
+        let temp_dir = setup_test_dir();
+        let file = create_test_file(&temp_dir, "file.txt", "content").await;
+
+        let result = check_exists(vec![file.clone()]).await;
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].exists);
+        assert_eq!(result[0].entry_type, Some("file".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_check_exists_checks_if_directories_exist() {
+        let temp_dir = setup_test_dir();
+        let dir = temp_dir
+            .path()
+            .join("testdir")
+            .to_string_lossy()
+            .to_string();
+        tokio::fs::create_dir(&dir)
+            .await
+            .expect("Failed to create directory");
+
+        let result = check_exists(vec![dir.clone()]).await;
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].exists);
+        assert_eq!(result[0].entry_type, Some("directory".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_check_exists_returns_type_for_existing_paths() {
+        let temp_dir = setup_test_dir();
+        let file = create_test_file(&temp_dir, "file.txt", "content").await;
+
+        let result = check_exists(vec![file.clone()]).await;
+
+        assert!(result[0].entry_type.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_get_metadata_returns_file_metadata() {
+        let temp_dir = setup_test_dir();
+        let file = create_test_file(&temp_dir, "file.txt", "content").await;
+
+        let result = get_metadata(vec![file.clone()]).await;
+
+        assert_eq!(result.succeeded.len(), 1);
+        let metadata = &result.succeeded[0];
+        assert_eq!(metadata.entry_type, "file");
+        assert_eq!(metadata.size, 7);
+        assert!(metadata.modified_at > 0);
+        assert!(metadata.created_at > 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_metadata_returns_directory_metadata() {
+        let temp_dir = setup_test_dir();
+        let dir = temp_dir
+            .path()
+            .join("testdir")
+            .to_string_lossy()
+            .to_string();
+        tokio::fs::create_dir(&dir)
+            .await
+            .expect("Failed to create directory");
+
+        let result = get_metadata(vec![dir.clone()]).await;
+
+        assert_eq!(result.succeeded.len(), 1);
+        let metadata = &result.succeeded[0];
+        assert_eq!(metadata.entry_type, "directory");
+        // Directory size varies by platform, just verify it's a valid directory
+        assert!(metadata.modified_at > 0);
+        assert!(metadata.created_at > 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_metadata_fails_for_non_existent_paths() {
+        let temp_dir = setup_test_dir();
+        let missing = temp_dir
+            .path()
+            .join("missing.txt")
+            .to_string_lossy()
+            .to_string();
+
+        let result = get_metadata(vec![missing.clone()]).await;
+
+        assert!(result.succeeded.is_empty());
+        assert_eq!(result.failed.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_metadata_handles_batch_requests() {
+        let temp_dir = setup_test_dir();
+        let file1 = create_test_file(&temp_dir, "file1.txt", "a").await;
+        let file2 = create_test_file(&temp_dir, "file2.txt", "bb").await;
+
+        let result = get_metadata(vec![file1.clone(), file2.clone()]).await;
+
+        assert_eq!(result.succeeded.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_write_binary_files_writes_binary_data() {
+        let temp_dir = setup_test_dir();
+        let file = temp_dir
+            .path()
+            .join("image.png")
+            .to_string_lossy()
+            .to_string();
+
+        let data = vec![0u8, 1, 2, 3, 255];
+        let files = vec![BinaryFileWriteRequest {
+            path: file.clone(),
+            data: data.clone(),
+        }];
+
+        let result = write_binary_files(files).await;
+
+        assert_eq!(result.succeeded.len(), 1);
+
+        let read_data = tokio::fs::read(&file).await.expect("Failed to read file");
+        assert_eq!(read_data, data);
+    }
+
+    #[tokio::test]
+    async fn test_write_binary_files_handles_empty_binary_files() {
+        let temp_dir = setup_test_dir();
+        let file = temp_dir
+            .path()
+            .join("empty.bin")
+            .to_string_lossy()
+            .to_string();
+
+        let files = vec![BinaryFileWriteRequest {
+            path: file.clone(),
+            data: vec![],
+        }];
+
+        let result = write_binary_files(files).await;
+
+        assert_eq!(result.succeeded.len(), 1);
+
+        let read_data = tokio::fs::read(&file).await.expect("Failed to read file");
+        assert!(read_data.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_write_binary_files_returns_failed_array_for_errors() {
+        let invalid_file = "/nonexistent/invalid/file.bin".to_string();
+
+        let files = vec![BinaryFileWriteRequest {
+            path: invalid_file.clone(),
+            data: vec![1],
+        }];
+
+        let result = write_binary_files(files).await;
+
+        assert!(result.succeeded.is_empty());
+        assert_eq!(result.failed.len(), 1);
+    }
 }
