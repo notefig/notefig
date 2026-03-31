@@ -253,49 +253,56 @@ export const Workspace = () => {
   return (
     <div
       dir={direction}
-      className="flex h-full w-full bg-background overflow-hidden"
+      className="flex h-full w-full overflow-hidden"
+      style={{
+        backgroundColor: "hsl(var(--background))",
+        backgroundImage: "url('/noise.svg')",
+        backgroundSize: "300px 300px",
+        backgroundBlendMode: "soft-light",
+      }}
     >
-      <IconSidebar
-        onCommandPaletteClick={() => setIsCommandPaletteOpen(true)}
-        isCollapsed={isSidebarCollapsed}
-        onToggleCollapse={toggleSidebarCollapsed}
-      />
+      {/* Connected sidebar container */}
+      <div className="flex m-2 rounded-2xl bg-sidebar shadow-[0_2px_8px_rgba(0,0,0,0.08),0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
+        <IconSidebar
+          onCommandPaletteClick={() => setIsCommandPaletteOpen(true)}
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={toggleSidebarCollapsed}
+        />
+
+        {!isSidebarCollapsed && (
+          <Sidebar
+            workspacePath={workspacePath}
+            activeTabId={activeTabId}
+            openTabs={openTabs}
+            onFileSelect={handleFileSelect}
+            closeTab={closeTab}
+            mode={fileTreeMode}
+            onModeChange={setFileTreeMode}
+          />
+        )}
+      </div>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <DebugPanel />
 
-        <div className="flex-1 flex min-h-0 overflow-hidden">
-          {!isSidebarCollapsed && (
-            <Sidebar
-              workspacePath={workspacePath}
-              activeTabId={activeTabId}
-              openTabs={openTabs}
-              onFileSelect={handleFileSelect}
-              closeTab={closeTab}
-              mode={fileTreeMode}
-              onModeChange={setFileTreeMode}
-            />
+        <div
+          ref={dockableRef}
+          className="flex-1 min-w-0 h-full overflow-hidden"
+          tabIndex={-1}
+        >
+          {openTabs.length === 0 ? (
+            <div className="flex items-center justify-center h-full text-muted-foreground p-4 ps-0">
+              <p className="text-center">{t("noFileSelected")}</p>
+            </div>
+          ) : (
+            <Dockable.Root
+              orientation="row"
+              layout={layout}
+              onChange={handleLayoutChange}
+            >
+              {dockableTabs}
+            </Dockable.Root>
           )}
-
-          <div
-            ref={dockableRef}
-            className="flex-1 min-w-0 h-full overflow-hidden"
-            tabIndex={-1}
-          >
-            {openTabs.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-muted-foreground p-4 ps-0">
-                <p className="text-center">{t("noFileSelected")}</p>
-              </div>
-            ) : (
-              <Dockable.Root
-                orientation="row"
-                layout={layout}
-                onChange={handleLayoutChange}
-              >
-                {dockableTabs}
-              </Dockable.Root>
-            )}
-          </div>
         </div>
       </div>
 

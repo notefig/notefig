@@ -70,6 +70,7 @@ function PanelHandle({
     <div
       onMouseDown={handleMouseDown}
       className={className}
+      data-orientation={direction === "row" ? "horizontal" : "vertical"}
       style={{
         position: "absolute",
         zIndex: 10,

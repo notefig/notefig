@@ -1,3 +1,33 @@
+.handle {
+  position: relative;
+  transition: all 0.15s ease;
+}
+
+.handle::before {
+  content: none;
+}
+
 .handle:hover {
-  background: hsl(var(--ring));
+  background: hsl(var(--muted) / 0.15);
+}
+
+
+/* Vertical separator (for row layout) */
+.handle[data-orientation="horizontal"]::before {
+  width: 2px;
+  height: 40%;
+}
+
+/* Horizontal separator (for column layout) */
+.handle[data-orientation="vertical"]::before {
+  width: 40%;
+  height: 2px;
+}
+
+.handle:hover::before {
+  background: hsl(var(--ring) / 0.6);
+}
+
+.handle:hover {
+  background: hsl(var(--muted) / 0.3);
 }

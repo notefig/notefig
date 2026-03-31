@@ -3,7 +3,7 @@
   height: 100%;
   padding: 0;
   color: var(--dockable-colors-text);
-  background: var(--dockable-colors-gap);
+  background: transparent;
   box-sizing: border-box;
 }
 

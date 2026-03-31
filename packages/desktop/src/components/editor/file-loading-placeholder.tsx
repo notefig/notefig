@@ -11,7 +11,7 @@ export function FileLoadingPlaceholder({
   const name = getFileName(filePath);
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 w-full items-center justify-center bg-muted/30">
+    <div className="flex flex-col flex-1 min-h-0 w-full items-center justify-center bg-transparent">
       <div className="flex flex-col items-center gap-4">
         <div className="relative">
           <FileText className="size-12 text-muted-foreground/50" />

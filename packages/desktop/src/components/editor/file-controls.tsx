@@ -50,7 +50,7 @@ export function FileControls({
 
   return (
     <TooltipProvider>
-      <div className="flex items-center justify-between h-9 px-2 bg-sidebar border-b border-sidebar-border">
+      <div className="flex items-center justify-between h-9 px-2 bg-sidebar border-b-0">
         <ButtonGroup>
           <Tooltip>
             <TooltipTrigger asChild>

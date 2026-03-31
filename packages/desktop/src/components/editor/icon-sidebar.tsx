@@ -77,7 +77,7 @@ export function IconSidebar({
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col items-center justify-start h-full w-12 bg-sidebar border-r rtl:border-r-0 rtl:border-l border-sidebar-border py-2">
+      <div className="flex flex-col items-center justify-start h-full w-12 bg-sidebar py-2">
         <Tooltip>
           <TooltipTrigger asChild>
             <button

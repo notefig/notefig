@@ -213,6 +213,7 @@ export function Dockable({
             className={styles.edgeDroppableHandle}
             overStyle={{
               backgroundColor: "hsl(var(--ring) / 0.3)",
+              padding: "0 !important",
             }}
           />
         </div>

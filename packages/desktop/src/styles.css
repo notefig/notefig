@@ -190,3 +190,54 @@
 .lucide * {
   vector-effect: non-scaling-stroke;
 }
+
+/* Heading typography for editor content */
+[data-slate-editor="true"] h1,
+[data-slate-editor="true"] h2,
+[data-slate-editor="true"] h3,
+[data-slate-editor="true"] h4,
+[data-slate-editor="true"] h5,
+[data-slate-editor="true"] h6,
+.plate-editor h1,
+.plate-editor h2,
+.plate-editor h3,
+.plate-editor h4,
+.plate-editor h5,
+.plate-editor h6,
+.editor-content h1,
+.editor-content h2,
+.editor-content h3,
+.editor-content h4,
+.editor-content h5,
+.editor-content h6 {
+  font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+[data-slate-editor="true"] h1,
+.plate-editor h1,
+.editor-content h1 {
+  font-size: 2rem;
+  line-height: 1.2;
+  margin-bottom: 1rem;
+  font-style: italic;
+}
+
+[data-slate-editor="true"] h2,
+.plate-editor h2,
+.editor-content h2 {
+  font-size: 1.5rem;
+  line-height: 1.3;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+[data-slate-editor="true"] h3,
+.plate-editor h3,
+.editor-content h3 {
+  font-size: 1.25rem;
+  line-height: 1.4;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}

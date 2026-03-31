@@ -187,7 +187,7 @@ export function Sidebar({
     <>
       <div
         ref={containerRef}
-        className="shrink-0 bg-sidebar flex flex-col-reverse border-border"
+        className="shrink-0 flex flex-col-reverse bg-sidebar border-0 overflow-hidden"
         style={{ width: sidebarWidth }}
       >
         <FileTree
@@ -212,7 +212,7 @@ export function Sidebar({
       <div
         ref={resizeRef}
         onMouseDown={handleResizeStart}
-        className="w-0.5 shrink-0 bg-border hover:bg-primary/50 cursor-col-resize transition-colors"
+        className="w-0 shrink-0 cursor-col-resize"
       />
     </>
   );

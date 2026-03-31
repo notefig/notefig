@@ -1,11 +1,13 @@
 .container {
   display: flex;
   flex-direction: column;
-  background: hsl(var(--background));
+  background: transparent;
   border-radius: 0;
   overflow: hidden;
   flex: 1;
-  transition: margin 0.1s ease-in-out;
+  transition: none;
+  margin: 0;
+  box-shadow: none;
 }
 
 .container::after {

@@ -76,10 +76,10 @@ function TabView({
             type: "tab-bar",
             address,
           }}
-          className="relative flex min-w-0 bg-transparent"
+          className="relative flex min-w-0 px-2 bg-transparent"
         >
           <ScrollArea className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
-            <div className="flex">
+            <div className="flex items-end">
               <SortableContext
                 items={tabs.map((tab) => tab.id)}
                 strategy={horizontalListSortingStrategy}
@@ -109,10 +109,11 @@ function TabView({
       )}
 
       <div
+        className="flex-1 relative"
         style={{
           overflow: "auto",
           display: "flex",
-          flex: 1,
+          zIndex: 5,
         }}
       >
         {tabs.find((tab) => tab.id === selected)?.content}
