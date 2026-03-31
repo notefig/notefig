@@ -196,7 +196,6 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
 
       return workspacePath;
     } catch (error) {
-      console.error("[BrowserFsAdapter] pickDirectory failed", error);
       return null;
     }
   }
