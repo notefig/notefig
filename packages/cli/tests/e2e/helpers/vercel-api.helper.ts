@@ -6,8 +6,8 @@ export interface VercelProject {
 
 export interface VercelDeployment {
   id: string;
-  readyState: 'QUEUED' | 'BUILDING' | 'READY' | 'ERROR' | 'CANCELED';
-  status: 'QUEUED' | 'BUILDING' | 'READY' | 'ERROR' | 'CANCELED';
+  readyState: 'INITIALIZING' | 'QUEUED' | 'BUILDING' | 'READY' | 'ERROR' | 'CANCELED';
+  status: 'INITIALIZING' | 'QUEUED' | 'BUILDING' | 'READY' | 'ERROR' | 'CANCELED';
   url?: string;
   ready?: number;
   errorMessage?: string;

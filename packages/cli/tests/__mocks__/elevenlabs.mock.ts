@@ -2,7 +2,9 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 export class MockElevenLabsClient {
-  constructor(_config: { apiKey: string }) {}
+  constructor(_config: { apiKey: string }) {
+    // Mock constructor - no initialization needed
+  }
 
   private getAudioFileData(): Uint8Array {
     const audioFilePath = join(
