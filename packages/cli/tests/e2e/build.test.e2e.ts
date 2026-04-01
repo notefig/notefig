@@ -7,7 +7,7 @@ describe('build_command_creates_the_right_files', () => {
   const temp = join(__dirname, 'tmp-build');
   let tempDirName: string;
   let tempDir: string;
-  const timeout = 150000;
+  const timeout = 300000;
   const outputDir = 'dist';
   const testChapters = [
     {

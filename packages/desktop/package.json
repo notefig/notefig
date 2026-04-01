@@ -1,5 +1,5 @@
 {
-  "name": "metrists",
+  "name": "@metrists/desktop",
   "private": true,
   "version": "0.0.39",
   "type": "module",
@@ -21,6 +21,7 @@
     "test:e2e:debug": "playwright test --debug"
   },
   "dependencies": {
+    "@metrists/shared": "*",
     "@ai-sdk/react": "^2.0.28",
     "@ariakit/react": "^0.4.21",
     "@dnd-kit/core": "^6.3.1",

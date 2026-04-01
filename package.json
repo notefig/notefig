@@ -2,18 +2,22 @@
   "name": "metrists-monorepo",
   "private": true,
   "workspaces": [
-    "./packages/cli",
+    "./packages/*",
     "./themes/*"
   ],
   "scripts": {
-    "build": "npm run build:cli && npm run sync-themes",
-    "build:cli": "cd packages/cli && npm install && npm run build",
-    "dev:build": "cd packages/cli && npm install && npm run dev:build",
-    "test:cli": "cd packages/cli && npm install && npm run test",
+    "build": "npm run build --workspaces",
+    "build:shared": "npm run build -w packages/shared",
+    "build:cli": "npm run build -w packages/shared && npm run build -w packages/cli",
+    "build:desktop": "npm run build -w packages/desktop",
+    "dev:cli": "npm run dev -w packages/cli",
+    "dev:desktop": "npm run dev -w packages/desktop",
+    "test": "npm run test --workspaces",
+    "test:cli": "npm run test -w packages/cli",
+    "test:desktop": "npm run test:unit -w packages/desktop",
+    "lint": "npm run lint -w packages/cli",
     "sync-themes": "rsync -av --delete --exclude-from=.rsync-exclude packages/themes/ packages/cli/dist/themes/",
-    "publish": "npm run build && cat README.md > ./packages/cli/README.md && cd packages/cli && npm publish --access public",
-    "publish:patch": "npm run build && cat README.md > ./packages/cli/README.md && cd packages/cli && npm version patch && npm publish --access public",
-    "publish:minor": "npm run build && cat README.md > ./packages/cli/README.md && cd packages/cli && npm version minor && npm publish --access public"
+    "clean": "rm -rf packages/*/dist packages/*/node_modules node_modules"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",

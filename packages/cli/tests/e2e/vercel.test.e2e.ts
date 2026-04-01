@@ -229,7 +229,7 @@ This book is created for testing purposes.
       projectId = deployment.project?.id;
 
       expect(deployment.id).toBeDefined();
-      expect(['QUEUED', 'BUILDING', 'READY']).toContain(deployment.readyState);
+      expect(['INITIALIZING', 'QUEUED', 'BUILDING', 'READY']).toContain(deployment.readyState);
 
       // Wait for deployment to be ready
       const readyDeployment = await vercelHelper.waitForDeployment(

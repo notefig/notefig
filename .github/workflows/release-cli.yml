@@ -1,0 +1,125 @@
+name: Release CLI Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g., 0.8.0)"
+        required: true
+        type: string
+      prerelease:
+        description: "Is this a prerelease?"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  bump-and-tag:
+    name: Bump Version and Create Tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate version format
+        run: |
+          if ! echo "${{ inputs.version }}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Error: Version must be in semver format (e.g., 0.8.0)"
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bump version in package.json
+        working-directory: packages/cli
+        run: |
+          npm version ${{ inputs.version }} --no-git-tag-version
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add packages/cli/package.json packages/cli/package-lock.json
+          git commit -m "cli: bump to v${{ inputs.version }}"
+          git push origin ${{ github.ref_name }}
+
+      - name: Create and push tag
+        run: |
+          git tag "cli-v${{ inputs.version }}"
+          git push origin "cli-v${{ inputs.version }}"
+
+  publish-npm:
+    name: Publish to npm
+    needs: bump-and-tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: "cli-v${{ inputs.version }}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build CLI
+        working-directory: packages/cli
+        run: npm run build
+
+      - name: Publish to npm
+        working-directory: packages/cli
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  create-release:
+    name: Create GitHub Release
+    needs: [bump-and-tag, publish-npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: "cli-v${{ inputs.version }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "cli-v${{ inputs.version }}"
+          name: "CLI v${{ inputs.version }}"
+          body: |
+            ## CLI Release v${{ inputs.version }}
+
+            This release contains the CLI package published to npm.
+
+            **Installation:**
+            ```bash
+            npm install -g metrists@${{ inputs.version }}
+            ```
+
+            **Changelog:**
+            See commits since last release.
+          draft: false
+          prerelease: ${{ inputs.prerelease }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
