@@ -2,3 +2,6 @@ node_modules
 dist
 # Ignore all .env files in sub foldesr
 **/.env
+# Test artifacts
+tmp/
+tmp-*/
