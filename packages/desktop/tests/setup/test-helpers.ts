@@ -361,3 +361,277 @@ export async function getIndexedDBContent(
     },
   );
 }
+
+/**
+ * Simulates external file change by directly modifying IndexedDB
+ * Used to test file watcher functionality
+ */
+export async function simulateExternalFileChange(
+  page: Page,
+  filePath: string,
+  newContent: string,
+) {
+  await page.evaluate(
+    async ({ path, content }) => {
+      const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "metrists-fs";
+      const request = indexedDB.open(dbName, 1);
+
+      return new Promise<void>((resolve, reject) => {
+        request.onerror = () => reject(request.error);
+
+        request.onsuccess = () => {
+          const db = request.result;
+          const transaction = db.transaction(["files"], "readwrite");
+          const store = transaction.objectStore("files");
+
+          const getRequest = store.get(path);
+
+          getRequest.onsuccess = () => {
+            const existing = getRequest.result;
+            if (existing) {
+              store.put({
+                ...existing,
+                content,
+                modified: Date.now(),
+                size: content.length,
+              });
+            }
+
+            transaction.oncomplete = () => {
+              db.close();
+              resolve();
+            };
+          };
+
+          getRequest.onerror = () => reject(getRequest.error);
+        };
+      });
+    },
+    { path: filePath, content: newContent },
+  );
+}
+
+/**
+ * Simulates external file creation
+ */
+export async function simulateExternalFileCreation(
+  page: Page,
+  filePath: string,
+  content: string,
+  type: "file" | "directory" = "file",
+) {
+  await page.evaluate(
+    async ({ path, fileContent, fileType }) => {
+      const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "metrists-fs";
+      const request = indexedDB.open(dbName, 1);
+
+      return new Promise<void>((resolve, reject) => {
+        request.onerror = () => reject(request.error);
+
+        request.onsuccess = () => {
+          const db = request.result;
+          const transaction = db.transaction(["files"], "readwrite");
+          const store = transaction.objectStore("files");
+
+          store.put({
+            path,
+            content: fileContent || "",
+            type: fileType,
+            size: fileType === "file" ? fileContent.length : 0,
+            modified: Date.now(),
+          });
+
+          transaction.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+
+          transaction.onerror = () => reject(transaction.error);
+        };
+      });
+    },
+    { path: filePath, fileContent: content, fileType: type },
+  );
+}
+
+/**
+ * Simulates external file deletion
+ */
+export async function simulateExternalFileDeletion(
+  page: Page,
+  filePath: string,
+) {
+  await page.evaluate(async (path) => {
+    const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "metrists-fs";
+    const request = indexedDB.open(dbName, 1);
+
+    return new Promise<void>((resolve, reject) => {
+      request.onerror = () => reject(request.error);
+
+      request.onsuccess = () => {
+        const db = request.result;
+        const transaction = db.transaction(["files"], "readwrite");
+        const store = transaction.objectStore("files");
+
+        store.delete(path);
+
+        transaction.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+
+        transaction.onerror = () => reject(transaction.error);
+      };
+    });
+  }, filePath);
+}
+
+/**
+ * Creates a new file through the UI
+ */
+export async function createNewFile(
+  page: Page,
+  fileName: string,
+  folderPath?: string,
+) {
+  // Click "New file" button or right-click folder
+  if (folderPath) {
+    // Right-click on folder
+    const folderButton = page
+      .locator(`button:has-text("${folderPath.split("/").pop()}")`)
+      .first();
+    await folderButton.click({ button: "right" });
+    // TODO: Select "New file" from context menu when implemented
+  } else {
+    // Click main "New file" button
+    await page.click('button:has-text("New file")');
+  }
+
+  // Type file name and confirm
+  // This depends on your UI implementation
+  // Assuming a prompt or modal appears
+  await page.waitForTimeout(300);
+}
+
+/**
+ * Right-clicks on a file in the tree
+ */
+export async function rightClickFile(page: Page, fileName: string) {
+  const fileButton = page.locator(`button:has-text("${fileName}")`).first();
+  await fileButton.click({ button: "right" });
+}
+
+/**
+ * Checks if a file exists in the file tree
+ */
+export async function fileExistsInTree(
+  page: Page,
+  fileName: string,
+): Promise<boolean> {
+  const fileButton = page.locator(`button:has-text("${fileName}")`).first();
+  return await fileButton.isVisible().catch(() => false);
+}
+
+/**
+ * Drags a file to a folder in the file tree
+ */
+export async function dragFileToFolder(
+  page: Page,
+  fileName: string,
+  folderName: string,
+) {
+  const fileButton = page.locator(`button:has-text("${fileName}")`).first();
+  const folderButton = page.locator(`button:has-text("${folderName}")`).first();
+
+  // Perform drag and drop
+  await fileButton.dragTo(folderButton);
+}
+
+/**
+ * Waits for file watcher to detect changes
+ * BrowserFileWatcher polls every 5s for metadata, 3s for content
+ */
+export async function waitForWatcherDetection(
+  page: Page,
+  type: "metadata" | "content" = "metadata",
+) {
+  // Wait for polling interval + buffer
+  const waitTime = type === "metadata" ? 5500 : 3500;
+  await page.waitForTimeout(waitTime);
+}
+
+/**
+ * Gets the current theme (light/dark)
+ */
+export async function getCurrentTheme(page: Page): Promise<"light" | "dark"> {
+  return page.evaluate(() => {
+    const html = document.documentElement;
+    return html.classList.contains("dark") ? "dark" : "light";
+  });
+}
+
+/**
+ * Toggles theme if toggle button exists
+ */
+export async function toggleTheme(page: Page) {
+  // Look for theme toggle button
+  const themeButton = page
+    .locator('button[aria-label*="theme" i], button[title*="theme" i]')
+    .first();
+  if (await themeButton.isVisible().catch(() => false)) {
+    await themeButton.click();
+  }
+}
+
+/**
+ * Gets sidebar width
+ */
+export async function getSidebarWidth(page: Page): Promise<number> {
+  const sidebar = page.locator("[data-sidebar], aside, .sidebar").first();
+  const box = await sidebar.boundingBox();
+  return box?.width || 0;
+}
+
+/**
+ * Resizes sidebar by dragging its edge
+ */
+export async function resizeSidebar(page: Page, deltaX: number) {
+  // Find sidebar resize handle
+  const resizeHandle = page
+    .locator("[data-resize-handle], .resize-handle")
+    .first();
+  const box = await resizeHandle.boundingBox();
+  if (box) {
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(
+      box.x + box.width / 2 + deltaX,
+      box.y + box.height / 2,
+    );
+    await page.mouse.up();
+  }
+}
+
+/**
+ * Presses Cmd+S (or Ctrl+S) to save
+ */
+export async function saveFile(page: Page) {
+  const isMac = await page.evaluate(() => navigator.platform.includes("Mac"));
+  await page.keyboard.press(isMac ? "Meta+s" : "Control+s");
+}
+
+/**
+ * Presses Cmd+Z (or Ctrl+Z) to undo
+ */
+export async function undo(page: Page) {
+  const isMac = await page.evaluate(() => navigator.platform.includes("Mac"));
+  await page.keyboard.press(isMac ? "Meta+z" : "Control+z");
+}
+
+/**
+ * Presses Cmd+Shift+Z (or Ctrl+Shift+Z) to redo
+ */
+export async function redo(page: Page) {
+  const isMac = await page.evaluate(() => navigator.platform.includes("Mac"));
+  await page.keyboard.press(isMac ? "Meta+Shift+z" : "Control+Shift+z");
+}
