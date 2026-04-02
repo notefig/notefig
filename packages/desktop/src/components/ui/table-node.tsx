@@ -60,11 +60,7 @@ export const TableElement = withHOC(
       "isSelectionAreaVisible",
     );
     const hasControls = !readOnly && !isSelectionAreaVisible;
-    const {
-      isSelectingCell,
-      marginLeft,
-      props: tableProps,
-    } = useTableElement();
+    const { marginLeft, props: tableProps } = useTableElement();
 
     const isSelectingTable = useBlockSelected(props.element.id as string);
 
@@ -79,10 +75,7 @@ export const TableElement = withHOC(
       >
         <div className="group/table relative w-fit">
           <table
-            className={cn(
-              "mr-0 ml-px table h-px table-fixed border-collapse",
-              isSelectingCell && "selection:bg-transparent",
-            )}
+            className={cn("mr-0 ml-px table h-px table-fixed border-collapse")}
             {...tableProps}
           >
             <tbody className="min-w-full">{children}</tbody>

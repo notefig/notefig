@@ -120,6 +120,18 @@ describe("BrowserFsPlatformAdapter", () => {
       onsuccess: null,
       onerror: null,
       onupgradeneeded: null,
+    } as any;
+
+    (global as any).indexedDB = {
+      open: vi.fn().mockImplementation(() => {
+        setTimeout(() => {
+          if ((mockIDBRequest as any).onsuccess) {
+            (mockIDBRequest as any).onsuccess({ target: mockIDBRequest });
+          }
+        }, 0);
+        return mockIDBRequest;
+      }),
+      deleteDatabase: vi.fn(),
     };
 
     (global as any).indexedDB = {

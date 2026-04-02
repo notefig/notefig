@@ -70,7 +70,8 @@ export const PlaceholderElement = withHOC(
     const { openFilePicker } = useFilePicker({
       accept: currentContent.accept,
       multiple: true,
-      onFilesSelected: ({ plainFiles: updatedFiles }) => {
+      onFilesSelected: (data: any) => {
+        const updatedFiles = data.plainFiles as File[];
         const firstFile = updatedFiles[0];
         const restFiles = updatedFiles.slice(1);
 

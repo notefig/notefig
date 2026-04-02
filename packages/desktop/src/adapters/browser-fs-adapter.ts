@@ -591,7 +591,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
           create: true,
         });
         const writable = await fileHandle.createWritable();
-        await writable.write(file.data);
+        await writable.write(file.data as BufferSource);
         await writable.close();
 
         succeeded.push(file.path);
