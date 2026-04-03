@@ -112,7 +112,7 @@ export function Welcome() {
 
   const handleOpenDocs = (e: React.MouseEvent) => {
     e.preventDefault();
-    openExternalLink("https://docs.metrists.io");
+    openExternalLink("https://metrists.com/docs");
   };
 
   const handleOpenGitHub = (e: React.MouseEvent) => {
