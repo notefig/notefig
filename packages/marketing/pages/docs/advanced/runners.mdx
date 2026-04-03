@@ -1,0 +1,38 @@
+# Custom Runners
+
+Use your own hardware or CI systems to build and deploy books.
+
+## Why Custom Runners
+
+- Run builds on your own infrastructure
+- Use specialized hardware (GPU for image processing, etc.)
+- Integrate with existing CI/CD pipelines
+- Avoid usage limits on free tiers
+
+## Options
+
+**GitHub Actions**: Self-hosted runners connect to GitHub repositories.
+
+**GitLab CI**: Runners register with your GitLab instance.
+
+**Generic**: Any system that can run shell commands. Cron jobs, webhooks, or manual triggers.
+
+## How It Works
+
+1. Your git server receives a push
+2. The runner triggers a build job
+3. The CLI generates static files
+4. The runner deploys to your web server
+
+## Example
+
+A simple shell script on your server:
+
+```bash
+cd /var/books/my-book
+git pull
+metrists build
+rsync -av dist/ /var/www/html/
+```
+
+Run this manually, via cron, or triggered by a git hook.

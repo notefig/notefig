@@ -1,0 +1,40 @@
+# Advanced
+
+This section covers self-hosted infrastructure. Most users can skip this and use GitHub or the hosted options.
+
+## Self-Hosted Git
+
+Run your own git server instead of using GitHub or GitLab. This gives you complete control over your repositories and data.
+
+**Use cases**:
+
+- Organizations with strict data residency requirements
+- Users who want to avoid third-party services
+- Teams with existing internal infrastructure
+
+**Requirements**:
+
+- A server (VPS, Raspberry Pi, or existing hardware)
+- Git server software (Gitea, Forgejo, or plain git)
+- Domain name (optional but recommended)
+
+## Custom Runners
+
+Use your own CI/CD infrastructure instead of GitHub Actions or GitLab CI.
+
+**Options**:
+
+- Self-hosted GitHub Actions runners
+- GitLab CI runners
+- Generic CI systems (Jenkins, Drone, etc.)
+- Simple git hooks on your server
+
+The CLI produces the same output regardless of where it runs. Any system that can execute commands can build and deploy your book.
+
+## Architecture
+
+```
+Git Repository → CLI Build → Static Files → Web Server
+```
+
+The git server stores your markdown. The CLI processes it. Your web server serves the result. Each component can be self-hosted or provided by a third party.

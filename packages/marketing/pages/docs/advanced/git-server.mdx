@@ -1,0 +1,32 @@
+# Self-Hosted Git
+
+Run your own git server to store repositories instead of using GitHub or GitLab.
+
+## Why Self-Host
+
+- Control where your data resides
+- No dependency on third-party services
+- Work offline on local networks
+
+## Options
+
+**Gitea**: Lightweight, easy to set up, runs on minimal hardware.
+
+**Forgejo**: Community-maintained fork of Gitea with open governance.
+
+**Plain Git**: SSH access to a server with bare repositories. No web interface.
+
+## Setup
+
+1. Install your chosen git server software
+2. Create a repository for your book
+3. Connect the Metrists Editor or CLI to your server URL
+4. Push your markdown files
+
+## Requirements
+
+- A server (VPS, old computer, Raspberry Pi)
+- Domain name (optional, IP addresses work)
+- HTTPS/TLS certificate (recommended, free via Let's Encrypt)
+
+The CLI works with any git remote. The server only needs to speak the git protocol.

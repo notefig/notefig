@@ -1,0 +1,74 @@
+# CLI
+
+The Metrists CLI converts markdown files into static websites. It handles building, theming, and deployment.
+
+## Installation
+
+```bash
+npm install -g metrists
+```
+
+Or use npx without installing:
+
+```bash
+npx metrists <command>
+```
+
+## Commands
+
+**init**: Create a new project
+
+```bash
+metrists init
+```
+
+**watch**: Start development server
+
+```bash
+metrists watch
+```
+
+**build**: Generate static site
+
+```bash
+metrists build
+```
+
+**publish**: Deploy to hosting platform
+
+```bash
+metrists publish vercel
+metrists publish netlify
+metrists publish s3
+```
+
+## Configuration
+
+The CLI reads `.metristsrc` for settings:
+
+```json
+{
+  "theme": "default",
+  "output": "dist",
+  "title": "My Book"
+}
+```
+
+## CI/CD Integration
+
+The CLI works in any CI environment. Example GitHub Actions workflow:
+
+```yaml
+- name: Build book
+  run: npx metrists build
+
+- name: Deploy
+  run: npx metrists publish vercel
+```
+
+## Global Options
+
+- `--config <path>`: Specify config file location
+- `--theme <name>`: Override theme
+- `--output <dir>`: Override output directory
+- `--verbose`: Detailed logging
