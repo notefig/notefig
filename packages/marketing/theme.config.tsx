@@ -1,7 +1,6 @@
-import React from "react";
 import { DocsThemeConfig } from "nextra-theme-docs";
 import { useRouter } from "next/router";
-import { useConfig } from 'nextra-theme-docs';
+import { useConfig } from "nextra-theme-docs";
 
 const config: DocsThemeConfig = {
   logo: (
@@ -34,29 +33,30 @@ const config: DocsThemeConfig = {
   head: function Head() {
     const { asPath } = useRouter();
     const { frontMatter, title } = useConfig();
-    
-    // Generate page title based on Nextra's title resolution
+
     const getPageTitle = () => {
-      if (asPath === '/docs' || asPath === '/') {
-        return 'Metrists Documentation';
+      if (asPath === "/docs" || asPath === "/") {
+        return "Metrists Documentation";
       }
-      
-      // Use Nextra's resolved title (from _meta.js or frontmatter)
-      if (title && title !== 'Metrists') {
+
+      if (title && title !== "Metrists") {
         return `${title} - Metrists Documentation`;
       }
-      
-      // Fallback: generate from path
-      const cleanPath = asPath.replace('/docs/', '').replace('/docs', '');
+
+      const cleanPath = asPath.replace("/docs/", "").replace("/docs", "");
       if (cleanPath) {
-        const segments = cleanPath.split('/').filter(Boolean);
-        const pathTitle = segments.map(segment => 
-          segment.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
-        ).join(' - ');
+        const segments = cleanPath.split("/").filter(Boolean);
+        const pathTitle = segments
+          .map((segment) =>
+            segment
+              .replace(/[-_]/g, " ")
+              .replace(/\b\w/g, (l) => l.toUpperCase()),
+          )
+          .join(" - ");
         return `${pathTitle} - Metrists Documentation`;
       }
-      
-      return 'Metrists Documentation';
+
+      return "Metrists Documentation";
     };
 
     return (
@@ -64,72 +64,6 @@ const config: DocsThemeConfig = {
         <title>{getPageTitle()}</title>
         <meta name="theme-color" content="#1D4528" />
         <meta name="msapplication-TileColor" content="#1D4528" />
-        <style jsx global>{`
-          :root {
-            --nextra-primary-hue: 127deg;
-            --nextra-primary-saturation: 34%;
-            --nextra-bg: #fefcf8;
-          }
-          [data-theme="dark"] {
-            --nextra-bg: #1a1a1a;
-          }
-          .nextra-nav-container {
-            background-color: #f8f6f0 !important;
-            border-bottom: 1px solid #e5e5e5;
-          }
-          .dark .nextra-nav-container {
-            background-color: #1a1a1a !important;
-          }
-          .nextra-content {
-            font-family: var(--font-inter) !important;
-          }
-          .nextra-sidebar {
-            background-color: #f8f6f0 !important;
-          }
-          .dark .nextra-sidebar {
-            background-color: #1a1a1a !important;
-          }
-          body {
-            background-image: radial-gradient(
-              circle at 1px 1px,
-              rgba(0, 0, 0, 0.02) 1px,
-              transparent 0
-            ) !important;
-            background-size: 20px 20px !important;
-          }
-          body::before {
-            content: "";
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: radial-gradient(
-                circle at 25% 25%,
-                rgba(139, 69, 19, 0.01) 0%,
-                transparent 50%
-              ),
-              radial-gradient(
-                circle at 75% 75%,
-                rgba(160, 82, 45, 0.01) 0%,
-                transparent 50%
-              ),
-              linear-gradient(
-                45deg,
-                transparent 49%,
-                rgba(139, 69, 19, 0.005) 50%,
-                transparent 51%
-              );
-            pointer-events: none;
-            z-index: -1;
-          }
-          .nextra-menu-mobile,
-          .nextra-nav-container-blur,
-          [data-nextra-menu] {
-            --nextra-primary-hue: 127deg !important;
-            --nextra-primary-saturation: 34% !important;
-          }
-        `}</style>
       </>
     );
   },
