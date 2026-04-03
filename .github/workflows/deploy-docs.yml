@@ -1,0 +1,40 @@
+name: Deploy Documentation Site
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/marketing/pages/**"
+      - "packages/marketing/theme.config.tsx"
+      - "packages/marketing/next.config.mjs"
+      - "packages/marketing/package.json"
+      - ".github/workflows/deploy-docs.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Install dependencies
+        working-directory: packages/marketing
+        run: npm install
+
+      - name: Build docs site
+        working-directory: packages/marketing
+        run: npm run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=metrists-docs --branch=main --commit-dirty=true
+          workingDirectory: packages/marketing

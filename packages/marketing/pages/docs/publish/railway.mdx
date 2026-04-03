@@ -1,0 +1,41 @@
+# Railway
+
+Deploy your book to Railway with simple deployment.
+
+```bash
+npx metrists publish railway
+```
+
+## What it does
+
+- Creates a `nixpacks.toml` configuration file (Railway uses Nixpacks for builds)
+- Sets up Node.js as the provider
+- Configures build phases and start command
+- Uses `npx serve -s` to serve your built book as a static site
+
+## Generated Configuration
+
+The generated configuration includes:
+- Node.js provider setup
+- Build phase with your book's build command
+- Start command to serve static files
+
+## Next Steps
+
+1. Install the [Railway CLI](https://docs.railway.app/develop/cli) if you haven't already:
+   ```bash
+   npm install -g @railway/cli
+   ```
+
+2. Login to Railway:
+   ```bash
+   railway login
+   ```
+
+3. Initialize and deploy your project:
+   ```bash
+   railway link
+   railway up
+   ```
+
+Your book will be deployed and available at your Railway URL!

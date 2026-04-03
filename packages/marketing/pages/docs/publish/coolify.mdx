@@ -1,0 +1,33 @@
+# Coolify
+
+Deploy your book to Coolify, a self-hosted deployment solution.
+
+```bash
+npx metrists publish coolify
+```
+
+## What it does
+
+- Creates a `nixpacks.toml` configuration file (Coolify uses Nixpacks for builds)
+- Configures Coolify's build system using Nixpacks
+- Sets up static file serving for your book
+
+## Generated Configuration
+
+Since Coolify also uses Nixpacks, it generates the same configuration as Railway with:
+- Node.js provider setup
+- Build phase with your book's build command
+- Start command to serve static files
+
+## Next Steps
+
+1. Make sure you have Coolify set up on your server. If not, follow the [Coolify installation guide](https://coolify.io/docs/installation).
+
+2. In your Coolify dashboard:
+   - Create a new application
+   - Connect your Git repository
+   - Coolify will automatically detect the `nixpacks.toml` configuration
+
+3. Deploy your application through the Coolify interface
+
+Your book will be deployed on your self-hosted Coolify instance!

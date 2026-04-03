@@ -1,0 +1,37 @@
+# AWS S3
+
+Deploy your book to Amazon S3 for static hosting.
+
+```bash
+npx metrists publish s3
+```
+
+## What it does
+
+- Creates a [SST](https://sst.dev/) configuration to create all required resources on AWS
+- Creates the GitHub Action workflow files to deploy to S3 on each push
+
+## Generated Files
+
+The command creates:
+- SST configuration for AWS resource management
+- GitHub Actions workflow for continuous deployment
+- Proper S3 bucket configuration for static hosting
+
+## Next Steps
+
+1. Make sure you have an AWS account and have configured your AWS credentials
+
+2. Install the [SST CLI](https://sst.dev/) if you haven't already:
+   ```bash
+   npm install -g sst
+   ```
+
+3. Deploy your SST application:
+   ```bash
+   sst deploy
+   ```
+
+4. Push your code to GitHub to trigger the automated deployment workflow
+
+Your book will be hosted on S3 and automatically updated whenever you push changes to your repository!

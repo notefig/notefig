@@ -1,0 +1,33 @@
+# Netlify
+
+Deploy your book to Netlify with continuous deployment from Git.
+
+```bash
+npx metrists publish netlify
+```
+
+## What it does
+
+- Creates a `netlify.toml` configuration file in your project root
+- Configures Netlify's build settings and publish directory
+- Sets up the build command for Netlify's continuous deployment
+
+## Generated Configuration
+
+The generated `netlify.toml` includes:
+- `[build]` section with publish directory and build command
+- Proper configuration for static site hosting
+
+## Next Steps
+
+1. Push your project to a Git repository (GitHub, GitLab, or Bitbucket)
+
+2. Go to [Netlify](https://netlify.com) and sign up or log in
+
+3. Click "New site from Git" and connect your repository
+
+4. Netlify will automatically detect the `netlify.toml` configuration
+
+5. Deploy your site!
+
+Your book will be automatically redeployed whenever you push changes to your repository.

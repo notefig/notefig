@@ -1,0 +1,108 @@
+# Getting Started
+
+Metrists is a Continuous Deployment pipeline for books that transforms your markdown files into beautiful web exports, with epub and audiobook formats coming soon. It makes book publishing incremental, fast, and automated.
+
+## Creating Your First Book
+
+### Quick Start (Recommended)
+
+Create a new directory and start developing immediately:
+
+```bash copy
+mkdir my-book
+cd my-book
+touch chapter-1.md
+npx metrists watch --noob
+```
+
+Metrists will automatically:
+- Initialize your project with the default theme
+- Create configuration files
+- Start the development server
+- Open your book in the browser
+
+## Project Structure
+
+After initialization, your project will have:
+
+```
+my-book/
+├── .metristsrc          # Configuration file
+├── meta.md              # Book metadata and description
+└── chapter-1.md         # Chapter files 
+```
+
+### Book Metadata (meta.md)
+
+The `meta.md` file is automatically created during initialization and contains your book's essential information:
+
+```markdown
+---
+title: My First Book
+author: Parsa
+date: '2025-08-29'
+tags:
+  - fiction
+  - adventure
+---
+
+This is the description or blurb for your book. It appears on the book's landing page and provides readers with an overview of what your book is about.
+
+Write a compelling summary that will engage your readers and make them want to continue reading.
+```
+
+### Chapter Files
+
+Create your book content using standard markdown files in the root directory:
+
+```markdown
+# Chapter 1: Introduction
+
+Welcome to my book! This is written in **markdown** and supports:
+
+- Lists and bullet points
+- **Bold** and *italic* text
+- Links to [other sites](https://example.com)
+- Images and diagrams
+- Code blocks with syntax highlighting
+
+## Subheading
+
+Your content here...
+```
+
+### Adding Assets
+
+Metrists gives you complete flexibility in organizing your assets:
+
+#### Images
+Place images anywhere and reference them with the correct path:
+
+```markdown
+# In root directory
+![Cover Image](./cover.png)
+
+# In subdirectories
+![Diagram](./images/architecture.jpg)
+![Screenshot](./assets/ui/screenshot.png)
+```
+
+#### Special Files
+- **Favicon**: Add `favicon.ico` to the root for a custom site icon
+- **Cover**: Add `cover.png`, `cover.jpg`, `cover.jpeg`, `cover.webp`, or `cover.gif` for your book cover
+
+#### Supported Asset Types
+All common file types are supported: images, PDFs, videos, audio files, etc.
+
+## Export Formats
+
+### Currently Available
+- **Static Web Export** - Modern, responsive websites optimized for performance
+
+### Coming Soon
+- **EPUB** - Standard ebook format for e-readers
+- **Audiobook** - AI-generated audio versions
+
+## Getting Help
+
+Report bugs and request features on [GitHub Issues](https://github.com/metrists/metrists/issues)

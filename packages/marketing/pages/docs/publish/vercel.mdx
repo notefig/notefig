@@ -1,0 +1,30 @@
+# Vercel
+
+Deploy your book to Vercel with zero configuration.
+
+```bash
+npx metrists publish vercel
+```
+
+## What it does
+
+- Creates a `vercel.json` configuration file in your project root
+- Sets up the build command and output directory for Vercel's deployment system
+- Configures Vercel to use your book's build output for static hosting
+
+## Generated Configuration
+
+The generated `vercel.json` includes:
+- `buildCommand`: The command to build your book
+- `outputDirectory`: Where the built files are located
+
+## Next Steps
+
+### Deploy from GitHub
+
+You can connect your GitHub repository to Vercel for automatic deployments on push.
+
+import VercelDeployGenerator from '../../../components/vercel-deploy-generator'
+
+<VercelDeployGenerator />
+
