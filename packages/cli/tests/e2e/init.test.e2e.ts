@@ -1,25 +1,25 @@
 import { join } from 'path';
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'fs';
+import { writeFileSync, existsSync, readFileSync } from 'fs';
 import { describe, expect, it, afterAll, beforeAll } from '@jest/globals';
 import execa = require('execa');
+import { createUniqueTempDir, cleanupTempDir, getCliPath } from './test-helpers';
 
 describe('init_command_creates_the_right_files', () => {
-  const temp = join(__dirname, 'tmp-init');
   let tempDirName: string;
   let tempDir: string;
-  const timeout = 100000;
+  const timeout = 300000; // Increase timeout for npm install
 
   beforeAll(async () => {
-    tempDirName = `test-init-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-    tempDir = join(temp, tempDirName);
-    mkdirSync(tempDir, { recursive: true });
-    await execa('node', ['../../../../dist/bin/metrists.js', 'init'], {
+    tempDir = createUniqueTempDir('init');
+    // Extract just the directory name for the test assertions
+    tempDirName = tempDir.split('/').pop() || tempDir.split('\\').pop() || 'test';
+    await execa('node', [getCliPath(), 'init'], {
       cwd: tempDir,
     });
   }, timeout);
 
   afterAll(() => {
-    rmSync(temp, { recursive: true, force: true });
+    cleanupTempDir(tempDir);
   }, timeout);
 
   it(

@@ -1,11 +1,10 @@
 import { join } from 'path';
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'fs';
+import { writeFileSync, existsSync, readFileSync } from 'fs';
 import { describe, expect, it, afterAll, beforeAll } from '@jest/globals';
 import execa = require('execa');
+import { createUniqueTempDir, cleanupTempDir, getCliPath } from './test-helpers';
 
 describe('build_command_creates_the_right_files', () => {
-  const temp = join(__dirname, 'tmp-build');
-  let tempDirName: string;
   let tempDir: string;
   const timeout = 300000;
   const outputDir = 'dist';
@@ -33,11 +32,7 @@ describe('build_command_creates_the_right_files', () => {
   ];
 
   beforeAll(async () => {
-    tempDirName = `test-build-${Date.now()}-${Math.random()
-      .toString(36)
-      .substring(7)}`;
-    tempDir = join(temp, tempDirName);
-    mkdirSync(tempDir, { recursive: true });
+    tempDir = createUniqueTempDir('build');
 
     // Create test markdown chapters
     testChapters.forEach((chapter) => {
@@ -53,7 +48,7 @@ describe('build_command_creates_the_right_files', () => {
 
     await execa(
       'node',
-      ['../../../../dist/bin/metrists.js', 'init', '--verbose'],
+      [getCliPath(), 'init', '--verbose'],
       {
         cwd: tempDir,
       },
@@ -62,7 +57,7 @@ describe('build_command_creates_the_right_files', () => {
     await execa(
       'node',
       [
-        '../../../../dist/bin/metrists.js',
+        getCliPath(),
         'build',
         '-o',
         outputDir,
@@ -75,14 +70,15 @@ describe('build_command_creates_the_right_files', () => {
   }, timeout);
 
   afterAll(() => {
-    rmSync(temp, { recursive: true, force: true });
+    cleanupTempDir(tempDir);
   }, timeout);
 
   it(
     'Should build complete static site with all expected files and structure',
     async () => {
       const outputDirPath = join(tempDir, outputDir);
-      const titleBasedOnDirName = tempDirName.replace(/-/g, ' ');
+      const dirName = tempDir.split('/').pop() || tempDir.split('\\').pop() || 'test';
+      const titleBasedOnDirName = dirName.replace(/-/g, ' ');
 
       // Verify output directory was created
       expect(existsSync(outputDirPath)).toBe(true);
@@ -147,7 +143,7 @@ describe('build_command_creates_the_right_files', () => {
       await expect(
         execa(
           'node',
-          ['../../../../dist/bin/metrists.js', 'build', '--skip-audiobook'],
+          [getCliPath(), 'build', '--skip-audiobook'],
           {
             cwd: tempDir,
           },

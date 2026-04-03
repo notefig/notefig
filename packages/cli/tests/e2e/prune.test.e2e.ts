@@ -1,31 +1,27 @@
 import { join, dirname } from 'path';
-import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync } from 'fs';
 import { describe, expect, it, afterAll, beforeAll } from '@jest/globals';
 import execa = require('execa');
 import { hostHelpers } from '../../lib/utils/hosts.util';
+import { createUniqueTempDir, cleanupTempDir, getCliPath } from './test-helpers';
 
 describe('prune_command_deletes_the_right_files', () => {
-  const temp = join(__dirname, 'tmp-prune');
   let tempDir: string;
-  const timeout = 100000;
+  const timeout = 300000; // Increase timeout for init command
 
   beforeAll(async () => {
-    tempDir = join(
-      temp,
-      `test-prune-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-    );
-    mkdirSync(tempDir, { recursive: true });
+    tempDir = createUniqueTempDir('prune');
 
     const markdownFilePath = join(tempDir, 'test.md');
     writeFileSync(markdownFilePath, '# Test Markdown File', 'utf-8');
 
-    await execa('node', ['../../../../dist/bin/metrists.js', 'init'], {
+    await execa('node', [getCliPath(), 'init'], {
       cwd: tempDir,
     });
   }, timeout);
 
   afterAll(() => {
-    rmSync(temp, { recursive: true, force: true });
+    cleanupTempDir(tempDir);
   }, timeout);
 
   it(
@@ -66,7 +62,7 @@ describe('prune_command_deletes_the_right_files', () => {
         expect(existsSync(fullPath)).toBe(true);
       });
 
-      await execa('node', ['../../../../dist/bin/metrists.js', 'prune'], {
+      await execa('node', [getCliPath(), 'prune'], {
         cwd: tempDir,
       });
 

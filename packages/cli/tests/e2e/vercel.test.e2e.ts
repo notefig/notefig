@@ -10,6 +10,7 @@ import {
 } from 'fs';
 import { describe, expect, it, afterEach, beforeAll } from '@jest/globals';
 import execa = require('execa');
+import { getCliPath } from './test-helpers';
 import { VercelApiHelper, DeploymentFile } from './helpers/vercel-api.helper';
 
 describe('vercel_e2e_deployment_workflow', () => {
@@ -103,7 +104,7 @@ This book is created for testing purposes.
     writeFileSync(join(tempDir, 'meta.md'), metaContent, 'utf-8');
 
     // Initialize metrists project
-    await execa('node', ['../../../../dist/bin/metrists.js', 'init'], {
+    await execa('node', [getCliPath(), 'init'], {
       cwd: tempDir,
     });
 
@@ -155,13 +156,9 @@ This book is created for testing purposes.
       const projectDir = await createTestProject();
 
       // Run publish command for vercel
-      await execa(
-        'node',
-        ['../../../../dist/bin/metrists.js', 'publish', 'vercel'],
-        {
-          cwd: projectDir,
-        },
-      );
+      await execa('node', [getCliPath(), 'publish', 'vercel'], {
+        cwd: projectDir,
+      });
 
       // Verify vercel.json was created
       const vercelConfigPath = join(projectDir, 'vercel.json');
@@ -229,7 +226,9 @@ This book is created for testing purposes.
       projectId = deployment.project?.id;
 
       expect(deployment.id).toBeDefined();
-      expect(['INITIALIZING', 'QUEUED', 'BUILDING', 'READY']).toContain(deployment.readyState);
+      expect(['INITIALIZING', 'QUEUED', 'BUILDING', 'READY']).toContain(
+        deployment.readyState,
+      );
 
       // Wait for deployment to be ready
       const readyDeployment = await vercelHelper.waitForDeployment(

@@ -1,21 +1,16 @@
 import { join } from 'path';
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'fs';
+import { writeFileSync, existsSync, readFileSync } from 'fs';
 import { describe, expect, it, afterAll, beforeAll } from '@jest/globals';
 import execa = require('execa');
+import { createUniqueTempDir, cleanupTempDir, getCliPath } from './test-helpers';
 
 describe('audiobook_command_creates_the_right_files', () => {
-  const temp = join(__dirname, 'tmp-audiobook');
-  let tempDirName: string;
   let tempDir: string;
   const timeout = 100000;
   const outputPath = 'audiobook-output';
 
   beforeAll(async () => {
-    tempDirName = `test-audiobook-${Date.now()}-${Math.random()
-      .toString(36)
-      .substring(7)}`;
-    tempDir = join(temp, tempDirName);
-    mkdirSync(tempDir, { recursive: true });
+    tempDir = createUniqueTempDir('audiobook');
 
     // Create some test content
     writeFileSync(
@@ -31,7 +26,7 @@ describe('audiobook_command_creates_the_right_files', () => {
 
     await execa(
       'node',
-      ['../../../../dist/bin/metrists.js', 'audiobook', '-o', outputPath],
+      [getCliPath(), 'audiobook', '-o', outputPath],
       {
         cwd: tempDir,
         env: {
@@ -43,7 +38,7 @@ describe('audiobook_command_creates_the_right_files', () => {
   }, timeout);
 
   afterAll(() => {
-    rmSync(temp, { recursive: true, force: true });
+    cleanupTempDir(tempDir);
   }, timeout);
 
   it(

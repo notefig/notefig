@@ -1,20 +1,17 @@
 import { join } from 'path';
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'fs';
 import { describe, expect, it, afterAll, beforeAll } from '@jest/globals';
 import execa = require('execa');
 import * as JSZip from 'jszip';
+import { createUniqueTempDir, cleanupTempDir, getCliPath } from './test-helpers';
 
 describe('epub_command_generates_valid_epub', () => {
-  const temp = join(__dirname, 'tmp-epub');
   let tempDir: string;
-  const timeout = 100000;
+  const timeout = 300000; // 5 minutes for long-running init with npm install
+  const setupTimeout = 300000; // Separate timeout for beforeAll
 
   beforeAll(async () => {
-    tempDir = join(
-      temp,
-      `test-epub-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-    );
-    mkdirSync(tempDir, { recursive: true });
+    tempDir = createUniqueTempDir('epub');
 
     // Create test markdown files with frontmatter
     const chapter1Content = `---
@@ -78,13 +75,13 @@ This book is created for testing the EPUB generation functionality.
     writeFileSync(join(tempDir, 'cover.jpg'), testImageBuffer as any);
 
     // Initialize metrists project
-    await execa('node', ['../../../../dist/bin/metrists.js', 'init'], {
+    await execa('node', [getCliPath(), 'init'], {
       cwd: tempDir,
     });
-  }, timeout);
+  }, setupTimeout);
 
   afterAll(() => {
-    rmSync(temp, { recursive: true, force: true });
+    cleanupTempDir(tempDir);
   }, timeout);
 
   it(
@@ -95,7 +92,7 @@ This book is created for testing the EPUB generation functionality.
       // Run the epub command (use relative path)
       await execa(
         'node',
-        ['../../../../dist/bin/metrists.js', 'epub', '--out', 'output.epub'],
+        [getCliPath(), 'epub', '--out', 'output.epub'],
         {
           cwd: tempDir,
         },
