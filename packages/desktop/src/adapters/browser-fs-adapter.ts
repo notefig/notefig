@@ -383,14 +383,33 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
 
     for (const file of files) {
       try {
-        // Register app write before writing to prevent re-emitting our own change
-        const contentHash = calculateContentHash(file.content);
-        this.fileWatcher.registerAppWrite(file.path, contentHash);
+        // Read current content to get the old hash BEFORE writing
+        // This prevents race condition where watcher polls during write and reads stale content
+        let oldContentHash: string | undefined;
+        try {
+          const handle = await this.resolveFileHandle(file.path, false, false);
+          const fileObj = await handle.getFile();
+          const oldContent = await fileObj.text();
+          oldContentHash = calculateContentHash(oldContent);
+        } catch {
+          // File doesn't exist yet - no old hash to register
+        }
 
         const handle = await this.resolveFileHandle(file.path, true, true);
         const writable = await handle.createWritable();
         await writable.write(file.content);
         await writable.close();
+
+        const newContentHash = calculateContentHash(file.content);
+
+        // Register BOTH old and new hashes as app writes:
+        // - Old hash: prevents watcher from emitting stale content if it polls during write
+        // - New hash: prevents watcher from emitting the new content as external change
+        if (oldContentHash) {
+          this.fileWatcher.registerAppWrite(file.path, oldContentHash);
+        }
+        this.fileWatcher.registerAppWrite(file.path, newContentHash);
+
         succeeded.push(file.path);
       } catch (error) {
         failed.push(
