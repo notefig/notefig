@@ -31,6 +31,26 @@ const config: Record<
   },
 };
 
+/**
+ * Maps list style type values to CSS class names.
+ * Using CSS classes instead of inline styles fixes cursor position bugs
+ * on Safari/WebKit on newer macOS versions.
+ */
+const listStyleTypeToClass: Record<string, string> = {
+  // Unordered
+  disc: 'list-style-disc',
+  circle: 'list-style-circle',
+  square: 'list-style-square',
+  // Ordered
+  decimal: 'list-style-decimal',
+  'lower-alpha': 'list-style-lower-alpha',
+  'upper-alpha': 'list-style-upper-alpha',
+  'lower-roman': 'list-style-lower-roman',
+  'upper-roman': 'list-style-upper-roman',
+  // Todo
+  todo: 'list-style-todo',
+};
+
 export const BlockList: RenderNodeWrapper = (props) => {
   if (!props.element.listStyleType) return;
 
@@ -42,10 +62,12 @@ function List(props: PlateElementProps) {
   const { Li, Marker } = config[listStyleType] ?? {};
   const List = isOrderedList(props.element) ? 'ol' : 'ul';
 
+  // Use CSS class for list-style-type to fix Safari cursor positioning bug
+  const listStyleClass = listStyleTypeToClass[listStyleType] ?? '';
+
   return (
     <List
-      className="relative m-0 p-0"
-      style={{ listStyleType }}
+      className={cn('relative m-0 p-0', listStyleClass)}
       start={listStart}
     >
       {Marker && <Marker {...props} />}
