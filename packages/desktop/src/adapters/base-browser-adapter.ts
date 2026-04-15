@@ -5,6 +5,8 @@ import type {
   IPlatformAdapter,
   PlatformEventListener,
   Result,
+  SearchMatch,
+  SearchOptions,
 } from "./platform-adapter.interface";
 
 export function createError(
@@ -184,5 +186,17 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
       return;
     }
     await document.documentElement.requestFullscreen();
+  }
+
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async *searchFiles(
+    _directory: string,
+    _options: SearchOptions,
+  ): AsyncIterableIterator<SearchMatch> {
+    // Browser search will be implemented in Phase 3
+    // For now, throw a clear error so callers know this isn't available
+    throw new Error(
+      "Search is not yet implemented for browser. Please use the desktop app for search functionality.",
+    );
   }
 }

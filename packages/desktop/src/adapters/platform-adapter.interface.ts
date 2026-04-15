@@ -77,6 +77,71 @@ export type ContentChangeEvent = {
 };
 
 /**
+ * Search options for workspace-wide search
+ */
+export type SearchOptions = {
+  /** Search query string */
+  query: string;
+  /** Treat query as regex pattern */
+  useRegex?: boolean;
+  /** Case-sensitive search */
+  caseSensitive?: boolean;
+  /** File pattern filter (e.g., "*.md", "*.txt") */
+  filePattern?: string;
+  /** Patterns to exclude (e.g., ["node_modules", "*.log"]) */
+  excludePatterns?: string[];
+  /** Maximum number of results (default: 1000) */
+  maxResults?: number;
+};
+
+/**
+ * Position in a file (1-indexed)
+ */
+export type FilePosition = {
+  /** 1-indexed line number */
+  line: number;
+  /** 1-indexed column number */
+  column: number;
+};
+
+/**
+ * Location of a search match
+ */
+export type SearchMatchLocation = {
+  /** Absolute path to the file */
+  filePath: string;
+  /** Range of the match */
+  range: {
+    start: FilePosition;
+    end: FilePosition;
+  };
+};
+
+/**
+ * Content and context of a search match
+ */
+export type SearchMatchContent = {
+  /** The matched text */
+  matchText: string;
+  /** Full content of the line containing the match */
+  lineContent: string;
+  /** Lines before the match (for context) */
+  beforeContext: string[];
+  /** Lines after the match (for context) */
+  afterContext: string[];
+};
+
+/**
+ * A single search match result
+ */
+export type SearchMatch = {
+  /** Where the match was found */
+  location: SearchMatchLocation;
+  /** What was matched and surrounding context */
+  content: SearchMatchContent;
+};
+
+/**
  * Platform events that can be emitted
  */
 export type PlatformEvent =
@@ -295,4 +360,19 @@ export interface IPlatformAdapter {
    * Toggle application fullscreen state.
    */
   toggleFullscreen(): Promise<void>;
+
+  /**
+   * Search files in a directory, returning an async iterator of matches.
+   *
+   * Results are streamed as they're found. Breaking out of the iteration
+   * automatically cancels the search.
+   *
+   * @param directory - Directory path to search in
+   * @param options - Search options
+   * @returns AsyncIterableIterator of search matches
+   */
+  searchFiles(
+    directory: string,
+    options: SearchOptions,
+  ): AsyncIterableIterator<SearchMatch>;
 }

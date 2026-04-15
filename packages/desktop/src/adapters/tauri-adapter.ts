@@ -7,6 +7,8 @@ import type {
   FileSystemMetadata,
   MetadataChangeEvent,
   ContentChangeEvent,
+  SearchOptions,
+  SearchMatch,
 } from "./platform-adapter.interface";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -462,6 +464,135 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     const window = getCurrentWindow();
     const isFullscreen = await window.isFullscreen();
     await window.setFullscreen(!isFullscreen);
+  }
+
+  /**
+   * Search files in a directory, returning an async iterator of matches.
+   * Results are streamed as they're found. Breaking out of the iteration
+   * automatically cancels the search.
+   */
+  searchFiles(
+    directory: string,
+    options: SearchOptions,
+  ): AsyncIterableIterator<SearchMatch> {
+    const searchId = `search-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    // Create a queue to hold results until they're consumed
+    const resultQueue: SearchMatch[] = [];
+    let resolveNext: ((value: IteratorResult<SearchMatch>) => void) | null =
+      null;
+    let isComplete = false;
+    let error: Error | null = null;
+
+    // Set up event listeners for this specific search
+    const resultUnlisten = listen<{ searchId: string; result: SearchMatch }>(
+      "search-result",
+      (event) => {
+        if (event.payload.searchId !== searchId) return;
+
+        const match = event.payload.result;
+        if (resolveNext) {
+          // Consumer is waiting, resolve immediately
+          const resolve = resolveNext;
+          resolveNext = null;
+          resolve({ value: match, done: false });
+        } else {
+          // Queue the result for later consumption
+          resultQueue.push(match);
+        }
+      },
+    );
+
+    const completeUnlisten = listen<{ searchId: string; count: number }>(
+      "search-complete",
+      (event) => {
+        if (event.payload.searchId !== searchId) return;
+
+        isComplete = true;
+        if (resolveNext) {
+          // Consumer is waiting, signal completion
+          const resolve = resolveNext;
+          resolveNext = null;
+          resolve({ value: undefined as unknown as SearchMatch, done: true });
+        }
+      },
+    );
+
+    // Start the search
+    const searchPromise = invoke("search_files_stream", {
+      searchId,
+      directory,
+      query: options.query,
+      useRegex: options.useRegex ?? false,
+      caseSensitive: options.caseSensitive ?? false,
+      filePattern: options.filePattern ?? null,
+      excludePatterns: options.excludePatterns ?? null,
+      maxResults: options.maxResults ?? 1000,
+    }).catch((err) => {
+      error = err instanceof Error ? err : new Error(String(err));
+      isComplete = true;
+      if (resolveNext) {
+        const resolve = resolveNext;
+        resolveNext = null;
+        resolve({ value: undefined as unknown as SearchMatch, done: true });
+      }
+    });
+
+    // Cleanup function
+    const cleanup = async () => {
+      // Cancel the search if still running
+      try {
+        await invoke("cancel_search", { searchId });
+      } catch {
+        // Ignore errors - search may have already completed
+      }
+
+      // Remove event listeners
+      (await resultUnlisten)();
+      (await completeUnlisten)();
+    };
+
+    // Create the async iterator
+    const iterator: AsyncIterableIterator<SearchMatch> = {
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+
+      async next(): Promise<IteratorResult<SearchMatch>> {
+        // Check for errors
+        if (error) {
+          throw error;
+        }
+
+        // Return queued results first
+        if (resultQueue.length > 0) {
+          return { value: resultQueue.shift()!, done: false };
+        }
+
+        // If complete and queue is empty, we're done
+        if (isComplete) {
+          return { value: undefined as unknown as SearchMatch, done: true };
+        }
+
+        // Wait for the next result
+        return new Promise((resolve) => {
+          resolveNext = resolve;
+        });
+      },
+
+      async return(): Promise<IteratorResult<SearchMatch>> {
+        // Called when consumer breaks out of the loop
+        await cleanup();
+        return { value: undefined as unknown as SearchMatch, done: true };
+      },
+
+      async throw(err: Error): Promise<IteratorResult<SearchMatch>> {
+        await cleanup();
+        throw err;
+      },
+    };
+
+    return iterator;
   }
 
   private cleanupListeners(): void {

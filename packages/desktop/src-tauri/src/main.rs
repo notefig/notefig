@@ -3,6 +3,8 @@
 
 mod file_watcher;
 mod fs_ops;
+mod search;
+mod walkdir_utils;
 
 use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager};
@@ -247,6 +249,7 @@ fn main() {
                 _ => {}
             }
         })
+        .manage(search::SearchState::new())
         .invoke_handler(tauri::generate_handler![
             // File system commands (errors-as-values pattern)
             fs_ops::read_directory,
@@ -266,6 +269,9 @@ fn main() {
             file_watcher::start_watching_metadata,
             file_watcher::start_watching_content,
             file_watcher::stop_watching,
+            // Search commands
+            search::search_files_stream,
+            search::cancel_search,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

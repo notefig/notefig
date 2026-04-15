@@ -1,4 +1,5 @@
 use crate::file_watcher::{compute_content_hash, register_app_write};
+use crate::walkdir_utils::{is_hidden_relative_to, walk_directory, WalkOptions};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
@@ -108,39 +109,7 @@ async fn ensure_parent_dir(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Check if a path contains any component that starts with a dot (hidden file/directory)
-/// Examples: .git, .vscode, .DS_Store, etc.
-fn is_hidden_path(path: &Path) -> bool {
-    path.components().any(|component| {
-        if let std::path::Component::Normal(os_str) = component {
-            if let Some(name) = os_str.to_str() {
-                return name.starts_with('.') && name.len() > 1;
-            }
-        }
-        false
-    })
-}
-
-/// Check if a path is hidden relative to a base path
-/// This is used in read_directory to avoid filtering out files
-/// just because the temp directory starts with "."
-fn is_hidden_relative_to(path: &Path, base: &Path) -> bool {
-    // Get the relative path from base to path
-    if let Ok(relative) = path.strip_prefix(base) {
-        // Check if any component of the relative path is hidden
-        relative.components().any(|component| {
-            if let std::path::Component::Normal(os_str) = component {
-                if let Some(name) = os_str.to_str() {
-                    return name.starts_with('.') && name.len() > 1;
-                }
-            }
-            false
-        })
-    } else {
-        // Can't get relative path, fall back to full path check
-        is_hidden_path(path)
-    }
-}
+// Note: is_hidden_path and is_hidden_relative_to are now in walkdir_utils module
 
 #[tauri::command]
 pub async fn read_directory(
@@ -170,26 +139,25 @@ pub async fn read_directory(
     let mut results = Vec::new();
 
     if recursive {
-        use walkdir::WalkDir;
-        for entry in WalkDir::new(&path_buf).follow_links(true) {
-            match entry {
-                Ok(entry) => {
-                    let entry_path = entry.path();
-                    if entry_path == path_buf {
-                        continue; // Skip root
-                    }
+        // Use shared walk_directory utility for consistent traversal
+        let options = WalkOptions {
+            follow_links: true,
+            exclude_hidden: true,
+            exclude_patterns: vec![],
+            base_path: path_buf.clone(),
+        };
 
-                    if is_hidden_relative_to(entry_path, &path_buf) {
-                        continue;
-                    }
+        if let Err(e) = walk_directory(&path_buf, &options, |entry| {
+            let entry_path = entry.path();
+            let is_dir = entry_path.is_dir();
 
-                    let is_dir = entry_path.is_dir();
-                    if (is_dir && include_directories) || (!is_dir && include_files) {
-                        results.push(entry_path.to_string_lossy().to_string());
-                    }
-                }
-                Err(_) => continue,
+            if (is_dir && include_directories) || (!is_dir && include_files) {
+                results.push(entry_path.to_string_lossy().to_string());
             }
+
+            Ok(())
+        }) {
+            return Result::err(path, FileSystemErrorType::IoError, e);
         }
     } else {
         // Non-recursive: read immediate children
@@ -198,7 +166,7 @@ pub async fn read_directory(
                 while let Ok(Some(entry)) = entries.next_entry().await {
                     let entry_path = entry.path();
 
-                    // Filter out hidden files/directories (starting with .)
+                    // Filter out hidden files/directories using shared utility
                     if is_hidden_relative_to(&entry_path, &path_buf) {
                         continue;
                     }
