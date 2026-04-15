@@ -362,10 +362,9 @@ export interface IPlatformAdapter {
   toggleFullscreen(): Promise<void>;
 
   /**
-   * Search files in a directory, returning an async iterator of matches.
-   *
-   * Results are streamed as they're found. Breaking out of the iteration
-   * automatically cancels the search.
+   * Search files in a directory, returning
+   * an async iterator of
+   * matches.
    *
    * @param directory - Directory path to search in
    * @param options - Search options
