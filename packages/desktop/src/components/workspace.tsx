@@ -4,6 +4,7 @@ import { useIsFetching } from "@tanstack/react-query";
 import { Dockable } from "@/components/dockable";
 import { IconSidebar } from "@/components/editor/icon-sidebar";
 import { Sidebar } from "@/components/editor/sidebar";
+import type { SearchPanelHandle } from "@/components/editor/search-panel";
 import {
   PolymorphicEditor,
   canOpenFile as canOpenInEditor,
@@ -28,7 +29,11 @@ import {
   handleMetadataFileSystemChange,
   handleContentFileSystemChange,
 } from "@/utils/file-sync";
-import { disposeAllEditors, getEditor } from "@/components/editor/editor-store";
+import {
+  disposeAllEditors,
+  getEditor,
+  navigateToLocation,
+} from "@/components/editor/editor-store";
 import { useSearchParams } from "react-router";
 import {
   type FileTreeMode,
@@ -45,6 +50,7 @@ export const Workspace = () => {
   const { metadata, content } = getOrCreateWorkspaceCollections(workspacePath);
   const { t } = useTranslation();
   const dockableRef = useRef<HTMLDivElement>(null);
+  const searchPanelRef = useRef<SearchPanelHandle>(null);
 
   const {
     layout,
@@ -135,6 +141,38 @@ export const Workspace = () => {
       });
     }
   }, [searchParams, setSearchParams, focusActiveEditor]);
+
+  const handleSearchMatchClick = useCallback(
+    (filePath: string, line: number, column: number, matchText?: string) => {
+      // Open the file tab
+      handleFileSelect({
+        path: filePath,
+        type: "file",
+        contentHash: "",
+        content: "",
+      });
+      // Retry navigation until editor is mounted and ready (up to ~2s)
+      let attempt = 0;
+      const maxAttempts = 20;
+      const tryNavigate = () => {
+        attempt++;
+        if (
+          navigateToLocation(filePath, {
+            line,
+            column,
+            expectedText: matchText,
+          })
+        )
+          return;
+        if (attempt < maxAttempts) {
+          requestAnimationFrame(tryNavigate);
+        }
+      };
+      requestAnimationFrame(tryNavigate);
+    },
+    [handleFileSelect],
+  );
+
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [direction, setDirection] = useState<"ltr" | "rtl">("ltr");
 
@@ -204,8 +242,47 @@ export const Workspace = () => {
     });
   }, [setSearchParams]);
 
+  const openSearchPanel = useCallback(
+    (filePattern?: string) => {
+      // Switch sidebar to search view and expand it
+      setSearchParams((prev) => {
+        prev.set("sidebarView", "search");
+        prev.delete("sidebar"); // ensure expanded
+        return prev;
+      });
+
+      // Focus input after sidebar view switch renders
+      requestAnimationFrame(() => {
+        searchPanelRef.current?.focusInput(filePattern);
+      });
+    },
+    [setSearchParams],
+  );
+
+  /** Mod+F — search within the active file */
+  const handleSearchInFile = useCallback(() => {
+    if (activeTabId) {
+      openSearchPanel(getFileName(activeTabId));
+    } else {
+      openSearchPanel();
+    }
+  }, [activeTabId, openSearchPanel]);
+
+  /** Mod+Shift+F — global search across all files */
+  const handleSearchInFiles = useCallback(() => {
+    openSearchPanel();
+  }, [openSearchPanel]);
+
   useHotkey("Mod+N", () => {
     handleNewFile();
+  });
+
+  useHotkey("Mod+F", () => {
+    handleSearchInFile();
+  });
+
+  useHotkey("Mod+Shift+F", () => {
+    handleSearchInFiles();
   });
 
   useEffect(() => {
@@ -274,6 +351,8 @@ export const Workspace = () => {
               closeTab={closeTab}
               mode={fileTreeMode}
               onModeChange={setFileTreeMode}
+              onSearchMatchClick={handleSearchMatchClick}
+              searchPanelRef={searchPanelRef}
             />
           )}
 
@@ -323,6 +402,8 @@ export const Workspace = () => {
         onOpenSettings={handleOpenSettings}
         onToggleSidebar={toggleSidebarCollapsed}
         onToggleFullscreen={handleToggleFullscreen}
+        onSearchInFile={handleSearchInFile}
+        onSearchInFiles={handleSearchInFiles}
         onFocusEditor={focusActiveEditor}
         direction={direction}
       />

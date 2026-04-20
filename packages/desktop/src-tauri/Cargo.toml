@@ -25,6 +25,11 @@ notify-debouncer-full = "0.3"
 tauri-plugin-store = "2"
 lazy_static = "1.4"
 md5 = "0.8.0"
+# Search functionality - ripgrep's search engine
+grep = "0.3"
+grep-regex = "0.1"
+regex = "1.10"
+
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

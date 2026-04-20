@@ -49,6 +49,8 @@ interface CommandPaletteProps {
   onOpenSettings?: () => void;
   onToggleSidebar?: () => void;
   onToggleFullscreen?: () => void | Promise<void>;
+  onSearchInFile?: () => void;
+  onSearchInFiles?: () => void;
   onFocusEditor?: () => void;
   direction?: "ltr" | "rtl";
 }
@@ -74,6 +76,8 @@ export function CommandPalette({
   onOpenSettings,
   onToggleSidebar,
   onToggleFullscreen,
+  onSearchInFile,
+  onSearchInFiles,
   onFocusEditor,
   direction = "ltr",
 }: CommandPaletteProps) {
@@ -188,20 +192,22 @@ export function CommandPalette({
       action: onRedo,
       group: "Edit",
     },
-    // {
-    //   id: "find",
-    //   label: "Find in File",
-    //   icon: Search,
-    //   shortcut: formatForDisplay("Mod+F"),
-    //   group: "Edit",
-    // },
-    // {
-    //   id: "replace",
-    //   label: "Find and Replace",
-    //   icon: Edit3,
-    //   shortcut: formatForDisplay("Mod+H"),
-    //   group: "Edit",
-    // },
+    {
+      id: "search-in-file",
+      label: "Search in File",
+      icon: Search,
+      shortcut: formatForDisplay("Mod+F"),
+      action: onSearchInFile,
+      group: "Edit",
+    },
+    {
+      id: "search-in-files",
+      label: "Search in All Files",
+      icon: Search,
+      shortcut: formatForDisplay("Mod+Shift+F"),
+      action: onSearchInFiles,
+      group: "Edit",
+    },
     {
       id: "toggle-sidebar",
       label: "Toggle Sidebar",

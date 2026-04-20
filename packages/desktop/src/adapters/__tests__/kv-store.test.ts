@@ -45,6 +45,9 @@ class TestBrowserAdapter extends BaseBrowserAdapter {
   async resolveAssetUrl(): Promise<string> {
     return "";
   }
+  async searchContent() {
+    return [];
+  }
 }
 
 describe("BaseBrowserAdapter KV Store", () => {

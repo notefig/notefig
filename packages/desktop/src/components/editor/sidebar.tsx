@@ -1,6 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, type Ref } from "react";
 import { FileTree, type FileTreeMode } from "@/components/editor/file-tree";
 import { FileControls } from "@/components/editor/file-controls";
+import {
+  SearchPanel,
+  type SearchPanelHandle,
+} from "@/components/editor/search-panel";
 import {
   getOrCreateWorkspaceCollections,
   deleteFileOrDirectory,
@@ -20,6 +24,13 @@ interface SidebarProps {
   closeTab: (tabId: string) => void;
   mode: FileTreeMode;
   onModeChange: (mode: FileTreeMode) => void;
+  onSearchMatchClick: (
+    filePath: string,
+    line: number,
+    column: number,
+    matchText?: string,
+  ) => void;
+  searchPanelRef?: Ref<SearchPanelHandle>;
 }
 
 export function Sidebar({
@@ -30,6 +41,8 @@ export function Sidebar({
   closeTab,
   mode,
   onModeChange,
+  onSearchMatchClick,
+  searchPanelRef,
 }: SidebarProps) {
   const { metadata } = getOrCreateWorkspaceCollections(workspacePath);
 
@@ -183,31 +196,44 @@ export function Sidebar({
     [workspacePath, metadata],
   );
 
+  const sidebarView = searchParams.get("sidebarView") || "files";
+
   return (
     <>
       <div
         ref={containerRef}
-        className="shrink-0 bg-sidebar flex flex-col-reverse border-border"
+        data-sidebar
+        className="shrink-0 bg-sidebar flex flex-col-reverse border-border min-h-0 overflow-hidden"
         style={{ width: sidebarWidth }}
       >
-        <FileTree
-          selectedFilePath={activeTabId}
-          onFileSelect={onFileSelect}
-          onDelete={handleDeleteFile}
-          onRename={handleRenameFile}
-          onCreate={handleCreate}
-          openTabs={openTabs}
-          basePath={workspacePath}
-          sortOrder={sortOrder}
-          mode={mode}
-          onModeChange={onModeChange}
-        />
-        <FileControls
-          onNewFile={handleNewFile}
-          onNewFolder={handleNewFolder}
-          sortOrder={sortOrder}
-          onSortChange={setSortOrder}
-        />
+        {sidebarView === "search" ? (
+          <SearchPanel
+            ref={searchPanelRef}
+            workspacePath={workspacePath}
+            onMatchClick={onSearchMatchClick}
+          />
+        ) : (
+          <>
+            <FileTree
+              selectedFilePath={activeTabId}
+              onFileSelect={onFileSelect}
+              onDelete={handleDeleteFile}
+              onRename={handleRenameFile}
+              onCreate={handleCreate}
+              openTabs={openTabs}
+              basePath={workspacePath}
+              sortOrder={sortOrder}
+              mode={mode}
+              onModeChange={onModeChange}
+            />
+            <FileControls
+              onNewFile={handleNewFile}
+              onNewFolder={handleNewFolder}
+              sortOrder={sortOrder}
+              onSortChange={setSortOrder}
+            />
+          </>
+        )}
       </div>
       <div
         ref={resizeRef}

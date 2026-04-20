@@ -7,11 +7,14 @@ import type {
   FileSystemMetadata,
   MetadataChangeEvent,
   ContentChangeEvent,
+  SearchOptions,
+  SearchMatch,
 } from "./platform-adapter.interface";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LazyStore } from "@tauri-apps/plugin-store";
 
@@ -462,6 +465,24 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     const window = getCurrentWindow();
     const isFullscreen = await window.isFullscreen();
     await window.setFullscreen(!isFullscreen);
+  }
+
+  /**
+   * Search content in files within a directory, returning all matches.
+   */
+  async searchContent(
+    directory: string,
+    options: SearchOptions,
+  ): Promise<SearchMatch[]> {
+    return invoke<SearchMatch[]>("search_content", {
+      directory,
+      query: options.query,
+      useRegex: options.useRegex ?? false,
+      caseSensitive: options.caseSensitive ?? false,
+      filePattern: options.filePattern ?? null,
+      fileIncludes: options.fileIncludes ?? null,
+      maxResults: options.maxResults ?? 1000,
+    });
   }
 
   private cleanupListeners(): void {

@@ -3,12 +3,16 @@ import type {
   FileSystemError,
   FileSystemMetadata,
   Result,
+  SearchMatch,
+  SearchOptions,
   PlatformEventListener,
 } from "./platform-adapter.interface";
 import {
   BaseBrowserAdapter,
   createError,
   isHiddenPath,
+  filterFilePaths,
+  buildSearchPattern,
 } from "./base-browser-adapter";
 import {
   normalizeWorkspacePath,
@@ -19,6 +23,7 @@ import {
 } from "./browser-fs-utils";
 import { BrowserFileWatcher } from "./browser-file-watcher";
 import { calculateContentHash } from "@/utils/hash";
+import { processPool } from "@/utils/process-pool";
 
 type DirectoryHandle = FileSystemDirectoryHandle;
 type FileHandle = FileSystemFileHandle;
@@ -669,10 +674,161 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
   removeEventListener(callback: PlatformEventListener): void {
     this.fileWatcher.removeEventListener(callback);
   }
+
+  /**
+   * Override searchContent to use streaming — file contents are never
+   * fully materialized in memory. Uses file.stream() → searchStream().
+   */
+  async searchContent(
+    directory: string,
+    options: SearchOptions,
+  ): Promise<SearchMatch[]> {
+    const maxResults = options.maxResults ?? 1000;
+
+    let filePaths: string[];
+
+    if (options.fileIncludes?.length) {
+      // Skip directory walk — use provided paths directly
+      filePaths = filterFilePaths(options.fileIncludes, options);
+    } else {
+      const dirResult = await this.readDirectory(directory, {
+        recursive: true,
+        includeFiles: true,
+        includeDirectories: false,
+      });
+
+      if (!dirResult.ok) {
+        return [];
+      }
+
+      filePaths = filterFilePaths(dirResult.value, options);
+    }
+
+    const pattern = buildSearchPattern(options);
+    if (!pattern) return [];
+
+    const { succeeded } = await processPool(
+      filePaths,
+      async (filePath: string) => {
+        try {
+          const handle = await this.resolveFileHandle(filePath, false, false);
+          const file = await handle.getFile();
+          const stream = file.stream() as ReadableStream<Uint8Array>;
+          // Create a fresh regex per worker to avoid shared lastIndex state
+          const workerPattern = new RegExp(pattern.source, pattern.flags);
+          return await searchStream(
+            stream,
+            filePath,
+            workerPattern,
+            maxResults,
+          );
+        } catch {
+          return []; // Skip files with permission/access errors
+        }
+      },
+      {
+        concurrency: 6,
+        shouldContinue: (r) => r.length < maxResults,
+      },
+    );
+
+    return succeeded.slice(0, maxResults);
+  }
 }
 
 export function shouldUseBrowserFsAdapter(): boolean {
   if (isE2ETestEnv()) return false;
   if (isAutomatedBrowser()) return false;
   return supportsFsAccess();
+}
+
+/**
+ * Line-by-line streaming search over a ReadableStream<Uint8Array>.
+ *
+ * Reads chunks via getReader(), splits by newline, searches complete lines,
+ * carries the incomplete tail to the next chunk. Returns early (cancels reader)
+ * once maxResults is hit.
+ *
+ * Peak memory per file ≈ one chunk (~64KB) + the current line buffer.
+ */
+export async function searchStream(
+  stream: ReadableStream<Uint8Array>,
+  filePath: string,
+  pattern: RegExp,
+  maxResults?: number,
+): Promise<SearchMatch[]> {
+  const results: SearchMatch[] = [];
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let lineNumber = 0;
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        if (buffer.length > 0) {
+          lineNumber++;
+          searchLine(buffer, filePath, pattern, lineNumber, results);
+        }
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split("\n");
+      buffer = lines.pop()!;
+
+      for (const line of lines) {
+        lineNumber++;
+        searchLine(line, filePath, pattern, lineNumber, results);
+
+        if (maxResults !== undefined && results.length >= maxResults) {
+          await reader.cancel();
+          return results;
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return results;
+}
+
+function searchLine(
+  line: string,
+  filePath: string,
+  pattern: RegExp,
+  lineNumber: number,
+  results: SearchMatch[],
+): void {
+  pattern.lastIndex = 0;
+
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(line)) !== null) {
+    results.push({
+      location: {
+        filePath,
+        range: {
+          start: { line: lineNumber, column: match.index + 1 },
+          end: {
+            line: lineNumber,
+            column: match.index + match[0].length + 1,
+          },
+        },
+      },
+      content: {
+        matchText: match[0],
+        lineContent: line,
+        beforeContext: [],
+        afterContext: [],
+      },
+    });
+
+    if (match.index === pattern.lastIndex) {
+      pattern.lastIndex++;
+    }
+  }
 }

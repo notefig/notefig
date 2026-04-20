@@ -1,6 +1,7 @@
 // File watching module
 // Provides file system change detection using notify crate
 
+use crate::walkdir_utils::is_hidden_path;
 use notify::{
     event::{CreateKind, ModifyKind, RemoveKind, RenameMode},
     Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
@@ -79,18 +80,7 @@ pub fn register_app_write(path: String, content_hash: String) {
     writes.retain(|w| w.timestamp.elapsed().as_secs() < 5);
 }
 
-/// Check if a path contains any component that starts with a dot (hidden file/directory)
-/// Examples: .git, .vscode, .DS_Store, etc.
-fn is_hidden_path(path: &Path) -> bool {
-    path.components().any(|component| {
-        if let std::path::Component::Normal(os_str) = component {
-            if let Some(name) = os_str.to_str() {
-                return name.starts_with('.') && name.len() > 1;
-            }
-        }
-        false
-    })
-}
+// Note: is_hidden_path is now in walkdir_utils module
 
 /// Check if a path should be filtered (hidden files, temp files, etc.)
 fn should_filter_path(path: &Path) -> bool {
