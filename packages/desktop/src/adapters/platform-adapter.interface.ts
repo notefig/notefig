@@ -88,8 +88,8 @@ export type SearchOptions = {
   caseSensitive?: boolean;
   /** File pattern filter (e.g., "*.md", "*.txt") */
   filePattern?: string;
-  /** Patterns to exclude (e.g., ["node_modules", "*.log"]) */
-  excludePatterns?: string[];
+  /** Limit search to these file paths only. If omitted, adapter discovers files itself. */
+  fileIncludes?: string[];
   /** Maximum number of results (default: 1000) */
   maxResults?: number;
 };
@@ -362,16 +362,14 @@ export interface IPlatformAdapter {
   toggleFullscreen(): Promise<void>;
 
   /**
-   * Search files in a directory, returning
-   * an async iterator of
-   * matches.
+   * Search content in files within a directory.
    *
    * @param directory - Directory path to search in
    * @param options - Search options
-   * @returns AsyncIterableIterator of search matches
+   * @returns Promise resolving to array of search matches
    */
-  searchFiles(
+  searchContent(
     directory: string,
     options: SearchOptions,
-  ): AsyncIterableIterator<SearchMatch>;
+  ): Promise<SearchMatch[]>;
 }

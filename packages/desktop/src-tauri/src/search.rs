@@ -2,12 +2,10 @@ use crate::walkdir_utils::{check_circular_symlink, walk_directory, WalkOptions};
 use grep::searcher::{BinaryDetection, Searcher, SearcherBuilder, Sink, SinkMatch};
 use grep_regex::RegexMatcher;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{Emitter, Window};
 
 /// Position in a file (1-indexed)
 #[derive(Debug, Clone, Serialize)]
@@ -48,76 +46,15 @@ pub struct SearchMatch {
     pub content: SearchMatchContent,
 }
 
-/// Event payload for search results (includes search_id for correlation)
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SearchResultEvent {
-    search_id: String,
-    result: SearchMatch,
-}
-
-/// Event payload for search completion
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SearchCompleteEvent {
-    search_id: String,
-    count: usize,
-}
-
-/// State for managing search cancellation per search_id
-pub struct SearchState {
-    /// Map of search_id -> cancellation token
-    active_searches: Mutex<HashMap<String, Arc<AtomicBool>>>,
-}
-
-impl SearchState {
-    pub fn new() -> Self {
-        Self {
-            active_searches: Mutex::new(HashMap::new()),
-        }
-    }
-
-    /// Register a new search and return its cancellation token
-    pub fn register(&self, search_id: &str) -> Arc<AtomicBool> {
-        let token = Arc::new(AtomicBool::new(false));
-        let mut searches = self.active_searches.lock().unwrap();
-        searches.insert(search_id.to_string(), token.clone());
-        token
-    }
-
-    /// Cancel a specific search by ID
-    pub fn cancel(&self, search_id: &str) {
-        let searches = self.active_searches.lock().unwrap();
-        if let Some(token) = searches.get(search_id) {
-            token.store(true, Ordering::SeqCst);
-        }
-    }
-
-    /// Remove a search from tracking (called when search completes)
-    pub fn unregister(&self, search_id: &str) {
-        let mut searches = self.active_searches.lock().unwrap();
-        searches.remove(search_id);
-    }
-}
-
-impl Default for SearchState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Custom Sink implementation that streams matches via Tauri events
-struct StreamingSink<'a> {
-    window: &'a Window,
-    cancellation_token: &'a AtomicBool,
-    search_id: &'a str,
+/// Sink that collects matches into a Vec
+struct CollectingSink<'a> {
     file_path: String,
-    count: &'a mut usize,
+    results: &'a mut Vec<SearchMatch>,
     max_results: usize,
     matcher: &'a RegexMatcher,
 }
 
-impl<'a> Sink for StreamingSink<'a> {
+impl<'a> Sink for CollectingSink<'a> {
     type Error = io::Error;
 
     fn matched(
@@ -125,11 +62,6 @@ impl<'a> Sink for StreamingSink<'a> {
         _searcher: &Searcher,
         mat: &SinkMatch<'_>,
     ) -> Result<bool, Self::Error> {
-        // Check cancellation
-        if self.cancellation_token.load(Ordering::SeqCst) {
-            return Ok(false); // Stop searching
-        }
-
         // Get line content (trim trailing newline)
         let line_content = String::from_utf8_lossy(mat.bytes())
             .trim_end_matches('\n')
@@ -144,9 +76,9 @@ impl<'a> Sink for StreamingSink<'a> {
             true
         });
 
-        // Emit a result for each match in the line
+        // Collect a result for each match in the line
         for (start, end) in matches_in_line {
-            if self.cancellation_token.load(Ordering::SeqCst) || *self.count >= self.max_results {
+            if self.results.len() >= self.max_results {
                 return Ok(false);
             }
 
@@ -168,7 +100,7 @@ impl<'a> Sink for StreamingSink<'a> {
 
             let line_num = mat.line_number().unwrap_or(0) as usize;
 
-            let search_match = SearchMatch {
+            self.results.push(SearchMatch {
                 location: SearchMatchLocation {
                     file_path: self.file_path.clone(),
                     range: FileRange {
@@ -188,47 +120,25 @@ impl<'a> Sink for StreamingSink<'a> {
                     before_context: vec![],
                     after_context: vec![],
                 },
-            };
-
-            // Emit result via Tauri event with search_id
-            let event = SearchResultEvent {
-                search_id: self.search_id.to_string(),
-                result: search_match,
-            };
-            if let Err(e) = self.window.emit("search-result", &event) {
-                eprintln!("Failed to emit search result: {}", e);
-            }
-
-            *self.count += 1;
+            });
         }
 
         // Continue searching unless we've hit max results
-        Ok(*self.count < self.max_results)
+        Ok(self.results.len() < self.max_results)
     }
 }
 
-/// Search files in a directory and stream results via Tauri events
+/// Search content in files within a directory and return all matches
 #[tauri::command]
-pub async fn search_files_stream(
-    search_id: String,
+pub async fn search_content(
     directory: String,
     query: String,
     use_regex: bool,
     case_sensitive: bool,
     file_pattern: Option<String>,
-    exclude_patterns: Option<Vec<String>>,
+    file_includes: Option<Vec<String>>,
     max_results: Option<usize>,
-    window: Window,
-    state: tauri::State<'_, SearchState>,
-) -> Result<(), String> {
-    // Register this search and get its cancellation token
-    let cancellation_token = state.register(&search_id);
-
-    // Ensure we unregister when done (using a guard pattern)
-    let _cleanup = scopeguard::guard(search_id.clone(), |id| {
-        state.unregister(&id);
-    });
-
+) -> Result<Vec<SearchMatch>, String> {
     // Validate query
     if query.is_empty() {
         return Err("Query cannot be empty".to_string());
@@ -262,11 +172,13 @@ pub async fn search_files_stream(
         RegexMatcher::new(&pattern).map_err(|e| format!("Invalid pattern: {}", e))?;
 
     let max = max_results.unwrap_or(1000);
-    let mut count = 0;
+    let mut results: Vec<SearchMatch> = Vec::new();
     let visited = Arc::new(Mutex::new(HashSet::<PathBuf>::new()));
 
-    // Parse exclude patterns (e.g., gitignore patterns)
-    let exclude_patterns = exclude_patterns.unwrap_or_default();
+    // Parse file_includes into a HashSet for fast lookup
+    let file_includes: Option<HashSet<PathBuf>> = file_includes.map(|paths| {
+        paths.into_iter().map(PathBuf::from).collect()
+    });
 
     // Create searcher with optimal settings
     let mut searcher = SearcherBuilder::new()
@@ -288,16 +200,12 @@ pub async fn search_files_stream(
     let walk_options = WalkOptions {
         follow_links: true,
         exclude_hidden: true,
-        exclude_patterns,
+        exclude_patterns: vec![],
         base_path: dir_path.clone(),
     };
 
     // Use shared walk_directory utility
     let walk_result = walk_directory(&dir_path, &walk_options, |entry| {
-        if cancellation_token.load(Ordering::SeqCst) {
-            return Err("Cancelled".to_string());
-        }
-
         let path = entry.path();
 
         // Skip directories - we only search files
@@ -310,6 +218,13 @@ pub async fn search_files_stream(
             let mut visited_guard = visited.lock().unwrap();
             if check_circular_symlink(path, &mut visited_guard) {
                 return Ok(()); // Skip circular symlinks
+            }
+        }
+
+        // If file_includes is set, only search files in that set
+        if let Some(ref includes) = file_includes {
+            if !includes.contains(&path.to_path_buf()) {
+                return Ok(());
             }
         }
 
@@ -326,12 +241,9 @@ pub async fn search_files_stream(
         }
 
         // Set up sink for this file
-        let mut sink = StreamingSink {
-            window: &window,
-            cancellation_token: &cancellation_token,
-            search_id: &search_id,
+        let mut sink = CollectingSink {
             file_path: path.to_string_lossy().to_string(),
-            count: &mut count,
+            results: &mut results,
             max_results: max,
             matcher: &matcher,
         };
@@ -343,34 +255,21 @@ pub async fn search_files_stream(
         }
 
         // Check if we've hit max results
-        if count >= max {
+        if results.len() >= max {
             return Err("Max results reached".to_string());
         }
 
         Ok(())
     });
 
-    // Handle walk errors - "Cancelled" and "Max results reached" are not real errors
+    // Handle walk errors - "Max results reached" is not a real error
     if let Err(e) = walk_result {
-        if e != "Cancelled" && e != "Max results reached" {
+        if e != "Max results reached" {
             return Err(e);
         }
     }
 
-    // Emit completion event with search_id
-    let complete_event = SearchCompleteEvent {
-        search_id: search_id.clone(),
-        count,
-    };
-    let _ = window.emit("search-complete", &complete_event);
-
-    Ok(())
-}
-
-/// Cancel a specific search operation by ID
-#[tauri::command]
-pub fn cancel_search(search_id: String, state: tauri::State<'_, SearchState>) {
-    state.cancel(&search_id);
+    Ok(results)
 }
 
 /// Check if a file path matches a file pattern (e.g., "*.md", "*.txt")
@@ -454,33 +353,5 @@ mod tests {
         assert!(!is_binary_by_extension(Path::new("code.rs")));
         assert!(!is_binary_by_extension(Path::new("readme.md")));
         assert!(!is_binary_by_extension(Path::new("config.json")));
-    }
-
-    #[test]
-    fn test_search_state_cancellation() {
-        let state = SearchState::new();
-        let token = state.register("test-search");
-        assert!(!token.load(Ordering::SeqCst));
-
-        state.cancel("test-search");
-        assert!(token.load(Ordering::SeqCst));
-
-        state.unregister("test-search");
-    }
-
-    #[test]
-    fn test_search_state_multiple_searches() {
-        let state = SearchState::new();
-        let token1 = state.register("search-1");
-        let token2 = state.register("search-2");
-
-        // Cancel only search-1
-        state.cancel("search-1");
-        assert!(token1.load(Ordering::SeqCst));
-        assert!(!token2.load(Ordering::SeqCst));
-
-        // Cancel search-2
-        state.cancel("search-2");
-        assert!(token2.load(Ordering::SeqCst));
     }
 }

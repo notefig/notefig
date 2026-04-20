@@ -3,12 +3,18 @@ import type {
   BatchResult,
   FileSystemError,
   FileSystemMetadata,
+  SearchMatch,
+  SearchOptions,
 } from "./platform-adapter.interface";
 import {
   BaseBrowserAdapter,
   isHiddenPath,
   createError,
+  filterFilePaths,
+  buildSearchPattern,
+  searchFileContent,
 } from "./base-browser-adapter";
+import { processPool } from "@/utils/process-pool";
 
 export class BrowserPlatformAdapter extends BaseBrowserAdapter {
   private db: IDBDatabase | null = null;
@@ -844,5 +850,54 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     }
 
     return { succeeded, failed };
+  }
+
+  async searchContent(
+    directory: string,
+    options: SearchOptions,
+  ): Promise<SearchMatch[]> {
+    const maxResults = options.maxResults ?? 1000;
+
+    let filePaths: string[];
+
+    if (options.fileIncludes?.length) {
+      // Skip directory walk — use provided paths directly
+      filePaths = filterFilePaths(options.fileIncludes, options);
+    } else {
+      const dirResult = await this.readDirectory(directory, {
+        recursive: true,
+        includeFiles: true,
+        includeDirectories: false,
+      });
+
+      if (!dirResult.ok) {
+        return [];
+      }
+
+      filePaths = filterFilePaths(dirResult.value, options);
+    }
+
+    const pattern = buildSearchPattern(options);
+    if (!pattern) return [];
+
+    // Use processPool for bounded concurrency
+    const { succeeded } = await processPool(
+      filePaths,
+      async (filePath: string) => {
+        const readResult = await this.readFiles([filePath]);
+        if (readResult.succeeded.length === 0) return [];
+
+        const file = readResult.succeeded[0];
+        // Create fresh regex per worker to avoid shared lastIndex
+        const workerPattern = new RegExp(pattern.source, pattern.flags);
+        return searchFileContent(file.path, file.content, workerPattern);
+      },
+      {
+        concurrency: 6,
+        shouldContinue: (r) => r.length < maxResults,
+      },
+    );
+
+    return succeeded.slice(0, maxResults);
   }
 }

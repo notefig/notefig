@@ -249,7 +249,6 @@ fn main() {
                 _ => {}
             }
         })
-        .manage(search::SearchState::new())
         .invoke_handler(tauri::generate_handler![
             // File system commands (errors-as-values pattern)
             fs_ops::read_directory,
@@ -270,8 +269,7 @@ fn main() {
             file_watcher::start_watching_content,
             file_watcher::stop_watching,
             // Search commands
-            search::search_files_stream,
-            search::cancel_search,
+            search::search_content,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

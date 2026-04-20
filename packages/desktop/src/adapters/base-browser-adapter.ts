@@ -22,6 +22,79 @@ export function isHiddenPath(path: string): boolean {
   return parts.some((part) => part.startsWith(".") && part.length > 1);
 }
 
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function globToRegex(pattern: string): RegExp {
+  const regexStr = pattern
+    .replace(/\./g, "\\.")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  return new RegExp(`^${regexStr}$`);
+}
+
+const BINARY_EXTENSIONS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "bmp",
+  "svg",
+  "webp",
+  "ico",
+  "tiff",
+  "tif",
+  "mp4",
+  "mov",
+  "avi",
+  "mkv",
+  "webm",
+  "wmv",
+  "flv",
+  "mp3",
+  "wav",
+  "ogg",
+  "flac",
+  "aac",
+  "m4a",
+  "wma",
+  "zip",
+  "tar",
+  "gz",
+  "bz2",
+  "7z",
+  "rar",
+  "xz",
+  "pdf",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "ppt",
+  "pptx",
+  "exe",
+  "dll",
+  "so",
+  "dylib",
+  "bin",
+  "app",
+  "db",
+  "sqlite",
+  "sqlite3",
+  "lock",
+  "woff",
+  "woff2",
+  "ttf",
+  "otf",
+  "eot",
+]);
+
+function isBinaryByExtension(filePath: string): boolean {
+  const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
+  return BINARY_EXTENSIONS.has(ext);
+}
+
 export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   abstract pickDirectory(title: string): Promise<string | null>;
   abstract readDirectory(
@@ -188,15 +261,97 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     await document.documentElement.requestFullscreen();
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async *searchFiles(
-    _directory: string,
-    _options: SearchOptions,
-  ): AsyncIterableIterator<SearchMatch> {
-    // Browser search will be implemented in Phase 3
-    // For now, throw a clear error so callers know this isn't available
-    throw new Error(
-      "Search is not yet implemented for browser. Please use the desktop app for search functionality.",
-    );
+  abstract searchContent(
+    directory: string,
+    options: SearchOptions,
+  ): Promise<SearchMatch[]>;
+}
+
+/**
+ * Filter file paths by search options (file pattern, file includes, binary).
+ * Exported for reuse by adapter search implementations.
+ */
+export function filterFilePaths(
+  paths: string[],
+  options: SearchOptions,
+): string[] {
+  let filtered = paths;
+
+  // If fileIncludes is set, only search those files
+  if (options.fileIncludes?.length) {
+    const includeSet = new Set(options.fileIncludes);
+    filtered = filtered.filter((p) => includeSet.has(p));
   }
+
+  if (options.filePattern) {
+    const patternRegex = globToRegex(options.filePattern);
+    filtered = filtered.filter((p) => {
+      const fileName = p.split("/").pop() ?? "";
+      return patternRegex.test(fileName);
+    });
+  }
+
+  filtered = filtered.filter((p) => !isBinaryByExtension(p));
+
+  return filtered;
+}
+
+/**
+ * Build a search RegExp from SearchOptions.
+ * Returns null if the regex is invalid.
+ */
+export function buildSearchPattern(options: SearchOptions): RegExp | null {
+  try {
+    const source = options.useRegex
+      ? options.query
+      : escapeRegex(options.query);
+    return new RegExp(source, options.caseSensitive ? "g" : "gi");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Search a file's content string for pattern matches.
+ */
+export function searchFileContent(
+  filePath: string,
+  content: string,
+  pattern: RegExp,
+): SearchMatch[] {
+  const results: SearchMatch[] = [];
+  const lines = content.split("\n");
+
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const line = lines[lineIdx];
+    pattern.lastIndex = 0;
+
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(line)) !== null) {
+      results.push({
+        location: {
+          filePath,
+          range: {
+            start: { line: lineIdx + 1, column: match.index + 1 },
+            end: {
+              line: lineIdx + 1,
+              column: match.index + match[0].length + 1,
+            },
+          },
+        },
+        content: {
+          matchText: match[0],
+          lineContent: line,
+          beforeContext: [],
+          afterContext: [],
+        },
+      });
+
+      if (match.index === pattern.lastIndex) {
+        pattern.lastIndex++;
+      }
+    }
+  }
+
+  return results;
 }
