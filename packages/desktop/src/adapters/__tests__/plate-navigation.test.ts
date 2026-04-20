@@ -19,6 +19,8 @@ import {
   paragraphWithLink,
   realisticDocument,
   realisticDocumentLineMap,
+  embeddedNewlines,
+  embeddedNewlinesLineMap,
   codeBlock,
   blockquote,
   unorderedList,
@@ -609,5 +611,31 @@ describe("Integration: full navigation path with rawLineToBlockPath", () => {
     const node = Node.get(editor as unknown as Node, mapping!.path);
     const text = Node.string(node);
     expect(text).toBe("this is a quote");
+  });
+});
+
+describe("rawLineToBlockPath — embedded newlines", () => {
+  it.each(embeddedNewlinesLineMap)(
+    "line $rawLine → $description",
+    ({ rawLine, blockIndex, path, expectedText }) => {
+      const mapping = rawLineToBlockPath(
+        embeddedNewlines as BlockNode[],
+        rawLine,
+      );
+      expect(mapping).not.toBeNull();
+      expect(mapping!.blockIndex).toBe(blockIndex);
+      expect(mapping!.path).toEqual(path);
+
+      const editor = createTestEditor(embeddedNewlines as Descendant[]);
+      const node = Node.get(editor as unknown as Node, mapping!.path);
+      expect(Node.string(node)).toBe(expectedText);
+    },
+  );
+
+  it("blank lines between multi-line paragraphs return null", () => {
+    // Line 2 and 6 are blank separators
+    expect(rawLineToBlockPath(embeddedNewlines as BlockNode[], 2)).toBeNull();
+    expect(rawLineToBlockPath(embeddedNewlines as BlockNode[], 6)).toBeNull();
+    expect(rawLineToBlockPath(embeddedNewlines as BlockNode[], 10)).toBeNull();
   });
 });

@@ -138,6 +138,7 @@ function createMarkdownInstance(content: string): MarkdownInstance {
           this.editor.children as BlockNode[],
           location.line,
         );
+
         if (!mapping) {
           console.warn(
             `Line ${location.line} could not be mapped to any block in document`,

@@ -119,8 +119,20 @@ function isSameListGroup(a: BlockNode, b: BlockNode): boolean {
 }
 
 /**
+ * Recursively extract all text content from a block node.
+ */
+function getBlockText(block: BlockNode): string {
+  if (block.text !== undefined) return block.text;
+  if (!block.children) return "";
+  return block.children.map((c) => getBlockText(c as BlockNode)).join("");
+}
+
+/**
  * Count how many markdown lines a single top-level block produces
  * (excluding blank-line separators).
+ *
+ * Accounts for embedded newlines in paragraph text (e.g. poems, frontmatter
+ * that Plate stores as a single paragraph with \n characters).
  */
 function blockLineCount(block: BlockNode): number {
   const type = block.type;
@@ -141,8 +153,11 @@ function blockLineCount(block: BlockNode): number {
     return rowCount > 0 ? rowCount + 1 : 0;
   }
 
-  // All other blocks (p, h1-h6, blockquote, img, hr, etc.) = 1 line
-  return 1;
+  // For all other blocks, count embedded newlines in text content.
+  // A paragraph with "line1\nline2\nline3" occupies 3 raw file lines.
+  const text = getBlockText(block);
+  const newlineCount = (text.match(/\n/g) || []).length;
+  return 1 + newlineCount;
 }
 
 /**

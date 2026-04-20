@@ -559,6 +559,106 @@ export const mixedContentLineMap: Array<{
   { rawLine: 10, blockIndex: 5, path: [5], expectedText: "Final paragraph" },
 ];
 
+/**
+ * Document with paragraphs containing embedded newlines.
+ * Plate sometimes stores multi-line content (poems, frontmatter-like text)
+ * as a single paragraph with literal \n in the text.
+ *
+ * Markdown (raw file):
+ * Line 1:  # Poem
+ * Line 2:  (blank)
+ * Line 3:  title: canto xx
+ * Line 4:  index: 20
+ * Line 5:  author: parsa
+ * Line 6:  (blank)
+ * Line 7:  Roses are red
+ * Line 8:  Violets are blue
+ * Line 9:  Sugar is sweet
+ * Line 10: (blank)
+ * Line 11: The end.
+ */
+export const embeddedNewlines: PlateNode[] = [
+  // Block 0 — line 1
+  { type: "h1", children: [{ text: "Poem" }] },
+  // Block 1 — lines 3-5 (single paragraph with embedded \n, 3 raw lines)
+  {
+    type: "p",
+    children: [{ text: "title: canto xx\nindex: 20\nauthor: parsa" }],
+  },
+  // Block 2 — lines 7-9 (single paragraph with embedded \n, 3 raw lines)
+  {
+    type: "p",
+    children: [{ text: "Roses are red\nViolets are blue\nSugar is sweet" }],
+  },
+  // Block 3 — line 11
+  { type: "p", children: [{ text: "The end." }] },
+];
+
+export const embeddedNewlinesLineMap: Array<{
+  rawLine: number;
+  blockIndex: number;
+  path: number[];
+  expectedText: string;
+  description: string;
+}> = [
+  {
+    rawLine: 1,
+    blockIndex: 0,
+    path: [0],
+    expectedText: "Poem",
+    description: "h1 heading",
+  },
+  {
+    rawLine: 3,
+    blockIndex: 1,
+    path: [1],
+    expectedText: "title: canto xx\nindex: 20\nauthor: parsa",
+    description: "frontmatter paragraph (line 1 of 3)",
+  },
+  {
+    rawLine: 4,
+    blockIndex: 1,
+    path: [1],
+    expectedText: "title: canto xx\nindex: 20\nauthor: parsa",
+    description: "frontmatter paragraph (line 2 of 3)",
+  },
+  {
+    rawLine: 5,
+    blockIndex: 1,
+    path: [1],
+    expectedText: "title: canto xx\nindex: 20\nauthor: parsa",
+    description: "frontmatter paragraph (line 3 of 3)",
+  },
+  {
+    rawLine: 7,
+    blockIndex: 2,
+    path: [2],
+    expectedText: "Roses are red\nViolets are blue\nSugar is sweet",
+    description: "poem paragraph (line 1 of 3)",
+  },
+  {
+    rawLine: 8,
+    blockIndex: 2,
+    path: [2],
+    expectedText: "Roses are red\nViolets are blue\nSugar is sweet",
+    description: "poem paragraph (line 2 of 3)",
+  },
+  {
+    rawLine: 9,
+    blockIndex: 2,
+    path: [2],
+    expectedText: "Roses are red\nViolets are blue\nSugar is sweet",
+    description: "poem paragraph (line 3 of 3)",
+  },
+  {
+    rawLine: 11,
+    blockIndex: 3,
+    path: [3],
+    expectedText: "The end.",
+    description: "final paragraph",
+  },
+];
+
 export const table: PlateNode[] = [
   {
     type: "table",
