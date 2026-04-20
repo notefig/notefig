@@ -24,7 +24,12 @@ interface SidebarProps {
   closeTab: (tabId: string) => void;
   mode: FileTreeMode;
   onModeChange: (mode: FileTreeMode) => void;
-  onSearchMatchClick: (filePath: string, line: number, column: number) => void;
+  onSearchMatchClick: (
+    filePath: string,
+    line: number,
+    column: number,
+    matchText?: string,
+  ) => void;
   searchPanelRef?: Ref<SearchPanelHandle>;
 }
 

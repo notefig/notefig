@@ -4,6 +4,7 @@ import {
   fuzzyFind,
   lineColumnToTextareaOffset,
   columnToOffset,
+  markupPrefixLength,
   rawLineToBlockPath,
   type BlockNode,
 } from "@/utils/navigation-utils";
@@ -637,5 +638,162 @@ describe("rawLineToBlockPath — embedded newlines", () => {
     expect(rawLineToBlockPath(embeddedNewlines as BlockNode[], 2)).toBeNull();
     expect(rawLineToBlockPath(embeddedNewlines as BlockNode[], 6)).toBeNull();
     expect(rawLineToBlockPath(embeddedNewlines as BlockNode[], 10)).toBeNull();
+  });
+});
+
+describe("markupPrefixLength", () => {
+  it("returns correct prefix for headings", () => {
+    expect(markupPrefixLength({ type: "h1", children: [] })).toBe(2); // "# "
+    expect(markupPrefixLength({ type: "h2", children: [] })).toBe(3); // "## "
+    expect(markupPrefixLength({ type: "h3", children: [] })).toBe(4); // "### "
+    expect(markupPrefixLength({ type: "h4", children: [] })).toBe(5);
+    expect(markupPrefixLength({ type: "h5", children: [] })).toBe(6);
+    expect(markupPrefixLength({ type: "h6", children: [] })).toBe(7); // "###### "
+  });
+
+  it("returns correct prefix for unordered list items", () => {
+    // Top-level: "- " or "* " = 2
+    expect(
+      markupPrefixLength({
+        type: "p",
+        indent: 1,
+        listStyleType: "disc",
+        children: [],
+      }),
+    ).toBe(2);
+    // Nested (indent=2): "   - " = 5
+    expect(
+      markupPrefixLength({
+        type: "p",
+        indent: 2,
+        listStyleType: "disc",
+        children: [],
+      }),
+    ).toBe(5);
+  });
+
+  it("returns correct prefix for ordered list items", () => {
+    // "1. " = 3
+    expect(
+      markupPrefixLength({
+        type: "p",
+        indent: 1,
+        listStyleType: "decimal",
+        children: [],
+      }),
+    ).toBe(3);
+    // "2. " = 3
+    expect(
+      markupPrefixLength({
+        type: "p",
+        indent: 1,
+        listStyleType: "decimal",
+        listStart: 2,
+        children: [],
+      }),
+    ).toBe(3);
+    // "10. " = 4
+    expect(
+      markupPrefixLength({
+        type: "p",
+        indent: 1,
+        listStyleType: "decimal",
+        listStart: 10,
+        children: [],
+      }),
+    ).toBe(4);
+    // Nested: "   1. " = 6
+    expect(
+      markupPrefixLength({
+        type: "p",
+        indent: 2,
+        listStyleType: "decimal",
+        children: [],
+      }),
+    ).toBe(6);
+  });
+
+  it("returns correct prefix for blockquotes", () => {
+    expect(markupPrefixLength({ type: "blockquote", children: [] })).toBe(2); // "> "
+  });
+
+  it("returns 0 for plain paragraphs", () => {
+    expect(markupPrefixLength({ type: "p", children: [] })).toBe(0);
+  });
+
+  it("returns 0 for code blocks", () => {
+    expect(markupPrefixLength({ type: "code_block", children: [] })).toBe(0);
+  });
+});
+
+describe("markupPrefixLength integration: adjusted column → correct offset", () => {
+  it("heading: raw column maps to correct Plate text offset", () => {
+    // Raw markdown: "## Hello world"  →  "world" starts at raw column 10
+    // Plate text: "Hello world"       →  "world" starts at offset 6
+    const block: BlockNode = {
+      type: "h2",
+      children: [{ text: "Hello world" }],
+    };
+    const prefix = markupPrefixLength(block);
+    expect(prefix).toBe(3); // "## "
+    const rawColumn = 10;
+    const adjustedColumn = rawColumn - prefix; // 7
+    const offset = columnToOffset(11, adjustedColumn); // 6
+    expect(offset).toBe(6);
+  });
+
+  it("list item: raw column maps to correct Plate text offset", () => {
+    // Raw markdown: "- List item text"  →  "item" starts at raw column 8
+    // Plate text: "List item text"     →  "item" starts at offset 5
+    const block: BlockNode = {
+      type: "p",
+      indent: 1,
+      listStyleType: "disc",
+      children: [{ text: "List item text" }],
+    };
+    const prefix = markupPrefixLength(block);
+    expect(prefix).toBe(2); // "- "
+    const rawColumn = 8;
+    const adjustedColumn = rawColumn - prefix; // 6
+    const offset = columnToOffset(14, adjustedColumn); // 5
+    expect(offset).toBe(5);
+  });
+
+  it("blockquote: raw column maps to correct Plate text offset", () => {
+    // Raw markdown: "> A quoted sentence"  →  "quoted" starts at raw column 5
+    // Plate text: "A quoted sentence"     →  "quoted" starts at offset 2
+    const block: BlockNode = {
+      type: "blockquote",
+      children: [{ type: "p", children: [{ text: "A quoted sentence" }] }],
+    };
+    const prefix = markupPrefixLength(block);
+    expect(prefix).toBe(2); // "> "
+    const rawColumn = 5;
+    const adjustedColumn = rawColumn - prefix; // 3
+    const offset = columnToOffset(17, adjustedColumn); // 2
+    expect(offset).toBe(2);
+  });
+
+  it("plain paragraph: no adjustment needed", () => {
+    const block: BlockNode = {
+      type: "p",
+      children: [{ text: "Just plain text" }],
+    };
+    const prefix = markupPrefixLength(block);
+    expect(prefix).toBe(0);
+    const rawColumn = 6;
+    const offset = columnToOffset(15, rawColumn - prefix); // 5
+    expect(offset).toBe(5);
+  });
+
+  it("inline markup: prefix doesn't help but fuzzyFind corrects", () => {
+    // Raw markdown: "Some **bold** text"  →  "bold" at raw column 8
+    // Plate text: "Some bold text"       →  "bold" at offset 5
+    // markupPrefixLength returns 0 for plain p, so adjusted column = 7, offset = 7 (wrong)
+    // But fuzzyFind("Some bold text", "bold", 7) → 5 (correct)
+    const plateText = "Some bold text";
+    const wrongOffset = columnToOffset(plateText.length, 8); // 7
+    const corrected = fuzzyFind(plateText, "bold", wrongOffset);
+    expect(corrected).toBe(5);
   });
 });

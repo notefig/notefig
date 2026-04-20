@@ -143,7 +143,7 @@ export const Workspace = () => {
   }, [searchParams, setSearchParams, focusActiveEditor]);
 
   const handleSearchMatchClick = useCallback(
-    (filePath: string, line: number, column: number) => {
+    (filePath: string, line: number, column: number, matchText?: string) => {
       // Open the file tab
       handleFileSelect({
         path: filePath,
@@ -156,7 +156,14 @@ export const Workspace = () => {
       const maxAttempts = 20;
       const tryNavigate = () => {
         attempt++;
-        if (navigateToLocation(filePath, { line, column })) return;
+        if (
+          navigateToLocation(filePath, {
+            line,
+            column,
+            expectedText: matchText,
+          })
+        )
+          return;
         if (attempt < maxAttempts) {
           requestAnimationFrame(tryNavigate);
         }

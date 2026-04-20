@@ -15,6 +15,7 @@ import type { BaseSelection, Point, Range } from "slate";
 import {
   fuzzyFind,
   columnToOffset,
+  markupPrefixLength,
   lineColumnToTextareaOffset,
   rawLineToBlockPath,
   type BlockNode,
@@ -188,9 +189,16 @@ function createMarkdownInstance(content: string): MarkdownInstance {
         const block = Node.get(this.editor, blockPath);
         if (!block) return false;
 
-        // 3. Convert column to text offset within the block
+        // 3. Convert column to text offset within the block,
+        //    adjusting for markdown markup prefix characters (e.g. "## ", "- ", "> ")
+        //    that are counted in the raw column but absent from Plate text.
+        const topLevelBlock = this.editor.children[
+          mapping.blockIndex
+        ] as BlockNode;
+        const prefixLen = markupPrefixLength(topLevelBlock);
+        const adjustedColumn = Math.max(1, (location.column ?? 1) - prefixLen);
         const blockText = Node.string(block);
-        const offset = columnToOffset(blockText.length, location.column ?? 1);
+        const offset = columnToOffset(blockText.length, adjustedColumn);
 
         // 4. Find the correct text node path and offset
         const textPath = findTextNodePath(this.editor, blockPath, offset);
@@ -254,9 +262,17 @@ function createMarkdownInstance(content: string): MarkdownInstance {
           ) {
             const endBlock = Node.get(this.editor, endMapping.path);
             const endBlockText = Node.string(endBlock);
+            const endTopBlock = this.editor.children[
+              endMapping.blockIndex
+            ] as BlockNode;
+            const endPrefixLen = markupPrefixLength(endTopBlock);
+            const adjustedEndColumn = Math.max(
+              1,
+              location.endColumn - endPrefixLen,
+            );
             const endOffset = columnToOffset(
               endBlockText.length,
-              location.endColumn,
+              adjustedEndColumn,
             );
             const endTextPath = findTextNodePath(
               this.editor,

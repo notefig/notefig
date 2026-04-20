@@ -23,7 +23,12 @@ import { suppressEditorFocus } from "@/components/editor/editor-store";
 
 interface SearchPanelProps {
   workspacePath: string;
-  onMatchClick: (filePath: string, line: number, column: number) => void;
+  onMatchClick: (
+    filePath: string,
+    line: number,
+    column: number,
+    matchText?: string,
+  ) => void;
 }
 
 export interface SearchPanelHandle {
@@ -244,6 +249,7 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
                           filePath,
                           match.location.range.start.line,
                           match.location.range.start.column,
+                          match.content.matchText,
                         )
                       }
                     />

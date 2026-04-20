@@ -69,6 +69,61 @@ export function columnToOffset(textLength: number, column: number): number {
   return Math.min(offset, textLength);
 }
 
+/**
+ * Compute the number of markdown markup characters that precede the visible
+ * text content on a given line. This is used to adjust raw markdown column
+ * numbers (which count markup chars) to Plate text offsets (which don't).
+ *
+ * Examples:
+ *  - `# Heading`     → prefix = 2  ("# ")
+ *  - `## Heading`    → prefix = 3  ("## ")
+ *  - `- List item`   → prefix = 2  ("- ")
+ *  - `* List item`   → prefix = 2  ("* ")
+ *  - `1. Item`       → prefix = 3  ("1. ")
+ *  - `10. Item`      → prefix = 4  ("10. ")
+ *  - `> Quote`       → prefix = 2  ("> ")
+ *  - `   - Nested`   → prefix = 5  ("   - ")
+ *  - Code lines      → prefix = 0  (literal content)
+ *  - Plain paragraph → prefix = 0
+ *
+ * @param block - The top-level block node from the Plate AST
+ * @param innerBlock - For blockquotes, the inner block (block.children[0])
+ */
+export function markupPrefixLength(block: BlockNode): number {
+  const type = block.type;
+
+  // Headings: "# " through "###### "
+  if (type && /^h[1-6]$/.test(type)) {
+    const level = parseInt(type[1], 10);
+    return level + 1; // N hashes + 1 space
+  }
+
+  // List items (flat indent-based): compute indentation + marker
+  if (isListItem(block)) {
+    const indent = (block.indent ?? 1) - 1; // indent=1 is top-level (no leading spaces)
+    const indentSpaces = indent * 3; // typically 3 or 4 spaces per indent level
+
+    if (block.listStyleType === "decimal") {
+      // "1. ", "2. ", "10. ", etc.
+      const listStart = (block.listStart as number) ?? 1;
+      const numDigits = String(listStart).length;
+      return indentSpaces + numDigits + 2; // digits + ". "
+    }
+
+    // Unordered: "- " or "* "
+    return indentSpaces + 2;
+  }
+
+  // Blockquote: "> "
+  if (type === "blockquote") {
+    return 2;
+  }
+
+  // Code lines inside code_block: no prefix (literal content)
+  // Table cells, plain paragraphs, hr, img: no prefix
+  return 0;
+}
+
 // ---------------------------------------------------------------------------
 // Raw markdown line → Slate AST path mapping
 // ---------------------------------------------------------------------------
