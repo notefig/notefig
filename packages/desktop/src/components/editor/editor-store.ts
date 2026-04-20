@@ -16,6 +16,8 @@ import {
   fuzzyFind,
   columnToOffset,
   lineColumnToTextareaOffset,
+  rawLineToBlockPath,
+  type BlockNode,
 } from "@/utils/navigation-utils";
 
 /**
@@ -131,14 +133,29 @@ function createMarkdownInstance(content: string): MarkdownInstance {
     },
     goToLocation(location: EditorLocation): boolean {
       try {
-        // 1. Convert line number to Slate block path
-        const blockPath = lineToBlockPath(this.editor, location.line);
-        if (!blockPath) {
-          console.warn(`Line ${location.line} not found in document`);
+        // 1. Map raw file line number to Slate AST path using heuristic line counting
+        const mapping = rawLineToBlockPath(
+          this.editor.children as BlockNode[],
+          location.line,
+        );
+        if (!mapping) {
+          console.warn(
+            `Line ${location.line} could not be mapped to any block in document`,
+          );
           return false;
         }
 
-        // 2. Get the block at this path
+        // Skip non-navigable lines (code fences, table separators)
+        if (mapping.isFenceLine || mapping.isSeparatorLine) {
+          console.warn(
+            `Line ${location.line} is a fence/separator line, not navigable`,
+          );
+          return false;
+        }
+
+        const blockPath = mapping.path;
+
+        // 2. Get the node at the resolved path
         const block = Node.get(this.editor, blockPath);
         if (!block) return false;
 
@@ -147,7 +164,6 @@ function createMarkdownInstance(content: string): MarkdownInstance {
         const offset = columnToOffset(blockText.length, location.column ?? 1);
 
         // 4. Find the correct text node path and offset
-        // Blocks may have multiple text nodes (with marks), so we need to walk the text
         const textPath = findTextNodePath(this.editor, blockPath, offset);
         if (!textPath) {
           console.warn(`Could not find text node at offset ${offset}`);
@@ -162,17 +178,13 @@ function createMarkdownInstance(content: string): MarkdownInstance {
 
         // 6. If expectedText provided, verify and adjust with fuzzy matching
         if (location.expectedText) {
-          const blockText = Node.string(block);
           const computedOffset = textPath.absoluteOffset;
-
-          // Check if the expected text exists at the computed position
           const textAtPosition = blockText.slice(
             computedOffset,
             computedOffset + location.expectedText.length,
           );
 
           if (textAtPosition !== location.expectedText) {
-            // Fuzzy match: find closest occurrence of expected text
             const fuzzyOffset = fuzzyFind(
               blockText,
               location.expectedText,
@@ -202,9 +214,16 @@ function createMarkdownInstance(content: string): MarkdownInstance {
           location.endLine !== undefined &&
           location.endColumn !== undefined
         ) {
-          const endBlockPath = lineToBlockPath(this.editor, location.endLine);
-          if (endBlockPath) {
-            const endBlock = Node.get(this.editor, endBlockPath);
+          const endMapping = rawLineToBlockPath(
+            this.editor.children as BlockNode[],
+            location.endLine,
+          );
+          if (
+            endMapping &&
+            !endMapping.isFenceLine &&
+            !endMapping.isSeparatorLine
+          ) {
+            const endBlock = Node.get(this.editor, endMapping.path);
             const endBlockText = Node.string(endBlock);
             const endOffset = columnToOffset(
               endBlockText.length,
@@ -212,7 +231,7 @@ function createMarkdownInstance(content: string): MarkdownInstance {
             );
             const endTextPath = findTextNodePath(
               this.editor,
-              endBlockPath,
+              endMapping.path,
               endOffset,
             );
             if (endTextPath) {
@@ -227,7 +246,10 @@ function createMarkdownInstance(content: string): MarkdownInstance {
         // 8. Set selection and focus using Plate's API
         this.editor.tf.select(range);
 
-        // 9. Scroll into view
+        // 9. Save selection so focusEditor restores this location
+        this.selection = range;
+
+        // 10. Scroll into view
         try {
           const domRange = ReactEditor.toDOMRange(
             this.editor as unknown as ReactEditor,
@@ -248,7 +270,7 @@ function createMarkdownInstance(content: string): MarkdownInstance {
           console.warn("Failed to scroll to location:", scrollError);
         }
 
-        // 10. Focus the editor
+        // 11. Focus the editor
         this.editor.tf.focus();
 
         return true;
@@ -260,30 +282,6 @@ function createMarkdownInstance(content: string): MarkdownInstance {
   };
 
   return instance;
-}
-
-/**
- * Convert a 1-indexed line number to a Slate block path.
- * Treats each top-level block as a "line" in the document.
- */
-function lineToBlockPath(editor: PlateEditor, line: number): Path | null {
-  // Get all top-level block nodes
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const editorAny = editor as any;
-  const blocks = Array.from(
-    SlateEditor.nodes(editorAny, {
-      at: [],
-      match: (n) => SlateEditor.isBlock(editorAny, n as any),
-      mode: "highest", // Only top-level blocks
-    }),
-  );
-
-  // Line is 1-indexed, array is 0-indexed
-  if (line < 1 || line > blocks.length) {
-    return null;
-  }
-
-  return blocks[line - 1][1];
 }
 
 /**
@@ -313,7 +311,6 @@ function findTextNodePath(
     const endOffset = startOffset + textLength;
 
     if (absoluteOffset <= endOffset) {
-      // Found the text node containing our offset
       return {
         path: [...blockPath, ...relativePath],
         offset: absoluteOffset - startOffset,

@@ -28,7 +28,11 @@ import {
   handleMetadataFileSystemChange,
   handleContentFileSystemChange,
 } from "@/utils/file-sync";
-import { disposeAllEditors, getEditor } from "@/components/editor/editor-store";
+import {
+  disposeAllEditors,
+  getEditor,
+  navigateToLocation,
+} from "@/components/editor/editor-store";
 import { useSearchParams } from "react-router";
 import {
   type FileTreeMode,
@@ -135,6 +139,31 @@ export const Workspace = () => {
       });
     }
   }, [searchParams, setSearchParams, focusActiveEditor]);
+
+  const handleSearchMatchClick = useCallback(
+    (filePath: string, line: number, column: number) => {
+      // Open the file tab
+      handleFileSelect({
+        path: filePath,
+        type: "file",
+        contentHash: "",
+        content: "",
+      });
+      // Retry navigation until editor is mounted and ready (up to ~2s)
+      let attempt = 0;
+      const maxAttempts = 20;
+      const tryNavigate = () => {
+        attempt++;
+        if (navigateToLocation(filePath, { line, column })) return;
+        if (attempt < maxAttempts) {
+          requestAnimationFrame(tryNavigate);
+        }
+      };
+      requestAnimationFrame(tryNavigate);
+    },
+    [handleFileSelect],
+  );
+
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [direction, setDirection] = useState<"ltr" | "rtl">("ltr");
 
@@ -274,6 +303,7 @@ export const Workspace = () => {
               closeTab={closeTab}
               mode={fileTreeMode}
               onModeChange={setFileTreeMode}
+              onSearchMatchClick={handleSearchMatchClick}
             />
           )}
 

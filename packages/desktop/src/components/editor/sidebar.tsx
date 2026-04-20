@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { FileTree, type FileTreeMode } from "@/components/editor/file-tree";
 import { FileControls } from "@/components/editor/file-controls";
+import { SearchPanel } from "@/components/editor/search-panel";
 import {
   getOrCreateWorkspaceCollections,
   deleteFileOrDirectory,
@@ -20,6 +21,7 @@ interface SidebarProps {
   closeTab: (tabId: string) => void;
   mode: FileTreeMode;
   onModeChange: (mode: FileTreeMode) => void;
+  onSearchMatchClick: (filePath: string, line: number, column: number) => void;
 }
 
 export function Sidebar({
@@ -30,6 +32,7 @@ export function Sidebar({
   closeTab,
   mode,
   onModeChange,
+  onSearchMatchClick,
 }: SidebarProps) {
   const { metadata } = getOrCreateWorkspaceCollections(workspacePath);
 
@@ -183,6 +186,8 @@ export function Sidebar({
     [workspacePath, metadata],
   );
 
+  const sidebarView = searchParams.get("sidebarView") || "files";
+
   return (
     <>
       <div
@@ -190,24 +195,33 @@ export function Sidebar({
         className="shrink-0 bg-sidebar flex flex-col-reverse border-border"
         style={{ width: sidebarWidth }}
       >
-        <FileTree
-          selectedFilePath={activeTabId}
-          onFileSelect={onFileSelect}
-          onDelete={handleDeleteFile}
-          onRename={handleRenameFile}
-          onCreate={handleCreate}
-          openTabs={openTabs}
-          basePath={workspacePath}
-          sortOrder={sortOrder}
-          mode={mode}
-          onModeChange={onModeChange}
-        />
-        <FileControls
-          onNewFile={handleNewFile}
-          onNewFolder={handleNewFolder}
-          sortOrder={sortOrder}
-          onSortChange={setSortOrder}
-        />
+        {sidebarView === "search" ? (
+          <SearchPanel
+            workspacePath={workspacePath}
+            onMatchClick={onSearchMatchClick}
+          />
+        ) : (
+          <>
+            <FileTree
+              selectedFilePath={activeTabId}
+              onFileSelect={onFileSelect}
+              onDelete={handleDeleteFile}
+              onRename={handleRenameFile}
+              onCreate={handleCreate}
+              openTabs={openTabs}
+              basePath={workspacePath}
+              sortOrder={sortOrder}
+              mode={mode}
+              onModeChange={onModeChange}
+            />
+            <FileControls
+              onNewFile={handleNewFile}
+              onNewFolder={handleNewFolder}
+              sortOrder={sortOrder}
+              onSortChange={setSortOrder}
+            />
+          </>
+        )}
       </div>
       <div
         ref={resizeRef}

@@ -37,6 +37,7 @@ export function IconSidebar({
 }: IconSidebarProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const sidebarView = searchParams.get("sidebarView") || "files";
 
   useHotkey("Mod+\\", () => {
     onToggleCollapse();
@@ -46,15 +47,48 @@ export function IconSidebar({
     navigate("/welcome");
   };
 
+  const handleSidebarViewChange = (view: string) => {
+    setSearchParams((prev) => {
+      if (view === "files") {
+        prev.delete("sidebarView");
+      } else {
+        prev.set("sidebarView", view);
+      }
+      // Also ensure sidebar is expanded
+      prev.delete("sidebar");
+      return prev;
+    });
+  };
+
   const topIcons = [
-    { id: "search", icon: Search, label: "Search", onClick: () => {} },
+    {
+      id: "files",
+      icon: FileText,
+      label: "Files",
+      active: sidebarView === "files",
+      onClick: () => handleSidebarViewChange("files"),
+    },
+    {
+      id: "search",
+      icon: Search,
+      label: "Search",
+      active: sidebarView === "search",
+      onClick: () => handleSidebarViewChange("search"),
+    },
     {
       id: "command",
       icon: Command,
       label: "Command Palette",
+      active: false,
       onClick: onCommandPaletteClick,
     },
-    { id: "git", icon: GitBranch, label: "Git", onClick: () => {} },
+    {
+      id: "git",
+      icon: GitBranch,
+      label: "Git",
+      active: false,
+      onClick: () => {},
+    },
   ];
 
   const handleSettingsToggle = (open: boolean) => {
@@ -103,6 +137,7 @@ export function IconSidebar({
                   onClick={item.onClick}
                   className={cn(
                     "p-2 rounded-md transition-colors hover:bg-sidebar-accent",
+                    item.active && "bg-sidebar-accent",
                   )}
                 >
                   <item.icon className="w-5 h-5 text-muted-foreground" />
