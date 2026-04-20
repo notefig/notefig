@@ -78,7 +78,7 @@ export function SearchPanel({ workspacePath, onMatchClick }: SearchPanelProps) {
     <div className="flex flex-col h-full">
       {/* Search input row */}
       <div className="flex items-center gap-1 px-2 pt-2 pb-1">
-        <div className="flex-1 flex items-center gap-1.5 rounded-md border border-input bg-background px-2 py-1 text-sm">
+        <div className="flex-1 min-w-0 flex items-center gap-1.5 rounded-md border border-input bg-background px-2 py-1 text-sm">
           <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <input
             type="text"

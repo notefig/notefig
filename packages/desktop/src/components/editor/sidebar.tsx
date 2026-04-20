@@ -192,7 +192,7 @@ export function Sidebar({
     <>
       <div
         ref={containerRef}
-        className="shrink-0 bg-sidebar flex flex-col-reverse border-border"
+        className="shrink-0 bg-sidebar flex flex-col-reverse border-border min-h-0 overflow-hidden"
         style={{ width: sidebarWidth }}
       >
         {sidebarView === "search" ? (
