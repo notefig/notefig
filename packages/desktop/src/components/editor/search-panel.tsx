@@ -1,4 +1,11 @@
-import { useState, useCallback, useMemo } from "react";
+import {
+  useState,
+  useCallback,
+  useMemo,
+  useRef,
+  useImperativeHandle,
+  forwardRef,
+} from "react";
 import {
   Search,
   X,
@@ -12,207 +19,250 @@ import { useSearch } from "@/hooks/use-search";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { getFileName } from "@/utils/fs";
 import type { SearchMatch } from "@/adapters/platform-adapter.interface";
+import { suppressEditorFocus } from "@/components/editor/editor-store";
 
 interface SearchPanelProps {
   workspacePath: string;
   onMatchClick: (filePath: string, line: number, column: number) => void;
 }
 
-export function SearchPanel({ workspacePath, onMatchClick }: SearchPanelProps) {
-  const [query, setQuery] = useState("");
-  const [caseSensitive, setCaseSensitive] = useState(false);
-  const [filePattern, setFilePattern] = useState("");
-  const [showFilters, setShowFilters] = useState(false);
-  const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
+export interface SearchPanelHandle {
+  /** Focus the search input, select its text, and optionally set the file filter. */
+  focusInput: (filePattern?: string) => void;
+}
 
-  const { results, isSearching, error, resultCount, fileCount } = useSearch(
-    workspacePath,
-    {
-      query,
-      caseSensitive,
-      filePattern: filePattern || undefined,
-    },
-  );
+export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
+  function SearchPanel({ workspacePath, onMatchClick }, ref) {
+    const inputRef = useRef<HTMLInputElement>(null);
+    const [query, setQuery] = useState("");
+    const [caseSensitive, setCaseSensitive] = useState(false);
+    const [filePattern, setFilePattern] = useState("");
+    const [showFilters, setShowFilters] = useState(false);
+    const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(
+      new Set(),
+    );
 
-  // Group results by file
-  const groupedResults = useMemo(() => {
-    const groups = new Map<string, SearchMatch[]>();
-    for (const match of results) {
-      const filePath = match.location.filePath;
-      const existing = groups.get(filePath);
-      if (existing) {
-        existing.push(match);
-      } else {
-        groups.set(filePath, [match]);
+    useImperativeHandle(ref, () => ({
+      focusInput: (pattern?: string) => {
+        // Suppress editor focus stealing for 500ms to prevent race conditions
+        suppressEditorFocus(500);
+
+        if (pattern) {
+          setFilePattern(pattern);
+          setShowFilters(true);
+        } else {
+          // Global search — clear any existing file filter
+          setFilePattern("");
+          setShowFilters(false);
+        }
+        // Double rAF to ensure React has rendered the sidebar/search view
+        // before we attempt to focus. The first rAF waits for the current
+        // paint, the second ensures our state updates have flushed.
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            inputRef.current?.focus();
+            inputRef.current?.select();
+          });
+        });
+      },
+    }));
+
+    const { results, isSearching, error, resultCount, fileCount } = useSearch(
+      workspacePath,
+      {
+        query,
+        caseSensitive,
+        filePattern: filePattern || undefined,
+      },
+    );
+
+    // Group results by file
+    const groupedResults = useMemo(() => {
+      const groups = new Map<string, SearchMatch[]>();
+      for (const match of results) {
+        const filePath = match.location.filePath;
+        const existing = groups.get(filePath);
+        if (existing) {
+          existing.push(match);
+        } else {
+          groups.set(filePath, [match]);
+        }
       }
-    }
 
-    // Sort groups by file name (A to Z)
-    const entries = [...groups.entries()];
-    entries.sort((a, b) => {
-      const nameA = getFileName(a[0]).toLowerCase();
-      const nameB = getFileName(b[0]).toLowerCase();
-      return nameA.localeCompare(nameB);
-    });
+      // Sort groups by file name (A to Z)
+      const entries = [...groups.entries()];
+      entries.sort((a, b) => {
+        const nameA = getFileName(a[0]).toLowerCase();
+        const nameB = getFileName(b[0]).toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
 
-    return entries;
-  }, [results]);
+      return entries;
+    }, [results]);
 
-  const toggleFileCollapsed = useCallback((filePath: string) => {
-    setCollapsedFiles((prev) => {
-      const next = new Set(prev);
-      if (next.has(filePath)) {
-        next.delete(filePath);
-      } else {
-        next.add(filePath);
-      }
-      return next;
-    });
-  }, []);
+    const toggleFileCollapsed = useCallback((filePath: string) => {
+      setCollapsedFiles((prev) => {
+        const next = new Set(prev);
+        if (next.has(filePath)) {
+          next.delete(filePath);
+        } else {
+          next.add(filePath);
+        }
+        return next;
+      });
+    }, []);
 
-  const handleClear = useCallback(() => {
-    setQuery("");
-  }, []);
+    const handleClear = useCallback(() => {
+      setQuery("");
+    }, []);
 
-  return (
-    <div className="flex flex-col h-full">
-      {/* Search input row */}
-      <div className="flex items-center gap-1 px-2 pt-2 pb-1">
-        <div className="flex-1 min-w-0 flex items-center gap-1.5 rounded-md border border-input bg-background px-2 py-1 text-sm">
-          <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search"
-            className="flex-1 bg-transparent outline-none placeholder:text-muted-foreground text-sm min-w-0"
-            autoFocus
-          />
+    return (
+      <div className="flex flex-col h-full">
+        {/* Search input row */}
+        <div className="flex items-center gap-1 px-2 pt-2 pb-1">
+          <div className="flex-1 min-w-0 flex items-center gap-1.5 rounded-md border border-input bg-background px-2 py-1 text-sm">
+            <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search"
+              className="flex-1 bg-transparent outline-none placeholder:text-muted-foreground text-sm min-w-0"
+              autoFocus
+            />
+            <button
+              onClick={() => setCaseSensitive(!caseSensitive)}
+              className={cn(
+                "p-0.5 rounded transition-colors shrink-0",
+                caseSensitive
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              title="Match case"
+            >
+              <CaseSensitive className="w-4 h-4" />
+            </button>
+            {query && (
+              <button
+                onClick={handleClear}
+                className="p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                title="Clear search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
           <button
-            onClick={() => setCaseSensitive(!caseSensitive)}
+            onClick={() => {
+              const willHide = showFilters;
+              setShowFilters(!showFilters);
+              if (willHide) {
+                setFilePattern("");
+              }
+            }}
             className={cn(
-              "p-0.5 rounded transition-colors shrink-0",
-              caseSensitive
+              "p-1.5 rounded transition-colors shrink-0",
+              showFilters
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:text-foreground",
             )}
-            title="Match case"
+            title="Toggle filters"
           >
-            <CaseSensitive className="w-4 h-4" />
+            <SlidersHorizontal className="w-4 h-4" />
           </button>
-          {query && (
-            <button
-              onClick={handleClear}
-              className="p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors shrink-0"
-              title="Clear search"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
         </div>
-        <button
-          onClick={() => setShowFilters(!showFilters)}
-          className={cn(
-            "p-1.5 rounded transition-colors shrink-0",
-            showFilters
-              ? "bg-accent text-accent-foreground"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-          title="Toggle filters"
-        >
-          <SlidersHorizontal className="w-4 h-4" />
-        </button>
-      </div>
 
-      {/* Filter row */}
-      {showFilters && (
-        <div className="px-2 pb-1">
-          <input
-            type="text"
-            value={filePattern}
-            onChange={(e) => setFilePattern(e.target.value)}
-            placeholder="File filter (e.g. *.md)"
-            className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm outline-none placeholder:text-muted-foreground"
-          />
-        </div>
-      )}
-
-      {/* Toolbar row */}
-      {query.trim() && (
-        <div className="flex items-center px-2 py-1 text-xs text-muted-foreground">
-          {isSearching ? (
-            <span className="inline-flex items-center gap-1">
-              searching
-              <span className="animate-pulse">...</span>
-            </span>
-          ) : (
-            `${resultCount} result${resultCount !== 1 ? "s" : ""} in ${fileCount} file${fileCount !== 1 ? "s" : ""}`
-          )}
-        </div>
-      )}
-
-      {/* Error */}
-      {error && (
-        <div className="px-2 py-1 text-xs text-destructive">
-          {error.message}
-        </div>
-      )}
-
-      {/* Results */}
-      <ScrollArea className="flex-1 min-h-0">
-        {groupedResults.map(([filePath, matches]) => {
-          const isCollapsed = collapsedFiles.has(filePath);
-          const fileName = getFileName(filePath);
-
-          return (
-            <div key={filePath}>
-              {/* File header */}
-              <button
-                onClick={() => toggleFileCollapsed(filePath)}
-                className="flex items-center w-full px-2 py-1 text-sm hover:bg-accent/50 transition-colors gap-1"
-              >
-                {isCollapsed ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                )}
-                <span className="truncate text-start flex-1">{fileName}</span>
-                <span className="text-xs text-muted-foreground shrink-0">
-                  {matches.length}
-                </span>
-              </button>
-
-              {/* Match items */}
-              {!isCollapsed &&
-                matches.map((match, i) => (
-                  <SearchResultItem
-                    key={`${filePath}:${match.location.range.start.line}:${match.location.range.start.column}:${i}`}
-                    match={match}
-                    query={query}
-                    caseSensitive={caseSensitive}
-                    onClick={() =>
-                      onMatchClick(
-                        filePath,
-                        match.location.range.start.line,
-                        match.location.range.start.column,
-                      )
-                    }
-                  />
-                ))}
-            </div>
-          );
-        })}
-
-        {/* Empty state */}
-        {!isSearching && query.trim() && resultCount === 0 && !error && (
-          <div className="px-2 py-4 text-sm text-muted-foreground text-center">
-            No results found
+        {/* Filter row */}
+        {showFilters && (
+          <div className="px-2 pb-1">
+            <input
+              type="text"
+              value={filePattern}
+              onChange={(e) => setFilePattern(e.target.value)}
+              placeholder="File filter (e.g. *.md)"
+              className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm outline-none placeholder:text-muted-foreground"
+            />
           </div>
         )}
-      </ScrollArea>
-    </div>
-  );
-}
+
+        {/* Toolbar row */}
+        {query.trim() && (
+          <div className="flex items-center px-2 py-1 text-xs text-muted-foreground">
+            {isSearching ? (
+              <span className="inline-flex items-center gap-1">
+                searching
+                <span className="animate-pulse">...</span>
+              </span>
+            ) : (
+              `${resultCount} result${resultCount !== 1 ? "s" : ""} in ${fileCount} file${fileCount !== 1 ? "s" : ""}`
+            )}
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div className="px-2 py-1 text-xs text-destructive">
+            {error.message}
+          </div>
+        )}
+
+        {/* Results */}
+        <ScrollArea className="flex-1 min-h-0">
+          {groupedResults.map(([filePath, matches]) => {
+            const isCollapsed = collapsedFiles.has(filePath);
+            const fileName = getFileName(filePath);
+
+            return (
+              <div key={filePath}>
+                {/* File header */}
+                <button
+                  onClick={() => toggleFileCollapsed(filePath)}
+                  className="flex items-center w-full px-2 py-1 text-sm hover:bg-accent/50 transition-colors gap-1"
+                >
+                  {isCollapsed ? (
+                    <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                  )}
+                  <span className="truncate text-start flex-1">{fileName}</span>
+                  <span className="text-xs text-muted-foreground shrink-0">
+                    {matches.length}
+                  </span>
+                </button>
+
+                {/* Match items */}
+                {!isCollapsed &&
+                  matches.map((match, i) => (
+                    <SearchResultItem
+                      key={`${filePath}:${match.location.range.start.line}:${match.location.range.start.column}:${i}`}
+                      match={match}
+                      query={query}
+                      caseSensitive={caseSensitive}
+                      onClick={() =>
+                        onMatchClick(
+                          filePath,
+                          match.location.range.start.line,
+                          match.location.range.start.column,
+                        )
+                      }
+                    />
+                  ))}
+              </div>
+            );
+          })}
+
+          {/* Empty state */}
+          {!isSearching && query.trim() && resultCount === 0 && !error && (
+            <div className="px-2 py-4 text-sm text-muted-foreground text-center">
+              No results found
+            </div>
+          )}
+        </ScrollArea>
+      </div>
+    );
+  },
+);
 
 function SearchResultItem({
   match,

@@ -148,6 +148,10 @@ export function useDockableTabs(
 
     // Use rAF to ensure DOM is ready and component has mounted
     const rafId = requestAnimationFrame(() => {
+      // Don't steal focus from sidebar inputs (e.g. search panel)
+      const active = document.activeElement;
+      if (active && active.closest("[data-sidebar]")) return;
+
       focusEditor(activeTabId);
     });
 

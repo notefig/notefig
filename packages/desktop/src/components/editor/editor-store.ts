@@ -98,6 +98,32 @@ export interface ImageInstance extends EditorInstance {
 /** Module-level store: file path → editor instance */
 const editorInstances = new Map<string, EditorInstance>();
 
+/**
+ * When true, all editor focus() calls are suppressed.
+ * Used to prevent the editor from stealing focus from the search panel.
+ */
+let focusSuppressed = false;
+let focusSuppressTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Suppress all editor focus for the given duration (ms).
+ * Calling again resets the timer.
+ */
+export function suppressEditorFocus(durationMs = 300): void {
+  focusSuppressed = true;
+  if (focusSuppressTimer) clearTimeout(focusSuppressTimer);
+  focusSuppressTimer = setTimeout(() => {
+    focusSuppressed = false;
+    focusSuppressTimer = null;
+  }, durationMs);
+}
+
+function isEditorFocusSuppressed(): boolean {
+  if (focusSuppressed) return true;
+  const active = document.activeElement;
+  return !!(active && active.closest("[data-sidebar]"));
+}
+
 function createMarkdownInstance(content: string): MarkdownInstance {
   const editor = createPlateEditor({
     plugins: MarkdownEditorKit,
@@ -116,6 +142,8 @@ function createMarkdownInstance(content: string): MarkdownInstance {
     editor,
     selection: null,
     focus(): boolean {
+      if (isEditorFocusSuppressed()) return false;
+
       const saved = this.selection ?? this.editor.selection;
       if (saved) {
         this.editor.tf.focus({ at: saved });
@@ -339,6 +367,8 @@ function createCodeInstance(filePath: string): CodeInstance {
       content: "",
     },
     focus(): boolean {
+      if (isEditorFocusSuppressed()) return false;
+
       // Look up the container by data attribute since we don't store a ref
       const el = document.querySelector(
         `[data-editor-container="${this.filePath}"]`,
@@ -416,6 +446,8 @@ function createImageInstance(filePath: string): ImageInstance {
     type: "image",
     filePath,
     focus(): boolean {
+      if (isEditorFocusSuppressed()) return false;
+
       const selector = `[data-editor-container="${this.filePath}"]`;
       const el = document.querySelector(selector);
       if (el instanceof HTMLElement) {

@@ -1,7 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, type Ref } from "react";
 import { FileTree, type FileTreeMode } from "@/components/editor/file-tree";
 import { FileControls } from "@/components/editor/file-controls";
-import { SearchPanel } from "@/components/editor/search-panel";
+import {
+  SearchPanel,
+  type SearchPanelHandle,
+} from "@/components/editor/search-panel";
 import {
   getOrCreateWorkspaceCollections,
   deleteFileOrDirectory,
@@ -22,6 +25,7 @@ interface SidebarProps {
   mode: FileTreeMode;
   onModeChange: (mode: FileTreeMode) => void;
   onSearchMatchClick: (filePath: string, line: number, column: number) => void;
+  searchPanelRef?: Ref<SearchPanelHandle>;
 }
 
 export function Sidebar({
@@ -33,6 +37,7 @@ export function Sidebar({
   mode,
   onModeChange,
   onSearchMatchClick,
+  searchPanelRef,
 }: SidebarProps) {
   const { metadata } = getOrCreateWorkspaceCollections(workspacePath);
 
@@ -192,11 +197,13 @@ export function Sidebar({
     <>
       <div
         ref={containerRef}
+        data-sidebar
         className="shrink-0 bg-sidebar flex flex-col-reverse border-border min-h-0 overflow-hidden"
         style={{ width: sidebarWidth }}
       >
         {sidebarView === "search" ? (
           <SearchPanel
+            ref={searchPanelRef}
             workspacePath={workspacePath}
             onMatchClick={onSearchMatchClick}
           />

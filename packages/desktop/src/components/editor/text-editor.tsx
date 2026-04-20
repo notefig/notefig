@@ -174,6 +174,10 @@ export function TextEditor({ file, basePath }: TextEditorProps) {
     const rafId = requestAnimationFrame(() => {
       if (cancelled) return;
 
+      // Don't steal focus from sidebar inputs (e.g. search panel)
+      const active = document.activeElement;
+      if (active && active.closest("[data-sidebar]")) return;
+
       // Force-clear IS_FOCUSED so DOMEditor.focus() doesn't bail as no-op
       editor.tf.blur();
 
