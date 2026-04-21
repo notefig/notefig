@@ -22,6 +22,8 @@ import {
   realisticDocumentLineMap,
   embeddedNewlines,
   embeddedNewlinesLineMap,
+  frontmatterEmptyParagraphsAndTodos,
+  frontmatterEmptyParagraphsAndTodosLineMap,
   codeBlock,
   blockquote,
   unorderedList,
@@ -142,9 +144,12 @@ describe("rawLineToBlockPath", () => {
       expect(result!.path).toEqual([2]);
     });
 
-    it("should return null for blank line 2", () => {
+    it("should return separator mapping for blank line 2 (not null)", () => {
+      // Line 2 in the file is a blank separator between block 0 and block 1.
+      // Plate doesn't display it, so we map it to the preceding block.
       const result = rawLineToBlockPath(simpleParagraphs as BlockNode[], 2);
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result!.isSeparatorLine).toBe(true);
     });
 
     it("should return null for line 0", () => {
@@ -329,12 +334,18 @@ describe("rawLineToBlockPath", () => {
       },
     );
 
-    it("should return null for blank lines", () => {
+    it("should return separator mapping for blank lines (Plate doesn't display them)", () => {
+      // Blank lines in the file are separator lines between blocks.
+      // Plate doesn't display these lines, so we map them to the preceding block
+      // with isSeparatorLine=true (instead of returning null).
       const blanks = [2, 4, 10, 14, 18, 20, 22, 27];
       for (const line of blanks) {
-        expect(
-          rawLineToBlockPath(realisticDocument as BlockNode[], line),
-        ).toBeNull();
+        const result = rawLineToBlockPath(
+          realisticDocument as BlockNode[],
+          line,
+        );
+        expect(result).not.toBeNull();
+        expect(result!.isSeparatorLine).toBe(true);
       }
     });
 
@@ -633,11 +644,25 @@ describe("rawLineToBlockPath — embedded newlines", () => {
     },
   );
 
-  it("blank lines between multi-line paragraphs return null", () => {
-    // Line 2 and 6 are blank separators
-    expect(rawLineToBlockPath(embeddedNewlines as BlockNode[], 2)).toBeNull();
-    expect(rawLineToBlockPath(embeddedNewlines as BlockNode[], 6)).toBeNull();
-    expect(rawLineToBlockPath(embeddedNewlines as BlockNode[], 10)).toBeNull();
+  it("blank lines between multi-line paragraphs return block mapping (Plate doesn't display separator)", () => {
+    // Line 2 and 6 are blank separators — Plate doesn't display these separator lines.
+    // Our implementation maps them to the preceding block with isSeparatorLine=true.
+    // This is correct because the line belongs to the preceding block in the rendered view.
+    const sep2 = rawLineToBlockPath(embeddedNewlines as BlockNode[], 2);
+    expect(sep2).not.toBeNull();
+    expect(sep2!.blockIndex).toBe(0);
+    expect(sep2!.isSeparatorLine).toBe(true);
+
+    const sep6 = rawLineToBlockPath(embeddedNewlines as BlockNode[], 6);
+    expect(sep6).not.toBeNull();
+    expect(sep6!.blockIndex).toBe(1);
+    expect(sep6!.isSeparatorLine).toBe(true);
+
+    // Line 10 is beyond the last block
+    const sep10 = rawLineToBlockPath(embeddedNewlines as BlockNode[], 10);
+    expect(sep10).not.toBeNull();
+    expect(sep10!.blockIndex).toBe(2);
+    expect(sep10!.isSeparatorLine).toBe(true);
   });
 });
 
@@ -711,6 +736,58 @@ describe("markupPrefixLength", () => {
         children: [],
       }),
     ).toBe(6);
+  });
+
+  it("returns correct prefix for checkbox list items", () => {
+    // Unordered checkbox: "- [ ] " = 6 or "- [x] " = 6
+    expect(
+      markupPrefixLength({
+        type: "p",
+        indent: 1,
+        listStyleType: "disc",
+        checked: false,
+        children: [],
+      }),
+    ).toBe(6); // "- [ ] "
+    expect(
+      markupPrefixLength({
+        type: "p",
+        indent: 1,
+        listStyleType: "disc",
+        checked: true,
+        children: [],
+      }),
+    ).toBe(6); // "- [x] "
+    // Todo style checkbox: "- [ ] " = 6 (same as disc)
+    expect(
+      markupPrefixLength({
+        type: "p",
+        indent: 1,
+        listStyleType: "todo",
+        checked: false,
+        children: [],
+      }),
+    ).toBe(6); // "- [ ] "
+    // Nested checkbox: "   - [ ] " = 9
+    expect(
+      markupPrefixLength({
+        type: "p",
+        indent: 2,
+        listStyleType: "todo",
+        checked: false,
+        children: [],
+      }),
+    ).toBe(9); // "   - [ ] "
+    // Nested checkbox: "   - [ ] " = 9
+    expect(
+      markupPrefixLength({
+        type: "p",
+        indent: 2,
+        listStyleType: "disc",
+        checked: false,
+        children: [],
+      }),
+    ).toBe(9); // "   - [ ] "
   });
 
   it("returns correct prefix for blockquotes", () => {
@@ -795,5 +872,48 @@ describe("markupPrefixLength integration: adjusted column → correct offset", (
     const wrongOffset = columnToOffset(plateText.length, 8); // 7
     const corrected = fuzzyFind(plateText, "bold", wrongOffset);
     expect(corrected).toBe(5);
+  });
+});
+
+describe("rawLineToBlockPath — frontmatter with empty paragraphs and todos", () => {
+  it.each(frontmatterEmptyParagraphsAndTodosLineMap)(
+    "line $rawLine → $description",
+    ({ rawLine, blockIndex, path, expectedText }) => {
+      const mapping = rawLineToBlockPath(
+        frontmatterEmptyParagraphsAndTodos as BlockNode[],
+        rawLine,
+      );
+      expect(mapping).not.toBeNull();
+      expect(mapping!.blockIndex).toBe(blockIndex);
+      expect(mapping!.path).toEqual(path);
+
+      const editor = createTestEditor(
+        frontmatterEmptyParagraphsAndTodos as Descendant[],
+      );
+      const node = Node.get(editor as unknown as Node, mapping!.path);
+      expect(Node.string(node)).toBe(expectedText);
+    },
+  );
+
+  it("blank lines between frontmatter and todo items are correctly mapped", () => {
+    // Based on the line counting trace:
+    // Block 0 (hr): line 1
+    // Block 1 (h2): lines 2-6 (5 embedded newlines)
+    // Separator after block 1: line 8 (falls in h2 range [3,7])
+    // Block 2 (empty p): line 9
+    // Block 3 (empty p): line 10 (no separator - same list group with block 2)
+    // Block 4 (empty p): line 11
+    // Separator after block 4: line 12 (falls in block 4 range [11,11])
+    // Block 5 (todo hello): line 13
+    // etc.
+    expect(
+      rawLineToBlockPath(frontmatterEmptyParagraphsAndTodos as BlockNode[], 7),
+    ).not.toBeNull(); // falls in block 1 (h2) range [3,7]
+    expect(
+      rawLineToBlockPath(frontmatterEmptyParagraphsAndTodos as BlockNode[], 9),
+    ).not.toBeNull(); // block 2 (first empty p)
+    expect(
+      rawLineToBlockPath(frontmatterEmptyParagraphsAndTodos as BlockNode[], 10),
+    ).not.toBeNull(); // block 3 (second empty p)
   });
 });

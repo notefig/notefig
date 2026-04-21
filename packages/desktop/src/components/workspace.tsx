@@ -25,6 +25,7 @@ import type { FileEntry } from "@/utils/fs";
 import { getFileName } from "@/utils/fs";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
 import { platformAdapter } from "@/adapters";
+import { retryOnAnimationFrame } from "@/utils/retry-on-animation-frame";
 import {
   handleMetadataFileSystemChange,
   handleContentFileSystemChange,
@@ -62,6 +63,7 @@ export const Workspace = () => {
     closeActiveTab,
     getFocusedTabId,
     focusActiveEditor,
+    getSelectedText,
   } = useDockableTabs({
     renderTabs: () => [],
     canOpenFile: (file) => file.type === "file" && canOpenInEditor(file.path),
@@ -131,6 +133,7 @@ export const Workspace = () => {
         prev.delete("sidebar");
       } else {
         prev.set("sidebar", "collapsed");
+        prev.delete("sidebarView");
       }
       return prev;
     });
@@ -243,7 +246,10 @@ export const Workspace = () => {
   }, [setSearchParams]);
 
   const openSearchPanel = useCallback(
-    (filePattern?: string) => {
+    (options?: { filePattern?: string; initialQuery?: string }) => {
+      const filePattern = options?.filePattern;
+      const initialQuery = options?.initialQuery;
+
       // Switch sidebar to search view and expand it
       setSearchParams((prev) => {
         prev.set("sidebarView", "search");
@@ -251,9 +257,10 @@ export const Workspace = () => {
         return prev;
       });
 
-      // Focus input after sidebar view switch renders
-      requestAnimationFrame(() => {
-        searchPanelRef.current?.focusInput(filePattern);
+      retryOnAnimationFrame(() => {
+        if (!searchPanelRef.current) return false;
+        searchPanelRef.current.focusInput({ filePattern, initialQuery });
+        return true;
       });
     },
     [setSearchParams],
@@ -261,16 +268,23 @@ export const Workspace = () => {
 
   /** Mod+F — search within the active file */
   const handleSearchInFile = useCallback(() => {
+    const selectedText = getSelectedText();
+
     if (activeTabId) {
-      openSearchPanel(getFileName(activeTabId));
+      openSearchPanel({
+        filePattern: getFileName(activeTabId),
+        initialQuery: selectedText,
+      });
     } else {
-      openSearchPanel();
+      openSearchPanel({ initialQuery: selectedText });
     }
-  }, [activeTabId, openSearchPanel]);
+  }, [activeTabId, getSelectedText, openSearchPanel]);
 
   /** Mod+Shift+F — global search across all files */
   const handleSearchInFiles = useCallback(() => {
-    openSearchPanel();
+    const selectedText = getSelectedText();
+
+    openSearchPanel({ initialQuery: selectedText });
   }, [openSearchPanel]);
 
   useHotkey("Mod+N", () => {

@@ -659,6 +659,203 @@ export const embeddedNewlinesLineMap: Array<{
   },
 ];
 
+/**
+ * Document with frontmatter, consecutive empty paragraphs, and todo list items.
+ * Mimics the structure from the canto-xxxiv.md file that caused navigation issues.
+ *
+ * Raw markdown:
+ * Line 1:  ---
+ * Line 2:  title: canto xxxiv
+ * Line 3:  index: 34
+ * Line 4:  author: parsa
+ * Line 5:  date: '2025-10-14'
+ * Line 6:  updated: '2025-10-14'
+ * Line 7:  ---
+ * Line 8:  ## title: canto xxxiv...
+ * Line 9:  (blank)
+ * Line 10: (blank)
+ * Line 11: (blank)
+ * Line 12: - [ ] hello
+ * Line 13: - [x] worldd
+ * Line 14: ## CANTO XXXIV.
+ * Line 15: [massive paragraph content]
+ *
+ * Note: The frontmatter separator creates empty p blocks for blank lines.
+ */
+export const frontmatterEmptyParagraphsAndTodos: PlateNode[] = [
+  // Block 0 — line 1 (hr)
+  { type: "hr", children: [{ text: "" }] },
+  // Block 1 — lines 2-6 (h2 with frontmatter, 5 embedded lines)
+  {
+    type: "h2",
+    children: [
+      {
+        text: "title: canto xxxiv\nindex: 34\nauthor: parsa\ndate: '2025-10-14'\nupdated: '2025-10-14'",
+      },
+    ],
+  },
+  // Block 2 — line 9 (empty p = blank line)
+  { type: "p", children: [{ text: "" }] },
+  // Block 3 — line 10 (empty p = blank line)
+  { type: "p", children: [{ text: "" }] },
+  // Block 4 — line 11 (empty p = blank line)
+  { type: "p", children: [{ text: "" }] },
+  // Block 5 — line 12 (todo item: - [ ] hello)
+  {
+    type: "p",
+    indent: 1,
+    listStyleType: "todo",
+    checked: false,
+    children: [{ text: "hello" }],
+  },
+  // Block 6 — line 13 (todo item: - [x] worldd)
+  {
+    type: "p",
+    indent: 1,
+    listStyleType: "todo",
+    checked: true,
+    listStart: 2,
+    children: [{ text: "worldd" }],
+  },
+  // Block 7 — line 16 (h2: CANTO XXXIV.) after separators
+  { type: "h2", children: [{ text: "CANTO XXXIV." }] },
+  // Block 8 — line 18+ (large paragraph with all the poem text) after separator
+  {
+    type: "p",
+    children: [
+      {
+        text: "'Vexilla Regis prodeunt Inferni Towards where we are; seek then with vision keen,' My Master bade, 'if trace of him thou spy.' As, when the exhalations dense have been, Or when our hemisphere grows dark with night, A windmill from afar is sometimes seen, I seemed to catch of such a structure sight; And then to 'scape the blast did backward draw Behind my Guide--sole shelter in my plight. Now was I where (I versify with awe) The shades were wholly covered, and did show Visible as in glass are bits of straw. Some stood upright and some were lying low, Some with head topmost, others with their feet; And some with face to feet bent like a bow. But we kept going on till it seemed meet Unto my Master that I should behold The creature once of countenance so sweet. He stepped aside and stopped me as he told: 'Lo, Dis! And lo, we are arrived at last Where thou must nerve thee and must make thee bold,' How I hereon stood shivering and aghast, Demand not, Reader; this I cannot write; So much the fact all reach of words surpassed. I was not dead, yet living was not quite: Think for thyself, if gifted with the power, What, life and death denied me, was my plight.",
+      },
+    ],
+  },
+];
+
+export const frontmatterEmptyParagraphsAndTodosLineMap: Array<{
+  rawLine: number;
+  blockIndex: number;
+  path: number[];
+  expectedText: string;
+  description: string;
+}> = [
+  {
+    rawLine: 1,
+    blockIndex: 0,
+    path: [0],
+    expectedText: "",
+    description: "hr (line 1)",
+  },
+  // Line 2: separator after hr (falls in hr range, separator not displayed by Plate)
+  {
+    rawLine: 2,
+    blockIndex: 0,
+    path: [0],
+    expectedText: "",
+    description: "separator after hr (line 2)",
+  },
+  {
+    rawLine: 3,
+    blockIndex: 1,
+    path: [1],
+    expectedText:
+      "title: canto xxxiv\nindex: 34\nauthor: parsa\ndate: '2025-10-14'\nupdated: '2025-10-14'",
+    description: "frontmatter h2 (line 1 of 5)",
+  },
+  {
+    rawLine: 3,
+    blockIndex: 1,
+    path: [1],
+    expectedText:
+      "title: canto xxxiv\nindex: 34\nauthor: parsa\ndate: '2025-10-14'\nupdated: '2025-10-14'",
+    description: "frontmatter h2 (line 2 of 5)",
+  },
+  {
+    rawLine: 4,
+    blockIndex: 1,
+    path: [1],
+    expectedText:
+      "title: canto xxxiv\nindex: 34\nauthor: parsa\ndate: '2025-10-14'\nupdated: '2025-10-14'",
+    description: "frontmatter h2 (line 3 of 5)",
+  },
+  {
+    rawLine: 5,
+    blockIndex: 1,
+    path: [1],
+    expectedText:
+      "title: canto xxxiv\nindex: 34\nauthor: parsa\ndate: '2025-10-14'\nupdated: '2025-10-14'",
+    description: "frontmatter h2 (line 4 of 5)",
+  },
+  {
+    rawLine: 6,
+    blockIndex: 1,
+    path: [1],
+    expectedText:
+      "title: canto xxxiv\nindex: 34\nauthor: parsa\ndate: '2025-10-14'\nupdated: '2025-10-14'",
+    description: "frontmatter h2 (line 5 of 5)",
+  },
+  // Line 7: blank separator after block 1 (h2) — falls in h2's range
+  // Line 8: blank separator after block 1
+  // Line 9: first empty p block
+  {
+    rawLine: 9,
+    blockIndex: 2,
+    path: [2],
+    expectedText: "",
+    description: "empty p (blank line 1)",
+  },
+  // Line 10: second empty p block (no separator between consecutive empty p's)
+  {
+    rawLine: 10,
+    blockIndex: 3,
+    path: [3],
+    expectedText: "",
+    description: "empty p (blank line 2)",
+  },
+  // Line 11: third empty p block
+  {
+    rawLine: 11,
+    blockIndex: 4,
+    path: [4],
+    expectedText: "",
+    description: "empty p (blank line 3)",
+  },
+  // Line 12: separator after empty p block 4
+  // Line 13: todo item
+  {
+    rawLine: 13,
+    blockIndex: 5,
+    path: [5],
+    expectedText: "hello",
+    description: "todo item 'hello' (unchecked)",
+  },
+  // Line 14: todo item
+  {
+    rawLine: 14,
+    blockIndex: 6,
+    path: [6],
+    expectedText: "worldd",
+    description: "todo item 'worldd' (checked)",
+  },
+  // Line 15: separator
+  // Line 16: h2 CANTO XXXIV
+  {
+    rawLine: 16,
+    blockIndex: 7,
+    path: [7],
+    expectedText: "CANTO XXXIV.",
+    description: "h2 CANTO XXXIV",
+  },
+  // Line 17: separator
+  // Line 18+: large paragraph
+  {
+    rawLine: 18,
+    blockIndex: 8,
+    path: [8],
+    expectedText:
+      "'Vexilla Regis prodeunt Inferni Towards where we are; seek then with vision keen,' My Master bade, 'if trace of him thou spy.' As, when the exhalations dense have been, Or when our hemisphere grows dark with night, A windmill from afar is sometimes seen, I seemed to catch of such a structure sight; And then to 'scape the blast did backward draw Behind my Guide--sole shelter in my plight. Now was I where (I versify with awe) The shades were wholly covered, and did show Visible as in glass are bits of straw. Some stood upright and some were lying low, Some with head topmost, others with their feet; And some with face to feet bent like a bow. But we kept going on till it seemed meet Unto my Master that I should behold The creature once of countenance so sweet. He stepped aside and stopped me as he told: 'Lo, Dis! And lo, we are arrived at last Where thou must nerve thee and must make thee bold,' How I hereon stood shivering and aghast, Demand not, Reader; this I cannot write; So much the fact all reach of words surpassed. I was not dead, yet living was not quite: Think for thyself, if gifted with the power, What, life and death denied me, was my plight.",
+    description: "large paragraph (line 1 of N)",
+  },
+];
+
 export const table: PlateNode[] = [
   {
     type: "table",

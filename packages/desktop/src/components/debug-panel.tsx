@@ -15,8 +15,15 @@ import {
   X,
   Copy,
   Check,
+  FileJson,
+  AlertTriangle,
 } from "lucide-react";
 import type { LayoutNode } from "@/components/dockable";
+import {
+  getEditor,
+  isMarkdownInstance,
+  isCodeInstance,
+} from "@/components/editor/editor-store";
 
 // ── Types ──
 
@@ -421,6 +428,70 @@ function DebugPanelContent({
     }
   }, [buildDebugReport]);
 
+  // ── Copy Plate AST ──
+  const [astCopied, setAstCopied] = useState(false);
+  const [showAstWarning, setShowAstWarning] = useState(false);
+
+  const buildPlateAstReport = useCallback(() => {
+    interface FileReport {
+      type: string;
+      ast?: unknown;
+      content?: string;
+      note?: string;
+    }
+
+    const files: Record<string, FileReport> = {};
+
+    for (const tabPath of openTabs) {
+      const editor = getEditor(tabPath);
+      if (isMarkdownInstance(editor)) {
+        // Plate editor children contain the AST
+        files[tabPath] = {
+          type: "markdown",
+          ast: editor.editor.children,
+        };
+      } else if (isCodeInstance(editor)) {
+        files[tabPath] = {
+          type: "code",
+          content: editor.editorState.content,
+        };
+      } else {
+        files[tabPath] = {
+          type: editor?.type || "unknown",
+          note: "No AST available for this file type",
+        };
+      }
+    }
+
+    const report = {
+      timestamp: new Date().toISOString(),
+      files,
+    };
+
+    return JSON.stringify(report, null, 2);
+  }, [openTabs]);
+
+  const copyPlateAst = useCallback(async () => {
+    const report = buildPlateAstReport();
+    try {
+      await navigator.clipboard.writeText(report);
+      setAstCopied(true);
+      setTimeout(() => setAstCopied(false), 2000);
+    } catch {
+      // Fallback for environments where clipboard API is blocked
+      const textarea = document.createElement("textarea");
+      textarea.value = report;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setAstCopied(true);
+      setTimeout(() => setAstCopied(false), 2000);
+    }
+  }, [buildPlateAstReport]);
+
   // ── Collapsible sections ──
   const [showLayout, setShowLayout] = useState(false);
   const [activeTab, setActiveTab] = useState<"state" | "console">(
@@ -522,6 +593,16 @@ function DebugPanelContent({
               <Copy className="h-3 w-3" />
             )}
           </Button>
+          {/* Copy Plate AST (with warning about file content) */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={() => setShowAstWarning(true)}
+            title="Copy Plate AST (includes file content!)"
+          >
+            <FileJson className="h-3 w-3" />
+          </Button>
           {/* Reload */}
           <Button
             variant="ghost"
@@ -546,6 +627,55 @@ function DebugPanelContent({
           )}
         </div>
       </div>
+
+      {/* ── Plate AST Warning ── */}
+      {showAstWarning && (
+        <div className="px-3 py-2 bg-amber-500/10 border-b border-amber-500/30 shrink-0">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <div className="text-amber-700 dark:text-amber-400 font-semibold text-xs mb-1">
+                Warning: File content will be copied
+              </div>
+              <div className="text-amber-600/80 dark:text-amber-300/70 text-[11px] mb-2">
+                The Plate AST includes the full content of your open files. Only
+                share this with trusted parties.
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 text-[11px] border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
+                  onClick={() => {
+                    copyPlateAst();
+                    setShowAstWarning(false);
+                  }}
+                >
+                  {astCopied ? (
+                    <>
+                      <Check className="h-3 w-3 mr-1" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3 w-3 mr-1" />
+                      Copy anyway
+                    </>
+                  )}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-[11px] text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowAstWarning(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── URL Editor ── */}
       <div className="px-3 py-1.5 border-b border-border bg-muted/30 shrink-0 space-y-1">

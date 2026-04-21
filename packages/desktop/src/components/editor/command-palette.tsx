@@ -311,7 +311,12 @@ export function CommandPalette({
   const skipFocusRestoreRef = useRef(false);
 
   const handleSelect = (command: CommandType) => {
-    if (command.id === "new-file" || command.id === "new-directory") {
+    if (
+      command.id === "new-file" ||
+      command.id === "new-directory" ||
+      command.id === "search-in-file" ||
+      command.id === "search-in-files"
+    ) {
       skipFocusRestoreRef.current = true;
     }
     if (command.action) {
