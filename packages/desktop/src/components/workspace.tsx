@@ -25,6 +25,7 @@ import type { FileEntry } from "@/utils/fs";
 import { getFileName } from "@/utils/fs";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
 import { platformAdapter } from "@/adapters";
+import { retryOnAnimationFrame } from "@/utils/retry-on-animation-frame";
 import {
   handleMetadataFileSystemChange,
   handleContentFileSystemChange,
@@ -251,9 +252,10 @@ export const Workspace = () => {
         return prev;
       });
 
-      // Focus input after sidebar view switch renders
-      requestAnimationFrame(() => {
-        searchPanelRef.current?.focusInput(filePattern);
+      retryOnAnimationFrame(() => {
+        if (!searchPanelRef.current) return false;
+        searchPanelRef.current.focusInput(filePattern);
+        return true;
       });
     },
     [setSearchParams],

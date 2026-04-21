@@ -47,6 +47,16 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
       new Set(),
     );
 
+    const focusSearchInput = useCallback(() => {
+      const input = inputRef.current;
+      if (!input) return false;
+
+      input.focus({ preventScroll: true });
+      input.select();
+
+      return document.activeElement === input;
+    }, []);
+
     useImperativeHandle(ref, () => ({
       focusInput: (pattern?: string) => {
         // Suppress editor focus stealing for 500ms to prevent race conditions
@@ -60,14 +70,9 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
           setFilePattern("");
           setShowFilters(false);
         }
-        // Double rAF to ensure React has rendered the sidebar/search view
-        // before we attempt to focus. The first rAF waits for the current
-        // paint, the second ensures our state updates have flushed.
+
         requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            inputRef.current?.focus();
-            inputRef.current?.select();
-          });
+          focusSearchInput();
         });
       },
     }));
@@ -134,7 +139,6 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search"
               className="flex-1 bg-transparent outline-none placeholder:text-muted-foreground text-sm min-w-0"
-              autoFocus
             />
             <button
               onClick={() => setCaseSensitive(!caseSensitive)}

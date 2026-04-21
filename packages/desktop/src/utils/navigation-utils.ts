@@ -103,15 +103,20 @@ export function markupPrefixLength(block: BlockNode): number {
     const indent = (block.indent ?? 1) - 1; // indent=1 is top-level (no leading spaces)
     const indentSpaces = indent * 3; // typically 3 or 4 spaces per indent level
 
+    // Check for checkbox: checked property indicates "- [ ] " or "- [x] " prefix
+    // Plate stores checkbox state in a `checked` property on list items
+    const isCheckbox = block.checked !== undefined;
+    const checkboxPrefix = isCheckbox ? 4 : 0; // "[ ] " or "[x] " = 4 chars
+
     if (block.listStyleType === "decimal") {
       // "1. ", "2. ", "10. ", etc.
       const listStart = (block.listStart as number) ?? 1;
       const numDigits = String(listStart).length;
-      return indentSpaces + numDigits + 2; // digits + ". "
+      return indentSpaces + numDigits + 2 + checkboxPrefix; // digits + ". " + checkbox
     }
 
-    // Unordered: "- " or "* "
-    return indentSpaces + 2;
+    // Unordered: "- " or "* " plus optional checkbox
+    return indentSpaces + 2 + checkboxPrefix;
   }
 
   // Blockquote: "> "
@@ -168,9 +173,23 @@ function isListItem(block: BlockNode): boolean {
  * (no blank line separator between them).
  *
  * Same list group = both are list items with the same listStyleType.
+ * Consecutive empty paragraphs are also treated as a single blank line
+ * (no extra separator between them).
  */
 function isSameListGroup(a: BlockNode, b: BlockNode): boolean {
-  return isListItem(a) && isListItem(b) && a.listStyleType === b.listStyleType;
+  if (isListItem(a) && isListItem(b)) {
+    return a.listStyleType === b.listStyleType;
+  }
+  // Two consecutive empty paragraphs count as one blank line
+  // (no separator added between them)
+  return isEmptyParagraph(a) && isEmptyParagraph(b);
+}
+
+/**
+ * Check if a block is an empty paragraph (represents a blank line).
+ */
+function isEmptyParagraph(block: BlockNode): boolean {
+  return block.type === "p" && getBlockText(block) === "";
 }
 
 /**
@@ -331,7 +350,22 @@ export function rawLineToBlockPath(
 
     // Add blank line separator after this block (unless next block is same list group)
     const nextBlock = blocks[i + 1];
-    if (nextBlock && !isSameListGroup(block, nextBlock)) {
+    const hasSeparator = nextBlock && !isSameListGroup(block, nextBlock);
+
+    // Check if rawLine falls in the separator line that follows this block.
+    // The separator line logically belongs to this block (it's the trailing blank line).
+    // separatorEnd = currentLine (before adding separator) + 1 = currentLine
+    if (hasSeparator && rawLine === currentLine) {
+      // rawLine is the separator line after this block → map to current block
+      return {
+        path: [i],
+        blockIndex: i,
+        isFenceLine: false,
+        isSeparatorLine: true,
+      };
+    }
+
+    if (hasSeparator) {
       currentLine += 1; // blank separator line
     }
   }
