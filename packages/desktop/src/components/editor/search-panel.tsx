@@ -33,7 +33,10 @@ interface SearchPanelProps {
 
 export interface SearchPanelHandle {
   /** Focus the search input, select its text, and optionally set the file filter. */
-  focusInput: (filePattern?: string) => void;
+  focusInput: (options?: {
+    filePattern?: string;
+    initialQuery?: string;
+  }) => void;
 }
 
 export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
@@ -58,9 +61,16 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
     }, []);
 
     useImperativeHandle(ref, () => ({
-      focusInput: (pattern?: string) => {
+      focusInput: (options) => {
+        const pattern = options?.filePattern;
+        const initialQuery = options?.initialQuery;
+
         // Suppress editor focus stealing for 500ms to prevent race conditions
         suppressEditorFocus(500);
+
+        if (initialQuery !== undefined) {
+          setQuery(initialQuery);
+        }
 
         if (pattern) {
           setFilePattern(pattern);

@@ -18,7 +18,11 @@ import {
   createInitialLayout,
   extractTabIds,
 } from "@/utils/dockable-layout";
-import { disposeEditor, focusEditor } from "@/components/editor/editor-store";
+import {
+  disposeEditor,
+  focusEditor,
+  getSelectedText as getSelectedTextForEditor,
+} from "@/components/editor/editor-store";
 import type { FileTreeNode } from "@/utils/fs";
 
 export interface UseDockableTabsOptions {
@@ -85,6 +89,9 @@ export interface UseDockableTabsResult {
 
   /** Focus the editor of the currently focused tab (last-focused window aware) */
   focusActiveEditor: () => boolean;
+
+  /** Get selected text from the currently focused tab's editor */
+  getSelectedText: () => string | undefined;
 }
 
 /**
@@ -305,6 +312,12 @@ export function useDockableTabs(
     return focusEditor(tabId);
   }, [getFocusedTabId]);
 
+  const getSelectedText = useCallback(() => {
+    const tabId = getFocusedTabId();
+    if (!tabId) return undefined;
+    return getSelectedTextForEditor(tabId);
+  }, [getFocusedTabId]);
+
   const selectTabAtIndex = useCallback(
     (index: number) => {
       const activeWindow = getActiveWindow();
@@ -464,5 +477,6 @@ export function useDockableTabs(
     selectNextTab,
     selectPrevTab,
     focusActiveEditor,
+    getSelectedText,
   };
 }

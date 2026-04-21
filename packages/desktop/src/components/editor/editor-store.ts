@@ -9,7 +9,12 @@
 import { createPlateEditor, type PlateEditor } from "platejs/react";
 import { MarkdownPlugin } from "@platejs/markdown";
 import { MarkdownEditorKit } from "@/components/editor/markdown-editor-kit";
-import { Editor as SlateEditor, Node, type Path } from "slate";
+import {
+  Editor as SlateEditor,
+  Node,
+  type Path,
+  Range as SlateRange,
+} from "slate";
 import { ReactEditor } from "slate-react";
 import type { BaseSelection, Point, Range } from "slate";
 import {
@@ -691,6 +696,47 @@ export function getSavedSelection(filePath: string): BaseSelection | undefined {
  */
 export function getAllEditorPaths(): string[] {
   return Array.from(editorInstances.keys());
+}
+
+/**
+ * Get the currently selected text for a given editor, if any.
+ */
+export function getSelectedText(filePath: string): string | undefined {
+  const instance = editorInstances.get(filePath);
+
+  if (isMarkdownInstance(instance)) {
+    const selection = instance.editor.selection ?? instance.selection;
+    if (!selection || SlateRange.isCollapsed(selection)) {
+      return undefined;
+    }
+
+    const text = SlateEditor.string(
+      instance.editor as unknown as SlateEditor,
+      selection,
+    );
+    return text.trim() ? text : undefined;
+  }
+
+  if (isCodeInstance(instance)) {
+    const container = document.querySelector(
+      `[data-editor-container="${filePath}"]`,
+    );
+    const textarea = container?.querySelector("textarea");
+
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+      return undefined;
+    }
+
+    const { selectionStart, selectionEnd, value } = textarea;
+    if (selectionStart === selectionEnd) {
+      return undefined;
+    }
+
+    const text = value.slice(selectionStart, selectionEnd);
+    return text.trim() ? text : undefined;
+  }
+
+  return undefined;
 }
 
 /**

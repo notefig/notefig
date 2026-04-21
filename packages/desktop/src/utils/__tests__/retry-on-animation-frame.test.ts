@@ -6,12 +6,33 @@ describe("retryOnAnimationFrame", () => {
     vi.restoreAllMocks();
   });
 
-  it("retries until the predicate succeeds", () => {
-    let callback: FrameRequestCallback | undefined;
+  function setupRafQueue() {
+    const queue: FrameRequestCallback[] = [];
+    let nextId = 1;
+
     vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb) => {
-      callback = cb;
-      return 1;
+      queue.push(cb);
+      return nextId++;
     });
+
+    return {
+      flushNext() {
+        const cb = queue.shift();
+        cb?.(0);
+      },
+      flushAll(limit = 20) {
+        let count = 0;
+        while (queue.length > 0 && count < limit) {
+          const cb = queue.shift();
+          cb?.(0);
+          count += 1;
+        }
+      },
+    };
+  }
+
+  it("retries until the predicate succeeds", () => {
+    const raf = setupRafQueue();
 
     let attempts = 0;
     retryOnAnimationFrame(() => {
@@ -19,19 +40,13 @@ describe("retryOnAnimationFrame", () => {
       return attempts === 3;
     });
 
-    callback?.(0);
-    callback?.(0);
-    callback?.(0);
+    raf.flushAll();
 
     expect(attempts).toBe(3);
   });
 
   it("stops after maxAttempts", () => {
-    let callback: FrameRequestCallback | undefined;
-    vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb) => {
-      callback = cb;
-      return 1;
-    });
+    const raf = setupRafQueue();
 
     let attempts = 0;
     retryOnAnimationFrame(
@@ -42,21 +57,19 @@ describe("retryOnAnimationFrame", () => {
       { maxAttempts: 2 },
     );
 
-    callback?.(0);
-    callback?.(0);
-    callback?.(0);
+    raf.flushAll();
 
     expect(attempts).toBe(2);
   });
 
   it("cancels scheduled retries", () => {
-    let callback: FrameRequestCallback | undefined;
+    const queue: FrameRequestCallback[] = [];
     const cancelAnimationFrame = vi
       .spyOn(globalThis, "cancelAnimationFrame")
       .mockImplementation(() => {});
 
     vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb) => {
-      callback = cb;
+      queue.push(cb);
       return 7;
     });
 
@@ -67,7 +80,7 @@ describe("retryOnAnimationFrame", () => {
     });
 
     cancel();
-    callback?.(0);
+    queue.shift()?.(0);
 
     expect(attempts).toBe(0);
     expect(cancelAnimationFrame).toHaveBeenCalledWith(7);
