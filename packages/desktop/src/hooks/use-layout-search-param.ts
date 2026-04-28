@@ -1,6 +1,6 @@
 import { useMemo, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
 import type { LayoutNode } from "@/components/dockable";
+import { useSearchParam } from "@/hooks/use-search-param";
 
 const LAYOUT_PARAM = "layout";
 
@@ -68,7 +68,7 @@ export interface UseLayoutSearchParam {
  * Other search params (e.g. `settings`) are preserved.
  */
 export function useLayoutSearchParam(): UseLayoutSearchParam {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { searchParams, setSearchParams } = useSearchParam();
 
   const layout = useMemo(
     () => parseLayout(searchParams.get(LAYOUT_PARAM)),
@@ -77,15 +77,12 @@ export function useLayoutSearchParam(): UseLayoutSearchParam {
 
   const setLayout = useCallback(
     (newLayout: LayoutNode[]) => {
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
+      setSearchParams((next) => {
         if (newLayout.length === 0) {
           next.delete(LAYOUT_PARAM);
         } else {
           next.set(LAYOUT_PARAM, JSON.stringify(newLayout));
         }
-
-        return next;
       });
     },
     [setSearchParams],
