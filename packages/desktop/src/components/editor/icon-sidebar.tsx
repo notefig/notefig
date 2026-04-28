@@ -20,9 +20,10 @@ import {
   TooltipProvider,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { useSearchParams, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { PlainLogo } from "@/components/logo";
+import { useSearchParam } from "@/hooks/use-search-param";
 
 interface IconSidebarProps {
   onCommandPaletteClick: () => void;
@@ -35,7 +36,7 @@ export function IconSidebar({
   isCollapsed,
   onToggleCollapse,
 }: IconSidebarProps) {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { searchParams, setSearchParams } = useSearchParam();
   const navigate = useNavigate();
   const sidebarView = searchParams.get("sidebarView") || "files";
 
@@ -48,15 +49,14 @@ export function IconSidebar({
   };
 
   const handleSidebarViewChange = (view: string) => {
-    setSearchParams((prev) => {
+    setSearchParams((next) => {
       if (view === "files") {
-        prev.delete("sidebarView");
+        next.delete("sidebarView");
       } else {
-        prev.set("sidebarView", view);
+        next.set("sidebarView", view);
       }
       // Also ensure sidebar is expanded
-      prev.delete("sidebar");
-      return prev;
+      next.delete("sidebar");
     });
   };
 
@@ -92,12 +92,13 @@ export function IconSidebar({
   ];
 
   const handleSettingsToggle = (open: boolean) => {
-    if (open) {
-      searchParams.set("settings", "true");
-    } else {
-      searchParams.delete("settings");
-    }
-    setSearchParams(searchParams);
+    setSearchParams((next) => {
+      if (open) {
+        next.set("settings", "true");
+      } else {
+        next.delete("settings");
+      }
+    });
   };
 
   const bottomIcons = [

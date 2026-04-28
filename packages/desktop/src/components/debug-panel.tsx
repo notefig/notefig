@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useParams, useSearchParams } from "react-router";
+import { useParams } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -24,6 +24,7 @@ import {
   isMarkdownInstance,
   isCodeInstance,
 } from "@/components/editor/editor-store";
+import { useSearchParam } from "@/hooks/use-search-param";
 
 // ── Types ──
 
@@ -195,7 +196,7 @@ interface DebugPanelProps {
 }
 
 export function DebugPanel({ forceOpen, error }: DebugPanelProps) {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { searchParams, setSearchParams } = useSearchParam();
   const isOpen = forceOpen || searchParams.get("debug") === "true";
 
   if (!isOpen) return null;
@@ -208,12 +209,12 @@ export function DebugPanel({ forceOpen, error }: DebugPanelProps) {
         forceOpen
           ? undefined
           : () => {
-              setSearchParams((prev) => {
-                prev.delete("debug");
-                return prev;
+              setSearchParams((next) => {
+                next.delete("debug");
               });
             }
       }
+      searchParams={searchParams}
     />
   );
 }
@@ -222,13 +223,14 @@ function DebugPanelContent({
   error,
   forceOpen,
   onClose,
+  searchParams,
 }: {
   error?: { message: string; stack?: string };
   forceOpen?: boolean;
   onClose?: () => void;
+  searchParams: URLSearchParams;
 }) {
   const { basePath, "*": filePath } = useParams();
-  const [searchParams] = useSearchParams();
 
   // ── Derive tab/layout state from URL (self-sufficient) ──
   const dockableLayout = useMemo(

@@ -35,7 +35,7 @@ import {
   getEditor,
   navigateToLocation,
 } from "@/components/editor/editor-store";
-import { useSearchParams } from "react-router";
+import { useSearchParam } from "@/hooks/use-search-param";
 import {
   type FileTreeMode,
   FILE_TREE_IDLE,
@@ -123,19 +123,18 @@ export const Workspace = () => {
   );
   const currentContent = activeFileData?.content || "";
 
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { searchParams, setSearchParams } = useSearchParam();
   const isSidebarCollapsed = searchParams.get("sidebar") === "collapsed";
   const toggleSidebarCollapsed = useCallback(() => {
     const isClosing = searchParams.get("sidebar") !== "collapsed";
 
-    setSearchParams((prev) => {
-      if (prev.get("sidebar") === "collapsed") {
-        prev.delete("sidebar");
+    setSearchParams((next) => {
+      if (next.get("sidebar") === "collapsed") {
+        next.delete("sidebar");
       } else {
-        prev.set("sidebar", "collapsed");
-        prev.delete("sidebarView");
+        next.set("sidebar", "collapsed");
+        next.delete("sidebarView");
       }
-      return prev;
     });
 
     if (isClosing) {
@@ -239,9 +238,8 @@ export const Workspace = () => {
   }, []);
 
   const handleOpenSettings = useCallback(() => {
-    setSearchParams((prev) => {
-      prev.set("settings", "true");
-      return prev;
+    setSearchParams((next) => {
+      next.set("settings", "true");
     });
   }, [setSearchParams]);
 
@@ -251,10 +249,9 @@ export const Workspace = () => {
       const initialQuery = options?.initialQuery;
 
       // Switch sidebar to search view and expand it
-      setSearchParams((prev) => {
-        prev.set("sidebarView", "search");
-        prev.delete("sidebar"); // ensure expanded
-        return prev;
+      setSearchParams((next) => {
+        next.set("sidebarView", "search");
+        next.delete("sidebar"); // ensure expanded
       });
 
       retryOnAnimationFrame(() => {

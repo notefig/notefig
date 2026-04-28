@@ -14,7 +14,7 @@ import {
 } from "@/utils/collections";
 import { getDirectoryPath, isTextFile } from "@/utils/fs";
 import type { FileTreeNode, SortOrder } from "@/utils/fs";
-import { useSearchParams } from "react-router";
+import { useSearchParam } from "@/hooks/use-search-param";
 
 interface SidebarProps {
   workspacePath: string;
@@ -46,17 +46,16 @@ export function Sidebar({
 }: SidebarProps) {
   const { metadata } = getOrCreateWorkspaceCollections(workspacePath);
 
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { searchParams, setSearchParams } = useSearchParam();
   const sortOrder = (searchParams.get("sort") as SortOrder) || "name-asc";
   const setSortOrder = useCallback(
     (order: SortOrder) => {
-      setSearchParams((prev) => {
+      setSearchParams((next) => {
         if (order === "name-asc") {
-          prev.delete("sort");
+          next.delete("sort");
         } else {
-          prev.set("sort", order);
+          next.set("sort", order);
         }
-        return prev;
       });
     },
     [setSearchParams],

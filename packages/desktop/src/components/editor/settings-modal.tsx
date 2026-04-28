@@ -28,7 +28,7 @@ import { useUpdater } from "@/hooks/use-updater";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
-import { useSearchParams } from "react-router";
+import { useSearchParam } from "@/hooks/use-search-param";
 
 interface SettingsModalProps {
   direction: "ltr" | "rtl";
@@ -74,14 +74,15 @@ export function SettingsModal({
   onFocusEditor,
 }: SettingsModalProps) {
   const { t } = useTranslation();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { searchParams, setSearchParams } = useSearchParam();
   const handleSettingsToggle = (open: boolean) => {
-    if (open) {
-      searchParams.set("settings", "true");
-    } else {
-      searchParams.delete("settings");
-    }
-    setSearchParams(searchParams);
+    setSearchParams((next) => {
+      if (open) {
+        next.set("settings", "true");
+      } else {
+        next.delete("settings");
+      }
+    });
   };
   const handleCloseAutoFocus = (event: Event) => {
     event.preventDefault();
@@ -381,17 +382,16 @@ function UpdateSection() {
 }
 
 function DebugModeToggle() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { searchParams, setSearchParams } = useSearchParam();
   const isDebugActive = searchParams.get("debug") === "true";
 
   const handleToggle = (checked: boolean) => {
-    setSearchParams((prev) => {
+    setSearchParams((next) => {
       if (checked) {
-        prev.set("debug", "true");
+        next.set("debug", "true");
       } else {
-        prev.delete("debug");
+        next.delete("debug");
       }
-      return prev;
     });
   };
 
