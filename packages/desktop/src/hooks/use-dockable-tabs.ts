@@ -180,22 +180,23 @@ export function useDockableTabs(
 
       if (openTabs.includes(file.path)) {
         // Tab already open — update selection in the layout
-        setLayout(selectTabInLayout(layout, file.path));
+        setLayout((currentLayout) =>
+          selectTabInLayout(currentLayout, file.path),
+        );
         return;
       }
 
       // New tab: merge into the current layout
-      let nextLayout: LayoutNode[];
-      if (layout.length > 0) {
-        nextLayout = addTabToLayout(layout, file.path);
-      } else {
-        // First tab ever — create a fresh single-window layout
-        nextLayout = createInitialLayout(file.path);
-      }
+      setLayout((currentLayout) => {
+        if (currentLayout.length > 0) {
+          return addTabToLayout(currentLayout, file.path);
+        }
 
-      setLayout(nextLayout);
+        // First tab ever — create a fresh single-window layout
+        return createInitialLayout(file.path);
+      });
     },
-    [layout, openTabs, setLayout, canOpenFile],
+    [openTabs, setLayout, canOpenFile],
   );
 
   // Handle layout changes from Dockable
@@ -216,17 +217,17 @@ export function useDockableTabs(
   const openTab = useCallback(
     (tabId: string) => {
       if (openTabs.includes(tabId)) {
-        setLayout(selectTabInLayout(layout, tabId));
+        setLayout((currentLayout) => selectTabInLayout(currentLayout, tabId));
         return;
       }
 
-      const nextLayout =
-        layout.length > 0
-          ? addTabToLayout(layout, tabId)
-          : createInitialLayout(tabId);
-      setLayout(nextLayout);
+      setLayout((currentLayout) =>
+        currentLayout.length > 0
+          ? addTabToLayout(currentLayout, tabId)
+          : createInitialLayout(tabId),
+      );
     },
-    [layout, openTabs, setLayout],
+    [openTabs, setLayout],
   );
 
   const closeTab = useCallback(
@@ -235,17 +236,17 @@ export function useDockableTabs(
 
       disposeEditor(tabId);
 
-      setLayout(removeTabFromLayout(layout, tabId));
+      setLayout((currentLayout) => removeTabFromLayout(currentLayout, tabId));
     },
-    [layout, openTabs, setLayout],
+    [openTabs, setLayout],
   );
 
   const selectTab = useCallback(
     (tabId: string) => {
       if (!openTabs.includes(tabId)) return;
-      setLayout(selectTabInLayout(layout, tabId));
+      setLayout((currentLayout) => selectTabInLayout(currentLayout, tabId));
     },
-    [layout, openTabs, setLayout],
+    [openTabs, setLayout],
   );
 
   const getActiveWindow = useCallback(() => {
@@ -325,9 +326,9 @@ export function useDockableTabs(
 
       if (!tabId) return;
 
-      setLayout(selectTabInLayout(layout, tabId));
+      setLayout((currentLayout) => selectTabInLayout(currentLayout, tabId));
     },
-    [getActiveWindow, layout, setLayout],
+    [getActiveWindow, setLayout],
   );
 
   const dockableHotkeyOptions = useMemo(
@@ -443,8 +444,8 @@ export function useDockableTabs(
 
     const nextTabId =
       activeWindow.children[(currentIndex + 1) % activeWindow.children.length];
-    setLayout(selectTabInLayout(layout, nextTabId));
-  }, [getActiveWindow, layout, setLayout]);
+    setLayout((currentLayout) => selectTabInLayout(currentLayout, nextTabId));
+  }, [getActiveWindow, setLayout]);
 
   const selectPrevTab = useCallback(() => {
     const activeWindow = getActiveWindow();
@@ -458,8 +459,8 @@ export function useDockableTabs(
         (currentIndex - 1 + activeWindow.children.length) %
           activeWindow.children.length
       ];
-    setLayout(selectTabInLayout(layout, prevTabId));
-  }, [getActiveWindow, layout, setLayout]);
+    setLayout((currentLayout) => selectTabInLayout(currentLayout, prevTabId));
+  }, [getActiveWindow, setLayout]);
 
   return {
     layout,

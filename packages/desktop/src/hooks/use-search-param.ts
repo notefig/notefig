@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 interface SearchParamUpdateOptions {
@@ -15,39 +15,70 @@ interface UseSearchParamResult {
   ) => void;
 }
 
-function cloneParams(params: URLSearchParams): URLSearchParams {
-  return new URLSearchParams(params);
+const subscribers = new Set<(search: string) => void>();
+let sharedSearch = "";
+let isSharedSearchInitialized = false;
+
+function notifySharedSearch(search: string): void {
+  subscribers.forEach((subscriber) => subscriber(search));
+}
+
+function toSearchString(params: URLSearchParams): string {
+  return params.toString();
+}
+
+function fromSearchString(search: string): URLSearchParams {
+  return new URLSearchParams(search);
 }
 
 export function useSearchParam(): UseSearchParamResult {
   const [urlSearchParams, setUrlSearchParams] = useSearchParams();
+
+  if (!isSharedSearchInitialized) {
+    sharedSearch = toSearchString(urlSearchParams);
+    isSharedSearchInitialized = true;
+  }
+
   const [optimisticSearchParams, setOptimisticSearchParams] = useState(() =>
-    cloneParams(urlSearchParams),
+    fromSearchString(sharedSearch),
   );
-  const optimisticRef = useRef(optimisticSearchParams);
 
   useEffect(() => {
-    optimisticRef.current = optimisticSearchParams;
-  }, [optimisticSearchParams]);
+    const subscriber = (search: string) => {
+      const next = fromSearchString(search);
+      setOptimisticSearchParams(next);
+    };
+
+    subscribers.add(subscriber);
+    return () => {
+      subscribers.delete(subscriber);
+    };
+  }, []);
 
   useEffect(() => {
-    const nextFromUrl = cloneParams(urlSearchParams);
+    const urlSearch = toSearchString(urlSearchParams);
 
-    if (nextFromUrl.toString() === optimisticRef.current.toString()) {
+    if (urlSearch === sharedSearch) {
       return;
     }
 
-    optimisticRef.current = nextFromUrl;
-    setOptimisticSearchParams(nextFromUrl);
+    sharedSearch = urlSearch;
+    notifySharedSearch(sharedSearch);
   }, [urlSearchParams]);
 
   const setSearchParams = useCallback(
     (mutator: SearchParamMutator, options?: SearchParamUpdateOptions) => {
-      const next = cloneParams(optimisticRef.current);
+      const next = fromSearchString(sharedSearch);
       mutator(next);
 
-      optimisticRef.current = next;
+      const nextSearch = toSearchString(next);
+      if (nextSearch === sharedSearch) {
+        return;
+      }
+
+      sharedSearch = nextSearch;
       setOptimisticSearchParams(next);
+      notifySharedSearch(sharedSearch);
       setUrlSearchParams(next, { replace: options?.replace ?? true });
     },
     [setUrlSearchParams],

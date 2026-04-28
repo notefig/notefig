@@ -54,7 +54,9 @@ export interface UseLayoutSearchParam {
   /** The full Dockable layout tree from the URL */
   layout: LayoutNode[];
   /** Write a new layout to the URL (pushes history entry) */
-  setLayout: (newLayout: LayoutNode[]) => void;
+  setLayout: (
+    nextLayout: LayoutNode[] | ((currentLayout: LayoutNode[]) => LayoutNode[]),
+  ) => void;
   /** All tab IDs extracted from the layout */
   openTabs: string[];
   /** The currently selected tab ID, or null */
@@ -76,12 +78,22 @@ export function useLayoutSearchParam(): UseLayoutSearchParam {
   );
 
   const setLayout = useCallback(
-    (newLayout: LayoutNode[]) => {
+    (
+      nextLayout:
+        | LayoutNode[]
+        | ((currentLayout: LayoutNode[]) => LayoutNode[]),
+    ) => {
       setSearchParams((next) => {
-        if (newLayout.length === 0) {
+        const currentLayout = parseLayout(next.get(LAYOUT_PARAM));
+        const resolvedLayout =
+          typeof nextLayout === "function"
+            ? nextLayout(currentLayout)
+            : nextLayout;
+
+        if (resolvedLayout.length === 0) {
           next.delete(LAYOUT_PARAM);
         } else {
-          next.set(LAYOUT_PARAM, JSON.stringify(newLayout));
+          next.set(LAYOUT_PARAM, JSON.stringify(resolvedLayout));
         }
       });
     },

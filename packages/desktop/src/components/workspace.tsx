@@ -123,6 +123,16 @@ export const Workspace = () => {
   );
   const currentContent = activeFileData?.content || "";
 
+  const existingOpenTabIds = useMemo(
+    () => new Set(fileDataWithContent.map((file) => file.path)),
+    [fileDataWithContent],
+  );
+
+  const missingOpenTabIds = useMemo(
+    () => openTabs.filter((tabId) => !existingOpenTabIds.has(tabId)),
+    [openTabs, existingOpenTabIds],
+  );
+
   const { searchParams, setSearchParams } = useSearchParam();
   const isSidebarCollapsed = searchParams.get("sidebar") === "collapsed";
   const toggleSidebarCollapsed = useCallback(() => {
@@ -182,6 +192,23 @@ export const Workspace = () => {
     { queryKey: ["file-content", workspacePath] },
     queryClient,
   );
+  const isFetchingMetadata = useIsFetching(
+    { queryKey: ["file-metadata", workspacePath] },
+    queryClient,
+  );
+
+  useEffect(() => {
+    if (isFetchingMetadata > 0) return;
+    if (missingOpenTabIds.length === 0) return;
+
+    const sanitizedLayout = missingOpenTabIds.reduce(
+      (nextLayout, tabId) => removeTabFromLayout(nextLayout, tabId),
+      layout,
+    );
+
+    handleLayoutChange(sanitizedLayout);
+  }, [missingOpenTabIds, layout, handleLayoutChange, isFetchingMetadata]);
+
   const isSynced = isFetchingContent === 0;
   const { wordCount, characterCount } = useMemo(() => {
     const words = currentContent
