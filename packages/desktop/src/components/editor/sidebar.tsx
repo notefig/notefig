@@ -12,7 +12,11 @@ import {
   createFile,
   createDirectory,
 } from "@/utils/collections";
-import { getDirectoryPath, isTextFile } from "@/utils/fs";
+import {
+  ensureNewFileNameHasDefaultMarkdownExtension,
+  getDirectoryPath,
+  isTextFile,
+} from "@/utils/fs";
 import type { FileTreeNode, SortOrder } from "@/utils/fs";
 import { useSearchParam } from "@/hooks/use-search-param";
 
@@ -127,7 +131,11 @@ export function Sidebar({
 
   const handleCreate = useCallback(
     (parentPath: string, name: string, type: "file" | "directory") => {
-      const fullPath = parentPath + "/" + name;
+      const resolvedName =
+        type === "file"
+          ? ensureNewFileNameHasDefaultMarkdownExtension(name)
+          : name;
+      const fullPath = parentPath + "/" + resolvedName;
 
       const existing = metadata.get(fullPath);
       if (existing) {

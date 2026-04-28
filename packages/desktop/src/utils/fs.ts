@@ -309,6 +309,30 @@ export function validateFileName(name: string): string | null {
   return null;
 }
 
+/**
+ * Ensure a newly created file name has an extension.
+ * If no extension is present, defaults to `.md`.
+ */
+export function ensureNewFileNameHasDefaultMarkdownExtension(
+  fileName: string,
+): string {
+  if (fileName.length === 0) return fileName;
+
+  if (fileName.endsWith(".")) {
+    const withoutTrailingDots = fileName.replace(/\.+$/, "");
+    return withoutTrailingDots.length > 0
+      ? `${withoutTrailingDots}.md`
+      : fileName;
+  }
+
+  const lastDotIndex = fileName.lastIndexOf(".");
+  const hasExtension = lastDotIndex >= 0 && lastDotIndex < fileName.length - 1;
+
+  if (hasExtension) return fileName;
+
+  return `${fileName}.md`;
+}
+
 export async function pickDirectory(title: string): Promise<string | null> {
   return platformAdapter.pickDirectory(title);
 }
