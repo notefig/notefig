@@ -540,4 +540,86 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       }
     });
   });
+
+  /**
+   * TEST SUITE 9: Single-Tab UX
+   */
+  test.describe("Single-Tab UX", () => {
+    test("default open replaces current tab, modifier/context menu open in new tab", async ({
+      page,
+    }) => {
+      const dockableTabs = () =>
+        page.locator("[data-dockable-window-id] .cursor-pointer");
+
+      await openFileInTree(page, "tab-a.md");
+      await page.waitForTimeout(300);
+
+      // Single-tab windows hide the tab bar.
+      await expect(dockableTabs()).toHaveCount(0);
+
+      // Default open replaces existing selected tab in the focused window.
+      await openFileInTree(page, "tab-b.md");
+      await page.waitForTimeout(300);
+      await expect(dockableTabs()).toHaveCount(0);
+      await expect(page.locator('[role="textbox"]').first()).toContainText(
+        "Content for tab B",
+      );
+
+      // Modifier open creates a new tab.
+      const tabCInTree = page
+        .locator('[data-file-tree-root] button:has-text("tab-c.md")')
+        .first();
+      await tabCInTree.click({ modifiers: ["Meta"] });
+      await page.waitForTimeout(300);
+
+      await expect(dockableTabs()).toHaveCount(2);
+
+      await expect(
+        dockableTabs().filter({ hasText: "tab-b.md" }).first(),
+      ).toBeVisible();
+      await expect(
+        dockableTabs().filter({ hasText: "tab-c.md" }).first(),
+      ).toBeVisible();
+
+      // Context-menu action creates another tab.
+      const tabAInTree = page
+        .locator('[data-file-tree-root] button:has-text("tab-a.md")')
+        .first();
+      await tabAInTree.click({ button: "right" });
+      await page
+        .locator('[role="menuitem"]:has-text("Open in New Tab")')
+        .click();
+      await page.waitForTimeout(300);
+
+      await expect(dockableTabs()).toHaveCount(3);
+
+      await expect(
+        dockableTabs().filter({ hasText: "tab-a.md" }).first(),
+      ).toBeVisible();
+
+      // Opening an already-open file focuses it; no duplicates created.
+      await tabCInTree.click({ modifiers: ["Meta"] });
+      await page.waitForTimeout(300);
+      await expect(dockableTabs().filter({ hasText: "tab-c.md" })).toHaveCount(
+        1,
+      );
+
+      // Default open still replaces selected tab even when multiple tabs exist.
+      await openFileInTree(page, "readme.md");
+      await page.waitForTimeout(300);
+
+      await expect(
+        dockableTabs().filter({ hasText: "readme.md" }).first(),
+      ).toBeVisible();
+      await expect(
+        dockableTabs().filter({ hasText: "tab-b.md" }).first(),
+      ).toBeVisible();
+      await expect(
+        dockableTabs().filter({ hasText: "tab-a.md" }).first(),
+      ).toBeVisible();
+      await expect(dockableTabs().filter({ hasText: "tab-c.md" })).toHaveCount(
+        0,
+      );
+    });
+  });
 });

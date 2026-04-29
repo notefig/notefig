@@ -19,12 +19,16 @@ import {
   isTextFile,
 } from "@/utils/fs";
 import type { FileTreeNode, SortOrder } from "@/utils/fs";
+import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 
 interface SidebarProps {
   workspacePath: string;
   activeTabId: string | null;
   openTabs: string[];
-  onFileSelect: (file: FileTreeNode) => void;
+  onFileSelect: (
+    file: FileTreeNode,
+    options?: Omit<OpenFileInLayoutOptions, "tabId">,
+  ) => void;
   closeTab: (tabId: string) => void;
   mode: FileTreeMode;
   onModeChange: (mode: FileTreeMode) => void;

@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback, useRef, useEffect, memo } from "react";
-import { useHotkey } from "@tanstack/react-hotkeys";
+import { useHotkey, useKeyHold } from "@tanstack/react-hotkeys";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,6 +35,7 @@ import {
 } from "@/utils/collections";
 import { useLiveQuery } from "@tanstack/react-db";
 import { FileTreeContextMenu } from "./file-tree-context-menu";
+import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 
 /** Discriminated union representing the file tree's inline-editing state. */
 export type FileTreeMode =
@@ -46,7 +47,10 @@ export const FILE_TREE_IDLE: FileTreeMode = { type: "idle" };
 
 interface FileTreeProps {
   selectedFilePath: string | null;
-  onFileSelect: (file: FileTreeNode) => void;
+  onFileSelect: (
+    file: FileTreeNode,
+    options?: Omit<OpenFileInLayoutOptions, "tabId">,
+  ) => void;
   onDelete?: (path: string) => void;
   onRename?: (oldPath: string, newName: string) => void;
   onCreate?: (
@@ -65,7 +69,10 @@ interface FileTreeItemProps {
   node: FileTreeNode;
   depth: number;
   selectedFilePath: string | null;
-  onFileSelect: (file: FileTreeNode) => void;
+  onFileSelect: (
+    file: FileTreeNode,
+    options?: Omit<OpenFileInLayoutOptions, "tabId">,
+  ) => void;
   onFileHover?: (filePath: string) => void;
   onDelete?: (path: string) => void;
   onRequestDelete: (path: string, type: "file" | "directory") => void;
@@ -317,6 +324,9 @@ function FileTreeItem({
   onModeChange,
 }: FileTreeItemProps) {
   const [isExpanded, setIsExpanded] = useState(depth === 0);
+  const isMetaHeld = useKeyHold("Meta");
+  const isControlHeld = useKeyHold("Control");
+  const isModHeld = isMetaHeld || isControlHeld;
 
   const isRenaming = mode.type === "renaming" && mode.path === node.path;
   const isCreatingHere =
@@ -346,7 +356,10 @@ function FileTreeItem({
     if (node.type === "directory") {
       setIsExpanded(!isExpanded);
     } else {
-      onFileSelect(node);
+      onFileSelect(
+        node,
+        isModHeld ? { intent: "new-tab" } : { intent: "replace" },
+      );
     }
   };
 
@@ -398,6 +411,21 @@ function FileTreeItem({
       });
     },
     [onModeChange],
+  );
+
+  const handleOpenInNewTab = useCallback(
+    (path: string) => {
+      onFileSelect(
+        {
+          path,
+          type: "file",
+          contentHash: "",
+          content: "",
+        },
+        { intent: "new-tab" },
+      );
+    },
+    [onFileSelect],
   );
 
   const paddingValue = depth * 12 + 8;
@@ -463,6 +491,7 @@ function FileTreeItem({
           onRenameStart={() =>
             onModeChange({ type: "renaming", path: node.path })
           }
+          onOpenInNewTab={node.type === "file" ? handleOpenInNewTab : undefined}
           onNewFile={handleNewFileInDir}
           onNewFolder={handleNewFolderInDir}
           disableRename={isOpen}

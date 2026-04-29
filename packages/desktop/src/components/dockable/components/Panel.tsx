@@ -18,7 +18,24 @@ type PanelProps = {
   address: number[];
   gap?: number;
   panels: LayoutNode[];
+  rootPanels?: LayoutNode[];
 };
+
+function countTabs(nodes: LayoutNode[]): number {
+  return nodes.reduce((count, node) => {
+    if (node.type === "Window") return count + node.children.length;
+    if (node.type === "Panel") return count + countTabs(node.children);
+    return count;
+  }, 0);
+}
+
+function countWindows(nodes: LayoutNode[]): number {
+  return nodes.reduce((count, node) => {
+    if (node.type === "Window") return count + 1;
+    if (node.type === "Panel") return count + countWindows(node.children);
+    return count;
+  }, 0);
+}
 
 // a list of TabViews with horizontal or vertical orientation
 function PanelView({
@@ -27,8 +44,12 @@ function PanelView({
   address,
   gap,
   panels,
+  rootPanels,
 }: PanelProps) {
   const { dispatch } = useDockable();
+  const layoutRoot = rootPanels ?? panels;
+  const showAllTabBars =
+    countTabs(layoutRoot) > 1 || countWindows(layoutRoot) > 1;
 
   const sizes = panels.map((panel) => panel.size || 1);
 
@@ -77,6 +98,7 @@ function PanelView({
               <TabView
                 id={panel.id}
                 tabs={panelTabs}
+                hideTabs={!showAllTabBars}
                 selected={(panel as WindowNode).selected.toString()}
                 orientation={orientation}
                 address={address.concat(index)}
@@ -98,6 +120,7 @@ function PanelView({
                 children={children}
                 address={address.concat(index)}
                 gap={gap}
+                rootPanels={layoutRoot}
               />
             );
           }

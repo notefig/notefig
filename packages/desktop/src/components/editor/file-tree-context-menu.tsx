@@ -1,4 +1,10 @@
-import { FilePlus, FolderPlus, Pencil, Trash2 } from "lucide-react";
+import {
+  FilePlus,
+  FolderPlus,
+  Pencil,
+  Trash2,
+  ExternalLink,
+} from "lucide-react";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -12,6 +18,7 @@ import { useTranslation } from "react-i18next";
 interface FileTreeContextMenuProps {
   path: string;
   type: "file" | "directory";
+  onOpenInNewTab?: (path: string) => void;
   onRequestDelete: (path: string, type: "file" | "directory") => void;
   onRenameStart: () => void;
   onNewFile: (parentDirPath: string) => void;
@@ -23,6 +30,7 @@ interface FileTreeContextMenuProps {
 export function FileTreeContextMenu({
   path,
   type,
+  onOpenInNewTab,
   onRequestDelete,
   onRenameStart,
   onNewFile,
@@ -39,6 +47,16 @@ export function FileTreeContextMenu({
       <ContextMenu>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
         <ContextMenuContent>
+          {type === "file" && onOpenInNewTab && (
+            <>
+              <ContextMenuItem onSelect={() => onOpenInNewTab(path)}>
+                <ExternalLink className="w-4 h-4 mr-2" />
+                {t("openInNewTab", "Open in New Tab")}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+            </>
+          )}
+          <ContextMenuSeparator />
           <ContextMenuItem onSelect={() => onNewFile(targetDir)}>
             <FilePlus className="w-4 h-4 mr-2" />
             {t("newFile", "New File")}

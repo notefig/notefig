@@ -1,6 +1,34 @@
 import type { LayoutNode } from "@/components/dockable";
 import type { WindowNode } from "@/components/dockable/utils/serializeLayout";
 
+export type OpenFileIntent = "replace" | "new-tab";
+
+export interface OpenFileInLayoutOptions {
+  tabId: string;
+  intent: OpenFileIntent;
+  targetWindowId?: string;
+}
+
+function mapLayout(
+  nodes: LayoutNode[],
+  mapWindow: (node: WindowNode) => WindowNode,
+): LayoutNode[] {
+  return nodes.map((node) => {
+    if (node.type === "Window") {
+      return mapWindow(node);
+    }
+
+    if (node.type === "Panel") {
+      return {
+        ...node,
+        children: mapLayout(node.children, mapWindow),
+      };
+    }
+
+    return node;
+  });
+}
+
 /**
  * Deep-clone a layout tree, adding a new tab to the first Window and selecting it.
  * Preserves all panel splits, sizes, and tab ordering.
@@ -9,24 +37,12 @@ export function addTabToLayout(
   layout: LayoutNode[],
   tabId: string,
 ): LayoutNode[] {
-  let added = false;
-  function walk(nodes: LayoutNode[]): LayoutNode[] {
-    return nodes.map((node) => {
-      if (node.type === "Window" && !added) {
-        added = true;
-        return {
-          ...node,
-          children: [...node.children, tabId],
-          selected: tabId,
-        };
-      }
-      if (node.type === "Panel") {
-        return { ...node, children: walk(node.children) };
-      }
-      return node;
-    });
+  const firstWindow = findFirstWindow(layout);
+  if (!firstWindow) {
+    return createInitialLayout(tabId);
   }
-  return walk(layout);
+
+  return openTabInWindow(layout, firstWindow.id, tabId, "new-tab");
 }
 
 /**
@@ -107,6 +123,120 @@ export function findWindowById(
   }
 
   return null;
+}
+
+/**
+ * Find the first window that contains the given tab id.
+ */
+export function findWindowContainingTab(
+  nodes: LayoutNode[],
+  tabId: string,
+): WindowNode | null {
+  for (const node of nodes) {
+    if (node.type === "Window" && node.children.includes(tabId)) {
+      return node;
+    }
+
+    if (node.type === "Panel") {
+      const childWindow = findWindowContainingTab(node.children, tabId);
+      if (childWindow) {
+        return childWindow;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Resolve a target window id, with fallback to the first window.
+ */
+export function resolveTargetWindowId(
+  layout: LayoutNode[],
+  preferredWindowId?: string,
+): string | null {
+  if (preferredWindowId && findWindowById(layout, preferredWindowId)) {
+    return preferredWindowId;
+  }
+
+  return findFirstWindow(layout)?.id ?? null;
+}
+
+/**
+ * Replace the selected tab in a specific window and select the replacement.
+ */
+export function replaceSelectedTabInWindow(
+  layout: LayoutNode[],
+  windowId: string,
+  nextTabId: string,
+): LayoutNode[] {
+  return mapLayout(layout, (windowNode) => {
+    if (windowNode.id !== windowId) return windowNode;
+
+    if (windowNode.children.length === 0) {
+      return { ...windowNode, children: [nextTabId], selected: nextTabId };
+    }
+
+    const selectedIndex = windowNode.children.indexOf(windowNode.selected);
+    const replaceIndex = selectedIndex >= 0 ? selectedIndex : 0;
+    const nextChildren = [...windowNode.children];
+    nextChildren[replaceIndex] = nextTabId;
+
+    return {
+      ...windowNode,
+      children: nextChildren,
+      selected: nextTabId,
+    };
+  });
+}
+
+/**
+ * Open a tab in a specific window, either appending or replacing selected tab.
+ */
+export function openTabInWindow(
+  layout: LayoutNode[],
+  windowId: string,
+  tabId: string,
+  mode: OpenFileIntent,
+): LayoutNode[] {
+  if (mode === "replace") {
+    return replaceSelectedTabInWindow(layout, windowId, tabId);
+  }
+
+  return mapLayout(layout, (windowNode) => {
+    if (windowNode.id !== windowId) return windowNode;
+    return {
+      ...windowNode,
+      children: [...windowNode.children, tabId],
+      selected: tabId,
+    };
+  });
+}
+
+/**
+ * Open a file with explicit intent. If already open, selects existing tab.
+ */
+export function openFileInLayout(
+  layout: LayoutNode[],
+  options: OpenFileInLayoutOptions,
+): LayoutNode[] {
+  const { tabId, intent, targetWindowId } = options;
+
+  const existingWindow = findWindowContainingTab(layout, tabId);
+  if (existingWindow) {
+    return selectTabInLayout(layout, tabId);
+  }
+
+  if (layout.length === 0) {
+    return createInitialLayout(tabId);
+  }
+
+  const resolvedTargetWindowId = resolveTargetWindowId(layout, targetWindowId);
+  if (!resolvedTargetWindowId) {
+    return createInitialLayout(tabId);
+  }
+
+  return openTabInWindow(layout, resolvedTargetWindowId, tabId, intent);
 }
 
 /**

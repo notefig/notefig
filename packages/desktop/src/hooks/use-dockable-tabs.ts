@@ -10,12 +10,12 @@ import { useHotkey } from "@tanstack/react-hotkeys";
 import type { LayoutNode, TabProps } from "@/components/dockable";
 import { useLayoutSearchParam } from "./use-layout-search-param";
 import {
-  addTabToLayout,
   findFirstWindow,
   findWindowById,
+  openFileInLayout,
+  type OpenFileInLayoutOptions,
   removeTabFromLayout,
   selectTabInLayout,
-  createInitialLayout,
   extractTabIds,
 } from "@/utils/dockable-layout";
 import {
@@ -58,13 +58,16 @@ export interface UseDockableTabsResult {
   tabs: ReactElement<TabProps>[];
 
   /** Handle file selection from file tree */
-  handleFileSelect: (file: FileTreeNode) => void;
+  handleFileSelect: (
+    file: FileTreeNode,
+    options?: Omit<OpenFileInLayoutOptions, "tabId">,
+  ) => void;
 
   /** Handle layout changes from Dockable */
   handleLayoutChange: (newLayout: LayoutNode[]) => void;
 
-  /** Programmatically open a tab */
-  openTab: (tabId: string) => void;
+  /** Programmatically open a file with explicit intent */
+  openFile: (options: OpenFileInLayoutOptions) => void;
 
   /** Programmatically close a tab */
   closeTab: (tabId: string) => void;
@@ -167,88 +170,6 @@ export function useDockableTabs(
     };
   }, [activeTabId]);
 
-  // Handle file selection from file tree
-  const handleFileSelect = useCallback(
-    (file: FileTreeNode) => {
-      if (file.type !== "file") return;
-
-      // Check if file can be opened (if filter provided)
-      if (canOpenFile && !canOpenFile(file)) {
-        console.warn(`File cannot be opened as tab: ${file.path}`);
-        return;
-      }
-
-      if (openTabs.includes(file.path)) {
-        // Tab already open — update selection in the layout
-        setLayout((currentLayout) =>
-          selectTabInLayout(currentLayout, file.path),
-        );
-        return;
-      }
-
-      // New tab: merge into the current layout
-      setLayout((currentLayout) => {
-        if (currentLayout.length > 0) {
-          return addTabToLayout(currentLayout, file.path);
-        }
-
-        // First tab ever — create a fresh single-window layout
-        return createInitialLayout(file.path);
-      });
-    },
-    [openTabs, setLayout, canOpenFile],
-  );
-
-  // Handle layout changes from Dockable
-  const handleLayoutChange = useCallback(
-    (newLayout: LayoutNode[]) => {
-      // Dispose editors for any tabs that Dockable removed (e.g. via drag to close)
-      const newTabIds = extractTabIds(newLayout);
-      const removed = openTabs.filter((id) => !newTabIds.includes(id));
-      removed.forEach((id) => disposeEditor(id));
-
-      // Write the full layout to the URL
-      setLayout(newLayout);
-    },
-    [openTabs, setLayout],
-  );
-
-  // Programmatic tab management
-  const openTab = useCallback(
-    (tabId: string) => {
-      if (openTabs.includes(tabId)) {
-        setLayout((currentLayout) => selectTabInLayout(currentLayout, tabId));
-        return;
-      }
-
-      setLayout((currentLayout) =>
-        currentLayout.length > 0
-          ? addTabToLayout(currentLayout, tabId)
-          : createInitialLayout(tabId),
-      );
-    },
-    [openTabs, setLayout],
-  );
-
-  const closeTab = useCallback(
-    (tabId: string) => {
-      if (!openTabs.includes(tabId)) return;
-
-      disposeEditor(tabId);
-
-      setLayout((currentLayout) => removeTabFromLayout(currentLayout, tabId));
-    },
-    [openTabs, setLayout],
-  );
-
-  const selectTab = useCallback(
-    (tabId: string) => {
-      if (!openTabs.includes(tabId)) return;
-      setLayout((currentLayout) => selectTabInLayout(currentLayout, tabId));
-    },
-    [openTabs, setLayout],
-  );
-
   const getActiveWindow = useCallback(() => {
     const root = dockableRef?.current;
     const activeElement = document.activeElement;
@@ -294,6 +215,80 @@ export function useDockableTabs(
     // 4) Fallback to first window
     return findFirstWindow(layout);
   }, [dockableRef, layout, activeTabId]);
+
+  const getActiveWindowId = useCallback(() => {
+    return getActiveWindow()?.id ?? null;
+  }, [getActiveWindow]);
+
+  // Handle file selection from file tree
+  const handleFileSelect = useCallback(
+    (file: FileTreeNode, options?: Omit<OpenFileInLayoutOptions, "tabId">) => {
+      if (file.type !== "file") return;
+
+      // Check if file can be opened (if filter provided)
+      if (canOpenFile && !canOpenFile(file)) {
+        console.warn(`File cannot be opened as tab: ${file.path}`);
+        return;
+      }
+
+      setLayout((currentLayout) => {
+        return openFileInLayout(currentLayout, {
+          tabId: file.path,
+          intent: options?.intent ?? "replace",
+          targetWindowId:
+            options?.targetWindowId ?? getActiveWindowId() ?? undefined,
+        });
+      });
+    },
+    [setLayout, canOpenFile, getActiveWindowId],
+  );
+
+  // Handle layout changes from Dockable
+  const handleLayoutChange = useCallback(
+    (newLayout: LayoutNode[]) => {
+      // Dispose editors for any tabs that Dockable removed (e.g. via drag to close)
+      const newTabIds = extractTabIds(newLayout);
+      const removed = openTabs.filter((id) => !newTabIds.includes(id));
+      removed.forEach((id) => disposeEditor(id));
+
+      // Write the full layout to the URL
+      setLayout(newLayout);
+    },
+    [openTabs, setLayout],
+  );
+
+  // Programmatic tab management
+  const openFile = useCallback(
+    (options: OpenFileInLayoutOptions) => {
+      setLayout((currentLayout) =>
+        openFileInLayout(currentLayout, {
+          ...options,
+          targetWindowId:
+            options.targetWindowId ?? getActiveWindowId() ?? undefined,
+        }),
+      );
+    },
+    [setLayout, getActiveWindowId],
+  );
+
+  const closeTab = useCallback(
+    (tabId: string) => {
+      if (!openTabs.includes(tabId)) return;
+
+      disposeEditor(tabId);
+
+      setLayout((currentLayout) => removeTabFromLayout(currentLayout, tabId));
+    },
+    [openTabs, setLayout],
+  );
+
+  const selectTab = useCallback(
+    (tabId: string) => {
+      if (!openTabs.includes(tabId)) return;
+      setLayout((currentLayout) => selectTabInLayout(currentLayout, tabId));
+    },
+    [openTabs, setLayout],
+  );
 
   const getFocusedTabId = useCallback(() => {
     return getActiveWindow()?.selected ?? activeTabId;
@@ -469,7 +464,7 @@ export function useDockableTabs(
     tabs,
     handleFileSelect,
     handleLayoutChange,
-    openTab,
+    openFile,
     closeTab,
     getFocusedTabId,
     closeActiveTab,

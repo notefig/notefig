@@ -48,14 +48,14 @@ export function FileControls({
   const SortIcon = sortIcons[sortOrder];
 
   return (
-    <div className="flex items-center justify-between h-9 px-2 bg-sidebar border-b border-sidebar-border">
+    <div className="flex h-11 items-center justify-between border-b border-sidebar-border bg-sidebar px-2">
       <ButtonGroup>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-muted-foreground"
+              className="h-8 w-8 text-muted-foreground"
               onClick={onNewFile}
             >
               <FilePlus className="h-4 w-4" />
@@ -69,7 +69,7 @@ export function FileControls({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-muted-foreground"
+              className="h-8 w-8 text-muted-foreground"
               onClick={onNewFolder}
             >
               <FolderPlus className="h-4 w-4" />
@@ -86,7 +86,7 @@ export function FileControls({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 text-muted-foreground"
+                className="h-8 w-8 text-muted-foreground"
                 aria-label={t("sortFiles")}
               >
                 <SortIcon className="h-4 w-4" />
