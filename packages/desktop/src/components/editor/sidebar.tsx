@@ -37,6 +37,7 @@ interface SidebarProps {
     line: number,
     column: number,
     matchText?: string,
+    options?: Omit<OpenFileInLayoutOptions, "tabId">,
   ) => void;
   searchPanelRef?: Ref<SearchPanelHandle>;
 }

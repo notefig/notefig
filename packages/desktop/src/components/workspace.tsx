@@ -25,6 +25,7 @@ import { useDockableTabs } from "@/hooks/use-dockable-tabs";
 import type { FileEntry } from "@/utils/fs";
 import { getFileName } from "@/utils/fs";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
+import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { platformAdapter } from "@/adapters";
 import { retryOnAnimationFrame } from "@/utils/retry-on-animation-frame";
 import {
@@ -160,14 +161,23 @@ export const Workspace = () => {
   }, [isSidebarCollapsed, setUrlSearchParams, focusActiveEditor]);
 
   const handleSearchMatchClick = useCallback(
-    (filePath: string, line: number, column: number, matchText?: string) => {
+    (
+      filePath: string,
+      line: number,
+      column: number,
+      matchText?: string,
+      options?: Omit<OpenFileInLayoutOptions, "tabId">,
+    ) => {
       // Open the file tab
-      handleFileSelect({
-        path: filePath,
-        type: "file",
-        contentHash: "",
-        content: "",
-      });
+      handleFileSelect(
+        {
+          path: filePath,
+          type: "file",
+          contentHash: "",
+          content: "",
+        },
+        options,
+      );
       // Retry navigation until editor is mounted and ready (up to ~2s)
       let attempt = 0;
       const maxAttempts = 20;

@@ -6,6 +6,7 @@ import {
   useImperativeHandle,
   forwardRef,
 } from "react";
+import { useKeyHold } from "@tanstack/react-hotkeys";
 import {
   Search,
   X,
@@ -19,6 +20,7 @@ import { useSearch } from "@/hooks/use-search";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { getFileName } from "@/utils/fs";
 import type { SearchMatch } from "@/adapters/platform-adapter.interface";
+import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { suppressEditorFocus } from "@/components/editor/editor-store";
 
 interface SearchPanelProps {
@@ -28,6 +30,7 @@ interface SearchPanelProps {
     line: number,
     column: number,
     matchText?: string,
+    options?: Omit<OpenFileInLayoutOptions, "tabId">,
   ) => void;
 }
 
@@ -41,6 +44,10 @@ export interface SearchPanelHandle {
 
 export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
   function SearchPanel({ workspacePath, onMatchClick }, ref) {
+    const isMetaHeld = useKeyHold("Meta");
+    const isControlHeld = useKeyHold("Control");
+    const isModHeld = isMetaHeld || isControlHeld;
+
     const inputRef = useRef<HTMLInputElement>(null);
     const [query, setQuery] = useState("");
     const [caseSensitive, setCaseSensitive] = useState(false);
@@ -264,6 +271,9 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
                           match.location.range.start.line,
                           match.location.range.start.column,
                           match.content.matchText,
+                          {
+                            intent: isModHeld ? "new-tab" : "replace",
+                          },
                         )
                       }
                     />
