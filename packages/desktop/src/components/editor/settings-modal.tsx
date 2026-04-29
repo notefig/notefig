@@ -28,7 +28,7 @@ import { useUpdater } from "@/hooks/use-updater";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
-import { useSearchParam } from "@/hooks/use-search-param";
+import { useSearchParams } from "react-router-dom";
 
 interface SettingsModalProps {
   direction: "ltr" | "rtl";
@@ -74,15 +74,21 @@ export function SettingsModal({
   onFocusEditor,
 }: SettingsModalProps) {
   const { t } = useTranslation();
-  const { searchParams, setSearchParams } = useSearchParam();
+  const [searchParams, setUrlSearchParams] = useSearchParams();
+  const isSettingsOpen = searchParams.get("settings") === "true";
   const handleSettingsToggle = (open: boolean) => {
-    setSearchParams((next) => {
-      if (open) {
-        next.set("settings", "true");
-      } else {
-        next.delete("settings");
-      }
-    });
+    setUrlSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (open) {
+          next.set("settings", "true");
+        } else {
+          next.delete("settings");
+        }
+        return next;
+      },
+      { replace: true },
+    );
   };
   const handleCloseAutoFocus = (event: Event) => {
     event.preventDefault();
@@ -97,7 +103,7 @@ export function SettingsModal({
   });
 
   useHotkey({ key: ",", mod: true, shift: true }, () => {
-    handleSettingsToggle(!searchParams.get("settings"));
+    handleSettingsToggle(!isSettingsOpen);
   });
 
   const renderSettingsContent = () => {
@@ -120,7 +126,7 @@ export function SettingsModal({
 
   return (
     <Dialog
-      open={searchParams.get("settings") === "true"}
+      open={isSettingsOpen}
       onOpenChange={(open) => handleSettingsToggle(open)}
     >
       <DialogContent
@@ -382,17 +388,22 @@ function UpdateSection() {
 }
 
 function DebugModeToggle() {
-  const { searchParams, setSearchParams } = useSearchParam();
+  const [searchParams, setUrlSearchParams] = useSearchParams();
   const isDebugActive = searchParams.get("debug") === "true";
 
   const handleToggle = (checked: boolean) => {
-    setSearchParams((next) => {
-      if (checked) {
-        next.set("debug", "true");
-      } else {
-        next.delete("debug");
-      }
-    });
+    setUrlSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (checked) {
+          next.set("debug", "true");
+        } else {
+          next.delete("debug");
+        }
+        return next;
+      },
+      { replace: true },
+    );
   };
 
   return (

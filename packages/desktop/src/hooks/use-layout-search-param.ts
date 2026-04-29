@@ -1,6 +1,6 @@
 import { useMemo, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import type { LayoutNode } from "@/components/dockable";
-import { useSearchParam } from "@/hooks/use-search-param";
 
 const LAYOUT_PARAM = "layout";
 
@@ -70,12 +70,10 @@ export interface UseLayoutSearchParam {
  * Other search params (e.g. `settings`) are preserved.
  */
 export function useLayoutSearchParam(): UseLayoutSearchParam {
-  const { searchParams, setSearchParams } = useSearchParam();
+  const [searchParams, setUrlSearchParams] = useSearchParams();
+  const layoutParam = searchParams.get(LAYOUT_PARAM);
 
-  const layout = useMemo(
-    () => parseLayout(searchParams.get(LAYOUT_PARAM)),
-    [searchParams],
-  );
+  const layout = useMemo(() => parseLayout(layoutParam), [layoutParam]);
 
   const setLayout = useCallback(
     (
@@ -83,7 +81,8 @@ export function useLayoutSearchParam(): UseLayoutSearchParam {
         | LayoutNode[]
         | ((currentLayout: LayoutNode[]) => LayoutNode[]),
     ) => {
-      setSearchParams((next) => {
+      setUrlSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
         const currentLayout = parseLayout(next.get(LAYOUT_PARAM));
         const resolvedLayout =
           typeof nextLayout === "function"
@@ -95,9 +94,11 @@ export function useLayoutSearchParam(): UseLayoutSearchParam {
         } else {
           next.set(LAYOUT_PARAM, JSON.stringify(resolvedLayout));
         }
+
+        return next;
       });
     },
-    [setSearchParams],
+    [setUrlSearchParams],
   );
 
   const openTabs = useMemo(() => extractTabIds(layout), [layout]);

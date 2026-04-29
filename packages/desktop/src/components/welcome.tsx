@@ -11,13 +11,13 @@ import { pickDirectory } from "@/utils/fs";
 import { PlainLogo } from "@/components/logo";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
+import { useSearchParams } from "react-router-dom";
 import { useTheme } from "@/components/theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useRecentProjects } from "@/hooks/use-recent-projects";
 import { DebugPanel } from "./debug-panel";
-import { useSearchParam } from "@/hooks/use-search-param";
 
 function ThemeToggle() {
   const { setTheme } = useTheme();
@@ -71,7 +71,7 @@ const projectButtonStyles = `
 
 export function Welcome() {
   const [loading, setLoading] = useState(false);
-  const { setSearchParams } = useSearchParam();
+  const [, setUrlSearchParams] = useSearchParams();
   const { t } = useTranslation();
   const navigate = useNavigate();
   const newProjectRef = useRef<HTMLButtonElement>(null);
@@ -105,9 +105,14 @@ export function Welcome() {
   };
 
   const handleOpenSettings = () => {
-    setSearchParams((next) => {
-      next.set("settings", "true");
-    });
+    setUrlSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("settings", "true");
+        return next;
+      },
+      { replace: true },
+    );
   };
 
   const handleOpenDocs = (e: React.MouseEvent) => {

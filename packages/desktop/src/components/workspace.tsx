@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { useIsFetching } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { Dockable } from "@/components/dockable";
 import { IconSidebar } from "@/components/editor/icon-sidebar";
 import { Sidebar } from "@/components/editor/sidebar";
@@ -35,7 +36,6 @@ import {
   getEditor,
   navigateToLocation,
 } from "@/components/editor/editor-store";
-import { useSearchParam } from "@/hooks/use-search-param";
 import {
   type FileTreeMode,
   FILE_TREE_IDLE,
@@ -133,26 +133,31 @@ export const Workspace = () => {
     [openTabs, existingOpenTabIds],
   );
 
-  const { searchParams, setSearchParams } = useSearchParam();
+  const [searchParams, setUrlSearchParams] = useSearchParams();
   const isSidebarCollapsed = searchParams.get("sidebar") === "collapsed";
   const toggleSidebarCollapsed = useCallback(() => {
-    const isClosing = searchParams.get("sidebar") !== "collapsed";
+    const isClosing = !isSidebarCollapsed;
 
-    setSearchParams((next) => {
-      if (next.get("sidebar") === "collapsed") {
-        next.delete("sidebar");
-      } else {
-        next.set("sidebar", "collapsed");
-        next.delete("sidebarView");
-      }
-    });
+    setUrlSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (next.get("sidebar") === "collapsed") {
+          next.delete("sidebar");
+        } else {
+          next.set("sidebar", "collapsed");
+          next.delete("sidebarView");
+        }
+        return next;
+      },
+      { replace: true },
+    );
 
     if (isClosing) {
       requestAnimationFrame(() => {
         focusActiveEditor();
       });
     }
-  }, [searchParams, setSearchParams, focusActiveEditor]);
+  }, [isSidebarCollapsed, setUrlSearchParams, focusActiveEditor]);
 
   const handleSearchMatchClick = useCallback(
     (filePath: string, line: number, column: number, matchText?: string) => {
@@ -187,6 +192,10 @@ export const Workspace = () => {
 
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [direction, setDirection] = useState<"ltr" | "rtl">("ltr");
+
+  const handleCommandPaletteOpen = useCallback(() => {
+    setIsCommandPaletteOpen(true);
+  }, []);
 
   const isFetchingContent = useIsFetching(
     { queryKey: ["file-content", workspacePath] },
@@ -265,10 +274,15 @@ export const Workspace = () => {
   }, []);
 
   const handleOpenSettings = useCallback(() => {
-    setSearchParams((next) => {
-      next.set("settings", "true");
-    });
-  }, [setSearchParams]);
+    setUrlSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("settings", "true");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setUrlSearchParams]);
 
   const openSearchPanel = useCallback(
     (options?: { filePattern?: string; initialQuery?: string }) => {
@@ -276,10 +290,15 @@ export const Workspace = () => {
       const initialQuery = options?.initialQuery;
 
       // Switch sidebar to search view and expand it
-      setSearchParams((next) => {
-        next.set("sidebarView", "search");
-        next.delete("sidebar"); // ensure expanded
-      });
+      setUrlSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("sidebarView", "search");
+          next.delete("sidebar"); // ensure expanded
+          return next;
+        },
+        { replace: true },
+      );
 
       retryOnAnimationFrame(() => {
         if (!searchPanelRef.current) return false;
@@ -287,7 +306,7 @@ export const Workspace = () => {
         return true;
       });
     },
-    [setSearchParams],
+    [setUrlSearchParams],
   );
 
   /** Mod+F — search within the active file */
@@ -371,7 +390,7 @@ export const Workspace = () => {
       className="flex h-full w-full bg-background overflow-hidden"
     >
       <IconSidebar
-        onCommandPaletteClick={() => setIsCommandPaletteOpen(true)}
+        onCommandPaletteClick={handleCommandPaletteOpen}
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={toggleSidebarCollapsed}
       />

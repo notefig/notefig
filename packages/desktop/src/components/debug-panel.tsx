@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useParams } from "react-router";
+import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -24,7 +25,6 @@ import {
   isMarkdownInstance,
   isCodeInstance,
 } from "@/components/editor/editor-store";
-import { useSearchParam } from "@/hooks/use-search-param";
 
 // ── Types ──
 
@@ -196,8 +196,9 @@ interface DebugPanelProps {
 }
 
 export function DebugPanel({ forceOpen, error }: DebugPanelProps) {
-  const { searchParams, setSearchParams } = useSearchParam();
-  const isOpen = forceOpen || searchParams.get("debug") === "true";
+  const [searchParams, setUrlSearchParams] = useSearchParams();
+  const isDebugOpen = searchParams.get("debug") === "true";
+  const isOpen = forceOpen || isDebugOpen;
 
   if (!isOpen) return null;
 
@@ -209,8 +210,10 @@ export function DebugPanel({ forceOpen, error }: DebugPanelProps) {
         forceOpen
           ? undefined
           : () => {
-              setSearchParams((next) => {
+              setUrlSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
                 next.delete("debug");
+                return next;
               });
             }
       }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, type Ref } from "react";
+import { useSearchParams } from "react-router-dom";
 import { FileTree, type FileTreeMode } from "@/components/editor/file-tree";
 import { FileControls } from "@/components/editor/file-controls";
 import {
@@ -18,7 +19,6 @@ import {
   isTextFile,
 } from "@/utils/fs";
 import type { FileTreeNode, SortOrder } from "@/utils/fs";
-import { useSearchParam } from "@/hooks/use-search-param";
 
 interface SidebarProps {
   workspacePath: string;
@@ -50,19 +50,21 @@ export function Sidebar({
 }: SidebarProps) {
   const { metadata } = getOrCreateWorkspaceCollections(workspacePath);
 
-  const { searchParams, setSearchParams } = useSearchParam();
+  const [searchParams, setUrlSearchParams] = useSearchParams();
   const sortOrder = (searchParams.get("sort") as SortOrder) || "name-asc";
   const setSortOrder = useCallback(
     (order: SortOrder) => {
-      setSearchParams((next) => {
+      setUrlSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
         if (order === "name-asc") {
           next.delete("sort");
         } else {
           next.set("sort", order);
         }
+        return next;
       });
     },
-    [setSearchParams],
+    [setUrlSearchParams],
   );
 
   const [sidebarWidth, setSidebarWidth] = useState(240);
