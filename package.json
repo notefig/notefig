@@ -8,6 +8,7 @@
   "scripts": {
     "build": "npm run build --workspaces",
     "build:shared": "npm run build -w packages/shared",
+    "build:git": "npm run build -w packages/git",
     "build:cli": "npm run build -w packages/shared && npm run build -w packages/cli",
     "build:desktop": "npm run build -w packages/desktop",
     "dev:cli": "npm run dev -w packages/cli",
