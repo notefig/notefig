@@ -14,7 +14,6 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-
 import git from "isomorphic-git";
 
 import { createIsomorphicGitFs } from "./isomorphicGitFs";
@@ -139,6 +138,16 @@ class MockPlatformStorageHost implements GitStorageHost {
   }
 }
 
+class MissingControlFilesStatHost extends MockPlatformStorageHost {
+  override async stat(path: string): Promise<GitHostStatResult> {
+    if (path.endsWith("/.git/HEAD") || path.endsWith("/.git/config")) {
+      return { exists: false, isFile: false, isDir: false };
+    }
+
+    return super.stat(path);
+  }
+}
+
 describe("createIsomorphicGitFs + IsomorphicGitService", () => {
   let repoDir: string;
   let host: MockPlatformStorageHost;
@@ -168,8 +177,6 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
   beforeEach(async () => {
     repoDir = await mkdtemp(join(tmpdir(), "metrists-git-it-"));
     host = new MockPlatformStorageHost(repoDir);
-    const fsClient = createIsomorphicGitFs(host);
-    await git.init({ fs: fsClient, dir: repoDir, defaultBranch: "main" });
   });
 
   afterEach(async () => {
@@ -177,13 +184,94 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
   });
 
   it("maps host storage through isomorphic-git init", async () => {
-    const headFile = await host.readFile(join(repoDir, ".git", "HEAD"));
+    const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+
+    const headFile = await host.readFile(join(repoDir, ".git/HEAD"));
     const headText = Buffer.from(headFile).toString("utf8");
     expect(headText).toContain("refs/heads/main");
+
+    const configFile = await host.readFile(join(repoDir, ".git/config"));
+    const configText = Buffer.from(configFile).toString("utf8");
+    expect(configText).toContain("[core]");
+  });
+
+  it("repairs incomplete .git metadata on init", async () => {
+    const service = new IsomorphicGitService(host);
+
+    await host.createDir(join(repoDir, ".git"));
+    await host.createDir(join(repoDir, ".git/objects"));
+    await host.createDir(join(repoDir, ".git/refs"));
+
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+
+    const headFile = await host.readFile(join(repoDir, ".git/HEAD"));
+    const headText = Buffer.from(headFile).toString("utf8");
+    expect(headText).toContain("refs/heads/main");
+
+    const configFile = await host.readFile(join(repoDir, ".git/config"));
+    const configText = Buffer.from(configFile).toString("utf8");
+    expect(configText).toContain("repositoryformatversion = 0");
+  });
+
+  it("writes control files on repeated init calls", async () => {
+    const service = new IsomorphicGitService(host);
+
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+
+    const headFile = await host.readFile(join(repoDir, ".git/HEAD"));
+    const configFile = await host.readFile(join(repoDir, ".git/config"));
+
+    expect(Buffer.from(headFile).toString("utf8")).toContain("refs/heads/main");
+    expect(Buffer.from(configFile).toString("utf8")).toContain("[core]");
+  });
+
+  it("returns success when kernel init fails but control files exist", async () => {
+    const service = new IsomorphicGitService(host);
+    const initSpy = jest
+      .spyOn(git, "init")
+      .mockRejectedValue(new Error("forced init failure"));
+
+    try {
+      await expect(
+        service.init({ repoPath: repoDir, defaultBranch: "main" }),
+      ).resolves.toBeUndefined();
+
+      const headFile = await host.readFile(join(repoDir, ".git/HEAD"));
+      const configFile = await host.readFile(join(repoDir, ".git/config"));
+
+      expect(Buffer.from(headFile).toString("utf8")).toContain(
+        "refs/heads/main",
+      );
+      expect(Buffer.from(configFile).toString("utf8")).toContain("[core]");
+    } finally {
+      initSpy.mockRestore();
+    }
+  });
+
+  it("throws when kernel init fails and control files are missing", async () => {
+    const missingStatHost = new MissingControlFilesStatHost(repoDir);
+    const service = new IsomorphicGitService(missingStatHost);
+    const initSpy = jest
+      .spyOn(git, "init")
+      .mockRejectedValue(new Error("forced init failure"));
+
+    try {
+      await expect(
+        service.init({ repoPath: repoDir, defaultBranch: "main" }),
+      ).rejects.toMatchObject({
+        name: "GitError",
+        code: "CorruptRepository",
+      });
+    } finally {
+      initSpy.mockRestore();
+    }
   });
 
   it("reports untracked files before first commit", async () => {
     const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
     await host.writeFileAtomic(
       join(repoDir, "note.md"),
       new TextEncoder().encode("hello\n"),
@@ -195,6 +283,7 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
 
   it("stages and commits via mock storage host", async () => {
     const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
     await host.writeFileAtomic(
       join(repoDir, "note.md"),
       new TextEncoder().encode("hello\n"),
@@ -212,6 +301,7 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
 
   it("lists branches and supports branch creation", async () => {
     const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
     await host.writeFileAtomic(
       join(repoDir, "a.md"),
       new TextEncoder().encode("a\n"),
@@ -232,6 +322,7 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
 
   it("supports switch branch and log per ref", async () => {
     const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
     await host.writeFileAtomic(
       join(repoDir, "base.md"),
       new TextEncoder().encode("base\n"),
@@ -279,6 +370,7 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
 
   it("reports status transitions and restores file with checkoutPaths", async () => {
     const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
     await host.writeFileAtomic(
       join(repoDir, "note.md"),
       new TextEncoder().encode("hello\n"),

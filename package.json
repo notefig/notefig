@@ -12,7 +12,7 @@
     "build:cli": "npm run build -w packages/shared && npm run build -w packages/cli",
     "build:desktop": "npm run build -w packages/desktop",
     "dev:cli": "npm run dev -w packages/cli",
-    "dev:desktop": "npm run dev -w packages/desktop",
+    "dev:desktop": "npm run tauri dev -w packages/desktop",
     "dev:marketing": "npm run dev -w packages/marketing",
     "test": "npm run test --workspaces",
     "test:cli": "npm run test -w packages/cli",

@@ -9,6 +9,7 @@ import {
   type GitCreateBranchInput,
   type GitFetchInput,
   type GitFileChange,
+  type GitInitInput,
   type GitListBranchesInput,
   type GitLogInput,
   type GitPullInput,
@@ -19,6 +20,17 @@ import {
   type GitSwitchBranchInput,
   type GitUnstageInput,
 } from "./types";
+
+const textEncoder = new TextEncoder();
+
+function joinGitPath(repoPath: string, relativePath: string): string {
+  const base = repoPath.endsWith("/") ? repoPath.slice(0, -1) : repoPath;
+  return `${base}/${relativePath}`;
+}
+
+function encodeText(value: string): Uint8Array {
+  return textEncoder.encode(value);
+}
 
 function toGitError(error: unknown): GitError {
   if (error instanceof GitError) {
@@ -72,6 +84,96 @@ export class IsomorphicGitService implements GitService {
 
   constructor(private readonly host: GitStorageHost) {
     this.fsClient = createIsomorphicGitFs(host);
+  }
+
+  private async ensureInitControlFiles(input: GitInitInput): Promise<void> {
+    const defaultBranch = input.defaultBranch ?? "master";
+    const gitDir = joinGitPath(input.repoPath, ".git");
+    const headPath = joinGitPath(gitDir, "HEAD");
+    const configPath = joinGitPath(gitDir, "config");
+    const infoDir = joinGitPath(gitDir, "info");
+    const hooksDir = joinGitPath(gitDir, "hooks");
+    const objectsDir = joinGitPath(gitDir, "objects");
+    const objectsInfoDir = joinGitPath(objectsDir, "info");
+    const objectsPackDir = joinGitPath(objectsDir, "pack");
+    const refsDir = joinGitPath(gitDir, "refs");
+    const refsHeadsDir = joinGitPath(refsDir, "heads");
+    const refsTagsDir = joinGitPath(refsDir, "tags");
+    const descriptionPath = joinGitPath(gitDir, "description");
+    const excludePath = joinGitPath(infoDir, "exclude");
+
+    await this.host.createDir(gitDir);
+    await this.host.createDir(infoDir);
+    await this.host.createDir(hooksDir);
+    await this.host.createDir(objectsDir);
+    await this.host.createDir(objectsInfoDir);
+    await this.host.createDir(objectsPackDir);
+    await this.host.createDir(refsDir);
+    await this.host.createDir(refsHeadsDir);
+    await this.host.createDir(refsTagsDir);
+
+    const headStat = await this.host.stat(headPath);
+    if (!headStat.exists) {
+      await this.host.writeFileAtomic(
+        headPath,
+        encodeText(`ref: refs/heads/${defaultBranch}\n`),
+      );
+    }
+
+    const configStat = await this.host.stat(configPath);
+    if (!configStat.exists) {
+      await this.host.writeFileAtomic(
+        configPath,
+        encodeText(
+          "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\n",
+        ),
+      );
+    }
+
+    const descriptionStat = await this.host.stat(descriptionPath);
+    if (!descriptionStat.exists) {
+      await this.host.writeFileAtomic(
+        descriptionPath,
+        encodeText(
+          "Unnamed repository; edit this file 'description' to name the repository.\n",
+        ),
+      );
+    }
+
+    const excludeStat = await this.host.stat(excludePath);
+    if (!excludeStat.exists) {
+      await this.host.writeFileAtomic(
+        excludePath,
+        encodeText(
+          "# git ls-files --others --exclude-from=.git/info/exclude\n# Lines that start with '#' are comments.\n",
+        ),
+      );
+    }
+  }
+
+  async init(input: GitInitInput): Promise<void> {
+    await this.ensureInitControlFiles(input);
+
+    try {
+      await git.init({
+        ...input,
+        fs: this.fsClient,
+        dir: input.repoPath,
+      });
+    } catch (error) {
+      const headPath = joinGitPath(input.repoPath, ".git/HEAD");
+      const configPath = joinGitPath(input.repoPath, ".git/config");
+      const [headStat, configStat] = await Promise.all([
+        this.host.stat(headPath),
+        this.host.stat(configPath),
+      ]);
+
+      if (headStat.exists && configStat.exists) {
+        return;
+      }
+
+      throw toGitError(error);
+    }
   }
 
   async status(input: { repoPath: string }): Promise<RepoStatus> {

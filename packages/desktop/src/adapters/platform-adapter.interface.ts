@@ -1,4 +1,5 @@
 import type { Theme } from "@/components/theme-provider";
+import type { GitStorageHost } from "@metrists/git";
 
 /**
  * Error types for file system operations
@@ -380,4 +381,10 @@ export interface IPlatformAdapter {
     directory: string,
     options: SearchOptions,
   ): Promise<SearchMatch[]>;
+
+  /**
+   * Create a GitStorageHost bound to a workspace root.
+   * This enables one-line Git service initialization per workspace.
+   */
+  getGitStorageHost(workspacePath: string): GitStorageHost;
 }

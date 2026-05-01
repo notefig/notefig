@@ -4,6 +4,7 @@ import type {
   checkout as igCheckout,
   commit as igCommit,
   fetch as igFetch,
+  init as igInit,
   listBranches as igListBranches,
   log as igLog,
   pull as igPull,
@@ -18,6 +19,7 @@ type BranchParams = Parameters<typeof igBranch>[0];
 type CheckoutParams = Parameters<typeof igCheckout>[0];
 type CommitParams = Parameters<typeof igCommit>[0];
 type FetchParams = Parameters<typeof igFetch>[0];
+type InitParams = Parameters<typeof igInit>[0];
 type ListBranchesParams = Parameters<typeof igListBranches>[0];
 type LogParams = Parameters<typeof igLog>[0];
 type PullParams = Parameters<typeof igPull>[0];
@@ -128,6 +130,7 @@ export interface GitStorageHost {
 }
 
 export type GitAddInput = WithRepoPath<AddParams>;
+export type GitInitInput = WithRepoPath<InitParams>;
 export type GitUnstageInput = WithRepoPath<ResetIndexParams>;
 export type GitCommitInput = WithRepoPath<CommitParams>;
 export type GitListBranchesInput = WithRepoPath<ListBranchesParams>;
@@ -147,6 +150,7 @@ export type GitPullInput = WithRepoPath<PullParams>;
 export type GitPushInput = WithRepoPath<PushParams>;
 
 export interface GitService {
+  init(input: GitInitInput): ReturnType<typeof igInit>;
   status(input: { repoPath: string }): Promise<RepoStatus>;
   add(input: GitAddInput): ReturnType<typeof igAdd>;
   unstage(input: GitUnstageInput): ReturnType<typeof igResetIndex>;

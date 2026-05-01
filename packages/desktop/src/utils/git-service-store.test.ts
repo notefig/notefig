@@ -1,0 +1,95 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mockHost = {
+  readFile: vi.fn(),
+  writeFileAtomic: vi.fn(),
+  renameAtomic: vi.fn(),
+  deleteFile: vi.fn(),
+  stat: vi.fn(),
+  lstat: vi.fn(),
+  readDir: vi.fn(),
+  createDir: vi.fn(),
+  removeDir: vi.fn(),
+  readLink: vi.fn(),
+  createSymlink: vi.fn(),
+  chmod: vi.fn(),
+  lock: vi.fn(),
+  unlock: vi.fn(),
+};
+
+const initMock = vi.fn();
+const isomorphicGitServiceCtor = vi.fn().mockImplementation(() => ({
+  init: initMock,
+}));
+
+const platformAdapterMock = {
+  getGitStorageHost: vi.fn(() => mockHost),
+  exists: vi.fn(),
+};
+
+vi.mock("@metrists/git", () => ({
+  IsomorphicGitService: isomorphicGitServiceCtor,
+}));
+
+vi.mock("@/adapters", () => ({
+  platformAdapter: platformAdapterMock,
+}));
+
+describe("git-service-store", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    initMock.mockResolvedValue(undefined);
+  });
+
+  it("returns singleton git service per normalized workspace", async () => {
+    const store = await import("./git-service-store");
+    store.clearWorkspaceGitServices();
+
+    const first = store.getOrCreateWorkspaceGitService("/workspace/");
+    const second = store.getOrCreateWorkspaceGitService("/workspace");
+
+    expect(first).toBe(second);
+    expect(platformAdapterMock.getGitStorageHost).toHaveBeenCalledTimes(1);
+    expect(platformAdapterMock.getGitStorageHost).toHaveBeenCalledWith(
+      "/workspace",
+    );
+  });
+
+  it("initializes repository once per in-flight workspace", async () => {
+    const store = await import("./git-service-store");
+    store.clearWorkspaceGitServices();
+
+    await Promise.all([
+      store.ensureWorkspaceGitInitialized("/workspace"),
+      store.ensureWorkspaceGitInitialized("/workspace"),
+    ]);
+
+    expect(initMock).toHaveBeenCalledTimes(1);
+    expect(initMock).toHaveBeenCalledWith({
+      repoPath: "/workspace",
+      defaultBranch: "main",
+    });
+  });
+
+  it("re-runs init on later ensure calls", async () => {
+    const store = await import("./git-service-store");
+    store.clearWorkspaceGitServices();
+
+    await store.ensureWorkspaceGitInitialized("/workspace");
+    await store.ensureWorkspaceGitInitialized("/workspace");
+
+    expect(initMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("disposes a workspace service entry", async () => {
+    const store = await import("./git-service-store");
+    store.clearWorkspaceGitServices();
+
+    const first = store.getOrCreateWorkspaceGitService("/workspace");
+    store.disposeWorkspaceGitService("/workspace");
+    const second = store.getOrCreateWorkspaceGitService("/workspace");
+
+    expect(first).not.toBe(second);
+    expect(platformAdapterMock.getGitStorageHost).toHaveBeenCalledTimes(2);
+  });
+});
