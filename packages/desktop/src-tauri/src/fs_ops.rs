@@ -321,6 +321,38 @@ pub struct FileContent {
     pub content: String,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct BinaryFileContent {
+    pub path: String,
+    pub data: Vec<u8>,
+}
+
+#[tauri::command]
+pub async fn read_binary_files(paths: Vec<String>) -> BatchResult<BinaryFileContent> {
+    let mut result = BatchResult::new();
+
+    let tasks: Vec<_> = paths
+        .into_iter()
+        .map(|path| async move {
+            match fs::read(&path).await {
+                Ok(data) => Ok(BinaryFileContent { path, data }),
+                Err(err) => Err(map_io_error(&path, err)),
+            }
+        })
+        .collect();
+
+    let results = futures::future::join_all(tasks).await;
+
+    for res in results {
+        match res {
+            Ok(file_content) => result.succeeded.push(file_content),
+            Err(err) => result.failed.push(err),
+        }
+    }
+
+    result
+}
+
 #[derive(Deserialize)]
 pub struct FileToWrite {
     pub path: String,
@@ -808,6 +840,57 @@ mod tests {
 
         assert_eq!(result.succeeded.len(), 1);
         assert_eq!(result.succeeded[0].content, "");
+    }
+
+    #[tokio::test]
+    async fn test_read_binary_files_reads_multiple_files_in_batch() {
+        let temp_dir = setup_test_dir();
+        let file1_path = temp_dir.path().join("file1.bin");
+        let file2_path = temp_dir.path().join("file2.bin");
+        tokio::fs::write(&file1_path, vec![1u8, 2, 3])
+            .await
+            .expect("Failed to write binary file1");
+        tokio::fs::write(&file2_path, vec![4u8, 5, 6])
+            .await
+            .expect("Failed to write binary file2");
+
+        let file1 = file1_path.to_string_lossy().to_string();
+        let file2 = file2_path.to_string_lossy().to_string();
+
+        let result = read_binary_files(vec![file1.clone(), file2.clone()]).await;
+
+        assert_eq!(result.succeeded.len(), 2);
+        assert!(result
+            .succeeded
+            .iter()
+            .any(|f| f.path == file1 && f.data == vec![1u8, 2, 3]));
+        assert!(result
+            .succeeded
+            .iter()
+            .any(|f| f.path == file2 && f.data == vec![4u8, 5, 6]));
+        assert!(result.failed.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_read_binary_files_returns_partial_success() {
+        let temp_dir = setup_test_dir();
+        let file = temp_dir.path().join("file.bin");
+        tokio::fs::write(&file, vec![1u8, 2, 3])
+            .await
+            .expect("Failed to write binary file");
+        let existing = file.to_string_lossy().to_string();
+        let missing = temp_dir
+            .path()
+            .join("missing.bin")
+            .to_string_lossy()
+            .to_string();
+
+        let result = read_binary_files(vec![existing.clone(), missing.clone()]).await;
+
+        assert_eq!(result.succeeded.len(), 1);
+        assert_eq!(result.failed.len(), 1);
+        assert_eq!(result.succeeded[0].path, existing);
+        assert_eq!(result.failed[0].path, missing);
     }
 
     #[tokio::test]

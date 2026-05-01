@@ -217,6 +217,14 @@ export interface IPlatformAdapter {
   ): Promise<BatchResult<{ path: string; content: string }>>;
 
   /**
+   * Read binary file contents
+   * @returns Batch result with binary data for succeeded reads and errors for failures
+   */
+  readBinaryFiles(
+    paths: string[],
+  ): Promise<BatchResult<{ path: string; data: Uint8Array }>>;
+
+  /**
    * Write/update files (creates or updates)
    * Creates parent directories if they don't exist
    * @returns Batch result with succeeded paths and failed operations

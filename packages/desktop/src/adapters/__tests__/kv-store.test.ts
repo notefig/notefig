@@ -27,6 +27,11 @@ class TestBrowserAdapter extends BaseBrowserAdapter {
   async readFiles(): Promise<BatchResult<{ path: string; content: string }>> {
     return { succeeded: [], failed: [] };
   }
+  async readBinaryFiles(): Promise<
+    BatchResult<{ path: string; data: Uint8Array }>
+  > {
+    return { succeeded: [], failed: [] };
+  }
   async writeFiles(): Promise<BatchResult<string>> {
     return { succeeded: [], failed: [] };
   }

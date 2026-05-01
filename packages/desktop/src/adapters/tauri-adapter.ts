@@ -154,6 +154,32 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
+  async readBinaryFiles(
+    paths: string[],
+  ): Promise<BatchResult<{ path: string; data: Uint8Array }>> {
+    try {
+      const result = await invoke<
+        BatchResult<{ path: string; data: number[] }>
+      >("read_binary_files", { paths });
+      return {
+        succeeded: result.succeeded.map((entry) => ({
+          path: entry.path,
+          data: Uint8Array.from(entry.data),
+        })),
+        failed: result.failed,
+      };
+    } catch (error) {
+      return {
+        succeeded: [],
+        failed: paths.map((path) => ({
+          path,
+          type: "io_error",
+          message: error instanceof Error ? error.message : "Unknown error",
+        })),
+      };
+    }
+  }
+
   async writeFiles(
     files: { path: string; content: string }[],
   ): Promise<BatchResult<string>> {

@@ -477,6 +477,19 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
+  async readBinaryFiles(
+    paths: string[],
+  ): Promise<BatchResult<{ path: string; data: Uint8Array }>> {
+    const { succeeded: textFiles, failed } = await this.readFiles(paths);
+    return {
+      succeeded: textFiles.map((file) => ({
+        path: file.path,
+        data: new TextEncoder().encode(file.content),
+      })),
+      failed,
+    };
+  }
+
   async writeFiles(
     files: { path: string; content: string }[],
   ): Promise<BatchResult<string>> {

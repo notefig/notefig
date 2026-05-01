@@ -256,6 +256,7 @@ fn main() {
             fs_ops::delete_directories,
             fs_ops::move_directory,
             fs_ops::read_files,
+            fs_ops::read_binary_files,
             fs_ops::write_files,
             fs_ops::create_files,
             fs_ops::delete_files,

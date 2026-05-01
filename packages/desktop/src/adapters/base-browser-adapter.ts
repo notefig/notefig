@@ -117,6 +117,9 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   abstract readFiles(
     paths: string[],
   ): Promise<BatchResult<{ path: string; content: string }>>;
+  abstract readBinaryFiles(
+    paths: string[],
+  ): Promise<BatchResult<{ path: string; data: Uint8Array }>>;
   abstract writeFiles(
     files: { path: string; content: string }[],
   ): Promise<BatchResult<string>>;

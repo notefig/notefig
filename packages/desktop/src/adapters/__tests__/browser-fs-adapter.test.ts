@@ -56,6 +56,9 @@ describe("BrowserFsPlatformAdapter", () => {
 
     mockFile = {
       text: vi.fn().mockResolvedValue("file content"),
+      arrayBuffer: vi
+        .fn()
+        .mockResolvedValue(new TextEncoder().encode("file content").buffer),
       size: 100,
       lastModified: Date.now(),
     };
@@ -389,6 +392,35 @@ describe("BrowserFsPlatformAdapter", () => {
 
       expect(result.succeeded.length).toBe(1);
       expect(result.succeeded[0].content).toBe("");
+    });
+  });
+
+  describe("readBinaryFiles", () => {
+    it("should read multiple binary files in batch", async () => {
+      const result = await adapter.readBinaryFiles([
+        "/test-workspace/file1.bin",
+        "/test-workspace/file2.bin",
+      ]);
+
+      expect(result.succeeded.length).toBe(2);
+      expect(result.succeeded[0].path).toBe("/test-workspace/file1.bin");
+      expect(result.succeeded[0].data).toBeInstanceOf(Uint8Array);
+    });
+
+    it("should return partial success for missing binary files", async () => {
+      mockDirectoryHandle.getFileHandle = vi
+        .fn()
+        .mockResolvedValueOnce(mockFileHandle)
+        .mockRejectedValueOnce(new Error("File not found"));
+
+      const result = await adapter.readBinaryFiles([
+        "/test-workspace/file1.bin",
+        "/test-workspace/missing.bin",
+      ]);
+
+      expect(result.succeeded.length).toBe(1);
+      expect(result.failed.length).toBe(1);
+      expect(result.failed[0].path).toBe("/test-workspace/missing.bin");
     });
   });
 
