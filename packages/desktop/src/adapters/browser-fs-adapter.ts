@@ -332,11 +332,11 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
       });
       if (filesResult.ok) {
         const filePaths = filesResult.value;
-        const fileData = await this.readFiles(filePaths);
-        await this.writeFiles(
+        const fileData = await this.readBinaryFiles(filePaths);
+        await this.writeBinaryFiles(
           fileData.succeeded.map((f) => ({
             path: f.path.replace(oldPath, newPath),
-            content: f.content,
+            data: f.data,
           })),
         );
       }

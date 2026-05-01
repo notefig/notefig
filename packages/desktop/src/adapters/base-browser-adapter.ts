@@ -146,15 +146,15 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   }
 
   async moveFile(oldPath: string, newPath: string): Promise<Result<void>> {
-    const readResult = await this.readFiles([oldPath]);
+    const readResult = await this.readBinaryFiles([oldPath]);
     if (readResult.failed.length > 0 || readResult.succeeded.length === 0) {
       return {
         ok: false,
         error: createError(oldPath, "not_found", "File not found"),
       };
     }
-    const content = readResult.succeeded[0].content;
-    const writeResult = await this.writeFiles([{ path: newPath, content }]);
+    const data = readResult.succeeded[0].data;
+    const writeResult = await this.writeBinaryFiles([{ path: newPath, data }]);
     if (writeResult.failed.length > 0) {
       return {
         ok: false,
@@ -166,15 +166,15 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   }
 
   async copyFile(from: string, to: string): Promise<Result<void>> {
-    const readResult = await this.readFiles([from]);
+    const readResult = await this.readBinaryFiles([from]);
     if (readResult.failed.length > 0 || readResult.succeeded.length === 0) {
       return {
         ok: false,
         error: createError(from, "not_found", "File not found"),
       };
     }
-    const writeResult = await this.writeFiles([
-      { path: to, content: readResult.succeeded[0].content },
+    const writeResult = await this.writeBinaryFiles([
+      { path: to, data: readResult.succeeded[0].data },
     ]);
     if (writeResult.failed.length > 0) {
       return { ok: false, error: writeResult.failed[0] };

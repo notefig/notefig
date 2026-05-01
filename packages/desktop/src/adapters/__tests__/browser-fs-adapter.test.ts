@@ -664,16 +664,19 @@ describe("BrowserFsPlatformAdapter", () => {
     });
 
     it("should move file between directories", async () => {
-      // Mock readFiles to return content from source
-      vi.spyOn(adapter, "readFiles").mockResolvedValue({
+      // Mock readBinaryFiles to return source bytes
+      vi.spyOn(adapter, "readBinaryFiles").mockResolvedValue({
         succeeded: [
-          { path: "/test-workspace/a/file.txt", content: "file content" },
+          {
+            path: "/test-workspace/a/file.txt",
+            data: new TextEncoder().encode("file content"),
+          },
         ],
         failed: [],
       });
 
-      // Mock writeFiles to succeed
-      vi.spyOn(adapter, "writeFiles").mockResolvedValue({
+      // Mock writeBinaryFiles to succeed
+      vi.spyOn(adapter, "writeBinaryFiles").mockResolvedValue({
         succeeded: ["/test-workspace/b/file.txt"],
         failed: [],
       });
@@ -690,11 +693,14 @@ describe("BrowserFsPlatformAdapter", () => {
       );
 
       expect(result.ok).toBe(true);
-      expect(adapter.readFiles).toHaveBeenCalledWith([
+      expect(adapter.readBinaryFiles).toHaveBeenCalledWith([
         "/test-workspace/a/file.txt",
       ]);
-      expect(adapter.writeFiles).toHaveBeenCalledWith([
-        { path: "/test-workspace/b/file.txt", content: "file content" },
+      expect(adapter.writeBinaryFiles).toHaveBeenCalledWith([
+        {
+          path: "/test-workspace/b/file.txt",
+          data: new TextEncoder().encode("file content"),
+        },
       ]);
       expect(adapter.deleteFiles).toHaveBeenCalledWith([
         "/test-workspace/a/file.txt",
