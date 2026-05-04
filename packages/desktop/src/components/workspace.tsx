@@ -37,7 +37,6 @@ import {
   getEditor,
   navigateToLocation,
 } from "@/components/editor/editor-store";
-import { ensureWorkspaceGitInitialized } from "@/utils/git-service-store";
 import {
   type FileTreeMode,
   FILE_TREE_IDLE,
@@ -77,18 +76,6 @@ export const Workspace = () => {
       disposeAllEditors();
     };
   }, []);
-
-  useEffect(() => {
-    const ensureRepo = async () => {
-      try {
-        await ensureWorkspaceGitInitialized(workspacePath);
-      } catch (error) {
-        console.error("Failed to initialize git repository:", error);
-      }
-    };
-
-    void ensureRepo();
-  }, [workspacePath]);
 
   // Query metadata and content for all open tabs
   // Uses left join so files appear immediately (metadata loads eagerly)

@@ -47,6 +47,12 @@ export async function ensureWorkspaceGitInitialized(
   return service;
 }
 
+export async function initializeWorkspaceGit(
+  workspacePath: string,
+): Promise<IsomorphicGitService> {
+  return ensureWorkspaceGitInitialized(workspacePath);
+}
+
 export function disposeWorkspaceGitService(workspacePath: string): void {
   const normalizedWorkspacePath = normalizePath(workspacePath);
   gitServiceRegistry.delete(normalizedWorkspacePath);
