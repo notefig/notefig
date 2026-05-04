@@ -1,4 +1,5 @@
 import type { FsClient } from "isomorphic-git";
+import { Buffer } from "buffer";
 
 import type { GitStorageHost } from "./types";
 

@@ -13,6 +13,7 @@ import {
   readlink,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { Buffer } from "node:buffer";
 import { dirname, join, resolve } from "node:path";
 import git from "isomorphic-git";
 
@@ -279,6 +280,27 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
 
     const before = await service.status({ repoPath: repoDir });
     expect(before.untracked).toEqual(["note.md"]);
+  });
+
+  it("returns empty log for initialized repo without commits", async () => {
+    const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+
+    await expect(service.log({ repoPath: repoDir })).resolves.toEqual([]);
+  });
+
+  it("returns status for initialized repo without commits", async () => {
+    const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+
+    const status = await service.status({ repoPath: repoDir });
+
+    expect(status.repoPath).toBe(repoDir);
+    expect(status.currentBranch).toBe("main");
+    expect(status.staged).toEqual([]);
+    expect(status.unstaged).toEqual([]);
+    expect(status.untracked).toEqual([]);
+    expect(status.conflicts).toEqual([]);
   });
 
   it("stages and commits via mock storage host", async () => {

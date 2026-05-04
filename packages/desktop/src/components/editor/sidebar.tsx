@@ -6,6 +6,7 @@ import {
   SearchPanel,
   type SearchPanelHandle,
 } from "@/components/editor/search-panel";
+import { CheckpointPanel } from "@/components/editor/git/checkpoint-panel";
 import {
   getOrCreateWorkspaceCollections,
   deleteFileOrDirectory,
@@ -226,6 +227,8 @@ export function Sidebar({
             workspacePath={workspacePath}
             onMatchClick={onSearchMatchClick}
           />
+        ) : sidebarView === "git" ? (
+          <CheckpointPanel workspacePath={workspacePath} />
         ) : (
           <>
             <FileTree
