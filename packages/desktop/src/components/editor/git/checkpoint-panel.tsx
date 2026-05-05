@@ -121,7 +121,7 @@ async function saveCheckpointMutation(
     message,
     author: {
       name: "Metrists",
-      email: "checkpoints@metrists.local",
+      email: "git@metrists.com",
     },
   });
 
