@@ -66,17 +66,6 @@ type SyncState = "uncommitted" | "unsynced" | "synced";
 
 type MutableT = (key: string, defaultValue: string) => string;
 
-function debugGitTimeline(event: string, details?: unknown): void {
-  if (!import.meta.env.DEV) return;
-
-  if (details === undefined) {
-    console.debug(`[git-timeline] ${event}`);
-    return;
-  }
-
-  console.debug(`[git-timeline] ${event}`, details);
-}
-
 function gitQueryKeys(workspacePath: string) {
   return {
     status: ["git", workspacePath, "status"] as const,
@@ -93,34 +82,11 @@ function isGitError(value: unknown): value is GitError {
   );
 }
 
-function toGitError(value: unknown): GitError {
-  if (isGitError(value)) return value;
-
-  const message =
-    value instanceof Error
-      ? value.message
-      : typeof value === "string"
-        ? value
-        : "Unknown git error";
-
-  return {
-    name: "GitError",
-    message,
-    code: "CorruptRepository",
-  } as GitError;
-}
-
 async function loadCheckpointsQuery(
   workspacePath: string,
   service: GitService,
 ): Promise<CheckpointListItem[]> {
-  debugGitTimeline("checkpoints.query.start", { workspacePath });
   const entries = await service.log({ repoPath: workspacePath, depth: 100 });
-  debugGitTimeline("checkpoints.query.success", {
-    workspacePath,
-    count: entries.length,
-    head: entries[0]?.oid,
-  });
 
   return entries.map((entry) => ({
     id: entry.oid,
@@ -135,19 +101,7 @@ async function saveCheckpointMutation(
   service: GitService,
   description?: string,
 ): Promise<string | null> {
-  debugGitTimeline("save.mutation.start", {
-    workspacePath,
-    hasDescription: Boolean(description?.trim()),
-  });
-
   const status = await service.status({ repoPath: workspacePath });
-  debugGitTimeline("save.mutation.status", {
-    workspacePath,
-    staged: status.staged.length,
-    unstaged: status.unstaged.length,
-    untracked: status.untracked.length,
-    branch: status.currentBranch,
-  });
 
   const changedPaths = new Set<string>([
     ...status.untracked,
@@ -156,15 +110,8 @@ async function saveCheckpointMutation(
   ]);
 
   if (changedPaths.size === 0) {
-    debugGitTimeline("save.mutation.noop", { workspacePath });
     return null;
   }
-
-  debugGitTimeline("save.mutation.stage", {
-    workspacePath,
-    count: changedPaths.size,
-    paths: Array.from(changedPaths),
-  });
 
   for (const path of changedPaths) {
     await service.add({ repoPath: workspacePath, filepath: path });
@@ -180,8 +127,6 @@ async function saveCheckpointMutation(
       email: "checkpoints@metrists.local",
     },
   });
-
-  debugGitTimeline("save.mutation.success", { workspacePath, oid });
 
   return oid;
 }
@@ -301,48 +246,13 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
 
   const checkpointsQuery = useQuery<CheckpointListItem[], GitError>({
     queryKey: keys.checkpoints,
-    queryFn: async () => {
-      try {
-        return await loadCheckpointsQuery(workspacePath, service);
-      } catch (error) {
-        const gitError = toGitError(error);
-        debugGitTimeline("checkpoints.query.error", {
-          workspacePath,
-          code: gitError.code,
-          message: gitError.message,
-          raw: error,
-        });
-        throw gitError;
-      }
-    },
+    queryFn: async () => loadCheckpointsQuery(workspacePath, service),
     retry: false,
   });
 
   const statusQuery = useQuery({
     queryKey: keys.status,
-    queryFn: async () => {
-      debugGitTimeline("status.query.start", { workspacePath });
-      try {
-        const status = await service.status({ repoPath: workspacePath });
-        debugGitTimeline("status.query.success", {
-          workspacePath,
-          branch: status.currentBranch,
-          staged: status.staged.length,
-          unstaged: status.unstaged.length,
-          untracked: status.untracked.length,
-        });
-        return status;
-      } catch (error) {
-        const gitError = toGitError(error);
-        debugGitTimeline("status.query.error", {
-          workspacePath,
-          code: gitError.code,
-          message: gitError.message,
-          raw: error,
-        });
-        throw gitError;
-      }
-    },
+    queryFn: async () => service.status({ repoPath: workspacePath }),
     retry: false,
   });
 
@@ -351,22 +261,9 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
     GitError,
     string | undefined
   >({
-    mutationFn: async (value) => {
-      try {
-        return await saveCheckpointMutation(workspacePath, service, value);
-      } catch (error) {
-        const gitError = toGitError(error);
-        debugGitTimeline("save.mutation.error", {
-          workspacePath,
-          code: gitError.code,
-          message: gitError.message,
-          raw: error,
-        });
-        throw gitError;
-      }
-    },
+    mutationFn: async (value) =>
+      saveCheckpointMutation(workspacePath, service, value),
     onSuccess: () => {
-      debugGitTimeline("save.mutation.invalidate", { workspacePath });
       void queryClient.invalidateQueries({ queryKey: keys.checkpoints });
       void queryClient.invalidateQueries({ queryKey: keys.status });
     },
@@ -374,23 +271,9 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
 
   const initializeTimeline = useMutation<void, GitError, void>({
     mutationFn: async () => {
-      debugGitTimeline("initialize.mutation.start", { workspacePath });
-      try {
-        await initializeWorkspaceGit(workspacePath);
-        debugGitTimeline("initialize.mutation.success", { workspacePath });
-      } catch (error) {
-        const gitError = toGitError(error);
-        debugGitTimeline("initialize.mutation.error", {
-          workspacePath,
-          code: gitError.code,
-          message: gitError.message,
-          raw: error,
-        });
-        throw gitError;
-      }
+      await initializeWorkspaceGit(workspacePath);
     },
     onSuccess: () => {
-      debugGitTimeline("initialize.mutation.invalidate", { workspacePath });
       void queryClient.invalidateQueries({ queryKey: keys.checkpoints });
       void queryClient.invalidateQueries({ queryKey: keys.status });
     },
@@ -425,14 +308,6 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
           retry: runRetry,
           initialize: initializeTimeline.mutate,
         });
-
-  if (state.error) {
-    debugGitTimeline("panel.error.active", {
-      workspacePath,
-      code: state.error.code,
-      message: state.error.message,
-    });
-  }
 
   const syncState = deriveSyncState(statusQuery.data ?? null);
 

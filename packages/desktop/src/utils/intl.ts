@@ -233,7 +233,6 @@ i18n
           autoSaveCheckpointsHint: "After each change",
           loadingTimeline: "Loading timeline...",
           noCheckpointsYet: "No checkpoints yet. Save your first one!",
-          checkpoints: "Checkpoints",
           latest: "Latest",
           compareCheckpoint: "Compare checkpoint",
           restoreCheckpoint: "Restore checkpoint",
@@ -254,9 +253,7 @@ i18n
           timelineStateUncommitted: "Uncommitted",
           timelineStateUnsynced: "Not synced",
           timelineStateSynced: "Synced",
-          timelineStateTooltip: "Timeline sync status",
           copyCommitHash: "Copy commit hash",
-          copied: "Copied",
 
           // Settings Commands
           openSettings: "Open Settings",

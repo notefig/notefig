@@ -23,22 +23,6 @@ import {
 
 const textEncoder = new TextEncoder();
 
-const gitDebugEnabled =
-  typeof process !== "undefined" &&
-  process.env !== undefined &&
-  process.env.METRISTS_GIT_DEBUG === "1";
-
-function debugGitService(event: string, details?: unknown): void {
-  if (!gitDebugEnabled) return;
-
-  if (details === undefined) {
-    console.debug(`[metrists-git] ${event}`);
-    return;
-  }
-
-  console.debug(`[metrists-git] ${event}`, details);
-}
-
 function joinGitPath(repoPath: string, relativePath: string): string {
   const base = repoPath.endsWith("/") ? repoPath.slice(0, -1) : repoPath;
   return `${base}/${relativePath}`;
@@ -172,10 +156,6 @@ export class IsomorphicGitService implements GitService {
   }
 
   async init(input: GitInitInput): Promise<void> {
-    debugGitService("init.start", {
-      repoPath: input.repoPath,
-      defaultBranch: input.defaultBranch,
-    });
     await this.ensureInitControlFiles(input);
 
     try {
@@ -184,12 +164,7 @@ export class IsomorphicGitService implements GitService {
         fs: this.fsClient,
         dir: input.repoPath,
       });
-      debugGitService("init.success", { repoPath: input.repoPath });
     } catch (error) {
-      debugGitService("init.error", {
-        repoPath: input.repoPath,
-        error,
-      });
       const headPath = joinGitPath(input.repoPath, ".git/HEAD");
       const configPath = joinGitPath(input.repoPath, ".git/config");
       const [headStat, configStat] = await Promise.all([
@@ -198,9 +173,6 @@ export class IsomorphicGitService implements GitService {
       ]);
 
       if (headStat.exists && configStat.exists) {
-        debugGitService("init.recoverExistingControlFiles", {
-          repoPath: input.repoPath,
-        });
         return;
       }
 
@@ -210,7 +182,6 @@ export class IsomorphicGitService implements GitService {
 
   async status(input: { repoPath: string }): Promise<RepoStatus> {
     try {
-      debugGitService("status.start", { repoPath: input.repoPath });
       let branch: string | null = null;
 
       try {
@@ -229,11 +200,6 @@ export class IsomorphicGitService implements GitService {
         ) {
           throw gitError;
         }
-
-        debugGitService("status.unbornHead", {
-          repoPath: input.repoPath,
-          message: gitError.message,
-        });
       }
 
       const matrix = await git.statusMatrix({
@@ -280,7 +246,6 @@ export class IsomorphicGitService implements GitService {
         conflicts,
       };
     } catch (error) {
-      debugGitService("status.error", { repoPath: input.repoPath, error });
       throw toGitError(error);
     }
   }
@@ -387,11 +352,6 @@ export class IsomorphicGitService implements GitService {
 
   async log(input: GitLogInput) {
     try {
-      debugGitService("log.start", {
-        repoPath: input.repoPath,
-        ref: input.ref,
-        depth: input.depth,
-      });
       return await git.log({
         ...input,
         fs: this.fsClient,
@@ -399,25 +359,12 @@ export class IsomorphicGitService implements GitService {
       });
     } catch (error) {
       const gitError = toGitError(error);
-      debugGitService("log.error", {
-        repoPath: input.repoPath,
-        code: gitError.code,
-        message: gitError.message,
-        error,
-      });
 
       if (gitError.code === "RepoNotFound") {
         try {
           await this.status({ repoPath: input.repoPath });
-          debugGitService("log.emptyUnbornHead", {
-            repoPath: input.repoPath,
-          });
           return [];
         } catch (statusError) {
-          debugGitService("log.emptyUnbornHead.statusError", {
-            repoPath: input.repoPath,
-            statusError,
-          });
           throw toGitError(statusError);
         }
       }
