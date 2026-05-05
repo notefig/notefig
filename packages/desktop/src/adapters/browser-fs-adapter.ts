@@ -332,11 +332,11 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
       });
       if (filesResult.ok) {
         const filePaths = filesResult.value;
-        const fileData = await this.readFiles(filePaths);
-        await this.writeFiles(
+        const fileData = await this.readBinaryFiles(filePaths);
+        await this.writeBinaryFiles(
           fileData.succeeded.map((f) => ({
             path: f.path.replace(oldPath, newPath),
-            content: f.content,
+            data: f.data,
           })),
         );
       }
@@ -366,6 +366,32 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
         const file = await handle.getFile();
         const content = await file.text();
         succeeded.push({ path, content });
+      } catch (error) {
+        failed.push(
+          createError(
+            path,
+            "not_found",
+            error instanceof Error ? error.message : "Unknown error",
+          ),
+        );
+      }
+    }
+
+    return { succeeded, failed };
+  }
+
+  async readBinaryFiles(
+    paths: string[],
+  ): Promise<BatchResult<{ path: string; data: Uint8Array }>> {
+    const succeeded: Array<{ path: string; data: Uint8Array }> = [];
+    const failed: FileSystemError[] = [];
+
+    for (const path of paths) {
+      try {
+        const handle = await this.resolveFileHandle(path, false, false);
+        const file = await handle.getFile();
+        const buffer = await file.arrayBuffer();
+        succeeded.push({ path, data: new Uint8Array(buffer) });
       } catch (error) {
         failed.push(
           createError(

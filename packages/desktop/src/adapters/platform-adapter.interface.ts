@@ -1,4 +1,5 @@
 import type { Theme } from "@/components/theme-provider";
+import type { GitStorageHost } from "@metrists/git";
 
 /**
  * Error types for file system operations
@@ -217,6 +218,14 @@ export interface IPlatformAdapter {
   ): Promise<BatchResult<{ path: string; content: string }>>;
 
   /**
+   * Read binary file contents
+   * @returns Batch result with binary data for succeeded reads and errors for failures
+   */
+  readBinaryFiles(
+    paths: string[],
+  ): Promise<BatchResult<{ path: string; data: Uint8Array }>>;
+
+  /**
    * Write/update files (creates or updates)
    * Creates parent directories if they don't exist
    * @returns Batch result with succeeded paths and failed operations
@@ -372,4 +381,10 @@ export interface IPlatformAdapter {
     directory: string,
     options: SearchOptions,
   ): Promise<SearchMatch[]>;
+
+  /**
+   * Create a GitStorageHost bound to a workspace root.
+   * This enables one-line Git service initialization per workspace.
+   */
+  getGitStorageHost(workspacePath: string): GitStorageHost;
 }

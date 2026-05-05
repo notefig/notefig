@@ -59,6 +59,15 @@ class TestAdapter extends BaseBrowserAdapter {
     return { succeeded, failed: [] };
   }
 
+  async readBinaryFiles(
+    paths: string[],
+  ): Promise<BatchResult<{ path: string; data: Uint8Array }>> {
+    const succeeded = paths
+      .filter((p) => p in this.files)
+      .map((p) => ({ path: p, data: new TextEncoder().encode(this.files[p]) }));
+    return { succeeded, failed: [] };
+  }
+
   async writeFiles(): Promise<BatchResult<string>> {
     return { succeeded: [], failed: [] };
   }

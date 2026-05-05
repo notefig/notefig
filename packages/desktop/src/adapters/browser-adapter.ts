@@ -477,6 +477,78 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
+  async readBinaryFiles(
+    paths: string[],
+  ): Promise<BatchResult<{ path: string; data: Uint8Array }>> {
+    const succeeded: Array<{ path: string; data: Uint8Array }> = [];
+    const failed: FileSystemError[] = [];
+
+    if (paths.length === 0) {
+      return { succeeded, failed };
+    }
+
+    try {
+      const db = await this.ensureDB();
+      const transaction = db.transaction([this.STORE_NAME], "readonly");
+      const store = transaction.objectStore(this.STORE_NAME);
+
+      for (const path of paths) {
+        try {
+          const data: {
+            content?: string;
+            binaryData?: string;
+          } | null = await new Promise((resolve, reject) => {
+            const request = store.get(path);
+            request.onsuccess = () => resolve(request.result || null);
+            request.onerror = () => reject(request.error);
+          });
+
+          if (!data) {
+            failed.push(createError(path, "not_found", "File not found"));
+            continue;
+          }
+
+          if (typeof data.binaryData === "string") {
+            const binaryString = atob(data.binaryData);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+            succeeded.push({ path, data: bytes });
+            continue;
+          }
+
+          succeeded.push({
+            path,
+            data: new TextEncoder().encode(data.content || ""),
+          });
+        } catch (error) {
+          failed.push(
+            createError(
+              path,
+              "io_error",
+              error instanceof Error ? error.message : "Unknown error",
+            ),
+          );
+        }
+      }
+    } catch (error) {
+      paths.forEach((path) => {
+        if (!succeeded.find((entry) => entry.path === path)) {
+          failed.push(
+            createError(
+              path,
+              "io_error",
+              error instanceof Error ? error.message : "Unknown error",
+            ),
+          );
+        }
+      });
+    }
+
+    return { succeeded, failed };
+  }
+
   async writeFiles(
     files: { path: string; content: string }[],
   ): Promise<BatchResult<string>> {
@@ -495,14 +567,25 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
       for (const file of files) {
         try {
           await new Promise<void>((resolve, reject) => {
-            const request = store.put({
-              path: file.path,
-              content: file.content,
-              modifiedAt: new Date(),
-              createdAt: new Date(),
-            });
-            request.onsuccess = () => resolve();
-            request.onerror = () => reject(request.error);
+            const existingRequest = store.get(file.path);
+            existingRequest.onsuccess = () => {
+              const existing = existingRequest.result as
+                | { createdAt?: Date }
+                | undefined;
+
+              const request = store.put({
+                path: file.path,
+                content: file.content,
+                modifiedAt: new Date(),
+                createdAt:
+                  existing?.createdAt instanceof Date
+                    ? existing.createdAt
+                    : new Date(),
+              });
+              request.onsuccess = () => resolve();
+              request.onerror = () => reject(request.error);
+            };
+            existingRequest.onerror = () => reject(existingRequest.error);
           });
 
           succeeded.push(file.path);
@@ -554,16 +637,27 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
           const base64 = this.uint8ArrayToBase64(file.data);
 
           await new Promise<void>((resolve, reject) => {
-            const request = store.put({
-              path: file.path,
-              content: "", // No text content for binary files
-              binaryData: base64,
-              mimeType: this.guessMimeType(file.path),
-              modifiedAt: new Date(),
-              createdAt: new Date(),
-            });
-            request.onsuccess = () => resolve();
-            request.onerror = () => reject(request.error);
+            const existingRequest = store.get(file.path);
+            existingRequest.onsuccess = () => {
+              const existing = existingRequest.result as
+                | { createdAt?: Date }
+                | undefined;
+
+              const request = store.put({
+                path: file.path,
+                content: "", // No text content for binary files
+                binaryData: base64,
+                mimeType: this.guessMimeType(file.path),
+                modifiedAt: new Date(),
+                createdAt:
+                  existing?.createdAt instanceof Date
+                    ? existing.createdAt
+                    : new Date(),
+              });
+              request.onsuccess = () => resolve();
+              request.onerror = () => reject(request.error);
+            };
+            existingRequest.onerror = () => reject(existingRequest.error);
           });
 
           succeeded.push(file.path);

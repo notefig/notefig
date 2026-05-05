@@ -60,6 +60,10 @@ describe("getWorkspaceRoot", () => {
     expect(getWorkspaceRoot("///my-folder///sub")).toBe("/my-folder");
   });
 
+  it("should normalize dot segments", () => {
+    expect(getWorkspaceRoot("/my-folder/./docs/../file.md")).toBe("/my-folder");
+  });
+
   it("should handle single segment path", () => {
     expect(getWorkspaceRoot("/workspace")).toBe("/workspace");
   });
@@ -90,6 +94,18 @@ describe("getRelativePath", () => {
     expect(getRelativePath("/My Project/docs/file.md", "/My Project")).toBe(
       "docs/file.md",
     );
+  });
+
+  it("should normalize current-directory segments", () => {
+    expect(getRelativePath("/my-folder/./docs/file.md", "/my-folder")).toBe(
+      "docs/file.md",
+    );
+  });
+
+  it("should normalize parent-directory segments", () => {
+    expect(
+      getRelativePath("/my-folder/docs/../notes/file.md", "/my-folder"),
+    ).toBe("notes/file.md");
   });
 });
 

@@ -14,6 +14,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import type { GitStorageHost } from "@metrists/git";
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LazyStore } from "@tauri-apps/plugin-store";
@@ -22,6 +23,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   private eventListeners: Set<PlatformEventListener> = new Set();
   private unlistenFns: Promise<UnlistenFn>[] = [];
   private kvStore = new LazyStore("kv.json");
+  private gitLocks = new Set<string>();
 
   async pickDirectory(title: string): Promise<string | null> {
     const result = await open({
@@ -142,6 +144,32 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
         BatchResult<{ path: string; content: string }>
       >("read_files", { paths });
       return result;
+    } catch (error) {
+      return {
+        succeeded: [],
+        failed: paths.map((path) => ({
+          path,
+          type: "io_error",
+          message: error instanceof Error ? error.message : "Unknown error",
+        })),
+      };
+    }
+  }
+
+  async readBinaryFiles(
+    paths: string[],
+  ): Promise<BatchResult<{ path: string; data: Uint8Array }>> {
+    try {
+      const result = await invoke<
+        BatchResult<{ path: string; data: number[] }>
+      >("read_binary_files", { paths });
+      return {
+        succeeded: result.succeeded.map((entry) => ({
+          path: entry.path,
+          data: Uint8Array.from(entry.data),
+        })),
+        failed: result.failed,
+      };
     } catch (error) {
       return {
         succeeded: [],
@@ -483,6 +511,165 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       fileIncludes: options.fileIncludes ?? null,
       maxResults: options.maxResults ?? 1000,
     });
+  }
+
+  getGitStorageHost(workspacePath: string): GitStorageHost {
+    const toEpochMs = (value: Date | number): number => {
+      if (value instanceof Date) {
+        return value.getTime();
+      }
+      return value;
+    };
+
+    const requireSuccess = <T>(
+      path: string,
+      result: BatchResult<T>,
+      errorKind: "read" | "write",
+    ): T => {
+      if (result.succeeded.length > 0) {
+        return result.succeeded[0];
+      }
+
+      const failed = result.failed[0];
+      const reason = failed?.message ?? "Unknown error";
+      throw new Error(`Git host ${errorKind} failed for '${path}': ${reason}`);
+    };
+
+    const host: GitStorageHost = {
+      readFile: async (path: string): Promise<Uint8Array> => {
+        const result = await this.readBinaryFiles([path]);
+        const entry = requireSuccess(path, result, "read");
+        return entry.data;
+      },
+
+      writeFileAtomic: async (
+        path: string,
+        data: Uint8Array,
+      ): Promise<void> => {
+        const result = await this.writeBinaryFiles([{ path, data }]);
+        requireSuccess(path, result, "write");
+      },
+
+      renameAtomic: async (from: string, to: string): Promise<void> => {
+        const result = await this.moveFile(from, to);
+        if (!result.ok) {
+          throw new Error(
+            `Git host rename failed for '${from}' -> '${to}': ${result.error.message}`,
+          );
+        }
+      },
+
+      deleteFile: async (path: string): Promise<void> => {
+        const result = await this.deleteFiles([path]);
+        requireSuccess(path, result, "write");
+      },
+
+      stat: async (path: string) => {
+        const exists = await this.exists([path]);
+        const entry = exists[0];
+        if (!entry?.exists) {
+          return {
+            exists: false as const,
+            isFile: false as const,
+            isDir: false as const,
+          };
+        }
+
+        const metadataResult = await this.getMetadata([path]);
+        const metadata = requireSuccess(path, metadataResult, "read");
+        const isDir = metadata.type === "directory";
+
+        return {
+          exists: true as const,
+          isFile: !isDir,
+          isDir,
+          size: metadata.size,
+          mode: isDir ? 0o040755 : 0o100644,
+          mtimeMs: toEpochMs(metadata.modifiedAt),
+        };
+      },
+
+      lstat: async (path: string) => {
+        const info = await host.stat(path);
+        if (!info.exists) {
+          return {
+            exists: false as const,
+            isFile: false as const,
+            isDir: false as const,
+            isSymbolicLink: false as const,
+          };
+        }
+
+        return {
+          ...info,
+          isSymbolicLink: false,
+        };
+      },
+
+      readDir: async (path: string) => {
+        const result = await this.readDirectory(path, {
+          recursive: false,
+          includeFiles: true,
+          includeDirectories: true,
+        });
+
+        if (!result.ok) {
+          throw new Error(
+            `Git host readdir failed for '${path}': ${result.error.message}`,
+          );
+        }
+
+        const childExists = await this.exists(result.value);
+        return childExists
+          .filter((entry) => entry.exists)
+          .map((entry) => ({
+            name: entry.path.split("/").filter(Boolean).pop() ?? entry.path,
+            isFile: entry.type === "file",
+            isDir: entry.type === "directory",
+            isSymbolicLink: false,
+          }));
+      },
+
+      createDir: async (path: string): Promise<void> => {
+        const result = await this.createDirectories([path]);
+        requireSuccess(path, result, "write");
+      },
+
+      removeDir: async (path: string): Promise<void> => {
+        const result = await this.deleteDirectories([path], {
+          recursive: false,
+        });
+        requireSuccess(path, result, "write");
+      },
+
+      readLink: async () => {
+        throw new Error("Git host readLink is not supported on this adapter.");
+      },
+
+      createSymlink: async () => {
+        throw new Error(
+          "Git host createSymlink is not supported on this adapter.",
+        );
+      },
+
+      chmod: async () => {
+        throw new Error("Git host chmod is not supported on this adapter.");
+      },
+
+      lock: async (name: string): Promise<void> => {
+        const key = `${workspacePath}::${name}`;
+        if (this.gitLocks.has(key)) {
+          throw new Error(`Git lock '${name}' is already held.`);
+        }
+        this.gitLocks.add(key);
+      },
+
+      unlock: async (name: string): Promise<void> => {
+        this.gitLocks.delete(`${workspacePath}::${name}`);
+      },
+    };
+
+    return host;
   }
 
   private cleanupListeners(): void {
