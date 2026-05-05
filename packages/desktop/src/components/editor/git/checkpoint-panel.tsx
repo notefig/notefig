@@ -1,6 +1,14 @@
 import { useMemo, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
-import { ChevronDown, History, Undo2 } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  CloudUpload,
+  GitCommitHorizontal,
+  History,
+  TriangleAlert,
+  Undo2,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   useMutation,
@@ -12,7 +20,6 @@ import {
 import type { GitError, GitService } from "@metrists/git";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
-import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
@@ -21,6 +28,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
   TooltipContent,
@@ -39,6 +47,7 @@ interface CheckpointListItem {
   id: string;
   timestamp: Date;
   hash: string;
+  message: string;
 }
 
 interface RecoveryAction {
@@ -52,6 +61,8 @@ interface QueryState {
   error: GitError | null;
   isLoading: boolean;
 }
+
+type SyncState = "uncommitted" | "unsynced" | "synced";
 
 type MutableT = (key: string, defaultValue: string) => string;
 
@@ -115,6 +126,7 @@ async function loadCheckpointsQuery(
     id: entry.oid,
     hash: entry.oid.slice(0, 7),
     timestamp: new Date(entry.commit.committer.timestamp * 1000),
+    message: entry.commit.message.split("\n")[0] || "Checkpoint",
   }));
 }
 
@@ -221,6 +233,59 @@ function getErrorPresentation(
   }
 }
 
+function deriveSyncState(
+  status: {
+    staged: unknown[];
+    unstaged: unknown[];
+    untracked: unknown[];
+    ahead?: number;
+  } | null,
+): SyncState {
+  if (!status) {
+    return "synced";
+  }
+
+  if (
+    status.staged.length > 0 ||
+    status.unstaged.length > 0 ||
+    status.untracked.length > 0
+  ) {
+    return "uncommitted";
+  }
+
+  if ((status.ahead ?? 0) > 0) {
+    return "unsynced";
+  }
+
+  return "synced";
+}
+
+function getSyncStatePresentation(
+  state: SyncState,
+  t: MutableT,
+): {
+  label: string;
+  Icon: typeof TriangleAlert;
+} {
+  switch (state) {
+    case "uncommitted":
+      return {
+        label: t("timelineStateUncommitted", "Uncommitted"),
+        Icon: TriangleAlert,
+      };
+    case "unsynced":
+      return {
+        label: t("timelineStateUnsynced", "Not synced"),
+        Icon: CloudUpload,
+      };
+    default:
+      return {
+        label: t("timelineStateSynced", "Synced"),
+        Icon: Check,
+      };
+  }
+}
+
 export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -253,7 +318,7 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
     retry: false,
   });
 
-  useQuery({
+  const statusQuery = useQuery({
     queryKey: keys.status,
     queryFn: async () => {
       debugGitTimeline("status.query.start", { workspacePath });
@@ -369,6 +434,8 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
     });
   }
 
+  const syncState = deriveSyncState(statusQuery.data ?? null);
+
   return (
     <div className="flex h-full flex-col">
       <QuickSaveCheckpoint
@@ -378,6 +445,7 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
         description={description}
         onDescriptionChange={setDescription}
         onSave={(value) => saveCheckpoint.mutate(value)}
+        syncState={syncState}
         t={t}
       />
 
@@ -482,6 +550,7 @@ interface QuickSaveCheckpointProps {
   description: string;
   onDescriptionChange: (value: string) => void;
   onSave: (description?: string) => void;
+  syncState: SyncState;
   t: MutableT;
 }
 
@@ -492,9 +561,11 @@ function QuickSaveCheckpoint({
   description,
   onDescriptionChange,
   onSave,
+  syncState,
   t,
 }: QuickSaveCheckpointProps) {
   const [open, setOpen] = useState(false);
+  const syncPresentation = getSyncStatePresentation(syncState, t);
 
   const saveQuick = () => {
     onSave(undefined);
@@ -507,34 +578,56 @@ function QuickSaveCheckpoint({
   };
 
   return (
-    <div className="flex items-center px-4 py-2">
+    <div className="flex h-[2.6rem] items-center justify-between border-b border-sidebar-border bg-sidebar px-2">
       <ButtonGroup>
         <Button
-          size="sm"
+          type="button"
           variant="ghost"
-          className="h-8 min-w-32 px-3 text-xs"
+          className="h-6 gap-1 px-1.5 text-xs text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 [&_svg]:size-3.5"
           disabled={isSaving}
           onClick={saveQuick}
+          aria-label={t("saveCheckpoint", "Save checkpoint")}
         >
-          {isSaving
-            ? t("checkpointSaving", "Saving checkpoint...")
-            : t("saveCheckpoint", "Save checkpoint")}
+          <GitCommitHorizontal className="h-3.5 w-3.5" />
+          <span className="truncate">
+            {isSaving
+              ? t("checkpointSaving", "Saving checkpoint...")
+              : t("saveCheckpoint", "Save checkpoint")}
+          </span>
         </Button>
 
         <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              className="h-8 w-10 p-0"
-              aria-label={t(
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 [&_svg]:size-3.5"
+                  aria-label={t(
+                    "saveCheckpointWithDescription",
+                    "Save checkpoint with description",
+                  )}
+                  disabled={isSaving}
+                >
+                  <ChevronDown className="h-3.5 w-3.5" />
+                  <span className="sr-only">
+                    {t(
+                      "saveCheckpointWithDescription",
+                      "Save checkpoint with description",
+                    )}
+                  </span>
+                </Button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="px-2 py-1 text-[11px]">
+              {t(
                 "saveCheckpointWithDescription",
                 "Save checkpoint with description",
               )}
-              disabled={isSaving}
-              variant="ghost"
-            >
-              <ChevronDown className="size-4" />
-            </Button>
-          </PopoverTrigger>
+            </TooltipContent>
+          </Tooltip>
           <PopoverContent side="bottom" align="start" className="w-80">
             <div className="flex flex-col gap-3">
               <div className="space-y-1.5">
@@ -552,24 +645,27 @@ function QuickSaveCheckpoint({
                 </p>
               </div>
 
-              <div className="flex gap-2">
-                <Input
+              <div className="space-y-2">
+                <Textarea
                   placeholder={t(
                     "checkpointDescriptionPlaceholder",
                     "What changed?",
                   )}
                   value={description}
                   onChange={(event) => onDescriptionChange(event.target.value)}
-                  className="h-8 text-sm"
+                  className="min-h-[84px] resize-none text-sm"
                 />
-                <Button
-                  size="sm"
-                  className="h-8 shrink-0 text-xs"
-                  onClick={saveWithDescription}
-                  disabled={isSaving}
-                >
-                  {t("saveCheckpoint", "Save checkpoint")}
-                </Button>
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 shrink-0 text-xs"
+                    onClick={saveWithDescription}
+                    disabled={isSaving}
+                  >
+                    {t("saveCheckpoint", "Save checkpoint")}
+                  </Button>
+                </div>
               </div>
 
               <Separator className="my-1" />
@@ -592,6 +688,11 @@ function QuickSaveCheckpoint({
           </PopoverContent>
         </Popover>
       </ButtonGroup>
+
+      <span className="inline-flex h-6 max-w-24 min-w-0 items-center gap-1 overflow-hidden rounded-md border px-1.5 text-[11px] leading-none">
+        <syncPresentation.Icon className="h-3.5 w-3.5 shrink-0" />
+        <span className="min-w-0 truncate">{syncPresentation.label}</span>
+      </span>
     </div>
   );
 }
@@ -630,35 +731,45 @@ function CheckpointsList({
   return (
     <ScrollArea className="flex-1 min-h-0">
       <div className="flex flex-col" role="list">
-        <div className="px-4 py-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            {t("checkpoints", "Checkpoints")}
-          </p>
-        </div>
         {checkpoints.map((checkpoint, index) => (
           <div
             key={checkpoint.id}
-            className="flex items-center justify-between gap-2 px-4 py-1.5 transition-colors hover:bg-muted/50"
+            className="flex items-center justify-between gap-2 py-1.5 pl-4 pr-1 transition-colors hover:bg-muted/50"
             role="listitem"
           >
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
-                <time
-                  className="text-[11px] text-muted-foreground"
-                  dateTime={checkpoint.timestamp.toISOString()}
-                >
-                  {formatDistanceToNow(checkpoint.timestamp, {
-                    addSuffix: true,
-                  })}
-                </time>
+                {checkpoint.message ? (
+                  <span className="truncate text-[11px] font-medium">
+                    {checkpoint.message}
+                  </span>
+                ) : (
+                  <time
+                    className="truncate text-[11px] text-muted-foreground"
+                    dateTime={checkpoint.timestamp.toISOString()}
+                  >
+                    {formatDistanceToNow(checkpoint.timestamp, {
+                      addSuffix: true,
+                    })}
+                  </time>
+                )}
                 {index === 0 ? (
-                  <span className="inline-flex h-4 items-center rounded-md bg-secondary px-1.5 text-[10px] text-secondary-foreground">
+                  <span className="inline-flex h-4 max-w-16 shrink-0 items-center truncate whitespace-nowrap rounded-md bg-secondary px-1.5 text-[10px] text-secondary-foreground">
                     {t("latest", "Latest")}
                   </span>
                 ) : null}
               </div>
-              <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-                {checkpoint.hash}
+              <div className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+                <button
+                  type="button"
+                  className="h-auto w-auto p-0 font-mono leading-none hover:text-foreground"
+                  onClick={() =>
+                    void navigator.clipboard.writeText(checkpoint.hash)
+                  }
+                  aria-label={t("copyCommitHash", "Copy commit hash")}
+                >
+                  {checkpoint.hash}
+                </button>
               </div>
             </div>
 
@@ -683,14 +794,14 @@ function CheckpointActions({ disabled = false, t }: CheckpointActionsProps) {
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 text-muted-foreground"
+            className="h-6 w-6 text-muted-foreground [&_svg]:size-3.5"
             aria-label={t("compareCheckpoint", "Compare checkpoint")}
             disabled
           >
             <History className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="left">
+        <TooltipContent side="left" className="px-2 py-1 text-[11px]">
           {t("compareCheckpoint", "Compare checkpoint")}
         </TooltipContent>
       </Tooltip>
@@ -700,14 +811,14 @@ function CheckpointActions({ disabled = false, t }: CheckpointActionsProps) {
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 text-muted-foreground"
+            className="h-6 w-6 text-muted-foreground [&_svg]:size-3.5"
             aria-label={t("restoreCheckpoint", "Restore checkpoint")}
             disabled={disabled}
           >
             <Undo2 className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="left">
+        <TooltipContent side="left" className="px-2 py-1 text-[11px]">
           {t("restoreCheckpoint", "Restore checkpoint")}
         </TooltipContent>
       </Tooltip>

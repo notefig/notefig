@@ -224,7 +224,7 @@ i18n
           gitCommit: "Git Commit",
 
           // Checkpoints (Git Sidebar)
-          saveCheckpoint: "Save checkpoint",
+          saveCheckpoint: "Checkpoint",
           checkpointSaving: "Saving checkpoint...",
           saveCheckpointWithDescription: "Save checkpoint with description",
           checkpointDescriptionHint: "Add a brief description of what changed",
@@ -251,6 +251,12 @@ i18n
             "This action is not available in this environment.",
           timelineInvalidInputTitle: "Invalid input",
           timelineUnexpectedTitle: "Timeline error",
+          timelineStateUncommitted: "Uncommitted",
+          timelineStateUnsynced: "Not synced",
+          timelineStateSynced: "Synced",
+          timelineStateTooltip: "Timeline sync status",
+          copyCommitHash: "Copy commit hash",
+          copied: "Copied",
 
           // Settings Commands
           openSettings: "Open Settings",
