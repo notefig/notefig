@@ -379,7 +379,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
         }
 
         const childExists = await this.exists(result.value);
-        return childExists
+        const mapped = childExists
           .filter((entry) => entry.exists)
           .map((entry) => ({
             name: entry.path.split("/").filter(Boolean).pop() ?? entry.path,
@@ -387,6 +387,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
             isDir: entry.type === "directory",
             isSymbolicLink: false,
           }));
+        return mapped;
       },
 
       createDir: async (path: string): Promise<void> => {

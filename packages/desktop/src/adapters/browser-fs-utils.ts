@@ -9,12 +9,41 @@ export function normalizeWorkspacePath(name: string): string {
   return cleanName ? `/${cleanName}` : "/untitled";
 }
 
+function normalizePathSegments(path: string): string {
+  const hasLeadingSlash = path.startsWith("/");
+  const segments = path.split("/");
+  const normalized: string[] = [];
+
+  for (const segment of segments) {
+    if (!segment || segment === ".") {
+      continue;
+    }
+
+    if (segment === "..") {
+      if (normalized.length > 0) {
+        normalized.pop();
+      }
+      continue;
+    }
+
+    normalized.push(segment);
+  }
+
+  const joined = normalized.join("/");
+  if (!joined) {
+    return hasLeadingSlash ? "/" : "";
+  }
+
+  return hasLeadingSlash ? `/${joined}` : joined;
+}
+
 /**
  * Extract the root workspace name from a full path.
  * For browser FS, the "root" is the first segment (e.g., "/my-folder" from "/my-folder/sub/file.md")
  */
 export function getWorkspaceRoot(path: string): string | null {
-  const trimmed = path.replace(/^\/+/, "");
+  const normalizedPath = normalizePathSegments(path);
+  const trimmed = normalizedPath.replace(/^\/+/, "");
   const parts = trimmed.split("/");
   if (!parts[0]) return null;
   return `/${parts[0]}`;
@@ -25,10 +54,13 @@ export function getWorkspaceRoot(path: string): string | null {
  * E.g., for path "/my-folder/docs/file.md" and root "/my-folder", returns "docs/file.md"
  */
 export function getRelativePath(path: string, workspaceRoot: string): string {
-  if (path === workspaceRoot) return "";
-  const prefix = workspaceRoot + "/";
-  if (path.startsWith(prefix)) {
-    return path.slice(prefix.length);
+  const normalizedPath = normalizePathSegments(path);
+  const normalizedRoot = normalizePathSegments(workspaceRoot);
+
+  if (normalizedPath === normalizedRoot) return "";
+  const prefix = normalizedRoot + "/";
+  if (normalizedPath.startsWith(prefix)) {
+    return normalizedPath.slice(prefix.length);
   }
   return "";
 }
