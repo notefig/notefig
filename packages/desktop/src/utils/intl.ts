@@ -250,7 +250,7 @@ i18n
             "This action is not available in this environment.",
           timelineInvalidInputTitle: "Invalid input",
           timelineUnexpectedTitle: "Timeline error",
-          timelineStateUncommitted: "Uncommitted",
+          timelineStateUncommitted: "Unchecked",
           timelineStateUnsynced: "Not synced",
           timelineStateSynced: "Synced",
           copyCommitHash: "Copy commit hash",

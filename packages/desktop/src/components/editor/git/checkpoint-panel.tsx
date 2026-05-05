@@ -3,6 +3,7 @@ import { formatDistanceToNow } from "date-fns";
 import {
   Check,
   ChevronDown,
+  CircleDashed,
   CloudUpload,
   GitCommitHorizontal,
   History,
@@ -62,6 +63,11 @@ interface QueryState {
   isLoading: boolean;
 }
 
+interface SaveCheckpointMutationContext {
+  previousCheckpoints: CheckpointListItem[];
+  optimisticId: string;
+}
+
 type SyncState = "uncommitted" | "unsynced" | "synced";
 
 type MutableT = (key: string, defaultValue: string) => string;
@@ -71,15 +77,6 @@ function gitQueryKeys(workspacePath: string) {
     status: ["git", workspacePath, "status"] as const,
     checkpoints: ["git", workspacePath, "checkpoints"] as const,
   };
-}
-
-function isGitError(value: unknown): value is GitError {
-  if (!value || typeof value !== "object") return false;
-  return (
-    "name" in value &&
-    (value as { name: unknown }).name === "GitError" &&
-    "code" in value
-  );
 }
 
 async function loadCheckpointsQuery(
@@ -215,8 +212,8 @@ function getSyncStatePresentation(
   switch (state) {
     case "uncommitted":
       return {
-        label: t("timelineStateUncommitted", "Uncommitted"),
-        Icon: TriangleAlert,
+        label: t("timelineStateUncommitted", "Unchecked"),
+        Icon: CircleDashed,
       };
     case "unsynced":
       return {
@@ -248,24 +245,83 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
     queryKey: keys.checkpoints,
     queryFn: async () => loadCheckpointsQuery(workspacePath, service),
     retry: false,
+    staleTime: 5_000,
   });
 
   const statusQuery = useQuery({
     queryKey: keys.status,
     queryFn: async () => service.status({ repoPath: workspacePath }),
     retry: false,
+    staleTime: 1_000,
+    refetchInterval: 2_000,
+    refetchIntervalInBackground: false,
   });
 
   const saveCheckpoint = useMutation<
     string | null,
     GitError,
-    string | undefined
+    string | undefined,
+    SaveCheckpointMutationContext
   >({
     mutationFn: async (value) =>
       saveCheckpointMutation(workspacePath, service, value),
-    onSuccess: () => {
+    onMutate: async (value) => {
+      await queryClient.cancelQueries({ queryKey: keys.checkpoints });
+
+      const previousCheckpoints =
+        queryClient.getQueryData<CheckpointListItem[]>(keys.checkpoints) ?? [];
+      const optimisticId = `optimistic-${Date.now()}`;
+
+      const optimisticEntry: CheckpointListItem = {
+        id: optimisticId,
+        hash: "pending",
+        timestamp: new Date(),
+        message: value?.trim() || "Checkpoint",
+      };
+
+      queryClient.setQueryData<CheckpointListItem[]>(keys.checkpoints, [
+        optimisticEntry,
+        ...previousCheckpoints,
+      ]);
+
+      return { previousCheckpoints, optimisticId };
+    },
+    onError: (_error, _value, context) => {
+      if (!context) return;
+      queryClient.setQueryData(keys.checkpoints, context.previousCheckpoints);
+    },
+    onSuccess: (oid, _value, context) => {
+      if (!context) return;
+
+      if (!oid) {
+        queryClient.setQueryData(keys.checkpoints, context.previousCheckpoints);
+        return;
+      }
+
+      queryClient.setQueryData<CheckpointListItem[] | undefined>(
+        keys.checkpoints,
+        (current) => {
+          if (!current) return current;
+          return current.map((item) =>
+            item.id === context.optimisticId
+              ? {
+                  ...item,
+                  id: oid,
+                  hash: oid.slice(0, 7),
+                }
+              : item,
+          );
+        },
+      );
+
       void queryClient.invalidateQueries({ queryKey: keys.checkpoints });
       void queryClient.invalidateQueries({ queryKey: keys.status });
+    },
+    onSettled: async () => {
+      await queryClient.refetchQueries({
+        queryKey: keys.status,
+        type: "active",
+      });
     },
   });
 
@@ -288,10 +344,7 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
   const state: QueryState = {
     checkpoints: checkpointsQuery.data ?? [],
     error: combinedError,
-    isLoading:
-      checkpointsQuery.isLoading ||
-      saveCheckpoint.isPending ||
-      initializeTimeline.isPending,
+    isLoading: checkpointsQuery.isLoading || initializeTimeline.isPending,
   };
 
   const runRetry = () => {
@@ -310,7 +363,12 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
         });
 
   const syncState = deriveSyncState(statusQuery.data ?? null);
-
+  const hasChanges = Boolean(
+    statusQuery.data &&
+    (statusQuery.data.staged.length > 0 ||
+      statusQuery.data.unstaged.length > 0 ||
+      statusQuery.data.untracked.length > 0),
+  );
   return (
     <div className="flex h-full flex-col">
       <QuickSaveCheckpoint
@@ -321,6 +379,7 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
         onDescriptionChange={setDescription}
         onSave={(value) => saveCheckpoint.mutate(value)}
         syncState={syncState}
+        canSave={hasChanges}
         t={t}
       />
 
@@ -426,6 +485,7 @@ interface QuickSaveCheckpointProps {
   onDescriptionChange: (value: string) => void;
   onSave: (description?: string) => void;
   syncState: SyncState;
+  canSave: boolean;
   t: MutableT;
 }
 
@@ -437,6 +497,7 @@ function QuickSaveCheckpoint({
   onDescriptionChange,
   onSave,
   syncState,
+  canSave,
   t,
 }: QuickSaveCheckpointProps) {
   const [open, setOpen] = useState(false);
@@ -444,11 +505,13 @@ function QuickSaveCheckpoint({
 
   const saveQuick = () => {
     onSave(undefined);
+    onDescriptionChange("");
     setOpen(false);
   };
 
   const saveWithDescription = () => {
     onSave(description.trim() ? description : undefined);
+    onDescriptionChange("");
     setOpen(false);
   };
 
@@ -459,7 +522,7 @@ function QuickSaveCheckpoint({
           type="button"
           variant="ghost"
           className="h-6 gap-1 px-1.5 text-xs text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 [&_svg]:size-3.5"
-          disabled={isSaving}
+          disabled={isSaving || !canSave}
           onClick={saveQuick}
           aria-label={t("saveCheckpoint", "Save checkpoint")}
         >
@@ -536,7 +599,7 @@ function QuickSaveCheckpoint({
                     size="sm"
                     className="h-8 shrink-0 text-xs"
                     onClick={saveWithDescription}
-                    disabled={isSaving}
+                    disabled={isSaving || !canSave}
                   >
                     {t("saveCheckpoint", "Save checkpoint")}
                   </Button>
@@ -557,6 +620,7 @@ function QuickSaveCheckpoint({
                 <Switch
                   checked={autoSaveEnabled}
                   onCheckedChange={onAutoSaveToggle}
+                  disabled
                 />
               </div>
             </div>
