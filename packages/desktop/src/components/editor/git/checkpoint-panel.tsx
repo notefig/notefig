@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import {
   Check,
@@ -18,7 +18,7 @@ import {
   type UseMutateFunction,
 } from "@tanstack/react-query";
 
-import type { GitError, GitService } from "@metrists/git";
+import type { GitError, GitService, RepoStatus } from "@metrists/git";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {
@@ -55,12 +55,12 @@ interface RecoveryAction {
   id: "initialize" | "repair" | "retry";
   label: string;
   onClick: () => void;
+  disabled?: boolean;
 }
 
 interface QueryState {
   checkpoints: CheckpointListItem[];
   error: GitError | null;
-  isLoading: boolean;
 }
 
 interface SaveCheckpointMutationContext {
@@ -70,6 +70,8 @@ interface SaveCheckpointMutationContext {
 
 type SyncState = "uncommitted" | "unsynced" | "synced";
 
+type PanelState = "uninitialized" | "error" | "empty" | "ready";
+
 type MutableT = (key: string, defaultValue: string) => string;
 
 function gitQueryKeys(workspacePath: string) {
@@ -77,6 +79,10 @@ function gitQueryKeys(workspacePath: string) {
     status: ["git", workspacePath, "status"] as const,
     checkpoints: ["git", workspacePath, "checkpoints"] as const,
   };
+}
+
+function isRepoNotFoundError(error: GitError | null | undefined): boolean {
+  return error?.code === "RepoNotFound";
 }
 
 async function loadCheckpointsQuery(
@@ -175,6 +181,34 @@ function getErrorPresentation(
   }
 }
 
+function derivePanelState({
+  status,
+  statusError,
+  checkpointsError,
+  initializeError,
+  checkpoints,
+}: {
+  status: RepoStatus | undefined;
+  statusError: GitError | null;
+  checkpointsError: GitError | null;
+  initializeError: GitError | null;
+  checkpoints: CheckpointListItem[];
+}): PanelState {
+  if (isRepoNotFoundError(statusError) && !status && checkpoints.length === 0) {
+    return "uninitialized";
+  }
+
+  if (initializeError || checkpointsError || statusError) {
+    return "error";
+  }
+
+  if (checkpoints.length === 0) {
+    return "empty";
+  }
+
+  return "ready";
+}
+
 function deriveSyncState(
   status: {
     staged: unknown[];
@@ -233,6 +267,9 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
   const queryClient = useQueryClient();
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
   const [description, setDescription] = useState("");
+  const [stablePanelState, setStablePanelState] = useState<PanelState | null>(
+    null,
+  );
 
   const service = useMemo(
     () => getOrCreateWorkspaceGitService(workspacePath),
@@ -241,20 +278,22 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
 
   const keys = useMemo(() => gitQueryKeys(workspacePath), [workspacePath]);
 
-  const checkpointsQuery = useQuery<CheckpointListItem[], GitError>({
-    queryKey: keys.checkpoints,
-    queryFn: async () => loadCheckpointsQuery(workspacePath, service),
-    retry: false,
-    staleTime: 5_000,
-  });
-
-  const statusQuery = useQuery({
+  const statusQuery = useQuery<RepoStatus, GitError>({
     queryKey: keys.status,
     queryFn: async () => service.status({ repoPath: workspacePath }),
     retry: false,
     staleTime: 1_000,
     refetchInterval: 2_000,
     refetchIntervalInBackground: false,
+  });
+
+  const checkpointsQuery = useQuery<CheckpointListItem[], GitError>({
+    queryKey: keys.checkpoints,
+    queryFn: async () => loadCheckpointsQuery(workspacePath, service),
+    retry: false,
+    staleTime: 5_000,
+    enabled: !isRepoNotFoundError(statusQuery.error),
+    placeholderData: (previous) => previous,
   });
 
   const saveCheckpoint = useMutation<
@@ -335,21 +374,48 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
     },
   });
 
-  const combinedError =
-    checkpointsQuery.error ??
-    saveCheckpoint.error ??
-    initializeTimeline.error ??
-    null;
+  const statusError = statusQuery.error ?? null;
+  const checkpointsError = checkpointsQuery.error ?? null;
+  const initializeError = initializeTimeline.error ?? null;
+  const effectiveStatusError = statusQuery.data ? null : statusError;
+
+  const panelState = derivePanelState({
+    status: statusQuery.data,
+    statusError: effectiveStatusError,
+    checkpointsError,
+    initializeError,
+    checkpoints: checkpointsQuery.data ?? [],
+  });
+
+  const isBackgroundFetching =
+    statusQuery.isFetching || checkpointsQuery.isFetching;
+
+  useEffect(() => {
+    if (stablePanelState === null) {
+      setStablePanelState(panelState);
+      return;
+    }
+
+    if (!isBackgroundFetching) {
+      setStablePanelState(panelState);
+    }
+  }, [panelState, isBackgroundFetching, stablePanelState]);
+
+  const renderPanelState = stablePanelState ?? panelState;
 
   const state: QueryState = {
     checkpoints: checkpointsQuery.data ?? [],
-    error: combinedError,
-    isLoading: checkpointsQuery.isLoading || initializeTimeline.isPending,
+    error:
+      renderPanelState === "error"
+        ? (initializeError ?? checkpointsError ?? effectiveStatusError)
+        : null,
   };
 
   const runRetry = () => {
-    void checkpointsQuery.refetch();
-    void queryClient.invalidateQueries({ queryKey: keys.status });
+    if (renderPanelState !== "uninitialized") {
+      void checkpointsQuery.refetch();
+    }
+    void statusQuery.refetch();
   };
 
   const errorActions =
@@ -369,6 +435,8 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
       statusQuery.data.unstaged.length > 0 ||
       statusQuery.data.untracked.length > 0),
   );
+  const canSave = renderPanelState !== "uninitialized" && hasChanges;
+
   return (
     <div className="flex h-full flex-col">
       <QuickSaveCheckpoint
@@ -379,17 +447,49 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
         onDescriptionChange={setDescription}
         onSave={(value) => saveCheckpoint.mutate(value)}
         syncState={syncState}
-        canSave={hasChanges}
+        canSave={canSave}
         t={t}
       />
 
-      {state.error ? (
-        <RecoveryBanner error={state.error} actions={errorActions} t={t} />
-      ) : null}
-
       <CheckpointsList
+        panelState={renderPanelState}
         checkpoints={state.checkpoints}
-        isLoading={state.isLoading}
+        actions={
+          renderPanelState === "uninitialized"
+            ? [
+                {
+                  id: "initialize",
+                  label: t("initializeTimeline", "Initialize timeline"),
+                  onClick: () => initializeTimeline.mutate(),
+                },
+              ]
+            : renderPanelState === "empty"
+              ? [
+                  {
+                    id: "retry",
+                    label: t("saveCheckpoint", "Save checkpoint"),
+                    onClick: () => saveCheckpoint.mutate(undefined),
+                    disabled: !canSave || saveCheckpoint.isPending,
+                  },
+                ]
+              : errorActions
+        }
+        message={
+          renderPanelState === "uninitialized"
+            ? t(
+                "timelineNotInitializedMessage",
+                "Project timeline is not initialized.",
+              )
+            : renderPanelState === "empty"
+              ? t(
+                  "noCheckpointsYet",
+                  "No checkpoints yet. Save your first one!",
+                )
+              : state.error
+                ? getErrorPresentation(state.error, t).message
+                : null
+        }
+        isError={renderPanelState === "error"}
         t={t}
       />
     </div>
@@ -637,31 +737,55 @@ function QuickSaveCheckpoint({
 }
 
 interface CheckpointsListProps {
+  panelState: PanelState;
   checkpoints: CheckpointListItem[];
-  isLoading?: boolean;
+  actions: RecoveryAction[];
+  message: string | null;
+  isError: boolean;
   t: MutableT;
 }
 
 function CheckpointsList({
+  panelState,
   checkpoints,
-  isLoading = false,
+  actions,
+  message,
+  isError,
   t,
 }: CheckpointsListProps) {
-  if (isLoading && checkpoints.length === 0) {
+  if (panelState === "uninitialized" || panelState === "empty" || isError) {
     return (
-      <div className="flex items-center justify-center p-8">
-        <div className="text-center text-sm text-muted-foreground">
-          {t("loadingTimeline", "Loading timeline...")}
-        </div>
-      </div>
-    );
-  }
-
-  if (checkpoints.length === 0) {
-    return (
-      <div className="flex items-center justify-center p-8">
-        <div className="text-center text-sm text-muted-foreground">
-          {t("noCheckpointsYet", "No checkpoints yet. Save your first one!")}
+      <div className="flex flex-1 items-center justify-center p-8">
+        <div className="space-y-3 text-center">
+          <div
+            className={
+              isError
+                ? "text-sm text-destructive"
+                : "text-sm text-muted-foreground"
+            }
+          >
+            {message}
+          </div>
+          {actions.length > 0 ? (
+            <div className="flex justify-center gap-2">
+              {actions.map((action) => (
+                <Button
+                  key={action.id}
+                  variant="outline"
+                  size="sm"
+                  className={
+                    isError
+                      ? "h-6 border-destructive/30 text-[11px] text-destructive hover:bg-destructive/10"
+                      : "h-6 text-[11px]"
+                  }
+                  onClick={action.onClick}
+                  disabled={action.disabled}
+                >
+                  {action.label}
+                </Button>
+              ))}
+            </div>
+          ) : null}
         </div>
       </div>
     );
