@@ -303,6 +303,15 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     expect(status.conflicts).toEqual([]);
   });
 
+  it("throws RepoNotFound for status when repository is not initialized", async () => {
+    const service = new IsomorphicGitService(host);
+
+    await expect(service.status({ repoPath: repoDir })).rejects.toMatchObject({
+      name: "GitError",
+      code: "RepoNotFound",
+    });
+  });
+
   it("stages and commits via mock storage host", async () => {
     const service = new IsomorphicGitService(host);
     await service.init({ repoPath: repoDir, defaultBranch: "main" });

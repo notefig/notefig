@@ -200,6 +200,15 @@ export class IsomorphicGitService implements GitService {
         ) {
           throw gitError;
         }
+
+        const [headStat, configStat] = await Promise.all([
+          this.host.stat(joinGitPath(input.repoPath, ".git/HEAD")),
+          this.host.stat(joinGitPath(input.repoPath, ".git/config")),
+        ]);
+
+        if (!headStat.exists || !configStat.exists) {
+          throw gitError;
+        }
       }
 
       const matrix = await git.statusMatrix({
