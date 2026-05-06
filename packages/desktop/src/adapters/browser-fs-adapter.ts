@@ -211,6 +211,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
       recursive?: boolean;
       includeFiles?: boolean;
       includeDirectories?: boolean;
+      includeHidden?: boolean;
     },
   ): Promise<Result<string[]>> {
     try {
@@ -223,6 +224,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
       const includeFiles = options?.includeFiles !== false;
       const includeDirectories = options?.includeDirectories !== false;
       const recursive = options?.recursive ?? false;
+      const includeHidden = options?.includeHidden ?? false;
 
       const results: string[] = [];
 
@@ -233,7 +235,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
         const iterator = (handle as any).entries?.() ?? [];
         for await (const entry of iterator as AsyncIterable<[string, any]>) {
           const [name, sub] = entry;
-          if (isHiddenPath(name)) continue;
+          if (!includeHidden && isHiddenPath(name)) continue;
           const nextRel = currentRel ? `${currentRel}/${name}` : name;
           if (sub.kind === "file") {
             if (includeFiles) {

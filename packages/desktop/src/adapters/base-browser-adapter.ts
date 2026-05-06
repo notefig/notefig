@@ -106,6 +106,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
       recursive?: boolean;
       includeFiles?: boolean;
       includeDirectories?: boolean;
+      includeHidden?: boolean;
     },
   ): Promise<Result<string[]>>;
   abstract createDirectories(paths: string[]): Promise<BatchResult<string>>;
@@ -370,6 +371,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
           recursive: false,
           includeFiles: true,
           includeDirectories: true,
+          includeHidden: true,
         });
 
         if (!result.ok) {

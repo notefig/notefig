@@ -117,6 +117,7 @@ pub async fn read_directory(
     recursive: bool,
     include_files: bool,
     include_directories: bool,
+    include_hidden: bool,
 ) -> Result<Vec<String>> {
     let path_buf = PathBuf::from(&path);
 
@@ -142,7 +143,7 @@ pub async fn read_directory(
         // Use shared walk_directory utility for consistent traversal
         let options = WalkOptions {
             follow_links: true,
-            exclude_hidden: true,
+            exclude_hidden: !include_hidden,
             exclude_patterns: vec![],
             base_path: path_buf.clone(),
         };
@@ -166,8 +167,8 @@ pub async fn read_directory(
                 while let Ok(Some(entry)) = entries.next_entry().await {
                     let entry_path = entry.path();
 
-                    // Filter out hidden files/directories using shared utility
-                    if is_hidden_relative_to(&entry_path, &path_buf) {
+                    // Filter out hidden files/directories unless include_hidden is true
+                    if !include_hidden && is_hidden_relative_to(&entry_path, &path_buf) {
                         continue;
                     }
 
@@ -680,7 +681,7 @@ mod tests {
         create_test_file(&temp_dir, "subdir/file2.txt", "content2").await;
         create_test_file(&temp_dir, "subdir/nested/file3.txt", "content3").await;
 
-        let result = read_directory(root_path.clone(), true, true, false).await;
+        let result = read_directory(root_path.clone(), true, true, false, false).await;
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
@@ -699,7 +700,7 @@ mod tests {
         create_test_file(&temp_dir, "file1.txt", "content1").await;
         create_test_file(&temp_dir, "subdir/file2.txt", "content2").await;
 
-        let result = read_directory(root_path.clone(), false, true, false).await;
+        let result = read_directory(root_path.clone(), false, true, false, false).await;
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
@@ -717,13 +718,32 @@ mod tests {
         create_test_file(&temp_dir, ".hidden.txt", "hidden").await;
         create_test_file(&temp_dir, ".git/config", "git config").await;
 
-        let result = read_directory(root_path.clone(), true, true, true).await;
+        let result = read_directory(root_path.clone(), true, true, true, false).await;
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
             assert!(value.iter().any(|p| p.contains("file1.txt")));
             assert!(!value.iter().any(|p| p.contains(".hidden.txt")));
             assert!(!value.iter().any(|p| p.contains(".git")));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_directory_includes_hidden_files_when_requested() {
+        let temp_dir = setup_test_dir();
+        let root_path = temp_dir.path().to_string_lossy().to_string();
+
+        create_test_file(&temp_dir, "file1.txt", "content1").await;
+        create_test_file(&temp_dir, ".hidden.txt", "hidden").await;
+        create_test_file(&temp_dir, ".git/config", "git config").await;
+
+        let result = read_directory(root_path.clone(), true, true, true, true).await;
+
+        assert!(matches!(result, Result::Ok { .. }));
+        if let Result::Ok { value, .. } = result {
+            assert!(value.iter().any(|p| p.contains("file1.txt")));
+            assert!(value.iter().any(|p| p.contains(".hidden.txt")));
+            assert!(value.iter().any(|p| p.contains(".git")));
         }
     }
 
@@ -735,7 +755,7 @@ mod tests {
 
         create_test_file(&temp_dir, "file1.txt", "content1").await;
 
-        let result = read_directory(root_path, false, true, false).await;
+        let result = read_directory(root_path, false, true, false, false).await;
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
@@ -745,7 +765,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_directory_returns_error_for_invalid_workspace_path() {
-        let result = read_directory("".to_string(), false, true, true).await;
+        let result = read_directory("".to_string(), false, true, true, false).await;
 
         assert!(matches!(result, Result::Err { .. }));
     }
@@ -760,7 +780,7 @@ mod tests {
             .await
             .expect("Failed to create dir");
 
-        let result = read_directory(root_path.clone(), false, true, false).await;
+        let result = read_directory(root_path.clone(), false, true, false, false).await;
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
@@ -779,7 +799,7 @@ mod tests {
             .await
             .expect("Failed to create dir");
 
-        let result = read_directory(root_path.clone(), false, false, true).await;
+        let result = read_directory(root_path.clone(), false, false, true, false).await;
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {

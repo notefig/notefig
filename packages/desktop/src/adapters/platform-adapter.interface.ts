@@ -183,6 +183,7 @@ export interface IPlatformAdapter {
       recursive?: boolean;
       includeFiles?: boolean;
       includeDirectories?: boolean;
+      includeHidden?: boolean;
     },
   ): Promise<Result<string[]>>;
 

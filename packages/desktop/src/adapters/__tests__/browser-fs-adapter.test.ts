@@ -353,6 +353,46 @@ describe("BrowserFsPlatformAdapter", () => {
 
       expect(resultWithDirs.ok).toBe(true);
     });
+
+    it("should exclude hidden files by default", async () => {
+      const entriesIterator = (async function* () {
+        yield ["visible.txt", mockFileHandle];
+        yield [".hidden", { kind: "directory" }];
+        yield [".hidden-file.txt", mockFileHandle];
+      })();
+
+      mockDirectoryHandle.entries = vi.fn().mockReturnValue(entriesIterator);
+
+      const result = await adapter.readDirectory("/test-workspace");
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toContain("/test-workspace/visible.txt");
+        expect(result.value).not.toContain("/test-workspace/.hidden");
+        expect(result.value).not.toContain("/test-workspace/.hidden-file.txt");
+      }
+    });
+
+    it("should include hidden files when includeHidden is true", async () => {
+      const entriesIterator = (async function* () {
+        yield ["visible.txt", mockFileHandle];
+        yield [".hidden", { kind: "directory" }];
+        yield [".hidden-file.txt", mockFileHandle];
+      })();
+
+      mockDirectoryHandle.entries = vi.fn().mockReturnValue(entriesIterator);
+
+      const result = await adapter.readDirectory("/test-workspace", {
+        includeHidden: true,
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toContain("/test-workspace/visible.txt");
+        expect(result.value).toContain("/test-workspace/.hidden");
+        expect(result.value).toContain("/test-workspace/.hidden-file.txt");
+      }
+    });
   });
 
   describe("readFiles", () => {

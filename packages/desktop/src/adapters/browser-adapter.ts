@@ -203,6 +203,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
       recursive?: boolean;
       includeFiles?: boolean;
       includeDirectories?: boolean;
+      includeHidden?: boolean;
     },
   ): Promise<Result<string[]>> {
     try {
@@ -237,6 +238,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
       const includeFiles = options?.includeFiles !== false;
       const includeDirectories = options?.includeDirectories !== false;
       const recursive = options?.recursive ?? false;
+      const includeHidden = options?.includeHidden ?? false;
 
       const normalizedPath = path.endsWith("/") ? path : path + "/";
 
@@ -246,7 +248,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
         const filePaths = allKeys.filter((key) => {
           if (!key.startsWith(normalizedPath)) return false;
 
-          if (isHiddenPath(key)) return false;
+          if (!includeHidden && isHiddenPath(key)) return false;
 
           const relativePath = key.slice(normalizedPath.length);
 

@@ -41,6 +41,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       recursive?: boolean;
       includeFiles?: boolean;
       includeDirectories?: boolean;
+      includeHidden?: boolean;
     },
   ): Promise<Result<string[]>> {
     try {
@@ -53,6 +54,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
         recursive: options?.recursive ?? false,
         includeFiles: options?.includeFiles ?? true,
         includeDirectories: options?.includeDirectories ?? true,
+        includeHidden: options?.includeHidden ?? false,
       });
 
       if (result.ok && result.value) {
@@ -611,6 +613,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
           recursive: false,
           includeFiles: true,
           includeDirectories: true,
+          includeHidden: true,
         });
 
         if (!result.ok) {
