@@ -25,6 +25,22 @@ import {
   isMarkdownInstance,
   isCodeInstance,
 } from "@/components/editor/editor-store";
+import { useQueryClient } from "@tanstack/react-query";
+import type { GitError, RepoStatus } from "@metrists/git";
+
+function useQueryCacheTick(): number {
+  const queryClient = useQueryClient();
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const unsubscribe = queryClient.getQueryCache().subscribe(() => {
+      setTick((prev) => prev + 1);
+    });
+    return unsubscribe;
+  }, [queryClient]);
+
+  return tick;
+}
 
 // ── Types ──
 
@@ -248,6 +264,21 @@ function DebugPanelContent({
     () => findSelectedTab(dockableLayout),
     [dockableLayout],
   );
+  useQueryCacheTick();
+  const queryClient = useQueryClient();
+  const gitStatusQueryKey = basePath
+    ? (["git", basePath, "status"] as const)
+    : null;
+  const latestGitStatus = gitStatusQueryKey
+    ? (queryClient.getQueryData<RepoStatus>(gitStatusQueryKey) ?? null)
+    : null;
+  const latestGitStatusError = gitStatusQueryKey
+    ? (queryClient.getQueryState<RepoStatus, GitError>(gitStatusQueryKey)
+        ?.error ?? null)
+    : null;
+  const latestGitStatusUpdatedAt = gitStatusQueryKey
+    ? (queryClient.getQueryState(gitStatusQueryKey)?.dataUpdatedAt ?? 0)
+    : 0;
 
   // ── Console capture ──
   const [isCapturing, setIsCapturing] = useState(false);
@@ -384,6 +415,17 @@ function DebugPanelContent({
       lines.push("");
     }
 
+    // Git status cache snapshot
+    lines.push("── Git Status Cache ──");
+    lines.push(
+      `updatedAt: ${latestGitStatusUpdatedAt ? new Date(latestGitStatusUpdatedAt).toISOString() : "(none)"}`,
+    );
+    if (latestGitStatusError) {
+      lines.push(`error: ${latestGitStatusError.message}`);
+    }
+    lines.push(JSON.stringify(latestGitStatus, null, 2));
+    lines.push("");
+
     // Console entries
     if (consoleEntries.length > 0) {
       lines.push(`── Console Output (${consoleEntries.length} entries) ──`);
@@ -408,6 +450,9 @@ function DebugPanelContent({
     openTabs,
     activeTabId,
     dockableLayout,
+    latestGitStatus,
+    latestGitStatusError,
+    latestGitStatusUpdatedAt,
     consoleEntries,
     error,
   ]);
@@ -783,6 +828,23 @@ function DebugPanelContent({
                 )}
               </div>
             )}
+
+            {/* Git status snapshot */}
+            <div className="border-t border-border pt-2">
+              <Row label="gitStatus.updatedAt">
+                {latestGitStatusUpdatedAt
+                  ? new Date(latestGitStatusUpdatedAt).toISOString()
+                  : "(none)"}
+              </Row>
+              {latestGitStatusError ? (
+                <Row label="gitStatus.error">
+                  {latestGitStatusError.message}
+                </Row>
+              ) : null}
+              <pre className="mt-1 rounded bg-muted p-2 text-[10px] leading-tight whitespace-pre-wrap break-all border border-border select-text">
+                {JSON.stringify(latestGitStatus, null, 2)}
+              </pre>
+            </div>
           </div>
         ) : (
           <div className="flex flex-col h-full">
