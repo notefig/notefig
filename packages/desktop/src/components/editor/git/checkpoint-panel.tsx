@@ -104,34 +104,14 @@ async function saveCheckpointMutation(
   service: GitService,
   description?: string,
 ): Promise<string | null> {
-  const status = await service.status({ repoPath: workspacePath });
-
-  const changedPaths = new Set<string>([
-    ...status.untracked,
-    ...status.unstaged.map((item) => item.path),
-    ...status.staged.map((item) => item.path),
-  ]);
-
-  if (changedPaths.size === 0) {
-    return null;
-  }
-
-  for (const path of changedPaths) {
-    await service.add({ repoPath: workspacePath, filepath: path });
-  }
-
-  const message = description?.trim() || "Checkpoint";
-
-  const oid = await service.commit({
+  return service.addAllAndCommit({
     repoPath: workspacePath,
-    message,
+    message: description?.trim() || "Checkpoint",
     author: {
       name: "Metrists",
       email: "git@metrists.com",
     },
   });
-
-  return oid;
 }
 
 function getErrorPresentation(

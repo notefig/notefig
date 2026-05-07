@@ -14,6 +14,8 @@ import {
   type GitLogInput,
   type GitPullInput,
   type GitPushInput,
+  type GitRemoveInput,
+  type GitAddAllAndCommitInput,
   type GitService,
   type GitStorageHost,
   type RepoStatus,
@@ -67,17 +69,39 @@ function isMissingHeadMessage(message: string): boolean {
   return /could not find head/i.test(message);
 }
 
-function deriveChangeType(
+function deriveStagedChangeType(
   headStatus: number,
-  workdirStatus: number,
   stageStatus: number,
 ): GitFileChange["type"] {
-  if (headStatus === 0 && (workdirStatus > 0 || stageStatus > 0)) {
+  if (headStatus === 0 && stageStatus > 0) {
     return "added";
   }
 
-  if (headStatus > 0 && workdirStatus === 0 && stageStatus === 0) {
+  if (headStatus > 0 && stageStatus === 0) {
     return "deleted";
+  }
+
+  if (headStatus > 0 && stageStatus > 0 && stageStatus !== headStatus) {
+    return "modified";
+  }
+
+  return "modified";
+}
+
+function deriveUnstagedChangeType(
+  stageStatus: number,
+  workdirStatus: number,
+): GitFileChange["type"] {
+  if (stageStatus === 0 && workdirStatus > 0) {
+    return "added";
+  }
+
+  if (stageStatus > 0 && workdirStatus === 0) {
+    return "deleted";
+  }
+
+  if (stageStatus > 0 && workdirStatus > 0 && workdirStatus !== stageStatus) {
+    return "modified";
   }
 
   return "modified";
@@ -222,23 +246,23 @@ export class IsomorphicGitService implements GitService {
       const conflicts: string[] = [];
 
       for (const [path, headStatus, workdirStatus, stageStatus] of matrix) {
-        const changeType = deriveChangeType(
-          headStatus,
-          workdirStatus,
-          stageStatus,
-        );
-
         if (headStatus === 0 && workdirStatus === 2 && stageStatus === 0) {
           untracked.push(path);
           continue;
         }
 
         if (stageStatus !== headStatus) {
-          staged.push({ path, type: changeType });
+          staged.push({
+            path,
+            type: deriveStagedChangeType(headStatus, stageStatus),
+          });
         }
 
         if (workdirStatus !== stageStatus) {
-          unstaged.push({ path, type: changeType });
+          unstaged.push({
+            path,
+            type: deriveUnstagedChangeType(stageStatus, workdirStatus),
+          });
         }
 
         if (stageStatus === 3) {
@@ -262,6 +286,18 @@ export class IsomorphicGitService implements GitService {
   async add(input: GitAddInput): Promise<void> {
     try {
       await git.add({
+        ...input,
+        fs: this.fsClient,
+        dir: input.repoPath,
+      });
+    } catch (error) {
+      throw toGitError(error);
+    }
+  }
+
+  async remove(input: GitRemoveInput): Promise<void> {
+    try {
+      await git.remove({
         ...input,
         fs: this.fsClient,
         dir: input.repoPath,
@@ -295,6 +331,55 @@ export class IsomorphicGitService implements GitService {
     } catch (error) {
       throw toGitError(error);
     }
+  }
+
+  async addAllAndCommit(
+    input: GitAddAllAndCommitInput,
+  ): Promise<string | null> {
+    validateMessage(input.message ?? "Checkpoint");
+
+    const status = await this.status({ repoPath: input.repoPath });
+
+    const stagedPaths = new Set(status.staged.map((item) => item.path));
+    const pathsToAdd = [
+      ...status.untracked,
+      ...status.unstaged
+        .filter((item) => item.type !== "deleted")
+        .map((item) => item.path)
+        .filter((path) => !stagedPaths.has(path)),
+    ];
+    const pathsToRemove = status.unstaged
+      .filter((item) => item.type === "deleted")
+      .map((item) => item.path)
+      .filter((path) => !stagedPaths.has(path));
+
+    if (
+      pathsToAdd.length === 0 &&
+      pathsToRemove.length === 0 &&
+      status.staged.length === 0
+    ) {
+      return null;
+    }
+
+    for (const filepath of pathsToAdd) {
+      await this.add({ repoPath: input.repoPath, filepath });
+    }
+
+    for (const filepath of pathsToRemove) {
+      await this.remove({ repoPath: input.repoPath, filepath });
+    }
+
+    const afterStage = await this.status({ repoPath: input.repoPath });
+    if (afterStage.staged.length === 0) {
+      return null;
+    }
+
+    return this.commit({
+      repoPath: input.repoPath,
+      message: input.message ?? "Checkpoint",
+      author: input.author,
+      committer: input.committer,
+    });
   }
 
   async listBranches(input: GitListBranchesInput): Promise<string[]> {

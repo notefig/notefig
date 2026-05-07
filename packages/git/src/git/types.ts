@@ -9,6 +9,7 @@ import type {
   log as igLog,
   pull as igPull,
   push as igPush,
+  remove as igRemove,
   resetIndex as igResetIndex,
 } from "isomorphic-git";
 
@@ -24,6 +25,7 @@ type ListBranchesParams = Parameters<typeof igListBranches>[0];
 type LogParams = Parameters<typeof igLog>[0];
 type PullParams = Parameters<typeof igPull>[0];
 type PushParams = Parameters<typeof igPush>[0];
+type RemoveParams = Parameters<typeof igRemove>[0];
 type ResetIndexParams = Parameters<typeof igResetIndex>[0];
 
 export type GitChangeType =
@@ -132,7 +134,14 @@ export interface GitStorageHost {
 export type GitAddInput = WithRepoPath<AddParams>;
 export type GitInitInput = WithRepoPath<InitParams>;
 export type GitUnstageInput = WithRepoPath<ResetIndexParams>;
+export type GitRemoveInput = WithRepoPath<RemoveParams>;
 export type GitCommitInput = WithRepoPath<CommitParams>;
+export type GitAddAllAndCommitInput = {
+  repoPath: string;
+  message?: string;
+  author: NonNullable<CommitParams["author"]>;
+  committer?: CommitParams["committer"];
+};
 export type GitListBranchesInput = WithRepoPath<ListBranchesParams>;
 export type GitCreateBranchInput = WithRepoPath<BranchParams>;
 export type GitSwitchBranchInput = WithRepoPath<
@@ -153,8 +162,10 @@ export interface GitService {
   init(input: GitInitInput): ReturnType<typeof igInit>;
   status(input: { repoPath: string }): Promise<RepoStatus>;
   add(input: GitAddInput): ReturnType<typeof igAdd>;
+  remove(input: GitRemoveInput): ReturnType<typeof igRemove>;
   unstage(input: GitUnstageInput): ReturnType<typeof igResetIndex>;
   commit(input: GitCommitInput): ReturnType<typeof igCommit>;
+  addAllAndCommit(input: GitAddAllAndCommitInput): Promise<string | null>;
   listBranches(input: GitListBranchesInput): ReturnType<typeof igListBranches>;
   createBranch(input: GitCreateBranchInput): ReturnType<typeof igBranch>;
   switchBranch(input: GitSwitchBranchInput): ReturnType<typeof igCheckout>;

@@ -445,6 +445,243 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     expect(restored.unstaged).toEqual([]);
   });
 
+  it("reports staged modifications and unstaged deletion accurately", async () => {
+    const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+
+    await host.writeFileAtomic(
+      join(repoDir, "2026-05-05.md"),
+      new TextEncoder().encode("day 1\n"),
+    );
+    await host.writeFileAtomic(
+      join(repoDir, "2026-05-06.md"),
+      new TextEncoder().encode("day 2\n"),
+    );
+    await host.writeFileAtomic(
+      join(repoDir, "h.md"),
+      new TextEncoder().encode("hello\n"),
+    );
+
+    await service.add({
+      repoPath: repoDir,
+      filepath: ["2026-05-05.md", "2026-05-06.md", "h.md"],
+    });
+    await service.commit({
+      repoPath: repoDir,
+      message: "baseline",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+      committer: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    await host.writeFileAtomic(
+      join(repoDir, "2026-05-05.md"),
+      new TextEncoder().encode("day 1 updated\n"),
+    );
+    await host.writeFileAtomic(
+      join(repoDir, "2026-05-06.md"),
+      new TextEncoder().encode("day 2 updated\n"),
+    );
+    await host.deleteFile(join(repoDir, "h.md"));
+
+    await service.add({
+      repoPath: repoDir,
+      filepath: ["2026-05-05.md", "2026-05-06.md"],
+    });
+
+    const status = await service.status({ repoPath: repoDir });
+
+    expect(status.staged).toEqual(
+      expect.arrayContaining([
+        { path: "2026-05-05.md", type: "modified" },
+        { path: "2026-05-06.md", type: "modified" },
+      ]),
+    );
+    expect(status.unstaged).toEqual(
+      expect.arrayContaining([{ path: "h.md", type: "deleted" }]),
+    );
+  });
+
+  it("removes deleted files from index before commit", async () => {
+    const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+
+    await host.writeFileAtomic(
+      join(repoDir, "note.md"),
+      new TextEncoder().encode("hello\n"),
+    );
+    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    await service.commit({
+      repoPath: repoDir,
+      message: "baseline",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+      committer: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    await host.deleteFile(join(repoDir, "note.md"));
+    const before = await service.status({ repoPath: repoDir });
+    expect(before.unstaged).toEqual(
+      expect.arrayContaining([{ path: "note.md", type: "deleted" }]),
+    );
+
+    await service.remove({ repoPath: repoDir, filepath: "note.md" });
+    const after = await service.status({ repoPath: repoDir });
+    expect(after.unstaged).toEqual([]);
+    expect(after.staged).toEqual(
+      expect.arrayContaining([{ path: "note.md", type: "deleted" }]),
+    );
+  });
+
+  it("addAllAndCommit stages mixed changes and commits once", async () => {
+    const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+
+    await host.writeFileAtomic(
+      join(repoDir, "keep.md"),
+      new TextEncoder().encode("keep\n"),
+    );
+    await host.writeFileAtomic(
+      join(repoDir, "delete.md"),
+      new TextEncoder().encode("delete\n"),
+    );
+    await service.add({
+      repoPath: repoDir,
+      filepath: ["keep.md", "delete.md"],
+    });
+    await service.commit({
+      repoPath: repoDir,
+      message: "baseline",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+      committer: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    await host.writeFileAtomic(
+      join(repoDir, "keep.md"),
+      new TextEncoder().encode("keep updated\n"),
+    );
+    await host.deleteFile(join(repoDir, "delete.md"));
+    await host.writeFileAtomic(
+      join(repoDir, "new.md"),
+      new TextEncoder().encode("new\n"),
+    );
+
+    const oid = await service.addAllAndCommit({
+      repoPath: repoDir,
+      message: "checkpoint",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    expect(oid).toBeTruthy();
+
+    const status = await service.status({ repoPath: repoDir });
+    expect(status.staged).toEqual([]);
+    expect(status.unstaged).toEqual([]);
+    expect(status.untracked).toEqual([]);
+  });
+
+  it("addAllAndCommit stages mixed changes including deletions", async () => {
+    const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+
+    await host.writeFileAtomic(
+      join(repoDir, "keep.md"),
+      new TextEncoder().encode("keep\n"),
+    );
+    await host.writeFileAtomic(
+      join(repoDir, "delete-me.md"),
+      new TextEncoder().encode("delete me\n"),
+    );
+    await service.add({
+      repoPath: repoDir,
+      filepath: ["keep.md", "delete-me.md"],
+    });
+    await service.commit({
+      repoPath: repoDir,
+      message: "baseline",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+      committer: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    await host.writeFileAtomic(
+      join(repoDir, "keep.md"),
+      new TextEncoder().encode("keep updated\n"),
+    );
+    await host.deleteFile(join(repoDir, "delete-me.md"));
+    await host.writeFileAtomic(
+      join(repoDir, "new.md"),
+      new TextEncoder().encode("new file\n"),
+    );
+
+    const oid = await service.addAllAndCommit({
+      repoPath: repoDir,
+      message: "checkpoint",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    expect(oid).toBeTruthy();
+
+    const status = await service.status({ repoPath: repoDir });
+    expect(status.staged).toEqual([]);
+    expect(status.unstaged).toEqual([]);
+    expect(status.untracked).toEqual([]);
+  });
+
+  it("addAllAndCommit returns null when there are no changes", async () => {
+    const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+
+    const oid = await service.addAllAndCommit({
+      repoPath: repoDir,
+      message: "noop",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    expect(oid).toBeNull();
+  });
+
+  it("addAllAndCommit stages mixed changes and creates commit", async () => {
+    const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+
+    await host.writeFileAtomic(
+      join(repoDir, "a.md"),
+      new TextEncoder().encode("a\n"),
+    );
+    await host.writeFileAtomic(
+      join(repoDir, "b.md"),
+      new TextEncoder().encode("b\n"),
+    );
+    await service.add({ repoPath: repoDir, filepath: ["a.md", "b.md"] });
+    await service.commit({
+      repoPath: repoDir,
+      message: "baseline",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+      committer: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    await host.writeFileAtomic(
+      join(repoDir, "a.md"),
+      new TextEncoder().encode("a updated\n"),
+    );
+    await host.writeFileAtomic(
+      join(repoDir, "c.md"),
+      new TextEncoder().encode("c\n"),
+    );
+    await host.deleteFile(join(repoDir, "b.md"));
+
+    const oid = await service.addAllAndCommit({
+      repoPath: repoDir,
+      message: "mixed changes",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    expect(oid).toHaveLength(40);
+
+    const clean = await service.status({ repoPath: repoDir });
+    expect(clean.staged).toEqual([]);
+    expect(clean.unstaged).toEqual([]);
+    expect(clean.untracked).toEqual([]);
+  });
+
   it("validates strict stat payloads in fs shim", async () => {
     const invalidHost: GitStorageHost = {
       readFile: async () => new Uint8Array(),
