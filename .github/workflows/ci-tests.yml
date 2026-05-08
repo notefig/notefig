@@ -27,12 +27,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify git availability
-        run: git --version
-
-      - name: Run git package tests
-        run: npm run test -w packages/git
-
       - name: Build shared package
         run: npm run build -w packages/shared
 
@@ -47,6 +41,28 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
         run: npm run test -w packages/cli
+
+  test-git:
+    name: Test Git Package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify git availability
+        run: git --version
+
+      - name: Run git package tests
+        run: npm run test -w packages/git
 
   test-desktop-unit:
     name: Test Desktop (Unit)
