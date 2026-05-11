@@ -129,7 +129,11 @@ export const IconSidebar = memo(function IconSidebar({
 
   return (
     <div
-      className="flex flex-col items-center justify-start h-full w-10 border-r rtl:border-r-0 rtl:border-l border-sidebar-border py-2"
+      className={cn(
+        "flex flex-col items-center justify-start h-full w-10 py-2",
+        !isCollapsed &&
+          "border-r rtl:border-r-0 rtl:border-l border-sidebar-border",
+      )}
       style={{ backgroundColor: "rgba(15, 15, 15, 0.05)" }}
     >
       <Tooltip>

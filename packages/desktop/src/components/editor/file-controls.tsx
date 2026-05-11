@@ -48,7 +48,7 @@ export function FileControls({
   const SortIcon = sortIcons[sortOrder];
 
   return (
-    <div className="flex h-10 items-center justify-between border-b border-sidebar-border bg-sidebar px-2">
+    <div className="flex h-9 items-center justify-between border-b border-sidebar-border bg-sidebar px-2">
       <ButtonGroup>
         <Tooltip>
           <TooltipTrigger asChild>
