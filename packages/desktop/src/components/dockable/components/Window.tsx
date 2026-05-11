@@ -111,7 +111,7 @@ function TabView({
       )}
 
       <div
-        className="p-2"
+        className="px-2"
         style={{
           overflow: "hidden",
           display: "flex",
