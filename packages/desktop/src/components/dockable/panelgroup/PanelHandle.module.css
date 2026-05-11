@@ -27,6 +27,7 @@
 
 .visual[data-direction="column"] {
   flex-direction: row;
+  padding-bottom: 1rem;
 }
 
 .visual::before,

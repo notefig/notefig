@@ -50,22 +50,23 @@ function PanelHandle({
     window.addEventListener("mouseup", handleMouseUp);
   };
 
-  const sizeGapDifference = size - gap;
+  const handleSize = direction === "column" ? size + 16 : size;
+  const sizeGapDifference = handleSize - gap;
   const offset = sizeGapDifference / 2;
   const style: React.CSSProperties =
     direction === "row"
       ? {
           top: 0,
-          right: -size + offset,
-          width: size,
+          right: -handleSize + offset,
+          width: handleSize,
           height: "100%",
           cursor: "col-resize",
         }
       : {
-          bottom: -size + offset,
+          bottom: -handleSize + offset,
           left: 0,
           width: "100%",
-          height: size,
+          height: handleSize,
           cursor: "row-resize",
         };
 

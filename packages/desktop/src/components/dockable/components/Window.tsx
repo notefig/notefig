@@ -8,6 +8,7 @@ import {
 import { useDndContext } from "@dnd-kit/core";
 import { useDockable } from "../store";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 export type tabObject = {
   id: string;
   name: string;
@@ -112,7 +113,7 @@ function TabView({
       <div
         className="p-2"
         style={{
-          overflow: "auto",
+          overflow: "hidden",
           display: "flex",
           flex: 1,
         }}
