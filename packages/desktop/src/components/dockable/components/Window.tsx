@@ -76,7 +76,7 @@ function TabView({
             type: "tab-bar",
             address,
           }}
-          className="relative flex h-10 min-w-0 bg-transparent"
+          className="relative flex min-w-0 bg-transparent p-2"
         >
           <ScrollArea className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
             <div className="flex">
@@ -109,6 +109,7 @@ function TabView({
       )}
 
       <div
+        className="p-2"
         style={{
           overflow: "auto",
           display: "flex",

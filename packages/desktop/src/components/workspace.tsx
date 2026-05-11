@@ -395,34 +395,33 @@ export const Workspace = () => {
   }, [workspacePath, openTabs.join(",")]);
 
   return (
-    <div
-      dir={direction}
-      className="flex h-full w-full bg-background overflow-hidden"
-    >
-      <IconSidebar
-        onCommandPaletteClick={handleCommandPaletteOpen}
-        isCollapsed={isSidebarCollapsed}
-        onToggleCollapse={toggleSidebarCollapsed}
-      />
+    <div dir={direction} className="flex h-full w-full overflow-hidden p-2">
+      <div className="flex h-full shrink-0 overflow-hidden rounded-xl border border-border">
+        <IconSidebar
+          onCommandPaletteClick={handleCommandPaletteOpen}
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={toggleSidebarCollapsed}
+        />
+
+        {!isSidebarCollapsed && (
+          <Sidebar
+            workspacePath={workspacePath}
+            activeTabId={activeTabId}
+            openTabs={openTabs}
+            onFileSelect={handleFileSelect}
+            closeTab={closeTab}
+            mode={fileTreeMode}
+            onModeChange={setFileTreeMode}
+            onSearchMatchClick={handleSearchMatchClick}
+            searchPanelRef={searchPanelRef}
+          />
+        )}
+      </div>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <DebugPanel />
 
         <div className="flex-1 flex min-h-0 overflow-hidden">
-          {!isSidebarCollapsed && (
-            <Sidebar
-              workspacePath={workspacePath}
-              activeTabId={activeTabId}
-              openTabs={openTabs}
-              onFileSelect={handleFileSelect}
-              closeTab={closeTab}
-              mode={fileTreeMode}
-              onModeChange={setFileTreeMode}
-              onSearchMatchClick={handleSearchMatchClick}
-              searchPanelRef={searchPanelRef}
-            />
-          )}
-
           <div
             ref={dockableRef}
             className="flex-1 min-w-0 h-full overflow-hidden"
