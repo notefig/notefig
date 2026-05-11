@@ -556,7 +556,7 @@ function DebugPanelContent({
   return (
     <div
       className={cn(
-        "bg-card/95 backdrop-blur-sm border-b border-border text-foreground font-mono text-xs flex flex-col overflow-hidden",
+        "bg-card/95 backdrop-blur-sm border-border text-foreground font-mono text-xs flex flex-col overflow-hidden texture-surface",
         forceOpen ? "h-full" : "max-h-[40vh]",
       )}
     >

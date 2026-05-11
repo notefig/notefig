@@ -106,7 +106,6 @@
   }
 
   .texture-surface {
-    background-color: hsl(var(--background));
     background-image: image-set(
       url("/textures/noise.webp") type("image/webp"),
       url("/textures/noise.png") type("image/png")
