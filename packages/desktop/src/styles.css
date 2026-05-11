@@ -89,25 +89,37 @@
     position: fixed;
     inset: 0;
     pointer-events: none;
-    background-image: url("/textures/noise.png");
+    background-image: image-set(
+      url("/textures/noise.webp") type("image/webp"),
+      url("/textures/noise.png") type("image/png")
+    );
     background-repeat: repeat;
     background-size: 100px 100px;
     z-index: 0;
   }
 
   .dark body::before {
-    background-image: url("/textures/noise-dark.png");
+    background-image: image-set(
+      url("/textures/noise-dark.webp") type("image/webp"),
+      url("/textures/noise-dark.png") type("image/png")
+    );
   }
 
   .texture-surface {
     background-color: hsl(var(--background));
-    background-image: url("/textures/noise.png");
+    background-image: image-set(
+      url("/textures/noise.webp") type("image/webp"),
+      url("/textures/noise.png") type("image/png")
+    );
     background-repeat: repeat;
     background-size: 100px 100px;
   }
 
   .dark .texture-surface {
-    background-image: url("/textures/noise-dark.png");
+    background-image: image-set(
+      url("/textures/noise-dark.webp") type("image/webp"),
+      url("/textures/noise-dark.png") type("image/png")
+    );
   }
 
   #root {
