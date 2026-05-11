@@ -76,10 +76,11 @@ function TabView({
             type: "tab-bar",
             address,
           }}
-          className="relative flex min-w-0 bg-transparent p-2"
+          className="relative mx-2 flex min-w-0 w-[calc(100%-1rem)] rounded-lg border border-sidebar-border overflow-hidden"
+          style={{ backgroundColor: "rgba(15, 15, 15, 0.05)" }}
         >
-          <ScrollArea className="flex min-w-0 flex-1 overflow-x-hidden overflow-y-hidden">
-            <div className="flex">
+          <ScrollArea className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
+            <div className="flex h-full items-stretch">
               <SortableContext
                 items={tabs.map((tab) => tab.id)}
                 strategy={horizontalListSortingStrategy}
