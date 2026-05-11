@@ -126,7 +126,7 @@ export function Welcome() {
   };
 
   return (
-    <div className="relative flex h-screen flex-col bg-background overflow-hidden">
+    <div className="relative flex h-screen flex-col bg-background overflow-hidden texture-surface">
       <DebugPanel />
       <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none">
         <PlainLogo size={400} className="block dark:hidden text-foreground" />

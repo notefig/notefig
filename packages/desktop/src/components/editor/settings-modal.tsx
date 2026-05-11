@@ -130,7 +130,7 @@ export function SettingsModal({
       onOpenChange={(open) => handleSettingsToggle(open)}
     >
       <DialogContent
-        className="max-w-6xl w-[95vw] h-[85vh] p-0 gap-0 overflow-hidden bg-card border-border"
+        className="max-w-6xl w-[95vw] h-[85vh] p-0 gap-0 overflow-hidden bg-card border-border texture-surface"
         onCloseAutoFocus={handleCloseAutoFocus}
       >
         <DialogTitle className="sr-only">Settings</DialogTitle>

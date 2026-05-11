@@ -95,6 +95,13 @@
     z-index: 0;
   }
 
+  .texture-surface {
+    background-color: hsl(var(--background));
+    background-image: url("/textures/noise.png");
+    background-repeat: repeat;
+    background-size: 100px 100px;
+  }
+
   #root {
     position: relative;
     z-index: 1;
