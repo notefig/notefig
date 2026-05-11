@@ -1,3 +1,7 @@
+.handle {
+  background: transparent;
+}
+
 .handle:hover {
-  background: hsl(var(--ring));
+  background: transparent;
 }

@@ -1,3 +1,7 @@
+import type React from "react";
+import { GripHorizontal, GripVertical } from "lucide-react";
+import styles from "./PanelHandle.module.css";
+
 function PanelHandle({
   className,
   direction,
@@ -48,7 +52,6 @@ function PanelHandle({
 
   const sizeGapDifference = size - gap;
   const offset = sizeGapDifference / 2;
-
   const style: React.CSSProperties =
     direction === "row"
       ? {
@@ -66,19 +69,35 @@ function PanelHandle({
           cursor: "row-resize",
         };
 
+  const visualStyle: React.CSSProperties =
+    direction === "row"
+      ? { paddingTop: 2, paddingBottom: 2 }
+      : { paddingLeft: 2, paddingRight: 2 };
+
   return (
     <div
       onMouseDown={handleMouseDown}
-      className={className}
+      className={[styles.handle, className].filter(Boolean).join(" ")}
+      data-direction={direction}
       style={{
-        position: "absolute",
-        zIndex: 10,
-        transition: "background-color 0.1s ease-in-out",
-        borderRadius: 2,
-        overflow: "hidden",
         ...style,
       }}
     >
+      <div
+        className={styles.visual}
+        data-direction={direction}
+        style={visualStyle}
+      >
+        <span className={styles.line} />
+        <span className={styles.icon}>
+          {direction === "row" ? (
+            <GripVertical size={18} />
+          ) : (
+            <GripHorizontal size={18} />
+          )}
+        </span>
+        <span className={styles.line} />
+      </div>
       {handleComponent}
     </div>
   );

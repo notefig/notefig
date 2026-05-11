@@ -78,7 +78,7 @@ function TabView({
           }}
           className="relative flex min-w-0 bg-transparent p-2"
         >
-          <ScrollArea className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
+          <ScrollArea className="flex min-w-0 flex-1 overflow-x-hidden overflow-y-hidden">
             <div className="flex">
               <SortableContext
                 items={tabs.map((tab) => tab.id)}
