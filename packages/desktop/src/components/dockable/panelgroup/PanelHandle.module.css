@@ -1,0 +1,65 @@
+.handle {
+  --line-thickness: 1px;
+  position: absolute;
+  z-index: 10;
+  transition: background-color 0.1s ease-in-out;
+  border-radius: 2px;
+  overflow: visible;
+}
+
+.handle:hover {
+  --line-thickness: 2px;
+}
+
+.visual {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.visual[data-direction="row"] {
+  flex-direction: column;
+}
+
+.visual[data-direction="column"] {
+  flex-direction: row;
+  padding-bottom: 1rem;
+}
+
+.visual::before,
+.visual::after {
+  content: "";
+  flex: 0 0 4%;
+}
+
+.line {
+  flex: 1;
+  align-self: center;
+  border-radius: 999px;
+  background-color: hsl(var(--border));
+}
+
+.visual[data-direction="row"] .line {
+  width: var(--line-thickness);
+}
+
+.visual[data-direction="column"] .line {
+  height: var(--line-thickness);
+}
+
+.icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  line-height: 0;
+  color: hsl(var(--muted-foreground) / 0.7);
+}
+
+.icon svg {
+  display: block;
+}

@@ -79,15 +79,59 @@
 
   body {
     @apply bg-background text-foreground;
+    position: relative;
     font-synthesis-weight: none;
     text-rendering: optimizeLegibility;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image: image-set(
+      url("/textures/noise.webp") type("image/webp"),
+      url("/textures/noise.png") type("image/png")
+    );
+    background-repeat: repeat;
+    background-size: 100px 100px;
+    z-index: 0;
+  }
+
+  .dark body::before {
+    background-image: image-set(
+      url("/textures/noise-dark.webp") type("image/webp"),
+      url("/textures/noise-dark.png") type("image/png")
+    );
+  }
+
+  .texture-surface {
+    background-color: hsl(var(--background));
+    background-image: image-set(
+      url("/textures/noise.webp") type("image/webp"),
+      url("/textures/noise.png") type("image/png")
+    );
+    background-repeat: repeat;
+    background-size: 100px 100px;
+  }
+
+  .dark .texture-surface {
+    background-image: image-set(
+      url("/textures/noise-dark.webp") type("image/webp"),
+      url("/textures/noise-dark.png") type("image/png")
+    );
+  }
+
+  #root {
+    position: relative;
+    z-index: 1;
   }
 
   /* Map Dockable CSS variables to our design tokens */
   :root {
     --dockable-colors-headers: hsl(var(--background));
     --dockable-colors-background: transparent;
-    --dockable-colors-gap: hsl(var(--border));
+    --dockable-colors-gap: transparent;
     --dockable-colors-text: hsl(var(--foreground));
     --dockable-colors-selected: hsl(var(--primary));
     --dockable-radius: 0;
@@ -97,7 +141,7 @@
   .dark {
     --dockable-colors-headers: hsl(var(--background));
     --dockable-colors-background: transparent;
-    --dockable-colors-gap: hsl(var(--border));
+    --dockable-colors-gap: transparent;
     --dockable-colors-text: hsl(var(--foreground));
     --dockable-colors-selected: hsl(var(--primary));
     --dockable-radius: 0;

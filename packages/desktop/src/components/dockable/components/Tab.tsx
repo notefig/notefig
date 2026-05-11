@@ -36,13 +36,13 @@ function Tab({
       <div
         className={cn(
           // Base styles
-          "group relative flex cursor-pointer items-center overflow-visible",
+          "group relative flex h-full cursor-pointer items-center overflow-visible border-x border-transparent bg-background first:border-l-0 rtl:first:border-r-0",
           "text-sm font-medium leading-tight",
-          "border-b-2 transition-all duration-150",
+          "transition-colors duration-150",
           // Selected vs unselected
           selected
-            ? "border-foreground text-foreground"
-            : "border-transparent text-muted-foreground opacity-60 hover:text-foreground hover:opacity-100",
+            ? "border-border text-foreground"
+            : "text-muted-foreground opacity-70 hover:text-foreground hover:opacity-100",
         )}
         onPointerDown={onClick}
         onDoubleClick={(e) => {
@@ -51,7 +51,7 @@ function Tab({
         title={name}
       >
         <div className="flex min-w-0 flex-shrink items-center overflow-hidden">
-          <span className="min-w-0 flex-1 truncate whitespace-nowrap py-2 pl-4 pr-1">
+          <span className="min-w-0 flex-1 truncate whitespace-nowrap px-4 py-2">
             {name}
           </span>
           {onClose && (

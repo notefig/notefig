@@ -8,6 +8,7 @@ import {
 import { useDndContext } from "@dnd-kit/core";
 import { useDockable } from "../store";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 export type tabObject = {
   id: string;
   name: string;
@@ -76,10 +77,11 @@ function TabView({
             type: "tab-bar",
             address,
           }}
-          className="relative flex h-10 min-w-0 bg-transparent"
+          className="relative mx-2 flex min-w-0 w-[calc(100%-1rem)] rounded-lg border border-sidebar-border overflow-hidden"
+          style={{ backgroundColor: "rgba(15, 15, 15, 0.05)" }}
         >
           <ScrollArea className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
-            <div className="flex">
+            <div className="flex h-full items-stretch">
               <SortableContext
                 items={tabs.map((tab) => tab.id)}
                 strategy={horizontalListSortingStrategy}
@@ -109,8 +111,9 @@ function TabView({
       )}
 
       <div
+        className="px-2"
         style={{
-          overflow: "auto",
+          overflow: "hidden",
           display: "flex",
           flex: 1,
         }}

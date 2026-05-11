@@ -1,7 +1,7 @@
 .container {
   display: flex;
   flex-direction: column;
-  background: hsl(var(--background));
+  background: transparent;
   border-radius: 0;
   overflow: hidden;
   flex: 1;

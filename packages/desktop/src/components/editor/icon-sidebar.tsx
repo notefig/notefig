@@ -128,15 +128,22 @@ export const IconSidebar = memo(function IconSidebar({
   );
 
   return (
-    <div className="flex flex-col items-center justify-start h-full w-12 bg-sidebar border-r rtl:border-r-0 rtl:border-l border-sidebar-border py-2">
+    <div
+      className={cn(
+        "flex flex-col items-center justify-start h-full w-10 py-2",
+        !isCollapsed &&
+          "border-r rtl:border-r-0 rtl:border-l border-sidebar-border",
+      )}
+      style={{ backgroundColor: "rgba(15, 15, 15, 0.05)" }}
+    >
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             onClick={handleLogoClick}
-            className="mb-3 p-0.3 rounded-md transition-colors hover:bg-sidebar-accent cursor-pointer"
+            className="mb-3 p-0.5 rounded-md transition-colors hover:bg-sidebar-accent cursor-pointer"
           >
-            <PlainLogo size={20} className="block dark:hidden" />
-            <PlainLogo size={20} fill="white" className="hidden dark:block" />
+            <PlainLogo size={18} className="block dark:hidden" />
+            <PlainLogo size={18} fill="white" className="hidden dark:block" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>
@@ -153,11 +160,11 @@ export const IconSidebar = memo(function IconSidebar({
               <button
                 onClick={item.onClick}
                 className={cn(
-                  "p-2 rounded-md transition-colors hover:bg-sidebar-accent",
+                  "p-1.5 rounded-md transition-colors hover:bg-sidebar-accent",
                   item.active && "bg-sidebar-accent",
                 )}
               >
-                <item.icon className="w-5 h-5 text-muted-foreground" />
+                <item.icon className="w-4 h-4 text-muted-foreground" />
                 <span className="sr-only">{item.label}</span>
               </button>
             </TooltipTrigger>
@@ -175,12 +182,12 @@ export const IconSidebar = memo(function IconSidebar({
           <TooltipTrigger asChild>
             <button
               onClick={onToggleCollapse}
-              className="p-2 rounded-md transition-colors hover:bg-sidebar-accent"
+              className="p-1.5 rounded-md transition-colors hover:bg-sidebar-accent"
             >
               {isCollapsed ? (
-                <PanelLeft className="w-5 h-5 text-muted-foreground" />
+                <PanelLeft className="w-4 h-4 text-muted-foreground" />
               ) : (
-                <PanelLeftClose className="w-5 h-5 text-muted-foreground" />
+                <PanelLeftClose className="w-4 h-4 text-muted-foreground" />
               )}
               <span className="sr-only">
                 {isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -200,10 +207,10 @@ export const IconSidebar = memo(function IconSidebar({
               <button
                 onClick={item.onClick}
                 className={cn(
-                  "p-2 rounded-md transition-colors hover:bg-sidebar-accent",
+                  "p-1.5 rounded-md transition-colors hover:bg-sidebar-accent",
                 )}
               >
-                <item.icon className="w-5 h-5 text-muted-foreground" />
+                <item.icon className="w-4 h-4 text-muted-foreground" />
                 <span className="sr-only">{item.label}</span>
               </button>
             </TooltipTrigger>
