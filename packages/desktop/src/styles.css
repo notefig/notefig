@@ -179,6 +179,14 @@
     -ms-user-select: text;
   }
 
+  [data-slate-editor="true"] [data-slate-placeholder] {
+    top: 0 !important;
+    left: 0 !important;
+    transform: none !important;
+    line-height: 1.5 !important;
+    padding-top: 0.25rem;
+  }
+
   /* Allow selection in code blocks and pre elements */
   pre,
   code {
