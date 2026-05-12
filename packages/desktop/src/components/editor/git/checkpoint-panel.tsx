@@ -52,7 +52,7 @@ interface CheckpointListItem {
 }
 
 interface RecoveryAction {
-  id: "initialize" | "repair" | "retry";
+  id: "initialize" | "repair" | "retry" | "abort" | "dismiss";
   label: string;
   onClick: () => void;
   disabled?: boolean;
@@ -141,6 +141,14 @@ function getErrorPresentation(
         message: t(
           "timelineCorruptMessage",
           "Project commit history metadata is inconsistent.",
+        ),
+      };
+    case "MergeRequired":
+      return {
+        title: t("timelineMergeRequiredTitle", "Revert needs attention"),
+        message: t(
+          "timelineMergeRequiredMessage",
+          "Revert would conflict with current changes.",
         ),
       };
     case "UnsupportedOperation":
@@ -253,10 +261,17 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
   const [stablePanelState, setStablePanelState] = useState<PanelState | null>(
     null,
   );
+  const [revertError, setRevertError] = useState<GitError | null>(null);
+  const [activeRevertId, setActiveRevertId] = useState<string | null>(null);
 
   const service = useMemo(
     () => getOrCreateWorkspaceGitService(workspacePath),
     [workspacePath],
+  );
+
+  const commitAuthor = useMemo(
+    () => ({ name: "Metrists", email: "git@metrists.com" }),
+    [],
   );
 
   const keys = useMemo(() => gitQueryKeys(workspacePath), [workspacePath]);
@@ -420,6 +435,80 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
   );
   const canSave = renderPanelState !== "uninitialized" && hasChanges;
 
+  const revertCommit = useMutation<string | null, GitError, CheckpointListItem>(
+    {
+      mutationFn: async (checkpoint) => {
+        const status = await service.status({ repoPath: workspacePath });
+        const hasLocalChanges =
+          status.staged.length > 0 ||
+          status.unstaged.length > 0 ||
+          status.untracked.length > 0;
+
+        if (hasLocalChanges) {
+          await service.addAllAndCommit({
+            repoPath: workspacePath,
+            message: `WIP before revert ${checkpoint.hash}`,
+            author: commitAuthor,
+          });
+        }
+
+        return service.revertCommit({
+          repoPath: workspacePath,
+          oid: checkpoint.id,
+          message: `Revert ${checkpoint.hash}`,
+          author: commitAuthor,
+        });
+      },
+      onMutate: (checkpoint) => {
+        setRevertError(null);
+        setActiveRevertId(checkpoint.id);
+      },
+      onSuccess: async () => {
+        setRevertError(null);
+        await queryClient.invalidateQueries({ queryKey: keys.checkpoints });
+        await queryClient.invalidateQueries({ queryKey: keys.status });
+      },
+      onError: (error) => {
+        setRevertError(error);
+      },
+      onSettled: () => {
+        setActiveRevertId(null);
+      },
+    },
+  );
+
+  const abortRevert = useMutation<void, GitError, void>({
+    mutationFn: async () => {
+      await service.abortRevert({ repoPath: workspacePath });
+    },
+    onSuccess: async () => {
+      setRevertError(null);
+      await queryClient.invalidateQueries({ queryKey: keys.status });
+    },
+  });
+
+  const revertActions: RecoveryAction[] = useMemo(() => {
+    if (!revertError) return [];
+    if (revertError.code === "MergeRequired") {
+      return [
+        {
+          id: "abort",
+          label: t("abortRevert", "Abort revert"),
+          onClick: () => abortRevert.mutate(),
+          disabled: abortRevert.isPending,
+        },
+      ];
+    }
+
+    return [
+      {
+        id: "dismiss",
+        label: t("dismiss", "Dismiss"),
+        onClick: () => setRevertError(null),
+      },
+    ];
+  }, [abortRevert, revertError, t]);
+
   return (
     <div className="flex h-full flex-col">
       <QuickSaveCheckpoint
@@ -434,9 +523,18 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
         t={t}
       />
 
+      {revertError ? (
+        <RecoveryBanner error={revertError} actions={revertActions} t={t} />
+      ) : null}
+
       <CheckpointsList
         panelState={renderPanelState}
         checkpoints={state.checkpoints}
+        isReverting={revertCommit.isPending}
+        activeRevertId={activeRevertId}
+        onRevert={(checkpoint: CheckpointListItem) =>
+          revertCommit.mutate(checkpoint)
+        }
         actions={
           renderPanelState === "uninitialized"
             ? [
@@ -533,7 +631,7 @@ function RecoveryBanner({ error, actions, t }: RecoveryBannerProps) {
   const content = getErrorPresentation(error, t);
 
   return (
-    <div className="mx-4 mb-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2">
+    <div className="m-0 w-full rounded-none border-0 bg-destructive/10 px-3 py-2">
       <div className="text-xs font-semibold text-destructive">
         {content.title}
       </div>
@@ -548,6 +646,7 @@ function RecoveryBanner({ error, actions, t }: RecoveryBannerProps) {
             size="sm"
             className="h-6 border-destructive/30 text-[11px] text-destructive hover:bg-destructive/10"
             onClick={action.onClick}
+            disabled={action.disabled}
           >
             {action.label}
           </Button>
@@ -723,6 +822,9 @@ interface CheckpointsListProps {
   message: string | null;
   isError: boolean;
   t: MutableT;
+  onRevert: (checkpoint: CheckpointListItem) => void;
+  isReverting: boolean;
+  activeRevertId: string | null;
 }
 
 function CheckpointsList({
@@ -732,6 +834,9 @@ function CheckpointsList({
   message,
   isError,
   t,
+  onRevert,
+  isReverting,
+  activeRevertId,
 }: CheckpointsListProps) {
   if (panelState === "uninitialized" || panelState === "empty" || isError) {
     return (
@@ -816,7 +921,17 @@ function CheckpointsList({
               </div>
             </div>
 
-            <CheckpointActions disabled t={t} />
+            <CheckpointActions
+              disabled={
+                index === 0 ||
+                checkpoint.hash === "pending" ||
+                isReverting ||
+                activeRevertId === checkpoint.id
+              }
+              isReverting={isReverting && activeRevertId === checkpoint.id}
+              onRevert={() => onRevert(checkpoint)}
+              t={t}
+            />
           </div>
         ))}
       </div>
@@ -827,9 +942,16 @@ function CheckpointsList({
 interface CheckpointActionsProps {
   disabled?: boolean;
   t: MutableT;
+  onRevert: () => void;
+  isReverting: boolean;
 }
 
-function CheckpointActions({ disabled = false, t }: CheckpointActionsProps) {
+function CheckpointActions({
+  disabled = false,
+  t,
+  onRevert,
+  isReverting,
+}: CheckpointActionsProps) {
   return (
     <div className="flex items-center gap-0.5">
       <Tooltip>
@@ -838,25 +960,9 @@ function CheckpointActions({ disabled = false, t }: CheckpointActionsProps) {
             variant="ghost"
             size="icon"
             className="h-6 w-6 text-muted-foreground [&_svg]:size-3.5"
-            aria-label={t("compareCheckpoint", "Compare commit")}
-            disabled
-          >
-            <History className="h-3.5 w-3.5" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="left" className="px-2 py-1 text-[11px]">
-          {t("compareCheckpoint", "Compare commit")}
-        </TooltipContent>
-      </Tooltip>
-
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 text-muted-foreground [&_svg]:size-3.5"
             aria-label={t("restoreCheckpoint", "Restore commit")}
-            disabled={disabled}
+            disabled={disabled || isReverting}
+            onClick={onRevert}
           >
             <Undo2 className="h-3.5 w-3.5" />
           </Button>

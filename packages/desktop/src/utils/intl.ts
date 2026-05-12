@@ -247,6 +247,9 @@ i18n
           timelineCorruptTitle: "Commit history needs repair",
           timelineCorruptMessage:
             "Project commit history metadata is inconsistent.",
+          timelineMergeRequiredTitle: "Revert needs attention",
+          timelineMergeRequiredMessage:
+            "Revert would conflict with current changes.",
           timelineUnsupportedTitle: "Action unavailable",
           timelineUnsupportedMessage:
             "This action is not available in this environment.",
@@ -256,6 +259,8 @@ i18n
           timelineStateUnsynced: "Not synced",
           timelineStateSynced: "Synced",
           copyCommitHash: "Copy commit hash",
+          abortRevert: "Abort revert",
+          dismiss: "Dismiss",
 
           // Settings Commands
           openSettings: "Open Settings",

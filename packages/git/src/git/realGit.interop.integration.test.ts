@@ -273,4 +273,40 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
     expect(show).toContain("D\tdelete.md");
     expect(show).toContain("A\tnew.md");
   });
+
+  it("revertCommit produces a new commit visible to system git", async () => {
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    await writeFile(join(repoDir, "note.md"), "one\n", "utf8");
+
+    await service.add({ repoPath: repoDir, filepath: "note.md" });
+    await service.commit({
+      repoPath: repoDir,
+      message: "base",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+      committer: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    await writeFile(join(repoDir, "note.md"), "two\n", "utf8");
+    await service.add({ repoPath: repoDir, filepath: "note.md" });
+    const changeCommit = await service.commit({
+      repoPath: repoDir,
+      message: "change",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+      committer: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    const revertCommit = await service.revertCommit({
+      repoPath: repoDir,
+      oid: changeCommit,
+      author: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    expect(revertCommit).toHaveLength(40);
+
+    const fileAtHead = await runGit(repoDir, ["show", "HEAD:note.md"]);
+    const status = await runGit(repoDir, ["status", "--porcelain"]);
+
+    expect(fileAtHead).toBe("one");
+    expect(status).toBe("");
+  });
 });

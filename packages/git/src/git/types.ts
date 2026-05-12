@@ -142,6 +142,16 @@ export type GitAddAllAndCommitInput = {
   author: NonNullable<CommitParams["author"]>;
   committer?: CommitParams["committer"];
 };
+export type GitRevertCommitInput = {
+  repoPath: string;
+  oid: string;
+  author: NonNullable<CommitParams["author"]>;
+  committer?: CommitParams["committer"];
+  message?: string;
+};
+export type GitAbortRevertInput = {
+  repoPath: string;
+};
 export type GitListBranchesInput = WithRepoPath<ListBranchesParams>;
 export type GitCreateBranchInput = WithRepoPath<BranchParams>;
 export type GitSwitchBranchInput = WithRepoPath<
@@ -166,6 +176,8 @@ export interface GitService {
   unstage(input: GitUnstageInput): ReturnType<typeof igResetIndex>;
   commit(input: GitCommitInput): ReturnType<typeof igCommit>;
   addAllAndCommit(input: GitAddAllAndCommitInput): Promise<string | null>;
+  revertCommit(input: GitRevertCommitInput): Promise<string | null>;
+  abortRevert(input: GitAbortRevertInput): Promise<void>;
   listBranches(input: GitListBranchesInput): ReturnType<typeof igListBranches>;
   createBranch(input: GitCreateBranchInput): ReturnType<typeof igBranch>;
   switchBranch(input: GitSwitchBranchInput): ReturnType<typeof igCheckout>;

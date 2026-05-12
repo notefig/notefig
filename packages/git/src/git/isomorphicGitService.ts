@@ -16,6 +16,8 @@ import {
   type GitPushInput,
   type GitRemoveInput,
   type GitAddAllAndCommitInput,
+  type GitAbortRevertInput,
+  type GitRevertCommitInput,
   type GitService,
   type GitStorageHost,
   type RepoStatus,
@@ -105,6 +107,21 @@ function deriveUnstagedChangeType(
   }
 
   return "modified";
+}
+
+type RevertChange = {
+  path: string;
+  type: "added" | "deleted" | "modified";
+  parentOid?: string;
+  commitOid?: string;
+  headOid?: string;
+};
+
+function hasRevertConflict(change: RevertChange): boolean {
+  if (!change.headOid) return false;
+  return (
+    change.headOid !== change.commitOid && change.headOid !== change.parentOid
+  );
 }
 
 export class IsomorphicGitService implements GitService {
@@ -380,6 +397,160 @@ export class IsomorphicGitService implements GitService {
       author: input.author,
       committer: input.committer,
     });
+  }
+
+  private async computeRevertChanges(
+    repoPath: string,
+    commitOid: string,
+  ): Promise<{ parentOid: string; changes: RevertChange[] }> {
+    const { commit } = await git.readCommit({
+      fs: this.fsClient,
+      dir: repoPath,
+      oid: commitOid,
+    });
+
+    const parentOid = commit.parent?.[0];
+    if (!parentOid) {
+      throw new GitError("InvalidInput", "Cannot revert the initial commit.");
+    }
+
+    const [parentFiles, commitFiles, headOid] = await Promise.all([
+      git.listFiles({ fs: this.fsClient, dir: repoPath, ref: parentOid }),
+      git.listFiles({ fs: this.fsClient, dir: repoPath, ref: commitOid }),
+      git.resolveRef({ fs: this.fsClient, dir: repoPath, ref: "HEAD" }),
+    ]);
+
+    const headFiles = await git.listFiles({
+      fs: this.fsClient,
+      dir: repoPath,
+      ref: headOid,
+    });
+
+    const fileSet = new Set<string>([
+      ...parentFiles,
+      ...commitFiles,
+      ...headFiles,
+    ]);
+
+    const getBlobOid = async (
+      ref: string | undefined,
+      filepath: string,
+    ): Promise<string | undefined> => {
+      if (!ref) return undefined;
+      try {
+        const result = await git.readBlob({
+          fs: this.fsClient,
+          dir: repoPath,
+          oid: ref,
+          filepath,
+        });
+        return result.oid;
+      } catch {
+        return undefined;
+      }
+    };
+
+    const changes: RevertChange[] = [];
+
+    for (const path of fileSet) {
+      const [parentBlob, commitBlob, headBlob] = await Promise.all([
+        getBlobOid(parentOid, path),
+        getBlobOid(commitOid, path),
+        getBlobOid(headOid, path),
+      ]);
+
+      if (!parentBlob && !commitBlob) continue;
+      if (parentBlob === commitBlob) continue;
+
+      const type: RevertChange["type"] =
+        !parentBlob && commitBlob
+          ? "added"
+          : parentBlob && !commitBlob
+            ? "deleted"
+            : "modified";
+
+      changes.push({
+        path,
+        type,
+        parentOid: parentBlob,
+        commitOid: commitBlob,
+        headOid: headBlob,
+      });
+    }
+
+    return { parentOid, changes };
+  }
+
+  async revertCommit(input: GitRevertCommitInput): Promise<string | null> {
+    try {
+      const { parentOid, changes } = await this.computeRevertChanges(
+        input.repoPath,
+        input.oid,
+      );
+
+      if (changes.length === 0) {
+        return null;
+      }
+
+      const conflicts = changes.filter(hasRevertConflict);
+      if (conflicts.length > 0) {
+        throw new GitError(
+          "MergeRequired",
+          "Revert would conflict with current changes.",
+        );
+      }
+
+      for (const change of changes) {
+        if (change.type === "added") {
+          if (!change.headOid) continue;
+          await this.remove({
+            repoPath: input.repoPath,
+            filepath: change.path,
+          });
+          continue;
+        }
+
+        await git.checkout({
+          fs: this.fsClient,
+          dir: input.repoPath,
+          ref: parentOid,
+          filepaths: [change.path],
+          force: true,
+          noUpdateHead: true,
+        });
+        await this.add({ repoPath: input.repoPath, filepath: change.path });
+      }
+
+      const status = await this.status({ repoPath: input.repoPath });
+      if (status.staged.length === 0) {
+        return null;
+      }
+
+      const message = input.message ?? `Revert ${input.oid.slice(0, 7)}`;
+
+      return this.commit({
+        repoPath: input.repoPath,
+        message,
+        author: input.author,
+        committer: input.committer,
+      });
+    } catch (error) {
+      throw toGitError(error);
+    }
+  }
+
+  async abortRevert(input: GitAbortRevertInput): Promise<void> {
+    try {
+      await git.checkout({
+        fs: this.fsClient,
+        dir: input.repoPath,
+        ref: "HEAD",
+        force: true,
+        noUpdateHead: true,
+      });
+    } catch (error) {
+      throw toGitError(error);
+    }
   }
 
   async listBranches(input: GitListBranchesInput): Promise<string[]> {
