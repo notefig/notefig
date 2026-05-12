@@ -118,16 +118,10 @@ type RevertChange = {
 };
 
 function hasRevertConflict(change: RevertChange): boolean {
-  switch (change.type) {
-    case "added":
-      return Boolean(change.headOid && change.headOid !== change.commitOid);
-    case "deleted":
-      return Boolean(change.headOid && change.headOid !== change.parentOid);
-    case "modified":
-      return change.headOid !== change.commitOid;
-    default:
-      return true;
-  }
+  if (!change.headOid) return false;
+  return (
+    change.headOid !== change.commitOid && change.headOid !== change.parentOid
+  );
 }
 
 export class IsomorphicGitService implements GitService {

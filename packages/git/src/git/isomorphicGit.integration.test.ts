@@ -782,6 +782,57 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     expect(currentText).toBe("three\n");
   });
 
+  it("revertCommit is a no-op when HEAD is already reverted", async () => {
+    const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+
+    await host.writeFileAtomic(
+      join(repoDir, "note.md"),
+      new TextEncoder().encode("one\n"),
+    );
+    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    await service.commit({
+      repoPath: repoDir,
+      message: "base",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+      committer: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    await host.writeFileAtomic(
+      join(repoDir, "note.md"),
+      new TextEncoder().encode("two\n"),
+    );
+    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    const changeCommit = await service.commit({
+      repoPath: repoDir,
+      message: "change",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+      committer: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    // Revert the change once
+    await service.revertCommit({
+      repoPath: repoDir,
+      oid: changeCommit,
+      author: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    const currentText = await readFile(join(repoDir, "note.md"), "utf8");
+    expect(currentText).toBe("one\n");
+
+    // Revert the same commit again — HEAD already matches parent
+    const secondRevert = await service.revertCommit({
+      repoPath: repoDir,
+      oid: changeCommit,
+      author: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    expect(secondRevert).toBeNull();
+
+    const log = await service.log({ repoPath: repoDir });
+    expect(log).toHaveLength(3);
+  });
+
   it("abortRevert restores working tree to HEAD", async () => {
     const service = new IsomorphicGitService(host);
     await service.init({ repoPath: repoDir, defaultBranch: "main" });
