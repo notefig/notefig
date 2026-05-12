@@ -669,7 +669,7 @@ function RecoveryBanner({ error, actions, t }: RecoveryBannerProps) {
   const content = getErrorPresentation(error, t);
 
   return (
-    <div className="mx-4 mb-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2">
+    <div className="m-0 w-full rounded-none border-0 bg-destructive/10 px-3 py-2">
       <div className="text-xs font-semibold text-destructive">
         {content.title}
       </div>
