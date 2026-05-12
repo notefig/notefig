@@ -11,7 +11,6 @@ import {
   GitBranch,
   Settings,
   HelpCircle,
-  Command,
   PanelLeftClose,
   PanelLeft,
 } from "lucide-react";
@@ -27,13 +26,11 @@ import { useHotkey } from "@tanstack/react-hotkeys";
 import { PlainLogo } from "@/components/logo";
 
 interface IconSidebarProps {
-  onCommandPaletteClick: () => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
 }
 
 export const IconSidebar = memo(function IconSidebar({
-  onCommandPaletteClick,
   isCollapsed,
   onToggleCollapse,
 }: IconSidebarProps) {
@@ -83,13 +80,6 @@ export const IconSidebar = memo(function IconSidebar({
         onClick: () => handleSidebarViewChange("search"),
       },
       {
-        id: "command",
-        icon: Command,
-        label: "Command Palette",
-        active: false,
-        onClick: onCommandPaletteClick,
-      },
-      {
         id: "git",
         icon: GitBranch,
         label: "Git",
@@ -97,7 +87,7 @@ export const IconSidebar = memo(function IconSidebar({
         onClick: () => handleSidebarViewChange("git"),
       },
     ],
-    [sidebarView, handleSidebarViewChange, onCommandPaletteClick],
+    [sidebarView, handleSidebarViewChange],
   );
 
   const handleSettingsToggle = useCallback(
@@ -130,7 +120,7 @@ export const IconSidebar = memo(function IconSidebar({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-start h-full w-10 py-2",
+        "flex flex-col items-center justify-start h-full w-9 py-2",
         !isCollapsed &&
           "border-r rtl:border-r-0 rtl:border-l border-sidebar-border",
       )}
@@ -140,10 +130,10 @@ export const IconSidebar = memo(function IconSidebar({
         <TooltipTrigger asChild>
           <button
             onClick={handleLogoClick}
-            className="mb-3 p-0.5 rounded-md transition-colors hover:bg-sidebar-accent cursor-pointer"
+            className="mb-3 p-0.5 pt-0 rounded-md transition-colors hover:bg-sidebar-accent cursor-pointer"
           >
-            <PlainLogo size={18} className="block dark:hidden" />
-            <PlainLogo size={18} fill="white" className="hidden dark:block" />
+            <PlainLogo size={20} className="block dark:hidden" />
+            <PlainLogo size={20} fill="white" className="hidden dark:block" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>

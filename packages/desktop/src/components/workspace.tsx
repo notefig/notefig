@@ -203,10 +203,6 @@ export const Workspace = () => {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [direction, setDirection] = useState<"ltr" | "rtl">("ltr");
 
-  const handleCommandPaletteOpen = useCallback(() => {
-    setIsCommandPaletteOpen(true);
-  }, []);
-
   const isFetchingContent = useIsFetching(
     { queryKey: ["file-content", workspacePath] },
     queryClient,
@@ -398,7 +394,6 @@ export const Workspace = () => {
     <div dir={direction} className="flex h-full w-full overflow-hidden p-2">
       <div className="flex h-full shrink-0 overflow-hidden rounded-xl border border-border">
         <IconSidebar
-          onCommandPaletteClick={handleCommandPaletteOpen}
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={toggleSidebarCollapsed}
         />

@@ -6,7 +6,7 @@ export function Titlebar() {
   return (
     <div
       data-tauri-drag-region
-      className="w-full shrink-0 h-[5vh] md:h-[3vh] xl:h-[2.5vh] min-h-5 bg-background border-b border-border"
+      className="texture-surface -m-1 w-[calc(100%+1rem)] shrink-0 h-[5vh] md:h-[3vh] xl:h-[2.5vh] min-h-5 bg-background"
       style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
     />
   );

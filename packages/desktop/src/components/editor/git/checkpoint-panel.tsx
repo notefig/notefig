@@ -95,7 +95,7 @@ async function loadCheckpointsQuery(
     id: entry.oid,
     hash: entry.oid.slice(0, 7),
     timestamp: new Date(entry.commit.committer.timestamp * 1000),
-    message: entry.commit.message.split("\n")[0] || "Checkpoint",
+    message: entry.commit.message.split("\n")[0] || "Commit",
   }));
 }
 
@@ -106,7 +106,7 @@ async function saveCheckpointMutation(
 ): Promise<string | null> {
   return service.addAllAndCommit({
     repoPath: workspacePath,
-    message: description?.trim() || "Checkpoint",
+    message: description?.trim() || "Commit",
     author: {
       name: "Metrists",
       email: "git@metrists.com",
@@ -121,23 +121,26 @@ function getErrorPresentation(
   switch (error.code) {
     case "RepoNotFound":
       return {
-        title: t("timelineNotInitializedTitle", "Timeline not initialized"),
+        title: t(
+          "timelineNotInitializedTitle",
+          "Commit history not initialized",
+        ),
         message: t(
           "timelineNotInitializedMessage",
-          "Project timeline is not initialized.",
+          "Project commit history is not initialized.",
         ),
       };
     case "LockUnavailable":
       return {
-        title: t("timelineBusyTitle", "Timeline is busy"),
-        message: t("timelineBusyMessage", "Project timeline is busy."),
+        title: t("timelineBusyTitle", "Commit history is busy"),
+        message: t("timelineBusyMessage", "Project commit history is busy."),
       };
     case "CorruptRepository":
       return {
-        title: t("timelineCorruptTitle", "Timeline needs repair"),
+        title: t("timelineCorruptTitle", "Commit history needs repair"),
         message: t(
           "timelineCorruptMessage",
-          "Project timeline metadata is inconsistent.",
+          "Project commit history metadata is inconsistent.",
         ),
       };
     case "UnsupportedOperation":
@@ -155,7 +158,7 @@ function getErrorPresentation(
       };
     default:
       return {
-        title: t("timelineUnexpectedTitle", "Timeline error"),
+        title: t("timelineUnexpectedTitle", "Commit history error"),
         message: error.message,
       };
   }
@@ -295,7 +298,7 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
         id: optimisticId,
         hash: "pending",
         timestamp: new Date(),
-        message: value?.trim() || "Checkpoint",
+        message: value?.trim() || "Commit",
       };
 
       queryClient.setQueryData<CheckpointListItem[]>(keys.checkpoints, [
@@ -439,7 +442,7 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
             ? [
                 {
                   id: "initialize",
-                  label: t("initializeTimeline", "Initialize timeline"),
+                  label: t("initializeTimeline", "Initialize commit history"),
                   onClick: () => initializeTimeline.mutate(),
                 },
               ]
@@ -447,7 +450,7 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
               ? [
                   {
                     id: "retry",
-                    label: t("saveCheckpoint", "Save checkpoint"),
+                    label: t("saveCheckpoint", "Save commit"),
                     onClick: () => saveCheckpoint.mutate(undefined),
                     disabled: !canSave || saveCheckpoint.isPending,
                   },
@@ -458,13 +461,10 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
           renderPanelState === "uninitialized"
             ? t(
                 "timelineNotInitializedMessage",
-                "Project timeline is not initialized.",
+                "Project commit history is not initialized.",
               )
             : renderPanelState === "empty"
-              ? t(
-                  "noCheckpointsYet",
-                  "No checkpoints yet. Save your first one!",
-                )
+              ? t("noCheckpointsYet", "No commits yet. Save your first one!")
               : state.error
                 ? getErrorPresentation(state.error, t).message
                 : null
@@ -492,7 +492,7 @@ function getRecoveryActions({
       return [
         {
           id: "initialize",
-          label: t("initializeTimeline", "Initialize timeline"),
+          label: t("initializeTimeline", "Initialize commit history"),
           onClick: () => initialize(),
         },
       ];
@@ -500,7 +500,7 @@ function getRecoveryActions({
       return [
         {
           id: "repair",
-          label: t("repairTimeline", "Repair timeline"),
+          label: t("repairTimeline", "Repair commit history"),
           onClick: () => initialize(),
         },
       ];
@@ -604,13 +604,13 @@ function QuickSaveCheckpoint({
           className="h-6 gap-1 px-1.5 text-xs text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 [&_svg]:size-3.5"
           disabled={isSaving || !canSave}
           onClick={saveQuick}
-          aria-label={t("saveCheckpoint", "Save checkpoint")}
+          aria-label={t("saveCheckpoint", "Save commit")}
         >
           <GitCommitHorizontal className="h-3.5 w-3.5" />
           <span className="truncate">
             {isSaving
-              ? t("checkpointSaving", "Saving checkpoint...")
-              : t("saveCheckpoint", "Save checkpoint")}
+              ? t("checkpointSaving", "Saving commit...")
+              : t("saveCheckpoint", "Save commit")}
           </span>
         </Button>
 
@@ -625,7 +625,7 @@ function QuickSaveCheckpoint({
                   className="h-6 w-6 text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 [&_svg]:size-3.5"
                   aria-label={t(
                     "saveCheckpointWithDescription",
-                    "Save checkpoint with description",
+                    "Save commit with description",
                   )}
                   disabled={isSaving}
                 >
@@ -633,7 +633,7 @@ function QuickSaveCheckpoint({
                   <span className="sr-only">
                     {t(
                       "saveCheckpointWithDescription",
-                      "Save checkpoint with description",
+                      "Save commit with description",
                     )}
                   </span>
                 </Button>
@@ -642,7 +642,7 @@ function QuickSaveCheckpoint({
             <TooltipContent side="bottom" className="px-2 py-1 text-[11px]">
               {t(
                 "saveCheckpointWithDescription",
-                "Save checkpoint with description",
+                "Save commit with description",
               )}
             </TooltipContent>
           </Tooltip>
@@ -652,7 +652,7 @@ function QuickSaveCheckpoint({
                 <h4 className="text-sm font-medium">
                   {t(
                     "saveCheckpointWithDescription",
-                    "Save checkpoint with description",
+                    "Save commit with description",
                   )}
                 </h4>
                 <p className="text-xs text-muted-foreground">
@@ -681,7 +681,7 @@ function QuickSaveCheckpoint({
                     onClick={saveWithDescription}
                     disabled={isSaving || !canSave}
                   >
-                    {t("saveCheckpoint", "Save checkpoint")}
+                    {t("saveCheckpoint", "Save commit")}
                   </Button>
                 </div>
               </div>
@@ -691,7 +691,7 @@ function QuickSaveCheckpoint({
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-medium">
-                    {t("autoSaveCheckpoints", "Auto-save checkpoints")}
+                    {t("autoSaveCheckpoints", "Auto-save commits")}
                   </p>
                   <p className="text-[11px] text-muted-foreground">
                     {t("autoSaveCheckpointsHint", "After each change")}
@@ -838,14 +838,14 @@ function CheckpointActions({ disabled = false, t }: CheckpointActionsProps) {
             variant="ghost"
             size="icon"
             className="h-6 w-6 text-muted-foreground [&_svg]:size-3.5"
-            aria-label={t("compareCheckpoint", "Compare checkpoint")}
+            aria-label={t("compareCheckpoint", "Compare commit")}
             disabled
           >
             <History className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
         <TooltipContent side="left" className="px-2 py-1 text-[11px]">
-          {t("compareCheckpoint", "Compare checkpoint")}
+          {t("compareCheckpoint", "Compare commit")}
         </TooltipContent>
       </Tooltip>
 
@@ -855,14 +855,14 @@ function CheckpointActions({ disabled = false, t }: CheckpointActionsProps) {
             variant="ghost"
             size="icon"
             className="h-6 w-6 text-muted-foreground [&_svg]:size-3.5"
-            aria-label={t("restoreCheckpoint", "Restore checkpoint")}
+            aria-label={t("restoreCheckpoint", "Restore commit")}
             disabled={disabled}
           >
             <Undo2 className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
         <TooltipContent side="left" className="px-2 py-1 text-[11px]">
-          {t("restoreCheckpoint", "Restore checkpoint")}
+          {t("restoreCheckpoint", "Restore commit")}
         </TooltipContent>
       </Tooltip>
     </div>
