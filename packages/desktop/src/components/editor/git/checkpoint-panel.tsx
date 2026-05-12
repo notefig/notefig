@@ -438,10 +438,6 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
   const revertCommit = useMutation<string | null, GitError, CheckpointListItem>(
     {
       mutationFn: async (checkpoint) => {
-        console.log(
-          "[checkpoint-panel] revertCommit mutationFn starting for",
-          checkpoint.hash,
-        );
         const status = await service.status({ repoPath: workspacePath });
         const hasLocalChanges =
           status.staged.length > 0 ||
@@ -449,9 +445,6 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
           status.untracked.length > 0;
 
         if (hasLocalChanges) {
-          console.log(
-            "[checkpoint-panel] auto-committing local changes before revert",
-          );
           await service.addAllAndCommit({
             repoPath: workspacePath,
             message: `WIP before revert ${checkpoint.hash}`,
@@ -459,42 +452,26 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
           });
         }
 
-        const result = await service.revertCommit({
+        return service.revertCommit({
           repoPath: workspacePath,
           oid: checkpoint.id,
           message: `Revert ${checkpoint.hash}`,
           author: commitAuthor,
         });
-        console.log(
-          "[checkpoint-panel] revertCommit mutationFn completed",
-          result,
-        );
-        return result;
       },
       onMutate: (checkpoint) => {
-        console.log(
-          "[checkpoint-panel] revertCommit onMutate",
-          checkpoint.hash,
-        );
         setRevertError(null);
         setActiveRevertId(checkpoint.id);
       },
       onSuccess: async () => {
-        console.log("[checkpoint-panel] revertCommit onSuccess");
         setRevertError(null);
         await queryClient.invalidateQueries({ queryKey: keys.checkpoints });
         await queryClient.invalidateQueries({ queryKey: keys.status });
       },
       onError: (error) => {
-        console.error(
-          "[checkpoint-panel] revertCommit failed:",
-          error.code,
-          error.message,
-        );
         setRevertError(error);
       },
       onSettled: () => {
-        console.log("[checkpoint-panel] revertCommit onSettled");
         setActiveRevertId(null);
       },
     },
@@ -502,23 +479,11 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
 
   const abortRevert = useMutation<void, GitError, void>({
     mutationFn: async () => {
-      console.log("[checkpoint-panel] abortRevert mutationFn starting");
       await service.abortRevert({ repoPath: workspacePath });
-      console.log("[checkpoint-panel] abortRevert mutationFn completed");
-    },
-    onMutate: () => {
-      console.log("[checkpoint-panel] abortRevert onMutate");
     },
     onSuccess: async () => {
-      console.log("[checkpoint-panel] abortRevert onSuccess");
       setRevertError(null);
       await queryClient.invalidateQueries({ queryKey: keys.status });
-    },
-    onError: (error) => {
-      console.error("[checkpoint-panel] abortRevert failed:", error);
-    },
-    onSettled: () => {
-      console.log("[checkpoint-panel] abortRevert onSettled");
     },
   });
 
@@ -529,10 +494,7 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
         {
           id: "abort",
           label: t("abortRevert", "Abort revert"),
-          onClick: () => {
-            console.log("[checkpoint-panel] Abort revert clicked");
-            abortRevert.mutate();
-          },
+          onClick: () => abortRevert.mutate(),
           disabled: abortRevert.isPending,
         },
       ];
