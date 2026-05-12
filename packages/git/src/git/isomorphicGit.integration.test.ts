@@ -682,6 +682,137 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     expect(clean.untracked).toEqual([]);
   });
 
+  it("revertCommit creates a new commit restoring parent content", async () => {
+    const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+
+    await host.writeFileAtomic(
+      join(repoDir, "note.md"),
+      new TextEncoder().encode("one\n"),
+    );
+    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    const baseCommit = await service.commit({
+      repoPath: repoDir,
+      message: "base",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+      committer: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    await host.writeFileAtomic(
+      join(repoDir, "note.md"),
+      new TextEncoder().encode("two\n"),
+    );
+    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    const changeCommit = await service.commit({
+      repoPath: repoDir,
+      message: "change",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+      committer: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    const revertCommit = await service.revertCommit({
+      repoPath: repoDir,
+      oid: changeCommit,
+      author: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    expect(revertCommit).toHaveLength(40);
+
+    const restoredText = await readFile(join(repoDir, "note.md"), "utf8");
+    expect(restoredText).toBe("one\n");
+
+    const log = await service.log({ repoPath: repoDir });
+    expect(log[0]?.oid).toBe(revertCommit);
+    expect(log[1]?.oid).toBe(changeCommit);
+    expect(log[2]?.oid).toBe(baseCommit);
+  });
+
+  it("revertCommit detects conflicts when HEAD has diverged", async () => {
+    const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+
+    await host.writeFileAtomic(
+      join(repoDir, "note.md"),
+      new TextEncoder().encode("one\n"),
+    );
+    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    await service.commit({
+      repoPath: repoDir,
+      message: "base",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+      committer: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    await host.writeFileAtomic(
+      join(repoDir, "note.md"),
+      new TextEncoder().encode("two\n"),
+    );
+    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    const changeCommit = await service.commit({
+      repoPath: repoDir,
+      message: "change",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+      committer: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    await host.writeFileAtomic(
+      join(repoDir, "note.md"),
+      new TextEncoder().encode("three\n"),
+    );
+    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    await service.commit({
+      repoPath: repoDir,
+      message: "change again",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+      committer: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    await expect(
+      service.revertCommit({
+        repoPath: repoDir,
+        oid: changeCommit,
+        author: { name: "Metrists", email: "dev@metrists.app" },
+      }),
+    ).rejects.toMatchObject({
+      name: "GitError",
+      code: "MergeRequired",
+    });
+
+    const currentText = await readFile(join(repoDir, "note.md"), "utf8");
+    expect(currentText).toBe("three\n");
+  });
+
+  it("abortRevert restores working tree to HEAD", async () => {
+    const service = new IsomorphicGitService(host);
+    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+
+    await host.writeFileAtomic(
+      join(repoDir, "note.md"),
+      new TextEncoder().encode("one\n"),
+    );
+    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    await service.commit({
+      repoPath: repoDir,
+      message: "base",
+      author: { name: "Metrists", email: "dev@metrists.app" },
+      committer: { name: "Metrists", email: "dev@metrists.app" },
+    });
+
+    await host.writeFileAtomic(
+      join(repoDir, "note.md"),
+      new TextEncoder().encode("dirty\n"),
+    );
+
+    await service.abortRevert({ repoPath: repoDir });
+
+    const currentText = await readFile(join(repoDir, "note.md"), "utf8");
+    expect(currentText).toBe("one\n");
+
+    const status = await service.status({ repoPath: repoDir });
+    expect(status.staged).toEqual([]);
+    expect(status.unstaged).toEqual([]);
+  });
+
   it("validates strict stat payloads in fs shim", async () => {
     const invalidHost: GitStorageHost = {
       readFile: async () => new Uint8Array(),
