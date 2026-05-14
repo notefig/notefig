@@ -64,8 +64,10 @@ i18n
           newTab: "New tab",
 
           // Status Bar
-          synced: "Synced ",
-          syncing: "Syncing",
+          saved: "Saved",
+          saving: "Saving",
+          checked: "Checked",
+          unchecked: "Unchecked",
           word: "word",
           words: "words",
           characters: "characters",

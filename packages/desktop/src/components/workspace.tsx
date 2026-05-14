@@ -441,8 +441,8 @@ export const Workspace = () => {
 
       <StatusBar
         wordCount={wordCount}
-        characterCount={characterCount}
         isSynced={isSynced}
+        workspacePath={workspacePath}
       />
 
       <SettingsModal
