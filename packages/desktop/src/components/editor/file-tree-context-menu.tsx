@@ -47,7 +47,7 @@ export function FileTreeContextMenu({
       <ContextMenu>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
         <ContextMenuContent>
-          {type === "file" && onOpenInNewTab && (
+          {type === "file" && onOpenInNewTab ? (
             <>
               <ContextMenuItem onSelect={() => onOpenInNewTab(path)}>
                 <ExternalLink className="w-4 h-4 mr-2" />
@@ -55,8 +55,9 @@ export function FileTreeContextMenu({
               </ContextMenuItem>
               <ContextMenuSeparator />
             </>
+          ) : (
+            <ContextMenuSeparator />
           )}
-          <ContextMenuSeparator />
           <ContextMenuItem onSelect={() => onNewFile(targetDir)}>
             <FilePlus className="w-4 h-4 mr-2" />
             {t("newFile", "New File")}
