@@ -43,7 +43,7 @@ export interface EditorLocation {
   endColumn?: number;
 }
 
-export type EditorType = "markdown" | "code" | "image";
+import type { EditorType } from "./polymorphic-editor";
 
 /**
  * Base interface that all editor instances must implement
@@ -585,13 +585,6 @@ export function isImageInstance(
  */
 export function getEditor(filePath: string): EditorInstance | undefined {
   return editorInstances.get(filePath);
-}
-
-/**
- * Get the editor type for a file path.
- */
-export function getEditorType(filePath: string): EditorType | undefined {
-  return editorInstances.get(filePath)?.type;
 }
 
 /**

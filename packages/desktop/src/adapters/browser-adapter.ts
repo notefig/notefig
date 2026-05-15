@@ -8,12 +8,12 @@ import type {
 } from "./platform-adapter.interface";
 import {
   BaseBrowserAdapter,
-  isHiddenPath,
   createError,
   filterFilePaths,
   buildSearchPattern,
   searchFileContent,
 } from "./base-browser-adapter";
+import { isHiddenPath } from "./browser-fs-utils";
 import { processPool } from "@/utils/process-pool";
 
 export class BrowserPlatformAdapter extends BaseBrowserAdapter {

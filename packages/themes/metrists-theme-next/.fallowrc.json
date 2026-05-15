@@ -1,0 +1,16 @@
+{
+  "extends": ["../../.fallowrc.json"],
+  "ignorePatterns": [
+    "**/.contentlayer/**",
+    "**/.next/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/*.d.ts"
+  ],
+  "ignoreDependencies": [
+    "contentlayer2",
+    "next-contentlayer2",
+    "postcss-load-config",
+    "tailwindcss-animate"
+  ]
+}

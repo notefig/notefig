@@ -357,14 +357,4 @@ export class BrowserFileWatcher {
     }
   }
 
-  dispose(): void {
-    for (const [watchId] of this.metadataWatchers) {
-      this.stopWatching(watchId);
-    }
-    for (const [watchId] of this.contentWatchers) {
-      this.stopWatching(watchId);
-    }
-    this.eventListeners.clear();
-    this.appWrites = [];
-  }
 }

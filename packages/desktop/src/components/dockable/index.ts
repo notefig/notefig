@@ -1,4 +1,4 @@
-import { Dockable as DockableRoot } from "./components/Root";
+import { DockableRoot } from "./components/Root";
 import { Panel, Window, Tab } from "./primitives";
 
 export type { LayoutNode } from "./utils/serializeLayout";

@@ -107,6 +107,68 @@ jobs:
         working-directory: packages/desktop/src-tauri
         run: cargo test
 
+  fallow-dead-code:
+    name: Fallow Dead Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: fallow-rs/fallow@v2
+        id: fallow
+        with:
+          command: dead-code
+          format: sarif
+          fail-on-issues: true
+          auto-changed-since: true
+          changed-workspaces: origin/main
+          annotations: true
+          comment: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: github/codeql-action/upload-sarif@v4
+        if: always() && github.event_name == 'pull_request'
+        with:
+          sarif_file: fallow-results.sarif
+
+  fallow-health:
+    name: Fallow Health (Advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: fallow-rs/fallow@v2
+        with:
+          command: health
+          format: sarif
+          fail-on-issues: false
+          max-crap: 50
+          score: true
+
   lint-cli:
     name: Lint CLI
     runs-on: ubuntu-latest

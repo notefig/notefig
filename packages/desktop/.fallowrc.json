@@ -1,0 +1,53 @@
+{
+  "extends": ["../../.fallowrc.json"],
+  "publicPackages": ["@metrists/desktop"],
+  "ignoreDependencies": [
+    "@radix-ui/react-accordion",
+    "@radix-ui/react-aspect-ratio",
+    "@radix-ui/react-collapsible",
+    "@radix-ui/react-hover-card",
+    "@radix-ui/react-label",
+    "@radix-ui/react-menubar",
+    "@radix-ui/react-navigation-menu",
+    "@radix-ui/react-progress",
+    "@radix-ui/react-radio-group",
+    "@radix-ui/react-scroll-area",
+    "@radix-ui/react-separator",
+    "@radix-ui/react-slider",
+    "@radix-ui/react-slot",
+    "@radix-ui/react-switch",
+    "@radix-ui/react-tabs",
+    "@radix-ui/react-toast",
+    "@radix-ui/react-toggle",
+    "@radix-ui/react-toggle-group",
+    "@radix-ui/react-toolbar",
+    "@radix-ui/react-tooltip",
+    "@radix-ui/react-checkbox",
+    "@radix-ui/react-dialog",
+    "@radix-ui/react-dropdown-menu",
+    "@radix-ui/react-popover",
+    "@radix-ui/react-select",
+    "@metrists/git",
+    "@metrists/shared",
+    "@tauri-apps/plugin-fs",
+    "@tauri-apps/plugin-window-state",
+    "@tanstack/query-core",
+    "slate",
+    "slate-react"
+  ],
+  "rules": {
+    "unused-dependencies": "warn",
+    "unlisted-dependencies": "error"
+  },
+  "overrides": [
+    {
+      "files": ["**/*.test.ts", "**/*.spec.ts", "**/__tests__/**", "**/tests/**"],
+      "rules": {
+        "unused-dependencies": "off"
+      }
+    }
+  ],
+  "boundaries": {
+    "enabled": false
+  }
+}

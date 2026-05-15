@@ -1,0 +1,78 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "workspaces": {
+    "patterns": ["packages/*", "packages/themes/*"]
+  },
+  "ignorePatterns": [
+    "**/.contentlayer/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/*.d.ts",
+    "**/*.generated.ts",
+    "**/node_modules/**"
+  ],
+  "ignoreDependencies": [
+    "@tanstack/query-core",
+    "class-variance-authority",
+    "clsx",
+    "lucide-react",
+    "slate",
+    "slate-react",
+    "tailwind-merge",
+    "tailwindcss-animate",
+    "next-themes",
+    "contentlayer2",
+    "next-contentlayer2",
+    "rehype-highlight",
+    "remark-gfm",
+    "vaul",
+    "postcss-load-config"
+  ],
+  "ignoreExports": [
+    { "file": "packages/desktop/src/components/ui/**", "exports": ["*"] },
+    { "file": "packages/marketing/components/ui/**", "exports": ["*"] },
+    { "file": "packages/themes/**/components/ui/**", "exports": ["*"] }
+  ],
+  "usedClassMembers": [
+    { "implements": "IPlatformAdapter", "members": ["*"] },
+    { "extends": "BaseBrowserAdapter", "members": ["*"] }
+  ],
+  "dynamicallyLoaded": [
+    "packages/cli/commands/*.command.ts"
+  ],
+  "rules": {
+    "unresolved-imports": "error",
+    "unlisted-dependencies": "error",
+    "unused-dependencies": "warn",
+    "unused-devDependencies": "warn",
+    "circular-dependencies": "error",
+    "duplicate-exports": "error",
+    "unused-files": "off",
+    "unused-exports": "off",
+    "unused-types": "off"
+  },
+  "overrides": [
+    {
+      "files": ["**/*.test.ts", "**/*.spec.ts", "**/__tests__/**", "**/tests/**"],
+      "rules": {
+        "unused-exports": "off",
+        "unused-types": "off",
+        "unused-files": "off"
+      }
+    }
+  ],
+  "health": {
+    "maxCyclomatic": 20,
+    "maxCognitive": 15,
+    "maxCrap": 50,
+    "ignore": ["**/*.generated.ts"]
+  },
+  "duplicates": {
+    "mode": "mild",
+    "minTokens": 50,
+    "minLines": 5,
+    "threshold": 10,
+    "ignore": ["**/components/ui/**"],
+    "skipLocal": false
+  }
+}

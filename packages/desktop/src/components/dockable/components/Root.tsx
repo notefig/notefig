@@ -39,7 +39,7 @@ type DockableProps = {
   radius?: number;
 };
 
-export function Dockable({
+export function DockableRoot({
   orientation = "row",
   children,
   layout: controledPanels,

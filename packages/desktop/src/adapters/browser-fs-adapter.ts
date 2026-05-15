@@ -10,10 +10,10 @@ import type {
 import {
   BaseBrowserAdapter,
   createError,
-  isHiddenPath,
   filterFilePaths,
   buildSearchPattern,
 } from "./base-browser-adapter";
+import { isHiddenPath } from "./browser-fs-utils";
 import {
   normalizeWorkspacePath,
   getWorkspaceRoot,

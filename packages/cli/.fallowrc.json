@@ -1,0 +1,9 @@
+{
+  "extends": ["../../.fallowrc.json"],
+  "publicPackages": ["metrists"],
+  "ignoreDependencies": [
+    "execa",
+    "eslint-plugin-import",
+    "tsconfig-paths"
+  ]
+}

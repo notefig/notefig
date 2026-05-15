@@ -18,11 +18,6 @@ export function createError(
   return { path, type, message };
 }
 
-export function isHiddenPath(path: string): boolean {
-  const parts = path.split("/");
-  return parts.some((part) => part.startsWith(".") && part.length > 1);
-}
-
 function escapeRegex(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

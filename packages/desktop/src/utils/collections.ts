@@ -744,19 +744,19 @@ export interface AppSettingRow {
   value: unknown;
 }
 
-export interface AppSettings {
+interface AppSettings {
   theme: Theme;
   lastPath: string | null;
   zoomLevel: number;
 }
 
-export const SETTING_KEYS: (keyof AppSettings)[] = [
+const SETTING_KEYS: (keyof AppSettings)[] = [
   "theme",
   "lastPath",
   "zoomLevel",
 ];
 
-export const DEFAULT_APP_SETTINGS: AppSettings = {
+const DEFAULT_APP_SETTINGS: AppSettings = {
   theme: "dark",
   lastPath: null,
   zoomLevel: 1,
