@@ -40,21 +40,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { BasicMarksKit } from '@/components/editor/plugins/basic-marks-kit';
-import {
-  type TDiscussion,
-  discussionPlugin,
-} from '@/components/editor/plugins/discussion-kit';
+import { discussionPlugin } from '@/components/editor/plugins/discussion-kit';
+import type { TDiscussion } from '@/components/editor/plugins/discussion-types';
 
 import { Editor, EditorContainer } from './editor';
-
-export type TComment = {
-  id: string;
-  contentRich: Value;
-  createdAt: Date;
-  discussionId: string;
-  isEdited: boolean;
-  userId: string;
-};
+import type { TComment } from '@/components/editor/plugins/discussion-types';
 
 export function Comment(props: {
   comment: TComment;

@@ -26,14 +26,12 @@ import { useEditorPlugin, usePluginOption } from 'platejs/react';
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import {
-  type TDiscussion,
-  discussionPlugin,
-} from '@/components/editor/plugins/discussion-kit';
+import { discussionPlugin } from '@/components/editor/plugins/discussion-kit';
+import type { TDiscussion } from '@/components/editor/plugins/discussion-types';
 import { suggestionPlugin } from '@/components/editor/plugins/suggestion-kit';
 
+import type { TComment } from '@/components/editor/plugins/discussion-types';
 import {
-  type TComment,
   Comment,
   CommentCreateForm,
   formatCommentDate,

@@ -7,8 +7,8 @@ import { BasicBlocksKit } from "@/components/editor/plugins/basic-blocks-kit";
 import { BasicMarksKit } from "@/components/editor/plugins/basic-marks-kit";
 import { CodeBlockKit } from "@/components/editor/plugins/code-block-kit";
 import { TableKit } from "@/components/editor/plugins/table-kit";
-import { CommentKit } from "@/components/editor/plugins/comment-kit";
-import { DiscussionKit } from "@/components/editor/plugins/discussion-kit";
+import { commentPlugin } from "@/components/editor/plugins/comment-kit";
+import { discussionPlugin } from "@/components/editor/plugins/discussion-kit";
 import { BlockSelectionKit } from "@/components/editor/plugins/block-selection-kit";
 import { DndKit } from "@/components/editor/plugins/dnd-kit";
 import { ExitBreakKit } from "@/components/editor/plugins/exit-break-kit";
@@ -16,7 +16,10 @@ import { LinkKit } from "@/components/editor/plugins/link-kit";
 import { ListKit } from "@/components/editor/plugins/list-kit";
 import { MarkdownKit } from "@/components/editor/plugins/markdown-kit";
 import { MediaKit } from "@/components/editor/plugins/media-kit";
-import { SuggestionKit } from "@/components/editor/plugins/suggestion-kit";
+import { suggestionPlugin } from "@/components/editor/plugins/suggestion-kit";
+import { BlockDiscussion } from "@/components/ui/block-discussion";
+import { CommentLeaf } from "@/components/ui/comment-node";
+import { SuggestionLeaf, SuggestionLineBreak } from "@/components/ui/suggestion-node";
 
 // Minimal editor kit focused on markdown compatibility
 export const MarkdownEditorKit = [
@@ -31,9 +34,14 @@ export const MarkdownEditorKit = [
   ...BasicMarksKit,
 
   // Collaboration (needed for LinkElement and BlockDiscussion to work correctly)
-  ...DiscussionKit, // Discussion and user data
-  ...CommentKit, // Comments on text
-  ...SuggestionKit, // Track changes and suggestions
+  discussionPlugin.configure({ render: { aboveNodes: BlockDiscussion } }),
+  commentPlugin.configure({ node: { component: CommentLeaf } }),
+  suggestionPlugin.configure({
+    render: {
+      belowNodes: SuggestionLineBreak as any,
+      node: SuggestionLeaf,
+    },
+  }),
 
   // Editing
   ...AutoformatKit, // Markdown shortcuts like **bold**, * lists, # headings

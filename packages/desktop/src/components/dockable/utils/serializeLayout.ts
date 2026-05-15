@@ -1,6 +1,6 @@
 import React from "react";
-import { Panel, Window, Tab } from "..";
-import type { PanelProps, WindowProps, TabProps } from "..";
+import { Panel, Window, Tab } from "../primitives";
+import type { PanelProps, WindowProps, TabProps } from "../primitives";
 
 export type LayoutNode = PanelNode | WindowNode;
 

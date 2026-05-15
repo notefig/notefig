@@ -1,19 +1,8 @@
 'use client';
 
-import type { TComment } from '@/components/ui/comment';
-
 import { createPlatePlugin } from 'platejs/react';
 
-import { BlockDiscussion } from '@/components/ui/block-discussion';
-
-export type TDiscussion = {
-  id: string;
-  comments: TComment[];
-  createdAt: Date;
-  isResolved: boolean;
-  userId: string;
-  documentContent?: string;
-};
+import type { TDiscussion } from './discussion-types';
 
 const discussionsData: TDiscussion[] = [
   {
@@ -136,13 +125,9 @@ export const discussionPlugin = createPlatePlugin({
     discussions: discussionsData,
     users: usersData,
   },
-})
-  .configure({
-    render: { aboveNodes: BlockDiscussion },
-  })
-  .extendSelectors(({ getOption }) => ({
-    currentUser: () => getOption('users')[getOption('currentUserId')],
-    user: (id: string) => getOption('users')[id],
-  }));
+}).extendSelectors(({ getOption }) => ({
+  currentUser: () => getOption('users')[getOption('currentUserId')],
+  user: (id: string) => getOption('users')[id],
+}));
 
 export const DiscussionKit = [discussionPlugin];

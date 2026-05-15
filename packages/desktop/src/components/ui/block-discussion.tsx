@@ -33,10 +33,8 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { commentPlugin } from '@/components/editor/plugins/comment-kit';
-import {
-  type TDiscussion,
-  discussionPlugin,
-} from '@/components/editor/plugins/discussion-kit';
+import { discussionPlugin } from '@/components/editor/plugins/discussion-kit';
+import type { TDiscussion } from '@/components/editor/plugins/discussion-types';
 import { suggestionPlugin } from '@/components/editor/plugins/suggestion-kit';
 
 import {

@@ -12,9 +12,9 @@ import { BlockPlaceholderKit } from "@/components/editor/plugins/block-placehold
 import { CalloutKit } from "@/components/editor/plugins/callout-kit";
 import { CodeBlockKit } from "@/components/editor/plugins/code-block-kit";
 import { ColumnKit } from "@/components/editor/plugins/column-kit";
-import { CommentKit } from "@/components/editor/plugins/comment-kit";
+import { commentPlugin } from "@/components/editor/plugins/comment-kit";
 import { DateKit } from "@/components/editor/plugins/date-kit";
-import { DiscussionKit } from "@/components/editor/plugins/discussion-kit";
+import { discussionPlugin } from "@/components/editor/plugins/discussion-kit";
 import { DndKit } from "@/components/editor/plugins/dnd-kit";
 import { DocxKit } from "@/components/editor/plugins/docx-kit";
 import { EmojiKit } from "@/components/editor/plugins/emoji-kit";
@@ -30,10 +30,13 @@ import { MathKit } from "@/components/editor/plugins/math-kit";
 import { MediaKit } from "@/components/editor/plugins/media-kit";
 import { MentionKit } from "@/components/editor/plugins/mention-kit";
 import { SlashKit } from "@/components/editor/plugins/slash-kit";
-import { SuggestionKit } from "@/components/editor/plugins/suggestion-kit";
+import { suggestionPlugin } from "@/components/editor/plugins/suggestion-kit";
 import { TableKit } from "@/components/editor/plugins/table-kit";
 import { TocKit } from "@/components/editor/plugins/toc-kit";
 import { ToggleKit } from "@/components/editor/plugins/toggle-kit";
+import { BlockDiscussion } from "@/components/ui/block-discussion";
+import { CommentLeaf } from "@/components/ui/comment-node";
+import { SuggestionLeaf, SuggestionLineBreak } from "@/components/ui/suggestion-node";
 
 export const EditorKit = [
   // Elements
@@ -60,9 +63,14 @@ export const EditorKit = [
   ...LineHeightKit,
 
   // Collaboration
-  ...DiscussionKit,
-  ...CommentKit,
-  ...SuggestionKit,
+  discussionPlugin.configure({ render: { aboveNodes: BlockDiscussion } }),
+  commentPlugin.configure({ node: { component: CommentLeaf } }),
+  suggestionPlugin.configure({
+    render: {
+      belowNodes: SuggestionLineBreak as any,
+      node: SuggestionLeaf,
+    },
+  }),
 
   // Editing
   ...SlashKit,

@@ -9,11 +9,6 @@ import {
 import { isSlateEditor, isSlateString } from 'platejs';
 import { toTPlatePlugin } from 'platejs/react';
 
-import {
-  SuggestionLeaf,
-  SuggestionLineBreak,
-} from '@/components/ui/suggestion-node';
-
 import { discussionPlugin } from './discussion-kit';
 
 export type SuggestionConfig = ExtendConfig<
@@ -80,10 +75,6 @@ export const suggestionPlugin = toTPlatePlugin<SuggestionConfig>(
 
       if (!isSet) unsetActiveSuggestion();
     },
-  },
-  render: {
-    belowNodes: SuggestionLineBreak as any,
-    node: SuggestionLeaf,
   },
 });
 
