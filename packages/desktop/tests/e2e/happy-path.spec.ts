@@ -5,6 +5,7 @@ import {
   waitForFileTree,
   openWorkspace,
   openFileInTree,
+  openFileInNewTab,
   getEditorContent,
   replaceEditorContent,
   getFileContentFromDB,
@@ -124,31 +125,30 @@ ${fixture.files[0].content}`,
     await expandDirectory(page, "docs");
     await expandDirectory(page, "notes");
 
-    // Open 3 files in different directories
+    // Open 3 files in different directories (use new-tab for 2nd and 3rd)
     await openFileInTree(page, "README.md");
     await page.waitForTimeout(500);
 
-    await openFileInTree(page, "getting-started.md");
+    await openFileInNewTab(page, "getting-started.md");
     await page.waitForTimeout(500);
 
-    await openFileInTree(page, "2026-02-01.md");
+    await openFileInNewTab(page, "2026-02-01.md");
     await page.waitForTimeout(500);
 
-    // Verify all 3 files are accessible by checking editor content
-    // (Tab management may not be fully working yet, but files should load)
+    // Verify all 3 files are in the URL layout
     const url = page.url();
     expect(url).toContain("README.md");
     expect(url).toContain("getting-started.md");
     expect(url).toContain("2026-02-01.md");
 
-    // Edit each file with unique content
-    // Note: We'll click files to switch to them since tab switching may not work yet
-    await openFileInTree(page, "README.md");
+    // Edit each file with unique content by switching via tabs
+    const tabBar = page.locator('[data-testid="tab-bar"]');
+    await tabBar.locator('.cursor-pointer:has-text("README.md")').first().click();
     await page.waitForTimeout(300);
     await replaceEditorContent(page, "# README Edit\n\nFirst file edited.");
     await page.waitForTimeout(1500);
 
-    await openFileInTree(page, "getting-started.md");
+    await tabBar.locator('.cursor-pointer:has-text("getting-started.md")').first().click();
     await page.waitForTimeout(300);
     await replaceEditorContent(
       page,
@@ -156,7 +156,7 @@ ${fixture.files[0].content}`,
     );
     await page.waitForTimeout(1500);
 
-    await openFileInTree(page, "2026-02-01.md");
+    await tabBar.locator('.cursor-pointer:has-text("2026-02-01.md")').first().click();
     await page.waitForTimeout(300);
     await replaceEditorContent(page, "# Note Edit\n\nThird file edited.");
     await page.waitForTimeout(1500);

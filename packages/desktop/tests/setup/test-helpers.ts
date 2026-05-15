@@ -122,6 +122,23 @@ export async function openFileInTree(page: Page, fileName: string) {
 }
 
 /**
+ * Opens a file in a new tab via the context menu.
+ * More reliable than modifier clicks for cross-platform testing.
+ */
+export async function openFileInNewTab(page: Page, fileName: string) {
+  const fileButton = page.locator(`button:has-text("${fileName}")`).first();
+
+  await fileButton.waitFor({ timeout: 5000 });
+  await fileButton.click({ button: "right" });
+  await page
+    .locator('[role="menuitem"]:has-text("Open in New Tab")')
+    .click();
+
+  // Wait a bit for the navigation/URL update to complete
+  await page.waitForTimeout(300);
+}
+
+/**
  * Gets the content of the currently active editor
  */
 export async function getEditorContent(page: Page): Promise<string> {

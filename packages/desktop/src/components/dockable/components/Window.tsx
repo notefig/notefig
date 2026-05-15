@@ -77,6 +77,7 @@ function TabView({
             type: "tab-bar",
             address,
           }}
+          data-testid="tab-bar"
           className="relative mx-2 flex min-w-0 w-[calc(100%-1rem)] rounded-lg border border-sidebar-border overflow-hidden"
           style={{ backgroundColor: "rgba(15, 15, 15, 0.05)" }}
         >

@@ -7,6 +7,7 @@ type DroppableProps = {
   className?: string;
   children?: React.ReactNode;
   data?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  "data-testid"?: string;
 };
 function Droppable({
   id,
@@ -15,6 +16,7 @@ function Droppable({
   className,
   children,
   data,
+  "data-testid": dataTestId,
 }: DroppableProps) {
   const { setNodeRef, isOver } = useDroppable({
     id,
@@ -29,6 +31,7 @@ function Droppable({
         ...(isOver && overStyle),
       }}
       className={className}
+      data-testid={dataTestId}
     >
       {children}
     </div>

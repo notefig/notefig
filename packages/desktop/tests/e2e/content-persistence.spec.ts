@@ -4,6 +4,7 @@ import {
   openWorkspace,
   seedTestFiles,
   openFileInTree,
+  openFileInNewTab,
   replaceEditorContent,
   getEditorContent,
   waitForAutoSave,
@@ -220,20 +221,21 @@ test.describe("Content & Persistence", () => {
     // Wait for workspace to load
     await waitForFileTree(page, "tab-1.md");
 
-    // Open multiple tabs
+    // Open multiple tabs (use new-tab for 2nd and 3rd)
     await openFileInTree(page, "tab-1.md");
     await page.waitForTimeout(500); // Wait for tab to render
 
-    await openFileInTree(page, "tab-2.md");
+    await openFileInNewTab(page, "tab-2.md");
     await page.waitForTimeout(500);
 
-    await openFileInTree(page, "tab-3.md");
+    await openFileInNewTab(page, "tab-3.md");
     await page.waitForTimeout(500);
 
-    // Verify all tabs are visible in the tab bar (as divs with cursor-pointer class)
-    const tab1 = page.locator('.cursor-pointer:has-text("tab-1.md")').first();
-    const tab2 = page.locator('.cursor-pointer:has-text("tab-2.md")').first();
-    const tab3 = page.locator('.cursor-pointer:has-text("tab-3.md")').first();
+    // Verify all tabs are visible in the tab bar
+    const tabBar = page.locator('[data-testid="tab-bar"]');
+    const tab1 = tabBar.locator('.cursor-pointer:has-text("tab-1.md")').first();
+    const tab2 = tabBar.locator('.cursor-pointer:has-text("tab-2.md")').first();
+    const tab3 = tabBar.locator('.cursor-pointer:has-text("tab-3.md")').first();
 
     await expect(tab1).toBeVisible();
     await expect(tab2).toBeVisible();
@@ -325,11 +327,13 @@ test.describe("Content & Persistence", () => {
     // Open two files to create two tabs
     await openFileInTree(page, "tab-1.md");
     await page.waitForTimeout(500);
-    await openFileInTree(page, "tab-2.md");
+    await openFileInNewTab(page, "tab-2.md");
     await page.waitForTimeout(500);
 
+    const tabBar = page.locator('[data-testid="tab-bar"]');
+
     // Find and click on tab-1 to ensure it's active
-    const tab1Button = page
+    const tab1Button = tabBar
       .locator('.cursor-pointer:has-text("tab-1.md")')
       .first();
     await tab1Button.click();
@@ -355,7 +359,7 @@ test.describe("Content & Persistence", () => {
     });
 
     // Switch to tab-2
-    const tab2Button = page
+    const tab2Button = tabBar
       .locator('.cursor-pointer:has-text("tab-2.md")')
       .first();
     await tab2Button.click();

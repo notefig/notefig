@@ -5,6 +5,7 @@ import {
   seedTestFiles,
   waitForFileTree,
   openFileInTree,
+  openFileInNewTab,
   getEditorContent,
   replaceEditorContent,
   waitForAutoSave,
@@ -288,20 +289,21 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
     test("multiple tabs - open several files, switch between, content correct", async ({
       page,
     }) => {
-      // Open three files
+      // Open three files (use new-tab for 2nd and 3rd to keep multiple tabs open)
       await openFileInTree(page, "tab-a.md");
       await page.waitForTimeout(300);
 
-      await openFileInTree(page, "tab-b.md");
+      await openFileInNewTab(page, "tab-b.md");
       await page.waitForTimeout(300);
 
-      await openFileInTree(page, "tab-c.md");
+      await openFileInNewTab(page, "tab-c.md");
       await page.waitForTimeout(300);
 
-      // Verify tabs exist (look for tab buttons with file names)
-      const tabA = page.locator('.cursor-pointer:has-text("tab-a.md")').first();
-      const tabB = page.locator('.cursor-pointer:has-text("tab-b.md")').first();
-      const tabC = page.locator('.cursor-pointer:has-text("tab-c.md")').first();
+      // Verify tabs exist (look for tab buttons with file names inside the tab bar)
+      const tabBar = page.locator('[data-testid="tab-bar"]');
+      const tabA = tabBar.locator('.cursor-pointer:has-text("tab-a.md")').first();
+      const tabB = tabBar.locator('.cursor-pointer:has-text("tab-b.md")').first();
+      const tabC = tabBar.locator('.cursor-pointer:has-text("tab-c.md")').first();
 
       await expect(tabA).toBeVisible();
       await expect(tabB).toBeVisible();
@@ -346,12 +348,13 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
         };
       });
 
-      // Open and switch to file B
-      await openFileInTree(page, "tab-b.md");
+      // Open file B in a new tab so both tabs remain open
+      await openFileInNewTab(page, "tab-b.md");
       await page.waitForTimeout(500);
 
       // Switch back to file A
-      const tabA = page.locator('.cursor-pointer:has-text("tab-a.md")').first();
+      const tabBar = page.locator('[data-testid="tab-bar"]');
+      const tabA = tabBar.locator('.cursor-pointer:has-text("tab-a.md")').first();
       await tabA.click();
       await page.waitForTimeout(500);
 
@@ -549,7 +552,7 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       page,
     }) => {
       const dockableTabs = () =>
-        page.locator("[data-dockable-window-id] .cursor-pointer");
+        page.locator('[data-testid="tab-bar"] .cursor-pointer');
 
       await openFileInTree(page, "tab-a.md");
       await page.waitForTimeout(300);
@@ -565,11 +568,14 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
         "Content for tab B",
       );
 
-      // Modifier open creates a new tab.
+      // Open in new tab via context menu creates a new tab.
       const tabCInTree = page
-        .locator('[data-file-tree-root] button:has-text("tab-c.md")')
+        .locator('button:has-text("tab-c.md")')
         .first();
-      await tabCInTree.click({ modifiers: ["Meta"] });
+      await tabCInTree.click({ button: "right" });
+      await page
+        .locator('[role="menuitem"]:has-text("Open in New Tab")')
+        .click();
       await page.waitForTimeout(300);
 
       await expect(dockableTabs()).toHaveCount(2);
@@ -583,7 +589,7 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
 
       // Context-menu action creates another tab.
       const tabAInTree = page
-        .locator('[data-file-tree-root] button:has-text("tab-a.md")')
+        .locator('button:has-text("tab-a.md")')
         .first();
       await tabAInTree.click({ button: "right" });
       await page
@@ -598,7 +604,10 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       ).toBeVisible();
 
       // Opening an already-open file focuses it; no duplicates created.
-      await tabCInTree.click({ modifiers: ["Meta"] });
+      await tabCInTree.click({ button: "right" });
+      await page
+        .locator('[role="menuitem"]:has-text("Open in New Tab")')
+        .click();
       await page.waitForTimeout(300);
       await expect(dockableTabs().filter({ hasText: "tab-c.md" })).toHaveCount(
         1,
