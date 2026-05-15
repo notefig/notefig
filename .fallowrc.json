@@ -9,8 +9,7 @@
     "**/build/**",
     "**/*.d.ts",
     "**/*.generated.ts",
-    "**/node_modules/**",
-    "packages/desktop/plate-reference/**"
+    "**/node_modules/**"
   ],
   "ignoreDependencies": [
     "@tanstack/query-core",

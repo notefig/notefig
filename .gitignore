@@ -5,3 +5,4 @@ dist
 # Test artifacts
 tmp/
 tmp-*/
+packages/desktop/plate-reference/
