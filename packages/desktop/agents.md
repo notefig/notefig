@@ -213,6 +213,84 @@ src/
 - ✅ Virtualize large lists
 - ✅ Keep platform logic in adapters
 
+## App Icons (macOS)
+
+### The Problem
+macOS app icons have strict design requirements. The icon must follow Apple's Human Interface Guidelines to render correctly across:
+- Dock
+- Finder
+- Spotlight
+- Launchpad
+- System Settings
+
+### macOS Tahoe (macOS 26) Changes
+Apple introduced new icon rendering with **Liquid Glass** effects in macOS 26. While `.icns` files still work, the system applies stricter masking and scaling. Icons that don't follow the proper grid appear too small or have ugly gray borders.
+
+### Icon Specifications
+
+**Content Ratio:** The actual icon content (logo/artwork) should occupy **~83%** of the total canvas. This leaves transparent padding around the edges for macOS to apply its own rounded corners, shadows, and glass effects.
+
+**Corner Radius:** macOS app icons use a corner radius of approximately **22.37%** of the canvas width. For a 1024×1024 icon, this means:
+- Corner radius: ~229px
+- The icon should have rounded corners built-in
+
+**Example for 1024×1024:**
+- Canvas: 1024×1024
+- Content size: ~849×849 (83%)
+- Corner radius: ~229px
+- Padding: ~87px on each side
+
+### Common Mistakes
+
+1. **Solid background filling 100%** — macOS will not apply its glass effects properly
+2. **Logo too small** (< 80%) — icon appears tiny in the grid
+3. **Logo too large** (> 90%) — edges get clipped by the system mask
+4. **Sharp corners** — macOS expects pre-rounded icons
+5. **Runtime hacks** — Using `setApplicationIconImage` only fixes the Dock, not Finder/Spotlight
+
+### Implementation
+
+**Tauri Configuration:**
+```json
+"icon": [
+  "icons/32x32.png",
+  "icons/64x64.png",
+  "icons/128x128.png",
+  "icons/128x128@2x.png",
+  "icons/icon.png",
+  "icons/icon.icns",
+  "icons/icon.ico"
+]
+```
+
+**Files Required:**
+- `icon.icns` — macOS bundle icon (contains multiple sizes)
+- `icon.png` — 512×512 (Linux/default)
+- `icon.ico` — Windows icon
+- `32x32.png`, `64x64.png`, `128x128.png`, `128x128@2x.png` — Various sizes
+
+**Do NOT use runtime icon scaling.** The `.icns` file in the app bundle is read by all system services. Runtime changes only affect the Dock.
+
+### Our Fix
+
+We fixed the icon by:
+1. Removing the white background from the source SVG
+2. Scaling the logo to 83% of canvas
+3. Applying proper rounded corners (229px radius)
+4. Removing the runtime `objc2` hack from `main.rs`
+5. Using `iconutil` to generate the `.icns` file
+
+### Cache Clearing
+
+After changing icons, macOS caches aggressively. To see changes:
+```bash
+rm -rf ~/Library/Caches/com.apple.finder/
+rm -rf ~/Library/Caches/com.apple.Spotlight/
+rm -rf ~/Library/Caches/com.apple.dock.iconcache
+killall Finder
+killall Dock
+```
+
 ## Summary
 
 1. **Performance**: Fast file operations, responsive UI
