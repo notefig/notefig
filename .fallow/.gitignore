@@ -1,0 +1,4 @@
+*
+!baselines/
+!baselines/*
+!.gitignore

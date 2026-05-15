@@ -107,8 +107,8 @@ jobs:
         working-directory: packages/desktop/src-tauri
         run: cargo test
 
-  fallow-dead-code:
-    name: Fallow Dead Code
+  fallow-audit:
+    name: Fallow Audit
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -128,9 +128,10 @@ jobs:
       - uses: fallow-rs/fallow@v2
         id: fallow
         with:
-          command: dead-code
+          command: audit
           format: sarif
-          fail-on-issues: false
+          fail-on-issues: true
+          gate: new-only
           auto-changed-since: true
           annotations: true
           comment: true

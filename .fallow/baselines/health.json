@@ -1,0 +1,668 @@
+{
+  "finding_counts": {
+    "packages/cli/commands/config-aware.command.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/commands/prune.command.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/commands/watch.command.ts": {
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/lib/epub/index.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 2
+      }
+    },
+    "packages/cli/lib/utils/elevenlabs.util.ts": {
+      "crap_critical": {
+        "count": 2
+      }
+    },
+    "packages/cli/lib/utils/json.util.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/lib/utils/open.util.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/lib/utils/process.util.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/lib/utils/version.util.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/tests/e2e/helpers/vercel-api.helper.ts": {
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/tests/e2e/test-helpers.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/tests/e2e/vercel.test.e2e.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/App.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/adapters/browser-adapter.ts": {
+      "complexity_moderate": {
+        "count": 3
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 4
+      }
+    },
+    "packages/desktop/src/adapters/browser-fs-adapter.ts": {
+      "complexity_moderate": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/desktop/src/adapters/tauri-adapter.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/debug-panel.tsx": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/desktop/src/components/dockable/components/Root.tsx": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/dockable/components/Window.tsx": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/dockable/reducer.ts": {
+      "complexity_high": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/dockable/utils/serializeLayout.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/editor/command-palette.tsx": {
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/desktop/src/components/editor/editor-store.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/editor/file-tree.tsx": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/editor/git/checkpoint-panel.tsx": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 4
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/editor/icon-sidebar.tsx": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/editor/plugins/comment-kit.tsx": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/editor/plugins/suggestion-kit.tsx": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/editor/search-panel.tsx": {
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/editor/settings-modal.tsx": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/editor/sidebar.tsx": {
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/desktop/src/components/editor/status-bar.tsx": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/editor/text-editor.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/editor/transforms.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/logo.tsx": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/block-context-menu.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/block-discussion.tsx": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "packages/desktop/src/components/ui/block-draggable.tsx": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/desktop/src/components/ui/block-list-static.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/block-list.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/block-selection-after-editable.tsx": {
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/desktop/src/components/ui/block-selection.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/block-suggestion.tsx": {
+      "complexity_high": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 3
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/desktop/src/components/ui/code-block-node-static.tsx": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/code-block-node.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/code-drawing-node-static.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/code-drawing-node.tsx": {
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_high": {
+        "count": 3
+      }
+    },
+    "packages/desktop/src/components/ui/column-node.tsx": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/comment-node.tsx": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/comment.tsx": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/desktop/src/components/ui/date-node-static.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/date-node.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/emoji-toolbar-button.tsx": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/equation-node.tsx": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/font-size-toolbar-button.tsx": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/inline-combobox.tsx": {
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/desktop/src/components/ui/link-node.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/link-toolbar.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/media-embed-node.tsx": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/media-image-node.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/media-placeholder-node.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/media-preview-dialog.tsx": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/media-toolbar.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/media-upload-toast.tsx": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/media-video-node.tsx": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/mention-node.tsx": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/suggestion-node.tsx": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/switch.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/table-node-static.tsx": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/table-node.tsx": {
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/desktop/src/components/ui/table-toolbar-button.tsx": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/ui/toolbar.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/workspace.tsx": {
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "packages/desktop/src/hooks/use-dockable-tabs.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/hooks/use-layout-search-param.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/hooks/use-recent-projects.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/hooks/use-updater.ts": {
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "packages/desktop/src/lib/markdown-joiner-transform.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/desktop/src/utils/collections.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 4
+      }
+    },
+    "packages/desktop/src/utils/file-sync.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/utils/format.ts": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/utils/navigation-utils.ts": {
+      "complexity_critical": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/utils/routing.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/git/src/git/isomorphicGitService.ts": {
+      "complexity_high": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/marketing/components/ui/carousel.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/marketing/components/ui/chart.tsx": {
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/marketing/components/ui/sidebar.tsx": {
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/marketing/components/ui/use-toast.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/marketing/hooks/use-toast.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/marketing/theme.config.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/shared/src/parsing/markdown.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/themes/metrists-theme-next/components/patterns/theme-switch.tsx": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/themes/metrists-theme-next/lib/utils.ts": {
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    }
+  },
+  "runtime_coverage_findings": [],
+  "target_keys": [
+    "packages/marketing/components/ui/tooltip.tsx:dead code",
+    "packages/marketing/components/ui/resizable.tsx:dead code",
+    "packages/desktop/src/components/ui/tabs.tsx:dead code",
+    "packages/marketing/components/ui/avatar.tsx:dead code",
+    "packages/marketing/components/ui/accordion.tsx:dead code",
+    "packages/marketing/components/ui/alert.tsx:dead code",
+    "packages/marketing/components/ui/tabs.tsx:dead code",
+    "packages/cli/lib/utils/rc.util.ts:dead code",
+    "packages/marketing/components/ui/hover-card.tsx:dead code",
+    "packages/marketing/components/ui/popover.tsx:dead code",
+    "packages/cli/lib/utils/template-config.util.ts:dead code",
+    "packages/themes/metrists-theme-next/components/ui/button.tsx:circular dependency",
+    "packages/desktop/src/components/editor/transforms.ts:dead code",
+    "packages/desktop/src/components/ui/inline-combobox.tsx:dead code",
+    "packages/themes/metrists-theme-next/components/patterns/chapter-navigation.tsx:circular dependency",
+    "packages/marketing/components/ui/toast.tsx:dead code",
+    "packages/desktop/src/components/ui/table-node-static.tsx:dead code",
+    "packages/themes/metrists-theme-next/lib/utils.ts:circular dependency",
+    "packages/desktop/src/utils/hash.ts:dead code",
+    "packages/marketing/hooks/use-toast.ts:dead code",
+    "packages/desktop/src/lib/markdown-joiner-transform.ts:complexity",
+    "packages/themes/metrists-theme-next/components/ui/toast.tsx:dead code",
+    "packages/marketing/components/ui/chart.tsx:dead code",
+    "packages/desktop/src/components/ui/list-toolbar-button.tsx:dead code",
+    "packages/desktop/src/utils/routing.ts:dead code",
+    "packages/themes/metrists-theme-next/pages/[chapter].tsx:dead code",
+    "packages/desktop/src/components/ui/heading-node-static.tsx:dead code",
+    "packages/cli/tests/e2e/test-helpers.ts:dead code",
+    "packages/desktop/src/components/ui/equation-node-static.tsx:dead code",
+    "packages/marketing/components/ui/carousel.tsx:dead code",
+    "packages/marketing/components/ui/use-toast.ts:dead code",
+    "packages/themes/metrists-theme-next/components/ui/drawer.tsx:dead code",
+    "packages/marketing/components/ui/dialog.tsx:dead code",
+    "packages/marketing/components/ui/sheet.tsx:dead code",
+    "packages/desktop/src/components/ui/code-block-node-static.tsx:dead code",
+    "packages/desktop/src/components/ui/column-node-static.tsx:dead code",
+    "packages/marketing/components/ui/pagination.tsx:dead code",
+    "packages/marketing/components/ui/form.tsx:dead code",
+    "packages/marketing/components/ui/alert-dialog.tsx:dead code",
+    "packages/marketing/components/ui/command.tsx:dead code",
+    "packages/desktop/src/components/ui/button-group.tsx:dead code",
+    "packages/marketing/components/ui/breadcrumb.tsx:dead code",
+    "packages/marketing/components/ui/card.tsx:dead code",
+    "packages/marketing/components/ui/input-otp.tsx:dead code",
+    "packages/marketing/components/ui/table.tsx:dead code",
+    "packages/themes/metrists-theme-next/components/ui/card.tsx:dead code",
+    "packages/marketing/components/ui/context-menu.tsx:dead code",
+    "packages/marketing/components/ui/drawer.tsx:dead code",
+    "packages/marketing/components/ui/dropdown-menu.tsx:dead code",
+    "packages/marketing/components/ui/menubar.tsx:dead code",
+    "packages/marketing/components/ui/select.tsx:dead code",
+    "packages/themes/metrists-theme-next/components/ui/menubar.tsx:dead code",
+    "packages/marketing/components/ui/navigation-menu.tsx:dead code",
+    "packages/desktop/src/components/logo.tsx:dead code",
+    "packages/marketing/components/ui/sidebar.tsx:dead code",
+    "packages/desktop/src/components/ui/emoji-toolbar-button.tsx:dead code",
+    "packages/desktop/src/components/ui/font-color-toolbar-button.tsx:dead code",
+    "packages/desktop/src/components/ui/select.tsx:dead code",
+    "packages/cli/lib/utils/logger.util.ts:high impact",
+    "packages/desktop/src/components/debug-panel.tsx:complexity",
+    "packages/cli/lib/utils/elevenlabs.util.ts:untested risk",
+    "packages/desktop/src/components/ui/table-icons.tsx:dead code",
+    "packages/desktop/src/utils/navigation-utils.ts:complexity",
+    "packages/desktop/src/utils/file-sync.ts:complexity"
+  ]
+}
