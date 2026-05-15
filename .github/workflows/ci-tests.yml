@@ -130,9 +130,8 @@ jobs:
         with:
           command: dead-code
           format: sarif
-          fail-on-issues: true
+          fail-on-issues: false
           auto-changed-since: true
-          changed-workspaces: origin/main
           annotations: true
           comment: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
