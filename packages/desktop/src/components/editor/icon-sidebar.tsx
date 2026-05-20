@@ -133,7 +133,7 @@ export const IconSidebar = memo(function IconSidebar({
             className="mb-3 p-0.5 pt-0 rounded-md transition-colors hover:bg-sidebar-accent cursor-pointer"
           >
             <PlainLogo size={20} className="block dark:hidden" />
-            <PlainLogo size={20} fill="white" className="hidden dark:block" />
+            <PlainLogo size={20} fill="#CEFF1A" className="hidden dark:block" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>
