@@ -7,9 +7,19 @@ import {
   BlockSelectionPlugin,
   useSelectionArea,
 } from "@platejs/selection/react";
+import { MarkdownPlugin } from "@platejs/markdown";
 import { KEYS, PathApi } from "platejs";
 import { useEditorPlugin, useEditorRef, usePluginOption } from "platejs/react";
 import { useHotkey } from "@tanstack/react-hotkeys";
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
 export function BlockSelectionAfterEditable() {
   const editor = useEditorRef();
@@ -334,6 +344,31 @@ export function BlockSelectionAfterEditable() {
         encodeURIComponent(selectedFragmentStr),
       );
       data.setData("application/x-slate-fragment", encodedFragment);
+
+      // Override plain text with raw markdown so paste into non-Slate editors
+      // preserves markdown syntax instead of rendered plain text.
+      const markdownApi = (editor.getApi(MarkdownPlugin) as any)?.markdown;
+      let markdownText = "";
+
+      try {
+        markdownText =
+          markdownApi?.serialize?.({ value: selectedFragment }) ?? "";
+      } catch {
+        try {
+          markdownText = markdownApi?.serialize?.(selectedFragment) ?? "";
+        } catch {
+          markdownText = "";
+        }
+      }
+
+      if (markdownText) {
+        const normalizedMarkdown = markdownText.replace(/&#x20;/g, "");
+        data.setData("text/plain", normalizedMarkdown);
+        data.setData(
+          "text/html",
+          `<pre>${escapeHtml(normalizedMarkdown)}</pre>`,
+        );
+      }
     },
     [editor, getOption],
   );
@@ -359,6 +394,8 @@ export function BlockSelectionAfterEditable() {
     (e: React.ClipboardEvent) => {
       e.preventDefault();
 
+      const clipboardData = e.nativeEvent.clipboardData;
+
       if (!editor.api.isReadOnly()) {
         const entries = api.blockSelection.getNodes();
 
@@ -373,7 +410,21 @@ export function BlockSelectionAfterEditable() {
             });
           }
 
-          editor.tf.insertData(e.nativeEvent.clipboardData!);
+          const hasSlateFragment = Boolean(
+            clipboardData?.getData("application/x-slate-fragment"),
+          );
+
+          if (!hasSlateFragment) {
+            const markdownText = clipboardData?.getData("text/plain") ?? "";
+            if (markdownText) {
+              const nodes = editor
+                .getApi(MarkdownPlugin)
+                .markdown.deserialize(markdownText);
+              editor.tf.insertNodes(nodes as any);
+            }
+          } else {
+            editor.tf.insertData(clipboardData!);
+          }
 
           // Select inserted blocks
           const ids = new Set<string>();

@@ -62,6 +62,7 @@ i18n
           // Tab Bar
           closeTab: "Close tab",
           newTab: "New tab",
+          openInNewTab: "Open in new tab",
 
           // Status Bar
           saved: "Saved",
