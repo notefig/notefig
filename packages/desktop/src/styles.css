@@ -175,6 +175,11 @@
     padding-top: 0.25rem;
   }
 
+  [data-slate-editor="true"] .list-style-todo [data-slate-placeholder] {
+    line-height: inherit !important;
+    padding-top: 0 !important;
+  }
+
   /* Allow selection in code blocks and pre elements */
   pre,
   code {
