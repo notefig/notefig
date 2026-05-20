@@ -24,7 +24,6 @@ import {
   getSelectedText as getSelectedTextForEditor,
 } from "@/components/editor/editor-store";
 import type { FileTreeNode } from "@/utils/fs";
-import { isDockableHotkeyFocusTarget } from "@/utils/dockable-hotkeys";
 
 export interface UseDockableTabsOptions {
   /**
@@ -354,100 +353,107 @@ export function useDockableTabs(
     setLayout((currentLayout) => selectTabInLayout(currentLayout, prevTabId));
   }, [getActiveWindow, setLayout]);
 
-  const shouldHandleDockableHotkey = useCallback(() => {
-    return isDockableHotkeyFocusTarget(
-      document.activeElement,
-      dockableRef?.current ?? null,
-    );
-  }, [dockableRef]);
-
-  const guardDockableHotkey = useCallback(
-    (handler: () => void) => {
-      return () => {
-        if (!shouldHandleDockableHotkey()) return;
-        handler();
-      };
-    },
-    [shouldHandleDockableHotkey],
-  );
-
   const dockableHotkeyOptions = useMemo(
     () => ({
       enabled: openTabs.length > 0,
-      target: typeof document !== "undefined" ? document : null,
+      target: dockableRef,
     }),
-    [openTabs.length],
+    [dockableRef, openTabs.length],
   );
 
   useHotkey(
     "Mod+W",
-    guardDockableHotkey(closeActiveTab),
+    () => {
+      closeActiveTab();
+    },
     dockableHotkeyOptions,
   );
 
   useHotkey(
     "Control+Tab",
-    guardDockableHotkey(selectNextTab),
+    () => {
+      selectNextTab();
+    },
     dockableHotkeyOptions,
   );
 
   useHotkey(
     "Control+Shift+Tab",
-    guardDockableHotkey(selectPrevTab),
+    () => {
+      selectPrevTab();
+    },
     dockableHotkeyOptions,
   );
 
   useHotkey(
     { key: "1", mod: true },
-    guardDockableHotkey(() => selectTabAtIndex(0)),
+    () => {
+      selectTabAtIndex(0);
+    },
     dockableHotkeyOptions,
   );
 
   useHotkey(
     { key: "2", mod: true },
-    guardDockableHotkey(() => selectTabAtIndex(1)),
+    () => {
+      selectTabAtIndex(1);
+    },
     dockableHotkeyOptions,
   );
 
   useHotkey(
     { key: "3", mod: true },
-    guardDockableHotkey(() => selectTabAtIndex(2)),
+    () => {
+      selectTabAtIndex(2);
+    },
     dockableHotkeyOptions,
   );
 
   useHotkey(
     { key: "4", mod: true },
-    guardDockableHotkey(() => selectTabAtIndex(3)),
+    () => {
+      selectTabAtIndex(3);
+    },
     dockableHotkeyOptions,
   );
 
   useHotkey(
     { key: "5", mod: true },
-    guardDockableHotkey(() => selectTabAtIndex(4)),
+    () => {
+      selectTabAtIndex(4);
+    },
     dockableHotkeyOptions,
   );
 
   useHotkey(
     { key: "6", mod: true },
-    guardDockableHotkey(() => selectTabAtIndex(5)),
+    () => {
+      selectTabAtIndex(5);
+    },
     dockableHotkeyOptions,
   );
 
   useHotkey(
     { key: "7", mod: true },
-    guardDockableHotkey(() => selectTabAtIndex(6)),
+    () => {
+      selectTabAtIndex(6);
+    },
     dockableHotkeyOptions,
   );
 
   useHotkey(
     { key: "8", mod: true },
-    guardDockableHotkey(() => selectTabAtIndex(7)),
+    () => {
+      selectTabAtIndex(7);
+    },
     dockableHotkeyOptions,
   );
 
   useHotkey(
     { key: "9", mod: true },
-    guardDockableHotkey(() => selectTabAtIndex(8)),
+    () => {
+      selectTabAtIndex(8);
+    },
     dockableHotkeyOptions,
   );
 

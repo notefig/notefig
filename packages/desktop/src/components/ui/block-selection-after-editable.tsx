@@ -63,6 +63,8 @@ export function BlockSelectionAfterEditable() {
 
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [isMounted, setIsMounted] = React.useState(false);
+  const [portalContainer, setPortalContainer] =
+    React.useState<HTMLElement | null>(null);
 
   React.useEffect(() => {
     setIsMounted(true);
@@ -71,6 +73,13 @@ export function BlockSelectionAfterEditable() {
       setIsMounted(false);
     };
   }, [setOption]);
+
+  // Portal inside the editor tree (not document.body) so dockable hotkeys
+  // scoped to dockableRef still receive events when this input has focus.
+  React.useEffect(() => {
+    const editorEl = editor.api.toDOMNode(editor);
+    setPortalContainer(editorEl?.parentElement ?? editorEl ?? null);
+  }, [editor, isSelectingSome]);
 
   React.useEffect(() => {
     if (!isSelectingSome) setOption("anchorId", null);
@@ -393,7 +402,9 @@ export function BlockSelectionAfterEditable() {
     [editor, api.blockSelection, setOption],
   );
 
-  if (!isMounted || typeof window === "undefined") return null;
+  if (!isMounted || !portalContainer || typeof window === "undefined") {
+    return null;
+  }
 
   return ReactDOM.createPortal(
     <input
@@ -410,6 +421,6 @@ export function BlockSelectionAfterEditable() {
       onCut={handleCut}
       onPaste={handlePaste}
     />,
-    document.body,
+    portalContainer,
   );
 }
