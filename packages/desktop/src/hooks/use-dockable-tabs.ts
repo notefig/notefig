@@ -3,6 +3,7 @@ import {
   useMemo,
   useRef,
   useEffect,
+  useState,
   type ReactElement,
   type RefObject,
 } from "react";
@@ -128,8 +129,10 @@ export function useDockableTabs(
   options: UseDockableTabsOptions,
 ): UseDockableTabsResult {
   const { renderTabs, canOpenFile, dockableRef } = options;
-  const { layout, setLayout, openTabs, activeTabId } = useLayoutSearchParam();
+  const { layout, setLayout, openTabs, layoutSelectedTabId } =
+    useLayoutSearchParam();
   const lastFocusedWindowIdRef = useRef<string | null>(null);
+  const [, setFocusedWindowId] = useState<string | null>(null);
 
   // Render tabs using the provided render function
   const tabs = useMemo(() => renderTabs(openTabs), [renderTabs, openTabs]);
@@ -142,8 +145,12 @@ export function useDockableTabs(
       const target = event.target as HTMLElement | null;
       if (!target) return;
       const windowEl = target.closest<HTMLElement>("[data-dockable-window-id]");
-      if (windowEl?.dataset.dockableWindowId) {
-        lastFocusedWindowIdRef.current = windowEl.dataset.dockableWindowId;
+      const nextFocusedWindowId = windowEl?.dataset.dockableWindowId;
+      if (nextFocusedWindowId) {
+        lastFocusedWindowIdRef.current = nextFocusedWindowId;
+        setFocusedWindowId((current) =>
+          current === nextFocusedWindowId ? current : nextFocusedWindowId,
+        );
       }
     };
 
@@ -152,23 +159,6 @@ export function useDockableTabs(
       root.removeEventListener("focusin", handleFocusIn);
     };
   }, [dockableRef]);
-
-  useEffect(() => {
-    if (!activeTabId) return;
-
-    // Use rAF to ensure DOM is ready and component has mounted
-    const rafId = requestAnimationFrame(() => {
-      // Don't steal focus from sidebar inputs (e.g. search panel)
-      const active = document.activeElement;
-      if (active && active.closest("[data-sidebar]")) return;
-
-      focusEditor(activeTabId);
-    });
-
-    return () => {
-      cancelAnimationFrame(rafId);
-    };
-  }, [activeTabId]);
 
   const getActiveWindow = useCallback(() => {
     const root = dockableRef?.current;
@@ -202,10 +192,10 @@ export function useDockableTabs(
       if (rememberedWindow) return rememberedWindow;
     }
 
-    // 3) Fallback to window containing activeTabId
-    if (activeTabId) {
+    // 3) Fallback to window containing layout-selected tab
+    if (layoutSelectedTabId) {
       const windowWithActive = layout.find((node) =>
-        "selected" in node ? node.selected === activeTabId : false,
+        "selected" in node ? node.selected === layoutSelectedTabId : false,
       );
       if (windowWithActive && "selected" in windowWithActive) {
         return windowWithActive as any;
@@ -214,7 +204,31 @@ export function useDockableTabs(
 
     // 4) Fallback to first window
     return findFirstWindow(layout);
-  }, [dockableRef, layout, activeTabId]);
+  }, [dockableRef, layout, layoutSelectedTabId]);
+
+  const getFocusedTabId = useCallback(() => {
+    return getActiveWindow()?.selected ?? layoutSelectedTabId;
+  }, [getActiveWindow, layoutSelectedTabId]);
+
+  const activeTabId = getFocusedTabId();
+
+  useEffect(() => {
+    const tabId = getFocusedTabId();
+    if (!tabId) return;
+
+    // Use rAF to ensure DOM is ready and component has mounted
+    const rafId = requestAnimationFrame(() => {
+      // Don't steal focus from sidebar inputs (e.g. search panel)
+      const active = document.activeElement;
+      if (active && active.closest("[data-sidebar]")) return;
+
+      focusEditor(tabId);
+    });
+
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
+  }, [getFocusedTabId]);
 
   const getActiveWindowId = useCallback(() => {
     return getActiveWindow()?.id ?? null;
@@ -289,10 +303,6 @@ export function useDockableTabs(
     },
     [openTabs, setLayout],
   );
-
-  const getFocusedTabId = useCallback(() => {
-    return getActiveWindow()?.selected ?? activeTabId;
-  }, [getActiveWindow, activeTabId]);
 
   const closeActiveTab = useCallback(() => {
     const tabId = getFocusedTabId();

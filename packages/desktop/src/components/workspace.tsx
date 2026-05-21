@@ -154,8 +154,13 @@ export const Workspace = () => {
     );
 
     if (isClosing) {
-      requestAnimationFrame(() => {
-        focusActiveEditor();
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active.closest("[data-sidebar]")) {
+        active.blur();
+      }
+
+      retryOnAnimationFrame(() => {
+        return focusActiveEditor();
       });
     }
   }, [isSidebarCollapsed, setUrlSearchParams, focusActiveEditor]);
