@@ -129,18 +129,13 @@ jobs:
         id: fallow
         with:
           command: audit
-          format: sarif
+          format: json
           fail-on-issues: true
           gate: new-only
           auto-changed-since: true
           annotations: true
           comment: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: github/codeql-action/upload-sarif@v4
-        if: always() && github.event_name == 'pull_request'
-        with:
-          sarif_file: fallow-results.sarif
 
   fallow-health:
     name: Fallow Health (Advisory)

@@ -36,14 +36,15 @@ function extractTabIds(nodes: LayoutNode[]): string[] {
 
 /**
  * Find the selected tab in the first window that has one.
+ * This is layout-derived state, not focus-derived active UI state.
  */
-function findSelectedTab(nodes: LayoutNode[]): string | null {
+function findLayoutSelectedTab(nodes: LayoutNode[]): string | null {
   for (const node of nodes) {
     if (node.type === "Window" && node.selected) {
       return node.selected;
     }
     if (node.type === "Panel") {
-      const found = findSelectedTab(node.children);
+      const found = findLayoutSelectedTab(node.children);
       if (found) return found;
     }
   }
@@ -59,8 +60,8 @@ export interface UseLayoutSearchParam {
   ) => void;
   /** All tab IDs extracted from the layout */
   openTabs: string[];
-  /** The currently selected tab ID, or null */
-  activeTabId: string | null;
+  /** Layout-derived selected tab ID (first selected window), or null */
+  layoutSelectedTabId: string | null;
 }
 
 /**
@@ -102,7 +103,10 @@ export function useLayoutSearchParam(): UseLayoutSearchParam {
   );
 
   const openTabs = useMemo(() => extractTabIds(layout), [layout]);
-  const activeTabId = useMemo(() => findSelectedTab(layout), [layout]);
+  const layoutSelectedTabId = useMemo(
+    () => findLayoutSelectedTab(layout),
+    [layout],
+  );
 
-  return { layout, setLayout, openTabs, activeTabId };
+  return { layout, setLayout, openTabs, layoutSelectedTabId };
 }

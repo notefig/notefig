@@ -150,7 +150,7 @@ function createMarkdownInstance(content: string): MarkdownInstance {
     focus(): boolean {
       if (isEditorFocusSuppressed()) return false;
 
-      const saved = this.selection ?? this.editor.selection;
+      const saved = this.editor.selection ?? this.selection;
       if (saved) {
         this.editor.tf.focus({ at: saved });
       } else {

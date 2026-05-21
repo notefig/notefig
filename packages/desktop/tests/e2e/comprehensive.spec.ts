@@ -301,9 +301,15 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
 
       // Verify tabs exist (look for tab buttons with file names inside the tab bar)
       const tabBar = page.locator('[data-testid="tab-bar"]');
-      const tabA = tabBar.locator('.cursor-pointer:has-text("tab-a.md")').first();
-      const tabB = tabBar.locator('.cursor-pointer:has-text("tab-b.md")').first();
-      const tabC = tabBar.locator('.cursor-pointer:has-text("tab-c.md")').first();
+      const tabA = tabBar
+        .locator('.cursor-pointer:has-text("tab-a.md")')
+        .first();
+      const tabB = tabBar
+        .locator('.cursor-pointer:has-text("tab-b.md")')
+        .first();
+      const tabC = tabBar
+        .locator('.cursor-pointer:has-text("tab-c.md")')
+        .first();
 
       await expect(tabA).toBeVisible();
       await expect(tabB).toBeVisible();
@@ -354,7 +360,9 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
 
       // Switch back to file A
       const tabBar = page.locator('[data-testid="tab-bar"]');
-      const tabA = tabBar.locator('.cursor-pointer:has-text("tab-a.md")').first();
+      const tabA = tabBar
+        .locator('.cursor-pointer:has-text("tab-a.md")')
+        .first();
       await tabA.click();
       await page.waitForTimeout(500);
 
@@ -369,6 +377,60 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
 
       // Cursor should be in the same text node
       expect(cursorAfter.anchorText).toBe(cursorBefore.anchorText);
+    });
+
+    test("Mod+F uses focused dock tab in multi-window layout", async ({
+      page,
+    }) => {
+      const workspacePath = e2eTestFixture.workspacePath;
+      const tabAPath = `${workspacePath}/tab-a.md`;
+      const tabCPath = `${workspacePath}/tab-c.md`;
+
+      const twoWindowLayout = [
+        {
+          type: "Panel",
+          id: "panel-root",
+          orientation: "row",
+          size: 1,
+          children: [
+            {
+              type: "Window",
+              id: "window-left",
+              children: [tabAPath],
+              selected: tabAPath,
+              size: 0.5,
+            },
+            {
+              type: "Window",
+              id: "window-right",
+              children: [tabCPath],
+              selected: tabCPath,
+              size: 0.5,
+            },
+          ],
+        },
+      ];
+
+      const encodedPath = encodeURIComponent(workspacePath);
+      const encodedLayout = encodeURIComponent(JSON.stringify(twoWindowLayout));
+      await page.goto(`/${encodedPath}?layout=${encodedLayout}`);
+      await waitForFileTree(page);
+
+      // Focus the right dock/editor (tab-c.md)
+      const rightEditor = page
+        .locator('[role="textbox"]')
+        .filter({ hasText: "Content for tab C" })
+        .first();
+      await rightEditor.click();
+
+      const isMac = await page.evaluate(() =>
+        navigator.platform.includes("Mac"),
+      );
+      await page.keyboard.press(isMac ? "Meta+f" : "Control+f");
+
+      const fileFilterInput = page.getByPlaceholder("File filter (e.g. *.md)");
+      await expect(fileFilterInput).toBeVisible();
+      await expect(fileFilterInput).toHaveValue("tab-c.md");
     });
   });
 
@@ -569,9 +631,7 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       );
 
       // Open in new tab via context menu creates a new tab.
-      const tabCInTree = page
-        .locator('button:has-text("tab-c.md")')
-        .first();
+      const tabCInTree = page.locator('button:has-text("tab-c.md")').first();
       await tabCInTree.click({ button: "right" });
       await page
         .locator('[role="menuitem"]:has-text("Open in New Tab")')
@@ -588,9 +648,7 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       ).toBeVisible();
 
       // Context-menu action creates another tab.
-      const tabAInTree = page
-        .locator('button:has-text("tab-a.md")')
-        .first();
+      const tabAInTree = page.locator('button:has-text("tab-a.md")').first();
       await tabAInTree.click({ button: "right" });
       await page
         .locator('[role="menuitem"]:has-text("Open in New Tab")')
