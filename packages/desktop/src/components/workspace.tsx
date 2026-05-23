@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, memo } from "react";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { useIsFetching } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -9,13 +9,17 @@ import type { SearchPanelHandle } from "@/components/editor/search-panel";
 import {
   PolymorphicEditor,
   canOpenFile as canOpenInEditor,
+  getEditorType,
 } from "@/components/editor/polymorphic-editor";
+import { FileLoadingPlaceholder } from "@/components/editor/file-loading-placeholder";
+import { FileLoadErrorBoundary } from "@/components/editor/file-load-error-boundary";
 import { StatusBar } from "@/components/editor/status-bar";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
 import {
   getOrCreateWorkspaceCollections,
+  prefetchFileContent,
   queryClient,
 } from "@/utils/collections";
 import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
@@ -92,11 +96,92 @@ export const Workspace = () => {
             )
             .select(({ file, content }) => ({
               ...file,
-              content: content?.content ?? "",
-              contentHash: content?.contentHash ?? "",
+              content: content?.content,
+              contentHash: content?.contentHash,
             })),
     [workspacePath, ...openTabs],
   );
+
+  const isFetchingContent = useIsFetching(
+    { queryKey: ["file-content", workspacePath] },
+    queryClient,
+  );
+  const isFetchingMetadata = useIsFetching(
+    { queryKey: ["file-metadata", workspacePath] },
+    queryClient,
+  );
+
+  const [tabLoadStates, setTabLoadStates] = useState<
+    Record<string, "idle" | "loading" | "error">
+  >({});
+
+  const setTabLoadState = useCallback(
+    (filePath: string, nextState: "idle" | "loading" | "error") => {
+      setTabLoadStates((prev) => {
+        if (prev[filePath] === nextState) return prev;
+        return { ...prev, [filePath]: nextState };
+      });
+    },
+    [],
+  );
+
+  const retryFileLoad = useCallback(
+    async (filePath: string) => {
+      setTabLoadState(filePath, "loading");
+      try {
+        await prefetchFileContent(workspacePath, filePath);
+        setTabLoadState(filePath, "idle");
+      } catch (error) {
+        setTabLoadState(filePath, "error");
+        throw error;
+      }
+    },
+    [workspacePath, setTabLoadState],
+  );
+
+  useEffect(() => {
+    for (const fileEntry of fileDataWithContent) {
+      const editorType = getEditorType(fileEntry.path);
+      const needsTextContent =
+        editorType === "markdown" || editorType === "code";
+
+      if (!needsTextContent) continue;
+
+      if (typeof fileEntry.content === "string") {
+        setTabLoadState(fileEntry.path, "idle");
+        continue;
+      }
+
+      const loadState = tabLoadStates[fileEntry.path] ?? "idle";
+      if (loadState === "loading" || loadState === "error") continue;
+
+      void retryFileLoad(fileEntry.path).catch(() => {
+        // handled by load state + retry UI
+      });
+    }
+  }, [fileDataWithContent, tabLoadStates, retryFileLoad, setTabLoadState]);
+
+  useEffect(() => {
+    setTabLoadStates((prev) => {
+      const openSet = new Set(openTabs);
+      const next: Record<string, "idle" | "loading" | "error"> = {};
+      let changed = false;
+
+      for (const [path, state] of Object.entries(prev)) {
+        if (openSet.has(path)) {
+          next[path] = state;
+        } else {
+          changed = true;
+        }
+      }
+
+      if (!changed && Object.keys(next).length === Object.keys(prev).length) {
+        return prev;
+      }
+
+      return next;
+    });
+  }, [openTabs]);
 
   const dockableTabs = useMemo(
     () =>
@@ -110,19 +195,31 @@ export const Workspace = () => {
             handleLayoutChange(nextLayout);
           }}
         >
-          <PolymorphicEditor
-            file={fileEntry as FileEntry}
+          <WorkspaceTabEditor
+            filePath={fileEntry.path}
             basePath={workspacePath}
+            content={fileEntry.content}
+            contentHash={fileEntry.contentHash}
+            loadState={tabLoadStates[fileEntry.path] ?? "idle"}
+            onRetry={async () => retryFileLoad(fileEntry.path)}
           />
         </Dockable.Tab>
       )),
-    [fileDataWithContent, workspacePath, layout, handleLayoutChange],
+    [
+      fileDataWithContent,
+      workspacePath,
+      layout,
+      handleLayoutChange,
+      tabLoadStates,
+      retryFileLoad,
+    ],
   );
 
   const activeFileData = fileDataWithContent.find(
     (f) => f.path === activeTabId,
   );
-  const currentContent = activeFileData?.content || "";
+  const currentContent =
+    typeof activeFileData?.content === "string" ? activeFileData.content : "";
 
   const existingOpenTabIds = useMemo(
     () => new Set(fileDataWithContent.map((file) => file.path)),
@@ -207,15 +304,6 @@ export const Workspace = () => {
 
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [direction, setDirection] = useState<"ltr" | "rtl">("ltr");
-
-  const isFetchingContent = useIsFetching(
-    { queryKey: ["file-content", workspacePath] },
-    queryClient,
-  );
-  const isFetchingMetadata = useIsFetching(
-    { queryKey: ["file-metadata", workspacePath] },
-    queryClient,
-  );
 
   useEffect(() => {
     if (isFetchingMetadata > 0) return;
@@ -476,3 +564,61 @@ export const Workspace = () => {
     </div>
   );
 };
+
+interface WorkspaceTabEditorProps {
+  filePath: string;
+  basePath: string;
+  content?: string;
+  contentHash?: string;
+  loadState: "idle" | "loading" | "error";
+  onRetry: () => Promise<void>;
+}
+
+const WorkspaceTabEditor = memo(
+  function WorkspaceTabEditor({
+    filePath,
+    basePath,
+    content,
+    contentHash,
+    loadState,
+    onRetry,
+  }: WorkspaceTabEditorProps) {
+    const editorType = getEditorType(filePath);
+    const needsTextContent = editorType === "markdown" || editorType === "code";
+
+    if (needsTextContent && typeof content !== "string") {
+      if (loadState !== "error") {
+        return <FileLoadingPlaceholder filePath={filePath} />;
+      }
+
+      return (
+        <FileLoadErrorBoundary filePath={filePath} onRetry={onRetry}>
+          <ThrowRenderError
+            message={`Failed to load file content for ${filePath}`}
+          />
+        </FileLoadErrorBoundary>
+      );
+    }
+
+    const safeContent = needsTextContent ? (content as string) : "";
+
+    const readyFile: FileEntry = {
+      path: filePath,
+      type: "file",
+      content: safeContent,
+      contentHash: contentHash ?? "",
+    };
+
+    return <PolymorphicEditor file={readyFile} basePath={basePath} />;
+  },
+  (prev, next) =>
+    prev.filePath === next.filePath &&
+    prev.basePath === next.basePath &&
+    prev.content === next.content &&
+    prev.contentHash === next.contentHash &&
+    prev.loadState === next.loadState,
+);
+
+function ThrowRenderError({ message }: { message: string }): never {
+  throw new Error(message);
+}

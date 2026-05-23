@@ -30,6 +30,46 @@ import type { FileEntry } from "./fs";
 import { calculateContentHash } from "./hash";
 import type { Theme } from "@/components/theme-provider";
 
+function getDebugFileLoadDelayMs(): number {
+  const runtimeValue = Number(
+    (globalThis as { __METRISTS_DEBUG_FILE_LOAD_DELAY_MS?: number })
+      .__METRISTS_DEBUG_FILE_LOAD_DELAY_MS ?? 0,
+  );
+  if (Number.isFinite(runtimeValue) && runtimeValue > 0) {
+    return runtimeValue;
+  }
+
+  const envValue = Number(import.meta.env.VITE_DEBUG_FILE_LOAD_DELAY_MS ?? 0);
+  if (Number.isFinite(envValue) && envValue > 0) {
+    return envValue;
+  }
+
+  return 0;
+}
+
+function getDebugFileLoadFailMatch(): string {
+  const runtimeValue = (
+    globalThis as { __METRISTS_DEBUG_FILE_LOAD_FAIL_MATCH?: string }
+  ).__METRISTS_DEBUG_FILE_LOAD_FAIL_MATCH;
+  if (typeof runtimeValue === "string" && runtimeValue.trim().length > 0) {
+    return runtimeValue.trim();
+  }
+
+  return import.meta.env.VITE_DEBUG_FILE_LOAD_FAIL_MATCH?.trim() ?? "";
+}
+
+function shouldDebugFailFileLoad(path: string): boolean {
+  const match = getDebugFileLoadFailMatch();
+  if (!match) return false;
+  return path.includes(match);
+}
+
+async function maybeDelayFileLoad(): Promise<void> {
+  const delayMs = getDebugFileLoadDelayMs();
+  if (!Number.isFinite(delayMs) || delayMs <= 0) return;
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
 // Global QueryClient instance for TanStack Query
 export const queryClient = new QueryClient({
   defaultOptions: {},
@@ -246,6 +286,8 @@ export function createFileContentCollection(workspaceId: string) {
       syncMode: "on-demand",
 
       queryFn: async (context): Promise<FileContent[]> => {
+        await maybeDelayFileLoad();
+
         const parsed = parseLoadSubsetOptions(context.meta?.loadSubsetOptions);
 
         // Extract path filters (eq or in operators on 'path' field)
@@ -270,6 +312,13 @@ export function createFileContentCollection(workspaceId: string) {
 
         // Add succeeded reads
         for (const file of result.succeeded) {
+          if (shouldDebugFailFileLoad(file.path)) {
+            console.warn(
+              `[debug] Simulated file load failure for ${file.path}`,
+            );
+            continue;
+          }
+
           contentMap.set(file.path, {
             path: file.path,
             content: file.content,
@@ -277,16 +326,12 @@ export function createFileContentCollection(workspaceId: string) {
           });
         }
 
-        // Add empty entries for failed reads (binary files like images)
+        // Do not insert empty placeholder content on read failures.
+        // A failed read must not be treated as a valid empty file.
         for (const failure of result.failed) {
           console.warn(
             `Failed to read file ${failure.path}: ${failure.message}`,
           );
-          contentMap.set(failure.path, {
-            path: failure.path,
-            content: "",
-            contentHash: calculateContentHash(failure.path), // Use path as hash for failed reads
-          });
         }
 
         return Array.from(contentMap.values());
@@ -452,6 +497,12 @@ export async function createFile(
     size: 0,
   });
 
+  collections.content.utils.writeInsert({
+    path: filePath,
+    content,
+    contentHash: calculateContentHash(content),
+  });
+
   // If content is provided, write it
   if (content) {
     await writeFileContent(workspaceId, filePath, content);
@@ -595,11 +646,17 @@ export async function prefetchFileContent(
   workspaceId: string,
   filePath: string,
 ): Promise<void> {
+  await maybeDelayFileLoad();
+
   const collections = getOrCreateWorkspaceCollections(workspaceId);
 
   const existingContent = collections.content.get(filePath);
   if (existingContent) {
     return;
+  }
+
+  if (shouldDebugFailFileLoad(filePath)) {
+    throw new Error(`Simulated file load failure for ${filePath}`);
   }
 
   const result = await platformAdapter.readFiles([filePath]);
@@ -613,7 +670,15 @@ export async function prefetchFileContent(
       content: file.content,
       contentHash,
     });
+    return;
   }
+
+  const failure = result.failed.find((entry) => entry.path === filePath);
+  throw new Error(
+    failure
+      ? `Failed to read file ${filePath}: ${failure.message}`
+      : `Failed to read file ${filePath}`,
+  );
 }
 
 /**
@@ -750,11 +815,7 @@ interface AppSettings {
   zoomLevel: number;
 }
 
-const SETTING_KEYS: (keyof AppSettings)[] = [
-  "theme",
-  "lastPath",
-  "zoomLevel",
-];
+const SETTING_KEYS: (keyof AppSettings)[] = ["theme", "lastPath", "zoomLevel"];
 
 const DEFAULT_APP_SETTINGS: AppSettings = {
   theme: "dark",
