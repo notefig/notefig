@@ -1,5 +1,10 @@
-import React, { useCallback } from "react";
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ElementType,
+} from "react";
 import {
   FileText,
   Settings,
@@ -19,6 +24,7 @@ import {
   Command,
   CommandEmpty,
   CommandGroup,
+  CommandInput,
   CommandItem,
   CommandList,
   CommandSeparator,
@@ -62,7 +68,7 @@ interface CommandType {
   labelKey: string;
   groupKey: string;
   keywordKey: string;
-  icon: React.ElementType;
+  icon: ElementType;
   shortcut?: string;
   action?: () => void | Promise<void>;
 }
@@ -387,14 +393,19 @@ export function CommandPalette({
         onCloseAutoFocus={handleCloseAutoFocus}
         showCloseButton={false}
       >
-        <Command className="bg-transparent [&_[cmdk-group-heading]]:text-muted-foreground **:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5">
-          <div className="flex items-center border-b px-3 h-12">
-            <Search className="size-5 shrink-0 opacity-50 me-2" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+        <Command
+          value={search}
+          onValueChange={setSearch}
+          className={`bg-transparent [&_[cmdk-group-heading]]:text-muted-foreground **:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5 ${
+            search.trim().length > 0
+              ? "[&_[cmdk-item]]:opacity-60 [&_[cmdk-item][data-selected=true]]:opacity-100"
+              : ""
+          }`}
+        >
+          <div className="relative">
+            <CommandInput
               placeholder={t("typeCommand")}
-              className="flex-1 h-10 bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              className="pe-10"
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
@@ -402,7 +413,7 @@ export function CommandPalette({
             />
             <button
               onClick={() => onOpenChange(false)}
-              className="ms-2 p-1 rounded hover:bg-accent transition-colors"
+              className="absolute top-1/2 end-3 -translate-y-1/2 p-1 rounded hover:bg-accent transition-colors"
               aria-label="Close command palette"
             >
               <X className="size-4 text-muted-foreground" />
@@ -415,32 +426,15 @@ export function CommandPalette({
               if (!groupCommands) return null;
 
               const groupLabel = t(groupName);
-              const filteredCommands = search
-                ? groupCommands.filter((cmd) => {
-                    const label = t(cmd.labelKey);
-                    const keywords = getLocalizedCommandKeywords(
-                      t,
-                      cmd.keywordKey,
-                    );
-                    const searchValue = search.toLowerCase();
-
-                    if (label.toLowerCase().includes(searchValue)) return true;
-
-                    return keywords.some((keyword) =>
-                      keyword.toLowerCase().includes(searchValue),
-                    );
-                  })
-                : groupCommands;
-
-              if (filteredCommands.length === 0) return null;
 
               return (
                 <div key={groupName}>
                   {index > 0 && <CommandSeparator />}
                   <CommandGroup heading={groupLabel}>
-                    {filteredCommands.map((command) => (
+                    {groupCommands.map((command) => (
                       <CommandItem
                         key={command.id}
+                        value={t(command.labelKey)}
                         keywords={getLocalizedCommandKeywords(
                           t,
                           command.keywordKey,

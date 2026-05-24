@@ -210,7 +210,6 @@ i18n
           paste: "Paste",
           searchInFile: "Search in File",
           searchInAllFiles: "Search in All Files",
-          findInFile: "Find in File",
           findAndReplace: "Find and Replace",
 
           // View Commands
