@@ -200,6 +200,7 @@ i18n
           openFile: "Open File",
           saveFile: "Save File",
           closeFile: "Close File",
+          closeWorkspace: "Close Workspace",
 
           // Edit Commands
           undo: "Undo",
@@ -207,7 +208,8 @@ i18n
           cut: "Cut",
           copy: "Copy",
           paste: "Paste",
-          findInFile: "Find in File",
+          searchInFile: "Search in File",
+          searchInAllFiles: "Search in All Files",
           findAndReplace: "Find and Replace",
 
           // View Commands
@@ -268,7 +270,31 @@ i18n
           // Settings Commands
           openSettings: "Open Settings",
           keyboardShortcuts: "Keyboard Shortcuts",
-          toggleTheme: "Toggle Dark/Light Theme",
+          toggleTheme: "Toggle Theme",
+
+          // Command Keywords
+          commandKeywords: {
+            newFile: ["new", "file", "create", "add"],
+            closeFile: ["close", "file", "tab"],
+            newFolder: ["new", "folder", "directory", "create"],
+            openFolder: ["open", "folder", "workspace", "directory"],
+            closeWorkspace: ["close", "workspace", "home"],
+            undo: ["undo", "revert", "back"],
+            redo: ["redo", "forward", "again"],
+            searchInFile: ["search", "find", "current", "file"],
+            searchInAllFiles: ["search", "find", "global", "workspace"],
+            toggleSidebar: ["sidebar", "panel", "toggle", "files"],
+            toggleFullscreen: ["fullscreen", "maximize", "window"],
+            openSettings: ["settings", "preferences", "options"],
+            toggleTheme: [
+              "theme",
+              "appearance",
+              "light",
+              "dark",
+              "system",
+              "mode",
+            ],
+          },
 
           // Help Commands
           documentation: "Documentation",
