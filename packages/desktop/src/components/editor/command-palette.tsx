@@ -35,7 +35,9 @@ import { useHotkey, formatForDisplay } from "@tanstack/react-hotkeys";
 import { useTheme } from "../theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 import { pickDirectory } from "../../utils/fs";
+import { getLocalizedCommandKeywords } from "@/utils/command-keywords";
 
 interface CommandPaletteProps {
   open: boolean;
@@ -57,11 +59,12 @@ interface CommandPaletteProps {
 
 interface CommandType {
   id: string;
-  label: string;
+  labelKey: string;
+  groupKey: string;
+  keywordKey: string;
   icon: React.ElementType;
   shortcut?: string;
   action?: () => void | Promise<void>;
-  group: string;
 }
 
 export function CommandPalette({
@@ -83,6 +86,7 @@ export function CommandPalette({
 }: CommandPaletteProps) {
   const { setTheme, theme } = useTheme();
   const { setTheme: persistTheme } = useAppSettings();
+  const { t } = useTranslation();
   const [search, setSearch] = useState("");
 
   const navigate = useNavigate();
@@ -127,7 +131,9 @@ export function CommandPalette({
   const commands: CommandType[] = [
     {
       id: "new-file",
-      label: "New File",
+      labelKey: "newFile",
+      groupKey: "file",
+      keywordKey: "commandKeywords.newFile",
       icon: Plus,
       shortcut: formatForDisplay("Mod+N"),
       action: () => {
@@ -136,19 +142,21 @@ export function CommandPalette({
         }
         onNewFile?.();
       },
-      group: "File",
     },
     {
       id: "close-file",
-      label: "Close File",
+      labelKey: "closeFile",
+      groupKey: "file",
+      keywordKey: "commandKeywords.closeFile",
       icon: FileText,
       shortcut: formatForDisplay("Mod+W"),
       action: onCloseFile,
-      group: "File",
     },
     {
       id: "new-directory",
-      label: "New Directory",
+      labelKey: "newFolder",
+      groupKey: "file",
+      keywordKey: "commandKeywords.newFolder",
       icon: FolderPlus,
       action: () => {
         if (sidebarOpen) {
@@ -156,73 +164,80 @@ export function CommandPalette({
         }
         onNewDirectory?.();
       },
-      group: "File",
     },
     {
       id: "open-folder",
-      label: "Open Folder",
+      labelKey: "openFolder",
+      groupKey: "file",
+      keywordKey: "commandKeywords.openFolder",
       icon: FolderOpen,
       action: () => {
         handleOpenFolder();
       },
-      group: "File",
     },
     {
       id: "close-workspace",
-      label: "Close Workspace",
+      labelKey: "closeWorkspace",
+      groupKey: "file",
+      keywordKey: "commandKeywords.closeWorkspace",
       icon: Home,
       action: () => {
         navigate("/welcome");
       },
-      group: "File",
     },
     {
       id: "undo",
-      label: "Undo",
+      labelKey: "undo",
+      groupKey: "edit",
+      keywordKey: "commandKeywords.undo",
       icon: Undo,
       shortcut: formatForDisplay("Mod+Z"),
       action: onUndo,
-      group: "Edit",
     },
     {
       id: "redo",
-      label: "Redo",
+      labelKey: "redo",
+      groupKey: "edit",
+      keywordKey: "commandKeywords.redo",
       icon: Redo,
       shortcut: formatForDisplay("Mod+Shift+Z"),
       action: onRedo,
-      group: "Edit",
     },
     {
       id: "search-in-file",
-      label: "Search in File",
+      labelKey: "searchInFile",
+      groupKey: "edit",
+      keywordKey: "commandKeywords.searchInFile",
       icon: Search,
       shortcut: formatForDisplay("Mod+F"),
       action: onSearchInFile,
-      group: "Edit",
     },
     {
       id: "search-in-files",
-      label: "Search in All Files",
+      labelKey: "searchInAllFiles",
+      groupKey: "edit",
+      keywordKey: "commandKeywords.searchInAllFiles",
       icon: Search,
       shortcut: formatForDisplay("Mod+Shift+F"),
       action: onSearchInFiles,
-      group: "Edit",
     },
     {
       id: "toggle-sidebar",
-      label: "Toggle Sidebar",
+      labelKey: "toggleSidebar",
+      groupKey: "view",
+      keywordKey: "commandKeywords.toggleSidebar",
       icon: LayoutGrid,
       shortcut: formatForDisplay("Mod+\\"),
       action: onToggleSidebar,
-      group: "View",
     },
     {
       id: "toggle-fullscreen",
-      label: "Toggle Fullscreen",
+      labelKey: "toggleFullscreen",
+      groupKey: "view",
+      keywordKey: "commandKeywords.toggleFullscreen",
       icon: Maximize,
       shortcut: "F11",
       action: onToggleFullscreen,
-      group: "View",
     },
     // {
     //   id: "next-tab",
@@ -273,11 +288,12 @@ export function CommandPalette({
     // },
     {
       id: "open-settings",
-      label: "Open Settings",
+      labelKey: "openSettings",
+      groupKey: "settings",
+      keywordKey: "commandKeywords.openSettings",
       icon: Settings,
       shortcut: formatForDisplay("Mod+Shift+,"),
       action: onOpenSettings,
-      group: "Settings",
     },
     // {
     //   id: "keyboard-shortcuts",
@@ -288,9 +304,10 @@ export function CommandPalette({
     // },
     {
       id: "toggle-theme",
-      label: "Toggle Theme",
+      labelKey: "toggleTheme",
+      groupKey: "settings",
+      keywordKey: "commandKeywords.toggleTheme",
       icon: Moon,
-      group: "Settings",
       action: swapTheme,
     },
     // {
@@ -329,23 +346,23 @@ export function CommandPalette({
 
   const groupedCommands = commands.reduce(
     (acc, command) => {
-      if (!acc[command.group]) {
-        acc[command.group] = [];
+      if (!acc[command.groupKey]) {
+        acc[command.groupKey] = [];
       }
-      acc[command.group].push(command);
+      acc[command.groupKey].push(command);
       return acc;
     },
     {} as Record<string, CommandType[]>,
   );
 
   const groupOrder = [
-    "File",
-    "Edit",
-    "View",
-    "Navigation",
-    "Tools",
-    "Settings",
-    "Help",
+    "file",
+    "edit",
+    "view",
+    "navigation",
+    "tools",
+    "settings",
+    "help",
   ];
 
   const handleCloseAutoFocus = (event: Event) => {
@@ -361,8 +378,8 @@ export function CommandPalette({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogHeader className="sr-only">
-        <DialogTitle>Command Palette</DialogTitle>
-        <DialogDescription>Search for a command to run...</DialogDescription>
+        <DialogTitle>{t("commandPaletteTitle")}</DialogTitle>
+        <DialogDescription>{t("commandPaletteDesc")}</DialogDescription>
       </DialogHeader>
       <DialogContent
         className="overflow-hidden p-0 max-w-lg gap-0 texture-surface"
@@ -376,13 +393,12 @@ export function CommandPalette({
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Type a command or search..."
+              placeholder={t("typeCommand")}
               className="flex-1 h-10 bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
-              // @ts-ignore
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              spellcheck="false"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
             />
             <button
               onClick={() => onOpenChange(false)}
@@ -393,16 +409,27 @@ export function CommandPalette({
             </button>
           </div>
           <CommandList>
-            <CommandEmpty>No results found.</CommandEmpty>
+            <CommandEmpty>{t("noResults")}</CommandEmpty>
             {groupOrder.map((groupName, index) => {
               const groupCommands = groupedCommands[groupName];
               if (!groupCommands) return null;
 
-              // Filter by search
+              const groupLabel = t(groupName);
               const filteredCommands = search
-                ? groupCommands.filter((cmd) =>
-                    cmd.label.toLowerCase().includes(search.toLowerCase()),
-                  )
+                ? groupCommands.filter((cmd) => {
+                    const label = t(cmd.labelKey);
+                    const keywords = getLocalizedCommandKeywords(
+                      t,
+                      cmd.keywordKey,
+                    );
+                    const searchValue = search.toLowerCase();
+
+                    if (label.toLowerCase().includes(searchValue)) return true;
+
+                    return keywords.some((keyword) =>
+                      keyword.toLowerCase().includes(searchValue),
+                    );
+                  })
                 : groupCommands;
 
               if (filteredCommands.length === 0) return null;
@@ -410,15 +437,19 @@ export function CommandPalette({
               return (
                 <div key={groupName}>
                   {index > 0 && <CommandSeparator />}
-                  <CommandGroup heading={groupName}>
+                  <CommandGroup heading={groupLabel}>
                     {filteredCommands.map((command) => (
                       <CommandItem
                         key={command.id}
+                        keywords={getLocalizedCommandKeywords(
+                          t,
+                          command.keywordKey,
+                        )}
                         onSelect={() => handleSelect(command)}
                         className="flex items-center gap-2 cursor-pointer"
                       >
                         <command.icon className="w-4 h-4 text-muted-foreground shrink-0" />
-                        <span className="flex-1">{command.label}</span>
+                        <span className="flex-1">{t(command.labelKey)}</span>
                         {command.shortcut && (
                           <CommandShortcut className="ms-auto">
                             {command.shortcut}
