@@ -38,7 +38,7 @@ export interface FocusArbiterOptions {
   defaultTtlMs?: number;
   maxMountAttempts?: number;
   now?: () => number;
-  executeFocus: (intent: FocusIntent) => boolean;
+  executeFocus?: (intent: FocusIntent) => boolean;
   requestFrame?: (cb: FrameRequestCallback) => number;
   cancelFrame?: (id: number) => void;
   setTimer?: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>;
@@ -59,7 +59,7 @@ export class FocusArbiter {
   private readonly defaultTtlMs: number;
   private readonly maxMountAttempts: number;
   private readonly now: () => number;
-  private readonly executeFocus: (intent: FocusIntent) => boolean;
+  private executeFocus: (intent: FocusIntent) => boolean;
   private readonly requestFrame: (cb: FrameRequestCallback) => number;
   private readonly cancelFrame: (id: number) => void;
   private readonly setTimer: (
@@ -84,13 +84,13 @@ export class FocusArbiter {
   private cooldownTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
 
-  constructor(options: FocusArbiterOptions) {
+  constructor(options: FocusArbiterOptions = {}) {
     this.cooldownMs = options.cooldownMs ?? DEFAULT_COOLDOWN_MS;
     this.defaultTtlMs = options.defaultTtlMs ?? DEFAULT_TTL_MS;
     this.maxMountAttempts =
       options.maxMountAttempts ?? DEFAULT_MAX_MOUNT_ATTEMPTS;
     this.now = options.now ?? (() => Date.now());
-    this.executeFocus = options.executeFocus;
+    this.executeFocus = options.executeFocus ?? (() => false);
     this.requestFrame =
       options.requestFrame ?? ((cb) => requestAnimationFrame(cb));
     this.cancelFrame =
@@ -207,6 +207,10 @@ export class FocusArbiter {
 
   getPendingCount(): number {
     return this.pending.size;
+  }
+
+  setExecutor(executor: (intent: FocusIntent) => boolean): void {
+    this.executeFocus = executor;
   }
 
   dispose(): void {
@@ -336,3 +340,5 @@ export class FocusArbiter {
     }, delay);
   }
 }
+
+export const focusArbiter = new FocusArbiter({});

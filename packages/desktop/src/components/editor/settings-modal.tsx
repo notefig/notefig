@@ -92,9 +92,7 @@ export function SettingsModal({
   };
   const handleCloseAutoFocus = (event: Event) => {
     event.preventDefault();
-    requestAnimationFrame(() => {
-      onFocusEditor();
-    });
+    onFocusEditor();
   };
   const [activeSection, setActiveSection] = useState("general");
   const [settings, setSettings] = useState<SettingsState>({
