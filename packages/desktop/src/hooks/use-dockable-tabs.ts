@@ -223,7 +223,7 @@ export function useDockableTabs(
     if (!tabId) return;
 
     requestEditorFocus(tabId, {
-      when: "next-frame",
+      when: "when-mounted",
       reason: "tab-selected",
     });
   }, [getFocusedTabId]);

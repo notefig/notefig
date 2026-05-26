@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import {
   FilePlus,
   FolderPlus,
@@ -39,6 +40,7 @@ export function FileTreeContextMenu({
   children,
 }: FileTreeContextMenuProps) {
   const { t } = useTranslation();
+  const preventCloseAutoFocusRef = useRef(false);
   // For files, create in the parent directory. For directories, create inside.
   const targetDir = type === "directory" ? path : getDirectoryPath(path);
 
@@ -46,7 +48,13 @@ export function FileTreeContextMenu({
     <>
       <ContextMenu>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-        <ContextMenuContent>
+        <ContextMenuContent
+          onCloseAutoFocus={(event) => {
+            if (!preventCloseAutoFocusRef.current) return;
+            event.preventDefault();
+            preventCloseAutoFocusRef.current = false;
+          }}
+        >
           {type === "file" && onOpenInNewTab ? (
             <>
               <ContextMenuItem onSelect={() => onOpenInNewTab(path)}>
@@ -58,18 +66,31 @@ export function FileTreeContextMenu({
           ) : (
             <ContextMenuSeparator />
           )}
-          <ContextMenuItem onSelect={() => onNewFile(targetDir)}>
+          <ContextMenuItem
+            onSelect={() => {
+              preventCloseAutoFocusRef.current = true;
+              onNewFile(targetDir);
+            }}
+          >
             <FilePlus className="w-4 h-4 mr-2" />
             {t("newFile", "New File")}
           </ContextMenuItem>
-          <ContextMenuItem onSelect={() => onNewFolder(targetDir)}>
+          <ContextMenuItem
+            onSelect={() => {
+              preventCloseAutoFocusRef.current = true;
+              onNewFolder(targetDir);
+            }}
+          >
             <FolderPlus className="w-4 h-4 mr-2" />
             {t("newFolder", "New Folder")}
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem
             disabled={disableRename}
-            onSelect={() => onRenameStart()}
+            onSelect={() => {
+              preventCloseAutoFocusRef.current = true;
+              onRenameStart();
+            }}
           >
             <Pencil className="w-4 h-4 mr-2" />
             {t("rename", "Rename")}
