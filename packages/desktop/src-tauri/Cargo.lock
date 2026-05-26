@@ -1994,7 +1994,7 @@ dependencies = [
 
 [[package]]
 name = "metrists"
-version = "0.0.63"
+version = "0.0.64"
 dependencies = [
  "futures",
  "grep",
