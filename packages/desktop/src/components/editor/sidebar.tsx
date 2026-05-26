@@ -21,6 +21,7 @@ import {
 } from "@/utils/fs";
 import type { FileTreeNode, SortOrder } from "@/utils/fs";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
+import { requestElementFocus } from "@/utils/focus-arbiter";
 
 interface SidebarProps {
   workspacePath: string;
@@ -114,19 +115,12 @@ export function Sidebar({
   useEffect(() => {
     if (mode.type !== "idle") return;
 
-    // When the sidebar mounts (opened), focus the first file item for keyboard nav.
-    // Skip this while inline-create/rename modes are active to avoid stealing focus.
-    const raf = requestAnimationFrame(() => {
-      const hasInlineInput = containerRef.current?.querySelector(
-        "input[data-focus-key]",
-      );
-      if (hasInlineInput) return;
-
-      const firstButton =
-        containerRef.current?.querySelector<HTMLButtonElement>("button");
-      firstButton?.focus({ preventScroll: true });
+    requestElementFocus("sidebar-first-file-item", {
+      domain: "sidebar",
+      priority: 60,
+      reason: "sidebar-open-focus-first-item",
+      when: "when-mounted",
     });
-    return () => cancelAnimationFrame(raf);
   }, [mode.type]);
 
   const handleNewFile = useCallback(() => {

@@ -387,3 +387,14 @@ export function requestElementFocus(
 function escapeForAttributeSelector(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
+
+export function isSidebarTextEntryActive(
+  activeElement: Element | null,
+): boolean {
+  if (!(activeElement instanceof HTMLElement)) return false;
+  if (!activeElement.closest("[data-sidebar]")) return false;
+
+  return !!activeElement.closest(
+    'input, textarea, [contenteditable="true"], [role="textbox"]',
+  );
+}

@@ -26,7 +26,7 @@ import {
   type BlockNode,
 } from "@/utils/navigation-utils";
 import { focusArbiter } from "@/utils/focus-arbiter";
-import { isSidebarTextEntryActive } from "@/utils/focus-utils";
+import { isSidebarTextEntryActive } from "@/utils/focus-arbiter";
 
 /**
  * Location for editor navigation.

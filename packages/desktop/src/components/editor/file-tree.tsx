@@ -69,6 +69,7 @@ interface FileTreeProps {
 interface FileTreeItemProps {
   node: FileTreeNode;
   depth: number;
+  isPrimaryFocusTarget?: boolean;
   selectedFilePath: string | null;
   onFileSelect: (
     file: FileTreeNode,
@@ -295,6 +296,7 @@ const NewFileInput = memo(function NewFileInput({
 function FileTreeItem({
   node,
   depth,
+  isPrimaryFocusTarget = false,
   selectedFilePath,
   onFileSelect,
   onFileHover,
@@ -415,6 +417,9 @@ function FileTreeItem({
 
   const buttonElement = (
     <button
+      data-focus-key={
+        isPrimaryFocusTarget ? "sidebar-first-file-item" : undefined
+      }
       data-file-path={node.path}
       onClick={handleClick}
       onMouseEnter={handleMouseEnter}
@@ -499,6 +504,7 @@ function FileTreeItem({
               key={child.path}
               node={child}
               depth={depth + 1}
+              isPrimaryFocusTarget={false}
               selectedFilePath={selectedFilePath}
               onFileSelect={onFileSelect}
               onFileHover={onFileHover}
@@ -637,6 +643,7 @@ export function FileTree({
             key={node.path}
             node={node}
             depth={0}
+            isPrimaryFocusTarget={filesTree[0]?.path === node.path}
             selectedFilePath={selectedFilePath}
             onFileSelect={onFileSelect}
             onFileHover={handleFileHover}
