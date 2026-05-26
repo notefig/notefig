@@ -38,7 +38,6 @@ export interface FocusArbiterOptions {
   defaultTtlMs?: number;
   maxMountAttempts?: number;
   now?: () => number;
-  executeFocus?: (intent: FocusIntent) => boolean;
   requestFrame?: (cb: FrameRequestCallback) => number;
   cancelFrame?: (id: number) => void;
   setTimer?: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>;
@@ -59,7 +58,6 @@ export class FocusArbiter {
   private readonly defaultTtlMs: number;
   private readonly maxMountAttempts: number;
   private readonly now: () => number;
-  private executeFocus: (intent: FocusIntent) => boolean;
   private readonly resolvers = new Map<
     FocusTarget["type"],
     (intent: FocusIntent) => boolean
@@ -94,7 +92,6 @@ export class FocusArbiter {
     this.maxMountAttempts =
       options.maxMountAttempts ?? DEFAULT_MAX_MOUNT_ATTEMPTS;
     this.now = options.now ?? (() => Date.now());
-    this.executeFocus = options.executeFocus ?? (() => false);
     this.requestFrame =
       options.requestFrame ?? ((cb) => requestAnimationFrame(cb));
     this.cancelFrame =
@@ -140,10 +137,6 @@ export class FocusArbiter {
     return id;
   }
 
-  cancel(id: string): void {
-    this.pending.delete(id);
-  }
-
   suppress(scope: FocusDomain | "all", ms: number): void {
     if (this.disposed) return;
 
@@ -181,7 +174,12 @@ export class FocusArbiter {
     }
 
     const resolver = this.resolvers.get(winner.target.type);
-    const focused = resolver ? resolver(winner) : this.executeFocus(winner);
+    if (!resolver) {
+      this.removeIntent(winner.id);
+      return;
+    }
+
+    const focused = resolver(winner);
     if (!focused) {
       if (winner.when === "when-mounted") {
         this.retryIntent(winner);
@@ -212,10 +210,6 @@ export class FocusArbiter {
 
   getPendingCount(): number {
     return this.pending.size;
-  }
-
-  setExecutor(executor: (intent: FocusIntent) => boolean): void {
-    this.executeFocus = executor;
   }
 
   registerResolver(

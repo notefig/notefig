@@ -10,10 +10,6 @@ describe("FocusArbiter", () => {
 
     const arbiter = new FocusArbiter({
       now: () => now,
-      executeFocus: (intent) => {
-        focused.push(intent);
-        return true;
-      },
       requestFrame: () => 1,
       cancelFrame: () => {},
       setTimer: ((cb) => {
@@ -25,6 +21,15 @@ describe("FocusArbiter", () => {
         timers.delete(id as unknown as number);
       }) as (id: ReturnType<typeof setTimeout>) => void,
       queueMicrotask: () => {},
+    });
+
+    arbiter.registerResolver("editor", (intent) => {
+      focused.push(intent);
+      return true;
+    });
+    arbiter.registerResolver("element", (intent) => {
+      focused.push(intent);
+      return true;
     });
 
     return {
@@ -39,6 +44,30 @@ describe("FocusArbiter", () => {
         callbacks.forEach((cb) => cb());
       },
     };
+  }
+
+  function createStaticArbiter(options?: {
+    executeFocus?: () => boolean;
+    maxMountAttempts?: number;
+    now?: () => number;
+  }) {
+    const arbiter = new FocusArbiter({
+      now: options?.now,
+      maxMountAttempts: options?.maxMountAttempts,
+      requestFrame: () => 1,
+      cancelFrame: () => {},
+      setTimer: (() => {
+        return 1 as unknown as ReturnType<typeof setTimeout>;
+      }) as (cb: () => void, ms: number) => ReturnType<typeof setTimeout>,
+      clearTimer: () => {},
+      queueMicrotask: () => {},
+    });
+
+    const execute = options?.executeFocus ?? (() => true);
+    arbiter.registerResolver("editor", () => execute());
+    arbiter.registerResolver("element", () => execute());
+
+    return arbiter;
   }
 
   it("selects highest-priority intent", () => {
@@ -174,17 +203,10 @@ describe("FocusArbiter", () => {
   it("retries when-mounted intents and rejects after max attempts", () => {
     let now = 1000;
 
-    const arbiter = new FocusArbiter({
+    const arbiter = createStaticArbiter({
       now: () => now,
       maxMountAttempts: 2,
       executeFocus: () => false,
-      requestFrame: () => 1,
-      cancelFrame: () => {},
-      setTimer: (() => {
-        return 1 as unknown as ReturnType<typeof setTimeout>;
-      }) as (cb: () => void, ms: number) => ReturnType<typeof setTimeout>,
-      clearTimer: () => {},
-      queueMicrotask: () => {},
     });
 
     arbiter.request({
@@ -205,16 +227,7 @@ describe("FocusArbiter", () => {
   });
 
   it("drops non-mounted intents when focus execution fails", () => {
-    const arbiter = new FocusArbiter({
-      executeFocus: () => false,
-      requestFrame: () => 1,
-      cancelFrame: () => {},
-      setTimer: (() => {
-        return 1 as unknown as ReturnType<typeof setTimeout>;
-      }) as (cb: () => void, ms: number) => ReturnType<typeof setTimeout>,
-      clearTimer: () => {},
-      queueMicrotask: () => {},
-    });
+    const arbiter = createStaticArbiter({ executeFocus: () => false });
 
     arbiter.request({
       id: "one-shot",
@@ -231,16 +244,7 @@ describe("FocusArbiter", () => {
   });
 
   it("dispose clears pending intents", () => {
-    const arbiter = new FocusArbiter({
-      executeFocus: () => true,
-      requestFrame: () => 1,
-      cancelFrame: () => {},
-      setTimer: (() => {
-        return 1 as unknown as ReturnType<typeof setTimeout>;
-      }) as (cb: () => void, ms: number) => ReturnType<typeof setTimeout>,
-      clearTimer: () => {},
-      queueMicrotask: () => {},
-    });
+    const arbiter = createStaticArbiter({ executeFocus: () => true });
 
     arbiter.request({
       id: "pending",

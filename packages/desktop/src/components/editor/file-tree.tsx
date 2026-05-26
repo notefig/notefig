@@ -113,14 +113,7 @@ const RenameInput = memo(function RenameInput({
   const focusKey = `file-tree-rename-${filePath}`;
   const committedRef = useRef(false);
 
-  useEffect(() => {
-    requestElementFocus(focusKey, {
-      domain: "sidebar",
-      priority: 85,
-      reason: "file-tree-rename",
-      when: "when-mounted",
-    });
-  }, [focusKey]);
+  useSidebarInputFocus(focusKey, "file-tree-rename");
 
   useEffect(() => {
     const input = inputRef.current;
@@ -214,14 +207,7 @@ const NewFileInput = memo(function NewFileInput({
   const committedRef = useRef(false);
   const focusKey = `file-tree-create-${depth}-${type}`;
 
-  useEffect(() => {
-    requestElementFocus(focusKey, {
-      domain: "sidebar",
-      priority: 85,
-      reason: "file-tree-create",
-      when: "when-mounted",
-    });
-  }, [focusKey]);
+  useSidebarInputFocus(focusKey, "file-tree-create");
 
   const commit = useCallback(
     (value: string) => {
@@ -292,6 +278,17 @@ const NewFileInput = memo(function NewFileInput({
     </div>
   );
 });
+
+function useSidebarInputFocus(focusKey: string, reason: string): void {
+  useEffect(() => {
+    requestElementFocus(focusKey, {
+      domain: "sidebar",
+      priority: 85,
+      reason,
+      when: "when-mounted",
+    });
+  }, [focusKey, reason]);
+}
 
 function FileTreeItem({
   node,
