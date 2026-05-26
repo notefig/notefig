@@ -84,6 +84,31 @@ jobs:
         working-directory: packages/desktop
         run: npm run test:unit
 
+  test-desktop-e2e:
+    name: Test Desktop
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: packages/desktop
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Desktop E2E tests
+        working-directory: packages/desktop
+        run: npm run test:e2e -- --project=chromium
+
   test-desktop-tauri:
     name: Test Desktop (Tauri)
     runs-on: macos-latest
