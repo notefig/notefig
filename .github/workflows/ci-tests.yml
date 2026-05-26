@@ -87,7 +87,7 @@ jobs:
   test-desktop-e2e:
     name: Test Desktop
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -101,13 +101,26 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
       - name: Install Playwright Chromium
         working-directory: packages/desktop
         run: npx playwright install --with-deps chromium
 
-      - name: Run Desktop E2E tests
+      - name: Run Desktop E2E tests (smoke on PR, full on main)
         working-directory: packages/desktop
-        run: npm run test:e2e -- --project=chromium
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            npm run test:e2e -- --project=chromium --grep "@smoke"
+          else
+            npm run test:e2e -- --project=chromium
+          fi
 
   test-desktop-tauri:
     name: Test Desktop (Tauri)

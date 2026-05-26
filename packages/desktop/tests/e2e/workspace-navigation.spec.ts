@@ -13,7 +13,9 @@ test.describe("Workspace Navigation", () => {
     await setupTestDatabase(page, "workspace-navigation");
   });
 
-  test("should open workspace and display file tree", async ({ page }) => {
+  test("should open workspace and display file tree @smoke", async ({
+    page,
+  }) => {
     const fixture = workspaceNavigationFixture.populatedWorkspace;
 
     // Navigate to workspace first (so IndexedDB context is available)
@@ -41,7 +43,7 @@ test.describe("Workspace Navigation", () => {
     await expect(subfolderButton).toBeVisible();
   });
 
-  test("should handle empty workspace", async ({ page }) => {
+  test("should handle empty workspace @smoke", async ({ page }) => {
     const fixture = workspaceNavigationFixture.emptyWorkspace;
 
     // Navigate to workspace first

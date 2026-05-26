@@ -14,7 +14,7 @@ import {
 import { contentPersistenceFixture } from "./content-persistence.fixture";
 
 test.describe("Content & Persistence", () => {
-  test("Auto-save functionality", async ({ page }) => {
+  test("Auto-save functionality @smoke", async ({ page }) => {
     // Setup unique database for this test
     await setupTestDatabase(page, "content-persistence-autosave");
 

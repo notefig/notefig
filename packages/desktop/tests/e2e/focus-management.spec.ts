@@ -79,7 +79,7 @@ test.describe("Focus Management", () => {
     await waitForFileTree(page, "tab-a.md");
   });
 
-  test("context menu rename keeps input focus", async ({ page }) => {
+  test("context menu rename keeps input focus @smoke", async ({ page }) => {
     await page.locator('button:has-text("rename-me.md")').first().click({
       button: "right",
     });
