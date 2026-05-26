@@ -60,6 +60,10 @@ export class FocusArbiter {
   private readonly maxMountAttempts: number;
   private readonly now: () => number;
   private executeFocus: (intent: FocusIntent) => boolean;
+  private readonly resolvers = new Map<
+    FocusTarget["type"],
+    (intent: FocusIntent) => boolean
+  >();
   private readonly requestFrame: (cb: FrameRequestCallback) => number;
   private readonly cancelFrame: (id: number) => void;
   private readonly setTimer: (
@@ -176,7 +180,8 @@ export class FocusArbiter {
       return;
     }
 
-    const focused = this.executeFocus(winner);
+    const resolver = this.resolvers.get(winner.target.type);
+    const focused = resolver ? resolver(winner) : this.executeFocus(winner);
     if (!focused) {
       if (winner.when === "when-mounted") {
         this.retryIntent(winner);
@@ -211,6 +216,13 @@ export class FocusArbiter {
 
   setExecutor(executor: (intent: FocusIntent) => boolean): void {
     this.executeFocus = executor;
+  }
+
+  registerResolver(
+    type: FocusTarget["type"],
+    resolver: (intent: FocusIntent) => boolean,
+  ): void {
+    this.resolvers.set(type, resolver);
   }
 
   dispose(): void {
@@ -342,3 +354,36 @@ export class FocusArbiter {
 }
 
 export const focusArbiter = new FocusArbiter({});
+
+focusArbiter.registerResolver("element", (intent) => {
+  if (intent.target.type !== "element") return false;
+
+  const selector = `[data-focus-key="${escapeForAttributeSelector(intent.target.key)}"]`;
+  const el = document.querySelector(selector);
+  if (!(el instanceof HTMLElement)) return false;
+
+  el.focus({ preventScroll: true });
+  return document.activeElement === el;
+});
+
+export function requestElementFocus(
+  key: string,
+  options: {
+    domain?: FocusDomain;
+    priority?: number;
+    reason?: string;
+    when?: FocusTiming;
+  } = {},
+): string {
+  return focusArbiter.request({
+    domain: options.domain ?? "misc",
+    target: { type: "element", key },
+    priority: options.priority ?? 10,
+    reason: options.reason ?? "element-focus",
+    when: options.when ?? "immediate",
+  });
+}
+
+function escapeForAttributeSelector(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}

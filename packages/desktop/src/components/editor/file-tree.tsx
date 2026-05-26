@@ -36,6 +36,7 @@ import {
 import { useLiveQuery } from "@tanstack/react-db";
 import { FileTreeContextMenu } from "./file-tree-context-menu";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
+import { requestElementFocus } from "@/utils/focus-arbiter";
 
 /** Discriminated union representing the file tree's inline-editing state. */
 export type FileTreeMode =
@@ -108,37 +109,33 @@ const RenameInput = memo(function RenameInput({
   onCancel,
 }: RenameInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const focusKey = `file-tree-rename-${filePath}`;
   const committedRef = useRef(false);
-  // Guard against premature blur caused by the context menu's focus-restore
-  // racing with our autoFocus. Becomes true after a short delay.
-  const readyRef = useRef(false);
 
   useEffect(() => {
-    const timerId = setTimeout(() => {
-      readyRef.current = true;
-    }, 150);
-
-    // Select the appropriate text range once mounted.
-    const rafId = requestAnimationFrame(() => {
-      const input = inputRef.current;
-      if (!input) return;
-      input.focus();
-      if (fileType === "file") {
-        const ext = getFileExtension(filePath);
-        const nameWithoutExt = ext
-          ? initialName.slice(0, -(ext.length + 1))
-          : initialName;
-        input.setSelectionRange(0, nameWithoutExt.length);
-      } else {
-        input.select();
-      }
+    requestElementFocus(focusKey, {
+      domain: "sidebar",
+      priority: 85,
+      reason: "file-tree-rename",
+      when: "when-mounted",
     });
+  }, [focusKey]);
 
-    return () => {
-      clearTimeout(timerId);
-      cancelAnimationFrame(rafId);
-    };
-  }, []); // Only on mount
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    if (document.activeElement !== input) return;
+
+    if (fileType === "file") {
+      const ext = getFileExtension(filePath);
+      const nameWithoutExt = ext
+        ? initialName.slice(0, -(ext.length + 1))
+        : initialName;
+      input.setSelectionRange(0, nameWithoutExt.length);
+    } else {
+      input.select();
+    }
+  }, [filePath, fileType, initialName]);
 
   const commit = useCallback(
     (value: string) => {
@@ -174,12 +171,6 @@ const RenameInput = memo(function RenameInput({
 
   const handleBlur = useCallback(
     (e: React.FocusEvent<HTMLInputElement>) => {
-      // If the input loses focus before we're ready (context menu focus-restore
-      // race), re-focus instead of committing.
-      if (!readyRef.current) {
-        e.currentTarget.focus();
-        return;
-      }
       commit(e.currentTarget.value);
     },
     [commit],
@@ -188,6 +179,7 @@ const RenameInput = memo(function RenameInput({
   return (
     <input
       ref={inputRef}
+      data-focus-key={focusKey}
       autoFocus
       defaultValue={initialName}
       className="flex-1 min-w-0 bg-background text-foreground text-sm outline-none border border-ring rounded px-1"
@@ -219,22 +211,16 @@ const NewFileInput = memo(function NewFileInput({
 }: NewFileInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const committedRef = useRef(false);
-  const readyRef = useRef(false);
+  const focusKey = `file-tree-create-${depth}-${type}`;
 
   useEffect(() => {
-    const timerId = setTimeout(() => {
-      readyRef.current = true;
-    }, 150);
-
-    const rafId = requestAnimationFrame(() => {
-      inputRef.current?.focus();
+    requestElementFocus(focusKey, {
+      domain: "sidebar",
+      priority: 85,
+      reason: "file-tree-create",
+      when: "when-mounted",
     });
-
-    return () => {
-      clearTimeout(timerId);
-      cancelAnimationFrame(rafId);
-    };
-  }, []);
+  }, [focusKey]);
 
   const commit = useCallback(
     (value: string) => {
@@ -269,10 +255,6 @@ const NewFileInput = memo(function NewFileInput({
 
   const handleBlur = useCallback(
     (e: React.FocusEvent<HTMLInputElement>) => {
-      if (!readyRef.current) {
-        e.currentTarget.focus();
-        return;
-      }
       commit(e.currentTarget.value);
     },
     [commit],
@@ -296,6 +278,7 @@ const NewFileInput = memo(function NewFileInput({
         )}
         <input
           ref={inputRef}
+          data-focus-key={focusKey}
           autoFocus
           placeholder={type === "file" ? "filename.md" : "folder name"}
           className="flex-1 min-w-0 bg-background text-foreground text-sm outline-none border border-ring rounded px-1"

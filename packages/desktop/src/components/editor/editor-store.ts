@@ -111,23 +111,17 @@ const EDITOR_FOCUS_PRIORITY = 70;
 let observedFocusIntentId: string | null = null;
 let observedFocusResult = false;
 
-function executeFocusIntent(intent: {
-  target:
-    | { type: "editor"; filePath: string }
-    | { type: "element"; key: string };
-}): boolean {
-  if (intent.target.type !== "editor") {
-    return false;
-  }
-
-  const instance = editorInstances.get(intent.target.filePath);
+function focusEditorPath(filePath: string): boolean {
+  const instance = editorInstances.get(filePath);
   if (!instance) return false;
 
   return instance.focus();
 }
 
-focusArbiter.setExecutor((intent) => {
-  const result = executeFocusIntent(intent);
+focusArbiter.registerResolver("editor", (intent) => {
+  if (intent.target.type !== "editor") return false;
+
+  const result = focusEditorPath(intent.target.filePath);
   if (observedFocusIntentId === intent.id) {
     observedFocusResult = result;
   }
