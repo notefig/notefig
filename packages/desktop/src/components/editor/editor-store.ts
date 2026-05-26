@@ -25,6 +25,8 @@ import {
   rawLineToBlockPath,
   type BlockNode,
 } from "@/utils/navigation-utils";
+import { focusArbiter } from "@/utils/focus-arbiter";
+import { isSidebarTextEntryActive } from "@/utils/focus-arbiter";
 
 /**
  * Location for editor navigation.
@@ -104,30 +106,58 @@ export interface ImageInstance extends EditorInstance {
 /** Module-level store: file path → editor instance */
 const editorInstances = new Map<string, EditorInstance>();
 
-/**
- * When true, all editor focus() calls are suppressed.
- * Used to prevent the editor from stealing focus from the search panel.
- */
-let focusSuppressed = false;
-let focusSuppressTimer: ReturnType<typeof setTimeout> | null = null;
+const EDITOR_FOCUS_PRIORITY = 70;
+
+let observedFocusIntentId: string | null = null;
+let observedFocusResult = false;
+
+function focusEditorPath(filePath: string): boolean {
+  const instance = editorInstances.get(filePath);
+  if (!instance) return false;
+
+  return instance.focus();
+}
+
+focusArbiter.registerResolver("editor", (intent) => {
+  if (intent.target.type !== "editor") return false;
+
+  const result = focusEditorPath(intent.target.filePath);
+  if (observedFocusIntentId === intent.id) {
+    observedFocusResult = result;
+  }
+  return result;
+});
 
 /**
  * Suppress all editor focus for the given duration (ms).
  * Calling again resets the timer.
  */
 export function suppressEditorFocus(durationMs = 300): void {
-  focusSuppressed = true;
-  if (focusSuppressTimer) clearTimeout(focusSuppressTimer);
-  focusSuppressTimer = setTimeout(() => {
-    focusSuppressed = false;
-    focusSuppressTimer = null;
-  }, durationMs);
+  focusArbiter.suppress("editor", durationMs);
 }
 
 function isEditorFocusSuppressed(): boolean {
-  if (focusSuppressed) return true;
-  const active = document.activeElement;
-  return !!(active && active.closest("[data-sidebar]"));
+  return isSidebarTextEntryActive(document.activeElement);
+}
+
+export function setActiveEditorFocusTarget(filePath: string | null): void {
+  focusArbiter.setActiveEditor(filePath);
+}
+
+export function requestEditorFocus(
+  filePath: string,
+  options: {
+    when?: "immediate" | "next-frame" | "when-mounted";
+    reason?: string;
+  } = {},
+): string {
+  return focusArbiter.request({
+    domain: "editor",
+    target: { type: "editor", filePath },
+    priority: EDITOR_FOCUS_PRIORITY,
+    reason: options.reason ?? "editor-focus",
+    when: options.when ?? "immediate",
+  });
 }
 
 function createMarkdownInstance(content: string): MarkdownInstance {
@@ -629,7 +659,18 @@ export function disposeAllEditors(): void {
 export function focusEditor(filePath: string): boolean {
   const instance = editorInstances.get(filePath);
   if (!instance) return false;
-  return instance.focus();
+
+  const intentId = requestEditorFocus(filePath, {
+    when: "immediate",
+    reason: "focus-editor",
+  });
+
+  observedFocusIntentId = intentId;
+  observedFocusResult = false;
+  focusArbiter.flush();
+  observedFocusIntentId = null;
+
+  return observedFocusResult;
 }
 
 /**

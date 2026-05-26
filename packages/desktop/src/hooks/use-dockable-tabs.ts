@@ -22,6 +22,8 @@ import {
 import {
   disposeEditor,
   focusEditor,
+  requestEditorFocus,
+  setActiveEditorFocusTarget,
   getSelectedText as getSelectedTextForEditor,
 } from "@/components/editor/editor-store";
 import type { FileTreeNode } from "@/utils/fs";
@@ -213,21 +215,17 @@ export function useDockableTabs(
   const activeTabId = getFocusedTabId();
 
   useEffect(() => {
+    setActiveEditorFocusTarget(activeTabId);
+  }, [activeTabId]);
+
+  useEffect(() => {
     const tabId = getFocusedTabId();
     if (!tabId) return;
 
-    // Use rAF to ensure DOM is ready and component has mounted
-    const rafId = requestAnimationFrame(() => {
-      // Don't steal focus from sidebar inputs (e.g. search panel)
-      const active = document.activeElement;
-      if (active && active.closest("[data-sidebar]")) return;
-
-      focusEditor(tabId);
+    requestEditorFocus(tabId, {
+      when: "when-mounted",
+      reason: "tab-selected",
     });
-
-    return () => {
-      cancelAnimationFrame(rafId);
-    };
   }, [getFocusedTabId]);
 
   const getActiveWindowId = useCallback(() => {

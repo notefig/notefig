@@ -29,6 +29,7 @@ import { writeFileContent } from "@/utils/collections";
 import { calculateContentHash } from "@/utils/hash";
 import {
   getOrCreateEditor,
+  requestEditorFocus,
   saveSelection,
   getSavedSelection,
   isMarkdownInstance,
@@ -164,34 +165,22 @@ export function TextEditor({ file, basePath }: TextEditorProps) {
   // We save the selection on unmount and restore it here.
   //
   // Timing: useEffect fires after Editable's useLayoutEffect has set
-  // EDITOR_TO_ELEMENT. A single rAF waits for browser paint and focus
-  // events to settle. We blur first to clear stale IS_FOCUSED state
-  // (the tab click may leave it truthy), then focus at the saved position.
+  // EDITOR_TO_ELEMENT. We now request focus through the arbiter so it can
+  // reconcile this request with other surfaces and timing.
   useEffect(() => {
     if (!editor) return;
 
-    let cancelled = false;
-    const rafId = requestAnimationFrame(() => {
-      if (cancelled) return;
+    const saved = getSavedSelection(file.path);
+    if (saved) {
+      editor.tf.select(saved);
+    }
 
-      // Don't steal focus from sidebar inputs (e.g. search panel)
-      const active = document.activeElement;
-      if (active && active.closest("[data-sidebar]")) return;
-
-      // Force-clear IS_FOCUSED so DOMEditor.focus() doesn't bail as no-op
-      editor.tf.blur();
-
-      const saved = getSavedSelection(file.path);
-      if (saved) {
-        editor.tf.focus({ at: saved });
-      } else {
-        editor.tf.focus();
-      }
+    requestEditorFocus(file.path, {
+      when: "next-frame",
+      reason: "text-editor-mount",
     });
 
     return () => {
-      cancelled = true;
-      cancelAnimationFrame(rafId);
       // Save selection on unmount so it survives the remount cycle
       if (editor.selection) {
         saveSelection(file.path, editor.selection);

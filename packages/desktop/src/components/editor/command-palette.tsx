@@ -376,9 +376,7 @@ export function CommandPalette({
     const shouldRestore = !skipFocusRestoreRef.current;
     skipFocusRestoreRef.current = false;
     if (!shouldRestore) return;
-    requestAnimationFrame(() => {
-      onFocusEditor?.();
-    });
+    onFocusEditor?.();
   };
 
   return (
