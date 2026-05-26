@@ -112,14 +112,22 @@ export function Sidebar({
   }, []);
 
   useEffect(() => {
+    if (mode.type !== "idle") return;
+
     // When the sidebar mounts (opened), focus the first file item for keyboard nav.
+    // Skip this while inline-create/rename modes are active to avoid stealing focus.
     const raf = requestAnimationFrame(() => {
+      const hasInlineInput = containerRef.current?.querySelector(
+        "input[data-focus-key]",
+      );
+      if (hasInlineInput) return;
+
       const firstButton =
         containerRef.current?.querySelector<HTMLButtonElement>("button");
       firstButton?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [mode.type]);
 
   const handleNewFile = useCallback(() => {
     onModeChange({

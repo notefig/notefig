@@ -244,21 +244,36 @@ export const Workspace = () => {
   const [fileTreeMode, setFileTreeMode] =
     useState<FileTreeMode>(FILE_TREE_IDLE);
 
+  const openSidebarIfCollapsed = useCallback(() => {
+    if (!isSidebarCollapsed) return;
+
+    setUrlSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("sidebar");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [isSidebarCollapsed, setUrlSearchParams]);
+
   const handleNewFile = useCallback(() => {
+    openSidebarIfCollapsed();
     setFileTreeMode({
       type: "creating",
       parentPath: workspacePath,
       itemType: "file",
     });
-  }, [workspacePath]);
+  }, [workspacePath, openSidebarIfCollapsed]);
 
   const handleNewDirectory = useCallback(() => {
+    openSidebarIfCollapsed();
     setFileTreeMode({
       type: "creating",
       parentPath: workspacePath,
       itemType: "directory",
     });
-  }, [workspacePath]);
+  }, [workspacePath, openSidebarIfCollapsed]);
 
   const runEditorHistoryAction = useCallback(
     (action: "undo" | "redo") => {
