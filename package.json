@@ -19,7 +19,8 @@
     "test:desktop": "npm run test:unit -w packages/desktop",
     "lint": "npm run lint -w packages/cli",
     "sync-themes": "rsync -av --delete --exclude-from=.rsync-exclude packages/themes/ packages/cli/dist/themes/",
-    "clean": "rm -rf packages/*/dist packages/*/node_modules node_modules"
+    "clean": "rm -rf packages/*/dist packages/*/node_modules node_modules",
+    "postinstall": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",
