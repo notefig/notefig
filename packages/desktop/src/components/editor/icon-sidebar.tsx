@@ -154,7 +154,12 @@ export const IconSidebar = memo(function IconSidebar({
                   item.active && "bg-sidebar-accent",
                 )}
               >
-                <item.icon className="w-4 h-4 text-muted-foreground" />
+                <item.icon
+                  className={cn(
+                    "w-4 h-4",
+                    item.active ? "text-foreground" : "text-muted-foreground",
+                  )}
+                />
                 <span className="sr-only">{item.label}</span>
               </button>
             </TooltipTrigger>
