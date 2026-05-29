@@ -88,7 +88,7 @@ jobs:
           command: pages deploy dist --project-name=metrists-app --branch=main --commit-dirty=true
           workingDirectory: packages/desktop
 
-  build-and-publish:
+  build:
     needs: bump-and-tag
     permissions:
       contents: write
@@ -146,4 +146,36 @@ jobs:
           releaseBody: "See the assets to download this version and install."
           releaseDraft: false
           prerelease: false
+          includeUpdaterJson: false
           args: ${{ matrix.args }}
+
+      - name: Upload updater fragment
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-json-${{ matrix.args }}
+          path: packages/desktop/src-tauri/target/*/release/bundle/**/latest.json
+
+  publish-updater:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download updater fragments
+        uses: actions/download-artifact@v4
+        with:
+          path: updater-fragments
+          pattern: updater-json-*
+
+      - name: Merge latest.json
+        run: |
+          jq -s '
+            .[0] as $base |
+            reduce .[1:][] as $item ($base; .platforms += $item.platforms)
+          ' updater-fragments/*/latest.json > latest.json
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop-v${{ inputs.version }}
+          files: latest.json
