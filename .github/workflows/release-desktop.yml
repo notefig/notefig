@@ -98,12 +98,16 @@ jobs:
         include:
           - platform: macos-latest
             args: --target aarch64-apple-darwin
+            id: macos-aarch64
           - platform: macos-latest
             args: --target x86_64-apple-darwin
+            id: macos-x86_64
           # - platform: ubuntu-22.04
           #   args: --bundles deb,appimage
+          #   id: linux
           # - platform: windows-latest
           #   args: ""
+          #   id: windows
 
     runs-on: ${{ matrix.platform }}
 
@@ -146,14 +150,25 @@ jobs:
           releaseBody: "See the assets to download this version and install."
           releaseDraft: false
           prerelease: false
-          includeUpdaterJson: false
+          uploadUpdaterJson: false
           args: ${{ matrix.args }}
+
+      - name: Stage updater fragment
+        run: |
+          JSON_PATH=$(find . -maxdepth 2 -name latest.json | head -n1)
+          if [ -z "$JSON_PATH" ]; then
+            echo "ERROR: latest.json not found"
+            find . -name latest.json 2>/dev/null
+            exit 1
+          fi
+          cp "$JSON_PATH" latest.json
 
       - name: Upload updater fragment
         uses: actions/upload-artifact@v4
         with:
-          name: updater-json-${{ matrix.args }}
-          path: packages/desktop/src-tauri/target/*/release/bundle/**/latest.json
+          name: updater-json-${{ matrix.id }}
+          path: latest.json
+          if-no-files-found: error
 
   publish-updater:
     needs: build
@@ -169,13 +184,15 @@ jobs:
 
       - name: Merge latest.json
         run: |
-          jq -s '
+          find updater-fragments -name latest.json -print0 | xargs -0 jq -s '
             .[0] as $base |
             reduce .[1:][] as $item ($base; .platforms += $item.platforms)
-          ' updater-fragments/*/latest.json > latest.json
+          ' > latest.json
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: desktop-v${{ inputs.version }}
           files: latest.json
