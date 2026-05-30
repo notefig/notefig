@@ -150,7 +150,7 @@ jobs:
           releaseBody: "See the assets to download this version and install."
           releaseDraft: false
           prerelease: false
-          uploadUpdaterJson: false
+          includeUpdaterJson: false
           args: ${{ matrix.args }}
 
       - name: Stage updater fragment
@@ -200,3 +200,4 @@ jobs:
         with:
           tag_name: desktop-v${{ inputs.version }}
           files: latest.json
+          overwrite_files: true
