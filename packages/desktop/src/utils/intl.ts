@@ -114,6 +114,23 @@ i18n
 
           // General Settings
           version: "Version",
+          updaterIdle: "Click to check for updates.",
+          updaterChecking: "Checking for updates...",
+          updaterUpToDate: "You're on the latest version.",
+          updaterAvailable: "Version {{version}} is available.",
+          updaterDownloading: "Downloading update...",
+          updaterReady: "Update downloaded. Restart to apply.",
+          updaterCheckForUpdates: "Check for updates",
+          updaterDownload: "Download",
+          updaterRestart: "Restart",
+          updaterGenericError: "Something went wrong. Please try again.",
+          updaterToastAvailableTitle: "Update {{version}} is available",
+          updaterToastAvailableDescription:
+            "Download now and restart when it's ready.",
+          updaterToastDownloading: "Downloading update...",
+          updaterToastDownloaded: "Update downloaded.",
+          updaterToastReadyToRestart:
+            "Update is ready. Restart to apply changes.",
           installerVersion: "Installer version:",
           newVersionReady: "A new version is ready to be installed.",
           readChangelog: "Read the changelog.",
