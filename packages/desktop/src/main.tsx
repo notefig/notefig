@@ -5,6 +5,8 @@ import { Buffer } from "buffer";
 import { BrowserRouter } from "react-router-dom";
 import "./utils/intl";
 import { ThemeProvider } from "@/components/theme-provider";
+import { AppUpdaterBootstrap } from "@/components/app-updater";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { queryClient } from "@/utils/collections";
 import { App } from "./App";
@@ -21,7 +23,9 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <BrowserRouter>
         <ThemeProvider>
           <TooltipProvider>
+            <AppUpdaterBootstrap />
             <App />
+            <Toaster />
           </TooltipProvider>
         </ThemeProvider>
       </BrowserRouter>

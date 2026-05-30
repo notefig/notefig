@@ -1,6 +1,7 @@
 import type {
   IPlatformAdapter,
   PlatformEventListener,
+  PlatformUpdater,
   Result,
   BatchResult,
   FileSystemError,
@@ -24,6 +25,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   private unlistenFns: Promise<UnlistenFn>[] = [];
   private kvStore = new LazyStore("kv.json");
   private gitLocks = new Set<string>();
+  private updater: PlatformUpdater | null = null;
 
   async pickDirectory(title: string): Promise<string | null> {
     const result = await open({
@@ -673,6 +675,107 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     };
 
     return host;
+  }
+
+  getUpdater(): PlatformUpdater {
+    if (this.updater) {
+      return this.updater;
+    }
+
+    let pendingUpdate: Awaited<
+      ReturnType<Awaited<typeof import("@tauri-apps/plugin-updater")>["check"]>
+    > = null;
+
+    this.updater = {
+      check: async () => {
+        try {
+          const { check } = await import("@tauri-apps/plugin-updater");
+          const update = await check();
+
+          if (!update) {
+            pendingUpdate = null;
+            return {
+              status: "up-to-date",
+              flow: "download-restart",
+            };
+          }
+
+          pendingUpdate = update;
+
+          return {
+            status: "available",
+            flow: "download-restart",
+            version: update.version,
+            body: update.body ?? undefined,
+          };
+        } catch (error) {
+          return {
+            status: "error",
+            error:
+              error instanceof Error ? error.message : "UPDATE_CHECK_FAILED",
+          };
+        }
+      },
+      apply: async function* () {
+        if (!pendingUpdate) {
+          yield {
+            status: "error",
+            error: "NO_PENDING_UPDATE",
+          };
+          return;
+        }
+
+        let total: number | null = null;
+
+        yield {
+          status: "downloading",
+          downloaded: 0,
+          total: null,
+        };
+
+        try {
+          await pendingUpdate.downloadAndInstall((event) => {
+            if (event.event === "Started") {
+              total = event.data.contentLength ?? null;
+            }
+          });
+
+          pendingUpdate = null;
+
+          if (total !== null) {
+            yield {
+              status: "downloading",
+              downloaded: total,
+              total,
+            };
+          }
+
+          yield {
+            status: "ready",
+          };
+        } catch (error) {
+          yield {
+            status: "error",
+            error:
+              error instanceof Error ? error.message : "UPDATE_DOWNLOAD_FAILED",
+          };
+        }
+      },
+      restart: async () => {
+        try {
+          const { relaunch } = await import("@tauri-apps/plugin-process");
+          await relaunch();
+          return { status: "restarted" };
+        } catch (error) {
+          return {
+            status: "error",
+            error: error instanceof Error ? error.message : "RELAUNCH_FAILED",
+          };
+        }
+      },
+    };
+
+    return this.updater;
   }
 
   private cleanupListeners(): void {

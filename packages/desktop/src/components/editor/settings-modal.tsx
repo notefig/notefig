@@ -24,11 +24,17 @@ import {
   AlertCircle,
   Loader2,
 } from "lucide-react";
-import { useUpdater } from "@/hooks/use-updater";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useSearchParams } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  checkForUpdate,
+  getAppUpdaterQueryOptions,
+  relaunchApp,
+  startDownloadWithToastPromise,
+} from "@/components/app-updater";
 
 interface SettingsModalProps {
   direction: "ltr" | "rtl";
@@ -280,15 +286,10 @@ function AppearanceSettings() {
 }
 
 function UpdateSection() {
-  const {
-    status,
-    progress,
-    error,
-    updateInfo,
-    checkForUpdate,
-    downloadAndInstall,
-    relaunch,
-  } = useUpdater();
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const { data: updater } = useQuery(getAppUpdaterQueryOptions(queryClient));
+  const { status, progress, error, updateInfo, flow } = updater;
 
   const currentVersion = __APP_VERSION__;
 
@@ -304,44 +305,40 @@ function UpdateSection() {
           <h3 className="text-base font-medium">Version {currentVersion}</h3>
 
           {status === "idle" && (
-            <p className="text-sm text-muted-foreground">
-              Click to check for updates.
-            </p>
+            <p className="text-sm text-muted-foreground">{t("updaterIdle")}</p>
           )}
           {status === "checking" && (
             <p className="text-sm text-muted-foreground">
-              Checking for updates...
+              {t("updaterChecking")}
             </p>
           )}
           {status === "up-to-date" && (
             <p className="text-sm text-muted-foreground flex items-center gap-1.5">
               <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-              You're on the latest version.
+              {t("updaterUpToDate")}
             </p>
           )}
           {status === "available" && updateInfo && (
             <p className="text-sm text-muted-foreground">
-              Version {updateInfo.version} is available.
+              {t("updaterAvailable", { version: updateInfo.version })}
             </p>
           )}
           {status === "downloading" && (
             <div className="space-y-1.5">
               <p className="text-sm text-muted-foreground flex items-center gap-1.5">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Downloading update...
+                {t("updaterDownloading")}
                 {progressPercent !== null && ` ${progressPercent}%`}
               </p>
             </div>
           )}
           {status === "ready" && (
-            <p className="text-sm text-muted-foreground">
-              Update downloaded. Restart to apply.
-            </p>
+            <p className="text-sm text-muted-foreground">{t("updaterReady")}</p>
           )}
           {status === "error" && (
             <p className="text-sm text-destructive flex items-center gap-1.5">
               <AlertCircle className="h-3.5 w-3.5" />
-              {error ?? "Update check failed."}
+              {error ?? t("updaterGenericError")}
             </p>
           )}
         </div>
@@ -353,30 +350,36 @@ function UpdateSection() {
             status === "error") && (
             <Button
               variant="secondary"
-              onClick={checkForUpdate}
+              onClick={() => {
+                void checkForUpdate(queryClient);
+              }}
               disabled={status === "checking"}
             >
               {status === "checking" && (
                 <Loader2 className="h-4 w-4 animate-spin" />
               )}
-              Check for updates
+              {t("updaterCheckForUpdates")}
             </Button>
           )}
           {status === "available" && (
             <Button
               className="bg-primary hover:bg-primary/90 text-primary-foreground"
-              onClick={downloadAndInstall}
+              onClick={() => {
+                startDownloadWithToastPromise(queryClient);
+              }}
             >
               <Download className="h-4 w-4 mr-1.5" />
-              Download
+              {flow === "refresh" ? t("updaterRefresh") : t("updaterDownload")}
             </Button>
           )}
           {status === "ready" && (
             <Button
               className="bg-primary hover:bg-primary/90 text-primary-foreground"
-              onClick={relaunch}
+              onClick={() => {
+                void relaunchApp(queryClient);
+              }}
             >
-              Restart
+              {t("updaterRestart")}
             </Button>
           )}
         </div>

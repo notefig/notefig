@@ -3,6 +3,7 @@ import type {
   FileSystemError,
   FileSystemMetadata,
   IPlatformAdapter,
+  PlatformUpdater,
   PlatformEventListener,
   Result,
   SearchMatch,
@@ -89,6 +90,66 @@ const BINARY_EXTENSIONS = new Set([
 function isBinaryByExtension(filePath: string): boolean {
   const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
   return BINARY_EXTENSIONS.has(ext);
+}
+
+const GITHUB_LATEST_MANIFEST_URL =
+  "https://github.com/metrists/metrists/releases/latest/download/latest.json";
+
+function normalizeVersion(version: string): number[] {
+  const sanitized = version.trim().replace(/^v/i, "");
+  return sanitized
+    .split(/[.-]/)
+    .map((part) => Number.parseInt(part, 10))
+    .map((part) => (Number.isFinite(part) ? part : 0));
+}
+
+function isRemoteVersionNewer(
+  remoteVersion: string,
+  currentVersion: string,
+): boolean {
+  const remote = normalizeVersion(remoteVersion);
+  const current = normalizeVersion(currentVersion);
+  const length = Math.max(remote.length, current.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const remotePart = remote[index] ?? 0;
+    const currentPart = current[index] ?? 0;
+    if (remotePart > currentPart) return true;
+    if (remotePart < currentPart) return false;
+  }
+
+  return false;
+}
+
+function extractManifestInfo(payload: unknown): {
+  version: string;
+  body?: string;
+} | null {
+  if (!payload || typeof payload !== "object") return null;
+  const maybeRecord = payload as Record<string, unknown>;
+  const version = maybeRecord.version;
+  if (typeof version !== "string" || version.trim().length === 0) {
+    return null;
+  }
+
+  const notes = maybeRecord.notes;
+  const body = typeof notes === "string" ? notes : undefined;
+
+  return {
+    version,
+    body,
+  };
+}
+
+function getCurrentAppVersion(): string {
+  if (
+    typeof __APP_VERSION__ === "string" &&
+    __APP_VERSION__.trim().length > 0
+  ) {
+    return __APP_VERSION__;
+  }
+
+  return "0.0.0";
 }
 
 export abstract class BaseBrowserAdapter implements IPlatformAdapter {
@@ -427,6 +488,61 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     };
 
     return host;
+  }
+
+  getUpdater(): PlatformUpdater {
+    return {
+      check: async () => {
+        try {
+          const response = await fetch(GITHUB_LATEST_MANIFEST_URL, {
+            cache: "no-store",
+          });
+
+          if (!response.ok) {
+            return {
+              status: "error",
+              error: `HTTP_${response.status}`,
+            };
+          }
+
+          const payload = (await response.json()) as unknown;
+          const manifest = extractManifestInfo(payload);
+
+          if (!manifest) {
+            return {
+              status: "error",
+              error: "INVALID_MANIFEST",
+            };
+          }
+
+          if (isRemoteVersionNewer(manifest.version, getCurrentAppVersion())) {
+            return {
+              status: "available",
+              flow: "refresh",
+              version: manifest.version,
+              body: manifest.body,
+            };
+          }
+
+          return {
+            status: "up-to-date",
+            flow: "refresh",
+          };
+        } catch {
+          return {
+            status: "error",
+            error: "NETWORK_ERROR",
+          };
+        }
+      },
+      apply: async function* () {
+        yield { status: "applied" };
+      },
+      restart: async () => {
+        window.location.reload();
+        return { status: "restarted" };
+      },
+    };
   }
 }
 
