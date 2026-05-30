@@ -5,8 +5,9 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { platformAdapter } from "@/adapters";
 import i18n from "@/utils/intl";
-import { isTauri } from "@/utils/platform";
+import type { UpdateFlow } from "@/adapters/platform-adapter.interface";
 
 export type UpdaterStatus =
   | "idle"
@@ -32,11 +33,8 @@ export interface AppUpdaterState {
   progress: UpdateProgress;
   error: string | null;
   updateInfo: UpdateInfo | null;
+  flow: UpdateFlow;
 }
-
-type PendingUpdate = Awaited<
-  ReturnType<Awaited<typeof import("@tauri-apps/plugin-updater")>["check"]>
->;
 
 export const APP_UPDATER_QUERY_KEY = ["app-updater"] as const;
 
@@ -48,9 +46,8 @@ const INITIAL_UPDATER_STATE: AppUpdaterState = {
   },
   error: null,
   updateInfo: null,
+  flow: "download-restart",
 };
-
-let pendingUpdate: PendingUpdate | null = null;
 
 function genericErrorMessage(): string {
   return i18n.t("updaterGenericError");
@@ -98,63 +95,43 @@ export function getAppUpdaterQueryOptions(queryClient: QueryClient) {
 }
 
 export async function checkForUpdate(queryClient: QueryClient) {
-  if (!isTauri()) {
-    patchState(queryClient, {
-      status: "up-to-date",
-      error: null,
-      updateInfo: null,
-    });
-    return;
-  }
-
   patchState(queryClient, {
     status: "checking",
     error: null,
   });
 
-  try {
-    const { check } = await import("@tauri-apps/plugin-updater");
-    const update = await check();
+  const result = await platformAdapter.getUpdater().check();
 
-    if (update) {
-      pendingUpdate = update;
-
-      patchState(queryClient, {
-        status: "available",
-        error: null,
-        updateInfo: {
-          version: update.version,
-          body: update.body ?? undefined,
-        },
-      });
-
-      return;
-    }
-
-    pendingUpdate = null;
-    patchState(queryClient, {
-      status: "up-to-date",
-      error: null,
-      updateInfo: null,
-    });
-  } catch (error) {
-    console.error("[Updater] Check failed:", error);
+  if (result.status === "error") {
     patchState(queryClient, {
       status: "error",
       error: genericErrorMessage(),
     });
+    return;
   }
+
+  if (result.status === "available") {
+    patchState(queryClient, {
+      status: "available",
+      error: null,
+      flow: result.flow,
+      updateInfo: {
+        version: result.version,
+        body: result.body,
+      },
+    });
+    return;
+  }
+
+  patchState(queryClient, {
+    status: "up-to-date",
+    error: null,
+    flow: result.flow,
+    updateInfo: null,
+  });
 }
 
 export async function downloadAndInstall(queryClient: QueryClient) {
-  if (!isTauri() || !pendingUpdate) {
-    patchState(queryClient, {
-      status: "error",
-      error: genericErrorMessage(),
-    });
-    throw new Error(genericErrorMessage());
-  }
-
   patchState(queryClient, {
     status: "downloading",
     error: null,
@@ -164,37 +141,29 @@ export async function downloadAndInstall(queryClient: QueryClient) {
     },
   });
 
-  try {
-    await pendingUpdate.downloadAndInstall((event) => {
-      switch (event.event) {
-        case "Started":
-          patchState(queryClient, {
-            progress: {
-              downloaded: 0,
-              total: event.data.contentLength ?? null,
-            },
-          });
-          break;
-        case "Progress":
-          patchState(queryClient, (state) => ({
-            progress: {
-              ...state.progress,
-              downloaded:
-                state.progress.downloaded + (event.data.chunkLength ?? 0),
-            },
-          }));
-          break;
-        case "Finished":
-          break;
-      }
-    });
+  const updater = platformAdapter.getUpdater();
 
-    patchState(queryClient, {
-      status: "ready",
-      error: null,
-    });
-  } catch (error) {
-    console.error("[Updater] Download failed:", error);
+  for await (const step of updater.apply()) {
+    if (step.status === "downloading") {
+      patchState(queryClient, {
+        status: "downloading",
+        error: null,
+        progress: {
+          downloaded: step.downloaded,
+          total: step.total,
+        },
+      });
+      continue;
+    }
+
+    if (step.status === "ready" || step.status === "applied") {
+      patchState(queryClient, {
+        status: "ready",
+        error: null,
+      });
+      continue;
+    }
+
     patchState(queryClient, {
       status: "error",
       error: genericErrorMessage(),
@@ -204,15 +173,8 @@ export async function downloadAndInstall(queryClient: QueryClient) {
 }
 
 export async function relaunchApp(queryClient: QueryClient) {
-  if (!isTauri()) {
-    return;
-  }
-
-  try {
-    const { relaunch } = await import("@tauri-apps/plugin-process");
-    await relaunch();
-  } catch (error) {
-    console.error("[Updater] Relaunch failed:", error);
+  const result = await platformAdapter.getUpdater().restart();
+  if (result.status === "error") {
     patchState(queryClient, {
       status: "error",
       error: genericErrorMessage(),
@@ -221,6 +183,13 @@ export async function relaunchApp(queryClient: QueryClient) {
 }
 
 export function startDownloadWithToastPromise(queryClient: QueryClient) {
+  const state = getStoredState(queryClient);
+
+  if (state.flow === "refresh") {
+    void relaunchApp(queryClient);
+    return;
+  }
+
   const downloadPromise = downloadAndInstall(queryClient);
 
   toast.promise(downloadPromise, {
@@ -272,9 +241,15 @@ export function AppUpdaterBootstrap() {
         version: updater.updateInfo.version,
       }),
       {
-        description: i18n.t("updaterToastAvailableDescription"),
+        description:
+          updater.flow === "refresh"
+            ? i18n.t("updaterToastAvailableDescriptionRefresh")
+            : i18n.t("updaterToastAvailableDescription"),
         action: {
-          label: i18n.t("updaterDownload"),
+          label:
+            updater.flow === "refresh"
+              ? i18n.t("updaterRefresh")
+              : i18n.t("updaterDownload"),
           onClick: () => {
             startDownloadWithToastPromise(queryClient);
           },

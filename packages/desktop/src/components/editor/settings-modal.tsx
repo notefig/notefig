@@ -289,7 +289,7 @@ function UpdateSection() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { data: updater } = useQuery(getAppUpdaterQueryOptions(queryClient));
-  const { status, progress, error, updateInfo } = updater;
+  const { status, progress, error, updateInfo, flow } = updater;
 
   const currentVersion = __APP_VERSION__;
 
@@ -369,7 +369,7 @@ function UpdateSection() {
               }}
             >
               <Download className="h-4 w-4 mr-1.5" />
-              {t("updaterDownload")}
+              {flow === "refresh" ? t("updaterRefresh") : t("updaterDownload")}
             </Button>
           )}
           {status === "ready" && (

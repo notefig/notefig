@@ -122,11 +122,14 @@ i18n
           updaterReady: "Update downloaded. Restart to apply.",
           updaterCheckForUpdates: "Check for updates",
           updaterDownload: "Download",
+          updaterRefresh: "Refresh",
           updaterRestart: "Restart",
           updaterGenericError: "Something went wrong. Please try again.",
           updaterToastAvailableTitle: "Update {{version}} is available",
           updaterToastAvailableDescription:
             "Download now and restart when it's ready.",
+          updaterToastAvailableDescriptionRefresh:
+            "Refresh now to load the latest version.",
           updaterToastDownloading: "Downloading update...",
           updaterToastDownloaded: "Update downloaded.",
           updaterToastReadyToRestart:

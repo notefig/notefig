@@ -158,6 +158,56 @@ export type PlatformEvent =
  */
 export type PlatformEventListener = (event: PlatformEvent) => void;
 
+export type UpdateFlow = "download-restart" | "refresh";
+
+export type UpdateCheckResult =
+  | {
+      status: "available";
+      flow: UpdateFlow;
+      version: string;
+      body?: string;
+    }
+  | {
+      status: "up-to-date";
+      flow: UpdateFlow;
+    }
+  | {
+      status: "error";
+      error: string;
+    };
+
+export type UpdateApplyProgress =
+  | {
+      status: "downloading";
+      downloaded: number;
+      total: number | null;
+    }
+  | {
+      status: "ready";
+    }
+  | {
+      status: "applied";
+    }
+  | {
+      status: "error";
+      error: string;
+    };
+
+export type UpdateRestartResult =
+  | {
+      status: "restarted";
+    }
+  | {
+      status: "error";
+      error: string;
+    };
+
+export interface PlatformUpdater {
+  check(): Promise<UpdateCheckResult>;
+  apply(): AsyncGenerator<UpdateApplyProgress, void, void>;
+  restart(): Promise<UpdateRestartResult>;
+}
+
 /**
  * Platform adapter interface
  * Provides a unified interface for platform-specific operations
@@ -388,4 +438,9 @@ export interface IPlatformAdapter {
    * This enables one-line Git service initialization per workspace.
    */
   getGitStorageHost(workspacePath: string): GitStorageHost;
+
+  /**
+   * Create updater actions for the current platform.
+   */
+  getUpdater(): PlatformUpdater;
 }
