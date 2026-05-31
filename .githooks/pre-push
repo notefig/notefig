@@ -3,4 +3,4 @@
 set -eu
 
 echo "Running desktop E2E tests before push..."
-npm run -w packages/desktop test:e2e -- --project=chromium
+npm run -w packages/desktop test:e2e -- --project=chromium --workers=3
