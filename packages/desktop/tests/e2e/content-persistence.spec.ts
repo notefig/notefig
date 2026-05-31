@@ -110,10 +110,8 @@ test.describe("Content & Persistence", () => {
   });
 
   test("Large file handling", async ({ page }) => {
-    // Setup unique database
     await setupTestDatabase(page, "content-persistence-large-file");
 
-    // Seed workspace
     await openWorkspace(page, contentPersistenceFixture.workspacePath);
     await seedTestFiles(page, contentPersistenceFixture.files);
     await page.reload();
@@ -121,22 +119,18 @@ test.describe("Content & Persistence", () => {
     // Wait for workspace to load
     await waitForFileTree(page, "large-file.md");
 
-    // Open large file (2000 lines)
     await openFileInTree(page, "large-file.md");
 
-    // Wait a bit longer for large file to render
     await page.waitForTimeout(1000);
 
-    // Verify file opens by checking IndexedDB (editor might chunk/virtualize)
     const dbContent = await getIndexedDBContent(
       page,
       contentPersistenceFixture.workspacePath,
       `${contentPersistenceFixture.workspacePath}/large-file.md`,
     );
     expect(dbContent).toContain("# Large File Test");
-    expect(dbContent).toContain("Section"); // Should contain section headers
+    expect(dbContent).toContain("Section");
 
-    // Verify editor is present and visible
     await page.waitForSelector('[role="textbox"]', { timeout: 10000 });
     const editor = page
       .locator('[role="textbox"]')
@@ -144,15 +138,12 @@ test.describe("Content & Persistence", () => {
       .first();
     expect(await editor.isVisible()).toBe(true);
 
-    // For large files, just verify we can type at the start without selecting all
     await editor.click();
-    await page.keyboard.press("Home"); // Go to start of line
+    await page.keyboard.press("Home");
     await page.keyboard.type("EDITED: ", { delay: 5 });
 
-    // Wait for auto-save
-    await waitForAutoSave(page, 800);
+    await waitForAutoSave(page, 1000);
 
-    // Verify edit persisted by checking IndexedDB directly
     const updatedContent = await getIndexedDBContent(
       page,
       contentPersistenceFixture.workspacePath,
