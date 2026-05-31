@@ -38,6 +38,7 @@ import {
 interface TextEditorProps {
   file: FileEntry;
   basePath: string;
+  isContentLoaded: boolean;
 }
 
 /**
@@ -48,7 +49,11 @@ interface TextEditorProps {
  * editor-store, so undo history, scroll position, and internal Slate state
  * survive across Dockable tab switches that unmount/remount this component.
  */
-export function TextEditor({ file, basePath }: TextEditorProps) {
+export function TextEditor({
+  file,
+  basePath,
+  isContentLoaded,
+}: TextEditorProps) {
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   // Single ref tracking the last contentHash we know about — whether from our own
   // save or from the initial load. When file.contentHash differs from this, it's
@@ -128,6 +133,9 @@ export function TextEditor({ file, basePath }: TextEditorProps) {
     // Don't save when the change came from programmatic setValue (external update)
     if (suppressSaveRef.current) return;
 
+    // Allow typing before hydration, but don't persist until content has loaded.
+    if (!isContentLoaded) return;
+
     // Cancel any pending save
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -147,7 +155,7 @@ export function TextEditor({ file, basePath }: TextEditorProps) {
       // Save directly - Rust will filter out self-writes from file watcher
       writeFileContent(basePath, file.path, normalizedMarkdown);
     }, 500);
-  }, [editor, file.path, basePath]);
+  }, [editor, file.path, basePath, isContentLoaded]);
 
   // Cleanup pending saves on unmount
   useEffect(() => {

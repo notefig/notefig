@@ -53,10 +53,8 @@ test.describe("Content & Persistence", () => {
       "# Auto-save Test\n\nThis content has been edited multiple times.\n\nLine 1 of edits.\n\nLine 2 of edits.",
     );
 
-    // Wait for auto-save again
     await waitForAutoSave(page);
 
-    // Verify second edit persisted
     const updatedContent = await getIndexedDBContent(
       page,
       contentPersistenceFixture.workspacePath,
@@ -121,15 +119,19 @@ test.describe("Content & Persistence", () => {
 
     await openFileInTree(page, "large-file.md");
 
-    await page.waitForTimeout(1000);
-
-    const dbContent = await getIndexedDBContent(
-      page,
-      contentPersistenceFixture.workspacePath,
-      `${contentPersistenceFixture.workspacePath}/large-file.md`,
+    const polled = expect.poll(
+      async () =>
+        getIndexedDBContent(
+          page,
+          contentPersistenceFixture.workspacePath,
+          `${contentPersistenceFixture.workspacePath}/large-file.md`,
+        ),
+      {
+        timeout: 1000,
+      },
     );
-    expect(dbContent).toContain("# Large File Test");
-    expect(dbContent).toContain("Section");
+    await polled.toContain("# Large File Test");
+    await polled.toContain("Section");
 
     await page.waitForSelector('[role="textbox"]', { timeout: 10000 });
     const editor = page
@@ -139,17 +141,26 @@ test.describe("Content & Persistence", () => {
     expect(await editor.isVisible()).toBe(true);
 
     await editor.click();
-    await page.keyboard.press("Home");
-    await page.keyboard.type("EDITED: ", { delay: 5 });
+    await page.keyboard.press("End");
+    await page.waitForTimeout(50);
+    await editor.pressSequentially("\nEDITED:", { delay: 5 });
+    await expect(editor).toContainText("EDITED:");
 
-    await waitForAutoSave(page, 1000);
+    await waitForAutoSave(page, 800);
 
-    const updatedContent = await getIndexedDBContent(
-      page,
-      contentPersistenceFixture.workspacePath,
-      `${contentPersistenceFixture.workspacePath}/large-file.md`,
-    );
-    expect(updatedContent).toContain("EDITED:");
+    await expect
+      .poll(
+        async () =>
+          await getIndexedDBContent(
+            page,
+            contentPersistenceFixture.workspacePath,
+            `${contentPersistenceFixture.workspacePath}/large-file.md`,
+          ),
+        {
+          timeout: 500,
+        },
+      )
+      .toContain("EDITED:");
   });
 
   test("Special characters in content", async ({ page }) => {

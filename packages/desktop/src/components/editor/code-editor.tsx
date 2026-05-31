@@ -7,9 +7,14 @@ import { cn } from "@/lib/utils";
 interface CodeEditorProps {
   file: FileEntry;
   basePath: string;
+  isContentLoaded: boolean;
 }
 
-export function CodeEditor({ file, basePath }: CodeEditorProps) {
+export function CodeEditor({
+  file,
+  basePath,
+  isContentLoaded,
+}: CodeEditorProps) {
   const [content, setContent] = useState(file.content);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -25,10 +30,19 @@ export function CodeEditor({ file, basePath }: CodeEditorProps) {
     return () => clearTimeout(timeoutId);
   }, []);
 
+  useEffect(() => {
+    if (!isContentLoaded) return;
+    setContent(file.content);
+  }, [isContentLoaded, file.content]);
+
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newContent = e.target.value;
       setContent(newContent);
+
+      if (!isContentLoaded) {
+        return;
+      }
 
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
@@ -38,7 +52,7 @@ export function CodeEditor({ file, basePath }: CodeEditorProps) {
         writeFileContent(basePath, file.path, newContent);
       }, 500);
     },
-    [file.path, basePath],
+    [file.path, basePath, isContentLoaded],
   );
 
   useEffect(() => {

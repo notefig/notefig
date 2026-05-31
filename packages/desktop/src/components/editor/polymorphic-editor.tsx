@@ -13,6 +13,7 @@ export type EditorType = "markdown" | "code" | "image";
 interface PolymorphicEditorProps {
   file: FileEntry;
   basePath: string;
+  isContentLoaded: boolean;
 }
 
 /**
@@ -58,18 +59,40 @@ export function canOpenFile(filePath: string): boolean {
  * Inner component that assumes content is loaded.
  * Suspended by parent Suspense boundary during loading.
  */
-function PolymorphicEditorInner({ file, basePath }: PolymorphicEditorProps) {
+function PolymorphicEditorInner({
+  file,
+  basePath,
+  isContentLoaded,
+}: PolymorphicEditorProps) {
   const editorType = getEditorType(file.path);
 
   switch (editorType) {
     case "markdown":
-      return <TextEditor file={file} basePath={basePath} />;
+      return (
+        <TextEditor
+          file={file}
+          basePath={basePath}
+          isContentLoaded={isContentLoaded}
+        />
+      );
     case "code":
-      return <CodeEditor file={file} basePath={basePath} />;
+      return (
+        <CodeEditor
+          file={file}
+          basePath={basePath}
+          isContentLoaded={isContentLoaded}
+        />
+      );
     case "image":
       return <ImageViewer file={file} basePath={basePath} />;
     default:
-      return <CodeEditor file={file} basePath={basePath} />;
+      return (
+        <CodeEditor
+          file={file}
+          basePath={basePath}
+          isContentLoaded={isContentLoaded}
+        />
+      );
   }
 }
 
@@ -78,10 +101,18 @@ function PolymorphicEditorInner({ file, basePath }: PolymorphicEditorProps) {
  * File data (metadata + content) is loaded by the parent Workspace component.
  * Uses Suspense to show loading state while content is being fetched.
  */
-export function PolymorphicEditor({ file, basePath }: PolymorphicEditorProps) {
+export function PolymorphicEditor({
+  file,
+  basePath,
+  isContentLoaded,
+}: PolymorphicEditorProps) {
   return (
     <Suspense fallback={<FileLoadingPlaceholder filePath={file.path} />}>
-      <PolymorphicEditorInner file={file} basePath={basePath} />
+      <PolymorphicEditorInner
+        file={file}
+        basePath={basePath}
+        isContentLoaded={isContentLoaded}
+      />
     </Suspense>
   );
 }

@@ -94,6 +94,7 @@ export const Workspace = () => {
               ...file,
               content: content?.content ?? "",
               contentHash: content?.contentHash ?? "",
+              isContentLoaded: content !== undefined,
             })),
     [workspacePath, ...openTabs],
   );
@@ -113,6 +114,7 @@ export const Workspace = () => {
           <PolymorphicEditor
             file={fileEntry as FileEntry}
             basePath={workspacePath}
+            isContentLoaded={fileEntry.isContentLoaded}
           />
         </Dockable.Tab>
       )),
