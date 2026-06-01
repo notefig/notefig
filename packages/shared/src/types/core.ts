@@ -1,5 +1,7 @@
 // Shared core types between CLI and Desktop
 
+import type { ProjectConfigV1Output } from "../config/project-config.schema";
+
 export interface FileMetadata {
   path: string;
   name: string;
@@ -9,14 +11,7 @@ export interface FileMetadata {
   contentHash?: string;
 }
 
-export interface ProjectConfig {
-  name: string;
-  basePath: string;
-  settings: {
-    textDirection?: "ltr" | "rtl";
-    language?: string;
-  };
-}
+export type ProjectConfig = ProjectConfigV1Output;
 
 export interface ParsedContent {
   content: string;

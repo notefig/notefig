@@ -1,15 +1,9 @@
 // Shared Zod schemas for validation
 
 import { z } from "zod";
+import { ProjectConfigV1Schema } from "../config/project-config.schema";
 
-export const ProjectConfigSchema = z.object({
-  name: z.string().min(1),
-  basePath: z.string(),
-  settings: z.object({
-    textDirection: z.enum(["ltr", "rtl"]).optional(),
-    language: z.string().optional(),
-  }),
-});
+export const ProjectConfigSchema = ProjectConfigV1Schema;
 
 export const FileMetadataSchema = z.object({
   path: z.string(),
@@ -22,8 +16,6 @@ export const FileMetadataSchema = z.object({
 
 export const ParsedContentSchema = z.object({
   content: z.string(),
-  metadata: z.record(z.unknown()),
-  frontmatter: z.record(z.unknown()),
+  metadata: z.record(z.string(), z.unknown()),
+  frontmatter: z.record(z.string(), z.unknown()),
 });
-
-

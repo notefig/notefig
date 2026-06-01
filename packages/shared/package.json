@@ -24,12 +24,17 @@
     "./validation": {
       "require": "./dist/validation/index.js",
       "types": "./dist/validation/index.d.ts"
+    },
+    "./config": {
+      "require": "./dist/config/index.js",
+      "types": "./dist/config/index.d.ts"
     }
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "jest"
+    "test": "jest",
+    "schema:generate": "npm run build && node scripts/generate-project-config-schema.js"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",
@@ -39,6 +44,6 @@
     "typescript": "^5.4.0"
   },
   "dependencies": {
-    "zod": "^3.23.0"
+    "zod": "^4.1.0"
   }
 }
