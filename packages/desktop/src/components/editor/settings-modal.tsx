@@ -27,6 +27,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
+import { useConfig, useUpdateConfig } from "@/utils/project-config-store";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -37,8 +38,6 @@ import {
 } from "@/components/app-updater";
 
 interface SettingsModalProps {
-  direction: "ltr" | "rtl";
-  onDirectionChange: (direction: "ltr" | "rtl") => void;
   onFocusEditor: () => void;
 }
 
@@ -74,11 +73,7 @@ interface SettingsState {
   notifySlowStartup: boolean;
 }
 
-export function SettingsModal({
-  direction,
-  onDirectionChange,
-  onFocusEditor,
-}: SettingsModalProps) {
+export function SettingsModal({ onFocusEditor }: SettingsModalProps) {
   const { t } = useTranslation();
   const [searchParams, setUrlSearchParams] = useSearchParams();
   const isSettingsOpen = searchParams.get("settings") === "true";
@@ -101,10 +96,22 @@ export function SettingsModal({
     onFocusEditor();
   };
   const [activeSection, setActiveSection] = useState("general");
+  const direction = useConfig((config) => config.editing.textDirection);
+  const updateConfig = useUpdateConfig();
   const [settings, setSettings] = useState<SettingsState>({
     language: "english",
     notifySlowStartup: false,
   });
+
+  const handleDirectionChange = (nextDirection: "ltr" | "rtl") => {
+    updateConfig((current) => ({
+      ...current,
+      editing: {
+        ...current.editing,
+        textDirection: nextDirection,
+      },
+    }));
+  };
 
   useHotkey({ key: ",", mod: true, shift: true }, () => {
     handleSettingsToggle(!isSettingsOpen);
@@ -118,7 +125,7 @@ export function SettingsModal({
             settings={settings}
             setSettings={setSettings}
             direction={direction}
-            onDirectionChange={onDirectionChange}
+            onDirectionChange={handleDirectionChange}
           />
         );
       case "appearance":

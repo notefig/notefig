@@ -18,61 +18,129 @@ const WebDeployProviderSchema = z.enum([
   "s3",
 ]);
 
+const DeploySchema = z
+  .object({
+    provider: WebDeployProviderSchema.nullable().optional(),
+    options: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict()
+  .default({})
+  .transform((value) => ({
+    provider: value.provider ?? null,
+    options: value.options ?? {},
+  }));
+
+const WebOutputSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    outDir: z.string().min(1).optional(),
+    theme: z.string().min(1).optional(),
+    deploy: DeploySchema.optional(),
+  })
+  .strict()
+  .default({})
+  .transform((value) => ({
+    enabled: value.enabled ?? true,
+    outDir: value.outDir ?? ".metrists",
+    theme: value.theme ?? "metrists-theme-next",
+    deploy: value.deploy ?? { provider: null, options: {} },
+  }));
+
+const EpubOutputSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    coverImagePath: z.string().min(1).optional(),
+  })
+  .strict()
+  .default({})
+  .transform((value) => ({
+    enabled: value.enabled ?? false,
+    coverImagePath: value.coverImagePath ?? "cover.jpg",
+  }));
+
+const PdfOutputSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+  })
+  .strict()
+  .default({})
+  .transform((value) => ({
+    enabled: value.enabled ?? false,
+  }));
+
+const AudiobookOutputSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    provider: z.literal("elevenlabs").optional(),
+    apiKey: SecretValueSchema.optional(),
+    voiceId: SecretValueSchema.optional(),
+    modelId: z.string().min(1).optional(),
+    format: z.string().min(1).optional(),
+  })
+  .strict()
+  .default({})
+  .transform((value) => ({
+    enabled: value.enabled ?? false,
+    provider: value.provider ?? "elevenlabs",
+    apiKey: value.apiKey ?? "$ELEVENLABS_API_KEY",
+    voiceId: value.voiceId ?? "$ELEVENLABS_VOICE_ID",
+    modelId: value.modelId ?? "eleven_multilingual_v2",
+    format: value.format ?? "mp3_44100_128",
+  }));
+
+const OutputsSchema = z
+  .object({
+    web: WebOutputSchema.optional(),
+    epub: EpubOutputSchema.optional(),
+    pdf: PdfOutputSchema.optional(),
+    audiobook: AudiobookOutputSchema.optional(),
+  })
+  .strict()
+  .default({})
+  .transform((value) => ({
+    web:
+      value.web ??
+      WebOutputSchema.parse({
+        enabled: true,
+        outDir: ".metrists",
+        theme: "metrists-theme-next",
+        deploy: { provider: null, options: {} },
+      }),
+    epub: value.epub ?? EpubOutputSchema.parse({}),
+    pdf: value.pdf ?? PdfOutputSchema.parse({}),
+    audiobook: value.audiobook ?? AudiobookOutputSchema.parse({}),
+  }));
+
 export const ProjectConfigV1Schema = z
   .object({
     $schema: z.literal(PROJECT_CONFIG_SCHEMA_URL_V1),
     editing: z
       .object({
-        textDirection: z.enum(["ltr", "rtl"]),
+        textDirection: z.enum(["ltr", "rtl"]).optional(),
       })
-      .strict(),
+      .strict()
+      .default({})
+      .transform((value) => ({
+        textDirection: value.textDirection ?? "ltr",
+      })),
     lifecycle: z
       .object({
         git: z
           .object({
-            enabled: z.boolean(),
+            enabled: z.boolean().optional(),
           })
-          .strict(),
+          .strict()
+          .default({ enabled: true })
+          .transform((value) => ({
+            enabled: value.enabled ?? true,
+          })),
       })
-      .strict(),
-    outputs: z
-      .object({
-        web: z
-          .object({
-            enabled: z.boolean(),
-            outDir: z.string().min(1),
-            theme: z.string().min(1),
-            deploy: z
-              .object({
-                provider: WebDeployProviderSchema.nullable(),
-                options: z.record(z.string(), z.unknown()),
-              })
-              .strict(),
-          })
-          .strict(),
-        epub: z
-          .object({
-            enabled: z.boolean(),
-            coverImagePath: z.string().min(1),
-          })
-          .strict(),
-        pdf: z
-          .object({
-            enabled: z.boolean(),
-          })
-          .strict(),
-        audiobook: z
-          .object({
-            enabled: z.boolean(),
-            provider: z.literal("elevenlabs"),
-            apiKey: SecretValueSchema,
-            voiceId: SecretValueSchema,
-            modelId: z.string().min(1),
-            format: z.string().min(1),
-          })
-          .strict(),
-      })
-      .strict(),
+      .strict()
+      .default({ git: { enabled: true } })
+      .transform((value) => ({
+        git: value.git ?? { enabled: true },
+      })),
+    outputs: OutputsSchema,
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -94,6 +162,12 @@ export const ProjectConfigV1Schema = z
 
 export type ProjectConfigV1Input = z.input<typeof ProjectConfigV1Schema>;
 export type ProjectConfigV1Output = z.output<typeof ProjectConfigV1Schema>;
+
+export function createDefaultProjectConfigV1(): ProjectConfigV1Output {
+  return ProjectConfigV1Schema.parse({
+    $schema: PROJECT_CONFIG_SCHEMA_URL_V1,
+  });
+}
 
 type ZodWithJsonSchema = typeof z & {
   toJSONSchema?: (

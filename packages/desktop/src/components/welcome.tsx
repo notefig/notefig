@@ -253,11 +253,7 @@ export function Welcome() {
       </div>
 
       {/* Settings Modal */}
-      <SettingsModal
-        direction="ltr"
-        onDirectionChange={() => {}}
-        onFocusEditor={() => {}}
-      />
+      <SettingsModal onFocusEditor={() => {}} />
     </div>
   );
 }
