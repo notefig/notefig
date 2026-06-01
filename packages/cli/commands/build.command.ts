@@ -105,6 +105,7 @@ export class BuildCommand extends InitCommand {
       return await makeAudiobook(
         {
           outputPath: combinePaths([this.templateAssetsPath, 'book.mp3']),
+          config: this.getRc((rc) => rc),
           workingDirectory: this.workingDirectory,
           extractProjectMetadata: this.extractProjectMetadata.bind(this),
           shouldIncludeChapterFile: this.shouldIncludeChapterFile.bind(this),

@@ -11,9 +11,11 @@ import {
   type MetaDocumentFrontmatterInterface,
 } from '../utils/content-layer.util';
 import type { Logger } from '../utils/logger.util';
+import type { ProjectConfigV1Output } from '@metrists/shared';
 
 interface MakeAudiobookParams {
   workingDirectory: string;
+  config: ProjectConfigV1Output;
   extractProjectMetadata: () => Promise<
     [MetaDocumentFrontmatterInterface, string]
   >;
@@ -22,14 +24,14 @@ interface MakeAudiobookParams {
 }
 
 export function canMakeAudiobook() {
-  return !!process.env.ELEVENLABS_API_KEY;
+  return true;
 }
 
 export async function makeAudiobook(
   makeAudiobookParams: MakeAudiobookParams,
   logger: Logger,
 ) {
-  const { outputPath } = makeAudiobookParams;
+  const { outputPath, config } = makeAudiobookParams;
   const entireContent = await getTheEntireContent(makeAudiobookParams);
 
   if (!entireContent.trim()) {
@@ -48,7 +50,10 @@ export async function makeAudiobook(
     ['verbose', 'noob'],
     'Initiating streaming connection to ElevenLabs...',
   );
-  const audio = await elevenLabsService.streamTextToSpeech(entireContent);
+  const audio = await elevenLabsService.streamTextToSpeech(
+    entireContent,
+    config,
+  );
 
   const writeStream = createWriteStream(outputPath);
 

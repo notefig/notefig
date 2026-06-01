@@ -46,7 +46,7 @@ export class PublishCommand extends InitCommand {
     await hostHelper.deploy({
       outDir,
       metristsBuildCommand: buildCommand,
-      hostOptions: this.getRc((rc) => rc?.hosts?.[platform] || {}),
+      hostOptions: this.getHostConfig(platform, (hostConfig) => hostConfig, {}),
       projectMetadata,
       logger: this.logger,
     });
@@ -62,7 +62,7 @@ export class PublishCommand extends InitCommand {
       return;
     }
 
-    const outDir = this.getRc((rc) => rc?.outDir);
+    const outDir = this.getRc((rc) => rc?.outputs?.web?.outDir);
     return await createFileIfNotExists(
       hostHelper.configFileName,
       hostHelper.getConfigFileContent({ outDir, buildCommand }),

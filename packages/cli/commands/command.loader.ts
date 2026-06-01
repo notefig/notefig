@@ -14,7 +14,13 @@ import {
   type LogTypes,
 } from '../lib/utils/logger.util';
 import { BaseException } from '../exceptions/base.exception';
+import { ProjectConfigException } from '../exceptions/project-config.exception';
 import type { Command } from 'commander';
+import {
+  ProjectConfigEnvResolutionError,
+  ProjectConfigJsonParseError,
+  ProjectConfigSchemaReferenceError,
+} from '@metrists/shared';
 
 export class CommandLoader {
   protected static logger: Logger;
@@ -64,6 +70,28 @@ export class CommandLoader {
       } catch (error: any) {
         if (error instanceof BaseException) {
           this.logger.error(`${ERROR_PREFIX} ${error.getMessage()}`);
+          process.exit(1);
+        }
+        if (
+          error instanceof ProjectConfigEnvResolutionError ||
+          error instanceof ProjectConfigJsonParseError ||
+          error instanceof ProjectConfigSchemaReferenceError
+        ) {
+          const ex = new ProjectConfigException(error.message);
+          this.logger.error(`${ERROR_PREFIX} ${ex.getMessage()}`);
+          process.exit(1);
+        }
+        if (error?.name === 'ZodError' && Array.isArray(error?.issues)) {
+          const details = error.issues
+            .map(
+              (issue: any) =>
+                `${issue.path.join('.') || '<root>'}: ${issue.message}`,
+            )
+            .join('; ');
+          const ex = new ProjectConfigException(
+            `Schema validation failed. ${details}`,
+          );
+          this.logger.error(`${ERROR_PREFIX} ${ex.getMessage()}`);
           process.exit(1);
         }
         throw error;

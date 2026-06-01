@@ -16,3 +16,10 @@ export class ProjectConfigSchemaReferenceError extends Error {
     this.name = "ProjectConfigSchemaReferenceError";
   }
 }
+
+export class ProjectConfigEnvResolutionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProjectConfigEnvResolutionError";
+  }
+}

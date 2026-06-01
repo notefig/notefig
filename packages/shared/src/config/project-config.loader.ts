@@ -7,8 +7,44 @@ import {
 import type { ProjectConfigV1Output } from "./project-config.schema";
 import {
   ProjectConfigJsonParseError,
+  ProjectConfigEnvResolutionError,
   ProjectConfigSchemaReferenceError,
 } from "./project-config.parse-errors";
+
+type EnvInput = Record<string, string | undefined>;
+
+const ENV_REF_PATTERN = /^\$([A-Z_][A-Z0-9_]*)$/;
+
+function resolveEnvReference(value: string, env: EnvInput): string {
+  const match = ENV_REF_PATTERN.exec(value);
+  if (!match) return value;
+
+  const envName = match[1];
+  const resolved = env[envName];
+  if (resolved !== undefined) return resolved;
+
+  throw new ProjectConfigEnvResolutionError(
+    `Missing environment variable "${envName}" for ${PROJECT_CONFIG_FILE_NAME}`,
+  );
+}
+
+function deepMapStrings(
+  value: unknown,
+  map: (text: string) => string,
+): unknown {
+  if (typeof value === "string") return map(value);
+  if (Array.isArray(value))
+    return value.map((item) => deepMapStrings(item, map));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [
+        key,
+        deepMapStrings(child, map),
+      ]),
+    );
+  }
+  return value;
+}
 
 export function parseProjectConfig(rawContent: string): ProjectConfigV1Output {
   let parsed: unknown;
@@ -51,4 +87,23 @@ export function parseProjectConfigObject(raw: unknown): ProjectConfigV1Output {
   }
 
   return ProjectConfigV1Schema.parse(raw);
+}
+
+export function parseProjectConfigWithEnv(
+  rawContent: string,
+  env: EnvInput,
+): ProjectConfigV1Output {
+  const parsed = parseProjectConfig(rawContent);
+  return parseProjectConfigObjectWithEnv(parsed, env);
+}
+
+export function parseProjectConfigObjectWithEnv(
+  raw: unknown,
+  env: EnvInput,
+): ProjectConfigV1Output {
+  const parsed = parseProjectConfigObject(raw);
+  const resolved = deepMapStrings(parsed, (text) =>
+    resolveEnvReference(text, env),
+  );
+  return ProjectConfigV1Schema.parse(resolved);
 }

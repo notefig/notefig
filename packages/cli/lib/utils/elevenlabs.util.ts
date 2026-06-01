@@ -2,6 +2,7 @@ import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
 import { MockElevenLabsClient as ElevenLabsClientMock } from '../../tests/__mocks__/elevenlabs.mock';
 import { ElevenLabsException } from '../../exceptions/elevenlabs.exception';
 import type { ReadableStream } from 'stream/web';
+import type { ProjectConfigV1Output } from '@metrists/shared';
 
 class ElevenLabsService {
   private static instance: ElevenLabsService;
@@ -36,19 +37,27 @@ class ElevenLabsService {
 
   public async convertTextToSpeech(
     text: string,
+    config?: ProjectConfigV1Output,
     voiceId?: Parameters<typeof this.client.textToSpeech.convert>[0],
     options?: {
       outputFormat?: any;
       modelId?: string;
     },
   ) {
-    const finalVoiceId = voiceId || process.env.ELEVENLABS_VOICE_ID || 'pqHfZKP75CvOlQylNhV4';
+    const finalVoiceId =
+      voiceId ||
+      config?.outputs?.audiobook?.voiceId ||
+      process.env.ELEVENLABS_VOICE_ID ||
+      'pqHfZKP75CvOlQylNhV4';
 
     try {
       return await this.client.textToSpeech.convert(finalVoiceId, {
         outputFormat: options?.outputFormat || 'mp3_44100_128',
         text,
-        modelId: options?.modelId || 'eleven_multilingual_v2',
+        modelId:
+          options?.modelId ||
+          config?.outputs?.audiobook?.modelId ||
+          'eleven_multilingual_v2',
       });
     } catch (error: any) {
       if (error.statusCode && error.body?.detail?.message) {
@@ -65,19 +74,29 @@ class ElevenLabsService {
 
   public async streamTextToSpeech(
     text: string,
+    config?: ProjectConfigV1Output,
     voiceId?: string,
     options?: {
       outputFormat?: any;
       modelId?: string;
     },
   ): Promise<ReadableStream<Uint8Array>> {
-    const finalVoiceId = voiceId || process.env.ELEVENLABS_VOICE_ID || 'pqHfZKP75CvOlQylNhV4';
+    const finalVoiceId =
+      voiceId ||
+      config?.outputs?.audiobook?.voiceId ||
+      process.env.ELEVENLABS_VOICE_ID ||
+      'pqHfZKP75CvOlQylNhV4';
 
     try {
       return await this.client.textToSpeech.stream(finalVoiceId, {
-        outputFormat: (options?.outputFormat || 'mp3_44100_128') as any,
+        outputFormat: (options?.outputFormat ||
+          config?.outputs?.audiobook?.format ||
+          'mp3_44100_128') as any,
         text,
-        modelId: options?.modelId || 'eleven_multilingual_v2',
+        modelId:
+          options?.modelId ||
+          config?.outputs?.audiobook?.modelId ||
+          'eleven_multilingual_v2',
       });
     } catch (error: any) {
       if (error.statusCode && error.body?.detail?.message) {

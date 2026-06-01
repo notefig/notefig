@@ -30,6 +30,7 @@ export class AudiobookCommand extends InitCommand {
     await makeAudiobook(
       {
         outputPath: outputFilePath,
+        config: this.getRc((rc) => rc),
         workingDirectory: this.workingDirectory,
         extractProjectMetadata: this.extractProjectMetadata.bind(this),
         shouldIncludeChapterFile: this.shouldIncludeChapterFile.bind(this),

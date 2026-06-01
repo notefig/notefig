@@ -24,6 +24,7 @@ import {
   MetaDocumentFrontmatterInterface,
 } from '../lib/utils/content-layer.util';
 import type { BookMetadata } from '../lib/epub';
+import { PROJECT_CONFIG_FILE_NAME } from '@metrists/shared';
 
 type UndefIndex<T extends any[], I extends number> = {
   [P in keyof T]: P extends Exclude<keyof T, keyof any[]>
@@ -35,10 +36,10 @@ type UndefIndex<T extends any[], I extends number> = {
 type FilterUndefined<T extends any[]> = T extends []
   ? []
   : T extends [infer H, ...infer R]
-  ? H extends undefined
-    ? FilterUndefined<R>
-    : [H, ...FilterUndefined<R>]
-  : T;
+    ? H extends undefined
+      ? FilterUndefined<R>
+      : [H, ...FilterUndefined<R>]
+    : T;
 type SpliceTuple<T extends any[], I extends number> = FilterUndefined<
   UndefIndex<T, I>
 >;
@@ -49,7 +50,11 @@ export class InitCommand extends ConfigAwareCommand {
   protected templatePath: string;
   protected templateContentPath: string;
   protected templateAssetsPath: string;
-  protected ignoredFiles = ['.gitignore', '.metristsrc', 'sst.config.ts'];
+  protected ignoredFiles = [
+    '.gitignore',
+    PROJECT_CONFIG_FILE_NAME,
+    'sst.config.ts',
+  ];
   protected ignoredDirectories = ['.git', '.sst'];
   protected metaFileName = 'meta.md';
 
@@ -62,7 +67,7 @@ export class InitCommand extends ConfigAwareCommand {
     await this.loadRcConfig();
 
     this.workingDirectory = process.cwd();
-    const outDir = this.getRc((rc) => rc?.outDir);
+    const outDir = this.getRc((rc) => rc?.outputs?.web?.outDir);
     this.templatePath = join(this.workingDirectory, outDir);
     const isFirstRun = this.isFirstRun(this.templatePath);
 
@@ -161,7 +166,7 @@ export class InitCommand extends ConfigAwareCommand {
   }
 
   protected async createGitIgnoreFile() {
-    const itemsToIgnore = [this.getRc((rc) => rc?.outDir), 'out'];
+    const itemsToIgnore = [this.getRc((rc) => rc?.outputs?.web?.outDir), 'out'];
     await addToGitIgnore(this.workingDirectory, itemsToIgnore);
   }
 
@@ -179,7 +184,7 @@ export class InitCommand extends ConfigAwareCommand {
   }
 
   protected async copyTemplate() {
-    const templateName = this.getRc((rc) => rc?.template?.name);
+    const templateName = this.getRc((rc) => rc?.outputs?.web?.theme);
     const fullTemplatePath = join(__dirname, '..', 'themes', templateName);
     if (!pathExists(this.templatePath)) {
       await createDirectory(this.templatePath);

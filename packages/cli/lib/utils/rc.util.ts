@@ -1,52 +1,36 @@
 import { config } from 'dotenv';
 import { join } from 'path';
-import { readFileInJsonIfExists } from './fs.util';
-import type { hostHelpers } from './hosts.util';
+import {
+  parseProjectConfigWithEnv,
+  PROJECT_CONFIG_FILE_NAME,
+  ProjectConfigSchemaReferenceError,
+  type ProjectConfigV1Output,
+} from '@metrists/shared';
+import { readFileIfExists } from './fs.util';
 
-type ISecretValue = `$${string}`;
+export const RC_FILE_NAME = PROJECT_CONFIG_FILE_NAME;
 
-export interface IRcFileComplete {
-  outDir: string;
-  template: {
-    name: string;
-  };
-  hosts?: Partial<Record<keyof typeof hostHelpers, any>>;
-  elevenLabs?: {
-    apiKey: string | Omit<string, ISecretValue>;
-    voiceId: string | Omit<string, ISecretValue>;
-  };
-}
-
-export type IRcFile = Partial<IRcFileComplete>;
-
-export const RC_FILE_NAME = '.metristsrc';
-
-export const DEFAULT_RC_FILE: IRcFileComplete = {
-  outDir: '.metrists',
-  template: {
-    name: 'metrists-theme-next',
-  },
-};
-
-export async function readRcFile(...basePath: string[]) {
-  return readFileInJsonIfExists<IRcFile>(...basePath, RC_FILE_NAME);
-}
-export type GetFieldValue<TData, TResult> = (data: TData) => TResult;
-
-export type GetRcFieldValue<TData> = GetFieldValue<IRcFile, TData>;
+export type GetRcFieldValue<TData> = (data: ProjectConfigV1Output) => TData;
 
 //TODO: Make sure this gets called only once per execution
 export async function getConfigGetter(...basePath: string[]) {
   config({
     'path': join(process.cwd(), '.env'),
   });
-  const data = await readRcFile(...basePath);
+  const rcContent = await readFileIfExists<string>(...basePath, RC_FILE_NAME);
+  if (!rcContent) {
+    throw new ProjectConfigSchemaReferenceError(
+      `No ${RC_FILE_NAME} file found in ${join(...basePath)}`,
+    );
+  }
+
+  const data = parseProjectConfigWithEnv(rcContent, process.env);
 
   function getConfig<TResult>(
     callback: GetRcFieldValue<TResult>,
     defaultValue?: TResult,
   ): TResult {
-    return callback(data) ?? defaultValue ?? callback(DEFAULT_RC_FILE);
+    return callback(data) ?? defaultValue;
   }
   return getConfig;
 }

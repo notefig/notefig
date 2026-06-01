@@ -1,6 +1,10 @@
-import { parseProjectConfig } from "./project-config.loader";
+import {
+  parseProjectConfig,
+  parseProjectConfigWithEnv,
+} from "./project-config.loader";
 import { PROJECT_CONFIG_SCHEMA_URL_V1 } from "./project-config.constants";
 import {
+  ProjectConfigEnvResolutionError,
   ProjectConfigJsonParseError,
   ProjectConfigSchemaReferenceError,
 } from "./project-config.parse-errors";
@@ -99,5 +103,71 @@ describe("project config schema", () => {
     expect(() => parseProjectConfig('{"$schema":')).toThrow(
       ProjectConfigJsonParseError,
     );
+  });
+
+  it("resolves env var references when env is provided", () => {
+    const raw = JSON.stringify({
+      $schema: PROJECT_CONFIG_SCHEMA_URL_V1,
+      editing: { textDirection: "ltr" },
+      lifecycle: { git: { enabled: true } },
+      outputs: {
+        web: {
+          enabled: true,
+          outDir: "out",
+          theme: "metrists-theme-next",
+          deploy: { provider: null, options: {} },
+        },
+        epub: { enabled: false, coverImagePath: "cover.jpg" },
+        pdf: { enabled: false },
+        audiobook: {
+          enabled: true,
+          provider: "elevenlabs",
+          apiKey: "$ELEVENLABS_API_KEY",
+          voiceId: "$ELEVENLABS_VOICE_ID",
+          modelId: "eleven_multilingual_v2",
+          format: "mp3_44100_128",
+        },
+      },
+    });
+
+    const result = parseProjectConfigWithEnv(raw, {
+      ELEVENLABS_API_KEY: "api-key-value",
+      ELEVENLABS_VOICE_ID: "voice-id-value",
+    });
+
+    expect(result.outputs.audiobook.apiKey).toBe("api-key-value");
+    expect(result.outputs.audiobook.voiceId).toBe("voice-id-value");
+  });
+
+  it("throws when required env var is missing", () => {
+    const raw = JSON.stringify({
+      $schema: PROJECT_CONFIG_SCHEMA_URL_V1,
+      editing: { textDirection: "ltr" },
+      lifecycle: { git: { enabled: true } },
+      outputs: {
+        web: {
+          enabled: true,
+          outDir: "out",
+          theme: "metrists-theme-next",
+          deploy: { provider: null, options: {} },
+        },
+        epub: { enabled: false, coverImagePath: "cover.jpg" },
+        pdf: { enabled: false },
+        audiobook: {
+          enabled: true,
+          provider: "elevenlabs",
+          apiKey: "$ELEVENLABS_API_KEY",
+          voiceId: "$ELEVENLABS_VOICE_ID",
+          modelId: "eleven_multilingual_v2",
+          format: "mp3_44100_128",
+        },
+      },
+    });
+
+    expect(() =>
+      parseProjectConfigWithEnv(raw, {
+        ELEVENLABS_API_KEY: "api-key-value",
+      }),
+    ).toThrow(ProjectConfigEnvResolutionError);
   });
 });

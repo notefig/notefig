@@ -49,7 +49,7 @@ export async function readFileIfExists<TData = any>(...paths: string[]) {
 
 export async function appendToFile(
   filePath: string,
-  data: string | string[] | Buffer,
+  data: string | string[] | Uint8Array,
 ) {
   if (Array.isArray(data)) {
     return await appendFile(filePath, data.join(EOL));
@@ -60,7 +60,7 @@ export async function appendToFile(
 
 export async function writeToFile(
   filePath: string,
-  date: string | string[] | Buffer,
+  date: string | string[] | Uint8Array,
 ) {
   if (Array.isArray(date)) {
     return await writeFile(filePath, date.join(EOL));
@@ -138,14 +138,14 @@ export async function deleteDirectory(directoryPath: string) {
 
 export async function createFile(
   filePath: string,
-  fileContent?: string | Buffer,
+  fileContent?: string | Uint8Array,
 ) {
   return await appendFile(filePath, fileContent ?? '');
 }
 
 export async function createFileIfNotExists(
   filePath: string,
-  fileContent?: string | Buffer,
+  fileContent?: string | Uint8Array,
 ) {
   if (!pathExists(filePath)) {
     return await createFile(filePath, fileContent);

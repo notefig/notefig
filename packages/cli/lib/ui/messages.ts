@@ -10,6 +10,7 @@ export const MESSAGES = {
   ENTITIES_CREATED: `${EMOJIS.CHECK}  Basic entities created successfully.`,
   RC_FILE_NOT_FOUND: 'No .metristsrc file found  in [file_path]',
   COULD_NOT_READ_ENV_FILE: 'Could not read .env file',
+  PROJECT_CONFIG_ERROR: 'Project config error: [error]',
   DEFAULT: `Something went wrong ${EMOJIS.POOP}`,
   PARSE_BOOK_EXCEPTION: `Could not validate parse book. [error]`,
   AUTHOR_NOT_SAVED: `${EMOJIS.SMIRK}  Trying to create avatar for an author that is not saved yet. [author]`,

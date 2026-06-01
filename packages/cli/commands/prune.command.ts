@@ -18,7 +18,7 @@ export class PruneCommand extends ConfigAwareCommand {
     await this.loadRcConfig();
 
     const workingDirectory = process.cwd();
-    const outDir = this.getRc((rc) => rc?.outDir);
+    const outDir = this.getRc((rc) => rc?.outputs?.web?.outDir);
     const templatePath = join(workingDirectory, outDir);
 
     let prunedItems = 0;
@@ -34,7 +34,11 @@ export class PruneCommand extends ConfigAwareCommand {
           await host.pruneHost({
             workingDirectory,
             outDir,
-            hostOptions: this.getRc((rc) => rc?.hosts?.[hostName] || {}),
+            hostOptions: this.getHostConfig(
+              hostName,
+              (hostConfig) => hostConfig,
+              {},
+            ),
             logger: this.logger,
           });
           prunedItems++;
