@@ -18,6 +18,13 @@ const WebDeployProviderSchema = z.enum([
   "s3",
 ]);
 
+const GitOriginSchema = z
+  .object({
+    name: z.string().min(1),
+    url: z.string().min(1).optional(),
+  })
+  .strict();
+
 const DeploySchema = z
   .object({
     provider: WebDeployProviderSchema.nullable().optional(),
@@ -114,31 +121,39 @@ const OutputsSchema = z
 export const ProjectConfigV1Schema = z
   .object({
     $schema: z.literal(PROJECT_CONFIG_SCHEMA_URL_V1),
-    editing: z
-      .object({
-        textDirection: z.enum(["ltr", "rtl"]).optional(),
-      })
-      .strict()
-      .default({})
-      .transform((value) => ({
-        textDirection: value.textDirection ?? "ltr",
-      })),
+    editing: z.object({}).strict().default({}),
     lifecycle: z
       .object({
         git: z
           .object({
             enabled: z.boolean().optional(),
+            remote: z
+              .object({
+                name: z.string().min(1).optional(),
+                url: z.string().min(1).optional(),
+              })
+              .strict()
+              .optional(),
+            origins: z.array(GitOriginSchema).optional(),
           })
           .strict()
-          .default({ enabled: true })
+          .default({ enabled: true, remote: undefined, origins: undefined })
           .transform((value) => ({
             enabled: value.enabled ?? true,
+            remote: value.remote,
+            origins: value.origins,
           })),
       })
       .strict()
-      .default({ git: { enabled: true } })
+      .default({
+        git: { enabled: true, remote: undefined, origins: undefined },
+      })
       .transform((value) => ({
-        git: value.git ?? { enabled: true },
+        git: value.git ?? {
+          enabled: true,
+          remote: undefined,
+          origins: undefined,
+        },
       })),
     outputs: OutputsSchema,
   })

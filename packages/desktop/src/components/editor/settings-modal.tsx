@@ -27,7 +27,6 @@ import {
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
-import { useConfig, useUpdateConfig } from "@/utils/project-config-store";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -96,22 +95,10 @@ export function SettingsModal({ onFocusEditor }: SettingsModalProps) {
     onFocusEditor();
   };
   const [activeSection, setActiveSection] = useState("general");
-  const direction = useConfig((config) => config.editing.textDirection);
-  const updateConfig = useUpdateConfig();
   const [settings, setSettings] = useState<SettingsState>({
     language: "english",
     notifySlowStartup: false,
   });
-
-  const handleDirectionChange = (nextDirection: "ltr" | "rtl") => {
-    updateConfig((current) => ({
-      ...current,
-      editing: {
-        ...(current.editing ?? {}),
-        textDirection: nextDirection,
-      },
-    }));
-  };
 
   useHotkey({ key: ",", mod: true, shift: true }, () => {
     handleSettingsToggle(!isSettingsOpen);
@@ -121,12 +108,7 @@ export function SettingsModal({ onFocusEditor }: SettingsModalProps) {
     switch (activeSection) {
       case "general":
         return (
-          <GeneralSettings
-            settings={settings}
-            setSettings={setSettings}
-            direction={direction}
-            onDirectionChange={handleDirectionChange}
-          />
+          <GeneralSettings settings={settings} setSettings={setSettings} />
         );
       case "appearance":
         return <AppearanceSettings />;
@@ -146,7 +128,7 @@ export function SettingsModal({ onFocusEditor }: SettingsModalProps) {
       >
         <DialogTitle className="sr-only">Settings</DialogTitle>
 
-        <div dir={direction} className="flex h-full overflow-hidden">
+        <div dir="ltr" className="flex h-full overflow-hidden">
           {/* Settings Sidebar */}
           <div className="w-56 shrink-0 border-e border-border bg-sidebar">
             <ScrollArea className="h-full p-0">
@@ -195,13 +177,9 @@ export function SettingsModal({ onFocusEditor }: SettingsModalProps) {
 function GeneralSettings({
   settings,
   setSettings,
-  direction,
-  onDirectionChange,
 }: {
   settings: SettingsState;
   setSettings: React.Dispatch<React.SetStateAction<SettingsState>>;
-  direction: "ltr" | "rtl";
-  onDirectionChange: (direction: "ltr" | "rtl") => void;
 }) {
   return (
     <div className="space-y-8 max-w-3xl">
@@ -229,24 +207,6 @@ function GeneralSettings({
             <SelectItem value="japanese">Japanese</SelectItem>
             <SelectItem value="arabic">Arabic</SelectItem>
             <SelectItem value="hebrew">Hebrew</SelectItem>
-          </SelectContent>
-        </Select>
-      </SettingRow>
-
-      <SettingRow
-        title="Text direction"
-        description="Control the layout direction of the entire application."
-      >
-        <Select
-          value={direction}
-          onValueChange={(value) => onDirectionChange(value as "ltr" | "rtl")}
-        >
-          <SelectTrigger className="w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ltr">Left to Right</SelectItem>
-            <SelectItem value="rtl">Right to Left</SelectItem>
           </SelectContent>
         </Select>
       </SettingRow>

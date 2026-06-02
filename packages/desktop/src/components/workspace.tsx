@@ -21,7 +21,6 @@ import {
 import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
-import { useConfig } from "@/utils/project-config-store";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
 import type { FileEntry } from "@/utils/fs";
 import { getFileName } from "@/utils/fs";
@@ -51,7 +50,6 @@ export const Workspace = () => {
   }
 
   const { metadata, content } = getOrCreateWorkspaceCollections(workspacePath);
-  const projectDirection = useConfig((config) => config.editing.textDirection);
   const { t } = useTranslation();
   const dockableRef = useRef<HTMLDivElement>(null);
   const searchPanelRef = useRef<SearchPanelHandle>(null);
@@ -414,10 +412,7 @@ export const Workspace = () => {
   }, [workspacePath, openTabs.join(",")]);
 
   return (
-    <div
-      dir={projectDirection}
-      className="flex h-full w-full overflow-hidden p-2"
-    >
+    <div dir="ltr" className="flex h-full w-full overflow-hidden p-2">
       <div className="flex h-full shrink-0 overflow-hidden rounded-xl border border-border">
         <IconSidebar
           isCollapsed={isSidebarCollapsed}
@@ -488,7 +483,7 @@ export const Workspace = () => {
         onSearchInFile={handleSearchInFile}
         onSearchInFiles={handleSearchInFiles}
         onFocusEditor={focusActiveEditor}
-        direction={projectDirection}
+        direction="ltr"
       />
     </div>
   );
