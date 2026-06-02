@@ -267,9 +267,13 @@ export function useConfig<TSelected>(
   return useProjectConfig(workspacePath ?? NO_WORKSPACE_ID, selector, fallback);
 }
 
-export function useUpdateConfig(): (
-  updater: (current: ProjectConfigV1Input) => ProjectConfigV1Input,
-) => void {
+export function useUpdateConfig(): {
+  update: (
+    updater: (current: ProjectConfigV1Input) => ProjectConfigV1Input,
+  ) => void;
+  error: Error | null;
+  isPending: boolean;
+} {
   const { workspacePath } = useWorkspaceParams();
   const resolvedWorkspacePath = workspacePath ?? NO_WORKSPACE_ID;
   const mutation = useMutation({
@@ -280,11 +284,15 @@ export function useUpdateConfig(): (
     },
   });
 
-  return (updater: (current: ProjectConfigV1Input) => ProjectConfigV1Input) => {
-    if (resolvedWorkspacePath === NO_WORKSPACE_ID) {
-      return;
-    }
+  return {
+    update: (updater: (current: ProjectConfigV1Input) => ProjectConfigV1Input) => {
+      if (resolvedWorkspacePath === NO_WORKSPACE_ID) {
+        return;
+      }
 
-    mutation.mutate(updater);
+      mutation.mutate(updater);
+    },
+    error: mutation.error,
+    isPending: mutation.isPending,
   };
 }

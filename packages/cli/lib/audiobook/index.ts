@@ -23,8 +23,9 @@ interface MakeAudiobookParams {
   outputPath: string;
 }
 
-export function canMakeAudiobook() {
-  return true;
+export function canMakeAudiobook(config: ProjectConfigV1Output) {
+  const apiKey = config.outputs?.audiobook?.apiKey || process.env.ELEVENLABS_API_KEY;
+  return !!config.outputs?.audiobook?.enabled && !!apiKey;
 }
 
 export async function makeAudiobook(
@@ -44,7 +45,12 @@ export async function makeAudiobook(
     `Streaming ${entireContent.length} characters to audiobook...`,
   );
 
-  const elevenLabsService = getElevenLabsService();
+  const apiKey = config.outputs?.audiobook?.apiKey || process.env.ELEVENLABS_API_KEY;
+  if (!apiKey) {
+    logger.error('No ElevenLabs API key available. Set outputs.audiobook.apiKey in .metristsrc or ELEVENLABS_API_KEY environment variable.');
+    process.exit(1);
+  }
+  const elevenLabsService = getElevenLabsService(apiKey);
 
   logger.log(
     ['verbose', 'noob'],

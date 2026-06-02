@@ -5,18 +5,9 @@ import type { ReadableStream } from 'stream/web';
 import type { ProjectConfigV1Output } from '@metrists/shared';
 
 class ElevenLabsService {
-  private static instance: ElevenLabsService;
   private client: ElevenLabsClient | ElevenLabsClientMock;
 
-  private constructor() {
-    const apiKey = process.env.ELEVENLABS_API_KEY;
-
-    if (!apiKey) {
-      throw new ElevenLabsException(
-        'ELEVENLABS_API_KEY environment variable is required',
-      );
-    }
-
+  constructor(apiKey: string) {
     if (process.env.TEST) {
       this.client = new ElevenLabsClientMock({
         apiKey,
@@ -26,13 +17,6 @@ class ElevenLabsService {
         apiKey,
       });
     }
-  }
-
-  public static getInstance(): ElevenLabsService {
-    if (!ElevenLabsService.instance) {
-      ElevenLabsService.instance = new ElevenLabsService();
-    }
-    return ElevenLabsService.instance;
   }
 
   public async convertTextToSpeech(
@@ -112,4 +96,6 @@ class ElevenLabsService {
   }
 }
 
-export const getElevenLabsService = () => ElevenLabsService.getInstance();
+export function getElevenLabsService(apiKey: string): ElevenLabsService {
+  return new ElevenLabsService(apiKey);
+}

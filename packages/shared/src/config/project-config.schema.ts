@@ -250,7 +250,7 @@ export function getProjectConfigV1PersistedJsonSchema() {
   }
 
   return zodWithJsonSchema.toJSONSchema(ProjectConfigV1PersistedSchema, {
-    name: "MetristsProjectConfigV1",
+    name: "MetristsProjectConfigV1Persisted",
   });
 }
 

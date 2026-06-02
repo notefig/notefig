@@ -93,7 +93,13 @@ export function parseProjectConfigWithEnv(
   rawContent: string,
   env: EnvInput,
 ): ProjectConfigV1Output {
-  const parsed = parseProjectConfig(rawContent);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawContent);
+  } catch (error) {
+    throw new ProjectConfigJsonParseError(error);
+  }
+
   return parseProjectConfigObjectWithEnv(parsed, env);
 }
 
@@ -101,9 +107,8 @@ export function parseProjectConfigObjectWithEnv(
   raw: unknown,
   env: EnvInput,
 ): ProjectConfigV1Output {
-  const parsed = parseProjectConfigObject(raw);
-  const resolved = deepMapStrings(parsed, (text) =>
+  const resolved = deepMapStrings(raw, (text) =>
     resolveEnvReference(text, env),
   );
-  return ProjectConfigV1Schema.parse(resolved);
+  return parseProjectConfigObject(resolved);
 }

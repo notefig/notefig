@@ -2,8 +2,8 @@ import { config } from 'dotenv';
 import { join } from 'path';
 import {
   parseProjectConfigWithEnv,
+  createDefaultProjectConfigV1,
   PROJECT_CONFIG_FILE_NAME,
-  ProjectConfigSchemaReferenceError,
   type ProjectConfigV1Output,
 } from '@metrists/shared';
 import { readFileIfExists } from './fs.util';
@@ -18,13 +18,13 @@ export async function getConfigGetter(...basePath: string[]) {
     'path': join(process.cwd(), '.env'),
   });
   const rcContent = await readFileIfExists<string>(...basePath, RC_FILE_NAME);
-  if (!rcContent) {
-    throw new ProjectConfigSchemaReferenceError(
-      `No ${RC_FILE_NAME} file found in ${join(...basePath)}`,
-    );
-  }
 
-  const data = parseProjectConfigWithEnv(rcContent, process.env);
+  let data: ProjectConfigV1Output;
+  if (rcContent) {
+    data = parseProjectConfigWithEnv(rcContent, process.env);
+  } else {
+    data = createDefaultProjectConfigV1();
+  }
 
   function getConfig<TResult>(
     callback: GetRcFieldValue<TResult>,

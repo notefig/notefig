@@ -1,6 +1,6 @@
 import { InitCommand } from './init.command';
 import { join } from 'path';
-import { makeAudiobook } from '../lib/audiobook';
+import { canMakeAudiobook, makeAudiobook } from '../lib/audiobook';
 import type { Command } from 'commander';
 
 export class AudiobookCommand extends InitCommand {
@@ -22,6 +22,13 @@ export class AudiobookCommand extends InitCommand {
       process.exit(1);
     }
     await super.handle(command);
+    const config = this.getRc((rc) => rc);
+    if (!canMakeAudiobook(config)) {
+      this.logger.error(
+        'Audiobook generation is not configured. Enable outputs.audiobook.enabled and set outputs.audiobook.apiKey or ELEVENLABS_API_KEY environment variable.',
+      );
+      process.exit(1);
+    }
     const extension = this.outputPath.endsWith('.mp3') ? '' : '.mp3';
     const outputFilePath = join(
       this.workingDirectory,
@@ -30,7 +37,7 @@ export class AudiobookCommand extends InitCommand {
     await makeAudiobook(
       {
         outputPath: outputFilePath,
-        config: this.getRc((rc) => rc),
+        config,
         workingDirectory: this.workingDirectory,
         extractProjectMetadata: this.extractProjectMetadata.bind(this),
         shouldIncludeChapterFile: this.shouldIncludeChapterFile.bind(this),

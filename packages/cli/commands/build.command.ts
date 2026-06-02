@@ -100,8 +100,8 @@ export class BuildCommand extends InitCommand {
   }
 
   protected async buildAudiobookFile() {
-    //TODO: canMakeAudiobook should return the reason why we can't generate
-    if (canMakeAudiobook()) {
+    const config = this.getRc((rc) => rc);
+    if (canMakeAudiobook(config)) {
       return await makeAudiobook(
         {
           outputPath: combinePaths([this.templateAssetsPath, 'book.mp3']),
