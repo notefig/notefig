@@ -107,7 +107,7 @@ export function SettingsModal({ onFocusEditor }: SettingsModalProps) {
     updateConfig((current) => ({
       ...current,
       editing: {
-        ...current.editing,
+        ...(current.editing ?? {}),
         textDirection: nextDirection,
       },
     }));

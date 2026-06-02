@@ -9,6 +9,7 @@ import { queryClient } from "@/utils/collections";
 import * as sharedConfig from "@shared/config";
 
 type ProjectConfigV1Output = import("@shared/config").ProjectConfigV1Output;
+type ProjectConfigV1Input = import("@shared/config").ProjectConfigV1Input;
 
 export const DEFAULT_PROJECT_CONFIG =
   sharedConfig.createDefaultProjectConfigV1();
@@ -18,6 +19,7 @@ export interface ProjectConfigRow {
   id: "project";
   status: "missing" | "ok" | "error";
   config: ProjectConfigV1Output | null;
+  persisted: ProjectConfigV1Input | null;
   error: string | null;
 }
 
@@ -36,12 +38,14 @@ function getProjectConfigPath(workspaceId: string): string {
 function toProjectConfigRow(
   status: ProjectConfigRow["status"],
   config: ProjectConfigV1Output | null,
+  persisted: ProjectConfigV1Input | null,
   error: string | null,
 ): ProjectConfigRow {
   return {
     id: "project",
     status,
     config,
+    persisted,
     error,
   };
 }
@@ -70,38 +74,41 @@ function createProjectConfigCollection(workspaceId: string) {
 
       queryFn: async (): Promise<ProjectConfigRow[]> => {
         if (!hasWorkspace) {
-          return [toProjectConfigRow("missing", null, null)];
+          return [toProjectConfigRow("missing", null, null, null)];
         }
 
         const fileRead = await platformAdapter.readFiles([configPath]);
         const read = fileRead.succeeded[0];
 
         if (!read) {
-          return [toProjectConfigRow("missing", null, null)];
+          return [toProjectConfigRow("missing", null, null, null)];
         }
 
         try {
+          const persisted = JSON.parse(read.content) as ProjectConfigV1Input;
           const config = sharedConfig.parseProjectConfigWithEnv(
             read.content,
             getProcessEnv(),
           );
-          return [toProjectConfigRow("ok", config, null)];
+          return [toProjectConfigRow("ok", config, persisted, null)];
         } catch (error) {
           const message =
             error instanceof Error ? error.message : "Unknown config error";
-          return [toProjectConfigRow("error", null, message)];
+          return [toProjectConfigRow("error", null, null, message)];
         }
       },
 
       getKey: (item) => item.id,
 
       onInsert: async ({ transaction }) => {
+        if (!hasWorkspace) return;
+
         const mutation = transaction.mutations[0];
         if (!mutation) return;
 
-        const nextConfig =
-          mutation.modified.config ??
-          sharedConfig.createDefaultProjectConfigV1();
+        const nextConfig = mutation.modified.persisted;
+        if (!nextConfig) return;
+
         const writeResult = await platformAdapter.writeFiles([
           {
             path: configPath,
@@ -115,10 +122,12 @@ function createProjectConfigCollection(workspaceId: string) {
       },
 
       onUpdate: async ({ transaction }) => {
+        if (!hasWorkspace) return;
+
         const mutation = transaction.mutations[0];
         if (!mutation) return;
 
-        const nextConfig = mutation.modified.config;
+        const nextConfig = mutation.modified.persisted;
         if (!nextConfig) return;
 
         const writeResult = await platformAdapter.writeFiles([
@@ -156,7 +165,20 @@ export function writeProjectConfig(
   workspaceId: string,
   nextConfig: unknown,
 ): void {
-  const validatedConfig = sharedConfig.parseProjectConfigObject(nextConfig);
+  if (
+    !nextConfig ||
+    typeof nextConfig !== "object" ||
+    Array.isArray(nextConfig)
+  ) {
+    throw new Error("Project config update must be a JSON object");
+  }
+
+  const persistedInput = {
+    ...(nextConfig as Record<string, unknown>),
+    $schema: sharedConfig.PROJECT_CONFIG_SCHEMA_URL_V1,
+  } as ProjectConfigV1Input;
+
+  const validatedConfig = sharedConfig.parseProjectConfigObject(persistedInput);
   const collection = getOrCreateProjectConfigCollection(workspaceId);
   const existing = collection.get("project");
 
@@ -164,6 +186,7 @@ export function writeProjectConfig(
     collection.update("project", (draft) => {
       draft.status = "ok";
       draft.config = validatedConfig;
+      draft.persisted = persistedInput;
       draft.error = null;
     });
     return;
@@ -173,23 +196,24 @@ export function writeProjectConfig(
     id: "project",
     status: "ok",
     config: validatedConfig,
+    persisted: persistedInput,
     error: null,
   });
 }
 
 export function updateProjectConfig(
   workspaceId: string,
-  updater: (current: ProjectConfigV1Output) => unknown,
+  updater: (current: ProjectConfigV1Input) => ProjectConfigV1Input,
 ): void {
   const collection = getOrCreateProjectConfigCollection(workspaceId);
   const existing = collection.get("project");
   const baseConfig =
-    existing?.status === "ok" && existing.config
-      ? existing.config
-      : DEFAULT_PROJECT_CONFIG;
+    existing?.status === "ok" && existing.persisted
+      ? existing.persisted
+      : sharedConfig.createInitialProjectConfigV1();
 
-  const nextConfig = updater(baseConfig);
-  writeProjectConfig(workspaceId, nextConfig);
+  const nextConfigInput = updater(baseConfig);
+  writeProjectConfig(workspaceId, nextConfigInput);
 }
 
 export function useProjectConfig<TSelected>(
@@ -204,6 +228,7 @@ export function useProjectConfig<TSelected>(
       q.from({ project: collection }).select(({ project }) => ({
         status: project.status,
         config: project.config,
+        persisted: project.persisted,
       })),
     [workspacePath],
   );
@@ -243,18 +268,23 @@ export function useConfig<TSelected>(
 }
 
 export function useUpdateConfig(): (
-  updater: (current: ProjectConfigV1Output) => unknown,
+  updater: (current: ProjectConfigV1Input) => ProjectConfigV1Input,
 ) => void {
   const { workspacePath } = useWorkspaceParams();
+  const resolvedWorkspacePath = workspacePath ?? NO_WORKSPACE_ID;
   const mutation = useMutation({
     mutationFn: async (
-      updater: (current: ProjectConfigV1Output) => unknown,
+      updater: (current: ProjectConfigV1Input) => ProjectConfigV1Input,
     ) => {
-      updateProjectConfig(workspacePath ?? NO_WORKSPACE_ID, updater);
+      updateProjectConfig(resolvedWorkspacePath, updater);
     },
   });
 
-  return (updater: (current: ProjectConfigV1Output) => unknown) => {
+  return (updater: (current: ProjectConfigV1Input) => ProjectConfigV1Input) => {
+    if (resolvedWorkspacePath === NO_WORKSPACE_ID) {
+      return;
+    }
+
     mutation.mutate(updater);
   };
 }

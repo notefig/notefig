@@ -81,11 +81,11 @@ const AudiobookOutputSchema = z
   .default({})
   .transform((value) => ({
     enabled: value.enabled ?? false,
-    provider: value.provider ?? "elevenlabs",
-    apiKey: value.apiKey ?? "$ELEVENLABS_API_KEY",
-    voiceId: value.voiceId ?? "$ELEVENLABS_VOICE_ID",
-    modelId: value.modelId ?? "eleven_multilingual_v2",
-    format: value.format ?? "mp3_44100_128",
+    provider: value.provider,
+    apiKey: value.apiKey,
+    voiceId: value.voiceId,
+    modelId: value.modelId,
+    format: value.format,
   }));
 
 const OutputsSchema = z
@@ -163,10 +163,17 @@ export const ProjectConfigV1Schema = z
 export type ProjectConfigV1Input = z.input<typeof ProjectConfigV1Schema>;
 export type ProjectConfigV1Output = z.output<typeof ProjectConfigV1Schema>;
 
-export function createDefaultProjectConfigV1(): ProjectConfigV1Output {
-  return ProjectConfigV1Schema.parse({
+export function createInitialProjectConfigV1(): Pick<
+  ProjectConfigV1Input,
+  "$schema"
+> {
+  return {
     $schema: PROJECT_CONFIG_SCHEMA_URL_V1,
-  });
+  };
+}
+
+export function createDefaultProjectConfigV1(): ProjectConfigV1Output {
+  return ProjectConfigV1Schema.parse(createInitialProjectConfigV1());
 }
 
 type ZodWithJsonSchema = typeof z & {

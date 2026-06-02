@@ -26,11 +26,6 @@ describe("project config schema", () => {
         pdf: { enabled: false },
         audiobook: {
           enabled: false,
-          provider: "elevenlabs",
-          apiKey: "$ELEVENLABS_API_KEY",
-          voiceId: "$ELEVENLABS_VOICE_ID",
-          modelId: "eleven_multilingual_v2",
-          format: "mp3_44100_128",
         },
       },
     });
@@ -54,11 +49,6 @@ describe("project config schema", () => {
         pdf: { enabled: false },
         audiobook: {
           enabled: false,
-          provider: "elevenlabs",
-          apiKey: "$ELEVENLABS_API_KEY",
-          voiceId: "$ELEVENLABS_VOICE_ID",
-          modelId: "eleven_multilingual_v2",
-          format: "mp3_44100_128",
         },
       },
     });
@@ -85,11 +75,6 @@ describe("project config schema", () => {
         pdf: { enabled: false },
         audiobook: {
           enabled: false,
-          provider: "elevenlabs",
-          apiKey: "$ELEVENLABS_API_KEY",
-          voiceId: "$ELEVENLABS_VOICE_ID",
-          modelId: "eleven_multilingual_v2",
-          format: "mp3_44100_128",
         },
       },
     });
