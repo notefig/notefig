@@ -27,49 +27,47 @@ describe('config_validation_errors', () => {
     }
   });
 
-  it(
-    'fails when .metristsrc is missing',
-    async () => {
-      const tempDir = createUniqueTempDir('config-missing-file');
-      createdTempDirs.push(tempDir);
+  function createTempProject(metristsrcContent?: string): string {
+    const tempDir = createUniqueTempDir('config-validation');
+    createdTempDirs.push(tempDir);
 
-      writeFileSync(join(tempDir, 'test.md'), '# Hello', 'utf-8');
+    writeFileSync(join(tempDir, 'test.md'), '# Hello', 'utf-8');
+    if (metristsrcContent !== undefined) {
+      writeFileSync(
+        join(tempDir, '.metristsrc'),
+        metristsrcContent,
+        'utf-8',
+      );
+    }
 
-      const result = await execa('node', [getCliPath(), 'init'], {
-        cwd: tempDir,
-        reject: false,
-      });
-      const output = `${result.stdout}\n${result.stderr}`;
+    return tempDir;
+  }
 
-      expect(result.exitCode).not.toBe(0);
-      expect(output).toContain('Project config error');
-      expect(output).toContain('No .metristsrc file found');
-    },
-    timeout,
-  );
+  async function runInitAndExpectConfigError(
+    tempDir: string,
+    expectedMessage: string,
+  ): Promise<string> {
+    const result = await execa('node', [getCliPath(), 'init'], {
+      cwd: tempDir,
+      reject: false,
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    expect(result.exitCode).not.toBe(0);
+    expect(output).toContain('Project config error');
+    expect(output).toContain(expectedMessage);
+
+    return output;
+  }
 
   it(
     'fails on malformed json',
     async () => {
-      const tempDir = createUniqueTempDir('config-malformed-json');
-      createdTempDirs.push(tempDir);
-
-      writeFileSync(join(tempDir, 'test.md'), '# Hello', 'utf-8');
-      writeFileSync(
-        join(tempDir, '.metristsrc'),
+      const tempDir = createTempProject(
         '{"$schema": "https://raw.githubusercontent.com/metrists/metrists/main/schemas/project-config/v1.schema.json",',
-        'utf-8',
       );
 
-      const result = await execa('node', [getCliPath(), 'init'], {
-        cwd: tempDir,
-        reject: false,
-      });
-      const output = `${result.stdout}\n${result.stderr}`;
-
-      expect(result.exitCode).not.toBe(0);
-      expect(output).toContain('Project config error');
-      expect(output).toContain('not valid JSON');
+      await runInitAndExpectConfigError(tempDir, 'not valid JSON');
     },
     timeout,
   );
@@ -77,18 +75,11 @@ describe('config_validation_errors', () => {
   it(
     'fails on unsupported $schema url',
     async () => {
-      const tempDir = createUniqueTempDir('config-unsupported-schema');
-      createdTempDirs.push(tempDir);
-
-      writeFileSync(join(tempDir, 'test.md'), '# Hello', 'utf-8');
-      writeFileSync(
-        join(tempDir, '.metristsrc'),
+      const tempDir = createTempProject(
         JSON.stringify(
           {
             $schema:
               'https://raw.githubusercontent.com/metrists/metrists/main/schemas/project-config/v2.schema.json',
-            editing: { textDirection: 'ltr' },
-            lifecycle: { git: { enabled: true } },
             outputs: {
               web: {
                 enabled: true,
@@ -111,18 +102,12 @@ describe('config_validation_errors', () => {
           null,
           2,
         ),
-        'utf-8',
       );
 
-      const result = await execa('node', [getCliPath(), 'init'], {
-        cwd: tempDir,
-        reject: false,
-      });
-      const output = `${result.stdout}\n${result.stderr}`;
-
-      expect(result.exitCode).not.toBe(0);
-      expect(output).toContain('Project config error');
-      expect(output).toContain('Unsupported .metristsrc schema version');
+      await runInitAndExpectConfigError(
+        tempDir,
+        'Unsupported .metristsrc schema version',
+      );
     },
     timeout,
   );

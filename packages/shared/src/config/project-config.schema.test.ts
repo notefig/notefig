@@ -9,23 +9,32 @@ import {
   ProjectConfigSchemaReferenceError,
 } from "./project-config.parse-errors";
 
+const VALID_OUTPUTS = {
+  web: {
+    enabled: true,
+    outDir: "out",
+    theme: "metrists-theme-next",
+    deploy: { provider: null, options: {} },
+  },
+  epub: { enabled: false, coverImagePath: "cover.jpg" },
+  pdf: { enabled: false },
+  audiobook: { enabled: false },
+};
+
+const AUDIOBOOK_OUTPUT_WITH_ENV_REFS = {
+  enabled: true,
+  provider: "elevenlabs",
+  apiKey: "$ELEVENLABS_API_KEY",
+  voiceId: "$ELEVENLABS_VOICE_ID",
+  modelId: "eleven_multilingual_v2",
+  format: "mp3_44100_128",
+};
+
 describe("project config schema", () => {
   it("accepts a valid minimal v1 config", () => {
     const raw = JSON.stringify({
       $schema: PROJECT_CONFIG_SCHEMA_URL_V1,
-      outputs: {
-        web: {
-          enabled: true,
-          outDir: "out",
-          theme: "metrists-theme-next",
-          deploy: { provider: null, options: {} },
-        },
-        epub: { enabled: false, coverImagePath: "cover.jpg" },
-        pdf: { enabled: false },
-        audiobook: {
-          enabled: false,
-        },
-      },
+      outputs: VALID_OUTPUTS,
     });
 
     const result = parseProjectConfig(raw);
@@ -34,19 +43,7 @@ describe("project config schema", () => {
 
   it("throws when $schema is missing", () => {
     const raw = JSON.stringify({
-      outputs: {
-        web: {
-          enabled: true,
-          outDir: "out",
-          theme: "metrists-theme-next",
-          deploy: { provider: null, options: {} },
-        },
-        epub: { enabled: false, coverImagePath: "cover.jpg" },
-        pdf: { enabled: false },
-        audiobook: {
-          enabled: false,
-        },
-      },
+      outputs: VALID_OUTPUTS,
     });
 
     expect(() => parseProjectConfig(raw)).toThrow(
@@ -58,19 +55,7 @@ describe("project config schema", () => {
     const raw = JSON.stringify({
       $schema:
         "https://raw.githubusercontent.com/metrists/metrists/main/schemas/project-config/v2.schema.json",
-      outputs: {
-        web: {
-          enabled: true,
-          outDir: "out",
-          theme: "metrists-theme-next",
-          deploy: { provider: null, options: {} },
-        },
-        epub: { enabled: false, coverImagePath: "cover.jpg" },
-        pdf: { enabled: false },
-        audiobook: {
-          enabled: false,
-        },
-      },
+      outputs: VALID_OUTPUTS,
     });
 
     expect(() => parseProjectConfig(raw)).toThrow(
@@ -88,22 +73,8 @@ describe("project config schema", () => {
     const raw = JSON.stringify({
       $schema: PROJECT_CONFIG_SCHEMA_URL_V1,
       outputs: {
-        web: {
-          enabled: true,
-          outDir: "out",
-          theme: "metrists-theme-next",
-          deploy: { provider: null, options: {} },
-        },
-        epub: { enabled: false, coverImagePath: "cover.jpg" },
-        pdf: { enabled: false },
-        audiobook: {
-          enabled: true,
-          provider: "elevenlabs",
-          apiKey: "$ELEVENLABS_API_KEY",
-          voiceId: "$ELEVENLABS_VOICE_ID",
-          modelId: "eleven_multilingual_v2",
-          format: "mp3_44100_128",
-        },
+        ...VALID_OUTPUTS,
+        audiobook: AUDIOBOOK_OUTPUT_WITH_ENV_REFS,
       },
     });
 
@@ -120,22 +91,8 @@ describe("project config schema", () => {
     const raw = JSON.stringify({
       $schema: PROJECT_CONFIG_SCHEMA_URL_V1,
       outputs: {
-        web: {
-          enabled: true,
-          outDir: "out",
-          theme: "metrists-theme-next",
-          deploy: { provider: null, options: {} },
-        },
-        epub: { enabled: false, coverImagePath: "cover.jpg" },
-        pdf: { enabled: false },
-        audiobook: {
-          enabled: true,
-          provider: "elevenlabs",
-          apiKey: "$ELEVENLABS_API_KEY",
-          voiceId: "$ELEVENLABS_VOICE_ID",
-          modelId: "eleven_multilingual_v2",
-          format: "mp3_44100_128",
-        },
+        ...VALID_OUTPUTS,
+        audiobook: AUDIOBOOK_OUTPUT_WITH_ENV_REFS,
       },
     });
 

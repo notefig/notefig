@@ -1,4 +1,7 @@
 {
   "extends": ["../../.fallowrc.json"],
-  "publicPackages": ["@metrists/shared"]
+  "publicPackages": ["@metrists/shared"],
+  "ignorePatterns": [
+    "**/scripts/**"
+  ]
 }
