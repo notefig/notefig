@@ -19,6 +19,38 @@ class ElevenLabsService {
     }
   }
 
+  private getVoiceId(
+    config?: ProjectConfigV1Output,
+    voiceId?: string,
+  ): string {
+    return (
+      voiceId ||
+      config?.outputs?.audiobook?.voiceId ||
+      process.env.ELEVENLABS_VOICE_ID ||
+      'pqHfZKP75CvOlQylNhV4'
+    );
+  }
+
+  private getModelId(config?: ProjectConfigV1Output, options?: { modelId?: string }): string {
+    return (
+      options?.modelId ||
+      config?.outputs?.audiobook?.modelId ||
+      'eleven_multilingual_v2'
+    );
+  }
+
+  private handleElevenLabsError(error: any): never {
+    if (error.statusCode && error.body?.detail?.message) {
+      throw new ElevenLabsException(
+        error.body.detail.message,
+        error.statusCode,
+      );
+    }
+    throw new ElevenLabsException(
+      error.message || 'Unknown ElevenLabs API error',
+    );
+  }
+
   public async convertTextToSpeech(
     text: string,
     config?: ProjectConfigV1Output,
@@ -28,31 +60,17 @@ class ElevenLabsService {
       modelId?: string;
     },
   ) {
-    const finalVoiceId =
-      voiceId ||
-      config?.outputs?.audiobook?.voiceId ||
-      process.env.ELEVENLABS_VOICE_ID ||
-      'pqHfZKP75CvOlQylNhV4';
-
     try {
-      return await this.client.textToSpeech.convert(finalVoiceId, {
-        outputFormat: options?.outputFormat || 'mp3_44100_128',
-        text,
-        modelId:
-          options?.modelId ||
-          config?.outputs?.audiobook?.modelId ||
-          'eleven_multilingual_v2',
-      });
-    } catch (error: any) {
-      if (error.statusCode && error.body?.detail?.message) {
-        throw new ElevenLabsException(
-          error.body.detail.message,
-          error.statusCode,
-        );
-      }
-      throw new ElevenLabsException(
-        error.message || 'Unknown ElevenLabs API error',
+      return await this.client.textToSpeech.convert(
+        this.getVoiceId(config, voiceId as string),
+        {
+          outputFormat: options?.outputFormat || 'mp3_44100_128',
+          text,
+          modelId: this.getModelId(config, options),
+        },
       );
+    } catch (error: any) {
+      this.handleElevenLabsError(error);
     }
   }
 
@@ -65,33 +83,19 @@ class ElevenLabsService {
       modelId?: string;
     },
   ): Promise<ReadableStream<Uint8Array>> {
-    const finalVoiceId =
-      voiceId ||
-      config?.outputs?.audiobook?.voiceId ||
-      process.env.ELEVENLABS_VOICE_ID ||
-      'pqHfZKP75CvOlQylNhV4';
-
     try {
-      return await this.client.textToSpeech.stream(finalVoiceId, {
-        outputFormat: (options?.outputFormat ||
-          config?.outputs?.audiobook?.format ||
-          'mp3_44100_128') as any,
-        text,
-        modelId:
-          options?.modelId ||
-          config?.outputs?.audiobook?.modelId ||
-          'eleven_multilingual_v2',
-      });
-    } catch (error: any) {
-      if (error.statusCode && error.body?.detail?.message) {
-        throw new ElevenLabsException(
-          error.body.detail.message,
-          error.statusCode,
-        );
-      }
-      throw new ElevenLabsException(
-        error.message || 'Unknown ElevenLabs API error',
+      return await this.client.textToSpeech.stream(
+        this.getVoiceId(config, voiceId),
+        {
+          outputFormat: (options?.outputFormat ||
+            config?.outputs?.audiobook?.format ||
+            'mp3_44100_128') as any,
+          text,
+          modelId: this.getModelId(config, options),
+        },
       );
+    } catch (error: any) {
+      this.handleElevenLabsError(error);
     }
   }
 }

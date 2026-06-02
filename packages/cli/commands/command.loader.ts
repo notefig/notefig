@@ -13,14 +13,8 @@ import {
   type Logger,
   type LogTypes,
 } from '../lib/utils/logger.util';
-import { BaseException } from '../exceptions/base.exception';
 import { ProjectConfigException } from '../exceptions/project-config.exception';
 import type { Command } from 'commander';
-import {
-  ProjectConfigEnvResolutionError,
-  ProjectConfigJsonParseError,
-  ProjectConfigSchemaReferenceError,
-} from '@metrists/shared';
 
 export class CommandLoader {
   protected static logger: Logger;
@@ -52,6 +46,50 @@ export class CommandLoader {
     });
   }
 
+  private static formatZodIssues(issues: any[]): string {
+    return issues
+      .map((issue: any) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
+      .join('; ');
+  }
+
+  private static resolveZodError(error: any): string | null {
+    if (!Array.isArray(error?.issues)) {
+      return null;
+    }
+    return new ProjectConfigException(
+      `Schema validation failed. ${this.formatZodIssues(error.issues)}`,
+    ).getMessage();
+  }
+
+  private static resolveErrorMessage(error: any): string | null {
+    if (!error) {
+      return null;
+    }
+    if (typeof error.getMessage === 'function') {
+      return error.getMessage();
+    }
+    const name = error.name;
+    if (typeof name !== 'string') {
+      return null;
+    }
+    if (name.startsWith('ProjectConfig')) {
+      return new ProjectConfigException(error.message).getMessage();
+    }
+    if (name === 'ZodError') {
+      return this.resolveZodError(error);
+    }
+    return null;
+  }
+
+  private static handleActionError(error: any): never {
+    const message = this.resolveErrorMessage(error);
+    if (message) {
+      this.logger.error(`${ERROR_PREFIX} ${message}`);
+      process.exit(1);
+    }
+    throw error;
+  }
+
   protected static loadCommandAndAction(
     command: AbstractCommand,
     program: Command,
@@ -68,33 +106,7 @@ export class CommandLoader {
         command.setServices(services);
         return await command.handle(commanderCommand);
       } catch (error: any) {
-        if (error instanceof BaseException) {
-          this.logger.error(`${ERROR_PREFIX} ${error.getMessage()}`);
-          process.exit(1);
-        }
-        if (
-          error instanceof ProjectConfigEnvResolutionError ||
-          error instanceof ProjectConfigJsonParseError ||
-          error instanceof ProjectConfigSchemaReferenceError
-        ) {
-          const ex = new ProjectConfigException(error.message);
-          this.logger.error(`${ERROR_PREFIX} ${ex.getMessage()}`);
-          process.exit(1);
-        }
-        if (error?.name === 'ZodError' && Array.isArray(error?.issues)) {
-          const details = error.issues
-            .map(
-              (issue: any) =>
-                `${issue.path.join('.') || '<root>'}: ${issue.message}`,
-            )
-            .join('; ');
-          const ex = new ProjectConfigException(
-            `Schema validation failed. ${details}`,
-          );
-          this.logger.error(`${ERROR_PREFIX} ${ex.getMessage()}`);
-          process.exit(1);
-        }
-        throw error;
+        this.handleActionError(error);
       }
     });
     return commanderCommand;
