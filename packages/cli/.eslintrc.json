@@ -21,5 +21,13 @@
     "@typescript-eslint/no-use-before-define": "off",
     "@typescript-eslint/no-non-null-assertion": "off"
   },
-  "ignorePatterns" : ["**/*.js" , "**/*.d.ts"]
+  "ignorePatterns" : ["**/*.js" , "**/*.d.ts"],
+  "overrides": [
+    {
+      "files": ["tests/**/*.test.ts"],
+      "parserOptions": {
+        "project": null
+      }
+    }
+  ]
 }
