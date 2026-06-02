@@ -13,7 +13,6 @@ describe("project config schema", () => {
   it("accepts a valid minimal v1 config", () => {
     const raw = JSON.stringify({
       $schema: PROJECT_CONFIG_SCHEMA_URL_V1,
-      lifecycle: { git: { enabled: true } },
       outputs: {
         web: {
           enabled: true,
@@ -35,7 +34,6 @@ describe("project config schema", () => {
 
   it("throws when $schema is missing", () => {
     const raw = JSON.stringify({
-      lifecycle: { git: { enabled: true } },
       outputs: {
         web: {
           enabled: true,
@@ -60,7 +58,6 @@ describe("project config schema", () => {
     const raw = JSON.stringify({
       $schema:
         "https://raw.githubusercontent.com/metrists/metrists/main/schemas/project-config/v2.schema.json",
-      lifecycle: { git: { enabled: true } },
       outputs: {
         web: {
           enabled: true,
@@ -81,38 +78,6 @@ describe("project config schema", () => {
     );
   });
 
-  it("accepts git origins in lifecycle config", () => {
-    const raw = JSON.stringify({
-      $schema: PROJECT_CONFIG_SCHEMA_URL_V1,
-      lifecycle: {
-        git: {
-          enabled: true,
-          origins: [
-            { name: "origin", url: "git@github.com:metrists/metrists.git" },
-            { name: "upstream" },
-          ],
-        },
-      },
-      outputs: {
-        web: {
-          enabled: true,
-          outDir: "out",
-          theme: "metrists-theme-next",
-          deploy: { provider: null, options: {} },
-        },
-        epub: { enabled: false, coverImagePath: "cover.jpg" },
-        pdf: { enabled: false },
-        audiobook: {
-          enabled: false,
-        },
-      },
-    });
-
-    const result = parseProjectConfig(raw);
-    expect(result.lifecycle.git.origins?.length).toBe(2);
-    expect(result.lifecycle.git.origins?.[0].name).toBe("origin");
-  });
-
   it("throws parse error for malformed JSON", () => {
     expect(() => parseProjectConfig('{"$schema":')).toThrow(
       ProjectConfigJsonParseError,
@@ -122,7 +87,6 @@ describe("project config schema", () => {
   it("resolves env var references when env is provided", () => {
     const raw = JSON.stringify({
       $schema: PROJECT_CONFIG_SCHEMA_URL_V1,
-      lifecycle: { git: { enabled: true } },
       outputs: {
         web: {
           enabled: true,
@@ -155,7 +119,6 @@ describe("project config schema", () => {
   it("throws when required env var is missing", () => {
     const raw = JSON.stringify({
       $schema: PROJECT_CONFIG_SCHEMA_URL_V1,
-      lifecycle: { git: { enabled: true } },
       outputs: {
         web: {
           enabled: true,

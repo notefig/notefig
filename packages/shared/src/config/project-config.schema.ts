@@ -18,13 +18,6 @@ const WebDeployProviderSchema = z.enum([
   "s3",
 ]);
 
-const GitOriginSchema = z
-  .object({
-    name: z.string().min(1),
-    url: z.string().min(1).optional(),
-  })
-  .strict();
-
 const DeploySchema = z
   .object({
     provider: WebDeployProviderSchema.nullable().optional(),
@@ -124,36 +117,14 @@ export const ProjectConfigV1Schema = z
     editing: z.object({}).strict().default({}),
     lifecycle: z
       .object({
-        git: z
-          .object({
-            enabled: z.boolean().optional(),
-            remote: z
-              .object({
-                name: z.string().min(1).optional(),
-                url: z.string().min(1).optional(),
-              })
-              .strict()
-              .optional(),
-            origins: z.array(GitOriginSchema).optional(),
-          })
-          .strict()
-          .default({ enabled: true, remote: undefined, origins: undefined })
-          .transform((value) => ({
-            enabled: value.enabled ?? true,
-            remote: value.remote,
-            origins: value.origins,
-          })),
+        git: z.object({}).strict().optional(),
       })
       .strict()
       .default({
-        git: { enabled: true, remote: undefined, origins: undefined },
+        git: {},
       })
       .transform((value) => ({
-        git: value.git ?? {
-          enabled: true,
-          remote: undefined,
-          origins: undefined,
-        },
+        git: value.git ?? {},
       })),
     outputs: OutputsSchema,
   })
@@ -174,6 +145,63 @@ export const ProjectConfigV1Schema = z
       });
     }
   });
+
+export const ProjectConfigV1PersistedSchema = z
+  .object({
+    $schema: z.literal(PROJECT_CONFIG_SCHEMA_URL_V1),
+    editing: z.object({}).strict().optional(),
+    lifecycle: z
+      .object({
+        git: z.object({}).strict().optional(),
+      })
+      .strict()
+      .optional(),
+    outputs: z
+      .object({
+        web: z
+          .object({
+            enabled: z.boolean().optional(),
+            outDir: z.string().min(1).optional(),
+            theme: z.string().min(1).optional(),
+            deploy: z
+              .object({
+                provider: WebDeployProviderSchema.nullable().optional(),
+                options: z.record(z.string(), z.unknown()).optional(),
+              })
+              .strict()
+              .optional(),
+          })
+          .strict()
+          .optional(),
+        epub: z
+          .object({
+            enabled: z.boolean().optional(),
+            coverImagePath: z.string().min(1).optional(),
+          })
+          .strict()
+          .optional(),
+        pdf: z
+          .object({
+            enabled: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
+        audiobook: z
+          .object({
+            enabled: z.boolean().optional(),
+            provider: z.literal("elevenlabs").optional(),
+            apiKey: SecretValueSchema.optional(),
+            voiceId: SecretValueSchema.optional(),
+            modelId: z.string().min(1).optional(),
+            format: z.string().min(1).optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
 
 export type ProjectConfigV1Input = z.input<typeof ProjectConfigV1Schema>;
 export type ProjectConfigV1Output = z.output<typeof ProjectConfigV1Schema>;
@@ -209,6 +237,19 @@ export function getProjectConfigV1JsonSchema() {
   }
 
   return zodWithJsonSchema.toJSONSchema(ProjectConfigV1Schema, {
+    name: "MetristsProjectConfigV1",
+  });
+}
+
+export function getProjectConfigV1PersistedJsonSchema() {
+  const zodWithJsonSchema = z as ZodWithJsonSchema;
+  if (!zodWithJsonSchema.toJSONSchema) {
+    throw new Error(
+      "z.toJSONSchema is unavailable. Ensure Zod 4 is installed.",
+    );
+  }
+
+  return zodWithJsonSchema.toJSONSchema(ProjectConfigV1PersistedSchema, {
     name: "MetristsProjectConfigV1",
   });
 }

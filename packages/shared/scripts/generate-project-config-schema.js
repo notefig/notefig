@@ -1,7 +1,7 @@
 const { mkdirSync, writeFileSync } = require("node:fs");
 const { resolve, dirname } = require("node:path");
 const {
-  getProjectConfigV1JsonSchema,
+  getProjectConfigV1PersistedJsonSchema,
 } = require("../dist/config/project-config.schema.js");
 
 function ensureDir(filePath) {
@@ -9,7 +9,7 @@ function ensureDir(filePath) {
 }
 
 function main() {
-  const schema = getProjectConfigV1JsonSchema();
+  const schema = getProjectConfigV1PersistedJsonSchema();
 
   const outputPath = resolve(
     __dirname,

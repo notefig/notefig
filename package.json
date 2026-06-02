@@ -11,6 +11,7 @@
     "build:git": "npm run build -w packages/git",
     "build:cli": "npm run build -w packages/shared && npm run build -w packages/cli",
     "build:desktop": "npm run build -w packages/desktop",
+    "schema:generate": "npm run schema:generate -w packages/shared",
     "dev:cli": "npm run dev -w packages/cli",
     "dev:desktop": "npm run tauri dev -w packages/desktop",
     "dev:marketing": "npm run dev -w packages/marketing",

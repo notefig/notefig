@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "https://raw.githubusercontent.com/metrists/metrists/main/schemas/project-config/v1.schema.json"
+    },
+    "editing": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "lifecycle": {
+      "type": "object",
+      "properties": {
+        "git": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputs": {
+      "type": "object",
+      "properties": {
+        "web": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "outDir": {
+              "type": "string",
+              "minLength": 1
+            },
+            "theme": {
+              "type": "string",
+              "minLength": 1
+            },
+            "deploy": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "netlify",
+                        "vercel",
+                        "nixpacks",
+                        "coolify",
+                        "railway",
+                        "s3"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "options": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "epub": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "coverImagePath": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "pdf": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "audiobook": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "provider": {
+              "type": "string",
+              "const": "elevenlabs"
+            },
+            "apiKey": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^\\$[A-Z_][A-Z0-9_]*$"
+                },
+                {
+                  "type": "string",
+                  "minLength": 1
+                }
+              ]
+            },
+            "voiceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^\\$[A-Z_][A-Z0-9_]*$"
+                },
+                {
+                  "type": "string",
+                  "minLength": 1
+                }
+              ]
+            },
+            "modelId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "format": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "$schema"
+  ],
+  "additionalProperties": false
+}
