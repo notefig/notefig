@@ -155,17 +155,18 @@ jobs:
 
       - name: Stage updater fragment
         run: |
-          JSON_PATH=$(find . -maxdepth 2 -name latest.json | head -n1)
+          JSON_PATH=$(find packages/desktop/src-tauri/target -name latest.json -path "*/release/bundle/*" | head -n1)
           if [ -z "$JSON_PATH" ]; then
-            echo "ERROR: latest.json not found"
-            find . -name latest.json 2>/dev/null
+            echo "ERROR: latest.json not found in target dirs, searching entire workspace..."
+            JSON_PATH=$(find . -name latest.json -not -path "*/node_modules/*" | head -n1)
+          fi
+          if [ -z "$JSON_PATH" ]; then
+            echo "ERROR: latest.json not found anywhere"
+            find . -name latest.json -not -path "*/node_modules/*" 2>/dev/null
             exit 1
           fi
-          if [ "$JSON_PATH" = "./latest.json" ] || [ "$JSON_PATH" = "latest.json" ]; then
-            echo "latest.json already in working directory"
-          else
-            cp "$JSON_PATH" latest.json
-          fi
+          echo "Found latest.json at: $JSON_PATH"
+          cp "$JSON_PATH" latest.json
 
       - name: Upload updater fragment
         uses: actions/upload-artifact@v4
