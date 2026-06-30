@@ -94,6 +94,7 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - platform: macos-latest
@@ -150,55 +151,4 @@ jobs:
           releaseBody: "See the assets to download this version and install."
           releaseDraft: false
           prerelease: false
-          includeUpdaterJson: false
           args: ${{ matrix.args }}
-
-      - name: Stage updater fragment
-        run: |
-          JSON_PATH=$(find packages/desktop/src-tauri/target -name latest.json -path "*/release/bundle/*" | head -n1)
-          if [ -z "$JSON_PATH" ]; then
-            echo "ERROR: latest.json not found in target dirs, searching entire workspace..."
-            JSON_PATH=$(find . -name latest.json -not -path "*/node_modules/*" | head -n1)
-          fi
-          if [ -z "$JSON_PATH" ]; then
-            echo "ERROR: latest.json not found anywhere"
-            find . -name latest.json -not -path "*/node_modules/*" 2>/dev/null
-            exit 1
-          fi
-          echo "Found latest.json at: $JSON_PATH"
-          cp "$JSON_PATH" latest.json
-
-      - name: Upload updater fragment
-        uses: actions/upload-artifact@v4
-        with:
-          name: updater-json-${{ matrix.id }}
-          path: latest.json
-          if-no-files-found: error
-
-  publish-updater:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download updater fragments
-        uses: actions/download-artifact@v4
-        with:
-          path: updater-fragments
-          pattern: updater-json-*
-
-      - name: Merge latest.json
-        run: |
-          find updater-fragments -name latest.json -print0 | xargs -0 jq -s '
-            .[0] as $base |
-            reduce .[1:][] as $item ($base; .platforms += $item.platforms)
-          ' > latest.json
-
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: desktop-v${{ inputs.version }}
-          files: latest.json
-          overwrite_files: true
