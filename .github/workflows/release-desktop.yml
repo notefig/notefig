@@ -80,6 +80,18 @@ jobs:
         working-directory: packages/desktop
         run: npm run build
 
+      - name: Create updater manifest for web
+        working-directory: packages/desktop
+        run: |
+          cat > dist/latest.json << JSON
+          {
+            "version": "${{ inputs.version }}",
+            "notes": "See the assets to download this version and install.",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {}
+          }
+          JSON
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
