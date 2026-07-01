@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { Node, type Descendant, Element, Text } from "slate";
 import {
   fuzzyFind,
-  lineColumnToTextareaOffset,
   columnToOffset,
   markupPrefixLength,
   rawLineToBlockPath,
@@ -563,22 +562,6 @@ describe("fuzzyFind", () => {
 
   it("should return -1 when not found", () => {
     expect(fuzzyFind("Hello world", "xyz", 0)).toBe(-1);
-  });
-});
-
-describe("lineColumnToTextareaOffset", () => {
-  const content = "Line 1\nLine 2\nLine 3";
-
-  it("should return 0 for line 1 column 1", () => {
-    expect(lineColumnToTextareaOffset(content, 1, 1)).toBe(0);
-  });
-
-  it("should calculate offset for line 2", () => {
-    expect(lineColumnToTextareaOffset(content, 2, 3)).toBe(9);
-  });
-
-  it("should handle end of line", () => {
-    expect(lineColumnToTextareaOffset(content, 1, 7)).toBe(6);
   });
 });
 

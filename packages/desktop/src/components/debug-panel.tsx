@@ -23,7 +23,6 @@ import type { LayoutNode } from "@/components/dockable";
 import {
   getEditor,
   isMarkdownInstance,
-  isCodeInstance,
 } from "@/components/editor/editor-store";
 import { useQueryClient } from "@tanstack/react-query";
 import type { GitError, RepoStatus } from "@metrists/git";
@@ -499,11 +498,6 @@ function DebugPanelContent({
         files[tabPath] = {
           type: "markdown",
           ast: editor.editor.children,
-        };
-      } else if (isCodeInstance(editor)) {
-        files[tabPath] = {
-          type: "code",
-          content: editor.editorState.content,
         };
       } else {
         files[tabPath] = {

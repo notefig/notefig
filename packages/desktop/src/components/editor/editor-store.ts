@@ -1,9 +1,8 @@
 /**
- * Polymorphic Editor Instance Store
+ * Editor Instance Store
  *
- * Maintains a unified registry of all editor types (markdown, code, image viewers).
- * Each editor type implements a common interface with polymorphic methods.
- * Irrelevant operations are no-ops for each type.
+ * Maintains a unified registry of markdown editors and image viewers.
+ * Each type implements a common interface with polymorphic methods.
  */
 
 import { createPlateEditor, type PlateEditor } from "platejs/react";
@@ -21,7 +20,6 @@ import {
   fuzzyFind,
   columnToOffset,
   markupPrefixLength,
-  lineColumnToTextareaOffset,
   rawLineToBlockPath,
   type BlockNode,
 } from "@/utils/navigation-utils";
@@ -81,18 +79,6 @@ export interface MarkdownInstance extends EditorInstance {
   readonly type: "markdown";
   readonly editor: PlateEditor;
   selection: BaseSelection | null;
-}
-
-/**
- * Code editor instance using plain textarea
- * editorState is nested to allow easy migration to Plate-based code editor later
- */
-export interface CodeInstance extends EditorInstance {
-  readonly type: "code";
-  readonly filePath: string;
-  editorState: {
-    content: string;
-  };
 }
 
 /**
@@ -410,88 +396,6 @@ function findTextNodePath(
   };
 }
 
-function createCodeInstance(filePath: string): CodeInstance {
-  const instance: CodeInstance = {
-    type: "code",
-    filePath,
-    editorState: {
-      content: "",
-    },
-    focus(): boolean {
-      if (isEditorFocusSuppressed()) return false;
-
-      // Look up the container by data attribute since we don't store a ref
-      const el = document.querySelector(
-        `[data-editor-container="${this.filePath}"]`,
-      );
-      if (el instanceof HTMLElement) {
-        el.focus();
-        return true;
-      }
-      return false;
-    },
-    dispose(): void {
-      // Cleanup any textarea listeners if needed
-      this.editorState.content = "";
-    },
-    isFocusable(): boolean {
-      return true;
-    },
-    goToLocation(location: EditorLocation): boolean {
-      try {
-        const container = document.querySelector(
-          `[data-editor-container="${this.filePath}"]`,
-        );
-        const textarea = container?.querySelector("textarea");
-
-        if (!(textarea instanceof HTMLTextAreaElement)) {
-          return false;
-        }
-
-        const content = textarea.value;
-
-        const startOffset = lineColumnToTextareaOffset(
-          content,
-          location.line,
-          location.column ?? 1,
-        );
-
-        let endOffset = startOffset;
-        if (
-          location.endLine !== undefined &&
-          location.endColumn !== undefined
-        ) {
-          endOffset = lineColumnToTextareaOffset(
-            content,
-            location.endLine,
-            location.endColumn,
-          );
-        } else if (location.expectedText) {
-          endOffset = startOffset + location.expectedText.length;
-        }
-
-        textarea.setSelectionRange(startOffset, endOffset);
-
-        textarea.focus();
-
-        const lines = content.slice(0, startOffset).split("\n");
-        const lineNumber = lines.length;
-        const lineHeight =
-          parseInt(getComputedStyle(textarea).lineHeight) || 20;
-        const scrollTop = Math.max(0, (lineNumber - 5) * lineHeight); // 5 lines of padding above
-        textarea.scrollTop = scrollTop;
-
-        return true;
-      } catch (error) {
-        console.error("Code editor navigation failed:", error);
-        return false;
-      }
-    },
-  };
-
-  return instance;
-}
-
 function createImageInstance(filePath: string): ImageInstance {
   const instance: ImageInstance = {
     type: "image",
@@ -526,15 +430,11 @@ interface MarkdownConfig {
   content: string;
 }
 
-interface CodeConfig {
-  type: "code";
-}
-
 interface ImageConfig {
   type: "image";
 }
 
-type EditorConfig = MarkdownConfig | CodeConfig | ImageConfig;
+type EditorConfig = MarkdownConfig | ImageConfig;
 
 /**
  * Get an existing editor for a file path, or create one with the given configuration.
@@ -569,9 +469,6 @@ export function getOrCreateEditor(
     case "markdown":
       instance = createMarkdownInstance(config.content);
       break;
-    case "code":
-      instance = createCodeInstance(filePath);
-      break;
     case "image":
       instance = createImageInstance(filePath);
       break;
@@ -590,15 +487,6 @@ export function isMarkdownInstance(
   instance: EditorInstance | undefined,
 ): instance is MarkdownInstance {
   return instance?.type === "markdown";
-}
-
-/**
- * Type guard for code instances
- */
-export function isCodeInstance(
-  instance: EditorInstance | undefined,
-): instance is CodeInstance {
-  return instance?.type === "code";
 }
 
 /**
@@ -686,20 +574,6 @@ export function getMarkdownEditor(filePath: string): PlateEditor | undefined {
 }
 
 /**
- * Get code editor state (type-safe accessor).
- * Returns undefined if the editor doesn't exist or isn't a code editor.
- */
-export function getCodeState(
-  filePath: string,
-): CodeInstance["editorState"] | undefined {
-  const instance = editorInstances.get(filePath);
-  if (isCodeInstance(instance)) {
-    return instance.editorState;
-  }
-  return undefined;
-}
-
-/**
  * Save the current selection for a markdown editor.
  * No-op for other editor types.
  */
@@ -748,25 +622,6 @@ export function getSelectedText(filePath: string): string | undefined {
       instance.editor as unknown as SlateEditor,
       selection,
     );
-    return text.trim() ? text : undefined;
-  }
-
-  if (isCodeInstance(instance)) {
-    const container = document.querySelector(
-      `[data-editor-container="${filePath}"]`,
-    );
-    const textarea = container?.querySelector("textarea");
-
-    if (!(textarea instanceof HTMLTextAreaElement)) {
-      return undefined;
-    }
-
-    const { selectionStart, selectionEnd, value } = textarea;
-    if (selectionStart === selectionEnd) {
-      return undefined;
-    }
-
-    const text = value.slice(selectionStart, selectionEnd);
     return text.trim() ? text : undefined;
   }
 

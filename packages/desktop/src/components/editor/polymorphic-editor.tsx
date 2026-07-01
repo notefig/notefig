@@ -3,12 +3,11 @@
 import { Suspense } from "react";
 import type { FileEntry } from "@/utils/fs";
 import { TextEditor } from "./text-editor";
-import { CodeEditor } from "./code-editor";
 import { ImageViewer } from "./image-viewer";
 import { FileLoadingPlaceholder } from "./file-loading-placeholder";
-import { getFileExtension } from "@/utils/fs";
+import { getFileExtension, isTextFile } from "@/utils/fs";
 
-export type EditorType = "markdown" | "code" | "image";
+export type EditorType = "markdown" | "image";
 
 interface PolymorphicEditorProps {
   file: FileEntry;
@@ -16,43 +15,38 @@ interface PolymorphicEditorProps {
   isContentLoaded: boolean;
 }
 
+const imageExtensions = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "webp",
+  "svg",
+  "bmp",
+  "ico",
+]);
+
 /**
  * Determine the editor type for a given file path.
+ * All non-image files are treated as markdown.
  */
 export function getEditorType(filePath: string): EditorType {
-  const extension = getFileExtension(filePath);
-
-  // Image files
-  const imageExtensions = new Set([
-    "jpg",
-    "jpeg",
-    "png",
-    "gif",
-    "webp",
-    "svg",
-    "bmp",
-    "ico",
-  ]);
-  if (imageExtensions.has(extension)) {
+  if (imageExtensions.has(getFileExtension(filePath))) {
     return "image";
   }
-
-  // Markdown files
-  const markdownExtensions = new Set(["md", "markdown", "mdown", "mkd"]);
-  if (markdownExtensions.has(extension)) {
-    return "markdown";
-  }
-
-  // All other text files use code editor
-  return "code";
+  return "markdown";
 }
 
 /**
- * Check if a file can be opened in an editor.
+ * Check if a file can be opened in the editor.
+ * Images get the image viewer, known text files get the markdown editor,
+ * unknown/binary files are refused.
  */
 export function canOpenFile(filePath: string): boolean {
-  const type = getEditorType(filePath);
-  return type !== null;
+  const ext = getFileExtension(filePath);
+  if (!ext) return true;
+  if (imageExtensions.has(ext)) return true;
+  return isTextFile(filePath);
 }
 
 /**
@@ -66,34 +60,17 @@ function PolymorphicEditorInner({
 }: PolymorphicEditorProps) {
   const editorType = getEditorType(file.path);
 
-  switch (editorType) {
-    case "markdown":
-      return (
-        <TextEditor
-          file={file}
-          basePath={basePath}
-          isContentLoaded={isContentLoaded}
-        />
-      );
-    case "code":
-      return (
-        <CodeEditor
-          file={file}
-          basePath={basePath}
-          isContentLoaded={isContentLoaded}
-        />
-      );
-    case "image":
-      return <ImageViewer file={file} basePath={basePath} />;
-    default:
-      return (
-        <CodeEditor
-          file={file}
-          basePath={basePath}
-          isContentLoaded={isContentLoaded}
-        />
-      );
+  if (editorType === "image") {
+    return <ImageViewer file={file} basePath={basePath} />;
   }
+
+  return (
+    <TextEditor
+      file={file}
+      basePath={basePath}
+      isContentLoaded={isContentLoaded}
+    />
+  );
 }
 
 /**

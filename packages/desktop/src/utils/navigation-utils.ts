@@ -31,31 +31,6 @@ export function fuzzyFind(
 }
 
 /**
- * Convert line/column (1-indexed) to absolute offset in text content.
- */
-export function lineColumnToTextareaOffset(
-  content: string,
-  line: number,
-  column: number,
-): number {
-  const lines = content.split("\n");
-  let offset = 0;
-
-  // Add length of all previous lines (including their newlines)
-  for (let i = 0; i < line - 1 && i < lines.length; i++) {
-    offset += lines[i].length + 1; // +1 for newline
-  }
-
-  // Add column offset for current line (clamped to line length)
-  if (line <= lines.length) {
-    const lineContent = lines[line - 1] ?? "";
-    offset += Math.min(column - 1, lineContent.length);
-  }
-
-  return Math.max(0, offset);
-}
-
-/**
  * Convert a 1-indexed column to a 0-indexed text offset.
  * Clamps to valid range.
  *
