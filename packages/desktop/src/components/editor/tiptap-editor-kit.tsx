@@ -44,7 +44,7 @@ export const editorExtensions = [
   }),
   TaskList,
   TaskItem.configure({
-    nested: true,
+    nested: false,
   }),
   Table.configure({
     resizable: true,

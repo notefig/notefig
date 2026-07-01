@@ -42,6 +42,10 @@ function isAutomatedBrowser(): boolean {
 }
 
 function supportsFsAccess(): boolean {
+  // Allow tests to force the pure IndexedDB adapter (no File System Access API needed)
+  if (typeof window !== "undefined" && (window as any).__METRISTS_FORCE_INDEXEDDB__) {
+    return false;
+  }
   return typeof window !== "undefined" && "showDirectoryPicker" in window;
 }
 
