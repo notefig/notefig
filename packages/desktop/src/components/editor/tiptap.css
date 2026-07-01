@@ -1,0 +1,15 @@
+/* Tiptap / ProseMirror base styles */
+
+.ProseMirror {
+  min-height: 100%;
+  outline: none;
+}
+
+.ProseMirror > * + * {
+  margin-top: 0.75em;
+}
+
+/* Ensure the editor fills available space */
+.tiptap-editor-wrapper .ProseMirror {
+  min-height: 100%;
+}
