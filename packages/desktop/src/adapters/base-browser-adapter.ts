@@ -92,8 +92,8 @@ function isBinaryByExtension(filePath: string): boolean {
   return BINARY_EXTENSIONS.has(ext);
 }
 
-const GITHUB_LATEST_MANIFEST_URL =
-  "https://github.com/metrists/metrists/releases/latest/download/latest.json";
+const UPDATER_MANIFEST_URL =
+  "https://app.metrists.com/latest.json";
 
 function normalizeVersion(version: string): number[] {
   const sanitized = version.trim().replace(/^v/i, "");
@@ -494,7 +494,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     return {
       check: async () => {
         try {
-          const response = await fetch(GITHUB_LATEST_MANIFEST_URL, {
+          const response = await fetch(UPDATER_MANIFEST_URL, {
             cache: "no-store",
           });
 

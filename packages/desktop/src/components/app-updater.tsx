@@ -7,6 +7,7 @@ import {
 import { toast } from "sonner";
 import { platformAdapter } from "@/adapters";
 import i18n from "@/utils/intl";
+import { isTauri } from "@/utils/platform";
 import type { UpdateFlow } from "@/adapters/platform-adapter.interface";
 
 export type UpdaterStatus =
@@ -222,6 +223,11 @@ export function AppUpdaterBootstrap() {
     }
 
     didRunInitialCheckRef.current = true;
+
+    if (!isTauri()) {
+      return;
+    }
+
     void checkForUpdate(queryClient);
   }, [queryClient]);
 
