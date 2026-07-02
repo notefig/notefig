@@ -51,6 +51,17 @@ export type FileSystemMetadata = {
 };
 
 /**
+ * Options for the single-line text prompt affordance
+ */
+export type TextPromptOptions = {
+  title: string;
+  message?: string;
+  defaultValue?: string;
+  placeholder?: string;
+  confirmLabel?: string;
+};
+
+/**
  * Metadata change event (batched)
  */
 export type MetadataChange = {
@@ -221,6 +232,15 @@ export interface IPlatformAdapter {
    * @returns Promise that resolves to the selected directory path or null if cancelled
    */
   pickDirectory(title: string): Promise<string | null>;
+
+  // ========== Text Prompt ==========
+  /**
+   * Ask the user for a single line of text (e.g. a link URL).
+   * window.prompt is not implemented inside the Tauri webview, so callers
+   * must go through this affordance instead.
+   * @returns the entered text, or null if the user cancelled
+   */
+  promptText(options: TextPromptOptions): Promise<string | null>;
 
   // ========== Directory Operations ==========
   /**

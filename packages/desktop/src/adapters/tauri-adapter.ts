@@ -10,7 +10,9 @@ import type {
   ContentChangeEvent,
   SearchOptions,
   SearchMatch,
+  TextPromptOptions,
 } from "./platform-adapter.interface";
+import { requestTextPrompt } from "@/utils/text-prompt";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -35,6 +37,12 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     });
 
     return Array.isArray(result) ? result[0] : result;
+  }
+
+  async promptText(options: TextPromptOptions): Promise<string | null> {
+    // The Tauri dialog plugin has no text-input dialog, and window.prompt is
+    // a no-op inside the webview — use the in-app dialog bridge.
+    return requestTextPrompt(options);
   }
 
   async readDirectory(

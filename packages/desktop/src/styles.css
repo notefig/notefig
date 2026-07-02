@@ -146,10 +146,14 @@
     -ms-user-select: none;
   }
 
-  /* Enable selection in text inputs and textareas */
+  /* Enable selection in text inputs and textareas.
+     The descendant selector matters: the global * rule above re-applies
+     user-select:none to every element INSIDE a contenteditable, and Chromium
+     refuses to place the caret on click in user-select:none text. */
   input,
   textarea,
-  [contenteditable="true"] {
+  [contenteditable="true"],
+  [contenteditable="true"] * {
     user-select: text;
     -webkit-user-select: text;
     -moz-user-select: text;

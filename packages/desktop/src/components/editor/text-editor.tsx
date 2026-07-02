@@ -18,11 +18,11 @@ import {
   ListOrderedIcon,
   QuoteIcon,
   StrikethroughIcon,
-  TableIcon,
   UnderlineIcon,
   LinkIcon,
 } from "lucide-react";
 import type { FileEntry } from "../../utils/fs";
+import { promptText } from "@/utils/fs";
 import { writeFileContent } from "@/utils/collections";
 import { calculateContentHash } from "@/utils/hash";
 import {
@@ -68,6 +68,21 @@ export function TextEditor({
     if (!editor || !file.contentHash) return;
 
     if (file.contentHash === lastKnownHashRef.current) return;
+
+    // The hash settles (or is recomputed) after mount even when nothing
+    // changed. Replacing the doc with identical content would only reset the
+    // caret to the document start — mid-typing, if the user is fast.
+    // trimEnd: files conventionally end with a newline that the markdown
+    // serializer never emits — that difference alone is not a content change
+    const currentMarkdown = (
+      editor.storage as unknown as {
+        markdown: { getMarkdown: () => string };
+      }
+    ).markdown.getMarkdown();
+    if (currentMarkdown.trimEnd() === (file.content ?? "").trimEnd()) {
+      lastKnownHashRef.current = file.contentHash;
+      return;
+    }
 
     console.log(
       `[text-editor] External change detected for ${file.path}, updating editor`,
@@ -121,7 +136,34 @@ export function TextEditor({
       reason: "text-editor-mount",
     });
 
+    // Tab-layout settling can re-parent the editor DOM after focus lands,
+    // which silently drops focus to <body> without a blur event — leaving
+    // ProseMirror's internal focus flag stale and click-to-place-caret
+    // broken. Reclaim through the arbiter, but only while focus sits on
+    // <body> (i.e. nothing else legitimately took it). Frame-by-frame for
+    // the settle window so user input can't slip into the gap.
+    const start = Date.now();
+    let reclaimRaf: number | null = null;
+    const reclaim = () => {
+      if (Date.now() - start > 600) {
+        reclaimRaf = null;
+        return;
+      }
+      if (
+        document.activeElement === document.body &&
+        !editor.view.hasFocus()
+      ) {
+        requestEditorFocus(file.path, {
+          when: "immediate",
+          reason: "focus-lost-after-mount",
+        });
+      }
+      reclaimRaf = requestAnimationFrame(reclaim);
+    };
+    reclaimRaf = requestAnimationFrame(reclaim);
+
     return () => {
+      if (reclaimRaf !== null) cancelAnimationFrame(reclaimRaf);
       const { from, to } = editor.state.selection;
       if (from !== to || editor.isFocused) {
         saveSelection(file.path, from, to);
@@ -219,34 +261,38 @@ export function TextEditor({
           >
             <CodeIcon />
           </ToolbarButton>
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() =>
-              editor
-                .chain()
-                .focus()
-                .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
-                .run()
-            }
-            tooltip="Insert Table"
-          >
-            <TableIcon />
-          </ToolbarButton>
-
           <Separator orientation="vertical" className="h-6" />
 
           <ToolbarButton
             onMouseDown={preventFocusLoss}
-            onClick={() => {
-              const previousUrl = editor.getAttributes("link").href;
-              if (previousUrl) {
-                editor.chain().focus().unsetLink().run();
-              } else {
-                const url = window.prompt("Enter URL");
-                if (url) {
-                  editor.chain().focus().setLink({ href: url }).run();
-                }
+            onClick={async () => {
+              const previousUrl = editor.getAttributes("link").href as
+                | string
+                | undefined;
+              const url = await promptText({
+                title: previousUrl ? "Edit link" : "Add link",
+                message: previousUrl
+                  ? "Clear the URL to remove the link."
+                  : undefined,
+                defaultValue: previousUrl ?? "",
+                placeholder: "https://example.com",
+                confirmLabel: previousUrl ? "Save" : "Add link",
+              });
+              if (url === null) return;
+              if (url === "") {
+                editor.chain().focus().extendMarkRange("link").unsetLink().run();
+                return;
               }
+              const resolved =
+                !url.includes("://") && !url.startsWith("/")
+                  ? `https://${url}`
+                  : url;
+              editor
+                .chain()
+                .focus()
+                .extendMarkRange("link")
+                .setLink({ href: resolved })
+                .run();
             }}
             tooltip="Link"
           >

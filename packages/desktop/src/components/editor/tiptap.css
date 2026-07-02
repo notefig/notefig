@@ -3,6 +3,11 @@
 .ProseMirror {
   min-height: 100%;
   outline: none;
+  /* WebKit draws the caret inside the trailing letter-space when any
+     letter-spacing applies, overlapping the last glyph */
+  letter-spacing: normal;
+  /* full-contrast caret — the prose body color renders it washed out */
+  caret-color: hsl(var(--foreground));
 }
 
 .ProseMirror > * + * {
@@ -30,6 +35,9 @@ ul[data-type="taskList"] > li > label {
   display: flex;
   align-items: center;
   user-select: none;
+  /* center the checkbox against the first text line (~1.5rem at prose-sm),
+     not the top of the item — keeps wrapped lines hanging correctly */
+  height: 1.5rem;
 }
 
 ul[data-type="taskList"] > li > div {
@@ -93,4 +101,33 @@ ul[data-type="taskList"] > li > div p {
 
 .ProseMirror.resize-cursor {
   cursor: col-resize;
+}
+
+/* Drag handle — the plugin positions it left-start (top-aligned, flush to
+   the block's left edge). Center it on the first text line and pull it into
+   the gutter so it clears list markers.
+   The padding widens the hit-target so the handle doesn't vanish as the
+   cursor approaches it (disappearing handle bug). */
+.drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-left: -0.25rem;
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+  cursor: grab;
+  color: hsl(var(--muted-foreground) / 0.4);
+  box-sizing: content-box;
+}
+
+.drag-handle:hover {
+  background-color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+}
+
+.drag-handle:active,
+.drag-handle[data-dragging="true"] {
+  cursor: grabbing;
 }

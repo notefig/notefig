@@ -577,7 +577,11 @@ export function getFileEntry(
     type: metadata.type,
     modified: metadata.modified,
     size: metadata.size,
-    contentHash: metadata.contentHash,
+    // content and its hash must come from the same row — the content
+    // collection hashes the exact string it holds. Pairing content with
+    // metadata's separately-scheduled hash made FileEntry internally
+    // inconsistent (loaded content + empty/stale hash).
+    contentHash: content?.contentHash || metadata.contentHash,
     content: content?.content || "",
     error: metadata.error,
   };

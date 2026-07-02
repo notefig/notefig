@@ -134,8 +134,8 @@ const MarkdownImage = Image.extend({
 export const editorExtensions = [
   StarterKit.configure({
     codeBlock: false,
-    dropcursor: false,
-    gapcursor: false,
+    // dropcursor gives drag-drop a visible insertion indicator; gapcursor
+    // makes positions before/after tables and block images reachable.
     // StarterKit bundles link and underline in Tiptap v3; disable them so the
     // standalone configured instances below are the only registrations.
     link: false,

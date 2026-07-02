@@ -6,6 +6,7 @@
  */
 
 import { Editor } from "@tiptap/core";
+import { TextSelection } from "@tiptap/pm/state";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
 import { fuzzyFind } from "@/utils/navigation-utils";
 import { focusArbiter } from "@/utils/focus-arbiter";
@@ -138,6 +139,32 @@ function createMarkdownInstance(filePath: string, content: string): MarkdownInst
     content,
     editable: true,
     autofocus: false,
+    editorProps: {
+      handleDOMEvents: {
+        // Layout re-parenting can silently drop DOM focus to <body> while
+        // ProseMirror still believes it is focused. Clicking then focuses
+        // the editor, and PM's on-focus selection restore clobbers the
+        // browser's caret placement with the stale state selection. Setting
+        // the state selection to the clicked position first makes that
+        // restore land where the user clicked.
+        mousedown: (view, event) => {
+          if (view.hasFocus() || event.button !== 0 || event.shiftKey) {
+            return false;
+          }
+          const pos = view.posAtCoords({
+            left: event.clientX,
+            top: event.clientY,
+          });
+          if (!pos) return false;
+          view.dispatch(
+            view.state.tr.setSelection(
+              TextSelection.near(view.state.doc.resolve(pos.pos)),
+            ),
+          );
+          return false;
+        },
+      },
+    },
   });
 
   const instance: MarkdownInstance = {
