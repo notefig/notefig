@@ -223,7 +223,7 @@ function createMarkdownInstance(filePath: string, content: string): MarkdownInst
   return instance;
 }
 
-function resolveLineColumn(
+export function resolveLineColumn(
   doc: { content: { size: number } },
   text: string,
   line: number,

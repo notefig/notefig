@@ -1,11 +1,10 @@
-import { useCallback, useRef, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import { EditorContent } from "@tiptap/react";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { GripVertical } from "lucide-react";
 import "./tiptap.css";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { FixedToolbar } from "@/components/ui/fixed-toolbar";
-import { ToolbarButton } from "@/components/ui/toolbar";
 import { Separator } from "@/components/ui/separator";
 import {
   BoldIcon,
@@ -32,6 +31,12 @@ import {
   getSavedSelection,
   isMarkdownInstance,
 } from "@/components/editor/editor-store";
+import {
+  TiptapHeadingButton,
+  TiptapMarkButton,
+  TiptapBlockButton,
+  TiptapLinkButton,
+} from "./tiptap-toolbar-buttons";
 
 interface TextEditorProps {
   file: FileEntry;
@@ -58,11 +63,6 @@ export function TextEditor({
   }
 
   const editor = instance.editor;
-
-  const preventFocusLoss = useCallback(
-    (e: React.MouseEvent) => e.preventDefault(),
-    [],
-  );
 
   useEffect(() => {
     if (!editor || !file.contentHash) return;
@@ -127,7 +127,11 @@ export function TextEditor({
     if (!editor) return;
 
     const saved = getSavedSelection(file.path);
-    if (saved) {
+    if (
+      saved &&
+      saved.from <= editor.state.doc.content.size &&
+      saved.to <= editor.state.doc.content.size
+    ) {
       editor.commands.setTextSelection(saved);
     }
 
@@ -168,136 +172,93 @@ export function TextEditor({
       if (from !== to || editor.isFocused) {
         saveSelection(file.path, from, to);
       }
+      // Detaching the editor's DOM from the document (tab switch) drops
+      // focus without a blur event — PM's view.hasFocus() stays stale.
+      // Explicitly blur so the next mount starts from a clean state.
+      (editor.view.dom as HTMLElement).blur();
     };
   }, [editor, file.path]);
+
+  const handleLinkToggle = async () => {
+    const previousUrl = editor.getAttributes("link").href as string | undefined;
+    const url = await promptText({
+      title: previousUrl ? "Edit link" : "Add link",
+      message: previousUrl ? "Clear the URL to remove the link." : undefined,
+      defaultValue: previousUrl ?? "",
+      placeholder: "https://example.com",
+      confirmLabel: previousUrl ? "Save" : "Add link",
+    });
+    if (url === null) return;
+    if (url === "") {
+      editor.chain().focus().extendMarkRange("link").unsetLink().run();
+      return;
+    }
+    const resolved =
+      !url.includes("://") && !url.startsWith("/") ? `https://${url}` : url;
+    editor
+      .chain()
+      .focus()
+      .extendMarkRange("link")
+      .setLink({ href: resolved })
+      .run();
+  };
 
   return (
     <div className="flex flex-col flex-1 min-h-0 w-full z-0">
       <FixedToolbar>
         <ScrollArea className="flex justify-start shrink-0 gap-1">
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
-            tooltip="Heading 1"
-          >
+          <TiptapHeadingButton editor={editor} level={1} tooltip="Heading 1">
             <Heading1Icon />
-          </ToolbarButton>
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-            tooltip="Heading 2"
-          >
+          </TiptapHeadingButton>
+          <TiptapHeadingButton editor={editor} level={2} tooltip="Heading 2">
             <Heading2Icon />
-          </ToolbarButton>
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
-            tooltip="Heading 3"
-          >
+          </TiptapHeadingButton>
+          <TiptapHeadingButton editor={editor} level={3} tooltip="Heading 3">
             <Heading3Icon />
-          </ToolbarButton>
+          </TiptapHeadingButton>
 
           <Separator orientation="vertical" className="h-6" />
 
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() => editor.chain().focus().toggleBold().run()}
-            tooltip="Bold"
-          >
+          <TiptapMarkButton editor={editor} format="bold" tooltip="Bold">
             <BoldIcon />
-          </ToolbarButton>
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() => editor.chain().focus().toggleItalic().run()}
-            tooltip="Italic"
-          >
+          </TiptapMarkButton>
+          <TiptapMarkButton editor={editor} format="italic" tooltip="Italic">
             <ItalicIcon />
-          </ToolbarButton>
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() => editor.chain().focus().toggleUnderline().run()}
-            tooltip="Underline"
-          >
+          </TiptapMarkButton>
+          <TiptapMarkButton editor={editor} format="underline" tooltip="Underline">
             <UnderlineIcon />
-          </ToolbarButton>
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() => editor.chain().focus().toggleStrike().run()}
-            tooltip="Strikethrough"
-          >
+          </TiptapMarkButton>
+          <TiptapMarkButton editor={editor} format="strike" tooltip="Strikethrough">
             <StrikethroughIcon />
-          </ToolbarButton>
+          </TiptapMarkButton>
 
           <Separator orientation="vertical" className="h-6" />
 
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() => editor.chain().focus().toggleBulletList().run()}
-            tooltip="Bullet List"
-          >
+          <TiptapBlockButton editor={editor} format="bulletList" tooltip="Bullet List">
             <ListIcon />
-          </ToolbarButton>
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() => editor.chain().focus().toggleOrderedList().run()}
-            tooltip="Numbered List"
-          >
+          </TiptapBlockButton>
+          <TiptapBlockButton editor={editor} format="orderedList" tooltip="Numbered List">
             <ListOrderedIcon />
-          </ToolbarButton>
+          </TiptapBlockButton>
 
           <Separator orientation="vertical" className="h-6" />
 
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() => editor.chain().focus().toggleBlockquote().run()}
-            tooltip="Blockquote"
-          >
+          <TiptapBlockButton editor={editor} format="blockquote" tooltip="Blockquote">
             <QuoteIcon />
-          </ToolbarButton>
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={() => editor.chain().focus().toggleCodeBlock().run()}
-            tooltip="Code Block"
-          >
+          </TiptapBlockButton>
+          <TiptapBlockButton editor={editor} format="codeBlock" tooltip="Code Block">
             <CodeIcon />
-          </ToolbarButton>
+          </TiptapBlockButton>
+
           <Separator orientation="vertical" className="h-6" />
 
-          <ToolbarButton
-            onMouseDown={preventFocusLoss}
-            onClick={async () => {
-              const previousUrl = editor.getAttributes("link").href as
-                | string
-                | undefined;
-              const url = await promptText({
-                title: previousUrl ? "Edit link" : "Add link",
-                message: previousUrl
-                  ? "Clear the URL to remove the link."
-                  : undefined,
-                defaultValue: previousUrl ?? "",
-                placeholder: "https://example.com",
-                confirmLabel: previousUrl ? "Save" : "Add link",
-              });
-              if (url === null) return;
-              if (url === "") {
-                editor.chain().focus().extendMarkRange("link").unsetLink().run();
-                return;
-              }
-              const resolved =
-                !url.includes("://") && !url.startsWith("/")
-                  ? `https://${url}`
-                  : url;
-              editor
-                .chain()
-                .focus()
-                .extendMarkRange("link")
-                .setLink({ href: resolved })
-                .run();
-            }}
+          <TiptapLinkButton
+            editor={editor}
+            onToggle={handleLinkToggle}
             tooltip="Link"
           >
             <LinkIcon />
-          </ToolbarButton>
+          </TiptapLinkButton>
         </ScrollArea>
       </FixedToolbar>
       <div className="flex-1 min-h-0 overflow-auto tiptap-editor-wrapper">
