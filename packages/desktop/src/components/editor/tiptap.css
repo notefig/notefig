@@ -103,23 +103,19 @@ ul[data-type="taskList"] > li > div p {
   cursor: col-resize;
 }
 
-/* Drag handle — the plugin positions it left-start (top-aligned, flush to
-   the block's left edge). Center it on the first text line and pull it into
-   the gutter so it clears list markers.
-   The padding widens the hit-target so the handle doesn't vanish as the
-   cursor approaches it (disappearing handle bug). */
+/* Drag handle — the plugin positions a portal at left-start of each
+   hovered block. The handle must sit at or inside the block edge; any
+   negative margin pushes it outside the block's hover zone and the
+   plugin hides it before the cursor reaches it. */
 .drag-handle {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  margin-left: -0.25rem;
-  padding: 0.5rem;
+  margin-left: 0;
+  padding: 0.375rem;
   border-radius: 0.25rem;
   cursor: grab;
   color: hsl(var(--muted-foreground) / 0.4);
-  box-sizing: content-box;
 }
 
 .drag-handle:hover {
