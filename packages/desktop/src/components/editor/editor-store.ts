@@ -186,26 +186,37 @@ function createMarkdownInstance(filePath: string, content: string): MarkdownInst
       try {
         const doc = this.editor.state.doc;
         const fullText = doc.textBetween(0, doc.content.size, "\n", "\n");
-        const startPos = resolveLineColumn(doc, fullText, location.line, location.column ?? 1);
-
+        let startPos = resolveLineColumn(doc, fullText, location.line, location.column ?? 1);
         let endPos = startPos;
-        if (location.endLine !== undefined && location.endColumn !== undefined) {
-          endPos = resolveLineColumn(doc, fullText, location.endLine, location.endColumn);
-        } else if (location.expectedText) {
-          endPos = startPos + location.expectedText.length;
-        }
 
         if (location.expectedText) {
-          const textAtPos = fullText.slice(
-            doc.resolve(startPos).pos - doc.resolve(1).pos,
-            doc.resolve(startPos).pos - doc.resolve(1).pos + location.expectedText.length,
+          const fuzzyOffset = fuzzyFind(
+            fullText,
+            location.expectedText,
+            startPos - 1,
           );
-          if (textAtPos !== location.expectedText) {
-            const fuzzyOffset = fuzzyFind(fullText, location.expectedText, startPos - 1);
-            if (fuzzyOffset !== -1) {
-              endPos = fuzzyOffset + 1 + location.expectedText.length;
-            }
+          if (fuzzyOffset !== -1) {
+            const textStart = fullTextOffsetToTextOffset(
+              fullText,
+              fuzzyOffset,
+            );
+            const textEnd = fullTextOffsetToTextOffset(
+              fullText,
+              fuzzyOffset + location.expectedText.length,
+            );
+            startPos = textOffsetToDocPos(doc, textStart);
+            endPos = textOffsetToDocPos(doc, textEnd - 1) + 1;
           }
+        } else if (
+          location.endLine !== undefined &&
+          location.endColumn !== undefined
+        ) {
+          endPos = resolveLineColumn(
+            doc,
+            fullText,
+            location.endLine,
+            location.endColumn,
+          );
         }
 
         this.editor.commands.setTextSelection({ from: startPos, to: endPos });
@@ -221,6 +232,39 @@ function createMarkdownInstance(filePath: string, content: string): MarkdownInst
   };
 
   return instance;
+}
+
+/**
+ * Map a 0-indexed character offset in the document's visible text to a
+ * 1-indexed ProseMirror document position. ProseMirror positions include
+ * node-boundary tokens that sit before the text content, so offset + 1 is
+ * not sufficient. We walk the text descendants to find the correct position.
+ */
+export function textOffsetToDocPos(doc: { content: { size: number }; descendants: (fn: (node: unknown, pos: number) => boolean | void) => void }, targetOffset: number): number {
+  let accumulated = 0;
+
+  let result = 1;
+  doc.descendants((node: unknown, pos: number) => {
+    const n = node as { isText?: boolean; text?: string; nodeSize?: number };
+    if (!n.isText || typeof n.text !== "string") return;
+
+    const len = n.text.length;
+    if (targetOffset < accumulated + len) {
+      result = pos + (targetOffset - accumulated);
+      return false; // stop traversal
+    }
+    accumulated += len;
+  });
+
+  return Math.max(1, Math.min(result, doc.content.size));
+}
+
+function fullTextOffsetToTextOffset(fullText: string, offset: number): number {
+  let count = 0;
+  for (let i = 0; i < offset; i++) {
+    if (fullText[i] === "\n") count++;
+  }
+  return offset - count;
 }
 
 export function resolveLineColumn(
