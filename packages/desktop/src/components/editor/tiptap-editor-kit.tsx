@@ -1,4 +1,5 @@
 import StarterKit from "@tiptap/starter-kit";
+import { ReactNodeViewRenderer } from "@tiptap/react";
 import { Markdown } from "tiptap-markdown";
 import Underline from "@tiptap/extension-underline";
 import Subscript from "@tiptap/extension-subscript";
@@ -16,6 +17,7 @@ import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import Placeholder from "@tiptap/extension-placeholder";
 import CharacterCount from "@tiptap/extension-character-count";
 import { common, createLowlight } from "lowlight";
+import { EditorImage } from "./editor-image-node";
 
 const lowlight = createLowlight(common);
 
@@ -103,8 +105,14 @@ const MarkdownTaskItem = TaskItem.extend({
  * written for schemas where image is an inline node. Tiptap's Image is a
  * block node, so without closeBlock the following block gets glued onto the
  * image line ("![x](y)After").
+ *
+ * Rendering uses a React node view that resolves local paths through
+ * useImageUrl / platformAdapter.resolveAssetUrl (the same async mechanism
+ * behind ImageViewer). The node attrs always store the canonical markdown
+ * path — serialization is unaffected. workspaceRoot is passed per-editor
+ * from editor-store.ts so resolution works regardless of the doc's directory.
  */
-const MarkdownImage = Image.extend({
+export const MarkdownImage = Image.extend({
   addStorage() {
     return {
       markdown: {
@@ -119,9 +127,9 @@ const MarkdownImage = Image.extend({
           },
         ) {
           const alt = state.esc(node.attrs.alt || "");
-          const src = node.attrs.src.replace(/[()]/g, "\\$&");
+          const src = node.attrs.src.replace(/[()]/g, String.raw`\$&`);
           const title = node.attrs.title
-            ? ` "${node.attrs.title.replace(/"/g, '\\"')}"`
+            ? ` "${node.attrs.title.replace(/"/g, String.raw`\"`)}"`
             : "";
           state.write(`![${alt}](${src}${title})`);
           state.closeBlock(node);
@@ -129,13 +137,15 @@ const MarkdownImage = Image.extend({
       },
     };
   },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(EditorImage);
+  },
 });
 
 export const editorExtensions = [
   StarterKit.configure({
     codeBlock: false,
-    // dropcursor gives drag-drop a visible insertion indicator; gapcursor
-    // makes positions before/after tables and block images reachable.
     // StarterKit bundles link and underline in Tiptap v3; disable them so the
     // standalone configured instances below are the only registrations.
     link: false,
@@ -164,27 +174,13 @@ export const editorExtensions = [
     linkOnPaste: false,
   }),
   MarkdownTaskList,
-  MarkdownTaskItem.configure({
-    nested: false,
-  }),
-  // Without an image node in the schema, ProseMirror drops <img> during
-  // parse and every image in the file is deleted by the next autosave.
-  // Rendering local paths through Tauri's asset protocol is Phase 5; this
-  // is about not destroying data.
-  MarkdownImage.configure({
-    allowBase64: true,
-  }),
-  Table.configure({
-    resizable: true,
-  }),
+  MarkdownTaskItem.configure({ nested: false }),
+  MarkdownImage.configure({ allowBase64: true }),
+  Table.configure({ resizable: true }),
   TableRow,
   TableCell,
   TableHeader,
-  CodeBlockLowlight.configure({
-    lowlight,
-  }),
-  Placeholder.configure({
-    placeholder: "Type something...",
-  }),
+  CodeBlockLowlight.configure({ lowlight }),
+  Placeholder.configure({ placeholder: "Type something..." }),
   CharacterCount,
 ];

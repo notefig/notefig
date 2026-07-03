@@ -56,6 +56,7 @@ export function TextEditor({
   const instance = getOrCreateEditor(file.path, {
     type: "markdown",
     content: file.content ?? "",
+    basePath,
   });
 
   if (!isMarkdownInstance(instance)) {
