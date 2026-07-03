@@ -1,47 +1,18 @@
-import { useRef, useEffect } from "react";
-import { EditorContent, EditorContext } from "@tiptap/react";
+import { EditorContent } from "@tiptap/react";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { GripVertical } from "lucide-react";
-import { LinkBubbleMenu } from "./tiptap-link-menu";
-import { normalizeLinkInput } from "./tiptap-link-utils";
-import { TableMenu } from "./tiptap-table-menu";
-import "./tiptap.css";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { FixedToolbar } from "@/components/ui/fixed-toolbar";
-import { Separator } from "@/components/ui/separator";
-import {
-  BoldIcon,
-  CodeIcon,
-  Heading1Icon,
-  Heading2Icon,
-  Heading3Icon,
-  ItalicIcon,
-  ListIcon,
-  ListOrderedIcon,
-  QuoteIcon,
-  StrikethroughIcon,
-  UnderlineIcon,
-  LinkIcon,
-  TableIcon,
-} from "lucide-react";
 import type { FileEntry } from "../../utils/fs";
-import { promptText } from "@/utils/fs";
-import { writeFileContent } from "@/utils/collections";
-import { calculateContentHash } from "@/utils/hash";
 import {
   getOrCreateEditor,
-  requestEditorFocus,
-  saveSelection,
-  getSavedSelection,
   isMarkdownInstance,
 } from "@/components/editor/editor-store";
-import {
-  TiptapHeadingButton,
-  TiptapMarkButton,
-  TiptapBlockButton,
-  TiptapLinkButton,
-  TiptapTableInsertButton,
-} from "./tiptap-toolbar-buttons";
+import { useEditorFileSync } from "./use-editor-file-sync";
+import { useEditorFocusLifecycle } from "./use-editor-focus-lifecycle";
+import { useLinkPrompt } from "./use-link-prompt";
+import { TiptapToolbar } from "./tiptap-toolbar";
+import { LinkBubbleMenu } from "./tiptap-link-menu";
+import { TableMenu } from "./tiptap-table-menu";
+import "./tiptap.css";
 
 interface TextEditorProps {
   file: FileEntry;
@@ -54,10 +25,6 @@ export function TextEditor({
   basePath,
   isContentLoaded,
 }: TextEditorProps) {
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastKnownHashRef = useRef<string>(file.contentHash || "");
-  const suppressSaveRef = useRef(false);
-
   const instance = getOrCreateEditor(file.path, {
     type: "markdown",
     content: file.content ?? "",
@@ -70,233 +37,13 @@ export function TextEditor({
 
   const editor = instance.editor;
 
-  useEffect(() => {
-    if (!editor || !file.contentHash) return;
-
-    if (file.contentHash === lastKnownHashRef.current) return;
-
-    // The hash settles (or is recomputed) after mount even when nothing
-    // changed. Replacing the doc with identical content would only reset the
-    // caret to the document start — mid-typing, if the user is fast.
-    // trimEnd: files conventionally end with a newline that the markdown
-    // serializer never emits — that difference alone is not a content change
-    const currentMarkdown = (
-      editor.storage as unknown as {
-        markdown: { getMarkdown: () => string };
-      }
-    ).markdown.getMarkdown();
-    if (currentMarkdown.trimEnd() === (file.content ?? "").trimEnd()) {
-      lastKnownHashRef.current = file.contentHash;
-      return;
-    }
-
-    console.log(
-      `[text-editor] External change detected for ${file.path}, updating editor`,
-    );
-
-    suppressSaveRef.current = true;
-    editor.commands.setContent(file.content, { emitUpdate: false });
-    suppressSaveRef.current = false;
-    lastKnownHashRef.current = file.contentHash;
-  }, [editor, file.contentHash, file.content, file.path]);
-
-  useEffect(() => {
-    const handleUpdate = () => {
-      if (suppressSaveRef.current) return;
-      if (!isContentLoaded) return;
-
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-
-      saveTimeoutRef.current = setTimeout(() => {
-        const markdown = (
-          editor.storage as unknown as {
-            markdown: { getMarkdown: () => string };
-          }
-        ).markdown.getMarkdown();
-
-        const hash = calculateContentHash(markdown);
-        lastKnownHashRef.current = hash;
-
-        writeFileContent(basePath, file.path, markdown);
-      }, 500);
-    };
-
-    editor.on("update", handleUpdate);
-
-    return () => {
-      editor.off("update", handleUpdate);
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-    };
-  }, [editor, file.path, basePath, isContentLoaded]);
-
-  useEffect(() => {
-    if (!editor) return;
-
-    const saved = getSavedSelection(file.path);
-    if (
-      saved &&
-      saved.from <= editor.state.doc.content.size &&
-      saved.to <= editor.state.doc.content.size
-    ) {
-      editor.commands.setTextSelection(saved);
-    }
-
-    requestEditorFocus(file.path, {
-      when: "next-frame",
-      reason: "text-editor-mount",
-    });
-
-    // Tab-layout settling can re-parent the editor DOM after focus lands,
-    // which silently drops focus to <body> without a blur event — leaving
-    // ProseMirror's internal focus flag stale and click-to-place-caret
-    // broken. Reclaim through the arbiter, but only while focus sits on
-    // <body> (i.e. nothing else legitimately took it). Frame-by-frame for
-    // the settle window so user input can't slip into the gap.
-    const start = Date.now();
-    let reclaimRaf: number | null = null;
-    const reclaim = () => {
-      if (Date.now() - start > 600) {
-        reclaimRaf = null;
-        return;
-      }
-      if (document.activeElement === document.body && !editor.view.hasFocus()) {
-        requestEditorFocus(file.path, {
-          when: "immediate",
-          reason: "focus-lost-after-mount",
-        });
-      }
-      reclaimRaf = requestAnimationFrame(reclaim);
-    };
-    reclaimRaf = requestAnimationFrame(reclaim);
-
-    return () => {
-      if (reclaimRaf !== null) cancelAnimationFrame(reclaimRaf);
-      const { from, to } = editor.state.selection;
-      if (from !== to || editor.isFocused) {
-        saveSelection(file.path, from, to);
-      }
-      // Detaching the editor's DOM from the document (tab switch) drops
-      // focus without a blur event — PM's view.hasFocus() stays stale.
-      // Explicitly blur so the next mount starts from a clean state.
-      (editor.view.dom as HTMLElement).blur();
-    };
-  }, [editor, file.path]);
-
-  const handleLinkToggle = async () => {
-    const previousUrl = editor.getAttributes("link").href as string | undefined;
-    const url = await promptText({
-      title: previousUrl ? "Edit link" : "Add link",
-      message: previousUrl ? "Clear the URL to remove the link." : undefined,
-      defaultValue: previousUrl ?? "",
-      placeholder: "https://example.com",
-      confirmLabel: previousUrl ? "Save" : "Add link",
-    });
-    if (url === null) return;
-    if (url === "") {
-      editor.chain().focus().extendMarkRange("link").unsetLink().run();
-      return;
-    }
-    const resolved = normalizeLinkInput(url);
-    editor
-      .chain()
-      .focus()
-      .extendMarkRange("link")
-      .setLink({ href: resolved })
-      .run();
-  };
+  useEditorFileSync(editor, file, basePath, isContentLoaded);
+  useEditorFocusLifecycle(editor, file.path);
+  const handleLinkToggle = useLinkPrompt(editor);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 w-full z-0">
-      <FixedToolbar>
-        <ScrollArea className="flex justify-start shrink-0 gap-1">
-          <TiptapHeadingButton editor={editor} level={1} tooltip="Heading 1">
-            <Heading1Icon />
-          </TiptapHeadingButton>
-          <TiptapHeadingButton editor={editor} level={2} tooltip="Heading 2">
-            <Heading2Icon />
-          </TiptapHeadingButton>
-          <TiptapHeadingButton editor={editor} level={3} tooltip="Heading 3">
-            <Heading3Icon />
-          </TiptapHeadingButton>
-
-          <Separator orientation="vertical" className="h-6" />
-
-          <TiptapMarkButton editor={editor} format="bold" tooltip="Bold">
-            <BoldIcon />
-          </TiptapMarkButton>
-          <TiptapMarkButton editor={editor} format="italic" tooltip="Italic">
-            <ItalicIcon />
-          </TiptapMarkButton>
-          <TiptapMarkButton
-            editor={editor}
-            format="underline"
-            tooltip="Underline"
-          >
-            <UnderlineIcon />
-          </TiptapMarkButton>
-          <TiptapMarkButton
-            editor={editor}
-            format="strike"
-            tooltip="Strikethrough"
-          >
-            <StrikethroughIcon />
-          </TiptapMarkButton>
-
-          <Separator orientation="vertical" className="h-6" />
-
-          <TiptapBlockButton
-            editor={editor}
-            format="bulletList"
-            tooltip="Bullet List"
-          >
-            <ListIcon />
-          </TiptapBlockButton>
-          <TiptapBlockButton
-            editor={editor}
-            format="orderedList"
-            tooltip="Numbered List"
-          >
-            <ListOrderedIcon />
-          </TiptapBlockButton>
-
-          <Separator orientation="vertical" className="h-6" />
-
-          <TiptapBlockButton
-            editor={editor}
-            format="blockquote"
-            tooltip="Blockquote"
-          >
-            <QuoteIcon />
-          </TiptapBlockButton>
-          <TiptapBlockButton
-            editor={editor}
-            format="codeBlock"
-            tooltip="Code Block"
-          >
-            <CodeIcon />
-          </TiptapBlockButton>
-
-          <Separator orientation="vertical" className="h-6" />
-
-          <TiptapTableInsertButton editor={editor} tooltip="Insert Table">
-            <TableIcon />
-          </TiptapTableInsertButton>
-
-          <Separator orientation="vertical" className="h-6" />
-
-          <TiptapLinkButton
-            editor={editor}
-            onToggle={handleLinkToggle}
-            tooltip="Link"
-          >
-            <LinkIcon />
-          </TiptapLinkButton>
-        </ScrollArea>
-      </FixedToolbar>
+      <TiptapToolbar editor={editor} onLinkToggle={handleLinkToggle} />
       <div className="flex-1 min-h-0 overflow-auto tiptap-editor-wrapper">
         <DragHandle editor={editor} nested>
           <GripVertical className="w-4 h-4 text-muted-foreground/40 hover:text-muted-foreground" />

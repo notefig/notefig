@@ -110,8 +110,7 @@ describe("identity round-trip (canonical markdown)", () => {
   it("task list — empty unchecked item (Bug #7)", () =>
     expectIdentity("- [ ]"));
 
-  it("task list — empty checked item (Bug #7)", () =>
-    expectIdentity("- [x]"));
+  it("task list — empty checked item (Bug #7)", () => expectIdentity("- [x]"));
 
   it("task list — empty item among full items (Bug #7)", () =>
     expectIdentity("- [ ] first\n- [ ]\n- [x] third"));
@@ -134,7 +133,8 @@ describe("identity round-trip (canonical markdown)", () => {
 });
 
 describe("stability round-trip (may normalize once, then fixed)", () => {
-  it("asterisk bullets normalize to dashes", () => expectStable("* one\n* two"));
+  it("asterisk bullets normalize to dashes", () =>
+    expectStable("* one\n* two"));
 
   it("underscore emphasis", () => expectStable("Some _italic_ text"));
 

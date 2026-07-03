@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { resolveLineColumn } from "@/components/editor/editor-store";
+import {
+  resolveLineColumn,
+  fullTextOffsetToTextOffset,
+} from "@/components/editor/editor-position";
 
 const mockDoc = (text: string) => {
   const size = text.length + 2; // doc start/end boundaries
@@ -25,12 +28,16 @@ describe("resolveLineColumn", () => {
 
   it("maps column to line 2 correctly", () => {
     // "Line 1\nLine 2": pos 1 + 6(L) + 1(nl) + 3(Lin) = 11
-    expect(resolveLineColumn(mockDoc("Line 1\nLine 2"), "Line 1\nLine 2", 2, 4)).toBe(11);
+    expect(
+      resolveLineColumn(mockDoc("Line 1\nLine 2"), "Line 1\nLine 2", 2, 4),
+    ).toBe(11);
   });
 
   it("maps line 2 column 1 to start of second line", () => {
     // pos 1 + 6(L) + 1(nl) + 0 = 8 (start of second line)
-    expect(resolveLineColumn(mockDoc("Line 1\nLine 2"), "Line 1\nLine 2", 2, 1)).toBe(8);
+    expect(
+      resolveLineColumn(mockDoc("Line 1\nLine 2"), "Line 1\nLine 2", 2, 1),
+    ).toBe(8);
   });
 
   it("clamps column beyond line length", () => {
@@ -84,5 +91,35 @@ describe("resolveLineColumn", () => {
     const text = "## Heading";
     expect(resolveLineColumn(mockDoc(text), text, 1, 1)).toBe(1);
     expect(resolveLineColumn(mockDoc(text), text, 1, 3)).toBe(3);
+  });
+});
+
+describe("fullTextOffsetToTextOffset", () => {
+  // Maps offsets in the "\n"-separated full text (textBetween output) to
+  // offsets in the concatenated text-node stream — the Bug #16 seam.
+
+  it("is identity when there are no separators before the offset", () => {
+    expect(fullTextOffsetToTextOffset("hello", 3)).toBe(3);
+    expect(fullTextOffsetToTextOffset("hello\nworld", 4)).toBe(4);
+  });
+
+  it("discounts one separator per preceding newline", () => {
+    // offset 6 points at "w" in "hello\nworld" → text-stream offset 5
+    expect(fullTextOffsetToTextOffset("hello\nworld", 6)).toBe(5);
+  });
+
+  it("discounts multiple separators", () => {
+    // "a\nb\nc": offset 4 points at "c" → stream offset 2
+    expect(fullTextOffsetToTextOffset("a\nb\nc", 4)).toBe(2);
+  });
+
+  it("handles offset 0", () => {
+    expect(fullTextOffsetToTextOffset("a\nb", 0)).toBe(0);
+  });
+
+  it("counts a separator exactly at the boundary", () => {
+    // offset pointing at the "\n" itself: separators strictly before it
+    expect(fullTextOffsetToTextOffset("ab\ncd", 2)).toBe(2);
+    expect(fullTextOffsetToTextOffset("ab\ncd", 3)).toBe(2);
   });
 });

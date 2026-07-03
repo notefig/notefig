@@ -14,6 +14,8 @@ import { test, expect, type Page } from "@playwright/test";
 const WORKSPACE = "/e2e-editor-ws";
 const FILE_NAME = "notes.md";
 const FILE_PATH = `${WORKSPACE}/${FILE_NAME}`;
+const OTHER_NAME = "other.md";
+const OTHER_PATH = `${WORKSPACE}/${OTHER_NAME}`;
 
 const FIXTURE = [
   "# E2E Fixture",
@@ -31,19 +33,29 @@ const FIXTURE = [
   "",
   "Trailing paragraph so the document does not end inside the table.",
   "",
+  "[open other](other.md) and [site](https://example.com/page)",
+  "",
+].join("\n");
+
+const OTHER_FIXTURE = [
+  "# Other Doc",
+  "",
+  "Hello from the other file.",
+  "",
 ].join("\n");
 
 async function seedWorkspace(page: Page) {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__METRISTS_FORCE_INDEXEDDB__ =
-      true;
+    (
+      window as unknown as Record<string, unknown>
+    ).__METRISTS_FORCE_INDEXEDDB__ = true;
   });
 
   // Must be on the app origin before touching IndexedDB.
   await page.goto("/welcome");
 
   await page.evaluate(
-    async ({ filePath, content }) => {
+    async ({ files }) => {
       const db: IDBDatabase = await new Promise((resolve, reject) => {
         const req = indexedDB.open("metrists-fs", 1);
         req.onerror = () => reject(req.error);
@@ -59,18 +71,25 @@ async function seedWorkspace(page: Page) {
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction(["files"], "readwrite");
         const store = tx.objectStore("files");
-        store.put({
-          path: filePath,
-          content,
-          modifiedAt: new Date(),
-          createdAt: new Date(),
-        });
+        for (const { path, content } of files) {
+          store.put({
+            path,
+            content,
+            modifiedAt: new Date(),
+            createdAt: new Date(),
+          });
+        }
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
       });
       db.close();
     },
-    { filePath: FILE_PATH, content: FIXTURE },
+    {
+      files: [
+        { path: FILE_PATH, content: FIXTURE },
+        { path: OTHER_PATH, content: OTHER_FIXTURE },
+      ],
+    },
   );
 }
 
@@ -246,8 +265,11 @@ test.describe("tables (Bug #4)", () => {
 
     // insert right after the second paragraph — the new table lands before
     // the fixture's pipe table in document order
-    await page.locator(".ProseMirror p", { hasText: "Second paragraph" }).click();
-    await page.getByRole("button", { name: "Insert Table" }).click();
+    await page
+      .locator(".ProseMirror p", { hasText: "Second paragraph" })
+      .click();
+    // Toolbar controls render as radix toggle-group items (role=radio).
+    await page.getByRole("radio", { name: "Insert Table" }).click();
 
     await expect(page.locator(".ProseMirror table")).toHaveCount(2);
     const table = page.locator(".ProseMirror table").first();
@@ -273,29 +295,28 @@ test.describe("task item input rule (Bug #7 UX path)", () => {
   // so a click places no caret and keystrokes land at the stale selection.
   // The input rule itself is verified: this test passes whenever focus is
   // healthy, and the serialization layer is covered by unit tests.
-  test.fixme(
-    "typing [] at line start creates a task item, not literal text",
-    async ({ page }) => {
-      await openFixtureFile(page);
+  test.fixme("typing [] at line start creates a task item, not literal text", async ({
+    page,
+  }) => {
+    await openFixtureFile(page);
 
-      // typing inside an existing task item legitimately does not
-      // re-trigger the input rule, so start from a plain paragraph
-      await page
-        .locator(".ProseMirror p", { hasText: "Second paragraph" })
-        .click();
-      await page.keyboard.press("End");
-      await page.keyboard.press("Enter");
-      await page.keyboard.type("[] fresh task", { delay: 20 });
+    // typing inside an existing task item legitimately does not
+    // re-trigger the input rule, so start from a plain paragraph
+    await page
+      .locator(".ProseMirror p", { hasText: "Second paragraph" })
+      .click();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("[] fresh task", { delay: 20 });
 
-      const item = page.locator('ul[data-type="taskList"] > li', {
-        hasText: "fresh task",
-      });
-      await expect(item).toBeVisible();
-      await expect(item.locator("input[type=checkbox]")).toHaveCount(1);
-      // the literal "[]" must be consumed by the input rule
-      await expect(item).not.toContainText("[]");
-    },
-  );
+    const item = page.locator('ul[data-type="taskList"] > li', {
+      hasText: "fresh task",
+    });
+    await expect(item).toBeVisible();
+    await expect(item.locator("input[type=checkbox]")).toHaveCount(1);
+    // the literal "[]" must be consumed by the input rule
+    await expect(item).not.toContainText("[]");
+  });
 
   test("link toolbar button uses the in-app prompt dialog", async ({
     page,
@@ -311,17 +332,22 @@ test.describe("task item input rule (Bug #7 UX path)", () => {
     });
     await paragraph.click();
     await paragraph.dblclick();
-    await page.getByRole("button", { name: "Link" }).click();
+    // Toolbar controls render as radix toggle-group items (role=radio).
+    await page.getByRole("radio", { name: "Link" }).click();
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByRole("heading", { name: "Add link" })).toBeVisible();
+    await expect(
+      dialog.getByRole("heading", { name: "Add link" }),
+    ).toBeVisible();
 
     await dialog.getByRole("textbox").fill("https://example.com/test");
     await dialog.getByRole("button", { name: "Add link" }).click();
 
     await expect(dialog).not.toBeVisible();
-    const link = page.locator('.ProseMirror a[href="https://example.com/test"]');
+    const link = page.locator(
+      '.ProseMirror a[href="https://example.com/test"]',
+    );
     await expect(link).toBeVisible();
   });
 
@@ -342,5 +368,202 @@ test.describe("task item input rule (Bug #7 UX path)", () => {
     await expect(
       page.locator(".ProseMirror h1", { hasText: "E2E Fixture" }),
     ).not.toContainText("XYZ");
+  });
+});
+
+test.describe("link bubble menu", () => {
+  test("internal link opens the target file as a new tab", async ({ page }) => {
+    await openFixtureFile(page);
+
+    await page
+      .locator('.ProseMirror a[href="other.md"]', { hasText: "open other" })
+      .click();
+
+    // Menu labels the action by link class and shows the raw href.
+    const openButton = page.getByTitle("Open in new tab");
+    await expect(openButton).toBeVisible();
+    await expect(openButton).toContainText("other.md");
+
+    await openButton.click();
+
+    // The target file renders — opened and selected as a tab.
+    await expect(
+      page.locator(".ProseMirror h1", { hasText: "Other Doc" }),
+    ).toBeVisible({ timeout: 10_000 });
+    // The original file's tab is still around (opened as a NEW tab).
+    await expect(page.getByText(FILE_NAME).first()).toBeVisible();
+  });
+
+  test("external link shows the full URL and opens via window.open", async ({
+    page,
+  }) => {
+    await openFixtureFile(page);
+
+    // Capture window.open instead of actually leaving the app.
+    await page.evaluate(() => {
+      (window as unknown as Record<string, unknown>).__openedUrls = [];
+      window.open = ((url: unknown) => {
+        (
+          (window as unknown as Record<string, unknown>)
+            .__openedUrls as string[]
+        ).push(String(url));
+        return null;
+      }) as typeof window.open;
+    });
+
+    await page
+      .locator('.ProseMirror a[href="https://example.com/page"]')
+      .click();
+
+    // Full URL displayed, scheme included — an external link must never be
+    // disguised as an internal-looking filename.
+    const openButton = page.getByTitle(/^Open in browser/);
+    await expect(openButton).toBeVisible();
+    await expect(openButton).toContainText("https://example.com/page");
+
+    await openButton.click();
+
+    await expect
+      .poll(async () =>
+        page.evaluate(
+          () =>
+            (window as unknown as Record<string, unknown>)
+              .__openedUrls as string[],
+        ),
+      )
+      .toEqual(["https://example.com/page"]);
+  });
+});
+
+test.describe("table bubble menu", () => {
+  test("row/column edits via the floating menu", async ({ page }) => {
+    await openFixtureFile(page);
+
+    const table = page.locator(".ProseMirror table");
+    const rows = table.locator("tr");
+    await page.locator(".ProseMirror td", { hasText: "Alice" }).click();
+
+    const addRow = page.getByTitle("Insert row after");
+    await expect(addRow).toBeVisible();
+
+    await expect(rows).toHaveCount(2);
+    await addRow.click();
+    await expect(rows).toHaveCount(3);
+
+    await page.getByTitle("Insert column after").click();
+    await expect(rows.first().locator("th, td")).toHaveCount(3);
+
+    await page.getByTitle("Delete row").click();
+    await expect(rows).toHaveCount(2);
+
+    await page.getByTitle("Delete table").click();
+    await expect(table).toHaveCount(0);
+  });
+});
+
+test.describe("image drop and paste", () => {
+  // 1x1 transparent PNG
+  const PNG_BASE64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+  function buildImageFile(base64: string, name: string): File {
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    return new File([bytes], name, { type: "image/png" });
+  }
+
+  test("dropping an image file inserts a rendering image node", async ({
+    page,
+  }) => {
+    await openFixtureFile(page);
+    const urlBefore = page.url();
+
+    await page.evaluate(
+      ({ base64 }) => {
+        const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        const file = new File([bytes], "dropped image.png", {
+          type: "image/png",
+        });
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+
+        const target = document.querySelector<HTMLElement>(".ProseMirror > p");
+        if (!target) throw new Error("missing drop target");
+        const rect = target.getBoundingClientRect();
+        target.dispatchEvent(
+          new DragEvent("drop", {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer,
+            clientX: rect.left + 10,
+            clientY: rect.top + 5,
+          }),
+        );
+      },
+      { base64: PNG_BASE64 },
+    );
+
+    const img = page.locator(".ProseMirror img");
+    await expect(img).toBeVisible({ timeout: 10_000 });
+    // The IndexedDB-backed resolveAssetUrl path must produce real bytes.
+    await expect
+      .poll(async () =>
+        img.evaluate((el) => (el as HTMLImageElement).naturalWidth),
+      )
+      .toBeGreaterThan(0);
+    // An unhandled drop would have navigated to the file URL.
+    expect(page.url()).toBe(urlBefore);
+  });
+
+  test("pasting an image writes a pasted-* asset and inserts it", async ({
+    page,
+  }) => {
+    await openFixtureFile(page);
+
+    await page.evaluate(
+      ({ base64 }) => {
+        const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        const file = new File([bytes], "clipboard.png", { type: "image/png" });
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+
+        const target = document.querySelector<HTMLElement>(".ProseMirror");
+        if (!target) throw new Error("missing editor");
+        target.dispatchEvent(
+          new ClipboardEvent("paste", {
+            bubbles: true,
+            cancelable: true,
+            clipboardData: dataTransfer,
+          }),
+        );
+      },
+      { base64: PNG_BASE64 },
+    );
+
+    await expect(page.locator(".ProseMirror img")).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // The asset was written into the workspace under a pasted-* name.
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          const db: IDBDatabase = await new Promise((resolve, reject) => {
+            const req = indexedDB.open("metrists-fs", 1);
+            req.onerror = () => reject(req.error);
+            req.onsuccess = () => resolve(req.result);
+          });
+          const keys = await new Promise<string[]>((resolve, reject) => {
+            const tx = db.transaction(["files"], "readonly");
+            const req = tx.objectStore("files").getAllKeys();
+            req.onsuccess = () => resolve(req.result as string[]);
+            req.onerror = () => reject(req.error);
+          });
+          db.close();
+          return keys.some((k) =>
+            k.startsWith("/e2e-editor-ws/assets/pasted-"),
+          );
+        }),
+      )
+      .toBe(true);
   });
 });

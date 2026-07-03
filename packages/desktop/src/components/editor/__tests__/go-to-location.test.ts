@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { Editor } from "@tiptap/core";
-import { resolveLineColumn, textOffsetToDocPos } from "@/components/editor/editor-store";
+import {
+  resolveLineColumn,
+  textOffsetToDocPos,
+} from "@/components/editor/editor-position";
 import { fuzzyFind } from "@/utils/navigation-utils";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
 
@@ -38,7 +41,8 @@ function resolveSearchPosition(
   if (expectedText) {
     const fuzzyOffset = fuzzyFind(fullText, expectedText, startPos - 1);
     if (fuzzyOffset !== -1) {
-      let startSep = 0, endSep = 0;
+      let startSep = 0,
+        endSep = 0;
       const textEnd = fuzzyOffset + expectedText.length;
       for (let i = 0; i < textEnd; i++) {
         if (fullText[i] === "\n") {

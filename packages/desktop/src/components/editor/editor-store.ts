@@ -7,28 +7,19 @@
 
 import { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
-import { editorExtensions, MarkdownImage } from "@/components/editor/tiptap-editor-kit";
-import { fuzzyFind } from "@/utils/navigation-utils";
+import {
+  editorExtensions,
+  MarkdownImage,
+} from "@/components/editor/tiptap-editor-kit";
 import { focusArbiter } from "@/utils/focus-arbiter";
 import { isSidebarTextEntryActive } from "@/utils/focus-arbiter";
-import { platformAdapter } from "@/adapters";
+import { resolveEditorLocation, type EditorLocation } from "./editor-position";
+import {
+  createImageDropHandler,
+  createImagePasteHandler,
+} from "./editor-image-paste";
 
-/**
- * Location for editor navigation.
- * Mirrors SearchMatchLocation from search results.
- */
-export interface EditorLocation {
-  /** Line number (1-indexed) */
-  line: number;
-  /** Column number (1-indexed, optional - defaults to 1) */
-  column?: number;
-  /** Expected text at location for verification/fuzzy matching */
-  expectedText?: string;
-  /** Selection range end line (for multi-line selections) */
-  endLine?: number;
-  /** Selection range end column */
-  endColumn?: number;
-}
+export type { EditorLocation };
 
 import type { EditorType } from "./polymorphic-editor";
 
@@ -134,8 +125,13 @@ export function requestEditorFocus(
   });
 }
 
-function createMarkdownInstance(filePath: string, content: string, basePath?: string): MarkdownInstance {
-  const workspaceRoot = basePath || filePath.substring(0, filePath.lastIndexOf("/")) || "/";
+function createMarkdownInstance(
+  filePath: string,
+  content: string,
+  basePath?: string,
+): MarkdownInstance {
+  const workspaceRoot =
+    basePath || filePath.substring(0, filePath.lastIndexOf("/")) || "/";
 
   const extensions = [
     ...editorExtensions.filter((e) => e.name !== "image"),
@@ -148,98 +144,8 @@ function createMarkdownInstance(filePath: string, content: string, basePath?: st
     editable: true,
     autofocus: false,
     editorProps: {
-      handleDrop(view, event, _slice, moved) {
-        if (moved || !event.dataTransfer?.files.length) return false;
-
-        const imageFiles: File[] = [];
-        for (let i = 0; i < event.dataTransfer.files.length; i++) {
-          if (event.dataTransfer.files[i].type.startsWith("image/")) {
-            imageFiles.push(event.dataTransfer.files[i]);
-          }
-        }
-        if (imageFiles.length === 0) return false;
-
-        event.preventDefault();
-
-        const pos = view.posAtCoords({
-          left: event.clientX,
-          top: event.clientY,
-        });
-        const insertPos = pos?.pos ?? view.state.selection.from;
-
-        (async () => {
-          for (const file of imageFiles) {
-            try {
-              const normalized = await dedupeAssetName(
-                workspaceRoot,
-                normalizeImageName(file.name),
-              );
-              const destPath = `${workspaceRoot}/assets/${normalized}`;
-              const data = new Uint8Array(await file.arrayBuffer());
-
-              await platformAdapter.writeBinaryFiles([
-                { path: destPath, data },
-              ]);
-
-              view.dispatch(
-                view.state.tr.insert(
-                  insertPos,
-                  view.state.schema.nodes.image.create({
-                    src: `assets/${normalized}`,
-                  }),
-                ),
-              );
-            } catch (err) {
-              console.error("[handleDrop] Failed:", err);
-            }
-          }
-        })();
-
-        return true;
-      },
-
-      handlePaste(view, event) {
-        const items = event.clipboardData?.items;
-        if (!items) return false;
-
-        for (let i = 0; i < items.length; i++) {
-          const item = items[i];
-          if (item.type.startsWith("image/")) {
-            event.preventDefault();
-            const file = item.getAsFile();
-            if (!file) continue;
-
-            (async () => {
-              try {
-                const extension = item.type.split("/")[1] || "png";
-                const name = await dedupeAssetName(
-                  workspaceRoot,
-                  `pasted-${Date.now()}.${extension}`,
-                );
-                const destPath = `${workspaceRoot}/assets/${name}`;
-                const data = new Uint8Array(await file.arrayBuffer());
-
-                await platformAdapter.writeBinaryFiles([
-                  { path: destPath, data },
-                ]);
-
-                view.dispatch(
-                  view.state.tr.insert(
-                    view.state.selection.from,
-                    view.state.schema.nodes.image.create({
-                      src: `assets/${name}`,
-                    }),
-                  ),
-                );
-              } catch (err) {
-                console.error("[handlePaste] Failed:", err);
-              }
-            })();
-            return true;
-          }
-        }
-        return false;
-      },
+      handleDrop: createImageDropHandler(workspaceRoot),
+      handlePaste: createImagePasteHandler(workspaceRoot),
 
       handleDOMEvents: {
         // Layout re-parenting can silently drop DOM focus to <body> while
@@ -297,42 +203,12 @@ function createMarkdownInstance(filePath: string, content: string, basePath?: st
     },
     goToLocation(location: EditorLocation): boolean {
       try {
-        const doc = this.editor.state.doc;
-        const fullText = doc.textBetween(0, doc.content.size, "\n", "\n");
-        let startPos = resolveLineColumn(doc, fullText, location.line, location.column ?? 1);
-        let endPos = startPos;
+        const { from, to } = resolveEditorLocation(
+          this.editor.state.doc,
+          location,
+        );
 
-        if (location.expectedText) {
-          const fuzzyOffset = fuzzyFind(
-            fullText,
-            location.expectedText,
-            startPos - 1,
-          );
-          if (fuzzyOffset !== -1) {
-            const textStart = fullTextOffsetToTextOffset(
-              fullText,
-              fuzzyOffset,
-            );
-            const textEnd = fullTextOffsetToTextOffset(
-              fullText,
-              fuzzyOffset + location.expectedText.length,
-            );
-            startPos = textOffsetToDocPos(doc, textStart);
-            endPos = textOffsetToDocPos(doc, textEnd - 1) + 1;
-          }
-        } else if (
-          location.endLine !== undefined &&
-          location.endColumn !== undefined
-        ) {
-          endPos = resolveLineColumn(
-            doc,
-            fullText,
-            location.endLine,
-            location.endColumn,
-          );
-        }
-
-        this.editor.commands.setTextSelection({ from: startPos, to: endPos });
+        this.editor.commands.setTextSelection({ from, to });
         this.editor.commands.scrollIntoView();
         this.editor.commands.focus();
 
@@ -345,85 +221,6 @@ function createMarkdownInstance(filePath: string, content: string, basePath?: st
   };
 
   return instance;
-}
-
-/**
- * Map a 0-indexed character offset in the document's visible text to a
- * 1-indexed ProseMirror document position. ProseMirror positions include
- * node-boundary tokens that sit before the text content, so offset + 1 is
- * not sufficient. We walk the text descendants to find the correct position.
- */
-export function textOffsetToDocPos(doc: { content: { size: number }; descendants: (fn: (node: unknown, pos: number) => boolean | void) => void }, targetOffset: number): number {
-  let accumulated = 0;
-
-  let result = 1;
-  doc.descendants((node: unknown, pos: number) => {
-    const n = node as { isText?: boolean; text?: string; nodeSize?: number };
-    if (!n.isText || typeof n.text !== "string") return;
-
-    const len = n.text.length;
-    if (targetOffset < accumulated + len) {
-      result = pos + (targetOffset - accumulated);
-      return false; // stop traversal
-    }
-    accumulated += len;
-  });
-
-  return Math.max(1, Math.min(result, doc.content.size));
-}
-
-function fullTextOffsetToTextOffset(fullText: string, offset: number): number {
-  let count = 0;
-  for (let i = 0; i < offset; i++) {
-    if (fullText[i] === "\n") count++;
-  }
-  return offset - count;
-}
-
-/** Sanitize a filename for use in markdown image paths.
- * Spaces become hyphens, parentheses are removed — both break many markdown
- * parsers when used inside `![](...)` paths. */
-export function normalizeImageName(name: string): string {
-  return name
-    .replace(/\s+/g, "-")
-    .replace(/[()]/g, "");
-}
-
-/**
- * Find a name under `<workspaceRoot>/assets/` that doesn't collide with an
- * existing file, suffixing `-1`, `-2`, … before the extension. Overwriting
- * would silently swap the image in every document referencing the old path.
- */
-async function dedupeAssetName(workspaceRoot: string, name: string): Promise<string> {
-  const dot = name.lastIndexOf(".");
-  const stem = dot > 0 ? name.slice(0, dot) : name;
-  const ext = dot > 0 ? name.slice(dot) : "";
-
-  let candidate = name;
-  for (let i = 1; ; i++) {
-    const result = await platformAdapter.exists([`${workspaceRoot}/assets/${candidate}`]);
-    if (!result[0]?.exists) return candidate;
-    candidate = `${stem}-${i}${ext}`;
-  }
-}
-
-export function resolveLineColumn(
-  doc: { content: { size: number } },
-  text: string,
-  line: number,
-  column: number,
-): number {
-  const lines = text.split("\n");
-  let pos = 1;
-
-  for (let i = 0; i < line - 1 && i < lines.length; i++) {
-    pos += lines[i].length + 1;
-  }
-
-  const lineContent = lines[line - 1] ?? "";
-  pos += Math.min(column - 1, lineContent.length);
-
-  return Math.max(1, Math.min(pos, doc.content.size));
 }
 
 function createImageInstance(filePath: string): ImageInstance {
@@ -498,7 +295,11 @@ export function getOrCreateEditor(
 
   switch (config.type) {
     case "markdown":
-      instance = createMarkdownInstance(filePath, config.content, config.basePath);
+      instance = createMarkdownInstance(
+        filePath,
+        config.content,
+        config.basePath,
+      );
       break;
     case "image":
       instance = createImageInstance(filePath);
@@ -615,7 +416,9 @@ export function saveSelection(
   }
 }
 
-export function getSavedSelection(filePath: string): { from: number; to: number } | undefined {
+export function getSavedSelection(
+  filePath: string,
+): { from: number; to: number } | undefined {
   const instance = editorInstances.get(filePath);
   if (isMarkdownInstance(instance)) {
     return instance.savedSelection;
