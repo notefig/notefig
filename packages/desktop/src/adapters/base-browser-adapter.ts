@@ -163,6 +163,15 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     // Same in-app dialog on the web — consistent UX, no native prompt.
     return requestTextPrompt(options);
   }
+
+  openExternal(url: string): Promise<void> {
+    // Only allow http, https, and mailto schemes
+    const allowed = /^(https?|mailto):/i;
+    if (allowed.test(url)) {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+    return Promise.resolve();
+  }
   abstract readDirectory(
     path: string,
     options?: {

@@ -264,6 +264,18 @@ function createMarkdownInstance(filePath: string, content: string, basePath?: st
           );
           return false;
         },
+
+        // openOnClick: false prevents Tiptap from opening links, but the
+        // browser still navigates when clicking a rendered <a href>. Block
+        // native navigation — the bubble menu's Open button is the only
+        // way to follow a link.
+        click: (_view, event) => {
+          const target = event.target as HTMLElement;
+          if (target.closest("a[href]")) {
+            event.preventDefault();
+          }
+          return false;
+        },
       },
     },
   });

@@ -133,3 +133,37 @@ export function TiptapLinkButton({
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
+
+type TableInsertButtonProps = {
+  editor: Editor;
+  tooltip: string;
+  children: React.ReactNode;
+};
+
+export function TiptapTableInsertButton({
+  editor,
+  tooltip,
+  children,
+}: TableInsertButtonProps) {
+  const isActive = useEditorState({
+    editor,
+    selector: ({ editor }) => editor.isActive("table"),
+  });
+
+  return (
+    <ToolbarButton
+      onMouseDown={preventFocusLoss}
+      onClick={() =>
+        editor
+          .chain()
+          .focus()
+          .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+          .run()
+      }
+      tooltip={tooltip}
+      pressed={isActive}
+    >
+      {children}
+    </ToolbarButton>
+  );
+}

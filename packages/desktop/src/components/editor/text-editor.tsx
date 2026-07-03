@@ -2,6 +2,8 @@ import { useRef, useEffect } from "react";
 import { EditorContent } from "@tiptap/react";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { GripVertical } from "lucide-react";
+import { LinkBubbleMenu } from "./tiptap-link-menu";
+import { TableMenu } from "./tiptap-table-menu";
 import "./tiptap.css";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { FixedToolbar } from "@/components/ui/fixed-toolbar";
@@ -19,6 +21,7 @@ import {
   StrikethroughIcon,
   UnderlineIcon,
   LinkIcon,
+  TableIcon,
 } from "lucide-react";
 import type { FileEntry } from "../../utils/fs";
 import { promptText } from "@/utils/fs";
@@ -36,6 +39,7 @@ import {
   TiptapMarkButton,
   TiptapBlockButton,
   TiptapLinkButton,
+  TiptapTableInsertButton,
 } from "./tiptap-toolbar-buttons";
 
 interface TextEditorProps {
@@ -180,6 +184,21 @@ export function TextEditor({
     };
   }, [editor, file.path]);
 
+  /**
+   * Only auto-prepend https:// for bare-domain inputs (google.com).
+   * Keep internal paths (/docs/readme, ./local, ../parent, #anchor),
+   * known schemes (https://, mailto:), and data URIs as-is.
+   */
+  function isExternalLike(value: string): boolean {
+    return (
+      !/^(https?|mailto|data|asset):/i.test(value) &&
+      !value.startsWith("/") &&
+      !value.startsWith("./") &&
+      !value.startsWith("../") &&
+      !value.startsWith("#")
+    );
+  }
+
   const handleLinkToggle = async () => {
     const previousUrl = editor.getAttributes("link").href as string | undefined;
     const url = await promptText({
@@ -194,8 +213,9 @@ export function TextEditor({
       editor.chain().focus().extendMarkRange("link").unsetLink().run();
       return;
     }
-    const resolved =
-      !url.includes("://") && !url.startsWith("/") ? `https://${url}` : url;
+    const resolved = isExternalLike(url)
+      ? `https://${url}`
+      : url;
     editor
       .chain()
       .focus()
@@ -253,6 +273,12 @@ export function TextEditor({
 
           <Separator orientation="vertical" className="h-6" />
 
+          <TiptapTableInsertButton editor={editor} tooltip="Insert Table">
+            <TableIcon />
+          </TiptapTableInsertButton>
+
+          <Separator orientation="vertical" className="h-6" />
+
           <TiptapLinkButton
             editor={editor}
             onToggle={handleLinkToggle}
@@ -266,6 +292,8 @@ export function TextEditor({
         <DragHandle editor={editor} nested>
           <GripVertical className="w-4 h-4 text-muted-foreground/40 hover:text-muted-foreground" />
         </DragHandle>
+        <LinkBubbleMenu editor={editor} onEdit={handleLinkToggle} basePath={basePath} />
+        <TableMenu editor={editor} />
         <EditorContent
           editor={editor}
           className="prose prose-sm dark:prose-invert max-w-2xl mx-auto p-4 outline-none"

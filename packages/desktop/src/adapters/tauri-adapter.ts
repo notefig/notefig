@@ -14,6 +14,7 @@ import type {
 } from "./platform-adapter.interface";
 import { requestTextPrompt } from "@/utils/text-prompt";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
@@ -43,6 +44,14 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     // The Tauri dialog plugin has no text-input dialog, and window.prompt is
     // a no-op inside the webview — use the in-app dialog bridge.
     return requestTextPrompt(options);
+  }
+
+  openExternal(url: string): Promise<void> {
+    const allowed = /^(https?|mailto):/i;
+    if (allowed.test(url)) {
+      openUrl(url);
+    }
+    return Promise.resolve();
   }
 
   async readDirectory(

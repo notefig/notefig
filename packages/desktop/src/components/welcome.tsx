@@ -55,8 +55,10 @@ function ThemeToggle() {
   );
 }
 
+import { platformAdapter } from "@/adapters";
+
 function openExternalLink(url: string) {
-  window.open(url, "_blank", "noopener,noreferrer");
+  platformAdapter.openExternal(url);
 }
 
 const projectButtonStyles = `

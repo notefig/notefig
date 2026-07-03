@@ -242,6 +242,12 @@ export interface IPlatformAdapter {
    */
   promptText(options: TextPromptOptions): Promise<string | null>;
 
+  /**
+   * Open a URL in the system's default browser.
+   * @param url — must be http(s) or mailto; other schemes are ignored
+   */
+  openExternal(url: string): Promise<void>;
+
   // ========== Directory Operations ==========
   /**
    * Read directory contents
