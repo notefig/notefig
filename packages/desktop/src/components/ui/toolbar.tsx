@@ -310,7 +310,14 @@ function withTooltip<T extends React.ElementType>(Component: T) {
       setMounted(true);
     }, []);
 
-    const component = <Component {...(props as React.ComponentProps<T>)} />;
+    // icon-only toolbar buttons have no accessible name without the
+    // aria-label; an explicit aria-label in props still wins via spread order
+    const componentProps = {
+      ...(typeof tooltip === "string" ? { "aria-label": tooltip } : {}),
+      ...props,
+    } as React.ComponentProps<T>;
+
+    const component = <Component {...componentProps} />;
 
     if (tooltip && mounted) {
       return (

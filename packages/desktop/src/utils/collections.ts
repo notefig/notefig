@@ -577,7 +577,11 @@ export function getFileEntry(
     type: metadata.type,
     modified: metadata.modified,
     size: metadata.size,
-    contentHash: metadata.contentHash,
+    // content and its hash must come from the same row — the content
+    // collection hashes the exact string it holds. Pairing content with
+    // metadata's separately-scheduled hash made FileEntry internally
+    // inconsistent (loaded content + empty/stale hash).
+    contentHash: content?.contentHash || metadata.contentHash,
     content: content?.content || "",
     error: metadata.error,
   };
@@ -608,11 +612,24 @@ export async function prefetchFileContent(
     const file = result.succeeded[0];
     const contentHash = calculateContentHash(file.content);
 
-    collections.content.utils.writeInsert({
-      path: file.path,
-      content: file.content,
-      contentHash,
-    });
+    try {
+      collections.content.utils.writeInsert({
+        path: file.path,
+        content: file.content,
+        contentHash,
+      });
+    } catch (error) {
+      // The content collection uses on-demand sync — its write context is
+      // only initialized when a live query subscribes (a file tab opens).
+      // Hover-prefetch before any tab opens hits this; silently skip.
+      if (
+        error instanceof Error &&
+        error.name === "SyncNotInitializedError"
+      ) {
+        return;
+      }
+      throw error;
+    }
   }
 }
 

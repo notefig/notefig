@@ -135,6 +135,29 @@ Tests run automatically on PRs via GitHub Actions. Test files:
 - Desktop: `packages/desktop/**/*.test.ts` (Vitest)
 - Desktop E2E: `packages/desktop/tests/e2e/` (Playwright)
 
+### Playwright / Browser Debugging
+
+The desktop app runs in browser mode via `npm run dev:desktop` (Vite dev server on port 1420).
+
+**Forcing the IndexedDB adapter:** In Playwright's Chromium, `window.showDirectoryPicker` exists and causes the app to use the File System Access API adapter, which requires OS file picker dialogs. To use the pure IndexedDB adapter (testable without OS dialogs), inject this before page load:
+
+```js
+await page.addInitScript(() => {
+  window.__METRISTS_FORCE_INDEXEDDB__ = true;
+});
+```
+
+Then seed test files in the `metrists-fs` IndexedDB and navigate to `/<workspace-path>`.
+
+The `BrowserPlatformAdapter.pickDirectory()` dispatches a `mock-pick-directory` CustomEvent on `window`. Listen for it and respond with a workspace path:
+
+```js
+window.addEventListener('mock-pick-directory', (e) => {
+  const { callback } = e.detail;
+  callback('/playwright-test-workspace');
+});
+```
+
 ## Important Notes
 
 1. **Desktop package name changed**: Was `metrists`, now `@metrists/desktop` (private)

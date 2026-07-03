@@ -356,9 +356,31 @@ focusArbiter.registerResolver("element", (intent) => {
   const el = document.querySelector(selector);
   if (!(el instanceof HTMLElement)) return false;
 
+  if (document.activeElement === el) return true;
+
+  // Never steal focus from an open overlay or an active text entry.
+  // Radix menus/dialogs re-grab focus synchronously, so stealing creates a
+  // per-frame tug-of-war with `when-mounted` retries; stealing from a text
+  // entry blurs it, which cancels rename/create flows mid-typing. Returning
+  // false lets when-mounted intents keep retrying until the overlay closes
+  // (or the attempt/TTL cap expires) without ever yanking focus.
+  if (
+    isFocusInsideOpenOverlay(document.activeElement) ||
+    isSidebarTextEntryActive(document.activeElement)
+  ) {
+    return false;
+  }
+
   el.focus({ preventScroll: true });
   return document.activeElement === el;
 });
+
+function isFocusInsideOpenOverlay(activeElement: Element | null): boolean {
+  if (!(activeElement instanceof HTMLElement)) return false;
+  return !!activeElement.closest(
+    '[role="menu"], [role="dialog"], [role="alertdialog"], [role="listbox"]',
+  );
+}
 
 export function requestElementFocus(
   key: string,

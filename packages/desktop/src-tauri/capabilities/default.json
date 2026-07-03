@@ -9,6 +9,7 @@
     "core:default",
     "updater:default",
     "process:default",
+    "opener:default",
     "core:webview:allow-set-webview-zoom",
     "window-state:default",
     {

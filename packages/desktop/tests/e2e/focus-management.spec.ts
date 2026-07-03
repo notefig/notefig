@@ -142,11 +142,15 @@ test.describe("Focus Management", () => {
     await expect(editor).toContainText("bravo content for tab b");
     await expect(editor).toContainText("B");
 
+    // Typing without a click relies on the async tab-switch focus restore
+    // (next-frame request + reclaim window) — wait for it, not for a clock.
     await clickTab(page, "tab-a.md");
+    await expect(editor).toBeFocused();
     await page.keyboard.type("1");
     await expect(editor).toContainText("A-1alpha content for tab a");
 
     await clickTab(page, "tab-b.md");
+    await expect(editor).toBeFocused();
     await page.keyboard.type("2");
     await expect(editor).toContainText("bravo content for tab b");
     await expect(editor).toContainText("B");

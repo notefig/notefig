@@ -1,4 +1,5 @@
 import { platformAdapter } from "@/adapters";
+import type { TextPromptOptions } from "@/adapters/platform-adapter.interface";
 
 export interface FileEntry {
   path: string; // Absolute path
@@ -335,4 +336,10 @@ export function ensureNewFileNameHasDefaultMarkdownExtension(
 
 export async function pickDirectory(title: string): Promise<string | null> {
   return platformAdapter.pickDirectory(title);
+}
+
+export async function promptText(
+  options: TextPromptOptions,
+): Promise<string | null> {
+  return platformAdapter.promptText(options);
 }

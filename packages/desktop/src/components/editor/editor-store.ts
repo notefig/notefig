@@ -5,43 +5,21 @@
  * Each type implements a common interface with polymorphic methods.
  */
 
-import { createPlateEditor, type PlateEditor } from "platejs/react";
-import { MarkdownPlugin } from "@platejs/markdown";
-import { MarkdownEditorKit } from "@/components/editor/markdown-editor-kit";
+import { Editor } from "@tiptap/core";
+import { TextSelection } from "@tiptap/pm/state";
 import {
-  Editor as SlateEditor,
-  Node,
-  type Path,
-  Range as SlateRange,
-} from "slate";
-import { ReactEditor } from "slate-react";
-import type { BaseSelection, Point, Range } from "slate";
-import {
-  fuzzyFind,
-  columnToOffset,
-  markupPrefixLength,
-  rawLineToBlockPath,
-  type BlockNode,
-} from "@/utils/navigation-utils";
+  editorExtensions,
+  MarkdownImage,
+} from "@/components/editor/tiptap-editor-kit";
 import { focusArbiter } from "@/utils/focus-arbiter";
 import { isSidebarTextEntryActive } from "@/utils/focus-arbiter";
+import { resolveEditorLocation, type EditorLocation } from "./editor-position";
+import {
+  createImageDropHandler,
+  createImagePasteHandler,
+} from "./editor-image-paste";
 
-/**
- * Location for editor navigation.
- * Mirrors SearchMatchLocation from search results.
- */
-export interface EditorLocation {
-  /** Line number (1-indexed) */
-  line: number;
-  /** Column number (1-indexed, optional - defaults to 1) */
-  column?: number;
-  /** Expected text at location for verification/fuzzy matching */
-  expectedText?: string;
-  /** Selection range end line (for multi-line selections) */
-  endLine?: number;
-  /** Selection range end column */
-  endColumn?: number;
-}
+export type { EditorLocation };
 
 import type { EditorType } from "./polymorphic-editor";
 
@@ -73,12 +51,13 @@ export interface EditorInstance {
 }
 
 /**
- * Markdown editor instance using Plate.js
+ * Markdown editor instance using Tiptap
  */
 export interface MarkdownInstance extends EditorInstance {
   readonly type: "markdown";
-  readonly editor: PlateEditor;
-  selection: BaseSelection | null;
+  readonly editor: Editor;
+  filePath: string;
+  savedSelection?: { from: number; to: number };
 }
 
 /**
@@ -146,198 +125,92 @@ export function requestEditorFocus(
   });
 }
 
-function createMarkdownInstance(content: string): MarkdownInstance {
-  const editor = createPlateEditor({
-    plugins: MarkdownEditorKit,
-    value: (e) =>
-      (e as PlateEditor).getApi(MarkdownPlugin).markdown.deserialize(content),
-  });
+function createMarkdownInstance(
+  filePath: string,
+  content: string,
+  basePath?: string,
+): MarkdownInstance {
+  const workspaceRoot =
+    basePath || filePath.substring(0, filePath.lastIndexOf("/")) || "/";
 
-  // Enable chunking for large documents (Slate performance optimization).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (editor as any).getChunkSize = (node: any) => {
-    return SlateEditor.isEditor(node) ? 1000 : null;
-  };
+  const extensions = [
+    ...editorExtensions.filter((e) => e.name !== "image"),
+    MarkdownImage.configure({ allowBase64: true, workspaceRoot } as any),
+  ];
+
+  const editor = new Editor({
+    extensions,
+    content,
+    editable: true,
+    autofocus: false,
+    editorProps: {
+      handleDrop: createImageDropHandler(workspaceRoot),
+      handlePaste: createImagePasteHandler(workspaceRoot),
+
+      handleDOMEvents: {
+        // Layout re-parenting can silently drop DOM focus to <body> while
+        // ProseMirror still believes it is focused. Clicking then focuses
+        // the editor, and PM's on-focus selection restore clobbers the
+        // browser's caret placement with the stale state selection. Setting
+        // the state selection to the clicked position first makes that
+        // restore land where the user clicked.
+        mousedown: (view, event) => {
+          if (view.hasFocus() || event.button !== 0 || event.shiftKey) {
+            return false;
+          }
+          const pos = view.posAtCoords({
+            left: event.clientX,
+            top: event.clientY,
+          });
+          if (!pos) return false;
+          view.dispatch(
+            view.state.tr.setSelection(
+              TextSelection.near(view.state.doc.resolve(pos.pos)),
+            ),
+          );
+          return false;
+        },
+
+        // openOnClick: false prevents Tiptap from opening links, but the
+        // browser still navigates when clicking a rendered <a href>. Block
+        // native navigation — the bubble menu's Open button is the only
+        // way to follow a link.
+        click: (_view, event) => {
+          const target = event.target as HTMLElement;
+          if (target.closest("a[href]")) {
+            event.preventDefault();
+          }
+          return false;
+        },
+      },
+    },
+  });
 
   const instance: MarkdownInstance = {
     type: "markdown",
     editor,
-    selection: null,
+    filePath,
     focus(): boolean {
       if (isEditorFocusSuppressed()) return false;
-
-      const saved = this.editor.selection ?? this.selection;
-      if (saved) {
-        this.editor.tf.focus({ at: saved });
-      } else {
-        this.editor.tf.focus();
-      }
+      this.editor.commands.focus();
       return true;
     },
     dispose(): void {
-      // Plate editors clean up automatically when GC'd
-      this.selection = null;
+      this.editor.destroy();
     },
     isFocusable(): boolean {
       return true;
     },
     goToLocation(location: EditorLocation): boolean {
       try {
-        // 1. Map raw file line number to Slate AST path using heuristic line counting
-        const mapping = rawLineToBlockPath(
-          this.editor.children as BlockNode[],
-          location.line,
+        const { from, to } = resolveEditorLocation(
+          this.editor.state.doc,
+          location,
         );
 
-        if (!mapping) {
-          console.warn(
-            `Line ${location.line} could not be mapped to any block in document`,
-          );
-          return false;
-        }
-
-        // Skip non-navigable lines (code fences, table separators)
-        if (mapping.isFenceLine || mapping.isSeparatorLine) {
-          console.warn(
-            `Line ${location.line} is a fence/separator line, not navigable`,
-          );
-          return false;
-        }
-
-        const blockPath = mapping.path;
-
-        // 2. Get the node at the resolved path
-        const block = Node.get(this.editor, blockPath);
-        if (!block) return false;
-
-        // 3. Convert column to text offset within the block,
-        //    adjusting for markdown markup prefix characters (e.g. "## ", "- ", "> ")
-        //    that are counted in the raw column but absent from Plate text.
-        const topLevelBlock = this.editor.children[
-          mapping.blockIndex
-        ] as BlockNode;
-        const prefixLen = markupPrefixLength(topLevelBlock);
-        const adjustedColumn = Math.max(1, (location.column ?? 1) - prefixLen);
-        const blockText = Node.string(block);
-        const offset = columnToOffset(blockText.length, adjustedColumn);
-
-        // 4. Find the correct text node path and offset
-        const textPath = findTextNodePath(this.editor, blockPath, offset);
-        if (!textPath) {
-          console.warn(`Could not find text node at offset ${offset}`);
-          return false;
-        }
-
-        // 5. Create start point
-        let startPoint: Point = {
-          path: textPath.path,
-          offset: textPath.offset,
-        };
-
-        // 6. If expectedText provided, verify and adjust with fuzzy matching
-        if (location.expectedText) {
-          const computedOffset = textPath.absoluteOffset;
-          const textAtPosition = blockText.slice(
-            computedOffset,
-            computedOffset + location.expectedText.length,
-          );
-
-          if (textAtPosition !== location.expectedText) {
-            const fuzzyOffset = fuzzyFind(
-              blockText,
-              location.expectedText,
-              computedOffset,
-            );
-            if (fuzzyOffset !== -1) {
-              const adjustedTextPath = findTextNodePath(
-                this.editor,
-                blockPath,
-                fuzzyOffset,
-              );
-              if (adjustedTextPath) {
-                startPoint = {
-                  path: adjustedTextPath.path,
-                  offset: adjustedTextPath.offset,
-                };
-              }
-            }
-          }
-        }
-
-        // 7. Create range (selection)
-        let range: Range = { anchor: startPoint, focus: startPoint };
-
-        // Handle selection range if end position provided
-        if (
-          location.endLine !== undefined &&
-          location.endColumn !== undefined
-        ) {
-          const endMapping = rawLineToBlockPath(
-            this.editor.children as BlockNode[],
-            location.endLine,
-          );
-          if (
-            endMapping &&
-            !endMapping.isFenceLine &&
-            !endMapping.isSeparatorLine
-          ) {
-            const endBlock = Node.get(this.editor, endMapping.path);
-            const endBlockText = Node.string(endBlock);
-            const endTopBlock = this.editor.children[
-              endMapping.blockIndex
-            ] as BlockNode;
-            const endPrefixLen = markupPrefixLength(endTopBlock);
-            const adjustedEndColumn = Math.max(
-              1,
-              location.endColumn - endPrefixLen,
-            );
-            const endOffset = columnToOffset(
-              endBlockText.length,
-              adjustedEndColumn,
-            );
-            const endTextPath = findTextNodePath(
-              this.editor,
-              endMapping.path,
-              endOffset,
-            );
-            if (endTextPath) {
-              range.focus = {
-                path: endTextPath.path,
-                offset: endTextPath.offset,
-              };
-            }
-          }
-        }
-
-        // 8. Set selection and focus using Plate's API
-        this.editor.tf.select(range);
-
-        // 9. Save selection so focusEditor restores this location
-        this.selection = range;
-
-        // 10. Scroll into view
-        try {
-          const domRange = ReactEditor.toDOMRange(
-            this.editor as unknown as ReactEditor,
-            range,
-          );
-          const startContainer = domRange.startContainer;
-          // Use numeric constant 3 for TEXT_NODE to avoid conflict with Slate's Node
-          const scrollTarget =
-            startContainer.nodeType === 3 // Node.TEXT_NODE
-              ? startContainer.parentElement
-              : (startContainer as Element);
-          scrollTarget?.scrollIntoView({
-            behavior: "smooth",
-            block: "center",
-          });
-        } catch (scrollError) {
-          // Scroll failed, but selection was set - still a partial success
-          console.warn("Failed to scroll to location:", scrollError);
-        }
-
-        // 11. Focus the editor
-        this.editor.tf.focus();
+        this.editor.commands.setTextSelection({ from, to });
+        this.editor.commands.scrollIntoView();
+        this.editor.commands.focus();
 
         return true;
       } catch (error) {
@@ -348,52 +221,6 @@ function createMarkdownInstance(content: string): MarkdownInstance {
   };
 
   return instance;
-}
-
-/**
- * Find the text node path and relative offset for an absolute offset within a block.
- * Slate blocks can have multiple text nodes (e.g., with marks), so we need to
- * walk through them to find the correct path and offset.
- */
-function findTextNodePath(
-  editor: PlateEditor,
-  blockPath: Path,
-  absoluteOffset: number,
-): { path: Path; offset: number; absoluteOffset: number } | null {
-  const textNodes = Array.from(
-    Node.texts(Node.get(editor, blockPath), { from: [] }),
-  );
-
-  if (textNodes.length === 0) {
-    // Block has no text nodes - create a path to an empty text node
-    return { path: [...blockPath, 0], offset: 0, absoluteOffset: 0 };
-  }
-
-  let accumulatedOffset = 0;
-
-  for (const [textNode, relativePath] of textNodes) {
-    const textLength = textNode.text.length;
-    const startOffset = accumulatedOffset;
-    const endOffset = startOffset + textLength;
-
-    if (absoluteOffset <= endOffset) {
-      return {
-        path: [...blockPath, ...relativePath],
-        offset: absoluteOffset - startOffset,
-        absoluteOffset: startOffset,
-      };
-    }
-
-    accumulatedOffset = endOffset;
-  }
-
-  // Offset is past the end - return last position
-  const lastText = textNodes[textNodes.length - 1];
-  return {
-    path: [...blockPath, ...lastText[1]],
-    offset: lastText[0].text.length,
-    absoluteOffset: accumulatedOffset - lastText[0].text.length,
-  };
 }
 
 function createImageInstance(filePath: string): ImageInstance {
@@ -428,6 +255,7 @@ function createImageInstance(filePath: string): ImageInstance {
 interface MarkdownConfig {
   type: "markdown";
   content: string;
+  basePath?: string;
 }
 
 interface ImageConfig {
@@ -467,7 +295,11 @@ export function getOrCreateEditor(
 
   switch (config.type) {
     case "markdown":
-      instance = createMarkdownInstance(config.content);
+      instance = createMarkdownInstance(
+        filePath,
+        config.content,
+        config.basePath,
+      );
       break;
     case "image":
       instance = createImageInstance(filePath);
@@ -565,7 +397,7 @@ export function focusEditor(filePath: string): boolean {
  * Get a markdown editor instance (type-safe accessor).
  * Returns undefined if the editor doesn't exist or isn't a markdown editor.
  */
-export function getMarkdownEditor(filePath: string): PlateEditor | undefined {
+export function getMarkdownEditor(filePath: string): Editor | undefined {
   const instance = editorInstances.get(filePath);
   if (isMarkdownInstance(instance)) {
     return instance.editor;
@@ -573,28 +405,23 @@ export function getMarkdownEditor(filePath: string): PlateEditor | undefined {
   return undefined;
 }
 
-/**
- * Save the current selection for a markdown editor.
- * No-op for other editor types.
- */
 export function saveSelection(
   filePath: string,
-  selection: BaseSelection,
+  from: number,
+  to: number,
 ): void {
   const instance = editorInstances.get(filePath);
   if (isMarkdownInstance(instance)) {
-    instance.selection = selection;
+    instance.savedSelection = { from, to };
   }
 }
 
-/**
- * Retrieve a previously saved selection for a markdown editor.
- * Returns undefined for other editor types or if none saved.
- */
-export function getSavedSelection(filePath: string): BaseSelection | undefined {
+export function getSavedSelection(
+  filePath: string,
+): { from: number; to: number } | undefined {
   const instance = editorInstances.get(filePath);
   if (isMarkdownInstance(instance)) {
-    return instance.selection ?? undefined;
+    return instance.savedSelection;
   }
   return undefined;
 }
@@ -613,15 +440,10 @@ export function getSelectedText(filePath: string): string | undefined {
   const instance = editorInstances.get(filePath);
 
   if (isMarkdownInstance(instance)) {
-    const selection = instance.editor.selection ?? instance.selection;
-    if (!selection || SlateRange.isCollapsed(selection)) {
-      return undefined;
-    }
+    const { from, to } = instance.editor.state.selection;
+    if (from === to) return undefined;
 
-    const text = SlateEditor.string(
-      instance.editor as unknown as SlateEditor,
-      selection,
-    );
+    const text = instance.editor.state.doc.textBetween(from, to, "\n");
     return text.trim() ? text : undefined;
   }
 

@@ -4,6 +4,7 @@ import { Workspace } from "@/components/workspace";
 import { Welcome } from "@/components/welcome";
 import { RootRedirect } from "@/components/root-redirect";
 import { MockDirectoryPickerDialog } from "@/components/mock-directory-picker-dialog";
+import { TextPromptDialog } from "@/components/text-prompt-dialog";
 import { useEffect } from "react";
 import { useTheme } from "@/components/theme-provider";
 import { platformAdapter } from "@/adapters";
@@ -63,6 +64,7 @@ export const App = () => {
     <div className="flex h-screen flex-col text-foreground overflow-hidden">
       <Titlebar />
       {isWeb() && <MockDirectoryPickerDialog />}
+      <TextPromptDialog />
       <div className="flex-1 min-h-0">
         <Routes>
           <Route

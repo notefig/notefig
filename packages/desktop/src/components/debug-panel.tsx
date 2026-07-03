@@ -494,10 +494,9 @@ function DebugPanelContent({
     for (const tabPath of openTabs) {
       const editor = getEditor(tabPath);
       if (isMarkdownInstance(editor)) {
-        // Plate editor children contain the AST
         files[tabPath] = {
           type: "markdown",
-          ast: editor.editor.children,
+          ast: editor.editor.getJSON(),
         };
       } else {
         files[tabPath] = {

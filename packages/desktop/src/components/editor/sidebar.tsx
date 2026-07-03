@@ -34,13 +34,6 @@ interface SidebarProps {
   closeTab: (tabId: string) => void;
   mode: FileTreeMode;
   onModeChange: (mode: FileTreeMode) => void;
-  onSearchMatchClick: (
-    filePath: string,
-    line: number,
-    column: number,
-    matchText?: string,
-    options?: Omit<OpenFileInLayoutOptions, "tabId">,
-  ) => void;
   searchPanelRef?: Ref<SearchPanelHandle>;
 }
 
@@ -52,7 +45,6 @@ export function Sidebar({
   closeTab,
   mode,
   onModeChange,
-  onSearchMatchClick,
   searchPanelRef,
 }: SidebarProps) {
   const { metadata } = getOrCreateWorkspaceCollections(workspacePath);
@@ -224,11 +216,7 @@ export function Sidebar({
         style={{ width: sidebarWidth }}
       >
         {sidebarView === "search" ? (
-          <SearchPanel
-            ref={searchPanelRef}
-            workspacePath={workspacePath}
-            onMatchClick={onSearchMatchClick}
-          />
+          <SearchPanel ref={searchPanelRef} workspacePath={workspacePath} />
         ) : sidebarView === "git" ? (
           <CheckpointPanel workspacePath={workspacePath} />
         ) : (
