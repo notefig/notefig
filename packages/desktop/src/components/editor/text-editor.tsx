@@ -1,8 +1,9 @@
 import { useRef, useEffect } from "react";
-import { EditorContent } from "@tiptap/react";
+import { EditorContent, EditorContext } from "@tiptap/react";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { GripVertical } from "lucide-react";
 import { LinkBubbleMenu } from "./tiptap-link-menu";
+import { normalizeLinkInput } from "./tiptap-link-utils";
 import { TableMenu } from "./tiptap-table-menu";
 import "./tiptap.css";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -109,7 +110,11 @@ export function TextEditor({
       }
 
       saveTimeoutRef.current = setTimeout(() => {
-        const markdown = (editor.storage as unknown as { markdown: { getMarkdown: () => string } }).markdown.getMarkdown();
+        const markdown = (
+          editor.storage as unknown as {
+            markdown: { getMarkdown: () => string };
+          }
+        ).markdown.getMarkdown();
 
         const hash = calculateContentHash(markdown);
         lastKnownHashRef.current = hash;
@@ -158,10 +163,7 @@ export function TextEditor({
         reclaimRaf = null;
         return;
       }
-      if (
-        document.activeElement === document.body &&
-        !editor.view.hasFocus()
-      ) {
+      if (document.activeElement === document.body && !editor.view.hasFocus()) {
         requestEditorFocus(file.path, {
           when: "immediate",
           reason: "focus-lost-after-mount",
@@ -184,21 +186,6 @@ export function TextEditor({
     };
   }, [editor, file.path]);
 
-  /**
-   * Only auto-prepend https:// for bare-domain inputs (google.com).
-   * Keep internal paths (/docs/readme, ./local, ../parent, #anchor),
-   * known schemes (https://, mailto:), and data URIs as-is.
-   */
-  function isExternalLike(value: string): boolean {
-    return (
-      !/^(https?|mailto|data|asset):/i.test(value) &&
-      !value.startsWith("/") &&
-      !value.startsWith("./") &&
-      !value.startsWith("../") &&
-      !value.startsWith("#")
-    );
-  }
-
   const handleLinkToggle = async () => {
     const previousUrl = editor.getAttributes("link").href as string | undefined;
     const url = await promptText({
@@ -213,9 +200,7 @@ export function TextEditor({
       editor.chain().focus().extendMarkRange("link").unsetLink().run();
       return;
     }
-    const resolved = isExternalLike(url)
-      ? `https://${url}`
-      : url;
+    const resolved = normalizeLinkInput(url);
     editor
       .chain()
       .focus()
@@ -246,28 +231,52 @@ export function TextEditor({
           <TiptapMarkButton editor={editor} format="italic" tooltip="Italic">
             <ItalicIcon />
           </TiptapMarkButton>
-          <TiptapMarkButton editor={editor} format="underline" tooltip="Underline">
+          <TiptapMarkButton
+            editor={editor}
+            format="underline"
+            tooltip="Underline"
+          >
             <UnderlineIcon />
           </TiptapMarkButton>
-          <TiptapMarkButton editor={editor} format="strike" tooltip="Strikethrough">
+          <TiptapMarkButton
+            editor={editor}
+            format="strike"
+            tooltip="Strikethrough"
+          >
             <StrikethroughIcon />
           </TiptapMarkButton>
 
           <Separator orientation="vertical" className="h-6" />
 
-          <TiptapBlockButton editor={editor} format="bulletList" tooltip="Bullet List">
+          <TiptapBlockButton
+            editor={editor}
+            format="bulletList"
+            tooltip="Bullet List"
+          >
             <ListIcon />
           </TiptapBlockButton>
-          <TiptapBlockButton editor={editor} format="orderedList" tooltip="Numbered List">
+          <TiptapBlockButton
+            editor={editor}
+            format="orderedList"
+            tooltip="Numbered List"
+          >
             <ListOrderedIcon />
           </TiptapBlockButton>
 
           <Separator orientation="vertical" className="h-6" />
 
-          <TiptapBlockButton editor={editor} format="blockquote" tooltip="Blockquote">
+          <TiptapBlockButton
+            editor={editor}
+            format="blockquote"
+            tooltip="Blockquote"
+          >
             <QuoteIcon />
           </TiptapBlockButton>
-          <TiptapBlockButton editor={editor} format="codeBlock" tooltip="Code Block">
+          <TiptapBlockButton
+            editor={editor}
+            format="codeBlock"
+            tooltip="Code Block"
+          >
             <CodeIcon />
           </TiptapBlockButton>
 
@@ -292,7 +301,12 @@ export function TextEditor({
         <DragHandle editor={editor} nested>
           <GripVertical className="w-4 h-4 text-muted-foreground/40 hover:text-muted-foreground" />
         </DragHandle>
-        <LinkBubbleMenu editor={editor} onEdit={handleLinkToggle} basePath={basePath} />
+        <LinkBubbleMenu
+          editor={editor}
+          onEdit={handleLinkToggle}
+          basePath={basePath}
+          filePath={file.path}
+        />
         <TableMenu editor={editor} />
         <EditorContent
           editor={editor}

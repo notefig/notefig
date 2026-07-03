@@ -21,17 +21,14 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { getFileName } from "@/utils/fs";
 import type { SearchMatch } from "@/adapters/platform-adapter.interface";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
-import { suppressEditorFocus } from "@/components/editor/editor-store";
+import {
+  suppressEditorFocus,
+  navigateToLocation,
+} from "@/components/editor/editor-store";
+import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
 
 interface SearchPanelProps {
   workspacePath: string;
-  onMatchClick: (
-    filePath: string,
-    line: number,
-    column: number,
-    matchText?: string,
-    options?: Omit<OpenFileInLayoutOptions, "tabId">,
-  ) => void;
 }
 
 export interface SearchPanelHandle {
@@ -43,10 +40,42 @@ export interface SearchPanelHandle {
 }
 
 export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
-  function SearchPanel({ workspacePath, onMatchClick }, ref) {
+  function SearchPanel({ workspacePath }, ref) {
     const isMetaHeld = useKeyHold("Meta");
     const isControlHeld = useKeyHold("Control");
     const isModHeld = isMetaHeld || isControlHeld;
+    const { openFile } = useWorkspaceTabs();
+
+    const handleMatchClick = useCallback(
+      (
+        filePath: string,
+        line: number,
+        column: number,
+        matchText?: string,
+        options?: Omit<OpenFileInLayoutOptions, "tabId">,
+      ) => {
+        openFile({ tabId: filePath, intent: options?.intent ?? "replace" });
+        // Retry navigation until editor is mounted and ready (up to ~2s)
+        let attempt = 0;
+        const maxAttempts = 20;
+        const tryNavigate = () => {
+          attempt++;
+          if (
+            navigateToLocation(filePath, {
+              line,
+              column,
+              expectedText: matchText,
+            })
+          )
+            return;
+          if (attempt < maxAttempts) {
+            requestAnimationFrame(tryNavigate);
+          }
+        };
+        requestAnimationFrame(tryNavigate);
+      },
+      [openFile],
+    );
 
     const inputRef = useRef<HTMLInputElement>(null);
     const [query, setQuery] = useState("");
@@ -266,7 +295,7 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
                       query={query}
                       caseSensitive={caseSensitive}
                       onClick={() =>
-                        onMatchClick(
+                        handleMatchClick(
                           filePath,
                           match.location.range.start.line,
                           match.location.range.start.column,

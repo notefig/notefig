@@ -26,17 +26,14 @@ import type { FileEntry } from "@/utils/fs";
 import { getFileName } from "@/utils/fs";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
+import { WorkspaceTabsProvider } from "@/components/workspace-tabs-provider";
 import { platformAdapter } from "@/adapters";
 import { retryOnAnimationFrame } from "@/utils/retry-on-animation-frame";
 import {
   handleMetadataFileSystemChange,
   handleContentFileSystemChange,
 } from "@/utils/file-sync";
-import {
-  disposeAllEditors,
-  getEditor,
-  navigateToLocation,
-} from "@/components/editor/editor-store";
+import { disposeAllEditors, getEditor } from "@/components/editor/editor-store";
 import {
   type FileTreeMode,
   FILE_TREE_IDLE,
@@ -65,6 +62,7 @@ export const Workspace = () => {
     getFocusedTabId,
     focusActiveEditor,
     getSelectedText,
+    openFile,
   } = useDockableTabs({
     renderTabs: () => [],
     canOpenFile: (file) => file.type === "file" && canOpenInEditor(file.path),
@@ -167,44 +165,15 @@ export const Workspace = () => {
     }
   }, [isSidebarCollapsed, setUrlSearchParams, focusActiveEditor]);
 
-  const handleSearchMatchClick = useCallback(
-    (
-      filePath: string,
-      line: number,
-      column: number,
-      matchText?: string,
-      options?: Omit<OpenFileInLayoutOptions, "tabId">,
-    ) => {
-      // Open the file tab
-      handleFileSelect(
-        {
-          path: filePath,
-          type: "file",
-          contentHash: "",
-          content: "",
-        },
-        options,
-      );
-      // Retry navigation until editor is mounted and ready (up to ~2s)
-      let attempt = 0;
-      const maxAttempts = 20;
-      const tryNavigate = () => {
-        attempt++;
-        if (
-          navigateToLocation(filePath, {
-            line,
-            column,
-            expectedText: matchText,
-          })
-        )
-          return;
-        if (attempt < maxAttempts) {
-          requestAnimationFrame(tryNavigate);
-        }
-      };
-      requestAnimationFrame(tryNavigate);
+  // Exposed via WorkspaceTabsContext so components nested in the layout
+  // (link menu, search panel) can open files as tabs.
+  const openFileInTabs = useCallback(
+    (options: OpenFileInLayoutOptions) => {
+      if (!canOpenInEditor(options.tabId)) return false;
+      openFile(options);
+      return true;
     },
-    [handleFileSelect],
+    [openFile],
   );
 
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -413,83 +382,84 @@ export const Workspace = () => {
   }, [workspacePath, openTabs.join(",")]);
 
   return (
-    <div dir={direction} className="flex h-full w-full overflow-hidden p-2">
-      <div className="flex h-full shrink-0 overflow-hidden rounded-xl border border-border">
-        <IconSidebar
-          isCollapsed={isSidebarCollapsed}
-          onToggleCollapse={toggleSidebarCollapsed}
-        />
-
-        {!isSidebarCollapsed && (
-          <Sidebar
-            workspacePath={workspacePath}
-            activeTabId={activeTabId}
-            openTabs={openTabs}
-            onFileSelect={handleFileSelect}
-            closeTab={closeTab}
-            mode={fileTreeMode}
-            onModeChange={setFileTreeMode}
-            onSearchMatchClick={handleSearchMatchClick}
-            searchPanelRef={searchPanelRef}
+    <WorkspaceTabsProvider openFile={openFileInTabs}>
+      <div dir={direction} className="flex h-full w-full overflow-hidden p-2">
+        <div className="flex h-full shrink-0 overflow-hidden rounded-xl border border-border">
+          <IconSidebar
+            isCollapsed={isSidebarCollapsed}
+            onToggleCollapse={toggleSidebarCollapsed}
           />
-        )}
-      </div>
 
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <DebugPanel />
+          {!isSidebarCollapsed && (
+            <Sidebar
+              workspacePath={workspacePath}
+              activeTabId={activeTabId}
+              openTabs={openTabs}
+              onFileSelect={handleFileSelect}
+              closeTab={closeTab}
+              mode={fileTreeMode}
+              onModeChange={setFileTreeMode}
+              searchPanelRef={searchPanelRef}
+            />
+          )}
+        </div>
 
-        <div className="flex-1 flex min-h-0 overflow-hidden">
-          <div
-            ref={dockableRef}
-            className="flex-1 min-w-0 h-full overflow-hidden"
-            tabIndex={-1}
-          >
-            {openTabs.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-muted-foreground p-4 ps-0">
-                <p className="text-center">{t("noFileSelected")}</p>
-              </div>
-            ) : (
-              <Dockable.Root
-                orientation="row"
-                layout={layout}
-                onChange={handleLayoutChange}
-              >
-                {dockableTabs}
-              </Dockable.Root>
-            )}
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          <DebugPanel />
+
+          <div className="flex-1 flex min-h-0 overflow-hidden">
+            <div
+              ref={dockableRef}
+              className="flex-1 min-w-0 h-full overflow-hidden"
+              tabIndex={-1}
+            >
+              {openTabs.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-muted-foreground p-4 ps-0">
+                  <p className="text-center">{t("noFileSelected")}</p>
+                </div>
+              ) : (
+                <Dockable.Root
+                  orientation="row"
+                  layout={layout}
+                  onChange={handleLayoutChange}
+                >
+                  {dockableTabs}
+                </Dockable.Root>
+              )}
+            </div>
           </div>
         </div>
+
+        <StatusBar
+          wordCount={wordCount}
+          isSynced={isSynced}
+          workspacePath={workspacePath}
+        />
+
+        <SettingsModal
+          direction={direction}
+          onDirectionChange={setDirection}
+          onFocusEditor={focusActiveEditor}
+        />
+
+        <CommandPalette
+          open={isCommandPaletteOpen}
+          sidebarOpen={isSidebarCollapsed}
+          onOpenChange={setIsCommandPaletteOpen}
+          onNewFile={handleNewFile}
+          onNewDirectory={handleNewDirectory}
+          onCloseFile={closeActiveTab}
+          onUndo={() => runEditorHistoryAction("undo")}
+          onRedo={() => runEditorHistoryAction("redo")}
+          onOpenSettings={handleOpenSettings}
+          onToggleSidebar={toggleSidebarCollapsed}
+          onToggleFullscreen={handleToggleFullscreen}
+          onSearchInFile={handleSearchInFile}
+          onSearchInFiles={handleSearchInFiles}
+          onFocusEditor={focusActiveEditor}
+          direction={direction}
+        />
       </div>
-
-      <StatusBar
-        wordCount={wordCount}
-        isSynced={isSynced}
-        workspacePath={workspacePath}
-      />
-
-      <SettingsModal
-        direction={direction}
-        onDirectionChange={setDirection}
-        onFocusEditor={focusActiveEditor}
-      />
-
-      <CommandPalette
-        open={isCommandPaletteOpen}
-        sidebarOpen={isSidebarCollapsed}
-        onOpenChange={setIsCommandPaletteOpen}
-        onNewFile={handleNewFile}
-        onNewDirectory={handleNewDirectory}
-        onCloseFile={closeActiveTab}
-        onUndo={() => runEditorHistoryAction("undo")}
-        onRedo={() => runEditorHistoryAction("redo")}
-        onOpenSettings={handleOpenSettings}
-        onToggleSidebar={toggleSidebarCollapsed}
-        onToggleFullscreen={handleToggleFullscreen}
-        onSearchInFile={handleSearchInFile}
-        onSearchInFiles={handleSearchInFiles}
-        onFocusEditor={focusActiveEditor}
-        direction={direction}
-      />
-    </div>
+    </WorkspaceTabsProvider>
   );
 };
