@@ -361,12 +361,16 @@ focusArbiter.registerResolver("element", (intent) => {
   // Never steal focus from an open overlay or an active text entry.
   // Radix menus/dialogs re-grab focus synchronously, so stealing creates a
   // per-frame tug-of-war with `when-mounted` retries; stealing from a text
-  // entry blurs it, which cancels rename/create flows mid-typing. Returning
-  // false lets when-mounted intents keep retrying until the overlay closes
-  // (or the attempt/TTL cap expires) without ever yanking focus.
+  // entry blurs it, which cancels rename/create flows mid-typing — and for
+  // the main editor, a late-firing when-mounted intent (e.g. the sidebar's
+  // focus-first-item request) would hijack keystrokes mid-typing: the next
+  // Enter activates the newly focused tree button and opens that file.
+  // Returning false lets when-mounted intents keep retrying until the
+  // overlay closes or the user leaves the text entry (or the attempt/TTL
+  // cap expires) without ever yanking focus.
   if (
     isFocusInsideOpenOverlay(document.activeElement) ||
-    isSidebarTextEntryActive(document.activeElement)
+    isTextEntryActive(document.activeElement)
   ) {
     return false;
   }
@@ -409,6 +413,16 @@ export function isSidebarTextEntryActive(
 ): boolean {
   if (!(activeElement instanceof HTMLElement)) return false;
   if (!activeElement.closest("[data-sidebar]")) return false;
+
+  return isTextEntryActive(activeElement);
+}
+
+/**
+ * Whether the given element is (inside) a text-editing context anywhere in
+ * the app — a form field, a contenteditable, or the main editor.
+ */
+export function isTextEntryActive(activeElement: Element | null): boolean {
+  if (!(activeElement instanceof HTMLElement)) return false;
 
   return !!activeElement.closest(
     'input, textarea, [contenteditable="true"], [role="textbox"]',

@@ -262,3 +262,45 @@ describe("FocusArbiter", () => {
     expect(arbiter.getPendingCount()).toBe(0);
   });
 });
+
+describe("isTextEntryActive", () => {
+  it("protects the main editor (role=textbox outside the sidebar)", async () => {
+    const { isTextEntryActive } = await import("../focus-arbiter");
+    document.body.innerHTML = `
+      <div role="textbox" contenteditable="true"><p id="para">typing here</p></div>
+    `;
+    const para = document.getElementById("para");
+    expect(isTextEntryActive(para)).toBe(true);
+  });
+
+  it("protects plain inputs and textareas", async () => {
+    const { isTextEntryActive } = await import("../focus-arbiter");
+    document.body.innerHTML = `<input id="i" /><textarea id="t"></textarea>`;
+    expect(isTextEntryActive(document.getElementById("i"))).toBe(true);
+    expect(isTextEntryActive(document.getElementById("t"))).toBe(true);
+  });
+
+  it("does not protect buttons or plain containers", async () => {
+    const { isTextEntryActive } = await import("../focus-arbiter");
+    document.body.innerHTML = `<button id="b">api.md</button><div id="d"></div>`;
+    expect(isTextEntryActive(document.getElementById("b"))).toBe(false);
+    expect(isTextEntryActive(document.getElementById("d"))).toBe(false);
+    expect(isTextEntryActive(null)).toBe(false);
+  });
+});
+
+describe("isSidebarTextEntryActive", () => {
+  it("requires the text entry to be inside the sidebar", async () => {
+    const { isSidebarTextEntryActive } = await import("../focus-arbiter");
+    document.body.innerHTML = `
+      <div data-sidebar="true"><input id="inside" /></div>
+      <input id="outside" />
+    `;
+    expect(isSidebarTextEntryActive(document.getElementById("inside"))).toBe(
+      true,
+    );
+    expect(isSidebarTextEntryActive(document.getElementById("outside"))).toBe(
+      false,
+    );
+  });
+});
