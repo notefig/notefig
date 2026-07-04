@@ -21,6 +21,7 @@ import {
 import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
+import { useProjectSettings } from "@/utils/project-settings";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
 import type { FileEntry } from "@/utils/fs";
 import { getFileName } from "@/utils/fs";
@@ -177,7 +178,19 @@ export const Workspace = () => {
   );
 
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
-  const [direction, setDirection] = useState<"ltr" | "rtl">("ltr");
+  const { settings: projectSettings, update: updateProjectSettings } =
+    useProjectSettings(workspacePath);
+  const direction = projectSettings.settings?.direction ?? "ltr";
+  const setDirection = useCallback(
+    (next: "ltr" | "rtl") => {
+      updateProjectSettings({ settings: { direction: next } }).catch(
+        (error) => {
+          console.error("Failed to persist direction setting:", error);
+        },
+      );
+    },
+    [updateProjectSettings],
+  );
 
   const isFetchingContent = useIsFetching(
     { queryKey: ["file-content", workspacePath] },

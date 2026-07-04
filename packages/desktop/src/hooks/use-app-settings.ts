@@ -1,6 +1,7 @@
 import { useKv } from "@/utils/kv-store";
-import { SETTINGS_NAMESPACE } from "../utils/collections";
 import type { Theme } from "@/components/theme-provider";
+
+export const SETTINGS_NAMESPACE = "settings";
 
 export interface AppSettings {
   theme: Theme;

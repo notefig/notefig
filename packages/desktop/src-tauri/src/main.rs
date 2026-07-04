@@ -82,11 +82,20 @@ fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
     Ok(menu)
 }
 
-/// Reads the persisted zoom level from the settings store and applies native webview zoom.
+/// Reads the persisted zoom level and applies native webview zoom.
+/// Zoom lives in the frontend's KV store (kv.json, key `settings:zoomLevel`);
+/// the frontend is the sole writer — Rust only reads it back at startup.
+/// Falls back to the legacy settings.json store for values persisted before
+/// the stores were unified.
 fn restore_zoom_level(app: &AppHandle) {
-    match app.store("settings.json") {
+    match app.store("kv.json") {
         Ok(store) => {
-            if let Some(zoom_value) = store.get("zoomLevel") {
+            let zoom_value = store.get("settings:zoomLevel").or_else(|| {
+                app.store("settings.json")
+                    .ok()
+                    .and_then(|legacy| legacy.get("zoomLevel"))
+            });
+            if let Some(zoom_value) = zoom_value {
                 if let Some(zoom) = zoom_value.as_f64() {
                     // Apply native webview zoom
                     if let Some(webview_window) = app.get_webview_window("main") {
@@ -99,12 +108,13 @@ fn restore_zoom_level(app: &AppHandle) {
             }
         }
         Err(e) => {
-            eprintln!("Failed to open settings store for zoom restore: {}", e);
+            eprintln!("Failed to open kv store for zoom restore: {}", e);
         }
     }
 }
 
-/// Persists the zoom level to the settings store and applies native webview zoom.
+/// Applies native webview zoom; persistence happens on the frontend
+/// (the `zoom-changed` handler writes kv.json).
 fn set_zoom_level(app: &AppHandle, zoom: f64) {
     // Apply native webview zoom
     if let Some(webview_window) = app.get_webview_window("main") {
@@ -115,18 +125,6 @@ fn set_zoom_level(app: &AppHandle, zoom: f64) {
 
     // Emit event so frontend can persist the setting
     let _ = app.emit("zoom-changed", zoom);
-
-    match app.store("settings.json") {
-        Ok(store) => {
-            store.set("zoomLevel", serde_json::json!(zoom));
-            if let Err(e) = store.save() {
-                eprintln!("Failed to save settings store: {}", e);
-            }
-        }
-        Err(e) => {
-            eprintln!("Failed to persist zoom level: {}", e);
-        }
-    }
 }
 
 fn main() {

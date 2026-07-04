@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { platformAdapter } from "@/adapters";
-import { queryClient } from "@/utils/collections";
 import type {
   SearchOptions,
   SearchMatch,
@@ -22,15 +22,15 @@ export interface UseSearchResult {
   fileCount: number;
 }
 
+const NO_RESULTS: SearchMatch[] = [];
+
 /**
  * Debounced workspace search hook using TanStack Query for data fetching.
  *
- * Debounces the query string by 300ms, then uses queryClient.fetchQuery
- * to call platformAdapter.searchContent. Cancels in-flight searches when
- * the query or options change.
- *
- * Revalidates automatically when file content or metadata changes
- * (via platform events), debounced at 500ms.
+ * Debounces the query string by 300ms, then runs
+ * platformAdapter.searchContent as a subscribed query. Revalidation on
+ * filesystem changes happens through the central invalidator in
+ * utils/file-sync.ts, which invalidates ["search-content", workspacePath].
  */
 export function useSearch(
   workspacePath: string,
@@ -49,68 +49,18 @@ export function useSearch(
     return () => clearTimeout(timer);
   }, [query]);
 
-  const [results, setResults] = useState<SearchMatch[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
+  const trimmed = debouncedQuery.trim();
 
-  // Generation counter — incremented on file system changes to re-trigger search
-  const [generation, setGeneration] = useState(0);
+  const searchOptions: SearchOptions = {
+    query: trimmed,
+    caseSensitive,
+    useRegex,
+    filePattern: filePattern || undefined,
+    maxResults,
+  };
 
-  // Track whether there's an active search (for skipping invalidation when idle)
-  const hasActiveSearch = debouncedQuery.trim() !== "";
-
-  // Listen for file system changes and bump generation (debounced 500ms)
-  useEffect(() => {
-    if (!hasActiveSearch) return;
-
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const cleanup = platformAdapter.addEventListener((event) => {
-      if (
-        event.type === "fs-metadata-changed" ||
-        event.type === "fs-content-changed"
-      ) {
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          setGeneration((g) => g + 1);
-        }, 500);
-      }
-    });
-
-    return () => {
-      cleanup();
-      if (debounceTimer) clearTimeout(debounceTimer);
-    };
-  }, [hasActiveSearch]);
-
-  // AbortController ref for cancellation
-  const abortRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    // Cancel any in-flight search
-    abortRef.current?.abort();
-
-    const trimmed = debouncedQuery.trim();
-    if (trimmed === "") {
-      setResults([]);
-      setIsSearching(false);
-      setError(null);
-      return;
-    }
-
-    const abortController = new AbortController();
-    abortRef.current = abortController;
-
-    const searchOptions: SearchOptions = {
-      query: trimmed,
-      caseSensitive,
-      useRegex,
-      filePattern: filePattern || undefined,
-      maxResults,
-    };
-
-    // Include generation in query key to bypass TanStack Query cache on revalidation
-    const queryKey = [
+  const { data, isFetching, error } = useQuery<SearchMatch[], Error>({
+    queryKey: [
       "search-content",
       workspacePath,
       trimmed,
@@ -118,50 +68,26 @@ export function useSearch(
       useRegex,
       filePattern,
       maxResults,
-      generation,
-    ];
+    ],
+    queryFn: () => platformAdapter.searchContent(workspacePath, searchOptions),
+    enabled: trimmed !== "",
+    retry: false,
+    placeholderData: (previous) => previous,
+    gcTime: 30_000,
+  });
 
-    setIsSearching(true);
-    setError(null);
-
-    queryClient
-      .fetchQuery({
-        queryKey,
-        queryFn: () =>
-          platformAdapter.searchContent(workspacePath, searchOptions),
-        gcTime: 0,
-      })
-      .then((data) => {
-        if (!abortController.signal.aborted) {
-          setResults(data);
-          setIsSearching(false);
-        }
-      })
-      .catch((err: unknown) => {
-        if (!abortController.signal.aborted) {
-          setError(err instanceof Error ? err : new Error(String(err)));
-          setResults([]);
-          setIsSearching(false);
-        }
-      });
-
-    return () => {
-      abortController.abort();
-    };
-  }, [
-    workspacePath,
-    debouncedQuery,
-    caseSensitive,
-    useRegex,
-    filePattern,
-    maxResults,
-    generation,
-  ]);
+  const results = trimmed === "" ? NO_RESULTS : (data ?? NO_RESULTS);
 
   const { resultCount, fileCount } = useMemo(() => {
     const files = new Set(results.map((r) => r.location.filePath));
     return { resultCount: results.length, fileCount: files.size };
   }, [results]);
 
-  return { results, isSearching, error, resultCount, fileCount };
+  return {
+    results,
+    isSearching: isFetching,
+    error: error ?? null,
+    resultCount,
+    fileCount,
+  };
 }

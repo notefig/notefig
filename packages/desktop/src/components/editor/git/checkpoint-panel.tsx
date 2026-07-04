@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/tooltip";
 import {
   getOrCreateWorkspaceGitService,
+  gitQueryKeys,
   initializeWorkspaceGit,
 } from "@/utils/git-service-store";
 
@@ -73,13 +74,6 @@ type SyncState = "uncommitted" | "unsynced" | "synced";
 type PanelState = "uninitialized" | "error" | "empty" | "ready";
 
 type MutableT = (key: string, defaultValue: string) => string;
-
-function gitQueryKeys(workspacePath: string) {
-  return {
-    status: ["git", workspacePath, "status"] as const,
-    checkpoints: ["git", workspacePath, "checkpoints"] as const,
-  };
-}
 
 function isRepoNotFoundError(error: GitError | null | undefined): boolean {
   return error?.code === "RepoNotFound";
@@ -281,8 +275,7 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
     queryFn: async () => service.status({ repoPath: workspacePath }),
     retry: false,
     staleTime: 1_000,
-    refetchInterval: 2_000,
-    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   });
 
   const checkpointsQuery = useQuery<CheckpointListItem[], GitError>({

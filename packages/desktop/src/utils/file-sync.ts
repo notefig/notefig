@@ -2,8 +2,53 @@ import type {
   MetadataChangeEvent,
   ContentChangeEvent,
 } from "@/adapters/platform-adapter.interface";
-import { getOrCreateWorkspaceCollections } from "./collections";
+import { getOrCreateWorkspaceCollections, queryClient } from "./collections";
+import { gitQueryKeys } from "./git-service-store";
+import {
+  projectSettingsPath,
+  projectSettingsQueryKey,
+} from "./project-settings";
 import { platformAdapter } from "@/adapters";
+
+const INVALIDATE_DEBOUNCE_MS = 500;
+const invalidationTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * Single invalidation channel for all filesystem-derived query state
+ * (search results, git status/checkpoints). Debounced per workspace so
+ * bursts of watcher events collapse into one invalidation.
+ *
+ * Called from the fs-event handlers below and from in-app writes
+ * (whose watcher echoes are self-suppressed).
+ */
+export function invalidateDerivedState(workspaceId: string): void {
+  const pending = invalidationTimers.get(workspaceId);
+  if (pending) clearTimeout(pending);
+
+  invalidationTimers.set(
+    workspaceId,
+    setTimeout(() => {
+      invalidationTimers.delete(workspaceId);
+      const keys = gitQueryKeys(workspaceId);
+      queryClient.invalidateQueries({
+        queryKey: ["search-content", workspaceId],
+      });
+      queryClient.invalidateQueries({ queryKey: keys.status });
+      queryClient.invalidateQueries({ queryKey: keys.checkpoints });
+    }, INVALIDATE_DEBOUNCE_MS),
+  );
+}
+
+function invalidateProjectSettingsIfChanged(
+  changedPaths: string[],
+  workspaceId: string,
+): void {
+  if (changedPaths.includes(projectSettingsPath(workspaceId))) {
+    queryClient.invalidateQueries({
+      queryKey: projectSettingsQueryKey(workspaceId),
+    });
+  }
+}
 
 export async function handleMetadataFileSystemChange(
   event: MetadataChangeEvent,
@@ -102,6 +147,12 @@ export async function handleMetadataFileSystemChange(
       );
     }
   }
+
+  invalidateProjectSettingsIfChanged(
+    event.changes.map((c) => c.path),
+    workspaceId,
+  );
+  invalidateDerivedState(workspaceId);
 }
 
 export async function handleContentFileSystemChange(
@@ -146,4 +197,10 @@ export async function handleContentFileSystemChange(
       );
     }
   }
+
+  invalidateProjectSettingsIfChanged(
+    event.changes.map((c) => c.path),
+    workspaceId,
+  );
+  invalidateDerivedState(workspaceId);
 }

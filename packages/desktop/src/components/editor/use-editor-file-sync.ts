@@ -86,7 +86,9 @@ export function useEditorFileSync(
         const hash = calculateContentHash(markdown);
         lastKnownHashRef.current = hash;
 
-        writeFileContent(basePath, file.path, markdown);
+        writeFileContent(basePath, file.path, markdown).catch((error) => {
+          console.error(`Autosave failed for ${file.path}:`, error);
+        });
       }, AUTOSAVE_DEBOUNCE_MS);
     };
 

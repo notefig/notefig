@@ -28,7 +28,9 @@ import { QueryClient } from "@tanstack/query-core";
 import { platformAdapter } from "@/adapters";
 import type { FileEntry } from "./fs";
 import { calculateContentHash } from "./hash";
-import type { Theme } from "@/components/theme-provider";
+// Circular with ./file-sync (which imports this module); safe because both
+// sides only reference each other's exports inside function bodies.
+import { invalidateDerivedState } from "./file-sync";
 
 // Global QueryClient instance for TanStack Query
 export const queryClient = new QueryClient({
@@ -300,7 +302,12 @@ export function createFileContentCollection(workspaceId: string) {
           content: m.modified.content,
         }));
 
-        await platformAdapter.writeFiles(files);
+        const result = await platformAdapter.writeFiles(files);
+        if (result.failed.length > 0) {
+          throw new Error(
+            `Failed to write files: ${result.failed.map((f) => f.message).join(", ")}`,
+          );
+        }
       },
 
       enabled: true,
@@ -425,6 +432,10 @@ export async function writeFileContent(
       });
     }
   }
+
+  // App self-writes are suppressed by the fs watcher, so derived state
+  // (git status, search) must be invalidated here.
+  invalidateDerivedState(workspaceId);
 }
 
 /**
@@ -755,74 +766,4 @@ export async function renameFileOrDirectory(
  */
 export function clearWorkspaceCollections(workspaceId: string): void {
   workspaceCollectionsRegistry.delete(workspaceId);
-}
-export interface AppSettingRow {
-  key: string;
-  value: unknown;
-}
-
-interface AppSettings {
-  theme: Theme;
-  lastPath: string | null;
-  zoomLevel: number;
-}
-
-const SETTING_KEYS: (keyof AppSettings)[] = [
-  "theme",
-  "lastPath",
-  "zoomLevel",
-];
-
-const DEFAULT_APP_SETTINGS: AppSettings = {
-  theme: "dark",
-  lastPath: null,
-  zoomLevel: 1,
-};
-
-export const SETTINGS_NAMESPACE = "settings";
-
-function createSettingsCollection() {
-  return createCollection(
-    queryCollectionOptions<AppSettingRow, string>({
-      queryKey: ["app-settings"],
-      queryClient,
-
-      queryFn: async (): Promise<AppSettingRow[]> => {
-        const raw = await platformAdapter.getAllKv<unknown>(SETTINGS_NAMESPACE);
-        return Object.entries(raw).map(([key, value]) => ({ key, value }));
-      },
-
-      getKey: (item) => item.key,
-
-      onInsert: async ({ transaction }) => {
-        for (const m of transaction.mutations) {
-          await platformAdapter.setKv(
-            SETTINGS_NAMESPACE,
-            m.modified.key,
-            m.modified.value,
-          );
-        }
-      },
-
-      onUpdate: async ({ transaction }) => {
-        for (const m of transaction.mutations) {
-          await platformAdapter.setKv(
-            SETTINGS_NAMESPACE,
-            m.modified.key,
-            m.modified.value,
-          );
-        }
-      },
-    }),
-  );
-}
-
-type SettingsCollection = ReturnType<typeof createSettingsCollection>;
-let _settingsCollection: SettingsCollection | null = null;
-
-export function getOrCreateSettingsCollection(): SettingsCollection {
-  if (!_settingsCollection) {
-    _settingsCollection = createSettingsCollection();
-  }
-  return _settingsCollection;
 }

@@ -5,6 +5,14 @@ import { normalizePath } from "@/utils/fs";
 const gitServiceRegistry = new Map<string, IsomorphicGitService>();
 const gitInitRegistry = new Map<string, Promise<void>>();
 
+/** Shared TanStack Query keys for git-derived state of a workspace. */
+export function gitQueryKeys(workspacePath: string) {
+  return {
+    status: ["git", workspacePath, "status"] as const,
+    checkpoints: ["git", workspacePath, "checkpoints"] as const,
+  };
+}
+
 export function getOrCreateWorkspaceGitService(
   workspacePath: string,
 ): IsomorphicGitService {

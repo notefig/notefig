@@ -62,14 +62,26 @@ export function useEditorFocusLifecycle(
 
     return () => {
       if (reclaimRaf !== null) cancelAnimationFrame(reclaimRaf);
+      if (editor.isDestroyed) return;
       const { from, to } = editor.state.selection;
+      // Closing a tab/pane can unmount EditorContent (detaching the view)
+      // before this cleanup runs — editor.view is a throwing getter then,
+      // and isFocused reads through it too. No view means no focus state
+      // to save or blur, so bail out.
+      let viewDom: HTMLElement;
+      try {
+        viewDom = editor.view.dom as HTMLElement;
+      } catch {
+        if (from !== to) saveSelection(filePath, from, to);
+        return;
+      }
       if (from !== to || editor.isFocused) {
         saveSelection(filePath, from, to);
       }
       // Detaching the editor's DOM from the document (tab switch) drops
       // focus without a blur event — PM's view.hasFocus() stays stale.
       // Explicitly blur so the next mount starts from a clean state.
-      (editor.view.dom as HTMLElement).blur();
+      viewDom.blur();
     };
   }, [editor, filePath]);
 }

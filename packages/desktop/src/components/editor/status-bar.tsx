@@ -9,7 +9,10 @@ import {
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { getOrCreateWorkspaceGitService } from "@/utils/git-service-store";
+import {
+  getOrCreateWorkspaceGitService,
+  gitQueryKeys,
+} from "@/utils/git-service-store";
 import type { GitError, RepoStatus } from "@metrists/git";
 
 interface StatusBarProps {
@@ -41,7 +44,7 @@ function useDebouncedSyncState(
 
 function useGitStatus(workspacePath: string | undefined) {
   return useQuery<RepoStatus, GitError>({
-    queryKey: ["git", workspacePath, "status"],
+    queryKey: gitQueryKeys(workspacePath ?? "").status,
     queryFn: async () => {
       if (!workspacePath) throw new Error("No workspace");
       const service = getOrCreateWorkspaceGitService(workspacePath);
@@ -49,7 +52,8 @@ function useGitStatus(workspacePath: string | undefined) {
     },
     enabled: !!workspacePath,
     retry: false,
-    refetchInterval: 5000,
+    staleTime: 2_000,
+    refetchOnWindowFocus: true,
   });
 }
 
