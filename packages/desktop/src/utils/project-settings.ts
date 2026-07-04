@@ -15,16 +15,34 @@ import { queryClient } from "@/utils/collections";
 
 export const PROJECT_SETTINGS_FILENAME = "metrists.json";
 
+/** The typed, fully-resolved settings consumers work with. */
+export interface ProjectSettingsValues {
+  direction: "ltr" | "rtl";
+}
+
+export const DEFAULT_PROJECT_SETTINGS: ProjectSettingsValues = {
+  direction: "ltr",
+};
+
+/**
+ * Raw on-disk shape of metrists.json. Sections are partial because the file
+ * may be absent, hand-edited, or written by other tools; unknown keys are
+ * preserved on write but not typed here.
+ */
 export interface ProjectSettings {
   workspace?: {
     name?: string;
     created?: string;
     version?: string;
   };
-  settings?: {
-    direction?: "ltr" | "rtl";
-    [key: string]: unknown;
-  };
+  settings?: Partial<ProjectSettingsValues>;
+}
+
+/** Overlay the raw file contents onto the defaults. */
+export function resolveProjectSettings(
+  raw: ProjectSettings,
+): ProjectSettingsValues {
+  return { ...DEFAULT_PROJECT_SETTINGS, ...raw.settings };
 }
 
 export function projectSettingsQueryKey(workspacePath: string) {
@@ -111,7 +129,7 @@ export function useProjectSettings(workspacePath: string) {
   );
 
   return {
-    settings: data ?? {},
+    settings: resolveProjectSettings(data ?? {}),
     isLoading,
     update,
   } as const;

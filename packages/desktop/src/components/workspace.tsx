@@ -180,7 +180,7 @@ export const Workspace = () => {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const { settings: projectSettings, update: updateProjectSettings } =
     useProjectSettings(workspacePath);
-  const direction = projectSettings.settings?.direction ?? "ltr";
+  const direction = projectSettings.direction;
   const setDirection = useCallback(
     (next: "ltr" | "rtl") => {
       updateProjectSettings({ settings: { direction: next } }).catch(

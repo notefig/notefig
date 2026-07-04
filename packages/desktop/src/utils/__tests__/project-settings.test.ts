@@ -4,6 +4,8 @@ import {
   readProjectSettings,
   updateProjectSettings,
   projectSettingsPath,
+  resolveProjectSettings,
+  DEFAULT_PROJECT_SETTINGS,
 } from "../project-settings";
 
 vi.mock("@/adapters", () => ({
@@ -43,6 +45,18 @@ beforeEach(() => {
 describe("projectSettingsPath", () => {
   it("points at metrists.json in the workspace root", () => {
     expect(SETTINGS_PATH).toBe("/workspace/metrists.json");
+  });
+});
+
+describe("resolveProjectSettings", () => {
+  it("returns defaults for an empty file", () => {
+    expect(resolveProjectSettings({})).toEqual(DEFAULT_PROJECT_SETTINGS);
+  });
+
+  it("overlays file values onto defaults", () => {
+    expect(
+      resolveProjectSettings({ settings: { direction: "rtl" } }),
+    ).toEqual({ ...DEFAULT_PROJECT_SETTINGS, direction: "rtl" });
   });
 });
 
