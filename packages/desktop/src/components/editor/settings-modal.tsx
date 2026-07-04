@@ -28,10 +28,9 @@ import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useSearchParams } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
-  checkForUpdate,
-  getAppUpdaterQueryOptions,
+  useAppUpdater,
   relaunchApp,
   startDownloadWithToastPromise,
 } from "@/components/app-updater";
@@ -288,7 +287,7 @@ function AppearanceSettings() {
 function UpdateSection() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const { data: updater } = useQuery(getAppUpdaterQueryOptions(queryClient));
+  const updater = useAppUpdater();
   const { status, progress, error, updateInfo, flow } = updater;
 
   const currentVersion = __APP_VERSION__;
@@ -351,7 +350,7 @@ function UpdateSection() {
             <Button
               variant="secondary"
               onClick={() => {
-                void checkForUpdate(queryClient);
+                updater.checkForUpdate();
               }}
               disabled={status === "checking"}
             >

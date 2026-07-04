@@ -29,7 +29,132 @@ export interface UpdateInfo {
   body?: string;
 }
 
-export interface AppUpdaterState {
+/** How often to re-check for updates while the app is running. */
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+/** Focus-triggered refetches are skipped while the result is fresher than this. */
+const UPDATE_CHECK_STALE_TIME_MS = 10 * 60 * 1000;
+
+function genericErrorMessage(): string {
+  return i18n.t("updaterGenericError");
+}
+
+// ---------------------------------------------------------------------------
+// Update check — a real query. TanStack Query provides the proactive
+// behavior: fetch on mount, refetch on window focus (throttled by
+// staleTime), refetch on an interval, and dedupe of concurrent checks.
+// ---------------------------------------------------------------------------
+
+export const UPDATE_CHECK_QUERY_KEY = ["app-update-check"] as const;
+
+export interface UpdateCheckData {
+  flow: UpdateFlow;
+  updateInfo: UpdateInfo | null;
+}
+
+async function fetchUpdateCheck(): Promise<UpdateCheckData> {
+  const result = await platformAdapter.getUpdater().check();
+
+  if (result.status === "error") {
+    throw new Error(result.error);
+  }
+
+  if (result.status === "available") {
+    return {
+      flow: result.flow,
+      updateInfo: {
+        version: result.version,
+        body: result.body,
+      },
+    };
+  }
+
+  return {
+    flow: result.flow,
+    updateInfo: null,
+  };
+}
+
+export function getUpdateCheckQueryOptions(queryClient: QueryClient) {
+  return {
+    queryKey: UPDATE_CHECK_QUERY_KEY,
+    queryFn: fetchUpdateCheck,
+    // Automatic checks are Tauri-only: browser builds run the dev server /
+    // e2e suite too, where version drift would nag constantly. The manual
+    // settings button still works there — refetch() ignores `enabled`.
+    enabled: isTauri(),
+    retry: false,
+    staleTime: UPDATE_CHECK_STALE_TIME_MS,
+    gcTime: Number.POSITIVE_INFINITY,
+    // Pause automatic checks while an install is underway so a check can't
+    // race a download or replace a staged update's info.
+    refetchInterval: () =>
+      isInstallActive(queryClient) ? false : UPDATE_CHECK_INTERVAL_MS,
+    refetchOnWindowFocus: () => !isInstallActive(queryClient),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Install state — download/restart progress. This is mutation-style state
+// shared across components (settings modal, toasts), so it lives in the
+// query cache as a passive entry that the install functions patch.
+// ---------------------------------------------------------------------------
+
+export const UPDATE_INSTALL_QUERY_KEY = ["app-update-install"] as const;
+
+export type InstallPhase = "idle" | "downloading" | "ready" | "error";
+
+export interface InstallState {
+  phase: InstallPhase;
+  progress: UpdateProgress;
+  error: string | null;
+}
+
+const INITIAL_INSTALL_STATE: InstallState = {
+  phase: "idle",
+  progress: {
+    downloaded: 0,
+    total: null,
+  },
+  error: null,
+};
+
+function getInstallState(queryClient: QueryClient): InstallState {
+  return (
+    queryClient.getQueryData<InstallState>(UPDATE_INSTALL_QUERY_KEY) ??
+    INITIAL_INSTALL_STATE
+  );
+}
+
+function patchInstallState(
+  queryClient: QueryClient,
+  patch: Partial<InstallState>,
+) {
+  queryClient.setQueryData<InstallState>(UPDATE_INSTALL_QUERY_KEY, (prev) => ({
+    ...(prev ?? INITIAL_INSTALL_STATE),
+    ...patch,
+  }));
+}
+
+function getInstallStateQueryOptions(queryClient: QueryClient) {
+  return {
+    queryKey: UPDATE_INSTALL_QUERY_KEY,
+    queryFn: async () => getInstallState(queryClient),
+    initialData: INITIAL_INSTALL_STATE,
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: Number.POSITIVE_INFINITY,
+  };
+}
+
+function isInstallActive(queryClient: QueryClient): boolean {
+  const phase = getInstallState(queryClient).phase;
+  return phase === "downloading" || phase === "ready";
+}
+
+// ---------------------------------------------------------------------------
+// Combined view for the UI
+// ---------------------------------------------------------------------------
+
+export interface AppUpdaterView {
   status: UpdaterStatus;
   progress: UpdateProgress;
   error: string | null;
@@ -37,104 +162,96 @@ export interface AppUpdaterState {
   flow: UpdateFlow;
 }
 
-export const APP_UPDATER_QUERY_KEY = ["app-updater"] as const;
-
-const INITIAL_UPDATER_STATE: AppUpdaterState = {
-  status: "idle",
-  progress: {
-    downloaded: 0,
-    total: null,
+/**
+ * Collapse check-query state and install state into the single status the
+ * UI renders. Install phases win: once a download starts, check activity
+ * must not flip the UI back to "checking".
+ */
+export function deriveUpdaterView(
+  check: {
+    data: UpdateCheckData | undefined;
+    isFetching: boolean;
+    isError: boolean;
   },
-  error: null,
-  updateInfo: null,
-  flow: "download-restart",
-};
+  install: InstallState,
+): AppUpdaterView {
+  const updateInfo = check.data?.updateInfo ?? null;
+  const flow = check.data?.flow ?? "download-restart";
 
-function genericErrorMessage(): string {
-  return i18n.t("updaterGenericError");
-}
-
-function getStoredState(queryClient: QueryClient): AppUpdaterState {
-  const existing = queryClient.getQueryData<AppUpdaterState>(
-    APP_UPDATER_QUERY_KEY,
-  );
-
-  if (existing) {
-    return existing;
+  if (install.phase === "downloading") {
+    return {
+      status: "downloading",
+      progress: install.progress,
+      error: null,
+      updateInfo,
+      flow,
+    };
   }
 
-  queryClient.setQueryData(APP_UPDATER_QUERY_KEY, INITIAL_UPDATER_STATE);
-  return INITIAL_UPDATER_STATE;
-}
-
-function patchState(
-  queryClient: QueryClient,
-  patch:
-    | Partial<AppUpdaterState>
-    | ((state: AppUpdaterState) => Partial<AppUpdaterState>),
-) {
-  queryClient.setQueryData<AppUpdaterState>(APP_UPDATER_QUERY_KEY, (prev) => {
-    const current = prev ?? INITIAL_UPDATER_STATE;
-    const nextPatch = typeof patch === "function" ? patch(current) : patch;
+  if (install.phase === "ready") {
     return {
-      ...current,
-      ...nextPatch,
+      status: "ready",
+      progress: install.progress,
+      error: null,
+      updateInfo,
+      flow,
     };
-  });
-}
+  }
 
-export function getAppUpdaterQueryOptions(queryClient: QueryClient) {
-  const initialData = getStoredState(queryClient);
+  if (install.phase === "error") {
+    return {
+      status: "error",
+      progress: install.progress,
+      error: install.error ?? genericErrorMessage(),
+      updateInfo,
+      flow,
+    };
+  }
+
+  let status: UpdaterStatus;
+  if (check.isFetching) {
+    status = "checking";
+  } else if (check.isError) {
+    status = "error";
+  } else if (updateInfo) {
+    status = "available";
+  } else if (check.data) {
+    status = "up-to-date";
+  } else {
+    status = "idle";
+  }
 
   return {
-    queryKey: APP_UPDATER_QUERY_KEY,
-    queryFn: async () => getStoredState(queryClient),
-    initialData,
-    staleTime: Number.POSITIVE_INFINITY,
-    gcTime: Number.POSITIVE_INFINITY,
+    status,
+    progress: install.progress,
+    error: status === "error" ? genericErrorMessage() : null,
+    updateInfo,
+    flow,
   };
 }
 
-export async function checkForUpdate(queryClient: QueryClient) {
-  patchState(queryClient, {
-    status: "checking",
-    error: null,
-  });
+export function useAppUpdater(): AppUpdaterView & {
+  checkForUpdate: () => void;
+} {
+  const queryClient = useQueryClient();
+  const check = useQuery(getUpdateCheckQueryOptions(queryClient));
+  const { data: install } = useQuery(getInstallStateQueryOptions(queryClient));
 
-  const result = await platformAdapter.getUpdater().check();
-
-  if (result.status === "error") {
-    patchState(queryClient, {
-      status: "error",
-      error: genericErrorMessage(),
-    });
-    return;
-  }
-
-  if (result.status === "available") {
-    patchState(queryClient, {
-      status: "available",
-      error: null,
-      flow: result.flow,
-      updateInfo: {
-        version: result.version,
-        body: result.body,
-      },
-    });
-    return;
-  }
-
-  patchState(queryClient, {
-    status: "up-to-date",
-    error: null,
-    flow: result.flow,
-    updateInfo: null,
-  });
+  return {
+    ...deriveUpdaterView(check, install),
+    checkForUpdate: () => {
+      void check.refetch();
+    },
+  };
 }
 
+// ---------------------------------------------------------------------------
+// Download / restart actions
+// ---------------------------------------------------------------------------
+
 export async function downloadAndInstall(queryClient: QueryClient) {
-  patchState(queryClient, {
-    status: "downloading",
+  patchInstallState(queryClient, {
+    phase: "downloading",
     error: null,
     progress: {
       downloaded: 0,
@@ -146,8 +263,8 @@ export async function downloadAndInstall(queryClient: QueryClient) {
 
   for await (const step of updater.apply()) {
     if (step.status === "downloading") {
-      patchState(queryClient, {
-        status: "downloading",
+      patchInstallState(queryClient, {
+        phase: "downloading",
         error: null,
         progress: {
           downloaded: step.downloaded,
@@ -158,15 +275,15 @@ export async function downloadAndInstall(queryClient: QueryClient) {
     }
 
     if (step.status === "ready" || step.status === "applied") {
-      patchState(queryClient, {
-        status: "ready",
+      patchInstallState(queryClient, {
+        phase: "ready",
         error: null,
       });
       continue;
     }
 
-    patchState(queryClient, {
-      status: "error",
+    patchInstallState(queryClient, {
+      phase: "error",
       error: genericErrorMessage(),
     });
     throw new Error(genericErrorMessage());
@@ -176,17 +293,19 @@ export async function downloadAndInstall(queryClient: QueryClient) {
 export async function relaunchApp(queryClient: QueryClient) {
   const result = await platformAdapter.getUpdater().restart();
   if (result.status === "error") {
-    patchState(queryClient, {
-      status: "error",
+    patchInstallState(queryClient, {
+      phase: "error",
       error: genericErrorMessage(),
     });
   }
 }
 
 export function startDownloadWithToastPromise(queryClient: QueryClient) {
-  const state = getStoredState(queryClient);
+  const checkData = queryClient.getQueryData<UpdateCheckData>(
+    UPDATE_CHECK_QUERY_KEY,
+  );
 
-  if (state.flow === "refresh") {
+  if (checkData?.flow === "refresh") {
     void relaunchApp(queryClient);
     return;
   }
@@ -211,49 +330,40 @@ export function startDownloadWithToastPromise(queryClient: QueryClient) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Bootstrap — subscribes to the check query (which starts the automatic
+// mount/focus/interval checks) and raises the "update available" toast.
+// ---------------------------------------------------------------------------
+
 export function AppUpdaterBootstrap() {
   const queryClient = useQueryClient();
-  const { data: updater } = useQuery(getAppUpdaterQueryOptions(queryClient));
-  const didRunInitialCheckRef = useRef(false);
+  const { data } = useQuery(getUpdateCheckQueryOptions(queryClient));
   const lastNotifiedVersionRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (didRunInitialCheckRef.current) {
+    const updateInfo = data?.updateInfo;
+    if (!updateInfo) {
       return;
     }
 
-    didRunInitialCheckRef.current = true;
-
-    if (!isTauri()) {
+    if (lastNotifiedVersionRef.current === updateInfo.version) {
       return;
     }
 
-    void checkForUpdate(queryClient);
-  }, [queryClient]);
-
-  useEffect(() => {
-    if (updater.status !== "available" || !updater.updateInfo) {
-      return;
-    }
-
-    if (lastNotifiedVersionRef.current === updater.updateInfo.version) {
-      return;
-    }
-
-    lastNotifiedVersionRef.current = updater.updateInfo.version;
+    lastNotifiedVersionRef.current = updateInfo.version;
 
     toast(
       i18n.t("updaterToastAvailableTitle", {
-        version: updater.updateInfo.version,
+        version: updateInfo.version,
       }),
       {
         description:
-          updater.flow === "refresh"
+          data.flow === "refresh"
             ? i18n.t("updaterToastAvailableDescriptionRefresh")
             : i18n.t("updaterToastAvailableDescription"),
         action: {
           label:
-            updater.flow === "refresh"
+            data.flow === "refresh"
               ? i18n.t("updaterRefresh")
               : i18n.t("updaterDownload"),
           onClick: () => {
@@ -262,7 +372,7 @@ export function AppUpdaterBootstrap() {
         },
       },
     );
-  }, [queryClient, updater.status, updater.updateInfo]);
+  }, [queryClient, data]);
 
   return null;
 }
