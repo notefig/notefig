@@ -39,6 +39,7 @@ export function useEditorFileSync(
   file: FileEntry,
   basePath: string,
   isContentLoaded: boolean,
+  contentError?: string,
 ): void {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastKnownHashRef = useRef<string>(file.contentHash || "");
@@ -47,6 +48,10 @@ export function useEditorFileSync(
   // Disk → editor: adopt external changes.
   useEffect(() => {
     if (!editor || !file.contentHash) return;
+
+    // A failed read produces a row with empty content and a synthetic hash.
+    // Adopting it would wipe the user's document; keep what the editor has.
+    if (contentError) return;
 
     if (file.contentHash === lastKnownHashRef.current) return;
 
@@ -68,7 +73,7 @@ export function useEditorFileSync(
     editor.commands.setContent(file.content, { emitUpdate: false });
     suppressSaveRef.current = false;
     lastKnownHashRef.current = file.contentHash;
-  }, [editor, file.contentHash, file.content, file.path]);
+  }, [editor, file.contentHash, file.content, file.path, contentError]);
 
   // Editor → disk: debounced autosave.
   useEffect(() => {

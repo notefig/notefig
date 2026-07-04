@@ -59,6 +59,7 @@ export interface FileContent {
   path: string; // Absolute path - foreign key to metadata
   content: string;
   contentHash: string; // Hash of the content
+  error?: string; // Set when the read failed — content is NOT the file's real content
 }
 
 /**
@@ -279,7 +280,9 @@ export function createFileContentCollection(workspaceId: string) {
           });
         }
 
-        // Add empty entries for failed reads (binary files like images)
+        // Add empty entries for failed reads (binary files like images).
+        // The error field marks that content is not the file's real content,
+        // so the editor must never mount from (or save over) this entry.
         for (const failure of result.failed) {
           console.warn(
             `Failed to read file ${failure.path}: ${failure.message}`,
@@ -288,6 +291,7 @@ export function createFileContentCollection(workspaceId: string) {
             path: failure.path,
             content: "",
             contentHash: calculateContentHash(failure.path), // Use path as hash for failed reads
+            error: failure.message,
           });
         }
 

@@ -18,12 +18,15 @@ interface TextEditorProps {
   file: FileEntry;
   basePath: string;
   isContentLoaded: boolean;
+  /** Set when the content read failed — file.content is NOT the real content. */
+  contentError?: string;
 }
 
 export function TextEditor({
   file,
   basePath,
   isContentLoaded,
+  contentError,
 }: TextEditorProps) {
   const instance = getOrCreateEditor(file.path, {
     type: "markdown",
@@ -37,7 +40,7 @@ export function TextEditor({
 
   const editor = instance.editor;
 
-  useEditorFileSync(editor, file, basePath, isContentLoaded);
+  useEditorFileSync(editor, file, basePath, isContentLoaded, contentError);
   useEditorFocusLifecycle(editor, file.path);
   const handleLinkToggle = useLinkPrompt(editor);
 

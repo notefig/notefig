@@ -78,7 +78,7 @@ export const Workspace = () => {
 
   // Query metadata and content for all open tabs
   // Uses left join so files appear immediately (metadata loads eagerly)
-  // Content loads on-demand; Suspense in PolymorphicEditor handles loading state
+  // Content loads on-demand; PolymorphicEditor shows a placeholder until it arrives
   const { data: fileDataWithContent = [] } = useLiveQuery(
     (q) =>
       openTabs.length === 0
@@ -94,6 +94,7 @@ export const Workspace = () => {
               content: content?.content ?? "",
               contentHash: content?.contentHash ?? "",
               isContentLoaded: content !== undefined,
+              contentError: content?.error,
             })),
     [workspacePath, ...openTabs],
   );
@@ -114,6 +115,7 @@ export const Workspace = () => {
             file={fileEntry as FileEntry}
             basePath={workspacePath}
             isContentLoaded={fileEntry.isContentLoaded}
+            contentError={fileEntry.contentError}
           />
         </Dockable.Tab>
       )),

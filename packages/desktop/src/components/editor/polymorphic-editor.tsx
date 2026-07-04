@@ -1,10 +1,10 @@
 "use client";
 
-import { Suspense } from "react";
 import type { FileEntry } from "@/utils/fs";
 import { TextEditor } from "./text-editor";
 import { ImageViewer } from "./image-viewer";
 import { FileLoadingPlaceholder } from "./file-loading-placeholder";
+import { hasEditor } from "@/components/editor/editor-store";
 import { getFileExtension, isTextFile } from "@/utils/fs";
 
 export type EditorType = "markdown" | "image";
@@ -13,6 +13,8 @@ interface PolymorphicEditorProps {
   file: FileEntry;
   basePath: string;
   isContentLoaded: boolean;
+  /** Set when the content read failed — file.content is NOT the real content. */
+  contentError?: string;
 }
 
 const imageExtensions = new Set([
@@ -50,13 +52,21 @@ export function canOpenFile(filePath: string): boolean {
 }
 
 /**
- * Inner component that assumes content is loaded.
- * Suspended by parent Suspense boundary during loading.
+ * Polymorphic editor that renders the appropriate editor based on file type.
+ * File data (metadata + content) is loaded by the parent Workspace component.
+ *
+ * The text editor is not mounted until content has loaded: creating the
+ * Tiptap instance with empty content would let the user type into a blank
+ * doc that gets replaced when the real content arrives, and risks
+ * persisting an empty document. Once an editor instance exists it stays
+ * mounted even if isContentLoaded flips back to false transiently, so
+ * focus and caret survive content refetches.
  */
-function PolymorphicEditorInner({
+export function PolymorphicEditor({
   file,
   basePath,
   isContentLoaded,
+  contentError,
 }: PolymorphicEditorProps) {
   const editorType = getEditorType(file.path);
 
@@ -64,32 +74,23 @@ function PolymorphicEditorInner({
     return <ImageViewer file={file} basePath={basePath} />;
   }
 
+  // A failed read still produces a content row (with empty content), so it
+  // must be checked before isContentLoaded: mounting an editor on it would
+  // let an autosave overwrite the real file with an empty document.
+  if (contentError && !hasEditor(file.path)) {
+    return <FileLoadingPlaceholder filePath={file.path} error={contentError} />;
+  }
+
+  if (!isContentLoaded && !hasEditor(file.path)) {
+    return <FileLoadingPlaceholder filePath={file.path} />;
+  }
+
   return (
     <TextEditor
       file={file}
       basePath={basePath}
       isContentLoaded={isContentLoaded}
+      contentError={contentError}
     />
-  );
-}
-
-/**
- * Polymorphic editor that renders the appropriate editor based on file type.
- * File data (metadata + content) is loaded by the parent Workspace component.
- * Uses Suspense to show loading state while content is being fetched.
- */
-export function PolymorphicEditor({
-  file,
-  basePath,
-  isContentLoaded,
-}: PolymorphicEditorProps) {
-  return (
-    <Suspense fallback={<FileLoadingPlaceholder filePath={file.path} />}>
-      <PolymorphicEditorInner
-        file={file}
-        basePath={basePath}
-        isContentLoaded={isContentLoaded}
-      />
-    </Suspense>
   );
 }
