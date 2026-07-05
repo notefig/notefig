@@ -30,4 +30,9 @@ export default defineConfig(async () => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+
+  // Module workers (markdown conversion) in dev and build.
+  worker: {
+    format: "es" as const,
+  },
 }));

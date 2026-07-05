@@ -10,6 +10,20 @@ export function EditorImage(props: NodeViewProps) {
   const workspaceRoot = options.workspaceRoot || "/";
   const filePath = options.filePath || "";
 
+  // Focus containment. The node view is a non-editable island, so the
+  // browser's default reaction to pressing it is to move DOM focus to the
+  // nearest focusable ancestor — outside the editor, onto the dockable
+  // pane's tabindex=-1 wrapper — while ProseMirror selects the node.
+  // Backspace would then go to that pane div. tabIndex makes the island
+  // itself the nearest focusable element, and onFocus hands the focus
+  // straight to the editor without disturbing the selection. (mousedown
+  // preventDefault would also stop the focus transfer, but ProseMirror
+  // skips node selection and the browser skips drag initiation for
+  // default-prevented presses.)
+  const containFocus = () => {
+    props.editor.commands.focus(null, { scrollIntoView: false });
+  };
+
   if (
     !src ||
     src.startsWith("http://") ||
@@ -17,7 +31,7 @@ export function EditorImage(props: NodeViewProps) {
     src.startsWith("data:")
   ) {
     return (
-      <NodeViewWrapper data-drag-handle>
+      <NodeViewWrapper data-drag-handle tabIndex={-1} onFocus={containFocus}>
         <img src={src} alt="" draggable={false} />
       </NodeViewWrapper>
     );
@@ -26,6 +40,8 @@ export function EditorImage(props: NodeViewProps) {
   return (
     <NodeViewWrapper
       data-drag-handle
+      tabIndex={-1}
+      onFocus={containFocus}
       // Drag-protocol payload for external drop zones; ProseMirror still
       // owns the drag itself, so in-editor moves keep moved=true semantics.
       {...dragSourceProps({

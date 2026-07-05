@@ -33,6 +33,23 @@ i18n
           clickFileHint: "Click any file to start editing",
           pickDirectory: "Select Directory",
 
+          // Workspace Access Recovery
+          fsAccessLostTitle: "Folder access lost",
+          fsAccessLostBodyWeb:
+            "Your browser paused access to this folder. Grant access again to keep editing — if that fails, reset the site's file permissions (lock icon in the address bar).",
+          fsAccessLostBodyDesktop:
+            "The operating system denied access to this folder. On macOS, enable this app under Privacy & Security → Files and Folders, then retry.",
+          fsRestoreAccess: "Restore access",
+          fsReconnectTitle: "Folder no longer connected",
+          fsReconnectBody:
+            "The connection to this folder was lost. Choose the folder again to reconnect.",
+          fsChooseFolderAgain: "Choose folder again",
+          fsOpenSystemSettings: "Open System Settings",
+          fsSitePermissionsHelp: "How to change site permissions",
+          backToHome: "Back to home",
+          pickerPermissionDenied:
+            "Browser denied folder access — check the site's file permissions.",
+
           // Theme
           light: "Light",
           dark: "Dark",

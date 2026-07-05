@@ -1,18 +1,18 @@
 /**
- * Keeps the editor and the file on disk in sync, in both directions:
- * debounced autosave of editor changes, and adoption of external file
- * changes (detected via contentHash) without clobbering the caret.
+ * Wires an editor to its file's DocumentSync pipeline (see
+ * utils/markdown-conversion.ts, which owns all save coalescing, baselines
+ * and adoption decisions). This hook only translates editor events into
+ * pipeline calls and pipeline results into `setContent`.
  */
 
 import { useEffect, useRef } from "react";
-import type { Editor } from "@tiptap/core";
+import type { Editor, JSONContent } from "@tiptap/core";
 import type { FileEntry } from "@/utils/fs";
 import { writeFileContent } from "@/utils/collections";
-import { calculateContentHash } from "@/utils/hash";
+import { getDocumentSync } from "@/utils/markdown-conversion";
 
-const AUTOSAVE_DEBOUNCE_MS = 500;
-
-/** The markdown serialization of the current editor document. */
+/** The markdown serialization of the current editor document (synchronous,
+ * main-thread — kept for tests and one-off callers, not the save path). */
 export function getEditorMarkdown(editor: Editor): string {
   return (
     editor.storage as unknown as {
@@ -41,69 +41,67 @@ export function useEditorFileSync(
   isContentLoaded: boolean,
   contentError?: string,
 ): void {
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastKnownHashRef = useRef<string>(file.contentHash || "");
   const suppressSaveRef = useRef(false);
+
+  // Baseline for external-change comparison. A failed read produces a row
+  // with empty content and a synthetic hash — never baseline on that.
+  useEffect(() => {
+    if (isContentLoaded && !contentError) {
+      getDocumentSync(file.path).ensureBaseline(
+        file.content ?? "",
+        file.contentHash,
+      );
+    }
+  }, [file.path, isContentLoaded, contentError, file.content, file.contentHash]);
 
   // Disk → editor: adopt external changes.
   useEffect(() => {
-    if (!editor || !file.contentHash) return;
+    if (!editor || !file.contentHash || contentError) return;
 
-    // A failed read produces a row with empty content and a synthetic hash.
-    // Adopting it would wipe the user's document; keep what the editor has.
-    if (contentError) return;
+    const sync = getDocumentSync(file.path);
+    const fileContent = file.content ?? "";
+    if (!sync.needsAdoption(file.contentHash, fileContent)) return;
 
-    if (file.contentHash === lastKnownHashRef.current) return;
+    let cancelled = false;
+    const targetHash = file.contentHash;
+    (async () => {
+      const doc = await sync.prepareAdoption(fileContent);
+      if (!doc || cancelled || editor.isDestroyed) return;
 
-    // The hash settles (or is recomputed) after mount even when nothing
-    // changed. Replacing the doc with identical content would only reset the
-    // caret to the document start — mid-typing, if the user is fast.
-    if (
-      !isExternalContentChange(getEditorMarkdown(editor), file.content ?? "")
-    ) {
-      lastKnownHashRef.current = file.contentHash;
-      return;
-    }
+      console.log(
+        `[text-editor] External change detected for ${file.path}, updating editor`,
+      );
 
-    console.log(
-      `[text-editor] External change detected for ${file.path}, updating editor`,
-    );
-
-    suppressSaveRef.current = true;
-    editor.commands.setContent(file.content, { emitUpdate: false });
-    suppressSaveRef.current = false;
-    lastKnownHashRef.current = file.contentHash;
+      suppressSaveRef.current = true;
+      editor.commands.setContent(doc, { emitUpdate: false });
+      suppressSaveRef.current = false;
+      sync.commitAdoption(fileContent, targetHash);
+    })().catch((error) => {
+      console.error(
+        `[text-editor] Failed to adopt external change for ${file.path}:`,
+        error,
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [editor, file.contentHash, file.content, file.path, contentError]);
 
-  // Editor → disk: debounced autosave.
+  // Editor → disk: ship every update to the pipeline as it happens.
   useEffect(() => {
+    const sync = getDocumentSync(file.path);
+    sync.writer = (markdown) => writeFileContent(basePath, file.path, markdown);
+
     const handleUpdate = () => {
       if (suppressSaveRef.current) return;
       if (!isContentLoaded) return;
-
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-
-      saveTimeoutRef.current = setTimeout(() => {
-        const markdown = getEditorMarkdown(editor);
-
-        const hash = calculateContentHash(markdown);
-        lastKnownHashRef.current = hash;
-
-        writeFileContent(basePath, file.path, markdown).catch((error) => {
-          console.error(`Autosave failed for ${file.path}:`, error);
-        });
-      }, AUTOSAVE_DEBOUNCE_MS);
+      sync.pushUpdate(() => editor.state.doc.toJSON() as JSONContent);
     };
 
     editor.on("update", handleUpdate);
 
     return () => {
       editor.off("update", handleUpdate);
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
     };
   }, [editor, file.path, basePath, isContentLoaded]);
 }

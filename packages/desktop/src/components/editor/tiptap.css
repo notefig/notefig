@@ -14,8 +14,19 @@
   margin-top: 0.75em;
 }
 
-/* Ensure the editor fills available space */
+/* Ensure the editor fills available space: the prose container stretches to
+   the scroll viewport and the contenteditable flexes to fill it, so clicks
+   anywhere below the content land inside ProseMirror (which places the caret
+   at the nearest position). min-height on .ProseMirror alone cannot do this —
+   a percentage never resolves against the prose container's auto height. */
+.tiptap-editor-wrapper .prose {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
 .tiptap-editor-wrapper .ProseMirror {
+  flex: 1 1 auto;
   min-height: 100%;
 }
 

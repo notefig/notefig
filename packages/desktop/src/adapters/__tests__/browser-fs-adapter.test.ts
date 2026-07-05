@@ -4,8 +4,12 @@ import {
   shouldUseBrowserFsAdapter,
 } from "../browser-fs-adapter";
 import * as browserFsUtils from "../browser-fs-utils";
+import { FsError } from "../platform-adapter.interface";
 
-vi.mock("../browser-fs-utils", () => ({
+vi.mock("../browser-fs-utils", async (importOriginal) => ({
+  // Real error classes + permission helpers — classifyBrowserError relies on
+  // instanceof checks against these.
+  ...(await importOriginal<typeof import("../browser-fs-utils")>()),
   normalizeWorkspacePath: vi.fn((name: string) => `/${name}`),
   getWorkspaceRoot: vi.fn((path: string) => {
     if (!path || path === "/") return null;
@@ -197,21 +201,33 @@ describe("BrowserFsPlatformAdapter", () => {
     it("should handle user cancellation", async () => {
       (window as any).showDirectoryPicker = vi
         .fn()
-        .mockRejectedValue(new Error("User cancelled"));
+        .mockRejectedValue(new DOMException("User cancelled", "AbortError"));
 
       const result = await adapter.pickDirectory("Select Folder");
 
       expect(result).toBeNull();
     });
 
-    it("should handle permission errors", async () => {
+    it("should surface picker permission denials", async () => {
+      (window as any).showDirectoryPicker = vi
+        .fn()
+        .mockRejectedValue(
+          new DOMException("Permission denied", "NotAllowedError"),
+        );
+
+      await expect(adapter.pickDirectory("Select Folder")).rejects.toThrow(
+        FsError,
+      );
+    });
+
+    it("should surface permission errors on the picked handle", async () => {
       vi.mocked(browserFsUtils.ensurePermission).mockRejectedValue(
-        new Error("Permission denied"),
+        new FsError("permission_denied", "test-workspace"),
       );
 
-      const result = await adapter.pickDirectory("Select Folder");
-
-      expect(result).toBeNull();
+      await expect(adapter.pickDirectory("Select Folder")).rejects.toThrow(
+        FsError,
+      );
     });
   });
 

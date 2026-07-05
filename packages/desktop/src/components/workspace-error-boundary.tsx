@@ -1,13 +1,26 @@
-import { Component } from "react";
+import { Component, useEffect, useSyncExternalStore } from "react";
 import type { ReactNode, ErrorInfo } from "react";
+import { useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
+import { FolderLock } from "lucide-react";
+import { toast } from "sonner";
 import { DebugPanel } from "./debug-panel";
+import { Button } from "@/components/ui/button";
+import { platformAdapter } from "@/adapters";
+import {
+  FsError,
+  isWorkspaceAccessError,
+} from "@/adapters/platform-adapter.interface";
+import { useWorkspaceParams } from "@/hooks/use-workspace-params";
+import { clearWorkspaceCollections, queryClient } from "@/utils/collections";
+import { isWeb } from "@/utils/platform";
 
 interface WorkspaceErrorBoundaryProps {
   children: ReactNode;
 }
 
 interface WorkspaceErrorBoundaryState {
-  error: { message: string; stack?: string } | null;
+  error: Error | null;
 }
 
 export class WorkspaceErrorBoundary extends Component<
@@ -20,12 +33,7 @@ export class WorkspaceErrorBoundary extends Component<
   }
 
   static getDerivedStateFromError(error: Error): WorkspaceErrorBoundaryState {
-    return {
-      error: {
-        message: error.message,
-        stack: error.stack,
-      },
-    };
+    return { error };
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
@@ -39,10 +47,154 @@ export class WorkspaceErrorBoundary extends Component<
   }
 
   render() {
-    if (this.state.error) {
-      return <DebugPanel forceOpen error={this.state.error} />;
+    const { error } = this.state;
+    if (error) {
+      if (isWorkspaceAccessError(error)) {
+        return (
+          <WorkspaceAccessError
+            error={error}
+            onResolved={() => this.setState({ error: null })}
+          />
+        );
+      }
+      return (
+        <DebugPanel
+          forceOpen
+          error={{ message: error.message, stack: error.stack }}
+        />
+      );
     }
 
     return this.props.children;
   }
+}
+
+/**
+ * Surface workspace access failures from the fs-backed query layer as a
+ * render-time throw, so WorkspaceErrorBoundary can catch them. The data
+ * layer holds query errors internally and would otherwise just render an
+ * empty workspace.
+ */
+export function useThrowWorkspaceAccessError(workspaceId: string) {
+  const error = useSyncExternalStore(
+    subscribeToQueryCache,
+    () => queryClient.getQueryState(["file-metadata", workspaceId])?.error,
+  );
+  if (isWorkspaceAccessError(error)) throw error;
+}
+
+function subscribeToQueryCache(onStoreChange: () => void) {
+  return queryClient.getQueryCache().subscribe(onStoreChange);
+}
+
+const MACOS_FILES_AND_FOLDERS_SETTINGS_URL =
+  "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesFolders";
+const CHROME_SITE_PERMISSIONS_HELP_URL =
+  "https://support.google.com/chrome/answer/114662";
+
+const isMacDesktop = () =>
+  !isWeb() && navigator.platform.toLowerCase().includes("mac");
+
+/**
+ * Fallback for fs permission failures: explains what happened and offers
+ * the right re-grant action per platform. Resolving clears the workspace's
+ * cached collections and resets the boundary so everything refetches.
+ */
+function WorkspaceAccessError({
+  error,
+  onResolved,
+}: {
+  error: FsError;
+  onResolved: () => void;
+}) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { workspacePath } = useWorkspaceParams();
+  const needsRepick = error.type === "handle_missing";
+
+  const title = needsRepick ? t("fsReconnectTitle") : t("fsAccessLostTitle");
+  const body = needsRepick
+    ? t("fsReconnectBody")
+    : isWeb()
+      ? t("fsAccessLostBodyWeb")
+      : t("fsAccessLostBodyDesktop");
+
+  useEffect(() => {
+    toast.error(title);
+  }, [title]);
+
+  const resume = (path: string) => {
+    clearWorkspaceCollections(path);
+    onResolved();
+  };
+
+  const handleRecover = async () => {
+    if (needsRepick) {
+      const picked = await platformAdapter
+        .pickDirectory(t("pickDirectory"))
+        .catch(() => null);
+      if (!picked) return;
+      if (picked !== workspacePath) {
+        navigate(`/${encodeURIComponent(picked)}`);
+      }
+      resume(picked);
+      return;
+    }
+    // Web: must call requestPermission inside this click. Desktop: no-op
+    // true — the retry refetch will surface the error again if still denied.
+    const granted = await platformAdapter.requestWorkspaceAccess(
+      workspacePath ?? error.path,
+    );
+    if (!granted) {
+      toast.error(t("fsAccessLostBodyWeb"));
+      return;
+    }
+    resume(workspacePath ?? error.path);
+  };
+
+  return (
+    <div className="flex h-full flex-col items-center justify-center bg-background px-6 texture-surface">
+      <div className="w-full max-w-md rounded-lg border border-border bg-card p-8 text-center">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-md bg-muted">
+          <FolderLock className="h-6 w-6 text-primary" />
+        </div>
+        <h2 className="text-lg font-medium text-foreground">{title}</h2>
+        <p className="mt-2 text-sm text-muted-foreground">{body}</p>
+        <div className="mt-6 flex flex-col gap-2">
+          <Button onClick={handleRecover}>
+            {needsRepick
+              ? t("fsChooseFolderAgain")
+              : isWeb()
+                ? t("fsRestoreAccess")
+                : t("retry")}
+          </Button>
+          {!needsRepick && isMacDesktop() && (
+            <Button
+              variant="secondary"
+              onClick={() =>
+                platformAdapter.openExternal(
+                  MACOS_FILES_AND_FOLDERS_SETTINGS_URL,
+                )
+              }
+            >
+              {t("fsOpenSystemSettings")}
+            </Button>
+          )}
+          <Button variant="ghost" onClick={() => navigate("/welcome")}>
+            {t("backToHome")}
+          </Button>
+          {!needsRepick && isWeb() && (
+            <button
+              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+              onClick={() =>
+                platformAdapter.openExternal(CHROME_SITE_PERMISSIONS_HELP_URL)
+              }
+            >
+              {t("fsSitePermissionsHelp")}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }

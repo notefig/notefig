@@ -14,7 +14,18 @@ import {
   getMarkdownEditor,
 } from "@/components/editor/editor-store";
 
-const MD_CONFIG = { type: "markdown" as const, content: "Hello world" };
+/** Editors accept only parsed doc JSON (conversion happens in the worker). */
+function docWithText(text: string) {
+  return {
+    type: "doc",
+    content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+  };
+}
+
+const MD_CONFIG = {
+  type: "markdown" as const,
+  content: docWithText("Hello world"),
+};
 
 afterEach(() => {
   disposeAllEditors();
@@ -111,7 +122,7 @@ describe("navigateToLocation", () => {
   it("selects the expectedText when it can be found", () => {
     getOrCreateEditor("/ws/a.md", {
       type: "markdown",
-      content: "Alpha beta gamma",
+      content: docWithText("Alpha beta gamma"),
     });
 
     expect(

@@ -7,6 +7,7 @@ import type {
   SearchOptions,
   PlatformEventListener,
 } from "./platform-adapter.interface";
+import { FsError } from "./platform-adapter.interface";
 import {
   BaseBrowserAdapter,
   createError,
@@ -19,6 +20,9 @@ import {
   getWorkspaceRoot,
   getRelativePath,
   ensurePermission,
+  queryPermissionState,
+  requestPermissionState,
+  classifyBrowserError,
   buildAbsolutePath,
 } from "./browser-fs-utils";
 import { BrowserFileWatcher } from "./browser-file-watcher";
@@ -134,11 +138,18 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
   private async getRootHandle(workspacePath: string): Promise<DirectoryHandle> {
     const existing = await this.loadHandle(workspacePath);
     if (!existing) {
-      throw new Error(
+      throw new FsError(
+        "handle_missing",
+        workspacePath,
         `Workspace handle not found for ${workspacePath}. Please re-open the folder.`,
       );
     }
-    await ensurePermission(existing, "readwrite");
+    // Query-only: requestPermission needs a user gesture, and most callers
+    // (watcher polls, collection reads) run outside one. Re-granting goes
+    // through requestWorkspaceAccess from the recovery UI.
+    if ((await queryPermissionState(existing, "readwrite")) !== "granted") {
+      throw new FsError("permission_denied", workspacePath);
+    }
     return existing;
   }
 
@@ -190,22 +201,44 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
   }
 
   async pickDirectory(title: string): Promise<string | null> {
+    this.ensureSupported();
+    void title;
+
+    let handle: DirectoryHandle;
     try {
-      this.ensureSupported();
-      void title;
-
-      const handle = await (window as any).showDirectoryPicker();
-      await ensurePermission(handle, "readwrite");
-
-      const workspacePath = normalizeWorkspacePath(handle.name);
-
-      // Store the handle indexed by the workspace path
-      await this.storeHandle(workspacePath, handle);
-      this.handleCache.set(workspacePath, handle);
-
-      return workspacePath;
+      handle = await (window as any).showDirectoryPicker();
     } catch (error) {
-      return null;
+      // null means the user cancelled — a denial must surface to the caller.
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return null;
+      }
+      if (
+        error instanceof DOMException &&
+        (error.name === "NotAllowedError" || error.name === "SecurityError")
+      ) {
+        throw new FsError("permission_denied", "directory picker", error.message);
+      }
+      throw error;
+    }
+
+    await ensurePermission(handle, "readwrite");
+
+    const workspacePath = normalizeWorkspacePath(handle.name);
+
+    // Store the handle indexed by the workspace path
+    await this.storeHandle(workspacePath, handle);
+    this.handleCache.set(workspacePath, handle);
+
+    return workspacePath;
+  }
+
+  async requestWorkspaceAccess(workspacePath: string): Promise<boolean> {
+    const handle = await this.loadHandle(workspacePath).catch(() => null);
+    if (!handle) return false;
+    try {
+      return (await requestPermissionState(handle, "readwrite")) === "granted";
+    } catch {
+      return false;
     }
   }
 
@@ -260,14 +293,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
 
       return { ok: true, value: results };
     } catch (error) {
-      return {
-        ok: false,
-        error: createError(
-          path,
-          "io_error",
-          error instanceof Error ? error.message : "Unknown error",
-        ),
-      };
+      return { ok: false, error: classifyBrowserError(path, error) };
     }
   }
 
@@ -279,13 +305,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
         await this.resolveDirectory(path, true);
         succeeded.push(path);
       } catch (error) {
-        failed.push(
-          createError(
-            path,
-            "io_error",
-            error instanceof Error ? error.message : "Unknown error",
-          ),
-        );
+        failed.push(classifyBrowserError(path, error));
       }
     }
     return { succeeded, failed };
@@ -316,13 +336,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
         });
         succeeded.push(path);
       } catch (error) {
-        failed.push(
-          createError(
-            path,
-            "io_error",
-            error instanceof Error ? error.message : "Unknown error",
-          ),
-        );
+        failed.push(classifyBrowserError(path, error));
       }
     }
     return { succeeded, failed };
@@ -349,14 +363,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
       await this.deleteDirectories([oldPath], { recursive: true });
       return { ok: true, value: undefined };
     } catch (error) {
-      return {
-        ok: false,
-        error: createError(
-          oldPath,
-          "io_error",
-          error instanceof Error ? error.message : "Unknown error",
-        ),
-      };
+      return { ok: false, error: classifyBrowserError(oldPath, error) };
     }
   }
 
@@ -373,13 +380,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
         const content = await file.text();
         succeeded.push({ path, content });
       } catch (error) {
-        failed.push(
-          createError(
-            path,
-            "not_found",
-            error instanceof Error ? error.message : "Unknown error",
-          ),
-        );
+        failed.push(classifyBrowserError(path, error));
       }
     }
 
@@ -399,13 +400,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
         const buffer = await file.arrayBuffer();
         succeeded.push({ path, data: new Uint8Array(buffer) });
       } catch (error) {
-        failed.push(
-          createError(
-            path,
-            "not_found",
-            error instanceof Error ? error.message : "Unknown error",
-          ),
-        );
+        failed.push(classifyBrowserError(path, error));
       }
     }
 
@@ -449,13 +444,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
 
         succeeded.push(file.path);
       } catch (error) {
-        failed.push(
-          createError(
-            file.path,
-            "io_error",
-            error instanceof Error ? error.message : "Unknown error",
-          ),
-        );
+        failed.push(classifyBrowserError(file.path, error));
       }
     }
 
@@ -484,13 +473,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
         await parent.removeEntry(fileName);
         succeeded.push(path);
       } catch (error) {
-        failed.push(
-          createError(
-            path,
-            "io_error",
-            error instanceof Error ? error.message : "Unknown error",
-          ),
-        );
+        failed.push(classifyBrowserError(path, error));
       }
     }
 
@@ -610,13 +593,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
           });
         }
       } catch (error) {
-        failed.push(
-          createError(
-            path,
-            "io_error",
-            error instanceof Error ? error.message : "Unknown error",
-          ),
-        );
+        failed.push(classifyBrowserError(path, error));
       }
     }
 
@@ -652,13 +629,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
 
         succeeded.push(file.path);
       } catch (error) {
-        failed.push(
-          createError(
-            file.path,
-            "io_error",
-            error instanceof Error ? error.message : "Unknown error",
-          ),
-        );
+        failed.push(classifyBrowserError(file.path, error));
       }
     }
 
