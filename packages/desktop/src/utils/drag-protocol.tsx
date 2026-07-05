@@ -418,16 +418,11 @@ function dropZoneAtPoint(
   return { element, config };
 }
 
-function pointFromDndEvent(event: DragMoveEvent | DragEndEvent): {
-  x: number;
-  y: number;
-} {
-  const activator = event.activatorEvent as Partial<PointerEvent>;
-  return {
-    x: (activator.clientX ?? 0) + event.delta.x,
-    y: (activator.clientY ?? 0) + event.delta.y,
-  };
-}
+// NOTE: do NOT derive the pointer from activatorEvent + event.delta —
+// dnd-kit's delta tracks the dragged item's transform, which is
+// scroll-compensated during auto-scroll, so it diverges from the real
+// pointer as soon as a scroll container moves. The context below tracks
+// the actual pointer with a window listener instead.
 
 /**
  * dnd-kit draggable wired to the protocol: spread the returned
@@ -454,17 +449,25 @@ export function ProtocolDndContext(props: {
   children: ReactNode;
   overlay?: (payload: DragPayload) => ReactNode;
 }): ReactElement {
-  // The ref is the source of truth for handlers: dnd-kit can deliver a
+  // The refs are the source of truth for handlers: dnd-kit can deliver a
   // trailing onDragMove after onDragEnd, and a state-based guard would
   // read a stale closure and re-stamp the drop-over highlight after the
   // drop cleared it. State exists only to render the overlay.
   const activePayloadRef = useRef<DragPayload | null>(null);
+  // Real pointer position, tracked with a window listener for the drag's
+  // duration — see the note above pointFromDndEvent's former location:
+  // dnd-kit deltas diverge from the pointer once auto-scroll kicks in.
+  const pointerRef = useRef({ x: 0, y: 0 });
+  const trackPointer = useRef((event: PointerEvent) => {
+    pointerRef.current = { x: event.clientX, y: event.clientY };
+  }).current;
   const [activePayload, setActivePayload] = useState<DragPayload | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   );
 
   const finish = () => {
+    window.removeEventListener("pointermove", trackPointer);
     activePayloadRef.current = null;
     setHoveredDropElement(null);
     clearCurrentDragPayload();
@@ -476,26 +479,32 @@ export function ProtocolDndContext(props: {
       | DragPayload
       | undefined;
     if (!payload) return;
+    const activator = event.activatorEvent as Partial<PointerEvent>;
+    pointerRef.current = {
+      x: activator.clientX ?? 0,
+      y: activator.clientY ?? 0,
+    };
+    window.addEventListener("pointermove", trackPointer);
     tagCurrentDrag(payload);
     activePayloadRef.current = payload;
     setActivePayload(payload);
   };
 
-  const handleMove = (event: DragMoveEvent) => {
+  const handleMove = (_event: DragMoveEvent) => {
     const payload = activePayloadRef.current;
     if (!payload) return;
-    const { x, y } = pointFromDndEvent(event);
+    const { x, y } = pointerRef.current;
     const hit = dropZoneAtPoint(x, y);
     setHoveredDropElement(
       hit && hit.config.accepts.includes(payload.kind) ? hit.element : null,
     );
   };
 
-  const handleEnd = (event: DragEndEvent) => {
+  const handleEnd = (_event: DragEndEvent) => {
     const payload = activePayloadRef.current;
+    const { x, y } = pointerRef.current;
     finish();
     if (!payload) return;
-    const { x, y } = pointFromDndEvent(event);
     const hit = dropZoneAtPoint(x, y);
     if (hit && hit.config.accepts.includes(payload.kind)) {
       hit.config.onDrop(payload as never, {

@@ -37,7 +37,10 @@ const NOTES_FIXTURE = [
   "",
 ].join("\n");
 
-async function seedWorkspace(page: Page) {
+async function seedWorkspace(
+  page: Page,
+  extraFiles: { path: string; content: string }[] = [],
+) {
   await page.addInitScript(() => {
     (
       window as unknown as Record<string, unknown>
@@ -85,6 +88,7 @@ async function seedWorkspace(page: Page) {
         { path: DUPE_ROOT_PATH, content: "# Dupe at root\n" },
         { path: DUPE_NESTED_PATH, content: "# Dupe in sub\n" },
         { path: ASSET_PATH, content: "not-a-real-png" },
+        ...extraFiles,
       ],
     },
   );
@@ -273,6 +277,55 @@ test.describe("drag protocol: file tree → tabs/editor", () => {
         '[data-dockable-window-id] >> nth=0 >> div[title="inside.md"]',
       ),
     ).toHaveCount(0);
+  });
+
+  test("drops still register after the tree scrolls mid-drag", async ({
+    page,
+  }) => {
+    // enough filler rows that the tree overflows and can actually scroll
+    const filler = Array.from({ length: 60 }, (_, i) => ({
+      path: `${WORKSPACE}/zz-filler-${String(i).padStart(2, "0")}.md`,
+      content: `# filler ${i}\n`,
+    }));
+    await seedWorkspace(page, filler);
+    await page.goto(`/${encodeURIComponent(WORKSPACE)}`);
+    await page.getByRole("button", { name: NOTES_NAME }).click();
+    await expect(page.locator(".ProseMirror")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // start dragging a row, then scroll its container mid-drag — the same
+    // displacement dnd-kit's auto-scroll produces near the viewport edge
+    const row = (await page.locator(treeRow(OTHER_NAME)).boundingBox())!;
+    await page.mouse.move(row.x + row.width / 2, row.y + row.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(row.x + row.width / 2 + 12, row.y + 12, {
+      steps: 3,
+    });
+
+    await page.evaluate(() => {
+      // the ScrollArea is the overflow-auto parent of the tree root
+      const viewport =
+        document.querySelector("[data-file-tree-root]")?.parentElement;
+      if (!viewport) throw new Error("missing tree scroll viewport");
+      viewport.scrollTop = 300;
+      if (viewport.scrollTop === 0) {
+        throw new Error("tree viewport did not scroll — fixture too short?");
+      }
+    });
+
+    const editorBox = (await page.locator(".ProseMirror").boundingBox())!;
+    await page.mouse.move(
+      editorBox.x + editorBox.width / 2,
+      editorBox.y + 40,
+      { steps: 10 },
+    );
+    await page.mouse.up();
+
+    // the drop still lands: other.md opened as a tab
+    await expect(
+      page.locator('[data-testid="tab-bar"]', { hasText: OTHER_NAME }),
+    ).toBeVisible({ timeout: 5_000 });
   });
 
   test("dropping a directory row on the editor is a silent no-op", async ({
