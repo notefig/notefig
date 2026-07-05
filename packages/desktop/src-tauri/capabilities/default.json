@@ -10,6 +10,10 @@
     "updater:default",
     "process:default",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "x-apple.systempreferences:*" }]
+    },
     "core:webview:allow-set-webview-zoom",
     "window-state:default",
     {

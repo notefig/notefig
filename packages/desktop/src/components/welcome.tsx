@@ -8,6 +8,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { pickDirectory } from "@/utils/fs";
+import { FsError } from "@/adapters/platform-adapter.interface";
+import { toast } from "sonner";
 import { PlainLogo } from "@/components/logo";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
@@ -94,6 +96,13 @@ export function Welcome() {
         addRecentProject(selectedPath);
         const encodedPath = encodeURIComponent(selectedPath);
         navigate(`/${encodedPath}`);
+      }
+    } catch (error) {
+      // null means cancel; a throw means the browser denied the picker.
+      if (error instanceof FsError && error.type === "permission_denied") {
+        toast.error(t("pickerPermissionDenied"));
+      } else {
+        throw error;
       }
     } finally {
       setLoading(false);

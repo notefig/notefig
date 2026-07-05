@@ -1,3 +1,6 @@
+import { FsError } from "./platform-adapter.interface";
+import type { FileSystemError } from "./platform-adapter.interface";
+
 /**
  * Normalize a path for use as a workspace identifier.
  * The File System Access API doesn't expose full paths, so we use the folder name.
@@ -80,6 +83,65 @@ export function isHiddenPath(path: string): boolean {
  */
 export type FsPermissionMode = "read" | "readwrite";
 
+type PermissionCapableHandle = FileSystemHandle & {
+  queryPermission?: (options: {
+    mode: FsPermissionMode;
+  }) => Promise<PermissionState>;
+  requestPermission?: (options: {
+    mode: FsPermissionMode;
+  }) => Promise<PermissionState>;
+};
+
+/**
+ * Query the current permission state without prompting.
+ * Handles without the permission API report "granted".
+ */
+export async function queryPermissionState(
+  handle: FileSystemDirectoryHandle | FileSystemFileHandle,
+  mode: FsPermissionMode,
+): Promise<PermissionState> {
+  const permissionHandle = handle as PermissionCapableHandle;
+  if (!permissionHandle.queryPermission) return "granted";
+  return permissionHandle.queryPermission({ mode });
+}
+
+/**
+ * Actively request permission — MUST run inside a user gesture (Chrome
+ * rejects requestPermission without user activation).
+ * Handles without the permission API report "granted".
+ */
+export async function requestPermissionState(
+  handle: FileSystemDirectoryHandle | FileSystemFileHandle,
+  mode: FsPermissionMode,
+): Promise<PermissionState> {
+  const permissionHandle = handle as PermissionCapableHandle;
+  if (!permissionHandle.requestPermission) return "granted";
+  return permissionHandle.requestPermission({ mode });
+}
+
+/**
+ * Turn a thrown browser fs error into a typed FileSystemError.
+ */
+export function classifyBrowserError(
+  path: string,
+  error: unknown,
+): FileSystemError {
+  if (error instanceof FsError) return error;
+  if (error instanceof DOMException) {
+    if (error.name === "NotAllowedError" || error.name === "SecurityError") {
+      return new FsError("permission_denied", path, error.message);
+    }
+    if (error.name === "NotFoundError") {
+      return new FsError("not_found", path, error.message);
+    }
+  }
+  return new FsError(
+    "io_error",
+    path,
+    error instanceof Error ? error.message : "Unknown error",
+  );
+}
+
 /**
  * Ensure permission is granted for a file system handle.
  * @throws Error if permission is denied
@@ -108,7 +170,7 @@ export async function ensurePermission(
   if (state === "granted") return;
   const request = await permissionHandle.requestPermission({ mode });
   if (request !== "granted") {
-    throw new Error("Permission denied");
+    throw new FsError("permission_denied", handle.name);
   }
 }
 

@@ -28,6 +28,7 @@ import { getFileName } from "@/utils/fs";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { WorkspaceTabsProvider } from "@/components/workspace-tabs-provider";
+import { useThrowWorkspaceAccessError } from "@/components/workspace-error-boundary";
 import { platformAdapter } from "@/adapters";
 import { retryOnAnimationFrame } from "@/utils/retry-on-animation-frame";
 import {
@@ -48,6 +49,7 @@ export const Workspace = () => {
   }
 
   const { metadata, content } = getOrCreateWorkspaceCollections(workspacePath);
+  useThrowWorkspaceAccessError(workspacePath);
   const { t } = useTranslation();
   const dockableRef = useRef<HTMLDivElement>(null);
   const searchPanelRef = useRef<SearchPanelHandle>(null);

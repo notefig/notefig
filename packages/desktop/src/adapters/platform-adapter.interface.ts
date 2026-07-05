@@ -7,6 +7,7 @@ import type { GitStorageHost } from "@metrists/git";
 export type FileSystemErrorType =
   | "not_found"
   | "permission_denied"
+  | "handle_missing"
   | "already_exists"
   | "invalid_path"
   | "not_empty"
@@ -23,6 +24,33 @@ export type FileSystemError = {
   type: FileSystemErrorType;
   message: string;
 };
+
+/**
+ * Throwable form of FileSystemError — one class shared across platforms,
+ * discriminated by the same FileSystemErrorType. Satisfies the
+ * FileSystemError shape so it can be returned in Result/BatchResult as-is.
+ */
+export class FsError extends Error implements FileSystemError {
+  constructor(
+    readonly type: FileSystemErrorType,
+    readonly path: string,
+    message?: string,
+  ) {
+    super(message ?? `${type.replace(/_/g, " ")}: ${path}`);
+    this.name = "FsError";
+  }
+}
+
+/**
+ * True when the error means the app lost access to the workspace folder and
+ * the user can recover it (re-grant on web, OS settings on desktop, re-pick).
+ */
+export function isWorkspaceAccessError(error: unknown): error is FsError {
+  return (
+    error instanceof FsError &&
+    (error.type === "permission_denied" || error.type === "handle_missing")
+  );
+}
 
 /**
  * Result type for operations that can fail
@@ -232,6 +260,14 @@ export interface IPlatformAdapter {
    * @returns Promise that resolves to the selected directory path or null if cancelled
    */
   pickDirectory(title: string): Promise<string | null>;
+
+  // ========== Workspace Access ==========
+  /**
+   * (Re)acquire access to a workspace folder after a permission failure.
+   * On web this MUST run inside a user gesture (it calls
+   * handle.requestPermission); elsewhere it's a no-op returning true.
+   */
+  requestWorkspaceAccess(workspacePath: string): Promise<boolean>;
 
   // ========== Text Prompt ==========
   /**

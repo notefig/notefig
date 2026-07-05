@@ -12,6 +12,7 @@ import type {
   SearchMatch,
   TextPromptOptions,
 } from "./platform-adapter.interface";
+import { FsError } from "./platform-adapter.interface";
 import { requestTextPrompt } from "@/utils/text-prompt";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -22,6 +23,18 @@ import type { GitStorageHost } from "@metrists/git";
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LazyStore } from "@tauri-apps/plugin-store";
+
+/**
+ * Classify a *thrown* invoke error (capability/scope violations, OS-level
+ * throws) into a typed FileSystemError. Rust-mapped errors come back as
+ * values, not throws, so string matching is the only signal here.
+ */
+function classifyInvokeError(path: string, error: unknown): FileSystemError {
+  const message = error instanceof Error ? error.message : String(error);
+  const isPermission =
+    /permission denied|os error 1\b|not allowed|forbidden|scope/i.test(message);
+  return new FsError(isPermission ? "permission_denied" : "io_error", path, message);
+}
 
 export class TauriPlatformAdapter implements IPlatformAdapter {
   private eventListeners: Set<PlatformEventListener> = new Set();
@@ -40,6 +53,12 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     return Array.isArray(result) ? result[0] : result;
   }
 
+  async requestWorkspaceAccess(_workspacePath: string): Promise<boolean> {
+    // Desktop has no permission prompt to trigger — the user flips the OS
+    // setting (macOS Files and Folders) and retries.
+    return true;
+  }
+
   async promptText(options: TextPromptOptions): Promise<string | null> {
     // The Tauri dialog plugin has no text-input dialog, and window.prompt is
     // a no-op inside the webview — use the in-app dialog bridge.
@@ -47,7 +66,9 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   }
 
   openExternal(url: string): Promise<void> {
-    const allowed = /^(https?|mailto):/i;
+    // x-apple.systempreferences deep-links into macOS System Settings
+    // (e.g. Privacy & Security → Files and Folders for fs re-grants).
+    const allowed = /^(https?|mailto):|^x-apple\.systempreferences:/i;
     if (allowed.test(url)) {
       openUrl(url);
     }
@@ -82,14 +103,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
         return { ok: false, error: result.error! };
       }
     } catch (error) {
-      return {
-        ok: false,
-        error: {
-          path,
-          type: "io_error",
-          message: error instanceof Error ? error.message : "Unknown error",
-        },
-      };
+      return { ok: false, error: classifyInvokeError(path, error) };
     }
   }
 
@@ -102,11 +116,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     } catch (error) {
       return {
         succeeded: [],
-        failed: paths.map((path) => ({
-          path,
-          type: "io_error",
-          message: error instanceof Error ? error.message : "Unknown error",
-        })),
+        failed: paths.map((path) => classifyInvokeError(path, error)),
       };
     }
   }
@@ -124,11 +134,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     } catch (error) {
       return {
         succeeded: [],
-        failed: paths.map((path) => ({
-          path,
-          type: "io_error",
-          message: error instanceof Error ? error.message : "Unknown error",
-        })),
+        failed: paths.map((path) => classifyInvokeError(path, error)),
       };
     }
   }
@@ -146,14 +152,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
         return { ok: false, error: result.error! };
       }
     } catch (error) {
-      return {
-        ok: false,
-        error: {
-          path: oldPath,
-          type: "io_error",
-          message: error instanceof Error ? error.message : "Unknown error",
-        },
-      };
+      return { ok: false, error: classifyInvokeError(oldPath, error) };
     }
   }
 
@@ -168,11 +167,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     } catch (error) {
       return {
         succeeded: [],
-        failed: paths.map((path) => ({
-          path,
-          type: "io_error",
-          message: error instanceof Error ? error.message : "Unknown error",
-        })),
+        failed: paths.map((path) => classifyInvokeError(path, error)),
       };
     }
   }
@@ -194,11 +189,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     } catch (error) {
       return {
         succeeded: [],
-        failed: paths.map((path) => ({
-          path,
-          type: "io_error",
-          message: error instanceof Error ? error.message : "Unknown error",
-        })),
+        failed: paths.map((path) => classifyInvokeError(path, error)),
       };
     }
   }
@@ -214,11 +205,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     } catch (error) {
       return {
         succeeded: [],
-        failed: files.map((file) => ({
-          path: file.path,
-          type: "io_error",
-          message: error instanceof Error ? error.message : "Unknown error",
-        })),
+        failed: files.map((file) => classifyInvokeError(file.path, error)),
       };
     }
   }
@@ -232,11 +219,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     } catch (error) {
       return {
         succeeded: [],
-        failed: paths.map((path) => ({
-          path,
-          type: "io_error",
-          message: error instanceof Error ? error.message : "Unknown error",
-        })),
+        failed: paths.map((path) => classifyInvokeError(path, error)),
       };
     }
   }
@@ -250,11 +233,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     } catch (error) {
       return {
         succeeded: [],
-        failed: paths.map((path) => ({
-          path,
-          type: "io_error",
-          message: error instanceof Error ? error.message : "Unknown error",
-        })),
+        failed: paths.map((path) => classifyInvokeError(path, error)),
       };
     }
   }
@@ -272,14 +251,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
         return { ok: false, error: result.error! };
       }
     } catch (error) {
-      return {
-        ok: false,
-        error: {
-          path: oldPath,
-          type: "io_error",
-          message: error instanceof Error ? error.message : "Unknown error",
-        },
-      };
+      return { ok: false, error: classifyInvokeError(oldPath, error) };
     }
   }
 
@@ -296,14 +268,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
         return { ok: false, error: result.error! };
       }
     } catch (error) {
-      return {
-        ok: false,
-        error: {
-          path: from,
-          type: "io_error",
-          message: error instanceof Error ? error.message : "Unknown error",
-        },
-      };
+      return { ok: false, error: classifyInvokeError(from, error) };
     }
   }
 
@@ -321,11 +286,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     } catch (error) {
       return {
         succeeded: [],
-        failed: files.map((f) => ({
-          path: f.path,
-          type: "io_error",
-          message: error instanceof Error ? error.message : "Unknown error",
-        })),
+        failed: files.map((f) => classifyInvokeError(f.path, error)),
       };
     }
   }
@@ -365,11 +326,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     } catch (error) {
       return {
         succeeded: [],
-        failed: paths.map((path) => ({
-          path,
-          type: "io_error",
-          message: error instanceof Error ? error.message : "Unknown error",
-        })),
+        failed: paths.map((path) => classifyInvokeError(path, error)),
       };
     }
   }

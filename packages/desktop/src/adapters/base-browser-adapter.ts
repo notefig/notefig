@@ -159,6 +159,12 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
 
   abstract pickDirectory(title: string): Promise<string | null>;
 
+  // The pure-IndexedDB adapter has no permission surface; the FS Access
+  // adapter overrides this.
+  async requestWorkspaceAccess(_workspacePath: string): Promise<boolean> {
+    return true;
+  }
+
   async promptText(options: TextPromptOptions): Promise<string | null> {
     // Same in-app dialog on the web — consistent UX, no native prompt.
     return requestTextPrompt(options);

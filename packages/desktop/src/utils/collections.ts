@@ -26,6 +26,10 @@ import {
 } from "@tanstack/query-db-collection";
 import { QueryClient } from "@tanstack/query-core";
 import { platformAdapter } from "@/adapters";
+import {
+  FsError,
+  isWorkspaceAccessError,
+} from "@/adapters/platform-adapter.interface";
 import type { FileEntry } from "./fs";
 import { calculateContentHash } from "./hash";
 // Circular with ./file-sync (which imports this module); safe because both
@@ -76,6 +80,11 @@ export function createFileMetadataCollection(workspaceId: string) {
       queryKey: ["file-metadata", workspaceId],
       queryClient,
 
+      // Access errors can't be retried away — fail fast so the recovery UI
+      // (WorkspaceErrorBoundary) shows immediately.
+      retry: (failureCount, error) =>
+        !isWorkspaceAccessError(error) && failureCount < 3,
+
       queryFn: async (): Promise<FileMetadata[]> => {
         // Read the entire workspace directory tree
         const dirResult = await platformAdapter.readDirectory(workspaceId, {
@@ -85,9 +94,10 @@ export function createFileMetadataCollection(workspaceId: string) {
         });
 
         if (!dirResult.ok) {
-          throw new Error(
-            `Failed to read directory ${workspaceId}: ${dirResult.error.message}`,
-          );
+          // Rethrow typed so WorkspaceErrorBoundary can recognize permission
+          // failures and render the recovery fallback instead of DebugPanel.
+          const { type, path, message } = dirResult.error;
+          throw new FsError(type, path, message);
         }
 
         const paths = dirResult.value;
@@ -790,4 +800,8 @@ export async function renameFileOrDirectory(
  */
 export function clearWorkspaceCollections(workspaceId: string): void {
   workspaceCollectionsRegistry.delete(workspaceId);
+  // Drop cached query state too, so a fresh open refetches instead of
+  // replaying a stale error or stale data.
+  queryClient.removeQueries({ queryKey: ["file-metadata", workspaceId] });
+  queryClient.removeQueries({ queryKey: ["file-content", workspaceId] });
 }
