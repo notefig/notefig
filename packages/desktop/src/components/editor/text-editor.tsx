@@ -12,6 +12,7 @@ import { useLinkPrompt } from "./use-link-prompt";
 import { TiptapToolbar } from "./tiptap-toolbar";
 import { LinkBubbleMenu } from "./tiptap-link-menu";
 import { TableMenu } from "./tiptap-table-menu";
+import { dropZoneProps, getProtocolContext } from "@/utils/drag-protocol";
 import "./tiptap.css";
 
 interface TextEditorProps {
@@ -47,7 +48,22 @@ export function TextEditor({
   return (
     <div className="flex flex-col flex-1 min-h-0 w-full z-0">
       <TiptapToolbar editor={editor} onLinkToggle={handleLinkToggle} />
-      <div className="flex-1 min-h-0 overflow-auto tiptap-editor-wrapper">
+      <div
+        className="flex-1 min-h-0 overflow-auto tiptap-editor-wrapper"
+        // Dropping a file here opens it as a tab. Pointer drags (file tree)
+        // dispatch through this zone; native drags are additionally guarded
+        // by the protocol handler in the ProseMirror handleDrop chain.
+        {...dropZoneProps({
+          accepts: ["file"],
+          onDrop: (payload) => {
+            if (payload.fileType !== "file") return;
+            getProtocolContext().openFile?.({
+              tabId: payload.path,
+              intent: "new-tab",
+            });
+          },
+        })}
+      >
         <DragHandle editor={editor} nested>
           <GripVertical className="w-4 h-4 text-muted-foreground/40 hover:text-muted-foreground" />
         </DragHandle>

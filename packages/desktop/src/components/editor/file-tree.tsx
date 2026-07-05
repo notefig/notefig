@@ -37,6 +37,12 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { FileTreeContextMenu } from "./file-tree-context-menu";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { requestElementFocus } from "@/utils/focus-arbiter";
+import {
+  dropZoneProps,
+  ProtocolDndContext,
+  useProtocolDraggable,
+} from "@/utils/drag-protocol";
+import { moveIntoFolder } from "@/utils/drop-actions";
 
 /** Discriminated union representing the file tree's inline-editing state. */
 export type FileTreeMode =
@@ -69,6 +75,7 @@ interface FileTreeProps {
 interface FileTreeItemProps {
   node: FileTreeNode;
   depth: number;
+  basePath: string;
   isPrimaryFocusTarget?: boolean;
   selectedFilePath: string | null;
   onFileSelect: (
@@ -293,6 +300,7 @@ function useSidebarInputFocus(focusKey: string, reason: string): void {
 function FileTreeItem({
   node,
   depth,
+  basePath,
   isPrimaryFocusTarget = false,
   selectedFilePath,
   onFileSelect,
@@ -412,8 +420,25 @@ function FileTreeItem({
 
   const paddingValue = depth * 12 + 8;
 
+  // Pointer-driven drag (same engine as the dockable tabs); the payload
+  // travels through the drag-protocol registry, so any declared drop zone
+  // (folders, tab bar, editor) reacts to it.
+  const drag = useProtocolDraggable({
+    id: node.path,
+    payload: {
+      kind: "file",
+      path: node.path,
+      fileType: node.type,
+      workspaceRoot: basePath,
+    },
+    disabled: mode.type !== "idle",
+  });
+
   const buttonElement = (
     <button
+      ref={drag.setNodeRef}
+      {...drag.listeners}
+      {...drag.attributes}
       data-focus-key={
         isPrimaryFocusTarget ? "sidebar-first-file-item" : undefined
       }
@@ -467,7 +492,22 @@ function FileTreeItem({
   );
 
   return (
-    <div>
+    <div
+      // Directories accept drops across their whole subtree region (row +
+      // children), VS Code style; nested zones win via closest().
+      {...(node.type === "directory"
+        ? dropZoneProps({
+            accepts: ["file", "image-asset"],
+            dropEffect: "move",
+            onDrop: (payload) => moveIntoFolder(payload, node.path),
+          })
+        : {})}
+      className={
+        node.type === "directory"
+          ? "data-[mtr-drop-over=true]:bg-accent/40 rounded-sm transition-colors"
+          : undefined
+      }
+    >
       {onDelete ? (
         <FileTreeContextMenu
           path={node.path}
@@ -501,6 +541,7 @@ function FileTreeItem({
               key={child.path}
               node={child}
               depth={depth + 1}
+              basePath={basePath}
               isPrimaryFocusTarget={false}
               selectedFilePath={selectedFilePath}
               onFileSelect={onFileSelect}
@@ -579,7 +620,7 @@ export function FileTree({
   const isCreatingAtRoot =
     mode.type === "creating" && mode.parentPath === basePath;
   const rootCreatingItemType = mode.type === "creating" ? mode.itemType : null;
-  const treeRootRef = useRef<HTMLDivElement>(null);
+  const treeRootRef = useRef<HTMLDivElement | null>(null);
 
   const handleCreateSubmitRoot = useCallback(
     (name: string) => {
@@ -624,9 +665,34 @@ export function FileTree({
     target: treeRootRef,
   });
 
+  // Dropping on the tree's empty space (or on file rows, which aren't
+  // zones) moves the dragged item to the workspace root.
+  const rootDrop = dropZoneProps({
+    accepts: ["file", "image-asset"],
+    dropEffect: "move",
+    onDrop: (payload) => moveIntoFolder(payload, basePath),
+  });
+
   return (
-    <ScrollArea className="h-full w-full">
-      <div className="py-1" data-file-tree-root ref={treeRootRef}>
+    <ProtocolDndContext
+      overlay={(payload) =>
+        payload.kind === "file" ? (
+          <div className="rounded border border-border bg-popover px-2 py-1 text-sm text-popover-foreground shadow-md">
+            {getFileName(payload.path)}
+          </div>
+        ) : null
+      }
+    >
+      <ScrollArea className="h-full w-full">
+        <div
+          className="py-1 data-[mtr-drop-over=true]:bg-accent/20 transition-colors"
+          data-file-tree-root
+          data-mtr-dropzone={rootDrop["data-mtr-dropzone"]}
+          ref={(element) => {
+            treeRootRef.current = element;
+            rootDrop.ref(element);
+          }}
+        >
         {isCreatingAtRoot && rootCreatingItemType && (
           <NewFileInput
             type={rootCreatingItemType}
@@ -640,6 +706,7 @@ export function FileTree({
             key={node.path}
             node={node}
             depth={0}
+            basePath={basePath}
             isPrimaryFocusTarget={filesTree[0]?.path === node.path}
             selectedFilePath={selectedFilePath}
             onFileSelect={onFileSelect}
@@ -699,6 +766,7 @@ export function FileTree({
           </AlertDialogContent>
         </AlertDialog>
       )}
-    </ScrollArea>
+      </ScrollArea>
+    </ProtocolDndContext>
   );
 }

@@ -9,6 +9,7 @@ import { useDndContext } from "@dnd-kit/core";
 import { useDockable } from "../store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { dropZoneProps, getProtocolContext } from "@/utils/drag-protocol";
 export type tabObject = {
   id: string;
   name: string;
@@ -78,7 +79,18 @@ function TabView({
             address,
           }}
           data-testid="tab-bar"
-          className="relative mx-2 flex min-w-0 w-[calc(100%-1rem)] rounded-lg border border-sidebar-border overflow-hidden"
+          {...dropZoneProps({
+            accepts: ["file"],
+            onDrop: (payload) => {
+              if (payload.fileType !== "file") return;
+              getProtocolContext().openFile?.({
+                tabId: payload.path,
+                intent: "new-tab",
+                targetWindowId: id,
+              });
+            },
+          })}
+          className="relative mx-2 flex min-w-0 w-[calc(100%-1rem)] rounded-lg border border-sidebar-border overflow-hidden data-[mtr-drop-over=true]:border-primary"
           style={{ backgroundColor: "rgba(15, 15, 15, 0.05)" }}
         >
           <ScrollArea className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden">

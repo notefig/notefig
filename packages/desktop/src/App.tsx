@@ -13,6 +13,7 @@ import { Loader } from "./components/loader";
 import { Titlebar } from "@/components/titlebar";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { WorkspaceErrorBoundary } from "@/components/workspace-error-boundary";
+import { EditorHarness } from "@/test-harness/editor-harness";
 
 export const App = () => {
   const { setTheme } = useTheme();
@@ -67,6 +68,9 @@ export const App = () => {
       <TextPromptDialog />
       <div className="flex-1 min-h-0">
         <Routes>
+          {import.meta.env.DEV && (
+            <Route path="/__harness/editor" element={<EditorHarness />} />
+          )}
           <Route
             path="/:basePath/edit/*"
             element={

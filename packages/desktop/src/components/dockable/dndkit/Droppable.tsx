@@ -7,8 +7,8 @@ type DroppableProps = {
   className?: string;
   children?: React.ReactNode;
   data?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
-  "data-testid"?: string;
-};
+  ref?: (element: HTMLDivElement | null) => void;
+} & React.HTMLAttributes<HTMLDivElement>;
 function Droppable({
   id,
   style,
@@ -16,7 +16,8 @@ function Droppable({
   className,
   children,
   data,
-  "data-testid": dataTestId,
+  ref: externalRef,
+  ...rest
 }: DroppableProps) {
   const { setNodeRef, isOver } = useDroppable({
     id,
@@ -25,13 +26,16 @@ function Droppable({
 
   return (
     <div
-      ref={setNodeRef}
+      ref={(element) => {
+        setNodeRef(element);
+        externalRef?.(element);
+      }}
+      {...rest}
       style={{
         ...style,
         ...(isOver && overStyle),
       }}
       className={className}
-      data-testid={dataTestId}
     >
       {children}
     </div>

@@ -1,0 +1,230 @@
+/**
+ * Component-level tests for the markdown editing experience, run against
+ * the dev-only /__harness/editor route (src/test-harness/editor-harness.tsx).
+ *
+ * Unlike tests/e2e/*, nothing here boots the workspace: each test loads
+ * just the real TextEditor + SearchPanel against the real platform
+ * adapter, configured through window.__EDITOR_HARNESS__ and observed
+ * through window.__HARNESS__. Keep editor-behavior coverage here — it's
+ * an order of magnitude cheaper than a full e2e test.
+ */
+import { test, expect, type Page } from "@playwright/test";
+import { syntheticNativeDrag } from "../setup/drag-helpers";
+
+const BASE = "/harness-ws";
+const DOC = `${BASE}/doc.md`;
+
+interface HarnessOptions {
+  content?: string;
+  files?: { path: string; content: string }[];
+}
+
+async function openHarness(page: Page, options: HarnessOptions = {}) {
+  await page.addInitScript(
+    ({ options, BASE, DOC }) => {
+      (
+        window as unknown as Record<string, unknown>
+      ).__METRISTS_FORCE_INDEXEDDB__ = true;
+      (window as unknown as Record<string, unknown>).__EDITOR_HARNESS__ = {
+        basePath: BASE,
+        filePath: DOC,
+        ...options,
+      };
+    },
+    { options, BASE, DOC },
+  );
+  await page.goto("/__harness/editor");
+  await expect(page.locator(".ProseMirror")).toBeVisible({ timeout: 10_000 });
+}
+
+const getMarkdown = (page: Page) =>
+  page.evaluate(() =>
+    (
+      window as unknown as {
+        __HARNESS__: { getMarkdown: () => string | null };
+      }
+    ).__HARNESS__.getMarkdown(),
+  );
+
+const readFile = (page: Page, path: string) =>
+  page.evaluate(
+    (path) =>
+      (
+        window as unknown as {
+          __HARNESS__: { readFile: (p: string) => Promise<string | null> };
+        }
+      ).__HARNESS__.readFile(path),
+    path,
+  );
+
+test.describe("rendering & input rules", () => {
+  test("renders the provided markdown", async ({ page }) => {
+    await openHarness(page, {
+      content: "# Hello Harness\n\nSome **bold** text.\n",
+    });
+    await expect(
+      page.locator(".ProseMirror h1", { hasText: "Hello Harness" }),
+    ).toBeVisible();
+    await expect(page.locator(".ProseMirror strong")).toHaveText("bold");
+  });
+
+  test("markdown input rules: heading and list", async ({ page }) => {
+    await openHarness(page, { content: "start\n" });
+    const editor = page.locator(".ProseMirror");
+    await editor.click();
+    await page.keyboard.press("ControlOrMeta+End" as never).catch(() => {});
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("## Section");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("- item one");
+
+    await expect(
+      page.locator(".ProseMirror h2", { hasText: "Section" }),
+    ).toBeVisible();
+    await expect(
+      page.locator(".ProseMirror li", { hasText: "item one" }),
+    ).toBeVisible();
+  });
+});
+
+test.describe("persistence", () => {
+  test("autosave writes the edited markdown through the adapter", async ({
+    page,
+  }) => {
+    await openHarness(page, { content: "# Doc\n" });
+    const editor = page.locator(".ProseMirror");
+    await editor.click();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("freshly typed line");
+
+    await expect
+      .poll(() => readFile(page, DOC), { timeout: 5_000 })
+      .toContain("freshly typed line");
+    // serialization round-trip stays markdown
+    expect(await getMarkdown(page)).toContain("# Doc");
+  });
+});
+
+test.describe("images", () => {
+  const PNG_BYTES = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+  test("pasting an image writes an asset and inserts the node", async ({
+    page,
+  }) => {
+    await openHarness(page);
+    await page.locator(".ProseMirror").click();
+
+    await page.evaluate((bytes) => {
+      const file = new File([new Uint8Array(bytes)], "shot.png", {
+        type: "image/png",
+      });
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(file);
+      document.querySelector(".ProseMirror")!.dispatchEvent(
+        new ClipboardEvent("paste", {
+          bubbles: true,
+          cancelable: true,
+          clipboardData: dataTransfer,
+        }),
+      );
+    }, PNG_BYTES);
+
+    // node appears (broken-image fallback is fine — bytes aren't a real png)
+    await expect(
+      page.locator(".ProseMirror [data-drag-handle]"),
+    ).toBeVisible();
+    // and the asset was written under <basePath>/assets/
+    await expect
+      .poll(() => getMarkdown(page), { timeout: 5_000 })
+      .toMatch(/assets\/pasted-\d+\.png/);
+  });
+
+  test("dropping an image file inserts a node with a deduped asset name", async ({
+    page,
+  }) => {
+    await openHarness(page);
+
+    await page.evaluate((bytes) => {
+      const file = new File([new Uint8Array(bytes)], "photo.png", {
+        type: "image/png",
+      });
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(file);
+      const target = document.querySelector(".ProseMirror p")!;
+      const rect = target.getBoundingClientRect();
+      target.dispatchEvent(
+        new DragEvent("drop", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer,
+          clientX: rect.left + 5,
+          clientY: rect.top + 5,
+        }),
+      );
+    }, PNG_BYTES);
+
+    await expect
+      .poll(() => getMarkdown(page), { timeout: 5_000 })
+      .toContain("assets/photo.png");
+    expect(await readFile(page, `${BASE}/assets/photo.png`)).not.toBeNull();
+  });
+
+  test("block drag handle reorders content", async ({ page }) => {
+    await openHarness(page, {
+      content: "First paragraph.\n\nSecond paragraph.\n",
+    });
+    await page
+      .locator(".ProseMirror p", { hasText: "First paragraph" })
+      .hover();
+    await expect(page.locator(".drag-handle")).toBeVisible();
+
+    await syntheticNativeDrag(
+      page,
+      ".drag-handle",
+      ".ProseMirror > p:nth-of-type(2)",
+    );
+
+    const paragraphs = page.locator(".ProseMirror > p");
+    await expect(paragraphs.nth(0)).toContainText("Second paragraph");
+    await expect(paragraphs.nth(1)).toContainText("First paragraph");
+  });
+});
+
+test.describe("search", () => {
+  test("finds matches across workspace files and opens them", async ({
+    page,
+  }) => {
+    await openHarness(page, {
+      content: "# Doc\n\nneedle in the open doc\n",
+      files: [
+        { path: `${BASE}/notes/a.md`, content: "# A\n\na needle here\n" },
+        { path: `${BASE}/notes/b.md`, content: "# B\n\nnothing to see\n" },
+      ],
+    });
+
+    const input = page.getByPlaceholder(/search/i).first();
+    await input.fill("needle");
+
+    // matches from both the open doc and the seeded file, not from b.md
+    await expect(page.getByText("a.md")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("doc.md")).toBeVisible();
+    await expect(page.getByText("b.md")).not.toBeVisible();
+
+    // clicking a match in another file routes through openFile
+    await page.getByText("a needle here").click();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              window as unknown as {
+                __HARNESS__: { opened: { tabId: string }[] };
+              }
+            ).__HARNESS__.opened.map((o) => o.tabId),
+        ),
+      )
+      .toContain(`${BASE}/notes/a.md`);
+  });
+});

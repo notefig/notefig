@@ -1,4 +1,4 @@
-import { Page } from "@playwright/test";
+import { expect, Page } from "@playwright/test";
 
 /**
  * Test Helpers for Metrists E2E Tests
@@ -109,15 +109,38 @@ export async function openWorkspace(page: Page, workspacePath: string) {
  * Clicks on a file in the file tree to open it
  * Only clicks on files (not directories) by checking for presence of file icon
  */
-export async function openFileInTree(page: Page, fileName: string) {
+export async function openFileInTree(
+  page: Page,
+  fileName: string,
+  options: { waitForEditor?: boolean } = {},
+) {
+  const { waitForEditor = true } = options;
   // Wait for the file button to be present
   // Files have a specific structure: button > div > svg (FileText icon) + span (filename)
   const fileButton = page.locator(`button:has-text("${fileName}")`).first();
 
   await fileButton.waitFor({ timeout: 5000 });
-  await fileButton.click();
 
-  // Wait a bit for the navigation/URL update to complete
+  if (!waitForEditor) {
+    // Caller expects no editor to mount (e.g. a failing content read).
+    await fileButton.click();
+    await page.waitForTimeout(300);
+    return;
+  }
+
+  // A click during a layout shift (initial mount, tab re-parenting) can
+  // land without a tab ever becoming visible, which read helpers then see
+  // as an empty editor forever. Retry the user action until an editor is
+  // actually visible — the standard self-healing pattern for compound UI
+  // actions under parallel-suite load.
+  await expect(async () => {
+    await fileButton.click();
+    await expect(
+      page.locator('[role="textbox"]:visible').first(),
+    ).toBeVisible({ timeout: 2000 });
+  }).toPass({ timeout: 15_000 });
+
+  // Let the navigation/URL update settle
   await page.waitForTimeout(300);
 }
 

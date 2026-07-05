@@ -353,6 +353,26 @@ export interface WorkspaceCollections {
  */
 const workspaceCollectionsRegistry = new Map<string, WorkspaceCollections>();
 
+if (import.meta.env.DEV) {
+  // Diagnostic hook for e2e failure dumps (dev builds only).
+  (window as unknown as Record<string, unknown>).__metristsDebugContentRow = (
+    workspaceId: string,
+    filePath: string,
+  ) => {
+    const collections = workspaceCollectionsRegistry.get(workspaceId);
+    if (!collections) return { error: "no collections for workspace" };
+    const content = collections.content.get(filePath);
+    const metadata = collections.metadata.get(filePath);
+    return {
+      metadata,
+      content: content && {
+        ...content,
+        content: `${content.content.slice(0, 40)} (len ${content.content.length})`,
+      },
+    };
+  };
+}
+
 /**
  * Get or create collections for a workspace
  *

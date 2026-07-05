@@ -8,7 +8,7 @@ import { defineConfig, devices } from "@playwright/test";
  * They may be created on test failures but won't be committed.
  */
 export default defineConfig({
-  testDir: "./tests/e2e",
+  testDir: "./tests",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -23,8 +23,17 @@ export default defineConfig({
   },
 
   projects: [
+    // Full-app end-to-end suites.
     {
       name: "chromium",
+      testMatch: /e2e\/.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    // Cheap component-level suites against the /__harness/* routes —
+    // real browser, no app bootstrap (see src/test-harness/).
+    {
+      name: "editor",
+      testMatch: /editor\/.*\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
     },
   ],

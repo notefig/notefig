@@ -18,6 +18,10 @@ import {
   createImageDropHandler,
   createImagePasteHandler,
 } from "./editor-image-paste";
+import {
+  composeDropHandlers,
+  createProtocolDropHandler,
+} from "@/utils/drag-protocol";
 
 export type { EditorLocation };
 
@@ -70,6 +74,24 @@ export interface ImageInstance extends EditorInstance {
 
 /** Module-level store: file path → editor instance */
 const editorInstances = new Map<string, EditorInstance>();
+
+if (import.meta.env.DEV) {
+  // Diagnostic hook for e2e failure dumps (dev builds only).
+  (window as unknown as Record<string, unknown>).__metristsDebugEditors =
+    () =>
+      Array.from(editorInstances.entries()).map(([path, instance]) => {
+        const editor = isMarkdownInstance(instance)
+          ? instance.editor
+          : undefined;
+        return {
+          path,
+          type: instance.type,
+          destroyed: editor?.isDestroyed,
+          docLength: editor?.state.doc.textContent.length,
+          docHead: editor?.state.doc.textContent.slice(0, 40),
+        };
+      });
+}
 
 const EDITOR_FOCUS_PRIORITY = 70;
 
@@ -135,7 +157,9 @@ function createMarkdownInstance(
 
   const extensions = [
     ...editorExtensions.filter((e) => e.name !== "image"),
-    MarkdownImage.configure({ allowBase64: true, workspaceRoot } as any),
+    // filePath lets the image node view declare its drag-protocol payload
+    // (which document to rewrite when the asset is moved elsewhere).
+    MarkdownImage.configure({ allowBase64: true, workspaceRoot, filePath } as any),
   ];
 
   const editor = new Editor({
@@ -144,7 +168,13 @@ function createMarkdownInstance(
     editable: true,
     autofocus: false,
     editorProps: {
-      handleDrop: createImageDropHandler(workspaceRoot),
+      // Protocol handler first: it consumes tagged drags (file-tree rows,
+      // image assets) and falls through for internal moves and payload-less
+      // drags, so OS image drops still reach the image handler unchanged.
+      handleDrop: composeDropHandlers(
+        createProtocolDropHandler(),
+        createImageDropHandler(workspaceRoot),
+      ),
       handlePaste: createImagePasteHandler(workspaceRoot),
 
       handleDOMEvents: {

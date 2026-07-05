@@ -181,7 +181,7 @@ test.describe("Content Loading", () => {
     // storage row so the on-demand content read fails.
     await simulateExternalFileDeletion(page, `${ws}/doomed-file.md`);
 
-    await openFileInTree(page, "doomed-file.md");
+    await openFileInTree(page, "doomed-file.md", { waitForEditor: false });
 
     // The error placeholder appears instead of an editor.
     await expect(page.getByText("Failed to load file:")).toBeVisible({

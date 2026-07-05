@@ -2,11 +2,13 @@ import { Component, Suspense, useState, type ReactNode } from "react";
 import type { NodeViewProps } from "@tiptap/core";
 import { NodeViewWrapper } from "@tiptap/react";
 import { useImageUrl } from "@/hooks/use-image-url";
+import { dragSourceProps } from "@/utils/drag-protocol";
 
 export function EditorImage(props: NodeViewProps) {
   const src = props.node.attrs.src as string;
-  const workspaceRoot =
-    (props.extension.options as Record<string, string>).workspaceRoot || "/";
+  const options = props.extension.options as Record<string, string>;
+  const workspaceRoot = options.workspaceRoot || "/";
+  const filePath = options.filePath || "";
 
   if (
     !src ||
@@ -22,7 +24,20 @@ export function EditorImage(props: NodeViewProps) {
   }
 
   return (
-    <NodeViewWrapper data-drag-handle>
+    <NodeViewWrapper
+      data-drag-handle
+      // Declares the drag-protocol payload this node registers when dragged
+      // (external drop zones like sidebar folders move the asset file).
+      // ProseMirror still owns the drag itself — in-editor moves keep their
+      // moved=true semantics.
+      {...dragSourceProps({
+        kind: "image-asset",
+        src,
+        absolutePath: `${workspaceRoot}/${src}`,
+        workspaceRoot,
+        sourceFilePath: filePath,
+      })}
+    >
       <ImageErrorBoundary fallback={<BrokenImage src={src} />}>
         <Suspense fallback={<div className="h-8 w-full animate-pulse rounded bg-muted" />}>
           <EditorImageInner src={src} workspaceRoot={workspaceRoot} />

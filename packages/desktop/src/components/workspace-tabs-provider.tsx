@@ -1,5 +1,12 @@
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  type ReactNode,
+} from "react";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
+import { registerProtocolContext } from "@/utils/drag-protocol";
 
 interface WorkspaceTabsContextValue {
   /**
@@ -19,6 +26,12 @@ export function WorkspaceTabsProvider({
   children,
 }: WorkspaceTabsContextValue & { children: ReactNode }) {
   const value = useMemo(() => ({ openFile }), [openFile]);
+
+  // Drop actions (drag protocol) open files through the same entry point.
+  useEffect(() => {
+    registerProtocolContext({ openFile });
+  }, [openFile]);
+
   return (
     <WorkspaceTabsContext.Provider value={value}>
       {children}
