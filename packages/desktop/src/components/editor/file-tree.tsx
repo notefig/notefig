@@ -504,7 +504,12 @@ function FileTreeItem({
         : {})}
       className={
         node.type === "directory"
-          ? "data-[mtr-drop-over=true]:bg-accent/40 rounded-sm transition-colors"
+          ? cn(
+              // drop feedback mirrors the dockable tab bar (inset ring + tint)
+              "rounded-sm transition-colors",
+              "data-[mtr-drop-over=true]:shadow-[0_0_0_1px_hsl(var(--ring))_inset]",
+              "data-[mtr-drop-over=true]:bg-[hsl(var(--ring)/0.12)]",
+            )
           : undefined
       }
     >
@@ -685,7 +690,11 @@ export function FileTree({
     >
       <ScrollArea className="h-full w-full">
         <div
-          className="py-1 data-[mtr-drop-over=true]:bg-accent/20 transition-colors"
+          className={cn(
+            "py-1 transition-colors",
+            "data-[mtr-drop-over=true]:shadow-[0_0_0_1px_hsl(var(--ring))_inset]",
+            "data-[mtr-drop-over=true]:bg-[hsl(var(--ring)/0.06)]",
+          )}
           data-file-tree-root
           data-mtr-dropzone={rootDrop["data-mtr-dropzone"]}
           ref={(element) => {

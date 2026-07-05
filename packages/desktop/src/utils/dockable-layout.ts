@@ -7,6 +7,14 @@ export interface OpenFileInLayoutOptions {
   tabId: string;
   intent: OpenFileIntent;
   targetWindowId?: string;
+  /**
+   * When the file is already open in a different window than
+   * targetWindowId, move its tab there instead of selecting it in place.
+   * Only explicit placement gestures (drag-and-drop onto a window) should
+   * set this — targetWindowId alone often just carries the active-window
+   * fallback.
+   */
+  moveIfOpen?: boolean;
 }
 
 function mapLayout(
@@ -220,10 +228,22 @@ export function openFileInLayout(
   layout: LayoutNode[],
   options: OpenFileInLayoutOptions,
 ): LayoutNode[] {
-  const { tabId, intent, targetWindowId } = options;
+  const { tabId, intent, targetWindowId, moveIfOpen } = options;
 
   const existingWindow = findWindowContainingTab(layout, tabId);
   if (existingWindow) {
+    if (
+      moveIfOpen &&
+      targetWindowId &&
+      existingWindow.id !== targetWindowId &&
+      findWindowById(layout, targetWindowId)
+    ) {
+      // Explicit placement gesture: relocate the tab. Removing it first
+      // also collapses the source window when it becomes empty, matching
+      // dnd-kit tab moves.
+      const without = removeTabFromLayout(layout, tabId);
+      return openTabInWindow(without, targetWindowId, tabId, "new-tab");
+    }
     return selectTabInLayout(layout, tabId);
   }
 

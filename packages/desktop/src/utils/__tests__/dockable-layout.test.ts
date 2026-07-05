@@ -139,6 +139,65 @@ describe("dockable-layout", () => {
     expect(findWindowContainingTab(next, "b.md")?.selected).toBe("a.md");
   });
 
+  it("openFileInLayout with moveIfOpen relocates an open tab to the target window", () => {
+    const layout = makeTwoWindowLayout();
+    const next = openFileInLayout(layout, {
+      tabId: "a.md",
+      intent: "new-tab",
+      targetWindowId: "window-right",
+      moveIfOpen: true,
+    });
+
+    const right = findWindowContainingTab(next, "a.md");
+    expect(right?.id).toBe("window-right");
+    expect(right?.children).toEqual(["c.md", "a.md"]);
+    expect(right?.selected).toBe("a.md");
+    // gone from the source window
+    expect(findWindowContainingTab(next, "b.md")?.children).toEqual(["b.md"]);
+  });
+
+  it("openFileInLayout with moveIfOpen collapses an emptied source window", () => {
+    const layout = makeTwoWindowLayout();
+    const next = openFileInLayout(layout, {
+      tabId: "c.md",
+      intent: "new-tab",
+      targetWindowId: "window-left",
+      moveIfOpen: true,
+    });
+
+    expect(findWindowContainingTab(next, "c.md")?.id).toBe("window-left");
+    // window-right had only c.md — it should be gone entirely
+    expect(resolveTargetWindowId(next, "window-right")).not.toBe(
+      "window-right",
+    );
+  });
+
+  it("openFileInLayout with moveIfOpen and same window just selects", () => {
+    const layout = makeTwoWindowLayout();
+    const next = openFileInLayout(layout, {
+      tabId: "a.md",
+      intent: "new-tab",
+      targetWindowId: "window-left",
+      moveIfOpen: true,
+    });
+
+    const left = findWindowContainingTab(next, "a.md");
+    expect(left?.id).toBe("window-left");
+    expect(left?.children).toEqual(["a.md", "b.md"]);
+    expect(left?.selected).toBe("a.md");
+  });
+
+  it("openFileInLayout without moveIfOpen selects in place (active-window fallback safety)", () => {
+    const layout = makeTwoWindowLayout();
+    const next = openFileInLayout(layout, {
+      tabId: "a.md",
+      intent: "new-tab",
+      targetWindowId: "window-right",
+    });
+
+    expect(findWindowContainingTab(next, "a.md")?.id).toBe("window-left");
+  });
+
   it("addTabToLayout appends to first window", () => {
     const layout = makeTwoWindowLayout();
     const next = addTabToLayout(layout, "x.md");

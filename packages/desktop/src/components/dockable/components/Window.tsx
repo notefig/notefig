@@ -87,10 +87,16 @@ function TabView({
                 tabId: payload.path,
                 intent: "new-tab",
                 targetWindowId: id,
+                moveIfOpen: true,
               });
             },
           })}
-          className="relative mx-2 flex min-w-0 w-[calc(100%-1rem)] rounded-lg border border-sidebar-border overflow-hidden data-[mtr-drop-over=true]:border-primary"
+          className={cn(
+            "relative mx-2 flex min-w-0 w-[calc(100%-1rem)] rounded-lg border border-sidebar-border overflow-hidden",
+            // drop feedback matches the dockable isOver treatment
+            "data-[mtr-drop-over=true]:border-ring",
+            "data-[mtr-drop-over=true]:shadow-[0_0_0_1px_hsl(var(--ring))_inset]",
+          )}
           style={{ backgroundColor: "rgba(15, 15, 15, 0.05)" }}
         >
           <ScrollArea className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden">

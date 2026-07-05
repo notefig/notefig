@@ -237,6 +237,19 @@ describe("ProseMirror protocol drop handler", () => {
     expect(handler(view, event, null, true)).toBe(false);
   });
 
+  it("consumes drops a zone already handled (defaultPrevented)", () => {
+    const openFile = vi.fn();
+    registerProtocolContext({ openFile });
+    tagCurrentDrag(filePayload);
+    const handler = createProtocolDropHandler();
+    const event = {
+      dataTransfer: null,
+      defaultPrevented: true,
+    } as unknown as DragEvent;
+    expect(handler(view, event, null, false)).toBe(true);
+    expect(openFile).not.toHaveBeenCalled();
+  });
+
   it("falls through when no payload exists (OS image drops)", () => {
     const handler = createProtocolDropHandler();
     const event = {

@@ -42,6 +42,22 @@ export function getFileExtension(filePath: string): string {
   return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : "";
 }
 
+const imageExtensions = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "webp",
+  "svg",
+  "bmp",
+  "ico",
+]);
+
+/** Whether a path is an image by extension (viewer/insertable image). */
+export function isImageFile(filePath: string): boolean {
+  return imageExtensions.has(getFileExtension(filePath));
+}
+
 /**
  * Check if a file is a text file that can be edited in the text editor.
  * This excludes binary files like images, videos, PDFs, etc.

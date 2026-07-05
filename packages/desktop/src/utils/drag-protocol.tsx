@@ -27,6 +27,7 @@
 
 import {
   cloneElement,
+  useRef,
   useState,
   type ReactElement,
   type ReactNode,
@@ -178,18 +179,24 @@ const DRAG_ATTR = "data-mtr-drag";
 const DROP_ATTR = "data-mtr-dropzone";
 const DROP_OVER_ATTR = "data-mtr-drop-over";
 
+/** Where a drop landed — available to every zone regardless of engine. */
+export interface DropInfo {
+  /** The registered zone element the drop landed on. */
+  element: HTMLElement;
+  /** Viewport drop point. */
+  position: { x: number; y: number };
+  /** Native DragEvent; undefined for pointer-driven (dnd-kit) drags. */
+  event?: DragEvent;
+}
+
 export interface DropZoneConfig<
   K extends DragPayloadKind = DragPayloadKind,
 > {
   /** Payload kinds this zone reacts to; everything else passes through. */
   accepts: readonly K[];
   dropEffect?: "copy" | "move";
-  /**
-   * Self-contained drop behavior, colocated with the element. `event` is
-   * the native DragEvent for HTML5 drags and undefined for pointer-driven
-   * (dnd-kit) drags.
-   */
-  onDrop: (payload: PayloadOfKind<K>, event?: DragEvent) => void;
+  /** Self-contained drop behavior, colocated with the element. */
+  onDrop: (payload: PayloadOfKind<K>, info: DropInfo) => void;
 }
 
 /** Element → config registry; entries die with their DOM nodes. */
@@ -338,7 +345,11 @@ function handleDrop(event: DragEvent): void {
   event.preventDefault();
 
   try {
-    hit.config.onDrop(payload, event);
+    hit.config.onDrop(payload, {
+      element: hit.element,
+      position: { x: event.clientX, y: event.clientY },
+      event,
+    });
   } finally {
     // Same-window drags also get a dragend on the source, but drops onto
     // targets that remove the source from the DOM can swallow it.
@@ -443,12 +454,18 @@ export function ProtocolDndContext(props: {
   children: ReactNode;
   overlay?: (payload: DragPayload) => ReactNode;
 }): ReactElement {
+  // The ref is the source of truth for handlers: dnd-kit can deliver a
+  // trailing onDragMove after onDragEnd, and a state-based guard would
+  // read a stale closure and re-stamp the drop-over highlight after the
+  // drop cleared it. State exists only to render the overlay.
+  const activePayloadRef = useRef<DragPayload | null>(null);
   const [activePayload, setActivePayload] = useState<DragPayload | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   );
 
   const finish = () => {
+    activePayloadRef.current = null;
     setHoveredDropElement(null);
     clearCurrentDragPayload();
     setActivePayload(null);
@@ -460,28 +477,31 @@ export function ProtocolDndContext(props: {
       | undefined;
     if (!payload) return;
     tagCurrentDrag(payload);
+    activePayloadRef.current = payload;
     setActivePayload(payload);
   };
 
   const handleMove = (event: DragMoveEvent) => {
-    if (!activePayload) return;
+    const payload = activePayloadRef.current;
+    if (!payload) return;
     const { x, y } = pointFromDndEvent(event);
     const hit = dropZoneAtPoint(x, y);
     setHoveredDropElement(
-      hit && hit.config.accepts.includes(activePayload.kind)
-        ? hit.element
-        : null,
+      hit && hit.config.accepts.includes(payload.kind) ? hit.element : null,
     );
   };
 
   const handleEnd = (event: DragEndEvent) => {
-    const payload = activePayload;
+    const payload = activePayloadRef.current;
     finish();
     if (!payload) return;
     const { x, y } = pointFromDndEvent(event);
     const hit = dropZoneAtPoint(x, y);
     if (hit && hit.config.accepts.includes(payload.kind)) {
-      hit.config.onDrop(payload as never, undefined);
+      hit.config.onDrop(payload as never, {
+        element: hit.element,
+        position: { x, y },
+      });
     }
   };
 
@@ -543,6 +563,11 @@ export function composeDropHandlers(
 export function createProtocolDropHandler(): ProseMirrorDropHandler {
   return function handleProtocolDrop(_view, event, _slice, moved) {
     if (moved) return false;
+
+    // The delegated window listener runs first (capture) — when a zone on
+    // or around the editor already handled this drop, consume it here so
+    // ProseMirror neither double-handles nor pastes a text form.
+    if (event.defaultPrevented) return true;
 
     const payload = getDragPayload(event.dataTransfer);
     if (!payload) return false;

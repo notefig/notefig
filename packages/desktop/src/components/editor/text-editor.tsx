@@ -12,7 +12,9 @@ import { useLinkPrompt } from "./use-link-prompt";
 import { TiptapToolbar } from "./tiptap-toolbar";
 import { LinkBubbleMenu } from "./tiptap-link-menu";
 import { TableMenu } from "./tiptap-table-menu";
+import { cn } from "@/lib/utils";
 import { dropZoneProps, getProtocolContext } from "@/utils/drag-protocol";
+import { isImageFile } from "@/utils/fs";
 import "./tiptap.css";
 
 interface TextEditorProps {
@@ -49,17 +51,48 @@ export function TextEditor({
     <div className="flex flex-col flex-1 min-h-0 w-full z-0">
       <TiptapToolbar editor={editor} onLinkToggle={handleLinkToggle} />
       <div
-        className="flex-1 min-h-0 overflow-auto tiptap-editor-wrapper"
-        // Dropping a file here opens it as a tab. Pointer drags (file tree)
-        // dispatch through this zone; native drags are additionally guarded
-        // by the protocol handler in the ProseMirror handleDrop chain.
+        // Dropping a file here opens it as a tab in THIS editor's window;
+        // dropping an image file inserts it into the document at the drop
+        // point. Pointer drags (file tree) dispatch through this zone;
+        // native drags are additionally guarded by the protocol handler in
+        // the ProseMirror handleDrop chain. Drop feedback mirrors the
+        // dockable tab bar (inset ring shadow + tint).
+        className={cn(
+          "flex-1 min-h-0 overflow-auto tiptap-editor-wrapper",
+          "data-[mtr-drop-over=true]:shadow-[0_0_0_1px_hsl(var(--ring))_inset]",
+          "data-[mtr-drop-over=true]:bg-[hsl(var(--ring)/0.06)]",
+        )}
         {...dropZoneProps({
           accepts: ["file"],
-          onDrop: (payload) => {
+          onDrop: (payload, info) => {
             if (payload.fileType !== "file") return;
+
+            if (isImageFile(payload.path)) {
+              const src = payload.path.startsWith(basePath + "/")
+                ? payload.path.slice(basePath.length + 1)
+                : payload.path;
+              const pos =
+                editor.view.posAtCoords({
+                  left: info.position.x,
+                  top: info.position.y,
+                })?.pos ?? editor.state.selection.from;
+              editor.view.dispatch(
+                editor.state.tr.insert(
+                  pos,
+                  editor.state.schema.nodes.image.create({ src }),
+                ),
+              );
+              return;
+            }
+
             getProtocolContext().openFile?.({
               tabId: payload.path,
               intent: "new-tab",
+              targetWindowId:
+                info.element
+                  .closest("[data-dockable-window-id]")
+                  ?.getAttribute("data-dockable-window-id") ?? undefined,
+              moveIfOpen: true,
             });
           },
         })}

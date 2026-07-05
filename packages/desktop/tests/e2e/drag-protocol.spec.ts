@@ -183,6 +183,98 @@ test.describe("drag protocol: file tree → tabs/editor", () => {
     await expect(page.locator(".ProseMirror")).not.toContainText("file://");
   });
 
+  test("dropping an image file row on the editor inserts it into the document", async ({
+    page,
+  }) => {
+    await openNotes(page);
+    // the fixture doc already contains one image node
+    await expect(page.locator(".ProseMirror [data-drag-handle]")).toHaveCount(
+      1,
+    );
+
+    await pointerDrag(page, treeRow("photo.png"), ".ProseMirror > p");
+
+    // a second image node appears in the document…
+    await expect(page.locator(".ProseMirror [data-drag-handle]")).toHaveCount(
+      2,
+    );
+    // …and no tab was opened for it (still a single tab → no tab bar)
+    await expect(page.locator('[data-testid="tab-bar"]')).not.toBeVisible();
+    // the drop indicator never sticks after the drop
+    await expect(page.locator("[data-mtr-drop-over='true']")).toHaveCount(0);
+  });
+
+  test("with two windows, an editor drop opens in the window it landed on", async ({
+    page,
+  }) => {
+    await openNotes(page);
+    await page.locator(treeRow(OTHER_NAME)).click({
+      modifiers: ["ControlOrMeta"],
+    });
+    await expect(page.locator('[data-testid="tab-bar"]')).toBeVisible();
+
+    // split: drag the other.md tab onto the right edge zone
+    const windowBox = (await page
+      .locator("[data-dockable-window-id]")
+      .first()
+      .boundingBox())!;
+    const tabBox = (await page
+      .locator('[data-testid="tab-bar"] div[title="other.md"]')
+      .boundingBox())!;
+    await page.mouse.move(
+      tabBox.x + tabBox.width / 2,
+      tabBox.y + tabBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(tabBox.x + tabBox.width / 2 + 15, tabBox.y + 15, {
+      steps: 3,
+    });
+    await page.mouse.move(
+      windowBox.x + windowBox.width - 8,
+      windowBox.y + windowBox.height / 2,
+      { steps: 12 },
+    );
+    await page.mouse.up();
+    await expect(page.locator("[data-dockable-window-id]")).toHaveCount(2);
+
+    // drop a file onto the FIRST window's editor — it must open there,
+    // not in the most recently active (second) window
+    await pointerDrag(
+      page,
+      treeRow("inside.md"),
+      "[data-dockable-window-id] >> nth=0 >> .ProseMirror",
+    );
+
+    await expect(
+      page.locator(
+        '[data-dockable-window-id] >> nth=0 >> div[title="inside.md"]',
+      ),
+    ).toBeVisible({ timeout: 5_000 });
+    await expect(
+      page.locator(
+        '[data-dockable-window-id] >> nth=1 >> div[title="inside.md"]',
+      ),
+    ).toHaveCount(0);
+
+    // dragging an ALREADY-OPEN file onto the other window MOVES its tab
+    // there (explicit placement gesture) instead of selecting it in place
+    await pointerDrag(
+      page,
+      treeRow("inside.md"),
+      "[data-dockable-window-id] >> nth=1 >> .ProseMirror",
+    );
+    await expect(
+      page.locator(
+        '[data-dockable-window-id] >> nth=1 >> div[title="inside.md"]',
+      ),
+    ).toBeVisible({ timeout: 5_000 });
+    await expect(
+      page.locator(
+        '[data-dockable-window-id] >> nth=0 >> div[title="inside.md"]',
+      ),
+    ).toHaveCount(0);
+  });
+
   test("dropping a directory row on the editor is a silent no-op", async ({
     page,
   }) => {

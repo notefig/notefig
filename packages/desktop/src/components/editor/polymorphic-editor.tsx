@@ -5,7 +5,7 @@ import { TextEditor } from "./text-editor";
 import { ImageViewer } from "./image-viewer";
 import { FileLoadingPlaceholder } from "./file-loading-placeholder";
 import { hasEditor } from "@/components/editor/editor-store";
-import { getFileExtension, isTextFile } from "@/utils/fs";
+import { getFileExtension, isImageFile, isTextFile } from "@/utils/fs";
 
 export type EditorType = "markdown" | "image";
 
@@ -17,26 +17,12 @@ interface PolymorphicEditorProps {
   contentError?: string;
 }
 
-const imageExtensions = new Set([
-  "jpg",
-  "jpeg",
-  "png",
-  "gif",
-  "webp",
-  "svg",
-  "bmp",
-  "ico",
-]);
-
 /**
  * Determine the editor type for a given file path.
  * All non-image files are treated as markdown.
  */
 export function getEditorType(filePath: string): EditorType {
-  if (imageExtensions.has(getFileExtension(filePath))) {
-    return "image";
-  }
-  return "markdown";
+  return isImageFile(filePath) ? "image" : "markdown";
 }
 
 /**
@@ -47,7 +33,7 @@ export function getEditorType(filePath: string): EditorType {
 export function canOpenFile(filePath: string): boolean {
   const ext = getFileExtension(filePath);
   if (!ext) return true;
-  if (imageExtensions.has(ext)) return true;
+  if (isImageFile(filePath)) return true;
   return isTextFile(filePath);
 }
 
