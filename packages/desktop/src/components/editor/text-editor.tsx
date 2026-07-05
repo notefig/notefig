@@ -52,6 +52,25 @@ export function TextEditor({
   useEditorFocusLifecycle(editor, file.path);
   const handleLinkToggle = useLinkPrompt(editor);
 
+  // The contenteditable fills the wrapper's height (tiptap.css), but the
+  // side gutters around the centered prose column and its padding are still
+  // outside ProseMirror — clicking there should focus the editor at the
+  // nearest position instead of doing nothing.
+  const handleGutterMouseDown = (event: React.MouseEvent) => {
+    const target = event.target as HTMLElement;
+    if (target !== event.currentTarget && !target.matches(".prose")) return;
+    event.preventDefault();
+    const pos = editor.view.posAtCoords({
+      left: event.clientX,
+      top: event.clientY,
+    });
+    if (pos) {
+      editor.chain().focus().setTextSelection(pos.pos).run();
+    } else {
+      editor.commands.focus("end");
+    }
+  };
+
   return (
     <div className="flex flex-col flex-1 min-h-0 w-full z-0">
       <TiptapToolbar editor={editor} onLinkToggle={handleLinkToggle} />
@@ -63,6 +82,7 @@ export function TextEditor({
           "data-[mtr-drop-over=true]:shadow-[0_0_0_1px_hsl(var(--ring))_inset]",
           "data-[mtr-drop-over=true]:bg-[hsl(var(--ring)/0.06)]",
         )}
+        onMouseDown={handleGutterMouseDown}
         {...dropZoneProps({
           accepts: ["file"],
           onDrop: (payload, info) => {
