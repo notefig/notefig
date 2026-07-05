@@ -21,6 +21,7 @@
  *     getMarkdown(): string | null;            // current doc serialization
  *     readFile(path): Promise<string | null>;  // adapter-side content
  *     opened: OpenFileInLayoutOptions[];       // recorded openFile calls
+ *     selectAll(): void;                       // focus + select the whole doc
  *   }
  */
 
@@ -96,6 +97,12 @@ export function EditorHarness() {
         return result.succeeded[0]?.content ?? null;
       },
       opened,
+      // Selection set through the editor itself — browser-driven selection
+      // (keyboard/mouse) reaches ProseMirror asynchronously via
+      // selectionchange, which races with synchronously dispatched events.
+      selectAll: () => {
+        getMarkdownEditor(config.filePath)?.chain().focus().selectAll().run();
+      },
     };
   }, [config, opened]);
 

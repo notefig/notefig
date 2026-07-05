@@ -192,6 +192,58 @@ test.describe("images", () => {
   });
 });
 
+test.describe("native format events", () => {
+  const dispatchFormat = (page: Page, inputType: string) =>
+    page.evaluate((inputType) => {
+      const event = new InputEvent("beforeinput", {
+        inputType,
+        bubbles: true,
+        cancelable: true,
+      });
+      document.querySelector(".ProseMirror")!.dispatchEvent(event);
+      return event.defaultPrevented;
+    }, inputType);
+
+  // Selecting via the harness (through the editor) rather than keyboard or
+  // mouse: browser-driven selection reaches ProseMirror asynchronously via
+  // selectionchange, which races with the synchronous dispatch below.
+  const selectAll = (page: Page) =>
+    page.evaluate(() =>
+      (
+        window as unknown as { __HARNESS__: { selectAll: () => void } }
+      ).__HARNESS__.selectAll(),
+    );
+
+  test("OS Font menu inputTypes apply the matching marks", async ({
+    page,
+  }) => {
+    await openHarness(page, { content: "styled\n" });
+    await selectAll(page);
+
+    expect(await dispatchFormat(page, "formatBold")).toBe(true);
+    await expect(page.locator(".ProseMirror strong")).toHaveText("styled");
+
+    await dispatchFormat(page, "formatUnderline");
+    await dispatchFormat(page, "formatStrikeThrough");
+
+    const markdown = await getMarkdown(page);
+    expect(markdown).toContain("**");
+    expect(markdown).toContain("<u>");
+    expect(markdown).toContain("~~");
+  });
+
+  test("unmapped format inputTypes are swallowed without changes", async ({
+    page,
+  }) => {
+    await openHarness(page, { content: "plain\n" });
+    await selectAll(page);
+
+    const before = await getMarkdown(page);
+    expect(await dispatchFormat(page, "formatJustifyCenter")).toBe(true);
+    expect(await getMarkdown(page)).toBe(before);
+  });
+});
+
 test.describe("search", () => {
   test("finds matches across workspace files and opens them", async ({
     page,
