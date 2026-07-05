@@ -1,0 +1,202 @@
+/**
+ * Integration tests for the worker-backed save pipeline in useEditorFileSync:
+ * edits ship as they come (no debounce), coalesce under backpressure, and
+ * still save when the conversion worker is unavailable (inline fallback —
+ * which is also the path this happy-dom environment exercises, since it has
+ * no real module workers).
+ */
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { createElement } from "react";
+import { Editor } from "@tiptap/core";
+import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
+import type { FileEntry } from "@/utils/fs";
+import { calculateContentHash } from "@/utils/hash";
+
+vi.mock("@/utils/collections", () => ({
+  writeFileContent: vi.fn(async () => {}),
+}));
+
+import { writeFileContent } from "@/utils/collections";
+import {
+  parseMarkdown,
+  serializeDoc,
+  resetConverterForTests,
+  closeDocumentSync,
+} from "@/utils/markdown-conversion";
+import { useEditorFileSync } from "../use-editor-file-sync";
+
+const writeFileContentMock = vi.mocked(writeFileContent);
+
+(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+
+beforeAll(() => {
+  // No real module workers here: force the deterministic inline fallback,
+  // which doubles as the worker-boot-failure regression test.
+  vi.stubGlobal(
+    "Worker",
+    class {
+      constructor() {
+        throw new Error("Workers unavailable in this environment");
+      }
+    },
+  );
+  resetConverterForTests();
+});
+
+let editor: Editor;
+let root: Root;
+let container: HTMLElement;
+
+interface HarnessProps {
+  file: FileEntry;
+}
+
+function Harness({ file }: HarnessProps) {
+  useEditorFileSync(editor, file, "/ws", true);
+  return null;
+}
+
+function makeFile(content: string): FileEntry {
+  return {
+    path: "/ws/note.md",
+    type: "file",
+    content,
+    contentHash: calculateContentHash(content),
+  };
+}
+
+async function render(file: FileEntry) {
+  await act(async () => {
+    root.render(createElement(Harness, { file }));
+  });
+}
+
+beforeEach(async () => {
+  writeFileContentMock.mockClear();
+  editor = new Editor({
+    extensions: editorExtensions,
+    content: "start",
+    editable: true,
+    autofocus: false,
+  });
+  container = document.createElement("div");
+  root = createRoot(container);
+});
+
+afterEach(async () => {
+  await act(async () => {
+    root.unmount();
+  });
+  editor.destroy();
+  // DocumentSync state is per-path and module-global.
+  closeDocumentSync("/ws/note.md");
+});
+
+async function flushSaves() {
+  // Serialize + write are promise-chained microtasks plus the inline codec;
+  // a few macrotask turns let the loop drain.
+  for (let i = 0; i < 20; i++) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+    if (
+      writeFileContentMock.mock.calls.length > 0 &&
+      !editorHasPendingSave()
+    ) {
+      break;
+    }
+  }
+}
+
+function editorHasPendingSave(): boolean {
+  const lastCall = writeFileContentMock.mock.calls.at(-1);
+  return lastCall === undefined;
+}
+
+describe("save pipeline (inline fallback = worker-boot-failure path)", () => {
+  it("saves an edit without any debounce timer", async () => {
+    await render(makeFile("start"));
+
+    await act(async () => {
+      editor.commands.insertContentAt(editor.state.doc.content.size - 1, " typed");
+    });
+    await flushSaves();
+
+    expect(writeFileContentMock).toHaveBeenCalled();
+    const [basePath, path, markdown] =
+      writeFileContentMock.mock.calls.at(-1)!;
+    expect(basePath).toBe("/ws");
+    expect(path).toBe("/ws/note.md");
+    expect(markdown).toBe("start typed");
+  });
+
+  it("coalesces a burst of edits and always persists the final state", async () => {
+    await render(makeFile("start"));
+
+    await act(async () => {
+      for (let i = 0; i < 10; i++) {
+        editor.commands.insertContentAt(editor.state.doc.content.size - 1, "x");
+      }
+    });
+    await flushSaves();
+
+    const calls = writeFileContentMock.mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    // Backpressure coalescing: far fewer writes than edits.
+    expect(calls.length).toBeLessThan(10);
+    expect(calls.at(-1)![2]).toBe("start" + "x".repeat(10));
+  });
+
+  it("matches the standalone parse/serialize facade output", async () => {
+    const doc = await parseMarkdown("# Title\n\nBody");
+    const result = await serializeDoc(doc);
+    expect(result.markdown).toBe("# Title\n\nBody");
+    expect(result.hash).toBe(calculateContentHash("# Title\n\nBody"));
+  });
+
+  it("adopts an external change without writing it back", async () => {
+    await render(makeFile("start"));
+
+    await render(makeFile("external content"));
+    // Adoption parses asynchronously.
+    for (let i = 0; i < 20; i++) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      });
+      if (editor.state.doc.textContent === "external content") break;
+    }
+
+    expect(editor.state.doc.textContent).toBe("external content");
+    expect(writeFileContentMock).not.toHaveBeenCalled();
+  });
+
+  it("does not save while updates are suppressed as not-loaded", async () => {
+    editor.destroy();
+    editor = new Editor({
+      extensions: editorExtensions,
+      content: "start",
+      editable: true,
+      autofocus: false,
+    });
+
+    await act(async () => {
+      root.render(
+        createElement(function NotLoaded({ file }: HarnessProps) {
+          useEditorFileSync(editor, file, "/ws", false);
+          return null;
+        }, { file: makeFile("start") }),
+      );
+    });
+
+    await act(async () => {
+      editor.commands.insertContentAt(editor.state.doc.content.size - 1, "!");
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+
+    expect(writeFileContentMock).not.toHaveBeenCalled();
+  });
+});

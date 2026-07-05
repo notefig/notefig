@@ -5,12 +5,13 @@
  * Each type implements a common interface with polymorphic methods.
  */
 
-import { Editor } from "@tiptap/core";
+import { Editor, type JSONContent } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import {
   editorExtensions,
   MarkdownImage,
 } from "@/components/editor/tiptap-editor-kit";
+import { closeDocumentSync } from "@/utils/markdown-conversion";
 import { focusArbiter } from "@/utils/focus-arbiter";
 import { isSidebarTextEntryActive } from "@/utils/focus-arbiter";
 import { resolveEditorLocation, type EditorLocation } from "./editor-position";
@@ -149,7 +150,9 @@ export function requestEditorFocus(
 
 function createMarkdownInstance(
   filePath: string,
-  content: string,
+  // Doc JSON only — all markdown parsing goes through the conversion worker
+  // (utils/markdown-conversion.ts) before an editor is ever created.
+  content: JSONContent,
   basePath?: string,
 ): MarkdownInstance {
   const workspaceRoot =
@@ -283,7 +286,8 @@ function createImageInstance(filePath: string): ImageInstance {
 
 interface MarkdownConfig {
   type: "markdown";
-  content: string;
+  /** Parsed doc JSON; may be omitted only when the editor already exists. */
+  content?: JSONContent;
   basePath?: string;
 }
 
@@ -324,6 +328,13 @@ export function getOrCreateEditor(
 
   switch (config.type) {
     case "markdown":
+      if (!config.content) {
+        // Creating on empty content would let an autosave overwrite the
+        // real file with an empty document — fail loudly instead.
+        throw new Error(
+          `Markdown editor for ${filePath} requires a parsed document`,
+        );
+      }
       instance = createMarkdownInstance(
         filePath,
         config.content,
@@ -389,6 +400,7 @@ export function disposeEditor(filePath: string): void {
   if (instance) {
     instance.dispose();
     editorInstances.delete(filePath);
+    closeDocumentSync(filePath);
   }
 }
 
@@ -396,7 +408,10 @@ export function disposeEditor(filePath: string): void {
  * Dispose all editors (e.g. when switching workspaces).
  */
 export function disposeAllEditors(): void {
-  editorInstances.forEach((instance) => instance.dispose());
+  editorInstances.forEach((instance, filePath) => {
+    instance.dispose();
+    closeDocumentSync(filePath);
+  });
   editorInstances.clear();
 }
 

@@ -1,4 +1,5 @@
 import { EditorContent } from "@tiptap/react";
+import type { JSONContent } from "@tiptap/core";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { GripVertical } from "lucide-react";
 import type { FileEntry } from "../../utils/fs";
@@ -23,6 +24,9 @@ interface TextEditorProps {
   isContentLoaded: boolean;
   /** Set when the content read failed — file.content is NOT the real content. */
   contentError?: string;
+  /** Pre-parsed doc JSON from the conversion worker. Required to create an
+   * editor; may be omitted only when the instance already exists. */
+  initialDoc?: JSONContent;
 }
 
 export function TextEditor({
@@ -30,10 +34,11 @@ export function TextEditor({
   basePath,
   isContentLoaded,
   contentError,
+  initialDoc,
 }: TextEditorProps) {
   const instance = getOrCreateEditor(file.path, {
     type: "markdown",
-    content: file.content ?? "",
+    content: initialDoc,
     basePath,
   });
 

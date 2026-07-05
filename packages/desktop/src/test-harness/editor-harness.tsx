@@ -26,6 +26,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import type { JSONContent } from "@tiptap/core";
 import { TextEditor } from "@/components/editor/text-editor";
 import { SearchPanel } from "@/components/editor/search-panel";
 import { WorkspaceTabsProvider } from "@/components/workspace-tabs-provider";
@@ -35,6 +36,7 @@ import {
 } from "@/components/editor/editor-store";
 import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
 import { platformAdapter } from "@/adapters";
+import { openDocument } from "@/utils/markdown-conversion";
 import { calculateContentHash } from "@/utils/hash";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import type { FileEntry } from "@/utils/fs";
@@ -66,7 +68,7 @@ export function EditorHarness() {
     [],
   );
 
-  const [ready, setReady] = useState(false);
+  const [initialDoc, setInitialDoc] = useState<JSONContent | null>(null);
   const [opened] = useState<OpenFileInLayoutOptions[]>([]);
 
   useEffect(() => {
@@ -78,7 +80,9 @@ export function EditorHarness() {
         { path: config.filePath, content: config.content },
         ...(config.files ?? []),
       ]);
-      if (!cancelled) setReady(true);
+      // Editors accept only parsed doc JSON — same worker path as the app.
+      const doc = await openDocument(config.filePath, config.content);
+      if (!cancelled) setInitialDoc(doc);
     })();
     return () => {
       cancelled = true;
@@ -106,7 +110,7 @@ export function EditorHarness() {
     };
   }, [config, opened]);
 
-  if (!ready) return <div data-testid="harness-loading">loading…</div>;
+  if (!initialDoc) return <div data-testid="harness-loading">loading…</div>;
 
   const file: FileEntry = {
     path: config.filePath,
@@ -130,7 +134,12 @@ export function EditorHarness() {
           <SearchPanel workspacePath={config.basePath} />
         </div>
         <div className="flex min-w-0 flex-1 flex-col">
-          <TextEditor file={file} basePath={config.basePath} isContentLoaded />
+          <TextEditor
+            file={file}
+            basePath={config.basePath}
+            isContentLoaded
+            initialDoc={initialDoc}
+          />
         </div>
       </div>
     </WorkspaceTabsProvider>
