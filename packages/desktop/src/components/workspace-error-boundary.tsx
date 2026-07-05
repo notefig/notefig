@@ -95,6 +95,45 @@ const CHROME_SITE_PERMISSIONS_HELP_URL =
 const isMacDesktop = () =>
   !isWeb() && navigator.platform.toLowerCase().includes("mac");
 
+type RecoveryContent = {
+  title: string;
+  body: string;
+  actionLabel: string;
+  showSystemSettings: boolean;
+  showSitePermissionsHelp: boolean;
+};
+
+function getRecoveryContent(
+  error: FsError,
+  t: (key: string) => string,
+): RecoveryContent {
+  if (error.type === "handle_missing") {
+    return {
+      title: t("fsReconnectTitle"),
+      body: t("fsReconnectBody"),
+      actionLabel: t("fsChooseFolderAgain"),
+      showSystemSettings: false,
+      showSitePermissionsHelp: false,
+    };
+  }
+  if (isWeb()) {
+    return {
+      title: t("fsAccessLostTitle"),
+      body: t("fsAccessLostBodyWeb"),
+      actionLabel: t("fsRestoreAccess"),
+      showSystemSettings: false,
+      showSitePermissionsHelp: true,
+    };
+  }
+  return {
+    title: t("fsAccessLostTitle"),
+    body: t("fsAccessLostBodyDesktop"),
+    actionLabel: t("retry"),
+    showSystemSettings: isMacDesktop(),
+    showSitePermissionsHelp: false,
+  };
+}
+
 /**
  * Fallback for fs permission failures: explains what happened and offers
  * the right re-grant action per platform. Resolving clears the workspace's
@@ -110,47 +149,42 @@ function WorkspaceAccessError({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { workspacePath } = useWorkspaceParams();
-  const needsRepick = error.type === "handle_missing";
-
-  const title = needsRepick ? t("fsReconnectTitle") : t("fsAccessLostTitle");
-  const body = needsRepick
-    ? t("fsReconnectBody")
-    : isWeb()
-      ? t("fsAccessLostBodyWeb")
-      : t("fsAccessLostBodyDesktop");
+  const content = getRecoveryContent(error, t);
 
   useEffect(() => {
-    toast.error(title);
-  }, [title]);
+    toast.error(content.title);
+  }, [content.title]);
 
   const resume = (path: string) => {
     clearWorkspaceCollections(path);
     onResolved();
   };
 
-  const handleRecover = async () => {
-    if (needsRepick) {
-      const picked = await platformAdapter
-        .pickDirectory(t("pickDirectory"))
-        .catch(() => null);
-      if (!picked) return;
-      if (picked !== workspacePath) {
-        navigate(`/${encodeURIComponent(picked)}`);
-      }
-      resume(picked);
-      return;
+  const handleRepick = async () => {
+    const picked = await platformAdapter
+      .pickDirectory(t("pickDirectory"))
+      .catch(() => null);
+    if (!picked) return;
+    if (picked !== workspacePath) {
+      navigate(`/${encodeURIComponent(picked)}`);
     }
+    resume(picked);
+  };
+
+  const handleRestore = async () => {
+    const target = workspacePath ?? error.path;
     // Web: must call requestPermission inside this click. Desktop: no-op
     // true — the retry refetch will surface the error again if still denied.
-    const granted = await platformAdapter.requestWorkspaceAccess(
-      workspacePath ?? error.path,
-    );
+    const granted = await platformAdapter.requestWorkspaceAccess(target);
     if (!granted) {
       toast.error(t("fsAccessLostBodyWeb"));
       return;
     }
-    resume(workspacePath ?? error.path);
+    resume(target);
   };
+
+  const handleRecover =
+    error.type === "handle_missing" ? handleRepick : handleRestore;
 
   return (
     <div className="flex h-full flex-col items-center justify-center bg-background px-6 texture-surface">
@@ -158,17 +192,13 @@ function WorkspaceAccessError({
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-md bg-muted">
           <FolderLock className="h-6 w-6 text-primary" />
         </div>
-        <h2 className="text-lg font-medium text-foreground">{title}</h2>
-        <p className="mt-2 text-sm text-muted-foreground">{body}</p>
+        <h2 className="text-lg font-medium text-foreground">
+          {content.title}
+        </h2>
+        <p className="mt-2 text-sm text-muted-foreground">{content.body}</p>
         <div className="mt-6 flex flex-col gap-2">
-          <Button onClick={handleRecover}>
-            {needsRepick
-              ? t("fsChooseFolderAgain")
-              : isWeb()
-                ? t("fsRestoreAccess")
-                : t("retry")}
-          </Button>
-          {!needsRepick && isMacDesktop() && (
+          <Button onClick={handleRecover}>{content.actionLabel}</Button>
+          {content.showSystemSettings && (
             <Button
               variant="secondary"
               onClick={() =>
@@ -183,7 +213,7 @@ function WorkspaceAccessError({
           <Button variant="ghost" onClick={() => navigate("/welcome")}>
             {t("backToHome")}
           </Button>
-          {!needsRepick && isWeb() && (
+          {content.showSitePermissionsHelp && (
             <button
               className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
               onClick={() =>
