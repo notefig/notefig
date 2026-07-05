@@ -51,12 +51,8 @@ export function TextEditor({
     <div className="flex flex-col flex-1 min-h-0 w-full z-0">
       <TiptapToolbar editor={editor} onLinkToggle={handleLinkToggle} />
       <div
-        // Dropping a file here opens it as a tab in THIS editor's window;
-        // dropping an image file inserts it into the document at the drop
-        // point. Pointer drags (file tree) dispatch through this zone;
-        // native drags are additionally guarded by the protocol handler in
-        // the ProseMirror handleDrop chain. Drop feedback mirrors the
-        // dockable tab bar (inset ring shadow + tint).
+        // Drop zone: files open as tabs in this editor's window; image
+        // files insert into the document at the drop point.
         className={cn(
           "flex-1 min-h-0 overflow-auto tiptap-editor-wrapper",
           "data-[mtr-drop-over=true]:shadow-[0_0_0_1px_hsl(var(--ring))_inset]",

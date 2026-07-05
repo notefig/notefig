@@ -420,9 +420,6 @@ function FileTreeItem({
 
   const paddingValue = depth * 12 + 8;
 
-  // Pointer-driven drag (same engine as the dockable tabs); the payload
-  // travels through the drag-protocol registry, so any declared drop zone
-  // (folders, tab bar, editor) reacts to it.
   const drag = useProtocolDraggable({
     id: node.path,
     payload: {
@@ -493,8 +490,7 @@ function FileTreeItem({
 
   return (
     <div
-      // Directories accept drops across their whole subtree region (row +
-      // children), VS Code style; nested zones win via closest().
+      // Directories accept drops across their whole subtree region.
       {...(node.type === "directory"
         ? dropZoneProps({
             accepts: ["file", "image-asset"],
@@ -505,7 +501,6 @@ function FileTreeItem({
       className={
         node.type === "directory"
           ? cn(
-              // drop feedback mirrors the dockable tab bar (inset ring + tint)
               "rounded-sm transition-colors",
               "data-[mtr-drop-over=true]:shadow-[0_0_0_1px_hsl(var(--ring))_inset]",
               "data-[mtr-drop-over=true]:bg-[hsl(var(--ring)/0.12)]",
@@ -670,8 +665,7 @@ export function FileTree({
     target: treeRootRef,
   });
 
-  // Dropping on the tree's empty space (or on file rows, which aren't
-  // zones) moves the dragged item to the workspace root.
+  // Drops on empty space / file rows (not zones) move to workspace root.
   const rootDrop = dropZoneProps({
     accepts: ["file", "image-asset"],
     dropEffect: "move",

@@ -168,9 +168,8 @@ function createMarkdownInstance(
     editable: true,
     autofocus: false,
     editorProps: {
-      // Protocol handler first: it consumes tagged drags (file-tree rows,
-      // image assets) and falls through for internal moves and payload-less
-      // drags, so OS image drops still reach the image handler unchanged.
+      // Protocol handler first — consumes tagged drags, falls through for
+      // internal moves and payload-less drags (OS image drops).
       handleDrop: composeDropHandlers(
         createProtocolDropHandler(),
         createImageDropHandler(workspaceRoot),

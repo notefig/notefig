@@ -9,7 +9,6 @@ import {
   hasPayloadOfKind,
   dragSourceProps,
   dropZoneProps,
-  registerProtocolContext,
   installDragProtocol,
   uninstallDragProtocol,
   composeDropHandlers,
@@ -73,8 +72,6 @@ describe("payload wire format", () => {
         workspaceRoot: "/ws",
         sourceFilePath: "/ws/doc.md",
       },
-      { kind: "tab", tabId: "/ws/doc.md" },
-      { kind: "os-files", paths: ["/tmp/a", "/tmp/b"] },
     ];
     for (const payload of payloads) {
       const dt = new FakeDataTransfer();
@@ -94,20 +91,6 @@ describe("payload wire format", () => {
     expect(
       hasPayloadOfKind(dt as unknown as DataTransfer, "image-asset"),
     ).toBe(false);
-  });
-
-  it("sets text/uri-list and text/plain for file payloads only", () => {
-    const dt = new FakeDataTransfer();
-    tagCurrentDrag(filePayload, dt as unknown as DataTransfer);
-    expect(dt.getData("text/uri-list")).toBe("file:///ws/notes/a.md");
-    expect(dt.getData("text/plain")).toBe("/ws/notes/a.md");
-
-    const dt2 = new FakeDataTransfer();
-    tagCurrentDrag(
-      { kind: "tab", tabId: "x" },
-      dt2 as unknown as DataTransfer,
-    );
-    expect(dt2.getData("text/plain")).toBe("");
   });
 
   it("prefers the in-memory record over the JSON channel", () => {
@@ -195,7 +178,13 @@ describe("delegated dispatch", () => {
 
   it("dragover a non-accepting drag leaves the event untouched", () => {
     const { inner, target } = mountSourceAndTarget();
-    tagCurrentDrag({ kind: "tab", tabId: "x" });
+    tagCurrentDrag({
+      kind: "image-asset",
+      src: "assets/x.png",
+      absolutePath: "/ws/assets/x.png",
+      workspaceRoot: "/ws",
+      sourceFilePath: "/ws/doc.md",
+    });
     const over = dragEvent("dragover", inner, new FakeDataTransfer());
     expect(over.defaultPrevented).toBe(false);
     expect(target.hasAttribute("data-mtr-drop-over")).toBe(false);
@@ -220,11 +209,6 @@ describe("delegated dispatch", () => {
     expect(target.hasAttribute("data-mtr-drop-over")).toBe(false);
   });
 
-  it("dragSourceProps disabled emits no attribute and no draggable", () => {
-    expect(dragSourceProps(filePayload, { disabled: true })).toEqual({
-      draggable: false,
-    });
-  });
 });
 
 describe("ProseMirror protocol drop handler", () => {
@@ -238,16 +222,12 @@ describe("ProseMirror protocol drop handler", () => {
   });
 
   it("consumes drops a zone already handled (defaultPrevented)", () => {
-    const openFile = vi.fn();
-    registerProtocolContext({ openFile });
-    tagCurrentDrag(filePayload);
     const handler = createProtocolDropHandler();
     const event = {
       dataTransfer: null,
       defaultPrevented: true,
     } as unknown as DragEvent;
     expect(handler(view, event, null, false)).toBe(true);
-    expect(openFile).not.toHaveBeenCalled();
   });
 
   it("falls through when no payload exists (OS image drops)", () => {
@@ -258,42 +238,8 @@ describe("ProseMirror protocol drop handler", () => {
     expect(handler(view, event, null, false)).toBe(false);
   });
 
-  it("opens file payloads via the registered context and consumes the event", () => {
-    const openFile = vi.fn().mockReturnValue(true);
-    registerProtocolContext({ openFile });
+  it("consumes any tagged payload so PM never inserts a text form", () => {
     tagCurrentDrag(filePayload);
-    const handler = createProtocolDropHandler();
-    const event = {
-      dataTransfer: null,
-      preventDefault: vi.fn(),
-    } as unknown as DragEvent;
-    expect(handler(view, event, null, false)).toBe(true);
-    expect(event.preventDefault).toHaveBeenCalled();
-    expect(openFile).toHaveBeenCalledWith({
-      tabId: "/ws/notes/a.md",
-      intent: "new-tab",
-    });
-  });
-
-  it("consumes directory payloads without opening anything", () => {
-    const openFile = vi.fn();
-    registerProtocolContext({ openFile });
-    tagCurrentDrag({ ...filePayload, fileType: "directory" });
-    const handler = createProtocolDropHandler();
-    const event = { dataTransfer: null } as unknown as DragEvent;
-    // true (consumed) so ProseMirror never pastes the text/plain path
-    expect(handler(view, event, null, false)).toBe(true);
-    expect(openFile).not.toHaveBeenCalled();
-  });
-
-  it("consumes image-asset payloads without acting", () => {
-    tagCurrentDrag({
-      kind: "image-asset",
-      src: "assets/x.png",
-      absolutePath: "/ws/assets/x.png",
-      workspaceRoot: "/ws",
-      sourceFilePath: "/ws/doc.md",
-    });
     const handler = createProtocolDropHandler();
     const event = { dataTransfer: null } as unknown as DragEvent;
     expect(handler(view, event, null, false)).toBe(true);

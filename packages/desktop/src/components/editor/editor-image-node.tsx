@@ -26,10 +26,8 @@ export function EditorImage(props: NodeViewProps) {
   return (
     <NodeViewWrapper
       data-drag-handle
-      // Declares the drag-protocol payload this node registers when dragged
-      // (external drop zones like sidebar folders move the asset file).
-      // ProseMirror still owns the drag itself — in-editor moves keep their
-      // moved=true semantics.
+      // Drag-protocol payload for external drop zones; ProseMirror still
+      // owns the drag itself, so in-editor moves keep moved=true semantics.
       {...dragSourceProps({
         kind: "image-asset",
         src,

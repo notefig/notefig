@@ -1,37 +1,23 @@
 /**
- * Metrists drag-and-drop protocol.
+ * Metrists drag-and-drop protocol. See docs/dnd-protocol.md.
  *
- * Standardizes drag payloads across the app's DnD contexts (file tree,
- * dockable tabs, TipTap editor, future OS drops) without replacing any
- * context's internal engine. See docs/dnd-protocol.md for the full design.
+ * Standardizes drag payloads across the app's DnD contexts without
+ * replacing any context's engine:
  *
- * Three layers, all in this file — feature code only ever imports from here:
- *
- * 1. Payload types + wire format. Dual channel per drag (the pragmatic-dnd
- *    pattern): a marker MIME per kind (`application/x-metrists-<kind>`,
- *    readable via dataTransfer.types during dragover) plus the full JSON
- *    under `application/x-metrists+json` (readable on drop, cross-window),
- *    plus an in-memory record for same-window drags.
- *
- * 2. Declarative attribute layer. Drag sources opt in with spreadable
- *    props (`dragSourceProps` / `DragSource`) declaring the payload they
- *    register on drag; drop zones opt in with `dropZoneProps`, passing a
- *    self-contained drop callback colocated with the element. A fixed set
- *    of window-level delegated listeners routes everything — a thousand
- *    tree rows add zero listeners.
- *
- * 3. Escape hatches for non-DOM consumers: ProseMirror adopts the protocol
- *    through `createProtocolDropHandler` composed via `composeDropHandlers`,
- *    and tags its own native drags with `tagCurrentDrag`.
+ * 1. Payloads + wire format — an in-memory record for same-window drags,
+ *    plus marker/JSON MIME channels on native DataTransfers (dataTransfer
+ *    data is unreadable during dragover; only `types` is).
+ * 2. Declarative layer — `dragSourceProps` declares what an element
+ *    registers when dragged; `dropZoneProps` takes a colocated drop
+ *    callback. A fixed set of delegated window listeners routes native
+ *    drags; `ProtocolDndContext` routes pointer (dnd-kit) drags into the
+ *    same zone registry.
+ * 3. ProseMirror adoption — `createProtocolDropHandler` composed into
+ *    editorProps.handleDrop keeps PM behaviors (block reorder, OS image
+ *    drops) untouched while consuming protocol payloads.
  */
 
-import {
-  cloneElement,
-  useRef,
-  useState,
-  type ReactElement,
-  type ReactNode,
-} from "react";
+import { useRef, useState, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   DndContext,
@@ -48,7 +34,7 @@ import type { EditorView } from "@tiptap/pm/view";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 
 /* ------------------------------------------------------------------ */
-/* Layer 1 — payload types & wire format                               */
+/* Payloads & wire format                                              */
 /* ------------------------------------------------------------------ */
 
 export type DragPayload =
@@ -67,9 +53,7 @@ export type DragPayload =
       workspaceRoot: string;
       /** Document the image node lives in, so its src can be rewritten. */
       sourceFilePath: string;
-    }
-  | { kind: "tab"; tabId: string }
-  | { kind: "os-files"; paths: string[] };
+    };
 
 export type DragPayloadKind = DragPayload["kind"];
 
@@ -81,11 +65,6 @@ export type PayloadOfKind<K extends DragPayloadKind> = Extract<
 const JSON_MIME = "application/x-metrists+json";
 const markerMime = (kind: DragPayloadKind) => `application/x-metrists-${kind}`;
 
-/**
- * Same-window drag record. dataTransfer data is unreadable during dragover
- * (only `types` is exposed), so accept-checks and hover feedback read this
- * instead; the JSON channel remains the cross-window fallback on drop.
- */
 let currentDrag: DragPayload | null = null;
 
 export function getCurrentDragPayload(): DragPayload | null {
@@ -97,9 +76,8 @@ export function clearCurrentDragPayload(): void {
 }
 
 /**
- * Record a payload for the in-flight drag and, when a DataTransfer is given,
- * write both wire channels. Used by the delegated dragstart listener and by
- * imperative sources that own their dragstart (e.g. ProseMirror image nodes).
+ * Record the in-flight drag's payload; when a DataTransfer is given
+ * (native drags), also write the marker + JSON channels.
  */
 export function tagCurrentDrag(
   payload: DragPayload,
@@ -107,19 +85,11 @@ export function tagCurrentDrag(
 ): void {
   currentDrag = payload;
   if (!dataTransfer) return;
-
   dataTransfer.setData(markerMime(payload.kind), "");
   dataTransfer.setData(JSON_MIME, JSON.stringify(payload));
-
-  if (payload.kind === "file") {
-    dataTransfer.setData("text/uri-list", encodeURI(`file://${payload.path}`));
-    // The editor's protocol drop handler consumes file drops before
-    // ProseMirror can paste this as text (see createProtocolDropHandler).
-    dataTransfer.setData("text/plain", payload.path);
-  }
 }
 
-/** Read the in-flight payload: in-memory record first, JSON channel fallback. */
+/** Read the in-flight payload: in-memory record first, JSON fallback. */
 export function getDragPayload(
   dataTransfer?: DataTransfer | null,
 ): DragPayload | null {
@@ -147,7 +117,7 @@ export function hasPayloadOfKind(
 }
 
 /* ------------------------------------------------------------------ */
-/* App context — non-serializable dependencies actions need at drop    */
+/* App context — non-serializable capabilities zones need at drop time */
 /* ------------------------------------------------------------------ */
 
 export interface DragProtocolContext {
@@ -156,11 +126,7 @@ export interface DragProtocolContext {
 
 let protocolContext: Partial<DragProtocolContext> = {};
 
-/**
- * Provide app capabilities (openFile, …) to drop actions. Called from
- * providers that own them (mirrors the focus-arbiter decoupling pattern);
- * actions read lazily at drop time via `getProtocolContext`.
- */
+/** Registered by the providers that own the capability (workspace tabs). */
 export function registerProtocolContext(
   context: Partial<DragProtocolContext>,
 ): void {
@@ -172,21 +138,19 @@ export function getProtocolContext(): Partial<DragProtocolContext> {
 }
 
 /* ------------------------------------------------------------------ */
-/* Layer 2 — declarative attribute layer + delegated listeners         */
+/* Declarative layer + delegated native listeners                      */
 /* ------------------------------------------------------------------ */
 
 const DRAG_ATTR = "data-mtr-drag";
 const DROP_ATTR = "data-mtr-dropzone";
 const DROP_OVER_ATTR = "data-mtr-drop-over";
 
-/** Where a drop landed — available to every zone regardless of engine. */
+/** Where a drop landed — identical for both engines. */
 export interface DropInfo {
   /** The registered zone element the drop landed on. */
   element: HTMLElement;
   /** Viewport drop point. */
   position: { x: number; y: number };
-  /** Native DragEvent; undefined for pointer-driven (dnd-kit) drags. */
-  event?: DragEvent;
 }
 
 export interface DropZoneConfig<
@@ -202,37 +166,30 @@ export interface DropZoneConfig<
 /** Element → config registry; entries die with their DOM nodes. */
 const dropZones = new WeakMap<Element, DropZoneConfig>();
 
-/**
- * Spreadable props that make an element a protocol drag source, declaring
- * the payload it registers when dragged. No listeners — the delegated
- * dragstart listener picks the element up via the attribute.
- */
-export function dragSourceProps(
-  payload: DragPayload,
-  opts?: { disabled?: boolean },
-): { draggable: boolean; [DRAG_ATTR]?: string } {
-  installDragProtocol(); // lazy, idempotent — first declaration wires the listeners
-  if (opts?.disabled) return { draggable: false };
+/** Spreadable props making an element a native drag source. */
+export function dragSourceProps(payload: DragPayload): {
+  draggable: boolean;
+  [DRAG_ATTR]: string;
+} {
+  installDragProtocol();
   return { draggable: true, [DRAG_ATTR]: JSON.stringify(payload) };
 }
 
 /**
- * Spreadable props that make an element a drop zone. The callback is held
- * in a WeakMap keyed by the element (registered through the returned ref),
- * so registration follows the DOM node's lifecycle automatically and any
- * context the handler needs is just a closure capture.
+ * Spreadable props making an element a drop zone. The callback is held in
+ * a WeakMap keyed by the element (via the returned ref), so registration
+ * follows the DOM node's lifecycle and context is just closure capture.
  */
 export function dropZoneProps<K extends DragPayloadKind>(
   config: DropZoneConfig<K>,
 ): { [DROP_ATTR]: string; ref: (element: Element | null) => void } {
-  installDragProtocol(); // lazy, idempotent — first declaration wires the listeners
+  installDragProtocol();
   let current: Element | null = null;
   return {
     [DROP_ATTR]: "true",
     ref: (element: Element | null) => {
       if (element) {
-        // Runtime dispatch re-checks `accepts` before calling onDrop, so
-        // widening the payload type here is safe.
+        // Dispatch re-checks `accepts` before calling onDrop.
         dropZones.set(element, config as unknown as DropZoneConfig);
         current = element;
       } else if (current) {
@@ -242,20 +199,6 @@ export function dropZoneProps<K extends DragPayloadKind>(
     },
   };
 }
-
-/** Wrapper flavor of `dragSourceProps` for elements we don't render ourselves. */
-export function DragSource(props: {
-  payload: DragPayload;
-  disabled?: boolean;
-  children: ReactElement;
-}): ReactElement {
-  return cloneElement(
-    props.children,
-    dragSourceProps(props.payload, { disabled: props.disabled }) as never,
-  );
-}
-
-/* ---- delegated listeners ---- */
 
 function closestDropZone(event: DragEvent): {
   element: HTMLElement;
@@ -268,13 +211,6 @@ function closestDropZone(event: DragEvent): {
   const config = dropZones.get(element);
   if (!config) return null;
   return { element, config };
-}
-
-function zoneAcceptsCurrentDrag(
-  config: DropZoneConfig,
-  event: DragEvent,
-): boolean {
-  return hasPayloadOfKind(event.dataTransfer, ...config.accepts);
 }
 
 let hoveredDropElement: HTMLElement | null = null;
@@ -299,21 +235,14 @@ function handleDragStart(event: DragEvent): void {
     return;
   }
 
-  // A new drag always supersedes any stale record (dragend can be missed
-  // when a drag is cancelled by the OS).
   clearCurrentDragPayload();
   tagCurrentDrag(payload, event.dataTransfer);
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed =
-      payload.kind === "file" || payload.kind === "image-asset"
-        ? "copyMove"
-        : "copy";
-  }
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
 }
 
 function handleDragOver(event: DragEvent): void {
   const hit = closestDropZone(event);
-  if (!hit || !zoneAcceptsCurrentDrag(hit.config, event)) {
+  if (!hit || !hasPayloadOfKind(event.dataTransfer, ...hit.config.accepts)) {
     setHoveredDropElement(null);
     return;
   }
@@ -325,7 +254,7 @@ function handleDragOver(event: DragEvent): void {
 }
 
 function handleDragLeave(event: DragEvent): void {
-  // Only clear when leaving the hovered target for somewhere outside it.
+  // Clear only when leaving the hovered zone for somewhere outside it.
   if (!hoveredDropElement) return;
   const related = event.relatedTarget;
   if (related instanceof Node && hoveredDropElement.contains(related)) return;
@@ -343,16 +272,14 @@ function handleDrop(event: DragEvent): void {
   if (!payload || !hit.config.accepts.includes(payload.kind)) return;
 
   event.preventDefault();
-
   try {
     hit.config.onDrop(payload, {
       element: hit.element,
       position: { x: event.clientX, y: event.clientY },
-      event,
     });
   } finally {
-    // Same-window drags also get a dragend on the source, but drops onto
-    // targets that remove the source from the DOM can swallow it.
+    // dragend usually clears too, but drops that unmount the source can
+    // swallow it.
     queueMicrotask(clearCurrentDragPayload);
   }
 }
@@ -365,10 +292,9 @@ function handleDragEnd(): void {
 let installed = false;
 
 /**
- * Install the delegated window listeners. Idempotent and inert until an
- * element carries the protocol attributes. Called lazily by
- * `dragSourceProps`/`dropZoneProps`, so app code never needs to call it —
- * exported for tests and unusual bootstrap orders.
+ * Install the delegated window listeners. Idempotent, inert without the
+ * protocol attributes, and called lazily by the prop helpers — exported
+ * only for tests.
  */
 export function installDragProtocol(): void {
   if (installed) return;
@@ -394,17 +320,10 @@ export function uninstallDragProtocol(): void {
 }
 
 /* ------------------------------------------------------------------ */
-/* Layer 2b — pointer-driven drags (dnd-kit engine)                    */
-/*                                                                     */
-/* Native HTML5 drags are hard to control (OS ghost image, coarse      */
-/* activation, no auto-scroll). For app-internal sources we reuse the  */
-/* same engine as the dockable tabs: dnd-kit pointer drags with a      */
-/* DragOverlay. The protocol stays engine-agnostic — on move/end the   */
-/* bridge hit-tests the SAME drop-zone registry, so a zone declared    */
-/* with dropZoneProps reacts identically to native and pointer drags.  */
+/* Pointer engine (dnd-kit) — same zone registry, better drag UX       */
 /* ------------------------------------------------------------------ */
 
-/** Find the innermost registered drop zone under a viewport point. */
+/** Innermost registered drop zone under a viewport point. */
 function dropZoneAtPoint(
   x: number,
   y: number,
@@ -418,16 +337,9 @@ function dropZoneAtPoint(
   return { element, config };
 }
 
-// NOTE: do NOT derive the pointer from activatorEvent + event.delta —
-// dnd-kit's delta tracks the dragged item's transform, which is
-// scroll-compensated during auto-scroll, so it diverges from the real
-// pointer as soon as a scroll container moves. The context below tracks
-// the actual pointer with a window listener instead.
-
 /**
- * dnd-kit draggable wired to the protocol: spread the returned
- * `setNodeRef`/`listeners`/`attributes` on the element and the declared
- * payload travels through the drag. Must render inside ProtocolDndContext.
+ * dnd-kit draggable wired to the protocol: spread `setNodeRef`,
+ * `listeners`, `attributes` on the element. Requires ProtocolDndContext.
  */
 export function useProtocolDraggable(args: {
   id: string;
@@ -442,21 +354,18 @@ export function useProtocolDraggable(args: {
 }
 
 /**
- * DndContext that dispatches pointer drags of protocol payloads into the
- * shared drop-zone registry. `overlay` renders the floating drag preview.
+ * DndContext dispatching pointer drags into the shared drop-zone
+ * registry. `overlay` renders the floating drag preview.
  */
 export function ProtocolDndContext(props: {
   children: ReactNode;
   overlay?: (payload: DragPayload) => ReactNode;
 }): ReactElement {
-  // The refs are the source of truth for handlers: dnd-kit can deliver a
-  // trailing onDragMove after onDragEnd, and a state-based guard would
-  // read a stale closure and re-stamp the drop-over highlight after the
-  // drop cleared it. State exists only to render the overlay.
+  // Refs, not state, drive the handlers: dnd-kit can emit a trailing
+  // onDragMove after onDragEnd, and event.delta is scroll-compensated so
+  // it diverges from the pointer during auto-scroll. State only renders
+  // the overlay.
   const activePayloadRef = useRef<DragPayload | null>(null);
-  // Real pointer position, tracked with a window listener for the drag's
-  // duration — see the note above pointFromDndEvent's former location:
-  // dnd-kit deltas diverge from the pointer once auto-scroll kicks in.
   const pointerRef = useRef({ x: 0, y: 0 });
   const trackPointer = useRef((event: PointerEvent) => {
     pointerRef.current = { x: event.clientX, y: event.clientY };
@@ -523,19 +432,15 @@ export function ProtocolDndContext(props: {
       onDragCancel={finish}
     >
       {props.children}
-      {/* pointer-events none on the overlay wrapper — it tracks the cursor
-          and would otherwise swallow the elementFromPoint hit-test */}
       {createPortal(
+        // pointer-events none so the overlay tracking the cursor never
+        // swallows the elementFromPoint hit-test
         <DragOverlay
           zIndex={999}
           dropAnimation={null}
           style={{ pointerEvents: "none" }}
         >
-          {activePayload ? (
-            <div style={{ pointerEvents: "none" }}>
-              {props.overlay?.(activePayload)}
-            </div>
-          ) : null}
+          {activePayload ? props.overlay?.(activePayload) : null}
         </DragOverlay>,
         document.body,
       )}
@@ -544,7 +449,7 @@ export function ProtocolDndContext(props: {
 }
 
 /* ------------------------------------------------------------------ */
-/* Layer 3 — ProseMirror adoption                                      */
+/* ProseMirror adoption                                                */
 /* ------------------------------------------------------------------ */
 
 export type ProseMirrorDropHandler = (
@@ -563,44 +468,16 @@ export function composeDropHandlers(
 }
 
 /**
- * editorProps.handleDrop link that consumes protocol payloads dropped onto
- * the editor surface. Ordering is load-bearing: it must run BEFORE the
- * image-file drop handler, and it must fall through (return false) for
- * internal ProseMirror moves and for payload-less drags so existing
- * behavior — block reorder, OS image drops, plain text drops — is untouched.
+ * editorProps.handleDrop link consuming protocol payloads so ProseMirror
+ * never double-handles or inserts a serialized form of them. Must run
+ * before other handlers; falls through for internal PM moves and
+ * payload-less drags (block reorder and OS image drops stay untouched).
+ * Behavior for protocol drops on the editor lives in its drop zone.
  */
 export function createProtocolDropHandler(): ProseMirrorDropHandler {
-  return function handleProtocolDrop(_view, event, _slice, moved) {
+  return (_view, event, _slice, moved) => {
     if (moved) return false;
-
-    // The delegated window listener runs first (capture) — when a zone on
-    // or around the editor already handled this drop, consume it here so
-    // ProseMirror neither double-handles nor pastes a text form.
     if (event.defaultPrevented) return true;
-
-    const payload = getDragPayload(event.dataTransfer);
-    if (!payload) return false;
-
-    switch (payload.kind) {
-      case "file": {
-        // Directories can't open in a tab; consume the drop anyway so
-        // ProseMirror never pastes the payload's text/plain path as text.
-        if (payload.fileType !== "file") return true;
-        event.preventDefault();
-        getProtocolContext().openFile?.({
-          tabId: payload.path,
-          intent: "new-tab",
-        });
-        return true;
-      }
-      case "image-asset":
-        // In-editor image moves arrive with moved=true and are handled by
-        // ProseMirror; a payload without `moved` means the drag ended on the
-        // editor after being tagged for an external target. Consume it so
-        // no text form of the payload is inserted.
-        return true;
-      default:
-        return false;
-    }
+    return getDragPayload(event.dataTransfer) !== null;
   };
 }
