@@ -95,11 +95,12 @@ afterEach(async () => {
 });
 
 async function flushSaves() {
-  // Serialize + write are promise-chained microtasks plus the inline codec;
-  // a few macrotask turns let the loop drain.
-  for (let i = 0; i < 20; i++) {
+  // The save fires SAVE_DEBOUNCE_MS after the last edit; serialize + write
+  // are promise-chained microtasks plus the inline codec. Wait past the
+  // debounce, then let the loop drain.
+  for (let i = 0; i < 40; i++) {
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      await new Promise((resolve) => setTimeout(resolve, 25));
     });
     if (
       writeFileContentMock.mock.calls.length > 0 &&
@@ -116,7 +117,7 @@ function editorHasPendingSave(): boolean {
 }
 
 describe("save pipeline (inline fallback = worker-boot-failure path)", () => {
-  it("saves an edit without any debounce timer", async () => {
+  it("saves an edit after the debounce window", async () => {
     await render(makeFile("start"));
 
     await act(async () => {
@@ -193,8 +194,9 @@ describe("save pipeline (inline fallback = worker-boot-failure path)", () => {
     await act(async () => {
       editor.commands.insertContentAt(editor.state.doc.content.size - 1, "!");
     });
+    // Wait well past the save debounce before asserting nothing was written.
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      await new Promise((resolve) => setTimeout(resolve, 700));
     });
 
     expect(writeFileContentMock).not.toHaveBeenCalled();

@@ -1,8 +1,10 @@
 /**
  * Wires an editor to its file's DocumentSync pipeline (see
- * utils/markdown-conversion.ts, which owns all save coalescing, baselines
- * and adoption decisions). This hook only translates editor events into
- * pipeline calls and pipeline results into `setContent`.
+ * utils/markdown-conversion.ts, which owns save coalescing, baselines and
+ * adoption decisions). This hook translates editor events into pipeline
+ * calls and pipeline results into `setContent`, and owns the autosave
+ * debounce: updates reach the pipeline once per typing pause, so disk
+ * writes (and the watcher events they produce) don't fire per keystroke.
  */
 
 import { useEffect, useRef } from "react";
@@ -10,6 +12,8 @@ import type { Editor, JSONContent } from "@tiptap/core";
 import type { FileEntry } from "@/utils/fs";
 import { writeFileContent } from "@/utils/collections";
 import { getDocumentSync } from "@/utils/markdown-conversion";
+
+const AUTOSAVE_DEBOUNCE_MS = 500;
 
 /** The markdown serialization of the current editor document (synchronous,
  * main-thread — kept for tests and one-off callers, not the save path). */
@@ -42,6 +46,10 @@ export function useEditorFileSync(
   contentError?: string,
 ): void {
   const suppressSaveRef = useRef(false);
+  // Non-null while edits sit in the debounce window (not yet pushed to the
+  // pipeline). Those edits are local state the adoption path must not
+  // clobber, and they must be flushed — not dropped — on teardown.
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Baseline for external-change comparison. A failed read produces a row
   // with empty content and a synthetic hash — never baseline on that.
@@ -67,6 +75,9 @@ export function useEditorFileSync(
     (async () => {
       const doc = await sync.prepareAdoption(fileContent);
       if (!doc || cancelled || editor.isDestroyed) return;
+      // Edits waiting in the autosave debounce window win over external
+      // content, same as an in-flight save (checked inside prepareAdoption).
+      if (saveTimerRef.current) return;
 
       console.log(
         `[text-editor] External change detected for ${file.path}, updating editor`,
@@ -87,21 +98,36 @@ export function useEditorFileSync(
     };
   }, [editor, file.contentHash, file.content, file.path, contentError]);
 
-  // Editor → disk: ship every update to the pipeline as it happens.
+  // Editor → disk: debounced autosave into the pipeline.
   useEffect(() => {
     const sync = getDocumentSync(file.path);
     sync.writer = (markdown) => writeFileContent(basePath, file.path, markdown);
 
+    const pushSnapshot = () => {
+      sync.pushUpdate(() => editor.state.doc.toJSON() as JSONContent);
+    };
+
     const handleUpdate = () => {
       if (suppressSaveRef.current) return;
       if (!isContentLoaded) return;
-      sync.pushUpdate(() => editor.state.doc.toJSON() as JSONContent);
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        saveTimerRef.current = null;
+        pushSnapshot();
+      }, AUTOSAVE_DEBOUNCE_MS);
     };
 
     editor.on("update", handleUpdate);
 
     return () => {
       editor.off("update", handleUpdate);
+      // Flush rather than drop a pending save: teardown here is a tab
+      // switch, layout change or unmount, and the edits are real.
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        if (!editor.isDestroyed) pushSnapshot();
+      }
     };
   }, [editor, file.path, basePath, isContentLoaded]);
 }

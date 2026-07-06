@@ -34,7 +34,7 @@ import type { FileEntry } from "./fs";
 import { calculateContentHash } from "./hash";
 // Circular with ./file-sync (which imports this module); safe because both
 // sides only reference each other's exports inside function bodies.
-import { invalidateDerivedState } from "./file-sync";
+import { invalidateDerivedState, recordSelfWrite } from "./file-sync";
 
 // Global QueryClient instance for TanStack Query
 export const queryClient = new QueryClient({
@@ -474,6 +474,10 @@ export async function writeFileContent(
 ): Promise<void> {
   const collections = getOrCreateWorkspaceCollections(workspaceId);
   const contentHash = calculateContentHash(content);
+
+  // Ledger first, write second: a watcher echo of this write must find the
+  // hash already recorded so it is never mistaken for an external change.
+  recordSelfWrite(filePath, contentHash);
 
   // Update content collection (this triggers onUpdate/onInsert which writes to file system)
   const existingContent = collections.content.get(filePath);
