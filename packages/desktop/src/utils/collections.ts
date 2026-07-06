@@ -41,6 +41,8 @@ export const queryClient = new QueryClient({
   defaultOptions: {},
 });
 
+const METADATA_REFETCH_INTERVAL_MS = 30_000;
+
 /**
  * File Metadata Type
  * Excludes content to keep metadata queries lightweight
@@ -79,6 +81,10 @@ export function createFileMetadataCollection(workspaceId: string) {
     queryCollectionOptions<FileMetadata, string>({
       queryKey: ["file-metadata", workspaceId],
       queryClient,
+
+      // Safety net for changes the fs watcher misses (network volumes,
+      // watcher gaps): periodically re-read the tree from disk.
+      refetchInterval: METADATA_REFETCH_INTERVAL_MS,
 
       // Access errors can't be retried away — fail fast so the recovery UI
       // (WorkspaceErrorBoundary) shows immediately.
@@ -161,14 +167,16 @@ export function createFileMetadataCollection(workspaceId: string) {
         }
       },
 
-      onUpdate: async ({ transaction }) => {
+      onUpdate: async ({ transaction, collection }) => {
         // Updates to metadata only (we don't update file content here)
         // This would be used for things like renaming files
+        let hasRename = false;
         for (const mutation of transaction.mutations) {
           const oldPath = String(mutation.key);
           const newPath = mutation.modified.path;
 
           if (oldPath !== newPath) {
+            hasRename = true;
             // This is a rename/move operation
             const original = mutation.original;
             if (original.type === "file") {
@@ -194,6 +202,19 @@ export function createFileMetadataCollection(workspaceId: string) {
             }
           }
         }
+
+        // Renames change keys, so let the refetch rebuild the tree. Plain
+        // metadata updates (e.g. the modified timestamp after every save)
+        // must not trigger one: a full workspace scan per save is wasteful,
+        // and concurrent scans can land out of order, reverting a fresh
+        // timestamp to a stale one (files jump around in date-sorted trees).
+        // Direct-write the confirmed values into the synced store instead so
+        // state survives the optimistic overlay being dropped on commit.
+        if (hasRename) return;
+        collection.utils.writeUpsert(
+          transaction.mutations.map((m) => m.modified),
+        );
+        return { refetch: false };
       },
 
       onDelete: async ({ transaction }) => {
@@ -310,7 +331,7 @@ export function createFileContentCollection(workspaceId: string) {
 
       getKey: (item) => item.path,
 
-      onUpdate: async ({ transaction }) => {
+      onUpdate: async ({ transaction, collection }) => {
         const files = transaction.mutations.map((m) => ({
           path: String(m.key),
           content: m.modified.content,
@@ -322,13 +343,23 @@ export function createFileContentCollection(workspaceId: string) {
             `Failed to write files: ${result.failed.map((f) => f.message).join(", ")}`,
           );
         }
+
+        // The app is the writer here — what we just wrote IS the file's
+        // content, so re-reading every loaded file from disk (the default
+        // post-mutation refetch) is redundant and, during a typing burst,
+        // races later writes. Direct-write into the synced store so state
+        // survives the optimistic overlay being dropped on commit.
+        collection.utils.writeUpsert(
+          transaction.mutations.map((m) => m.modified),
+        );
+        return { refetch: false };
       },
 
       enabled: true,
 
       // Mutation handlers - write content changes back to file system
 
-      onInsert: async ({ transaction }) => {
+      onInsert: async ({ transaction, collection }) => {
         const files = transaction.mutations.map((m) => ({
           path: m.modified.path,
           content: m.modified.content,
@@ -340,6 +371,12 @@ export function createFileContentCollection(workspaceId: string) {
             `Failed to write files: ${result.failed.map((f) => f.message).join(", ")}`,
           );
         }
+
+        // See onUpdate: our write is authoritative; skip the disk re-read.
+        collection.utils.writeUpsert(
+          transaction.mutations.map((m) => m.modified),
+        );
+        return { refetch: false };
       },
 
       onDelete: async () => {
@@ -440,18 +477,21 @@ export async function writeFileContent(
 
   // Update content collection (this triggers onUpdate/onInsert which writes to file system)
   const existingContent = collections.content.get(filePath);
-  if (existingContent) {
-    collections.content.update(filePath, (draft) => {
-      draft.content = content;
-      draft.contentHash = contentHash;
-    });
-  } else {
-    collections.content.insert({
-      path: filePath,
-      content,
-      contentHash,
-    });
-  }
+  const tx = existingContent
+    ? collections.content.update(filePath, (draft) => {
+        draft.content = content;
+        draft.contentHash = contentHash;
+      })
+    : collections.content.insert({
+        path: filePath,
+        content,
+        contentHash,
+      });
+
+  // The disk write happens asynchronously in the mutation handler; reading
+  // metadata before it lands would capture the pre-write mtime and make
+  // date-sorted views flap between old and new positions.
+  await tx.isPersisted.promise;
 
   // Update metadata with new timestamp and hash
   const metadataResult = await platformAdapter.getMetadata([filePath]);
