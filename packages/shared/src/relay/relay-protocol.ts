@@ -37,14 +37,39 @@ export type RelayFrame = z.infer<typeof RelayFrameSchema>;
 
 /**
  * Channels multiplexed *inside* the encrypted payload (the relay never sees
- * these): "acp" carries the JSON-RPC byte stream, "watch" carries file-change
- * events from the worker's watcher, "ctl" carries worker control messages.
+ * these): "acp" carries one task's JSON-RPC byte stream, "watch" carries
+ * file-change events from the worker's watcher, "ctl" carries worker
+ * control. The worker treats "acp" bodies as opaque lines — it never parses
+ * the protocol; one adapter process per taskId.
  */
 export const TunnelChannelSchema = z.enum(["acp", "watch", "ctl"]);
 export type TunnelChannel = z.infer<typeof TunnelChannelSchema>;
 
+export const TaskIdSchema = z.string().min(1).max(64);
+
+/** Worker control messages (ctl channel bodies). */
+export const CtlMessageSchema = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("start-task"),
+    taskId: TaskIdSchema,
+    harnessId: z.string().min(1),
+    cwd: z.string().min(1),
+  }),
+  z.object({ op: z.literal("stop-task"), taskId: TaskIdSchema }),
+  z.object({ op: z.literal("list-tasks") }),
+  /** worker → app */
+  z.object({
+    op: z.literal("task-exit"),
+    taskId: TaskIdSchema,
+    code: z.number().int().nullable(),
+  }),
+]);
+export type CtlMessage = z.infer<typeof CtlMessageSchema>;
+
 export const TunnelMessageSchema = z.object({
   ch: TunnelChannelSchema,
+  /** Required for "acp" (routes to that task's process); absent for "watch". */
+  taskId: TaskIdSchema.optional(),
   body: z.unknown(),
 });
 export type TunnelMessage = z.infer<typeof TunnelMessageSchema>;

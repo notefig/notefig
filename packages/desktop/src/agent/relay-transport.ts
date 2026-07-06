@@ -6,6 +6,13 @@ export type RelayTransportOptions = {
   relayUrl: string;
   /** Pairing code shown by `metrists agent` on the user's machine */
   pairingCode: string;
+  /**
+   * One RelayTransport per task: acp frames are tagged with this id and the
+   * worker routes them to the task's adapter process (spawned via a ctl
+   * start-task message). The underlying socket/crypto session is shared
+   * across a workspace's transports.
+   */
+  taskId: string;
 };
 
 /**

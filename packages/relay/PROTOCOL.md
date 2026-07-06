@@ -46,9 +46,21 @@ chars — the room id derived from the pairing secret; see Pairing).
    possession; no application traffic before it completes.
 5. Rekeying = re-pairing with a fresh secret.
 
-Inside the decrypted payload, messages are multiplexed by channel:
-`{ ch: "acp" | "watch" | "ctl", body: … }` — the ACP JSON-RPC byte stream,
-file-watch events from the worker, and worker control respectively.
+Inside the decrypted payload, messages are multiplexed by channel and task:
+`{ ch: "acp" | "watch" | "ctl", taskId?, body: … }`.
+
+- `acp` (`taskId` required): one JSON-RPC line of the ACP byte stream for
+  that task's adapter process, either direction. The worker never parses
+  `body` — it writes it to the process's stdin / forwards its stdout.
+- `watch`: file-change events from the worker's watcher (no `taskId`).
+- `ctl`: worker control —
+  `{ op: "start-task", taskId, harnessId, cwd }` (worker spawns one adapter
+  process for the task), `{ op: "stop-task", taskId }`,
+  `{ op: "list-tasks" }`, and worker→app events
+  `{ op: "task-exit", taskId, code }`.
+
+One adapter process per task: parallel tasks are parallel children under
+the worker, all sharing the single encrypted socket.
 
 ## Server obligations
 

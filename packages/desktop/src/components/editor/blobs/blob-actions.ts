@@ -23,6 +23,8 @@ export async function answerBlob(
   // 1. Authoritative markdown: editor doc via editor-store if open, else disk.
   // 2. patchBlobInMarkdown(markdown, blobId, {...patch from type.onAnswer}).
   // 3. Write via DocumentSync.pushUpdate / platformAdapter.writeFiles.
-  // 4. getWorkspaceAgentService(...)?.notifyBlobAnswered({filePath, blobId}).
+  // 4. Route to the AUTHORING task (blob→task attribution recorded at fence
+  //    detection): getWorkspaceTaskManager(...)?.getTask(authoringTaskId)
+  //      ?.notifyBlobAnswered({filePath, blobId}).
   throw new Error("not implemented: answerBlob");
 }
