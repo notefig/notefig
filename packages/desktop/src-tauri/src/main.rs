@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agent_proc;
 mod file_watcher;
 mod fs_ops;
 mod search;
@@ -217,6 +218,10 @@ fn main() {
             file_watcher::stop_watching,
             // Search commands
             search::search_content,
+            // Agent process host (errors-as-values pattern)
+            agent_proc::spawn_agent,
+            agent_proc::write_agent_stdin,
+            agent_proc::kill_agent,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

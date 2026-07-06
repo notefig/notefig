@@ -24,6 +24,18 @@
     "./validation": {
       "require": "./dist/validation/index.js",
       "types": "./dist/validation/index.d.ts"
+    },
+    "./agent": {
+      "require": "./dist/agent/index.js",
+      "types": "./dist/agent/index.d.ts"
+    },
+    "./blobs": {
+      "require": "./dist/blobs/index.js",
+      "types": "./dist/blobs/index.d.ts"
+    },
+    "./relay": {
+      "require": "./dist/relay/index.js",
+      "types": "./dist/relay/index.d.ts"
     }
   },
   "scripts": {
@@ -39,6 +51,8 @@
     "typescript": "^5.4.0"
   },
   "dependencies": {
+    "@zed-industries/agent-client-protocol": "^0.4.0",
+    "yaml": "^2.5.0",
     "zod": "^3.23.0"
   }
 }
