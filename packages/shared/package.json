@@ -6,36 +6,44 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "default": "./dist/index.js"
     },
     "./types": {
+      "types": "./dist/types/index.d.ts",
       "require": "./dist/types/index.js",
-      "types": "./dist/types/index.d.ts"
+      "default": "./dist/types/index.js"
     },
     "./utils": {
+      "types": "./dist/utils/index.d.ts",
       "require": "./dist/utils/index.js",
-      "types": "./dist/utils/index.d.ts"
+      "default": "./dist/utils/index.js"
     },
     "./parsing": {
+      "types": "./dist/parsing/index.d.ts",
       "require": "./dist/parsing/index.js",
-      "types": "./dist/parsing/index.d.ts"
+      "default": "./dist/parsing/index.js"
     },
     "./validation": {
+      "types": "./dist/validation/index.d.ts",
       "require": "./dist/validation/index.js",
-      "types": "./dist/validation/index.d.ts"
+      "default": "./dist/validation/index.js"
     },
     "./agent": {
+      "types": "./dist/agent/index.d.ts",
       "require": "./dist/agent/index.js",
-      "types": "./dist/agent/index.d.ts"
+      "default": "./dist/agent/index.js"
     },
     "./blobs": {
+      "types": "./dist/blobs/index.d.ts",
       "require": "./dist/blobs/index.js",
-      "types": "./dist/blobs/index.d.ts"
+      "default": "./dist/blobs/index.js"
     },
     "./relay": {
+      "types": "./dist/relay/index.d.ts",
       "require": "./dist/relay/index.js",
-      "types": "./dist/relay/index.d.ts"
+      "default": "./dist/relay/index.js"
     }
   },
   "scripts": {

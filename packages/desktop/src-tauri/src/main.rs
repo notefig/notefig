@@ -223,6 +223,12 @@ fn main() {
             agent_proc::write_agent_stdin,
             agent_proc::kill_agent,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            // Kill every spawned agent process when the app exits.
+            if let tauri::RunEvent::Exit = event {
+                agent_proc::kill_all_agents();
+            }
+        });
 }

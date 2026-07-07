@@ -1,15 +1,27 @@
+import { ClientSideConnection, ndJsonStream } from "@zed-industries/agent-client-protocol";
 import type {
+  AuthMethod,
+  Client,
   ClientCapabilities,
+  ContentBlock,
+  InitializeResponse,
+  NewSessionResponse,
+  PromptResponse,
   ReadTextFileRequest,
   ReadTextFileResponse,
   RequestPermissionRequest,
   RequestPermissionResponse,
   SessionNotification,
   WriteTextFileRequest,
+  WriteTextFileResponse,
 } from "@metrists/shared/agent";
+import { transportToStreams } from "./agent-transport.interface";
 import type { AgentTransport } from "./agent-transport.interface";
 import type { AgentWriteGate } from "./agent-write-gate";
 import type { PermissionBroker } from "./permission-broker";
+
+/** ACP protocol version we speak (pinned; a spec bump changes acp-types). */
+const PROTOCOL_VERSION = 1;
 
 /**
  * Capabilities are a function of where the agent process runs relative to
@@ -46,15 +58,62 @@ export type AcpClientDeps = {
  * transport-agnostic by construction. The app is the sole ACP client on
  * both platforms; Rust/CLI-worker layers never parse the protocol.
  */
-export class MetristsAcpClient {
+export class MetristsAcpClient implements Client {
+  private connection: ClientSideConnection | null = null;
+  /** From the initialize response — drives auth affordance and capability gating. */
+  private authMethods: AuthMethod[] = [];
+  private agentCapabilities: InitializeResponse["agentCapabilities"] = undefined;
+
   constructor(private readonly deps: AcpClientDeps) {}
 
   /** Open the connection: initialize + capability negotiation. */
-  async connect(): Promise<void> {
-    // TODO(phase 1): new ClientSideConnection(this asClient, ...streams)
-    // from @zed-industries/agent-client-protocol, then initialize() with
-    // capabilitiesForLocus(this.deps.transport.locus).
-    throw new Error("not implemented: MetristsAcpClient.connect");
+  async connect(): Promise<InitializeResponse> {
+    const { writable, readable } = transportToStreams(this.deps.transport);
+    // ndJsonStream(output, input): output is where we send encoded messages,
+    // input is where we receive them. Our transport's writable decodes lines
+    // into transport.send(); its readable enqueues incoming lines.
+    const stream = ndJsonStream(writable, readable);
+    // The ClientSideConnection is itself the Agent-side handle we call.
+    this.connection = new ClientSideConnection(() => this, stream);
+
+    const response = await this.connection.initialize({
+      protocolVersion: PROTOCOL_VERSION,
+      clientCapabilities: capabilitiesForLocus(this.deps.transport.locus),
+    });
+    this.authMethods = response.authMethods ?? [];
+    this.agentCapabilities = response.agentCapabilities;
+    return response;
+  }
+
+  private requireConnection(): ClientSideConnection {
+    if (!this.connection) {
+      throw new Error("ACP connection not established; call connect() first");
+    }
+    return this.connection;
+  }
+
+  // ===== Agent-side calls (thin wrappers the AgentTask uses) =====
+
+  async newSession(cwd: string): Promise<NewSessionResponse> {
+    return this.requireConnection().newSession({ cwd, mcpServers: [] });
+  }
+
+  async prompt(sessionId: string, blocks: ContentBlock[]): Promise<PromptResponse> {
+    return this.requireConnection().prompt({ sessionId, prompt: blocks });
+  }
+
+  async cancel(sessionId: string): Promise<void> {
+    await this.requireConnection().cancel({ sessionId });
+  }
+
+  /**
+   * Human-readable "how to authenticate" hint from the adapter, if any.
+   * claude-code-acp advertises `{ id: "claude-login", description: "Run
+   * `claude /login` in the terminal" }` (see the auth spike); we prefer this
+   * over a hardcoded HarnessDefinition.authHint.
+   */
+  get authHint(): string | undefined {
+    return this.authMethods[0]?.description ?? undefined;
   }
 
   // ===== ACP client-side methods (called by the agent) =====
@@ -67,7 +126,9 @@ export class MetristsAcpClient {
     return this.deps.permissionBroker.request(request);
   }
 
-  async readTextFile(request: ReadTextFileRequest): Promise<ReadTextFileResponse> {
+  async readTextFile(
+    request: ReadTextFileRequest,
+  ): Promise<ReadTextFileResponse> {
     const content = await this.deps.writeGate.readTextFile(request.path, {
       line: request.line ?? undefined,
       limit: request.limit ?? undefined,
@@ -75,12 +136,15 @@ export class MetristsAcpClient {
     return { content };
   }
 
-  async writeTextFile(request: WriteTextFileRequest): Promise<void> {
+  async writeTextFile(
+    request: WriteTextFileRequest,
+  ): Promise<WriteTextFileResponse> {
     await this.deps.writeGate.writeTextFile(
       this.deps.taskId,
       request.path,
       request.content,
     );
+    return {};
   }
 
   async sessionUpdate(notification: SessionNotification): Promise<void> {

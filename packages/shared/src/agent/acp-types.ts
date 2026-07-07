@@ -31,7 +31,10 @@ export type {
   ReadTextFileRequest,
   ReadTextFileResponse,
   WriteTextFileRequest,
+  WriteTextFileResponse,
   CancelNotification,
+  AuthMethod,
+  Stream,
 } from "@zed-industries/agent-client-protocol";
 
 /** Why the agent stopped a turn (PromptResponse["stopReason"]). */

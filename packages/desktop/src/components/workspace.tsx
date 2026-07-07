@@ -36,6 +36,8 @@ import {
   handleContentFileSystemChange,
 } from "@/utils/file-sync";
 import { disposeAllEditors, getEditor } from "@/components/editor/editor-store";
+import { AgentPanel } from "@/components/agent/agent-panel";
+import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
 import {
   type FileTreeMode,
   FILE_TREE_IDLE,
@@ -77,6 +79,14 @@ export const Workspace = () => {
       disposeAllEditors();
     };
   }, []);
+
+  // Tear down agent tasks (kills adapter processes) and clear their rows when
+  // leaving the workspace — alongside editor disposal.
+  useEffect(() => {
+    return () => {
+      void disposeWorkspaceTaskManager(workspacePath);
+    };
+  }, [workspacePath]);
 
   // Query metadata and content for all open tabs
   // Uses left join so files appear immediately (metadata loads eagerly)
@@ -169,6 +179,19 @@ export const Workspace = () => {
       });
     }
   }, [isSidebarCollapsed, setUrlSearchParams, focusActiveEditor]);
+
+  const isAgentOpen = searchParams.get("agent") === "open";
+  const toggleAgentPanel = useCallback(() => {
+    setUrlSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (next.get("agent") === "open") next.delete("agent");
+        else next.set("agent", "open");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setUrlSearchParams]);
 
   // Exposed via WorkspaceTabsContext so components nested in the layout
   // (link menu, search panel) can open files as tabs.
@@ -356,6 +379,10 @@ export const Workspace = () => {
     handleSearchInFiles();
   });
 
+  useHotkey("Mod+Shift+A", () => {
+    toggleAgentPanel();
+  });
+
   useEffect(() => {
     const metadataWatchId = `metadata-${workspacePath}`;
     const contentWatchId = `content-${workspacePath}`;
@@ -400,7 +427,10 @@ export const Workspace = () => {
 
   return (
     <WorkspaceTabsProvider openFile={openFileInTabs}>
-      <div dir={direction} className="flex h-full w-full overflow-hidden p-2">
+      <div
+        dir={direction}
+        className="relative flex h-full w-full overflow-hidden p-2"
+      >
         <div className="flex h-full shrink-0 overflow-hidden rounded-xl border border-border">
           <IconSidebar
             isCollapsed={isSidebarCollapsed}
@@ -444,8 +474,26 @@ export const Workspace = () => {
                 </Dockable.Root>
               )}
             </div>
+
+            {isAgentOpen && (
+              <div className="w-96 shrink-0 h-full">
+                <AgentPanel workspacePath={workspacePath} />
+              </div>
+            )}
           </div>
         </div>
+
+        <button
+          onClick={toggleAgentPanel}
+          className={`absolute end-4 top-3 z-10 rounded-md px-2 py-1 text-xs shadow-sm ${
+            isAgentOpen
+              ? "bg-accent text-accent-foreground"
+              : "bg-background/80 text-muted-foreground hover:bg-muted"
+          }`}
+          title="Toggle agent panel (⌘⇧A)"
+        >
+          Agent
+        </button>
 
         <StatusBar
           wordCount={wordCount}

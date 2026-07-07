@@ -22,6 +22,10 @@ export class LoopbackTransport implements AgentTransport {
   private closeListeners = new Set<(error?: AgentTransportError) => void>();
   private closed = false;
 
+  async start(): Promise<void> {
+    // In-memory pair is live on construction; nothing to spawn.
+  }
+
   send(line: string): void {
     if (this.closed || !this.peer) return;
     for (const listener of this.peer.lineListeners) listener(line);

@@ -20,6 +20,12 @@ export type AgentTaskRow = {
   status: AgentTaskStatus;
   harnessId: string;
   createdAt: number;
+  /**
+   * "How to sign in" hint from the adapter/harness, surfaced on auth errors.
+   * On the row (not just the AgentTask instance) so the banner flows through
+   * useLiveQuery and can't lag behind an unrelated collection write.
+   */
+  authHint?: string;
 };
 
 export type AgentTurnStatus = "running" | "completed" | "cancelled" | "error";
@@ -32,6 +38,8 @@ export type AgentTurn = {
   status: AgentTurnStatus;
   /** ACP stop reason once the turn ends */
   stopReason?: string;
+  /** Failure reason when status is "error" — the "why did it fail?" answer. */
+  error?: string;
   startedAt: number;
 };
 
@@ -112,5 +120,38 @@ export const agentPermissionRequestsCollection = createCollection(
   localOnlyCollectionOptions({
     id: "agent-permission-requests",
     getKey: (request: AgentPermissionRequestRow) => request.id,
+  }),
+);
+
+/**
+ * The harness-side truth that the transcript collections don't capture:
+ * adapter stderr, raw ACP frames both directions, turn/exit failures with
+ * codes, unknown session updates, and the resolved spawn context. Task-keyed
+ * so a dev "Raw" view and the AI can query one stream per task; also the
+ * source for on-disk `.acp.jsonl` capture (dev flag) and future fixtures.
+ */
+export type AgentDiagnosticKind =
+  | "stderr"
+  | "frame_out" // client → agent JSON-RPC line
+  | "frame_in" // agent → client JSON-RPC line
+  | "turn_error"
+  | "exit"
+  | "session_update" // updates the transcript doesn't render (thoughts, usage, …)
+  | "spawn_context";
+
+export type AgentDiagnosticRow = {
+  /** dg_ (ascending) — reconcilable stream order */
+  id: string;
+  taskId: string;
+  kind: AgentDiagnosticKind;
+  /** Raw text (frames/stderr) or a structured object (errors/spawn context). */
+  payload: unknown;
+  receivedAt: number;
+};
+
+export const agentDiagnosticsCollection = createCollection(
+  localOnlyCollectionOptions({
+    id: "agent-diagnostics",
+    getKey: (row: AgentDiagnosticRow) => row.id,
   }),
 );
