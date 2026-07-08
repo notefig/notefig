@@ -29,16 +29,21 @@ const invalidationTimers = new Map<string, ReturnType<typeof setTimeout>>();
  * since several events can legitimately observe the same disk state.
  */
 const SELF_WRITE_TTL_MS = 30_000;
-const MAX_SELF_WRITES_PER_PATH = 100;
 const recentSelfWrites = new Map<string, { hash: string; at: number }[]>();
 
 export function recordSelfWrite(path: string, contentHash: string): void {
   const now = Date.now();
+  // TTL is the ONLY eviction rule. A fixed-count cap silently drops recent,
+  // still-valid hashes under a save burst — and a delayed watcher echo of one
+  // of those dropped writes then passes as "external" and overwrites newer
+  // content with older (the intermittent "old overwrites new" regression).
+  // Pruning by TTL on every write keeps memory bounded to a 30s window, which
+  // at the debounced save cadence is a few dozen entries per file.
   const entries = (recentSelfWrites.get(path) ?? []).filter(
     (entry) => now - entry.at < SELF_WRITE_TTL_MS,
   );
   entries.push({ hash: contentHash, at: now });
-  recentSelfWrites.set(path, entries.slice(-MAX_SELF_WRITES_PER_PATH));
+  recentSelfWrites.set(path, entries);
 }
 
 export function isRecentSelfWrite(path: string, contentHash: string): boolean {

@@ -532,4 +532,45 @@ describe("typing → save → adoption loop integrity", () => {
     await tick(20);
     expect(content.get(FILE)?.content).toBe(external);
   });
+
+  it("a delayed echo evicted from the self-write ledger still must not regress the row", async () => {
+    // Root cause of the *intermittent* "older overwrites newer": the frontend
+    // self-write ledger is capped (MAX_SELF_WRITES_PER_PATH) and the Rust
+    // watcher evicts its own registration after 5s. A watcher echo delivered
+    // late (batched fs events, a slow read, IPC backlog) can therefore carry
+    // content this app wrote — yet find NO matching ledger entry because a
+    // burst of newer saves has since pushed that hash out. With no pending
+    // edit to guard it, handleContentFileSystemChange then writes the stale
+    // payload over the newer row.
+    //
+    // Reproduce deterministically by flooding the ledger past its cap so an
+    // early write's hash is evicted, then replaying that early write as an echo.
+    const { content } = getOrCreateWorkspaceCollections(WS);
+
+    const stale = "content from an early save";
+    await writeFileContent(WS, FILE, stale); // hash recorded...
+
+    // ...then evicted: more than MAX_SELF_WRITES_PER_PATH (100) newer writes.
+    let newest = "";
+    for (let i = 0; i < 110; i++) {
+      newest = `newer save number ${i}`;
+      await writeFileContent(WS, FILE, newest);
+    }
+    expect(content.get(FILE)?.content).toBe(newest);
+
+    // The late watcher echo of the early write arrives now.
+    await handleContentFileSystemChange(
+      {
+        changes: [
+          { path: FILE, content: stale, contentHash: calculateContentHash(stale) },
+        ],
+      },
+      WS,
+    );
+    await tick(20);
+
+    // The row must still hold the newest content — the stale echo is this
+    // app's own write and must never win, ledger capacity notwithstanding.
+    expect(content.get(FILE)?.content).toBe(newest);
+  });
 });
