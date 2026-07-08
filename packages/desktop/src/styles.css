@@ -1,6 +1,78 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@plugin "@tailwindcss/typography";
+@plugin "tailwind-scrollbar-hide";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Map the design tokens (defined as :root/.dark CSS variables below) onto
+   Tailwind v4's utility theme. `inline` keeps the var reference at the point
+   of use so runtime theme switching (.dark overriding the variables) works.
+   Opacity modifiers (e.g. bg-primary/50, bg-brand/40) work automatically:
+   v4 wraps arbitrary color expressions in color-mix(). */
+@theme inline {
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --color-brand: var(--brand);
+  --color-highlight: var(--highlight);
+
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont,
+    "Segoe UI Variable Display", "Segoe UI", Helvetica, "Apple Color Emoji",
+    Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-heading: var(--font-sans);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+}
 
 @layer base {
   :root {
@@ -224,6 +296,57 @@
 
     ::-webkit-scrollbar-thumb:hover {
       background: hsl(var(--muted-foreground) / 0.5);
+    }
+  }
+}
+
+/* shimmer — animated streaming-text effect. The text is painted with
+   background-clip:text and a highlight band sweeps across it in a loop. The
+   highlight is derived from currentColor so it adapts to any text color and
+   brightens in dark mode. Disabled automatically under prefers-reduced-motion. */
+@layer utilities {
+  .shimmer {
+    --shimmer-duration: 2s;
+    --shimmer-spread: calc(3ch + 40px);
+    --shimmer-angle: 20deg;
+    --shimmer-color: oklch(from currentColor calc(l + 0.4) c h);
+    color: transparent;
+    background-color: currentColor;
+    background-image: linear-gradient(
+      var(--shimmer-angle),
+      transparent calc(50% - var(--shimmer-spread) / 2),
+      var(--shimmer-color),
+      transparent calc(50% + var(--shimmer-spread) / 2)
+    );
+    background-repeat: no-repeat;
+    background-size: 250% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    animation: tw-shimmer var(--shimmer-duration) linear infinite;
+  }
+
+  .shimmer-once {
+    animation-iteration-count: 1;
+  }
+
+  .shimmer-reverse {
+    animation-direction: reverse;
+  }
+
+  @keyframes tw-shimmer {
+    from {
+      background-position: 150% 0;
+    }
+    to {
+      background-position: -50% 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .shimmer {
+      animation: none;
+      color: inherit;
+      background: none;
     }
   }
 }

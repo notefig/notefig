@@ -1,9 +1,27 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useLiveQuery, eq } from "@tanstack/react-db";
+import {
+  ArrowUp,
+  Globe,
+  Loader2,
+  Mic,
+  Plus,
+  Sparkles,
+  Square,
+  Telescope,
+} from "lucide-react";
 import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
+import { cn } from "@/lib/utils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -112,6 +130,7 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
     ? getWorkspaceTaskManager(workspacePath)?.getTask(activeTaskId)
     : undefined;
   const activeTaskRow = sortedTasks.find((t) => t.taskId === activeTaskId);
+  const isRunning = activeTaskRow?.status === "running";
   const [showRaw, setShowRaw] = useState(false);
   const debugEnabled = isAgentDebugEnabled();
 
@@ -140,7 +159,7 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
       <OverlapBanner workspacePath={workspacePath} tick={tasks.length} />
 
       {activeTaskId ? (
-        <>
+        <div className="relative flex min-h-0 flex-1 flex-col">
           {debugEnabled && (
             <div className="flex items-center gap-2 border-b border-border px-3 py-1 text-xs">
               <button
@@ -162,23 +181,41 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
           ) : (
             <Transcript taskId={activeTaskId} />
           )}
-          {activeTask && (
-            <div className="px-3">
-              <PermissionCard broker={activeTask.permissionBroker} />
-            </div>
-          )}
-          {activeTaskRow?.authHint && (
-            <div className="mx-3 mb-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
-              {activeTaskRow.authHint}
-            </div>
-          )}
-          <PromptBox
-            value={draft}
-            onChange={setDraft}
-            onSend={sendPrompt}
-            onStop={stopTask}
-          />
-        </>
+
+          {/* Floating composer pinned to the bottom of the tab. The gradient
+              fades the transcript out behind it; the wrapper is click-through
+              (pointer-events-none) so only the cards inside catch pointers. */}
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-2 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-3 pt-10">
+            {isRunning && (
+              <Marker
+                role="status"
+                className="pointer-events-auto self-start rounded-full border border-border bg-card/80 px-3 py-1 backdrop-blur"
+              >
+                <MarkerIcon>
+                  <Loader2 className="animate-spin" />
+                </MarkerIcon>
+                <MarkerContent className="shimmer">Working…</MarkerContent>
+              </Marker>
+            )}
+            {activeTask && (
+              <div className="pointer-events-auto">
+                <PermissionCard broker={activeTask.permissionBroker} />
+              </div>
+            )}
+            {activeTaskRow?.authHint && (
+              <div className="pointer-events-auto rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
+                {activeTaskRow.authHint}
+              </div>
+            )}
+            <PromptBox
+              value={draft}
+              onChange={setDraft}
+              onSend={sendPrompt}
+              onStop={stopTask}
+              isRunning={isRunning}
+            />
+          </div>
+        </div>
       ) : (
         <div className="flex flex-1 items-center justify-center p-4 text-center text-sm text-muted-foreground">
           Start a task to chat with an agent about your documents.
@@ -335,7 +372,8 @@ function Transcript({ taskId }: { taskId: string }) {
 
   return (
     <ScrollArea className="flex-1 min-h-0">
-      <div className="flex flex-col gap-3 p-3">
+      {/* pb clears the floating composer overlay pinned to the bottom. */}
+      <div className="flex flex-col gap-3 p-3 pb-36">
         {sortedMessages.map((message) => (
           <MessageView
             key={message.messageId}
@@ -460,32 +498,46 @@ function ToolCallCard({ event }: { event: AgentEvent }) {
   const title = payload.title ?? "Tool call";
   const isEdit = payload.kind === "edit";
   return (
-    <div className="w-full max-w-[85%] rounded-md border border-border bg-card px-3 py-1.5 text-xs">
-      <span className="font-medium">
+    <Marker
+      variant="border"
+      className="w-full max-w-[85%] py-1.5 text-xs text-foreground"
+    >
+      <MarkerContent className="font-medium">
         {isEdit ? "✎ " : ""}
         {title}
-      </span>
+      </MarkerContent>
       {payload.status && (
-        <span className="ms-2 text-muted-foreground">{payload.status}</span>
+        <span className="ms-auto shrink-0 text-muted-foreground">
+          {payload.status}
+        </span>
       )}
-    </div>
+    </Marker>
   );
 }
 
+/**
+ * The floating composer: a rounded card pinned to the bottom of the tab with
+ * the prompt input above a toolbar row. The send control flips to a stop
+ * button while the task is streaming (⌘⏎ sends). The left affordances mirror
+ * the target design; they are visual placeholders until wired to real actions.
+ */
 function PromptBox({
   value,
   onChange,
   onSend,
   onStop,
+  isRunning,
 }: {
   value: string;
   onChange: (value: string) => void;
   onSend: () => void;
   onStop: () => void;
+  isRunning: boolean;
 }) {
+  const canSend = value.trim().length > 0;
   return (
-    <div className="flex items-end gap-2 border-t border-border p-2">
-      <Textarea
+    <div className="pointer-events-auto rounded-2xl border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40">
+      <textarea
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
@@ -494,18 +546,74 @@ function PromptBox({
             onSend();
           }
         }}
-        placeholder="Ask the agent to edit your docs… (⌘⏎ to send)"
-        className="min-h-[38px] flex-1 resize-none"
+        placeholder="Ask anything, @models, /prompts …"
         rows={2}
+        className="max-h-40 min-h-[44px] w-full resize-none bg-transparent px-4 pt-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
       />
-      <div className="flex flex-col gap-1">
-        <Button size="sm" onClick={onSend} disabled={!value.trim()}>
-          Send
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onStop}>
-          Stop
-        </Button>
+      <div className="flex items-center gap-1 px-2 pb-2">
+        <ComposerIconButton label="Add context">
+          <Plus />
+        </ComposerIconButton>
+        <div className="mx-1 h-5 w-px bg-border" />
+        <ComposerIconButton label="Prompts">
+          <Sparkles />
+        </ComposerIconButton>
+        <ComposerIconButton label="Explore">
+          <Telescope />
+        </ComposerIconButton>
+        <ComposerIconButton label="Web search">
+          <Globe />
+        </ComposerIconButton>
+
+        <div className="ms-auto flex items-center gap-1">
+          <ComposerIconButton label="Dictate">
+            <Mic />
+          </ComposerIconButton>
+          {isRunning ? (
+            <Button
+              size="icon"
+              onClick={onStop}
+              className="size-9 rounded-xl"
+              title="Stop"
+              aria-label="Stop"
+            >
+              <Square className="fill-current" />
+            </Button>
+          ) : (
+            <Button
+              size="icon"
+              onClick={onSend}
+              disabled={!canSend}
+              className="size-9 rounded-xl"
+              title="Send (⌘⏎)"
+              aria-label="Send"
+            >
+              <ArrowUp />
+            </Button>
+          )}
+        </div>
       </div>
     </div>
+  );
+}
+
+function ComposerIconButton({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      title={label}
+      aria-label={label}
+      className={cn("size-8 rounded-lg text-muted-foreground")}
+    >
+      {children}
+    </Button>
   );
 }
