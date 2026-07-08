@@ -122,36 +122,3 @@ export const agentPermissionRequestsCollection = createCollection(
     getKey: (request: AgentPermissionRequestRow) => request.id,
   }),
 );
-
-/**
- * The harness-side truth that the transcript collections don't capture:
- * adapter stderr, raw ACP frames both directions, turn/exit failures with
- * codes, unknown session updates, and the resolved spawn context. Task-keyed
- * so a dev "Raw" view and the AI can query one stream per task; also the
- * source for on-disk `.acp.jsonl` capture (dev flag) and future fixtures.
- */
-export type AgentDiagnosticKind =
-  | "stderr"
-  | "frame_out" // client → agent JSON-RPC line
-  | "frame_in" // agent → client JSON-RPC line
-  | "turn_error"
-  | "exit"
-  | "session_update" // updates the transcript doesn't render (thoughts, usage, …)
-  | "spawn_context";
-
-export type AgentDiagnosticRow = {
-  /** dg_ (ascending) — reconcilable stream order */
-  id: string;
-  taskId: string;
-  kind: AgentDiagnosticKind;
-  /** Raw text (frames/stderr) or a structured object (errors/spawn context). */
-  payload: unknown;
-  receivedAt: number;
-};
-
-export const agentDiagnosticsCollection = createCollection(
-  localOnlyCollectionOptions({
-    id: "agent-diagnostics",
-    getKey: (row: AgentDiagnosticRow) => row.id,
-  }),
-);

@@ -24,7 +24,6 @@ export async function answerBlob(
   // 2. patchBlobInMarkdown(markdown, blobId, {...patch from type.onAnswer}).
   // 3. Write via DocumentSync.pushUpdate / platformAdapter.writeFiles.
   // 4. Route to the AUTHORING task (blob→task attribution recorded at fence
-  //    detection): getWorkspaceTaskManager(...)?.getTask(authoringTaskId)
-  //      ?.notifyBlobAnswered({filePath, blobId}).
+  //    detection) via a notifyBlobAnswered command keyed on authoringTaskId.
   throw new Error("not implemented: answerBlob");
 }

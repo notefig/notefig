@@ -35,22 +35,20 @@ import {
 import { useKv } from "@/utils/kv-store";
 import { normalizePath } from "@/utils/fs";
 import {
-  agentDiagnosticsCollection,
   agentEventsCollection,
   agentMessagesCollection,
   agentTasksCollection,
   agentTurnsCollection,
-  type AgentDiagnosticRow,
   type AgentEvent,
   type AgentMessageRow,
   type AgentTaskRow,
 } from "@/agent/agent-collections";
 import {
-  getOrCreateWorkspaceTaskManager,
-  getWorkspaceTaskManager,
+  cancelAgentTask,
+  getWorkspaceOverlaps,
+  promptAgentTask,
+  startAgentTask,
 } from "@/agent/agent-service";
-import { isAgentDebugEnabled } from "@/agent/agent-trace";
-import { TauriStdioTransport } from "@/agent/tauri-stdio-transport";
 import { PermissionCard } from "./permission-card";
 
 /**
@@ -94,19 +92,9 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
   }, [activeTaskId, sortedTasks]);
 
   const startTask = useCallback(async () => {
-    const harness = BUILT_IN_HARNESSES[0];
-    const manager = getOrCreateWorkspaceTaskManager(workspacePath);
-    const task = manager.createTask(harness);
-    setActiveTaskId(task.taskId);
-    const transport = new TauriStdioTransport({
-      procId: task.taskId,
-      program: harness.command,
-      args: harness.args,
-      cwd: workspacePath,
-      env: harness.env,
-    });
     try {
-      await task.start(transport);
+      const taskId = await startAgentTask(workspacePath);
+      setActiveTaskId(taskId);
     } catch (error) {
       console.error("Failed to start agent task:", error);
     }
@@ -126,26 +114,20 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
     void startTask();
   }, [kv, trustKey, startTask]);
 
-  const activeTask = activeTaskId
-    ? getWorkspaceTaskManager(workspacePath)?.getTask(activeTaskId)
-    : undefined;
   const activeTaskRow = sortedTasks.find((t) => t.taskId === activeTaskId);
   const isRunning = activeTaskRow?.status === "running";
-  const [showRaw, setShowRaw] = useState(false);
-  const debugEnabled = isAgentDebugEnabled();
 
   const sendPrompt = useCallback(() => {
     const text = draft.trim();
     if (!activeTaskId || !text) return;
-    const task = getWorkspaceTaskManager(workspacePath)?.getTask(activeTaskId);
-    void task?.prompt(text);
+    promptAgentTask(activeTaskId, text);
     setDraft("");
-  }, [draft, activeTaskId, workspacePath]);
+  }, [draft, activeTaskId]);
 
   const stopTask = useCallback(() => {
     if (!activeTaskId) return;
-    void getWorkspaceTaskManager(workspacePath)?.getTask(activeTaskId)?.cancel();
-  }, [activeTaskId, workspacePath]);
+    void cancelAgentTask(activeTaskId);
+  }, [activeTaskId]);
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden border-s border-border bg-background">
@@ -160,27 +142,7 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
 
       {activeTaskId ? (
         <div className="relative flex min-h-0 flex-1 flex-col">
-          {debugEnabled && (
-            <div className="flex items-center gap-2 border-b border-border px-3 py-1 text-xs">
-              <button
-                onClick={() => setShowRaw(false)}
-                className={!showRaw ? "font-medium" : "text-muted-foreground"}
-              >
-                Chat
-              </button>
-              <button
-                onClick={() => setShowRaw(true)}
-                className={showRaw ? "font-medium" : "text-muted-foreground"}
-              >
-                Raw
-              </button>
-            </div>
-          )}
-          {showRaw ? (
-            <DiagnosticsView taskId={activeTaskId} />
-          ) : (
-            <Transcript taskId={activeTaskId} />
-          )}
+          <Transcript taskId={activeTaskId} />
 
           {/* Floating composer pinned to the bottom of the tab. The gradient
               fades the transcript out behind it; the wrapper is click-through
@@ -197,11 +159,9 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
                 <MarkerContent className="shimmer">Working…</MarkerContent>
               </Marker>
             )}
-            {activeTask && (
-              <div className="pointer-events-auto">
-                <PermissionCard broker={activeTask.permissionBroker} />
-              </div>
-            )}
+            <div className="pointer-events-auto empty:hidden">
+              <PermissionCard taskId={activeTaskId} />
+            </div>
             {activeTaskRow?.authHint && (
               <div className="pointer-events-auto rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
                 {activeTaskRow.authHint}
@@ -301,9 +261,7 @@ function OverlapBanner({
   // Re-evaluate when tasks change; overlap is imperative (write-gate state).
   tick: number;
 }) {
-  const overlaps =
-    getWorkspaceTaskManager(workspacePath)?.writeGate.getOverlappingPaths() ??
-    [];
+  const overlaps = getWorkspaceOverlaps(workspacePath);
   void tick;
   if (overlaps.length === 0) return null;
   return (
@@ -395,55 +353,6 @@ function Transcript({ taskId }: { taskId: string }) {
   );
 }
 
-/**
- * Dev-only "Raw" view: the task's diagnostics stream (stderr, raw ACP frames
- * both directions, turn/exit errors, spawn context, unrendered updates). The
- * inspectable harness-side truth the transcript doesn't show.
- */
-function DiagnosticsView({ taskId }: { taskId: string }) {
-  const { data: rows = [] } = useLiveQuery(
-    (q) =>
-      q
-        .from({ row: agentDiagnosticsCollection })
-        .where(({ row }) => eq(row.taskId, taskId)),
-    [taskId],
-  );
-  const sorted = useMemo(
-    () => [...rows].sort((a, b) => (a.id < b.id ? -1 : 1)),
-    [rows],
-  );
-
-  const kindColor = (kind: AgentDiagnosticRow["kind"]) =>
-    kind === "frame_out"
-      ? "text-blue-500"
-      : kind === "frame_in"
-        ? "text-green-600 dark:text-green-400"
-        : kind === "stderr"
-          ? "text-amber-600 dark:text-amber-400"
-          : kind === "turn_error" || kind === "exit"
-            ? "text-red-500"
-            : "text-muted-foreground";
-
-  return (
-    <ScrollArea className="flex-1 min-h-0">
-      <div className="flex flex-col gap-0.5 p-2 font-mono text-[11px] leading-tight">
-        {sorted.map((row) => (
-          <div key={row.id} className="whitespace-pre-wrap break-all">
-            <span className={kindColor(row.kind)}>{row.kind}</span>{" "}
-            <span className="text-foreground/80">
-              {typeof row.payload === "string"
-                ? row.payload
-                : JSON.stringify(row.payload)}
-            </span>
-          </div>
-        ))}
-        {sorted.length === 0 && (
-          <div className="p-2 text-muted-foreground">No diagnostics yet.</div>
-        )}
-      </div>
-    </ScrollArea>
-  );
-}
 
 function messageText(events: AgentEvent[]): string {
   return events

@@ -116,39 +116,3 @@ export function transportToStreams(transport: AgentTransport): {
 
   return { writable, readable };
 }
-
-/**
- * Wrap a transport so every JSON-RPC line is observed in both directions
- * before being forwarded — the tap point for the raw-frame diagnostics log.
- * Delegates all lifecycle (start/close/onDiagnostic/spawnInfo) to the inner
- * transport, so the caller can use the wrapper everywhere.
- */
-export function tapTransport(
-  inner: AgentTransport,
-  hooks: {
-    onOutgoing?: (line: string) => void;
-    onIncoming?: (line: string) => void;
-  },
-): AgentTransport {
-  return {
-    locus: inner.locus,
-    get spawnInfo() {
-      return inner.spawnInfo;
-    },
-    start: () => inner.start(),
-    send: (line) => {
-      hooks.onOutgoing?.(line);
-      inner.send(line);
-    },
-    onLine: (callback) =>
-      inner.onLine((line) => {
-        hooks.onIncoming?.(line);
-        callback(line);
-      }),
-    onClose: (callback) => inner.onClose(callback),
-    onDiagnostic: inner.onDiagnostic
-      ? (callback) => inner.onDiagnostic!(callback)
-      : undefined,
-    close: () => inner.close(),
-  };
-}

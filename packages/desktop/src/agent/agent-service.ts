@@ -3,9 +3,10 @@ import {
   newTurnId,
   newMessageId,
   newEventId,
-  newDiagnosticId,
+  BUILT_IN_HARNESSES,
   type ContentBlock,
   type HarnessDefinition,
+  type RequestPermissionResponse,
   type SessionNotification,
 } from "@metrists/shared/agent";
 import { platformAdapter } from "@/adapters";
@@ -14,19 +15,15 @@ import { MarkdownJoiner } from "@/lib/markdown-joiner-transform";
 import { AgentWriteGate } from "./agent-write-gate";
 import { PermissionBroker } from "./permission-broker";
 import { MetristsAcpClient } from "./acp-client";
-import { tapTransport } from "./agent-transport.interface";
 import type { AgentTransport } from "./agent-transport.interface";
 import { AgentTransportError } from "./agent-transport.interface";
-import { AgentTracer, isAgentTracingEnabled } from "./agent-trace";
+import { TauriStdioTransport } from "./tauri-stdio-transport";
 import {
-  agentDiagnosticsCollection,
   agentEventsCollection,
   agentMessagesCollection,
   agentPermissionRequestsCollection,
   agentTasksCollection,
   agentTurnsCollection,
-  type AgentDiagnosticKind,
-  type AgentDiagnosticRow,
   type AgentTaskStatus,
   type AgentTurnStatus,
 } from "./agent-collections";
@@ -48,9 +45,6 @@ type TurnState = {
   /** toolCallId → event row id, so updates coalesce into one card. */
   toolEventIds: Map<string, string>;
 };
-
-/** Queued prompt + the deferred that resolves when its own turn ends. */
-type QueuedPrompt = { text: string; resolve: () => void };
 
 function contentBlockText(content: ContentBlock): string {
   return content.type === "text" ? content.text : "";
@@ -77,9 +71,13 @@ function errorMessage(error: unknown): string {
  * worker maps taskId → child process. Process-per-task: adapters'
  * multi-session support is unproven, and processes give free crash
  * isolation and trivially correct cancellation.
+ *
+ * The app never holds an AgentTask directly — it drives tasks through the
+ * free functions below (startAgentTask/promptAgentTask/…) and reads all state
+ * through the agent collections.
  */
 export class AgentTask {
-  readonly permissionBroker = new PermissionBroker();
+  readonly permissionBroker: PermissionBroker;
 
   private client: MetristsAcpClient | null = null;
   private transport: AgentTransport | null = null;
@@ -88,13 +86,15 @@ export class AgentTask {
   private title = "New task";
 
   private currentTurn: TurnState | null = null;
-  /** Prompts arriving while a turn runs: FIFO, promoted on turn end. */
-  private readonly promptQueue: QueuedPrompt[] = [];
+  /**
+   * Single-slot coalescing: the next prompt to run. Prompts arriving while a
+   * turn runs overwrite it (latest wins) rather than stacking a queue — the UI
+   * gates Send while running, so this only coalesces rapid programmatic sends.
+   */
+  private pendingPrompt: string | null = null;
   /** "How to sign in" hint, surfaced only when an auth error actually occurs. */
   private authHintValue?: string;
   private disposed = false;
-  /** Opt-in on-disk trace of the diagnostics stream (dev flag). */
-  private tracer?: AgentTracer;
   private readonly unsubscribers: Array<() => void> = [];
 
   constructor(
@@ -104,35 +104,29 @@ export class AgentTask {
     private readonly writeGate: AgentWriteGate,
     /** Set when spawned by another task (subagent pattern, opencode-style) */
     readonly parentTaskId?: string,
-  ) {}
+  ) {
+    this.permissionBroker = new PermissionBroker(taskId);
+  }
 
   /** Spawn transport + connect ACP + create the session. */
   async start(transport: AgentTransport): Promise<void> {
-    if (isAgentTracingEnabled()) {
-      this.tracer = new AgentTracer(this.workspacePath, this.taskId);
-    }
-    // Tap frames both directions into the diagnostics stream, then use the
-    // wrapper everywhere (it delegates all lifecycle to the inner transport).
-    const tapped = tapTransport(transport, {
-      onOutgoing: (line) => this.logDiagnostic("frame_out", line),
-      onIncoming: (line) => this.logDiagnostic("frame_in", line),
-    });
-    this.transport = tapped;
+    this.transport = transport;
     this.insertTaskRow();
 
     this.unsubscribers.push(
-      tapped.onClose((error) => this.handleTransportClose(error)),
+      transport.onClose((error) => this.handleTransportClose(error)),
     );
-    // Adapter stderr → diagnostics (was console.debug-only, D1).
-    if (tapped.onDiagnostic) {
+    // Adapter stderr — console-only for now (observability lives on the
+    // transcript collections; the raw-frame diagnostics stream was removed).
+    if (transport.onDiagnostic) {
       this.unsubscribers.push(
-        tapped.onDiagnostic((line) => this.logDiagnostic("stderr", line)),
+        transport.onDiagnostic((line) => this.warn("stderr", line)),
       );
     }
 
     this.client = new MetristsAcpClient({
       taskId: this.taskId,
-      transport: tapped,
+      transport,
       permissionBroker: this.permissionBroker,
       writeGate: this.writeGate,
       onSessionUpdate: (notification) => this.handleSessionUpdate(notification),
@@ -141,8 +135,7 @@ export class AgentTask {
     // Bring the transport live before any ACP traffic; spawn failure surfaces
     // here as an AgentTransportError and marks the task errored.
     try {
-      await tapped.start();
-      if (tapped.spawnInfo) this.logDiagnostic("spawn_context", tapped.spawnInfo);
+      await transport.start();
       await this.client.connect();
       // Note: we do NOT surface authHint here — the adapter always advertises
       // authMethods regardless of login (see the auth spike), so the hint only
@@ -158,36 +151,37 @@ export class AgentTask {
       this.setStatus("idle");
     } catch (error) {
       const message = errorMessage(error);
-      this.logDiagnostic("turn_error", { phase: "start", message });
+      this.warn("start failed", message);
       this.setStatus("error");
       throw error instanceof AgentTransportError ? error : new Error(message);
     }
   }
 
   /**
-   * Send a user prompt. The returned promise resolves when *this* prompt's
-   * turn reaches a terminal state (completed / error / cancelled) — not merely
-   * when it is accepted. Prompts sent while a turn runs are queued FIFO.
+   * Send a user prompt (fire-and-forget). While a turn runs the text is held
+   * in a single slot (latest wins) and promoted when the turn ends.
    */
-  async prompt(text: string): Promise<void> {
+  prompt(text: string): void {
     if (!this.client || !this.sessionId) {
       throw new Error("agent task is not started");
     }
-    return new Promise<void>((resolve) => {
-      this.promptQueue.push({ text, resolve });
-      // A running turn's drain loop will pick this up; otherwise start one.
-      if (!this.currentTurn) void this.drainQueue();
-    });
+    this.pendingPrompt = text;
+    // A running turn's drain loop will pick this up; otherwise start one.
+    if (!this.currentTurn) void this.drainQueue();
+  }
+
+  /** Answer a pending permission request this task raised. */
+  respondPermission(requestId: string, response: RequestPermissionResponse): void {
+    this.permissionBroker.respond(requestId, response);
   }
 
   private async drainQueue(): Promise<void> {
-    while (!this.disposed && this.promptQueue.length > 0) {
-      const item = this.promptQueue.shift() as QueuedPrompt;
-      const status = await this.runTurn(item.text);
-      item.resolve();
-      // A5: don't spam the rest of the queue through the same failure (e.g.
-      // three "Authentication required" turns). Remaining prompts stay queued
-      // and resume on the next prompt() once the block is resolved.
+    while (!this.disposed && this.pendingPrompt !== null) {
+      const text = this.pendingPrompt;
+      this.pendingPrompt = null;
+      const status = await this.runTurn(text);
+      // Don't auto-run a coalesced follow-up through the same failure (e.g. an
+      // auth block); it resumes when the user sends again.
       if (status === "error") break;
     }
   }
@@ -257,7 +251,7 @@ export class AgentTask {
       if (/authentication required/i.test(message)) {
         this.setAuthHint(this.client?.authHint ?? this.harness.authHint);
       }
-      this.logDiagnostic("turn_error", { turnId, message });
+      this.warn("turn error", message);
       return this.finishTurn(undefined, "error", message);
     }
   }
@@ -284,17 +278,12 @@ export class AgentTask {
 
     this.currentTurn = null;
     this.setStatus(turnStatus === "error" ? "error" : "idle");
-    void this.tracer?.flush(); // persist at turn boundaries (dev flag)
     return turnStatus;
   }
 
   handleSessionUpdate(notification: SessionNotification): void {
     const turn = this.currentTurn;
-    if (!turn) {
-      // Update outside a turn — keep it in diagnostics rather than dropping it.
-      this.logDiagnostic("session_update", notification.update);
-      return;
-    }
+    if (!turn) return; // update outside a turn — nothing to attach it to
     const update = notification.update;
 
     switch (update.sessionUpdate) {
@@ -326,8 +315,7 @@ export class AgentTask {
       }
       default:
         // agent_thought_chunk / user_message_chunk / available_commands_update
-        // / current_mode_update — not rendered, but recorded for debugging (D4).
-        this.logDiagnostic("session_update", update);
+        // / current_mode_update — not rendered.
         break;
     }
   }
@@ -372,18 +360,6 @@ export class AgentTask {
       payload: update,
       receivedAt: Date.now(),
     });
-  }
-
-  private logDiagnostic(kind: AgentDiagnosticKind, payload: unknown): void {
-    const row: AgentDiagnosticRow = {
-      id: newDiagnosticId(),
-      taskId: this.taskId,
-      kind,
-      payload,
-      receivedAt: Date.now(),
-    };
-    agentDiagnosticsCollection.insert(row);
-    this.tracer?.append(row);
   }
 
   private setAuthHint(hint?: string): void {
@@ -464,17 +440,19 @@ export class AgentTask {
 
   async dispose(): Promise<void> {
     this.disposed = true;
-    // Settle any awaited-but-never-run queued prompts so callers don't hang.
-    for (const item of this.promptQueue) item.resolve();
-    this.promptQueue.length = 0;
+    this.pendingPrompt = null;
     for (const unsubscribe of this.unsubscribers) unsubscribe();
     this.unsubscribers.length = 0;
     await this.cancel();
     await this.transport?.close();
-    await this.tracer?.flush();
   }
 
   // ===== internal helpers =====
+
+  /** Residual observability: signals that used to land in the diagnostics stream. */
+  private warn(label: string, detail?: unknown): void {
+    console.warn(`[agent ${this.taskId}] ${label}`, detail ?? "");
+  }
 
   private insertTaskRow(): void {
     agentTasksCollection.insert({
@@ -501,13 +479,12 @@ export class AgentTask {
     this.permissionBroker.cancelAll();
     // "agent process exited (code N)" / "terminated (signal)" from the
     // transport — the difference between a silent dead task and a real reason.
-    this.logDiagnostic("exit", { message: error?.message ?? "transport closed" });
+    this.warn("transport closed", error?.message ?? "transport closed");
     if (this.currentTurn) {
       this.finishTurn(undefined, "error", error?.message ?? "agent process ended");
     } else if (!this.disposed) {
       this.setStatus("error");
     }
-    void this.tracer?.flush();
   }
 }
 
@@ -538,6 +515,7 @@ export class TaskManager {
       options?.parentTaskId,
     );
     this.tasks.set(taskId, task);
+    taskRegistry.set(taskId, task);
     return task;
   }
 
@@ -552,16 +530,21 @@ export class TaskManager {
   async cancelTask(taskId: string): Promise<void> {
     const task = this.tasks.get(taskId);
     this.tasks.delete(taskId);
+    taskRegistry.delete(taskId);
     await task?.dispose();
   }
 
   async disposeAll(): Promise<void> {
     const tasks = this.listTasks();
     this.tasks.clear();
+    for (const task of tasks) taskRegistry.delete(task.taskId);
     await Promise.all(tasks.map((task) => task.dispose()));
   }
 }
 
+/** Flat taskId → AgentTask registry (editor-store convention) backing the
+ *  free-function command API below, so the app addresses tasks by id alone. */
+const taskRegistry = new Map<string, AgentTask>();
 const taskManagerRegistry = new Map<string, TaskManager>();
 
 export function getWorkspaceTaskManager(
@@ -580,6 +563,53 @@ export function getOrCreateWorkspaceTaskManager(
     taskManagerRegistry.set(normalized, manager);
   }
   return manager;
+}
+
+// ===== app-facing command API (thin free functions; state via collections) =====
+
+/**
+ * Create + start an agent task in a workspace, returning its id. Owns the
+ * platform transport choice so the UI never touches transport internals.
+ */
+export async function startAgentTask(
+  workspacePath: string,
+  harness: HarnessDefinition = BUILT_IN_HARNESSES[0],
+): Promise<string> {
+  const manager = getOrCreateWorkspaceTaskManager(workspacePath);
+  const task = manager.createTask(harness);
+  const transport = new TauriStdioTransport({
+    procId: task.taskId,
+    program: harness.command,
+    args: harness.args,
+    cwd: workspacePath,
+    env: harness.env,
+  });
+  await task.start(transport);
+  return task.taskId;
+}
+
+/** Send a prompt to a task (fire-and-forget; single-slot coalescing). */
+export function promptAgentTask(taskId: string, text: string): void {
+  taskRegistry.get(taskId)?.prompt(text);
+}
+
+/** Cancel a task's running turn and pending permissions. */
+export async function cancelAgentTask(taskId: string): Promise<void> {
+  await taskRegistry.get(taskId)?.cancel();
+}
+
+/** Answer a pending permission request (rows flow via the collection). */
+export function respondToAgentPermission(
+  taskId: string,
+  requestId: string,
+  response: RequestPermissionResponse,
+): void {
+  taskRegistry.get(taskId)?.respondPermission(requestId, response);
+}
+
+/** Files two or more of a workspace's tasks are concurrently editing. */
+export function getWorkspaceOverlaps(workspacePath: string) {
+  return getWorkspaceTaskManager(workspacePath)?.writeGate.getOverlappingPaths() ?? [];
 }
 
 export async function disposeWorkspaceTaskManager(
@@ -604,11 +634,6 @@ function clearWorkspaceAgentRows(normalizedWorkspacePath: string): void {
   );
   if (taskIds.size === 0) return;
 
-  for (const diagnostic of agentDiagnosticsCollection.toArray) {
-    if (taskIds.has(diagnostic.taskId)) {
-      agentDiagnosticsCollection.delete(diagnostic.id);
-    }
-  }
   for (const event of agentEventsCollection.toArray) {
     if (taskIds.has(event.taskId)) agentEventsCollection.delete(event.id);
   }

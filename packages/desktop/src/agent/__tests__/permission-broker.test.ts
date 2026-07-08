@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { PermissionBroker } from "../permission-broker";
+import { agentPermissionRequestsCollection } from "../agent-collections";
 import type { RequestPermissionRequest } from "@metrists/shared/agent";
 
 function req(title: string): RequestPermissionRequest {
@@ -10,51 +11,63 @@ function req(title: string): RequestPermissionRequest {
   } as RequestPermissionRequest;
 }
 
+function rowsFor(taskId: string) {
+  return agentPermissionRequestsCollection.toArray
+    .filter((r) => r.taskId === taskId)
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
+}
+
+beforeEach(() => {
+  for (const r of agentPermissionRequestsCollection.toArray) {
+    agentPermissionRequestsCollection.delete(r.id);
+  }
+});
+
 describe("PermissionBroker", () => {
-  it("resolves the awaited promise when the matching request is answered", async () => {
-    const broker = new PermissionBroker();
+  it("publishes a pending row and resolves the awaited promise on answer", async () => {
+    const broker = new PermissionBroker("task_1");
     const pending = broker.request(req("one"));
 
-    let head: { id: string } | undefined;
-    const unsub = broker.subscribe((list) => (head = list[0]));
-    unsub();
+    const head = rowsFor("task_1")[0];
+    expect(head.status).toBe("pending");
+    expect(head.title).toBe("one");
 
-    broker.respond(head!.id, {
+    broker.respond(head.id, {
       outcome: { outcome: "selected", optionId: "allow" },
     });
     await expect(pending).resolves.toEqual({
       outcome: { outcome: "selected", optionId: "allow" },
     });
+    // Row is no longer pending, so the UI query drops it.
+    expect(agentPermissionRequestsCollection.get(head.id)?.status).toBe(
+      "granted",
+    );
   });
 
-  it("queues multiple requests and exposes them in order", () => {
-    const broker = new PermissionBroker();
+  it("queues multiple requests, exposed in order via the collection", () => {
+    const broker = new PermissionBroker("task_2");
     broker.request(req("one"));
     broker.request(req("two"));
-    let snapshot: { request: RequestPermissionRequest }[] = [];
-    broker.subscribe((list) => (snapshot = list))();
-    expect(snapshot).toHaveLength(2);
-    expect(snapshot[0].request.toolCall.title).toBe("one");
-    expect(snapshot[1].request.toolCall.title).toBe("two");
+    const rows = rowsFor("task_2");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].title).toBe("one");
+    expect(rows[1].title).toBe("two");
   });
 
   it("cancelAll resolves every pending request as cancelled", async () => {
-    const broker = new PermissionBroker();
+    const broker = new PermissionBroker("task_3");
     const a = broker.request(req("a"));
     const b = broker.request(req("b"));
     broker.cancelAll();
     await expect(a).resolves.toEqual({ outcome: { outcome: "cancelled" } });
     await expect(b).resolves.toEqual({ outcome: { outcome: "cancelled" } });
-
-    let snapshot: unknown[] = [];
-    broker.subscribe((list) => (snapshot = list))();
-    expect(snapshot).toHaveLength(0);
+    expect(rowsFor("task_3").every((r) => r.status === "cancelled")).toBe(true);
   });
 
   it("ignores responses to unknown ids", () => {
-    const broker = new PermissionBroker();
+    const broker = new PermissionBroker("task_4");
     expect(() =>
-      broker.respond("perm_999", {
+      broker.respond("task_4_perm_999", {
         outcome: { outcome: "selected", optionId: "allow" },
       }),
     ).not.toThrow();
