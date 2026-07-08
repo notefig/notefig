@@ -20,8 +20,7 @@ import { createLoopbackPair } from "../loopback-transport";
 import { FakeAgent } from "./fake-agent";
 import { TaskManager, respondToAgentPermission } from "../agent-service";
 import {
-  agentEventsCollection,
-  agentMessagesCollection,
+  agentEntriesCollection,
   agentPermissionRequestsCollection,
   agentTurnsCollection,
   agentTasksCollection,
@@ -31,15 +30,17 @@ import type { AgentTask } from "../agent-service";
 
 const harness = BUILT_IN_HARNESSES[0];
 
+/** Entries for a task in chronological (id) order. */
+function entriesFor(taskId: string) {
+  return agentEntriesCollection.toArray
+    .filter((e) => e.taskId === taskId)
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
+}
+
 function textFor(taskId: string, role: "user" | "assistant"): string {
-  const messageIds = new Set(
-    agentMessagesCollection.toArray
-      .filter((m) => m.taskId === taskId && m.role === role)
-      .map((m) => m.messageId),
-  );
-  return agentEventsCollection.toArray
-    .filter((e) => e.kind === "message_chunk" && messageIds.has(e.messageId))
-    .map((e) => (e.payload as { text?: string }).text ?? "")
+  return entriesFor(taskId)
+    .filter((e) => e.type === role)
+    .map((e) => e.text ?? "")
     .join("");
 }
 
@@ -55,12 +56,8 @@ function pendingPerms(taskId: string) {
     .sort((a, b) => (a.id < b.id ? -1 : 1));
 }
 
-function toolEvents(taskId: string) {
-  return agentEventsCollection.toArray.filter(
-    (e) =>
-      e.taskId === taskId &&
-      (e.kind === "tool_call" || e.kind === "tool_call_update"),
-  );
+function toolEntries(taskId: string) {
+  return entriesFor(taskId).filter((e) => e.type === "tool_call");
 }
 
 /** Fire a prompt (now fire-and-forget) and wait for its turn to settle. */
@@ -77,8 +74,7 @@ async function runPrompt(task: AgentTask, text: string): Promise<void> {
 beforeEach(() => {
   writeFiles.mockClear();
   readFiles.mockClear();
-  for (const e of agentEventsCollection.toArray) agentEventsCollection.delete(e.id);
-  for (const m of agentMessagesCollection.toArray) agentMessagesCollection.delete(m.messageId);
+  for (const e of agentEntriesCollection.toArray) agentEntriesCollection.delete(e.id);
   for (const t of agentTurnsCollection.toArray) agentTurnsCollection.delete(t.turnId);
   for (const t of agentTasksCollection.toArray) agentTasksCollection.delete(t.taskId);
   for (const r of agentPermissionRequestsCollection.toArray)
@@ -297,11 +293,130 @@ describe("AgentTask vertical slice", () => {
     await task.start(client);
     await runPrompt(task, "edit");
 
-    const tools = toolEvents(task.taskId);
+    const tools = toolEntries(task.taskId);
     expect(tools).toHaveLength(1); // one card, not four
-    const payload = tools[0].payload as { status?: string; title?: string };
-    expect(payload.status).toBe("completed"); // merged latest state
-    expect(payload.title).toBe("Write README.md"); // kept from first update
+    expect(tools[0].toolCall?.status).toBe("completed"); // merged latest state
+    expect(tools[0].toolCall?.title).toBe("Write README.md"); // kept from first
+  });
+
+  it("merges a failed tool status into the one entry", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async (_p, a) => {
+      a.update("sess_test", {
+        sessionUpdate: "tool_call",
+        toolCallId: "t1",
+        title: "Run tests",
+        kind: "execute",
+        status: "in_progress",
+      });
+      a.update("sess_test", {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "t1",
+        status: "failed",
+      });
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    await runPrompt(task, "test");
+
+    const tools = toolEntries(task.taskId);
+    expect(tools).toHaveLength(1);
+    expect(tools[0].toolCall?.status).toBe("failed"); // sweep must not override
+  });
+
+  it("resolves a tool call left in_progress when the turn ends", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async (_p, a) => {
+      a.update("sess_test", {
+        sessionUpdate: "tool_call",
+        toolCallId: "t1",
+        title: "Grep",
+        kind: "search",
+        status: "in_progress",
+      });
+      // No completion update — the harness never closes it.
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    await runPrompt(task, "find");
+
+    // The turn-end sweep flips the lingering call so it doesn't spin forever.
+    expect(toolEntries(task.taskId)[0].toolCall?.status).toBe("completed");
+  });
+
+  it("applies a tool_call_update that arrives after the turn ended", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async (_p, a) => {
+      a.update("sess_test", {
+        sessionUpdate: "tool_call",
+        toolCallId: "t1",
+        title: "Write README.md",
+        kind: "edit",
+        status: "in_progress",
+      });
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    await runPrompt(task, "edit");
+
+    // A late update (no active turn) must still coalesce into the entry.
+    task.handleSessionUpdate({
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "t1",
+        status: "failed",
+        content: [{ type: "diff", path: "/ws/README.md", newText: "# Hi\n" }],
+      },
+    } as unknown as Parameters<typeof task.handleSessionUpdate>[0]);
+
+    const tools = toolEntries(task.taskId);
+    expect(tools).toHaveLength(1);
+    expect(tools[0].toolCall?.status).toBe("failed");
+    expect(tools[0].toolCall?.content?.[0]).toMatchObject({ type: "diff" });
+  });
+
+  it("interleaves text and tool calls in order", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async (_p, a) => {
+      a.update("sess_test", {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "Looking… " },
+      });
+      a.update("sess_test", {
+        sessionUpdate: "tool_call",
+        toolCallId: "t1",
+        title: "Read file",
+        kind: "read",
+        status: "completed",
+      });
+      a.update("sess_test", {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "Done." },
+      });
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    await runPrompt(task, "go");
+
+    // user, assistant("Looking… "), tool_call, assistant("Done.") — in order.
+    const types = entriesFor(task.taskId).map((e) => e.type);
+    expect(types).toEqual(["user", "assistant", "tool_call", "assistant"]);
+    const texts = entriesFor(task.taskId)
+      .filter((e) => e.type === "assistant")
+      .map((e) => e.text);
+    expect(texts).toEqual(["Looking… ", "Done."]);
   });
 
   it("stores the turn failure message on the turn row", async () => {

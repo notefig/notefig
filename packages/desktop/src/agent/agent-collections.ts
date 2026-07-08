@@ -6,6 +6,7 @@
  * useLiveQuery, the same idiom as the file collections.
  */
 import { createCollection, localOnlyCollectionOptions } from "@tanstack/react-db";
+import type { ToolCallUpdate } from "@metrists/shared/agent";
 
 export type AgentTaskStatus = "starting" | "idle" | "running" | "cancelled" | "error";
 
@@ -43,39 +44,31 @@ export type AgentTurn = {
   startedAt: number;
 };
 
+export type AgentEntryType = "user" | "assistant" | "tool_call" | "plan";
+
 /**
- * The addressable transcript unit — what deep links, revert, and Phase 4
- * persistence key on. ACP streams anonymous chunks, so message ids are
- * minted client-side (newMessageId): one user message when we send the
- * prompt, one assistant message when its first update arrives.
+ * One item in a task's transcript — a flat, ordered stream. Text and tool
+ * calls are peers (tools are NOT nested under a message), so a
+ * text → tool → text sequence renders in the order it happened. Assistant
+ * text is coalesced into a contiguous run; a new run starts after each tool
+ * call. Ids are minted ascending (newEventId) so lexicographic sort =
+ * chronological render order.
  */
-export type AgentMessageRow = {
-  /** msg_ (ascending: lexicographic sort = chronological) */
-  messageId: string;
-  taskId: string;
-  turnId: string;
-  role: "user" | "assistant";
-  createdAt: number;
-};
-
-export type AgentEventKind =
-  | "message_chunk"
-  | "tool_call"
-  | "tool_call_update"
-  | "plan"
-  | "usage";
-
-export type AgentEvent = {
-  /** evt_ (ascending) */
+export type AgentEntry = {
+  /** evt_ (ascending: lexicographic sort = chronological) */
   id: string;
-  /** The message this event belongs to (chunks → the assistant message) */
-  messageId: string;
-  turnId: string;
   taskId: string;
-  kind: AgentEventKind;
-  /** Raw session/update payload; message chunks are coalesced per message */
-  payload: unknown;
-  receivedAt: number;
+  turnId: string;
+  type: AgentEntryType;
+  /** user / assistant text runs */
+  text?: string;
+  /** tool_call: the ACP toolCallId this row coalesces */
+  toolCallId?: string;
+  /** tool_call: the coalesced tool call (title, kind, status, content, …) */
+  toolCall?: ToolCallUpdate;
+  /** plan: raw plan update payload */
+  plan?: unknown;
+  createdAt: number;
 };
 
 export type AgentPermissionRequestRow = {
@@ -102,17 +95,10 @@ export const agentTurnsCollection = createCollection(
   }),
 );
 
-export const agentMessagesCollection = createCollection(
+export const agentEntriesCollection = createCollection(
   localOnlyCollectionOptions({
-    id: "agent-messages",
-    getKey: (message: AgentMessageRow) => message.messageId,
-  }),
-);
-
-export const agentEventsCollection = createCollection(
-  localOnlyCollectionOptions({
-    id: "agent-events",
-    getKey: (event: AgentEvent) => event.id,
+    id: "agent-entries",
+    getKey: (entry: AgentEntry) => entry.id,
   }),
 );
 

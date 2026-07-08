@@ -1,13 +1,13 @@
 import {
   newTaskId,
   newTurnId,
-  newMessageId,
   newEventId,
   BUILT_IN_HARNESSES,
   type ContentBlock,
   type HarnessDefinition,
   type RequestPermissionResponse,
   type SessionNotification,
+  type ToolCallUpdate,
 } from "@metrists/shared/agent";
 import { platformAdapter } from "@/adapters";
 import { normalizePath } from "@/utils/fs";
@@ -19,8 +19,7 @@ import type { AgentTransport } from "./agent-transport.interface";
 import { AgentTransportError } from "./agent-transport.interface";
 import { TauriStdioTransport } from "./tauri-stdio-transport";
 import {
-  agentEventsCollection,
-  agentMessagesCollection,
+  agentEntriesCollection,
   agentPermissionRequestsCollection,
   agentTasksCollection,
   agentTurnsCollection,
@@ -31,19 +30,15 @@ import {
 /** KV namespace for agent state (sessionId per task, workspace trust flag). */
 const AGENT_KV_NAMESPACE = "agent";
 
-/** In-flight turn bookkeeping (chunk coalescing + client-minted ids). */
+/** In-flight turn bookkeeping (assistant-text coalescing into one entry). */
 type TurnState = {
   turnId: string;
-  /** Minted when the first assistant update arrives (ACP chunks are anonymous). */
-  assistantMessageId: string | null;
   /** Re-chunks streamed markdown at safe render boundaries. */
   joiner: MarkdownJoiner;
-  /** Coalesced assistant text so far. */
+  /** Text accumulated into the current assistant run (reset after a tool call). */
   text: string;
-  /** The single message_chunk event row we keep updating for this message. */
-  chunkEventId: string | null;
-  /** toolCallId → event row id, so updates coalesce into one card. */
-  toolEventIds: Map<string, string>;
+  /** The assistant entry the current run is streaming into, or null to open one. */
+  textEntryId: string | null;
 };
 
 function contentBlockText(content: ContentBlock): string {
@@ -86,6 +81,13 @@ export class AgentTask {
   private title = "New task";
 
   private currentTurn: TurnState | null = null;
+  /**
+   * toolCallId → event row id. Task-level (not per-turn) so a late
+   * tool_call_update — one that arrives at or after the turn boundary — still
+   * finds its row and flips the card to its final status instead of getting
+   * stuck at pending/in_progress.
+   */
+  private readonly toolEventIds = new Map<string, string>();
   /**
    * Single-slot coalescing: the next prompt to run. Prompts arriving while a
    * turn runs overwrite it (latest wins) rather than stacking a queue — the UI
@@ -190,7 +192,6 @@ export class AgentTask {
     if (!this.client || !this.sessionId) return "error";
 
     const turnId = newTurnId();
-    const userMessageId = newMessageId();
     const now = Date.now();
 
     // First prompt names the task.
@@ -201,23 +202,14 @@ export class AgentTask {
       });
     }
 
-    // User message + its text as a message_chunk event (messages are the
-    // addressable unit; content lives in events).
-    agentMessagesCollection.insert({
-      messageId: userMessageId,
-      taskId: this.taskId,
-      turnId,
-      role: "user",
-      createdAt: now,
-    });
-    agentEventsCollection.insert({
+    // User prompt as a first-class transcript entry.
+    agentEntriesCollection.insert({
       id: newEventId(),
-      messageId: userMessageId,
-      turnId,
       taskId: this.taskId,
-      kind: "message_chunk",
-      payload: { text },
-      receivedAt: now,
+      turnId,
+      type: "user",
+      text,
+      createdAt: now,
     });
     agentTurnsCollection.insert({
       turnId,
@@ -229,11 +221,9 @@ export class AgentTask {
 
     this.currentTurn = {
       turnId,
-      assistantMessageId: null,
       joiner: new MarkdownJoiner(),
       text: "",
-      chunkEventId: null,
-      toolEventIds: new Map(),
+      textEntryId: null,
     };
     this.setStatus("running");
 
@@ -267,8 +257,12 @@ export class AgentTask {
     const tail = turn.joiner.flush();
     if (tail) {
       turn.text += tail;
-      this.writeAssistantChunk(turn);
+      this.writeAssistantText(turn);
     }
+
+    // A finished turn means its tools are no longer running — resolve any that
+    // never received a terminal update so nothing spins forever.
+    this.resolveLingeringToolCalls(turn.turnId);
 
     agentTurnsCollection.update(turn.turnId, (draft) => {
       draft.status = turnStatus;
@@ -282,34 +276,42 @@ export class AgentTask {
   }
 
   handleSessionUpdate(notification: SessionNotification): void {
-    const turn = this.currentTurn;
-    if (!turn) return; // update outside a turn — nothing to attach it to
     const update = notification.update;
+
+    // Tool calls coalesce at the task level, so a final tool_call_update that
+    // arrives at/after the turn boundary still lands. Handle it before the
+    // active-turn guard below.
+    if (
+      update.sessionUpdate === "tool_call" ||
+      update.sessionUpdate === "tool_call_update"
+    ) {
+      this.upsertToolEntry(update);
+      return;
+    }
+
+    const turn = this.currentTurn;
+    if (!turn) return; // other updates need a turn to attach to
 
     switch (update.sessionUpdate) {
       case "agent_message_chunk": {
         const flushable = turn.joiner.processText(contentBlockText(update.content));
         if (flushable) {
           turn.text += flushable;
-          this.writeAssistantChunk(turn);
+          this.writeAssistantText(turn);
         }
         break;
       }
-      case "tool_call":
-      case "tool_call_update": {
-        this.upsertToolEvent(turn, update);
-        break;
-      }
       case "plan": {
-        const messageId = this.ensureAssistantMessage(turn);
-        agentEventsCollection.insert({
+        // Plans are peers of text/tools; close the current text run so a
+        // following reply opens a fresh assistant entry after the plan.
+        this.closeTextRun(turn);
+        agentEntriesCollection.insert({
           id: newEventId(),
-          messageId,
-          turnId: turn.turnId,
           taskId: this.taskId,
-          kind: "plan",
-          payload: update,
-          receivedAt: Date.now(),
+          turnId: turn.turnId,
+          type: "plan",
+          plan: update,
+          createdAt: Date.now(),
         });
         break;
       }
@@ -321,12 +323,13 @@ export class AgentTask {
   }
 
   /**
-   * Coalesce a tool call into one row keyed by toolCallId: the first update
-   * inserts, later ones (pending → in_progress → completed) merge into the
-   * same event so the UI shows one transitioning card, not a stack.
+   * Coalesce a tool call into one entry keyed by toolCallId: the first tool_call
+   * inserts, later updates (pending → in_progress → completed/failed) merge into
+   * the same entry so the UI shows one transitioning card, not a stack. Keyed at
+   * the task level so updates land even after the turn that started them ends.
+   * Tool entries are first-class — not nested under a message.
    */
-  private upsertToolEvent(
-    turn: TurnState,
+  private upsertToolEntry(
     update: Extract<
       SessionNotification["update"],
       { sessionUpdate: "tool_call" | "tool_call_update" }
@@ -334,32 +337,47 @@ export class AgentTask {
   ): void {
     const toolCallId = update.toolCallId;
     const existingId = toolCallId
-      ? turn.toolEventIds.get(toolCallId)
+      ? this.toolEventIds.get(toolCallId)
       : undefined;
 
     if (existingId) {
-      agentEventsCollection.update(existingId, (draft) => {
-        draft.kind = update.sessionUpdate;
-        draft.payload = {
-          ...(draft.payload as Record<string, unknown>),
+      agentEntriesCollection.update(existingId, (draft) => {
+        // ACP updates replace each field, so a shallow merge is correct.
+        draft.toolCall = {
+          ...(draft.toolCall as ToolCallUpdate),
           ...update,
         };
       });
       return;
     }
 
-    const messageId = this.ensureAssistantMessage(turn);
-    const eventId = newEventId();
-    if (toolCallId) turn.toolEventIds.set(toolCallId, eventId);
-    agentEventsCollection.insert({
-      id: eventId,
-      messageId,
-      turnId: turn.turnId,
+    // A new tool call ends the current assistant text run, so the reply that
+    // follows the tool renders below it (correct interleaving).
+    if (this.currentTurn) this.closeTextRun(this.currentTurn);
+    const id = newEventId();
+    if (toolCallId) this.toolEventIds.set(toolCallId, id);
+    agentEntriesCollection.insert({
+      id,
       taskId: this.taskId,
-      kind: update.sessionUpdate,
-      payload: update,
-      receivedAt: Date.now(),
+      turnId: this.currentTurn?.turnId ?? "",
+      type: "tool_call",
+      toolCallId: toolCallId ?? undefined,
+      toolCall: update,
+      createdAt: Date.now(),
     });
+  }
+
+  /** Flip this turn's still-open tool calls to completed (turn is over). */
+  private resolveLingeringToolCalls(turnId: string): void {
+    for (const entry of agentEntriesCollection.toArray) {
+      if (entry.type !== "tool_call" || entry.turnId !== turnId) continue;
+      const status = entry.toolCall?.status;
+      if (status === "pending" || status === "in_progress" || status == null) {
+        agentEntriesCollection.update(entry.id, (draft) => {
+          if (draft.toolCall) draft.toolCall.status = "completed";
+        });
+      }
+    }
   }
 
   private setAuthHint(hint?: string): void {
@@ -371,38 +389,37 @@ export class AgentTask {
     }
   }
 
-  /** Ensure the assistant message row exists (chunks are anonymous in ACP). */
-  private ensureAssistantMessage(turn: TurnState): string {
-    if (!turn.assistantMessageId) {
-      turn.assistantMessageId = newMessageId();
-      agentMessagesCollection.insert({
-        messageId: turn.assistantMessageId,
-        taskId: this.taskId,
-        turnId: turn.turnId,
-        role: "assistant",
-        createdAt: Date.now(),
-      });
+  /**
+   * End the current assistant text run; the next chunk opens a fresh entry.
+   * Flush the joiner first so text it was still buffering (awaiting a safe
+   * markdown boundary) lands in this run instead of being dropped when a tool
+   * call interrupts.
+   */
+  private closeTextRun(turn: TurnState): void {
+    const tail = turn.joiner.flush();
+    if (tail) {
+      turn.text += tail;
+      this.writeAssistantText(turn);
     }
-    return turn.assistantMessageId;
+    turn.textEntryId = null;
+    turn.text = "";
   }
 
-  /** Upsert the single coalesced message_chunk event for the assistant reply. */
-  private writeAssistantChunk(turn: TurnState): void {
-    const messageId = this.ensureAssistantMessage(turn);
-    if (!turn.chunkEventId) {
-      turn.chunkEventId = newEventId();
-      agentEventsCollection.insert({
-        id: turn.chunkEventId,
-        messageId,
-        turnId: turn.turnId,
+  /** Upsert the current assistant text run into its single coalesced entry. */
+  private writeAssistantText(turn: TurnState): void {
+    if (!turn.textEntryId) {
+      turn.textEntryId = newEventId();
+      agentEntriesCollection.insert({
+        id: turn.textEntryId,
         taskId: this.taskId,
-        kind: "message_chunk",
-        payload: { text: turn.text },
-        receivedAt: Date.now(),
+        turnId: turn.turnId,
+        type: "assistant",
+        text: turn.text,
+        createdAt: Date.now(),
       });
     } else {
-      agentEventsCollection.update(turn.chunkEventId, (draft) => {
-        draft.payload = { text: turn.text };
+      agentEntriesCollection.update(turn.textEntryId, (draft) => {
+        draft.text = turn.text;
       });
     }
   }
@@ -634,13 +651,8 @@ function clearWorkspaceAgentRows(normalizedWorkspacePath: string): void {
   );
   if (taskIds.size === 0) return;
 
-  for (const event of agentEventsCollection.toArray) {
-    if (taskIds.has(event.taskId)) agentEventsCollection.delete(event.id);
-  }
-  for (const message of agentMessagesCollection.toArray) {
-    if (taskIds.has(message.taskId)) {
-      agentMessagesCollection.delete(message.messageId);
-    }
+  for (const entry of agentEntriesCollection.toArray) {
+    if (taskIds.has(entry.taskId)) agentEntriesCollection.delete(entry.id);
   }
   for (const turn of agentTurnsCollection.toArray) {
     if (taskIds.has(turn.taskId)) agentTurnsCollection.delete(turn.turnId);

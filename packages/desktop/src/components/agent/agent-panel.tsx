@@ -8,15 +8,33 @@ import {
 } from "react";
 import { useLiveQuery, eq } from "@tanstack/react-db";
 import {
+  ArrowRightLeft,
   ArrowUp,
+  Brain,
+  Check,
+  ChevronRight,
+  Eye,
   Globe,
   Loader2,
   Mic,
+  Pencil,
   Plus,
+  Search,
   Sparkles,
   Square,
+  SquareTerminal,
   Telescope,
+  Trash2,
+  Wrench,
+  X,
+  type LucideIcon,
 } from "lucide-react";
+import type {
+  ToolCallContent,
+  ToolCallStatus,
+  ToolCallUpdate,
+  ToolKind,
+} from "@metrists/shared/agent";
 import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -35,12 +53,10 @@ import {
 import { useKv } from "@/utils/kv-store";
 import { normalizePath } from "@/utils/fs";
 import {
-  agentEventsCollection,
-  agentMessagesCollection,
+  agentEntriesCollection,
   agentTasksCollection,
   agentTurnsCollection,
-  type AgentEvent,
-  type AgentMessageRow,
+  type AgentEntry,
   type AgentTaskRow,
 } from "@/agent/agent-collections";
 import {
@@ -279,18 +295,11 @@ function OverlapBanner({
 function Transcript({ taskId }: { taskId: string }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const { data: messages = [] } = useLiveQuery(
+  const { data: entries = [] } = useLiveQuery(
     (q) =>
       q
-        .from({ message: agentMessagesCollection })
-        .where(({ message }) => eq(message.taskId, taskId)),
-    [taskId],
-  );
-  const { data: events = [] } = useLiveQuery(
-    (q) =>
-      q
-        .from({ event: agentEventsCollection })
-        .where(({ event }) => eq(event.taskId, taskId)),
+        .from({ entry: agentEntriesCollection })
+        .where(({ entry }) => eq(entry.taskId, taskId)),
     [taskId],
   );
   const { data: turns = [] } = useLiveQuery(
@@ -305,39 +314,23 @@ function Transcript({ taskId }: { taskId: string }) {
     [turns],
   );
 
-  const eventsByMessage = useMemo(() => {
-    const map = new Map<string, AgentEvent[]>();
-    for (const event of events) {
-      const list = map.get(event.messageId) ?? [];
-      list.push(event);
-      map.set(event.messageId, list);
-    }
-    for (const list of map.values()) {
-      list.sort((a, b) => (a.id < b.id ? -1 : 1));
-    }
-    return map;
-  }, [events]);
-
-  const sortedMessages = useMemo(
-    () =>
-      [...messages].sort((a, b) => (a.messageId < b.messageId ? -1 : 1)),
-    [messages],
+  // Ids are ascending, so document order = chronological (text and tool calls
+  // interleaved exactly as they streamed).
+  const sortedEntries = useMemo(
+    () => [...entries].sort((a, b) => (a.id < b.id ? -1 : 1)),
+    [entries],
   );
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [events, messages]);
+  }, [entries]);
 
   return (
     <ScrollArea className="flex-1 min-h-0">
       {/* pb clears the floating composer overlay pinned to the bottom. */}
       <div className="flex flex-col gap-3 p-3 pb-36">
-        {sortedMessages.map((message) => (
-          <MessageView
-            key={message.messageId}
-            message={message}
-            events={eventsByMessage.get(message.messageId) ?? []}
-          />
+        {sortedEntries.map((entry) => (
+          <EntryView key={entry.id} entry={entry} />
         ))}
         {turnErrors.map((turn) => (
           <div
@@ -353,75 +346,189 @@ function Transcript({ taskId }: { taskId: string }) {
   );
 }
 
+/** Render one transcript entry by type; tool calls are peers of text. */
+function EntryView({ entry }: { entry: AgentEntry }) {
+  if (entry.type === "tool_call") {
+    return entry.toolCall ? <ToolCallCard toolCall={entry.toolCall} /> : null;
+  }
+  if (entry.type === "plan") return null; // not rendered yet
 
-function messageText(events: AgentEvent[]): string {
-  return events
-    .filter((event) => event.kind === "message_chunk")
-    .map((event) => {
-      const payload = event.payload as { text?: string } | undefined;
-      return payload?.text ?? "";
-    })
-    .join("");
-}
-
-function MessageView({
-  message,
-  events,
-}: {
-  message: AgentMessageRow;
-  events: AgentEvent[];
-}) {
-  const text = messageText(events);
-  const toolEvents = events.filter(
-    (event) =>
-      event.kind === "tool_call" || event.kind === "tool_call_update",
-  );
-  const isUser = message.role === "user";
-
+  const isUser = entry.type === "user";
+  if (!entry.text) return null;
   return (
-    <div className={`flex flex-col gap-1 ${isUser ? "items-end" : "items-start"}`}>
-      {text && (
-        <div
-          className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm ${
-            isUser
-              ? "bg-primary text-primary-foreground"
-              : "bg-muted text-foreground"
-          }`}
-        >
-          {text}
-        </div>
-      )}
-      {toolEvents.map((event) => (
-        <ToolCallCard key={event.id} event={event} />
-      ))}
+    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+      <div
+        className={cn(
+          "max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm",
+          isUser
+            ? "bg-primary text-primary-foreground"
+            : "bg-muted text-foreground",
+        )}
+      >
+        {entry.text}
+      </div>
     </div>
   );
 }
 
-function ToolCallCard({ event }: { event: AgentEvent }) {
-  const payload = event.payload as {
-    title?: string | null;
-    kind?: string | null;
-    status?: string | null;
-  };
-  const title = payload.title ?? "Tool call";
-  const isEdit = payload.kind === "edit";
+const TOOL_KIND_ICON: Record<ToolKind, LucideIcon> = {
+  read: Eye,
+  edit: Pencil,
+  delete: Trash2,
+  move: ArrowRightLeft,
+  search: Search,
+  execute: SquareTerminal,
+  think: Brain,
+  fetch: Globe,
+  switch_mode: Wrench,
+  other: Wrench,
+};
+
+/**
+ * One tool call, coalesced into a single row upstream. Header (kind icon +
+ * title + live status) is always shown; the body — file diffs, command/tool
+ * output, or the raw input for tools with no content — is collapsible and
+ * defaults open while the call is active or failed, collapsed once completed.
+ */
+function ToolCallCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
+  const kind = call.kind ?? "other";
+  const status: ToolCallStatus = call.status ?? "pending";
+  const title = call.title ?? kind;
+  const content = call.content ?? [];
+  const locations = call.locations ?? [];
+  const rawInput = call.rawInput;
+  const Icon = TOOL_KIND_ICON[kind] ?? Wrench;
+
+  const failed = status === "failed";
+  const hasBody =
+    content.length > 0 ||
+    locations.length > 0 ||
+    (content.length === 0 && rawInput != null);
+
+  // null = follow the default (open while active/failed); a boolean is an
+  // explicit user toggle that then sticks.
+  const [override, setOverride] = useState<boolean | null>(null);
+  const defaultOpen = status !== "completed";
+  const open = override ?? defaultOpen;
+
   return (
-    <Marker
-      variant="border"
-      className="w-full max-w-[85%] py-1.5 text-xs text-foreground"
-    >
-      <MarkerContent className="font-medium">
-        {isEdit ? "✎ " : ""}
-        {title}
-      </MarkerContent>
-      {payload.status && (
-        <span className="ms-auto shrink-0 text-muted-foreground">
-          {payload.status}
-        </span>
+    <div
+      className={cn(
+        "w-full max-w-[85%] overflow-hidden rounded-lg border text-xs",
+        failed ? "border-destructive/40 bg-destructive/5" : "border-border bg-card",
       )}
-    </Marker>
+    >
+      <button
+        type="button"
+        onClick={() => hasBody && setOverride(!open)}
+        className={cn(
+          "flex w-full items-center gap-2 px-2.5 py-1.5 text-left",
+          hasBody && "cursor-pointer",
+        )}
+      >
+        <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
+        <ToolStatusIcon status={status} />
+        {hasBody && (
+          <ChevronRight
+            className={cn(
+              "size-3.5 shrink-0 text-muted-foreground transition-transform",
+              open && "rotate-90",
+            )}
+          />
+        )}
+      </button>
+
+      {hasBody && open && (
+        <div className="flex flex-col gap-2 border-t border-border/60 px-2.5 py-2">
+          {content.map((item, i) => (
+            <ToolContentView key={i} item={item} />
+          ))}
+          {content.length === 0 && rawInput != null && (
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/60 p-2 font-mono text-[11px] text-muted-foreground">
+              {rawInputPreview(rawInput)}
+            </pre>
+          )}
+          {locations.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {locations.map((loc, i) => (
+                <span
+                  key={i}
+                  className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+                >
+                  {loc.path.split("/").pop()}
+                  {loc.line != null ? `:${loc.line}` : ""}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
+}
+
+function ToolStatusIcon({ status }: { status: ToolCallStatus }) {
+  if (status === "completed") {
+    return <Check className="size-3.5 shrink-0 text-green-600 dark:text-green-400" />;
+  }
+  if (status === "failed") {
+    return <X className="size-3.5 shrink-0 text-destructive" />;
+  }
+  // pending / in_progress
+  return <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />;
+}
+
+function ToolContentView({ item }: { item: ToolCallContent }) {
+  if (item.type === "diff") {
+    const added = item.newText ? item.newText.split("\n").length : 0;
+    const removed = item.oldText ? item.oldText.split("\n").length : 0;
+    return (
+      <div className="overflow-hidden rounded border border-border/60">
+        <div className="flex items-center gap-2 bg-muted/60 px-2 py-1 font-mono text-[11px]">
+          <span className="min-w-0 flex-1 truncate">{item.path}</span>
+          <span className="shrink-0 text-green-600 dark:text-green-400">
+            +{added}
+          </span>
+          {item.oldText != null && (
+            <span className="shrink-0 text-destructive">−{removed}</span>
+          )}
+        </div>
+        <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all p-2 font-mono text-[11px]">
+          {item.newText}
+        </pre>
+      </div>
+    );
+  }
+  if (item.type === "terminal") {
+    return (
+      <span className="font-mono text-[11px] text-muted-foreground">
+        Terminal {item.terminalId}
+      </span>
+    );
+  }
+  // { type: "content", content: ContentBlock }
+  const block = item.content;
+  if (block.type === "text") {
+    return (
+      <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/60 p-2 text-[11px]">
+        {block.text}
+      </pre>
+    );
+  }
+  return (
+    <span className="text-[11px] text-muted-foreground">{block.type} content</span>
+  );
+}
+
+/** One-line-ish preview of a tool's raw input; prefer a `command` field. */
+function rawInputPreview(rawInput: Record<string, unknown>): string {
+  if (typeof rawInput.command === "string") return rawInput.command;
+  try {
+    return JSON.stringify(rawInput);
+  } catch {
+    return String(rawInput);
+  }
 }
 
 /**
