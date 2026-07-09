@@ -1,4 +1,6 @@
+import { Document, parseDocument } from "yaml";
 import type { BlobLocation, ParsedBlob } from "./blob-envelope";
+import { BLOB_LANG_PREFIX, BlobEnvelopeSchema } from "./blob-envelope";
 
 /**
  * Pure-text blob codec. No editor, no DOM: callable from the desktop app,
@@ -48,32 +50,86 @@ export class BlobPatchError extends Error {
 export type BlobResult<T, E> = { ok: true; value: T } | { ok: false; error: E };
 
 /**
+ * Matches a fenced code block whose language tag starts with `metrists:`,
+ * capturing the type suffix and body. Non-greedy body match stops at the
+ * first closing fence on its own line, on either LF or CRLF line endings.
+ */
+const BLOB_FENCE_PATTERN =
+  /```metrists:([a-zA-Z0-9_-]+)\r?\n([\s\S]*?)\r?\n```/g;
+
+/**
  * Parse one fenced block's language tag + body into a blob.
  */
 export function parseBlobBlock(
-  _langTag: string,
-  _yamlText: string,
+  langTag: string,
+  yamlText: string,
 ): BlobResult<ParsedBlob, BlobParseError> {
-  // TODO(phase 2): implement with the `yaml` document API + BlobEnvelopeSchema.
-  throw new Error("not implemented: parseBlobBlock");
+  if (!langTag.startsWith(BLOB_LANG_PREFIX)) {
+    return { ok: false, error: new BlobParseError("not_a_blob") };
+  }
+  const type = langTag.slice(BLOB_LANG_PREFIX.length);
+
+  const doc = parseDocument(yamlText);
+  if (doc.errors.length > 0) {
+    return {
+      ok: false,
+      error: new BlobParseError("invalid_yaml", doc.errors[0].message),
+    };
+  }
+
+  const payload = (doc.toJS() ?? {}) as Record<string, unknown>;
+  const parsedEnvelope = BlobEnvelopeSchema.safeParse(payload);
+  if (!parsedEnvelope.success) {
+    return {
+      ok: false,
+      error: new BlobParseError(
+        "invalid_envelope",
+        parsedEnvelope.error.message,
+      ),
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      type,
+      envelope: parsedEnvelope.data,
+      payload,
+      rawYaml: yamlText,
+    },
+  };
 }
 
 /**
- * Serialize a blob back to its full fenced-block text (fences included),
- * preserving payload key order and comments where they exist.
+ * Serialize a blob back to its full fenced-block text (fences included).
+ * Used for freshly-authored blobs with no prior document to preserve — for
+ * patching an *existing* fence in place (preserving comments/order/unknown
+ * keys), use `patchBlobInMarkdown`, which operates on the yaml document
+ * directly rather than round-tripping through this function.
  */
-export function serializeBlobBlock(_blob: ParsedBlob): string {
-  // TODO(phase 2)
-  throw new Error("not implemented: serializeBlobBlock");
+export function serializeBlobBlock(blob: ParsedBlob): string {
+  const doc = new Document(blob.payload);
+  const body = doc.toString().trimEnd();
+  return `\`\`\`${BLOB_LANG_PREFIX}${blob.type}\n${body}\n\`\`\`\n`;
 }
 
 /**
  * Find every metrists:* fenced block in a markdown document.
  * Blocks that fail blob parsing are skipped (they render as plain code).
  */
-export function findBlobs(_markdown: string): BlobLocation[] {
-  // TODO(phase 2)
-  throw new Error("not implemented: findBlobs");
+export function findBlobs(markdown: string): BlobLocation[] {
+  const locations: BlobLocation[] = [];
+  for (const match of markdown.matchAll(BLOB_FENCE_PATTERN)) {
+    const [full, langSuffix, body] = match;
+    const start = match.index;
+    if (start === undefined) continue;
+    const end = start + full.length + (markdown[start + full.length] === "\n" ? 1 : 0);
+
+    const result = parseBlobBlock(`${BLOB_LANG_PREFIX}${langSuffix}`, body);
+    if (!result.ok) continue;
+    locations.push({ blob: result.value, start, end });
+  }
+  return locations;
 }
 
 /**
@@ -82,10 +138,62 @@ export function findBlobs(_markdown: string): BlobLocation[] {
  * not offset-addressed, so it stays correct after unrelated edits.
  */
 export function patchBlobInMarkdown(
-  _markdown: string,
-  _blobId: string,
-  _patch: Record<string, unknown>,
+  markdown: string,
+  blobId: string,
+  patch: Record<string, unknown>,
 ): BlobResult<string, BlobPatchError> {
-  // TODO(phase 2)
-  throw new Error("not implemented: patchBlobInMarkdown");
+  const locations = findBlobs(markdown);
+  const location = locations.find((loc) => loc.blob.envelope.id === blobId);
+  if (!location) {
+    return { ok: false, error: new BlobPatchError("not_found", blobId) };
+  }
+
+  // Re-parse just this block's body as a mutable yaml Document so untouched
+  // keys, order, and comments survive — the whole reason this isn't a
+  // load/patch/dump cycle over the parsed JS object.
+  const doc = parseDocument(location.blob.rawYaml);
+  if (doc.errors.length > 0) {
+    return {
+      ok: false,
+      error: new BlobPatchError(
+        "conflict",
+        blobId,
+        "block no longer parses as valid YAML",
+      ),
+    };
+  }
+
+  for (const [key, value] of Object.entries(patch)) {
+    doc.set(key, value);
+  }
+
+  const patchedPayload = (doc.toJS() ?? {}) as Record<string, unknown>;
+  const validated = BlobEnvelopeSchema.safeParse(patchedPayload);
+  if (!validated.success) {
+    return {
+      ok: false,
+      error: new BlobPatchError(
+        "invalid_patch",
+        blobId,
+        validated.error.message,
+      ),
+    };
+  }
+
+  const newBody = doc.toString().trimEnd();
+  const newFence = `\`\`\`${BLOB_LANG_PREFIX}${location.blob.type}\n${newBody}\n\`\`\``;
+
+  // Splice only the fence's own span (start..end, per BlobLocation's exact
+  // offsets) — everything outside it, including the trailing newline (or
+  // its absence) past the closing fence, is preserved byte-for-byte.
+  const before = markdown.slice(0, location.start);
+  const after = markdown.slice(location.end);
+  const trailingNewline = markdown
+    .slice(location.start, location.end)
+    .endsWith("\n")
+    ? "\n"
+    : "";
+  const spliced = before + newFence + trailingNewline + after;
+
+  return { ok: true, value: spliced };
 }

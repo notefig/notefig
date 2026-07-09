@@ -13,6 +13,9 @@ const { writeFiles, readFiles } = vi.hoisted(() => ({
 vi.mock("@/adapters", () => ({
   platformAdapter: { setKv: vi.fn(), getKv: vi.fn(), writeFiles, readFiles },
 }));
+vi.mock("@/utils/history-service", () => ({
+  checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
+}));
 
 import { createLoopbackPair } from "../loopback-transport";
 import { FakeAgent } from "./fake-agent";

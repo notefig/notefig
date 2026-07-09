@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { defineBlobType } from "./blob-registry";
+import { defineBlobType } from "./blob-type";
 
 /**
  * The agent asks the user a contextual question inside the document.

@@ -25,7 +25,15 @@ import {
   isMarkdownInstance,
 } from "@/components/editor/editor-store";
 import { useQueryClient } from "@tanstack/react-query";
+import { useLiveQuery } from "@tanstack/react-db";
 import type { GitError, RepoStatus } from "@metrists/git";
+import {
+  agentEntriesCollection,
+  agentInteractionsCollection,
+  agentPermissionRequestsCollection,
+  agentTasksCollection,
+  agentTurnsCollection,
+} from "@/agent/agent-collections";
 
 function useQueryCacheTick(): number {
   const queryClient = useQueryClient();
@@ -535,9 +543,196 @@ function DebugPanelContent({
     }
   }, [buildPlateAstReport]);
 
+  // ── Agent session history (task transcript dump) ──
+  const workspacePath = basePath ? decodeURIComponent(basePath) : null;
+
+  // Query everything unconditionally (rules of hooks) and filter client-side —
+  // this is a debug view, not a hot path, so a full-collection subscription
+  // plus useMemo filtering is simpler than juggling conditional queries.
+  const { data: allTasks = [] } = useLiveQuery((q) =>
+    q.from({ task: agentTasksCollection }),
+  );
+  const { data: allTurns = [] } = useLiveQuery((q) =>
+    q.from({ turn: agentTurnsCollection }),
+  );
+  const { data: allEntries = [] } = useLiveQuery((q) =>
+    q.from({ entry: agentEntriesCollection }),
+  );
+  const { data: allPermissionRequests = [] } = useLiveQuery((q) =>
+    q.from({ req: agentPermissionRequestsCollection }),
+  );
+  const { data: allInteractions = [] } = useLiveQuery((q) =>
+    q.from({ interaction: agentInteractionsCollection }),
+  );
+
+  const workspaceTasks = useMemo(
+    () =>
+      [...allTasks]
+        .filter((task) => !workspacePath || task.workspacePath === workspacePath)
+        // Newest-first (task ids sort descending by construction).
+        .sort((a, b) => (a.taskId < b.taskId ? -1 : 1)),
+    [allTasks, workspacePath],
+  );
+
+  const [selectedSessionTaskId, setSelectedSessionTaskId] = useState<
+    string | null
+  >(null);
+
+  useEffect(() => {
+    if (
+      selectedSessionTaskId &&
+      workspaceTasks.some((task) => task.taskId === selectedSessionTaskId)
+    ) {
+      return;
+    }
+    setSelectedSessionTaskId(workspaceTasks[0]?.taskId ?? null);
+  }, [workspaceTasks, selectedSessionTaskId]);
+
+  const sessionTask = useMemo(
+    () => allTasks.find((task) => task.taskId === selectedSessionTaskId) ?? null,
+    [allTasks, selectedSessionTaskId],
+  );
+  const sessionTurns = useMemo(
+    () =>
+      allTurns
+        .filter((turn) => turn.taskId === selectedSessionTaskId)
+        .sort((a, b) => (a.turnId < b.turnId ? -1 : 1)),
+    [allTurns, selectedSessionTaskId],
+  );
+  const sessionEntries = useMemo(
+    () =>
+      allEntries
+        .filter((entry) => entry.taskId === selectedSessionTaskId)
+        .sort((a, b) => (a.id < b.id ? -1 : 1)),
+    [allEntries, selectedSessionTaskId],
+  );
+  const sessionPermissionRequests = useMemo(
+    () => allPermissionRequests.filter((req) => req.taskId === selectedSessionTaskId),
+    [allPermissionRequests, selectedSessionTaskId],
+  );
+  const sessionInteractions = useMemo(
+    () =>
+      allInteractions.filter(
+        (interaction) => interaction.taskId === selectedSessionTaskId,
+      ),
+    [allInteractions, selectedSessionTaskId],
+  );
+
+  const buildSessionReport = useCallback(() => {
+    if (!sessionTask) return "(no task selected)";
+
+    const lines: string[] = [];
+    lines.push("=== Metrists Agent Session Report ===");
+    lines.push(`Generated: ${new Date().toISOString()}`);
+    lines.push("");
+
+    lines.push("── Task ──");
+    lines.push(`taskId: ${sessionTask.taskId}`);
+    if (sessionTask.parentTaskId) {
+      lines.push(`parentTaskId: ${sessionTask.parentTaskId}`);
+    }
+    lines.push(`workspacePath: ${sessionTask.workspacePath}`);
+    lines.push(`title: ${sessionTask.title}`);
+    lines.push(`status: ${sessionTask.status}`);
+    lines.push(`harnessId: ${sessionTask.harnessId}`);
+    lines.push(`createdAt: ${new Date(sessionTask.createdAt).toISOString()}`);
+    if (sessionTask.authHint) {
+      lines.push(`authHint: ${sessionTask.authHint}`);
+    }
+    lines.push("");
+
+    lines.push(`── Turns (${sessionTurns.length}) ──`);
+    for (const turn of sessionTurns) {
+      lines.push(
+        `[${turn.turnId}] status=${turn.status}${turn.stopReason ? ` stopReason=${turn.stopReason}` : ""}${turn.error ? ` error=${turn.error}` : ""} startedAt=${new Date(turn.startedAt).toISOString()}`,
+      );
+    }
+    lines.push("");
+
+    lines.push(`── Transcript (${sessionEntries.length} entries) ──`);
+    for (const entry of sessionEntries) {
+      const time = new Date(entry.createdAt).toISOString();
+      switch (entry.type) {
+        case "user":
+        case "assistant":
+          lines.push(`[${time}] [${entry.type.toUpperCase()}] ${entry.text ?? ""}`);
+          break;
+        case "tool_call":
+          lines.push(
+            `[${time}] [TOOL_CALL${entry.toolCallSource ? `:${entry.toolCallSource}` : ""}] ${entry.toolCall?.title ?? entry.toolCallId ?? "(untitled)"} status=${entry.toolCall?.status ?? "unknown"}`,
+          );
+          if (entry.toolCall?.rawInput) {
+            lines.push(`  input: ${JSON.stringify(entry.toolCall.rawInput)}`);
+          }
+          if (entry.toolCall?.content) {
+            lines.push(`  content: ${JSON.stringify(entry.toolCall.content)}`);
+          }
+          break;
+        case "plan":
+          lines.push(`[${time}] [PLAN] ${JSON.stringify(entry.plan)}`);
+          break;
+        default:
+          lines.push(
+            `[${time}] [${entry.type.toUpperCase()}] ${entry.text ?? ""} ${entry.raw ? JSON.stringify(entry.raw) : ""}`.trimEnd(),
+          );
+      }
+    }
+    lines.push("");
+
+    if (sessionInteractions.length > 0) {
+      lines.push(`── Interactions (${sessionInteractions.length}) ──`);
+      for (const interaction of sessionInteractions) {
+        lines.push(
+          `[${interaction.id}] source=${interaction.source} state=${interaction.state} question="${interaction.question}"${interaction.answer ? ` answer="${interaction.answer}"` : ""}`,
+        );
+      }
+      lines.push("");
+    }
+
+    if (sessionPermissionRequests.length > 0) {
+      lines.push(`── Permission requests (${sessionPermissionRequests.length}) ──`);
+      for (const req of sessionPermissionRequests) {
+        lines.push(`[${req.id}] ${req.title} status=${req.status}`);
+      }
+      lines.push("");
+    }
+
+    lines.push("=== End Session Report ===");
+    return lines.join("\n");
+  }, [
+    sessionTask,
+    sessionTurns,
+    sessionEntries,
+    sessionInteractions,
+    sessionPermissionRequests,
+  ]);
+
+  const [sessionCopied, setSessionCopied] = useState(false);
+
+  const copySessionReport = useCallback(async () => {
+    const report = buildSessionReport();
+    try {
+      await navigator.clipboard.writeText(report);
+      setSessionCopied(true);
+      setTimeout(() => setSessionCopied(false), 2000);
+    } catch {
+      // Fallback for environments where clipboard API is blocked
+      const textarea = document.createElement("textarea");
+      textarea.value = report;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setSessionCopied(true);
+      setTimeout(() => setSessionCopied(false), 2000);
+    }
+  }, [buildSessionReport]);
+
   // ── Collapsible sections ──
   const [showLayout, setShowLayout] = useState(false);
-  const [activeTab, setActiveTab] = useState<"state" | "console">(
+  const [activeTab, setActiveTab] = useState<"state" | "console" | "session">(
     error ? "state" : "state",
   );
 
@@ -616,6 +811,22 @@ function DebugPanelContent({
             {consoleEntries.length > 0 && (
               <span className="ml-1 text-[10px] text-muted-foreground">
                 ({consoleEntries.length})
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab("session")}
+            className={cn(
+              "px-2 py-0.5 rounded text-xs transition-colors",
+              activeTab === "session"
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Session
+            {workspaceTasks.length > 0 && (
+              <span className="ml-1 text-[10px] text-muted-foreground">
+                ({workspaceTasks.length})
               </span>
             )}
           </button>
@@ -837,6 +1048,56 @@ function DebugPanelContent({
               <pre className="mt-1 rounded bg-muted p-2 text-[10px] leading-tight whitespace-pre-wrap break-all border border-border select-text">
                 {JSON.stringify(latestGitStatus, null, 2)}
               </pre>
+            </div>
+          </div>
+        ) : activeTab === "session" ? (
+          <div className="flex flex-col h-full">
+            {/* Session controls */}
+            <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border shrink-0">
+              <span className="text-muted-foreground text-[10px] uppercase tracking-wider shrink-0">
+                Task
+              </span>
+              <select
+                value={selectedSessionTaskId ?? ""}
+                onChange={(e) => setSelectedSessionTaskId(e.target.value || null)}
+                className="h-6 text-[11px] font-mono bg-background border border-border rounded px-1.5 flex-1 min-w-0"
+              >
+                {workspaceTasks.length === 0 && (
+                  <option value="">(no tasks in this workspace)</option>
+                )}
+                {workspaceTasks.map((task) => (
+                  <option key={task.taskId} value={task.taskId}>
+                    [{task.status}] {task.title} — {task.taskId}
+                  </option>
+                ))}
+              </select>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 shrink-0"
+                onClick={copySessionReport}
+                title="Copy session transcript to clipboard"
+                disabled={!sessionTask}
+              >
+                {sessionCopied ? (
+                  <Check className="h-3 w-3 text-green-500" />
+                ) : (
+                  <Copy className="h-3 w-3" />
+                )}
+              </Button>
+            </div>
+
+            {/* Session transcript */}
+            <div className="flex-1 overflow-auto min-h-0 p-3">
+              {!sessionTask ? (
+                <div className="flex items-center justify-center h-full p-4 text-muted-foreground text-[11px]">
+                  No agent session in this workspace yet.
+                </div>
+              ) : (
+                <pre className="text-[10px] leading-tight whitespace-pre-wrap break-all select-text">
+                  {buildSessionReport()}
+                </pre>
+              )}
             </div>
           </div>
         ) : (

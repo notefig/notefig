@@ -900,3 +900,141 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     });
   });
 });
+
+describe("IsomorphicGitService with a separate gitDir (Stage 2 history repo)", () => {
+  let workspaceDir: string;
+  let gitDir: string;
+  let host: MockPlatformStorageHost;
+  let service: IsomorphicGitService;
+  const originalCompressionStream = globalThis.CompressionStream;
+  const originalDecompressionStream = globalThis.DecompressionStream;
+
+  beforeAll(() => {
+    (
+      globalThis as { CompressionStream?: typeof CompressionStream }
+    ).CompressionStream = undefined;
+    (
+      globalThis as { DecompressionStream?: typeof DecompressionStream }
+    ).DecompressionStream = undefined;
+  });
+
+  afterAll(() => {
+    (
+      globalThis as { CompressionStream?: typeof CompressionStream }
+    ).CompressionStream = originalCompressionStream;
+    (
+      globalThis as { DecompressionStream?: typeof DecompressionStream }
+    ).DecompressionStream = originalDecompressionStream;
+  });
+
+  beforeEach(async () => {
+    workspaceDir = await mkdtemp(join(tmpdir(), "metrists-history-it-"));
+    gitDir = join(workspaceDir, ".metrists", "history");
+    host = new MockPlatformStorageHost(workspaceDir);
+    service = new IsomorphicGitService(host);
+  });
+
+  afterEach(async () => {
+    await rm(workspaceDir, { recursive: true, force: true });
+  });
+
+  it("never writes into <repoPath>/.git when gitDir is set", async () => {
+    await service.init({ repoPath: workspaceDir, gitDir, defaultBranch: "main" });
+
+    const defaultGitDir = await host.stat(join(workspaceDir, ".git"));
+    expect(defaultGitDir.exists).toBe(false);
+
+    const historyHead = await host.readFile(join(gitDir, "HEAD"));
+    expect(Buffer.from(historyHead).toString("utf8")).toContain("refs/heads/main");
+  });
+
+  it("round-trips checkpoint -> log -> diff (readTextFile) -> restore on a single file", async () => {
+    await service.init({ repoPath: workspaceDir, gitDir, defaultBranch: "main" });
+
+    await writeFile(join(workspaceDir, "notes.md"), "# Notes\n\nfirst draft\n");
+    const oid1 = await service.addAllAndCommit({
+      repoPath: workspaceDir,
+      gitDir,
+      message: "checkpoint: first draft",
+      author: { name: "claude-code", email: "agent@metrists.local" },
+    });
+    expect(oid1).toBeTruthy();
+
+    await writeFile(
+      join(workspaceDir, "notes.md"),
+      "# Notes\n\nfirst draft\n\nsecond paragraph\n",
+    );
+    const oid2 = await service.addAllAndCommit({
+      repoPath: workspaceDir,
+      gitDir,
+      message: "checkpoint: add second paragraph",
+      author: { name: "claude-code", email: "agent@metrists.local" },
+    });
+    expect(oid2).toBeTruthy();
+
+    const commits = await service.log({
+      repoPath: workspaceDir,
+      gitDir,
+      filepath: "notes.md",
+    });
+    expect(commits.map((c) => c.commit.message.trim())).toEqual([
+      "checkpoint: add second paragraph",
+      "checkpoint: first draft",
+    ]);
+
+    const contentAtOid1 = await service.readTextFile({
+      repoPath: workspaceDir,
+      gitDir,
+      ref: oid1 as string,
+      filepath: "notes.md",
+    });
+    const contentAtOid2 = await service.readTextFile({
+      repoPath: workspaceDir,
+      gitDir,
+      ref: oid2 as string,
+      filepath: "notes.md",
+    });
+    expect(contentAtOid1).toBe("# Notes\n\nfirst draft\n");
+    expect(contentAtOid2).toBe("# Notes\n\nfirst draft\n\nsecond paragraph\n");
+
+    // "Restore" checkpoint 1: write its content back over the live file.
+    await writeFile(join(workspaceDir, "notes.md"), contentAtOid1);
+    const restored = await readFile(join(workspaceDir, "notes.md"), "utf8");
+    expect(restored).toBe(contentAtOid1);
+  });
+
+  it("workspace-is-also-a-repo sees only .metrists/ as untracked from its own .git", async () => {
+    // The workspace's OWN default-gitdir repo (no gitDir override).
+    await service.init({ repoPath: workspaceDir, defaultBranch: "main" });
+    await writeFile(join(workspaceDir, "README.md"), "# project readme\n");
+    await service.addAllAndCommit({
+      repoPath: workspaceDir,
+      message: "init project repo",
+      author: { name: "user", email: "user@example.com" },
+    });
+
+    // The SEPARATE history repo, same worktree.
+    await service.init({ repoPath: workspaceDir, gitDir, defaultBranch: "main" });
+    await writeFile(join(workspaceDir, "notes.md"), "draft\n");
+    await service.addAllAndCommit({
+      repoPath: workspaceDir,
+      gitDir,
+      message: "checkpoint",
+      author: { name: "claude-code", email: "agent@metrists.local" },
+    });
+
+    const ownStatus = await service.status({ repoPath: workspaceDir });
+    // notes.md was never added to the outer repo, and README.md is
+    // committed so it's absent from untracked. isomorphic-git's statusMatrix
+    // walks files individually (unlike `git status`'s directory collapsing),
+    // so everything else untracked must live under .metrists/ — no
+    // submodule marker, no nested-.git confusion from the history repo.
+    expect(ownStatus.untracked).toContain("notes.md");
+    expect(ownStatus.untracked).not.toContain("README.md");
+    expect(
+      ownStatus.untracked.every(
+        (path) => path === "notes.md" || path.startsWith(".metrists/"),
+      ),
+    ).toBe(true);
+  });
+});

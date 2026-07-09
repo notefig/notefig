@@ -5,11 +5,15 @@ import {
   newInteractionId,
   BUILT_IN_HARNESSES,
   composePrompt,
+  renderToolGuidance,
+  type AgentTool,
   type ContentBlock,
   type HarnessDefinition,
   type RequestPermissionResponse,
   type SessionNotification,
+  type ToolAgentsFacade,
   type ToolCallUpdate,
+  type ToolContext,
   type TurnOutcome,
 } from "@metrists/shared/agent";
 import { platformAdapter } from "@/adapters";
@@ -19,6 +23,9 @@ import { PermissionBroker } from "./permission-broker";
 import { MetristsAcpClient } from "./acp-client";
 import type { AgentTransport } from "./agent-transport.interface";
 import { AgentTransportError } from "./agent-transport.interface";
+import { toolRegistry, getTool } from "./tools";
+import { findToolFence } from "./tool-fence";
+import { checkpointWorkspaceHistory } from "@/utils/history-service";
 import {
   agentEntriesCollection,
   agentInteractionsCollection,
@@ -41,10 +48,37 @@ type TurnState = {
   text: string;
   /** The assistant entry the current run is streaming into, or null to open one. */
   textEntryId: string | null;
+  /** True once a `metrists:tool` fence has been dispatched this turn (at most one per reply). */
+  fenceHandled: boolean;
+  /** The user prompt that started this turn (checkpoint commit message). */
+  userText: string;
 };
 
 function contentBlockText(content: ContentBlock): string {
   return content.type === "text" ? content.text : "";
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Minimal structural `ToolAgentsFacade` (Stage 2's `ToolContext.agents`),
+ * built from this module's own registries/free functions rather than
+ * importing `./agents` — `agents.ts` itself imports from this file, so
+ * importing it back here would be circular.
+ */
+function buildToolAgentsFacade(): ToolAgentsFacade {
+  return {
+    task: (taskId: string) => ({
+      prompt: (text: string) => taskRegistry.get(taskId)?.prompt(text),
+      cancel: () => cancelAgentTask(taskId),
+    }),
+    workspace: (workspacePath: string) => ({
+      createTask: (harness: unknown) =>
+        startAgentTask(workspacePath, harness as HarnessDefinition),
+    }),
+  };
 }
 
 /**
@@ -97,7 +131,14 @@ export class AgentTask {
    * A displaced slot resolves its handle as "superseded" (A3) before being
    * overwritten.
    */
-  private pendingPrompt: { turnId: string; text: string } | null = null;
+  private pendingPrompt:
+    | { turnId: string; text: string; fromContinuation: boolean }
+    | null = null;
+  /** Consecutive tool-triggered continuation turns (runaway-loop circuit breaker). */
+  private toolContinuationDepth = 0;
+  private static readonly MAX_TOOL_CONTINUATION_DEPTH = 8;
+  /** Sent once per task, on the first turn only (Stage 2 tool guidance). */
+  private guidanceSent = false;
   /** turnId → resolver for that turn's prompt-handle `completed` promise. */
   private readonly turnResolvers = new Map<
     string,
@@ -177,6 +218,13 @@ export class AgentTask {
    * (fire-and-forget); tests and programmatic callers await `completed`.
    */
   prompt(text: string): { turnId: string; completed: Promise<TurnOutcome> } {
+    return this.enqueuePrompt(text, false);
+  }
+
+  private enqueuePrompt(
+    text: string,
+    fromContinuation: boolean,
+  ): { turnId: string; completed: Promise<TurnOutcome> } {
     if (!this.client || !this.sessionId) {
       throw new Error("agent task is not started");
     }
@@ -186,7 +234,7 @@ export class AgentTask {
     if (displaced) {
       this.resolveTurn(displaced.turnId, { status: "superseded" });
     }
-    this.pendingPrompt = { turnId, text };
+    this.pendingPrompt = { turnId, text, fromContinuation };
 
     const completed = new Promise<TurnOutcome>((resolve) => {
       this.turnResolvers.set(turnId, resolve);
@@ -215,8 +263,13 @@ export class AgentTask {
     this.draining = true;
     try {
       while (!this.disposed && this.pendingPrompt !== null) {
-        const { turnId, text } = this.pendingPrompt;
+        const { turnId, text, fromContinuation } = this.pendingPrompt;
         this.pendingPrompt = null;
+        // Depth cap (Stage 2): reset on any user-initiated prompt, count
+        // consecutive tool-triggered continuations only.
+        this.toolContinuationDepth = fromContinuation
+          ? this.toolContinuationDepth + 1
+          : 0;
         const status = await this.runTurn(turnId, text);
         // Don't auto-run a coalesced follow-up through the same failure (e.g.
         // an auth block); it resumes when the user sends again.
@@ -265,12 +318,19 @@ export class AgentTask {
       joiner: new MarkdownJoiner(),
       text: "",
       textEntryId: null,
+      fenceHandled: false,
+      userText: text,
     };
     this.setStatus("running");
 
     try {
+      const preamble = this.guidanceSent
+        ? undefined
+        : renderToolGuidance(toolRegistry);
+      this.guidanceSent = true;
       const blocks = composePrompt({
         text,
+        preamble,
         capabilities: { embeddedContext: this.client.embeddedContextCapability },
       });
       const response = await this.client.prompt(this.sessionId, blocks);
@@ -328,8 +388,26 @@ export class AgentTask {
     // Now idle: fold in any tool answers that arrived mid-turn. Not on error
     // (A5: don't auto-continue through a failure) or cancel (the user just
     // stopped the task; a fresh continuation would fight that intent).
-    if (turnStatus === "completed") this.maybeComposeContinuation();
+    if (turnStatus === "completed") {
+      this.maybeComposeContinuation();
+      void this.checkpointTurn(turn.userText);
+    }
     return turnStatus;
+  }
+
+  /** Auto-checkpoint (Track D.3): one commit per completed turn, best-effort. */
+  private async checkpointTurn(promptText: string): Promise<void> {
+    const message =
+      promptText.length > 72 ? `${promptText.slice(0, 69)}…` : promptText;
+    try {
+      await checkpointWorkspaceHistory(this.workspacePath, message, {
+        name: this.harness.id,
+        email: "agent@metrists.local",
+      });
+    } catch (error) {
+      // Best-effort: history is a convenience, never block/fail the turn on it.
+      this.warn("checkpoint failed", errorMessage(error));
+    }
   }
 
   handleSessionUpdate(notification: SessionNotification): void {
@@ -355,6 +433,7 @@ export class AgentTask {
         if (flushable) {
           turn.text += flushable;
           this.writeAssistantText(turn);
+          if (!turn.fenceHandled) this.maybeDispatchToolFence(turn);
         }
         break;
       }
@@ -389,6 +468,174 @@ export class AgentTask {
         });
         break;
     }
+  }
+
+  /**
+   * Stage 2: detect a complete `metrists:tool` fence in the accumulating
+   * assistant text (the joiner already surfaces it as soon as its closing
+   * ``` streams in — no need to wait for turn end). At most one fence per
+   * reply (`turn.fenceHandled`); malformed fences and valid ones both route
+   * through an `agentInteractions` row + `answerInteraction`, giving the
+   * doc's "one repair round-trip" for free via the existing continuation
+   * machinery.
+   */
+  private maybeDispatchToolFence(turn: TurnState): void {
+    const result = findToolFence(turn.text);
+    if (result.kind === "none" || result.kind === "incomplete") return;
+    turn.fenceHandled = true;
+    this.closeTextRun(turn);
+
+    const toolCallId = newEventId();
+    const entryId = newEventId();
+
+    if (result.kind === "malformed") {
+      agentEntriesCollection.insert({
+        id: entryId,
+        taskId: this.taskId,
+        turnId: turn.turnId,
+        type: "tool_call",
+        toolCallId,
+        toolCallSource: "fence",
+        toolCall: { toolCallId, title: "(malformed tool fence)", status: "failed" },
+        createdAt: Date.now(),
+      });
+      this.raiseToolInteraction(
+        entryId,
+        `malformed tool fence: ${result.reason}`,
+        `Tool error: the fence was malformed (${result.reason}). Re-emit a well-formed metrists:tool fence.`,
+      );
+      return;
+    }
+
+    const tool = getTool(result.name);
+    if (!tool) {
+      agentEntriesCollection.insert({
+        id: entryId,
+        taskId: this.taskId,
+        turnId: turn.turnId,
+        type: "tool_call",
+        toolCallId,
+        toolCallSource: "fence",
+        toolCall: { toolCallId, title: result.name, status: "failed" },
+        createdAt: Date.now(),
+      });
+      this.raiseToolInteraction(
+        entryId,
+        `unknown tool: ${result.name}`,
+        `Tool error: unknown tool "${result.name}". Available tools: ${toolRegistry.map((t) => t.name).join(", ")}.`,
+      );
+      return;
+    }
+
+    const parsedInput = tool.input.safeParse(result.input);
+    if (!parsedInput.success) {
+      agentEntriesCollection.insert({
+        id: entryId,
+        taskId: this.taskId,
+        turnId: turn.turnId,
+        type: "tool_call",
+        toolCallId,
+        toolCallSource: "fence",
+        toolCall: {
+          toolCallId,
+          title: tool.name,
+          status: "failed",
+          rawInput: isPlainObject(result.input) ? result.input : undefined,
+        },
+        createdAt: Date.now(),
+      });
+      this.raiseToolInteraction(
+        entryId,
+        `invalid input for ${tool.name}`,
+        `Tool error: invalid input for "${tool.name}": ${parsedInput.error.message}`,
+      );
+      return;
+    }
+
+    agentEntriesCollection.insert({
+      id: entryId,
+      taskId: this.taskId,
+      turnId: turn.turnId,
+      type: "tool_call",
+      toolCallId,
+      toolCallSource: "fence",
+      toolCall: {
+        toolCallId,
+        title: tool.name,
+        status: "pending",
+        rawInput: isPlainObject(result.input) ? result.input : undefined,
+      },
+      createdAt: Date.now(),
+    });
+
+    void this.executeFenceTool(tool, entryId, parsedInput.data);
+  }
+
+  private async executeFenceTool(
+    tool: AgentTool<unknown, unknown>,
+    entryId: string,
+    input: unknown,
+  ): Promise<void> {
+    if (tool.requiresPermission) {
+      const response = await this.permissionBroker.request({
+        sessionId: this.sessionId ?? "",
+        toolCall: { toolCallId: entryId, title: tool.name },
+        options: [
+          { optionId: "allow", name: "Allow", kind: "allow_once" },
+          { optionId: "deny", name: "Deny", kind: "reject_once" },
+        ],
+      });
+      const outcome = response.outcome;
+      const denied =
+        outcome.outcome === "cancelled" ||
+        (outcome.outcome === "selected" && outcome.optionId === "deny");
+      if (denied) {
+        agentEntriesCollection.update(entryId, (draft) => {
+          if (draft.toolCall) draft.toolCall.status = "failed";
+        });
+        this.raiseToolInteraction(
+          entryId,
+          `${tool.name} was denied`,
+          `Tool error: permission denied for "${tool.name}".`,
+        );
+        return;
+      }
+    }
+
+    const ctx: ToolContext = {
+      workspacePath: this.workspacePath,
+      taskId: this.taskId,
+      agents: buildToolAgentsFacade(),
+    };
+    const result = await tool.execute(ctx, input);
+    agentEntriesCollection.update(entryId, (draft) => {
+      if (draft.toolCall) draft.toolCall.status = result.ok ? "completed" : "failed";
+    });
+    const resultText = result.ok
+      ? `Tool result: ${JSON.stringify(result.value)}`
+      : `Tool error: ${result.error}`;
+    this.raiseToolInteraction(entryId, tool.name, resultText);
+  }
+
+  /** Insert a `source: "tool"` interaction and immediately answer it with the
+   *  execution result — the app is the "answerer" here, not the user; this
+   *  is what feeds Stage 1's continuation batching. */
+  private raiseToolInteraction(
+    entryId: string,
+    question: string,
+    resultText: string,
+  ): void {
+    const interactionId = newInteractionId();
+    agentInteractionsCollection.insert({
+      id: interactionId,
+      taskId: this.taskId,
+      entryId,
+      source: "tool",
+      state: "pending",
+      question,
+      createdAt: Date.now(),
+    });
+    this.answerInteraction(interactionId, resultText);
   }
 
   /**
@@ -512,10 +759,14 @@ export class AgentTask {
   }
 
   /**
-   * Answer an interaction this task raised (question blob, tool ask, auth
-   * block). Tool-sourced answers accumulate and compose into exactly one
-   * continuation prompt once the task is idle (`maybeComposeContinuation`,
-   * called here directly if already idle, and again from `finishTurn`).
+   * Answer an interaction this task raised (tool ask, auth block). Tool
+   * answers accumulate and compose into exactly one continuation prompt once
+   * the task is idle (`maybeComposeContinuation`, deferred a tick here,
+   * called again from `finishTurn`). Auth interactions are answered by
+   * Stage 4's `authenticate` retry flow, not a continuation — excluded here.
+   * Blobs (question/approval widgets) never raise an interaction row at all
+   * — see `answerBlob` in blob-actions.ts, which prompts the authoring task
+   * directly instead of going through this state machine.
    */
   answerInteraction(interactionId: string, answer: string): void {
     const row = agentInteractionsCollection.get(interactionId);
@@ -553,24 +804,45 @@ export class AgentTask {
 
   /**
    * Mint one continuation prompt covering every tool interaction answered
-   * since the last continuation, once the task is idle. No-op mid-turn — the
-   * caller re-checks when the turn ends (`finishTurn`).
+   * since the last continuation, once the task is idle. No-op mid-turn —
+   * the caller re-checks when the turn ends (`finishTurn`).
    */
   private maybeComposeContinuation(): void {
     if (this.currentTurn) return;
-    const pending = agentInteractionsCollection.toArray.filter(
+    const answered = agentInteractionsCollection.toArray.filter(
       (row) =>
         row.taskId === this.taskId &&
         row.source === "tool" &&
         row.state === "answered" &&
         !this.deliveredInteractionIds.has(row.id),
     );
-    if (pending.length === 0) return;
-    for (const row of pending) this.deliveredInteractionIds.add(row.id);
-    const text = pending
+    if (answered.length === 0) return;
+
+    if (this.toolContinuationDepth >= AgentTask.MAX_TOOL_CONTINUATION_DEPTH) {
+      // Runaway-loop circuit breaker: stop auto-composing past the depth
+      // cap and surface a visible, still-pending interaction instead.
+      this.warn(
+        "tool continuation depth cap reached",
+        this.toolContinuationDepth,
+      );
+      agentInteractionsCollection.insert({
+        id: newInteractionId(),
+        taskId: this.taskId,
+        entryId: answered[0].entryId,
+        source: "tool",
+        state: "pending",
+        question:
+          "The agent is iterating on tool calls — continue letting it proceed?",
+        createdAt: Date.now(),
+      });
+      return;
+    }
+
+    for (const row of answered) this.deliveredInteractionIds.add(row.id);
+    const text = answered
       .map((row) => `Answer to "${row.question}": ${row.answer}`)
       .join("\n");
-    this.prompt(text);
+    this.enqueuePrompt(text, true);
   }
 
   /** Raise a structured `auth` interaction alongside the string authHint banner (A5). */
@@ -715,6 +987,29 @@ const taskManagerRegistry = new Map<string, TaskManager>();
 /** Exposed so `agents.ts`'s entity-handle facade can resolve a live task. */
 export function getRegisteredTask(taskId: string): AgentTask | undefined {
   return taskRegistry.get(taskId);
+}
+
+/**
+ * Which task authored a given blob, and its type/path — read straight off
+ * the `author_blob` tool call's transcript entry (every fence tool call
+ * already gets one, with `rawInput` verbatim), rather than a dedicated
+ * blob-tracking table. Used by `answerBlob` (blob-actions.ts) to address a
+ * fresh prompt back at the right session once the user interacts with the
+ * blob; the answer never routes through `agentInteractions`.
+ */
+export function findBlobAuthorTask(
+  blobId: string,
+): { taskId: string; blobType: string; path: string } | undefined {
+  const entry = agentEntriesCollection.toArray.find(
+    (e) =>
+      e.type === "tool_call" &&
+      e.toolCall?.title === "author_blob" &&
+      isPlainObject(e.toolCall.rawInput) &&
+      e.toolCall.rawInput.id === blobId,
+  );
+  if (!entry?.toolCall?.rawInput) return undefined;
+  const rawInput = entry.toolCall.rawInput as { path: string; type: string };
+  return { taskId: entry.taskId, blobType: rawInput.type, path: rawInput.path };
 }
 
 export function getWorkspaceTaskManager(

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { defineBlobType } from "./blob-registry";
+import { defineBlobType } from "./blob-type";
 
 /**
  * Agent-updated progress card. Read-only for the user: the agent patches it

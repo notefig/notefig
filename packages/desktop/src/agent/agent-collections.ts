@@ -71,6 +71,10 @@ export type AgentEntry = {
   toolCallId?: string;
   /** tool_call: the coalesced tool call (title, kind, status, content, …) */
   toolCall?: ToolCallUpdate;
+  /** tool_call: provenance — a real ACP tool_call/tool_call_update stream,
+   *  or an app-detected `metrists:tool` fence (Stage 2). Fence calls have no
+   *  external in_progress push, so this mostly matters for rendering. */
+  toolCallSource?: "acp" | "fence";
   /** plan: raw plan update payload */
   plan?: unknown;
   /** unknown: the full unrecognized session-update payload, kept verbatim

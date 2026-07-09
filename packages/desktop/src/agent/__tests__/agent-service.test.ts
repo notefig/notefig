@@ -15,6 +15,11 @@ const { writeFiles, readFiles } = vi.hoisted(() => ({
 vi.mock("@/adapters", () => ({
   platformAdapter: { setKv: vi.fn(), getKv: vi.fn(), writeFiles, readFiles },
 }));
+// History auto-checkpointing (Stage 2) is exercised separately; keep these
+// tests focused on the turn/interaction machinery, not git plumbing.
+vi.mock("@/utils/history-service", () => ({
+  checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
+}));
 
 import { createLoopbackPair } from "../loopback-transport";
 import { FakeAgent } from "./fake-agent";
@@ -59,6 +64,12 @@ function pendingPerms(taskId: string) {
 
 function toolEntries(taskId: string) {
   return entriesFor(taskId).filter((e) => e.type === "tool_call");
+}
+
+/** The user-text block is always last (Stage 2 prepends tool guidance on the
+ *  first turn only, so index 0 isn't reliably the user's text anymore). */
+function lastPromptText(params: { prompt: { text?: string }[] }): string {
+  return params.prompt[params.prompt.length - 1].text ?? "";
 }
 
 /** Fire a prompt (now fire-and-forget) and wait for its turn to settle. */
@@ -225,7 +236,7 @@ describe("AgentTask vertical slice", () => {
     const firstGate = new Promise<void>((r) => (releaseFirst = r));
     let promptCount = 0;
     agent.onPrompt = async (params, _a) => {
-      seen.push(params.prompt[0].text);
+      seen.push(lastPromptText(params));
       if (promptCount++ === 0) await firstGate; // hold the first turn open
       return { stopReason: "end_turn" };
     };
@@ -472,7 +483,7 @@ describe("AgentTask vertical slice", () => {
     let releaseFirst!: () => void;
     const gate = new Promise<void>((r) => (releaseFirst = r));
     agent.onPrompt = async (params) => {
-      seen.push(params.prompt[0].text);
+      seen.push(lastPromptText(params));
       await gate; // hold the first turn open so a second can be queued
       throw new Error("Authentication required");
     };
@@ -536,7 +547,7 @@ describe("prompt handles (A3, Stage 1)", () => {
     let releaseFirst!: () => void;
     const gate = new Promise<void>((r) => (releaseFirst = r));
     agent.onPrompt = async (params) => {
-      if (params.prompt[0].text === "one") await gate;
+      if (lastPromptText(params) === "one") await gate;
       return { stopReason: "end_turn" };
     };
 
@@ -604,7 +615,7 @@ describe("interactions (Stage 1)", () => {
     const agent = new FakeAgent(agentSide);
     const seen: string[] = [];
     agent.onPrompt = async (params) => {
-      seen.push(params.prompt[0].text);
+      seen.push(lastPromptText(params));
       return { stopReason: "end_turn" };
     };
 
@@ -665,5 +676,120 @@ describe("interactions (Stage 1)", () => {
     expect(interactionsFor(task.taskId)[0].state).toBe("pending");
     await task.cancel();
     expect(interactionsFor(task.taskId)[0].state).toBe("cancelled");
+  });
+});
+
+describe("tool fences (Stage 2)", () => {
+  it("sends tool guidance (including author_blob) as a preamble on the first turn only", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const seenPrompts: { text?: string }[][] = [];
+    agent.onPrompt = async (params) => {
+      seenPrompts.push(params.prompt);
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    await runPrompt(task, "one");
+    await runPrompt(task, "two");
+
+    expect(seenPrompts[0]).toHaveLength(2); // preamble + user text
+    expect(seenPrompts[0][0].text).toContain("metrists:tool");
+    expect(seenPrompts[0][0].text).toContain("- author_blob:");
+    expect(seenPrompts[0][1].text).toBe("one");
+
+    expect(seenPrompts[1]).toHaveLength(1); // no preamble on later turns
+    expect(seenPrompts[1][0].text).toBe("two");
+  });
+
+  it("detects a valid fence, executes the tool, and delivers one continuation prompt", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const seen: string[] = [];
+    agent.onPrompt = async (params, a) => {
+      seen.push(lastPromptText(params));
+      if (seen.length === 1) {
+        a.update("sess_test", {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "text",
+            text: "```metrists:tool\nname: workspace_open_files\ninput:\n  {}\n```",
+          },
+        });
+      }
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    task.prompt("what's open?");
+
+    await vi.waitFor(() => expect(seen.length).toBe(2));
+    expect(seen[1]).toContain("Tool result:");
+
+    const toolEntry = entriesFor(task.taskId).find((e) => e.type === "tool_call");
+    expect(toolEntry?.toolCall?.title).toBe("workspace_open_files");
+    expect(toolEntry?.toolCallSource).toBe("fence");
+    expect(toolEntry?.toolCall?.status).toBe("completed");
+
+    const toolInteractions = interactionsFor(task.taskId).filter(
+      (i) => i.source === "tool",
+    );
+    expect(toolInteractions).toHaveLength(1);
+    expect(toolInteractions[0].state).toBe("answered");
+  });
+
+  it("gives a malformed fence one repair round-trip with the validation error", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const seen: string[] = [];
+    agent.onPrompt = async (params, a) => {
+      seen.push(lastPromptText(params));
+      if (seen.length === 1) {
+        a.update("sess_test", {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "text",
+            text: "```metrists:tool\ninput:\n  {}\n```", // missing `name`
+          },
+        });
+      }
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    task.prompt("do something");
+
+    await vi.waitFor(() => expect(seen.length).toBe(2));
+    expect(seen[1]).toContain("Tool error");
+    expect(seen[1].toLowerCase()).toContain("malformed");
+  });
+
+  it("reports an unknown tool name as a tool error", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const seen: string[] = [];
+    agent.onPrompt = async (params, a) => {
+      seen.push(lastPromptText(params));
+      if (seen.length === 1) {
+        a.update("sess_test", {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "text",
+            text: "```metrists:tool\nname: full_text_search\ninput:\n  {}\n```",
+          },
+        });
+      }
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    task.prompt("search everything");
+
+    await vi.waitFor(() => expect(seen.length).toBe(2));
+    expect(seen[1]).toContain("unknown tool");
   });
 });

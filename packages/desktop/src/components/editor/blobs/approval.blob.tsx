@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { defineBlobType } from "./blob-registry";
+import { defineBlobType } from "./blob-type";
 
 /**
  * The agent asks the user to approve or reject a described action before

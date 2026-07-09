@@ -15,12 +15,16 @@ export interface PromptContextPart {
 
 export interface ComposePromptInput {
   text: string;
+  /** System-preamble text (e.g. tool guidance), prepended as its own leading block. */
+  preamble?: string;
   contextParts?: PromptContextPart[];
   capabilities: { embeddedContext: boolean };
 }
 
 export function composePrompt(input: ComposePromptInput): ContentBlock[] {
-  const blocks: ContentBlock[] = [{ type: "text", text: input.text }];
+  const blocks: ContentBlock[] = [];
+  if (input.preamble) blocks.push({ type: "text", text: input.preamble });
+  blocks.push({ type: "text", text: input.text });
 
   for (const part of input.contextParts ?? []) {
     if (part.kind === "resource_link") {

@@ -14,11 +14,13 @@ import {
   type GitLogInput,
   type GitPullInput,
   type GitPushInput,
+  type GitReadTextFileInput,
   type GitRemoveInput,
   type GitAddAllAndCommitInput,
   type GitAbortRevertInput,
   type GitRevertCommitInput,
   type GitService,
+  type GitStatusInput,
   type GitStorageHost,
   type RepoStatus,
   type GitSwitchBranchInput,
@@ -30,6 +32,11 @@ const textEncoder = new TextEncoder();
 function joinGitPath(repoPath: string, relativePath: string): string {
   const base = repoPath.endsWith("/") ? repoPath.slice(0, -1) : repoPath;
   return `${base}/${relativePath}`;
+}
+
+/** Defaults to `<repoPath>/.git` — byte-identical to pre-gitDir behavior. */
+function resolveGitDir(input: { repoPath: string; gitDir?: string }): string {
+  return input.gitDir ?? joinGitPath(input.repoPath, ".git");
 }
 
 function encodeText(value: string): Uint8Array {
@@ -133,7 +140,7 @@ export class IsomorphicGitService implements GitService {
 
   private async ensureInitControlFiles(input: GitInitInput): Promise<void> {
     const defaultBranch = input.defaultBranch ?? "master";
-    const gitDir = joinGitPath(input.repoPath, ".git");
+    const gitDir = resolveGitDir(input);
     const headPath = joinGitPath(gitDir, "HEAD");
     const configPath = joinGitPath(gitDir, "config");
     const infoDir = joinGitPath(gitDir, "info");
@@ -198,16 +205,18 @@ export class IsomorphicGitService implements GitService {
 
   async init(input: GitInitInput): Promise<void> {
     await this.ensureInitControlFiles(input);
+    const gitdir = resolveGitDir(input);
 
     try {
       await git.init({
         ...input,
         fs: this.fsClient,
         dir: input.repoPath,
+        gitdir,
       });
     } catch (error) {
-      const headPath = joinGitPath(input.repoPath, ".git/HEAD");
-      const configPath = joinGitPath(input.repoPath, ".git/config");
+      const headPath = joinGitPath(gitdir, "HEAD");
+      const configPath = joinGitPath(gitdir, "config");
       const [headStat, configStat] = await Promise.all([
         this.host.stat(headPath),
         this.host.stat(configPath),
@@ -221,7 +230,8 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
-  async status(input: { repoPath: string }): Promise<RepoStatus> {
+  async status(input: GitStatusInput): Promise<RepoStatus> {
+    const gitdir = resolveGitDir(input);
     try {
       let branch: string | null = null;
 
@@ -229,6 +239,7 @@ export class IsomorphicGitService implements GitService {
         const currentBranch = await git.currentBranch({
           fs: this.fsClient,
           dir: input.repoPath,
+          gitdir,
           fullname: false,
         });
         branch = currentBranch ?? null;
@@ -243,8 +254,8 @@ export class IsomorphicGitService implements GitService {
         }
 
         const [headStat, configStat] = await Promise.all([
-          this.host.stat(joinGitPath(input.repoPath, ".git/HEAD")),
-          this.host.stat(joinGitPath(input.repoPath, ".git/config")),
+          this.host.stat(joinGitPath(gitdir, "HEAD")),
+          this.host.stat(joinGitPath(gitdir, "config")),
         ]);
 
         if (!headStat.exists || !configStat.exists) {
@@ -255,6 +266,7 @@ export class IsomorphicGitService implements GitService {
       const matrix = await git.statusMatrix({
         fs: this.fsClient,
         dir: input.repoPath,
+        gitdir,
       });
 
       const staged: GitFileChange[] = [];
@@ -306,6 +318,7 @@ export class IsomorphicGitService implements GitService {
         ...input,
         fs: this.fsClient,
         dir: input.repoPath,
+        gitdir: resolveGitDir(input),
       });
     } catch (error) {
       throw toGitError(error);
@@ -318,6 +331,7 @@ export class IsomorphicGitService implements GitService {
         ...input,
         fs: this.fsClient,
         dir: input.repoPath,
+        gitdir: resolveGitDir(input),
       });
     } catch (error) {
       throw toGitError(error);
@@ -330,6 +344,7 @@ export class IsomorphicGitService implements GitService {
         ...input,
         fs: this.fsClient,
         dir: input.repoPath,
+        gitdir: resolveGitDir(input),
       });
     } catch (error) {
       throw toGitError(error);
@@ -344,6 +359,7 @@ export class IsomorphicGitService implements GitService {
         ...input,
         fs: this.fsClient,
         dir: input.repoPath,
+        gitdir: resolveGitDir(input),
       });
     } catch (error) {
       throw toGitError(error);
@@ -355,7 +371,10 @@ export class IsomorphicGitService implements GitService {
   ): Promise<string | null> {
     validateMessage(input.message ?? "Checkpoint");
 
-    const status = await this.status({ repoPath: input.repoPath });
+    const status = await this.status({
+      repoPath: input.repoPath,
+      gitDir: input.gitDir,
+    });
 
     const stagedPaths = new Set(status.staged.map((item) => item.path));
     const pathsToAdd = [
@@ -379,20 +398,24 @@ export class IsomorphicGitService implements GitService {
     }
 
     for (const filepath of pathsToAdd) {
-      await this.add({ repoPath: input.repoPath, filepath });
+      await this.add({ repoPath: input.repoPath, gitDir: input.gitDir, filepath });
     }
 
     for (const filepath of pathsToRemove) {
-      await this.remove({ repoPath: input.repoPath, filepath });
+      await this.remove({ repoPath: input.repoPath, gitDir: input.gitDir, filepath });
     }
 
-    const afterStage = await this.status({ repoPath: input.repoPath });
+    const afterStage = await this.status({
+      repoPath: input.repoPath,
+      gitDir: input.gitDir,
+    });
     if (afterStage.staged.length === 0) {
       return null;
     }
 
     return this.commit({
       repoPath: input.repoPath,
+      gitDir: input.gitDir,
       message: input.message ?? "Checkpoint",
       author: input.author,
       committer: input.committer,
@@ -401,11 +424,13 @@ export class IsomorphicGitService implements GitService {
 
   private async computeRevertChanges(
     repoPath: string,
+    gitdir: string,
     commitOid: string,
   ): Promise<{ parentOid: string; changes: RevertChange[] }> {
     const { commit } = await git.readCommit({
       fs: this.fsClient,
       dir: repoPath,
+      gitdir,
       oid: commitOid,
     });
 
@@ -415,14 +440,15 @@ export class IsomorphicGitService implements GitService {
     }
 
     const [parentFiles, commitFiles, headOid] = await Promise.all([
-      git.listFiles({ fs: this.fsClient, dir: repoPath, ref: parentOid }),
-      git.listFiles({ fs: this.fsClient, dir: repoPath, ref: commitOid }),
-      git.resolveRef({ fs: this.fsClient, dir: repoPath, ref: "HEAD" }),
+      git.listFiles({ fs: this.fsClient, dir: repoPath, gitdir, ref: parentOid }),
+      git.listFiles({ fs: this.fsClient, dir: repoPath, gitdir, ref: commitOid }),
+      git.resolveRef({ fs: this.fsClient, dir: repoPath, gitdir, ref: "HEAD" }),
     ]);
 
     const headFiles = await git.listFiles({
       fs: this.fsClient,
       dir: repoPath,
+      gitdir,
       ref: headOid,
     });
 
@@ -441,6 +467,7 @@ export class IsomorphicGitService implements GitService {
         const result = await git.readBlob({
           fs: this.fsClient,
           dir: repoPath,
+          gitdir,
           oid: ref,
           filepath,
         });
@@ -482,9 +509,11 @@ export class IsomorphicGitService implements GitService {
   }
 
   async revertCommit(input: GitRevertCommitInput): Promise<string | null> {
+    const gitdir = resolveGitDir(input);
     try {
       const { parentOid, changes } = await this.computeRevertChanges(
         input.repoPath,
+        gitdir,
         input.oid,
       );
 
@@ -505,6 +534,7 @@ export class IsomorphicGitService implements GitService {
           if (!change.headOid) continue;
           await this.remove({
             repoPath: input.repoPath,
+            gitDir: input.gitDir,
             filepath: change.path,
           });
           continue;
@@ -513,15 +543,23 @@ export class IsomorphicGitService implements GitService {
         await git.checkout({
           fs: this.fsClient,
           dir: input.repoPath,
+          gitdir,
           ref: parentOid,
           filepaths: [change.path],
           force: true,
           noUpdateHead: true,
         });
-        await this.add({ repoPath: input.repoPath, filepath: change.path });
+        await this.add({
+          repoPath: input.repoPath,
+          gitDir: input.gitDir,
+          filepath: change.path,
+        });
       }
 
-      const status = await this.status({ repoPath: input.repoPath });
+      const status = await this.status({
+        repoPath: input.repoPath,
+        gitDir: input.gitDir,
+      });
       if (status.staged.length === 0) {
         return null;
       }
@@ -530,6 +568,7 @@ export class IsomorphicGitService implements GitService {
 
       return this.commit({
         repoPath: input.repoPath,
+        gitDir: input.gitDir,
         message,
         author: input.author,
         committer: input.committer,
@@ -544,6 +583,7 @@ export class IsomorphicGitService implements GitService {
       await git.checkout({
         fs: this.fsClient,
         dir: input.repoPath,
+        gitdir: resolveGitDir(input),
         ref: "HEAD",
         force: true,
         noUpdateHead: true,
@@ -559,6 +599,7 @@ export class IsomorphicGitService implements GitService {
         ...input,
         fs: this.fsClient,
         dir: input.repoPath,
+        gitdir: resolveGitDir(input),
       });
     } catch (error) {
       throw toGitError(error);
@@ -571,6 +612,7 @@ export class IsomorphicGitService implements GitService {
         ...input,
         fs: this.fsClient,
         dir: input.repoPath,
+        gitdir: resolveGitDir(input),
       });
     } catch (error) {
       throw toGitError(error);
@@ -587,6 +629,7 @@ export class IsomorphicGitService implements GitService {
         ...input,
         fs: this.fsClient,
         dir: input.repoPath,
+        gitdir: resolveGitDir(input),
       });
     } catch (error) {
       throw toGitError(error);
@@ -606,6 +649,7 @@ export class IsomorphicGitService implements GitService {
         ...input,
         fs: this.fsClient,
         dir: input.repoPath,
+        gitdir: resolveGitDir(input),
         ref: input.ref ?? "HEAD",
         force: input.force ?? true,
         noUpdateHead: input.noUpdateHead ?? true,
@@ -621,13 +665,14 @@ export class IsomorphicGitService implements GitService {
         ...input,
         fs: this.fsClient,
         dir: input.repoPath,
+        gitdir: resolveGitDir(input),
       });
     } catch (error) {
       const gitError = toGitError(error);
 
       if (gitError.code === "RepoNotFound") {
         try {
-          await this.status({ repoPath: input.repoPath });
+          await this.status({ repoPath: input.repoPath, gitDir: input.gitDir });
           return [];
         } catch (statusError) {
           throw toGitError(statusError);
@@ -635,6 +680,21 @@ export class IsomorphicGitService implements GitService {
       }
 
       throw gitError;
+    }
+  }
+
+  async readTextFile(input: GitReadTextFileInput): Promise<string> {
+    try {
+      const { blob } = await git.readBlob({
+        fs: this.fsClient,
+        dir: input.repoPath,
+        gitdir: resolveGitDir(input),
+        oid: input.ref,
+        filepath: input.filepath,
+      });
+      return new TextDecoder().decode(blob);
+    } catch (error) {
+      throw toGitError(error);
     }
   }
 
