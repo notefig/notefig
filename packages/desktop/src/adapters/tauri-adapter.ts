@@ -20,6 +20,9 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import type { GitStorageHost } from "@metrists/git";
+import type { HarnessDefinition } from "@metrists/shared/agent";
+import type { AgentTransport } from "@/agent/agent-transport.interface";
+import { TauriStdioTransport } from "@/agent/tauri-stdio-transport";
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LazyStore } from "@tauri-apps/plugin-store";
@@ -649,6 +652,20 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     };
 
     return host;
+  }
+
+  createAgentTransport(spec: {
+    taskId: string;
+    harness: HarnessDefinition;
+    workspacePath: string;
+  }): AgentTransport {
+    return new TauriStdioTransport({
+      procId: spec.taskId,
+      program: spec.harness.command,
+      args: spec.harness.args,
+      cwd: spec.workspacePath,
+      env: spec.harness.env,
+    });
   }
 
   getUpdater(): PlatformUpdater {

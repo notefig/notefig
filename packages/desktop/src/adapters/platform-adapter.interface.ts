@@ -1,5 +1,7 @@
 import type { Theme } from "@/components/theme-provider";
 import type { GitStorageHost } from "@metrists/git";
+import type { HarnessDefinition } from "@metrists/shared/agent";
+import type { AgentTransport } from "@/agent/agent-transport.interface";
 
 /**
  * Error types for file system operations
@@ -500,6 +502,18 @@ export interface IPlatformAdapter {
    * This enables one-line Git service initialization per workspace.
    */
   getGitStorageHost(workspacePath: string): GitStorageHost;
+
+  /**
+   * Create the agent transport for a new task. Desktop spawns the harness as
+   * a local child process (Tauri stdio transport); other platforms plug in
+   * their own transport here (e.g. a relay transport) without the agent
+   * service ever knowing a transport constructor exists.
+   */
+  createAgentTransport(spec: {
+    taskId: string;
+    harness: HarnessDefinition;
+    workspacePath: string;
+  }): AgentTransport;
 
   /**
    * Create updater actions for the current platform.

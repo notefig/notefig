@@ -136,6 +136,11 @@ export class DocumentSync {
 
   constructor(readonly path: string) {}
 
+  /** Whether a save is pending/in-flight for this document. */
+  isDirty(): boolean {
+    return this.dirty || this.saving;
+  }
+
   /** Establish the file-content baseline once; later saves keep it fresh. */
   ensureBaseline(fileContent: string, contentHash?: string): void {
     if (this.lastMarkdown === null) {

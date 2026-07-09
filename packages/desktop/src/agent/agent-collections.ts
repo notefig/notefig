@@ -6,7 +6,7 @@
  * useLiveQuery, the same idiom as the file collections.
  */
 import { createCollection, localOnlyCollectionOptions } from "@tanstack/react-db";
-import type { ToolCallUpdate } from "@metrists/shared/agent";
+import type { AgentInteraction, ToolCallUpdate } from "@metrists/shared/agent";
 
 export type AgentTaskStatus = "starting" | "idle" | "running" | "cancelled" | "error";
 
@@ -114,5 +114,19 @@ export const agentPermissionRequestsCollection = createCollection(
   localOnlyCollectionOptions({
     id: "agent-permission-requests",
     getKey: (request: AgentPermissionRequestRow) => request.id,
+  }),
+);
+
+/**
+ * Things awaiting or carrying a user answer — question blobs, tool-sourced
+ * asks, auth blocks. Every row's `entryId` is a real FK to
+ * `agentEntriesCollection`; read sites relate the two with a TanStack DB
+ * `.leftJoin` (see `workspace.tsx`'s file-metadata/content join for the
+ * repo's existing precedent) rather than a second parallel `taskId` filter.
+ */
+export const agentInteractionsCollection = createCollection(
+  localOnlyCollectionOptions({
+    id: "agent-interactions",
+    getKey: (interaction: AgentInteraction) => interaction.id,
   }),
 );

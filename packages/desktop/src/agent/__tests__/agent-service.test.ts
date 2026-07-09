@@ -21,6 +21,7 @@ import { FakeAgent } from "./fake-agent";
 import { TaskManager, respondToAgentPermission } from "../agent-service";
 import {
   agentEntriesCollection,
+  agentInteractionsCollection,
   agentPermissionRequestsCollection,
   agentTurnsCollection,
   agentTasksCollection,
@@ -79,6 +80,8 @@ beforeEach(() => {
   for (const t of agentTasksCollection.toArray) agentTasksCollection.delete(t.taskId);
   for (const r of agentPermissionRequestsCollection.toArray)
     agentPermissionRequestsCollection.delete(r.id);
+  for (const i of agentInteractionsCollection.toArray)
+    agentInteractionsCollection.delete(i.id);
 });
 
 describe("AgentTask vertical slice", () => {
@@ -506,5 +509,161 @@ describe("AgentTask vertical slice", () => {
     expect(turnFor(task.taskId)[0].status).toBe("completed");
     // The thought chunk is not rendered, so no assistant message is created.
     expect(textFor(task.taskId, "assistant")).toBe("");
+  });
+});
+
+function interactionsFor(taskId: string) {
+  return agentInteractionsCollection.toArray.filter((i) => i.taskId === taskId);
+}
+
+describe("prompt handles (A3, Stage 1)", () => {
+  it("resolves the handle when the turn completes", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async () => ({ stopReason: "end_turn" });
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+
+    const handle = task.prompt("hi");
+    const outcome = await handle.completed;
+    expect(outcome).toEqual({ status: "completed", stopReason: "end_turn" });
+  });
+
+  it("resolves a displaced prompt as superseded", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    let releaseFirst!: () => void;
+    const gate = new Promise<void>((r) => (releaseFirst = r));
+    agent.onPrompt = async (params) => {
+      if (params.prompt[0].text === "one") await gate;
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+
+    const first = task.prompt("one");
+    await vi.waitFor(() => expect(turnFor(task.taskId).length).toBe(1));
+    const second = task.prompt("two"); // "one" is already running, so "two" queues
+    const third = task.prompt("three"); // displaces "two" before it ever runs
+    releaseFirst();
+
+    expect(await second.completed).toEqual({ status: "superseded" });
+    expect(await first.completed).toEqual({
+      status: "completed",
+      stopReason: "end_turn",
+    });
+    expect(await third.completed).toEqual({
+      status: "completed",
+      stopReason: "end_turn",
+    });
+  });
+
+  it("carries the error message when a turn fails", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async () => {
+      throw new Error("Authentication required");
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+
+    const outcome = await task.prompt("go").completed;
+    expect(outcome).toEqual({
+      status: "error",
+      error: expect.stringMatching(/authentication required/i),
+    });
+  });
+});
+
+describe("interactions (Stage 1)", () => {
+  it("raises a source:auth interaction with a real entryId join target on auth failure", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async () => {
+      throw new Error("Authentication required");
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    await runPrompt(task, "go");
+
+    const interactions = interactionsFor(task.taskId);
+    expect(interactions).toHaveLength(1);
+    expect(interactions[0]).toMatchObject({ source: "auth", state: "pending" });
+
+    const entry = agentEntriesCollection.get(interactions[0].entryId);
+    expect(entry).toBeDefined();
+    expect(entry?.type).toBe("unknown");
+  });
+
+  it("composes exactly one continuation prompt from queued tool answers once idle", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const seen: string[] = [];
+    agent.onPrompt = async (params) => {
+      seen.push(params.prompt[0].text);
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    await runPrompt(task, "start");
+
+    // Simulate two tool-sourced interactions this task raised.
+    const entryId = "evt_test";
+    agentEntriesCollection.insert({
+      id: entryId,
+      taskId: task.taskId,
+      turnId: turnFor(task.taskId)[0].turnId,
+      type: "tool_call",
+      createdAt: Date.now(),
+    });
+    agentInteractionsCollection.insert({
+      id: "itx_1",
+      taskId: task.taskId,
+      entryId,
+      source: "tool",
+      state: "pending",
+      question: "Overwrite the file?",
+      createdAt: Date.now(),
+    });
+    agentInteractionsCollection.insert({
+      id: "itx_2",
+      taskId: task.taskId,
+      entryId,
+      source: "tool",
+      state: "pending",
+      question: "Delete the backup?",
+      createdAt: Date.now(),
+    });
+
+    task.answerInteraction("itx_1", "yes");
+    task.answerInteraction("itx_2", "no");
+
+    await vi.waitFor(() => expect(seen).toEqual(["start", expect.any(String)]));
+    expect(seen[1]).toContain("Overwrite the file?");
+    expect(seen[1]).toContain("Delete the backup?");
+
+    const rows = interactionsFor(task.taskId).filter((i) => i.source === "tool");
+    expect(rows.every((r) => r.state === "answered")).toBe(true);
+  });
+
+  it("marks pending interactions cancelled on task cancel", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async () => {
+      throw new Error("Authentication required");
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    await runPrompt(task, "go");
+
+    expect(interactionsFor(task.taskId)[0].state).toBe("pending");
+    await task.cancel();
+    expect(interactionsFor(task.taskId)[0].state).toBe("cancelled");
   });
 });

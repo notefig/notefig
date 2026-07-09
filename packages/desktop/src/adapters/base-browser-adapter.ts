@@ -12,6 +12,7 @@ import type {
 } from "./platform-adapter.interface";
 import { requestTextPrompt } from "@/utils/text-prompt";
 import type { GitStorageHost } from "@metrists/git";
+import type { AgentTransport } from "@/agent/agent-transport.interface";
 
 export function createError(
   path: string,
@@ -510,6 +511,12 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     };
 
     return host;
+  }
+
+  createAgentTransport(): AgentTransport {
+    // Relay transport lands with Phase 3 web parity; the seam exists now so
+    // the agent service never constructs a transport itself.
+    throw new Error("Agent transport is not supported on this adapter yet.");
   }
 
   getUpdater(): PlatformUpdater {

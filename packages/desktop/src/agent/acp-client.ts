@@ -118,6 +118,11 @@ export class MetristsAcpClient implements Client {
     return this.authMethods[0]?.description ?? undefined;
   }
 
+  /** Whether the adapter advertised `promptCapabilities.embeddedContext` (drives PromptComposer's degrade path). */
+  get embeddedContextCapability(): boolean {
+    return this.agentCapabilities?.promptCapabilities?.embeddedContext ?? false;
+  }
+
   // ===== ACP client-side methods (called by the agent) =====
   // fs/* are only reachable on desktop (remote advertises fs:false; a
   // misbehaving agent calling them anyway gets a JSON-RPC error).

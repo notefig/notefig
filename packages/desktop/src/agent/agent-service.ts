@@ -2,12 +2,15 @@ import {
   newTaskId,
   newTurnId,
   newEventId,
+  newInteractionId,
   BUILT_IN_HARNESSES,
+  composePrompt,
   type ContentBlock,
   type HarnessDefinition,
   type RequestPermissionResponse,
   type SessionNotification,
   type ToolCallUpdate,
+  type TurnOutcome,
 } from "@metrists/shared/agent";
 import { platformAdapter } from "@/adapters";
 import { normalizePath } from "@/utils/fs";
@@ -16,9 +19,9 @@ import { PermissionBroker } from "./permission-broker";
 import { MetristsAcpClient } from "./acp-client";
 import type { AgentTransport } from "./agent-transport.interface";
 import { AgentTransportError } from "./agent-transport.interface";
-import { TauriStdioTransport } from "./tauri-stdio-transport";
 import {
   agentEntriesCollection,
+  agentInteractionsCollection,
   agentPermissionRequestsCollection,
   agentTasksCollection,
   agentTurnsCollection,
@@ -91,8 +94,19 @@ export class AgentTask {
    * Single-slot coalescing: the next prompt to run. Prompts arriving while a
    * turn runs overwrite it (latest wins) rather than stacking a queue — the UI
    * gates Send while running, so this only coalesces rapid programmatic sends.
+   * A displaced slot resolves its handle as "superseded" (A3) before being
+   * overwritten.
    */
-  private pendingPrompt: string | null = null;
+  private pendingPrompt: { turnId: string; text: string } | null = null;
+  /** turnId → resolver for that turn's prompt-handle `completed` promise. */
+  private readonly turnResolvers = new Map<
+    string,
+    (outcome: TurnOutcome) => void
+  >();
+  /** Tool interactions already folded into a sent continuation prompt. */
+  private readonly deliveredInteractionIds = new Set<string>();
+  /** True while `drainQueue`'s loop is actively running (reentrancy guard). */
+  private draining = false;
   /** "How to sign in" hint, surfaced only when an auth error actually occurs. */
   private authHintValue?: string;
   private disposed = false;
@@ -157,16 +171,38 @@ export class AgentTask {
   }
 
   /**
-   * Send a user prompt (fire-and-forget). While a turn runs the text is held
-   * in a single slot (latest wins) and promoted when the turn ends.
+   * Send a user prompt. While a turn runs the text is held in a single slot
+   * (latest wins) and promoted when the turn ends; a displaced slot's handle
+   * resolves "superseded" (A3). The UI may ignore the returned handle
+   * (fire-and-forget); tests and programmatic callers await `completed`.
    */
-  prompt(text: string): void {
+  prompt(text: string): { turnId: string; completed: Promise<TurnOutcome> } {
     if (!this.client || !this.sessionId) {
       throw new Error("agent task is not started");
     }
-    this.pendingPrompt = text;
-    // A running turn's drain loop will pick this up; otherwise start one.
-    if (!this.currentTurn) void this.drainQueue();
+    const turnId = newTurnId();
+
+    const displaced = this.pendingPrompt;
+    if (displaced) {
+      this.resolveTurn(displaced.turnId, { status: "superseded" });
+    }
+    this.pendingPrompt = { turnId, text };
+
+    const completed = new Promise<TurnOutcome>((resolve) => {
+      this.turnResolvers.set(turnId, resolve);
+    });
+    // A running (or actively draining, e.g. a continuation composed from
+    // inside finishTurn) loop will pick this up; otherwise start one.
+    if (!this.currentTurn && !this.draining) void this.drainQueue();
+    return { turnId, completed };
+  }
+
+  /** Resolve and clear a turn's prompt-handle promise, if one is pending. */
+  private resolveTurn(turnId: string, outcome: TurnOutcome): void {
+    const resolve = this.turnResolvers.get(turnId);
+    if (!resolve) return;
+    this.turnResolvers.delete(turnId);
+    resolve(outcome);
   }
 
   /** Answer a pending permission request this task raised. */
@@ -175,20 +211,28 @@ export class AgentTask {
   }
 
   private async drainQueue(): Promise<void> {
-    while (!this.disposed && this.pendingPrompt !== null) {
-      const text = this.pendingPrompt;
-      this.pendingPrompt = null;
-      const status = await this.runTurn(text);
-      // Don't auto-run a coalesced follow-up through the same failure (e.g. an
-      // auth block); it resumes when the user sends again.
-      if (status === "error") break;
+    if (this.draining) return;
+    this.draining = true;
+    try {
+      while (!this.disposed && this.pendingPrompt !== null) {
+        const { turnId, text } = this.pendingPrompt;
+        this.pendingPrompt = null;
+        const status = await this.runTurn(turnId, text);
+        // Don't auto-run a coalesced follow-up through the same failure (e.g.
+        // an auth block); it resumes when the user sends again.
+        if (status === "error") break;
+      }
+    } finally {
+      this.draining = false;
     }
   }
 
-  private async runTurn(text: string): Promise<AgentTurnStatus> {
-    if (!this.client || !this.sessionId) return "error";
+  private async runTurn(turnId: string, text: string): Promise<AgentTurnStatus> {
+    if (!this.client || !this.sessionId) {
+      this.resolveTurn(turnId, { status: "error", error: "agent task is not started" });
+      return "error";
+    }
 
-    const turnId = newTurnId();
     const now = Date.now();
 
     // First prompt names the task.
@@ -225,9 +269,11 @@ export class AgentTask {
     this.setStatus("running");
 
     try {
-      const response = await this.client.prompt(this.sessionId, [
-        { type: "text", text },
-      ]);
+      const blocks = composePrompt({
+        text,
+        capabilities: { embeddedContext: this.client.embeddedContextCapability },
+      });
+      const response = await this.client.prompt(this.sessionId, blocks);
       // A turn that reached the model clears any stale auth banner.
       this.setAuthHint(undefined);
       return this.finishTurn(response.stopReason, "completed");
@@ -237,6 +283,7 @@ export class AgentTask {
       // (see docs/architecture/spikes/phase1-auth-spike.md).
       if (/authentication required/i.test(message)) {
         this.setAuthHint(this.client?.authHint ?? this.harness.authHint);
+        this.raiseAuthInteraction(turnId, message);
       }
       this.warn("turn error", message);
       return this.finishTurn(undefined, "error", message);
@@ -267,8 +314,21 @@ export class AgentTask {
       if (error) draft.error = error;
     });
 
+    this.resolveTurn(
+      turn.turnId,
+      turnStatus === "error"
+        ? { status: "error", error: error ?? "unknown error" }
+        : turnStatus === "cancelled"
+          ? { status: "cancelled" }
+          : { status: "completed", stopReason },
+    );
+
     this.currentTurn = null;
     this.setStatus(turnStatus === "error" ? "error" : "idle");
+    // Now idle: fold in any tool answers that arrived mid-turn. Not on error
+    // (A5: don't auto-continue through a failure) or cancel (the user just
+    // stopped the task; a fresh continuation would fight that intent).
+    if (turnStatus === "completed") this.maybeComposeContinuation();
     return turnStatus;
   }
 
@@ -439,6 +499,7 @@ export class AgentTask {
    */
   async cancel(): Promise<void> {
     this.permissionBroker.cancelAll();
+    this.cancelPendingInteractions();
     if (this.client && this.sessionId && this.currentTurn) {
       try {
         await this.client.cancel(this.sessionId);
@@ -450,10 +511,89 @@ export class AgentTask {
     }
   }
 
-  /** Called by blob widgets when the user answers a blob this task authored. */
-  notifyBlobAnswered(_blobRef: { filePath: string; blobId: string }): void {
-    // TODO(phase 2): queue; when this task is idle, auto-compose a
-    // continuation prompt containing the queued answers.
+  /**
+   * Answer an interaction this task raised (question blob, tool ask, auth
+   * block). Tool-sourced answers accumulate and compose into exactly one
+   * continuation prompt once the task is idle (`maybeComposeContinuation`,
+   * called here directly if already idle, and again from `finishTurn`).
+   */
+  answerInteraction(interactionId: string, answer: string): void {
+    const row = agentInteractionsCollection.get(interactionId);
+    if (!row || row.taskId !== this.taskId || row.state !== "pending") return;
+    agentInteractionsCollection.update(interactionId, (draft) => {
+      draft.state = "answered";
+      draft.answer = answer;
+    });
+    // Deferred a tick so answers landing in the same synchronous batch (e.g.
+    // several widgets answered back to back) fold into one continuation
+    // instead of each triggering its own turn.
+    if (row.source === "tool") {
+      queueMicrotask(() => this.maybeComposeContinuation());
+    }
+  }
+
+  /** Cancel a specific pending interaction (e.g. the user dismisses a question). */
+  cancelInteraction(interactionId: string): void {
+    const row = agentInteractionsCollection.get(interactionId);
+    if (!row || row.taskId !== this.taskId || row.state !== "pending") return;
+    agentInteractionsCollection.update(interactionId, (draft) => {
+      draft.state = "cancelled";
+    });
+  }
+
+  private cancelPendingInteractions(): void {
+    for (const row of agentInteractionsCollection.toArray) {
+      if (row.taskId === this.taskId && row.state === "pending") {
+        agentInteractionsCollection.update(row.id, (draft) => {
+          draft.state = "cancelled";
+        });
+      }
+    }
+  }
+
+  /**
+   * Mint one continuation prompt covering every tool interaction answered
+   * since the last continuation, once the task is idle. No-op mid-turn — the
+   * caller re-checks when the turn ends (`finishTurn`).
+   */
+  private maybeComposeContinuation(): void {
+    if (this.currentTurn) return;
+    const pending = agentInteractionsCollection.toArray.filter(
+      (row) =>
+        row.taskId === this.taskId &&
+        row.source === "tool" &&
+        row.state === "answered" &&
+        !this.deliveredInteractionIds.has(row.id),
+    );
+    if (pending.length === 0) return;
+    for (const row of pending) this.deliveredInteractionIds.add(row.id);
+    const text = pending
+      .map((row) => `Answer to "${row.question}": ${row.answer}`)
+      .join("\n");
+    this.prompt(text);
+  }
+
+  /** Raise a structured `auth` interaction alongside the string authHint banner (A5). */
+  private raiseAuthInteraction(turnId: string, message: string): void {
+    const entryId = newEventId();
+    agentEntriesCollection.insert({
+      id: entryId,
+      taskId: this.taskId,
+      turnId,
+      type: "unknown",
+      text: "auth_error",
+      raw: { message },
+      createdAt: Date.now(),
+    });
+    agentInteractionsCollection.insert({
+      id: newInteractionId(),
+      taskId: this.taskId,
+      entryId,
+      source: "auth",
+      state: "pending",
+      question: message,
+      createdAt: Date.now(),
+    });
   }
 
   get authHint(): string | undefined {
@@ -466,7 +606,10 @@ export class AgentTask {
 
   async dispose(): Promise<void> {
     this.disposed = true;
-    this.pendingPrompt = null;
+    if (this.pendingPrompt) {
+      this.resolveTurn(this.pendingPrompt.turnId, { status: "cancelled" });
+      this.pendingPrompt = null;
+    }
     for (const unsubscribe of this.unsubscribers) unsubscribe();
     this.unsubscribers.length = 0;
     await this.cancel();
@@ -569,6 +712,11 @@ export class TaskManager {
 const taskRegistry = new Map<string, AgentTask>();
 const taskManagerRegistry = new Map<string, TaskManager>();
 
+/** Exposed so `agents.ts`'s entity-handle facade can resolve a live task. */
+export function getRegisteredTask(taskId: string): AgentTask | undefined {
+  return taskRegistry.get(taskId);
+}
+
 export function getWorkspaceTaskManager(
   workspacePath: string,
 ): TaskManager | undefined {
@@ -599,12 +747,10 @@ export async function startAgentTask(
 ): Promise<string> {
   const manager = getOrCreateWorkspaceTaskManager(workspacePath);
   const task = manager.createTask(harness);
-  const transport = new TauriStdioTransport({
-    procId: task.taskId,
-    program: harness.command,
-    args: harness.args,
-    cwd: workspacePath,
-    env: harness.env,
+  const transport = platformAdapter.createAgentTransport({
+    taskId: task.taskId,
+    harness,
+    workspacePath,
   });
   await task.start(transport);
   return task.taskId;
@@ -660,6 +806,11 @@ function clearWorkspaceAgentRows(normalizedWorkspacePath: string): void {
   for (const request of agentPermissionRequestsCollection.toArray) {
     if (taskIds.has(request.taskId)) {
       agentPermissionRequestsCollection.delete(request.id);
+    }
+  }
+  for (const interaction of agentInteractionsCollection.toArray) {
+    if (taskIds.has(interaction.taskId)) {
+      agentInteractionsCollection.delete(interaction.id);
     }
   }
   for (const taskId of taskIds) agentTasksCollection.delete(taskId);
