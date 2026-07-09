@@ -2,12 +2,14 @@ import type {
   MetadataChangeEvent,
   ContentChangeEvent,
 } from "@/adapters/platform-adapter.interface";
+import { FsError } from "@/adapters/platform-adapter.interface";
 import { getOrCreateWorkspaceCollections, queryClient } from "./collections";
 import { gitQueryKeys } from "./git-service-store";
 import {
   projectSettingsPath,
   projectSettingsQueryKey,
 } from "./project-settings";
+import { calculateContentHash } from "./hash";
 import { platformAdapter } from "@/adapters";
 
 const INVALIDATE_DEBOUNCE_MS = 500;
@@ -51,6 +53,53 @@ export function isRecentSelfWrite(path: string, contentHash: string): boolean {
   return (recentSelfWrites.get(path) ?? []).some(
     (entry) => entry.hash === contentHash && now - entry.at < SELF_WRITE_TTL_MS,
   );
+}
+
+/**
+ * The single path every desktop-mediated agent read/write takes (ACP
+ * fs/read_text_file, fs/write_text_file; web mode advertises fs:false so
+ * writes there are native and only adopted via the watcher).
+ *
+ * Writing here makes an agent edit indistinguishable from an external edit:
+ * write via the platform adapter so the standard content-change pipeline
+ * fires and DocumentSync's last-writer-wins arbitrates against open editors.
+ * No new merge machinery lives here or anywhere. `recordSelfWrite` keeps the
+ * watcher echo of this write from being misread as an external change.
+ *
+ * Per-path write serialization across parallel tasks is deliberately not
+ * implemented here (dropped along with AgentWriteGate) — two tasks writing
+ * the same path race like any two independent writeFiles calls. If
+ * concurrent same-file interleaving becomes a real problem, serialization
+ * returns as an internal detail of this function, not as a separate class.
+ */
+export async function writeWorkspaceTextFile(
+  path: string,
+  content: string,
+): Promise<void> {
+  recordSelfWrite(path, calculateContentHash(content));
+  const result = await platformAdapter.writeFiles([{ path, content }]);
+  const failure = result.failed[0];
+  if (failure) {
+    throw new FsError(failure.type, failure.path, failure.message);
+  }
+}
+
+export async function readWorkspaceTextFile(
+  path: string,
+  options?: { line?: number; limit?: number },
+): Promise<string> {
+  const result = await platformAdapter.readFiles([path]);
+  const failure = result.failed[0];
+  if (failure) {
+    throw new FsError(failure.type, failure.path, failure.message);
+  }
+  const content = result.succeeded[0].content;
+  if (!options?.line && !options?.limit) return content;
+  // ACP lines are 1-based.
+  const lines = content.split("\n");
+  const start = Math.max(0, (options.line ?? 1) - 1);
+  const end = options.limit ? start + options.limit : lines.length;
+  return lines.slice(start, end).join("\n");
 }
 
 /**

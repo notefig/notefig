@@ -61,7 +61,6 @@ import {
 } from "@/agent/agent-collections";
 import {
   cancelAgentTask,
-  getWorkspaceOverlaps,
   promptAgentTask,
   startAgentTask,
 } from "@/agent/agent-service";
@@ -153,8 +152,6 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
         onSelect={setActiveTaskId}
         onCreate={handleCreate}
       />
-
-      <OverlapBanner workspacePath={workspacePath} tick={tasks.length} />
 
       {activeTaskId ? (
         <div className="relative flex min-h-0 flex-1 flex-col">
@@ -269,28 +266,6 @@ function StatusDot({ status }: { status: AgentTaskRow["status"] }) {
   return <span className={`h-2 w-2 shrink-0 rounded-full ${color}`} />;
 }
 
-function OverlapBanner({
-  workspacePath,
-  tick,
-}: {
-  workspacePath: string;
-  // Re-evaluate when tasks change; overlap is imperative (write-gate state).
-  tick: number;
-}) {
-  const overlaps = getWorkspaceOverlaps(workspacePath);
-  void tick;
-  if (overlaps.length === 0) return null;
-  return (
-    <div className="border-b border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs">
-      {overlaps.map((o) => (
-        <div key={o.path}>
-          {o.taskIds.length} tasks are editing{" "}
-          <code>{o.path.split("/").pop()}</code>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function Transcript({ taskId }: { taskId: string }) {
   const bottomRef = useRef<HTMLDivElement>(null);

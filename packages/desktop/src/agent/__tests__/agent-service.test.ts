@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock the platform adapter singleton the write-gate and task service use.
+// Mock the platform adapter singleton the file-sync helpers and task service use.
 // vi.hoisted so the fns exist before the hoisted vi.mock factory runs.
 const { writeFiles, readFiles } = vi.hoisted(() => ({
   writeFiles: vi.fn(async (files: { path: string; content: string }[]) => ({
@@ -107,7 +107,34 @@ describe("AgentTask vertical slice", () => {
     expect(turnFor(task.taskId)[0].stopReason).toBe("end_turn");
   });
 
-  it("routes agent file writes through the write gate", async () => {
+  it("records unknown session updates as a catch-all entry (D4)", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const thought = { type: "text" as const, text: "thinking…" };
+    agent.onPrompt = async (_params, a) => {
+      a.update("sess_test", {
+        sessionUpdate: "agent_thought_chunk",
+        content: thought,
+      });
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    await runPrompt(task, "think about it");
+
+    const unknownEntries = entriesFor(task.taskId).filter(
+      (e) => e.type === "unknown",
+    );
+    expect(unknownEntries).toHaveLength(1);
+    expect(unknownEntries[0].text).toBe("agent_thought_chunk");
+    expect(unknownEntries[0].raw).toEqual({
+      sessionUpdate: "agent_thought_chunk",
+      content: thought,
+    });
+  });
+
+  it("routes agent file writes through the platform adapter", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
     agent.onPrompt = async (_params, a) => {

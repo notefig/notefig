@@ -17,8 +17,11 @@ import type {
 } from "@metrists/shared/agent";
 import { transportToStreams } from "./agent-transport.interface";
 import type { AgentTransport } from "./agent-transport.interface";
-import type { AgentWriteGate } from "./agent-write-gate";
 import type { PermissionBroker } from "./permission-broker";
+import {
+  readWorkspaceTextFile,
+  writeWorkspaceTextFile,
+} from "@/utils/file-sync";
 
 /** ACP protocol version we speak (pinned; a spec bump changes acp-types). */
 const PROTOCOL_VERSION = 1;
@@ -26,7 +29,7 @@ const PROTOCOL_VERSION = 1;
 /**
  * Capabilities are a function of where the agent process runs relative to
  * the files. Desktop: the app and the files share a machine, so we mediate
- * reads/writes (editor sync, write-gate arbitration). Remote (web): the
+ * reads/writes through the workspace file-sync helpers. Remote (web): the
  * files live with the harness, not the browser — advertise fs:false and the
  * harness uses its native file tools; the app adopts changes via the watch
  * channel. This asymmetry is the whole reason the CLI worker can stay a
@@ -45,7 +48,6 @@ export type AcpClientDeps = {
   taskId: string;
   transport: AgentTransport;
   permissionBroker: PermissionBroker;
-  writeGate: AgentWriteGate;
   /** AgentTask sink for session/update notifications */
   onSessionUpdate: (notification: SessionNotification) => void;
 };
@@ -129,7 +131,7 @@ export class MetristsAcpClient implements Client {
   async readTextFile(
     request: ReadTextFileRequest,
   ): Promise<ReadTextFileResponse> {
-    const content = await this.deps.writeGate.readTextFile(request.path, {
+    const content = await readWorkspaceTextFile(request.path, {
       line: request.line ?? undefined,
       limit: request.limit ?? undefined,
     });
@@ -139,11 +141,7 @@ export class MetristsAcpClient implements Client {
   async writeTextFile(
     request: WriteTextFileRequest,
   ): Promise<WriteTextFileResponse> {
-    await this.deps.writeGate.writeTextFile(
-      this.deps.taskId,
-      request.path,
-      request.content,
-    );
+    await writeWorkspaceTextFile(request.path, request.content);
     return {};
   }
 

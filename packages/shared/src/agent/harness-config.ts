@@ -32,7 +32,7 @@ export const BUILT_IN_HARNESSES: HarnessDefinition[] = [
     id: "claude-code",
     label: "Claude Code",
     command: "npx",
-    args: ["-y", "@zed-industries/claude-code-acp"],
+    args: ["-y", "@agentclientprotocol/claude-agent-acp"],
     env: {},
     authHint: "Run `claude login` in a terminal on this machine.",
   },

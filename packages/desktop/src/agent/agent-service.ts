@@ -12,7 +12,6 @@ import {
 import { platformAdapter } from "@/adapters";
 import { normalizePath } from "@/utils/fs";
 import { MarkdownJoiner } from "@/lib/markdown-joiner-transform";
-import { AgentWriteGate } from "./agent-write-gate";
 import { PermissionBroker } from "./permission-broker";
 import { MetristsAcpClient } from "./acp-client";
 import type { AgentTransport } from "./agent-transport.interface";
@@ -103,7 +102,6 @@ export class AgentTask {
     readonly taskId: string,
     readonly workspacePath: string,
     readonly harness: HarnessDefinition,
-    private readonly writeGate: AgentWriteGate,
     /** Set when spawned by another task (subagent pattern, opencode-style) */
     readonly parentTaskId?: string,
   ) {
@@ -130,7 +128,6 @@ export class AgentTask {
       taskId: this.taskId,
       transport,
       permissionBroker: this.permissionBroker,
-      writeGate: this.writeGate,
       onSessionUpdate: (notification) => this.handleSessionUpdate(notification),
     });
 
@@ -316,8 +313,20 @@ export class AgentTask {
         break;
       }
       default:
-        // agent_thought_chunk / user_message_chunk / available_commands_update
-        // / current_mode_update — not rendered.
+        // D4: agent_thought_chunk / user_message_chunk /
+        // available_commands_update / current_mode_update — not rendered
+        // yet, but kept as transcript data rather than dropped. Text-run
+        // boundaries are left alone (no closeTextRun) since thought chunks
+        // often interleave with message chunks.
+        agentEntriesCollection.insert({
+          id: newEventId(),
+          taskId: this.taskId,
+          turnId: turn.turnId,
+          type: "unknown",
+          text: update.sessionUpdate,
+          raw: update,
+          createdAt: Date.now(),
+        });
         break;
     }
   }
@@ -507,13 +516,10 @@ export class AgentTask {
 
 /**
  * Per-workspace task registry (registry convention: git-service-store.ts).
- * Owns the shared AgentWriteGate (per-file serialization + task attribution
- * across ALL tasks in the workspace) and workspace-level policy: trust
- * confirmation before the first spawn, harness config from settings — never
- * from document content.
+ * Owns workspace-level policy: trust confirmation before the first spawn,
+ * harness config from settings — never from document content.
  */
 export class TaskManager {
-  readonly writeGate = new AgentWriteGate(platformAdapter);
   private readonly tasks = new Map<string, AgentTask>();
 
   constructor(readonly workspacePath: string) {}
@@ -528,7 +534,6 @@ export class TaskManager {
       taskId,
       this.workspacePath,
       harness,
-      this.writeGate,
       options?.parentTaskId,
     );
     this.tasks.set(taskId, task);
@@ -622,11 +627,6 @@ export function respondToAgentPermission(
   response: RequestPermissionResponse,
 ): void {
   taskRegistry.get(taskId)?.respondPermission(requestId, response);
-}
-
-/** Files two or more of a workspace's tasks are concurrently editing. */
-export function getWorkspaceOverlaps(workspacePath: string) {
-  return getWorkspaceTaskManager(workspacePath)?.writeGate.getOverlappingPaths() ?? [];
 }
 
 export async function disposeWorkspaceTaskManager(

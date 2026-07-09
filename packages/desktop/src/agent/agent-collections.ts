@@ -44,7 +44,12 @@ export type AgentTurn = {
   startedAt: number;
 };
 
-export type AgentEntryType = "user" | "assistant" | "tool_call" | "plan";
+export type AgentEntryType =
+  | "user"
+  | "assistant"
+  | "tool_call"
+  | "plan"
+  | "unknown";
 
 /**
  * One item in a task's transcript — a flat, ordered stream. Text and tool
@@ -60,7 +65,7 @@ export type AgentEntry = {
   taskId: string;
   turnId: string;
   type: AgentEntryType;
-  /** user / assistant text runs */
+  /** user / assistant text runs; unknown: the update's sessionUpdate kind */
   text?: string;
   /** tool_call: the ACP toolCallId this row coalesces */
   toolCallId?: string;
@@ -68,6 +73,9 @@ export type AgentEntry = {
   toolCall?: ToolCallUpdate;
   /** plan: raw plan update payload */
   plan?: unknown;
+  /** unknown: the full unrecognized session-update payload, kept verbatim
+   * (D4) so a later stage can render it (e.g. agent_thought_chunk) for free */
+  raw?: unknown;
   createdAt: number;
 };
 
