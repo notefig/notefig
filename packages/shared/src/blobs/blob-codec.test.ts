@@ -154,6 +154,37 @@ describe("patchBlobInMarkdown", () => {
     expect(result.value).toContain("# agent note, keep me");
   });
 
+  it("patches a fence with CRLF line endings, preserving them outside the patch", () => {
+    const crlfMarkdown = [
+      "# Doc",
+      "",
+      "Intro paragraph.",
+      "",
+      "```metrists:question",
+      "id: q_crlf1",
+      "status: pending",
+      "prompt: Which tier?",
+      "```",
+      "",
+      "After the blob.",
+    ].join("\r\n");
+
+    const result = patchBlobInMarkdown(crlfMarkdown, "q_crlf1", {
+      status: "answered",
+      answer: "Pro",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.startsWith("# Doc\r\n\r\nIntro paragraph.\r\n\r\n")).toBe(true);
+    expect(result.value.endsWith("\r\nAfter the blob.")).toBe(true);
+
+    const reparsed = findBlobs(result.value);
+    expect(reparsed).toHaveLength(1);
+    expect(reparsed[0].blob.envelope.status).toBe("answered");
+    expect(reparsed[0].blob.payload.answer).toBe("Pro");
+  });
+
   it("[property] patching preserves every byte outside the target fence", () => {
     fc.assert(
       fc.property(

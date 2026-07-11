@@ -23,6 +23,7 @@ export const historyDiff: AgentTool<
   HistoryDiffResult
 > = {
   name: "history_diff",
+  title: "agentToolHistoryDiff",
   description:
     "Read a document's content at two checkpoints so the agent can compare them.",
   input: InputSchema,

@@ -26,7 +26,9 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { common, createLowlight } from "lowlight";
 
-const lowlight = createLowlight(common);
+export { CodeBlockLowlight };
+
+export const lowlight = createLowlight(common);
 
 // html must stay on: underline/highlight/sub/sup have no markdown syntax
 // and serialize as inline HTML tags (which is also what the previous
@@ -167,11 +169,13 @@ export const MarkdownImageBase = Image.extend({
 /**
  * The schema-defining extension list, in the same order the editor has
  * always registered them (order can influence schema construction). The
- * image extension is injectable so the renderer can substitute its
- * node-view-bearing subclass without duplicating the list.
+ * image and codeBlock extensions are injectable so the renderer can
+ * substitute their node-view-bearing subclasses without duplicating the
+ * list.
  */
 export function createSchemaExtensions(
   image: typeof MarkdownImageBase = MarkdownImageBase,
+  codeBlock: typeof CodeBlockLowlight = CodeBlockLowlight,
 ) {
   return [
     StarterKit.configure({
@@ -198,6 +202,6 @@ export function createSchemaExtensions(
     TableRow,
     TableCell,
     TableHeader,
-    CodeBlockLowlight.configure({ lowlight }),
+    codeBlock.configure({ lowlight }),
   ];
 }

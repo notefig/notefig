@@ -13,6 +13,7 @@ export const workspaceReadDocument: AgentTool<
   string
 > = {
   name: "workspace_read_document",
+  title: "agentToolWorkspaceReadDocument",
   description:
     "Read a workspace document's content by path. Optional 1-based `line` + `limit` for a partial read.",
   input: InputSchema,

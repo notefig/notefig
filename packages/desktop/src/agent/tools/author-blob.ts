@@ -30,6 +30,7 @@ function knownTypeNames(): string {
  */
 export const authorBlob: AgentTool<z.infer<typeof InputSchema>, { blobId: string }> = {
   name: "author_blob",
+  title: "agentToolAuthorBlob",
   description:
     `Author an interactive block into a document (e.g. a question for the user). ` +
     `Known types: ${knownTypeNames()}. Give a unique \`id\` matching ^[a-z]+_[a-z0-9]{4,}$ ` +

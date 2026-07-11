@@ -13,6 +13,7 @@ const InputSchema = z.object({
 
 export const historyRestore: AgentTool<z.infer<typeof InputSchema>, void> = {
   name: "history_restore",
+  title: "agentToolHistoryRestore",
   description:
     "Restore a document's content to an earlier checkpoint. Writes through the normal editor pipeline, so an open editor picks it up like any other write.",
   input: InputSchema,

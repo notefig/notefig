@@ -6,7 +6,7 @@
  * useLiveQuery, the same idiom as the file collections.
  */
 import { createCollection, localOnlyCollectionOptions } from "@tanstack/react-db";
-import type { AgentInteraction, ToolCallUpdate } from "@metrists/shared/agent";
+import type { ToolCallUpdate } from "@metrists/shared/agent";
 
 export type AgentTaskStatus = "starting" | "idle" | "running" | "cancelled" | "error";
 
@@ -71,10 +71,6 @@ export type AgentEntry = {
   toolCallId?: string;
   /** tool_call: the coalesced tool call (title, kind, status, content, …) */
   toolCall?: ToolCallUpdate;
-  /** tool_call: provenance — a real ACP tool_call/tool_call_update stream,
-   *  or an app-detected `metrists:tool` fence (Stage 2). Fence calls have no
-   *  external in_progress push, so this mostly matters for rendering. */
-  toolCallSource?: "acp" | "fence";
   /** plan: raw plan update payload */
   plan?: unknown;
   /** unknown: the full unrecognized session-update payload, kept verbatim
@@ -118,19 +114,5 @@ export const agentPermissionRequestsCollection = createCollection(
   localOnlyCollectionOptions({
     id: "agent-permission-requests",
     getKey: (request: AgentPermissionRequestRow) => request.id,
-  }),
-);
-
-/**
- * Things awaiting or carrying a user answer — question blobs, tool-sourced
- * asks, auth blocks. Every row's `entryId` is a real FK to
- * `agentEntriesCollection`; read sites relate the two with a TanStack DB
- * `.leftJoin` (see `workspace.tsx`'s file-metadata/content join for the
- * repo's existing precedent) rather than a second parallel `taskId` filter.
- */
-export const agentInteractionsCollection = createCollection(
-  localOnlyCollectionOptions({
-    id: "agent-interactions",
-    getKey: (interaction: AgentInteraction) => interaction.id,
   }),
 );

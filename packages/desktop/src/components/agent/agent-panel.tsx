@@ -34,6 +34,7 @@ import type {
   ToolCallStatus,
   ToolCallUpdate,
   ToolKind,
+  PlanEntry,
 } from "@metrists/shared/agent";
 import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
 import { Button } from "@/components/ui/button";
@@ -63,8 +64,10 @@ import {
   cancelAgentTask,
   promptAgentTask,
   startAgentTask,
+  contentBlockText,
 } from "@/agent/agent-service";
 import { PermissionCard } from "./permission-card";
+import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
 
 /**
  * The agent panel: a task list (create/switch/cancel — parallel tasks are
@@ -324,9 +327,16 @@ function Transcript({ taskId }: { taskId: string }) {
 /** Render one transcript entry by type; tool calls are peers of text. */
 function EntryView({ entry }: { entry: AgentEntry }) {
   if (entry.type === "tool_call") {
-    return entry.toolCall ? <ToolCallCard toolCall={entry.toolCall} /> : null;
+    if (!entry.toolCall) return null;
+    const CustomCard = TOOL_NAME_RENDERER[entry.toolCall.title ?? ""];
+    return CustomCard ? (
+      <CustomCard toolCall={entry.toolCall} />
+    ) : (
+      <ToolCallCard toolCall={entry.toolCall} />
+    );
   }
-  if (entry.type === "plan") return null; // not rendered yet
+  if (entry.type === "plan") return <PlanView plan={entry.plan} />;
+  if (entry.type === "unknown") return <ThoughtEntry entry={entry} />;
 
   const isUser = entry.type === "user";
   if (!entry.text) return null;
@@ -342,6 +352,88 @@ function EntryView({ entry }: { entry: AgentEntry }) {
       >
         {entry.text}
       </div>
+    </div>
+  );
+}
+
+/** Compact checklist for a `plan` session update (ACP entries: content/priority/status). */
+function PlanView({ plan }: { plan: unknown }) {
+  const entries = (plan as { entries?: PlanEntry[] } | undefined)?.entries ?? [];
+  if (entries.length === 0) return null;
+  return (
+    <div className="w-full max-w-[85%] rounded-lg border border-border bg-card px-2.5 py-2 text-xs">
+      {entries.map((planEntry, i) => (
+        <div key={i} className="flex items-center gap-2 py-0.5">
+          {planEntry.status === "completed" ? (
+            <Check className="size-3.5 shrink-0 text-green-600 dark:text-green-400" />
+          ) : planEntry.status === "in_progress" ? (
+            <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+          ) : (
+            <span className="size-3.5 shrink-0" />
+          )}
+          <span
+            className={cn(
+              "flex-1",
+              planEntry.status === "completed" && "text-muted-foreground line-through",
+            )}
+          >
+            {planEntry.content}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** `unknown` entries carry every session-update kind D4 didn't get a first-class
+ *  row for. Only agent_thought_chunk gets a rendering today; the rest (
+ *  available_commands_update, current_mode_update, …) stay silent. */
+function ThoughtEntry({ entry }: { entry: AgentEntry }) {
+  const raw = entry.raw as { sessionUpdate?: string; content?: { type: string; text?: string } } | undefined;
+  if (raw?.sessionUpdate !== "agent_thought_chunk" || !raw.content) return null;
+  const text = contentBlockText(raw.content as Parameters<typeof contentBlockText>[0]);
+  if (!text) return null;
+  return (
+    <details className="w-full max-w-[85%] rounded-lg border border-border/60 bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
+      <summary className="cursor-pointer select-none">Thinking…</summary>
+      <p className="mt-1 whitespace-pre-wrap">{text}</p>
+    </details>
+  );
+}
+
+/**
+ * Per-tool-name transcript renderers, for tools whose generic ToolCallCard
+ * (raw JSON result) isn't a useful summary. Deliberately a plain lookup
+ * table, not a glob-based registry like blob-registry.ts — proportionate to
+ * the one case that exists today; promote to a real registry file if a
+ * second one shows up.
+ */
+const TOOL_NAME_RENDERER: Record<string, (props: { toolCall: ToolCallUpdate }) => ReactNode> = {
+  author_blob: AuthorBlobCard,
+};
+
+/** "authored a question in notes.md" instead of the raw {blobId} JSON result. */
+function AuthorBlobCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
+  const rawInput = call.rawInput as { path?: string; type?: string; id?: string } | undefined;
+  const status: ToolCallStatus = call.status ?? "pending";
+  if (!rawInput?.path || !rawInput.type || !rawInput.id) {
+    return <ToolCallCard toolCall={call} />;
+  }
+  const fileName = rawInput.path.split("/").pop();
+  return (
+    <div className="flex w-full max-w-[85%] items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs">
+      <Sparkles className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="flex-1">
+        authored a {rawInput.type} in{" "}
+        <button
+          type="button"
+          className="underline hover:text-foreground"
+          onClick={() => jumpToBlob(rawInput.path!, rawInput.id!)}
+        >
+          {fileName}
+        </button>
+      </span>
+      <ToolStatusIcon status={status} />
     </div>
   );
 }

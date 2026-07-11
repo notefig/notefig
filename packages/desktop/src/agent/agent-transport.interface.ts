@@ -1,10 +1,17 @@
+import type { McpServer } from "@metrists/shared/agent";
+
 /**
  * AgentTransport is the seam that keeps the ACP session layer ignorant of
  * where the agent process lives. Desktop pipes a local child process's stdio
  * (TauriStdioTransport); web tunnels the identical newline-delimited JSON-RPC
  * byte stream through the relay (RelayTransport); tests use an in-memory pair
  * (LoopbackTransport). Mirrors how worker-rpc.ts gives one typed promise API
- * over any message port.
+ * over any message port. The task's MCP connection (TauriMcpTransport, Stage
+ * 3.5) is the exact same interface, not a parallel one — the factory
+ * (`createMcpTransport`) is exactly as dumb as `createAgentTransport`: it
+ * only constructs, never starts. The caller always calls `start()` itself
+ * and reads whatever platform-specific info comes back on the instance
+ * (`spawnInfo`, `mcpServer`) — same pattern, same place, for both.
  *
  * See docs/architecture/agent-harness.md.
  */
@@ -56,6 +63,17 @@ export interface AgentTransport {
 
   /** How the process was launched; populated after start() (desktop only). */
   readonly spawnInfo?: SpawnAgentInfo;
+
+  /**
+   * Only meaningful for a task's MCP connection (`createMcpTransport`): the
+   * ACP `session/new.mcpServers` entry describing how a harness reaches this
+   * same transport from its side. Populated after `start()`, same as
+   * `spawnInfo` — a transport is the only thing that knows how to express
+   * itself as one (desktop: an `McpServer::Stdio` command/args; a future
+   * platform might shape it differently), so building it lives here, not in
+   * the platform adapter or the agent service.
+   */
+  readonly mcpServer?: McpServer;
 
   /** Send one JSON-RPC message (a single line, no trailing newline). */
   send(line: string): void;

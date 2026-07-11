@@ -17,6 +17,7 @@ export const workspaceListDocuments: AgentTool<
   WorkspaceDocument[]
 > = {
   name: "workspace_list_documents",
+  title: "agentToolWorkspaceListDocuments",
   description:
     "List every document in the workspace (path, type, title). Title is the filename for now.",
   input: InputSchema,

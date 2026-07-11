@@ -4,9 +4,11 @@ import { ReactNodeViewRenderer } from "@tiptap/react";
 import Placeholder from "@tiptap/extension-placeholder";
 import CharacterCount from "@tiptap/extension-character-count";
 import { EditorImage } from "./editor-image-node";
+import { BlobNodeView } from "./blobs/blob-node-view";
 import {
   createSchemaExtensions,
   MarkdownImageBase,
+  CodeBlockLowlight,
 } from "./editor-schema-kit";
 
 /**
@@ -19,6 +21,19 @@ import {
 export const MarkdownImage = MarkdownImageBase.extend({
   addNodeView() {
     return ReactNodeViewRenderer(EditorImage);
+  },
+});
+
+/**
+ * Renders every code block through BlobNodeView, which itself dispatches on
+ * the `language` attr: metrists:* fences render as interactive blob widgets,
+ * everything else falls back to the ordinary code block chrome. Schema is
+ * unchanged (CodeBlockLowlight's own attrs/parsing), so this is presentation
+ * only — the worker's markdown round-trip is unaffected.
+ */
+export const MarkdownCodeBlock = CodeBlockLowlight.extend({
+  addNodeView() {
+    return ReactNodeViewRenderer(BlobNodeView);
   },
 });
 
@@ -65,7 +80,7 @@ const NativeFormatIntercept = Extension.create({
 });
 
 export const editorExtensions = [
-  ...createSchemaExtensions(MarkdownImage),
+  ...createSchemaExtensions(MarkdownImage, MarkdownCodeBlock),
   Placeholder.configure({ placeholder: "Type something..." }),
   CharacterCount,
   NativeFormatIntercept,

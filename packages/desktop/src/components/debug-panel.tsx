@@ -29,7 +29,6 @@ import { useLiveQuery } from "@tanstack/react-db";
 import type { GitError, RepoStatus } from "@metrists/git";
 import {
   agentEntriesCollection,
-  agentInteractionsCollection,
   agentPermissionRequestsCollection,
   agentTasksCollection,
   agentTurnsCollection,
@@ -561,9 +560,6 @@ function DebugPanelContent({
   const { data: allPermissionRequests = [] } = useLiveQuery((q) =>
     q.from({ req: agentPermissionRequestsCollection }),
   );
-  const { data: allInteractions = [] } = useLiveQuery((q) =>
-    q.from({ interaction: agentInteractionsCollection }),
-  );
 
   const workspaceTasks = useMemo(
     () =>
@@ -610,14 +606,6 @@ function DebugPanelContent({
     () => allPermissionRequests.filter((req) => req.taskId === selectedSessionTaskId),
     [allPermissionRequests, selectedSessionTaskId],
   );
-  const sessionInteractions = useMemo(
-    () =>
-      allInteractions.filter(
-        (interaction) => interaction.taskId === selectedSessionTaskId,
-      ),
-    [allInteractions, selectedSessionTaskId],
-  );
-
   const buildSessionReport = useCallback(() => {
     if (!sessionTask) return "(no task selected)";
 
@@ -659,7 +647,7 @@ function DebugPanelContent({
           break;
         case "tool_call":
           lines.push(
-            `[${time}] [TOOL_CALL${entry.toolCallSource ? `:${entry.toolCallSource}` : ""}] ${entry.toolCall?.title ?? entry.toolCallId ?? "(untitled)"} status=${entry.toolCall?.status ?? "unknown"}`,
+            `[${time}] [TOOL_CALL] ${entry.toolCall?.title ?? entry.toolCallId ?? "(untitled)"} status=${entry.toolCall?.status ?? "unknown"}`,
           );
           if (entry.toolCall?.rawInput) {
             lines.push(`  input: ${JSON.stringify(entry.toolCall.rawInput)}`);
@@ -679,16 +667,6 @@ function DebugPanelContent({
     }
     lines.push("");
 
-    if (sessionInteractions.length > 0) {
-      lines.push(`── Interactions (${sessionInteractions.length}) ──`);
-      for (const interaction of sessionInteractions) {
-        lines.push(
-          `[${interaction.id}] source=${interaction.source} state=${interaction.state} question="${interaction.question}"${interaction.answer ? ` answer="${interaction.answer}"` : ""}`,
-        );
-      }
-      lines.push("");
-    }
-
     if (sessionPermissionRequests.length > 0) {
       lines.push(`── Permission requests (${sessionPermissionRequests.length}) ──`);
       for (const req of sessionPermissionRequests) {
@@ -699,13 +677,7 @@ function DebugPanelContent({
 
     lines.push("=== End Session Report ===");
     return lines.join("\n");
-  }, [
-    sessionTask,
-    sessionTurns,
-    sessionEntries,
-    sessionInteractions,
-    sessionPermissionRequests,
-  ]);
+  }, [sessionTask, sessionTurns, sessionEntries, sessionPermissionRequests]);
 
   const [sessionCopied, setSessionCopied] = useState(false);
 

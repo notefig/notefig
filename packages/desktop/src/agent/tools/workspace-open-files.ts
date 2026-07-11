@@ -12,6 +12,7 @@ export const workspaceOpenFiles: AgentTool<
   WorkspaceEditorContext
 > = {
   name: "workspace_open_files",
+  title: "agentToolWorkspaceOpenFiles",
   description:
     "What the user currently has open: tabs, the active file, and whether there's a selection.",
   input: InputSchema,

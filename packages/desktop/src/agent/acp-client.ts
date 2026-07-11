@@ -5,6 +5,7 @@ import type {
   ClientCapabilities,
   ContentBlock,
   InitializeResponse,
+  McpServer,
   NewSessionResponse,
   PromptResponse,
   ReadTextFileRequest,
@@ -18,10 +19,27 @@ import type {
 import { transportToStreams } from "./agent-transport.interface";
 import type { AgentTransport } from "./agent-transport.interface";
 import type { PermissionBroker } from "./permission-broker";
+import { MCP_SERVER_NAME } from "./mcp-server";
 import {
   readWorkspaceTextFile,
   writeWorkspaceTextFile,
 } from "@/utils/file-sync";
+
+/**
+ * Claude Code (and presumably other adapters) asks for permission before
+ * *any* tool call by default, MCP included — separate from, and in addition
+ * to, our own `dispatchToolCall`'s `requiresPermission` gate in
+ * mcp-server.ts. That's the right default for the adapter's own native
+ * fs/bash tools (they touch disk directly, outside our mediation), but
+ * redundant for our own MCP tools: they're already consent-gated internally
+ * where that matters (e.g. `history_restore`), so a second UI prompt here
+ * only adds friction for zero extra safety. Recognize the adapter's
+ * `mcp__<server>__<tool>` naming (confirmed on claude-agent-acp,
+ * docs/architecture/spikes/v2-mcp-passthrough-spike.md) and auto-approve.
+ */
+function isMetristsMcpToolCall(request: RequestPermissionRequest): boolean {
+  return (request.toolCall.title ?? "").startsWith(`mcp__${MCP_SERVER_NAME}__`);
+}
 
 /** ACP protocol version we speak (pinned; a spec bump changes acp-types). */
 const PROTOCOL_VERSION = 1;
@@ -96,8 +114,11 @@ export class MetristsAcpClient implements Client {
 
   // ===== Agent-side calls (thin wrappers the AgentTask uses) =====
 
-  async newSession(cwd: string): Promise<NewSessionResponse> {
-    return this.requireConnection().newSession({ cwd, mcpServers: [] });
+  async newSession(
+    cwd: string,
+    mcpServers: McpServer[] = [],
+  ): Promise<NewSessionResponse> {
+    return this.requireConnection().newSession({ cwd, mcpServers });
   }
 
   async prompt(sessionId: string, blocks: ContentBlock[]): Promise<PromptResponse> {
@@ -130,6 +151,14 @@ export class MetristsAcpClient implements Client {
   async requestPermission(
     request: RequestPermissionRequest,
   ): Promise<RequestPermissionResponse> {
+    if (isMetristsMcpToolCall(request)) {
+      const grant =
+        request.options.find((o) => o.kind === "allow_always") ??
+        request.options.find((o) => o.kind === "allow_once");
+      if (grant) {
+        return { outcome: { outcome: "selected", optionId: grant.optionId } };
+      }
+    }
     return this.deps.permissionBroker.request(request);
   }
 

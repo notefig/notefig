@@ -10,7 +10,9 @@ import { TextSelection } from "@tiptap/pm/state";
 import {
   editorExtensions,
   MarkdownImage,
+  MarkdownCodeBlock,
 } from "@/components/editor/tiptap-editor-kit";
+import { lowlight } from "@/components/editor/editor-schema-kit";
 import { closeDocumentSync, getDocumentSync } from "@/utils/markdown-conversion";
 import {
   LAYOUT_PARAM,
@@ -165,10 +167,13 @@ function createMarkdownInstance(
     basePath || filePath.substring(0, filePath.lastIndexOf("/")) || "/";
 
   const extensions = [
-    ...editorExtensions.filter((e) => e.name !== "image"),
+    ...editorExtensions.filter((e) => e.name !== "image" && e.name !== "codeBlock"),
     // filePath lets the image node view declare its drag-protocol payload
     // (which document to rewrite when the asset is moved elsewhere).
     MarkdownImage.configure({ allowBase64: true, workspaceRoot, filePath } as any),
+    // filePath lets BlobNodeView address answerBlob at the right document;
+    // lowlight must be re-specified since configure() replaces options wholesale.
+    MarkdownCodeBlock.configure({ lowlight, filePath } as any),
   ];
 
   const editor = new Editor({

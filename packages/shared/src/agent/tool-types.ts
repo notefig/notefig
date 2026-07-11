@@ -2,17 +2,28 @@ import type { z } from "zod";
 
 /**
  * A Metrists-native agent tool. One plain object per tool, one file each —
- * see `packages/desktop/src/agent/tools/index.ts` for the registry. V2
- * delivers tools via prompt-guided fences (no MCP); the interface itself is
- * channel-agnostic so an MCP server can consume the same registry later.
+ * see `packages/desktop/src/agent/tools/index.ts` for the registry. Delivered
+ * to harnesses over MCP (`packages/desktop/src/agent/mcp-server.ts`, Stage
+ * 3.5) — the interface stayed channel-agnostic since Stage 2 specifically so
+ * that migration was a second consumer of the same registry, not a redesign.
  */
 export interface AgentTool<In, Out> {
+  /** Invocation identifier — stable, not shown to the user. */
   name: string;
+  /**
+   * i18next translation key (not literal text) for the human-readable
+   * display name (MCP's `Tool.title`) — what the user sees in permission
+   * prompts and tool-call UI, distinct from `name`. Resolved at the point of
+   * use (e.g. `mcp-server.ts`'s `tools/list`), never baked into this object
+   * at module-load time, so it reflects the active language even if it
+   * changes later. `shared` can't import `desktop`'s i18n instance, so this
+   * stays a plain string key here — desktop owns resolving it.
+   */
+  title: string;
   description: string;
   input: z.ZodType<In>;
-  /** Mutating tools set this so the fence-execution wiring gates behind the
-   *  existing PermissionBroker before calling `execute` — no second consent
-   *  surface. */
+  /** Mutating tools set this so the MCP dispatch gates behind the existing
+   *  PermissionBroker before calling `execute` — no second consent surface. */
   requiresPermission?: boolean;
   execute(ctx: ToolContext, input: In): Promise<ToolResult<Out>>;
 }

@@ -28,6 +28,7 @@ export type {
   ToolCallContent,
   ToolKind,
   ToolCallStatus,
+  PlanEntry,
   RequestPermissionRequest,
   RequestPermissionResponse,
   PermissionOption,
@@ -38,6 +39,7 @@ export type {
   CancelNotification,
   AuthMethod,
   Stream,
+  McpServer,
 } from "@zed-industries/agent-client-protocol";
 
 /** Why the agent stopped a turn (PromptResponse["stopReason"]). */

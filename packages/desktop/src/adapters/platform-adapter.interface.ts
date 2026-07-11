@@ -516,6 +516,20 @@ export interface IPlatformAdapter {
   }): AgentTransport;
 
   /**
+   * Create the transport for a task's MCP connection (Stage 3.5) — the exact
+   * same shape and contract as `createAgentTransport` right above: a dumb
+   * constructor that does nothing async and knows nothing about starting.
+   * The caller calls `start()` itself and reads `AgentTransport.mcpServer`
+   * off the returned instance afterward (populated after start, same pattern
+   * as `spawnInfo`) to build ACP `session/new.mcpServers`. Desktop's instance
+   * spawns its own binary as a stdio↔loopback-TCP relay (`McpServer::Stdio`,
+   * mandatory per the ACP spec, unlike `http`/`sse`); other platforms plug in
+   * their own mechanism without `mcp-server.ts` or `acp-client.ts` ever
+   * seeing a port or process.
+   */
+  createMcpTransport(spec: { taskId: string }): AgentTransport;
+
+  /**
    * Create updater actions for the current platform.
    */
   getUpdater(): PlatformUpdater;

@@ -11,7 +11,21 @@ const { writeFiles, readFiles } = vi.hoisted(() => ({
   })),
 }));
 vi.mock("@/adapters", () => ({
-  platformAdapter: { setKv: vi.fn(), getKv: vi.fn(), writeFiles, readFiles },
+  platformAdapter: {
+    setKv: vi.fn(),
+    getKv: vi.fn(),
+    writeFiles,
+    readFiles,
+    createMcpTransport: vi.fn(() => ({
+      locus: "local",
+      mcpServer: { name: "metrists", command: "metrists", args: [], env: [] },
+      start: vi.fn(async () => {}),
+      send: vi.fn(),
+      onLine: vi.fn(() => () => {}),
+      onClose: vi.fn(() => () => {}),
+      close: vi.fn(async () => {}),
+    })),
+  },
 }));
 vi.mock("@/utils/history-service", () => ({
   checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
@@ -23,7 +37,6 @@ import { TaskManager } from "../agent-service";
 import { agents } from "../agents";
 import {
   agentEntriesCollection,
-  agentInteractionsCollection,
   agentPermissionRequestsCollection,
   agentTasksCollection,
   agentTurnsCollection,
@@ -38,8 +51,6 @@ beforeEach(() => {
   for (const t of agentTasksCollection.toArray) agentTasksCollection.delete(t.taskId);
   for (const r of agentPermissionRequestsCollection.toArray)
     agentPermissionRequestsCollection.delete(r.id);
-  for (const i of agentInteractionsCollection.toArray)
-    agentInteractionsCollection.delete(i.id);
 });
 
 describe("agents facade (Stage 1)", () => {
@@ -71,42 +82,6 @@ describe("agents facade (Stage 1)", () => {
     expect("turnId" in result).toBe(true);
     const outcome = await (result as { completed: Promise<unknown> }).completed;
     expect(outcome).toEqual({ status: "completed", stopReason: "end_turn" });
-  });
-
-  it("interaction(id) answer()/cancel() fail as values when the interaction is missing", () => {
-    const handle = agents.interaction("itx_missing");
-    expect(handle.answer("yes")).toEqual({ ok: false, error: expect.any(String) });
-    expect(handle.cancel()).toEqual({ ok: false, error: expect.any(String) });
-  });
-
-  it("interaction(id).answer() routes to the owning task", async () => {
-    const [client, agentSide] = createLoopbackPair();
-    const agent = new FakeAgent(agentSide);
-    agent.onPrompt = async () => ({ stopReason: "end_turn" });
-
-    const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
-
-    agentEntriesCollection.insert({
-      id: "evt_itx_test",
-      taskId: task.taskId,
-      turnId: "trn_test",
-      type: "tool_call",
-      createdAt: Date.now(),
-    });
-    agentInteractionsCollection.insert({
-      id: "itx_test",
-      taskId: task.taskId,
-      entryId: "evt_itx_test",
-      source: "tool",
-      state: "pending",
-      question: "Proceed?",
-      createdAt: Date.now(),
-    });
-
-    const result = agents.interaction("itx_test").answer("yes");
-    expect(result).toEqual({ ok: true });
-    expect(agentInteractionsCollection.get("itx_test")?.state).toBe("answered");
   });
 
   it("turn(id).get() reads the live turn row", async () => {

@@ -335,6 +335,17 @@ i18n
 
           // Help Commands
           documentation: "Documentation",
+
+          // Agent Tools (display names — AgentTool.title holds these keys,
+          // never the literal text; resolved in mcp-server.ts's tools/list)
+          agentToolWorkspaceListDocuments: "List Documents",
+          agentToolWorkspaceReadDocument: "Read Document",
+          agentToolWorkspaceOpenFiles: "Open Files",
+          agentToolHistoryLog: "Document History",
+          agentToolHistoryDiff: "Compare Versions",
+          agentToolHistoryCheckpoint: "Save Checkpoint",
+          agentToolHistoryRestore: "Restore Version",
+          agentToolAuthorBlob: "Add Interactive Block",
         },
       },
     },

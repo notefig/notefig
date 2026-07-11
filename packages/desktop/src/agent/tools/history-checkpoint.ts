@@ -11,6 +11,7 @@ export const historyCheckpoint: AgentTool<
   { oid: string | null }
 > = {
   name: "history_checkpoint",
+  title: "agentToolHistoryCheckpoint",
   description: "Commit an explicit, named document-history checkpoint now.",
   input: InputSchema,
   async execute(ctx, input) {

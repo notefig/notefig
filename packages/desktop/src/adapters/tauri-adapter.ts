@@ -23,6 +23,7 @@ import type { GitStorageHost } from "@metrists/git";
 import type { HarnessDefinition } from "@metrists/shared/agent";
 import type { AgentTransport } from "@/agent/agent-transport.interface";
 import { TauriStdioTransport } from "@/agent/tauri-stdio-transport";
+import { TauriMcpTransport } from "@/agent/tauri-mcp-transport";
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LazyStore } from "@tauri-apps/plugin-store";
@@ -666,6 +667,10 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       cwd: spec.workspacePath,
       env: spec.harness.env,
     });
+  }
+
+  createMcpTransport(spec: { taskId: string }): AgentTransport {
+    return new TauriMcpTransport(spec.taskId);
   }
 
   getUpdater(): PlatformUpdater {

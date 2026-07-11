@@ -21,6 +21,10 @@ const blobFixtures: string[] = [
   "# Doc\n\nIntro paragraph.\n\n```metrists:question\nid: q_zz99\nstatus: pending\nprompt: Keep this section?\n```\n\nAfter the blob.",
   // invalid YAML must still round-trip as a plain code block
   "```metrists:question\nnot: [valid: yaml\n```",
+  // nested inside a list item
+  "- Context item\n\n  ```metrists:question\n  id: q_l1st\n  status: pending\n  prompt: Nested in a list?\n  ```",
+  // nested inside a blockquote
+  "> ```metrists:question\n> id: q_bq99\n> status: pending\n> prompt: Nested in a blockquote?\n> ```",
 ];
 
 describe("blob fenced blocks round-trip through the markdown codec", () => {

@@ -13,11 +13,7 @@ import type {
   RequestPermissionResponse,
   TurnOutcome,
 } from "@metrists/shared/agent";
-import {
-  agentInteractionsCollection,
-  agentTurnsCollection,
-  type AgentTurn,
-} from "./agent-collections";
+import { agentTurnsCollection, type AgentTurn } from "./agent-collections";
 import {
   cancelAgentTask,
   getRegisteredTask,
@@ -45,12 +41,6 @@ export interface AgentTurnHandle {
   /** Current row, or undefined if the turn/task has been disposed and its
    *  rows cleared. */
   get(): AgentTurn | undefined;
-}
-
-export interface AgentInteractionHandle {
-  readonly interactionId: string;
-  answer(text: string): ActionResult;
-  cancel(): ActionResult;
 }
 
 export interface AgentWorkspaceHandle {
@@ -89,28 +79,6 @@ function turnHandle(turnId: string): AgentTurnHandle {
   };
 }
 
-function interactionHandle(interactionId: string): AgentInteractionHandle {
-  return {
-    interactionId,
-    answer(text) {
-      const row = agentInteractionsCollection.get(interactionId);
-      if (!row) return { ok: false, error: "interaction not found" };
-      const task = getRegisteredTask(row.taskId);
-      if (!task) return { ok: false, error: "agent task is not started" };
-      task.answerInteraction(interactionId, text);
-      return { ok: true };
-    },
-    cancel() {
-      const row = agentInteractionsCollection.get(interactionId);
-      if (!row) return { ok: false, error: "interaction not found" };
-      const task = getRegisteredTask(row.taskId);
-      if (!task) return { ok: false, error: "agent task is not started" };
-      task.cancelInteraction(interactionId);
-      return { ok: true };
-    },
-  };
-}
-
 function workspaceHandle(workspacePath: string): AgentWorkspaceHandle {
   return {
     workspacePath,
@@ -124,6 +92,5 @@ function workspaceHandle(workspacePath: string): AgentWorkspaceHandle {
 export const agents = {
   task: taskHandle,
   turn: turnHandle,
-  interaction: interactionHandle,
   workspace: workspaceHandle,
 };

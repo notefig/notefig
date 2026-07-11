@@ -2,18 +2,14 @@ import {
   newTaskId,
   newTurnId,
   newEventId,
-  newInteractionId,
   BUILT_IN_HARNESSES,
   composePrompt,
-  renderToolGuidance,
-  type AgentTool,
   type ContentBlock,
   type HarnessDefinition,
   type RequestPermissionResponse,
   type SessionNotification,
   type ToolAgentsFacade,
   type ToolCallUpdate,
-  type ToolContext,
   type TurnOutcome,
 } from "@metrists/shared/agent";
 import { platformAdapter } from "@/adapters";
@@ -23,12 +19,15 @@ import { PermissionBroker } from "./permission-broker";
 import { MetristsAcpClient } from "./acp-client";
 import type { AgentTransport } from "./agent-transport.interface";
 import { AgentTransportError } from "./agent-transport.interface";
-import { toolRegistry, getTool } from "./tools";
-import { findToolFence } from "./tool-fence";
+import {
+  MCP_SERVER_NAME,
+  attachMcpTransport,
+  createMcpRequestHandler,
+  renderToolUsagePreamble,
+} from "./mcp-server";
 import { checkpointWorkspaceHistory } from "@/utils/history-service";
 import {
   agentEntriesCollection,
-  agentInteractionsCollection,
   agentPermissionRequestsCollection,
   agentTasksCollection,
   agentTurnsCollection,
@@ -48,18 +47,41 @@ type TurnState = {
   text: string;
   /** The assistant entry the current run is streaming into, or null to open one. */
   textEntryId: string | null;
-  /** True once a `metrists:tool` fence has been dispatched this turn (at most one per reply). */
-  fenceHandled: boolean;
   /** The user prompt that started this turn (checkpoint commit message). */
   userText: string;
 };
 
-function contentBlockText(content: ContentBlock): string {
+export function contentBlockText(content: ContentBlock): string {
   return content.type === "text" ? content.text : "";
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Some app tools (workspace_read_document, history_restore, author_blob, …)
+ * don't get `locations` from the adapter the way native tool calls
+ * sometimes do (confirmed absent on every MCP tool_call in
+ * docs/architecture/spikes/v2-mcp-passthrough-spike.md). Derive the same
+ * shape from the tool's own `path` input so these still show up in
+ * file-presence affordances (Stage 3) the same as native ones.
+ */
+function deriveToolLocations(rawInput: unknown): Array<{ path: string }> | undefined {
+  if (!isPlainObject(rawInput) || typeof rawInput.path !== "string") return undefined;
+  return [{ path: rawInput.path }];
+}
+
+/**
+ * Adapters mint MCP tool names as `mcp__<serverName>__<toolName>` (confirmed
+ * on claude-agent-acp — docs/architecture/spikes/v2-mcp-passthrough-spike.md).
+ * Strip the prefix so transcript entries and `findBlobAuthorTask` see the
+ * plain tool name, same as any other tool call.
+ */
+function normalizeMcpToolName(title: string | null | undefined): string | undefined {
+  if (!title) return undefined;
+  const prefix = `mcp__${MCP_SERVER_NAME}__`;
+  return title.startsWith(prefix) ? title.slice(prefix.length) : title;
 }
 
 /**
@@ -131,27 +153,22 @@ export class AgentTask {
    * A displaced slot resolves its handle as "superseded" (A3) before being
    * overwritten.
    */
-  private pendingPrompt:
-    | { turnId: string; text: string; fromContinuation: boolean }
-    | null = null;
-  /** Consecutive tool-triggered continuation turns (runaway-loop circuit breaker). */
-  private toolContinuationDepth = 0;
-  private static readonly MAX_TOOL_CONTINUATION_DEPTH = 8;
-  /** Sent once per task, on the first turn only (Stage 2 tool guidance). */
-  private guidanceSent = false;
+  private pendingPrompt: { turnId: string; text: string } | null = null;
   /** turnId → resolver for that turn's prompt-handle `completed` promise. */
   private readonly turnResolvers = new Map<
     string,
     (outcome: TurnOutcome) => void
   >();
-  /** Tool interactions already folded into a sent continuation prompt. */
-  private readonly deliveredInteractionIds = new Set<string>();
   /** True while `drainQueue`'s loop is actively running (reentrancy guard). */
   private draining = false;
   /** "How to sign in" hint, surfaced only when an auth error actually occurs. */
   private authHintValue?: string;
   private disposed = false;
   private readonly unsubscribers: Array<() => void> = [];
+  /** Stage 3.5: this task's app-tools MCP transport; torn down in dispose(). */
+  private mcpTransport: AgentTransport | null = null;
+  /** Sent once per task, on the first turn only (steers tool preference). */
+  private toolUsagePreambleSent = false;
 
   constructor(
     readonly taskId: string,
@@ -194,7 +211,29 @@ export class AgentTask {
       // Note: we do NOT surface authHint here — the adapter always advertises
       // authMethods regardless of login (see the auth spike), so the hint only
       // becomes meaningful when a prompt actually fails with "auth required".
-      const session = await this.client.newSession(this.workspacePath);
+      // Same construct-then-start pattern as the ACP transport above:
+      // createMcpTransport is a dumb sync constructor, we call start()
+      // ourselves, and mcpServer only exists on the instance afterward.
+      const mcpTransport = platformAdapter.createMcpTransport({ taskId: this.taskId });
+      this.mcpTransport = mcpTransport;
+      await mcpTransport.start();
+      this.unsubscribers.push(
+        attachMcpTransport(
+          mcpTransport,
+          createMcpRequestHandler({
+            ctx: {
+              workspacePath: this.workspacePath,
+              taskId: this.taskId,
+              agents: buildToolAgentsFacade(),
+            },
+            permissionBroker: this.permissionBroker,
+          }),
+        ),
+      );
+      const session = await this.client.newSession(
+        this.workspacePath,
+        mcpTransport.mcpServer ? [mcpTransport.mcpServer] : [],
+      );
       this.sessionId = session.sessionId;
       // Persist per task even though session/load waits until Phase 4.
       await platformAdapter.setKv(
@@ -218,13 +257,6 @@ export class AgentTask {
    * (fire-and-forget); tests and programmatic callers await `completed`.
    */
   prompt(text: string): { turnId: string; completed: Promise<TurnOutcome> } {
-    return this.enqueuePrompt(text, false);
-  }
-
-  private enqueuePrompt(
-    text: string,
-    fromContinuation: boolean,
-  ): { turnId: string; completed: Promise<TurnOutcome> } {
     if (!this.client || !this.sessionId) {
       throw new Error("agent task is not started");
     }
@@ -234,13 +266,12 @@ export class AgentTask {
     if (displaced) {
       this.resolveTurn(displaced.turnId, { status: "superseded" });
     }
-    this.pendingPrompt = { turnId, text, fromContinuation };
+    this.pendingPrompt = { turnId, text };
 
     const completed = new Promise<TurnOutcome>((resolve) => {
       this.turnResolvers.set(turnId, resolve);
     });
-    // A running (or actively draining, e.g. a continuation composed from
-    // inside finishTurn) loop will pick this up; otherwise start one.
+    // A running (or actively draining) loop will pick this up; otherwise start one.
     if (!this.currentTurn && !this.draining) void this.drainQueue();
     return { turnId, completed };
   }
@@ -263,13 +294,8 @@ export class AgentTask {
     this.draining = true;
     try {
       while (!this.disposed && this.pendingPrompt !== null) {
-        const { turnId, text, fromContinuation } = this.pendingPrompt;
+        const { turnId, text } = this.pendingPrompt;
         this.pendingPrompt = null;
-        // Depth cap (Stage 2): reset on any user-initiated prompt, count
-        // consecutive tool-triggered continuations only.
-        this.toolContinuationDepth = fromContinuation
-          ? this.toolContinuationDepth + 1
-          : 0;
         const status = await this.runTurn(turnId, text);
         // Don't auto-run a coalesced follow-up through the same failure (e.g.
         // an auth block); it resumes when the user sends again.
@@ -318,16 +344,15 @@ export class AgentTask {
       joiner: new MarkdownJoiner(),
       text: "",
       textEntryId: null,
-      fenceHandled: false,
       userText: text,
     };
     this.setStatus("running");
 
     try {
-      const preamble = this.guidanceSent
+      const preamble = this.toolUsagePreambleSent
         ? undefined
-        : renderToolGuidance(toolRegistry);
-      this.guidanceSent = true;
+        : renderToolUsagePreamble();
+      this.toolUsagePreambleSent = true;
       const blocks = composePrompt({
         text,
         preamble,
@@ -340,10 +365,11 @@ export class AgentTask {
     } catch (error) {
       const message = errorMessage(error);
       // Logged-out claude-code-acp fails here with "Authentication required"
-      // (see docs/architecture/spikes/phase1-auth-spike.md).
+      // (see docs/architecture/spikes/phase1-auth-spike.md). The string
+      // authHint banner (set below) is the sole signal for now — the richer
+      // task-row auth state (methods, retry) is Stage 4's job.
       if (/authentication required/i.test(message)) {
         this.setAuthHint(this.client?.authHint ?? this.harness.authHint);
-        this.raiseAuthInteraction(turnId, message);
       }
       this.warn("turn error", message);
       return this.finishTurn(undefined, "error", message);
@@ -385,11 +411,7 @@ export class AgentTask {
 
     this.currentTurn = null;
     this.setStatus(turnStatus === "error" ? "error" : "idle");
-    // Now idle: fold in any tool answers that arrived mid-turn. Not on error
-    // (A5: don't auto-continue through a failure) or cancel (the user just
-    // stopped the task; a fresh continuation would fight that intent).
     if (turnStatus === "completed") {
-      this.maybeComposeContinuation();
       void this.checkpointTurn(turn.userText);
     }
     return turnStatus;
@@ -433,7 +455,6 @@ export class AgentTask {
         if (flushable) {
           turn.text += flushable;
           this.writeAssistantText(turn);
-          if (!turn.fenceHandled) this.maybeDispatchToolFence(turn);
         }
         break;
       }
@@ -471,179 +492,16 @@ export class AgentTask {
   }
 
   /**
-   * Stage 2: detect a complete `metrists:tool` fence in the accumulating
-   * assistant text (the joiner already surfaces it as soon as its closing
-   * ``` streams in — no need to wait for turn end). At most one fence per
-   * reply (`turn.fenceHandled`); malformed fences and valid ones both route
-   * through an `agentInteractions` row + `answerInteraction`, giving the
-   * doc's "one repair round-trip" for free via the existing continuation
-   * machinery.
-   */
-  private maybeDispatchToolFence(turn: TurnState): void {
-    const result = findToolFence(turn.text);
-    if (result.kind === "none" || result.kind === "incomplete") return;
-    turn.fenceHandled = true;
-    this.closeTextRun(turn);
-
-    const toolCallId = newEventId();
-    const entryId = newEventId();
-
-    if (result.kind === "malformed") {
-      agentEntriesCollection.insert({
-        id: entryId,
-        taskId: this.taskId,
-        turnId: turn.turnId,
-        type: "tool_call",
-        toolCallId,
-        toolCallSource: "fence",
-        toolCall: { toolCallId, title: "(malformed tool fence)", status: "failed" },
-        createdAt: Date.now(),
-      });
-      this.raiseToolInteraction(
-        entryId,
-        `malformed tool fence: ${result.reason}`,
-        `Tool error: the fence was malformed (${result.reason}). Re-emit a well-formed metrists:tool fence.`,
-      );
-      return;
-    }
-
-    const tool = getTool(result.name);
-    if (!tool) {
-      agentEntriesCollection.insert({
-        id: entryId,
-        taskId: this.taskId,
-        turnId: turn.turnId,
-        type: "tool_call",
-        toolCallId,
-        toolCallSource: "fence",
-        toolCall: { toolCallId, title: result.name, status: "failed" },
-        createdAt: Date.now(),
-      });
-      this.raiseToolInteraction(
-        entryId,
-        `unknown tool: ${result.name}`,
-        `Tool error: unknown tool "${result.name}". Available tools: ${toolRegistry.map((t) => t.name).join(", ")}.`,
-      );
-      return;
-    }
-
-    const parsedInput = tool.input.safeParse(result.input);
-    if (!parsedInput.success) {
-      agentEntriesCollection.insert({
-        id: entryId,
-        taskId: this.taskId,
-        turnId: turn.turnId,
-        type: "tool_call",
-        toolCallId,
-        toolCallSource: "fence",
-        toolCall: {
-          toolCallId,
-          title: tool.name,
-          status: "failed",
-          rawInput: isPlainObject(result.input) ? result.input : undefined,
-        },
-        createdAt: Date.now(),
-      });
-      this.raiseToolInteraction(
-        entryId,
-        `invalid input for ${tool.name}`,
-        `Tool error: invalid input for "${tool.name}": ${parsedInput.error.message}`,
-      );
-      return;
-    }
-
-    agentEntriesCollection.insert({
-      id: entryId,
-      taskId: this.taskId,
-      turnId: turn.turnId,
-      type: "tool_call",
-      toolCallId,
-      toolCallSource: "fence",
-      toolCall: {
-        toolCallId,
-        title: tool.name,
-        status: "pending",
-        rawInput: isPlainObject(result.input) ? result.input : undefined,
-      },
-      createdAt: Date.now(),
-    });
-
-    void this.executeFenceTool(tool, entryId, parsedInput.data);
-  }
-
-  private async executeFenceTool(
-    tool: AgentTool<unknown, unknown>,
-    entryId: string,
-    input: unknown,
-  ): Promise<void> {
-    if (tool.requiresPermission) {
-      const response = await this.permissionBroker.request({
-        sessionId: this.sessionId ?? "",
-        toolCall: { toolCallId: entryId, title: tool.name },
-        options: [
-          { optionId: "allow", name: "Allow", kind: "allow_once" },
-          { optionId: "deny", name: "Deny", kind: "reject_once" },
-        ],
-      });
-      const outcome = response.outcome;
-      const denied =
-        outcome.outcome === "cancelled" ||
-        (outcome.outcome === "selected" && outcome.optionId === "deny");
-      if (denied) {
-        agentEntriesCollection.update(entryId, (draft) => {
-          if (draft.toolCall) draft.toolCall.status = "failed";
-        });
-        this.raiseToolInteraction(
-          entryId,
-          `${tool.name} was denied`,
-          `Tool error: permission denied for "${tool.name}".`,
-        );
-        return;
-      }
-    }
-
-    const ctx: ToolContext = {
-      workspacePath: this.workspacePath,
-      taskId: this.taskId,
-      agents: buildToolAgentsFacade(),
-    };
-    const result = await tool.execute(ctx, input);
-    agentEntriesCollection.update(entryId, (draft) => {
-      if (draft.toolCall) draft.toolCall.status = result.ok ? "completed" : "failed";
-    });
-    const resultText = result.ok
-      ? `Tool result: ${JSON.stringify(result.value)}`
-      : `Tool error: ${result.error}`;
-    this.raiseToolInteraction(entryId, tool.name, resultText);
-  }
-
-  /** Insert a `source: "tool"` interaction and immediately answer it with the
-   *  execution result — the app is the "answerer" here, not the user; this
-   *  is what feeds Stage 1's continuation batching. */
-  private raiseToolInteraction(
-    entryId: string,
-    question: string,
-    resultText: string,
-  ): void {
-    const interactionId = newInteractionId();
-    agentInteractionsCollection.insert({
-      id: interactionId,
-      taskId: this.taskId,
-      entryId,
-      source: "tool",
-      state: "pending",
-      question,
-      createdAt: Date.now(),
-    });
-    this.answerInteraction(interactionId, resultText);
-  }
-
-  /**
    * Coalesce a tool call into one entry keyed by toolCallId: the first tool_call
    * inserts, later updates (pending → in_progress → completed/failed) merge into
    * the same entry so the UI shows one transitioning card, not a stack. Keyed at
    * the task level so updates land even after the turn that started them ends.
    * Tool entries are first-class — not nested under a message.
+   *
+   * MCP tool names arrive prefixed (`mcp__metrists__author_blob`, confirmed
+   * on claude-agent-acp) and without `locations` — normalize the former and
+   * derive the latter from `rawInput.path` so app tools render and address
+   * (`findBlobAuthorTask`) exactly like any other tool call.
    */
   private upsertToolEntry(
     update: Extract<
@@ -658,10 +516,18 @@ export class AgentTask {
 
     if (existingId) {
       agentEntriesCollection.update(existingId, (draft) => {
-        // ACP updates replace each field, so a shallow merge is correct.
+        const previous = draft.toolCall as ToolCallUpdate | undefined;
+        // ACP updates replace each field, so a shallow merge is correct —
+        // except title/locations: a later update commonly omits `title`
+        // (unchanged since the first tool_call) and may omit `rawInput.path`
+        // entirely (e.g. a bare status flip); don't let either regress what
+        // an earlier update already established.
         draft.toolCall = {
-          ...(draft.toolCall as ToolCallUpdate),
+          ...previous,
           ...update,
+          title: normalizeMcpToolName(update.title) ?? previous?.title,
+          locations:
+            update.locations ?? deriveToolLocations(update.rawInput) ?? previous?.locations,
         };
       });
       return;
@@ -678,7 +544,11 @@ export class AgentTask {
       turnId: this.currentTurn?.turnId ?? "",
       type: "tool_call",
       toolCallId: toolCallId ?? undefined,
-      toolCall: update,
+      toolCall: {
+        ...update,
+        title: normalizeMcpToolName(update.title),
+        locations: update.locations ?? deriveToolLocations(update.rawInput),
+      },
       createdAt: Date.now(),
     });
   }
@@ -746,7 +616,6 @@ export class AgentTask {
    */
   async cancel(): Promise<void> {
     this.permissionBroker.cancelAll();
-    this.cancelPendingInteractions();
     if (this.client && this.sessionId && this.currentTurn) {
       try {
         await this.client.cancel(this.sessionId);
@@ -756,116 +625,6 @@ export class AgentTask {
       this.finishTurn("cancelled", "cancelled");
       this.setStatus("cancelled");
     }
-  }
-
-  /**
-   * Answer an interaction this task raised (tool ask, auth block). Tool
-   * answers accumulate and compose into exactly one continuation prompt once
-   * the task is idle (`maybeComposeContinuation`, deferred a tick here,
-   * called again from `finishTurn`). Auth interactions are answered by
-   * Stage 4's `authenticate` retry flow, not a continuation — excluded here.
-   * Blobs (question/approval widgets) never raise an interaction row at all
-   * — see `answerBlob` in blob-actions.ts, which prompts the authoring task
-   * directly instead of going through this state machine.
-   */
-  answerInteraction(interactionId: string, answer: string): void {
-    const row = agentInteractionsCollection.get(interactionId);
-    if (!row || row.taskId !== this.taskId || row.state !== "pending") return;
-    agentInteractionsCollection.update(interactionId, (draft) => {
-      draft.state = "answered";
-      draft.answer = answer;
-    });
-    // Deferred a tick so answers landing in the same synchronous batch (e.g.
-    // several widgets answered back to back) fold into one continuation
-    // instead of each triggering its own turn.
-    if (row.source === "tool") {
-      queueMicrotask(() => this.maybeComposeContinuation());
-    }
-  }
-
-  /** Cancel a specific pending interaction (e.g. the user dismisses a question). */
-  cancelInteraction(interactionId: string): void {
-    const row = agentInteractionsCollection.get(interactionId);
-    if (!row || row.taskId !== this.taskId || row.state !== "pending") return;
-    agentInteractionsCollection.update(interactionId, (draft) => {
-      draft.state = "cancelled";
-    });
-  }
-
-  private cancelPendingInteractions(): void {
-    for (const row of agentInteractionsCollection.toArray) {
-      if (row.taskId === this.taskId && row.state === "pending") {
-        agentInteractionsCollection.update(row.id, (draft) => {
-          draft.state = "cancelled";
-        });
-      }
-    }
-  }
-
-  /**
-   * Mint one continuation prompt covering every tool interaction answered
-   * since the last continuation, once the task is idle. No-op mid-turn —
-   * the caller re-checks when the turn ends (`finishTurn`).
-   */
-  private maybeComposeContinuation(): void {
-    if (this.currentTurn) return;
-    const answered = agentInteractionsCollection.toArray.filter(
-      (row) =>
-        row.taskId === this.taskId &&
-        row.source === "tool" &&
-        row.state === "answered" &&
-        !this.deliveredInteractionIds.has(row.id),
-    );
-    if (answered.length === 0) return;
-
-    if (this.toolContinuationDepth >= AgentTask.MAX_TOOL_CONTINUATION_DEPTH) {
-      // Runaway-loop circuit breaker: stop auto-composing past the depth
-      // cap and surface a visible, still-pending interaction instead.
-      this.warn(
-        "tool continuation depth cap reached",
-        this.toolContinuationDepth,
-      );
-      agentInteractionsCollection.insert({
-        id: newInteractionId(),
-        taskId: this.taskId,
-        entryId: answered[0].entryId,
-        source: "tool",
-        state: "pending",
-        question:
-          "The agent is iterating on tool calls — continue letting it proceed?",
-        createdAt: Date.now(),
-      });
-      return;
-    }
-
-    for (const row of answered) this.deliveredInteractionIds.add(row.id);
-    const text = answered
-      .map((row) => `Answer to "${row.question}": ${row.answer}`)
-      .join("\n");
-    this.enqueuePrompt(text, true);
-  }
-
-  /** Raise a structured `auth` interaction alongside the string authHint banner (A5). */
-  private raiseAuthInteraction(turnId: string, message: string): void {
-    const entryId = newEventId();
-    agentEntriesCollection.insert({
-      id: entryId,
-      taskId: this.taskId,
-      turnId,
-      type: "unknown",
-      text: "auth_error",
-      raw: { message },
-      createdAt: Date.now(),
-    });
-    agentInteractionsCollection.insert({
-      id: newInteractionId(),
-      taskId: this.taskId,
-      entryId,
-      source: "auth",
-      state: "pending",
-      question: message,
-      createdAt: Date.now(),
-    });
   }
 
   get authHint(): string | undefined {
@@ -885,7 +644,7 @@ export class AgentTask {
     for (const unsubscribe of this.unsubscribers) unsubscribe();
     this.unsubscribers.length = 0;
     await this.cancel();
-    await this.transport?.close();
+    await Promise.all([this.transport?.close(), this.mcpTransport?.close()]);
   }
 
   // ===== internal helpers =====
@@ -1101,11 +860,6 @@ function clearWorkspaceAgentRows(normalizedWorkspacePath: string): void {
   for (const request of agentPermissionRequestsCollection.toArray) {
     if (taskIds.has(request.taskId)) {
       agentPermissionRequestsCollection.delete(request.id);
-    }
-  }
-  for (const interaction of agentInteractionsCollection.toArray) {
-    if (taskIds.has(interaction.taskId)) {
-      agentInteractionsCollection.delete(interaction.id);
     }
   }
   for (const taskId of taskIds) agentTasksCollection.delete(taskId);

@@ -13,20 +13,39 @@ const { writeFiles, readFiles } = vi.hoisted(() => ({
   })),
 }));
 vi.mock("@/adapters", () => ({
-  platformAdapter: { setKv: vi.fn(), getKv: vi.fn(), writeFiles, readFiles },
+  platformAdapter: {
+    setKv: vi.fn(),
+    getKv: vi.fn(),
+    writeFiles,
+    readFiles,
+    // A fake AgentTransport: nothing in these tests drives real traffic over
+    // the MCP connection (that's exercised at the tool-call level via
+    // FakeAgent's scripted ACP session/update notifications instead), so
+    // this just has to satisfy attachMcpTransport's onLine + dispose's close.
+    // Dumb sync constructor, matching createAgentTransport's contract —
+    // AgentTask.start() calls .start() and reads .mcpServer itself.
+    createMcpTransport: vi.fn(() => ({
+      locus: "local",
+      mcpServer: { name: "metrists", command: "metrists", args: [], env: [] },
+      start: vi.fn(async () => {}),
+      send: vi.fn(),
+      onLine: vi.fn(() => () => {}),
+      onClose: vi.fn(() => () => {}),
+      close: vi.fn(async () => {}),
+    })),
+  },
 }));
 // History auto-checkpointing (Stage 2) is exercised separately; keep these
-// tests focused on the turn/interaction machinery, not git plumbing.
+// tests focused on the turn machinery, not git plumbing.
 vi.mock("@/utils/history-service", () => ({
   checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
 }));
 
 import { createLoopbackPair } from "../loopback-transport";
 import { FakeAgent } from "./fake-agent";
-import { TaskManager, respondToAgentPermission } from "../agent-service";
+import { TaskManager, respondToAgentPermission, findBlobAuthorTask } from "../agent-service";
 import {
   agentEntriesCollection,
-  agentInteractionsCollection,
   agentPermissionRequestsCollection,
   agentTurnsCollection,
   agentTasksCollection,
@@ -66,8 +85,6 @@ function toolEntries(taskId: string) {
   return entriesFor(taskId).filter((e) => e.type === "tool_call");
 }
 
-/** The user-text block is always last (Stage 2 prepends tool guidance on the
- *  first turn only, so index 0 isn't reliably the user's text anymore). */
 function lastPromptText(params: { prompt: { text?: string }[] }): string {
   return params.prompt[params.prompt.length - 1].text ?? "";
 }
@@ -91,8 +108,6 @@ beforeEach(() => {
   for (const t of agentTasksCollection.toArray) agentTasksCollection.delete(t.taskId);
   for (const r of agentPermissionRequestsCollection.toArray)
     agentPermissionRequestsCollection.delete(r.id);
-  for (const i of agentInteractionsCollection.toArray)
-    agentInteractionsCollection.delete(i.id);
 });
 
 describe("AgentTask vertical slice", () => {
@@ -201,6 +216,33 @@ describe("AgentTask vertical slice", () => {
     );
     expect(outcome).toEqual({ outcome: "selected", optionId: "allow" });
     // Row left the pending set.
+    expect(pendingPerms(task.taskId)).toHaveLength(0);
+  });
+
+  it("auto-approves permission requests for our own mcp__metrists__* tools, no UI prompt", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    let outcome: unknown;
+    agent.onPrompt = async (_params, a) => {
+      const response = await a.request("session/request_permission", {
+        sessionId: "sess_test",
+        toolCall: { toolCallId: "call_1", title: "mcp__metrists__author_blob" },
+        options: [
+          { optionId: "allow_once", name: "Allow", kind: "allow_once" },
+          { optionId: "allow_always", name: "Always Allow", kind: "allow_always" },
+          { optionId: "deny", name: "Deny", kind: "reject_once" },
+        ],
+      });
+      outcome = response.outcome;
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    await runPrompt(task, "add a question");
+
+    // Granted immediately — never surfaced as a row to answer.
+    expect(outcome).toEqual({ outcome: "selected", optionId: "allow_always" });
     expect(pendingPerms(task.taskId)).toHaveLength(0);
   });
 
@@ -523,10 +565,6 @@ describe("AgentTask vertical slice", () => {
   });
 });
 
-function interactionsFor(taskId: string) {
-  return agentInteractionsCollection.toArray.filter((i) => i.taskId === taskId);
-}
-
 describe("prompt handles (A3, Stage 1)", () => {
   it("resolves the handle when the turn completes", async () => {
     const [client, agentSide] = createLoopbackPair();
@@ -589,207 +627,93 @@ describe("prompt handles (A3, Stage 1)", () => {
   });
 });
 
-describe("interactions (Stage 1)", () => {
-  it("raises a source:auth interaction with a real entryId join target on auth failure", async () => {
+describe("MCP tool calls (Stage 3.5)", () => {
+  it("normalizes an mcp__metrists__* tool name and derives locations from rawInput.path", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
-    agent.onPrompt = async () => {
-      throw new Error("Authentication required");
-    };
-
-    const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
-    await runPrompt(task, "go");
-
-    const interactions = interactionsFor(task.taskId);
-    expect(interactions).toHaveLength(1);
-    expect(interactions[0]).toMatchObject({ source: "auth", state: "pending" });
-
-    const entry = agentEntriesCollection.get(interactions[0].entryId);
-    expect(entry).toBeDefined();
-    expect(entry?.type).toBe("unknown");
-  });
-
-  it("composes exactly one continuation prompt from queued tool answers once idle", async () => {
-    const [client, agentSide] = createLoopbackPair();
-    const agent = new FakeAgent(agentSide);
-    const seen: string[] = [];
-    agent.onPrompt = async (params) => {
-      seen.push(lastPromptText(params));
+    agent.onPrompt = async (_p, a) => {
+      a.update("sess_test", {
+        sessionUpdate: "tool_call",
+        toolCallId: "call_1",
+        title: "mcp__metrists__author_blob",
+        kind: "other",
+        status: "pending",
+        rawInput: {},
+      });
+      a.update("sess_test", {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call_1",
+        status: "completed",
+        rawInput: { path: "notes.md", type: "question", id: "question_8f2a" },
+      });
       return { stopReason: "end_turn" };
     };
 
     const task = new TaskManager("/ws").createTask(harness);
     await task.start(client);
-    await runPrompt(task, "start");
+    await runPrompt(task, "ask a question");
 
-    // Simulate two tool-sourced interactions this task raised.
-    const entryId = "evt_test";
-    agentEntriesCollection.insert({
-      id: entryId,
+    const tools = toolEntries(task.taskId);
+    expect(tools).toHaveLength(1); // still one coalesced card, not two
+    expect(tools[0].toolCall?.title).toBe("author_blob"); // prefix stripped
+    expect(tools[0].toolCall?.status).toBe("completed");
+    expect(tools[0].toolCall?.locations).toEqual([{ path: "notes.md" }]);
+  });
+
+  it("keeps previously-derived locations when a later update carries no rawInput.path", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async (_p, a) => {
+      a.update("sess_test", {
+        sessionUpdate: "tool_call",
+        toolCallId: "call_1",
+        title: "mcp__metrists__history_restore",
+        kind: "edit",
+        status: "pending",
+        rawInput: { path: "notes.md", checkpoint: "abc123" },
+      });
+      // A bare status flip with no rawInput at all — must not regress locations.
+      a.update("sess_test", {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call_1",
+        status: "completed",
+      });
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    await runPrompt(task, "restore");
+
+    const tools = toolEntries(task.taskId);
+    expect(tools[0].toolCall?.locations).toEqual([{ path: "notes.md" }]);
+    expect(tools[0].toolCall?.status).toBe("completed");
+  });
+
+  it("findBlobAuthorTask resolves a known blobId from the normalized author_blob call", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async (_p, a) => {
+      a.update("sess_test", {
+        sessionUpdate: "tool_call",
+        toolCallId: "call_1",
+        title: "mcp__metrists__author_blob",
+        kind: "other",
+        status: "completed",
+        rawInput: { path: "notes.md", type: "question", id: "question_8f2a" },
+      });
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    await runPrompt(task, "ask a question");
+
+    expect(findBlobAuthorTask("question_8f2a")).toEqual({
       taskId: task.taskId,
-      turnId: turnFor(task.taskId)[0].turnId,
-      type: "tool_call",
-      createdAt: Date.now(),
+      blobType: "question",
+      path: "notes.md",
     });
-    agentInteractionsCollection.insert({
-      id: "itx_1",
-      taskId: task.taskId,
-      entryId,
-      source: "tool",
-      state: "pending",
-      question: "Overwrite the file?",
-      createdAt: Date.now(),
-    });
-    agentInteractionsCollection.insert({
-      id: "itx_2",
-      taskId: task.taskId,
-      entryId,
-      source: "tool",
-      state: "pending",
-      question: "Delete the backup?",
-      createdAt: Date.now(),
-    });
-
-    task.answerInteraction("itx_1", "yes");
-    task.answerInteraction("itx_2", "no");
-
-    await vi.waitFor(() => expect(seen).toEqual(["start", expect.any(String)]));
-    expect(seen[1]).toContain("Overwrite the file?");
-    expect(seen[1]).toContain("Delete the backup?");
-
-    const rows = interactionsFor(task.taskId).filter((i) => i.source === "tool");
-    expect(rows.every((r) => r.state === "answered")).toBe(true);
-  });
-
-  it("marks pending interactions cancelled on task cancel", async () => {
-    const [client, agentSide] = createLoopbackPair();
-    const agent = new FakeAgent(agentSide);
-    agent.onPrompt = async () => {
-      throw new Error("Authentication required");
-    };
-
-    const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
-    await runPrompt(task, "go");
-
-    expect(interactionsFor(task.taskId)[0].state).toBe("pending");
-    await task.cancel();
-    expect(interactionsFor(task.taskId)[0].state).toBe("cancelled");
-  });
-});
-
-describe("tool fences (Stage 2)", () => {
-  it("sends tool guidance (including author_blob) as a preamble on the first turn only", async () => {
-    const [client, agentSide] = createLoopbackPair();
-    const agent = new FakeAgent(agentSide);
-    const seenPrompts: { text?: string }[][] = [];
-    agent.onPrompt = async (params) => {
-      seenPrompts.push(params.prompt);
-      return { stopReason: "end_turn" };
-    };
-
-    const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
-    await runPrompt(task, "one");
-    await runPrompt(task, "two");
-
-    expect(seenPrompts[0]).toHaveLength(2); // preamble + user text
-    expect(seenPrompts[0][0].text).toContain("metrists:tool");
-    expect(seenPrompts[0][0].text).toContain("- author_blob:");
-    expect(seenPrompts[0][1].text).toBe("one");
-
-    expect(seenPrompts[1]).toHaveLength(1); // no preamble on later turns
-    expect(seenPrompts[1][0].text).toBe("two");
-  });
-
-  it("detects a valid fence, executes the tool, and delivers one continuation prompt", async () => {
-    const [client, agentSide] = createLoopbackPair();
-    const agent = new FakeAgent(agentSide);
-    const seen: string[] = [];
-    agent.onPrompt = async (params, a) => {
-      seen.push(lastPromptText(params));
-      if (seen.length === 1) {
-        a.update("sess_test", {
-          sessionUpdate: "agent_message_chunk",
-          content: {
-            type: "text",
-            text: "```metrists:tool\nname: workspace_open_files\ninput:\n  {}\n```",
-          },
-        });
-      }
-      return { stopReason: "end_turn" };
-    };
-
-    const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
-    task.prompt("what's open?");
-
-    await vi.waitFor(() => expect(seen.length).toBe(2));
-    expect(seen[1]).toContain("Tool result:");
-
-    const toolEntry = entriesFor(task.taskId).find((e) => e.type === "tool_call");
-    expect(toolEntry?.toolCall?.title).toBe("workspace_open_files");
-    expect(toolEntry?.toolCallSource).toBe("fence");
-    expect(toolEntry?.toolCall?.status).toBe("completed");
-
-    const toolInteractions = interactionsFor(task.taskId).filter(
-      (i) => i.source === "tool",
-    );
-    expect(toolInteractions).toHaveLength(1);
-    expect(toolInteractions[0].state).toBe("answered");
-  });
-
-  it("gives a malformed fence one repair round-trip with the validation error", async () => {
-    const [client, agentSide] = createLoopbackPair();
-    const agent = new FakeAgent(agentSide);
-    const seen: string[] = [];
-    agent.onPrompt = async (params, a) => {
-      seen.push(lastPromptText(params));
-      if (seen.length === 1) {
-        a.update("sess_test", {
-          sessionUpdate: "agent_message_chunk",
-          content: {
-            type: "text",
-            text: "```metrists:tool\ninput:\n  {}\n```", // missing `name`
-          },
-        });
-      }
-      return { stopReason: "end_turn" };
-    };
-
-    const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
-    task.prompt("do something");
-
-    await vi.waitFor(() => expect(seen.length).toBe(2));
-    expect(seen[1]).toContain("Tool error");
-    expect(seen[1].toLowerCase()).toContain("malformed");
-  });
-
-  it("reports an unknown tool name as a tool error", async () => {
-    const [client, agentSide] = createLoopbackPair();
-    const agent = new FakeAgent(agentSide);
-    const seen: string[] = [];
-    agent.onPrompt = async (params, a) => {
-      seen.push(lastPromptText(params));
-      if (seen.length === 1) {
-        a.update("sess_test", {
-          sessionUpdate: "agent_message_chunk",
-          content: {
-            type: "text",
-            text: "```metrists:tool\nname: full_text_search\ninput:\n  {}\n```",
-          },
-        });
-      }
-      return { stopReason: "end_turn" };
-    };
-
-    const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
-    task.prompt("search everything");
-
-    await vi.waitFor(() => expect(seen.length).toBe(2));
-    expect(seen[1]).toContain("unknown tool");
+    expect(findBlobAuthorTask("does_not_exist")).toBeUndefined();
   });
 });

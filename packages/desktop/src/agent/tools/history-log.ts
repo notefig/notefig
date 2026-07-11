@@ -21,6 +21,7 @@ export const historyLog: AgentTool<
   HistoryLogEntry[]
 > = {
   name: "history_log",
+  title: "agentToolHistoryLog",
   description:
     "List document-history checkpoints (most recent first), optionally scoped to one file's path.",
   input: InputSchema,
