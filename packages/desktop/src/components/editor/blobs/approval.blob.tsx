@@ -75,4 +75,24 @@ export default defineBlobType({
   }),
   summaryText: (payload) =>
     payload.decision ? `${payload.prompt} — ${payload.decision}` : payload.prompt,
+  formatAnswerPrompt: ({ blobId, path, envelope, patch }) => {
+    const decision =
+      typeof patch.decision === "string" ? patch.decision : JSON.stringify(patch);
+    const subject =
+      typeof envelope.prompt === "string" ? ` ("${envelope.prompt}")` : "";
+    const followThrough =
+      decision === "approved"
+        ? `Proceed with the approved action, then replace that answered block in ${path} ` +
+          `with the content it resolves to, using your normal editing tools — remove the ` +
+          `\`\`\`metrists:approval fence with id ${blobId} once the outcome is folded into ` +
+          `the document.`
+        : `Do not proceed with the action. Replace that answered block in ${path} with ` +
+          `whatever the rejection resolves to (usually removing the ` +
+          `\`\`\`metrists:approval fence with id ${blobId} and leaving the document as-is, ` +
+          `or noting the decision), using your normal editing tools.`;
+    return (
+      `The user ${decision} your approval block ${blobId}${subject} in ${path}.\n\n` +
+      followThrough
+    );
+  },
 });

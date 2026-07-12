@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { McpServer } from "@metrists/shared/agent";
+import { MCP_SERVER_NAME, type McpServer } from "@metrists/shared/agent";
 import type { AgentTransport, Unsubscribe } from "./agent-transport.interface";
 import { AgentTransportError } from "./agent-transport.interface";
 
@@ -11,7 +11,13 @@ type AgentResult<T = unknown> = {
   error?: { proc_id: string; type: string; message: string };
 };
 
-type McpRelayInfo = { port: number; command: string; args: string[] };
+type McpRelayInfo = {
+  port: number;
+  command: string;
+  args: string[];
+  /** Per-task connection token; the relay presents it as its first line. */
+  token: string;
+};
 
 /**
  * Desktop transport for a task's MCP connection (Stage 3.5): the harness
@@ -77,8 +83,15 @@ export class TauriMcpTransport implements AgentTransport {
         result.error?.message ?? "failed to start mcp relay listener",
       );
     }
-    const { command, args } = result.value;
-    this._mcpServer = { name: "metrists", command, args, env: [] };
+    const { command, args, token } = result.value;
+    this._mcpServer = {
+      name: MCP_SERVER_NAME,
+      command,
+      args,
+      // The harness passes this env to the relay it spawns; the relay
+      // presents it as its first line and the bridge validates before wiring.
+      env: [{ name: "METRISTS_MCP_TOKEN", value: token }],
+    };
   }
 
   send(line: string): void {

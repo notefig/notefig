@@ -4,11 +4,11 @@ import {
   newEventId,
   BUILT_IN_HARNESSES,
   composePrompt,
+  MCP_SERVER_NAME,
   type ContentBlock,
   type HarnessDefinition,
   type RequestPermissionResponse,
   type SessionNotification,
-  type ToolAgentsFacade,
   type ToolCallUpdate,
   type TurnOutcome,
 } from "@metrists/shared/agent";
@@ -20,7 +20,6 @@ import { MetristsAcpClient } from "./acp-client";
 import type { AgentTransport } from "./agent-transport.interface";
 import { AgentTransportError } from "./agent-transport.interface";
 import {
-  MCP_SERVER_NAME,
   attachMcpTransport,
   createMcpRequestHandler,
   renderToolUsagePreamble,
@@ -34,6 +33,11 @@ import {
   type AgentTaskStatus,
   type AgentTurnStatus,
 } from "./agent-collections";
+import { getRegisteredTask, registerTask, unregisterTask } from "./task-registry";
+// The one `agents` facade (ToolContext.agents). Deferred-use import: this
+// module ↔ agents.ts reference each other only inside function bodies, never
+// at module-eval time, so evaluation order is a non-issue.
+import { agents } from "./agents";
 
 /** KV namespace for agent state (sessionId per task, workspace trust flag). */
 const AGENT_KV_NAMESPACE = "agent";
@@ -85,25 +89,6 @@ function normalizeMcpToolName(title: string | null | undefined): string | undefi
 }
 
 /**
- * Minimal structural `ToolAgentsFacade` (Stage 2's `ToolContext.agents`),
- * built from this module's own registries/free functions rather than
- * importing `./agents` — `agents.ts` itself imports from this file, so
- * importing it back here would be circular.
- */
-function buildToolAgentsFacade(): ToolAgentsFacade {
-  return {
-    task: (taskId: string) => ({
-      prompt: (text: string) => taskRegistry.get(taskId)?.prompt(text),
-      cancel: () => cancelAgentTask(taskId),
-    }),
-    workspace: (workspacePath: string) => ({
-      createTask: (harness: unknown) =>
-        startAgentTask(workspacePath, harness as HarnessDefinition),
-    }),
-  };
-}
-
-/**
  * Extract a message from anything thrown. The ACP library rejects with a plain
  * JSON-RPC `{ code, message }` object (not an Error), so `String(error)` would
  * yield "[object Object]" and lose the reason — including the auth signal.
@@ -147,13 +132,13 @@ export class AgentTask {
    */
   private readonly toolEventIds = new Map<string, string>();
   /**
-   * Single-slot coalescing: the next prompt to run. Prompts arriving while a
-   * turn runs overwrite it (latest wins) rather than stacking a queue — the UI
-   * gates Send while running, so this only coalesces rapid programmatic sends.
-   * A displaced slot resolves its handle as "superseded" (A3) before being
-   * overwritten.
+   * FIFO prompt queue. Prompts arriving while a turn runs stack in send
+   * order and run one per turn — nothing is displaced or dropped. Queued
+   * prompts are transcript state, not private task state: `prompt()` inserts
+   * their user entry + a `"queued"` turn row immediately, and `runTurn`
+   * promotes those rows to `"running"` when the queue reaches them.
    */
-  private pendingPrompt: { turnId: string; text: string } | null = null;
+  private readonly pendingPrompts: { turnId: string; text: string }[] = [];
   /** turnId → resolver for that turn's prompt-handle `completed` promise. */
   private readonly turnResolvers = new Map<
     string,
@@ -224,7 +209,7 @@ export class AgentTask {
             ctx: {
               workspacePath: this.workspacePath,
               taskId: this.taskId,
-              agents: buildToolAgentsFacade(),
+              agents,
             },
             permissionBroker: this.permissionBroker,
           }),
@@ -251,29 +236,84 @@ export class AgentTask {
   }
 
   /**
-   * Send a user prompt. While a turn runs the text is held in a single slot
-   * (latest wins) and promoted when the turn ends; a displaced slot's handle
-   * resolves "superseded" (A3). The UI may ignore the returned handle
-   * (fire-and-forget); tests and programmatic callers await `completed`.
+   * Send a user prompt. Enqueue always succeeds — this never throws. While a
+   * turn runs the prompt queues FIFO, visible in the transcript as a
+   * `"queued"` turn row; a task that never started or is disposed resolves
+   * the handle as an error/cancelled value instead. The UI may ignore the
+   * returned handle (fire-and-forget is lossless); tests and programmatic
+   * callers await `completed`.
    */
   prompt(text: string): { turnId: string; completed: Promise<TurnOutcome> } {
-    if (!this.client || !this.sessionId) {
-      throw new Error("agent task is not started");
-    }
     const turnId = newTurnId();
-
-    const displaced = this.pendingPrompt;
-    if (displaced) {
-      this.resolveTurn(displaced.turnId, { status: "superseded" });
-    }
-    this.pendingPrompt = { turnId, text };
-
     const completed = new Promise<TurnOutcome>((resolve) => {
       this.turnResolvers.set(turnId, resolve);
     });
+    const now = Date.now();
+
+    // Queued prompts are transcript state: entry + turn row exist from the
+    // moment of send, and runTurn promotes (not re-inserts) them.
+    agentEntriesCollection.insert({
+      id: newEventId(),
+      taskId: this.taskId,
+      turnId,
+      type: "user",
+      text,
+      createdAt: now,
+    });
+    agentTurnsCollection.insert({
+      turnId,
+      taskId: this.taskId,
+      sessionId: this.sessionId ?? "",
+      status: "queued",
+      startedAt: now,
+    });
+
+    if (this.disposed) {
+      this.settleQueuedTurn(turnId, { status: "cancelled" });
+      return { turnId, completed };
+    }
+    if (!this.client || !this.sessionId) {
+      this.settleQueuedTurn(turnId, {
+        status: "error",
+        error: "agent task is not started",
+      });
+      return { turnId, completed };
+    }
+
+    this.pendingPrompts.push({ turnId, text });
     // A running (or actively draining) loop will pick this up; otherwise start one.
     if (!this.currentTurn && !this.draining) void this.drainQueue();
     return { turnId, completed };
+  }
+
+  /**
+   * Drop one queued prompt (the panel's ✕ on a queued row): delete its
+   * transcript rows and resolve its handle cancelled. No-op if the turn
+   * already started running.
+   */
+  removeQueuedPrompt(turnId: string): void {
+    const index = this.pendingPrompts.findIndex((p) => p.turnId === turnId);
+    if (index === -1) return;
+    this.pendingPrompts.splice(index, 1);
+    for (const entry of agentEntriesCollection.toArray) {
+      if (entry.turnId === turnId) agentEntriesCollection.delete(entry.id);
+    }
+    agentTurnsCollection.delete(turnId);
+    this.resolveTurn(turnId, { status: "cancelled" });
+  }
+
+  /** Flip a queued turn's row to its terminal state and resolve its handle. */
+  private settleQueuedTurn(
+    turnId: string,
+    outcome: Extract<TurnOutcome, { status: "cancelled" | "error" }>,
+  ): void {
+    if (agentTurnsCollection.get(turnId)) {
+      agentTurnsCollection.update(turnId, (draft) => {
+        draft.status = outcome.status;
+        if (outcome.status === "error") draft.error = outcome.error;
+      });
+    }
+    this.resolveTurn(turnId, outcome);
   }
 
   /** Resolve and clear a turn's prompt-handle promise, if one is pending. */
@@ -293,12 +333,12 @@ export class AgentTask {
     if (this.draining) return;
     this.draining = true;
     try {
-      while (!this.disposed && this.pendingPrompt !== null) {
-        const { turnId, text } = this.pendingPrompt;
-        this.pendingPrompt = null;
+      while (!this.disposed && this.pendingPrompts.length > 0) {
+        const { turnId, text } = this.pendingPrompts.shift()!;
         const status = await this.runTurn(turnId, text);
-        // Don't auto-run a coalesced follow-up through the same failure (e.g.
-        // an auth block); it resumes when the user sends again.
+        // Don't march the rest of the queue through the same failure (e.g.
+        // an auth block); remaining rows stay visibly queued and resume on
+        // the next successful send.
         if (status === "error") break;
       }
     } finally {
@@ -308,11 +348,13 @@ export class AgentTask {
 
   private async runTurn(turnId: string, text: string): Promise<AgentTurnStatus> {
     if (!this.client || !this.sessionId) {
-      this.resolveTurn(turnId, { status: "error", error: "agent task is not started" });
+      this.settleQueuedTurn(turnId, {
+        status: "error",
+        error: "agent task is not started",
+      });
       return "error";
     }
-
-    const now = Date.now();
+    const sessionId = this.sessionId;
 
     // First prompt names the task.
     if (this.title === "New task") {
@@ -322,21 +364,11 @@ export class AgentTask {
       });
     }
 
-    // User prompt as a first-class transcript entry.
-    agentEntriesCollection.insert({
-      id: newEventId(),
-      taskId: this.taskId,
-      turnId,
-      type: "user",
-      text,
-      createdAt: now,
-    });
-    agentTurnsCollection.insert({
-      turnId,
-      taskId: this.taskId,
-      sessionId: this.sessionId,
-      status: "running",
-      startedAt: now,
+    // Promote the rows prompt() queued (same ids — the queued row becomes
+    // the running row; the user entry is already in the transcript).
+    agentTurnsCollection.update(turnId, (draft) => {
+      draft.status = "running";
+      draft.sessionId = sessionId;
     });
 
     this.currentTurn = {
@@ -352,13 +384,15 @@ export class AgentTask {
       const preamble = this.toolUsagePreambleSent
         ? undefined
         : renderToolUsagePreamble();
-      this.toolUsagePreambleSent = true;
       const blocks = composePrompt({
         text,
         preamble,
         capabilities: { embeddedContext: this.client.embeddedContextCapability },
       });
       const response = await this.client.prompt(this.sessionId, blocks);
+      // Only after a successful round-trip — a failed first turn (auth block,
+      // dead transport) must not eat the preamble for the retry.
+      this.toolUsagePreambleSent = true;
       // A turn that reached the model clears any stale auth banner.
       this.setAuthHint(undefined);
       return this.finishTurn(response.stopReason, "completed");
@@ -392,7 +426,7 @@ export class AgentTask {
 
     // A finished turn means its tools are no longer running — resolve any that
     // never received a terminal update so nothing spins forever.
-    this.resolveLingeringToolCalls(turn.turnId);
+    this.resolveLingeringToolCalls(turn.turnId, turnStatus);
 
     agentTurnsCollection.update(turn.turnId, (draft) => {
       draft.status = turnStatus;
@@ -553,14 +587,24 @@ export class AgentTask {
     });
   }
 
-  /** Flip this turn's still-open tool calls to completed (turn is over). */
-  private resolveLingeringToolCalls(turnId: string): void {
+  /**
+   * Flip this turn's still-open tool calls to a terminal status matching how
+   * the turn ended: completed turns close them as "completed"; errored or
+   * cancelled turns close them as "failed" (ACP's ToolCallStatus has no
+   * "cancelled" — "failed" is the honest terminal state either way: the
+   * tool did not finish).
+   */
+  private resolveLingeringToolCalls(
+    turnId: string,
+    turnStatus: AgentTurnStatus,
+  ): void {
+    const terminal = turnStatus === "completed" ? "completed" : "failed";
     for (const entry of agentEntriesCollection.toArray) {
       if (entry.type !== "tool_call" || entry.turnId !== turnId) continue;
       const status = entry.toolCall?.status;
       if (status === "pending" || status === "in_progress" || status == null) {
         agentEntriesCollection.update(entry.id, (draft) => {
-          if (draft.toolCall) draft.toolCall.status = "completed";
+          if (draft.toolCall) draft.toolCall.status = terminal;
         });
       }
     }
@@ -612,10 +656,15 @@ export class AgentTask {
 
   /**
    * session/cancel + resolve this task's pending permissions as cancelled.
-   * Other tasks are untouched.
+   * Queued prompts drain too: each handle resolves cancelled and its turn
+   * row flips to "cancelled" (rows persist in the transcript). Other tasks
+   * are untouched.
    */
   async cancel(): Promise<void> {
     this.permissionBroker.cancelAll();
+    for (const { turnId } of this.pendingPrompts.splice(0)) {
+      this.settleQueuedTurn(turnId, { status: "cancelled" });
+    }
     if (this.client && this.sessionId && this.currentTurn) {
       try {
         await this.client.cancel(this.sessionId);
@@ -637,9 +686,8 @@ export class AgentTask {
 
   async dispose(): Promise<void> {
     this.disposed = true;
-    if (this.pendingPrompt) {
-      this.resolveTurn(this.pendingPrompt.turnId, { status: "cancelled" });
-      this.pendingPrompt = null;
+    for (const { turnId } of this.pendingPrompts.splice(0)) {
+      this.settleQueuedTurn(turnId, { status: "cancelled" });
     }
     for (const unsubscribe of this.unsubscribers) unsubscribe();
     this.unsubscribers.length = 0;
@@ -711,7 +759,7 @@ export class TaskManager {
       options?.parentTaskId,
     );
     this.tasks.set(taskId, task);
-    taskRegistry.set(taskId, task);
+    registerTask(task);
     return task;
   }
 
@@ -726,27 +774,19 @@ export class TaskManager {
   async cancelTask(taskId: string): Promise<void> {
     const task = this.tasks.get(taskId);
     this.tasks.delete(taskId);
-    taskRegistry.delete(taskId);
+    unregisterTask(taskId);
     await task?.dispose();
   }
 
   async disposeAll(): Promise<void> {
     const tasks = this.listTasks();
     this.tasks.clear();
-    for (const task of tasks) taskRegistry.delete(task.taskId);
+    for (const task of tasks) unregisterTask(task.taskId);
     await Promise.all(tasks.map((task) => task.dispose()));
   }
 }
 
-/** Flat taskId → AgentTask registry (editor-store convention) backing the
- *  free-function command API below, so the app addresses tasks by id alone. */
-const taskRegistry = new Map<string, AgentTask>();
 const taskManagerRegistry = new Map<string, TaskManager>();
-
-/** Exposed so `agents.ts`'s entity-handle facade can resolve a live task. */
-export function getRegisteredTask(taskId: string): AgentTask | undefined {
-  return taskRegistry.get(taskId);
-}
 
 /**
  * Which task authored a given blob, and its type/path — read straight off
@@ -754,7 +794,7 @@ export function getRegisteredTask(taskId: string): AgentTask | undefined {
  * already gets one, with `rawInput` verbatim), rather than a dedicated
  * blob-tracking table. Used by `answerBlob` (blob-actions.ts) to address a
  * fresh prompt back at the right session once the user interacts with the
- * blob; the answer never routes through `agentInteractions`.
+ * blob; the answer is a plain prompt, no interaction bookkeeping.
  */
 export function findBlobAuthorTask(
   blobId: string,
@@ -810,14 +850,19 @@ export async function startAgentTask(
   return task.taskId;
 }
 
-/** Send a prompt to a task (fire-and-forget; single-slot coalescing). */
+/** Send a prompt to a task (fire-and-forget; FIFO queue, lossless). */
 export function promptAgentTask(taskId: string, text: string): void {
-  taskRegistry.get(taskId)?.prompt(text);
+  getRegisteredTask(taskId)?.prompt(text);
+}
+
+/** Remove one queued (not yet running) prompt from a task's queue. */
+export function removeQueuedPrompt(taskId: string, turnId: string): void {
+  getRegisteredTask(taskId)?.removeQueuedPrompt(turnId);
 }
 
 /** Cancel a task's running turn and pending permissions. */
 export async function cancelAgentTask(taskId: string): Promise<void> {
-  await taskRegistry.get(taskId)?.cancel();
+  await getRegisteredTask(taskId)?.cancel();
 }
 
 /** Answer a pending permission request (rows flow via the collection). */
@@ -826,7 +871,7 @@ export function respondToAgentPermission(
   requestId: string,
   response: RequestPermissionResponse,
 ): void {
-  taskRegistry.get(taskId)?.respondPermission(requestId, response);
+  getRegisteredTask(taskId)?.respondPermission(requestId, response);
 }
 
 export async function disposeWorkspaceTaskManager(

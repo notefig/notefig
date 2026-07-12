@@ -19,7 +19,7 @@ import type {
 import { transportToStreams } from "./agent-transport.interface";
 import type { AgentTransport } from "./agent-transport.interface";
 import type { PermissionBroker } from "./permission-broker";
-import { MCP_SERVER_NAME } from "./mcp-server";
+import { MCP_SERVER_NAME } from "@metrists/shared/agent";
 import {
   readWorkspaceTextFile,
   writeWorkspaceTextFile,

@@ -10,6 +10,12 @@ import {
   projectSettingsQueryKey,
 } from "./project-settings";
 import { calculateContentHash } from "./hash";
+import { getDocumentSync } from "./markdown-conversion";
+// Conscious utils → components import (direct-imports-over-injection house
+// rule; verified acyclic — editor-store does not import file-sync). If this
+// ever tangles, relocate the editor registry to a leaf module rather than
+// adding a registration seam.
+import { getMarkdownEditor } from "@/components/editor/editor-store";
 import { platformAdapter } from "@/adapters";
 
 const INVALIDATE_DEBOUNCE_MS = 500;
@@ -56,15 +62,23 @@ export function isRecentSelfWrite(path: string, contentHash: string): boolean {
 }
 
 /**
- * The single path every desktop-mediated agent read/write takes (ACP
- * fs/read_text_file, fs/write_text_file; web mode advertises fs:false so
- * writes there are native and only adopted via the watcher).
+ * The single path every desktop-mediated agent write takes (ACP
+ * fs/write_text_file, author_blob, history_restore, blob answers; web mode
+ * advertises fs:false so writes there are native and only adopted via the
+ * watcher).
  *
- * Writing here makes an agent edit indistinguishable from an external edit:
- * write via the platform adapter so the standard content-change pipeline
- * fires and DocumentSync's last-writer-wins arbitrates against open editors.
- * No new merge machinery lives here or anywhere. `recordSelfWrite` keeps the
- * watcher echo of this write from being misread as an external change.
+ * This is the *adopting* write primitive. The watcher echo of this write is
+ * self-write-suppressed (`recordSelfWrite` + `handleContentFileSystemChange`'s
+ * skip), so the watcher → content-change → DocumentSync pipeline never fires
+ * for it — correct for a normal editor autosave, where the editor already
+ * holds what was written, but wrong for any agent-shaped write to a document
+ * open in an editor. So after the disk write, this function pushes the
+ * content into the live editor itself, driving the same
+ * `DocumentSync.prepareAdoption`/`commitAdoption` API `useEditorFileSync`
+ * uses for external changes — directly and synchronously, not via a watcher
+ * round-trip that was never going to arrive. `prepareAdoption` returning
+ * null (a local edit mid-autosave-debounce) keeps last-writer-wins: the
+ * user's edit wins, exactly like any external change arriving mid-edit.
  *
  * Per-path write serialization across parallel tasks is deliberately not
  * implemented here (dropped along with AgentWriteGate) — two tasks writing
@@ -81,6 +95,16 @@ export async function writeWorkspaceTextFile(
   const failure = result.failed[0];
   if (failure) {
     throw new FsError(failure.type, failure.path, failure.message);
+  }
+
+  const editor = getMarkdownEditor(path);
+  if (editor && !editor.isDestroyed) {
+    const sync = getDocumentSync(path);
+    const doc = await sync.prepareAdoption(content);
+    if (doc && !editor.isDestroyed) {
+      editor.commands.setContent(doc, { emitUpdate: false });
+      sync.commitAdoption(content, calculateContentHash(content));
+    }
   }
 }
 

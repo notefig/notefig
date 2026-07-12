@@ -8,18 +8,17 @@
  * `agent-service.ts` are the implementation — this module reorganizes access
  * to them, it does not duplicate their logic.
  */
-import type {
-  HarnessDefinition,
-  RequestPermissionResponse,
-  TurnOutcome,
+import {
+  newTurnId,
+  type HarnessDefinition,
+  type RequestPermissionResponse,
+  type TurnOutcome,
 } from "@metrists/shared/agent";
 import { agentTurnsCollection, type AgentTurn } from "./agent-collections";
-import {
-  cancelAgentTask,
-  getRegisteredTask,
-  respondToAgentPermission,
-  startAgentTask,
-} from "./agent-service";
+import { getRegisteredTask } from "./task-registry";
+// Deferred-use import (see agent-service.ts's matching note): only
+// `workspaceHandle.createTask` reaches back into the service, at call time.
+import { startAgentTask } from "./agent-service";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -27,8 +26,11 @@ export type PromptHandle = { turnId: string; completed: Promise<TurnOutcome> };
 
 export interface AgentTaskHandle {
   readonly taskId: string;
-  /** Fails as a value if the task is missing/disposed rather than throwing. */
-  prompt(text: string): PromptHandle | { ok: false; error: string };
+  /**
+   * Enqueue a prompt — infallible, never throws. A missing/disposed task
+   * returns a handle whose `completed` is already resolved as an error.
+   */
+  prompt(text: string): PromptHandle;
   cancel(): Promise<ActionResult>;
   respondPermission(
     requestId: string,
@@ -53,20 +55,29 @@ function taskHandle(taskId: string): AgentTaskHandle {
     taskId,
     prompt(text) {
       const task = getRegisteredTask(taskId);
-      if (!task) return { ok: false, error: "agent task is not started" };
+      if (!task) {
+        return {
+          turnId: newTurnId(),
+          completed: Promise.resolve<TurnOutcome>({
+            status: "error",
+            error: "agent task is not started",
+          }),
+        };
+      }
       return task.prompt(text);
     },
     async cancel() {
       const task = getRegisteredTask(taskId);
       if (!task) return { ok: false, error: "agent task is not started" };
-      await cancelAgentTask(taskId);
+      await task.cancel();
       return { ok: true };
     },
     respondPermission(requestId, response) {
-      if (!getRegisteredTask(taskId)) {
+      const task = getRegisteredTask(taskId);
+      if (!task) {
         return { ok: false, error: "agent task is not started" };
       }
-      respondToAgentPermission(taskId, requestId, response);
+      task.respondPermission(requestId, response);
       return { ok: true };
     },
   };

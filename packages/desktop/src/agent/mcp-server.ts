@@ -1,5 +1,10 @@
 import { zodToJsonSchema } from "zod-to-json-schema";
-import type { AgentTool, ToolContext } from "@metrists/shared/agent";
+import {
+  MCP_SERVER_NAME,
+  newEventId,
+  type AgentTool,
+  type ToolContext,
+} from "@metrists/shared/agent";
 import { getAllBlobTypes } from "@/components/editor/blobs/blob-registry";
 import { toolRegistry, getTool } from "./tools";
 import type { PermissionBroker } from "./permission-broker";
@@ -12,10 +17,6 @@ import i18n from "@/utils/intl";
 function toolTitle(tool: Pick<AgentTool<unknown, unknown>, "title">): string {
   return i18n.t(tool.title);
 }
-
-/** The MCP server name Stage 3.5's `session/new.mcpServers` entry advertises;
- *  also the prefix adapters mint tool names under (`mcp__metrists__<tool>`). */
-export const MCP_SERVER_NAME = "metrists";
 
 /**
  * MCP's `tools/list` schema is enough for the model to call a tool
@@ -131,7 +132,8 @@ async function dispatchToolCall(
   if (tool.requiresPermission) {
     const response = await permissionBroker.request({
       sessionId: ctx.taskId,
-      toolCall: { toolCallId: `mcp_${Date.now()}`, title: toolTitle(tool) },
+      // newEventId: unique even for same-millisecond calls (Date.now() collides).
+      toolCall: { toolCallId: newEventId(), title: toolTitle(tool) },
       options: [
         { optionId: "allow", name: "Allow", kind: "allow_once" },
         { optionId: "deny", name: "Deny", kind: "reject_once" },

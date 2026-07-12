@@ -96,7 +96,9 @@ async function runPrompt(task: AgentTask, text: string): Promise<void> {
   await vi.waitFor(() => {
     const turns = turnFor(task.taskId);
     expect(turns.length).toBe(before + 1);
-    expect(turns[turns.length - 1].status).not.toBe("running");
+    expect(["completed", "error", "cancelled"]).toContain(
+      turns[turns.length - 1].status,
+    );
   });
 }
 
@@ -270,7 +272,7 @@ describe("AgentTask vertical slice", () => {
     await vi.waitFor(() => expect(outcome).toEqual({ outcome: "cancelled" }));
   });
 
-  it("coalesces prompts sent during a running turn (latest wins)", async () => {
+  it("queues prompts sent during a running turn FIFO — none dropped", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
     const seen: string[] = [];
@@ -288,13 +290,109 @@ describe("AgentTask vertical slice", () => {
 
     task.prompt("first"); // starts a turn, gated open
     await vi.waitFor(() => expect(seen).toEqual(["first"]));
-    task.prompt("second"); // both land in the single slot while running…
-    task.prompt("third"); // …and the latest wins
+    task.prompt("second");
+    task.prompt("third");
+    task.prompt("fourth");
     expect(seen).toEqual(["first"]); // nothing new delivered yet
     releaseFirst();
 
-    await vi.waitFor(() => expect(seen).toEqual(["first", "third"]));
-    expect(seen).not.toContain("second");
+    await vi.waitFor(() =>
+      expect(seen).toEqual(["first", "second", "third", "fourth"]),
+    );
+  });
+
+  it("renders queued prompts as transcript rows and promotes the same rows to running", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((r) => (releaseFirst = r));
+    let promptCount = 0;
+    agent.onPrompt = async () => {
+      if (promptCount++ === 0) await firstGate;
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    task.prompt("one");
+    await vi.waitFor(() =>
+      expect(turnFor(task.taskId)[0]?.status).toBe("running"),
+    );
+    const queuedHandle = task.prompt("two");
+
+    // Entry + turn row exist immediately, with status "queued".
+    const queuedRow = agentTurnsCollection.get(queuedHandle.turnId);
+    expect(queuedRow?.status).toBe("queued");
+    const userEntries = entriesFor(task.taskId).filter(
+      (e) => e.type === "user" && e.turnId === queuedHandle.turnId,
+    );
+    expect(userEntries).toHaveLength(1);
+
+    releaseFirst();
+    await queuedHandle.completed;
+
+    // Promotion reused the same rows (ids stable, no duplicates).
+    expect(agentTurnsCollection.get(queuedHandle.turnId)?.status).toBe("completed");
+    expect(
+      entriesFor(task.taskId).filter(
+        (e) => e.type === "user" && e.turnId === queuedHandle.turnId,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("cancel() resolves queued prompts cancelled and flips their rows", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = () => new Promise(() => {}); // hold the turn open forever
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    task.prompt("running");
+    await vi.waitFor(() =>
+      expect(turnFor(task.taskId)[0]?.status).toBe("running"),
+    );
+    const q1 = task.prompt("queued 1");
+    const q2 = task.prompt("queued 2");
+
+    await task.cancel();
+
+    expect(await q1.completed).toEqual({ status: "cancelled" });
+    expect(await q2.completed).toEqual({ status: "cancelled" });
+    expect(agentTurnsCollection.get(q1.turnId)?.status).toBe("cancelled");
+    expect(agentTurnsCollection.get(q2.turnId)?.status).toBe("cancelled");
+  });
+
+  it("removeQueuedPrompt removes exactly one queued prompt and its rows", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const seen: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((r) => (releaseFirst = r));
+    let promptCount = 0;
+    agent.onPrompt = async (params) => {
+      seen.push(lastPromptText(params));
+      if (promptCount++ === 0) await firstGate;
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(client);
+    task.prompt("one");
+    await vi.waitFor(() => expect(seen).toEqual(["one"]));
+    const removed = task.prompt("two");
+    const kept = task.prompt("three");
+
+    task.removeQueuedPrompt(removed.turnId);
+
+    expect(await removed.completed).toEqual({ status: "cancelled" });
+    expect(agentTurnsCollection.get(removed.turnId)).toBeUndefined();
+    expect(
+      entriesFor(task.taskId).filter((e) => e.turnId === removed.turnId),
+    ).toHaveLength(0);
+    // The other queued prompt is untouched and still runs.
+    releaseFirst();
+    await kept.completed;
+    expect(seen).toEqual(["one", "three"]);
   });
 
   it("keeps parallel tasks isolated", async () => {
@@ -518,7 +616,7 @@ describe("AgentTask vertical slice", () => {
     expect(turn.error).toMatch(/authentication required/i);
   });
 
-  it("does not run a coalesced prompt after the turn errors", async () => {
+  it("halts the drain on an error turn; the rest of the queue stays queued", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
     const seen: string[] = [];
@@ -534,14 +632,26 @@ describe("AgentTask vertical slice", () => {
     await task.start(client);
     task.prompt("one");
     await vi.waitFor(() => expect(seen).toEqual(["one"]));
-    task.prompt("two"); // lands in the slot while the (failing) first runs
+    const queued = task.prompt("two"); // queues while the (failing) first runs
     releaseFirst();
 
     await vi.waitFor(() =>
-      expect(turnFor(task.taskId).at(-1)?.status).toBe("error"),
+      expect(turnFor(task.taskId)[0]?.status).toBe("error"),
     );
-    // The drain halted on the error; "two" was not run.
+    // The drain halted on the error; "two" was not run and stays visibly queued.
     expect(seen).toEqual(["one"]);
+    expect(agentTurnsCollection.get(queued.turnId)?.status).toBe("queued");
+  });
+
+  it("prompt() on a never-started task resolves an error value, never throws", async () => {
+    const task = new TaskManager("/ws").createTask(harness);
+
+    const handle = task.prompt("hello");
+    expect(await handle.completed).toEqual({
+      status: "error",
+      error: expect.stringMatching(/not started/i),
+    });
+    expect(agentTurnsCollection.get(handle.turnId)?.status).toBe("error");
   });
 
   it("ignores an unrendered session update without breaking the turn", async () => {
@@ -579,7 +689,7 @@ describe("prompt handles (A3, Stage 1)", () => {
     expect(outcome).toEqual({ status: "completed", stopReason: "end_turn" });
   });
 
-  it("resolves a displaced prompt as superseded", async () => {
+  it("resolves every queued prompt's handle — nothing is displaced", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
     let releaseFirst!: () => void;
@@ -593,13 +703,18 @@ describe("prompt handles (A3, Stage 1)", () => {
     await task.start(client);
 
     const first = task.prompt("one");
-    await vi.waitFor(() => expect(turnFor(task.taskId).length).toBe(1));
+    await vi.waitFor(() =>
+      expect(turnFor(task.taskId)[0]?.status).toBe("running"),
+    );
     const second = task.prompt("two"); // "one" is already running, so "two" queues
-    const third = task.prompt("three"); // displaces "two" before it ever runs
+    const third = task.prompt("three"); // …and "three" queues behind it
     releaseFirst();
 
-    expect(await second.completed).toEqual({ status: "superseded" });
     expect(await first.completed).toEqual({
+      status: "completed",
+      stopReason: "end_turn",
+    });
+    expect(await second.completed).toEqual({
       status: "completed",
       stopReason: "end_turn",
     });

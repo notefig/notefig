@@ -56,8 +56,12 @@ beforeEach(() => {
 describe("agents facade (Stage 1)", () => {
   it("task(id) actions fail as values for an unknown/disposed task", async () => {
     const handle = agents.task("task_does_not_exist");
-    expect(handle.prompt("hi")).toEqual({
-      ok: false,
+    // prompt() is infallible: a missing task returns a handle whose
+    // `completed` is already resolved as an error — it never throws.
+    const promptHandle = handle.prompt("hi");
+    expect(promptHandle.turnId).toEqual(expect.any(String));
+    expect(await promptHandle.completed).toEqual({
+      status: "error",
       error: expect.any(String),
     });
     expect(await handle.cancel()).toEqual({ ok: false, error: expect.any(String) });
@@ -78,9 +82,7 @@ describe("agents facade (Stage 1)", () => {
     await task.start(client);
 
     const handle = agents.task(task.taskId);
-    const result = handle.prompt("hello");
-    expect("turnId" in result).toBe(true);
-    const outcome = await (result as { completed: Promise<unknown> }).completed;
+    const outcome = await handle.prompt("hello").completed;
     expect(outcome).toEqual({ status: "completed", stopReason: "end_turn" });
   });
 

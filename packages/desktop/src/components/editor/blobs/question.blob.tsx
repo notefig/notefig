@@ -104,4 +104,17 @@ export default defineBlobType({
     payload.answer
       ? `${payload.prompt} — ${payload.answer}`
       : payload.prompt,
+  formatAnswerPrompt: ({ blobId, path, envelope, patch }) => {
+    const answer =
+      typeof patch.answer === "string" ? patch.answer : JSON.stringify(patch);
+    const question =
+      typeof envelope.prompt === "string" ? ` ("${envelope.prompt}")` : "";
+    return (
+      `The user answered your question block ${blobId}${question} in ${path}: ${answer}\n\n` +
+      `Now replace that answered block in ${path} with the content the answer resolves to, ` +
+      `using your normal editing tools: fold the answer into the document and remove the ` +
+      `\`\`\`metrists:question fence with id ${blobId} — it has served its purpose. ` +
+      `Do not re-ask the question.`
+    );
+  },
 });

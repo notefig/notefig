@@ -29,12 +29,18 @@ export type AgentTaskRow = {
   authHint?: string;
 };
 
-export type AgentTurnStatus = "running" | "completed" | "cancelled" | "error";
+export type AgentTurnStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "cancelled"
+  | "error";
 
 export type AgentTurn = {
   /** trn_ (ascending) — one per session/prompt round-trip */
   turnId: string;
   taskId: string;
+  /** Empty while the turn is queued on a task whose session isn't up yet. */
   sessionId: string;
   status: AgentTurnStatus;
   /** ACP stop reason once the turn ends */

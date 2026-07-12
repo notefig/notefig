@@ -63,6 +63,7 @@ import {
 import {
   cancelAgentTask,
   promptAgentTask,
+  removeQueuedPrompt,
   startAgentTask,
   contentBlockText,
 } from "@/agent/agent-service";
@@ -291,6 +292,10 @@ function Transcript({ taskId }: { taskId: string }) {
     () => turns.filter((t) => t.status === "error" && t.error),
     [turns],
   );
+  const queuedTurnIds = useMemo(
+    () => new Set(turns.filter((t) => t.status === "queued").map((t) => t.turnId)),
+    [turns],
+  );
 
   // Ids are ascending, so document order = chronological (text and tool calls
   // interleaved exactly as they streamed).
@@ -308,7 +313,11 @@ function Transcript({ taskId }: { taskId: string }) {
       {/* pb clears the floating composer overlay pinned to the bottom. */}
       <div className="flex flex-col gap-3 p-3 pb-36">
         {sortedEntries.map((entry) => (
-          <EntryView key={entry.id} entry={entry} />
+          <EntryView
+            key={entry.id}
+            entry={entry}
+            queued={entry.type === "user" && queuedTurnIds.has(entry.turnId)}
+          />
         ))}
         {turnErrors.map((turn) => (
           <div
@@ -325,7 +334,7 @@ function Transcript({ taskId }: { taskId: string }) {
 }
 
 /** Render one transcript entry by type; tool calls are peers of text. */
-function EntryView({ entry }: { entry: AgentEntry }) {
+function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
   if (entry.type === "tool_call") {
     if (!entry.toolCall) return null;
     const CustomCard = TOOL_NAME_RENDERER[entry.toolCall.title ?? ""];
@@ -348,9 +357,26 @@ function EntryView({ entry }: { entry: AgentEntry }) {
           isUser
             ? "bg-primary text-primary-foreground"
             : "bg-muted text-foreground",
+          queued && "opacity-70",
         )}
       >
         {entry.text}
+        {queued && (
+          <span className="mt-1 flex items-center justify-end gap-1.5">
+            <span className="rounded-full bg-primary-foreground/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+              queued
+            </span>
+            <button
+              type="button"
+              title="Remove from queue"
+              aria-label="Remove from queue"
+              className="rounded-full p-0.5 hover:bg-primary-foreground/20"
+              onClick={() => removeQueuedPrompt(entry.taskId, entry.turnId)}
+            >
+              <X className="size-3" />
+            </button>
+          </span>
+        )}
       </div>
     </div>
   );
@@ -600,9 +626,10 @@ function rawInputPreview(rawInput: Record<string, unknown>): string {
 
 /**
  * The floating composer: a rounded card pinned to the bottom of the tab with
- * the prompt input above a toolbar row. The send control flips to a stop
- * button while the task is streaming (⌘⏎ sends). The left affordances mirror
- * the target design; they are visual placeholders until wired to real actions.
+ * the prompt input above a toolbar row. Send stays enabled while a turn runs
+ * — sending then queues the prompt (FIFO, lossless) — with Stop available
+ * alongside (⌘⏎ sends). The left affordances mirror the target design; they
+ * are visual placeholders until wired to real actions.
  */
 function PromptBox({
   value,
@@ -652,9 +679,10 @@ function PromptBox({
           <ComposerIconButton label="Dictate">
             <Mic />
           </ComposerIconButton>
-          {isRunning ? (
+          {isRunning && (
             <Button
               size="icon"
+              variant="outline"
               onClick={onStop}
               className="size-9 rounded-xl"
               title="Stop"
@@ -662,18 +690,17 @@ function PromptBox({
             >
               <Square className="fill-current" />
             </Button>
-          ) : (
-            <Button
-              size="icon"
-              onClick={onSend}
-              disabled={!canSend}
-              className="size-9 rounded-xl"
-              title="Send (⌘⏎)"
-              aria-label="Send"
-            >
-              <ArrowUp />
-            </Button>
           )}
+          <Button
+            size="icon"
+            onClick={onSend}
+            disabled={!canSend}
+            className="size-9 rounded-xl"
+            title={isRunning ? "Queue (⌘⏎)" : "Send (⌘⏎)"}
+            aria-label="Send"
+          >
+            <ArrowUp />
+          </Button>
         </div>
       </div>
     </div>

@@ -41,7 +41,7 @@ afterEach(() => {
 });
 
 describe("answerBlob", () => {
-  it("answer-while-open: patches the live editor's document", async () => {
+  it("answer-while-open: reads the live editor and writes through the adopting primitive", async () => {
     const content = codec.parse(baseMarkdown);
     getOrCreateEditor("/ws/notes.md", { type: "markdown", content, basePath: "/ws" });
     findBlobAuthorTask.mockReturnValue(undefined);
@@ -55,6 +55,8 @@ describe("answerBlob", () => {
     expect(writtenContent).toContain("status: answered");
     expect(writtenContent).toContain("answer: Pro");
     expect(readWorkspaceTextFile).not.toHaveBeenCalled();
+    // Live-editor adoption is writeWorkspaceTextFile's job now — covered by
+    // file-sync-workspace-fs.test.ts against an open editor.
   });
 
   it("answer-while-closed: falls back to readWorkspaceTextFile/writeWorkspaceTextFile", async () => {
@@ -96,7 +98,7 @@ describe("answerBlob", () => {
     expect(writeWorkspaceTextFile).not.toHaveBeenCalled();
   });
 
-  it("prompts the authoring task with the answer only on success", async () => {
+  it("prompts the authoring task with the type's directive formatter on success", async () => {
     readWorkspaceTextFile.mockResolvedValue(baseMarkdown);
     findBlobAuthorTask.mockReturnValue({ taskId: "t_1", blobType: "question", path: "/ws/closed.md" });
 
@@ -107,6 +109,23 @@ describe("answerBlob", () => {
     expect(taskId).toBe("t_1");
     expect(text).toContain("Enterprise");
     expect(text).toContain("q_test1");
+    expect(text).toContain("/ws/closed.md");
+    // Directive, not just informational: instructs the agent to replace the
+    // answered block with the content the answer resolves to.
+    expect(text.toLowerCase()).toContain("replace");
+  });
+
+  it("falls back to the generic informational sentence for a type without a formatter", async () => {
+    readWorkspaceTextFile.mockResolvedValue(baseMarkdown);
+    findBlobAuthorTask.mockReturnValue({ taskId: "t_1", blobType: "status", path: "/ws/closed.md" });
+
+    await answerBlob("/ws/closed.md", "q_test1", { status: "answered", answer: "done" });
+
+    const [, text] = taskPrompt.mock.calls[0];
+    expect(text).toContain('the "status" block');
+    expect(text).toContain("q_test1");
+    expect(text).toContain("done");
+    expect(text.toLowerCase()).not.toContain("replace");
   });
 
   it("does not prompt any task when the patch fails", async () => {
@@ -116,5 +135,53 @@ describe("answerBlob", () => {
 
     expect(taskPrompt).not.toHaveBeenCalled();
     expect(findBlobAuthorTask).not.toHaveBeenCalled();
+  });
+});
+
+describe("formatAnswerPrompt (per-type, single-file protocol)", () => {
+  const envelope = { id: "q_test1", status: "pending", createdBy: "agent" } as const;
+
+  it("question: states the answer and directs the agent to replace the block", async () => {
+    const questionType = (await import("../question.blob")).default;
+    const text = questionType.formatAnswerPrompt!({
+      blobId: "q_test1",
+      path: "/ws/notes.md",
+      envelope: { ...envelope, prompt: "Which tier?" },
+      patch: { answer: "Pro", status: "answered" },
+    });
+    expect(text).toContain("Pro");
+    expect(text).toContain("q_test1");
+    expect(text).toContain("/ws/notes.md");
+    expect(text).toContain("Which tier?");
+    expect(text.toLowerCase()).toContain("replace");
+  });
+
+  it("approval: approved directs proceed-then-replace; rejected directs do-not-proceed", async () => {
+    const approvalType = (await import("../approval.blob")).default;
+    const approved = approvalType.formatAnswerPrompt!({
+      blobId: "a_test1",
+      path: "/ws/notes.md",
+      envelope: { ...envelope, id: "a_test1", prompt: "Delete the intro?" },
+      patch: { decision: "approved", status: "answered" },
+    });
+    expect(approved).toContain("approved");
+    expect(approved).toContain("a_test1");
+    expect(approved).toContain("/ws/notes.md");
+    expect(approved.toLowerCase()).toContain("replace");
+    expect(approved).toContain("Proceed");
+
+    const rejected = approvalType.formatAnswerPrompt!({
+      blobId: "a_test1",
+      path: "/ws/notes.md",
+      envelope: { ...envelope, id: "a_test1" },
+      patch: { decision: "rejected", status: "answered" },
+    });
+    expect(rejected).toContain("rejected");
+    expect(rejected).toContain("Do not proceed");
+  });
+
+  it("status: has no formatter (falls back to the generic sentence)", async () => {
+    const statusType = (await import("../status.blob")).default;
+    expect(statusType.formatAnswerPrompt).toBeUndefined();
   });
 });

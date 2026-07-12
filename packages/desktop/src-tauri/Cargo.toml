@@ -25,6 +25,8 @@ notify-debouncer-full = "0.3"
 tauri-plugin-store = "2"
 lazy_static = "1.4"
 md5 = "0.8.0"
+# OS randomness for the MCP bridge's per-task connection token
+getrandom = "0.2"
 # Search functionality - ripgrep's search engine
 grep = "0.3"
 grep-regex = "0.1"

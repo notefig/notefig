@@ -28,7 +28,6 @@ const ID_PREFIXES = {
   event: "evt",
   permission: "per",
   diagnostic: "dg",
-  interaction: "itx",
 } as const;
 
 export type IdPrefix = keyof typeof ID_PREFIXES;
@@ -105,11 +104,6 @@ export function newPermissionId(): string {
 /** Ascending: task-keyed diagnostics stream (stderr, frames, errors …). */
 export function newDiagnosticId(): string {
   return createId("diagnostic", "ascending");
-}
-
-/** Ascending: answerable asks (question blobs, tool asks, auth blocks). */
-export function newInteractionId(): string {
-  return createId("interaction", "ascending");
 }
 
 /**

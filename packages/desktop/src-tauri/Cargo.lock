@@ -2236,6 +2236,7 @@ name = "metrists"
 version = "0.0.79"
 dependencies = [
  "futures",
+ "getrandom 0.2.17",
  "grep",
  "grep-regex",
  "lazy_static",

@@ -9,12 +9,17 @@
 /// already has to handle (`mcp-server.ts`), not something Rust needs to know.
 ///
 /// Uses ACP's `McpServer::Stdio` variant, not `Http`/`Sse`: the harness
-/// spawns the MCP server itself, so nothing here accepts arbitrary inbound
-/// connections and no bearer token/auth is needed (Stdio is also the only
-/// MCP transport the ACP spec makes mandatory — "All Agents MUST support
-/// this transport" — unlike `http`/`sse`, which are capability-gated and,
-/// per docs/architecture/spikes/v2-mcp-passthrough-spike.md, unreliable on
-/// at least one real adapter).
+/// spawns the MCP server itself (Stdio is also the only MCP transport the
+/// ACP spec makes mandatory — "All Agents MUST support this transport" —
+/// unlike `http`/`sse`, which are capability-gated and, per
+/// docs/architecture/spikes/v2-mcp-passthrough-spike.md, unreliable on at
+/// least one real adapter). The loopback listener the relay connects back to
+/// is still an open local port, though, so each task gets a random token:
+/// `start_mcp_relay` mints it, the frontend hands it to the harness via the
+/// relay's env (`METRISTS_MCP_TOKEN`), the relay presents it as its first
+/// line, and `handle_connection` drops any connection that doesn't lead with
+/// it. Threat model stays local-process — this only closes the race where
+/// the first local process to find the ephemeral port wins the tool channel.
 ///
 /// The "relay" the harness spawns is this same binary, re-invoked with
 /// `--mcp-stdio-relay <port>` (see `run_mcp_stdio_relay`, called from
@@ -44,6 +49,21 @@ pub struct McpRelayInfo {
     pub port: u16,
     pub command: String,
     pub args: Vec<String>,
+    /// Per-task connection token; the relay must present it as its first line.
+    pub token: String,
+}
+
+/// Env var the relay reads its connection token from (set by the harness,
+/// sourced from the `McpServer` entry the frontend builds).
+pub const MCP_TOKEN_ENV: &str = "METRISTS_MCP_TOKEN";
+
+/// How long an accepted connection gets to present its token.
+const TOKEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+fn generate_token() -> String {
+    let mut bytes = [0u8; 32];
+    getrandom::getrandom(&mut bytes).expect("failed to read OS randomness");
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 struct McpListenerHandle {
@@ -102,6 +122,7 @@ pub async fn start_mcp_relay(task_id: String, app_handle: AppHandle) -> AgentRes
     };
 
     let stop = Arc::new(Notify::new());
+    let token = generate_token();
     if let Some(previous) = MCP_LISTENERS
         .lock()
         .unwrap()
@@ -113,6 +134,7 @@ pub async fn start_mcp_relay(task_id: String, app_handle: AppHandle) -> AgentRes
 
     let accept_task_id = task_id.clone();
     let accept_app = app_handle.clone();
+    let accept_token = token.clone();
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::select! {
@@ -122,8 +144,9 @@ pub async fn start_mcp_relay(task_id: String, app_handle: AppHandle) -> AgentRes
                         Ok((stream, _)) => {
                             let conn_task_id = accept_task_id.clone();
                             let conn_app = accept_app.clone();
+                            let conn_token = accept_token.clone();
                             tauri::async_runtime::spawn(async move {
-                                handle_connection(stream, conn_task_id, conn_app).await;
+                                handle_connection(stream, conn_task_id, conn_app, conn_token).await;
                             });
                         }
                         Err(_) => break,
@@ -137,24 +160,55 @@ pub async fn start_mcp_relay(task_id: String, app_handle: AppHandle) -> AgentRes
         port,
         command: current_exe_path(),
         args: vec!["--mcp-stdio-relay".to_string(), port.to_string()],
+        token,
     })
 }
 
+/// Read the peer's first line and check it against the expected token.
+/// False on mismatch, EOF, read error, or timeout — the caller drops the
+/// connection without wiring it.
+async fn expect_token<R>(
+    lines: &mut tokio::io::Lines<BufReader<R>>,
+    expected: &str,
+) -> bool
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    match tokio::time::timeout(TOKEN_TIMEOUT, lines.next_line()).await {
+        Ok(Ok(Some(line))) => line == expected,
+        _ => false,
+    }
+}
+
 /// One accepted connection (expected: the one relay process the harness
-/// spawned). Pure line pump: every line read gets emitted verbatim, no
-/// parsing, no correlation. Emits a `close` event when the peer disconnects
-/// (natural close or error) — `stop_mcp_relay`-initiated teardown races
-/// harmlessly with this, matching agent_proc.rs's exit-is-exit convention;
-/// the frontend's close handling is already idempotent.
-async fn handle_connection(stream: TcpStream, task_id: String, app_handle: AppHandle) {
+/// spawned). The peer must present the task's token as its first line —
+/// mismatch/timeout drops the connection (with a close event) before any
+/// wiring happens. After that: pure line pump, every line read gets emitted
+/// verbatim, no parsing, no correlation. Emits a `close` event when the peer
+/// disconnects (natural close or error) — `stop_mcp_relay`-initiated
+/// teardown races harmlessly with this, matching agent_proc.rs's
+/// exit-is-exit convention; the frontend's close handling is already
+/// idempotent.
+async fn handle_connection(
+    stream: TcpStream,
+    task_id: String,
+    app_handle: AppHandle,
+    token: String,
+) {
     let (read_half, write_half) = stream.into_split();
+    let mut lines = BufReader::new(read_half).lines();
+
+    if !expect_token(&mut lines, &token).await {
+        let _ = app_handle.emit(&format!("mcp-bridge://{}/close", task_id), ());
+        return;
+    }
+
     let write_half = Arc::new(AsyncMutex::new(write_half));
     MCP_CONNECTIONS.lock().unwrap().insert(
         task_id.clone(),
         McpConnectionHandle { write_half: write_half.clone() },
     );
 
-    let mut lines = BufReader::new(read_half).lines();
     let topic = format!("mcp-bridge://{}/line", task_id);
     while let Ok(Some(line)) = lines.next_line().await {
         let _ = app_handle.emit(&topic, line);
@@ -223,10 +277,18 @@ pub fn run_mcp_stdio_relay(port: u16) {
         Ok(stream) => stream,
         Err(_) => std::process::exit(1),
     };
-    let write_stream = match stream.try_clone() {
+    let mut write_stream = match stream.try_clone() {
         Ok(stream) => stream,
         Err(_) => std::process::exit(1),
     };
+
+    // Token handshake: present METRISTS_MCP_TOKEN (from the harness-provided
+    // env) as the first line; the app-side listener drops us without it.
+    if let Ok(token) = std::env::var(MCP_TOKEN_ENV) {
+        if writeln!(write_stream, "{token}").is_err() {
+            std::process::exit(1);
+        }
+    }
 
     let stdin_to_socket = std::thread::spawn(move || {
         let stdin = std::io::stdin();
@@ -294,6 +356,37 @@ mod tests {
         let result = tauri::async_runtime::block_on(stop_mcp_relay("does-not-exist".to_string()));
         let json = serde_json::to_value(result).unwrap();
         assert_eq!(json["ok"], true);
+    }
+
+    #[test]
+    fn token_handshake_accepts_the_right_token_and_rejects_wrong_or_missing() {
+        tauri::async_runtime::block_on(async {
+            async fn peer_first_line_check(to_send: Option<&str>, expected: &str) -> bool {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let addr = listener.local_addr().unwrap();
+                let send = to_send.map(str::to_string);
+                let client = tokio::spawn(async move {
+                    let mut stream = TcpStream::connect(addr).await.unwrap();
+                    if let Some(line) = send {
+                        stream.write_all(format!("{line}\n").as_bytes()).await.unwrap();
+                        // Keep the socket open so a rejection is a mismatch,
+                        // not an EOF race.
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    }
+                    // None: close immediately (missing token → EOF → reject).
+                });
+                let (stream, _) = listener.accept().await.unwrap();
+                let (read_half, _write_half) = stream.into_split();
+                let mut lines = BufReader::new(read_half).lines();
+                let ok = expect_token(&mut lines, expected).await;
+                client.abort();
+                ok
+            }
+
+            assert!(peer_first_line_check(Some("tok_right"), "tok_right").await);
+            assert!(!peer_first_line_check(Some("tok_wrong"), "tok_right").await);
+            assert!(!peer_first_line_check(None, "tok_right").await);
+        });
     }
 
     #[test]

@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 import type { z } from "zod";
-import type { ParsedBlob } from "@metrists/shared/blobs";
+import type { BlobEnvelope, ParsedBlob } from "@metrists/shared/blobs";
 
 /**
  * One-file blob type protocol (DX convention shared with drag-protocol):
@@ -33,6 +33,22 @@ export type BlobTypeDefinition<Schema extends z.ZodTypeAny = z.ZodTypeAny> = {
   ) => Record<string, unknown>;
   /** Plain-text fallback for exports and non-interactive rendering */
   summaryText: (payload: z.infer<Schema>) => string;
+  /**
+   * Compose the follow-up prompt sent to the blob's authoring session once
+   * the user answers (`answerBlob` → `agents.task(id).prompt(text)`). Own
+   * this per type so the prompt can be *directive* — state the answer, then
+   * instruct the agent to replace the answered block in the document with
+   * the content the answer resolves to. Types that omit it get a generic
+   * informational sentence (see blob-actions).
+   */
+  formatAnswerPrompt?: (args: {
+    blobId: string;
+    path: string;
+    /** As parsed from the fence pre-patch. */
+    envelope: BlobEnvelope;
+    /** What the user answered. */
+    patch: Record<string, unknown>;
+  }) => string;
 };
 
 export function defineBlobType<Schema extends z.ZodTypeAny>(
