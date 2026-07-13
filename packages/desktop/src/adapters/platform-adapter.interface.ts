@@ -1,7 +1,7 @@
 import type { Theme } from "@/components/theme-provider";
 import type { GitStorageHost } from "@metrists/git";
 import type { HarnessDefinition } from "@metrists/shared/agent";
-import type { AgentTransport } from "@/agent/agent-transport.interface";
+import type { AgentTransport, McpEndpoint } from "@/agent/agent-transport.interface";
 
 /**
  * Error types for file system operations
@@ -513,21 +513,30 @@ export interface IPlatformAdapter {
     taskId: string;
     harness: HarnessDefinition;
     workspacePath: string;
+    /**
+     * Per-task env on top of the harness's static env — e.g. the
+     * OPENCODE_CONFIG path registering this task's MCP server
+     * (mcpRegistration: "opencode-config").
+     */
+    extraEnv?: Record<string, string>;
   }): AgentTransport;
 
   /**
-   * Create the transport for a task's MCP connection (Stage 3.5) — the exact
-   * same shape and contract as `createAgentTransport` right above: a dumb
-   * constructor that does nothing async and knows nothing about starting.
-   * The caller calls `start()` itself and reads `AgentTransport.mcpServer`
-   * off the returned instance afterward (populated after start, same pattern
-   * as `spawnInfo`) to build ACP `session/new.mcpServers`. Desktop's instance
+   * Create the endpoint for a task's app-tools MCP server (Stage 3.5) —
+   * same construction contract as `createAgentTransport` right above: a
+   * dumb constructor that does nothing async. The caller calls `start()`
+   * itself and reads `mcpServer` off the returned instance afterward
+   * (populated after start, same pattern as `spawnInfo`) to build ACP
+   * `session/new.mcpServers` or a harness config. Deliberately not an
+   * AgentTransport: harnesses may run several concurrent instances of the
+   * server command, so requests arrive with a per-connection `respond`
+   * instead of a single line channel (see McpEndpoint). Desktop's instance
    * spawns its own binary as a stdio↔loopback-TCP relay (`McpServer::Stdio`,
-   * mandatory per the ACP spec, unlike `http`/`sse`); other platforms plug in
-   * their own mechanism without `mcp-server.ts` or `acp-client.ts` ever
+   * mandatory per the ACP spec, unlike `http`/`sse`); other platforms plug
+   * in their own mechanism without `mcp-server.ts` or `acp-client.ts` ever
    * seeing a port or process.
    */
-  createMcpTransport(spec: { taskId: string }): AgentTransport;
+  createMcpEndpoint(spec: { taskId: string }): McpEndpoint;
 
   /**
    * Create updater actions for the current platform.

@@ -20,15 +20,7 @@ import type { NodeViewProps } from "@tiptap/core";
 import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
 import { BLOB_LANG_PREFIX, parseBlobBlock, type ParsedBlob } from "@metrists/shared/blobs";
 import { getBlobType, type BlobTypeDefinition } from "./blob-registry";
-import { answerBlob, type AnswerBlobResult } from "./blob-actions";
-
-/** Thrown from the `answer` closure so widgets can catch a typed reason. */
-export class BlobAnswerError extends Error {
-  constructor(readonly reason: Extract<AnswerBlobResult, { ok: false }>["reason"]) {
-    super(reason);
-    this.name = "BlobAnswerError";
-  }
-}
+import { answerBlob, BlobAnswerError } from "./blob-actions";
 
 export function BlobNodeView(props: NodeViewProps) {
   const language = (props.node.attrs.language as string | null) ?? "";

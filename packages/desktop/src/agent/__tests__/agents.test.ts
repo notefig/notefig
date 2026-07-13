@@ -16,13 +16,10 @@ vi.mock("@/adapters", () => ({
     getKv: vi.fn(),
     writeFiles,
     readFiles,
-    createMcpTransport: vi.fn(() => ({
-      locus: "local",
+    createMcpEndpoint: vi.fn(() => ({
       mcpServer: { name: "metrists", command: "metrists", args: [], env: [] },
       start: vi.fn(async () => {}),
-      send: vi.fn(),
-      onLine: vi.fn(() => () => {}),
-      onClose: vi.fn(() => () => {}),
+      onRequest: vi.fn(() => () => {}),
       close: vi.fn(async () => {}),
     })),
   },
@@ -79,7 +76,7 @@ describe("agents facade (Stage 1)", () => {
     agent.onPrompt = async () => ({ stopReason: "end_turn" });
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
 
     const handle = agents.task(task.taskId);
     const outcome = await handle.prompt("hello").completed;
@@ -92,7 +89,7 @@ describe("agents facade (Stage 1)", () => {
     agent.onPrompt = async () => ({ stopReason: "end_turn" });
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     const { turnId, completed } = task.prompt("hi");
     await completed;
 

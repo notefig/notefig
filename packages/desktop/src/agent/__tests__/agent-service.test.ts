@@ -16,21 +16,24 @@ vi.mock("@/adapters", () => ({
   platformAdapter: {
     setKv: vi.fn(),
     getKv: vi.fn(),
+    getAllKv: vi.fn(async () => ({})),
+    deleteKv: vi.fn(),
     writeFiles,
     readFiles,
-    // A fake AgentTransport: nothing in these tests drives real traffic over
-    // the MCP connection (that's exercised at the tool-call level via
+    deleteFiles: vi.fn(async (paths: string[]) => ({
+      succeeded: paths,
+      failed: [] as unknown[],
+    })),
+    // A fake McpEndpoint: nothing in these tests drives real traffic over
+    // the MCP channel (that's exercised at the tool-call level via
     // FakeAgent's scripted ACP session/update notifications instead), so
-    // this just has to satisfy attachMcpTransport's onLine + dispose's close.
-    // Dumb sync constructor, matching createAgentTransport's contract —
-    // AgentTask.start() calls .start() and reads .mcpServer itself.
-    createMcpTransport: vi.fn(() => ({
-      locus: "local",
+    // this just has to satisfy attachMcpEndpoint's onRequest + dispose's
+    // close. Dumb sync constructor, matching createAgentTransport's contract
+    // — AgentTask.start() calls .start() and reads .mcpServer itself.
+    createMcpEndpoint: vi.fn(() => ({
       mcpServer: { name: "metrists", command: "metrists", args: [], env: [] },
       start: vi.fn(async () => {}),
-      send: vi.fn(),
-      onLine: vi.fn(() => () => {}),
-      onClose: vi.fn(() => () => {}),
+      onRequest: vi.fn(() => () => {}),
       close: vi.fn(async () => {}),
     })),
   },
@@ -129,7 +132,7 @@ describe("AgentTask vertical slice", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     await runPrompt(task, "hi");
 
     expect(textFor(task.taskId, "user")).toBe("hi");
@@ -141,28 +144,72 @@ describe("AgentTask vertical slice", () => {
   it("records unknown session updates as a catch-all entry (D4)", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
-    const thought = { type: "text" as const, text: "thinking…" };
+    const commands = { sessionUpdate: "available_commands_update", availableCommands: [] };
     agent.onPrompt = async (_params, a) => {
-      a.update("sess_test", {
-        sessionUpdate: "agent_thought_chunk",
-        content: thought,
-      });
+      a.update("sess_test", commands);
       return { stopReason: "end_turn" };
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
-    await runPrompt(task, "think about it");
+    await task.start(() => client);
+    await runPrompt(task, "hello");
 
     const unknownEntries = entriesFor(task.taskId).filter(
       (e) => e.type === "unknown",
     );
     expect(unknownEntries).toHaveLength(1);
-    expect(unknownEntries[0].text).toBe("agent_thought_chunk");
-    expect(unknownEntries[0].raw).toEqual({
-      sessionUpdate: "agent_thought_chunk",
-      content: thought,
-    });
+    expect(unknownEntries[0].text).toBe("available_commands_update");
+    expect(unknownEntries[0].raw).toEqual(commands);
+  });
+
+  it("coalesces token-streamed thought chunks into one entry per contiguous run", async () => {
+    // Mirrors the real OpenCode transcript shape: a thought streamed as many
+    // tiny chunks, a tool call, another thought, then the visible reply —
+    // must land as exactly [user, thought, tool_call, thought, assistant].
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const think = (a: FakeAgent, text: string) =>
+      a.update("sess_test", {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text },
+      });
+    agent.onPrompt = async (_params, a) => {
+      think(a, "The user ");
+      think(a, "is asking ");
+      think(a, "about the workspace.");
+      a.update("sess_test", {
+        sessionUpdate: "tool_call",
+        toolCallId: "t1",
+        title: "ls",
+        kind: "read",
+        status: "completed",
+      });
+      think(a, "Looks like ");
+      think(a, "Dante's Inferno.");
+      a.update("sess_test", {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "This is the Inferno workspace." },
+      });
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "hi what harness is this?");
+
+    const entries = entriesFor(task.taskId);
+    expect(entries.map((e) => e.type)).toEqual([
+      "user",
+      "thought",
+      "tool_call",
+      "thought",
+      "assistant",
+    ]);
+    const thoughts = entries.filter((e) => e.type === "thought").map((e) => e.text);
+    expect(thoughts).toEqual([
+      "The user is asking about the workspace.",
+      "Looks like Dante's Inferno.",
+    ]);
   });
 
   it("routes agent file writes through the platform adapter", async () => {
@@ -178,7 +225,7 @@ describe("AgentTask vertical slice", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     await runPrompt(task, "edit the readme");
 
     expect(writeFiles).toHaveBeenCalledWith([
@@ -204,7 +251,7 @@ describe("AgentTask vertical slice", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     task.prompt("edit");
 
     await vi.waitFor(() => expect(pendingPerms(task.taskId).length).toBe(1));
@@ -240,7 +287,7 @@ describe("AgentTask vertical slice", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     await runPrompt(task, "add a question");
 
     // Granted immediately — never surfaced as a row to answer.
@@ -263,7 +310,7 @@ describe("AgentTask vertical slice", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     task.prompt("do it");
 
     await vi.waitFor(() => expect(pendingPerms(task.taskId).length).toBe(1));
@@ -286,7 +333,7 @@ describe("AgentTask vertical slice", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
 
     task.prompt("first"); // starts a turn, gated open
     await vi.waitFor(() => expect(seen).toEqual(["first"]));
@@ -313,7 +360,7 @@ describe("AgentTask vertical slice", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     task.prompt("one");
     await vi.waitFor(() =>
       expect(turnFor(task.taskId)[0]?.status).toBe("running"),
@@ -346,7 +393,7 @@ describe("AgentTask vertical slice", () => {
     agent.onPrompt = () => new Promise(() => {}); // hold the turn open forever
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     task.prompt("running");
     await vi.waitFor(() =>
       expect(turnFor(task.taskId)[0]?.status).toBe("running"),
@@ -376,7 +423,7 @@ describe("AgentTask vertical slice", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     task.prompt("one");
     await vi.waitFor(() => expect(seen).toEqual(["one"]));
     const removed = task.prompt("two");
@@ -418,8 +465,8 @@ describe("AgentTask vertical slice", () => {
     const manager = new TaskManager("/ws");
     const taskA = manager.createTask(harness);
     const taskB = manager.createTask(harness);
-    await taskA.start(clientA);
-    await taskB.start(clientB);
+    await taskA.start(() => clientA);
+    await taskB.start(() => clientB);
     await Promise.all([runPrompt(taskA, "a"), runPrompt(taskB, "b")]);
 
     expect(textFor(taskA.taskId, "assistant")).toContain("from A");
@@ -433,7 +480,7 @@ describe("AgentTask vertical slice", () => {
     agent.onPrompt = () => new Promise(() => {}); // never resolves
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     task.prompt("hang");
 
     await vi.waitFor(() =>
@@ -471,7 +518,7 @@ describe("AgentTask vertical slice", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     await runPrompt(task, "edit");
 
     const tools = toolEntries(task.taskId);
@@ -500,7 +547,7 @@ describe("AgentTask vertical slice", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     await runPrompt(task, "test");
 
     const tools = toolEntries(task.taskId);
@@ -524,7 +571,7 @@ describe("AgentTask vertical slice", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     await runPrompt(task, "find");
 
     // The turn-end sweep flips the lingering call so it doesn't spin forever.
@@ -546,7 +593,7 @@ describe("AgentTask vertical slice", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     await runPrompt(task, "edit");
 
     // A late update (no active turn) must still coalesce into the entry.
@@ -588,7 +635,7 @@ describe("AgentTask vertical slice", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     await runPrompt(task, "go");
 
     // user, assistant("Looking… "), tool_call, assistant("Done.") — in order.
@@ -608,7 +655,7 @@ describe("AgentTask vertical slice", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     await runPrompt(task, "go");
 
     const turn = turnFor(task.taskId)[0];
@@ -629,7 +676,7 @@ describe("AgentTask vertical slice", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     task.prompt("one");
     await vi.waitFor(() => expect(seen).toEqual(["one"]));
     const queued = task.prompt("two"); // queues while the (failing) first runs
@@ -666,7 +713,7 @@ describe("AgentTask vertical slice", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     await runPrompt(task, "go");
 
     expect(turnFor(task.taskId)[0].status).toBe("completed");
@@ -682,7 +729,7 @@ describe("prompt handles (A3, Stage 1)", () => {
     agent.onPrompt = async () => ({ stopReason: "end_turn" });
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
 
     const handle = task.prompt("hi");
     const outcome = await handle.completed;
@@ -700,7 +747,7 @@ describe("prompt handles (A3, Stage 1)", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
 
     const first = task.prompt("one");
     await vi.waitFor(() =>
@@ -732,7 +779,7 @@ describe("prompt handles (A3, Stage 1)", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
 
     const outcome = await task.prompt("go").completed;
     expect(outcome).toEqual({
@@ -765,14 +812,14 @@ describe("MCP tool calls (Stage 3.5)", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     await runPrompt(task, "ask a question");
 
     const tools = toolEntries(task.taskId);
     expect(tools).toHaveLength(1); // still one coalesced card, not two
     expect(tools[0].toolCall?.title).toBe("author_blob"); // prefix stripped
     expect(tools[0].toolCall?.status).toBe("completed");
-    expect(tools[0].toolCall?.locations).toEqual([{ path: "notes.md" }]);
+    expect(tools[0].toolCall?.locations).toEqual([{ path: "/ws/notes.md" }]);
   });
 
   it("keeps previously-derived locations when a later update carries no rawInput.path", async () => {
@@ -797,11 +844,11 @@ describe("MCP tool calls (Stage 3.5)", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     await runPrompt(task, "restore");
 
     const tools = toolEntries(task.taskId);
-    expect(tools[0].toolCall?.locations).toEqual([{ path: "notes.md" }]);
+    expect(tools[0].toolCall?.locations).toEqual([{ path: "/ws/notes.md" }]);
     expect(tools[0].toolCall?.status).toBe("completed");
   });
 
@@ -821,7 +868,7 @@ describe("MCP tool calls (Stage 3.5)", () => {
     };
 
     const task = new TaskManager("/ws").createTask(harness);
-    await task.start(client);
+    await task.start(() => client);
     await runPrompt(task, "ask a question");
 
     expect(findBlobAuthorTask("question_8f2a")).toEqual({
@@ -830,5 +877,181 @@ describe("MCP tool calls (Stage 3.5)", () => {
       path: "notes.md",
     });
     expect(findBlobAuthorTask("does_not_exist")).toBeUndefined();
+  });
+});
+
+describe("Stage 4: auth flows", () => {
+  const authMethods = [
+    {
+      id: "claude-login",
+      name: "Log in with Claude",
+      description: "Run `claude /login` in the terminal",
+    },
+  ];
+
+  function authScriptedPair(failures: number) {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.initializeResult = {
+      protocolVersion: 1,
+      agentCapabilities: {},
+      authMethods,
+    };
+    const seen: string[] = [];
+    let remainingFailures = failures;
+    agent.onPrompt = async (params) => {
+      seen.push(lastPromptText(params as { prompt: { text?: string }[] }));
+      if (remainingFailures > 0) {
+        remainingFailures -= 1;
+        throw new Error("Authentication required");
+      }
+      return { stopReason: "end_turn" };
+    };
+    return { client, agent, seen };
+  }
+
+  it("an auth-failed turn puts authRequired + methods on the task row", async () => {
+    const { client } = authScriptedPair(1);
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "go");
+
+    const row = agentTasksCollection.get(task.taskId)!;
+    expect(row.authRequired).toBe(true);
+    expect(row.authMethods).toEqual(authMethods);
+    expect(row.authHint).toBe("Run `claude /login` in the terminal");
+  });
+
+  it("authenticate() success retries the held prompt exactly once and clears the block", async () => {
+    const { client, seen } = authScriptedPair(1);
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "go");
+
+    const result = await task.authenticate("claude-login");
+    expect(result).toEqual({ ok: true });
+
+    await vi.waitFor(() => {
+      const turns = turnFor(task.taskId);
+      expect(turns[turns.length - 1].status).toBe("completed");
+    });
+    expect(seen).toEqual(["go", "go"]);
+    expect(agentTasksCollection.get(task.taskId)?.authRequired).toBe(false);
+  });
+
+  it("authenticate() failure is a value; the block stays and nothing retries", async () => {
+    const { client, agent, seen } = authScriptedPair(99);
+    agent.onAuthenticate = async () => {
+      throw new Error("method is out-of-band");
+    };
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "go");
+
+    const result = await task.authenticate("claude-login");
+    expect(result.ok).toBe(false);
+    expect(seen).toEqual(["go"]);
+    expect(agentTasksCollection.get(task.taskId)?.authRequired).toBe(true);
+  });
+
+  it("retryHeldPrompt() runs the held prompt before prompts queued behind the block", async () => {
+    const { client, seen } = authScriptedPair(1);
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "one"); // fails with the auth block, held
+    task.prompt("two"); // stays queued behind the halted drain
+
+    task.retryHeldPrompt();
+    await vi.waitFor(() => {
+      expect(seen).toEqual(["one", "one", "two"]);
+    });
+    expect(agentTasksCollection.get(task.taskId)?.authRequired).toBe(false);
+  });
+
+  it("a dismissed sign-in leaves the queue halted — no retry loop (A5 regression)", async () => {
+    const { client, seen } = authScriptedPair(99);
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "go");
+
+    // No authenticate, no retry: exactly one attempt was made.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(seen).toEqual(["go"]);
+  });
+});
+
+describe("Stage 4: per-harness MCP registration", () => {
+  const opencodeHarness = BUILT_IN_HARNESSES.find((h) => h.id === "opencode")!;
+  const geminiHarness = BUILT_IN_HARNESSES.find((h) => h.id === "gemini-cli")!;
+
+  it('"session-new" harnesses get the server through session/new.mcpServers', async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const task = new TaskManager("/ws").createTask(harness); // claude-code
+    await task.start(() => client);
+
+    expect(agent.newSessionParams?.mcpServers).toHaveLength(1);
+    expect(agent.newSessionParams?.mcpServers?.[0]?.name).toBe("metrists");
+  });
+
+  it('"opencode-config" harnesses get a per-task config file + OPENCODE_CONFIG, and empty mcpServers', async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    let capturedEnv: Record<string, string> | undefined;
+    const task = new TaskManager("/ws").createTask(opencodeHarness);
+    await task.start(({ extraEnv }) => {
+      capturedEnv = extraEnv;
+      return client;
+    });
+
+    const expectedPath = `/ws/.metrists/agent/opencode-${task.taskId}.json`;
+    expect(capturedEnv?.OPENCODE_CONFIG).toBe(expectedPath);
+    const write = writeFiles.mock.calls
+      .flat(1)
+      .flat(1)
+      .find((f: { path?: string }) => f?.path === expectedPath) as
+      | { path: string; content: string }
+      | undefined;
+    expect(write).toBeDefined();
+    const config = JSON.parse(write!.content);
+    expect(config.mcp.metrists.type).toBe("local");
+    expect(config.mcp.metrists.command).toEqual(["metrists"]);
+    expect(agent.newSessionParams?.mcpServers).toEqual([]);
+  });
+
+  it('"none" harnesses get neither', async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    let capturedEnv: Record<string, string> | undefined;
+    const task = new TaskManager("/ws").createTask(geminiHarness);
+    await task.start(({ extraEnv }) => {
+      capturedEnv = extraEnv;
+      return client;
+    });
+
+    expect(capturedEnv).toEqual({});
+    expect(agent.newSessionParams?.mcpServers).toEqual([]);
+  });
+
+  it("normalizes OpenCode's `<server>_<tool>` names like claude's `mcp__` prefix", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async (_p, a) => {
+      a.update("sess_test", {
+        sessionUpdate: "tool_call",
+        toolCallId: "oc_1",
+        title: "metrists_author_blob",
+        kind: "other",
+        status: "completed",
+        rawInput: { path: "notes.md", type: "question", id: "question_oc01" },
+      });
+      return { stopReason: "end_turn" };
+    };
+    const task = new TaskManager("/ws").createTask(opencodeHarness);
+    await task.start(() => client);
+    await runPrompt(task, "ask");
+
+    expect(toolEntries(task.taskId)[0].toolCall?.title).toBe("author_blob");
+    expect(findBlobAuthorTask("question_oc01")?.taskId).toBe(task.taskId);
   });
 });

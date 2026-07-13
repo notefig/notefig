@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveWorkspacePath } from "@/utils/fs";
 import type { AgentTool } from "@metrists/shared/agent";
 import {
   ensureWorkspaceHistoryInitialized,
@@ -28,6 +29,8 @@ export const historyDiff: AgentTool<
     "Read a document's content at two checkpoints so the agent can compare them.",
   input: InputSchema,
   async execute(ctx, input) {
+    const resolved = resolveWorkspacePath(ctx.workspacePath, input.path);
+    if (!resolved.ok) return { ok: false, error: resolved.error };
     try {
       const service = await ensureWorkspaceHistoryInitialized(ctx.workspacePath);
       const gitDir = historyGitDir(ctx.workspacePath);
@@ -36,13 +39,13 @@ export const historyDiff: AgentTool<
           repoPath: ctx.workspacePath,
           gitDir,
           ref: input.from,
-          filepath: input.path,
+          filepath: resolved.relative,
         }),
         service.readTextFile({
           repoPath: ctx.workspacePath,
           gitDir,
           ref: input.to,
-          filepath: input.path,
+          filepath: resolved.relative,
         }),
       ]);
       return {

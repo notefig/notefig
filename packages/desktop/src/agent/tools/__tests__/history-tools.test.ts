@@ -89,7 +89,7 @@ describe("historyRestore", () => {
       checkpoint: "abc123",
     });
     expect(result).toEqual({ ok: true, value: undefined });
-    expect(writeWorkspaceTextFile).toHaveBeenCalledWith("notes.md", "old content");
+    expect(writeWorkspaceTextFile).toHaveBeenCalledWith("/ws/notes.md", "old content");
   });
 
   it("is marked as requiring permission", () => {

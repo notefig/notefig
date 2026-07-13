@@ -27,6 +27,19 @@ export type AnswerBlobResult =
       reason: "not_found" | "conflict";
     };
 
+/**
+ * Thrown from a widget's `answer` closure so widgets can catch a typed
+ * reason (`useBlobAnswer` does). Lives here, not in blob-node-view.tsx: a
+ * component module must export only components or Vite's react-refresh
+ * downgrades every edit to it (and its importers) to a full reload.
+ */
+export class BlobAnswerError extends Error {
+  constructor(readonly reason: Extract<AnswerBlobResult, { ok: false }>["reason"]) {
+    super(reason);
+    this.name = "BlobAnswerError";
+  }
+}
+
 const codec = createMarkdownCodec();
 
 async function readAuthoritativeMarkdown(filePath: string): Promise<string> {

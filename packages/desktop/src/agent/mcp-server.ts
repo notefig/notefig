@@ -8,7 +8,7 @@ import {
 import { getAllBlobTypes } from "@/components/editor/blobs/blob-registry";
 import { toolRegistry, getTool } from "./tools";
 import type { PermissionBroker } from "./permission-broker";
-import type { AgentTransport, Unsubscribe } from "./agent-transport.interface";
+import type { McpEndpoint, Unsubscribe } from "./agent-transport.interface";
 import i18n from "@/utils/intl";
 
 /** `tool.title` holds an i18next key, never literal text — resolve it here,
@@ -31,13 +31,17 @@ function toolTitle(tool: Pick<AgentTool<unknown, unknown>, "title">): string {
 export function renderToolUsagePreamble(): string {
   const names = toolRegistry.map((tool) => tool.name).join(", ");
   return (
-    `You have Metrists-native tools available via MCP (${names}). Prefer these ` +
+    `You are running as an agent inside the Metrists writing app. You have ` +
+    `Metrists-native tools available via MCP (${names}). Prefer these ` +
     `over generic file-read/write or shell tools when working with this workspace's ` +
     `documents — they see live editor state (unsaved edits, open tabs) and document ` +
     `history that generic tools don't. In particular, use \`author_blob\` whenever the ` +
     `user asks you to add an interactive question, approval, or status block to a ` +
     `document — not plain text — it renders as an answerable widget, and you'll get a ` +
-    `follow-up prompt with the user's answer once they respond.`
+    `follow-up prompt with the user's answer once they respond. These tools come from ` +
+    `an MCP server named \`${MCP_SERVER_NAME}\` that Metrists registers automatically ` +
+    `for this session via a per-task, ephemeral config — it will not appear in your ` +
+    `global or project config files, and you don't need to locate or verify it.`
   );
 }
 
@@ -157,6 +161,30 @@ async function dispatchToolCall(
     : { isError: true, content: [{ type: "text", text: result.error }] };
 }
 
+/**
+ * If any top-level value of `args` is a string that itself parses as a JSON
+ * object/array, return a copy with those values parsed; undefined when
+ * nothing qualified (caller keeps the original failure).
+ */
+function parseStringifiedObjectValues(args: unknown): Record<string, unknown> | undefined {
+  if (typeof args !== "object" || args === null || Array.isArray(args)) return undefined;
+  let repairedAny = false;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args)) {
+    if (typeof value === "string" && /^\s*[[{]/.test(value)) {
+      try {
+        out[key] = JSON.parse(value);
+        repairedAny = true;
+        continue;
+      } catch {
+        // fall through, keep the original string
+      }
+    }
+    out[key] = value;
+  }
+  return repairedAny ? out : undefined;
+}
+
 export type McpHandlerDeps = {
   ctx: ToolContext;
   permissionBroker: PermissionBroker;
@@ -166,7 +194,7 @@ export type McpHandlerDeps = {
  * Stateless MCP request handler (initialize/tools.list/tools.call), bound to
  * one task's `ToolContext` + `PermissionBroker`. Transport-agnostic — it
  * takes a parsed JSON-RPC object and returns one back, and knows nothing
- * about ports, processes, or sockets. `attachMcpTransport` below is what
+ * about ports, processes, or sockets. `attachMcpEndpoint` below is what
  * puts it on the wire.
  */
 export function createMcpRequestHandler(
@@ -210,7 +238,16 @@ export function createMcpRequestHandler(
       if (!tool) {
         return jsonrpcError(id, -32602, `unknown tool: ${name ?? "(missing name)"}`);
       }
-      const parsed = tool.input.safeParse(callParams?.arguments ?? {});
+      const args = callParams?.arguments ?? {};
+      let parsed = tool.input.safeParse(args);
+      if (!parsed.success) {
+        // One repair pass: OpenCode has been observed delivering a nested
+        // object argument as its JSON *string* ("payload": "{\"kind\":…}",
+        // v2-opencode-config-mcp-spike.md). Re-parse stringified
+        // object/array values and retry before rejecting.
+        const repaired = parseStringifiedObjectValues(args);
+        if (repaired) parsed = tool.input.safeParse(repaired);
+      }
       if (!parsed.success) {
         return jsonrpcError(id, -32602, `invalid input for ${tool.name}: ${parsed.error.message}`);
       }
@@ -223,26 +260,25 @@ export function createMcpRequestHandler(
 }
 
 /**
- * Puts a `handleMcpRequest` function on the wire over an `AgentTransport` —
- * the same line-channel shape `MetristsAcpClient` rides for the ACP
- * connection, applied here too (`tauri-mcp-transport.ts`): once the
- * harness-spawned relay connects, an MCP request is just another line in,
- * and our response is just another line out. No request/response
- * correlation needed on either end — MCP's own JSON-RPC `id` is what the
- * *harness* uses to match a response to its request; we only ever have one
- * request in flight per line anyway.
+ * Puts a `handleMcpRequest` function on an `McpEndpoint`'s wire: an MCP
+ * request is one line in, our response goes out through that request's own
+ * `respond` — which the endpoint has already bound to the connection the
+ * request arrived on, so multi-instance harnesses (OpenCode runs the server
+ * command three times concurrently) can never receive each other's replies.
+ * No request/response correlation needed beyond that — MCP's own JSON-RPC
+ * `id` is what the *harness* uses to match a response to its request.
  */
-export function attachMcpTransport(
-  transport: AgentTransport,
+export function attachMcpEndpoint(
+  endpoint: McpEndpoint,
   handler: (body: JsonRpcMessage) => Promise<JsonRpcMessage | null>,
 ): Unsubscribe {
-  return transport.onLine((line) => {
+  return endpoint.onRequest((line, respond) => {
     void (async () => {
       let parsed: JsonRpcMessage;
       try {
         parsed = JSON.parse(line) as JsonRpcMessage;
       } catch (error) {
-        transport.send(
+        respond(
           JSON.stringify(
             jsonrpcError(null, -32700, error instanceof Error ? error.message : String(error)),
           ),
@@ -250,7 +286,7 @@ export function attachMcpTransport(
         return;
       }
       const response = await handler(parsed);
-      if (response) transport.send(JSON.stringify(response));
+      if (response) respond(JSON.stringify(response));
     })();
   });
 }

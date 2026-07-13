@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { MCP_SERVER_NAME, type McpServer } from "@metrists/shared/agent";
-import type { AgentTransport, Unsubscribe } from "./agent-transport.interface";
+import type { McpEndpoint, Unsubscribe } from "./agent-transport.interface";
 import { AgentTransportError } from "./agent-transport.interface";
 
 /** Errors-as-values shape returned by the mcp_bridge.rs commands. */
@@ -20,27 +20,26 @@ type McpRelayInfo = {
 };
 
 /**
- * Desktop transport for a task's MCP connection (Stage 3.5): the harness
- * spawns this app's own binary as a stdio relay (`McpServer::Stdio`), which
- * connects back to a loopback listener `mcp_bridge.rs` opened for this task.
- * Once connected, it's the exact same shape as `TauriStdioTransport` — a
- * newline-delimited JSON-RPC line channel — because it is one: `mcp_bridge.rs`
- * does no request/response bookkeeping of its own, just line-in/line-out.
- * Constructing this does nothing async — exactly like `TauriStdioTransport`,
- * the caller calls `start()` itself and reads `mcpServer` off the instance
- * afterward (this class is the only thing that knows how to express itself
- * as one).
+ * Desktop McpEndpoint for a task's app-tools MCP server (Stage 3.5): the
+ * harness spawns this app's own binary as a stdio relay (`McpServer::Stdio`),
+ * which connects back to a loopback listener `mcp_bridge.rs` opened for this
+ * task. Harnesses may spawn several relay instances concurrently (OpenCode
+ * spawns three — v2-opencode-config-mcp-spike.md), so the bridge tags every
+ * incoming line with the connection it arrived on; that multiplexing stays
+ * an internal detail here — consumers get each request with a `respond`
+ * already bound to the right connection. Individual relay connections
+ * coming and going is routine churn, never endpoint death; the endpoint
+ * closes only via close().
  *
  * Rust side contract (src-tauri/src/mcp_bridge.rs):
- * - invoke("start_mcp_relay", {taskId}) / invoke("write_mcp_line", {taskId, line})
- *   / invoke("stop_mcp_relay", {taskId})
- * - events: `mcp-bridge://{taskId}/line`, `mcp-bridge://{taskId}/close`
+ * - invoke("start_mcp_relay", {taskId}) / invoke("write_mcp_line",
+ *   {taskId, connId, line}) / invoke("stop_mcp_relay", {taskId})
+ * - event: `mcp-bridge://{taskId}/line` (payload `{ connId, line }`)
  */
-export class TauriMcpTransport implements AgentTransport {
-  readonly locus = "local" as const;
-
-  private readonly lineListeners = new Set<(line: string) => void>();
-  private readonly closeListeners = new Set<(error?: AgentTransportError) => void>();
+export class TauriMcpTransport implements McpEndpoint {
+  private readonly requestListeners = new Set<
+    (line: string, respond: (line: string) => void) => void
+  >();
   private unlistenFns: UnlistenFn[] = [];
   private writeChain: Promise<unknown> = Promise.resolve();
   private closed = false;
@@ -54,15 +53,16 @@ export class TauriMcpTransport implements AgentTransport {
 
   /** Start the listener and register handlers; reject on bind failure. */
   async start(): Promise<void> {
-    // Register listeners before starting the relay so no early line is missed
-    // (mirrors TauriStdioTransport's ordering).
-    const line = await listen<string>(`mcp-bridge://${this.taskId}/line`, (event) => {
-      for (const cb of this.lineListeners) cb(event.payload);
-    });
-    const close = await listen(`mcp-bridge://${this.taskId}/close`, () => {
-      this.handleClose(new AgentTransportError("closed", "mcp relay connection closed"));
-    });
-    this.unlistenFns.push(line, close);
+    // Register the event listener before starting the relay so no early
+    // line is missed (mirrors TauriStdioTransport's ordering).
+    const line = await listen<{ connId: number; line: string }>(
+      `mcp-bridge://${this.taskId}/line`,
+      (event) => {
+        const respond = (reply: string) => this.writeTo(event.payload.connId, reply);
+        for (const cb of this.requestListeners) cb(event.payload.line, respond);
+      },
+    );
+    this.unlistenFns.push(line);
 
     let result: AgentResult<McpRelayInfo>;
     try {
@@ -94,54 +94,45 @@ export class TauriMcpTransport implements AgentTransport {
     };
   }
 
-  send(line: string): void {
-    if (this.closed) {
-      throw new AgentTransportError("closed", "transport is closed");
-    }
-    // Chain writes so concurrent send() calls stay ordered on the wire.
+  onRequest(
+    callback: (line: string, respond: (line: string) => void) => void,
+  ): Unsubscribe {
+    this.requestListeners.add(callback);
+    return () => this.requestListeners.delete(callback);
+  }
+
+  /**
+   * Write one line back on one relay connection. Chained so concurrent
+   * replies stay ordered on the wire; a failed write means that connection
+   * is gone (its relay exited) — routine churn, so log and drop rather than
+   * failing the endpoint.
+   */
+  private writeTo(connId: number, line: string): void {
+    if (this.closed) return;
     this.writeChain = this.writeChain
-      .then(() => invoke<AgentResult>("write_mcp_line", { taskId: this.taskId, line }))
+      .then(() => invoke<AgentResult>("write_mcp_line", { taskId: this.taskId, connId, line }))
       .then((result) => {
         if (!result.ok) {
-          this.handleClose(new AgentTransportError("closed", result.error?.message));
+          console.warn(
+            `[mcp ${this.taskId}] write to relay connection ${connId} failed:`,
+            result.error?.message,
+          );
         }
       })
       .catch((error) => {
-        this.handleClose(
-          new AgentTransportError(
-            "closed",
-            error instanceof Error ? error.message : String(error),
-          ),
-        );
+        console.warn(`[mcp ${this.taskId}] write_mcp_line invoke failed:`, error);
       });
   }
 
-  onLine(callback: (line: string) => void): Unsubscribe {
-    this.lineListeners.add(callback);
-    return () => this.lineListeners.delete(callback);
-  }
-
-  onClose(callback: (error?: AgentTransportError) => void): Unsubscribe {
-    this.closeListeners.add(callback);
-    return () => this.closeListeners.delete(callback);
-  }
-
   async close(): Promise<void> {
-    if (!this.closed) {
-      try {
-        await invoke("stop_mcp_relay", { taskId: this.taskId });
-      } catch {
-        // idempotent: stopping an already-stopped listener is not an error
-      }
-    }
-    this.handleClose();
-  }
-
-  private handleClose(error?: AgentTransportError): void {
     if (this.closed) return;
     this.closed = true;
+    try {
+      await invoke("stop_mcp_relay", { taskId: this.taskId });
+    } catch {
+      // idempotent: stopping an already-stopped listener is not an error
+    }
     this.teardownListeners();
-    for (const cb of this.closeListeners) cb(error);
   }
 
   private teardownListeners(): void {

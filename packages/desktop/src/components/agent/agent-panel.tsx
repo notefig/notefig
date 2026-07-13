@@ -30,6 +30,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type {
+  AuthMethod,
+  HarnessDefinition,
   ToolCallContent,
   ToolCallStatus,
   ToolCallUpdate,
@@ -38,6 +40,12 @@ import type {
 } from "@metrists/shared/agent";
 import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { cn } from "@/lib/utils";
@@ -61,22 +69,25 @@ import {
   type AgentTaskRow,
 } from "@/agent/agent-collections";
 import {
+  authenticateAgentTask,
   cancelAgentTask,
   promptAgentTask,
   removeQueuedPrompt,
+  retryAgentTaskAfterAuth,
   startAgentTask,
-  contentBlockText,
 } from "@/agent/agent-service";
 import { PermissionCard } from "./permission-card";
 import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
 
 /**
  * The agent panel: a task list (create/switch/cancel — parallel tasks are
- * first-class), and per selected task a prompt input, streamed turn output
- * (message chunks coalesced per turn), inline tool-call cards, and that task's
- * permission queue. Reads the task-keyed collections via useLiveQuery and
- * talks to the workspace's TaskManager. Overlap warnings ("two tasks are
- * editing pricing.md") surface from TaskManager.writeGate.getOverlappingPaths.
+ * first-class, created on a chosen harness via the picker), and per selected
+ * task a prompt input, streamed turn output (message chunks coalesced per
+ * turn), inline tool-call cards, that task's permission queue, and its
+ * auth-block card when sign-in is required. Reads the task-keyed collections
+ * via useLiveQuery and talks to the workspace's TaskManager. This is where
+ * tasks are *watched*; the floating prompt (⌘I) is where they're started
+ * and steered.
  */
 export type AgentPanelProps = {
   workspacePath: string;
@@ -87,6 +98,10 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [trustPromptOpen, setTrustPromptOpen] = useState(false);
+  // The harness the pending trust confirmation would start (picker choice).
+  const [pendingHarness, setPendingHarness] = useState<HarnessDefinition>(
+    BUILT_IN_HARNESSES[0],
+  );
   const kv = useKv<boolean>("agent");
   const trustKey = `trust:${normalized}`;
 
@@ -110,28 +125,35 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
     }
   }, [activeTaskId, sortedTasks]);
 
-  const startTask = useCallback(async () => {
-    try {
-      const taskId = await startAgentTask(workspacePath);
-      setActiveTaskId(taskId);
-    } catch (error) {
-      console.error("Failed to start agent task:", error);
-    }
-  }, [workspacePath]);
+  const startTask = useCallback(
+    async (harness: HarnessDefinition) => {
+      try {
+        const taskId = await startAgentTask(workspacePath, harness);
+        setActiveTaskId(taskId);
+      } catch (error) {
+        console.error("Failed to start agent task:", error);
+      }
+    },
+    [workspacePath],
+  );
 
-  const handleCreate = useCallback(() => {
-    if (kv.get(trustKey)) {
-      void startTask();
-    } else {
-      setTrustPromptOpen(true);
-    }
-  }, [kv, trustKey, startTask]);
+  const handleCreate = useCallback(
+    (harness: HarnessDefinition) => {
+      if (kv.get(trustKey)) {
+        void startTask(harness);
+      } else {
+        setPendingHarness(harness);
+        setTrustPromptOpen(true);
+      }
+    },
+    [kv, trustKey, startTask],
+  );
 
   const confirmTrust = useCallback(() => {
     kv.set(trustKey, true);
     setTrustPromptOpen(false);
-    void startTask();
-  }, [kv, trustKey, startTask]);
+    void startTask(pendingHarness);
+  }, [kv, trustKey, startTask, pendingHarness]);
 
   const activeTaskRow = sortedTasks.find((t) => t.taskId === activeTaskId);
   const isRunning = activeTaskRow?.status === "running";
@@ -179,10 +201,8 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
             <div className="pointer-events-auto empty:hidden">
               <PermissionCard taskId={activeTaskId} />
             </div>
-            {activeTaskRow?.authHint && (
-              <div className="pointer-events-auto rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
-                {activeTaskRow.authHint}
-              </div>
+            {activeTaskRow?.authRequired && (
+              <AuthCard task={activeTaskRow} />
             )}
             <PromptBox
               value={draft}
@@ -204,7 +224,7 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>Run an agent in this workspace?</AlertDialogTitle>
             <AlertDialogDescription>
-              This spawns {BUILT_IN_HARNESSES[0].label} as a local process with
+              This spawns {pendingHarness.label} as a local process with
               access to the files in this folder. Only continue for workspaces
               you trust.
             </AlertDialogDescription>
@@ -230,13 +250,30 @@ function TaskList({
   tasks: AgentTaskRow[];
   activeTaskId: string | null;
   onSelect: (taskId: string) => void;
-  onCreate: () => void;
+  onCreate: (harness: HarnessDefinition) => void;
 }) {
+  // Signed-in marks are per harness per machine, written by the service on
+  // the first turn that reaches the model (there is no ahead-of-time probe).
+  const kv = useKv<boolean>("agent");
   return (
     <div className="flex items-center gap-2 overflow-x-auto border-b border-border p-2">
-      <Button size="sm" variant="outline" onClick={onCreate}>
-        + New task
-      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant="outline">
+            + New task
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          {BUILT_IN_HARNESSES.map((harness) => (
+            <DropdownMenuItem key={harness.id} onSelect={() => onCreate(harness)}>
+              <span className="flex-1">{harness.label}</span>
+              {kv.get(`auth:${harness.id}`) && (
+                <Check className="size-3.5 text-green-600 dark:text-green-400" />
+              )}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
       {tasks.map((task) => (
         <button
           key={task.taskId}
@@ -252,6 +289,67 @@ function TaskList({
           <span className="max-w-[140px] truncate">{task.title}</span>
         </button>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Auth-blocked task: sign-in methods off the task row (Stage 4 — auth is
+ * task-row state). Each method button tries in-band ACP `authenticate`; the
+ * out-of-band terminal logins both current adapters use reject it, and the
+ * card then shows the method's description as instructions. "I've signed in"
+ * retries the held prompt optimistically — a failed retry re-raises the
+ * block.
+ */
+function AuthCard({ task }: { task: AgentTaskRow }) {
+  const [instructions, setInstructions] = useState<string | null>(null);
+  const [busyMethodId, setBusyMethodId] = useState<string | null>(null);
+  const methods = task.authMethods ?? [];
+
+  const tryMethod = useCallback(
+    async (method: AuthMethod) => {
+      setBusyMethodId(method.id);
+      setInstructions(null);
+      const result = await authenticateAgentTask(task.taskId, method.id);
+      setBusyMethodId(null);
+      if (!result.ok) {
+        // Out-of-band method: show how to sign in instead.
+        setInstructions(method.description ?? task.authHint ?? null);
+      }
+    },
+    [task.taskId, task.authHint],
+  );
+
+  return (
+    <div className="pointer-events-auto flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
+      <span className="font-medium">Sign-in required</span>
+      {instructions ? (
+        <p className="whitespace-pre-wrap">{instructions}</p>
+      ) : (
+        task.authHint && <p className="whitespace-pre-wrap">{task.authHint}</p>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        {methods.map((method) => (
+          <Button
+            key={method.id}
+            size="sm"
+            variant="outline"
+            disabled={busyMethodId !== null}
+            onClick={() => void tryMethod(method)}
+          >
+            {busyMethodId === method.id && (
+              <Loader2 className="size-3.5 animate-spin" />
+            )}
+            {method.name ?? method.id}
+          </Button>
+        ))}
+        <Button
+          size="sm"
+          onClick={() => retryAgentTaskAfterAuth(task.taskId)}
+        >
+          I&apos;ve signed in — retry
+        </Button>
+      </div>
     </div>
   );
 }
@@ -345,7 +443,8 @@ function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
     );
   }
   if (entry.type === "plan") return <PlanView plan={entry.plan} />;
-  if (entry.type === "unknown") return <ThoughtEntry entry={entry} />;
+  if (entry.type === "thought") return <ThoughtEntry text={entry.text} />;
+  if (entry.type === "unknown") return null; // kept as transcript data only (D4)
 
   const isUser = entry.type === "user";
   if (!entry.text) return null;
@@ -411,13 +510,9 @@ function PlanView({ plan }: { plan: unknown }) {
   );
 }
 
-/** `unknown` entries carry every session-update kind D4 didn't get a first-class
- *  row for. Only agent_thought_chunk gets a rendering today; the rest (
- *  available_commands_update, current_mode_update, …) stay silent. */
-function ThoughtEntry({ entry }: { entry: AgentEntry }) {
-  const raw = entry.raw as { sessionUpdate?: string; content?: { type: string; text?: string } } | undefined;
-  if (raw?.sessionUpdate !== "agent_thought_chunk" || !raw.content) return null;
-  const text = contentBlockText(raw.content as Parameters<typeof contentBlockText>[0]);
+/** One coalesced thought run (a contiguous block of agent_thought_chunk
+ *  updates streams into a single entry upstream), collapsed by default. */
+function ThoughtEntry({ text }: { text?: string }) {
   if (!text) return null;
   return (
     <details className="w-full max-w-[85%] rounded-lg border border-border/60 bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
@@ -445,6 +540,9 @@ function AuthorBlobCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
   if (!rawInput?.path || !rawInput.type || !rawInput.id) {
     return <ToolCallCard toolCall={call} />;
   }
+  // rawInput.path is whatever the agent sent (usually workspace-relative);
+  // locations[0] carries the workspace-resolved absolute path the jump needs.
+  const jumpPath = call.locations?.[0]?.path ?? rawInput.path;
   const fileName = rawInput.path.split("/").pop();
   return (
     <div className="flex w-full max-w-[85%] items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs">
@@ -454,7 +552,7 @@ function AuthorBlobCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
         <button
           type="button"
           className="underline hover:text-foreground"
-          onClick={() => jumpToBlob(rawInput.path!, rawInput.id!)}
+          onClick={() => jumpToBlob(jumpPath, rawInput.id!)}
         >
           {fileName}
         </button>

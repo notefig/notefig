@@ -7,20 +7,23 @@ import {
   MCP_SERVER_NAME,
   type ContentBlock,
   type HarnessDefinition,
+  type McpServer,
+  type PromptContextPart,
   type RequestPermissionResponse,
   type SessionNotification,
   type ToolCallUpdate,
   type TurnOutcome,
 } from "@metrists/shared/agent";
 import { platformAdapter } from "@/adapters";
-import { normalizePath } from "@/utils/fs";
+import { normalizePath, resolveWorkspacePath } from "@/utils/fs";
+import { getOrCreateKvCollection } from "@/utils/kv-store";
 import { MarkdownJoiner } from "@/lib/markdown-joiner-transform";
 import { PermissionBroker } from "./permission-broker";
 import { MetristsAcpClient } from "./acp-client";
-import type { AgentTransport } from "./agent-transport.interface";
+import type { AgentTransport, McpEndpoint } from "./agent-transport.interface";
 import { AgentTransportError } from "./agent-transport.interface";
 import {
-  attachMcpTransport,
+  attachMcpEndpoint,
   createMcpRequestHandler,
   renderToolUsagePreamble,
 } from "./mcp-server";
@@ -42,15 +45,27 @@ import { agents } from "./agents";
 /** KV namespace for agent state (sessionId per task, workspace trust flag). */
 const AGENT_KV_NAMESPACE = "agent";
 
-/** In-flight turn bookkeeping (assistant-text coalescing into one entry). */
+/**
+ * A contiguous streamed run coalescing into one transcript entry. Both
+ * assistant text and thoughts stream chunk-by-chunk (OpenCode emits
+ * `agent_thought_chunk` per token — 60+ per thought), so per-chunk entries
+ * would flood the transcript. A turn has at most one run open at a time;
+ * a chunk of the other kind, a tool call, or a plan closes it, keeping
+ * entry order chronological.
+ */
+type StreamRun = {
+  kind: "assistant" | "thought";
+  entryId: string;
+  text: string;
+};
+
+/** In-flight turn bookkeeping (chunk coalescing into transcript entries). */
 type TurnState = {
   turnId: string;
-  /** Re-chunks streamed markdown at safe render boundaries. */
+  /** Re-chunks streamed assistant markdown at safe render boundaries. */
   joiner: MarkdownJoiner;
-  /** Text accumulated into the current assistant run (reset after a tool call). */
-  text: string;
-  /** The assistant entry the current run is streaming into, or null to open one. */
-  textEntryId: string | null;
+  /** The currently-open streamed run, or null (next chunk opens one). */
+  run: StreamRun | null;
   /** The user prompt that started this turn (checkpoint commit message). */
   userText: string;
 };
@@ -69,23 +84,32 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * sometimes do (confirmed absent on every MCP tool_call in
  * docs/architecture/spikes/v2-mcp-passthrough-spike.md). Derive the same
  * shape from the tool's own `path` input so these still show up in
- * file-presence affordances (Stage 3) the same as native ones.
+ * file-presence affordances (Stage 3) the same as native ones. Agents send
+ * workspace-relative paths (the tool schemas ask for them) while presence
+ * and jump affordances key on absolute editor paths — resolve here.
  */
-function deriveToolLocations(rawInput: unknown): Array<{ path: string }> | undefined {
+function deriveToolLocations(
+  rawInput: unknown,
+  workspacePath: string,
+): Array<{ path: string }> | undefined {
   if (!isPlainObject(rawInput) || typeof rawInput.path !== "string") return undefined;
-  return [{ path: rawInput.path }];
+  const resolved = resolveWorkspacePath(workspacePath, rawInput.path);
+  return [{ path: resolved.ok ? resolved.absolute : rawInput.path }];
 }
 
 /**
- * Adapters mint MCP tool names as `mcp__<serverName>__<toolName>` (confirmed
- * on claude-agent-acp — docs/architecture/spikes/v2-mcp-passthrough-spike.md).
- * Strip the prefix so transcript entries and `findBlobAuthorTask` see the
- * plain tool name, same as any other tool call.
+ * Adapters mint their own MCP tool-name prefixes: claude-agent-acp uses
+ * `mcp__<serverName>__<toolName>` (v2-mcp-passthrough-spike.md), OpenCode
+ * uses `<serverName>_<toolName>` (v2-opencode-config-mcp-spike.md). Strip
+ * whichever is present so transcript entries and `findBlobAuthorTask` see
+ * the plain tool name, same as any other tool call.
  */
 function normalizeMcpToolName(title: string | null | undefined): string | undefined {
   if (!title) return undefined;
-  const prefix = `mcp__${MCP_SERVER_NAME}__`;
-  return title.startsWith(prefix) ? title.slice(prefix.length) : title;
+  for (const prefix of [`mcp__${MCP_SERVER_NAME}__`, `${MCP_SERVER_NAME}_`]) {
+    if (title.startsWith(prefix)) return title.slice(prefix.length);
+  }
+  return title;
 }
 
 /**
@@ -138,7 +162,11 @@ export class AgentTask {
    * their user entry + a `"queued"` turn row immediately, and `runTurn`
    * promotes those rows to `"running"` when the queue reaches them.
    */
-  private readonly pendingPrompts: { turnId: string; text: string }[] = [];
+  private readonly pendingPrompts: {
+    turnId: string;
+    text: string;
+    contextParts?: PromptContextPart[];
+  }[] = [];
   /** turnId → resolver for that turn's prompt-handle `completed` promise. */
   private readonly turnResolvers = new Map<
     string,
@@ -148,10 +176,22 @@ export class AgentTask {
   private draining = false;
   /** "How to sign in" hint, surfaced only when an auth error actually occurs. */
   private authHintValue?: string;
+  /** The prompt text an auth block interrupted; retried after sign-in. */
+  private heldPromptText?: string;
+  /**
+   * While auth-blocked, new prompts queue without starting a drain — running
+   * them would just fail the same way and displace the held prompt. Cleared
+   * by authenticate()/retryHeldPrompt(), which restart the drain.
+   */
+  private authBlocked = false;
+  /** Whether this task wrote a per-task OpenCode config (cleaned up in dispose). */
+  private opencodeConfigWritten = false;
+  /** Per-harness signed-in KV mark, written once per task on first success. */
+  private signedInMarked = false;
   private disposed = false;
   private readonly unsubscribers: Array<() => void> = [];
-  /** Stage 3.5: this task's app-tools MCP transport; torn down in dispose(). */
-  private mcpTransport: AgentTransport | null = null;
+  /** Stage 3.5: this task's app-tools MCP endpoint; torn down in dispose(). */
+  private mcpEndpoint: McpEndpoint | null = null;
   /** Sent once per task, on the first turn only (steers tool preference). */
   private toolUsagePreambleSent = false;
 
@@ -165,46 +205,30 @@ export class AgentTask {
     this.permissionBroker = new PermissionBroker(taskId);
   }
 
-  /** Spawn transport + connect ACP + create the session. */
-  async start(transport: AgentTransport): Promise<void> {
-    this.transport = transport;
+  /**
+   * Spawn transport + connect ACP + create the session. Takes a transport
+   * *factory* rather than a transport: the app-tools MCP channel must be
+   * live before the harness process spawns, because some harnesses learn
+   * about the MCP server through their spawn environment
+   * (`mcpRegistration: "opencode-config"` → a per-task config file passed
+   * via `OPENCODE_CONFIG`) rather than through `session/new.mcpServers`.
+   */
+  async start(
+    createTransport: (spec: { extraEnv: Record<string, string> }) => AgentTransport,
+  ): Promise<void> {
     this.insertTaskRow();
 
-    this.unsubscribers.push(
-      transport.onClose((error) => this.handleTransportClose(error)),
-    );
-    // Adapter stderr — console-only for now (observability lives on the
-    // transcript collections; the raw-frame diagnostics stream was removed).
-    if (transport.onDiagnostic) {
-      this.unsubscribers.push(
-        transport.onDiagnostic((line) => this.warn("stderr", line)),
-      );
-    }
-
-    this.client = new MetristsAcpClient({
-      taskId: this.taskId,
-      transport,
-      permissionBroker: this.permissionBroker,
-      onSessionUpdate: (notification) => this.handleSessionUpdate(notification),
-    });
-
-    // Bring the transport live before any ACP traffic; spawn failure surfaces
-    // here as an AgentTransportError and marks the task errored.
     try {
-      await transport.start();
-      await this.client.connect();
-      // Note: we do NOT surface authHint here — the adapter always advertises
-      // authMethods regardless of login (see the auth spike), so the hint only
-      // becomes meaningful when a prompt actually fails with "auth required".
-      // Same construct-then-start pattern as the ACP transport above:
-      // createMcpTransport is a dumb sync constructor, we call start()
+      // MCP channel first — the harness spawn may need its address. Same
+      // construct-then-start pattern as the ACP transport below:
+      // createMcpEndpoint is a dumb sync constructor, we call start()
       // ourselves, and mcpServer only exists on the instance afterward.
-      const mcpTransport = platformAdapter.createMcpTransport({ taskId: this.taskId });
-      this.mcpTransport = mcpTransport;
-      await mcpTransport.start();
+      const mcpEndpoint = platformAdapter.createMcpEndpoint({ taskId: this.taskId });
+      this.mcpEndpoint = mcpEndpoint;
+      await mcpEndpoint.start();
       this.unsubscribers.push(
-        attachMcpTransport(
-          mcpTransport,
+        attachMcpEndpoint(
+          mcpEndpoint,
           createMcpRequestHandler({
             ctx: {
               workspacePath: this.workspacePath,
@@ -215,9 +239,46 @@ export class AgentTask {
           }),
         ),
       );
+
+      const extraEnv = await this.prepareHarnessMcpRegistration(
+        mcpEndpoint.mcpServer,
+      );
+
+      const transport = createTransport({ extraEnv });
+      this.transport = transport;
+      this.unsubscribers.push(
+        transport.onClose((error) => this.handleTransportClose(error)),
+      );
+      // Adapter stderr — console-only for now (observability lives on the
+      // transcript collections; the raw-frame diagnostics stream was removed).
+      if (transport.onDiagnostic) {
+        this.unsubscribers.push(
+          transport.onDiagnostic((line) => this.warn("stderr", line)),
+        );
+      }
+
+      this.client = new MetristsAcpClient({
+        taskId: this.taskId,
+        transport,
+        permissionBroker: this.permissionBroker,
+        onSessionUpdate: (notification) => this.handleSessionUpdate(notification),
+      });
+
+      // Bring the transport live before any ACP traffic; spawn failure
+      // surfaces here as an AgentTransportError and marks the task errored.
+      await transport.start();
+      await this.client.connect();
+      // Note: we do NOT surface authHint here — the adapter always advertises
+      // authMethods regardless of login (see the auth spike), so the hint only
+      // becomes meaningful when a prompt actually fails with "auth required".
       const session = await this.client.newSession(
         this.workspacePath,
-        mcpTransport.mcpServer ? [mcpTransport.mcpServer] : [],
+        // Only harnesses with verified session/new pass-through get the
+        // entry here (capability matrix, not self-reported mcpCapabilities);
+        // "opencode-config" harnesses already got it via their spawn env.
+        this.harness.mcpRegistration === "session-new" && mcpEndpoint.mcpServer
+          ? [mcpEndpoint.mcpServer]
+          : [],
       );
       this.sessionId = session.sessionId;
       // Persist per task even though session/load waits until Phase 4.
@@ -236,6 +297,54 @@ export class AgentTask {
   }
 
   /**
+   * Pre-spawn MCP registration for harnesses that don't take
+   * `session/new.mcpServers`. For "opencode-config": write a per-task
+   * OpenCode config registering our stdio server and return
+   * `OPENCODE_CONFIG` pointing at it (verified to reach the model —
+   * v2-opencode-config-mcp-spike.md). Best-effort: a failed write degrades
+   * to "no app tools" rather than failing the task.
+   */
+  private async prepareHarnessMcpRegistration(
+    mcpServer: McpServer | undefined,
+  ): Promise<Record<string, string>> {
+    if (
+      this.harness.mcpRegistration !== "opencode-config" ||
+      !mcpServer ||
+      !("command" in mcpServer) // only the stdio variant maps to an OpenCode "local" entry
+    ) {
+      return {};
+    }
+    const configPath = this.opencodeConfigPath();
+    const environment: Record<string, string> = {};
+    for (const entry of mcpServer.env ?? []) environment[entry.name] = entry.value;
+    const config = {
+      $schema: "https://opencode.ai/config.json",
+      mcp: {
+        [mcpServer.name]: {
+          type: "local",
+          command: [mcpServer.command, ...mcpServer.args],
+          enabled: true,
+          environment,
+        },
+      },
+    };
+    const result = await platformAdapter.writeFiles([
+      { path: configPath, content: JSON.stringify(config, null, 2) },
+    ]);
+    if (result.failed.length > 0) {
+      this.warn("opencode mcp config write failed; task runs without app tools");
+      return {};
+    }
+    this.opencodeConfigWritten = true;
+    return { OPENCODE_CONFIG: configPath };
+  }
+
+  /** Per-task OpenCode config, under the workspace's own `.metrists/`. */
+  private opencodeConfigPath(): string {
+    return `${this.workspacePath}/.metrists/agent/opencode-${this.taskId}.json`;
+  }
+
+  /**
    * Send a user prompt. Enqueue always succeeds — this never throws. While a
    * turn runs the prompt queues FIFO, visible in the transcript as a
    * `"queued"` turn row; a task that never started or is disposed resolves
@@ -243,7 +352,14 @@ export class AgentTask {
    * returned handle (fire-and-forget is lossless); tests and programmatic
    * callers await `completed`.
    */
-  prompt(text: string): { turnId: string; completed: Promise<TurnOutcome> } {
+  prompt(
+    text: string,
+    options?: {
+      contextParts?: PromptContextPart[];
+      /** Enqueue ahead of already-queued prompts (held-prompt retry). */
+      front?: boolean;
+    },
+  ): { turnId: string; completed: Promise<TurnOutcome> } {
     const turnId = newTurnId();
     const completed = new Promise<TurnOutcome>((resolve) => {
       this.turnResolvers.set(turnId, resolve);
@@ -280,9 +396,15 @@ export class AgentTask {
       return { turnId, completed };
     }
 
-    this.pendingPrompts.push({ turnId, text });
-    // A running (or actively draining) loop will pick this up; otherwise start one.
-    if (!this.currentTurn && !this.draining) void this.drainQueue();
+    const entry = { turnId, text, contextParts: options?.contextParts };
+    if (options?.front) this.pendingPrompts.unshift(entry);
+    else this.pendingPrompts.push(entry);
+    // A running (or actively draining) loop will pick this up; otherwise start
+    // one — unless sign-in is pending, in which case rows queue visibly until
+    // authenticate()/retryHeldPrompt() restarts the drain.
+    if (!this.currentTurn && !this.draining && !this.authBlocked) {
+      void this.drainQueue();
+    }
     return { turnId, completed };
   }
 
@@ -334,8 +456,8 @@ export class AgentTask {
     this.draining = true;
     try {
       while (!this.disposed && this.pendingPrompts.length > 0) {
-        const { turnId, text } = this.pendingPrompts.shift()!;
-        const status = await this.runTurn(turnId, text);
+        const { turnId, text, contextParts } = this.pendingPrompts.shift()!;
+        const status = await this.runTurn(turnId, text, contextParts);
         // Don't march the rest of the queue through the same failure (e.g.
         // an auth block); remaining rows stay visibly queued and resume on
         // the next successful send.
@@ -346,7 +468,11 @@ export class AgentTask {
     }
   }
 
-  private async runTurn(turnId: string, text: string): Promise<AgentTurnStatus> {
+  private async runTurn(
+    turnId: string,
+    text: string,
+    contextParts?: PromptContextPart[],
+  ): Promise<AgentTurnStatus> {
     if (!this.client || !this.sessionId) {
       this.settleQueuedTurn(turnId, {
         status: "error",
@@ -374,8 +500,7 @@ export class AgentTask {
     this.currentTurn = {
       turnId,
       joiner: new MarkdownJoiner(),
-      text: "",
-      textEntryId: null,
+      run: null,
       userText: text,
     };
     this.setStatus("running");
@@ -387,26 +512,106 @@ export class AgentTask {
       const blocks = composePrompt({
         text,
         preamble,
+        contextParts,
         capabilities: { embeddedContext: this.client.embeddedContextCapability },
       });
       const response = await this.client.prompt(this.sessionId, blocks);
       // Only after a successful round-trip — a failed first turn (auth block,
       // dead transport) must not eat the preamble for the retry.
       this.toolUsagePreambleSent = true;
-      // A turn that reached the model clears any stale auth banner.
-      this.setAuthHint(undefined);
+      // A turn that reached the model clears any auth block and marks this
+      // harness signed in on this machine (the only reliable signal — there
+      // is no ahead-of-time probe, per the auth spike). Written through the
+      // KV collection (not platformAdapter.setKv directly) so the harness
+      // picker's indicator updates live.
+      this.clearAuthBlock();
+      if (!this.signedInMarked) {
+        this.signedInMarked = true;
+        const kv = getOrCreateKvCollection(AGENT_KV_NAMESPACE);
+        const key = `auth:${this.harness.id}`;
+        if (kv.get(key)) {
+          kv.update(key, (draft) => {
+            draft.value = true;
+          });
+        } else {
+          kv.insert({ key, value: true });
+        }
+      }
       return this.finishTurn(response.stopReason, "completed");
     } catch (error) {
       const message = errorMessage(error);
       // Logged-out claude-code-acp fails here with "Authentication required"
-      // (see docs/architecture/spikes/phase1-auth-spike.md). The string
-      // authHint banner (set below) is the sole signal for now — the richer
-      // task-row auth state (methods, retry) is Stage 4's job.
+      // (docs/architecture/spikes/phase1-auth-spike.md). Auth-blocked state
+      // is task-row state: methods + hint land on the row, the failed
+      // prompt's text is held for a retry after sign-in.
       if (/authentication required/i.test(message)) {
-        this.setAuthHint(this.client?.authHint ?? this.harness.authHint);
+        this.enterAuthBlock(text);
       }
       this.warn("turn error", message);
       return this.finishTurn(undefined, "error", message);
+    }
+  }
+
+  /**
+   * ACP `authenticate` with one of the methods on the task row, then retry
+   * the held prompt. Fails as a value — for out-of-band methods (terminal
+   * logins; both claude-code and OpenCode today) the adapter typically
+   * rejects, and the UI falls back to showing the method's description as
+   * instructions plus the "I've signed in" retry affordance.
+   */
+  async authenticate(methodId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!this.client) return { ok: false, error: "agent task is not started" };
+    try {
+      await this.client.authenticate(methodId);
+    } catch (error) {
+      return { ok: false, error: errorMessage(error) };
+    }
+    this.retryHeldPrompt();
+    return { ok: true };
+  }
+
+  /**
+   * Clear the auth block and re-send the prompt it interrupted (jumping the
+   * queue — it was sent before anything queued behind it). Also the "I've
+   * signed in" affordance for out-of-band logins: optimistic, since there's
+   * no probe — if the user isn't actually signed in, the retry re-raises
+   * the block.
+   */
+  retryHeldPrompt(): void {
+    const text = this.heldPromptText;
+    this.heldPromptText = undefined;
+    this.clearAuthBlock();
+    if (this.status === "error") this.setStatus("idle");
+    if (text) {
+      this.prompt(text, { front: true });
+    } else if (this.pendingPrompts.length > 0 && !this.currentTurn && !this.draining) {
+      // Nothing held, but prompts queued up behind the block — resume them.
+      void this.drainQueue();
+    }
+  }
+
+  /** Auth-blocked is task-row state (Stage 4): methods + hint, held prompt. */
+  private enterAuthBlock(promptText: string): void {
+    this.authBlocked = true;
+    this.heldPromptText = promptText;
+    this.authHintValue = this.client?.authHint ?? this.harness.authHint;
+    if (agentTasksCollection.get(this.taskId)) {
+      agentTasksCollection.update(this.taskId, (draft) => {
+        draft.authRequired = true;
+        draft.authMethods = this.client?.availableAuthMethods ?? [];
+        draft.authHint = this.authHintValue;
+      });
+    }
+  }
+
+  private clearAuthBlock(): void {
+    this.authBlocked = false;
+    this.authHintValue = undefined;
+    if (agentTasksCollection.get(this.taskId)) {
+      agentTasksCollection.update(this.taskId, (draft) => {
+        draft.authRequired = false;
+        draft.authHint = undefined;
+      });
     }
   }
 
@@ -418,11 +623,8 @@ export class AgentTask {
     const turn = this.currentTurn;
     if (!turn) return turnStatus;
 
-    const tail = turn.joiner.flush();
-    if (tail) {
-      turn.text += tail;
-      this.writeAssistantText(turn);
-    }
+    // Land any buffered assistant text before sealing the turn.
+    this.closeRun(turn);
 
     // A finished turn means its tools are no longer running — resolve any that
     // never received a terminal update so nothing spins forever.
@@ -485,17 +687,26 @@ export class AgentTask {
 
     switch (update.sessionUpdate) {
       case "agent_message_chunk": {
+        // A reply after a thought closes the thought run (order-preserving);
+        // assistant text additionally rides the markdown joiner.
+        if (turn.run?.kind === "thought") this.closeRun(turn);
         const flushable = turn.joiner.processText(contentBlockText(update.content));
-        if (flushable) {
-          turn.text += flushable;
-          this.writeAssistantText(turn);
-        }
+        if (flushable) this.appendToRun(turn, "assistant", flushable);
+        break;
+      }
+      case "agent_thought_chunk": {
+        const chunk = contentBlockText(update.content);
+        if (!chunk) break;
+        // A thought after visible text closes the text run (and flushes any
+        // markdown the joiner was still buffering, keeping order).
+        if (turn.run?.kind !== "thought") this.closeRun(turn);
+        this.appendToRun(turn, "thought", chunk);
         break;
       }
       case "plan": {
-        // Plans are peers of text/tools; close the current text run so a
-        // following reply opens a fresh assistant entry after the plan.
-        this.closeTextRun(turn);
+        // Plans are peers of text/tools; close the open run so a following
+        // reply opens a fresh entry after the plan.
+        this.closeRun(turn);
         agentEntriesCollection.insert({
           id: newEventId(),
           taskId: this.taskId,
@@ -507,11 +718,9 @@ export class AgentTask {
         break;
       }
       default:
-        // D4: agent_thought_chunk / user_message_chunk /
-        // available_commands_update / current_mode_update — not rendered
-        // yet, but kept as transcript data rather than dropped. Text-run
-        // boundaries are left alone (no closeTextRun) since thought chunks
-        // often interleave with message chunks.
+        // D4: user_message_chunk / available_commands_update /
+        // current_mode_update — not rendered yet, but kept as transcript
+        // data rather than dropped. Run boundaries are left alone.
         agentEntriesCollection.insert({
           id: newEventId(),
           taskId: this.taskId,
@@ -561,15 +770,15 @@ export class AgentTask {
           ...update,
           title: normalizeMcpToolName(update.title) ?? previous?.title,
           locations:
-            update.locations ?? deriveToolLocations(update.rawInput) ?? previous?.locations,
+            update.locations ?? deriveToolLocations(update.rawInput, this.workspacePath) ?? previous?.locations,
         };
       });
       return;
     }
 
-    // A new tool call ends the current assistant text run, so the reply that
+    // A new tool call ends the open text/thought run, so the reply that
     // follows the tool renders below it (correct interleaving).
-    if (this.currentTurn) this.closeTextRun(this.currentTurn);
+    if (this.currentTurn) this.closeRun(this.currentTurn);
     const id = newEventId();
     if (toolCallId) this.toolEventIds.set(toolCallId, id);
     agentEntriesCollection.insert({
@@ -581,7 +790,7 @@ export class AgentTask {
       toolCall: {
         ...update,
         title: normalizeMcpToolName(update.title),
-        locations: update.locations ?? deriveToolLocations(update.rawInput),
+        locations: update.locations ?? deriveToolLocations(update.rawInput, this.workspacePath),
       },
       createdAt: Date.now(),
     });
@@ -610,48 +819,43 @@ export class AgentTask {
     }
   }
 
-  private setAuthHint(hint?: string): void {
-    this.authHintValue = hint;
-    if (agentTasksCollection.get(this.taskId)) {
-      agentTasksCollection.update(this.taskId, (draft) => {
-        draft.authHint = hint;
+  /**
+   * Append streamed text to the turn's open run, opening one (with its
+   * transcript entry) if none of this kind is open. Callers close a
+   * different-kind run first — this only extends or opens.
+   */
+  private appendToRun(turn: TurnState, kind: StreamRun["kind"], text: string): void {
+    if (!turn.run || turn.run.kind !== kind) {
+      turn.run = { kind, entryId: newEventId(), text };
+      agentEntriesCollection.insert({
+        id: turn.run.entryId,
+        taskId: this.taskId,
+        turnId: turn.turnId,
+        type: kind,
+        text,
+        createdAt: Date.now(),
       });
+      return;
     }
+    turn.run.text += text;
+    const { entryId, text: runText } = turn.run;
+    agentEntriesCollection.update(entryId, (draft) => {
+      draft.text = runText;
+    });
   }
 
   /**
-   * End the current assistant text run; the next chunk opens a fresh entry.
-   * Flush the joiner first so text it was still buffering (awaiting a safe
-   * markdown boundary) lands in this run instead of being dropped when a tool
-   * call interrupts.
+   * Close the open run; the next chunk opens a fresh entry (that boundary is
+   * what keeps thought/text/tool/plan entries chronological). Flushes the
+   * markdown joiner first so assistant text it was still buffering (awaiting
+   * a safe render boundary) lands before whatever interrupted it — the
+   * joiner only ever holds assistant text, so its buffer is empty whenever a
+   * thought run is the one being closed.
    */
-  private closeTextRun(turn: TurnState): void {
+  private closeRun(turn: TurnState): void {
     const tail = turn.joiner.flush();
-    if (tail) {
-      turn.text += tail;
-      this.writeAssistantText(turn);
-    }
-    turn.textEntryId = null;
-    turn.text = "";
-  }
-
-  /** Upsert the current assistant text run into its single coalesced entry. */
-  private writeAssistantText(turn: TurnState): void {
-    if (!turn.textEntryId) {
-      turn.textEntryId = newEventId();
-      agentEntriesCollection.insert({
-        id: turn.textEntryId,
-        taskId: this.taskId,
-        turnId: turn.turnId,
-        type: "assistant",
-        text: turn.text,
-        createdAt: Date.now(),
-      });
-    } else {
-      agentEntriesCollection.update(turn.textEntryId, (draft) => {
-        draft.text = turn.text;
-      });
-    }
+    if (tail) this.appendToRun(turn, "assistant", tail);
+    turn.run = null;
   }
 
   /**
@@ -692,7 +896,11 @@ export class AgentTask {
     for (const unsubscribe of this.unsubscribers) unsubscribe();
     this.unsubscribers.length = 0;
     await this.cancel();
-    await Promise.all([this.transport?.close(), this.mcpTransport?.close()]);
+    await Promise.all([this.transport?.close(), this.mcpEndpoint?.close()]);
+    if (this.opencodeConfigWritten) {
+      // Best-effort: a stale per-task config is inert (nothing points at it).
+      void platformAdapter.deleteFiles([this.opencodeConfigPath()]).catch(() => {});
+    }
   }
 
   // ===== internal helpers =====
@@ -841,18 +1049,24 @@ export async function startAgentTask(
 ): Promise<string> {
   const manager = getOrCreateWorkspaceTaskManager(workspacePath);
   const task = manager.createTask(harness);
-  const transport = platformAdapter.createAgentTransport({
-    taskId: task.taskId,
-    harness,
-    workspacePath,
-  });
-  await task.start(transport);
+  await task.start(({ extraEnv }) =>
+    platformAdapter.createAgentTransport({
+      taskId: task.taskId,
+      harness,
+      workspacePath,
+      extraEnv,
+    }),
+  );
   return task.taskId;
 }
 
 /** Send a prompt to a task (fire-and-forget; FIFO queue, lossless). */
-export function promptAgentTask(taskId: string, text: string): void {
-  getRegisteredTask(taskId)?.prompt(text);
+export function promptAgentTask(
+  taskId: string,
+  text: string,
+  contextParts?: PromptContextPart[],
+): void {
+  getRegisteredTask(taskId)?.prompt(text, { contextParts });
 }
 
 /** Remove one queued (not yet running) prompt from a task's queue. */
@@ -863,6 +1077,24 @@ export function removeQueuedPrompt(taskId: string, turnId: string): void {
 /** Cancel a task's running turn and pending permissions. */
 export async function cancelAgentTask(taskId: string): Promise<void> {
   await getRegisteredTask(taskId)?.cancel();
+}
+
+/**
+ * ACP `authenticate` with one of the task row's `authMethods`, retrying the
+ * held prompt on success. Errors as values (out-of-band methods reject).
+ */
+export async function authenticateAgentTask(
+  taskId: string,
+  methodId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const task = getRegisteredTask(taskId);
+  if (!task) return { ok: false, error: "agent task is not started" };
+  return task.authenticate(methodId);
+}
+
+/** "I've signed in" — clear the auth block and retry the held prompt. */
+export function retryAgentTaskAfterAuth(taskId: string): void {
+  getRegisteredTask(taskId)?.retryHeldPrompt();
 }
 
 /** Answer a pending permission request (rows flow via the collection). */

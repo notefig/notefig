@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveWorkspacePath } from "@/utils/fs";
 import type { AgentTool } from "@metrists/shared/agent";
 import {
   ensureWorkspaceHistoryInitialized,
@@ -26,12 +27,19 @@ export const historyLog: AgentTool<
     "List document-history checkpoints (most recent first), optionally scoped to one file's path.",
   input: InputSchema,
   async execute(ctx, input) {
+    // `path` is an optional scope filter; git wants it workspace-relative.
+    let filepath: string | undefined;
+    if (input.path) {
+      const resolved = resolveWorkspacePath(ctx.workspacePath, input.path);
+      if (!resolved.ok) return { ok: false, error: resolved.error };
+      filepath = resolved.relative;
+    }
     try {
       const service = await ensureWorkspaceHistoryInitialized(ctx.workspacePath);
       const commits = await service.log({
         repoPath: ctx.workspacePath,
         gitDir: historyGitDir(ctx.workspacePath),
-        filepath: input.path,
+        filepath,
       });
       const value = commits.map((c) => ({
         oid: c.oid,

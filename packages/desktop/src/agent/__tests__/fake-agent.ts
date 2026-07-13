@@ -18,9 +18,13 @@ export class FakeAgent {
     authMethods: [],
   };
   newSessionResult: Json = { sessionId: "sess_test" };
+  /** Captured `session/new` params (mcpServers pass-through assertions). */
+  newSessionParams: Json | null = null;
   /** Scripted turn behavior; may emit updates / request permission via `this`. */
   onPrompt: (params: Json, agent: FakeAgent) => Promise<{ stopReason: string }> =
     async () => ({ stopReason: "end_turn" });
+  /** Scripted `authenticate` behavior; throwing rejects the call. */
+  onAuthenticate: (params: Json, agent: FakeAgent) => Promise<Json> = async () => ({});
 
   constructor(private readonly transport: LoopbackTransport) {
     transport.onLine((line) => void this.handle(JSON.parse(line)));
@@ -72,7 +76,21 @@ export class FakeAgent {
       case "initialize":
         return this.respond(id, this.initializeResult);
       case "session/new":
+        this.newSessionParams = params;
         return this.respond(id, this.newSessionResult);
+      case "authenticate": {
+        try {
+          const result = await this.onAuthenticate(params, this);
+          this.respond(id, result);
+        } catch (error) {
+          this.respondError(
+            id,
+            -32000,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+        return;
+      }
       case "session/prompt": {
         try {
           const result = await this.onPrompt(params, this);

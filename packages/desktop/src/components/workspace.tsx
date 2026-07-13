@@ -37,6 +37,7 @@ import {
 } from "@/utils/file-sync";
 import { disposeAllEditors, getEditor } from "@/components/editor/editor-store";
 import { AgentPanel } from "@/components/agent/agent-panel";
+import { FloatingPrompt } from "@/components/agent/floating-prompt";
 import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
 import {
   type FileTreeMode,
@@ -181,6 +182,7 @@ export const Workspace = () => {
   }, [isSidebarCollapsed, setUrlSearchParams, focusActiveEditor]);
 
   const isAgentOpen = searchParams.get("agent") === "open";
+  const [floatingPromptOpen, setFloatingPromptOpen] = useState(false);
   const toggleAgentPanel = useCallback(() => {
     setUrlSearchParams(
       (prev) => {
@@ -383,6 +385,10 @@ export const Workspace = () => {
     toggleAgentPanel();
   });
 
+  useHotkey("Mod+I", () => {
+    setFloatingPromptOpen((current) => !current);
+  });
+
   useEffect(() => {
     const metadataWatchId = `metadata-${workspacePath}`;
     const contentWatchId = `content-${workspacePath}`;
@@ -482,6 +488,12 @@ export const Workspace = () => {
             )}
           </div>
         </div>
+
+        <FloatingPrompt
+          workspacePath={workspacePath}
+          open={floatingPromptOpen}
+          onOpenChange={setFloatingPromptOpen}
+        />
 
         <button
           onClick={toggleAgentPanel}

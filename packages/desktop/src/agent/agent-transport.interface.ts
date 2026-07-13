@@ -6,12 +6,13 @@ import type { McpServer } from "@metrists/shared/agent";
  * (TauriStdioTransport); web tunnels the identical newline-delimited JSON-RPC
  * byte stream through the relay (RelayTransport); tests use an in-memory pair
  * (LoopbackTransport). Mirrors how worker-rpc.ts gives one typed promise API
- * over any message port. The task's MCP connection (TauriMcpTransport, Stage
- * 3.5) is the exact same interface, not a parallel one — the factory
- * (`createMcpTransport`) is exactly as dumb as `createAgentTransport`: it
- * only constructs, never starts. The caller always calls `start()` itself
- * and reads whatever platform-specific info comes back on the instance
- * (`spawnInfo`, `mcpServer`) — same pattern, same place, for both.
+ * over any message port. The task's app-tools MCP server rides the separate
+ * `McpEndpoint` seam below — it multiplexes several harness-spawned
+ * connections, so it is deliberately not a line channel. Both factories
+ * (`createAgentTransport`, `createMcpEndpoint`) are equally dumb: they only
+ * construct, never start; the caller calls `start()` itself and reads
+ * whatever platform-specific info comes back on the instance
+ * (`spawnInfo`, `mcpServer`).
  *
  * See docs/architecture/agent-harness.md.
  */
@@ -64,17 +65,6 @@ export interface AgentTransport {
   /** How the process was launched; populated after start() (desktop only). */
   readonly spawnInfo?: SpawnAgentInfo;
 
-  /**
-   * Only meaningful for a task's MCP connection (`createMcpTransport`): the
-   * ACP `session/new.mcpServers` entry describing how a harness reaches this
-   * same transport from its side. Populated after `start()`, same as
-   * `spawnInfo` — a transport is the only thing that knows how to express
-   * itself as one (desktop: an `McpServer::Stdio` command/args; a future
-   * platform might shape it differently), so building it lives here, not in
-   * the platform adapter or the agent service.
-   */
-  readonly mcpServer?: McpServer;
-
   /** Send one JSON-RPC message (a single line, no trailing newline). */
   send(line: string): void;
 
@@ -91,6 +81,40 @@ export interface AgentTransport {
   onDiagnostic?(callback: (line: string) => void): Unsubscribe;
 
   /** Tear down: kill the process / close the socket. Idempotent. */
+  close(): Promise<void>;
+}
+
+/**
+ * The app-tools MCP server's wire seam — deliberately NOT an AgentTransport.
+ * ACP rides exactly one connection per task, but harnesses may run several
+ * concurrent instances of the MCP server command (OpenCode spawns three), so
+ * "the" connection doesn't exist here. Instead of tagging lines with
+ * connection ids and trusting call sites to route replies, each request
+ * carries its own `respond` — sending the reply anywhere else is
+ * structurally impossible. Our MCP handler is stateless request→response
+ * (no server-initiated messages), so this is the whole surface.
+ */
+export interface McpEndpoint {
+  /** Bring the listener live; `mcpServer` is populated afterward. */
+  start(): Promise<void>;
+
+  /**
+   * The ACP `McpServer` entry describing how a harness reaches this
+   * endpoint (desktop: an `McpServer::Stdio` command/args). Populated after
+   * `start()`; the endpoint is the only thing that knows how to express
+   * itself as one.
+   */
+  readonly mcpServer?: McpServer;
+
+  /**
+   * Subscribe to incoming MCP request lines. `respond` writes back on the
+   * connection the request arrived on.
+   */
+  onRequest(
+    callback: (line: string, respond: (line: string) => void) => void,
+  ): Unsubscribe;
+
+  /** Tear down the listener (connected relays see their socket close). */
   close(): Promise<void>;
 }
 

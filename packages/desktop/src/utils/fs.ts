@@ -181,6 +181,59 @@ export function normalizePath(filePath: string): string {
   return normalized;
 }
 
+export type WorkspacePathResolution =
+  | { ok: true; absolute: string; relative: string }
+  | { ok: false; error: string };
+
+/**
+ * Resolve an agent-supplied document path against a workspace root, errors
+ * as values. Agents send workspace-relative paths ("notes.md" — the tool
+ * schemas ask for them) but sometimes absolute ones; both are accepted, and
+ * the result is always `{ absolute, relative }` with containment enforced —
+ * `..` escapes and absolute paths outside the workspace are rejected.
+ *
+ * This exists because an unresolved relative path reaches the OS resolved
+ * against the *process CWD* — under `cargo tauri dev` that's `src-tauri/`,
+ * so an agent authoring "canto-ii.md" wrote into the app's own source tree
+ * and the dev watcher restarted the app on every question.
+ */
+export function resolveWorkspacePath(
+  workspacePath: string,
+  inputPath: string,
+): WorkspacePathResolution {
+  const root = normalizePath(workspacePath);
+  // normalizePath force-prepends "/", so absoluteness is decided on the raw
+  // input (after backslash conversion) — before normalization erases it.
+  const raw = inputPath.replace(/\\/g, "/");
+  const joined = raw.startsWith("/")
+    ? normalizePath(raw)
+    : normalizePath(`${root}/${raw}`);
+
+  // Collapse "." and ".." segments so escapes are caught structurally.
+  const segments: string[] = [];
+  for (const segment of joined.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      if (segments.length === 0) {
+        return { ok: false, error: `path escapes the workspace: ${inputPath}` };
+      }
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  const absolute = "/" + segments.join("/");
+
+  if (absolute !== root && !absolute.startsWith(root === "/" ? "/" : `${root}/`)) {
+    return {
+      ok: false,
+      error: `path is outside the workspace (${workspacePath}): ${inputPath}`,
+    };
+  }
+  const relative = absolute === root ? "" : absolute.slice(root.length + 1);
+  return { ok: true, absolute, relative };
+}
+
 export function flatEntriesToTree(
   flatFiles: FileEntries,
   basePath: string,

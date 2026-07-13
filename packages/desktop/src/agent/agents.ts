@@ -36,6 +36,14 @@ export interface AgentTaskHandle {
     requestId: string,
     response: RequestPermissionResponse,
   ): ActionResult;
+  /**
+   * ACP `authenticate` with one of the task row's `authMethods`, retrying
+   * the held prompt on success. Out-of-band methods (terminal logins)
+   * reject — the caller falls back to showing instructions.
+   */
+  authenticate(methodId: string): Promise<ActionResult>;
+  /** "I've signed in" — clear the auth block and retry the held prompt. */
+  retryAfterAuth(): ActionResult;
 }
 
 export interface AgentTurnHandle {
@@ -78,6 +86,17 @@ function taskHandle(taskId: string): AgentTaskHandle {
         return { ok: false, error: "agent task is not started" };
       }
       task.respondPermission(requestId, response);
+      return { ok: true };
+    },
+    async authenticate(methodId) {
+      const task = getRegisteredTask(taskId);
+      if (!task) return { ok: false, error: "agent task is not started" };
+      return task.authenticate(methodId);
+    },
+    retryAfterAuth() {
+      const task = getRegisteredTask(taskId);
+      if (!task) return { ok: false, error: "agent task is not started" };
+      task.retryHeldPrompt();
       return { ok: true };
     },
   };

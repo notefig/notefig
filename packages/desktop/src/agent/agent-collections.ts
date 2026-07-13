@@ -6,7 +6,7 @@
  * useLiveQuery, the same idiom as the file collections.
  */
 import { createCollection, localOnlyCollectionOptions } from "@tanstack/react-db";
-import type { ToolCallUpdate } from "@metrists/shared/agent";
+import type { AuthMethod, ToolCallUpdate } from "@metrists/shared/agent";
 
 export type AgentTaskStatus = "starting" | "idle" | "running" | "cancelled" | "error";
 
@@ -27,6 +27,15 @@ export type AgentTaskRow = {
    * useLiveQuery and can't lag behind an unrelated collection write.
    */
   authHint?: string;
+  /**
+   * Auth-blocked state is task-row state, not a collection of its own
+   * (Stage 4 design). True from a prompt failing with "authentication
+   * required" until a turn reaches the model again; `authMethods` carries
+   * what `initialize` advertised so the panel can render sign-in affordances
+   * straight off the row.
+   */
+  authRequired?: boolean;
+  authMethods?: AuthMethod[];
 };
 
 export type AgentTurnStatus =
@@ -53,6 +62,8 @@ export type AgentTurn = {
 export type AgentEntryType =
   | "user"
   | "assistant"
+  /** Coalesced agent_thought_chunk run (OpenCode streams these per token). */
+  | "thought"
   | "tool_call"
   | "plan"
   | "unknown";
@@ -71,7 +82,7 @@ export type AgentEntry = {
   taskId: string;
   turnId: string;
   type: AgentEntryType;
-  /** user / assistant text runs; unknown: the update's sessionUpdate kind */
+  /** user / assistant / thought text runs; unknown: the update's sessionUpdate kind */
   text?: string;
   /** tool_call: the ACP toolCallId this row coalesces */
   toolCallId?: string;

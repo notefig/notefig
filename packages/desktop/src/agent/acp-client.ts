@@ -130,6 +130,25 @@ export class MetristsAcpClient implements Client {
   }
 
   /**
+   * ACP `authenticate` with one of the methods `initialize` advertised.
+   * Out-of-band methods (terminal logins — both claude-code and OpenCode
+   * today) typically fail here or no-op; the caller treats a rejection as
+   * "method is out-of-band, show its description as instructions".
+   */
+  async authenticate(methodId: string): Promise<void> {
+    await this.requireConnection().authenticate({ methodId });
+  }
+
+  /**
+   * Auth methods from `initialize` — advertised regardless of login state
+   * (Phase 1 finding), so this is "what sign-in looks like", never "is the
+   * user signed in". Stage 4 surfaces these on the task row on auth failure.
+   */
+  get availableAuthMethods(): AuthMethod[] {
+    return this.authMethods;
+  }
+
+  /**
    * Human-readable "how to authenticate" hint from the adapter, if any.
    * claude-code-acp advertises `{ id: "claude-login", description: "Run
    * `claude /login` in the terminal" }` (see the auth spike); we prefer this

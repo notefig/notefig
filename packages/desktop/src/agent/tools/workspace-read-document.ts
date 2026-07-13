@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { AgentTool } from "@metrists/shared/agent";
 import { readWorkspaceTextFile } from "@/utils/file-sync";
+import { resolveWorkspacePath } from "@/utils/fs";
 
 const InputSchema = z.object({
   path: z.string().min(1),
@@ -17,9 +18,11 @@ export const workspaceReadDocument: AgentTool<
   description:
     "Read a workspace document's content by path. Optional 1-based `line` + `limit` for a partial read.",
   input: InputSchema,
-  async execute(_ctx, input) {
+  async execute(ctx, input) {
+    const resolved = resolveWorkspacePath(ctx.workspacePath, input.path);
+    if (!resolved.ok) return { ok: false, error: resolved.error };
     try {
-      const value = await readWorkspaceTextFile(input.path, {
+      const value = await readWorkspaceTextFile(resolved.absolute, {
         line: input.line,
         limit: input.limit,
       });

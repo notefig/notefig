@@ -29,6 +29,17 @@ vi.mock("@/components/editor/blobs/blob-registry", () => ({
   getBlobType: (type: string) => blobTypes.find((t) => t.type === type),
 }));
 
+// author_blob's execute reads/writes through the file-sync helpers; stub
+// them so the stringified-payload repair test below exercises the full
+// dispatch without touching a real workspace.
+const { writeWorkspaceTextFile } = vi.hoisted(() => ({
+  writeWorkspaceTextFile: vi.fn(async () => {}),
+}));
+vi.mock("@/utils/file-sync", () => ({
+  readWorkspaceTextFile: vi.fn(async () => "# Doc\n"),
+  writeWorkspaceTextFile,
+}));
+
 import { createMcpRequestHandler } from "../mcp-server";
 import { PermissionBroker } from "../permission-broker";
 import { agentPermissionRequestsCollection } from "../agent-collections";
@@ -133,6 +144,33 @@ describe("createMcpRequestHandler", () => {
     });
     expect(response?.error?.code).toBe(-32602);
     expect(response?.error?.message).toMatch(/invalid input for workspace_read_document/);
+  });
+
+  it("tools/call: repairs a nested argument delivered as a JSON string (OpenCode quirk)", async () => {
+    // OpenCode has been observed sending `payload` as the JSON *string* of
+    // the object (v2-opencode-config-mcp-spike.md); one repair pass re-parses
+    // it before rejecting.
+    const response = await handler()({
+      jsonrpc: "2.0",
+      id: 9,
+      method: "tools/call",
+      params: {
+        name: "author_blob",
+        arguments: {
+          path: "notes.md",
+          type: "question",
+          id: "question_str1",
+          payload: '{"prompt": "Pick one"}',
+        },
+      },
+    });
+    expect(response?.error).toBeUndefined();
+    const result = response?.result as { isError?: boolean; content: Array<{ text: string }> };
+    expect(result.isError).toBeUndefined();
+    expect(JSON.parse(result.content[0].text)).toEqual({ blobId: "question_str1" });
+    // The written fence carries the parsed payload, not the string.
+    const written = writeWorkspaceTextFile.mock.calls.at(-1) as unknown as [string, string];
+    expect(written[1]).toContain("Pick one");
   });
 
   it("tools/call: happy path dispatches to the tool and wraps the result as MCP content", async () => {

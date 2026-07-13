@@ -37,6 +37,25 @@ const invalidationTimers = new Map<string, ReturnType<typeof setTimeout>>();
  * since several events can legitimately observe the same disk state.
  */
 const SELF_WRITE_TTL_MS = 30_000;
+
+/**
+ * The app-layer choke point for the "workspace paths are absolute"
+ * invariant: a relative path here would reach the OS resolved against the
+ * process CWD (src-tauri/ under `cargo tauri dev` — agent-supplied
+ * workspace-relative paths once wrote into the app's own source tree and
+ * restarted the dev app on every write). Callers with agent-supplied paths
+ * resolve them first (resolveWorkspacePath in utils/fs); this throws into
+ * the standard FsError boundary if anyone forgets.
+ */
+function assertAbsoluteWorkspacePath(path: string): void {
+  if (!path.startsWith("/")) {
+    throw new FsError(
+      "invalid_path",
+      path,
+      `workspace file paths must be absolute, got "${path}" (resolve agent paths with resolveWorkspacePath first)`,
+    );
+  }
+}
 const recentSelfWrites = new Map<string, { hash: string; at: number }[]>();
 
 export function recordSelfWrite(path: string, contentHash: string): void {
@@ -90,6 +109,7 @@ export async function writeWorkspaceTextFile(
   path: string,
   content: string,
 ): Promise<void> {
+  assertAbsoluteWorkspacePath(path);
   recordSelfWrite(path, calculateContentHash(content));
   const result = await platformAdapter.writeFiles([{ path, content }]);
   const failure = result.failed[0];
@@ -112,6 +132,7 @@ export async function readWorkspaceTextFile(
   path: string,
   options?: { line?: number; limit?: number },
 ): Promise<string> {
+  assertAbsoluteWorkspacePath(path);
   const result = await platformAdapter.readFiles([path]);
   const failure = result.failed[0];
   if (failure) {

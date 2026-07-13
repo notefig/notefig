@@ -21,7 +21,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import type { GitStorageHost } from "@metrists/git";
 import type { HarnessDefinition } from "@metrists/shared/agent";
-import type { AgentTransport } from "@/agent/agent-transport.interface";
+import type { AgentTransport, McpEndpoint } from "@/agent/agent-transport.interface";
 import { TauriStdioTransport } from "@/agent/tauri-stdio-transport";
 import { TauriMcpTransport } from "@/agent/tauri-mcp-transport";
 
@@ -659,17 +659,22 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     taskId: string;
     harness: HarnessDefinition;
     workspacePath: string;
+    extraEnv?: Record<string, string>;
   }): AgentTransport {
     return new TauriStdioTransport({
       procId: spec.taskId,
       program: spec.harness.command,
-      args: spec.harness.args,
+      // `${workspace}` placeholder → the actual workspace path (e.g.
+      // OpenCode's `acp --cwd ${workspace}`).
+      args: spec.harness.args.map((arg) =>
+        arg.split("${workspace}").join(spec.workspacePath),
+      ),
       cwd: spec.workspacePath,
-      env: spec.harness.env,
+      env: { ...spec.harness.env, ...spec.extraEnv },
     });
   }
 
-  createMcpTransport(spec: { taskId: string }): AgentTransport {
+  createMcpEndpoint(spec: { taskId: string }): McpEndpoint {
     return new TauriMcpTransport(spec.taskId);
   }
 

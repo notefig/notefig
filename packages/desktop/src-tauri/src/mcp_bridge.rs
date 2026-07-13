@@ -74,13 +74,27 @@ struct McpConnectionHandle {
     write_half: Arc<AsyncMutex<OwnedWriteHalf>>,
 }
 
+/// One incoming line, tagged with which relay connection it arrived on so
+/// the webview can reply on the same one. Harnesses may spawn the MCP
+/// server command several times concurrently (OpenCode spawns three —
+/// docs/architecture/spikes/v2-opencode-config-mcp-spike.md), so connections
+/// are multiplexed per task, never assumed singular.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct McpLinePayload {
+    pub conn_id: u64,
+    pub line: String,
+}
+
+static NEXT_CONN_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 lazy_static::lazy_static! {
     /// task_id → running listener, so `stop_mcp_relay` can tear one down and
     /// a disposed task's relay process finds nothing to connect to.
     static ref MCP_LISTENERS: Mutex<HashMap<String, McpListenerHandle>> = Mutex::new(HashMap::new());
-    /// task_id → the one accepted connection's write half. Only one relay
-    /// connection is expected per task; `write_mcp_line` looks here.
-    static ref MCP_CONNECTIONS: Mutex<HashMap<String, McpConnectionHandle>> = Mutex::new(HashMap::new());
+    /// task_id → conn_id → that connection's write half. `write_mcp_line`
+    /// addresses one connection; a connection closing removes only itself.
+    static ref MCP_CONNECTIONS: Mutex<HashMap<String, HashMap<u64, McpConnectionHandle>>> = Mutex::new(HashMap::new());
 }
 
 static CURRENT_EXE: OnceLock<String> = OnceLock::new();
@@ -180,15 +194,14 @@ where
     }
 }
 
-/// One accepted connection (expected: the one relay process the harness
-/// spawned). The peer must present the task's token as its first line —
-/// mismatch/timeout drops the connection (with a close event) before any
-/// wiring happens. After that: pure line pump, every line read gets emitted
-/// verbatim, no parsing, no correlation. Emits a `close` event when the peer
-/// disconnects (natural close or error) — `stop_mcp_relay`-initiated
-/// teardown races harmlessly with this, matching agent_proc.rs's
-/// exit-is-exit convention; the frontend's close handling is already
-/// idempotent.
+/// One accepted relay connection. The peer must present the task's token as
+/// its first line — mismatch/timeout drops the connection silently (a failed
+/// stranger's probe must not affect the live channel). After that: pure line
+/// pump, every line read gets emitted verbatim (tagged with this
+/// connection's id), no parsing, no correlation. A connection closing
+/// removes only its own entry — other concurrent connections from the same
+/// harness (OpenCode spawns the server command several times) stay wired,
+/// and no transport-level close is implied.
 async fn handle_connection(
     stream: TcpStream,
     task_id: String,
@@ -199,32 +212,37 @@ async fn handle_connection(
     let mut lines = BufReader::new(read_half).lines();
 
     if !expect_token(&mut lines, &token).await {
-        let _ = app_handle.emit(&format!("mcp-bridge://{}/close", task_id), ());
         return;
     }
 
+    let conn_id = NEXT_CONN_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let write_half = Arc::new(AsyncMutex::new(write_half));
-    MCP_CONNECTIONS.lock().unwrap().insert(
-        task_id.clone(),
-        McpConnectionHandle { write_half: write_half.clone() },
-    );
+    MCP_CONNECTIONS
+        .lock()
+        .unwrap()
+        .entry(task_id.clone())
+        .or_default()
+        .insert(conn_id, McpConnectionHandle { write_half: write_half.clone() });
 
     let topic = format!("mcp-bridge://{}/line", task_id);
     while let Ok(Some(line)) = lines.next_line().await {
-        let _ = app_handle.emit(&topic, line);
+        let _ = app_handle.emit(&topic, McpLinePayload { conn_id, line });
     }
 
-    MCP_CONNECTIONS.lock().unwrap().remove(&task_id);
-    let _ = app_handle.emit(&format!("mcp-bridge://{}/close", task_id), ());
+    if let Some(conns) = MCP_CONNECTIONS.lock().unwrap().get_mut(&task_id) {
+        conns.remove(&conn_id);
+    }
 }
 
-/// Write one line to a task's active relay connection.
+/// Write one line to one of a task's relay connections (the one the request
+/// being answered arrived on).
 #[tauri::command]
-pub async fn write_mcp_line(task_id: String, line: String) -> AgentResult<()> {
+pub async fn write_mcp_line(task_id: String, conn_id: u64, line: String) -> AgentResult<()> {
     let write_half = MCP_CONNECTIONS
         .lock()
         .unwrap()
         .get(&task_id)
+        .and_then(|conns| conns.get(&conn_id))
         .map(|handle| handle.write_half.clone());
     let Some(write_half) = write_half else {
         return AgentResult::err(
@@ -393,6 +411,7 @@ mod tests {
     fn write_to_unknown_task_is_a_not_found_error() {
         let result = tauri::async_runtime::block_on(write_mcp_line(
             "does-not-exist".to_string(),
+            1,
             "{}".to_string(),
         ));
         let json = serde_json::to_value(result).unwrap();

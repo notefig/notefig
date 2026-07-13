@@ -3,6 +3,7 @@ import type { AgentTool } from "@metrists/shared/agent";
 import { BlobEnvelopeSchema, findBlobs, serializeBlobBlock } from "@metrists/shared/blobs";
 import { getAllBlobTypes, getBlobType } from "@/components/editor/blobs/blob-registry";
 import { readWorkspaceTextFile, writeWorkspaceTextFile } from "@/utils/file-sync";
+import { resolveWorkspacePath } from "@/utils/fs";
 
 const InputSchema = z.object({
   path: z.string().min(1),
@@ -31,14 +32,27 @@ function knownTypeNames(): string {
 export const authorBlob: AgentTool<z.infer<typeof InputSchema>, { blobId: string }> = {
   name: "author_blob",
   title: "agentToolAuthorBlob",
-  description:
-    `Author an interactive block into a document (e.g. a question for the user). ` +
-    `Known types: ${knownTypeNames()}. Give a unique \`id\` matching ^[a-z]+_[a-z0-9]{4,}$ ` +
-    `(e.g. "question_8f2a"). The block is appended to the document; the user answers it ` +
-    `whenever they get to it, and you'll receive a follow-up prompt with their answer then — ` +
-    `don't re-ask or wait synchronously.`,
+  // A getter, not a plain property: this module sits inside the
+  // tools/index ↔ blob-registry ↔ *.blob.tsx import cycle, and
+  // getAllBlobTypes() is only safe to call after every module in the cycle
+  // has finished evaluating. Deferring to first access (tools/list time)
+  // makes the description independent of module-eval order.
+  get description() {
+    return (
+      `Author an interactive block into a document (e.g. a question for the user). ` +
+      `Known types: ${knownTypeNames()}. Give a unique \`id\` matching ^[a-z]+_[a-z0-9]{4,}$ ` +
+      `(e.g. "question_8f2a"). The block is appended to the document; the user answers it ` +
+      `whenever they get to it, and you'll receive a follow-up prompt with their answer then — ` +
+      `don't re-ask or wait synchronously.`
+    );
+  },
   input: InputSchema,
-  async execute(_ctx, input) {
+  async execute(ctx, input) {
+    // Agents send workspace-relative paths; an unresolved one would land
+    // relative to the process CWD (src-tauri/ in dev — see resolveWorkspacePath).
+    const resolved = resolveWorkspacePath(ctx.workspacePath, input.path);
+    if (!resolved.ok) return { ok: false, error: resolved.error };
+
     const blobType = getBlobType(input.type);
     if (!blobType) {
       return {
@@ -67,7 +81,7 @@ export const authorBlob: AgentTool<z.infer<typeof InputSchema>, { blobId: string
 
     let content: string;
     try {
-      content = await readWorkspaceTextFile(input.path);
+      content = await readWorkspaceTextFile(resolved.absolute);
     } catch {
       content = "";
     }
@@ -85,7 +99,7 @@ export const authorBlob: AgentTool<z.infer<typeof InputSchema>, { blobId: string
       rawYaml: "",
     });
     const separator = content.length === 0 ? "" : content.endsWith("\n") ? "\n" : "\n\n";
-    await writeWorkspaceTextFile(input.path, `${content}${separator}${fence}`);
+    await writeWorkspaceTextFile(resolved.absolute, `${content}${separator}${fence}`);
 
     return { ok: true, value: { blobId: input.id } };
   },

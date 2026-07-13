@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { BlobWidgetProps } from "./blob-type";
-import { BlobAnswerError } from "./blob-node-view";
+import { BlobAnswerError } from "./blob-actions";
 
 export type BlobAnswerState = "idle" | "pending" | "conflict" | "not_found";
 

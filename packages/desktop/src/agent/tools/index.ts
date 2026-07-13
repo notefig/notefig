@@ -10,9 +10,11 @@ import { authorBlob } from "./author-blob";
 
 /**
  * The tool registry: one direct-imported array, no dynamic registration
- * machinery. Prompt-guided delivery (Stage 2, `tool-fence.ts`) renders this
- * list into the guidance preamble and validates fence invocations against
- * it; a future MCP channel would be a second consumer of the same array.
+ * machinery. The MCP server (`mcp-server.ts`, Stage 3.5) is its consumer —
+ * `tools/list` renders each tool's Zod schema as JSON Schema and
+ * `tools/call` dispatches through `dispatchToolCall`. (The Stage 2
+ * prompt-guided fence channel that used to read this list was deleted with
+ * Stage 3.5/4 — every supported harness now reaches tools over MCP.)
  */
 export const toolRegistry: readonly AgentTool<unknown, unknown>[] = [
   workspaceListDocuments,

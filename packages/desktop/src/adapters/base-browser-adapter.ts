@@ -12,7 +12,7 @@ import type {
 } from "./platform-adapter.interface";
 import { requestTextPrompt } from "@/utils/text-prompt";
 import type { GitStorageHost } from "@metrists/git";
-import type { AgentTransport } from "@/agent/agent-transport.interface";
+import type { AgentTransport, McpEndpoint } from "@/agent/agent-transport.interface";
 
 export function createError(
   path: string,
@@ -519,11 +519,11 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     throw new Error("Agent transport is not supported on this adapter yet.");
   }
 
-  createMcpTransport(): AgentTransport {
+  createMcpEndpoint(): McpEndpoint {
     // Same Phase 3 web-parity gap as createAgentTransport: a remote harness
     // can't reach a desktop loopback relay; the seam exists now so the agent
-    // service never constructs a transport itself.
-    throw new Error("MCP transport is not supported on this adapter yet.");
+    // service never constructs an endpoint itself.
+    throw new Error("MCP endpoint is not supported on this adapter yet.");
   }
 
   getUpdater(): PlatformUpdater {
