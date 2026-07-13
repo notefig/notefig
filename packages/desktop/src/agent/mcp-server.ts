@@ -23,25 +23,28 @@ function toolTitle(tool: Pick<AgentTool<unknown, unknown>, "title">): string {
  * correctly, but not enough to make it *reach* for one — a real session
  * defaulted to native Read/cat/Write for workspace files and wrote plain
  * text instead of calling `author_blob` for an explicit "add a question"
- * request, only using the MCP tools once told to directly. One short
- * steering nudge, sent once per task (`agent-service.ts`'s first turn),
- * fixes the preference without re-describing any schema the MCP layer
- * already covers.
+ * request, only using the MCP tools once told to directly. This steering
+ * text rides MCP's own channel for exactly that purpose —
+ * `initialize.instructions` — instead of a prompt preamble: the server
+ * describes itself, so only sessions that actually have the server hear
+ * about its tools (the old first-turn preamble was sent unconditionally,
+ * telling `mcpRegistration: "none"` harnesses and failed-registration
+ * tasks about tools that didn't exist).
  */
-export function renderToolUsagePreamble(): string {
+function serverInstructions(): string {
   const names = toolRegistry.map((tool) => tool.name).join(", ");
   return (
-    `You are running as an agent inside the Metrists writing app. You have ` +
-    `Metrists-native tools available via MCP (${names}). Prefer these ` +
-    `over generic file-read/write or shell tools when working with this workspace's ` +
-    `documents — they see live editor state (unsaved edits, open tabs) and document ` +
-    `history that generic tools don't. In particular, use \`author_blob\` whenever the ` +
+    `This server exposes the Metrists writing app's native tools (${names}) — ` +
+    `you are running as an agent inside that app. Prefer these tools over generic ` +
+    `file-read/write or shell tools when working with this workspace's documents — ` +
+    `they see live editor state (unsaved edits, open tabs) and document history ` +
+    `that generic tools don't. In particular, use \`author_blob\` whenever the ` +
     `user asks you to add an interactive question, approval, or status block to a ` +
     `document — not plain text — it renders as an answerable widget, and you'll get a ` +
-    `follow-up prompt with the user's answer once they respond. These tools come from ` +
-    `an MCP server named \`${MCP_SERVER_NAME}\` that Metrists registers automatically ` +
-    `for this session via a per-task, ephemeral config — it will not appear in your ` +
-    `global or project config files, and you don't need to locate or verify it.`
+    `follow-up prompt with the user's answer once they respond. Metrists registers ` +
+    `this server automatically for the session via a per-task, ephemeral config — it ` +
+    `will not appear in your global or project config files, and you don't need to ` +
+    `locate or verify it.`
   );
 }
 
@@ -213,6 +216,7 @@ export function createMcpRequestHandler(
           (params as { protocolVersion?: string } | undefined)?.protocolVersion ?? "2024-11-05",
         capabilities: { tools: {} },
         serverInfo: { name: MCP_SERVER_NAME, version: "1.0.0" },
+        instructions: serverInstructions(),
       });
     }
 

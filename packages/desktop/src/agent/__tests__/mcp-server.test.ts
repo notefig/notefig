@@ -71,9 +71,9 @@ describe("createMcpRequestHandler", () => {
     }
   });
 
-  it("initialize returns capabilities and server info", async () => {
+  it("initialize returns capabilities, server info, and tool-steering instructions", async () => {
     const response = await handler()({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
-    expect(response).toEqual({
+    expect(response).toMatchObject({
       jsonrpc: "2.0",
       id: 1,
       result: {
@@ -82,6 +82,10 @@ describe("createMcpRequestHandler", () => {
         serverInfo: { name: "metrists", version: "1.0.0" },
       },
     });
+    const instructions = (response?.result as { instructions?: string }).instructions;
+    // The steering text lives on the server's own channel (not a prompt
+    // preamble) so only sessions that have the server hear about its tools.
+    expect(instructions).toContain("author_blob");
   });
 
   it("notifications/initialized returns null (no response)", async () => {

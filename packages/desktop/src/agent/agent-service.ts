@@ -22,11 +22,7 @@ import { PermissionBroker } from "./permission-broker";
 import { MetristsAcpClient } from "./acp-client";
 import type { AgentTransport, McpEndpoint } from "./agent-transport.interface";
 import { AgentTransportError } from "./agent-transport.interface";
-import {
-  attachMcpEndpoint,
-  createMcpRequestHandler,
-  renderToolUsagePreamble,
-} from "./mcp-server";
+import { attachMcpEndpoint, createMcpRequestHandler } from "./mcp-server";
 import { checkpointWorkspaceHistory } from "@/utils/history-service";
 import {
   agentEntriesCollection,
@@ -192,8 +188,6 @@ export class AgentTask {
   private readonly unsubscribers: Array<() => void> = [];
   /** Stage 3.5: this task's app-tools MCP endpoint; torn down in dispose(). */
   private mcpEndpoint: McpEndpoint | null = null;
-  /** Sent once per task, on the first turn only (steers tool preference). */
-  private toolUsagePreambleSent = false;
 
   constructor(
     readonly taskId: string,
@@ -506,19 +500,15 @@ export class AgentTask {
     this.setStatus("running");
 
     try {
-      const preamble = this.toolUsagePreambleSent
-        ? undefined
-        : renderToolUsagePreamble();
+      // Tool steering rides the MCP server's own initialize.instructions
+      // (mcp-server.ts), not a prompt preamble — prompts carry only user
+      // content and context parts.
       const blocks = composePrompt({
         text,
-        preamble,
         contextParts,
         capabilities: { embeddedContext: this.client.embeddedContextCapability },
       });
       const response = await this.client.prompt(this.sessionId, blocks);
-      // Only after a successful round-trip — a failed first turn (auth block,
-      // dead transport) must not eat the preamble for the retry.
-      this.toolUsagePreambleSent = true;
       // A turn that reached the model clears any auth block and marks this
       // harness signed in on this machine (the only reliable signal — there
       // is no ahead-of-time probe, per the auth spike). Written through the
