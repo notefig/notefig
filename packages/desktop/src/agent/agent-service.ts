@@ -845,6 +845,12 @@ export class AgentTask {
   private closeRun(turn: TurnState): void {
     const tail = turn.joiner.flush();
     if (tail) this.appendToRun(turn, "assistant", tail);
+    // Models emit whitespace-only chunks around tool calls ("\n\n" before a
+    // tool_call opens a run that nothing else joins); a closed run that never
+    // got visible text is transcript noise — drop its entry.
+    if (turn.run && !turn.run.text.trim()) {
+      agentEntriesCollection.delete(turn.run.entryId);
+    }
     turn.run = null;
   }
 

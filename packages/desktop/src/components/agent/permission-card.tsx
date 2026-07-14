@@ -36,7 +36,10 @@ export function PermissionCard({ taskId }: { taskId: string }) {
   const options = head.options as PermissionOption[];
 
   return (
-    <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+    // Muted tint over an opaque bg-background (gradient-image trick): the
+    // card floats in the composer overlay, so a translucent bg would let
+    // transcript entries underneath show through it.
+    <div className="rounded-lg border border-border bg-background bg-gradient-to-b from-muted/40 to-muted/40 p-3 text-sm">
       <div className="mb-2 font-medium">{head.title}</div>
       <div className="flex flex-wrap gap-2">
         {options.map((option) => (

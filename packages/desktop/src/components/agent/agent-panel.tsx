@@ -2,7 +2,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -46,7 +45,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { cn } from "@/lib/utils";
 import {
@@ -165,6 +171,21 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
     setDraft("");
   }, [draft, activeTaskId]);
 
+  // The floating composer overlay's live height (it grows when permission/
+  // auth cards stack above the prompt box); the transcript pads its scroll
+  // end by this much so no entry ever sits underneath the overlay.
+  const [composerEl, setComposerEl] = useState<HTMLDivElement | null>(null);
+  const [composerHeight, setComposerHeight] = useState(0);
+  useEffect(() => {
+    if (!composerEl) return;
+    const observer = new ResizeObserver(() =>
+      setComposerHeight(composerEl.offsetHeight),
+    );
+    observer.observe(composerEl);
+    setComposerHeight(composerEl.offsetHeight);
+    return () => observer.disconnect();
+  }, [composerEl]);
+
   const stopTask = useCallback(() => {
     if (!activeTaskId) return;
     void cancelAgentTask(activeTaskId);
@@ -181,12 +202,23 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
 
       {activeTaskId ? (
         <div className="relative flex min-h-0 flex-1 flex-col">
-          <Transcript taskId={activeTaskId} />
+          {/* Keyed per task so scroll state never leaks across task switches
+              and each task reopens at its own last turn. */}
+          <Transcript
+            key={activeTaskId}
+            taskId={activeTaskId}
+            bottomInset={composerHeight}
+          />
 
           {/* Floating composer pinned to the bottom of the tab. The gradient
               fades the transcript out behind it; the wrapper is click-through
-              (pointer-events-none) so only the cards inside catch pointers. */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-2 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-3 pt-10">
+              (pointer-events-none) so only the cards inside catch pointers.
+              Measured so the transcript can pad past it — the overlay grows
+              when permission/auth cards stack above the prompt box. */}
+          <div
+            ref={setComposerEl}
+            className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-2 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-3 pt-10"
+          >
             {isRunning && (
               <Marker
                 role="status"
@@ -321,7 +353,10 @@ function AuthCard({ task }: { task: AgentTaskRow }) {
   );
 
   return (
-    <div className="pointer-events-auto flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
+    // The amber tint rides a gradient *image* over an opaque bg-background:
+    // this card floats in the composer overlay above the transcript, so a
+    // plain translucent bg would let entries underneath show through it.
+    <div className="pointer-events-auto flex flex-col gap-2 rounded-md border border-amber-500/40 bg-background bg-gradient-to-b from-amber-500/10 to-amber-500/10 p-3 text-xs">
       <span className="font-medium">Sign-in required</span>
       {instructions ? (
         <p className="whitespace-pre-wrap">{instructions}</p>
@@ -369,9 +404,14 @@ function StatusDot({ status }: { status: AgentTaskRow["status"] }) {
 }
 
 
-function Transcript({ taskId }: { taskId: string }) {
-  const bottomRef = useRef<HTMLDivElement>(null);
-
+function Transcript({
+  taskId,
+  bottomInset,
+}: {
+  taskId: string;
+  /** Live height of the floating composer overlay (0 until measured). */
+  bottomInset: number;
+}) {
   const { data: entries = [] } = useLiveQuery(
     (q) =>
       q
@@ -402,32 +442,55 @@ function Transcript({ taskId }: { taskId: string }) {
     [entries],
   );
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [entries]);
-
   return (
-    <ScrollArea className="flex-1 min-h-0">
-      {/* pb clears the floating composer overlay pinned to the bottom. */}
-      <div className="flex flex-col gap-3 p-3 pb-36">
-        {sortedEntries.map((entry) => (
-          <EntryView
-            key={entry.id}
-            entry={entry}
-            queued={entry.type === "user" && queuedTurnIds.has(entry.turnId)}
-          />
-        ))}
-        {turnErrors.map((turn) => (
-          <div
-            key={turn.turnId}
-            className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400"
+    // MessageScroller owns all scroll behavior: user prompts are anchors (a
+    // new turn lands near the top with a peek of the previous one), streamed
+    // replies are followed only while the reader is at the live edge, and a
+    // reopened task lands on its last turn instead of the absolute bottom.
+    <MessageScrollerProvider
+      autoScroll
+      defaultScrollPosition="last-anchor"
+      scrollPreviousItemPeek={48}
+    >
+      <MessageScroller className="flex-1 min-h-0">
+        <MessageScrollerViewport>
+          {/* Bottom padding clears the floating composer overlay: its
+              measured height (pb-36 as the pre-measurement fallback), plus
+              one gap. */}
+          <MessageScrollerContent
+            className="gap-3 p-3"
+            style={{ paddingBottom: Math.max(bottomInset, 144) + 12 }}
           >
-            <span className="font-medium">Turn failed:</span> {turn.error}
-          </div>
-        ))}
-        <div ref={bottomRef} />
-      </div>
-    </ScrollArea>
+            {sortedEntries.map((entry) => (
+              <MessageScrollerItem
+                key={entry.id}
+                messageId={entry.id}
+                scrollAnchor={entry.type === "user"}
+              >
+                <EntryView
+                  entry={entry}
+                  queued={entry.type === "user" && queuedTurnIds.has(entry.turnId)}
+                />
+              </MessageScrollerItem>
+            ))}
+            {turnErrors.map((turn) => (
+              <MessageScrollerItem key={turn.turnId} messageId={`error-${turn.turnId}`}>
+                <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+                  <span className="font-medium">Turn failed:</span> {turn.error}
+                </div>
+              </MessageScrollerItem>
+            ))}
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        {/* Tucked into the corner just above the composer cards: the overlay
+            begins with ~40px of transparent gradient (pt-10), so backing off
+            from its measured top keeps the button visually next to the
+            prompt box rather than floating high above it. */}
+        <MessageScrollerButton
+          style={{ bottom: Math.max(bottomInset, 144) - 32 }}
+        />
+      </MessageScroller>
+    </MessageScrollerProvider>
   );
 }
 
@@ -447,7 +510,10 @@ function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
   if (entry.type === "unknown") return null; // kept as transcript data only (D4)
 
   const isUser = entry.type === "user";
-  if (!entry.text) return null;
+  // trim(): models emit whitespace-only chunks around tool calls (a "\n\n"
+  // run closed by a tool_call renders as an empty bubble otherwise), and
+  // leading/trailing newlines would show inside whitespace-pre-wrap bubbles.
+  if (!entry.text?.trim()) return null;
   return (
     <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
       <div
@@ -459,7 +525,7 @@ function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
           queued && "opacity-70",
         )}
       >
-        {entry.text}
+        {entry.text.trim()}
         {queued && (
           <span className="mt-1 flex items-center justify-end gap-1.5">
             <span className="rounded-full bg-primary-foreground/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
