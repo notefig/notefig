@@ -68,11 +68,14 @@ export function deriveActiveToolLine(entries: AgentEntry[]): string | null {
     if (entry.type !== "tool_call" || !entry.toolCall) continue;
     const status = entry.toolCall.status ?? "pending";
     if (status !== "pending" && status !== "in_progress") continue;
-    const title = entry.toolCall.title;
+    // Never return "" — an empty label would render as a blank line where
+    // the caller's `||` fallback should kick in instead.
+    const title = entry.toolCall.title?.trim();
     const path = entry.toolCall.locations?.[0]?.path;
-    if (title && path) return `${title} · ${getFileName(path)}`;
+    const file = path ? getFileName(path).trim() : "";
+    if (title && file) return `${title} · ${file}`;
     if (title) return title;
-    if (path) return getFileName(path);
+    if (file) return file;
     return null;
   }
   return null;

@@ -67,6 +67,22 @@ describe("prompt-blob-store", () => {
     updatePromptBlob("/ws/e.md", { draft: "z" });
     expect(getPromptBlob("/ws/e.md")).toBe(getPromptBlob("/ws/e.md"));
   });
+
+  // The multi-widget regression: two widgets (distinct blobIds) in the same
+  // document must never share drafts or turn bindings.
+  it("keeps records under different ids fully independent", () => {
+    updatePromptBlob("blob_one", { draft: "first", boundTurnId: "trn_1" });
+    updatePromptBlob("blob_two", { draft: "second" });
+    updatePromptBlob("blob_one", { boundTurnId: "trn_9", draft: "" });
+    expect(getPromptBlob("blob_two")).toMatchObject({
+      draft: "second",
+      boundTurnId: null,
+    });
+    expect(getPromptBlob("blob_one")).toMatchObject({
+      draft: "",
+      boundTurnId: "trn_9",
+    });
+  });
 });
 
 describe("prompt-blob focus channel", () => {

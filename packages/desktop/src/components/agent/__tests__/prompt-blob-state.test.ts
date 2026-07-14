@@ -120,6 +120,14 @@ describe("deriveActiveToolLine", () => {
     expect(deriveActiveToolLine(entries)).toBe("Edit · pricing.md");
   });
 
+  it("never returns an empty string (blank labels would reserve blank space)", () => {
+    expect(
+      deriveActiveToolLine([
+        toolEntry("evt_1", { title: "  ", status: "in_progress" }),
+      ]),
+    ).toBeNull();
+  });
+
   it("falls back to title alone, and to null when nothing is in flight", () => {
     expect(
       deriveActiveToolLine([toolEntry("evt_1", { title: "Search", status: "pending" })]),

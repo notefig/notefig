@@ -24,9 +24,12 @@ import {
   AiPromptNodeBase,
   UI_ONLY_TRANSACTION_META,
 } from "./editor-schema-kit";
+import { useEffect } from "react";
 import {
   docHasPromptNode,
   docHasRealContent,
+  findPromptNodeId,
+  newPromptBlobInstanceId,
   revertToSlashTr,
   slashSummonTr,
 } from "./ai-prompt-utils";
@@ -47,7 +50,10 @@ function appendPromptTr(state: EditorState): Transaction | null {
   const type = state.schema.nodes[AiPromptNodeBase.name];
   if (!type) return null;
   return state.tr
-    .insert(state.doc.content.size, type.create())
+    .insert(
+      state.doc.content.size,
+      type.create({ blobId: newPromptBlobInstanceId() }),
+    )
     .setMeta("addToHistory", false)
     .setMeta(UI_ONLY_TRANSACTION_META, true);
 }
@@ -55,7 +61,20 @@ function appendPromptTr(state: EditorState): Transaction | null {
 function AiPromptNodeView(props: NodeViewProps) {
   const { filePath, basePath } = props.extension
     .options as AiPromptNodeOptions;
-  if (!filePath || !basePath) return <NodeViewWrapper />;
+  const blobId = (props.node.attrs.blobId as string | null) ?? null;
+
+  // Repair id-less instances (schema defaults survive clipboard round-trips
+  // — renderHTML doesn't carry attrs). One UI-only-ish attr write; the node
+  // view re-renders with the id and mounts the widget then.
+  const needsId = Boolean(filePath) && blobId === null;
+  useEffect(() => {
+    if (needsId) {
+      props.updateAttributes({ blobId: newPromptBlobInstanceId() });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsId]);
+
+  if (!filePath || !basePath || blobId === null) return <NodeViewWrapper />;
 
   const removeNode = (options?: { insertSlash?: boolean }) => {
     if (!options?.insertSlash) {
@@ -78,6 +97,7 @@ function AiPromptNodeView(props: NodeViewProps) {
       className="not-prose my-3"
     >
       <PromptBlob
+        blobId={blobId}
         workspacePath={basePath}
         documentPath={filePath}
         editor={props.editor}
@@ -119,13 +139,15 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
               !docHasRealContent(view.state.doc) &&
               docHasPromptNode(view.state.doc)
             ) {
-              requestPromptBlobFocus(options.filePath);
+              const existingId = findPromptNodeId(view.state.doc);
+              if (existingId) requestPromptBlobFocus(existingId);
               return true;
             }
-            const tr = slashSummonTr(view.state);
+            const blobId = newPromptBlobInstanceId();
+            const tr = slashSummonTr(view.state, blobId);
             if (!tr) return false;
             view.dispatch(tr);
-            requestPromptBlobFocus(options.filePath);
+            requestPromptBlobFocus(blobId);
             return true;
           },
         },

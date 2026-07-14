@@ -37,6 +37,27 @@ export function docHasPromptNode(doc: PMNode): boolean {
   return found;
 }
 
+/** The first prompt node's instance id, for the empty-doc "/" focus path. */
+export function findPromptNodeId(doc: PMNode): string | null {
+  let found: string | null = null;
+  doc.descendants((node) => {
+    if (found === null && node.type.name === AiPromptNodeBase.name) {
+      found = (node.attrs.blobId as string | null) ?? null;
+    }
+    return found === null;
+  });
+  return found;
+}
+
+/**
+ * Widget-instance identity (the `blobId` attr): editor-local UI state key,
+ * deliberately not part of the agent id family in shared/agent/ids.ts —
+ * it never crosses the service boundary.
+ */
+export function newPromptBlobInstanceId(): string {
+  return `blob_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
 /**
  * The "/" summon: replace the empty paragraph the cursor sits in with a
  * `summoned` aiPrompt node. Null unless the cursor is in an empty paragraph
@@ -45,7 +66,10 @@ export function docHasPromptNode(doc: PMNode): boolean {
  * (⌘Z restores the empty paragraph) and NOT autosave-exempt: dropping a
  * mid-doc empty paragraph can change the serialized blank lines.
  */
-export function slashSummonTr(state: EditorState): Transaction | null {
+export function slashSummonTr(
+  state: EditorState,
+  blobId: string,
+): Transaction | null {
   const { selection } = state;
   if (!(selection instanceof TextSelection) || !selection.empty) return null;
   const { $from } = selection;
@@ -59,7 +83,7 @@ export function slashSummonTr(state: EditorState): Transaction | null {
   return state.tr.replaceWith(
     $from.before(1),
     $from.after(1),
-    type.create({ summoned: true }),
+    type.create({ summoned: true, blobId }),
   );
 }
 

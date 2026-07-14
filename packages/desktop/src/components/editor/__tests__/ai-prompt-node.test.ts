@@ -107,34 +107,43 @@ function typeText(target: Editor, text: string): boolean {
   );
 }
 
-function findPromptNode(
-  target: Editor,
-): { pos: number; summoned: boolean; nodeSize: number } | null {
-  let found: { pos: number; summoned: boolean; nodeSize: number } | null =
-    null;
+type FoundPromptNode = {
+  pos: number;
+  summoned: boolean;
+  nodeSize: number;
+  blobId: string | null;
+};
+
+function findPromptNodes(target: Editor): FoundPromptNode[] {
+  const found: FoundPromptNode[] = [];
   target.state.doc.descendants((node, pos) => {
     if (node.type.name === "aiPrompt") {
-      found = { pos, summoned: Boolean(node.attrs.summoned), nodeSize: node.nodeSize };
+      found.push({
+        pos,
+        summoned: Boolean(node.attrs.summoned),
+        nodeSize: node.nodeSize,
+        blobId: (node.attrs.blobId as string | null) ?? null,
+      });
     }
-    return found === null;
   });
   return found;
 }
 
-describe('"/" summon', () => {
-  afterEach(() => {
-    // Drain the one-shot focus channel between cases.
-    consumePendingPromptBlobFocus("/ws/doc.md");
-  });
+function findPromptNode(target: Editor): FoundPromptNode | null {
+  return findPromptNodes(target)[0] ?? null;
+}
 
+describe('"/" summon', () => {
   it("replaces an empty top-level paragraph with a summoned widget", async () => {
     editor = await documentEditor("<p>Hi there</p><p></p>");
     editor.commands.setTextSelection(11); // inside the empty paragraph
     expect(typeText(editor, "/")).toBe(true);
     const node = findPromptNode(editor);
     expect(node?.summoned).toBe(true);
+    expect(node?.blobId).toBeTruthy();
     expect(getEditorMarkdown(editor)).toBe("Hi there");
-    expect(consumePendingPromptBlobFocus("/ws/doc.md")).toBe(true);
+    // The focus request is keyed to this instance's id.
+    expect(consumePendingPromptBlobFocus(node!.blobId!)).toBe(true);
   });
 
   it("types normally mid-text", async () => {
@@ -161,15 +170,29 @@ describe('"/" summon', () => {
 
   it("focuses the keeper widget in an empty doc instead of inserting twice", async () => {
     editor = await documentEditor("");
-    expect(hasPromptNode(editor)).toBe(true);
+    const keeper = findPromptNode(editor);
+    expect(keeper?.blobId).toBeTruthy();
     editor.commands.setTextSelection(1);
     expect(typeText(editor, "/")).toBe(true);
-    let count = 0;
-    editor.state.doc.descendants((node) => {
-      if (node.type.name === "aiPrompt") count++;
-    });
-    expect(count).toBe(1);
-    expect(consumePendingPromptBlobFocus("/ws/doc.md")).toBe(true);
+    expect(findPromptNodes(editor)).toHaveLength(1);
+    expect(consumePendingPromptBlobFocus(keeper!.blobId!)).toBe(true);
+  });
+
+  it("gives each summoned widget its own instance id", async () => {
+    editor = await documentEditor("<p>Hi</p><p></p><p>there</p><p></p>");
+    // First empty paragraph: after "Hi" (0..4).
+    editor.commands.setTextSelection(5);
+    expect(typeText(editor, "/")).toBe(true);
+    // Second empty paragraph, now at the end.
+    const last = editor.state.doc.content.size - 1;
+    editor.commands.setTextSelection(last);
+    expect(typeText(editor, "/")).toBe(true);
+
+    const nodes = findPromptNodes(editor);
+    expect(nodes).toHaveLength(2);
+    expect(nodes[0].blobId).toBeTruthy();
+    expect(nodes[1].blobId).toBeTruthy();
+    expect(nodes[0].blobId).not.toBe(nodes[1].blobId);
   });
 
   it("reverts to a literal '/' with the cursor after it", async () => {

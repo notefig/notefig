@@ -1,11 +1,14 @@
 /**
- * Per-document prompt-blob state, outside React — the dock mounts only the
- * selected tab, so the widget's component state dies on every tab switch
- * (same reason as composer-draft-store.ts). Unlike drafts, a blob record is
- * read while it changes from outside the component (send rebinds the turn),
- * so this store adds a subscribe/emit for useSyncExternalStore. Ephemeral by
- * design, like the agent collections: nothing persists across app runs, and
- * a stale bound turn (rows gone) simply renders as composing again.
+ * Per-WIDGET prompt-blob state, outside React — keyed by the aiPrompt
+ * node's `blobId` attr, NOT the document path: a document can hold several
+ * widgets ("/" summons), and each must have its own draft and bound turn.
+ * Lives outside React because the dock mounts only the selected tab, so
+ * component state dies on every tab switch (same reason as
+ * composer-draft-store.ts). Unlike drafts, a blob record is read while it
+ * changes from outside the component (send rebinds the turn), so this store
+ * adds a subscribe/emit for useSyncExternalStore. Ephemeral by design, like
+ * the agent collections: nothing persists across app runs, ids never recur,
+ * and a stale bound turn (rows gone) simply renders as composing again.
  */
 export type PromptBlobRecord = {
   /** Composer text (survives tab unmount). */
@@ -29,41 +32,41 @@ const EMPTY_RECORD: PromptBlobRecord = {
 const records = new Map<string, PromptBlobRecord>();
 const listeners = new Map<string, Set<() => void>>();
 
-function emit(documentPath: string): void {
-  for (const listener of listeners.get(documentPath) ?? []) listener();
+function emit(blobId: string): void {
+  for (const listener of listeners.get(blobId) ?? []) listener();
 }
 
 /** Stable snapshot — returns the same object until the record changes. */
-export function getPromptBlob(documentPath: string): PromptBlobRecord {
-  return records.get(documentPath) ?? EMPTY_RECORD;
+export function getPromptBlob(blobId: string): PromptBlobRecord {
+  return records.get(blobId) ?? EMPTY_RECORD;
 }
 
 export function updatePromptBlob(
-  documentPath: string,
+  blobId: string,
   patch: Partial<PromptBlobRecord>,
 ): void {
-  records.set(documentPath, { ...getPromptBlob(documentPath), ...patch });
-  emit(documentPath);
+  records.set(blobId, { ...getPromptBlob(blobId), ...patch });
+  emit(blobId);
 }
 
 /** Unbind the watched turn (dismiss / stale-row reset), keeping the draft. */
-export function clearPromptBlobTurn(documentPath: string): void {
-  updatePromptBlob(documentPath, { boundTurnId: null, boundTaskId: null });
+export function clearPromptBlobTurn(blobId: string): void {
+  updatePromptBlob(blobId, { boundTurnId: null, boundTaskId: null });
 }
 
 export function subscribePromptBlob(
-  documentPath: string,
+  blobId: string,
   listener: () => void,
 ): () => void {
-  let set = listeners.get(documentPath);
+  let set = listeners.get(blobId);
   if (!set) {
     set = new Set();
-    listeners.set(documentPath, set);
+    listeners.set(blobId, set);
   }
   set.add(listener);
   return () => {
     set.delete(listener);
-    if (set.size === 0) listeners.delete(documentPath);
+    if (set.size === 0) listeners.delete(blobId);
   };
 }
 
@@ -79,28 +82,28 @@ const focusListeners = new Map<string, Set<() => void>>();
 const pendingFocus = new Set<string>();
 
 /** Ask the document's prompt widget to focus its composer. */
-export function requestPromptBlobFocus(documentPath: string): void {
-  pendingFocus.add(documentPath);
-  for (const listener of focusListeners.get(documentPath) ?? []) listener();
+export function requestPromptBlobFocus(blobId: string): void {
+  pendingFocus.add(blobId);
+  for (const listener of focusListeners.get(blobId) ?? []) listener();
 }
 
 /** One-shot: true (and clears the request) if a focus request is pending. */
-export function consumePendingPromptBlobFocus(documentPath: string): boolean {
-  return pendingFocus.delete(documentPath);
+export function consumePendingPromptBlobFocus(blobId: string): boolean {
+  return pendingFocus.delete(blobId);
 }
 
 export function subscribePromptBlobFocus(
-  documentPath: string,
+  blobId: string,
   listener: () => void,
 ): () => void {
-  let set = focusListeners.get(documentPath);
+  let set = focusListeners.get(blobId);
   if (!set) {
     set = new Set();
-    focusListeners.set(documentPath, set);
+    focusListeners.set(blobId, set);
   }
   set.add(listener);
   return () => {
     set.delete(listener);
-    if (set.size === 0) focusListeners.delete(documentPath);
+    if (set.size === 0) focusListeners.delete(blobId);
   };
 }

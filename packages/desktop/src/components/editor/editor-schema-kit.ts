@@ -195,6 +195,12 @@ export const AiPromptNodeBase = Node.create({
       // contract (Esc / a second "/" turn the widget back into a literal
       // slash). Keeper-inserted nodes stay false. Never serialized.
       summoned: { default: false },
+      // Per-instance identity: every widget keys its own state (draft,
+      // bound turn) in prompt-blob-store by this id — a document can hold
+      // several widgets, so the document path is not identity enough.
+      // Minted at every creation site; null only for schema-default nodes,
+      // which the node view repairs on mount. Never serialized.
+      blobId: { default: null },
     };
   },
 
