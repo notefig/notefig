@@ -37,7 +37,6 @@ import {
 } from "@/utils/file-sync";
 import { disposeAllEditors, getEditor } from "@/components/editor/editor-store";
 import { AgentChatTab } from "@/components/agent/agent-chat-tab";
-import { FloatingPrompt } from "@/components/agent/floating-prompt";
 import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
 import { agentTasksCollection } from "@/agent/agent-collections";
 import {
@@ -252,8 +251,6 @@ export const Workspace = () => {
       });
     }
   }, [isSidebarCollapsed, setUrlSearchParams, focusActiveEditor]);
-
-  const [floatingPromptOpen, setFloatingPromptOpen] = useState(false);
 
   // Exposed via WorkspaceTabsContext so components nested in the layout
   // (link menu, search panel) can open files as tabs.
@@ -481,10 +478,6 @@ export const Workspace = () => {
     openSessionsSidebar();
   });
 
-  useHotkey("Mod+I", () => {
-    setFloatingPromptOpen((current) => !current);
-  });
-
   useEffect(() => {
     const metadataWatchId = `metadata-${workspacePath}`;
     const contentWatchId = `content-${workspacePath}`;
@@ -581,12 +574,6 @@ export const Workspace = () => {
             </div>
           </div>
         </div>
-
-        <FloatingPrompt
-          workspacePath={workspacePath}
-          open={floatingPromptOpen}
-          onOpenChange={setFloatingPromptOpen}
-        />
 
         <StatusBar
           wordCount={wordCount}

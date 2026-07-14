@@ -9,9 +9,11 @@
 
 import { useEffect, useRef } from "react";
 import type { Editor, JSONContent } from "@tiptap/core";
+import type { Transaction } from "@tiptap/pm/state";
 import type { FileEntry } from "@/utils/fs";
 import { writeFileContent } from "@/utils/collections";
 import { getDocumentSync } from "@/utils/markdown-conversion";
+import { UI_ONLY_TRANSACTION_META } from "@/components/editor/editor-schema-kit";
 
 const AUTOSAVE_DEBOUNCE_MS = 500;
 
@@ -107,9 +109,12 @@ export function useEditorFileSync(
       sync.pushUpdate(() => editor.state.doc.toJSON() as JSONContent);
     };
 
-    const handleUpdate = () => {
+    const handleUpdate = ({ transaction }: { transaction: Transaction }) => {
       if (suppressSaveRef.current) return;
       if (!isContentLoaded) return;
+      // UI-only node changes (the aiPrompt keeper) never alter the
+      // serialized markdown — saving would only churn the file watcher.
+      if (transaction.getMeta(UI_ONLY_TRANSACTION_META)) return;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         saveTimerRef.current = null;

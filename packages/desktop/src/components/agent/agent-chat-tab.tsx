@@ -74,8 +74,8 @@ import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
  * coalesced per turn), inline tool-call cards, the session's permission
  * queue, its auth-block card when sign-in is required, and the floating
  * composer. Pinned to a single taskId — sessions are listed and opened from
- * the sidebar SessionsPanel, and the floating prompt (⌘I) is where tasks are
- * started and steered without opening a tab. The dock mounts only the
+ * the sidebar SessionsPanel, and the inline prompt blob in each markdown
+ * editor is where tasks are started without opening a tab. The dock mounts only the
  * selected tab, so everything here must survive unmount: the transcript
  * lives in the task-keyed collections and the composer draft in
  * composer-draft-store.
@@ -189,7 +189,7 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
  * retries the held prompt optimistically — a failed retry re-raises the
  * block.
  */
-function AuthCard({ task }: { task: AgentTaskRow }) {
+export function AuthCard({ task }: { task: AgentTaskRow }) {
   const { t } = useTranslation();
   const [instructions, setInstructions] = useState<string | null>(null);
   const [busyMethodId, setBusyMethodId] = useState<string | null>(null);

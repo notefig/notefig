@@ -12,6 +12,7 @@ import {
   MarkdownImage,
   MarkdownCodeBlock,
 } from "@/components/editor/tiptap-editor-kit";
+import { AiPromptNode } from "@/components/editor/ai-prompt-node";
 import { lowlight } from "@/components/editor/editor-schema-kit";
 import { closeDocumentSync, getDocumentSync } from "@/utils/markdown-conversion";
 import {
@@ -167,13 +168,20 @@ function createMarkdownInstance(
     basePath || filePath.substring(0, filePath.lastIndexOf("/")) || "/";
 
   const extensions = [
-    ...editorExtensions.filter((e) => e.name !== "image" && e.name !== "codeBlock"),
+    ...editorExtensions.filter(
+      (e) =>
+        e.name !== "image" && e.name !== "codeBlock" && e.name !== "aiPrompt",
+    ),
     // filePath lets the image node view declare its drag-protocol payload
     // (which document to rewrite when the asset is moved elsewhere).
     MarkdownImage.configure({ allowBase64: true, workspaceRoot, filePath } as any),
     // filePath lets BlobNodeView address answerBlob at the right document;
     // lowlight must be re-specified since configure() replaces options wholesale.
     MarkdownCodeBlock.configure({ lowlight, filePath } as any),
+    // filePath/basePath scope the inline prompt widget to this document and
+    // its workspace; they also arm the empty-doc keeper (unconfigured
+    // schema-only instances never self-insert).
+    AiPromptNode.configure({ filePath, basePath: workspaceRoot }),
   ];
 
   const editor = new Editor({

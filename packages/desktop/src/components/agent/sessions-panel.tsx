@@ -43,7 +43,7 @@ import { HarnessLogo } from "./harness-logo";
  * session in the workspace, last-activity ordered with live status meta.
  * Clicking a row opens (or focuses) that session's dockable chat tab; the
  * `+` menu starts a new session on a chosen harness — behind the same
- * per-workspace trust gate the floating prompt uses — and opens its tab.
+ * per-workspace trust gate the inline prompt blob uses — and opens its tab.
  * This is the only list of sessions; chat tabs are pinned to one task each.
  */
 export function SessionsPanel({

@@ -1,0 +1,83 @@
+/**
+ * Pure ProseMirror helpers for the aiPrompt node — no React. Split from
+ * ai-prompt-node.tsx because prompt-blob.tsx needs `docHasRealContent` for
+ * its dismiss semantics, and importing the node module from the widget
+ * would close an import cycle (the node's view imports the widget).
+ */
+import type { Node as PMNode } from "@tiptap/pm/model";
+import type { EditorState, Transaction } from "@tiptap/pm/state";
+import { TextSelection } from "@tiptap/pm/state";
+import { AiPromptNodeBase } from "./editor-schema-kit";
+
+/** Real content = anything that would serialize to markdown: text, or a
+ *  non-aiPrompt leaf (image, horizontal rule, …). Empty paragraphs and the
+ *  widget itself don't count. */
+export function docHasRealContent(doc: PMNode): boolean {
+  let found = false;
+  doc.descendants((node) => {
+    if (found) return false;
+    if (node.isText) {
+      if (node.text?.trim()) found = true;
+      return false;
+    }
+    if (node.isLeaf && node.type.name !== AiPromptNodeBase.name) {
+      found = true;
+    }
+    return !found;
+  });
+  return found;
+}
+
+export function docHasPromptNode(doc: PMNode): boolean {
+  let found = false;
+  doc.descendants((node) => {
+    if (node.type.name === AiPromptNodeBase.name) found = true;
+    return !found;
+  });
+  return found;
+}
+
+/**
+ * The "/" summon: replace the empty paragraph the cursor sits in with a
+ * `summoned` aiPrompt node. Null unless the cursor is in an empty paragraph
+ * that is a direct child of the doc — "/" mid-text, in lists, code blocks,
+ * or blockquotes types normally. Deliberately a regular history transaction
+ * (⌘Z restores the empty paragraph) and NOT autosave-exempt: dropping a
+ * mid-doc empty paragraph can change the serialized blank lines.
+ */
+export function slashSummonTr(state: EditorState): Transaction | null {
+  const { selection } = state;
+  if (!(selection instanceof TextSelection) || !selection.empty) return null;
+  const { $from } = selection;
+  if ($from.depth !== 1) return null;
+  const paragraph = $from.parent;
+  if (paragraph.type.name !== "paragraph" || paragraph.content.size !== 0) {
+    return null;
+  }
+  const type = state.schema.nodes[AiPromptNodeBase.name];
+  if (!type) return null;
+  return state.tr.replaceWith(
+    $from.before(1),
+    $from.after(1),
+    type.create({ summoned: true }),
+  );
+}
+
+/**
+ * The revert half of the "/" contract: the widget at [pos, pos+nodeSize)
+ * becomes a paragraph holding a literal "/", cursor placed after it —
+ * exactly what Esc or a second "/" in the empty composer should leave
+ * behind.
+ */
+export function revertToSlashTr(
+  state: EditorState,
+  pos: number,
+  nodeSize: number,
+): Transaction {
+  const paragraph = state.schema.nodes.paragraph.create(
+    null,
+    state.schema.text("/"),
+  );
+  const tr = state.tr.replaceWith(pos, pos + nodeSize, paragraph);
+  return tr.setSelection(TextSelection.create(tr.doc, pos + 2));
+}

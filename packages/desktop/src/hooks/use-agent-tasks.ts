@@ -11,8 +11,8 @@ import i18n from "@/utils/intl";
 
 /**
  * One workspace task with the derived state the session pickers render.
- * Shared by the panel's session switcher and the floating prompt (⌘I) so
- * the two lists can't drift in ordering or status derivation.
+ * Owned by the sidebar sessions panel; kept as a shared hook so any future
+ * session picker can't drift in ordering or status derivation.
  */
 export type AgentTaskMeta = {
   task: AgentTaskRow;

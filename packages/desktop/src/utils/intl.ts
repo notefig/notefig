@@ -342,7 +342,7 @@ i18n
           agentNewSessionWith: "New session with {{harness}}",
           agentChooseHarness: "Choose harness",
           agentNoSessions:
-            "No agent sessions yet. Start one with the + button above, or press ⌘I.",
+            "No agent sessions yet. Start one with the + button above, or prompt from any document.",
           agentStopSession: "Stop session",
           agentTrustTitle: "Run an agent in this workspace?",
           agentTrustDescription:
@@ -373,16 +373,19 @@ i18n
           agentTerminal: "Terminal {{id}}",
           agentContentOfType: "{{type}} content",
 
-          // Agent UI — floating prompt (⌘I)
-          agentFloatingPlaceholder:
-            "Ask about your documents… @ to reference a file",
-          agentNewTaskTarget: "New task · {{harness}}",
-          agentTaskFallback: "Task",
-          agentRemoveContext: "Remove context",
-          agentSelectionSuffix: "(selection)",
-          agentFloatingTrustWarning:
+          // Agent UI — inline prompt blob (in the markdown editor)
+          promptBlobPlaceholder: "Ask AI — edit this doc, or any other…",
+          promptBlobQueued: "Queued",
+          promptBlobQueuedAhead: "Queued · {{count}} ahead",
+          promptBlobEdit: "Edit prompt",
+          promptBlobDone: "Done",
+          promptBlobStopped: "Stopped",
+          promptBlobFailed: "Failed.",
+          promptBlobDismiss: "Dismiss",
+          promptBlobOpenChat: "Open chat",
+          promptBlobNewSession: "Start a new session",
+          promptBlobTrustWarning:
             "Spawns {{name}} with access to this folder — send again to trust.",
-          agentGenericName: "an agent",
 
           // Agent Tools (display names — AgentTool.title holds these keys,
           // never the literal text; resolved in mcp-server.ts's tools/list)
