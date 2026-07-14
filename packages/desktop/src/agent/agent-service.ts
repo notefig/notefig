@@ -1073,16 +1073,22 @@ export function getOrCreateWorkspaceTaskManager(
 // ===== app-facing command API (thin free functions; state via collections) =====
 
 /**
- * Create + start an agent task in a workspace, returning its id. Owns the
- * platform transport choice so the UI never touches transport internals.
+ * Create + start an agent task in a workspace. Owns the platform transport
+ * choice so the UI never touches transport internals. Returns synchronously:
+ * the task row exists (status "starting") before this returns, so the UI can
+ * open the session's tab immediately — spawn + handshake take seconds, and a
+ * failed start lands on the row as status "error" rather than swallowing the
+ * session. `started` settles when the session is ready; await it before
+ * prompting programmatically.
  */
-export async function startAgentTask(
+export function startAgentTask(
   workspacePath: string,
   harness: HarnessDefinition = BUILT_IN_HARNESSES[0],
-): Promise<string> {
+): { taskId: string; started: Promise<void> } {
   const manager = getOrCreateWorkspaceTaskManager(workspacePath);
   const task = manager.createTask(harness);
-  await task.start(({ extraEnv }) =>
+  // start() inserts the task row synchronously before its first await.
+  const started = task.start(({ extraEnv }) =>
     platformAdapter.createAgentTransport({
       taskId: task.taskId,
       harness,
@@ -1090,7 +1096,7 @@ export async function startAgentTask(
       extraEnv,
     }),
   );
-  return task.taskId;
+  return { taskId: task.taskId, started };
 }
 
 /** Send a prompt to a task (fire-and-forget; FIFO queue, lossless). */

@@ -6,6 +6,7 @@ import {
   SearchPanel,
   type SearchPanelHandle,
 } from "@/components/editor/search-panel";
+import { SessionsPanel } from "@/components/agent/sessions-panel";
 import { CheckpointPanel } from "@/components/editor/git/checkpoint-panel";
 import {
   getOrCreateWorkspaceCollections,
@@ -219,6 +220,11 @@ export function Sidebar({
           <SearchPanel ref={searchPanelRef} workspacePath={workspacePath} />
         ) : sidebarView === "git" ? (
           <CheckpointPanel workspacePath={workspacePath} />
+        ) : sidebarView === "sessions" ? (
+          <SessionsPanel
+            workspacePath={workspacePath}
+            activeTabId={activeTabId}
+          />
         ) : (
           <>
             <FileTree

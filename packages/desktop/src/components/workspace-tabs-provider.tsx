@@ -15,17 +15,33 @@ interface WorkspaceTabsContextValue {
    * an editor tab.
    */
   openFile: (options: OpenFileInLayoutOptions) => boolean;
+  /**
+   * Open (or focus) an agent session's chat tab. Always a new tab — a
+   * session never replaces the file tab in view.
+   */
+  openAgentTab: (taskId: string) => void;
 }
 
 const WorkspaceTabsContext = createContext<
   WorkspaceTabsContextValue | undefined
 >(undefined);
 
+const noopOpenAgentTab = () => {};
+
 export function WorkspaceTabsProvider({
   openFile,
+  // Optional: hosts without a dockable layout (the editor test harness)
+  // have nowhere to open a chat tab. Consumers still get a callable.
+  openAgentTab = noopOpenAgentTab,
   children,
-}: WorkspaceTabsContextValue & { children: ReactNode }) {
-  const value = useMemo(() => ({ openFile }), [openFile]);
+}: Omit<WorkspaceTabsContextValue, "openAgentTab"> &
+  Partial<Pick<WorkspaceTabsContextValue, "openAgentTab">> & {
+    children: ReactNode;
+  }) {
+  const value = useMemo(
+    () => ({ openFile, openAgentTab }),
+    [openFile, openAgentTab],
+  );
 
   // Drop actions (drag protocol) open files through the same entry point.
   useEffect(() => {

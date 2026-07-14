@@ -336,6 +336,54 @@ i18n
           // Help Commands
           documentation: "Documentation",
 
+          // Agent UI — sessions sidebar panel
+          agentSessions: "Sessions",
+          agentNewSession: "New session",
+          agentNewSessionWith: "New session with {{harness}}",
+          agentChooseHarness: "Choose harness",
+          agentNoSessions:
+            "No agent sessions yet. Start one with the + button above, or press ⌘I.",
+          agentStopSession: "Stop session",
+          agentTrustTitle: "Run an agent in this workspace?",
+          agentTrustDescription:
+            "This spawns {{harness}} as a local process with access to the files in this folder. Only continue for workspaces you trust.",
+          agentTrustConfirm: "Trust & start",
+
+          // Agent UI — session meta labels (describeTaskMeta)
+          agentNeedsSignIn: "needs sign-in",
+          agentRunning: "running",
+          agentRunningQueued: "running · {{count}} queued",
+          agentQueuedCount: "{{count}} queued",
+          agentFailed: "failed",
+
+          // Agent UI — chat tab
+          agentSessionEnded: "Session ended.",
+          agentSignInRequired: "Sign-in required",
+          agentSignedInRetry: "I've signed in — retry",
+          agentWorking: "Working…",
+          agentTurnFailed: "Turn failed:",
+          agentThinking: "Thinking…",
+          agentQueuedBadge: "queued",
+          agentRemoveFromQueue: "Remove from queue",
+          agentPromptPlaceholder: "Ask anything, @models, /prompts …",
+          agentSend: "Send (⏎)",
+          agentQueue: "Queue (⏎)",
+          agentStop: "Stop",
+          agentAuthoredBlob: "authored a {{type}} in",
+          agentTerminal: "Terminal {{id}}",
+          agentContentOfType: "{{type}} content",
+
+          // Agent UI — floating prompt (⌘I)
+          agentFloatingPlaceholder:
+            "Ask about your documents… @ to reference a file",
+          agentNewTaskTarget: "New task · {{harness}}",
+          agentTaskFallback: "Task",
+          agentRemoveContext: "Remove context",
+          agentSelectionSuffix: "(selection)",
+          agentFloatingTrustWarning:
+            "Spawns {{name}} with access to this folder — send again to trust.",
+          agentGenericName: "an agent",
+
           // Agent Tools (display names — AgentTool.title holds these keys,
           // never the literal text; resolved in mcp-server.ts's tools/list)
           agentToolWorkspaceListDocuments: "List Documents",

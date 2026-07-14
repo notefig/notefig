@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { useLiveQuery, eq } from "@tanstack/react-db";
+import { useTranslation } from "react-i18next";
 import {
   ArrowRightLeft,
   ArrowUp,
@@ -15,14 +16,11 @@ import {
   Eye,
   Globe,
   Loader2,
-  Mic,
   Pencil,
-  Plus,
   Search,
   Sparkles,
   Square,
   SquareTerminal,
-  Telescope,
   Trash2,
   Wrench,
   X,
@@ -30,7 +28,6 @@ import {
 } from "lucide-react";
 import type {
   AuthMethod,
-  HarnessDefinition,
   ToolCallContent,
   ToolCallStatus,
   ToolCallUpdate,
@@ -39,12 +36,6 @@ import type {
 } from "@metrists/shared/agent";
 import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -56,117 +47,71 @@ import {
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { cn } from "@/lib/utils";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { useKv } from "@/utils/kv-store";
-import { normalizePath } from "@/utils/fs";
-import {
   agentEntriesCollection,
+  agentTasksCollection,
   agentTurnsCollection,
   type AgentEntry,
   type AgentTaskRow,
 } from "@/agent/agent-collections";
-import { useAgentTaskList } from "@/hooks/use-agent-tasks";
-import { SessionSwitcher } from "./session-switcher";
 import {
   authenticateAgentTask,
   cancelAgentTask,
   promptAgentTask,
   removeQueuedPrompt,
   retryAgentTaskAfterAuth,
-  startAgentTask,
 } from "@/agent/agent-service";
 import { PermissionCard } from "./permission-card";
+import { HarnessLogo } from "./harness-logo";
+import {
+  clearComposerDraft,
+  getComposerDraft,
+  setComposerDraft,
+} from "./composer-draft-store";
 import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
 
 /**
- * The agent panel: a session switcher (create/switch/cancel — parallel tasks
- * are first-class, created on a chosen harness via the picker), and per selected
- * task a prompt input, streamed turn output (message chunks coalesced per
- * turn), inline tool-call cards, that task's permission queue, and its
- * auth-block card when sign-in is required. Reads the task-keyed collections
- * via useLiveQuery and talks to the workspace's TaskManager. This is where
- * tasks are *watched*; the floating prompt (⌘I) is where they're started
- * and steered.
+ * One agent session as a dockable tab: streamed turn output (message chunks
+ * coalesced per turn), inline tool-call cards, the session's permission
+ * queue, its auth-block card when sign-in is required, and the floating
+ * composer. Pinned to a single taskId — sessions are listed and opened from
+ * the sidebar SessionsPanel, and the floating prompt (⌘I) is where tasks are
+ * started and steered without opening a tab. The dock mounts only the
+ * selected tab, so everything here must survive unmount: the transcript
+ * lives in the task-keyed collections and the composer draft in
+ * composer-draft-store.
  */
-export type AgentPanelProps = {
-  workspacePath: string;
-};
-
-export function AgentPanel({ workspacePath }: AgentPanelProps) {
-  const normalized = normalizePath(workspacePath);
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
-  const [trustPromptOpen, setTrustPromptOpen] = useState(false);
-  // The harness the pending trust confirmation would start (picker choice).
-  const [pendingHarness, setPendingHarness] = useState<HarnessDefinition>(
-    BUILT_IN_HARNESSES[0],
-  );
-  const kv = useKv<boolean>("agent");
-  const trustKey = `trust:${normalized}`;
-
-  // Last-activity ordered, with per-task queued counts (shared with ⌘I).
-  const taskMetas = useAgentTaskList(workspacePath);
-
-  // Default the selection to the most recently active task; also recover
-  // when the active task vanishes (workspace close deletes its rows).
-  useEffect(() => {
-    const activeExists =
-      activeTaskId !== null &&
-      taskMetas.some((meta) => meta.task.taskId === activeTaskId);
-    if (!activeExists) {
-      setActiveTaskId(taskMetas[0]?.task.taskId ?? null);
-    }
-  }, [activeTaskId, taskMetas]);
-
-  const startTask = useCallback(
-    async (harness: HarnessDefinition) => {
-      try {
-        const taskId = await startAgentTask(workspacePath, harness);
-        setActiveTaskId(taskId);
-      } catch (error) {
-        console.error("Failed to start agent task:", error);
-      }
+export function AgentChatTab({ taskId }: { taskId: string }) {
+  const { t } = useTranslation();
+  const [draft, setDraftState] = useState(() => getComposerDraft(taskId));
+  const setDraft = useCallback(
+    (value: string) => {
+      setDraftState(value);
+      setComposerDraft(taskId, value);
     },
-    [workspacePath],
+    [taskId],
   );
 
-  const handleCreate = useCallback(
-    (harness: HarnessDefinition) => {
-      if (kv.get(trustKey)) {
-        void startTask(harness);
-      } else {
-        setPendingHarness(harness);
-        setTrustPromptOpen(true);
-      }
-    },
-    [kv, trustKey, startTask],
+  const { data: taskRows = [] } = useLiveQuery(
+    (q) =>
+      q
+        .from({ task: agentTasksCollection })
+        .where(({ task }) => eq(task.taskId, taskId)),
+    [taskId],
   );
-
-  const confirmTrust = useCallback(() => {
-    kv.set(trustKey, true);
-    setTrustPromptOpen(false);
-    void startTask(pendingHarness);
-  }, [kv, trustKey, startTask, pendingHarness]);
-
-  const activeTaskRow = taskMetas.find(
-    (meta) => meta.task.taskId === activeTaskId,
-  )?.task;
-  const isRunning = activeTaskRow?.status === "running";
+  const taskRow = taskRows[0];
+  const isRunning = taskRow?.status === "running";
 
   const sendPrompt = useCallback(() => {
     const text = draft.trim();
-    if (!activeTaskId || !text) return;
-    promptAgentTask(activeTaskId, text);
-    setDraft("");
-  }, [draft, activeTaskId]);
+    if (!text) return;
+    promptAgentTask(taskId, text);
+    setDraftState("");
+    clearComposerDraft(taskId);
+  }, [draft, taskId]);
+
+  const stopTask = useCallback(() => {
+    void cancelAgentTask(taskId);
+  }, [taskId]);
 
   // The floating composer overlay's live height (it grows when permission/
   // auth cards stack above the prompt box); the transcript pads its scroll
@@ -183,123 +128,56 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
     return () => observer.disconnect();
   }, [composerEl]);
 
-  const stopTask = useCallback(() => {
-    if (!activeTaskId) return;
-    void cancelAgentTask(activeTaskId);
-  }, [activeTaskId]);
-
-  return (
-    <div className="flex h-full w-full flex-col overflow-hidden border-s border-border bg-background">
-      <div className="flex items-center gap-2 border-b border-border p-2">
-        <SessionSwitcher
-          tasks={taskMetas}
-          activeTaskId={activeTaskId}
-          onSelect={setActiveTaskId}
-        />
-        <NewTaskMenu onCreate={handleCreate} className="ms-auto" />
+  // The tab can outlive the task row for a frame (workspace teardown clears
+  // rows before the layout prunes the tab).
+  if (!taskRow) {
+    return (
+      <div className="flex h-full w-full flex-1 items-center justify-center bg-background text-sm text-muted-foreground">
+        {t("agentSessionEnded")}
       </div>
+    );
+  }
 
-      {activeTaskId ? (
-        <div className="relative flex min-h-0 flex-1 flex-col">
-          {/* Keyed per task so scroll state never leaks across task switches
-              and each task reopens at its own last turn. */}
-          <Transcript
-            key={activeTaskId}
-            taskId={activeTaskId}
-            bottomInset={composerHeight}
-          />
-
-          {/* Floating composer pinned to the bottom of the tab. The gradient
-              fades the transcript out behind it; the wrapper is click-through
-              (pointer-events-none) so only the cards inside catch pointers.
-              Measured so the transcript can pad past it — the overlay grows
-              when permission/auth cards stack above the prompt box. */}
-          <div
-            ref={setComposerEl}
-            className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-2 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-3 pt-10"
-          >
-            {isRunning && (
-              <Marker
-                role="status"
-                className="pointer-events-auto self-start rounded-full border border-border bg-card/80 px-3 py-1 backdrop-blur"
-              >
-                <MarkerIcon>
-                  <Loader2 className="animate-spin" />
-                </MarkerIcon>
-                <MarkerContent className="shimmer">Working…</MarkerContent>
-              </Marker>
-            )}
-            <div className="pointer-events-auto empty:hidden">
-              <PermissionCard taskId={activeTaskId} />
-            </div>
-            {activeTaskRow?.authRequired && (
-              <AuthCard task={activeTaskRow} />
-            )}
-            <PromptBox
-              value={draft}
-              onChange={setDraft}
-              onSend={sendPrompt}
-              onStop={stopTask}
-              isRunning={isRunning}
-            />
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-1 items-center justify-center p-4 text-center text-sm text-muted-foreground">
-          Start a task to chat with an agent about your documents.
-        </div>
-      )}
-
-      <AlertDialog open={trustPromptOpen} onOpenChange={setTrustPromptOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Run an agent in this workspace?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This spawns {pendingHarness.label} as a local process with
-              access to the files in this folder. Only continue for workspaces
-              you trust.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmTrust}>
-              Trust &amp; start
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
-  );
-}
-
-function NewTaskMenu({
-  onCreate,
-  className,
-}: {
-  onCreate: (harness: HarnessDefinition) => void;
-  className?: string;
-}) {
-  // Signed-in marks are per harness per machine, written by the service on
-  // the first turn that reaches the model (there is no ahead-of-time probe).
-  const kv = useKv<boolean>("agent");
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="outline" className={className}>
-          + New task
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {BUILT_IN_HARNESSES.map((harness) => (
-          <DropdownMenuItem key={harness.id} onSelect={() => onCreate(harness)}>
-            <span className="flex-1">{harness.label}</span>
-            {kv.get(`auth:${harness.id}`) && (
-              <Check className="size-3.5 text-green-600 dark:text-green-400" />
-            )}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    // The dock's content wrapper is a plain flex box, so this root brings
+    // its own positioning context for the absolute composer overlay.
+    <div className="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
+      <Transcript taskId={taskId} bottomInset={composerHeight} />
+
+      {/* Floating composer pinned to the bottom of the tab. The gradient
+          fades the transcript out behind it; the wrapper is click-through
+          (pointer-events-none) so only the cards inside catch pointers.
+          Measured so the transcript can pad past it — the overlay grows
+          when permission/auth cards stack above the prompt box. */}
+      <div
+        ref={setComposerEl}
+        className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-2 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-3 pt-10"
+      >
+        {isRunning && (
+          <Marker
+            role="status"
+            className="pointer-events-auto self-start rounded-full border border-border bg-card/80 px-3 py-1 backdrop-blur"
+          >
+            <MarkerIcon>
+              <Loader2 className="animate-spin" />
+            </MarkerIcon>
+            <MarkerContent className="shimmer">{t("agentWorking")}</MarkerContent>
+          </Marker>
+        )}
+        <div className="pointer-events-auto empty:hidden">
+          <PermissionCard taskId={taskId} />
+        </div>
+        {taskRow.authRequired && <AuthCard task={taskRow} />}
+        <PromptBox
+          value={draft}
+          onChange={setDraft}
+          onSend={sendPrompt}
+          onStop={stopTask}
+          isRunning={isRunning}
+          harnessId={taskRow.harnessId}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -312,6 +190,7 @@ function NewTaskMenu({
  * block.
  */
 function AuthCard({ task }: { task: AgentTaskRow }) {
+  const { t } = useTranslation();
   const [instructions, setInstructions] = useState<string | null>(null);
   const [busyMethodId, setBusyMethodId] = useState<string | null>(null);
   const methods = task.authMethods ?? [];
@@ -335,7 +214,7 @@ function AuthCard({ task }: { task: AgentTaskRow }) {
     // this card floats in the composer overlay above the transcript, so a
     // plain translucent bg would let entries underneath show through it.
     <div className="pointer-events-auto flex flex-col gap-2 rounded-md border border-amber-500/40 bg-background bg-gradient-to-b from-amber-500/10 to-amber-500/10 p-3 text-xs">
-      <span className="font-medium">Sign-in required</span>
+      <span className="font-medium">{t("agentSignInRequired")}</span>
       {instructions ? (
         <p className="whitespace-pre-wrap">{instructions}</p>
       ) : (
@@ -360,7 +239,7 @@ function AuthCard({ task }: { task: AgentTaskRow }) {
           size="sm"
           onClick={() => retryAgentTaskAfterAuth(task.taskId)}
         >
-          I&apos;ve signed in — retry
+          {t("agentSignedInRetry")}
         </Button>
       </div>
     </div>
@@ -375,6 +254,7 @@ function Transcript({
   /** Live height of the floating composer overlay (0 until measured). */
   bottomInset: number;
 }) {
+  const { t } = useTranslation();
   const { data: entries = [] } = useLiveQuery(
     (q) =>
       q
@@ -439,7 +319,7 @@ function Transcript({
             {turnErrors.map((turn) => (
               <MessageScrollerItem key={turn.turnId} messageId={`error-${turn.turnId}`}>
                 <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
-                  <span className="font-medium">Turn failed:</span> {turn.error}
+                  <span className="font-medium">{t("agentTurnFailed")}</span> {turn.error}
                 </div>
               </MessageScrollerItem>
             ))}
@@ -459,6 +339,7 @@ function Transcript({
 
 /** Render one transcript entry by type; tool calls are peers of text. */
 function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
+  const { t } = useTranslation();
   if (entry.type === "tool_call") {
     if (!entry.toolCall) return null;
     const CustomCard = TOOL_NAME_RENDERER[entry.toolCall.title ?? ""];
@@ -492,12 +373,12 @@ function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
         {queued && (
           <span className="mt-1 flex items-center justify-end gap-1.5">
             <span className="rounded-full bg-primary-foreground/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
-              queued
+              {t("agentQueuedBadge")}
             </span>
             <button
               type="button"
-              title="Remove from queue"
-              aria-label="Remove from queue"
+              title={t("agentRemoveFromQueue")}
+              aria-label={t("agentRemoveFromQueue")}
               className="rounded-full p-0.5 hover:bg-primary-foreground/20"
               onClick={() => removeQueuedPrompt(entry.taskId, entry.turnId)}
             >
@@ -542,10 +423,11 @@ function PlanView({ plan }: { plan: unknown }) {
 /** One coalesced thought run (a contiguous block of agent_thought_chunk
  *  updates streams into a single entry upstream), collapsed by default. */
 function ThoughtEntry({ text }: { text?: string }) {
+  const { t } = useTranslation();
   if (!text) return null;
   return (
     <details className="w-full max-w-[85%] rounded-lg border border-border/60 bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
-      <summary className="cursor-pointer select-none">Thinking…</summary>
+      <summary className="cursor-pointer select-none">{t("agentThinking")}</summary>
       <p className="mt-1 whitespace-pre-wrap">{text}</p>
     </details>
   );
@@ -564,6 +446,7 @@ const TOOL_NAME_RENDERER: Record<string, (props: { toolCall: ToolCallUpdate }) =
 
 /** "authored a question in notes.md" instead of the raw {blobId} JSON result. */
 function AuthorBlobCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
+  const { t } = useTranslation();
   const rawInput = call.rawInput as { path?: string; type?: string; id?: string } | undefined;
   const status: ToolCallStatus = call.status ?? "pending";
   if (!rawInput?.path || !rawInput.type || !rawInput.id) {
@@ -577,7 +460,7 @@ function AuthorBlobCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
     <div className="flex w-full max-w-[85%] items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs">
       <Sparkles className="size-3.5 shrink-0 text-muted-foreground" />
       <span className="flex-1">
-        authored a {rawInput.type} in{" "}
+        {t("agentAuthoredBlob", { type: rawInput.type })}{" "}
         <button
           type="button"
           className="underline hover:text-foreground"
@@ -700,6 +583,7 @@ function ToolStatusIcon({ status }: { status: ToolCallStatus }) {
 }
 
 function ToolContentView({ item }: { item: ToolCallContent }) {
+  const { t } = useTranslation();
   if (item.type === "diff") {
     const added = item.newText ? item.newText.split("\n").length : 0;
     const removed = item.oldText ? item.oldText.split("\n").length : 0;
@@ -723,7 +607,7 @@ function ToolContentView({ item }: { item: ToolCallContent }) {
   if (item.type === "terminal") {
     return (
       <span className="font-mono text-[11px] text-muted-foreground">
-        Terminal {item.terminalId}
+        {t("agentTerminal", { id: item.terminalId })}
       </span>
     );
   }
@@ -737,7 +621,9 @@ function ToolContentView({ item }: { item: ToolCallContent }) {
     );
   }
   return (
-    <span className="text-[11px] text-muted-foreground">{block.type} content</span>
+    <span className="text-[11px] text-muted-foreground">
+      {t("agentContentOfType", { type: block.type })}
+    </span>
   );
 }
 
@@ -755,8 +641,9 @@ function rawInputPreview(rawInput: Record<string, unknown>): string {
  * The floating composer: a rounded card pinned to the bottom of the tab with
  * the prompt input above a toolbar row. Send stays enabled while a turn runs
  * — sending then queues the prompt (FIFO, lossless) — with Stop available
- * alongside (⌘⏎ sends). The left affordances mirror the target design; they
- * are visual placeholders until wired to real actions.
+ * alongside (⏎ sends, ⇧⏎ inserts a newline). The left affordances mirror
+ * the target design; they are visual placeholders until wired to real
+ * actions.
  */
 function PromptBox({
   value,
@@ -764,56 +651,54 @@ function PromptBox({
   onSend,
   onStop,
   isRunning,
+  harnessId,
 }: {
   value: string;
   onChange: (value: string) => void;
   onSend: () => void;
   onStop: () => void;
   isRunning: boolean;
+  harnessId: string;
 }) {
+  const { t } = useTranslation();
   const canSend = value.trim().length > 0;
   return (
     <div className="pointer-events-auto rounded-2xl border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40">
       <textarea
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        // autoFocus: mount == tab selected (the dock unmounts unselected
+        // tabs), and pulling focus into the dock is also what keeps the
+        // tab hotkeys (Ctrl+Tab, ⌘W, ⌘1-9) alive — they listen on the
+        // dockable container, the way editors self-focus on tab-select.
+        autoFocus
         onKeyDown={(event) => {
-          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+          if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
             onSend();
           }
         }}
-        placeholder="Ask anything, @models, /prompts …"
+        placeholder={t("agentPromptPlaceholder")}
         rows={2}
         className="max-h-40 min-h-[44px] w-full resize-none bg-transparent px-4 pt-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
       />
       <div className="flex items-center gap-1 px-2 pb-2">
-        <ComposerIconButton label="Add context">
-          <Plus />
-        </ComposerIconButton>
-        <div className="mx-1 h-5 w-px bg-border" />
-        <ComposerIconButton label="Prompts">
-          <Sparkles />
-        </ComposerIconButton>
-        <ComposerIconButton label="Explore">
-          <Telescope />
-        </ComposerIconButton>
-        <ComposerIconButton label="Web search">
-          <Globe />
-        </ComposerIconButton>
+        {/* The session is pinned to one harness — a passive indicator, not
+            a picker (the sidebar's new-session split button chooses). */}
+        <span className="flex items-center gap-1.5 px-1.5 text-[11px] text-muted-foreground">
+          <HarnessLogo harnessId={harnessId} className="size-3" />
+          {harnessLabel(harnessId)}
+        </span>
 
         <div className="ms-auto flex items-center gap-1">
-          <ComposerIconButton label="Dictate">
-            <Mic />
-          </ComposerIconButton>
           {isRunning && (
             <Button
               size="icon"
               variant="outline"
               onClick={onStop}
               className="size-9 rounded-xl"
-              title="Stop"
-              aria-label="Stop"
+              title={t("agentStop")}
+              aria-label={t("agentStop")}
             >
               <Square className="fill-current" />
             </Button>
@@ -823,8 +708,8 @@ function PromptBox({
             onClick={onSend}
             disabled={!canSend}
             className="size-9 rounded-xl"
-            title={isRunning ? "Queue (⌘⏎)" : "Send (⌘⏎)"}
-            aria-label="Send"
+            title={isRunning ? t("agentQueue") : t("agentSend")}
+            aria-label={isRunning ? t("agentQueue") : t("agentSend")}
           >
             <ArrowUp />
           </Button>
@@ -834,23 +719,10 @@ function PromptBox({
   );
 }
 
-function ComposerIconButton({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
+/** Label for a harness id (built-ins today; falls back to the raw id). */
+function harnessLabel(harnessId: string): string {
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      title={label}
-      aria-label={label}
-      className={cn("size-8 rounded-lg text-muted-foreground")}
-    >
-      {children}
-    </Button>
+    BUILT_IN_HARNESSES.find((harness) => harness.id === harnessId)?.label ??
+    harnessId
   );
 }

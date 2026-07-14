@@ -7,6 +7,7 @@ import {
 } from "@/agent/agent-collections";
 import { normalizePath } from "@/utils/fs";
 import { formatTimeAgo } from "@/utils/format";
+import i18n from "@/utils/intl";
 
 /**
  * One workspace task with the derived state the session pickers render.
@@ -69,15 +70,20 @@ export function useAgentTaskList(workspacePath: string): AgentTaskMeta[] {
 /**
  * The right-aligned meta label for a session row. Priority: sign-in blocks
  * everything else > live activity (running/queued) > failure > last touch.
+ * Uses the i18n instance directly (not useTranslation) so it stays a pure
+ * function callable from any consumer; consumers re-render on language
+ * change through their own useTranslation subscriptions.
  */
 export function describeTaskMeta(meta: AgentTaskMeta): string {
-  if (meta.needsAuth) return "needs sign-in";
+  if (meta.needsAuth) return i18n.t("agentNeedsSignIn");
   if (meta.isRunning) {
     return meta.queuedCount > 0
-      ? `running · ${meta.queuedCount} queued`
-      : "running";
+      ? i18n.t("agentRunningQueued", { count: meta.queuedCount })
+      : i18n.t("agentRunning");
   }
-  if (meta.queuedCount > 0) return `${meta.queuedCount} queued`;
-  if (meta.isError) return "failed";
+  if (meta.queuedCount > 0) {
+    return i18n.t("agentQueuedCount", { count: meta.queuedCount });
+  }
+  if (meta.isError) return i18n.t("agentFailed");
   return formatTimeAgo(meta.task.updatedAt);
 }

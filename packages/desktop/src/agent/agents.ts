@@ -113,7 +113,11 @@ function workspaceHandle(workspacePath: string): AgentWorkspaceHandle {
   return {
     workspacePath,
     async createTask(harness) {
-      const taskId = await startAgentTask(workspacePath, harness);
+      // Programmatic callers (subagent pattern) prompt right after — wait
+      // for the session to be ready, unlike the UI which opens the tab on
+      // the "starting" row.
+      const { taskId, started } = startAgentTask(workspacePath, harness);
+      await started;
       return taskHandle(taskId);
     },
   };

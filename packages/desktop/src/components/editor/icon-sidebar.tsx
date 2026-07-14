@@ -3,6 +3,7 @@
 import { memo, useCallback, useMemo } from "react";
 
 import {
+  Bot,
   FileText,
   Search,
   Bookmark,
@@ -85,6 +86,13 @@ export const IconSidebar = memo(function IconSidebar({
         label: "Git",
         active: sidebarView === "git",
         onClick: () => handleSidebarViewChange("git"),
+      },
+      {
+        id: "sessions",
+        icon: Bot,
+        label: "Agent Sessions",
+        active: sidebarView === "sessions",
+        onClick: () => handleSidebarViewChange("sessions"),
       },
     ],
     [sidebarView, handleSidebarViewChange],

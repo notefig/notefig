@@ -5,12 +5,12 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { ArrowUp, FileText, Quote, X } from "lucide-react";
 import type {
   HarnessDefinition,
   PromptContextPart,
 } from "@metrists/shared/agent";
-import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -28,7 +28,12 @@ import {
 } from "@/components/editor/editor-store";
 import { promptAgentTask, startAgentTask } from "@/agent/agent-service";
 import { describeTaskMeta, useAgentTaskList } from "@/hooks/use-agent-tasks";
-import { StatusDot } from "./session-switcher";
+import {
+  useActiveHarnesses,
+  useDefaultHarness,
+} from "@/hooks/use-harness-selection";
+import { HarnessLogo } from "./harness-logo";
+import { StatusDot } from "./sessions-panel";
 
 /**
  * The floating prompt (Stage 4): a summonable (⌘I) surface for starting and
@@ -56,13 +61,18 @@ export function FloatingPrompt({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const normalized = normalizePath(workspacePath);
   const [text, setText] = useState("");
   const [chips, setChips] = useState<ContextChip[]>([]);
-  const [target, setTarget] = useState<Target>({
+  // New sessions default to the remembered harness — no picker required;
+  // the dropdown re-targets per send (and lists only active harnesses).
+  const { defaultHarness } = useDefaultHarness();
+  const activeHarnesses = useActiveHarnesses();
+  const [target, setTarget] = useState<Target>(() => ({
     type: "new",
-    harness: BUILT_IN_HARNESSES[0],
-  });
+    harness: defaultHarness,
+  }));
   const [confirmTrust, setConfirmTrust] = useState(false);
   const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -153,7 +163,13 @@ export function FloatingPrompt({
       if (target.type === "task") {
         promptAgentTask(target.taskId, fullText, contextParts);
       } else {
-        const taskId = await startAgentTask(workspacePath, target.harness);
+        // Wait for the session to be ready — prompting before the ACP
+        // handshake completes would settle the turn as an error.
+        const { taskId, started } = startAgentTask(
+          workspacePath,
+          target.harness,
+        );
+        await started;
         promptAgentTask(taskId, fullText, contextParts);
       }
       setText("");
@@ -180,9 +196,9 @@ export function FloatingPrompt({
 
   const targetLabel =
     target.type === "new"
-      ? `New task · ${target.harness.label}`
+      ? t("agentNewTaskTarget", { harness: target.harness.label })
       : (liveTasks.find((meta) => meta.task.taskId === target.taskId)?.task
-          .title ?? "Task");
+          .title ?? t("agentTaskFallback"));
 
   return (
     <div
@@ -206,10 +222,10 @@ export function FloatingPrompt({
                   <FileText className="size-3" />
                 )}
                 {getFileName(chip.path)}
-                {chip.kind === "selection" && " (selection)"}
+                {chip.kind === "selection" && ` ${t("agentSelectionSuffix")}`}
                 <button
                   type="button"
-                  aria-label="Remove context"
+                  aria-label={t("agentRemoveContext")}
                   className="rounded-full p-0.5 hover:bg-background"
                   onClick={() =>
                     setChips((current) => current.filter((_, i) => i !== index))
@@ -231,17 +247,17 @@ export function FloatingPrompt({
               event.preventDefault();
               onOpenChange(false);
             }
-            if (event.key === "Enter" && !event.shiftKey && mentionCandidates.length > 0) {
+            if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
-              applyMention(mentionCandidates[0].path);
-              return;
-            }
-            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-              event.preventDefault();
-              handleSend();
+              // A visible mention list claims Enter first; ⇧⏎ is the newline.
+              if (mentionCandidates.length > 0) {
+                applyMention(mentionCandidates[0].path);
+              } else {
+                handleSend();
+              }
             }
           }}
-          placeholder="Ask about your documents… @ to reference a file"
+          placeholder={t("agentFloatingPlaceholder")}
           rows={3}
           className="max-h-48 min-h-[56px] w-full resize-none bg-transparent px-4 pt-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
         />
@@ -269,17 +285,29 @@ export function FloatingPrompt({
         <div className="flex items-center gap-2 px-3 pb-3">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button size="sm" variant="outline" className="max-w-56 truncate text-xs">
-                {targetLabel}
+              <Button
+                size="sm"
+                variant="outline"
+                className="max-w-56 gap-1.5 truncate text-xs"
+              >
+                {target.type === "new" && (
+                  <HarnessLogo
+                    harnessId={target.harness.id}
+                    className="size-3"
+                  />
+                )}
+                <span className="truncate">{targetLabel}</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
-              {BUILT_IN_HARNESSES.map((harness) => (
+              {activeHarnesses.map((harness) => (
                 <DropdownMenuItem
                   key={harness.id}
+                  className="gap-2"
                   onSelect={() => setTarget({ type: "new", harness })}
                 >
-                  New task · {harness.label}
+                  <HarnessLogo harnessId={harness.id} className="size-3" />
+                  {t("agentNewTaskTarget", { harness: harness.label })}
                 </DropdownMenuItem>
               ))}
               {liveTasks.map((meta) => (
@@ -303,8 +331,12 @@ export function FloatingPrompt({
           <div className="ms-auto flex items-center gap-2">
             {confirmTrust && (
               <span className="text-[11px] text-amber-600 dark:text-amber-400">
-                Spawns {target.type === "new" ? target.harness.label : "an agent"} with
-                access to this folder — send again to trust.
+                {t("agentFloatingTrustWarning", {
+                  name:
+                    target.type === "new"
+                      ? target.harness.label
+                      : t("agentGenericName"),
+                })}
               </span>
             )}
             <Button
@@ -312,8 +344,8 @@ export function FloatingPrompt({
               onClick={handleSend}
               disabled={!text.trim() || sending}
               className="size-8 rounded-xl"
-              title="Send (⌘⏎)"
-              aria-label="Send"
+              title={t("agentSend")}
+              aria-label={t("agentSend")}
             >
               <ArrowUp />
             </Button>
