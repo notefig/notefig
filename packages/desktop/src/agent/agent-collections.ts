@@ -22,6 +22,12 @@ export type AgentTaskRow = {
   harnessId: string;
   createdAt: number;
   /**
+   * Last-activity timestamp: bumped on insert, every status transition, and
+   * prompt enqueue (queueing onto a busy task doesn't change status). Drives
+   * session-list ordering; deliberately NOT bumped per streamed chunk.
+   */
+  updatedAt: number;
+  /**
    * "How to sign in" hint from the adapter/harness, surfaced on auth errors.
    * On the row (not just the AgentTask instance) so the banner flows through
    * useLiveQuery and can't lag behind an unrelated collection write.

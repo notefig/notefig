@@ -172,8 +172,16 @@ export class AgentTask {
   private draining = false;
   /** "How to sign in" hint, surfaced only when an auth error actually occurs. */
   private authHintValue?: string;
-  /** The prompt text an auth block interrupted; retried after sign-in. */
-  private heldPromptText?: string;
+  /**
+   * The prompt an auth block interrupted; retried after sign-in. Holds the
+   * original turnId so the retry re-queues the existing transcript rows
+   * instead of inserting a duplicate user entry + turn.
+   */
+  private heldPrompt?: {
+    turnId: string;
+    text: string;
+    contextParts?: PromptContextPart[];
+  };
   /**
    * While auth-blocked, new prompts queue without starting a drain — running
    * them would just fail the same way and displace the held prompt. Cleared
@@ -377,6 +385,13 @@ export class AgentTask {
       status: "queued",
       startedAt: now,
     });
+    // Enqueue is activity even when it doesn't change status (queueing onto
+    // a busy task) — bump so the session list orders by last touch.
+    if (agentTasksCollection.get(this.taskId)) {
+      agentTasksCollection.update(this.taskId, (draft) => {
+        draft.updatedAt = now;
+      });
+    }
 
     if (this.disposed) {
       this.settleQueuedTurn(turnId, { status: "cancelled" });
@@ -535,7 +550,7 @@ export class AgentTask {
       // is task-row state: methods + hint land on the row, the failed
       // prompt's text is held for a retry after sign-in.
       if (/authentication required/i.test(message)) {
-        this.enterAuthBlock(text);
+        this.enterAuthBlock({ turnId, text, contextParts });
       }
       this.warn("turn error", message);
       return this.finishTurn(undefined, "error", message);
@@ -568,12 +583,28 @@ export class AgentTask {
    * the block.
    */
   retryHeldPrompt(): void {
-    const text = this.heldPromptText;
-    this.heldPromptText = undefined;
+    const held = this.heldPrompt;
+    this.heldPrompt = undefined;
     this.clearAuthBlock();
     if (this.status === "error") this.setStatus("idle");
-    if (text) {
-      this.prompt(text, { front: true });
+    if (held) {
+      // Re-queue the ORIGINAL rows: the failed turn goes back to "queued"
+      // (clearing its error also removes the stale "Turn failed" bubble) and
+      // its user entry stays put — no duplicate transcript rows. The first
+      // attempt's prompt handle already resolved as error (resolveTurn
+      // no-ops on the reused turnId), which is fine: programmatic callers
+      // saw the auth failure; the retry is UI-driven.
+      if (agentTurnsCollection.get(held.turnId)) {
+        agentTurnsCollection.update(held.turnId, (draft) => {
+          draft.status = "queued";
+          draft.error = undefined;
+          draft.stopReason = undefined;
+        });
+      }
+      this.pendingPrompts.unshift(held);
+      if (!this.currentTurn && !this.draining) {
+        void this.drainQueue();
+      }
     } else if (this.pendingPrompts.length > 0 && !this.currentTurn && !this.draining) {
       // Nothing held, but prompts queued up behind the block — resume them.
       void this.drainQueue();
@@ -581,9 +612,13 @@ export class AgentTask {
   }
 
   /** Auth-blocked is task-row state (Stage 4): methods + hint, held prompt. */
-  private enterAuthBlock(promptText: string): void {
+  private enterAuthBlock(held: {
+    turnId: string;
+    text: string;
+    contextParts?: PromptContextPart[];
+  }): void {
     this.authBlocked = true;
-    this.heldPromptText = promptText;
+    this.heldPrompt = held;
     this.authHintValue = this.client?.authHint ?? this.harness.authHint;
     if (agentTasksCollection.get(this.taskId)) {
       agentTasksCollection.update(this.taskId, (draft) => {
@@ -915,6 +950,7 @@ export class AgentTask {
       status: this.status,
       harnessId: this.harness.id,
       createdAt: Date.now(),
+      updatedAt: Date.now(),
     });
   }
 
@@ -923,6 +959,7 @@ export class AgentTask {
     if (agentTasksCollection.get(this.taskId)) {
       agentTasksCollection.update(this.taskId, (draft) => {
         draft.status = status;
+        draft.updatedAt = Date.now();
       });
     }
   }

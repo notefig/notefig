@@ -968,6 +968,71 @@ describe("Stage 4: auth flows", () => {
     expect(agentTasksCollection.get(task.taskId)?.authRequired).toBe(false);
   });
 
+  it("auth retry reuses the original transcript rows — no duplicate user entry or turn", async () => {
+    const { client } = authScriptedPair(1);
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "go");
+
+    // The failed attempt left exactly one user entry + one errored turn.
+    expect(entriesFor(task.taskId).filter((e) => e.type === "user")).toHaveLength(1);
+    expect(turnFor(task.taskId)).toHaveLength(1);
+    expect(turnFor(task.taskId)[0].status).toBe("error");
+
+    task.retryHeldPrompt();
+    await vi.waitFor(() => {
+      expect(turnFor(task.taskId)[0].status).toBe("completed");
+    });
+
+    // Same rows, promoted — not re-inserted duplicates.
+    const userEntries = entriesFor(task.taskId).filter((e) => e.type === "user");
+    expect(userEntries).toHaveLength(1);
+    expect(userEntries[0].text).toBe("go");
+    const turns = turnFor(task.taskId);
+    expect(turns).toHaveLength(1);
+    expect(turns[0].error).toBeUndefined();
+  });
+
+  it("auth retry preserves the held prompt's context parts", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.initializeResult = {
+      protocolVersion: 1,
+      agentCapabilities: {},
+      authMethods,
+    };
+    const prompts: unknown[][] = [];
+    let failed = false;
+    agent.onPrompt = async (params) => {
+      prompts.push((params as { prompt: unknown[] }).prompt);
+      if (!failed) {
+        failed = true;
+        throw new Error("Authentication required");
+      }
+      return { stopReason: "end_turn" };
+    };
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+
+    task.prompt("go", {
+      contextParts: [{ kind: "resource_link", path: "/ws/doc.md" }],
+    });
+    await vi.waitFor(() => {
+      expect(turnFor(task.taskId)[0]?.status).toBe("error");
+    });
+
+    task.retryHeldPrompt();
+    await vi.waitFor(() => {
+      expect(turnFor(task.taskId)[0].status).toBe("completed");
+    });
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContainEqual({
+      type: "resource_link",
+      uri: "/ws/doc.md",
+      name: "/ws/doc.md",
+    });
+  });
+
   it("a dismissed sign-in leaves the queue halted — no retry loop (A5 regression)", async () => {
     const { client, seen } = authScriptedPair(99);
     const task = new TaskManager("/ws").createTask(harness);
@@ -977,6 +1042,56 @@ describe("Stage 4: auth flows", () => {
     // No authenticate, no retry: exactly one attempt was made.
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(seen).toEqual(["go"]);
+  });
+});
+
+describe("task updatedAt (last-activity ordering, MET-48)", () => {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  async function startedTask(manager: TaskManager) {
+    const task = manager.createTask(harness);
+    const [client, agentSide] = createLoopbackPair();
+    new FakeAgent(agentSide);
+    await task.start(() => client);
+    return task;
+  }
+
+  it("insertTaskRow stamps updatedAt", async () => {
+    const task = await startedTask(new TaskManager("/ws"));
+    const row = agentTasksCollection.get(task.taskId)!;
+    expect(row.updatedAt).toBeGreaterThanOrEqual(row.createdAt);
+  });
+
+  it("prompt enqueue bumps updatedAt even when status doesn't change", async () => {
+    // An auth block halts the drain, so a new prompt queues without any
+    // status transition — the enqueue bump is the only write.
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async () => {
+      throw new Error("Authentication required");
+    };
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "one");
+
+    const before = agentTasksCollection.get(task.taskId)!;
+    await sleep(10);
+    task.prompt("two");
+    const after = agentTasksCollection.get(task.taskId)!;
+    expect(after.updatedAt).toBeGreaterThan(before.updatedAt);
+    expect(after.status).toBe(before.status);
+  });
+
+  it("prompting an older task lifts its updatedAt past a newer idle task", async () => {
+    const manager = new TaskManager("/ws");
+    const older = await startedTask(manager);
+    const newer = await startedTask(manager);
+    await sleep(10);
+
+    await runPrompt(older, "go");
+    const olderRow = agentTasksCollection.get(older.taskId)!;
+    const newerRow = agentTasksCollection.get(newer.taskId)!;
+    expect(olderRow.updatedAt).toBeGreaterThan(newerRow.updatedAt);
   });
 });
 

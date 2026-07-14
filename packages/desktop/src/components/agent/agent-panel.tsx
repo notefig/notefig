@@ -69,11 +69,12 @@ import { useKv } from "@/utils/kv-store";
 import { normalizePath } from "@/utils/fs";
 import {
   agentEntriesCollection,
-  agentTasksCollection,
   agentTurnsCollection,
   type AgentEntry,
   type AgentTaskRow,
 } from "@/agent/agent-collections";
+import { useAgentTaskList } from "@/hooks/use-agent-tasks";
+import { SessionSwitcher } from "./session-switcher";
 import {
   authenticateAgentTask,
   cancelAgentTask,
@@ -86,8 +87,8 @@ import { PermissionCard } from "./permission-card";
 import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
 
 /**
- * The agent panel: a task list (create/switch/cancel — parallel tasks are
- * first-class, created on a chosen harness via the picker), and per selected
+ * The agent panel: a session switcher (create/switch/cancel — parallel tasks
+ * are first-class, created on a chosen harness via the picker), and per selected
  * task a prompt input, streamed turn output (message chunks coalesced per
  * turn), inline tool-call cards, that task's permission queue, and its
  * auth-block card when sign-in is required. Reads the task-keyed collections
@@ -111,25 +112,19 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
   const kv = useKv<boolean>("agent");
   const trustKey = `trust:${normalized}`;
 
-  const { data: tasks = [] } = useLiveQuery(
-    (q) =>
-      q
-        .from({ task: agentTasksCollection })
-        .where(({ task }) => eq(task.workspacePath, normalized)),
-    [normalized],
-  );
-  // Newest-first (task ids sort descending by construction).
-  const sortedTasks = useMemo(
-    () => [...tasks].sort((a, b) => (a.taskId < b.taskId ? -1 : 1)),
-    [tasks],
-  );
+  // Last-activity ordered, with per-task queued counts (shared with ⌘I).
+  const taskMetas = useAgentTaskList(workspacePath);
 
-  // Default the selection to the newest task.
+  // Default the selection to the most recently active task; also recover
+  // when the active task vanishes (workspace close deletes its rows).
   useEffect(() => {
-    if (!activeTaskId && sortedTasks.length > 0) {
-      setActiveTaskId(sortedTasks[0].taskId);
+    const activeExists =
+      activeTaskId !== null &&
+      taskMetas.some((meta) => meta.task.taskId === activeTaskId);
+    if (!activeExists) {
+      setActiveTaskId(taskMetas[0]?.task.taskId ?? null);
     }
-  }, [activeTaskId, sortedTasks]);
+  }, [activeTaskId, taskMetas]);
 
   const startTask = useCallback(
     async (harness: HarnessDefinition) => {
@@ -161,7 +156,9 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
     void startTask(pendingHarness);
   }, [kv, trustKey, startTask, pendingHarness]);
 
-  const activeTaskRow = sortedTasks.find((t) => t.taskId === activeTaskId);
+  const activeTaskRow = taskMetas.find(
+    (meta) => meta.task.taskId === activeTaskId,
+  )?.task;
   const isRunning = activeTaskRow?.status === "running";
 
   const sendPrompt = useCallback(() => {
@@ -193,12 +190,14 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden border-s border-border bg-background">
-      <TaskList
-        tasks={sortedTasks}
-        activeTaskId={activeTaskId}
-        onSelect={setActiveTaskId}
-        onCreate={handleCreate}
-      />
+      <div className="flex items-center gap-2 border-b border-border p-2">
+        <SessionSwitcher
+          tasks={taskMetas}
+          activeTaskId={activeTaskId}
+          onSelect={setActiveTaskId}
+        />
+        <NewTaskMenu onCreate={handleCreate} className="ms-auto" />
+      </div>
 
       {activeTaskId ? (
         <div className="relative flex min-h-0 flex-1 flex-col">
@@ -273,55 +272,34 @@ export function AgentPanel({ workspacePath }: AgentPanelProps) {
   );
 }
 
-function TaskList({
-  tasks,
-  activeTaskId,
-  onSelect,
+function NewTaskMenu({
   onCreate,
+  className,
 }: {
-  tasks: AgentTaskRow[];
-  activeTaskId: string | null;
-  onSelect: (taskId: string) => void;
   onCreate: (harness: HarnessDefinition) => void;
+  className?: string;
 }) {
   // Signed-in marks are per harness per machine, written by the service on
   // the first turn that reaches the model (there is no ahead-of-time probe).
   const kv = useKv<boolean>("agent");
   return (
-    <div className="flex items-center gap-2 overflow-x-auto border-b border-border p-2">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button size="sm" variant="outline">
-            + New task
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          {BUILT_IN_HARNESSES.map((harness) => (
-            <DropdownMenuItem key={harness.id} onSelect={() => onCreate(harness)}>
-              <span className="flex-1">{harness.label}</span>
-              {kv.get(`auth:${harness.id}`) && (
-                <Check className="size-3.5 text-green-600 dark:text-green-400" />
-              )}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {tasks.map((task) => (
-        <button
-          key={task.taskId}
-          onClick={() => onSelect(task.taskId)}
-          className={`flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-xs ${
-            task.taskId === activeTaskId
-              ? "bg-accent text-accent-foreground"
-              : "hover:bg-muted"
-          }`}
-          title={task.title}
-        >
-          <StatusDot status={task.status} />
-          <span className="max-w-[140px] truncate">{task.title}</span>
-        </button>
-      ))}
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="outline" className={className}>
+          + New task
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {BUILT_IN_HARNESSES.map((harness) => (
+          <DropdownMenuItem key={harness.id} onSelect={() => onCreate(harness)}>
+            <span className="flex-1">{harness.label}</span>
+            {kv.get(`auth:${harness.id}`) && (
+              <Check className="size-3.5 text-green-600 dark:text-green-400" />
+            )}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -388,21 +366,6 @@ function AuthCard({ task }: { task: AgentTaskRow }) {
     </div>
   );
 }
-
-function StatusDot({ status }: { status: AgentTaskRow["status"] }) {
-  const color =
-    status === "running"
-      ? "bg-blue-500 animate-pulse"
-      : status === "error"
-        ? "bg-red-500"
-        : status === "idle"
-          ? "bg-green-500"
-          : status === "cancelled"
-            ? "bg-muted-foreground"
-            : "bg-amber-500";
-  return <span className={`h-2 w-2 shrink-0 rounded-full ${color}`} />;
-}
-
 
 function Transcript({
   taskId,

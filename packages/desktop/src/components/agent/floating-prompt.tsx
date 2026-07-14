@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { useLiveQuery, eq } from "@tanstack/react-db";
 import { ArrowUp, FileText, Quote, X } from "lucide-react";
 import type {
   HarnessDefinition,
@@ -27,8 +26,9 @@ import {
   getWorkspaceEditorContext,
   getSelectedText,
 } from "@/components/editor/editor-store";
-import { agentTasksCollection } from "@/agent/agent-collections";
 import { promptAgentTask, startAgentTask } from "@/agent/agent-service";
+import { describeTaskMeta, useAgentTaskList } from "@/hooks/use-agent-tasks";
+import { StatusDot } from "./session-switcher";
 
 /**
  * The floating prompt (Stage 4): a summonable (⌘I) surface for starting and
@@ -69,19 +69,16 @@ export function FloatingPrompt({
   const kv = useKv<boolean>("agent");
   const trustKey = `trust:${normalized}`;
 
-  const { data: tasks = [] } = useLiveQuery(
-    (q) =>
-      q
-        .from({ task: agentTasksCollection })
-        .where(({ task }) => eq(task.workspacePath, normalized)),
-    [normalized],
-  );
+  // Shared ordering/status derivation with the panel's session switcher —
+  // last-activity order, queued counts, meta labels — filtered here to the
+  // tasks worth steering (idle/running).
+  const taskMetas = useAgentTaskList(normalized);
   const liveTasks = useMemo(
     () =>
-      [...tasks]
-        .filter((t) => t.status === "idle" || t.status === "running")
-        .sort((a, b) => (a.taskId < b.taskId ? -1 : 1)),
-    [tasks],
+      taskMetas.filter(
+        (meta) => meta.task.status === "idle" || meta.task.status === "running",
+      ),
+    [taskMetas],
   );
 
   // Seed context chips from the editor snapshot each time the box opens.
@@ -184,7 +181,8 @@ export function FloatingPrompt({
   const targetLabel =
     target.type === "new"
       ? `New task · ${target.harness.label}`
-      : (liveTasks.find((t) => t.taskId === target.taskId)?.title ?? "Task");
+      : (liveTasks.find((meta) => meta.task.taskId === target.taskId)?.task
+          .title ?? "Task");
 
   return (
     <div
@@ -284,12 +282,19 @@ export function FloatingPrompt({
                   New task · {harness.label}
                 </DropdownMenuItem>
               ))}
-              {liveTasks.map((task) => (
+              {liveTasks.map((meta) => (
                 <DropdownMenuItem
-                  key={task.taskId}
-                  onSelect={() => setTarget({ type: "task", taskId: task.taskId })}
+                  key={meta.task.taskId}
+                  onSelect={() =>
+                    setTarget({ type: "task", taskId: meta.task.taskId })
+                  }
+                  className="gap-2"
                 >
-                  <span className="max-w-64 truncate">{task.title}</span>
+                  <StatusDot status={meta.task.status} />
+                  <span className="max-w-64 truncate">{meta.task.title}</span>
+                  <span className="ms-auto ps-3 text-[11px] text-muted-foreground">
+                    {describeTaskMeta(meta)}
+                  </span>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
