@@ -389,6 +389,54 @@ i18n
           promptBlobTrustWarning:
             "Spawns {{name}} with access to this folder. Press Enter again to continue.",
 
+          // Agent UI — harness settings (SettingsModal "Harnesses" section)
+          agentSettings: "Agent",
+          harnessSettingsTitle: "Harnesses",
+          harnessSettingsDescription:
+            "Agents Metrists can launch. Discovery checks which are installed on this machine; entries you customize stay available either way.",
+          harnessRescan: "Rescan",
+          harnessRescanFailed: "Couldn't scan this machine for harnesses.",
+          harnessAdd: "Add harness",
+          harnessEditTitle: "Edit harness",
+          harnessOriginOverridden: "customized",
+          harnessOriginCustom: "custom",
+          harnessRowActions: "Harness actions",
+          harnessMakeDefault: "Set as default",
+          harnessEnable: "Enable",
+          harnessDisable: "Disable",
+          harnessEdit: "Edit",
+          harnessDelete: "Delete",
+          harnessDeleteConfirmTitle: "Delete {{label}}?",
+          harnessDeleteConfirmDescription:
+            "Removes this harness and its configuration. Existing sessions are unaffected.",
+          harnessResetDefaults: "Reset to defaults",
+          harnessResetConfirmTitle: "Reset {{label}} to defaults?",
+          harnessResetConfirmDescription:
+            "Removes your customizations; the built-in command, arguments, and environment apply again.",
+          harnessSave: "Save",
+          harnessLabelField: "Name",
+          harnessLabelRequired: "A name is required.",
+          harnessLabelPlaceholder: "My harness",
+          harnessCommandField: "Command",
+          harnessCommandRequired:
+            "A command is required — reset to defaults to restore the built-in one.",
+          harnessCommandPlaceholder: "/path/to/binary",
+          harnessArgsField: "Arguments (one per line)",
+          harnessArgsPlaceholder: "--flag\n${workspace}",
+          harnessEnvField: "Environment variables",
+          harnessEnvPlaceholder:
+            "CLAUDE_CODE_USE_VERTEX=1\nANTHROPIC_VERTEX_PROJECT_ID=my-project",
+          harnessEnvErrorNoEquals: "Line {{line}}: missing =",
+          harnessEnvErrorBadKey: "Line {{line}}: invalid variable name",
+          harnessEnvErrorDuplicate: "Line {{line}}: duplicate variable",
+          harnessProbeField: "Probe command (optional)",
+          harnessProbePlaceholder: "command -v <command>",
+          harnessMcpField: "App tools (MCP)",
+          harnessMcpNone: "No app tools",
+          harnessMcpSessionNew: "Register via ACP session",
+          harnessMcpOptInWarning:
+            "This claims untested capabilities: the harness must support MCP servers passed through session/new, or tool calls will silently do nothing.",
+
           // Agent Tools (display names — AgentTool.title holds these keys,
           // never the literal text; resolved in mcp-server.ts's tools/list)
           agentToolWorkspaceListDocuments: "List Documents",

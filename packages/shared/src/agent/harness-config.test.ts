@@ -166,7 +166,7 @@ describe("filterDiscoveredHarnesses", () => {
     expect(visible.find((h) => h.id === "opencode")).toBeDefined();
   });
 
-  it("always keeps overridden entries — the user knows better than the probe", () => {
+  it("always keeps materially overridden entries — the user knows better than the probe", () => {
     const overrides: Record<string, HarnessOverride> = {
       opencode: { id: "opencode", enabled: true, command: "ocv" },
     };
@@ -177,6 +177,19 @@ describe("filterDiscoveredHarnesses", () => {
       discovered("opencode", false),
     );
     expect(visible.find((h) => h.id === "opencode")).toBeDefined();
+  });
+
+  it("an enabled-only override does NOT exempt a not-found harness", () => {
+    const overrides: Record<string, HarnessOverride> = {
+      "gemini-cli": { id: "gemini-cli", enabled: true },
+    };
+    const visible = filterDiscoveredHarnesses(
+      resolveEffectiveHarnesses(overrides, []),
+      overrides,
+      [],
+      discovered("gemini-cli", false),
+    );
+    expect(visible.find((h) => h.id === "gemini-cli")).toBeUndefined();
   });
 
   it("always keeps custom entries", () => {

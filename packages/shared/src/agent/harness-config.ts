@@ -112,6 +112,21 @@ export const HarnessOverrideSchema = z.object({
 export type HarnessOverride = z.infer<typeof HarnessOverrideSchema>;
 
 /**
+ * A material override actually changes how the harness spawns or probes.
+ * An enabled-only row is bookkeeping (the on/off switch), NOT a
+ * customization — it must not mark the harness "customized" in settings,
+ * and it must not exempt it from discovery filtering in pickers.
+ */
+export function isMaterialOverride(override: HarnessOverride): boolean {
+  return (
+    override.command !== undefined ||
+    override.args !== undefined ||
+    override.env !== undefined ||
+    override.probeCommand !== undefined
+  );
+}
+
+/**
  * A fully custom harness entry — no built-in counterpart. `mcpRegistration`
  * defaults to "none" (no capability-matrix row exists for an id Metrists has
  * never seen); the explicit opt-in lets a custom entry claim pass-through
@@ -145,10 +160,13 @@ export type HarnessDiscoveryResult = z.infer<
 /**
  * Picker visibility: hide built-ins whose binary discovery affirmatively
  * did NOT find (Parsa, 2026-07-15 — an uninstalled harness in the picker is
- * a dead end that fails at spawn). Explicitly configured entries — anything
- * with an override row, and all custom entries — always stay visible: the
- * user knows better than the probe. No discovery data for an id (scan never
- * ran, or a new harness) leaves it visible.
+ * a dead end that fails at spawn). MATERIALLY customized entries — an
+ * override that changes command/args/env/probe, and all custom entries —
+ * stay visible regardless: the user knows better than the probe. An
+ * enabled-only override does NOT exempt (flipping the settings switch is
+ * not a claim the binary exists — pointing the command somewhere is). No
+ * discovery data for an id (scan never ran, or a new harness) leaves it
+ * visible.
  */
 export function filterDiscoveredHarnesses(
   effective: HarnessDefinition[],
@@ -157,12 +175,14 @@ export function filterDiscoveredHarnesses(
   discovery: Record<string, HarnessDiscoveryResult>,
 ): HarnessDefinition[] {
   const customIds = new Set(custom.map((entry) => entry.id));
-  return effective.filter(
-    (harness) =>
-      overrides[harness.id] !== undefined ||
+  return effective.filter((harness) => {
+    const override = overrides[harness.id];
+    return (
+      (override !== undefined && isMaterialOverride(override)) ||
       customIds.has(harness.id) ||
-      discovery[harness.id]?.found !== false,
-  );
+      discovery[harness.id]?.found !== false
+    );
+  });
 }
 
 /**

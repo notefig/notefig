@@ -23,7 +23,9 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
+  Bot,
 } from "lucide-react";
+import { HarnessSettings } from "@/components/agent/harness-settings";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
@@ -58,6 +60,10 @@ const settingsSections: SettingsSection[] = [
       { id: "appearance", label: "Appearance", icon: Palette },
       { id: "hotkeys", label: "Hotkeys", icon: Keyboard },
     ],
+  },
+  {
+    label: "agentSettings",
+    items: [{ id: "harnesses", label: "Harnesses", icon: Bot }],
   },
   {
     label: "corePlugins",
@@ -122,6 +128,8 @@ export function SettingsModal({
         );
       case "appearance":
         return <AppearanceSettings />;
+      case "harnesses":
+        return <HarnessSettings />;
       default:
         return <PlaceholderSettings section={activeSection} />;
     }

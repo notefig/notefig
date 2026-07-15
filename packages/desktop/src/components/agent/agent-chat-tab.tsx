@@ -35,6 +35,7 @@ import type {
   PlanEntry,
 } from "@metrists/shared/agent";
 import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
+import { useActiveHarnesses } from "@/hooks/use-harness-selection";
 import { Button } from "@/components/ui/button";
 import {
   MessageScroller,
@@ -677,6 +678,7 @@ function PromptBox({
   harnessId: string;
 }) {
   const { t } = useTranslation();
+  const harnessLabel = useHarnessLabel(harnessId);
   const canSend = value.trim().length > 0;
   return (
     <div className="pointer-events-auto rounded-2xl border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40">
@@ -703,7 +705,7 @@ function PromptBox({
             a picker (the sidebar's new-session split button chooses). */}
         <span className="flex items-center gap-1.5 px-1.5 text-[11px] text-muted-foreground">
           <HarnessLogo harnessId={harnessId} className="size-3" />
-          {harnessLabel(harnessId)}
+          {harnessLabel}
         </span>
 
         <div className="ms-auto flex items-center gap-1">
@@ -735,9 +737,13 @@ function PromptBox({
   );
 }
 
-/** Label for a harness id (built-ins today; falls back to the raw id). */
-function harnessLabel(harnessId: string): string {
+/** Label for a harness id — effective list first (covers custom entries and
+ *  overrides), built-ins as fallback (a deleted custom entry's sessions keep
+ *  the raw id), raw id last. */
+function useHarnessLabel(harnessId: string): string {
+  const effective = useActiveHarnesses();
   return (
+    effective.find((harness) => harness.id === harnessId)?.label ??
     BUILT_IN_HARNESSES.find((harness) => harness.id === harnessId)?.label ??
     harnessId
   );
