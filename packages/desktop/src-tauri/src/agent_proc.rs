@@ -184,7 +184,10 @@ pub async fn run_shell_command(script: String) -> AgentResult<ShellCommandOutput
     let mut cmd = Command::new(&shell);
     cmd.args(["-ilc", &script])
         .stdin(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::null())
+        // A timeout drops the output() future — without this, a hung shell
+        // would outlive the command and leak.
+        .kill_on_drop(true);
 
     let output = match tokio::time::timeout(Duration::from_secs(10), cmd.output()).await {
         Ok(Ok(output)) => output,

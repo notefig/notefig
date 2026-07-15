@@ -16,6 +16,14 @@ export const HarnessDefinitionSchema = z.object({
   args: z.array(z.string()).default([]),
   env: z.record(z.string()).default({}),
   /**
+   * Discovery probe: a shell snippet whose stdout is the evidence the
+   * harness is installed (typically a resolved binary path); empty output ⇒
+   * not found. Absent = `command -v <command>`. Needed when `command` alone
+   * says nothing about availability — e.g. claude-code spawns via `npx`, so
+   * probing `npx` would report "found" on any machine with Node.
+   */
+  probeCommand: z.string().optional(),
+  /**
    * Shown when the adapter reports authentication is required, e.g.
    * "Run `claude login` in a terminal on this machine."
    */
@@ -48,6 +56,10 @@ export const BUILT_IN_HARNESSES: HarnessDefinition[] = [
     command: "npx",
     args: ["-y", "@agentclientprotocol/claude-agent-acp"],
     env: {},
+    // `command -v npx` would report "found" on any machine with Node; the
+    // meaningful availability signal is the Claude Code CLI itself (which
+    // the adapter's auth flow needs anyway — see authHint).
+    probeCommand: "command -v claude",
     authHint: "Run `claude /login` in a terminal on this machine.",
     mcpRegistration: "session-new",
   },
@@ -93,6 +105,8 @@ export const HarnessOverrideSchema = z.object({
   args: z.array(z.string()).optional(),
   /** Absent = inherit; present = merged over the built-in's env. */
   env: z.record(z.string()).optional(),
+  /** Absent = inherit the built-in's probe (or the `command -v` default). */
+  probeCommand: z.string().optional(),
 });
 
 export type HarnessOverride = z.infer<typeof HarnessOverrideSchema>;
@@ -129,6 +143,29 @@ export type HarnessDiscoveryResult = z.infer<
 >;
 
 /**
+ * Picker visibility: hide built-ins whose binary discovery affirmatively
+ * did NOT find (Parsa, 2026-07-15 — an uninstalled harness in the picker is
+ * a dead end that fails at spawn). Explicitly configured entries — anything
+ * with an override row, and all custom entries — always stay visible: the
+ * user knows better than the probe. No discovery data for an id (scan never
+ * ran, or a new harness) leaves it visible.
+ */
+export function filterDiscoveredHarnesses(
+  effective: HarnessDefinition[],
+  overrides: Record<string, HarnessOverride>,
+  custom: CustomHarnessEntry[],
+  discovery: Record<string, HarnessDiscoveryResult>,
+): HarnessDefinition[] {
+  const customIds = new Set(custom.map((entry) => entry.id));
+  return effective.filter(
+    (harness) =>
+      overrides[harness.id] !== undefined ||
+      customIds.has(harness.id) ||
+      discovery[harness.id]?.found !== false,
+  );
+}
+
+/**
  * Validate a raw `overrides` KV value (kv.json is a plain on-disk file —
  * corrupt or hand-edited rows are dropped, never spawned).
  */
@@ -142,6 +179,19 @@ export function parseHarnessOverrides(
     if (parsed.success) overrides[id] = parsed.data;
   }
   return overrides;
+}
+
+/** Validate a raw `discovery` KV value; invalid rows are dropped. */
+export function parseHarnessDiscovery(
+  raw: unknown,
+): Record<string, HarnessDiscoveryResult> {
+  if (raw === null || typeof raw !== "object") return {};
+  const results: Record<string, HarnessDiscoveryResult> = {};
+  for (const [id, row] of Object.entries(raw)) {
+    const parsed = HarnessDiscoveryResultSchema.safeParse(row);
+    if (parsed.success) results[id] = parsed.data;
+  }
+  return results;
 }
 
 /** Validate a raw `custom` KV value; invalid rows are dropped. */
@@ -182,6 +232,7 @@ export function resolveEffectiveHarnesses(
       command: override.command ?? builtin.command,
       args: override.args ?? builtin.args,
       env: override.env ? { ...builtin.env, ...override.env } : builtin.env,
+      probeCommand: override.probeCommand ?? builtin.probeCommand,
     });
   }
 

@@ -1,4 +1,5 @@
 import { platformAdapter } from "@/adapters";
+import { getOrCreateKvCollection } from "@/utils/kv-store";
 import {
   BUILT_IN_HARNESSES,
   parseCustomHarnessEntries,
@@ -13,11 +14,14 @@ import {
  * its sentinel format, and result parsing. `platformAdapter.runShellCommand`
  * is a generic "run this script locally" primitive — it never hears the
  * word "harness".
+ *
+ * The KV keys are exported as the single source of the storage layout;
+ * use-harness-selection.ts (and the future settings UI) import them.
  */
-const HARNESS_KV_NAMESPACE = "harness-settings";
-const OVERRIDES_KEY = "overrides";
-const CUSTOM_KEY = "custom";
-const DISCOVERY_KEY = "discovery";
+export const HARNESS_SETTINGS_NAMESPACE = "harness-settings";
+export const HARNESS_OVERRIDES_KEY = "overrides";
+export const HARNESS_CUSTOM_KEY = "custom";
+export const HARNESS_DISCOVERY_KEY = "discovery";
 
 const SENTINEL_PREFIX = "__MHD";
 const SENTINEL_SUFFIX = "__END__";
@@ -26,20 +30,25 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-function buildProbeScript(commands: string[]): string {
-  return commands
-    .map(
-      (cmd, i) =>
-        `printf '${SENTINEL_PREFIX}${i}__%s${SENTINEL_SUFFIX}' "$(command -v ${shellQuote(cmd)} 2>/dev/null)"`,
-    )
+/** An entry to probe: the definition's own `probeCommand` wins; the default
+ *  is `command -v <command>`. */
+export type ProbeEntry = { id: string; command: string; probeCommand?: string };
+
+function buildProbeScript(entries: ProbeEntry[]): string {
+  return entries
+    .map((entry, i) => {
+      const probe =
+        entry.probeCommand ?? `command -v ${shellQuote(entry.command)}`;
+      return `printf '${SENTINEL_PREFIX}${i}__%s${SENTINEL_SUFFIX}' "$(${probe} 2>/dev/null)"`;
+    })
     .join("; ");
 }
 
 function parseProbeOutput(
-  commands: string[],
+  count: number,
   stdout: string,
 ): { found: boolean; resolvedPath?: string }[] {
-  return commands.map((_cmd, i) => {
+  return Array.from({ length: count }, (_, i) => {
     const marker = `${SENTINEL_PREFIX}${i}__`;
     const start = stdout.indexOf(marker);
     if (start === -1) return { found: false };
@@ -54,30 +63,30 @@ function parseProbeOutput(
 }
 
 /**
- * Probe whether each `{id, command}` entry's binary exists on this machine.
- * Batches every command into a single shell invocation (spawning a login
- * shell is the expensive part). Falls back to "nothing found" if the
- * platform can't run local shell scripts at all (the browser adapter today)
- * — that and "the binary genuinely isn't installed" are the same observable
- * outcome from here, so no platform branch is needed beyond this catch.
+ * Probe whether each entry's harness is present on this machine — via its
+ * `probeCommand` when the definition declares one, else `command -v` on its
+ * spawn command. Batches every probe into a single shell invocation
+ * (spawning a login shell is the expensive part). Returns null when the
+ * probe itself couldn't run (browser adapter, shell timeout, spawn error):
+ * "we couldn't check" must not be persisted as an affirmative "not
+ * installed" — that would hide every built-in from the pickers over a
+ * transient failure. Callers skip persistence on null, leaving entries in
+ * the no-data (visible) state.
  */
 export async function discoverHarnesses(
-  entries: { id: string; command: string }[],
-): Promise<Record<string, HarnessDiscoveryResult>> {
+  entries: ProbeEntry[],
+): Promise<Record<string, HarnessDiscoveryResult> | null> {
   const probedAt = Date.now();
   if (entries.length === 0) return {};
 
   let probed: { found: boolean; resolvedPath?: string }[];
   try {
     const { stdout } = await platformAdapter.runShellCommand(
-      buildProbeScript(entries.map((e) => e.command)),
+      buildProbeScript(entries),
     );
-    probed = parseProbeOutput(
-      entries.map((e) => e.command),
-      stdout,
-    );
+    probed = parseProbeOutput(entries.length, stdout);
   } catch {
-    probed = entries.map(() => ({ found: false }));
+    return null;
   }
 
   const results: Record<string, HarnessDiscoveryResult> = {};
@@ -91,33 +100,46 @@ export async function discoverHarnesses(
   return results;
 }
 
-/** Candidate `{id, command}` pairs to probe: built-ins (overridden commands
- *  win) plus enabled custom entries. */
+/** Candidate probe entries: built-ins (overridden command/probe win) plus
+ *  enabled custom entries. */
 export function candidateProbeEntries(
   overrides: Record<string, HarnessOverride>,
   custom: CustomHarnessEntry[],
-): { id: string; command: string }[] {
+): ProbeEntry[] {
   const builtins = BUILT_IN_HARNESSES.map((h) => ({
     id: h.id,
     command: overrides[h.id]?.command ?? h.command,
+    // Same inherit rule as resolveEffectiveHarnesses.
+    probeCommand: overrides[h.id]?.probeCommand ?? h.probeCommand,
   }));
   const customEntries = custom
     .filter((c) => c.enabled !== false)
-    .map((c) => ({ id: c.id, command: c.command }));
+    .map((c) => ({ id: c.id, command: c.command, probeCommand: c.probeCommand }));
   return [...builtins, ...customEntries];
 }
 
 /** Run discovery for every known harness and persist the results. Trigger
  *  sites: app startup, settings "Rescan". Read-only w.r.t. `overrides`/
- *  `custom` — discovery only ever writes the `discovery` key. */
+ *  `custom` — discovery only ever writes the `discovery` key. Written
+ *  through the KV collection (not platformAdapter.setKv directly) so
+ *  useKv subscribers — the pickers — update live, not on next launch
+ *  (same rationale as the auth mark in agent-service.ts). A failed probe
+ *  (null) persists nothing: existing results stay as they were. */
 export async function refreshHarnessDiscovery(
   overrides: Record<string, HarnessOverride>,
   custom: CustomHarnessEntry[],
-): Promise<Record<string, HarnessDiscoveryResult>> {
+): Promise<Record<string, HarnessDiscoveryResult> | null> {
   const results = await discoverHarnesses(
     candidateProbeEntries(overrides, custom),
   );
-  await platformAdapter.setKv(HARNESS_KV_NAMESPACE, DISCOVERY_KEY, results);
+  if (results === null) return null;
+  const kv = getOrCreateKvCollection(HARNESS_SETTINGS_NAMESPACE);
+  const tx = kv.get(HARNESS_DISCOVERY_KEY)
+    ? kv.update(HARNESS_DISCOVERY_KEY, (draft) => {
+        draft.value = results;
+      })
+    : kv.insert({ key: HARNESS_DISCOVERY_KEY, value: results });
+  await tx.isPersisted.promise;
   return results;
 }
 
@@ -134,8 +156,14 @@ export function ensureStartupHarnessDiscovery(): void {
   void (async () => {
     try {
       const [rawOverrides, rawCustom] = await Promise.all([
-        platformAdapter.getKv<unknown>(HARNESS_KV_NAMESPACE, OVERRIDES_KEY),
-        platformAdapter.getKv<unknown>(HARNESS_KV_NAMESPACE, CUSTOM_KEY),
+        platformAdapter.getKv<unknown>(
+          HARNESS_SETTINGS_NAMESPACE,
+          HARNESS_OVERRIDES_KEY,
+        ),
+        platformAdapter.getKv<unknown>(
+          HARNESS_SETTINGS_NAMESPACE,
+          HARNESS_CUSTOM_KEY,
+        ),
       ]);
       await refreshHarnessDiscovery(
         parseHarnessOverrides(rawOverrides),

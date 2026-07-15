@@ -3,12 +3,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const runShellCommand = vi.fn();
 const setKv = vi.fn();
 const getKv = vi.fn();
+const getAllKv = vi.fn(async () => ({}));
 
 vi.mock("@/adapters", () => ({
   platformAdapter: {
     runShellCommand: (...args: unknown[]) => runShellCommand(...args),
     setKv: (...args: unknown[]) => setKv(...args),
     getKv: (...args: unknown[]) => getKv(...args),
+    getAllKv: () => getAllKv(),
   },
 }));
 
@@ -34,10 +36,10 @@ describe("discoverHarnesses", () => {
       stdout: "__MHD0__/usr/bin/foo__END____MHD1____END__",
       exitCode: 0,
     });
-    const results = await discoverHarnesses([
+    const results = (await discoverHarnesses([
       { id: "a", command: "foo" },
       { id: "b", command: "bar" },
-    ]);
+    ]))!;
     expect(results.a).toMatchObject({
       harnessId: "a",
       found: true,
@@ -57,7 +59,7 @@ describe("discoverHarnesses", () => {
     expect(runShellCommand).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back to found:false for every entry when the platform rejects (browser)", async () => {
+  it("returns null when the probe can't run — never an affirmative not-found", async () => {
     runShellCommand.mockRejectedValue(
       new Error("Shell commands are not supported on this adapter."),
     );
@@ -65,8 +67,7 @@ describe("discoverHarnesses", () => {
       { id: "a", command: "foo" },
       { id: "b", command: "bar" },
     ]);
-    expect(results.a.found).toBe(false);
-    expect(results.b.found).toBe(false);
+    expect(results).toBeNull();
   });
 
   it("returns {} without calling the adapter for an empty entry list", async () => {
@@ -74,13 +75,29 @@ describe("discoverHarnesses", () => {
     expect(results).toEqual({});
     expect(runShellCommand).not.toHaveBeenCalled();
   });
+
+  it("uses a definition's probeCommand instead of the command -v default", async () => {
+    runShellCommand.mockResolvedValue({ stdout: "", exitCode: 0 });
+    await discoverHarnesses([
+      { id: "a", command: "npx", probeCommand: "command -v claude" },
+      { id: "b", command: "bar" },
+    ]);
+    const script = runShellCommand.mock.calls[0][0] as string;
+    expect(script).toContain("command -v claude");
+    expect(script).not.toContain("command -v 'npx'");
+    expect(script).toContain("command -v 'bar'");
+  });
 });
 
 describe("candidateProbeEntries", () => {
-  it("uses built-in commands when there are no overrides", () => {
+  it("uses built-in commands and probes when there are no overrides", () => {
     const entries = candidateProbeEntries({}, []);
     expect(entries).toEqual(
-      BUILT_IN_HARNESSES.map((h) => ({ id: h.id, command: h.command })),
+      BUILT_IN_HARNESSES.map((h) => ({
+        id: h.id,
+        command: h.command,
+        probeCommand: h.probeCommand,
+      })),
     );
   });
 
@@ -139,12 +156,14 @@ describe("ensureStartupHarnessDiscovery", () => {
     expect(runShellCommand.mock.calls[0][0]).toContain("ocv");
   });
 
-  it("never throws when the platform can't run shell scripts", async () => {
+  it("persists nothing when the platform can't run shell scripts", async () => {
     getKv.mockResolvedValue(undefined);
     runShellCommand.mockRejectedValue(new Error("unsupported"));
     ensureStartupHarnessDiscovery();
-    // Discovery still persists an all-not-found result set.
-    await vi.waitFor(() => expect(setKv).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(runShellCommand).toHaveBeenCalledTimes(1));
+    // "Couldn't check" must not overwrite prior results with not-found.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(setKv).not.toHaveBeenCalled();
   });
 });
 

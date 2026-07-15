@@ -1,7 +1,22 @@
-import { BUILT_IN_HARNESSES, resolveEffectiveHarnesses } from "./harness-config";
-import type { CustomHarnessEntry, HarnessOverride } from "./harness-config";
+import {
+  BUILT_IN_HARNESSES,
+  filterDiscoveredHarnesses,
+  resolveEffectiveHarnesses,
+} from "./harness-config";
+import type {
+  CustomHarnessEntry,
+  HarnessDiscoveryResult,
+  HarnessOverride,
+} from "./harness-config";
 
 const CLAUDE_CODE_ID = "claude-code";
+
+function discovered(
+  id: string,
+  found: boolean,
+): Record<string, HarnessDiscoveryResult> {
+  return { [id]: { harnessId: id, found, probedAt: 0 } };
+}
 
 describe("resolveEffectiveHarnesses", () => {
   it("returns built-ins unchanged with no overrides or custom entries", () => {
@@ -86,6 +101,26 @@ describe("resolveEffectiveHarnesses", () => {
     );
   });
 
+  it("inherits the built-in probeCommand unless the override sets one", () => {
+    const inherited = resolveEffectiveHarnesses(
+      { [CLAUDE_CODE_ID]: { id: CLAUDE_CODE_ID, enabled: true, command: "/opt/acp" } },
+      [],
+    ).find((h) => h.id === CLAUDE_CODE_ID)!;
+    expect(inherited.probeCommand).toBe("command -v claude");
+
+    const overridden = resolveEffectiveHarnesses(
+      {
+        [CLAUDE_CODE_ID]: {
+          id: CLAUDE_CODE_ID,
+          enabled: true,
+          probeCommand: "command -v my-claude",
+        },
+      },
+      [],
+    ).find((h) => h.id === CLAUDE_CODE_ID)!;
+    expect(overridden.probeCommand).toBe("command -v my-claude");
+  });
+
   it("excludes a disabled custom entry", () => {
     const custom: CustomHarnessEntry[] = [
       {
@@ -100,5 +135,68 @@ describe("resolveEffectiveHarnesses", () => {
     ];
     const result = resolveEffectiveHarnesses({}, custom);
     expect(result.find((h) => h.id === "custom:3")).toBeUndefined();
+  });
+});
+
+describe("filterDiscoveredHarnesses", () => {
+  it("hides a built-in that discovery affirmatively did not find", () => {
+    const visible = filterDiscoveredHarnesses(
+      BUILT_IN_HARNESSES,
+      {},
+      [],
+      discovered("gemini-cli", false),
+    );
+    expect(visible.find((h) => h.id === "gemini-cli")).toBeUndefined();
+    expect(visible).toHaveLength(BUILT_IN_HARNESSES.length - 1);
+  });
+
+  it("keeps entries with no discovery data (scan never ran)", () => {
+    expect(filterDiscoveredHarnesses(BUILT_IN_HARNESSES, {}, [], {})).toEqual(
+      BUILT_IN_HARNESSES,
+    );
+  });
+
+  it("keeps a found built-in", () => {
+    const visible = filterDiscoveredHarnesses(
+      BUILT_IN_HARNESSES,
+      {},
+      [],
+      discovered("opencode", true),
+    );
+    expect(visible.find((h) => h.id === "opencode")).toBeDefined();
+  });
+
+  it("always keeps overridden entries — the user knows better than the probe", () => {
+    const overrides: Record<string, HarnessOverride> = {
+      opencode: { id: "opencode", enabled: true, command: "ocv" },
+    };
+    const visible = filterDiscoveredHarnesses(
+      resolveEffectiveHarnesses(overrides, []),
+      overrides,
+      [],
+      discovered("opencode", false),
+    );
+    expect(visible.find((h) => h.id === "opencode")).toBeDefined();
+  });
+
+  it("always keeps custom entries", () => {
+    const custom: CustomHarnessEntry[] = [
+      {
+        id: "custom:1",
+        label: "L",
+        command: "custom-bin",
+        args: [],
+        env: {},
+        mcpRegistrationOverride: "none",
+        enabled: true,
+      },
+    ];
+    const visible = filterDiscoveredHarnesses(
+      resolveEffectiveHarnesses({}, custom),
+      {},
+      custom,
+      discovered("custom:1", false),
+    );
+    expect(visible.find((h) => h.id === "custom:1")).toBeDefined();
   });
 });

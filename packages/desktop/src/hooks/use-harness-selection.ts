@@ -2,38 +2,48 @@ import { useMemo } from "react";
 import type { HarnessDefinition } from "@metrists/shared/agent";
 import {
   BUILT_IN_HARNESSES,
+  filterDiscoveredHarnesses,
   parseCustomHarnessEntries,
+  parseHarnessDiscovery,
   parseHarnessOverrides,
   resolveEffectiveHarnesses,
 } from "@metrists/shared/agent";
 import { useKv } from "@/utils/kv-store";
+import {
+  HARNESS_CUSTOM_KEY,
+  HARNESS_DISCOVERY_KEY,
+  HARNESS_OVERRIDES_KEY,
+  HARNESS_SETTINGS_NAMESPACE,
+} from "@/agent/harness-discovery";
 
 const DEFAULT_HARNESS_KEY = "default-harness";
-const HARNESS_SETTINGS_NAMESPACE = "harness-settings";
-const OVERRIDES_KEY = "overrides";
-const CUSTOM_KEY = "custom";
 
 /**
- * The enabled, machine-configured harness list: built-ins merged with any
- * per-machine overrides, plus custom entries (MET-67). KV rows are schema-
- * validated before they can reach a spawn spec (kv.json is a plain file on
- * disk — corrupt or hand-edited rows are dropped, not spawned). Discovery
- * results are not consulted here (see `resolveEffectiveHarnesses`) —
- * they're telemetry for the settings UI, not a filter on what's offered.
+ * The pickable harness list: built-ins merged with any per-machine
+ * overrides, plus custom entries (MET-67), then filtered by discovery —
+ * built-ins whose binary the startup scan didn't find are hidden (they'd
+ * just fail at spawn), while explicitly configured entries always show
+ * (see `filterDiscoveredHarnesses`). KV rows are schema-validated before
+ * they can reach a spawn spec (kv.json is a plain file on disk — corrupt or
+ * hand-edited rows are dropped, not spawned).
  */
 function useEffectiveHarnesses(): HarnessDefinition[] {
   const settings = useKv<unknown>(HARNESS_SETTINGS_NAMESPACE);
-  const rawOverrides = settings.get(OVERRIDES_KEY);
-  const rawCustom = settings.get(CUSTOM_KEY);
-  return useMemo(
-    () =>
-      resolveEffectiveHarnesses(
-        parseHarnessOverrides(rawOverrides),
-        parseCustomHarnessEntries(rawCustom),
-      ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [JSON.stringify(rawOverrides), JSON.stringify(rawCustom)],
-  );
+  // Row values are stable references between KV mutations, so plain
+  // reference deps suffice.
+  const rawOverrides = settings.get(HARNESS_OVERRIDES_KEY);
+  const rawCustom = settings.get(HARNESS_CUSTOM_KEY);
+  const rawDiscovery = settings.get(HARNESS_DISCOVERY_KEY);
+  return useMemo(() => {
+    const overrides = parseHarnessOverrides(rawOverrides);
+    const custom = parseCustomHarnessEntries(rawCustom);
+    return filterDiscoveredHarnesses(
+      resolveEffectiveHarnesses(overrides, custom),
+      overrides,
+      custom,
+      parseHarnessDiscovery(rawDiscovery),
+    );
+  }, [rawOverrides, rawCustom, rawDiscovery]);
 }
 
 /**
@@ -62,11 +72,12 @@ export function useDefaultHarness(): {
 
 /**
  * The harnesses worth offering in pickers: the effective (built-in +
- * override + custom) list, filtered to enabled ones. Before any settings
- * exist (fresh install) there are no overrides/custom rows, so this is just
- * all built-ins — a first run isn't a dead end. If every harness has been
- * explicitly disabled, fall back to showing all built-ins rather than an
- * empty picker.
+ * override + custom) list, minus built-ins discovery didn't find. Before
+ * any settings or scan results exist (fresh install, first frames) this is
+ * just all built-ins — a first run isn't a dead end. If the list comes out
+ * empty (everything disabled, or nothing installed at all), fall back to
+ * showing all built-ins rather than an empty picker — each still names its
+ * install/sign-in hint on failure.
  */
 export function useActiveHarnesses(): HarnessDefinition[] {
   const effective = useEffectiveHarnesses();
