@@ -357,7 +357,7 @@ export const PromptBlob = memo(function PromptBlob({
             onExpand={() => updatePromptBlob(blobId, { doneCollapsed: false })}
           />
         ) : (
-        <div className="rounded-xl border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40">
+        <div className="rounded-lg border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40">
           {phase === "composing" && (
             <Composer
               draft={record.draft}
@@ -404,7 +404,7 @@ export const PromptBlob = memo(function PromptBlob({
                 stopLabel={t("agentStop")}
               />
               {phase === "needs-permission" && boundTaskId && (
-                <div className="border-t border-border/60 p-2">
+                <div className="border-t border-border/60 p-1.5">
                   <PermissionCard taskId={boundTaskId} />
                 </div>
               )}
@@ -420,7 +420,7 @@ export const PromptBlob = memo(function PromptBlob({
                 onStop={stop}
                 stopLabel={t("agentStop")}
               />
-              <div className="border-t border-border/60 p-2">
+              <div className="border-t border-border/60 p-1.5">
                 <AuthCard task={task} />
               </div>
             </div>
@@ -538,7 +538,7 @@ function Composer({
   const { t } = useTranslation();
   return (
     <div className="flex flex-col">
-      <div className="flex items-start gap-1.5 px-2 py-1.5">
+      <div className="flex items-start gap-1.5 px-1.5 py-1">
         <SessionControl workspacePath={workspacePath} />
         <textarea
           ref={textareaRef}
@@ -686,7 +686,7 @@ function StatusRow({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center gap-2 px-3 py-2">
+    <div className="flex items-center gap-2 px-2.5 py-1.5">
       {shimmer && (
         <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
       )}
@@ -762,7 +762,7 @@ function CollapsedDone({
     <Marker
       asChild
       variant="border"
-      className="w-full cursor-pointer justify-start px-3 py-2 text-left"
+      className="w-full cursor-pointer justify-start px-2.5 py-1 text-left text-xs [&_svg]:size-3"
     >
       <button
         type="button"
@@ -799,9 +799,9 @@ function DoneState({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-1.5 px-3 py-2">
-      <div className="flex items-center gap-2">
-        <Check className="size-3.5 shrink-0 text-green-600 dark:text-green-400" />
+    <div className="flex flex-col gap-1 px-2.5 py-1.5">
+      <div className="flex items-center gap-1.5">
+        <Check className="size-3 shrink-0 text-green-600 dark:text-green-400" />
         <span className="min-w-0 flex-1 truncate text-xs font-medium">
           {cancelled ? t("promptBlobStopped") : t("promptBlobDone")}
         </span>
@@ -809,24 +809,24 @@ function DoneState({
           type="button"
           title={t("promptBlobEdit")}
           aria-label={t("promptBlobEdit")}
-          className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           onClick={onEdit}
         >
-          <Pencil className="size-3.5" />
+          <Pencil className="size-3" />
         </button>
         <button
           type="button"
           title={t("promptBlobDismiss")}
           aria-label={t("promptBlobDismiss")}
-          className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           onClick={onDismiss}
         >
-          <X className="size-3.5" />
+          <X className="size-3" />
         </button>
       </div>
       {/* Zero touched files still shows open-chat — the answer text lives
           in the transcript. */}
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-1">
         {touchedFiles.map((path) => (
           <button
             key={path}
@@ -862,7 +862,7 @@ function ErrorState({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center gap-2 px-3 py-2">
+    <div className="flex items-center gap-2 px-2.5 py-1.5">
       <X className="size-3.5 shrink-0 text-destructive" />
       <span className="min-w-0 flex-1 truncate text-xs text-destructive">
         {t("promptBlobFailed")}
