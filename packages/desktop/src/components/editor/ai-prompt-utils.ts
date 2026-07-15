@@ -6,7 +6,7 @@
  */
 import type { Node as PMNode } from "@tiptap/pm/model";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
-import { TextSelection } from "@tiptap/pm/state";
+import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { AiPromptNodeBase } from "./editor-schema-kit";
 
 /** Real content = anything that would serialize to markdown: text, or a
@@ -80,11 +80,18 @@ export function slashSummonTr(
   }
   const type = state.schema.nodes[AiPromptNodeBase.name];
   if (!type) return null;
-  return state.tr.replaceWith(
-    $from.before(1),
+  const from = $from.before(1);
+  const tr = state.tr.replaceWith(
+    from,
     $from.after(1),
     type.create({ summoned: true, blobId }),
   );
+  // Explicit, like revertToSlashTr/removeToParagraphTr below — leaving this
+  // to ProseMirror's default post-replace mapping (an implicit NodeSelection
+  // on the atom, since the old cursor position no longer resolves) left the
+  // history item without a recorded selection, which could make ⌘Z land the
+  // cursor in the wrong place instead of restoring the pre-summon position.
+  return tr.setSelection(NodeSelection.create(tr.doc, from));
 }
 
 /**
@@ -104,4 +111,20 @@ export function revertToSlashTr(
   );
   const tr = state.tr.replaceWith(pos, pos + nodeSize, paragraph);
   return tr.setSelection(TextSelection.create(tr.doc, pos + 2));
+}
+
+/**
+ * Backspace-dismiss: the widget at [pos, pos+nodeSize) becomes an empty
+ * paragraph, cursor inside — as if the summoning "/" was never typed. A
+ * normal history transaction like slashSummonTr/revertToSlashTr (⌘Z
+ * restores the widget) and NOT autosave-exempt.
+ */
+export function removeToParagraphTr(
+  state: EditorState,
+  pos: number,
+  nodeSize: number,
+): Transaction {
+  const paragraph = state.schema.nodes.paragraph.create();
+  const tr = state.tr.replaceWith(pos, pos + nodeSize, paragraph);
+  return tr.setSelection(TextSelection.create(tr.doc, pos + 1));
 }

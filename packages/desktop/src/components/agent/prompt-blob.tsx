@@ -102,8 +102,12 @@ export const PromptBlob = memo(function PromptBlob({
    *  revert-to-"/" contract (Esc / second "/" in the empty composer). */
   summoned?: boolean;
   /** Remove this widget's document node; insertSlash leaves a literal "/"
-   *  in its place. Provided by the node view (getPos/deleteNode). */
-  removeNode?: (options?: { insertSlash?: boolean }) => void;
+   *  in its place, restoreParagraph leaves a plain empty paragraph (the
+   *  Backspace-dismiss path). Provided by the node view (getPos/deleteNode). */
+  removeNode?: (options?: {
+    insertSlash?: boolean;
+    restoreParagraph?: boolean;
+  }) => void;
 }) {
   const { t } = useTranslation();
   const record = useSyncExternalStore(
@@ -309,6 +313,17 @@ export const PromptBlob = memo(function PromptBlob({
     [summoned, removeNode],
   );
 
+  // Backspace on an empty, summoned composer: unlike revertToSlash, no
+  // literal "/" is left behind — the widget just disappears, as if "/" was
+  // never typed. Same "summoned instances only" guard as revertToSlash.
+  const backspaceDismiss = useMemo(
+    () =>
+      summoned && removeNode
+        ? () => removeNode({ restoreParagraph: true })
+        : undefined,
+    [summoned, removeNode],
+  );
+
   const touchedFiles = useMemo(
     () =>
       phase === "done" ? deriveTouchedFiles(sortedEntries, workspacePath) : [],
@@ -339,6 +354,7 @@ export const PromptBlob = memo(function PromptBlob({
               onSend={() => void send()}
               onEscape={() => editor.commands.focus()}
               onRevert={revertToSlash}
+              onBackspaceDismiss={backspaceDismiss}
               confirmTrust={confirmTrust}
               trustName={defaultHarness.label}
               workspacePath={workspacePath}
@@ -485,6 +501,7 @@ function Composer({
   onSend,
   onEscape,
   onRevert,
+  onBackspaceDismiss,
   confirmTrust,
   trustName,
   workspacePath,
@@ -498,6 +515,9 @@ function Composer({
    *  Esc or "/" while the composer is empty; with a draft, Esc falls back
    *  to onEscape (return to the doc, draft kept). */
   onRevert?: () => void;
+  /** Slash-summoned instances only: Backspace on an empty composer removes
+   *  the widget entirely (no literal "/" left behind, unlike onRevert). */
+  onBackspaceDismiss?: () => void;
   confirmTrust: boolean;
   trustName: string;
   workspacePath: string;
@@ -523,6 +543,8 @@ function Composer({
             event.preventDefault();
             if (action.type === "send") onSend();
             else if (action.type === "revert") onRevert?.();
+            else if (action.type === "backspaceDismiss")
+              onBackspaceDismiss?.();
             else onEscape();
           }}
           placeholder={t("promptBlobPlaceholder")}

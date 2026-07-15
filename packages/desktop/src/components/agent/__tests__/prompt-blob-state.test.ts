@@ -275,6 +275,35 @@ describe("deriveComposerKeyAction", () => {
       }),
     ).toEqual({ type: "none" });
   });
+
+  it("Backspace dismisses only on an empty, revertible (summoned) composer", () => {
+    expect(
+      deriveComposerKeyAction({
+        key: "Backspace",
+        shiftKey: false,
+        draftEmpty: true,
+        canRevert: true,
+      }),
+    ).toEqual({ type: "backspaceDismiss" });
+    // Non-empty draft: default behavior (deletes a character).
+    expect(
+      deriveComposerKeyAction({
+        key: "Backspace",
+        shiftKey: false,
+        draftEmpty: false,
+        canRevert: true,
+      }),
+    ).toEqual({ type: "none" });
+    // Keeper widgets (summoned=false) never dismiss via Backspace.
+    expect(
+      deriveComposerKeyAction({
+        key: "Backspace",
+        shiftKey: false,
+        draftEmpty: true,
+        canRevert: false,
+      }),
+    ).toEqual({ type: "none" });
+  });
 });
 
 describe("deriveQueuePosition", () => {

@@ -126,11 +126,15 @@ export function deriveTouchedFiles(
  * "send". Escape and "/" only special-case to "revert" (turn back into a
  * literal "/") when the draft is empty and the widget is summoned; a
  * non-empty draft on Escape falls back to "escape" (return focus to the doc,
- * draft kept).
+ * draft kept). Backspace on an empty, summoned composer dismisses the
+ * widget entirely (no literal "/" left behind) — `canRevert` doubles as the
+ * "summoned instances only" guard for both, since it's already exactly
+ * that condition (see revertToSlash in prompt-blob.tsx).
  */
 export type ComposerKeyAction =
   | { type: "send" }
   | { type: "revert" }
+  | { type: "backspaceDismiss" }
   | { type: "escape" }
   | { type: "none" };
 
@@ -148,6 +152,9 @@ export function deriveComposerKeyAction(params: {
   // The "//" path: a second "/" right after summoning means the user
   // wanted a literal slash.
   if (key === "/" && draftEmpty && canRevert) return { type: "revert" };
+  if (key === "Backspace" && draftEmpty && canRevert) {
+    return { type: "backspaceDismiss" };
+  }
   return { type: "none" };
 }
 

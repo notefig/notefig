@@ -30,6 +30,7 @@ import {
   docHasRealContent,
   findPromptNodeId,
   newPromptBlobInstanceId,
+  removeToParagraphTr,
   revertToSlashTr,
   slashSummonTr,
 } from "./ai-prompt-utils";
@@ -76,7 +77,18 @@ function AiPromptNodeView(props: NodeViewProps) {
 
   if (!filePath || !basePath || blobId === null) return <NodeViewWrapper />;
 
-  const removeNode = (options?: { insertSlash?: boolean }) => {
+  const removeNode = (options?: {
+    insertSlash?: boolean;
+    restoreParagraph?: boolean;
+  }) => {
+    if (options?.restoreParagraph) {
+      const pos = props.getPos();
+      if (typeof pos !== "number") return;
+      const { view } = props.editor;
+      view.dispatch(removeToParagraphTr(view.state, pos, props.node.nodeSize));
+      props.editor.commands.focus(undefined, { scrollIntoView: false });
+      return;
+    }
     if (!options?.insertSlash) {
       props.deleteNode();
       return;

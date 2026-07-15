@@ -7,7 +7,10 @@ import { describe, it, expect, afterEach } from "vitest";
 import { Editor } from "@tiptap/core";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
 import { AiPromptNode } from "@/components/editor/ai-prompt-node";
-import { revertToSlashTr } from "@/components/editor/ai-prompt-utils";
+import {
+  removeToParagraphTr,
+  revertToSlashTr,
+} from "@/components/editor/ai-prompt-utils";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
 import { consumePendingPromptBlobFocus } from "@/components/agent/prompt-blob-store";
@@ -216,5 +219,39 @@ describe('"/" summon', () => {
     editor.commands.undo();
     expect(findPromptNode(editor)).toBeNull();
     expect(getEditorMarkdown(editor)).toBe("Hi there");
+    // Regression: the cursor must land back where "/" was typed, not reset
+    // to the start of the doc.
+    expect(editor.state.selection.from).toBe(11);
+  });
+
+  it("Backspace-dismiss removes the widget with no literal '/' left behind", async () => {
+    editor = await documentEditor("<p>Hi there</p><p></p>");
+    editor.commands.setTextSelection(11);
+    typeText(editor, "/");
+    const node = findPromptNode(editor)!;
+    editor.view.dispatch(
+      removeToParagraphTr(editor.state, node.pos, node.nodeSize),
+    );
+    expect(findPromptNode(editor)).toBeNull();
+    // Contrast with revertToSlashTr's "Hi there\n\n/" — no slash survives.
+    expect(getEditorMarkdown(editor)).toBe("Hi there");
+    expect(editor.state.selection.from).toBe(node.pos + 1);
+  });
+
+  it("undo restores the widget after a Backspace-dismiss", async () => {
+    editor = await documentEditor("<p>Hi there</p><p></p>");
+    editor.commands.setTextSelection(11);
+    typeText(editor, "/");
+    const node = findPromptNode(editor)!;
+    // History groups transactions dispatched within its newGroupDelay
+    // (500ms) into a single undo step — a real delay keeps summon and
+    // dismiss as separate steps, matching how a user actually interacts.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    editor.view.dispatch(
+      removeToParagraphTr(editor.state, node.pos, node.nodeSize),
+    );
+    expect(findPromptNode(editor)).toBeNull();
+    editor.commands.undo();
+    expect(findPromptNode(editor)?.blobId).toBe(node.blobId);
   });
 });
