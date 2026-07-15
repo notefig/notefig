@@ -310,7 +310,11 @@
     --shimmer-spread: calc(3ch + 40px);
     --shimmer-angle: 20deg;
     --shimmer-color: oklch(from currentColor calc(l + 0.4) c h);
-    color: transparent;
+    /* currentColor must still resolve to the element's real text color
+       below — color: transparent here would make currentColor transparent
+       too, erasing both the glyphs and the gradient. Use
+       -webkit-text-fill-color to hide the glyphs instead. */
+    -webkit-text-fill-color: transparent;
     background-color: currentColor;
     background-image: linear-gradient(
       var(--shimmer-angle),
@@ -345,7 +349,7 @@
   @media (prefers-reduced-motion: reduce) {
     .shimmer {
       animation: none;
-      color: inherit;
+      -webkit-text-fill-color: inherit;
       background: none;
     }
   }

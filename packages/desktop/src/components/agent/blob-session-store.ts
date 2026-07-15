@@ -54,6 +54,17 @@ export function dropSharedSession(workspacePath: string): void {
   sessions.delete(normalizePath(workspacePath));
 }
 
+/** Point the shared session at an existing live task (the session-picker
+ *  path). No-op if the task row is missing or terminal. */
+export function adoptSharedSession(workspacePath: string, taskId: string): void {
+  const row = agentTasksCollection.get(taskId);
+  if (!row || row.status === "error" || row.status === "cancelled") return;
+  sessions.set(normalizePath(workspacePath), {
+    taskId,
+    started: Promise.resolve(),
+  });
+}
+
 /** Current shared session's taskId, if one is live — for rendering only. */
 export function peekSharedSession(workspacePath: string): string | null {
   const session = sessions.get(normalizePath(workspacePath));
