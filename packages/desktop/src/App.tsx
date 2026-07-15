@@ -14,6 +14,7 @@ import { Titlebar } from "@/components/titlebar";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { WorkspaceErrorBoundary } from "@/components/workspace-error-boundary";
 import { EditorHarness } from "@/test-harness/editor-harness";
+import { ensureStartupHarnessDiscovery } from "@/agent/harness-discovery";
 
 export const App = () => {
   const { setTheme } = useTheme();
@@ -29,6 +30,12 @@ export const App = () => {
   useEffect(() => {
     setTheme(settings.theme);
   }, [settings.theme, setTheme]);
+
+  // One harness-discovery scan per app session (self-guarded; StrictMode's
+  // double-invoke and remounts are no-ops).
+  useEffect(() => {
+    ensureStartupHarnessDiscovery();
+  }, []);
 
   useEffect(() => {
     if (location.pathname !== "/" && location.pathname !== "/welcome") {

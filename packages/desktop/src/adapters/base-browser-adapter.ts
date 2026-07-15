@@ -526,6 +526,16 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     throw new Error("MCP endpoint is not supported on this adapter yet.");
   }
 
+  async runShellCommand(
+    _script: string,
+  ): Promise<{ stdout: string; exitCode: number }> {
+    // Not a future-parity gap like the two above — running arbitrary local
+    // shell scripts from a browser sandbox is categorically impossible.
+    // Callers (harness-discovery.ts) treat this rejection the same as "found
+    // nothing locally".
+    throw new Error("Shell commands are not supported on this adapter.");
+  }
+
   getUpdater(): PlatformUpdater {
     return {
       check: async () => {

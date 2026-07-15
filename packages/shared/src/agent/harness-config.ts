@@ -73,3 +73,125 @@ export const BUILT_IN_HARNESSES: HarnessDefinition[] = [
     mcpRegistration: "none",
   },
 ];
+
+/**
+ * Per-machine override of a built-in harness, or the settings row for a
+ * fully custom entry (`CustomHarnessEntrySchema` below). Deliberately just
+ * command/args/env — model/provider selection (Vertex, Bedrock, a specific
+ * model id, ...) is not a distinct schema concept, it's expressed through
+ * `env`/`args` like everything else spawn-config already is. A settings UI
+ * may offer curated presets that fill in known env vars, but that curation
+ * lives in the UI layer, not here.
+ */
+export const HarnessOverrideSchema = z.object({
+  /** Matches a BUILT_IN_HARNESSES id to override, or a custom entry's id. */
+  id: z.string().min(1),
+  enabled: z.boolean().default(true),
+  /** Absent = inherit the built-in's command. */
+  command: z.string().optional(),
+  /** Absent = inherit; present = replaces the built-in's args, not merged. */
+  args: z.array(z.string()).optional(),
+  /** Absent = inherit; present = merged over the built-in's env. */
+  env: z.record(z.string()).optional(),
+});
+
+export type HarnessOverride = z.infer<typeof HarnessOverrideSchema>;
+
+/**
+ * A fully custom harness entry — no built-in counterpart. `mcpRegistration`
+ * defaults to "none" (no capability-matrix row exists for an id Metrists has
+ * never seen); the explicit opt-in lets a custom entry claim pass-through
+ * registration, surfaced with a warning in settings rather than silently.
+ */
+export const CustomHarnessEntrySchema = HarnessDefinitionSchema.omit({
+  mcpRegistration: true,
+}).extend({
+  mcpRegistrationOverride: z
+    .enum(["session-new", "opencode-config", "none"])
+    .default("none"),
+  enabled: z.boolean().default(true),
+});
+
+export type CustomHarnessEntry = z.infer<typeof CustomHarnessEntrySchema>;
+
+/** One probe result per harness id, refreshed by a discovery scan. */
+export const HarnessDiscoveryResultSchema = z.object({
+  harnessId: z.string(),
+  found: z.boolean(),
+  /** Absolute path from `command -v`, when found. */
+  resolvedPath: z.string().optional(),
+  /** Epoch ms. */
+  probedAt: z.number(),
+});
+
+export type HarnessDiscoveryResult = z.infer<
+  typeof HarnessDiscoveryResultSchema
+>;
+
+/**
+ * Validate a raw `overrides` KV value (kv.json is a plain on-disk file —
+ * corrupt or hand-edited rows are dropped, never spawned).
+ */
+export function parseHarnessOverrides(
+  raw: unknown,
+): Record<string, HarnessOverride> {
+  if (raw === null || typeof raw !== "object") return {};
+  const overrides: Record<string, HarnessOverride> = {};
+  for (const [id, row] of Object.entries(raw)) {
+    const parsed = HarnessOverrideSchema.safeParse(row);
+    if (parsed.success) overrides[id] = parsed.data;
+  }
+  return overrides;
+}
+
+/** Validate a raw `custom` KV value; invalid rows are dropped. */
+export function parseCustomHarnessEntries(raw: unknown): CustomHarnessEntry[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((row) => {
+    const parsed = CustomHarnessEntrySchema.safeParse(row);
+    return parsed.success ? [parsed.data] : [];
+  });
+}
+
+/**
+ * Resolve the effective, spawnable harness list from built-ins plus
+ * per-machine settings: overrides shallow-merge onto their matching
+ * built-in (dropping it if disabled), then enabled custom entries are
+ * appended. Discovery results are NOT consulted here — an override can
+ * point at a binary discovery hasn't (yet) confirmed exists, and the user's
+ * explicit configuration wins; "found on this machine" is surfaced
+ * separately in the settings UI.
+ */
+export function resolveEffectiveHarnesses(
+  overrides: Record<string, HarnessOverride>,
+  custom: CustomHarnessEntry[],
+): HarnessDefinition[] {
+  const effective: HarnessDefinition[] = [];
+
+  for (const builtin of BUILT_IN_HARNESSES) {
+    const override = overrides[builtin.id];
+    if (!override) {
+      effective.push(builtin);
+      continue;
+    }
+    if (override.enabled === false) {
+      continue;
+    }
+    effective.push({
+      ...builtin,
+      command: override.command ?? builtin.command,
+      args: override.args ?? builtin.args,
+      env: override.env ? { ...builtin.env, ...override.env } : builtin.env,
+    });
+  }
+
+  for (const entry of custom) {
+    if (entry.enabled === false) continue;
+    effective.push({
+      ...entry,
+      mcpRegistration: entry.mcpRegistrationOverride,
+    });
+  }
+
+  return effective;
+}

@@ -678,6 +678,19 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     return new TauriMcpTransport(spec.taskId);
   }
 
+  async runShellCommand(
+    script: string,
+  ): Promise<{ stdout: string; exitCode: number }> {
+    const result = await invoke<
+      | { ok: true; value: { stdout: string; exitCode: number | null } }
+      | { ok: false; error: { message: string } }
+    >("run_shell_command", { script });
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+    return { stdout: result.value.stdout, exitCode: result.value.exitCode ?? -1 };
+  }
+
   getUpdater(): PlatformUpdater {
     if (this.updater) {
       return this.updater;

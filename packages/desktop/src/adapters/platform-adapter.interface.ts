@@ -539,6 +539,17 @@ export interface IPlatformAdapter {
   createMcpEndpoint(spec: { taskId: string }): McpEndpoint;
 
   /**
+   * Run a script through the user's local login shell and capture its
+   * output. A raw execution primitive — this adapter has no notion of what
+   * the script does (harness discovery is the first caller, from
+   * src/agent/harness-discovery.ts, which owns all script-building and
+   * output-parsing). Desktop-only capability: no equivalent exists on a
+   * web/relay platform, so non-desktop adapters reject it, same as
+   * `createAgentTransport`'s placeholder above.
+   */
+  runShellCommand(script: string): Promise<{ stdout: string; exitCode: number }>;
+
+  /**
    * Create updater actions for the current platform.
    */
   getUpdater(): PlatformUpdater;

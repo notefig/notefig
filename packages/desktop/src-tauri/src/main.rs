@@ -240,6 +240,7 @@ fn main() {
             agent_proc::spawn_agent,
             agent_proc::write_agent_stdin,
             agent_proc::kill_agent,
+            agent_proc::run_shell_command,
             // MCP tool bridge (Stage 3.5, errors-as-values pattern)
             mcp_bridge::start_mcp_relay,
             mcp_bridge::stop_mcp_relay,

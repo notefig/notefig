@@ -163,6 +163,53 @@ const NESTED_SESSION_GUARD_VARS: &[&str] = &[
 
 // ========== Tauri commands ==========
 
+/// Result of `run_shell_command`.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellCommandOutput {
+    pub stdout: String,
+    pub exit_code: Option<i32>,
+}
+
+/// Run an arbitrary script through the user's login+interactive shell and
+/// capture its output. A generic execution primitive — this module has no
+/// notion of what the script does or why (harness discovery is the first
+/// caller, from the frontend; more may follow). Same `$SHELL -ilc` shape as
+/// `probe_login_path` above, generalized to a caller-supplied script; no
+/// PATH injection needed — `-ilc` sources the login/interactive init files,
+/// which is where the probed PATH comes from in the first place.
+#[tauri::command]
+pub async fn run_shell_command(script: String) -> AgentResult<ShellCommandOutput> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let mut cmd = Command::new(&shell);
+    cmd.args(["-ilc", &script])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null());
+
+    let output = match tokio::time::timeout(Duration::from_secs(10), cmd.output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => {
+            return AgentResult::err(
+                String::new(),
+                AgentProcErrorType::SpawnFailed,
+                format!("failed to run shell command: {}", e),
+            );
+        }
+        Err(_) => {
+            return AgentResult::err(
+                String::new(),
+                AgentProcErrorType::Unknown,
+                "shell command timed out".to_string(),
+            );
+        }
+    };
+
+    AgentResult::ok(ShellCommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        exit_code: output.status.code(),
+    })
+}
+
 /// Spawn an ACP adapter as a child process with piped stdio.
 #[tauri::command]
 pub async fn spawn_agent(
