@@ -385,7 +385,7 @@ i18n
           promptBlobOpenChat: "Open chat",
           promptBlobNewSession: "Start a new session",
           promptBlobTrustWarning:
-            "Spawns {{name}} with access to this folder — send again to trust.",
+            "Spawns {{name}} with access to this folder. Press Enter again to continue.",
 
           // Agent Tools (display names — AgentTool.title holds these keys,
           // never the literal text; resolved in mcp-server.ts's tools/list)

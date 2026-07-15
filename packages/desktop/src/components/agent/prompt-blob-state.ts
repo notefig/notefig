@@ -119,6 +119,38 @@ export function deriveTouchedFiles(
   return [...paths];
 }
 
+/**
+ * The composer's keydown decision, pure so it's testable without mounting
+ * the textarea. Enter (no Shift) always submits — send() itself no-ops on
+ * an empty/sending draft, so this never needs to know draft state to decide
+ * "send". Escape and "/" only special-case to "revert" (turn back into a
+ * literal "/") when the draft is empty and the widget is summoned; a
+ * non-empty draft on Escape falls back to "escape" (return focus to the doc,
+ * draft kept).
+ */
+export type ComposerKeyAction =
+  | { type: "send" }
+  | { type: "revert" }
+  | { type: "escape" }
+  | { type: "none" };
+
+export function deriveComposerKeyAction(params: {
+  key: string;
+  shiftKey: boolean;
+  draftEmpty: boolean;
+  canRevert: boolean;
+}): ComposerKeyAction {
+  const { key, shiftKey, draftEmpty, canRevert } = params;
+  if (key === "Enter" && !shiftKey) return { type: "send" };
+  if (key === "Escape") {
+    return draftEmpty && canRevert ? { type: "revert" } : { type: "escape" };
+  }
+  // The "//" path: a second "/" right after summoning means the user
+  // wanted a literal slash.
+  if (key === "/" && draftEmpty && canRevert) return { type: "revert" };
+  return { type: "none" };
+}
+
 /** How many queued turns run before mine (turn ids are ascending). */
 export function deriveQueuePosition(
   taskTurns: AgentTurn[],

@@ -11,7 +11,6 @@ import {
 import { useLiveQuery, eq, and } from "@tanstack/react-db";
 import { useTranslation } from "react-i18next";
 import {
-  ArrowUp,
   Check,
   FileText,
   Loader2,
@@ -67,6 +66,7 @@ import {
   deriveActiveToolLine,
   deriveTouchedFiles,
   deriveQueuePosition,
+  deriveComposerKeyAction,
   type BlobPhase,
 } from "./prompt-blob-state";
 
@@ -314,8 +314,9 @@ export const PromptBlob = memo(function PromptBlob({
       phase === "done" ? deriveTouchedFiles(sortedEntries, workspacePath) : [],
     [phase, sortedEntries, workspacePath],
   );
-  const activeToolLine =
+  const rawActiveToolLine =
     phase === "running" ? deriveActiveToolLine(sortedEntries) : null;
+  const activeToolLine = useDebouncedActiveToolLine(rawActiveToolLine);
   const queueAhead =
     phase === "queued" && boundTurnId
       ? deriveQueuePosition(taskTurns, boundTurnId)
@@ -331,20 +332,21 @@ export const PromptBlob = memo(function PromptBlob({
     >
       <AnimatedHeight>
         <div className="rounded-xl border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40">
-          {(phase === "composing" || phase === "sending") && (
+          {phase === "composing" && (
             <Composer
               draft={record.draft}
               setDraft={setDraft}
               onSend={() => void send()}
               onEscape={() => editor.commands.focus()}
               onRevert={revertToSlash}
-              sending={phase === "sending"}
               confirmTrust={confirmTrust}
               trustName={defaultHarness.label}
               workspacePath={workspacePath}
               textareaRef={textareaRef}
             />
           )}
+
+          {phase === "sending" && <StatusRow shimmer prompt={record.draft} />}
 
           {phase === "queued" && (
             <StatusRow
@@ -401,7 +403,9 @@ export const PromptBlob = memo(function PromptBlob({
             <DoneState
               cancelled={turn?.status === "cancelled"}
               touchedFiles={touchedFiles}
-              onOpenFile={(path) => openFile({ tabId: path, intent: "new-tab" })}
+              onOpenFile={(path) =>
+                openFile({ tabId: path, intent: "new-tab" })
+              }
               onOpenChat={() => boundTaskId && openAgentTab(boundTaskId)}
               onEdit={editPrompt}
               onDismiss={dismiss}
@@ -420,6 +424,28 @@ export const PromptBlob = memo(function PromptBlob({
     </div>
   );
 });
+
+/**
+ * Debounces the tool-activity label the same way the editor status bar
+ * debounces "saved" (status-bar.tsx's useDebouncedSyncState): a new label
+ * lands immediately, but clearing back to null waits out `delay` — a tool
+ * call that starts and finishes inside the window never flashes on and off.
+ */
+function useDebouncedActiveToolLine(
+  label: string | null,
+  delay: number = 300,
+): string | null {
+  const [debounced, setDebounced] = useState(label);
+  useEffect(() => {
+    if (label !== null) {
+      setDebounced(label);
+      return;
+    }
+    const timeout = setTimeout(() => setDebounced(null), delay);
+    return () => clearTimeout(timeout);
+  }, [label, delay]);
+  return debounced;
+}
 
 /**
  * Measured-height wrapper so phase changes glide instead of jumping: the
@@ -449,9 +475,9 @@ function AnimatedHeight({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * The composing face: textarea + a footer with the harness/session control
- * and send. The textarea never remounts across the composing/confirm-trust
- * flip — the trust warning renders alongside it.
+ * The composing face: session control + textarea, one row, no send button —
+ * Enter (no Shift) is the only submit. The textarea never remounts across
+ * the composing/confirm-trust flip — the trust warning renders alongside it.
  */
 function Composer({
   draft,
@@ -459,7 +485,6 @@ function Composer({
   onSend,
   onEscape,
   onRevert,
-  sending,
   confirmTrust,
   trustName,
   workspacePath,
@@ -473,57 +498,37 @@ function Composer({
    *  Esc or "/" while the composer is empty; with a draft, Esc falls back
    *  to onEscape (return to the doc, draft kept). */
   onRevert?: () => void;
-  sending: boolean;
   confirmTrust: boolean;
   trustName: string;
   workspacePath: string;
   textareaRef: React.RefObject<HTMLTextAreaElement>;
 }) {
   const { t } = useTranslation();
-  const canSend = draft.trim().length > 0 && !sending;
   return (
     <div className="flex flex-col">
       <div className="flex items-start gap-1.5 px-2 py-1.5">
-        <SessionControl workspacePath={workspacePath} sending={sending} />
+        <SessionControl workspacePath={workspacePath} />
         <textarea
           ref={textareaRef}
           value={draft}
-          disabled={sending}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
-            const empty = draft.trim().length === 0;
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              onSend();
-            } else if (event.key === "Escape") {
-              event.preventDefault();
-              if (empty && onRevert) onRevert();
-              else onEscape();
-            } else if (event.key === "/" && empty && onRevert) {
-              // The "//" path: a second "/" right after summoning means the
-              // user wanted a literal slash.
-              event.preventDefault();
-              onRevert();
-            }
+            const action = deriveComposerKeyAction({
+              key: event.key,
+              shiftKey: event.shiftKey,
+              draftEmpty: draft.trim().length === 0,
+              canRevert: onRevert !== undefined,
+            });
+            if (action.type === "none") return;
+            event.preventDefault();
+            if (action.type === "send") onSend();
+            else if (action.type === "revert") onRevert?.();
+            else onEscape();
           }}
           placeholder={t("promptBlobPlaceholder")}
           rows={1}
-          className="max-h-40 min-h-[28px] flex-1 resize-none bg-transparent pt-1 pb-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:opacity-60"
+          className="max-h-40 min-h-[28px] flex-1 resize-none bg-transparent pt-1 pb-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
         />
-        <Button
-          size="icon"
-          onClick={onSend}
-          disabled={!canSend}
-          className="size-7 shrink-0 rounded-lg"
-          title={t("agentSend")}
-          aria-label={t("agentSend")}
-        >
-          {sending ? (
-            <Loader2 className="animate-spin" />
-          ) : (
-            <ArrowUp />
-          )}
-        </Button>
       </div>
       {confirmTrust && (
         <span className="px-3 pb-1.5 text-[11px] text-amber-600 dark:text-amber-400">
@@ -541,13 +546,7 @@ function Composer({
  * recent live sessions to re-target, or an explicit new session (started on
  * the default harness).
  */
-function SessionControl({
-  workspacePath,
-  sending,
-}: {
-  workspacePath: string;
-  sending: boolean;
-}) {
+function SessionControl({ workspacePath }: { workspacePath: string }) {
   const { t } = useTranslation();
   const { defaultHarness } = useDefaultHarness();
   const taskMetas = useAgentTaskList(workspacePath);
@@ -566,7 +565,8 @@ function SessionControl({
 
   const recentSessions = taskMetas
     .filter(
-      (meta) => meta.task.status !== "error" && meta.task.status !== "cancelled",
+      (meta) =>
+        meta.task.status !== "error" && meta.task.status !== "cancelled",
     )
     .slice(0, 5);
 
@@ -579,13 +579,8 @@ function SessionControl({
           className="size-7 shrink-0 cursor-pointer rounded-lg text-muted-foreground"
           title={t("agentChooseHarness")}
           aria-label={t("agentChooseHarness")}
-          disabled={sending}
         >
-          {sending ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <HarnessLogo harnessId={triggerHarnessId} />
-          )}
+          <HarnessLogo harnessId={triggerHarnessId} />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
@@ -631,10 +626,14 @@ function SessionControl({
 }
 
 /**
- * The in-flight face: the sent prompt for context, Edit + Stop, and — only
- * while a tool call is actually in flight — a shimmering tool-activity line
- * above it. No label means no line: the spinner alone carries "working",
- * and a filler label would just pad the row.
+ * The in-flight face: the sent prompt for context, and — only while a tool
+ * call is actually in flight — a shimmering tool-activity line above it. No
+ * label means no line: the spinner alone carries "working", and a filler
+ * label would just pad the row. Edit/Stop only show up once there's a bound
+ * turn to act on (queued/running/etc.) — the brief pre-turn "sending" face
+ * reuses this same row, shimmering, with no buttons. The button slots stay
+ * reserved (invisible, not unmounted) either way so the row's width — and
+ * the sending→running handoff — doesn't jump when they appear.
  */
 function StatusRow({
   label,
@@ -647,9 +646,9 @@ function StatusRow({
   label?: string;
   shimmer?: boolean;
   prompt: string;
-  onEdit: () => void;
-  onStop: () => void;
-  stopLabel: string;
+  onEdit?: () => void;
+  onStop?: () => void;
+  stopLabel?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -661,7 +660,7 @@ function StatusRow({
         {label?.trim() && (
           <div
             className={cn(
-              "truncate text-xs font-medium",
+              "truncate text-xs font-medium capitalize",
               shimmer && "shimmer text-muted-foreground",
             )}
           >
@@ -678,7 +677,13 @@ function StatusRow({
         type="button"
         title={t("promptBlobEdit")}
         aria-label={t("promptBlobEdit")}
-        className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        disabled={!onEdit}
+        className={cn(
+          "shrink-0 rounded p-1 text-muted-foreground transition-colors",
+          onEdit
+            ? "cursor-pointer hover:bg-accent hover:text-foreground"
+            : "invisible",
+        )}
         onClick={onEdit}
       >
         <Pencil className="size-3.5" />
@@ -687,7 +692,13 @@ function StatusRow({
         type="button"
         title={stopLabel}
         aria-label={stopLabel}
-        className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        disabled={!onStop}
+        className={cn(
+          "shrink-0 rounded p-1 text-muted-foreground transition-colors",
+          onStop
+            ? "cursor-pointer hover:bg-accent hover:text-foreground"
+            : "invisible",
+        )}
         onClick={onStop}
       >
         <Square className="size-3.5 fill-current" />
@@ -742,26 +753,26 @@ function DoneState({
       {/* Zero touched files still shows open-chat — the answer text lives
           in the transcript. */}
       <div className="flex flex-wrap items-center gap-1.5">
-          {touchedFiles.map((path) => (
-            <button
-              key={path}
-              type="button"
-              className="flex cursor-pointer items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              onClick={() => onOpenFile(path)}
-            >
-              <FileText className="size-3" />
-              {getFileName(path)}
-            </button>
-          ))}
+        {touchedFiles.map((path) => (
           <button
+            key={path}
             type="button"
-            className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
-            onClick={onOpenChat}
+            className="flex cursor-pointer items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            onClick={() => onOpenFile(path)}
           >
-            <MessageSquare className="size-3" />
-            {t("promptBlobOpenChat")}
+            <FileText className="size-3" />
+            {getFileName(path)}
           </button>
-        </div>
+        ))}
+        <button
+          type="button"
+          className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+          onClick={onOpenChat}
+        >
+          <MessageSquare className="size-3" />
+          {t("promptBlobOpenChat")}
+        </button>
+      </div>
     </div>
   );
 }

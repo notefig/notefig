@@ -13,6 +13,7 @@ import {
   deriveActiveToolLine,
   deriveTouchedFiles,
   deriveQueuePosition,
+  deriveComposerKeyAction,
 } from "../prompt-blob-state";
 
 function turn(overrides: Partial<AgentTurn> = {}): AgentTurn {
@@ -176,6 +177,103 @@ describe("deriveTouchedFiles", () => {
       }),
     ];
     expect(deriveTouchedFiles(entries, "/ws")).toEqual(["/ws/notes/c.md"]);
+  });
+});
+
+describe("deriveComposerKeyAction", () => {
+  it("Enter without Shift always sends, regardless of draft/revert state", () => {
+    expect(
+      deriveComposerKeyAction({
+        key: "Enter",
+        shiftKey: false,
+        draftEmpty: false,
+        canRevert: false,
+      }),
+    ).toEqual({ type: "send" });
+    expect(
+      deriveComposerKeyAction({
+        key: "Enter",
+        shiftKey: false,
+        draftEmpty: true,
+        canRevert: true,
+      }),
+    ).toEqual({ type: "send" });
+  });
+
+  it("Shift+Enter is not a submit", () => {
+    expect(
+      deriveComposerKeyAction({
+        key: "Enter",
+        shiftKey: true,
+        draftEmpty: false,
+        canRevert: false,
+      }),
+    ).toEqual({ type: "none" });
+  });
+
+  it("Escape reverts only when the draft is empty and revert is available", () => {
+    expect(
+      deriveComposerKeyAction({
+        key: "Escape",
+        shiftKey: false,
+        draftEmpty: true,
+        canRevert: true,
+      }),
+    ).toEqual({ type: "revert" });
+    expect(
+      deriveComposerKeyAction({
+        key: "Escape",
+        shiftKey: false,
+        draftEmpty: false,
+        canRevert: true,
+      }),
+    ).toEqual({ type: "escape" });
+    expect(
+      deriveComposerKeyAction({
+        key: "Escape",
+        shiftKey: false,
+        draftEmpty: true,
+        canRevert: false,
+      }),
+    ).toEqual({ type: "escape" });
+  });
+
+  it('"/" reverts only on an empty, revertible composer ("//" path)', () => {
+    expect(
+      deriveComposerKeyAction({
+        key: "/",
+        shiftKey: false,
+        draftEmpty: true,
+        canRevert: true,
+      }),
+    ).toEqual({ type: "revert" });
+    expect(
+      deriveComposerKeyAction({
+        key: "/",
+        shiftKey: false,
+        draftEmpty: false,
+        canRevert: true,
+      }),
+    ).toEqual({ type: "none" });
+    expect(
+      deriveComposerKeyAction({
+        key: "/",
+        shiftKey: false,
+        draftEmpty: true,
+        canRevert: false,
+      }),
+    ).toEqual({ type: "none" });
+  });
+
+  it("other keys are no-ops", () => {
+    expect(
+      deriveComposerKeyAction({
+        key: "a",
+        shiftKey: false,
+        draftEmpty: true,
+        canRevert: true,
+      }),
+    ).toEqual({ type: "none" });
   });
 });
 
