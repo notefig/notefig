@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import type { Editor } from "@tiptap/core";
 import { Button } from "@/components/ui/button";
+import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -249,6 +250,7 @@ export const PromptBlob = memo(function PromptBlob({
         boundTaskId: taskId,
         lastSentPrompt: text,
         draft: "",
+        doneCollapsed: true,
       });
     } catch (error) {
       console.error("Prompt blob send failed:", error);
@@ -336,6 +338,7 @@ export const PromptBlob = memo(function PromptBlob({
     phase === "queued" && boundTurnId
       ? deriveQueuePosition(taskTurns, boundTurnId)
       : 0;
+  const collapsedDone = phase === "done" && record.doneCollapsed;
 
   return (
     <div
@@ -346,6 +349,14 @@ export const PromptBlob = memo(function PromptBlob({
       className="w-full"
     >
       <AnimatedHeight>
+        {collapsedDone ? (
+          <CollapsedDone
+            cancelled={turn?.status === "cancelled"}
+            prompt={record.lastSentPrompt}
+            touchedFiles={touchedFiles}
+            onExpand={() => updatePromptBlob(blobId, { doneCollapsed: false })}
+          />
+        ) : (
         <div className="rounded-xl border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40">
           {phase === "composing" && (
             <Composer
@@ -436,6 +447,7 @@ export const PromptBlob = memo(function PromptBlob({
             />
           )}
         </div>
+        )}
       </AnimatedHeight>
     </div>
   );
@@ -726,6 +738,46 @@ function StatusRow({
         <Square className="size-3.5 fill-current" />
       </button>
     </div>
+  );
+}
+
+/** Done, collapsed: a plain bordered Marker row in place of the card —
+ *  click to expand. Icon reflects what the turn actually did (touched
+ *  files vs. a plain text answer) rather than a generic checkmark;
+ *  cancelled still gets its own X, since that's a status, not a result. */
+function CollapsedDone({
+  cancelled,
+  prompt,
+  touchedFiles,
+  onExpand,
+}: {
+  cancelled: boolean;
+  prompt: string;
+  touchedFiles: string[];
+  onExpand: () => void;
+}) {
+  const { t } = useTranslation();
+  const Icon = cancelled ? X : touchedFiles.length > 0 ? FileText : MessageSquare;
+  return (
+    <Marker
+      asChild
+      variant="border"
+      className="w-full cursor-pointer justify-start px-3 py-2 text-left"
+    >
+      <button
+        type="button"
+        title={t("promptBlobShowResult")}
+        aria-label={t("promptBlobShowResult")}
+        onClick={onExpand}
+      >
+        <MarkerIcon>
+          <Icon />
+        </MarkerIcon>
+        <MarkerContent className="flex-1 truncate text-left">
+          {prompt.trim() || t("promptBlobDone")}
+        </MarkerContent>
+      </button>
+    </Marker>
   );
 }
 

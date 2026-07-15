@@ -20,6 +20,9 @@ export type PromptBlobRecord = {
   boundTaskId: string | null;
   /** Last sent prompt text, for the Edit affordance. */
   lastSentPrompt: string;
+  /** Done phase renders collapsed to a tiny icon by default; false once the
+   *  user has clicked to expand it. Resets to true on every fresh send. */
+  doneCollapsed: boolean;
 };
 
 const EMPTY_RECORD: PromptBlobRecord = {
@@ -27,6 +30,7 @@ const EMPTY_RECORD: PromptBlobRecord = {
   boundTurnId: null,
   boundTaskId: null,
   lastSentPrompt: "",
+  doneCollapsed: true,
 };
 
 const records = new Map<string, PromptBlobRecord>();
@@ -51,7 +55,11 @@ export function updatePromptBlob(
 
 /** Unbind the watched turn (dismiss / stale-row reset), keeping the draft. */
 export function clearPromptBlobTurn(blobId: string): void {
-  updatePromptBlob(blobId, { boundTurnId: null, boundTaskId: null });
+  updatePromptBlob(blobId, {
+    boundTurnId: null,
+    boundTaskId: null,
+    doneCollapsed: true,
+  });
 }
 
 export function subscribePromptBlob(

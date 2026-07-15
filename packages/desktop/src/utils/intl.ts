@@ -382,6 +382,7 @@ i18n
           promptBlobStopped: "Stopped",
           promptBlobFailed: "Failed.",
           promptBlobDismiss: "Dismiss",
+          promptBlobShowResult: "Show result",
           promptBlobOpenChat: "Open chat",
           promptBlobNewSession: "Start a new session",
           promptBlobTrustWarning:
