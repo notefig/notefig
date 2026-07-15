@@ -214,6 +214,10 @@ export const PromptBlob = memo(function PromptBlob({
     autoFocused.current = true;
     const { draft, boundTurnId: bound } = getPromptBlob(blobId);
     if (editor.state.doc.textContent.trim() !== "" || draft || bound) return;
+    // Only for newly opened empty docs. When a doc becomes empty mid-edit
+    // (select-all + delete), the keeper reinsert remounts this widget — the
+    // user's cursor is in the editor and must stay there.
+    if (editor.view.hasFocus()) return;
     focusComposer();
   }, [blobId, editor, focusComposer]);
 
