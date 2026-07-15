@@ -11,6 +11,7 @@ import type { ToolCallUpdate } from "@metrists/shared/agent";
 import {
   derivePhase,
   deriveActiveToolLine,
+  deriveLatestAssistantLine,
   deriveTouchedFiles,
   deriveQueuePosition,
   deriveComposerKeyAction,
@@ -137,6 +138,45 @@ describe("deriveActiveToolLine", () => {
       deriveActiveToolLine([toolEntry("evt_1", { title: "Search", status: "completed" })]),
     ).toBeNull();
     expect(deriveActiveToolLine([])).toBeNull();
+  });
+});
+
+function assistantEntry(id: string, text: string | undefined): AgentEntry {
+  return {
+    id,
+    taskId: "task_1",
+    turnId: "trn_1",
+    type: "assistant",
+    text,
+    createdAt: 0,
+  };
+}
+
+describe("deriveLatestAssistantLine", () => {
+  it("picks the latest assistant entry's trimmed text", () => {
+    const entries = [
+      assistantEntry("evt_1", "first draft"),
+      toolEntry("evt_2", { title: "Edit", status: "completed" }),
+      assistantEntry("evt_3", "  latest text  "),
+    ];
+    expect(deriveLatestAssistantLine(entries)).toBe("latest text");
+  });
+
+  it("does not fall back to an earlier assistant entry when the latest one is blank", () => {
+    const entries = [
+      assistantEntry("evt_1", "earlier text"),
+      assistantEntry("evt_2", "   "),
+    ];
+    expect(deriveLatestAssistantLine(entries)).toBeNull();
+  });
+
+  it("never returns an empty string for whitespace-only text", () => {
+    expect(deriveLatestAssistantLine([assistantEntry("evt_1", "   ")])).toBeNull();
+    expect(deriveLatestAssistantLine([assistantEntry("evt_1", undefined)])).toBeNull();
+  });
+
+  it("returns null for an empty entries array", () => {
+    expect(deriveLatestAssistantLine([])).toBeNull();
   });
 });
 

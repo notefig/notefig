@@ -189,7 +189,15 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
  * retries the held prompt optimistically — a failed retry re-raises the
  * block.
  */
-export function AuthCard({ task }: { task: AgentTaskRow }) {
+export function AuthCard({
+  task,
+  bare = false,
+}: {
+  task: AgentTaskRow;
+  /** Skip the card's own border/bg/padding — for hosts (the prompt-blob
+   *  widget) that already wrap it in an equivalently-tinted container. */
+  bare?: boolean;
+}) {
   const { t } = useTranslation();
   const [instructions, setInstructions] = useState<string | null>(null);
   const [busyMethodId, setBusyMethodId] = useState<string | null>(null);
@@ -210,10 +218,18 @@ export function AuthCard({ task }: { task: AgentTaskRow }) {
   );
 
   return (
-    // The amber tint rides a gradient *image* over an opaque bg-background:
-    // this card floats in the composer overlay above the transcript, so a
-    // plain translucent bg would let entries underneath show through it.
-    <div className="pointer-events-auto flex flex-col gap-2 rounded-md border border-amber-500/40 bg-background bg-gradient-to-b from-amber-500/10 to-amber-500/10 p-3 text-xs">
+    <div
+      className={cn(
+        "pointer-events-auto flex flex-col gap-2 text-xs",
+        // The amber tint rides a gradient *image* over an opaque
+        // bg-background: this card floats in the composer overlay above the
+        // transcript, so a plain translucent bg would let entries underneath
+        // show through it. `bare` hosts (the prompt-blob widget) already
+        // wrap this in their own equivalently-tinted card, so they skip it.
+        !bare &&
+          "rounded-md border border-amber-500/40 bg-background bg-gradient-to-b from-amber-500/10 to-amber-500/10 p-3",
+      )}
+    >
       <span className="font-medium">{t("agentSignInRequired")}</span>
       {instructions ? (
         <p className="whitespace-pre-wrap">{instructions}</p>

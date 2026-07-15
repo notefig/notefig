@@ -81,6 +81,22 @@ export function deriveActiveToolLine(entries: AgentEntry[]): string | null {
   return null;
 }
 
+/**
+ * A one-line teaser of the latest assistant text while running, for the
+ * running row's second line when no tool call is currently in flight (see
+ * deriveActiveToolLine). Same hygiene: stop at the first match scanning
+ * backward, never return "".
+ */
+export function deriveLatestAssistantLine(entries: AgentEntry[]): string | null {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry.type !== "assistant") continue;
+    const text = entry.text?.trim();
+    return text ? text : null;
+  }
+  return null;
+}
+
 /** Kinds that mean "this call changed a document". */
 const MUTATING_KINDS = new Set(["edit", "delete", "move"]);
 

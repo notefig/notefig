@@ -381,6 +381,7 @@ i18n
           promptBlobDone: "Done",
           promptBlobStopped: "Stopped",
           promptBlobFailed: "Failed.",
+          promptBlobRetry: "Retry",
           promptBlobDismiss: "Dismiss",
           promptBlobShowResult: "Show result",
           promptBlobOpenChat: "Open chat",

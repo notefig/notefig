@@ -16,6 +16,7 @@ import {
   Loader2,
   MessageSquare,
   Pencil,
+  RotateCw,
   Square,
   X,
 } from "lucide-react";
@@ -65,6 +66,7 @@ import {
 import {
   derivePhase,
   deriveActiveToolLine,
+  deriveLatestAssistantLine,
   deriveTouchedFiles,
   deriveQueuePosition,
   deriveComposerKeyAction,
@@ -287,6 +289,15 @@ export const PromptBlob = memo(function PromptBlob({
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, [blobId]);
 
+  // Retry: pull the failed prompt back into the composer and immediately
+  // re-send it, no re-typing required. editPrompt writes the restored draft
+  // into the module-level store synchronously, so send() (which reads the
+  // draft at call time) sees it right away.
+  const retry = useCallback(() => {
+    editPrompt();
+    void send();
+  }, [editPrompt, send]);
+
   const stop = useCallback(() => {
     if (!boundTaskId || !boundTurnId) return;
     if (turn?.status === "queued") {
@@ -334,6 +345,8 @@ export const PromptBlob = memo(function PromptBlob({
   const rawActiveToolLine =
     phase === "running" ? deriveActiveToolLine(sortedEntries) : null;
   const activeToolLine = useDebouncedActiveToolLine(rawActiveToolLine);
+  const assistantTeaser =
+    phase === "running" ? deriveLatestAssistantLine(sortedEntries) : null;
   const queueAhead =
     phase === "queued" && boundTurnId
       ? deriveQueuePosition(taskTurns, boundTurnId)
@@ -357,7 +370,18 @@ export const PromptBlob = memo(function PromptBlob({
             onExpand={() => updatePromptBlob(blobId, { doneCollapsed: false })}
           />
         ) : (
-        <div className="rounded-lg border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40">
+        <div
+          className={cn(
+            "rounded-lg border shadow-lg shadow-black/5 dark:shadow-black/40",
+            phase === "needs-auth" &&
+              "border-amber-500/40 bg-background bg-gradient-to-b from-amber-500/10 to-amber-500/10",
+            phase === "needs-permission" &&
+              "border-border bg-background bg-gradient-to-b from-muted/40 to-muted/40",
+            phase !== "needs-auth" &&
+              phase !== "needs-permission" &&
+              "border-border bg-card",
+          )}
+        >
           {phase === "composing" && (
             <Composer
               draft={record.draft}
@@ -399,13 +423,14 @@ export const PromptBlob = memo(function PromptBlob({
                 label={activeToolLine ?? undefined}
                 shimmer
                 prompt={record.lastSentPrompt}
+                teaser={assistantTeaser ?? undefined}
                 onEdit={editPrompt}
                 onStop={stop}
                 stopLabel={t("agentStop")}
               />
               {phase === "needs-permission" && boundTaskId && (
-                <div className="border-t border-border/60 p-1.5">
-                  <PermissionCard taskId={boundTaskId} />
+                <div className="px-2.5 pb-2">
+                  <PermissionCard taskId={boundTaskId} bare />
                 </div>
               )}
             </div>
@@ -420,8 +445,8 @@ export const PromptBlob = memo(function PromptBlob({
                 onStop={stop}
                 stopLabel={t("agentStop")}
               />
-              <div className="border-t border-border/60 p-1.5">
-                <AuthCard task={task} />
+              <div className="px-2.5 pb-2">
+                <AuthCard task={task} bare />
               </div>
             </div>
           )}
@@ -442,6 +467,7 @@ export const PromptBlob = memo(function PromptBlob({
           {phase === "error" && (
             <ErrorState
               message={turn?.error}
+              onRetry={retry}
               onEdit={editPrompt}
               onDismiss={dismiss}
             />
@@ -673,6 +699,7 @@ function StatusRow({
   label,
   shimmer,
   prompt,
+  teaser,
   onEdit,
   onStop,
   stopLabel,
@@ -680,11 +707,15 @@ function StatusRow({
   label?: string;
   shimmer?: boolean;
   prompt: string;
+  /** Latest assistant text, shown instead of `prompt` while running so the
+   *  row reflects live progress rather than the static original ask. */
+  teaser?: string;
   onEdit?: () => void;
   onStop?: () => void;
   stopLabel?: string;
 }) {
   const { t } = useTranslation();
+  const secondLine = teaser ?? prompt;
   return (
     <div className="flex items-center gap-2 px-2.5 py-1.5">
       {shimmer && (
@@ -701,9 +732,9 @@ function StatusRow({
             {label}
           </div>
         )}
-        {prompt.trim() && (
+        {secondLine.trim() && (
           <div className="truncate text-[11px] text-muted-foreground">
-            {prompt}
+            {secondLine}
           </div>
         )}
       </div>
@@ -853,10 +884,12 @@ function DoneState({
 
 function ErrorState({
   message,
+  onRetry,
   onEdit,
   onDismiss,
 }: {
   message: string | undefined;
+  onRetry: () => void;
   onEdit: () => void;
   onDismiss: () => void;
 }) {
@@ -868,6 +901,15 @@ function ErrorState({
         {t("promptBlobFailed")}
         {message ? ` ${message}` : ""}
       </span>
+      <button
+        type="button"
+        title={t("promptBlobRetry")}
+        aria-label={t("promptBlobRetry")}
+        className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        onClick={onRetry}
+      >
+        <RotateCw className="size-3.5" />
+      </button>
       <button
         type="button"
         title={t("promptBlobEdit")}
