@@ -355,6 +355,14 @@ i18n
           agentRunningQueued: "running · {{count}} queued",
           agentQueuedCount: "{{count}} queued",
           agentFailed: "failed",
+          agentSessionUnavailable: "unavailable",
+
+          // Agent UI — restored sessions (MET-54)
+          agentSessionUnavailableNotice:
+            "This session is no longer available — the harness has no record of it.",
+          agentDeleteSession: "Delete session",
+          agentBlobAnswerOrphaned:
+            "Answer saved to the document, but the session that asked is no longer available.",
 
           // Agent UI — chat tab
           agentSessionEnded: "Session ended.",

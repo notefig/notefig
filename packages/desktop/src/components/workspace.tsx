@@ -38,6 +38,7 @@ import {
 import { disposeAllEditors, getEditor } from "@/components/editor/editor-store";
 import { AgentChatTab } from "@/components/agent/agent-chat-tab";
 import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
+import { useAgentTasksReady } from "@/hooks/use-agent-tasks";
 import { agentTasksCollection } from "@/agent/agent-collections";
 import {
   agentTabId,
@@ -86,13 +87,16 @@ export const Workspace = () => {
     };
   }, []);
 
-  // Tear down agent tasks (kills adapter processes) and clear their rows when
-  // leaving the workspace — alongside editor disposal.
+  // Tear down agent runtimes when leaving the workspace (their rows persist
+  // and demote to "restored" — the tasks collection is storage-backed,
+  // MET-54). On mount, kick the collection's boot load so restored sessions
+  // are in place before tab pruning runs.
   useEffect(() => {
     return () => {
       void disposeWorkspaceTaskManager(workspacePath);
     };
   }, [workspacePath]);
+  const agentTasksReady = useAgentTasksReady();
 
   // Agent chat tabs share the layout with file tabs but are keyed
   // `agent:<taskId>` — split them out so every file-path code path
@@ -209,16 +213,18 @@ export const Workspace = () => {
     [fileOpenTabIds, existingOpenTabIds],
   );
 
-  // Agent tabs whose task row is gone. Rows live only for the app run, so a
-  // restored `?layout` after a restart carries dead agent tabs — prune them
-  // like missing files (revisit with MET-54 agent-state persistence). The
-  // local-only collection is synchronously readable, so no fetching gate.
+  // Agent tabs whose task row is gone. Persisted sessions come back as
+  // "restored" rows (MET-54), so pruning waits for the collection's boot
+  // load — only tabs whose task genuinely no longer exists (deleted
+  // session, corrupt row) are dropped.
   const missingAgentTabIds = useMemo(
     () =>
-      agentOpenTaskIds
-        .filter((taskId) => !agentTasksCollection.get(taskId))
-        .map(agentTabId),
-    [agentOpenTaskIds, openAgentTaskRows],
+      agentTasksReady
+        ? agentOpenTaskIds
+            .filter((taskId) => !agentTasksCollection.get(taskId))
+            .map(agentTabId)
+        : [],
+    [agentOpenTaskIds, openAgentTaskRows, agentTasksReady],
   );
 
   const [searchParams, setUrlSearchParams] = useSearchParams();

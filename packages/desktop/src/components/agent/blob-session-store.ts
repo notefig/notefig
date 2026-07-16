@@ -16,11 +16,15 @@ type SharedSession = { taskId: string; started: Promise<void> };
 
 const sessions = new Map<string, SharedSession>();
 
-/** A cached session is only reusable while its task row is still live. */
+/** A cached session is only reusable while its task row is still live.
+ *  "restored" counts as live — prompting it revives via session/load. */
 function isReusable(session: SharedSession): boolean {
   const row = agentTasksCollection.get(session.taskId);
   return (
-    row !== undefined && row.status !== "error" && row.status !== "cancelled"
+    row !== undefined &&
+    row.status !== "error" &&
+    row.status !== "cancelled" &&
+    row.status !== "unavailable"
   );
 }
 
@@ -58,7 +62,14 @@ export function dropSharedSession(workspacePath: string): void {
  *  path). No-op if the task row is missing or terminal. */
 export function adoptSharedSession(workspacePath: string, taskId: string): void {
   const row = agentTasksCollection.get(taskId);
-  if (!row || row.status === "error" || row.status === "cancelled") return;
+  if (
+    !row ||
+    row.status === "error" ||
+    row.status === "cancelled" ||
+    row.status === "unavailable"
+  ) {
+    return;
+  }
   sessions.set(normalizePath(workspacePath), {
     taskId,
     started: Promise.resolve(),

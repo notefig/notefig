@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronDown, Plus, Square } from "lucide-react";
+import { Check, ChevronDown, Plus, Square, Trash2 } from "lucide-react";
 import type { HarnessDefinition } from "@metrists/shared/agent";
 import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,11 @@ import { cn } from "@/lib/utils";
 import { useKv } from "@/utils/kv-store";
 import { normalizePath } from "@/utils/fs";
 import type { AgentTaskRow } from "@/agent/agent-collections";
-import { cancelAgentTask, startAgentTask } from "@/agent/agent-service";
+import {
+  cancelAgentTask,
+  deleteAgentSession,
+  startAgentTask,
+} from "@/agent/agent-service";
 import {
   describeTaskMeta,
   useAgentTaskList,
@@ -119,6 +123,7 @@ export function SessionsPanel({
               task={meta.task}
               meta={describeTaskMeta(meta)}
               isRunning={meta.isRunning}
+              isUnavailable={meta.isUnavailable}
               active={agentTabId(meta.task.taskId) === activeTabId}
               onOpen={() => openAgentTab(meta.task.taskId)}
             />
@@ -150,12 +155,14 @@ function SessionRow({
   task,
   meta,
   isRunning,
+  isUnavailable,
   active,
   onOpen,
 }: {
   task: AgentTaskRow;
   meta: string;
   isRunning: boolean;
+  isUnavailable: boolean;
   active: boolean;
   onOpen: () => void;
 }) {
@@ -189,6 +196,20 @@ function SessionRow({
           }}
         >
           <Square className="size-3 fill-current" />
+        </button>
+      )}
+      {isUnavailable && (
+        <button
+          type="button"
+          title={t("agentDeleteSession")}
+          aria-label={t("agentDeleteSession")}
+          className="hidden shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-foreground group-hover:block"
+          onClick={(event) => {
+            event.stopPropagation();
+            void deleteAgentSession(task.taskId);
+          }}
+        >
+          <Trash2 className="size-3" />
         </button>
       )}
     </div>
@@ -263,9 +284,11 @@ export function StatusDot({ status }: { status: AgentTaskRow["status"] }) {
   const color =
     status === "running"
       ? "bg-blue-500 animate-pulse"
-      : status === "error"
+      : status === "error" || status === "unavailable"
         ? "bg-red-500"
-        : status === "idle"
+        : // A restored session is a normal (idle-equivalent) session whose
+          // runtime revives on first interaction (MET-54).
+        status === "idle" || status === "restored"
           ? "bg-green-500"
           : status === "cancelled"
             ? "bg-muted-foreground"

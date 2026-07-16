@@ -12,7 +12,9 @@
  * the blob already finished; this is just a new turn on the same session.
  */
 import { findBlobs, patchBlobInMarkdown } from "@metrists/shared/blobs";
+import { toast } from "sonner";
 import { agents } from "@/agent/agents";
+import i18n from "@/utils/intl";
 import { findBlobAuthorTask } from "@/agent/agent-service";
 import { readWorkspaceTextFile, writeWorkspaceTextFile } from "@/utils/file-sync";
 import { createMarkdownCodec } from "../markdown-codec";
@@ -79,7 +81,25 @@ export async function answerBlob(
       formatter && envelope
         ? formatter({ blobId, path: filePath, envelope, patch })
         : defaultAnswerPrompt(authoredBy.blobType, blobId, filePath, patch);
-    agents.task(authoredBy.taskId).prompt(text);
+    // Restored sessions revive transparently inside prompt(); a dead task
+    // (deleted, or revival landed "unavailable") resolves the handle as
+    // not-started — surface that instead of silently dropping the follow-up.
+    void agents
+      .task(authoredBy.taskId)
+      .prompt(text)
+      .completed.then((outcome) => {
+        if (
+          outcome.status === "error" &&
+          outcome.error === "agent task is not started"
+        ) {
+          toast(i18n.t("agentBlobAnswerOrphaned"));
+        }
+      });
+  } else {
+    // Author unknown — after a restart the routing entry only comes back
+    // once the authoring session is revived (accepted MET-54 limitation).
+    // The answer itself is already saved in the document.
+    toast(i18n.t("agentBlobAnswerOrphaned"));
   }
 
   return { ok: true };

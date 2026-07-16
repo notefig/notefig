@@ -630,7 +630,9 @@ function SessionControl({ workspacePath }: { workspacePath: string }) {
   const recentSessions = taskMetas
     .filter(
       (meta) =>
-        meta.task.status !== "error" && meta.task.status !== "cancelled",
+        meta.task.status !== "error" &&
+        meta.task.status !== "cancelled" &&
+        meta.task.status !== "unavailable",
     )
     .slice(0, 5);
 

@@ -20,6 +20,7 @@ export type {
   NewSessionRequest,
   NewSessionResponse,
   LoadSessionRequest,
+  LoadSessionResponse,
   PromptRequest,
   PromptResponse,
   ContentBlock,

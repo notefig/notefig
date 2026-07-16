@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery, eq } from "@tanstack/react-db";
 import {
   agentTasksCollection,
@@ -21,7 +21,29 @@ export type AgentTaskMeta = {
   isRunning: boolean;
   needsAuth: boolean;
   isError: boolean;
+  /** Revival failed — the harness no longer has this session (MET-54). */
+  isUnavailable: boolean;
 };
+
+/**
+ * True once the storage-backed tasks collection has completed its boot load
+ * (MET-54) — gates layout tab pruning so restored sessions' tabs aren't
+ * dropped while the read is in flight. preload() is idempotent and resolves
+ * once the first sync lands.
+ */
+export function useAgentTasksReady(): boolean {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void agentTasksCollection
+      .preload()
+      .finally(() => live && setReady(true));
+    return () => {
+      live = false;
+    };
+  }, []);
+  return ready;
+}
 
 /**
  * The workspace's tasks ordered by last activity (updatedAt desc, taskId as
@@ -63,6 +85,7 @@ export function useAgentTaskList(workspacePath: string): AgentTaskMeta[] {
         isRunning: task.status === "running",
         needsAuth: !!task.authRequired,
         isError: task.status === "error",
+        isUnavailable: task.status === "unavailable",
       }));
   }, [tasks, queuedTurns]);
 }
@@ -85,5 +108,8 @@ export function describeTaskMeta(meta: AgentTaskMeta): string {
     return i18n.t("agentQueuedCount", { count: meta.queuedCount });
   }
   if (meta.isError) return i18n.t("agentFailed");
+  if (meta.isUnavailable) return i18n.t("agentSessionUnavailable");
+  // "restored" deliberately gets no special label — a restored session is a
+  // normal session whose runtime just hasn't spawned yet (MET-54).
   return formatTimeAgo(meta.task.updatedAt);
 }

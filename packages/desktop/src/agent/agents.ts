@@ -17,8 +17,9 @@ import {
 import { agentTurnsCollection, type AgentTurn } from "./agent-collections";
 import { getRegisteredTask } from "./task-registry";
 // Deferred-use import (see agent-service.ts's matching note): only
-// `workspaceHandle.createTask` reaches back into the service, at call time.
-import { startAgentTask } from "./agent-service";
+// `workspaceHandle.createTask` and `taskHandle.prompt`'s revival path reach
+// back into the service, at call time.
+import { getOrReviveTask, startAgentTask } from "./agent-service";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -62,7 +63,9 @@ function taskHandle(taskId: string): AgentTaskHandle {
   return {
     taskId,
     prompt(text) {
-      const task = getRegisteredTask(taskId);
+      // getOrReviveTask revives a restored session transparently — the
+      // prompt rides the queue while session/load replays history.
+      const task = getOrReviveTask(taskId);
       if (!task) {
         return {
           turnId: newTurnId(),

@@ -23,6 +23,7 @@ function meta(overrides: Partial<AgentTaskMeta> = {}): AgentTaskMeta {
     isRunning: false,
     needsAuth: false,
     isError: false,
+    isUnavailable: false,
     ...overrides,
   };
 }

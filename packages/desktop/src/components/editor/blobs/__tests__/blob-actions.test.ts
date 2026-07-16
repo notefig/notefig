@@ -16,7 +16,19 @@ vi.mock("@/agent/agent-service", () => ({
 
 const taskPrompt = vi.fn();
 vi.mock("@/agent/agents", () => ({
-  agents: { task: (taskId: string) => ({ prompt: (text: string) => taskPrompt(taskId, text) }) },
+  agents: {
+    task: (taskId: string) => ({
+      prompt: (text: string) => {
+        taskPrompt(taskId, text);
+        // Real handles are infallible: answerBlob watches `completed` to
+        // surface orphaned answers (MET-54).
+        return {
+          turnId: "trn_test",
+          completed: Promise.resolve({ status: "completed" }),
+        };
+      },
+    }),
+  },
 }));
 
 const { answerBlob } = await import("../blob-actions");

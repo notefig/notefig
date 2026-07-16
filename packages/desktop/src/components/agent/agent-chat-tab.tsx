@@ -57,9 +57,11 @@ import {
 import {
   authenticateAgentTask,
   cancelAgentTask,
+  deleteAgentSession,
   promptAgentTask,
   removeQueuedPrompt,
   retryAgentTaskAfterAuth,
+  reviveAgentTask,
 } from "@/agent/agent-service";
 import { PermissionCard } from "./permission-card";
 import { HarnessLogo } from "./harness-logo";
@@ -101,6 +103,15 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
   );
   const taskRow = taskRows[0];
   const isRunning = taskRow?.status === "running";
+  const isUnavailable = taskRow?.status === "unavailable";
+
+  // A restored session revives transparently when its tab is viewed: the
+  // dock mounts only the selected tab, so this fires on open/selection, and
+  // session/load streams the history back into the transcript (MET-54).
+  const status = taskRow?.status;
+  useEffect(() => {
+    if (status === "restored") reviveAgentTask(taskId);
+  }, [status, taskId]);
 
   const sendPrompt = useCallback(() => {
     const text = draft.trim();
@@ -169,15 +180,41 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
           <PermissionCard taskId={taskId} />
         </div>
         {taskRow.authRequired && <AuthCard task={taskRow} />}
-        <PromptBox
-          value={draft}
-          onChange={setDraft}
-          onSend={sendPrompt}
-          onStop={stopTask}
-          isRunning={isRunning}
-          harnessId={taskRow.harnessId}
-        />
+        {isUnavailable ? (
+          <UnavailableCard taskId={taskId} />
+        ) : (
+          <PromptBox
+            value={draft}
+            onChange={setDraft}
+            onSend={sendPrompt}
+            onStop={stopTask}
+            isRunning={isRunning}
+            harnessId={taskRow.harnessId}
+          />
+        )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Revival failed (MET-54): the harness no longer has this session — its
+ * transcript can't come back, so the composer gives way to an explanation
+ * plus the one action that makes sense: delete the session everywhere.
+ */
+function UnavailableCard({ taskId }: { taskId: string }) {
+  const { t } = useTranslation();
+  return (
+    <div className="pointer-events-auto flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
+      <span className="min-w-0 flex-1">{t("agentSessionUnavailableNotice")}</span>
+      <Button
+        variant="outline"
+        size="sm"
+        className="shrink-0"
+        onClick={() => void deleteAgentSession(taskId)}
+      >
+        {t("agentDeleteSession")}
+      </Button>
     </div>
   );
 }

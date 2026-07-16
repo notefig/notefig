@@ -5,6 +5,7 @@ import type {
   ClientCapabilities,
   ContentBlock,
   InitializeResponse,
+  LoadSessionResponse,
   McpServer,
   NewSessionResponse,
   PromptResponse,
@@ -119,6 +120,20 @@ export class MetristsAcpClient implements Client {
     mcpServers: McpServer[] = [],
   ): Promise<NewSessionResponse> {
     return this.requireConnection().newSession({ cwd, mcpServers });
+  }
+
+  /**
+   * ACP `session/load`: resume a harness-stored session in a fresh process.
+   * History replays as ordinary session/update notifications before this
+   * resolves (verified on both adapters, 2026-07-15 MET-54 spike — see the
+   * capability matrix's loadSession row); a bogus/evicted id rejects.
+   */
+  async loadSession(
+    sessionId: string,
+    cwd: string,
+    mcpServers: McpServer[] = [],
+  ): Promise<LoadSessionResponse> {
+    return this.requireConnection().loadSession({ sessionId, cwd, mcpServers });
   }
 
   async prompt(sessionId: string, blocks: ContentBlock[]): Promise<PromptResponse> {

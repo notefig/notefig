@@ -25,6 +25,11 @@ export class FakeAgent {
     async () => ({ stopReason: "end_turn" });
   /** Scripted `authenticate` behavior; throwing rejects the call. */
   onAuthenticate: (params: Json, agent: FakeAgent) => Promise<Json> = async () => ({});
+  /** Captured `session/load` params (revival assertions). */
+  loadSessionParams: Json | null = null;
+  /** Scripted `session/load`: emit replay updates via `this` before
+   *  returning; throwing rejects the call (evicted session). */
+  onLoadSession: (params: Json, agent: FakeAgent) => Promise<Json> = async () => ({});
 
   constructor(private readonly transport: LoopbackTransport) {
     transport.onLine((line) => void this.handle(JSON.parse(line)));
@@ -78,6 +83,20 @@ export class FakeAgent {
       case "session/new":
         this.newSessionParams = params;
         return this.respond(id, this.newSessionResult);
+      case "session/load": {
+        this.loadSessionParams = params;
+        try {
+          const result = await this.onLoadSession(params, this);
+          this.respond(id, result);
+        } catch (error) {
+          this.respondError(
+            id,
+            -32603,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+        return;
+      }
       case "authenticate": {
         try {
           const result = await this.onAuthenticate(params, this);
