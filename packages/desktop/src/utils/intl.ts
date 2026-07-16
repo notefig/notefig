@@ -349,6 +349,24 @@ i18n
             "This spawns {{harness}} as a local process with access to the files in this folder. Only continue for workspaces you trust.",
           agentTrustConfirm: "Trust & start",
 
+          // Remote agent tunnel (pairing with `metrists agent`)
+          tunnelPairTitle: "Connect to a machine",
+          tunnelPairDescription:
+            "Run `npx metrists agent` on your computer, then scan the QR code or paste the pairing code below.",
+          tunnelPairCodePlaceholder: "Paste pairing code",
+          tunnelPairConnect: "Connect",
+          tunnelPairConnecting: "Connecting…",
+          tunnelPairHint:
+            "The code never reaches any server — it stays in the link fragment.",
+          tunnelPairedTitle: "Connected machine",
+          tunnelPairedWith: "Paired with {{host}}",
+          tunnelPairDisconnect: "Disconnect",
+          tunnelPairDone: "Done",
+          tunnelConnectMachine: "Connect a machine",
+          tunnelStatusConnected: "Paired with {{host}}",
+          tunnelStatusConnecting: "Connecting…",
+          tunnelStatusReconnect: "Disconnected — re-pair",
+
           // Agent UI — session meta labels (describeTaskMeta)
           agentNeedsSignIn: "needs sign-in",
           agentRunning: "running",

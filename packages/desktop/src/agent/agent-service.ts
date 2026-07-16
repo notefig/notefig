@@ -1434,6 +1434,19 @@ export function respondToAgentPermission(
   getRegisteredTask(taskId)?.respondPermission(requestId, response);
 }
 
+/**
+ * Dispose every workspace's task manager at once — the web tunnel's
+ * disconnect teardown. Losing the socket kills every agent on the worker, so
+ * all live tasks go down together; each workspace's sessionful rows demote to
+ * "restored" for revival on reconnect, exactly as a per-workspace close does.
+ */
+export async function disposeAllWorkspaceTaskManagers(): Promise<void> {
+  const workspaces = Array.from(taskManagerRegistry.keys());
+  for (const workspacePath of workspaces) {
+    await disposeWorkspaceTaskManager(workspacePath);
+  }
+}
+
 export async function disposeWorkspaceTaskManager(
   workspacePath: string,
 ): Promise<void> {

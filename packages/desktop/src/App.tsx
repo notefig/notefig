@@ -1,5 +1,5 @@
 import "./App.css";
-import { Routes, Route, useNavigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { Workspace } from "@/components/workspace";
 import { Welcome } from "@/components/welcome";
 import { RootRedirect } from "@/components/root-redirect";
@@ -15,6 +15,8 @@ import { useAppSettings } from "@/hooks/use-app-settings";
 import { WorkspaceErrorBoundary } from "@/components/workspace-error-boundary";
 import { EditorHarness } from "@/test-harness/editor-harness";
 import { ensureStartupHarnessDiscovery } from "@/agent/harness-discovery";
+import { PairDialog } from "@/components/tunnel/pair-dialog";
+import { autoConnectStoredPairing } from "@/agent/tunnel/connect-flow";
 
 export const App = () => {
   const { setTheme } = useTheme();
@@ -37,8 +39,21 @@ export const App = () => {
     ensureStartupHarnessDiscovery();
   }, []);
 
+  // Web only: reconnect to a previously paired worker on boot. Non-fatal —
+  // a stale pairing (worker restarted → new URL) just leaves the tunnel
+  // disconnected and the status pill offers a re-pair.
   useEffect(() => {
-    if (location.pathname !== "/" && location.pathname !== "/welcome") {
+    if (isWeb()) void autoConnectStoredPairing();
+  }, []);
+
+  useEffect(() => {
+    // "/pair" is a transient deep-link landing that redirects to "/" — never
+    // record it, or RootRedirect would bounce back to it in a loop.
+    if (
+      location.pathname !== "/" &&
+      location.pathname !== "/welcome" &&
+      location.pathname !== "/pair"
+    ) {
       const fullPath = location.pathname + location.search;
       setLastPath(fullPath);
     }
@@ -73,6 +88,7 @@ export const App = () => {
       <Titlebar />
       {isWeb() && <MockDirectoryPickerDialog />}
       <TextPromptDialog />
+      <PairDialog />
       <div className="flex-1 min-h-0">
         <Routes>
           {import.meta.env.DEV && (
@@ -106,6 +122,10 @@ export const App = () => {
               </WorkspaceErrorBoundary>
             }
           />
+          {/* Deep-link landing: the pairing code was captured + scrubbed
+              from the fragment at module load (pair-dialog-store), which
+              also opened the dialog — this just returns to the app. */}
+          <Route path="/pair" element={<Navigate to="/" replace />} />
           <Route
             path="/"
             element={

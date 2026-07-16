@@ -40,10 +40,10 @@
       "require": "./dist/blobs/index.js",
       "default": "./dist/blobs/index.js"
     },
-    "./relay": {
-      "types": "./dist/relay/index.d.ts",
-      "require": "./dist/relay/index.js",
-      "default": "./dist/relay/index.js"
+    "./tunnel": {
+      "types": "./dist/tunnel/index.d.ts",
+      "require": "./dist/tunnel/index.js",
+      "default": "./dist/tunnel/index.js"
     }
   },
   "scripts": {
@@ -61,6 +61,7 @@
   },
   "dependencies": {
     "@zed-industries/agent-client-protocol": "^0.4.0",
+    "tweetnacl": "^1.0.3",
     "yaml": "^2.5.0",
     "zod": "^3.23.0"
   }

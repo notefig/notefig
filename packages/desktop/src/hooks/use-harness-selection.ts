@@ -15,6 +15,25 @@ import {
   HARNESS_OVERRIDES_KEY,
   HARNESS_SETTINGS_NAMESPACE,
 } from "@/agent/harness-discovery";
+import { useTunnelConnection } from "@/hooks/use-tunnel-connection";
+
+/**
+ * When paired with a remote worker, the machine that spawns harnesses is
+ * the worker, not this browser — so the picker must reflect what the worker
+ * advertised (web-side discovery is impossible; `runShellCommand` throws).
+ * A null return means "not remote — leave the list alone".
+ */
+function useWorkerAvailableIds(): Set<string> | null {
+  const state = useTunnelConnection();
+  return useMemo(() => {
+    if (state.status !== "connected") return null;
+    return new Set(
+      state.workerInfo.harnesses
+        .filter((advert) => advert.available)
+        .map((advert) => advert.id),
+    );
+  }, [state]);
+}
 
 const DEFAULT_HARNESS_KEY = "default-harness";
 
@@ -57,7 +76,7 @@ export function useDefaultHarness(): {
   setDefaultHarness: (harnessId: string) => void;
 } {
   const kv = useKv<string>("agent");
-  const effective = useEffectiveHarnesses();
+  const effective = useActiveHarnesses();
   const storedId = kv.get(DEFAULT_HARNESS_KEY);
   const defaultHarness =
     effective.find((harness) => harness.id === storedId) ??
@@ -81,5 +100,15 @@ export function useDefaultHarness(): {
  */
 export function useActiveHarnesses(): HarnessDefinition[] {
   const effective = useEffectiveHarnesses();
-  return effective.length > 0 ? effective : BUILT_IN_HARNESSES;
+  const workerIds = useWorkerAvailableIds();
+  return useMemo(() => {
+    const base = effective.length > 0 ? effective : BUILT_IN_HARNESSES;
+    // Remote: intersect with what the worker actually has. If that leaves
+    // nothing (worker has none of our known harnesses), show the worker's
+    // list anyway is impossible — fall back to `base` so the picker isn't a
+    // dead end; a spawn will fail with the worker's own error.
+    if (!workerIds) return base;
+    const filtered = base.filter((harness) => workerIds.has(harness.id));
+    return filtered.length > 0 ? filtered : base;
+  }, [effective, workerIds]);
 }

@@ -12,7 +12,11 @@ import type {
 } from "./platform-adapter.interface";
 import { requestTextPrompt } from "@/utils/text-prompt";
 import type { GitStorageHost } from "@metrists/git";
+import type { HarnessDefinition } from "@metrists/shared/agent";
 import type { AgentTransport, McpEndpoint } from "@/agent/agent-transport.interface";
+import { tunnelConnection } from "@/agent/tunnel/tunnel-connection";
+import { TunnelTransport } from "@/agent/tunnel/tunnel-transport";
+import { TunnelMcpEndpoint } from "@/agent/tunnel/tunnel-mcp-endpoint";
 
 export function createError(
   path: string,
@@ -513,17 +517,31 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     return host;
   }
 
-  createAgentTransport(): AgentTransport {
-    // Relay transport lands with Phase 3 web parity; the seam exists now so
-    // the agent service never constructs a transport itself.
-    throw new Error("Agent transport is not supported on this adapter yet.");
+  createAgentTransport(spec: {
+    taskId: string;
+    harness: HarnessDefinition;
+    workspacePath: string;
+    extraEnv: Record<string, string>;
+  }): AgentTransport {
+    // Agents on web run on a paired `metrists agent` worker: the harness is
+    // a child process there and its ACP stdio tunnels through as bytes. No
+    // worker paired ⇒ no agent runtime (files still work via this adapter,
+    // but there's nothing to spawn the agent on).
+    if (tunnelConnection.getState().status === "connected") {
+      return new TunnelTransport(spec);
+    }
+    throw new Error(
+      "Agents need a paired machine on the web — run `metrists agent` and pair.",
+    );
   }
 
-  createMcpEndpoint(): McpEndpoint {
-    // Same Phase 3 web-parity gap as createAgentTransport: a remote harness
-    // can't reach a desktop loopback relay; the seam exists now so the agent
-    // service never constructs an endpoint itself.
-    throw new Error("MCP endpoint is not supported on this adapter yet.");
+  createMcpEndpoint(spec: { taskId: string }): McpEndpoint {
+    if (tunnelConnection.getState().status === "connected") {
+      return new TunnelMcpEndpoint(spec.taskId);
+    }
+    throw new Error(
+      "Agents need a paired machine on the web — run `metrists agent` and pair.",
+    );
   }
 
   async runShellCommand(
