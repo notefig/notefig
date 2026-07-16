@@ -1,5 +1,5 @@
 import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
-import { MockElevenLabsClient as ElevenLabsClientMock } from '../../tests/__mocks__/elevenlabs.mock';
+import type { MockElevenLabsClient as ElevenLabsClientMock } from '../../tests/__mocks__/elevenlabs.mock';
 import { ElevenLabsException } from '../../exceptions/elevenlabs.exception';
 import type { ReadableStream } from 'stream/web';
 
@@ -17,7 +17,11 @@ class ElevenLabsService {
     }
 
     if (process.env.TEST) {
-      this.client = new ElevenLabsClientMock({
+      // Lazy: the mock lives under tests/ and isn't shipped in the published
+      // package — only require it when actually running in test mode.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { MockElevenLabsClient } = require('../../tests/__mocks__/elevenlabs.mock');
+      this.client = new MockElevenLabsClient({
         apiKey,
       });
     } else {

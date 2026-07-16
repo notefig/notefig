@@ -11,12 +11,19 @@
   "bin": {
     "metrists": "./dist/bin/metrists.js"
   },
+  "files": [
+    "dist",
+    "!dist/tests",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node esbuild.config.mjs",
     "dev": "ts-node ./bin/metrists.ts",
     "dev:build": "nodemon --config nodemon.json --exec npm run build",
     "lint": "eslint . --ext .ts",
-    "test": "jest"
+    "test": "jest",
+    "prepublishOnly": "npm run build"
   },
   "repository": {
     "type": "git",
@@ -29,7 +36,6 @@
   "homepage": "https://github.com/metrists/metrists#readme",
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.20.1",
-    "@metrists/shared": "*",
     "chalk": "^3.0.0",
     "chokidar": "^3.6.0",
     "commander": "12.1.0",
@@ -54,6 +60,7 @@
     "@types/ws": "^8.5.12",
     "@typescript-eslint/eslint-plugin": "5.38.1",
     "@typescript-eslint/parser": "5.38.1",
+    "esbuild": "^0.24.2",
     "eslint": "8.24.0",
     "eslint-config-prettier": "8.5.0",
     "eslint-plugin-import": "2.26.0",

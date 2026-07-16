@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Loader2, MonitorSmartphone, Wifi } from "lucide-react";
+import { Check, Copy, Loader2, MonitorSmartphone, Wifi } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -36,7 +36,25 @@ export function PairDialog() {
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const autoConnected = useRef<string | null>(null);
+
+  const copyCommand = async () => {
+    const command = "npx metrists agent";
+    try {
+      await navigator.clipboard.writeText(command);
+    } catch {
+      // Clipboard API blocked (insecure context / permission) — fall back.
+      const el = document.createElement("textarea");
+      el.value = command;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
 
   const connect = async (pairingCode: string) => {
     setSubmitting(true);
@@ -124,6 +142,19 @@ export function PairDialog() {
               if (code.trim()) void connect(code.trim());
             }}
           >
+            <button
+              type="button"
+              onClick={() => void copyCommand()}
+              title={t("copy")}
+              className="flex w-full items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-xs hover:bg-muted"
+            >
+              <span className="truncate">npx metrists agent</span>
+              {copied ? (
+                <Check className="h-3.5 w-3.5 shrink-0 text-green-500" />
+              ) : (
+                <Copy className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              )}
+            </button>
             <input
               autoFocus
               value={code}

@@ -9,9 +9,10 @@ import {
   pairingLink,
   BUILT_IN_HARNESSES,
   type HarnessAdvert,
-} from '@metrists/shared';
+} from '../lib/shared';
 import { AbstractCommand } from './abstract.command';
 import { AgentWorker, probeHarnesses } from '../lib/agent-worker';
+import { open } from '../lib/utils/open.util';
 import type { Command } from 'commander';
 
 /**
@@ -43,7 +44,12 @@ export class AgentCommand extends AbstractCommand {
       .option(
         '--tunnel-url <url>',
         'pair against this wss:// endpoint instead of ws://127.0.0.1 (ngrok, Tailscale Funnel, your own proxy)',
-      );
+      )
+      .option(
+        '--app-url <url>',
+        'web app to open/pair with (default: https://app.metrists.com, or METRISTS_APP_URL)',
+      )
+      .option('--no-open', "don't auto-open the browser to pair");
   }
 
   public async handle(command: Command) {
@@ -66,7 +72,18 @@ export class AgentCommand extends AbstractCommand {
     this.logger.info(`Worker listening on 127.0.0.1:${port}`);
 
     const url = options.tunnelUrl ?? `ws://127.0.0.1:${port}`;
-    this.printPairing(secret, url, workspacePath, harnesses);
+    const appUrl = options.appUrl ?? process.env.METRISTS_APP_URL ?? undefined;
+    const links = this.printPairing(secret, url, workspacePath, harnesses, appUrl);
+
+    // commander sets `open` to false for --no-open (the negatable flag).
+    if (options.open !== false) {
+      this.logger.info('Opening your browser to pair...');
+      try {
+        open(links.web);
+      } catch {
+        // Non-fatal: the printed link + QR are the manual fallback.
+      }
+    }
 
     await new Promise<void>((resolve) => {
       const shutdown = async () => {
@@ -100,9 +117,10 @@ export class AgentCommand extends AbstractCommand {
     url: string,
     workspacePath: string,
     harnesses: HarnessAdvert[],
-  ): void {
+    appUrl?: string,
+  ): { web: string; deepLink: string } {
     const code = encodePairingCode(secret, url);
-    const links = pairingLink(code);
+    const links = pairingLink(code, appUrl);
     const harnessLines = harnesses
       .map((advert) => {
         const label =
@@ -132,5 +150,6 @@ export class AgentCommand extends AbstractCommand {
       ),
     );
     console.log('');
+    return links;
   }
 }

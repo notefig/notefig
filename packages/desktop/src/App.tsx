@@ -16,7 +16,10 @@ import { WorkspaceErrorBoundary } from "@/components/workspace-error-boundary";
 import { EditorHarness } from "@/test-harness/editor-harness";
 import { ensureStartupHarnessDiscovery } from "@/agent/harness-discovery";
 import { PairDialog } from "@/components/tunnel/pair-dialog";
-import { autoConnectStoredPairing } from "@/agent/tunnel/connect-flow";
+import {
+  autoConnectStoredPairing,
+  watchCrossTabPairing,
+} from "@/agent/tunnel/connect-flow";
 
 export const App = () => {
   const { setTheme } = useTheme();
@@ -41,9 +44,12 @@ export const App = () => {
 
   // Web only: reconnect to a previously paired worker on boot. Non-fatal —
   // a stale pairing (worker restarted → new URL) just leaves the tunnel
-  // disconnected and the status pill offers a re-pair.
+  // disconnected and the status pill offers a re-pair. Also listen for a
+  // pairing done in another tab (the CLI-opened tab) and connect this one.
   useEffect(() => {
-    if (isWeb()) void autoConnectStoredPairing();
+    if (!isWeb()) return;
+    void autoConnectStoredPairing();
+    return watchCrossTabPairing();
   }, []);
 
   useEffect(() => {

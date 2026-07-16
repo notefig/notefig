@@ -6,7 +6,7 @@
  * linger in history), then the dialog opens pre-filled to auto-connect.
  */
 import { useSyncExternalStore } from "react";
-import { pairingCodeFromHash } from "./connect-flow";
+import { decodePairingCode } from "@metrists/shared/tunnel";
 
 export type PairDialogState = { open: boolean; prefillCode?: string };
 
@@ -15,6 +15,22 @@ const listeners = new Set<() => void>();
 
 function emit(): void {
   for (const listener of listeners) listener();
+}
+
+/**
+ * A valid pairing code out of a URL fragment, or null. Kept here (not
+ * imported from connect-flow) so this store — loaded very early, at module
+ * import — doesn't pull in connect-flow's heavy agent-service graph.
+ */
+function pairingCodeFromHash(hash: string): string | null {
+  const code = hash.startsWith("#") ? hash.slice(1) : hash;
+  if (!code) return null;
+  try {
+    decodePairingCode(code);
+    return code;
+  } catch {
+    return null;
+  }
 }
 
 // Capture a fragment-carried code before anything renders, and scrub it.

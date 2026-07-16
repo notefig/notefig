@@ -53,4 +53,13 @@ describe("pairing codes", () => {
     expect(links.web).toBe("https://app.metrists.com/pair#CODE");
     expect(links.deepLink).toBe("metrists://pair#CODE");
   });
+
+  it("honors an app-base-url override (and trims a trailing slash)", () => {
+    expect(pairingLink("CODE", "http://localhost:1420").web).toBe(
+      "http://localhost:1420/pair#CODE",
+    );
+    expect(pairingLink("CODE", "https://self.host/").web).toBe(
+      "https://self.host/pair#CODE",
+    );
+  });
 });

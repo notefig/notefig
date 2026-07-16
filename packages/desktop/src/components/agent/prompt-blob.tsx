@@ -41,6 +41,7 @@ import {
 } from "@/agent/agent-collections";
 import { agents } from "@/agent/agents";
 import { cancelAgentTask, removeQueuedPrompt } from "@/agent/agent-service";
+import { ensureAgentRuntime } from "@/agent/tunnel/require-connection";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
 import { suppressEditorFocus } from "@/components/editor/editor-store";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
@@ -229,6 +230,7 @@ export const PromptBlob = memo(function PromptBlob({
   const send = useCallback(async () => {
     const text = getPromptBlob(blobId).draft.trim();
     if (!text || isSending) return;
+    if (!ensureAgentRuntime()) return;
     if (!kv.get(trustKey) && !confirmTrust) {
       setConfirmTrust(true);
       return;

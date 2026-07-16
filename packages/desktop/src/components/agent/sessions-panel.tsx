@@ -30,6 +30,7 @@ import {
   deleteAgentSession,
   startAgentTask,
 } from "@/agent/agent-service";
+import { ensureAgentRuntime } from "@/agent/tunnel/require-connection";
 import {
   describeTaskMeta,
   useAgentTaskList,
@@ -86,6 +87,7 @@ export function SessionsPanel({
 
   const handleCreate = useCallback(
     (harness: HarnessDefinition) => {
+      if (!ensureAgentRuntime()) return;
       if (kv.get(trustKey)) {
         startTask(harness);
       } else {

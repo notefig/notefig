@@ -22,6 +22,7 @@ import {
   forgetPairing,
   getStoredPairing,
   pairingCodeFromHash,
+  watchCrossTabPairing,
 } from "../connect-flow";
 import { tunnelConnection } from "../tunnel-connection";
 import { FakeWorker } from "./fake-worker";
@@ -114,6 +115,43 @@ describe("connect-flow", () => {
     const info = await connectWithCode(codeFor(second));
     expect(info.name).toBe("second");
     expect(tunnelConnection.getState().status).toBe("connected");
+  });
+});
+
+describe("watchCrossTabPairing", () => {
+  it("connects a disconnected tab when another tab writes a pairing", async () => {
+    const worker = useWorker();
+    // Simulate the pairing another tab persisted (KV + the code the storage
+    // event carries). autoConnectStoredPairing reads the stored code.
+    kv.set("tunnel:pairing", { code: codeFor(worker) });
+
+    const cleanup = watchCrossTabPairing();
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: "metrists-kv:tunnel:pairing",
+        newValue: "{}",
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(tunnelConnection.getState().status).toBe("connected");
+    });
+    cleanup();
+  });
+
+  it("ignores unrelated keys and its own null clears", () => {
+    const cleanup = watchCrossTabPairing();
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: "something-else", newValue: "x" }),
+    );
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: "metrists-kv:tunnel:pairing",
+        newValue: null,
+      }),
+    );
+    expect(tunnelConnection.getState().status).toBe("disconnected");
+    cleanup();
   });
 });
 

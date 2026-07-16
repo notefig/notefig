@@ -46,11 +46,13 @@
   "exclude": [
     "dist",
     "e2e",
+    "tests",
     ".git",
     ".circleci",
     ".eslint.json",
     ".prettierrc",
     "nodemon.json",
-    "**/*.test.ts"
+    "**/*.test.ts",
+    "**/*.e2e.ts"
   ]
 }

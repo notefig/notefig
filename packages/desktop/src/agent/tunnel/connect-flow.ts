@@ -137,3 +137,22 @@ export async function autoConnectStoredPairing(): Promise<WorkerInfo | null> {
 export function disconnectTunnel(): void {
   tunnelConnection.disconnect();
 }
+
+/**
+ * Cross-tab sync: when another tab pairs (e.g. the tab the CLI opened), it
+ * writes the pairing to localStorage. The `storage` event fires only in the
+ * OTHER tabs — so a tab that's already open and still disconnected picks up
+ * the new pairing and connects too. Returns a cleanup fn.
+ */
+export function watchCrossTabPairing(): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  const KEY = `metrists-kv:${TUNNEL_KV_NAMESPACE}:${TUNNEL_PAIRING_KEY}`;
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== KEY || !event.newValue) return;
+    if (tunnelConnection.getState().status === "disconnected") {
+      void autoConnectStoredPairing();
+    }
+  };
+  window.addEventListener("storage", onStorage);
+  return () => window.removeEventListener("storage", onStorage);
+}

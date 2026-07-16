@@ -41,7 +41,7 @@ import {
   type InnerFrame,
   type McpServerSpec,
   type TunnelErrorCode,
-} from '@metrists/shared';
+} from './shared';
 import type { Logger } from './utils/logger.util';
 
 const KILL_GRACE_MS = 5_000;

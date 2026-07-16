@@ -363,6 +363,7 @@ i18n
           tunnelPairDisconnect: "Disconnect",
           tunnelPairDone: "Done",
           tunnelConnectMachine: "Connect a machine",
+          tunnelNoConnection: "Connect a machine to run agents on the web.",
           tunnelStatusConnected: "Paired with {{host}}",
           tunnelStatusConnecting: "Connecting…",
           tunnelStatusReconnect: "Disconnected — re-pair",

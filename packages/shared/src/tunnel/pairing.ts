@@ -128,13 +128,19 @@ export function decodePairingCode(code: string): {
   return { secret, url };
 }
 
+export const DEFAULT_APP_URL = "https://app.metrists.com";
+
 /**
  * Shareable pairing links. The code lives in the fragment so it never
- * appears in any server's request log.
+ * appears in any server's request log. `appBaseUrl` overrides the web app
+ * origin (dev / self-host) — defaults to the hosted app.
  */
-export function pairingLink(code: string): { web: string; deepLink: string } {
+export function pairingLink(
+  code: string,
+  appBaseUrl: string = DEFAULT_APP_URL,
+): { web: string; deepLink: string } {
   return {
-    web: `https://app.metrists.com/pair#${code}`,
+    web: `${appBaseUrl.replace(/\/$/, "")}/pair#${code}`,
     deepLink: `metrists://pair#${code}`,
   };
 }
