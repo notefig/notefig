@@ -167,6 +167,28 @@ describe("tunnel transport symmetry", () => {
     expect(worker.receivedCtl.some((m) => m.op === "start-task")).toBe(true);
   });
 
+  it("uses the worker's real path as the ACP session cwd (not the browser path)", async () => {
+    // The browser addresses files by its own fs-adapter path; the agent runs
+    // on the worker and validates cwd there, so session/new must carry the
+    // worker's --dir (pair-ack), never the browser workspace path.
+    let captured: any = null;
+    const { connection } = await connectedPair({
+      workspacePath: "/worker/real-dir",
+      configureAgent: (agent) => {
+        agent.onPrompt = async (_p, _a) => {
+          captured = agent.newSessionParams;
+          return { stopReason: "end_turn" };
+        };
+      },
+    });
+
+    const task = new TaskManager("/browser-synthetic").createTask(claudeHarness);
+    await task.start(tunnelFactory(connection, task));
+    await runPrompt(task, "hi");
+
+    expect(captured?.cwd).toBe("/worker/real-dir");
+  });
+
   it("carries OPENCODE_CONFIG onto the worker: config file + spawn env", async () => {
     const { worker, connection } = await connectedPair();
 

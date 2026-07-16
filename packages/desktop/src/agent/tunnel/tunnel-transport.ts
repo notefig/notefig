@@ -26,6 +26,15 @@ export type TunnelTransportSpec = {
 export class TunnelTransport implements AgentTransport {
   readonly locus = "remote" as const;
 
+  /**
+   * The agent runs on the worker, so ACP's cwd must be the worker's real
+   * `--dir` (from pair-ack) — not the browser's fs-adapter workspace path.
+   * The worker spawns the child there too; the two stay consistent.
+   */
+  get agentCwd(): string | undefined {
+    return this.connection.workerInfo?.workspacePath;
+  }
+
   private readonly lineListeners = new Set<(line: string) => void>();
   private readonly closeListeners = new Set<
     (error?: AgentTransportError) => void

@@ -187,6 +187,15 @@ export class AgentTask {
   private client: MetristsAcpClient | null = null;
   private transport: AgentTransport | null = null;
   private sessionId: string | null = null;
+
+  /**
+   * The cwd the agent process runs in. Equals workspacePath on desktop; on a
+   * remote worker it's the worker's real folder (transport.agentCwd), since
+   * ACP validates cwd on the machine the agent runs on, not this browser.
+   */
+  private get agentCwd(): string {
+    return this.transport?.agentCwd ?? this.workspacePath;
+  }
   /**
    * Pre-insert cache only: seeds the row in upsertTaskRow and answers reads
    * before the row exists. Once it does, the row is the source of truth —
@@ -354,7 +363,7 @@ export class AgentTask {
         );
       } else {
         const session = await withStartupTimeout(
-          this.client.newSession(this.workspacePath, mcpServers),
+          this.client.newSession(this.agentCwd, mcpServers),
           "session/new",
         );
         this.sessionId = session.sessionId;
@@ -441,7 +450,7 @@ export class AgentTask {
       userText: "",
     };
     try {
-      await this.client.loadSession(sessionId, this.workspacePath, mcpServers);
+      await this.client.loadSession(sessionId, this.agentCwd, mcpServers);
       this.sessionId = sessionId;
     } finally {
       const turn = this.currentTurn;

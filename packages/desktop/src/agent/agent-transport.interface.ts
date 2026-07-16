@@ -57,6 +57,16 @@ export interface AgentTransport {
   readonly locus: "local" | "remote";
 
   /**
+   * The working directory the agent process actually runs in, when it
+   * differs from the app's workspace path. On web the app addresses files by
+   * its own fs-adapter path (e.g. a File System Access synthetic path) but
+   * the agent runs on a remote worker, so ACP's `cwd` must be the worker's
+   * real folder — the transport is the only thing that knows it. Undefined
+   * for local transports (the workspace path is already the real path).
+   */
+  readonly agentCwd?: string;
+
+  /**
    * Bring the transport live (spawn the process / open the socket) before any
    * ACP traffic. Rejects with an AgentTransportError on spawn/connect failure.
    * Idempotent-safe to await once; in-memory transports (loopback) no-op.
