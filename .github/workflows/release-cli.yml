@@ -49,7 +49,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add packages/cli/package.json packages/cli/package-lock.json
+          # Single-lockfile npm-workspaces monorepo: there is no
+          # packages/cli/package-lock.json — only the root lock, which npm
+          # version may refresh. Stage the CLI manifest plus the root lock
+          # (a no-op if unchanged); never a nonexistent per-package lock.
+          git add packages/cli/package.json package-lock.json
           git commit -m "cli: bump to v${{ inputs.version }}"
           git push origin ${{ github.ref_name }}
 
