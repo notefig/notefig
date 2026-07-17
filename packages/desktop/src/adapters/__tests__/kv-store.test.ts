@@ -199,4 +199,10 @@ describe("BaseBrowserAdapter KV Store", () => {
       expect(source).toBeUndefined();
     });
   });
+
+  describe("runShellCommand", () => {
+    it("rejects — a browser sandbox can't run local shell scripts", async () => {
+      await expect(adapter.runShellCommand("echo hi")).rejects.toThrow();
+    });
+  });
 });

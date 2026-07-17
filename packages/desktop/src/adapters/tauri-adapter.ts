@@ -20,6 +20,10 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import type { GitStorageHost } from "@metrists/git";
+import type { HarnessDefinition } from "@metrists/shared/agent";
+import type { AgentTransport, McpEndpoint } from "@/agent/agent-transport.interface";
+import { TauriStdioTransport } from "@/agent/tauri-stdio-transport";
+import { TauriMcpTransport } from "@/agent/tauri-mcp-transport";
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LazyStore } from "@tauri-apps/plugin-store";
@@ -649,6 +653,42 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     };
 
     return host;
+  }
+
+  createAgentTransport(spec: {
+    taskId: string;
+    harness: HarnessDefinition;
+    workspacePath: string;
+    extraEnv?: Record<string, string>;
+  }): AgentTransport {
+    return new TauriStdioTransport({
+      procId: spec.taskId,
+      program: spec.harness.command,
+      // `${workspace}` placeholder → the actual workspace path (e.g.
+      // OpenCode's `acp --cwd ${workspace}`).
+      args: spec.harness.args.map((arg) =>
+        arg.split("${workspace}").join(spec.workspacePath),
+      ),
+      cwd: spec.workspacePath,
+      env: { ...spec.harness.env, ...spec.extraEnv },
+    });
+  }
+
+  createMcpEndpoint(spec: { taskId: string }): McpEndpoint {
+    return new TauriMcpTransport(spec.taskId);
+  }
+
+  async runShellCommand(
+    script: string,
+  ): Promise<{ stdout: string; exitCode: number }> {
+    const result = await invoke<
+      | { ok: true; value: { stdout: string; exitCode: number | null } }
+      | { ok: false; error: { message: string } }
+    >("run_shell_command", { script });
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+    return { stdout: result.value.stdout, exitCode: result.value.exitCode ?? -1 };
   }
 
   getUpdater(): PlatformUpdater {

@@ -9,6 +9,7 @@
  * serialize output — is identical to the editor's.
  */
 
+import { Node } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "tiptap-markdown";
 import Underline from "@tiptap/extension-underline";
@@ -26,7 +27,9 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { common, createLowlight } from "lowlight";
 
-const lowlight = createLowlight(common);
+export { CodeBlockLowlight };
+
+export const lowlight = createLowlight(common);
 
 // html must stay on: underline/highlight/sub/sup have no markdown syntax
 // and serialize as inline HTML tags (which is also what the previous
@@ -165,13 +168,73 @@ export const MarkdownImageBase = Image.extend({
 });
 
 /**
+ * Transactions that only touch UI-only nodes (today: the aiPrompt widget)
+ * carry this meta so the autosave path can ignore them — they never change
+ * the serialized markdown, and a save would only churn the file watcher.
+ */
+export const UI_ONLY_TRANSACTION_META = "uiOnlyNodeChange";
+
+/**
+ * The inline AI prompt widget's schema node — a block atom that is pure UI:
+ * it serializes to NOTHING (the markdown storage below), so it can live in
+ * the document flow without ever touching the file on disk. This base is
+ * worker-safe (schema + serializer only); the renderer extends it with the
+ * React node view and the empty-doc keeper in ai-prompt-node.tsx. Without
+ * the explicit no-op serializer, tiptap-markdown's html fallback would
+ * write the node's placeholder <div> into the file.
+ */
+export const AiPromptNodeBase = Node.create({
+  name: "aiPrompt",
+  group: "block",
+  atom: true,
+  selectable: true,
+
+  addAttributes() {
+    return {
+      // True for instances summoned by typing "/" — gates the revert-to-"/"
+      // contract (Esc / a second "/" turn the widget back into a literal
+      // slash). Keeper-inserted nodes stay false. Never serialized.
+      summoned: { default: false },
+      // Per-instance identity: every widget keys its own state (draft,
+      // bound turn) in prompt-blob-store by this id — a document can hold
+      // several widgets, so the document path is not identity enough.
+      // Minted at every creation site; null only for schema-default nodes,
+      // which the node view repairs on mount. Never serialized.
+      blobId: { default: null },
+    };
+  },
+
+  parseHTML() {
+    // Internal HTML round-trips only (clipboard); markdown never produces it.
+    return [{ tag: 'div[data-type="ai-prompt"]' }];
+  },
+
+  renderHTML() {
+    return ["div", { "data-type": "ai-prompt" }];
+  },
+
+  addStorage() {
+    return {
+      markdown: {
+        serialize() {
+          // UI-only: contributes nothing to the file.
+        },
+      },
+    };
+  },
+});
+
+/**
  * The schema-defining extension list, in the same order the editor has
  * always registered them (order can influence schema construction). The
- * image extension is injectable so the renderer can substitute its
- * node-view-bearing subclass without duplicating the list.
+ * image, codeBlock, and aiPrompt extensions are injectable so the renderer
+ * can substitute their node-view-bearing subclasses without duplicating the
+ * list.
  */
 export function createSchemaExtensions(
   image: typeof MarkdownImageBase = MarkdownImageBase,
+  codeBlock: typeof CodeBlockLowlight = CodeBlockLowlight,
+  aiPrompt: typeof AiPromptNodeBase = AiPromptNodeBase,
 ) {
   return [
     StarterKit.configure({
@@ -198,6 +261,7 @@ export function createSchemaExtensions(
     TableRow,
     TableCell,
     TableHeader,
-    CodeBlockLowlight.configure({ lowlight }),
+    codeBlock.configure({ lowlight }),
+    aiPrompt,
   ];
 }

@@ -187,6 +187,65 @@ describe("dockable-layout", () => {
     expect(left?.selected).toBe("a.md");
   });
 
+  // Agent chat tabs ride the same layout with `agent:<taskId>` ids — the
+  // transforms must stay id-agnostic.
+  it("opens an agent tab id alongside file tabs and dedupes on reopen", () => {
+    const layout = makeTwoWindowLayout();
+    const opened = openFileInLayout(layout, {
+      tabId: "agent:task_1",
+      intent: "new-tab",
+      targetWindowId: "window-left",
+    });
+    const left = findWindowContainingTab(opened, "agent:task_1");
+    expect(left?.children).toEqual(["a.md", "b.md", "agent:task_1"]);
+    expect(left?.selected).toBe("agent:task_1");
+
+    // Reopening selects the existing tab instead of duplicating it.
+    const reopened = openFileInLayout(opened, {
+      tabId: "agent:task_1",
+      intent: "new-tab",
+      targetWindowId: "window-right",
+    });
+    const stillLeft = findWindowContainingTab(reopened, "agent:task_1");
+    expect(stillLeft?.id).toBe("window-left");
+    expect(
+      stillLeft?.children.filter((id) => id === "agent:task_1"),
+    ).toEqual(["agent:task_1"]);
+  });
+
+  it("removing a window's only agent tab collapses the window", () => {
+    const layout: LayoutNode[] = [
+      {
+        type: "Panel",
+        id: "panel-root",
+        orientation: "row",
+        children: [
+          {
+            type: "Window",
+            id: "window-left",
+            children: ["a.md"],
+            selected: "a.md",
+            size: 0.5,
+          },
+          {
+            type: "Window",
+            id: "window-right",
+            children: ["agent:task_1"],
+            selected: "agent:task_1",
+            size: 0.5,
+          },
+        ],
+        size: 1,
+      },
+    ];
+    const next = removeTabFromLayout(layout, "agent:task_1");
+    expect(findWindowContainingTab(next, "agent:task_1")).toBeNull();
+    expect(resolveTargetWindowId(next, "window-right")).not.toBe(
+      "window-right",
+    );
+    expect(findWindowContainingTab(next, "a.md")).not.toBeNull();
+  });
+
   it("openFileInLayout without moveIfOpen selects in place (active-window fallback safety)", () => {
     const layout = makeTwoWindowLayout();
     const next = openFileInLayout(layout, {

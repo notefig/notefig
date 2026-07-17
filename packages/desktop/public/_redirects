@@ -1,0 +1,7 @@
+# SPA fallback for Cloudflare Pages. The web app is a client-routed SPA
+# (react-router: /, /welcome, /pair). Hard navigations to any of those —
+# notably the CLI-opened pairing entrypoint app.metrists.com/pair#<code> —
+# must serve index.html so the app boots and its router (and the fragment
+# capture in agent/tunnel/pair-dialog-store.ts) can take over. Without this
+# rule Cloudflare Pages 404s /pair and pairing never starts.
+/*    /index.html   200

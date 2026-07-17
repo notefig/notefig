@@ -20,6 +20,36 @@ npx metrists publish
 
 That's it. You can push your files to a repository and connect your CI/CD pipeline. From now, every time you push to your repository, Metrists will automatically publish your book.
 
+## Using AI agents from the web app (`metrists agent`)
+
+The Metrists web app can drive AI coding agents (Claude Code, OpenCode, …)
+that run on **your** machine. The browser can't spawn processes, so a small
+local worker does it for you:
+
+```bash
+npx metrists agent
+```
+
+This starts a local worker in the current folder, prints a QR code + pairing
+link, and opens your browser to pair. The agent runs on your machine and edits
+files directly; the web app talks to it over an end-to-end-encrypted
+connection (the pairing code never reaches any server — it rides the link
+fragment). Leave it running while you work; `Ctrl-C` stops it.
+
+Options:
+
+| Flag | Purpose |
+|------|---------|
+| `--dir <path>` | Folder the agent operates on (default: current dir). |
+| `--port <n>` | Pin the local WebSocket port (default: ephemeral). |
+| `--app-url <url>` | Web app to open/pair with (default: `https://app.metrists.com`; or set `METRISTS_APP_URL`). |
+| `--no-open` | Don't auto-open the browser. |
+| `--tunnel-url <url>` | Pair over a `wss://` tunnel you provide (ngrok, Tailscale Funnel, your own proxy) instead of `ws://127.0.0.1` — for reaching the worker from another device. |
+
+The worker only ever spawns the harnesses it already knows about
+(Claude Code / OpenCode / …) and never runs anything received over the
+connection. See the app's "Connect a machine" dialog for pairing.
+
 ### Documentation
 
 Follow [the full documentation](https://metrists.com/docs) to get started building your own project.

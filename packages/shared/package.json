@@ -6,24 +6,44 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "default": "./dist/index.js"
     },
     "./types": {
+      "types": "./dist/types/index.d.ts",
       "require": "./dist/types/index.js",
-      "types": "./dist/types/index.d.ts"
+      "default": "./dist/types/index.js"
     },
     "./utils": {
+      "types": "./dist/utils/index.d.ts",
       "require": "./dist/utils/index.js",
-      "types": "./dist/utils/index.d.ts"
+      "default": "./dist/utils/index.js"
     },
     "./parsing": {
+      "types": "./dist/parsing/index.d.ts",
       "require": "./dist/parsing/index.js",
-      "types": "./dist/parsing/index.d.ts"
+      "default": "./dist/parsing/index.js"
     },
     "./validation": {
+      "types": "./dist/validation/index.d.ts",
       "require": "./dist/validation/index.js",
-      "types": "./dist/validation/index.d.ts"
+      "default": "./dist/validation/index.js"
+    },
+    "./agent": {
+      "types": "./dist/agent/index.d.ts",
+      "require": "./dist/agent/index.js",
+      "default": "./dist/agent/index.js"
+    },
+    "./blobs": {
+      "types": "./dist/blobs/index.d.ts",
+      "require": "./dist/blobs/index.js",
+      "default": "./dist/blobs/index.js"
+    },
+    "./tunnel": {
+      "types": "./dist/tunnel/index.d.ts",
+      "require": "./dist/tunnel/index.js",
+      "default": "./dist/tunnel/index.js"
     }
   },
   "scripts": {
@@ -34,11 +54,15 @@
   "devDependencies": {
     "@types/jest": "^29.5.12",
     "@types/node": "^20.11.30",
+    "fast-check": "^3.23.1",
     "jest": "^29.7.0",
     "ts-jest": "^29.2.4",
     "typescript": "^5.4.0"
   },
   "dependencies": {
+    "@zed-industries/agent-client-protocol": "^0.4.0",
+    "tweetnacl": "^1.0.3",
+    "yaml": "^2.5.0",
     "zod": "^3.23.0"
   }
 }

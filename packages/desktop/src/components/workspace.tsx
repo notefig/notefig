@@ -36,6 +36,15 @@ import {
   handleContentFileSystemChange,
 } from "@/utils/file-sync";
 import { disposeAllEditors, getEditor } from "@/components/editor/editor-store";
+import { AgentChatTab } from "@/components/agent/agent-chat-tab";
+import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
+import { useAgentTasksReady } from "@/hooks/use-agent-tasks";
+import { agentTasksCollection } from "@/agent/agent-collections";
+import {
+  agentTabId,
+  agentTaskIdFromTabId,
+  isAgentTabId,
+} from "@/utils/agent-tab-id";
 import {
   type FileTreeMode,
   FILE_TREE_IDLE,
@@ -78,16 +87,43 @@ export const Workspace = () => {
     };
   }, []);
 
+  // Tear down agent runtimes when leaving the workspace (their rows persist
+  // and demote to "restored" — the tasks collection is storage-backed,
+  // MET-54). On mount, kick the collection's boot load so restored sessions
+  // are in place before tab pruning runs.
+  useEffect(() => {
+    return () => {
+      void disposeWorkspaceTaskManager(workspacePath);
+    };
+  }, [workspacePath]);
+  const agentTasksReady = useAgentTasksReady();
+
+  // Agent chat tabs share the layout with file tabs but are keyed
+  // `agent:<taskId>` — split them out so every file-path code path
+  // (metadata queries, content watching, missing-file pruning) sees only
+  // real paths.
+  const fileOpenTabIds = useMemo(
+    () => openTabs.filter((tabId) => !isAgentTabId(tabId)),
+    [openTabs],
+  );
+  const agentOpenTaskIds = useMemo(
+    () =>
+      openTabs
+        .map(agentTaskIdFromTabId)
+        .filter((taskId): taskId is string => taskId !== null),
+    [openTabs],
+  );
+
   // Query metadata and content for all open tabs
   // Uses left join so files appear immediately (metadata loads eagerly)
   // Content loads on-demand; PolymorphicEditor shows a placeholder until it arrives
   const { data: fileDataWithContent = [] } = useLiveQuery(
     (q) =>
-      openTabs.length === 0
+      fileOpenTabIds.length === 0
         ? undefined
         : q
             .from({ file: metadata })
-            .where(({ file }) => inArray(file.path, openTabs))
+            .where(({ file }) => inArray(file.path, fileOpenTabIds))
             .leftJoin({ content }, ({ file, content }) =>
               eq(file.path, content.path),
             )
@@ -98,7 +134,43 @@ export const Workspace = () => {
               isContentLoaded: content !== undefined,
               contentError: content?.error,
             })),
-    [workspacePath, ...openTabs],
+    [workspacePath, ...fileOpenTabIds],
+  );
+
+  // Task rows for open agent tabs. Chat tab titles/state track the rows live.
+  const { data: openAgentTaskRows = [] } = useLiveQuery(
+    (q) =>
+      agentOpenTaskIds.length === 0
+        ? undefined
+        : q
+            .from({ task: agentTasksCollection })
+            .where(({ task }) => inArray(task.taskId, agentOpenTaskIds)),
+    [...agentOpenTaskIds],
+  );
+
+  const agentDockableTabs = useMemo(
+    () =>
+      openAgentTaskRows.map((task) => (
+        <Dockable.Tab
+          key={agentTabId(task.taskId)}
+          id={agentTabId(task.taskId)}
+          // Session titles are first-prompt text (up to 60 chars) — far
+          // wider than file names, so give tabs a much shorter ellipsis.
+          name={
+            task.title.length > 24
+              ? `${task.title.slice(0, 23).trimEnd()}…`
+              : task.title
+          }
+          // closeTab (functional layout update) rather than a closure over
+          // `layout`: keeps this memo stable across tab selects/drags. It
+          // never cancels the session — that stays reachable from the
+          // sessions sidebar.
+          onClose={() => closeTab(agentTabId(task.taskId))}
+        >
+          <AgentChatTab taskId={task.taskId} />
+        </Dockable.Tab>
+      )),
+    [openAgentTaskRows, closeTab],
   );
 
   const dockableTabs = useMemo(
@@ -108,10 +180,7 @@ export const Workspace = () => {
           key={fileEntry.path}
           id={fileEntry.path}
           name={getFileName(fileEntry.path)}
-          onClose={() => {
-            const nextLayout = removeTabFromLayout(layout, fileEntry.path);
-            handleLayoutChange(nextLayout);
-          }}
+          onClose={() => closeTab(fileEntry.path)}
         >
           <PolymorphicEditor
             file={fileEntry as FileEntry}
@@ -121,7 +190,12 @@ export const Workspace = () => {
           />
         </Dockable.Tab>
       )),
-    [fileDataWithContent, workspacePath, layout, handleLayoutChange],
+    [fileDataWithContent, workspacePath, closeTab],
+  );
+
+  const allDockableTabs = useMemo(
+    () => [...dockableTabs, ...agentDockableTabs],
+    [dockableTabs, agentDockableTabs],
   );
 
   const activeFileData = fileDataWithContent.find(
@@ -135,8 +209,22 @@ export const Workspace = () => {
   );
 
   const missingOpenTabIds = useMemo(
-    () => openTabs.filter((tabId) => !existingOpenTabIds.has(tabId)),
-    [openTabs, existingOpenTabIds],
+    () => fileOpenTabIds.filter((tabId) => !existingOpenTabIds.has(tabId)),
+    [fileOpenTabIds, existingOpenTabIds],
+  );
+
+  // Agent tabs whose task row is gone. Persisted sessions come back as
+  // "restored" rows (MET-54), so pruning waits for the collection's boot
+  // load — only tabs whose task genuinely no longer exists (deleted
+  // session, corrupt row) are dropped.
+  const missingAgentTabIds = useMemo(
+    () =>
+      agentTasksReady
+        ? agentOpenTaskIds
+            .filter((taskId) => !agentTasksCollection.get(taskId))
+            .map(agentTabId)
+        : [],
+    [agentOpenTaskIds, openAgentTaskRows, agentTasksReady],
   );
 
   const [searchParams, setUrlSearchParams] = useSearchParams();
@@ -174,9 +262,20 @@ export const Workspace = () => {
   // (link menu, search panel) can open files as tabs.
   const openFileInTabs = useCallback(
     (options: OpenFileInLayoutOptions) => {
-      if (!canOpenInEditor(options.tabId)) return false;
+      if (!isAgentTabId(options.tabId) && !canOpenInEditor(options.tabId)) {
+        return false;
+      }
       openFile(options);
       return true;
+    },
+    [openFile],
+  );
+
+  // Open (or focus — openFileInLayout dedupes by id) a session's chat tab.
+  // `new-tab` intent: a session must never replace the file tab in view.
+  const openAgentTab = useCallback(
+    (taskId: string) => {
+      openFile({ tabId: agentTabId(taskId), intent: "new-tab" });
     },
     [openFile],
   );
@@ -206,16 +305,28 @@ export const Workspace = () => {
   );
 
   useEffect(() => {
-    if (isFetchingMetadata > 0) return;
-    if (missingOpenTabIds.length === 0) return;
+    // File tabs wait out the metadata fetch; agent tabs need no gate (their
+    // collection is local-only). One pass so concurrent prunes can't race
+    // each other's layout writes.
+    const staleTabIds = [
+      ...(isFetchingMetadata > 0 ? [] : missingOpenTabIds),
+      ...missingAgentTabIds,
+    ];
+    if (staleTabIds.length === 0) return;
 
-    const sanitizedLayout = missingOpenTabIds.reduce(
+    const sanitizedLayout = staleTabIds.reduce(
       (nextLayout, tabId) => removeTabFromLayout(nextLayout, tabId),
       layout,
     );
 
     handleLayoutChange(sanitizedLayout);
-  }, [missingOpenTabIds, layout, handleLayoutChange, isFetchingMetadata]);
+  }, [
+    missingOpenTabIds,
+    missingAgentTabIds,
+    layout,
+    handleLayoutChange,
+    isFetchingMetadata,
+  ]);
 
   const isSynced = isFetchingContent === 0;
   const { wordCount, characterCount } = useMemo(() => {
@@ -356,6 +467,23 @@ export const Workspace = () => {
     handleSearchInFiles();
   });
 
+  /** Mod+Shift+A — the agent sessions menu in the left sidebar. */
+  const openSessionsSidebar = useCallback(() => {
+    setUrlSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("sidebarView", "sessions");
+        next.delete("sidebar"); // ensure expanded
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setUrlSearchParams]);
+
+  useHotkey("Mod+Shift+A", () => {
+    openSessionsSidebar();
+  });
+
   useEffect(() => {
     const metadataWatchId = `metadata-${workspacePath}`;
     const contentWatchId = `content-${workspacePath}`;
@@ -378,8 +506,11 @@ export const Workspace = () => {
           metadataWatchId,
         );
 
-        if (openTabs.length > 0) {
-          await platformAdapter.startWatchingContent(openTabs, contentWatchId);
+        if (fileOpenTabIds.length > 0) {
+          await platformAdapter.startWatchingContent(
+            fileOpenTabIds,
+            contentWatchId,
+          );
         }
       } catch (error) {
         console.error("Failed to setup watchers:", error);
@@ -392,15 +523,18 @@ export const Workspace = () => {
       isActive = false;
       eventCleanup?.();
       platformAdapter.stopWatching(metadataWatchId);
-      if (openTabs.length > 0) {
+      if (fileOpenTabIds.length > 0) {
         platformAdapter.stopWatching(contentWatchId);
       }
     };
-  }, [workspacePath, openTabs.join(",")]);
+  }, [workspacePath, fileOpenTabIds.join(",")]);
 
   return (
-    <WorkspaceTabsProvider openFile={openFileInTabs}>
-      <div dir={direction} className="flex h-full w-full overflow-hidden p-2">
+    <WorkspaceTabsProvider openFile={openFileInTabs} openAgentTab={openAgentTab}>
+      <div
+        dir={direction}
+        className="relative flex h-full w-full overflow-hidden p-2"
+      >
         <div className="flex h-full shrink-0 overflow-hidden rounded-xl border border-border">
           <IconSidebar
             isCollapsed={isSidebarCollapsed}
@@ -440,7 +574,7 @@ export const Workspace = () => {
                   layout={layout}
                   onChange={handleLayoutChange}
                 >
-                  {dockableTabs}
+                  {allDockableTabs}
                 </Dockable.Root>
               )}
             </div>

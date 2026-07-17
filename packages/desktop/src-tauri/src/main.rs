@@ -1,8 +1,10 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agent_proc;
 mod file_watcher;
 mod fs_ops;
+mod mcp_bridge;
 mod search;
 mod walkdir_utils;
 
@@ -128,6 +130,23 @@ fn set_zoom_level(app: &AppHandle, zoom: f64) {
 }
 
 fn main() {
+    // MCP stdio relay mode (Stage 3.5, mcp_bridge.rs): a harness process
+    // spawns this same binary with this flag to bridge its stdio to the
+    // loopback listener the running app opened for its task. Handled before
+    // any Tauri bootstrap — this invocation never shows a window.
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(pos) = args.iter().position(|a| a == "--mcp-stdio-relay") {
+        let port: u16 = args
+            .get(pos + 1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|| {
+                eprintln!("--mcp-stdio-relay requires a port argument");
+                std::process::exit(1);
+            });
+        mcp_bridge::run_mcp_stdio_relay(port);
+        return;
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -217,7 +236,22 @@ fn main() {
             file_watcher::stop_watching,
             // Search commands
             search::search_content,
+            // Agent process host (errors-as-values pattern)
+            agent_proc::spawn_agent,
+            agent_proc::write_agent_stdin,
+            agent_proc::kill_agent,
+            agent_proc::run_shell_command,
+            // MCP tool bridge (Stage 3.5, errors-as-values pattern)
+            mcp_bridge::start_mcp_relay,
+            mcp_bridge::stop_mcp_relay,
+            mcp_bridge::write_mcp_line,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            // Kill every spawned agent process when the app exits.
+            if let tauri::RunEvent::Exit = event {
+                agent_proc::kill_all_agents();
+            }
+        });
 }

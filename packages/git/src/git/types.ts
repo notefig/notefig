@@ -13,7 +13,12 @@ import type {
   resetIndex as igResetIndex,
 } from "isomorphic-git";
 
-type WithRepoPath<T> = Omit<T, "fs" | "dir" | "gitdir"> & { repoPath: string };
+type WithRepoPath<T> = Omit<T, "fs" | "dir" | "gitdir"> & {
+  repoPath: string;
+  /** Defaults to `<repoPath>/.git`. Set to point at a repo whose gitdir is
+   *  separate from its worktree (e.g. Metrists' document-history repo). */
+  gitDir?: string;
+};
 
 type AddParams = Parameters<typeof igAdd>[0];
 type BranchParams = Parameters<typeof igBranch>[0];
@@ -138,12 +143,14 @@ export type GitRemoveInput = WithRepoPath<RemoveParams>;
 export type GitCommitInput = WithRepoPath<CommitParams>;
 export type GitAddAllAndCommitInput = {
   repoPath: string;
+  gitDir?: string;
   message?: string;
   author: NonNullable<CommitParams["author"]>;
   committer?: CommitParams["committer"];
 };
 export type GitRevertCommitInput = {
   repoPath: string;
+  gitDir?: string;
   oid: string;
   author: NonNullable<CommitParams["author"]>;
   committer?: CommitParams["committer"];
@@ -151,6 +158,11 @@ export type GitRevertCommitInput = {
 };
 export type GitAbortRevertInput = {
   repoPath: string;
+  gitDir?: string;
+};
+export type GitStatusInput = {
+  repoPath: string;
+  gitDir?: string;
 };
 export type GitListBranchesInput = WithRepoPath<ListBranchesParams>;
 export type GitCreateBranchInput = WithRepoPath<BranchParams>;
@@ -167,10 +179,17 @@ export type GitLogInput = WithRepoPath<LogParams>;
 export type GitFetchInput = WithRepoPath<FetchParams>;
 export type GitPullInput = WithRepoPath<PullParams>;
 export type GitPushInput = WithRepoPath<PushParams>;
+export type GitReadTextFileInput = {
+  repoPath: string;
+  gitDir?: string;
+  /** Commit oid or ref to read the file at. */
+  ref: string;
+  filepath: string;
+};
 
 export interface GitService {
   init(input: GitInitInput): ReturnType<typeof igInit>;
-  status(input: { repoPath: string }): Promise<RepoStatus>;
+  status(input: GitStatusInput): Promise<RepoStatus>;
   add(input: GitAddInput): ReturnType<typeof igAdd>;
   remove(input: GitRemoveInput): ReturnType<typeof igRemove>;
   unstage(input: GitUnstageInput): ReturnType<typeof igResetIndex>;
@@ -183,6 +202,8 @@ export interface GitService {
   switchBranch(input: GitSwitchBranchInput): ReturnType<typeof igCheckout>;
   checkoutPaths(input: GitCheckoutPathsInput): ReturnType<typeof igCheckout>;
   log(input: GitLogInput): ReturnType<typeof igLog>;
+  /** Read a text file's content as of a given ref/commit (for history diff/restore). */
+  readTextFile(input: GitReadTextFileInput): Promise<string>;
   fetch(input: GitFetchInput): ReturnType<typeof igFetch>;
   pull(input: GitPullInput): ReturnType<typeof igPull>;
   push(input: GitPushInput): ReturnType<typeof igPush>;

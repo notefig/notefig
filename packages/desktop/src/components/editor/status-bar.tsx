@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { TunnelStatus } from "@/components/tunnel/tunnel-status";
 import { useQuery } from "@tanstack/react-query";
 import {
   getOrCreateWorkspaceGitService,
@@ -109,6 +110,7 @@ export function StatusBar({
           {wordCount} {wordCount === 1 ? t("word") : t("words")}
         </span>
       </div>
+      <TunnelStatus />
     </div>
   );
 }

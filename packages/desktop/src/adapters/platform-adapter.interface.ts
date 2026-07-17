@@ -1,5 +1,7 @@
 import type { Theme } from "@/components/theme-provider";
 import type { GitStorageHost } from "@metrists/git";
+import type { HarnessDefinition } from "@metrists/shared/agent";
+import type { AgentTransport, McpEndpoint } from "@/agent/agent-transport.interface";
 
 /**
  * Error types for file system operations
@@ -500,6 +502,52 @@ export interface IPlatformAdapter {
    * This enables one-line Git service initialization per workspace.
    */
   getGitStorageHost(workspacePath: string): GitStorageHost;
+
+  /**
+   * Create the agent transport for a new task. Desktop spawns the harness as
+   * a local child process (Tauri stdio transport); other platforms plug in
+   * their own transport here (e.g. a relay transport) without the agent
+   * service ever knowing a transport constructor exists.
+   */
+  createAgentTransport(spec: {
+    taskId: string;
+    harness: HarnessDefinition;
+    workspacePath: string;
+    /**
+     * Per-task env on top of the harness's static env — e.g. the
+     * OPENCODE_CONFIG path registering this task's MCP server
+     * (mcpRegistration: "opencode-config").
+     */
+    extraEnv?: Record<string, string>;
+  }): AgentTransport;
+
+  /**
+   * Create the endpoint for a task's app-tools MCP server (Stage 3.5) —
+   * same construction contract as `createAgentTransport` right above: a
+   * dumb constructor that does nothing async. The caller calls `start()`
+   * itself and reads `mcpServer` off the returned instance afterward
+   * (populated after start, same pattern as `spawnInfo`) to build ACP
+   * `session/new.mcpServers` or a harness config. Deliberately not an
+   * AgentTransport: harnesses may run several concurrent instances of the
+   * server command, so requests arrive with a per-connection `respond`
+   * instead of a single line channel (see McpEndpoint). Desktop's instance
+   * spawns its own binary as a stdio↔loopback-TCP relay (`McpServer::Stdio`,
+   * mandatory per the ACP spec, unlike `http`/`sse`); other platforms plug
+   * in their own mechanism without `mcp-server.ts` or `acp-client.ts` ever
+   * seeing a port or process.
+   */
+  createMcpEndpoint(spec: { taskId: string }): McpEndpoint;
+
+  /**
+   * Run a script through the user's local login shell and capture its
+   * output. A raw execution primitive — this adapter has no notion of what
+   * the script does (harness discovery is the first caller, from
+   * src/agent/harness-discovery.ts, which owns all script-building and
+   * output-parsing). Desktop-only capability: no equivalent exists on a
+   * web/relay platform, so non-desktop adapters reject it, same as
+   * `createAgentTransport`'s placeholder above.
+   */
+  runShellCommand(script: string): Promise<{ stdout: string; exitCode: number }>;
 
   /**
    * Create updater actions for the current platform.

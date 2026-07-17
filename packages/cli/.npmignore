@@ -33,3 +33,6 @@ CHANGELOG.md
 .gitignore
 
 !/dist/**
+
+# ...but not compiled test scaffolding
+/dist/tests

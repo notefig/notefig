@@ -78,7 +78,10 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       // Wait for watcher to detect (5s poll interval)
       await waitForWatcherDetection(page, "metadata");
       await page.reload(); // Refresh to see the change
-      await waitForFileTree(page);
+      // Wait for the new file specifically — the tree rehydrates from
+      // IndexedDB asynchronously after reload, so a generic wait + a
+      // point-in-time visibility check races under parallel load.
+      await waitForFileTree(page, newFileName);
 
       // File should now appear in tree
       exists = await fileExistsInTree(page, newFileName);
@@ -183,11 +186,14 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       // Wait for watcher to detect
       await waitForWatcherDetection(page, "metadata");
       await page.reload();
-      await waitForFileTree(page);
-
-      // File should be removed from tree
-      exists = await fileExistsInTree(page, "file-to-delete.md");
-      expect(exists).toBe(false);
+      // Anchor on a file that persists so we know the tree finished
+      // rehydrating from IndexedDB (else the deleted file's absence could be
+      // read spuriously — or its removal not yet applied — under load), then
+      // assert the deleted file is gone with an auto-retrying expectation.
+      await waitForFileTree(page, "readme.md");
+      await expect(
+        page.locator('button:has-text("file-to-delete.md")'),
+      ).toHaveCount(0);
     });
   });
 
@@ -548,14 +554,17 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
     });
 
     test("workspace restores after reload", async ({ page }) => {
-      // Verify we're in the test workspace
-      await waitForFileTree(page);
+      // Verify we're in the test workspace. Wait for the specific file, not
+      // just any tree control — the IndexedDB rehydration that populates the
+      // tree is async, so a point-in-time visibility check can otherwise lose
+      // the race under parallel load.
+      await waitForFileTree(page, "readme.md");
       const readmeExists = await fileExistsInTree(page, "readme.md");
       expect(readmeExists).toBe(true);
 
       // Reload page
       await page.reload();
-      await waitForFileTree(page);
+      await waitForFileTree(page, "readme.md");
 
       // Verify workspace still loaded
       const readmeStillExists = await fileExistsInTree(page, "readme.md");

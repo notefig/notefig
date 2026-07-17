@@ -335,6 +335,145 @@ i18n
 
           // Help Commands
           documentation: "Documentation",
+
+          // Agent UI — sessions sidebar panel
+          agentSessions: "Sessions",
+          agentNewSession: "New session",
+          agentNewSessionWith: "New session with {{harness}}",
+          agentChooseHarness: "Choose harness",
+          agentNoSessions:
+            "No agent sessions yet. Start one with the + button above, or prompt from any document.",
+          agentStopSession: "Stop session",
+          agentTrustTitle: "Run an agent in this workspace?",
+          agentTrustDescription:
+            "This spawns {{harness}} as a local process with access to the files in this folder. Only continue for workspaces you trust.",
+          agentTrustConfirm: "Trust & start",
+
+          // Remote agent tunnel (pairing with `metrists agent`)
+          tunnelPairTitle: "Connect to a machine",
+          tunnelPairDescription:
+            "Run `npx metrists agent` on your computer, then scan the QR code or paste the pairing code below.",
+          tunnelPairCodePlaceholder: "Paste pairing code",
+          tunnelPairConnect: "Connect",
+          tunnelPairConnecting: "Connecting…",
+          tunnelPairHint:
+            "The code never reaches any server — it stays in the link fragment.",
+          tunnelPairedTitle: "Connected machine",
+          tunnelPairedWith: "Paired with {{host}}",
+          tunnelPairDisconnect: "Disconnect",
+          tunnelPairDone: "Done",
+          tunnelConnectMachine: "Connect a machine",
+          tunnelNoConnection: "Connect a machine to run agents on the web.",
+          tunnelStatusConnected: "Paired with {{host}}",
+          tunnelStatusConnecting: "Connecting…",
+          tunnelStatusReconnect: "Disconnected — re-pair",
+
+          // Agent UI — session meta labels (describeTaskMeta)
+          agentNeedsSignIn: "needs sign-in",
+          agentRunning: "running",
+          agentRunningQueued: "running · {{count}} queued",
+          agentQueuedCount: "{{count}} queued",
+          agentFailed: "failed",
+          agentSessionUnavailable: "unavailable",
+
+          // Agent UI — restored sessions (MET-54)
+          agentSessionUnavailableNotice:
+            "This session is no longer available — the harness has no record of it.",
+          agentDeleteSession: "Delete session",
+          agentBlobAnswerOrphaned:
+            "Answer saved to the document, but the session that asked is no longer available.",
+
+          // Agent UI — chat tab
+          agentSessionEnded: "Session ended.",
+          agentSignInRequired: "Sign-in required",
+          agentSignedInRetry: "I've signed in — retry",
+          agentWorking: "Working…",
+          agentTurnFailed: "Turn failed:",
+          agentThinking: "Thinking…",
+          agentQueuedBadge: "queued",
+          agentRemoveFromQueue: "Remove from queue",
+          agentPromptPlaceholder: "Ask anything, @models, /prompts …",
+          agentSend: "Send (⏎)",
+          agentQueue: "Queue (⏎)",
+          agentStop: "Stop",
+          agentAuthoredBlob: "authored a {{type}} in",
+          agentTerminal: "Terminal {{id}}",
+          agentContentOfType: "{{type}} content",
+
+          // Agent UI — inline prompt blob (in the markdown editor)
+          promptBlobPlaceholder: "Ask AI — edit this doc, or any other…",
+          promptBlobQueued: "Queued",
+          promptBlobQueuedAhead: "Queued · {{count}} ahead",
+          promptBlobEdit: "Edit prompt",
+          promptBlobDone: "Done",
+          promptBlobStopped: "Stopped",
+          promptBlobFailed: "Failed.",
+          promptBlobRetry: "Retry",
+          promptBlobDismiss: "Dismiss",
+          promptBlobShowResult: "Show result",
+          promptBlobOpenChat: "Open chat",
+          promptBlobNewSession: "Start a new session",
+          promptBlobTrustWarning:
+            "Spawns {{name}} with access to this folder. Press Enter again to continue.",
+
+          // Agent UI — harness settings (SettingsModal "Harnesses" section)
+          agentSettings: "Agent",
+          harnessSettingsTitle: "Harnesses",
+          harnessSettingsDescription:
+            "Agents Metrists can launch. Discovery checks which are installed on this machine; entries you customize stay available either way.",
+          harnessRescan: "Rescan",
+          harnessRescanFailed: "Couldn't scan this machine for harnesses.",
+          harnessAdd: "Add harness",
+          harnessEditTitle: "Edit harness",
+          harnessOriginOverridden: "customized",
+          harnessOriginCustom: "custom",
+          harnessRowActions: "Harness actions",
+          harnessMakeDefault: "Set as default",
+          harnessEnable: "Enable",
+          harnessDisable: "Disable",
+          harnessEdit: "Edit",
+          harnessDelete: "Delete",
+          harnessDeleteConfirmTitle: "Delete {{label}}?",
+          harnessDeleteConfirmDescription:
+            "Removes this harness and its configuration. Existing sessions are unaffected.",
+          harnessResetDefaults: "Reset to defaults",
+          harnessResetConfirmTitle: "Reset {{label}} to defaults?",
+          harnessResetConfirmDescription:
+            "Removes your customizations; the built-in command, arguments, and environment apply again.",
+          harnessSave: "Save",
+          harnessLabelField: "Name",
+          harnessLabelRequired: "A name is required.",
+          harnessLabelPlaceholder: "My harness",
+          harnessCommandField: "Command",
+          harnessCommandRequired:
+            "A command is required — reset to defaults to restore the built-in one.",
+          harnessCommandPlaceholder: "/path/to/binary",
+          harnessArgsField: "Arguments (one per line)",
+          harnessArgsPlaceholder: "--flag\n${workspace}",
+          harnessEnvField: "Environment variables",
+          harnessEnvPlaceholder:
+            "CLAUDE_CODE_USE_VERTEX=1\nANTHROPIC_VERTEX_PROJECT_ID=my-project",
+          harnessEnvErrorNoEquals: "Line {{line}}: missing =",
+          harnessEnvErrorBadKey: "Line {{line}}: invalid variable name",
+          harnessEnvErrorDuplicate: "Line {{line}}: duplicate variable",
+          harnessProbeField: "Probe command (optional)",
+          harnessProbePlaceholder: "command -v <command>",
+          harnessMcpField: "App tools (MCP)",
+          harnessMcpNone: "No app tools",
+          harnessMcpSessionNew: "Register via ACP session",
+          harnessMcpOptInWarning:
+            "This claims untested capabilities: the harness must support MCP servers passed through session/new, or tool calls will silently do nothing.",
+
+          // Agent Tools (display names — AgentTool.title holds these keys,
+          // never the literal text; resolved in mcp-server.ts's tools/list)
+          agentToolWorkspaceListDocuments: "List Documents",
+          agentToolWorkspaceReadDocument: "Read Document",
+          agentToolWorkspaceOpenFiles: "Open Files",
+          agentToolHistoryLog: "Document History",
+          agentToolHistoryDiff: "Compare Versions",
+          agentToolHistoryCheckpoint: "Save Checkpoint",
+          agentToolHistoryRestore: "Restore Version",
+          agentToolAuthorBlob: "Add Interactive Block",
         },
       },
     },

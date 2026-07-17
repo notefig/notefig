@@ -45,3 +45,52 @@ describe("isExternalContentChange", () => {
     expect(isExternalContentChange("", "\n")).toBe(false);
   });
 });
+
+describe("external-content adoption keeps undo history intact", () => {
+  // Regression for a real repro: an agent writes a file to disk while the
+  // user has it open, the "disk → editor" adoption effect replaces the
+  // whole document (use-editor-file-sync.ts), and the user then types "/"
+  // to summon a prompt widget. A plain `editor.commands.setContent(...)`
+  // for the adoption becomes an ordinary undo step with no meaningful
+  // "before" position — undoing the summon afterward walked straight
+  // through the adoption too, dropping the cursor at the start of the doc
+  // instead of just reverting the summon. `addToHistory: false` on the
+  // adoption's transaction (via `.chain().setMeta(...).setContent(...)`,
+  // the exact pattern used in use-editor-file-sync.ts) keeps it out of the
+  // undo stack entirely, so undoing a later edit only ever targets that
+  // edit.
+  it("undoing an edit made after adoption doesn't also undo the adoption", async () => {
+    editor = new Editor({ extensions: editorExtensions, content: "<p>placeholder</p>" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    editor
+      .chain()
+      .setMeta("addToHistory", false)
+      .setContent("<h1>Title</h1><p>Intro.</p>", { emitUpdate: false })
+      .run();
+
+    editor.commands.setTextSelection(editor.state.doc.content.size - 1);
+    editor.commands.insertContent("!");
+    expect(getEditorMarkdown(editor)).toBe("# Title\n\nIntro.!");
+
+    editor.commands.undo();
+
+    expect(getEditorMarkdown(editor)).toBe("# Title\n\nIntro.");
+  });
+
+  it("contrast: a plain setContent adoption lets undo walk through it", async () => {
+    editor = new Editor({ extensions: editorExtensions, content: "<p>placeholder</p>" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    editor.commands.setContent("<h1>Title</h1><p>Intro.</p>", {
+      emitUpdate: false,
+    });
+    editor.commands.setTextSelection(editor.state.doc.content.size - 1);
+    editor.commands.insertContent("!");
+
+    editor.commands.undo();
+
+    // One undo reverts past the adoption too, back to pre-adoption content.
+    expect(getEditorMarkdown(editor)).toBe("placeholder");
+  });
+});

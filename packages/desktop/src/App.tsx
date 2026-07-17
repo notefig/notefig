@@ -1,5 +1,5 @@
 import "./App.css";
-import { Routes, Route, useNavigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { Workspace } from "@/components/workspace";
 import { Welcome } from "@/components/welcome";
 import { RootRedirect } from "@/components/root-redirect";
@@ -14,6 +14,13 @@ import { Titlebar } from "@/components/titlebar";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { WorkspaceErrorBoundary } from "@/components/workspace-error-boundary";
 import { EditorHarness } from "@/test-harness/editor-harness";
+import { ensureStartupHarnessDiscovery } from "@/agent/harness-discovery";
+import { PairDialog } from "@/components/tunnel/pair-dialog";
+import {
+  autoConnectStoredPairing,
+  watchCrossTabPairing,
+} from "@/agent/tunnel/connect-flow";
+import { hadDeepLinkPairing } from "@/agent/tunnel/pair-dialog-store";
 
 export const App = () => {
   const { setTheme } = useTheme();
@@ -30,8 +37,35 @@ export const App = () => {
     setTheme(settings.theme);
   }, [settings.theme, setTheme]);
 
+  // One harness-discovery scan per app session (self-guarded; StrictMode's
+  // double-invoke and remounts are no-ops).
   useEffect(() => {
-    if (location.pathname !== "/" && location.pathname !== "/welcome") {
+    ensureStartupHarnessDiscovery();
+  }, []);
+
+  // Web only: reconnect to a previously paired worker on boot. Non-fatal —
+  // a stale pairing (worker restarted → new URL) just leaves the tunnel
+  // disconnected and the status pill offers a re-pair. Also listen for a
+  // pairing done in another tab (the CLI-opened tab) and connect this one.
+  //
+  // Skip the stored reconnect when this load carried a deep-link code: the
+  // CLI-opened `/pair#<code>` tab has a FRESH code the dialog is about to
+  // connect, and the stored pairing points at the previous (now-dead) port —
+  // racing it would clobber the fresh connect with "could not reach the worker".
+  useEffect(() => {
+    if (!isWeb()) return;
+    if (!hadDeepLinkPairing) void autoConnectStoredPairing();
+    return watchCrossTabPairing();
+  }, []);
+
+  useEffect(() => {
+    // "/pair" is a transient deep-link landing that redirects to "/" — never
+    // record it, or RootRedirect would bounce back to it in a loop.
+    if (
+      location.pathname !== "/" &&
+      location.pathname !== "/welcome" &&
+      location.pathname !== "/pair"
+    ) {
       const fullPath = location.pathname + location.search;
       setLastPath(fullPath);
     }
@@ -66,6 +100,7 @@ export const App = () => {
       <Titlebar />
       {isWeb() && <MockDirectoryPickerDialog />}
       <TextPromptDialog />
+      <PairDialog />
       <div className="flex-1 min-h-0">
         <Routes>
           {import.meta.env.DEV && (
@@ -99,6 +134,10 @@ export const App = () => {
               </WorkspaceErrorBoundary>
             }
           />
+          {/* Deep-link landing: the pairing code was captured + scrubbed
+              from the fragment at module load (pair-dialog-store), which
+              also opened the dialog — this just returns to the app. */}
+          <Route path="/pair" element={<Navigate to="/" replace />} />
           <Route
             path="/"
             element={

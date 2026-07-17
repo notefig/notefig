@@ -10,8 +10,17 @@ import { TextSelection } from "@tiptap/pm/state";
 import {
   editorExtensions,
   MarkdownImage,
+  MarkdownCodeBlock,
 } from "@/components/editor/tiptap-editor-kit";
-import { closeDocumentSync } from "@/utils/markdown-conversion";
+import { AiPromptNode } from "@/components/editor/ai-prompt-node";
+import { lowlight } from "@/components/editor/editor-schema-kit";
+import { closeDocumentSync, getDocumentSync } from "@/utils/markdown-conversion";
+import {
+  LAYOUT_PARAM,
+  parseLayout,
+  extractTabIds,
+  findLayoutSelectedTab,
+} from "@/hooks/use-layout-search-param";
 import { focusArbiter } from "@/utils/focus-arbiter";
 import { isSidebarTextEntryActive } from "@/utils/focus-arbiter";
 import { resolveEditorLocation, type EditorLocation } from "./editor-position";
@@ -159,10 +168,20 @@ function createMarkdownInstance(
     basePath || filePath.substring(0, filePath.lastIndexOf("/")) || "/";
 
   const extensions = [
-    ...editorExtensions.filter((e) => e.name !== "image"),
+    ...editorExtensions.filter(
+      (e) =>
+        e.name !== "image" && e.name !== "codeBlock" && e.name !== "aiPrompt",
+    ),
     // filePath lets the image node view declare its drag-protocol payload
     // (which document to rewrite when the asset is moved elsewhere).
     MarkdownImage.configure({ allowBase64: true, workspaceRoot, filePath } as any),
+    // filePath lets BlobNodeView address answerBlob at the right document;
+    // lowlight must be re-specified since configure() replaces options wholesale.
+    MarkdownCodeBlock.configure({ lowlight, filePath } as any),
+    // filePath/basePath scope the inline prompt widget to this document and
+    // its workspace; they also arm the empty-doc keeper (unconfigured
+    // schema-only instances never self-insert).
+    AiPromptNode.configure({ filePath, basePath: workspaceRoot }),
   ];
 
   const editor = new Editor({
@@ -512,4 +531,41 @@ export function navigateToLocation(
     return false;
   }
   return instance.goToLocation(location);
+}
+
+export interface WorkspaceEditorContext {
+  openFiles: Array<{ path: string; dirty: boolean; active: boolean }>;
+  activeFile: string | null;
+  /** Coarse for Stage 1: whether the active file has a non-empty selection. */
+  selection?: boolean;
+}
+
+/**
+ * Read-only snapshot of what the user has open, scoped to one workspace.
+ * Sourced from the URL (the layout's single source of truth — see
+ * `use-layout-search-param.ts`) rather than a React hook, so non-React
+ * callers (agent tools, the prompt composer) can call it directly. Not
+ * reactive: callers that need live updates should still go through
+ * `useLayoutSearchParam`/`useDockableTabs`.
+ */
+export function getWorkspaceEditorContext(
+  workspacePath: string,
+): WorkspaceEditorContext {
+  const params = new URLSearchParams(window.location.search);
+  const layout = parseLayout(params.get(LAYOUT_PARAM));
+  const activeFile = findLayoutSelectedTab(layout);
+
+  const openFiles = extractTabIds(layout)
+    .filter((path) => path.startsWith(workspacePath))
+    .map((path) => ({
+      path,
+      dirty: getDocumentSync(path).isDirty(),
+      active: path === activeFile,
+    }));
+
+  return {
+    openFiles,
+    activeFile: activeFile && activeFile.startsWith(workspacePath) ? activeFile : null,
+    selection: activeFile ? getSelectedText(activeFile) !== undefined : undefined,
+  };
 }

@@ -2,13 +2,15 @@ import { useMemo, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { LayoutNode } from "@/components/dockable";
 
-const LAYOUT_PARAM = "layout";
+export const LAYOUT_PARAM = "layout";
 
 /**
  * Parse a JSON-encoded LayoutNode[] from a string.
- * Returns [] on any failure.
+ * Returns [] on any failure. Exported so non-hook code (e.g.
+ * `getWorkspaceEditorContext`) can read the same URL-sourced layout without
+ * duplicating it into a second store.
  */
-function parseLayout(raw: string | null): LayoutNode[] {
+export function parseLayout(raw: string | null): LayoutNode[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
@@ -22,7 +24,7 @@ function parseLayout(raw: string | null): LayoutNode[] {
 /**
  * Walk the LayoutNode tree and collect all tab IDs.
  */
-function extractTabIds(nodes: LayoutNode[]): string[] {
+export function extractTabIds(nodes: LayoutNode[]): string[] {
   const ids: string[] = [];
   for (const node of nodes) {
     if (node.type === "Window") {
@@ -38,7 +40,7 @@ function extractTabIds(nodes: LayoutNode[]): string[] {
  * Find the selected tab in the first window that has one.
  * This is layout-derived state, not focus-derived active UI state.
  */
-function findLayoutSelectedTab(nodes: LayoutNode[]): string | null {
+export function findLayoutSelectedTab(nodes: LayoutNode[]): string | null {
   for (const node of nodes) {
     if (node.type === "Window" && node.selected) {
       return node.selected;
