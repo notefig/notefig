@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { Loader2 } from "lucide-react";
 import { z } from "zod";
 import { defineBlobType } from "./blob-type";
 import { useBlobAnswer } from "./use-blob-answer";
@@ -17,6 +19,16 @@ export default defineBlobType({
   }),
   Widget({ blob, payload, answer }) {
     const { state, run } = useBlobAnswer(answer);
+    // Track the clicked decision so the spinner shows on that button only.
+    const [submitting, setSubmitting] = useState<"approved" | "rejected" | null>(
+      null,
+    );
+    const pending = state === "pending";
+
+    const decide = (decision: "approved" | "rejected") => {
+      setSubmitting(decision);
+      void run({ decision });
+    };
 
     if (blob.envelope.status === "answered") {
       return (
@@ -39,19 +51,21 @@ export default defineBlobType({
           </details>
         )}
         <div className="flex gap-2">
-          <Button
-            size="sm"
-            disabled={state === "pending"}
-            onClick={() => void run({ decision: "approved" })}
-          >
+          <Button size="sm" disabled={pending} onClick={() => decide("approved")}>
+            {pending && submitting === "approved" && (
+              <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+            )}
             Approve
           </Button>
           <Button
             size="sm"
             variant="outline"
-            disabled={state === "pending"}
-            onClick={() => void run({ decision: "rejected" })}
+            disabled={pending}
+            onClick={() => decide("rejected")}
           >
+            {pending && submitting === "rejected" && (
+              <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+            )}
             Reject
           </Button>
         </div>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Loader2 } from "lucide-react";
 import { z } from "zod";
 import { defineBlobType } from "./blob-type";
 import { useBlobAnswer } from "./use-blob-answer";
@@ -26,6 +27,15 @@ export default defineBlobType({
   Widget({ blob, payload, answer }) {
     const { state, run } = useBlobAnswer(answer);
     const [freeText, setFreeText] = useState("");
+    // Which control is mid-submit, so the spinner lands on the one the user
+    // actually clicked (options) rather than every button at once.
+    const [submitting, setSubmitting] = useState<string | null>(null);
+    const pending = state === "pending";
+
+    const submit = (value: string) => {
+      setSubmitting(value);
+      void run({ answer: value });
+    };
 
     // Render state, derived from the fence's own status on every render —
     // not a local "I clicked answer" flag — so a reload or an agent-side
@@ -51,9 +61,12 @@ export default defineBlobType({
                 key={option}
                 size="sm"
                 variant="outline"
-                disabled={state === "pending"}
-                onClick={() => void run({ answer: option })}
+                disabled={pending}
+                onClick={() => submit(option)}
               >
+                {pending && submitting === option && (
+                  <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                )}
                 {option}
               </Button>
             ))}
@@ -63,22 +76,25 @@ export default defineBlobType({
             className="flex gap-2"
             onSubmit={(e) => {
               e.preventDefault();
-              if (freeText.trim()) void run({ answer: freeText.trim() });
+              if (freeText.trim()) submit(freeText.trim());
             }}
           >
             <Input
               value={freeText}
               onChange={(e) => setFreeText(e.target.value)}
-              disabled={state === "pending"}
+              disabled={pending}
               placeholder="Type an answer…"
               className="h-8"
             />
-            <Button
-              type="submit"
-              size="sm"
-              disabled={state === "pending" || !freeText.trim()}
-            >
-              Send
+            <Button type="submit" size="sm" disabled={pending || !freeText.trim()}>
+              {pending ? (
+                <>
+                  <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                  Sending…
+                </>
+              ) : (
+                "Send"
+              )}
             </Button>
           </form>
         )}
