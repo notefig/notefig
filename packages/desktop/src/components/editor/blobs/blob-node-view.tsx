@@ -15,7 +15,7 @@
  * NodeViewContent) is always rendered and only visually hidden (not
  * unmounted) while a widget is shown on top of it.
  */
-import { useState } from "react";
+import { useState, type FocusEvent } from "react";
 import type { NodeViewProps } from "@tiptap/core";
 import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
 import { BLOB_LANG_PREFIX, parseBlobBlock, type ParsedBlob } from "@metrists/shared/blobs";
@@ -26,7 +26,14 @@ export function BlobNodeView(props: NodeViewProps) {
   const language = (props.node.attrs.language as string | null) ?? "";
   const [editAsCode, setEditAsCode] = useState(false);
 
-  const containFocus = () => {
+  // Reclaim the editor selection only when the wrapper element ITSELF is
+  // focused (e.g. via its tabIndex). React's onFocus maps to focusin, which
+  // bubbles — so a focus landing on an interactive control inside a widget
+  // (the question blob's freetext <Input>, a button) also reaches here. Those
+  // must keep focus; redirecting them into ProseMirror is what made the
+  // freetext field untypeable (every keystroke's focus got yanked back).
+  const containFocus = (event: FocusEvent) => {
+    if (event.target !== event.currentTarget) return;
     props.editor.commands.focus(null, { scrollIntoView: false });
   };
 
@@ -86,7 +93,10 @@ export function BlobNodeView(props: NodeViewProps) {
         </div>
       )}
       {widget && (
-        <div className="rounded border p-3">
+        // contentEditable={false}: this is interactive UI, not editor text —
+        // keep ProseMirror from managing selection/caret inside it, which
+        // would otherwise fight the widget's own inputs for focus.
+        <div className="rounded border p-3" contentEditable={false}>
           <widget.blobType.Widget
             blob={widget.blob}
             payload={widget.payload}
