@@ -18,7 +18,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc && node esbuild.config.mjs",
+    "build": "tsc && node esbuild.config.mjs && node scripts/copy-themes.mjs",
     "dev": "ts-node ./bin/metrists.ts",
     "dev:build": "nodemon --config nodemon.json --exec npm run build",
     "lint": "eslint . --ext .ts",
