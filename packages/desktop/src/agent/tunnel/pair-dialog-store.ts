@@ -47,6 +47,16 @@ if (bootCode) {
   state = { open: true, prefillCode: bootCode };
 }
 
+/**
+ * True when this page load carried a deep-link pairing code (a CLI-opened
+ * `/pair#<code>` tab). The dialog will auto-connect that fresh code, so boot
+ * must NOT also fire the stored auto-reconnect — the stored pairing points at
+ * the previous worker's port (the CLI mints a new one each run), and racing it
+ * would tear down the fresh connect and dial the dead port ("could not reach
+ * the worker").
+ */
+export const hadDeepLinkPairing = bootCode !== null;
+
 export function openPairDialog(prefillCode?: string): void {
   state = { open: true, prefillCode };
   emit();

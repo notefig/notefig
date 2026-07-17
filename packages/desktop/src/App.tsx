@@ -20,6 +20,7 @@ import {
   autoConnectStoredPairing,
   watchCrossTabPairing,
 } from "@/agent/tunnel/connect-flow";
+import { hadDeepLinkPairing } from "@/agent/tunnel/pair-dialog-store";
 
 export const App = () => {
   const { setTheme } = useTheme();
@@ -46,9 +47,14 @@ export const App = () => {
   // a stale pairing (worker restarted → new URL) just leaves the tunnel
   // disconnected and the status pill offers a re-pair. Also listen for a
   // pairing done in another tab (the CLI-opened tab) and connect this one.
+  //
+  // Skip the stored reconnect when this load carried a deep-link code: the
+  // CLI-opened `/pair#<code>` tab has a FRESH code the dialog is about to
+  // connect, and the stored pairing points at the previous (now-dead) port —
+  // racing it would clobber the fresh connect with "could not reach the worker".
   useEffect(() => {
     if (!isWeb()) return;
-    void autoConnectStoredPairing();
+    if (!hadDeepLinkPairing) void autoConnectStoredPairing();
     return watchCrossTabPairing();
   }, []);
 
