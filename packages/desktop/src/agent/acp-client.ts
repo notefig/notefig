@@ -20,27 +20,10 @@ import type {
 import { transportToStreams } from "./agent-transport.interface";
 import type { AgentTransport } from "./agent-transport.interface";
 import type { PermissionBroker } from "./permission-broker";
-import { MCP_SERVER_NAME } from "@metrists/shared/agent";
 import {
   readWorkspaceTextFile,
   writeWorkspaceTextFile,
 } from "@/utils/file-sync";
-
-/**
- * Claude Code (and presumably other adapters) asks for permission before
- * *any* tool call by default, MCP included — separate from, and in addition
- * to, our own `dispatchToolCall`'s `requiresPermission` gate in
- * mcp-server.ts. That's the right default for the adapter's own native
- * fs/bash tools (they touch disk directly, outside our mediation), but
- * redundant for our own MCP tools: they're already consent-gated internally
- * where that matters (e.g. `history_restore`), so a second UI prompt here
- * only adds friction for zero extra safety. Recognize the adapter's
- * `mcp__<server>__<tool>` naming (confirmed on claude-agent-acp,
- * docs/architecture/spikes/v2-mcp-passthrough-spike.md) and auto-approve.
- */
-function isMetristsMcpToolCall(request: RequestPermissionRequest): boolean {
-  return (request.toolCall.title ?? "").startsWith(`mcp__${MCP_SERVER_NAME}__`);
-}
 
 /** ACP protocol version we speak (pinned; a spec bump changes acp-types). */
 const PROTOCOL_VERSION = 1;
@@ -182,17 +165,35 @@ export class MetristsAcpClient implements Client {
   // fs/* are only reachable on desktop (remote advertises fs:false; a
   // misbehaving agent calling them anyway gets a JSON-RPC error).
 
+  /**
+   * The harness (claude-code, OpenCode, …) asks for permission before *every*
+   * tool call it makes — each file edit, each shell command, each MCP call —
+   * separate from, and in addition to, our own `dispatchToolCall`
+   * `requiresPermission` gate in mcp-server.ts.
+   *
+   * For the beta we run fully silent: auto-approve every ACP permission
+   * request so the agent isn't gated on a UI prompt for every action.
+   * Deliberate (a product decision), with these load-bearing caveats:
+   *   - The metrists MCP tools that genuinely need consent (`history_restore`)
+   *     gate INTERNALLY through `dispatchToolCall` → the broker directly — a
+   *     path that never reaches here — so this blanket grant does NOT defeat
+   *     them; they still prompt.
+   *   - Workspace trust is established once, up front, before any turn runs.
+   *   - The pairing secret gates the whole tunnel; nothing untrusted can reach
+   *     this method.
+   * Prefer `allow_always` so the harness also stops re-asking on its side.
+   */
   async requestPermission(
     request: RequestPermissionRequest,
   ): Promise<RequestPermissionResponse> {
-    if (isMetristsMcpToolCall(request)) {
-      const grant =
-        request.options.find((o) => o.kind === "allow_always") ??
-        request.options.find((o) => o.kind === "allow_once");
-      if (grant) {
-        return { outcome: { outcome: "selected", optionId: grant.optionId } };
-      }
+    const grant =
+      request.options.find((o) => o.kind === "allow_always") ??
+      request.options.find((o) => o.kind === "allow_once");
+    if (grant) {
+      return { outcome: { outcome: "selected", optionId: grant.optionId } };
     }
+    // No allow option offered (only reject kinds) — hand it to the UI rather
+    // than silently cancelling the turn.
     return this.deps.permissionBroker.request(request);
   }
 
