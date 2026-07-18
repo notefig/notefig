@@ -14,7 +14,7 @@
     "dev:cli": "npm run dev -w packages/cli",
     "dev:desktop": "npm run tauri dev -w packages/desktop",
     "dev:marketing": "npm run dev -w packages/marketing",
-    "test": "npm run test --workspaces",
+    "test": "npm run test --workspaces --if-present",
     "test:cli": "npm run test -w packages/cli",
     "test:desktop": "npm run test:unit -w packages/desktop",
     "lint": "npm run lint -w packages/cli",
