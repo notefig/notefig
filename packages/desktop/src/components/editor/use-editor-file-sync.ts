@@ -12,6 +12,7 @@ import type { Editor, JSONContent } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import type { FileEntry } from "@/utils/fs";
 import { writeFileContent } from "@/utils/collections";
+import { isRecentSelfWrite } from "@/utils/file-sync";
 import { getDocumentSync } from "@/utils/markdown-conversion";
 import { UI_ONLY_TRANSACTION_META } from "@/components/editor/editor-schema-kit";
 
@@ -67,6 +68,16 @@ export function useEditorFileSync(
   // Disk → editor: adopt external changes.
   useEffect(() => {
     if (!editor || !file.contentHash || contentError) return;
+
+    // A file state this app wrote itself is never an external change — the
+    // editor already moved past it. Under back-to-back autosaves a render
+    // can deliver the PREVIOUS save's row after DocumentSync's baseline has
+    // advanced to the next one; without this guard that stale row passes
+    // needsAdoption (hashes differ) and, once the in-flight save settles,
+    // setContent rolls the editor back to it (MET-70: deletions/undo/paste
+    // "jumping back"). Same ledger the watcher path consults in
+    // handleContentFileSystemChange.
+    if (isRecentSelfWrite(file.path, file.contentHash)) return;
 
     const sync = getDocumentSync(file.path);
     const fileContent = file.content ?? "";
