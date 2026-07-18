@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -36,6 +37,7 @@ import type {
 } from "@metrists/shared/agent";
 import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
 import { useActiveHarnesses } from "@/hooks/use-harness-selection";
+import { useAutosizeTextarea } from "@/hooks/use-autosize-textarea";
 import { Button } from "@/components/ui/button";
 import {
   MessageScroller,
@@ -144,7 +146,7 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
   // rows before the layout prunes the tab).
   if (!taskRow) {
     return (
-      <div className="flex h-full w-full flex-1 items-center justify-center bg-background text-sm text-muted-foreground">
+      <div className="flex h-full w-full flex-1 items-center justify-center text-sm text-muted-foreground">
         {t("agentSessionEnded")}
       </div>
     );
@@ -153,7 +155,7 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
   return (
     // The dock's content wrapper is a plain flex box, so this root brings
     // its own positioning context for the absolute composer overlay.
-    <div className="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
+    <div className="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
       <Transcript taskId={taskId} bottomInset={composerHeight} />
 
       {/* Floating composer pinned to the bottom of the tab. The gradient
@@ -717,9 +719,12 @@ function PromptBox({
   const { t } = useTranslation();
   const harnessLabel = useHarnessLabel(harnessId);
   const canSend = value.trim().length > 0;
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useAutosizeTextarea(textareaRef, value);
   return (
     <div className="pointer-events-auto rounded-2xl border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40">
       <textarea
+        ref={textareaRef}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         // autoFocus: mount == tab selected (the dock unmounts unselected
@@ -735,7 +740,7 @@ function PromptBox({
         }}
         placeholder={t("agentPromptPlaceholder")}
         rows={2}
-        className="max-h-40 min-h-[44px] w-full resize-none bg-transparent px-4 pt-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
+        className="min-h-[44px] w-full resize-none overflow-hidden bg-transparent px-4 pt-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
       />
       <div className="flex items-center gap-1 px-2 pb-2">
         {/* The session is pinned to one harness — a passive indicator, not

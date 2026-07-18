@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-react";
 import type { Editor } from "@tiptap/core";
+import { useAutosizeTextarea } from "@/hooks/use-autosize-textarea";
 import { Button } from "@/components/ui/button";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import {
@@ -568,6 +569,7 @@ function Composer({
   textareaRef: React.RefObject<HTMLTextAreaElement>;
 }) {
   const { t } = useTranslation();
+  useAutosizeTextarea(textareaRef, draft);
   return (
     <div className="flex flex-col">
       <div className="flex items-start gap-1.5 px-1.5 py-1">
@@ -593,7 +595,7 @@ function Composer({
           }}
           placeholder={t("promptBlobPlaceholder")}
           rows={1}
-          className="max-h-40 min-h-[28px] flex-1 resize-none bg-transparent pt-1 pb-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
+          className="min-h-[28px] min-w-0 flex-1 resize-none overflow-hidden bg-transparent pt-1 pb-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
         />
       </div>
       {confirmTrust && (
