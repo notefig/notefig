@@ -10,6 +10,8 @@ import { toolRegistry, getTool } from "./tools";
 import type { PermissionBroker } from "./permission-broker";
 import type { McpEndpoint, Unsubscribe } from "./agent-transport.interface";
 import i18n from "@/utils/intl";
+import { buildWidgetContextPayload } from "./widget-context-resource";
+import { decodeWidgetContextUri } from "./widget-context-uri";
 
 /** `tool.title` holds an i18next key, never literal text — resolve it here,
  *  at the point of use, so it reflects the active language even if it
@@ -44,7 +46,23 @@ function serverInstructions(): string {
     `follow-up prompt with the user's answer once they respond. Metrists registers ` +
     `this server automatically for the session via a per-task, ephemeral config — it ` +
     `will not appear in your global or project config files, and you don't need to ` +
-    `locate or verify it.`
+    `locate or verify it. A prompt sent from an in-document widget always carries a ` +
+    `\`resource_link\` — call \`resources/read\` on its URI as your FIRST action, before ` +
+    `\`workspace_read_document\` or any native file-read tool. Its payload (document title, ` +
+    `the full heading outline, the text surrounding the prompt's position, the current ` +
+    `selection, and the other files open in the workspace) is deliberately sized to be ` +
+    `enough context to act on most requests directly — treat it as your default context, ` +
+    `not an optional extra. Do NOT read the entire document by default: that wastes context ` +
+    `on documents where the request only concerns a few paragraphs. Only fall back to ` +
+    `\`workspace_read_document\` (optionally with \`line\`/\`limit\` for a partial read) or a ` +
+    `full file read when the resource's outline and surrounding text genuinely don't cover ` +
+    `what the request needs — e.g. editing a different section you can see named in the ` +
+    `outline but whose text isn't in the surrounding-text window. Most requests that ` +
+    `reference a document — including anything phrased as an instruction about "this ` +
+    `section" or "this doc" — expect you to edit the document directly with your editing ` +
+    `tools, not to reply with prose describing what you would do; treat the document named ` +
+    `in that resource payload as the default subject unless the user is clearly asking a ` +
+    `question instead.`
   );
 }
 
@@ -214,7 +232,7 @@ export function createMcpRequestHandler(
       return jsonrpcResult(id, {
         protocolVersion:
           (params as { protocolVersion?: string } | undefined)?.protocolVersion ?? "2024-11-05",
-        capabilities: { tools: {} },
+        capabilities: { tools: {}, resources: {} },
         serverInfo: { name: MCP_SERVER_NAME, version: "1.0.0" },
         instructions: serverInstructions(),
       });
@@ -232,6 +250,25 @@ export function createMcpRequestHandler(
           description: tool.description,
           inputSchema: toolInputJsonSchema(tool),
         })),
+      });
+    }
+
+    if (method === "resources/list") {
+      // Widget-context resources are self-contained URIs handed directly to
+      // the agent inside the prompt's own resource_link — nothing upfront
+      // to enumerate (no server-side registry; see widget-context-uri.ts).
+      return jsonrpcResult(id, { resources: [] });
+    }
+
+    if (method === "resources/read") {
+      const uri = (params as { uri?: string } | undefined)?.uri;
+      const ref = typeof uri === "string" ? decodeWidgetContextUri(uri) : undefined;
+      if (!ref || !uri) {
+        return jsonrpcError(id, -32602, `unknown resource uri: ${uri ?? "(missing)"}`);
+      }
+      const payload = await buildWidgetContextPayload(deps.ctx.workspacePath, ref);
+      return jsonrpcResult(id, {
+        contents: [{ uri, mimeType: "application/json", text: JSON.stringify(payload, null, 2) }],
       });
     }
 

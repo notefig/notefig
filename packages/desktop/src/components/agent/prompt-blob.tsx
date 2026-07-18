@@ -94,6 +94,7 @@ export const PromptBlob = memo(function PromptBlob({
   workspacePath,
   documentPath,
   editor,
+  getPos,
   summoned = false,
   removeNode,
 }: {
@@ -103,6 +104,11 @@ export const PromptBlob = memo(function PromptBlob({
   workspacePath: string;
   documentPath: string;
   editor: Editor;
+  /** The node view's live position getter — read at send() time and handed
+   *  to agents.task(taskId).promptFromWidget, which anchors the
+   *  widget-context resource to where in the document the prompt was sent
+   *  from. */
+  getPos?: () => number | undefined;
   /** True when this instance was summoned by typing "/" — arms the
    *  revert-to-"/" contract (Esc / second "/" in the empty composer). */
   summoned?: boolean;
@@ -246,14 +252,16 @@ export const PromptBlob = memo(function PromptBlob({
         workspacePath,
         defaultHarness,
       );
-      // The host document as an explicit subject line — prompt() takes no
-      // context parts, and the agent may still edit any workspace doc.
       const relative = documentPath.startsWith(workspacePath + "/")
         ? documentPath.slice(workspacePath.length + 1)
         : documentPath;
-      const { turnId } = agents
-        .task(taskId)
-        .prompt(`Regarding ${relative}:\n\n${text}`);
+
+      const doc = editor.state.doc;
+      const { turnId } = agents.task(taskId).promptFromWidget(text, {
+        path: relative,
+        pos: getPos?.() ?? doc.content.size,
+        isDocEmpty: !docHasRealContent(doc),
+      });
       updatePromptBlob(blobId, {
         boundTurnId: turnId,
         boundTaskId: taskId,
@@ -275,6 +283,8 @@ export const PromptBlob = memo(function PromptBlob({
     confirmTrust,
     workspacePath,
     defaultHarness,
+    editor,
+    getPos,
   ]);
 
   // Edit: pull the sent prompt back into the composer. A queued turn is

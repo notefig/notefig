@@ -40,6 +40,16 @@ vi.mock("@/utils/file-sync", () => ({
   writeWorkspaceTextFile,
 }));
 
+const { buildWidgetContextPayload } = vi.hoisted(() => ({
+  buildWidgetContextPayload: vi.fn(),
+}));
+vi.mock("../widget-context-resource", () => ({ buildWidgetContextPayload }));
+
+const { decodeWidgetContextUri } = vi.hoisted(() => ({
+  decodeWidgetContextUri: vi.fn(),
+}));
+vi.mock("../widget-context-uri", () => ({ decodeWidgetContextUri }));
+
 import { createMcpRequestHandler } from "../mcp-server";
 import { PermissionBroker } from "../permission-broker";
 import { agentPermissionRequestsCollection } from "../agent-collections";
@@ -47,9 +57,15 @@ import type { ToolContext } from "@metrists/shared/agent";
 
 // vi.hoisted can't reference `z` (hoisted above the "zod" import); assign
 // real schemas onto the mocked blob types now that imports have resolved.
-blobTypes[0].schema = z.object({ prompt: z.string(), options: z.array(z.string()).optional() });
+blobTypes[0].schema = z.object({
+  prompt: z.string(),
+  options: z.array(z.string()).optional(),
+});
 blobTypes[1].schema = z.object({ prompt: z.string() });
-blobTypes[2].schema = z.object({ label: z.string(), state: z.enum(["pending", "done"]) });
+blobTypes[2].schema = z.object({
+  label: z.string(),
+  state: z.enum(["pending", "done"]),
+});
 
 const ctx: ToolContext = {
   workspacePath: "/ws",
@@ -69,32 +85,109 @@ describe("createMcpRequestHandler", () => {
     for (const r of agentPermissionRequestsCollection.toArray) {
       agentPermissionRequestsCollection.delete(r.id);
     }
+    decodeWidgetContextUri.mockReset();
+    buildWidgetContextPayload.mockReset();
   });
 
-  it("initialize returns capabilities, server info, and tool-steering instructions", async () => {
-    const response = await handler()({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+  it("initialize returns capabilities (including resources), server info, and tool-steering instructions", async () => {
+    const response = await handler()({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {},
+    });
     expect(response).toMatchObject({
       jsonrpc: "2.0",
       id: 1,
       result: {
         protocolVersion: "2024-11-05",
-        capabilities: { tools: {} },
+        capabilities: { tools: {}, resources: {} },
         serverInfo: { name: "metrists", version: "1.0.0" },
       },
     });
-    const instructions = (response?.result as { instructions?: string }).instructions;
+    const instructions = (response?.result as { instructions?: string })
+      .instructions;
     // The steering text lives on the server's own channel (not a prompt
     // preamble) so only sessions that have the server hear about its tools.
     expect(instructions).toContain("author_blob");
+    expect(instructions).toContain("resources/read");
+    // Steering is directive, not optional: resources/read first, and full
+    // document reads are the fallback, not the default (context-size ask).
+    expect(instructions).toContain("FIRST action");
+    expect(instructions).toContain("Do NOT read the entire document by default");
+  });
+
+  it("resources/list returns an empty catalog (self-contained URIs, nothing to enumerate)", async () => {
+    const response = await handler()({
+      jsonrpc: "2.0",
+      id: 20,
+      method: "resources/list",
+      params: {},
+    });
+    expect(response?.result).toEqual({ resources: [] });
+  });
+
+  it("resources/read: an undecodable uri returns a JSON-RPC error, not a thrown exception", async () => {
+    decodeWidgetContextUri.mockReturnValue(undefined);
+    const response = await handler()({
+      jsonrpc: "2.0",
+      id: 21,
+      method: "resources/read",
+      params: { uri: "metrists://widget-context?bogus=1" },
+    });
+    expect(response?.error?.code).toBe(-32602);
+    expect(buildWidgetContextPayload).not.toHaveBeenCalled();
+  });
+
+  it("resources/read: a decodable uri returns the payload as JSON text content", async () => {
+    const ref = { path: "notes.md", pos: 0 };
+    const payload = {
+      documentTitle: "Notes",
+      documentPath: "notes.md",
+      outline: [],
+      position: { headingText: null },
+      surroundingText: "",
+      selectedText: null,
+      otherOpenFiles: [],
+    };
+    decodeWidgetContextUri.mockReturnValue(ref);
+    buildWidgetContextPayload.mockResolvedValue(payload);
+
+    const uri = "metrists://widget-context?path=notes.md&pos=0";
+    const response = await handler()({
+      jsonrpc: "2.0",
+      id: 22,
+      method: "resources/read",
+      params: { uri },
+    });
+    expect(decodeWidgetContextUri).toHaveBeenCalledWith(uri);
+    expect(buildWidgetContextPayload).toHaveBeenCalledWith(
+      ctx.workspacePath,
+      ref,
+    );
+    const result = response?.result as {
+      contents: Array<{ uri: string; mimeType: string; text: string }>;
+    };
+    expect(result.contents[0].uri).toBe(uri);
+    expect(result.contents[0].mimeType).toBe("application/json");
+    expect(JSON.parse(result.contents[0].text)).toEqual(payload);
   });
 
   it("notifications/initialized returns null (no response)", async () => {
-    const response = await handler()({ jsonrpc: "2.0", method: "notifications/initialized" });
+    const response = await handler()({
+      jsonrpc: "2.0",
+      method: "notifications/initialized",
+    });
     expect(response).toBeNull();
   });
 
   it("tools/list includes every registered tool with a title, a JSON Schema, and author_blob's payload is an anyOf over registered blob types", async () => {
-    const response = await handler()({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+    const response = await handler()({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/list",
+      params: {},
+    });
     const result = response?.result as {
       tools: Array<{ name: string; title: string; inputSchema: unknown }>;
     };
@@ -147,7 +240,9 @@ describe("createMcpRequestHandler", () => {
       params: { name: "workspace_read_document", arguments: { path: 123 } },
     });
     expect(response?.error?.code).toBe(-32602);
-    expect(response?.error?.message).toMatch(/invalid input for workspace_read_document/);
+    expect(response?.error?.message).toMatch(
+      /invalid input for workspace_read_document/,
+    );
   });
 
   it("tools/call: repairs a nested argument delivered as a JSON string (OpenCode quirk)", async () => {
@@ -169,11 +264,19 @@ describe("createMcpRequestHandler", () => {
       },
     });
     expect(response?.error).toBeUndefined();
-    const result = response?.result as { isError?: boolean; content: Array<{ text: string }> };
+    const result = response?.result as {
+      isError?: boolean;
+      content: Array<{ text: string }>;
+    };
     expect(result.isError).toBeUndefined();
-    expect(JSON.parse(result.content[0].text)).toEqual({ blobId: "question_str1" });
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      blobId: "question_str1",
+    });
     // The written fence carries the parsed payload, not the string.
-    const written = writeWorkspaceTextFile.mock.calls.at(-1) as unknown as [string, string];
+    const written = writeWorkspaceTextFile.mock.calls.at(-1) as unknown as [
+      string,
+      string,
+    ];
     expect(written[1]).toContain("Pick one");
   });
 
@@ -184,7 +287,9 @@ describe("createMcpRequestHandler", () => {
       method: "tools/call",
       params: { name: "workspace_open_files", arguments: {} },
     });
-    const result = response?.result as { content: Array<{ type: string; text: string }> };
+    const result = response?.result as {
+      content: Array<{ type: string; text: string }>;
+    };
     expect(result.content[0].type).toBe("text");
     expect(() => JSON.parse(result.content[0].text)).not.toThrow();
   });
@@ -195,23 +300,35 @@ describe("createMcpRequestHandler", () => {
       jsonrpc: "2.0",
       id: 6,
       method: "tools/call",
-      params: { name: "history_restore", arguments: { path: "notes.md", checkpoint: "abc123" } },
+      params: {
+        name: "history_restore",
+        arguments: { path: "notes.md", checkpoint: "abc123" },
+      },
     });
 
     const row = agentPermissionRequestsCollection.toArray.find(
       (r) => r.taskId === ctx.taskId && r.status === "pending",
     );
     expect(row).toBeDefined();
-    broker.respond(row!.id, { outcome: { outcome: "selected", optionId: "deny" } });
+    broker.respond(row!.id, {
+      outcome: { outcome: "selected", optionId: "deny" },
+    });
 
     const response = await pending;
-    const result = response?.result as { isError: true; content: Array<{ text: string }> };
+    const result = response?.result as {
+      isError: true;
+      content: Array<{ text: string }>;
+    };
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/permission denied/);
   });
 
   it("unknown method returns a JSON-RPC method-not-found error", async () => {
-    const response = await handler()({ jsonrpc: "2.0", id: 7, method: "not/a/real/method" });
+    const response = await handler()({
+      jsonrpc: "2.0",
+      id: 7,
+      method: "not/a/real/method",
+    });
     expect(response?.error?.code).toBe(-32601);
   });
 });

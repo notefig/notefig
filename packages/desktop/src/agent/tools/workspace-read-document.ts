@@ -16,7 +16,10 @@ export const workspaceReadDocument: AgentTool<
   name: "workspace_read_document",
   title: "agentToolWorkspaceReadDocument",
   description:
-    "Read a workspace document's content by path. Optional 1-based `line` + `limit` for a partial read.",
+    "Read a workspace document's content by path. Optional 1-based `line` + `limit` for a partial read. " +
+    "If this turn's prompt carries a widget-context resource_link, read that first via " +
+    "resources/read — only reach for this tool (or a full, unbounded read) when that resource's " +
+    "outline and surrounding text don't cover what you need.",
   input: InputSchema,
   async execute(ctx, input) {
     const resolved = resolveWorkspacePath(ctx.workspacePath, input.path);

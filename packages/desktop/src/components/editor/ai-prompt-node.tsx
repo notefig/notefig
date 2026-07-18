@@ -113,6 +113,7 @@ function AiPromptNodeView(props: NodeViewProps) {
         workspacePath={basePath}
         documentPath={filePath}
         editor={props.editor}
+        getPos={props.getPos}
         summoned={Boolean(props.node.attrs.summoned)}
         removeNode={removeNode}
       />

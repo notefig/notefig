@@ -11,6 +11,7 @@
 import {
   newTurnId,
   type HarnessDefinition,
+  type PromptContextPart,
   type RequestPermissionResponse,
   type TurnOutcome,
 } from "@metrists/shared/agent";
@@ -20,6 +21,7 @@ import { getRegisteredTask } from "./task-registry";
 // `workspaceHandle.createTask` and `taskHandle.prompt`'s revival path reach
 // back into the service, at call time.
 import { getOrReviveTask, startAgentTask } from "./agent-service";
+import { encodeWidgetContextUri } from "./widget-context-uri";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -31,7 +33,23 @@ export interface AgentTaskHandle {
    * Enqueue a prompt — infallible, never throws. A missing/disposed task
    * returns a handle whose `completed` is already resolved as an error.
    */
-  prompt(text: string): PromptHandle;
+  prompt(
+    text: string,
+    options?: { contextParts?: PromptContextPart[]; front?: boolean },
+  ): PromptHandle;
+  /**
+   * The in-document widget's send path (MET-68): callers hand over plain
+   * editor-derived facts (document path, ProseMirror position, whether the
+   * doc is empty) — this method owns turning that into either an embedded
+   * "author into this empty doc" framing sentence, or a `resource_link`
+   * pointing at a self-contained widget-context resource URI (see
+   * widget-context-uri.ts), so no MCP/ACP-shaped types need to reach into
+   * the React layer.
+   */
+  promptFromWidget(
+    text: string,
+    widget: { path: string; pos: number; isDocEmpty: boolean },
+  ): PromptHandle;
   cancel(): Promise<ActionResult>;
   respondPermission(
     requestId: string,
@@ -60,22 +78,42 @@ export interface AgentWorkspaceHandle {
 }
 
 function taskHandle(taskId: string): AgentTaskHandle {
+  // A local reference (not `this.prompt`) so promptFromWidget below stays
+  // correct even if a caller destructures the returned handle.
+  const promptImpl: AgentTaskHandle["prompt"] = (text, options) => {
+    // getOrReviveTask revives a restored session transparently — the
+    // prompt rides the queue while session/load replays history.
+    const task = getOrReviveTask(taskId);
+    if (!task) {
+      return {
+        turnId: newTurnId(),
+        completed: Promise.resolve<TurnOutcome>({
+          status: "error",
+          error: "agent task is not started",
+        }),
+      };
+    }
+    return task.prompt(text, options);
+  };
+
   return {
     taskId,
-    prompt(text) {
-      // getOrReviveTask revives a restored session transparently — the
-      // prompt rides the queue while session/load replays history.
-      const task = getOrReviveTask(taskId);
-      if (!task) {
-        return {
-          turnId: newTurnId(),
-          completed: Promise.resolve<TurnOutcome>({
-            status: "error",
-            error: "agent task is not started",
-          }),
-        };
+    prompt: promptImpl,
+    promptFromWidget(text, widget) {
+      if (widget.isDocEmpty) {
+        // The one deliberately-embedded exception: the agent can't
+        // discover "this doc is empty" by reading a resource it doesn't
+        // know to ask for, so this stays inline in the prompt text.
+        const framing = `${widget.path} is currently empty. Author directly into it — do not just describe what you would write.\n\n`;
+        return promptImpl(framing + text);
       }
-      return task.prompt(text);
+      const uri = encodeWidgetContextUri({
+        path: widget.path,
+        pos: widget.pos,
+      });
+      return promptImpl(text, {
+        contextParts: [{ kind: "resource_link", path: uri }],
+      });
     },
     async cancel() {
       const task = getRegisteredTask(taskId);
