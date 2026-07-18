@@ -31,12 +31,24 @@ const scriptedHarness: HarnessDefinition = {
 };
 
 class SilentLogger extends Logger {
-  info() {}
-  warn() {}
-  error() {}
-  verbose() {}
-  noob() {}
-  log(_types: LogTypes[]) {}
+  info() {
+    /* silent */
+  }
+  warn() {
+    /* silent */
+  }
+  error() {
+    /* silent */
+  }
+  verbose() {
+    /* silent */
+  }
+  noob() {
+    /* silent */
+  }
+  log(_types: LogTypes[]) {
+    /* silent */
+  }
 }
 
 /** A protocol-conformant fake browser built only on the shared module. */

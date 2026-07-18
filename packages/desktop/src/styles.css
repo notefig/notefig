@@ -1,6 +1,12 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Test code is not a utility source: the auto scanner otherwise compiles
+   Playwright locator strings (e.g. '[role="textbox"]:visible') into broken
+   rules in the shipped CSS. */
+@source not "../tests";
+@source not "../src-tauri";
+
 @plugin "@tailwindcss/typography";
 @plugin "tailwind-scrollbar-hide";
 

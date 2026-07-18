@@ -5,8 +5,6 @@ import {
   rmSync,
   existsSync,
   readFileSync,
-  readdirSync,
-  statSync,
 } from 'fs';
 import { describe, expect, it, afterEach, beforeAll } from '@jest/globals';
 import execa = require('execa');
@@ -109,28 +107,6 @@ This book is created for testing purposes.
     });
 
     return tempDir;
-  };
-
-  const collectFiles = (dirPath: string, basePath = ''): DeploymentFile[] => {
-    const files: DeploymentFile[] = [];
-    const items = readdirSync(dirPath);
-
-    for (const item of items) {
-      const itemPath = join(dirPath, item);
-      const relativePath = basePath ? `${basePath}/${item}` : item;
-
-      if (statSync(itemPath).isDirectory()) {
-        files.push(...collectFiles(itemPath, relativePath));
-      } else {
-        const content = readFileSync(itemPath, 'utf-8');
-        files.push({
-          file: relativePath,
-          data: content,
-        });
-      }
-    }
-
-    return files;
   };
 
   const verifyLiveDeployment = async (url: string): Promise<void> => {

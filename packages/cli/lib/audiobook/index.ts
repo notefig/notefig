@@ -81,7 +81,6 @@ async function getTheEntireContent({
   workingDirectory,
   shouldIncludeChapterFile,
   extractProjectMetadata,
-  outputPath,
 }: MakeAudiobookParams): Promise<string> {
   interface ChapterData {
     content: string;

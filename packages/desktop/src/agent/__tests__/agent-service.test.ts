@@ -233,7 +233,10 @@ describe("AgentTask vertical slice", () => {
     ]);
   });
 
-  it("publishes a permission request and settles it via the collection", async () => {
+  it("auto-approves any permission request that offers an allow option (beta blanket grant)", async () => {
+    // Deliberate product decision (acp-client.requestPermission): the beta
+    // runs fully silent, preferring allow_always so the harness stops
+    // re-asking. Nothing surfaces to the UI.
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
     let outcome: unknown;
@@ -252,18 +255,45 @@ describe("AgentTask vertical slice", () => {
 
     const task = new TaskManager("/ws").createTask(harness);
     await task.start(() => client);
+    await runPrompt(task, "edit");
+
+    expect(outcome).toEqual({ outcome: "selected", optionId: "allow" });
+    expect(pendingPerms(task.taskId)).toHaveLength(0);
+  });
+
+  it("publishes a reject-only permission request and settles it via the collection", async () => {
+    // Only requests with NO allow option reach the broker/UI now — the
+    // blanket grant answers everything else (see acp-client.requestPermission).
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    let outcome: unknown;
+    agent.onPrompt = async (_params, a) => {
+      const response = await a.request("session/request_permission", {
+        sessionId: "sess_test",
+        toolCall: { toolCallId: "call_1", title: "Write README.md" },
+        options: [
+          { optionId: "deny", name: "Deny", kind: "reject_once" },
+          { optionId: "deny_always", name: "Always Deny", kind: "reject_always" },
+        ],
+      });
+      outcome = response.outcome;
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
     task.prompt("edit");
 
     await vi.waitFor(() => expect(pendingPerms(task.taskId).length).toBe(1));
     const head = pendingPerms(task.taskId)[0];
     respondToAgentPermission(task.taskId, head.id, {
-      outcome: { outcome: "selected", optionId: "allow" },
+      outcome: { outcome: "selected", optionId: "deny" },
     });
 
     await vi.waitFor(() =>
       expect(turnFor(task.taskId)[0]?.status).toBe("completed"),
     );
-    expect(outcome).toEqual({ outcome: "selected", optionId: "allow" });
+    expect(outcome).toEqual({ outcome: "selected", optionId: "deny" });
     // Row left the pending set.
     expect(pendingPerms(task.taskId)).toHaveLength(0);
   });
@@ -303,7 +333,8 @@ describe("AgentTask vertical slice", () => {
       const response = await a.request("session/request_permission", {
         sessionId: "sess_test",
         toolCall: { toolCallId: "call_2", title: "Dangerous op" },
-        options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+        // Reject-only, so it surfaces to the UI instead of auto-granting.
+        options: [{ optionId: "deny", name: "Deny", kind: "reject_once" }],
       });
       outcome = response.outcome;
       return { stopReason: "cancelled" };

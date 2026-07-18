@@ -1,5 +1,5 @@
 import { join } from 'path';
-import { writeFileSync, existsSync, readFileSync } from 'fs';
+import { writeFileSync } from 'fs';
 import { describe, expect, it, afterAll, beforeAll } from '@jest/globals';
 import execa = require('execa');
 import { createUniqueTempDir, cleanupTempDir, getCliPath } from './test-helpers';

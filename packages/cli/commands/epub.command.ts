@@ -1,6 +1,6 @@
 import { join } from 'path';
 import { InitCommand } from './init.command';
-import { makeBook, type BookMetadata } from '../lib/epub';
+import { makeBook } from '../lib/epub';
 import type { Command } from 'commander';
 
 export class EpubCommand extends InitCommand {
