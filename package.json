@@ -1,6 +1,7 @@
 {
   "name": "metrists-monorepo",
   "private": true,
+  "license": "MIT",
   "workspaces": [
     "./packages/*",
     "./themes/*"
