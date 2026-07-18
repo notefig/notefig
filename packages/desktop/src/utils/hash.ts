@@ -23,7 +23,12 @@ import md5 from "md5";
  * This matches the Rust implementation for consistent cross-platform hashing
  */
 export function calculateContentHash(content: string): string {
-  return md5(content);
+  // Hash bytes, not the string: md5's string path UTF-8-encodes via
+  // encodeURIComponent, which throws URIError on lone surrogates — making
+  // every save of such a document fail. TextEncoder replaces lone
+  // surrogates with U+FFFD, which is exactly what Rust reads back after
+  // the lossy disk write, so JS and Rust digests stay in agreement.
+  return md5(new TextEncoder().encode(content));
 }
 
 /**

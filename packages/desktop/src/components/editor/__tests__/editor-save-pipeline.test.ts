@@ -24,6 +24,7 @@ import {
   serializeDoc,
   resetConverterForTests,
   closeDocumentSync,
+  flushDocumentSync,
 } from "@/utils/markdown-conversion";
 import { useEditorFileSync } from "../use-editor-file-sync";
 
@@ -171,6 +172,36 @@ describe("save pipeline (inline fallback = worker-boot-failure path)", () => {
 
     expect(editor.state.doc.textContent).toBe("external content");
     expect(writeFileContentMock).not.toHaveBeenCalled();
+  });
+
+  it("persists edits still in the debounce window on tab close (MET-71 #3)", async () => {
+    await render(makeFile("start"));
+
+    // Edit, then close the tab immediately — well inside the 500ms autosave
+    // debounce, so no save has shipped yet.
+    await act(async () => {
+      editor.commands.insertContentAt(
+        editor.state.doc.content.size - 1,
+        " last-second",
+      );
+    });
+
+    // disposeEditor's exact order: flush while the editor is alive, destroy,
+    // then close the sync. The flush's serialize+write is in flight when
+    // close() runs; the old generation bump used to discard it.
+    await act(async () => {
+      flushDocumentSync("/ws/note.md");
+      editor.destroy();
+      closeDocumentSync("/ws/note.md");
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+
+    expect(writeFileContentMock).toHaveBeenCalled();
+    expect(writeFileContentMock.mock.calls.at(-1)![2]).toBe(
+      "start last-second",
+    );
   });
 
   it("does not save while updates are suppressed as not-loaded", async () => {

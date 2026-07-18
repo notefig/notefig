@@ -80,6 +80,23 @@ pub fn register_app_write(path: String, content_hash: String) {
     writes.retain(|w| w.timestamp.elapsed().as_secs() < 5);
 }
 
+/// Whether this (path, hash) pair matches a recent app write.
+///
+/// Deliberately a membership test with TTL expiry, NOT consume-once: the
+/// recursive metadata watcher and the per-file content watcher both run
+/// `process_events` for the same save (one atomic write emits
+/// `Modify(Name(Any))` into both pipelines), so a single registration must
+/// answer every pipeline that observes it. Consume-once let the second
+/// pipeline leak the echo to the frontend on virtually every save.
+fn is_recent_app_write(path: &Path, content_hash: &str) -> bool {
+    let mut writes = APP_WRITES.lock().unwrap();
+    // Garbage-collect stale entries while we have the lock
+    writes.retain(|w| w.timestamp.elapsed().as_secs() < 5);
+    writes
+        .iter()
+        .any(|w| w.path == path && w.content_hash == content_hash)
+}
+
 // Note: is_hidden_path is now in walkdir_utils module
 
 /// Check if a path should be filtered (hidden files, temp files, etc.)
@@ -235,23 +252,7 @@ async fn process_events(events: Vec<Event>, app_handle: &AppHandle) {
                         if let Ok(content) = fs::read_to_string(&path).await {
                             let hash = compute_content_hash(&content);
 
-                            let is_app_write = {
-                                let mut writes = APP_WRITES.lock().unwrap();
-                                // Garbage-collect stale entries while we have the lock
-                                writes.retain(|w| w.timestamp.elapsed().as_secs() < 5);
-                                // Find and remove the matching entry (consume it)
-                                if let Some(pos) = writes
-                                    .iter()
-                                    .position(|w| w.path == path && w.content_hash == hash)
-                                {
-                                    writes.remove(pos);
-                                    true
-                                } else {
-                                    false
-                                }
-                            };
-
-                            if !is_app_write {
+                            if !is_recent_app_write(&path, &hash) {
                                 content_changes.push(ContentChange {
                                     path: path.to_string_lossy().to_string(),
                                     content,
@@ -277,21 +278,7 @@ async fn process_events(events: Vec<Event>, app_handle: &AppHandle) {
                         if let Ok(content) = fs::read_to_string(&path).await {
                             let hash = compute_content_hash(&content);
 
-                            let is_app_write = {
-                                let mut writes = APP_WRITES.lock().unwrap();
-                                writes.retain(|w| w.timestamp.elapsed().as_secs() < 5);
-                                if let Some(pos) = writes
-                                    .iter()
-                                    .position(|w| w.path == path && w.content_hash == hash)
-                                {
-                                    writes.remove(pos);
-                                    true
-                                } else {
-                                    false
-                                }
-                            };
-
-                            if !is_app_write {
+                            if !is_recent_app_write(&path, &hash) {
                                 content_changes.push(ContentChange {
                                     path: path.to_string_lossy().to_string(),
                                     content,

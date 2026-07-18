@@ -120,6 +120,18 @@ export function useEditorFileSync(
       sync.pushUpdate(() => editor.state.doc.toJSON() as JSONContent);
     };
 
+    const flushPending = () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        pushSnapshot();
+      }
+    };
+    // Lets disposeEditor flush the debounce window before destroying the
+    // editor — on tab close this cleanup runs too late (editor already
+    // destroyed) to do it itself.
+    sync.flushPendingEdits = flushPending;
+
     const handleUpdate = ({ transaction }: { transaction: Transaction }) => {
       if (suppressSaveRef.current) return;
       if (!isContentLoaded) return;
@@ -137,8 +149,13 @@ export function useEditorFileSync(
 
     return () => {
       editor.off("update", handleUpdate);
+      if (sync.flushPendingEdits === flushPending) {
+        sync.flushPendingEdits = null;
+      }
       // Flush rather than drop a pending save: teardown here is a tab
-      // switch, layout change or unmount, and the edits are real.
+      // switch, layout change or unmount, and the edits are real. (On tab
+      // close disposeEditor already flushed via flushPendingEdits and the
+      // timer is null by now.)
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;

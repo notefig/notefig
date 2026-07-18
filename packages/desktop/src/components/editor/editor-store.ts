@@ -14,7 +14,11 @@ import {
 } from "@/components/editor/tiptap-editor-kit";
 import { AiPromptNode } from "@/components/editor/ai-prompt-node";
 import { lowlight } from "@/components/editor/editor-schema-kit";
-import { closeDocumentSync, getDocumentSync } from "@/utils/markdown-conversion";
+import {
+  closeDocumentSync,
+  flushDocumentSync,
+  getDocumentSync,
+} from "@/utils/markdown-conversion";
 import {
   LAYOUT_PARAM,
   parseLayout,
@@ -417,6 +421,10 @@ export function isEditorFocusable(filePath: string): boolean {
 export function disposeEditor(filePath: string): void {
   const instance = editorInstances.get(filePath);
   if (instance) {
+    // Flush the autosave debounce window while the editor can still be
+    // snapshotted — the file-sync hook's teardown runs after destroy on
+    // this path and would have to drop those edits.
+    flushDocumentSync(filePath);
     instance.dispose();
     editorInstances.delete(filePath);
     closeDocumentSync(filePath);
@@ -428,6 +436,7 @@ export function disposeEditor(filePath: string): void {
  */
 export function disposeAllEditors(): void {
   editorInstances.forEach((instance, filePath) => {
+    flushDocumentSync(filePath);
     instance.dispose();
     closeDocumentSync(filePath);
   });

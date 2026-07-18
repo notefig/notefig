@@ -120,7 +120,8 @@ export function resetConverterForTests(): void {
 export class DocumentSync {
   private saving = false;
   private dirty = false;
-  /** Bumped on adoption/close so an in-flight serialization of a replaced
+  private closed = false;
+  /** Bumped on adoption so an in-flight serialization of a replaced
    * document is discarded instead of written. */
   private generation = 0;
   private getSnapshot: (() => JSONContent) | null = null;
@@ -133,6 +134,12 @@ export class DocumentSync {
 
   /** Persists a serialization; assigned by the editor-side hook. */
   writer: ((markdown: string) => Promise<void>) | null = null;
+
+  /** Pushes edits still sitting in the autosave debounce window into the
+   * pipeline; assigned by the editor-side hook. Called by `disposeEditor`
+   * BEFORE the editor is destroyed — the hook's own teardown flush runs
+   * after disposal on the tab-close path, when the snapshot is gone. */
+  flushPendingEdits: (() => void) | null = null;
 
   constructor(readonly path: string) {}
 
@@ -192,6 +199,7 @@ export class DocumentSync {
   /** Ship an editor update. The snapshot is taken lazily so a burst of
    * updates costs one `doc.toJSON()` per serialize round, not per edit. */
   pushUpdate(getSnapshot: () => JSONContent): void {
+    if (this.closed) return;
     this.getSnapshot = getSnapshot;
     if (this.saving) {
       this.dirty = true;
@@ -201,10 +209,18 @@ export class DocumentSync {
   }
 
   close(): void {
-    this.generation++;
+    this.closed = true;
     this.dirty = false;
     this.getSnapshot = null;
-    this.writer = null;
+    this.flushPendingEdits = null;
+    // Deliberately no generation bump, and the writer stays while a save is
+    // in flight: tab close flushes the debounce window right before this,
+    // and those edits are real — a bump would trip the generation-drop
+    // guard and discard the last ~500ms of typing (MET-71 #3). The save
+    // loop releases the writer once the final write lands.
+    if (!this.saving) {
+      this.writer = null;
+    }
   }
 
   private async runSaveLoop(): Promise<void> {
@@ -228,8 +244,10 @@ export class DocumentSync {
       console.error(`Autosave failed for ${this.path}:`, error);
     } finally {
       this.saving = false;
-      // An edit that landed during the error path must not go unsaved.
-      if (this.dirty) {
+      if (this.closed) {
+        this.writer = null;
+      } else if (this.dirty) {
+        // An edit that landed during the error path must not go unsaved.
         void this.runSaveLoop();
       }
     }
@@ -245,6 +263,12 @@ export function getDocumentSync(path: string): DocumentSync {
     documentSyncs.set(path, sync);
   }
   return sync;
+}
+
+/** Push any edits still in the autosave debounce window into the pipeline.
+ * Must run while the editor is still alive — the snapshot reads its state. */
+export function flushDocumentSync(path: string): void {
+  documentSyncs.get(path)?.flushPendingEdits?.();
 }
 
 /** Called when an editor is disposed (tab closed / workspace switch). */
