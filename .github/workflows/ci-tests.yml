@@ -192,7 +192,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - uses: fallow-rs/fallow@v2
+      - uses: fallow-rs/fallow@v3
         id: fallow
         with:
           command: audit
@@ -225,7 +225,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - uses: fallow-rs/fallow@v2
+      - uses: fallow-rs/fallow@v3
         with:
           command: health
           format: sarif
