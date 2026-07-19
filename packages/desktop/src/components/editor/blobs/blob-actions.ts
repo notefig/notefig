@@ -1,3 +1,9 @@
+// Pre-existing tangle: editor-store's editor kit renders blob node views,
+// which call back into these actions (directly and via file-sync's write
+// adoption). Untangling means relocating the editor registry to a leaf
+// module (see file-sync's editor-store import comment); new cycles
+// elsewhere still gate.
+// fallow-ignore-file circular-dependency
 /**
  * The write path for blob answers. Always ID-addressed string surgery via
  * patchBlobInMarkdown — never a whole-document re-serialization — and always

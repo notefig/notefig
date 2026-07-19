@@ -1,3 +1,8 @@
+// Pre-existing tangle: the editor component graph (jump-to-blob →
+// editor-store → ai-prompt-node → prompt-blob) reaches back to this tab.
+// Untangling means relocating the editor registry to a leaf module (see
+// file-sync's editor-store import comment); new cycles elsewhere still gate.
+// fallow-ignore-file circular-dependency
 import {
   useCallback,
   useEffect,

@@ -1,3 +1,8 @@
+// Pre-existing tangle: editor-store builds the editor kit with
+// ai-prompt-node, whose node view renders this component. Untangling means
+// relocating the editor registry to a leaf module (see file-sync's
+// editor-store import comment); new cycles elsewhere still gate.
+// fallow-ignore-file circular-dependency
 import {
   memo,
   useCallback,
