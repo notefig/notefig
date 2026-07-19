@@ -85,6 +85,22 @@ const LEVEL_BG: Record<ConsoleLevel, string> = {
 
 const MAX_CONSOLE_ENTRIES = 500;
 
+async function copyTextWithFallback(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Fallback for environments where clipboard API is blocked
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textarea);
+  }
+}
+
 // ── Console capture hook ──
 
 function useConsoleCapture(active: boolean) {
@@ -441,24 +457,9 @@ function DebugPanelContent({
   ]);
 
   const copyDebugReport = useCallback(async () => {
-    const report = buildDebugReport();
-    try {
-      await navigator.clipboard.writeText(report);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Fallback for environments where clipboard API is blocked
-      const textarea = document.createElement("textarea");
-      textarea.value = report;
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      document.body.removeChild(textarea);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
+    await copyTextWithFallback(buildDebugReport());
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }, [buildDebugReport]);
 
   // ── Copy Plate AST ──
@@ -499,24 +500,9 @@ function DebugPanelContent({
   }, [openTabs]);
 
   const copyPlateAst = useCallback(async () => {
-    const report = buildPlateAstReport();
-    try {
-      await navigator.clipboard.writeText(report);
-      setAstCopied(true);
-      setTimeout(() => setAstCopied(false), 2000);
-    } catch {
-      // Fallback for environments where clipboard API is blocked
-      const textarea = document.createElement("textarea");
-      textarea.value = report;
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      document.body.removeChild(textarea);
-      setAstCopied(true);
-      setTimeout(() => setAstCopied(false), 2000);
-    }
+    await copyTextWithFallback(buildPlateAstReport());
+    setAstCopied(true);
+    setTimeout(() => setAstCopied(false), 2000);
   }, [buildPlateAstReport]);
 
   // ── Agent session history (task transcript dump) ──
@@ -659,24 +645,9 @@ function DebugPanelContent({
   const [sessionCopied, setSessionCopied] = useState(false);
 
   const copySessionReport = useCallback(async () => {
-    const report = buildSessionReport();
-    try {
-      await navigator.clipboard.writeText(report);
-      setSessionCopied(true);
-      setTimeout(() => setSessionCopied(false), 2000);
-    } catch {
-      // Fallback for environments where clipboard API is blocked
-      const textarea = document.createElement("textarea");
-      textarea.value = report;
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      document.body.removeChild(textarea);
-      setSessionCopied(true);
-      setTimeout(() => setSessionCopied(false), 2000);
-    }
+    await copyTextWithFallback(buildSessionReport());
+    setSessionCopied(true);
+    setTimeout(() => setSessionCopied(false), 2000);
   }, [buildSessionReport]);
 
   // ── Collapsible sections ──
