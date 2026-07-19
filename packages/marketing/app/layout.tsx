@@ -1,13 +1,7 @@
 import type React from "react"
 import type { Metadata } from "next"
-import { Playfair_Display, Inter } from "next/font/google"
+import { Inter } from "next/font/google"
 import "./globals.css"
-
-const playfair = Playfair_Display({
-  subsets: ["latin"],
-  variable: "--font-playfair",
-  display: "swap",
-})
 
 const inter = Inter({
   subsets: ["latin"],
@@ -18,7 +12,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Metrists - Continues Publishing",
   description: "Metrists is a git-based pipeline that promotes continuesly publishing long-form content.",
-icons: {
+  icons: {
     icon: [
       { url: '/favicon.ico', sizes: 'any' },
       { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
@@ -30,12 +24,12 @@ icons: {
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode
-}) {
+}>) {
   return (
-    <html lang="en" className={`${playfair.variable} ${inter.variable}`}>
-      <body className={inter.className}>{children}</body>
+    <html lang="en" className={`${inter.variable} bg-background`}>
+      <body className="font-sans antialiased">{children}</body>
     </html>
   )
 }

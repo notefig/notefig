@@ -6,7 +6,13 @@ on:
       - main
     paths:
       - "packages/marketing/pages/**"
+      - "packages/marketing/app/**"
+      - "packages/marketing/components/**"
+      - "packages/marketing/hooks/**"
+      - "packages/marketing/lib/**"
+      - "packages/marketing/public/**"
       - "packages/marketing/theme.config.tsx"
+      - "packages/marketing/tailwind.config.ts"
       - "packages/marketing/next.config.mjs"
       - "packages/marketing/package.json"
       - ".github/workflows/deploy-docs.yml"
