@@ -204,6 +204,17 @@ jobs:
           comment: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # The rendered surfaces (annotations/comment) don't always show every
+      # gating finding — keep the raw results inspectable.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fallow-audit-results
+          path: |
+            fallow-results.json
+            fallow-results-scoped.json
+          if-no-files-found: ignore
+
   fallow-health:
     name: Fallow Health (Advisory)
     runs-on: ubuntu-latest
