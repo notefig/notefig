@@ -76,21 +76,6 @@ export function selectTabInLayout(
 }
 
 /**
- * Walk the LayoutNode tree and collect all tab IDs.
- */
-export function extractTabIds(nodes: LayoutNode[]): string[] {
-  const ids: string[] = [];
-  for (const node of nodes) {
-    if (node.type === "Window") {
-      ids.push(...node.children);
-    } else if (node.type === "Panel") {
-      ids.push(...extractTabIds(node.children));
-    }
-  }
-  return ids;
-}
-
-/**
  * Find the first window node in the layout tree.
  */
 export function findFirstWindow(nodes: LayoutNode[]): WindowNode | null {

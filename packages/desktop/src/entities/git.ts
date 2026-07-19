@@ -318,14 +318,25 @@ export interface GitSummary {
   hasChanges: boolean;
 }
 
+/** The workspace's git collection as a render-stable reference. */
+function useGitCollection(workspacePath: string): GitCollection;
+function useGitCollection(
+  workspacePath: string | undefined,
+): GitCollection | undefined;
+function useGitCollection(
+  workspacePath: string | undefined,
+): GitCollection | undefined {
+  return useMemo(
+    () => (workspacePath ? getOrCreateGitCollection(workspacePath) : undefined),
+    [workspacePath],
+  );
+}
+
 /** The repo summary row + change flag; undefined until the first fetch lands. */
 export function useGitSummary(
   workspacePath: string | undefined,
 ): GitSummary | undefined {
-  const collection = useMemo(
-    () => (workspacePath ? getOrCreateGitCollection(workspacePath) : undefined),
-    [workspacePath],
-  );
+  const collection = useGitCollection(workspacePath);
   const { data = [] } = useLiveQuery(
     (q) => (collection ? q.from({ git: collection }) : undefined),
     [workspacePath],
@@ -349,10 +360,7 @@ export function useGitSummary(
 
 /** Checkpoints newest-first. */
 export function useGitCheckpoints(workspacePath: string): GitCheckpointRow[] {
-  const collection = useMemo(
-    () => getOrCreateGitCollection(workspacePath),
-    [workspacePath],
-  );
+  const collection = useGitCollection(workspacePath);
   const { data = [] } = useLiveQuery(
     (q) =>
       q.from({ git: collection }).where(({ git }) => eq(git.kind, "checkpoint")),
@@ -372,10 +380,7 @@ export function useFileGitState(
   workspacePath: string,
   filePath: string,
 ): GitFileRow | undefined {
-  const collection = useMemo(
-    () => getOrCreateGitCollection(workspacePath),
-    [workspacePath],
-  );
+  const collection = useGitCollection(workspacePath);
   const { data = [] } = useLiveQuery(
     (q) =>
       q.from({ git: collection }).where(({ git }) => eq(git.id, fileRowId(filePath))),
