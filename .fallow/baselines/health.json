@@ -1,7 +1,7 @@
 {
   "finding_counts": {
-    "packages/cli/commands/config-aware.command.ts": {
-      "crap_moderate": {
+    "packages/cli/commands/agent.command.ts": {
+      "crap_high": {
         "count": 1
       }
     },
@@ -13,8 +13,11 @@
         "count": 1
       }
     },
-    "packages/cli/commands/watch.command.ts": {
-      "crap_moderate": {
+    "packages/cli/lib/agent-worker.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
         "count": 2
       }
     },
@@ -34,16 +37,6 @@
         "count": 2
       }
     },
-    "packages/cli/lib/utils/json.util.ts": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/cli/lib/utils/open.util.ts": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
     "packages/cli/lib/utils/process.util.ts": {
       "crap_high": {
         "count": 1
@@ -54,23 +47,8 @@
         "count": 1
       }
     },
-    "packages/cli/tests/e2e/helpers/vercel-api.helper.ts": {
-      "crap_moderate": {
-        "count": 2
-      }
-    },
-    "packages/cli/tests/e2e/test-helpers.ts": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/cli/tests/e2e/vercel.test.e2e.ts": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/App.tsx": {
-      "crap_moderate": {
+    "packages/cli/tests/e2e/fixtures/scripted-agent.js": {
+      "crap_high": {
         "count": 1
       }
     },
@@ -80,33 +58,93 @@
       },
       "crap_high": {
         "count": 1
-      },
-      "crap_moderate": {
-        "count": 4
       }
     },
     "packages/desktop/src/adapters/browser-fs-adapter.ts": {
       "complexity_moderate": {
         "count": 1
+      }
+    },
+    "packages/desktop/src/agent/__tests__/fake-agent.ts": {
+      "complexity_high": {
+        "count": 1
       },
-      "crap_moderate": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/agent/agent-service.ts": {
+      "complexity_high": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 3
+      }
+    },
+    "packages/desktop/src/agent/mcp-server.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/agent/tunnel/__tests__/fake-worker.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/agent/tunnel/tunnel-connection.ts": {
+      "complexity_high": {
+        "count": 1
+      },
+      "complexity_moderate": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/agent/agent-chat-tab.tsx": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/agent/harness-settings.tsx": {
+      "complexity_high": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
         "count": 2
       }
     },
-    "packages/desktop/src/adapters/tauri-adapter.ts": {
-      "crap_moderate": {
+    "packages/desktop/src/components/agent/prompt-blob-state.ts": {
+      "complexity_moderate": {
+        "count": 2
+      }
+    },
+    "packages/desktop/src/components/agent/prompt-blob.tsx": {
+      "complexity_critical": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/components/agent/sessions-panel.tsx": {
+      "crap_high": {
         "count": 1
       }
     },
     "packages/desktop/src/components/debug-panel.tsx": {
       "complexity_critical": {
-        "count": 1
+        "count": 2
       },
       "crap_critical": {
-        "count": 2
-      },
-      "crap_moderate": {
-        "count": 2
+        "count": 3
       }
     },
     "packages/desktop/src/components/dockable/components/Root.tsx": {
@@ -130,39 +168,28 @@
         "count": 1
       }
     },
-    "packages/desktop/src/components/dockable/utils/serializeLayout.ts": {
-      "crap_moderate": {
+    "packages/desktop/src/components/editor/blobs/blob-node-view.tsx": {
+      "complexity_moderate": {
         "count": 1
       }
     },
     "packages/desktop/src/components/editor/command-palette.tsx": {
-      "crap_moderate": {
-        "count": 2
-      }
-    },
-    "packages/desktop/src/components/editor/editor-store.ts": {
-      "complexity_critical": {
-        "count": 1
-      },
-      "crap_critical": {
-        "count": 2
-      },
-      "crap_high": {
-        "count": 1
-      },
-      "crap_moderate": {
+      "complexity_moderate": {
         "count": 1
       }
     },
     "packages/desktop/src/components/editor/file-tree.tsx": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "complexity_high": {
+        "count": 1
+      },
       "crap_critical": {
         "count": 1
       },
       "crap_high": {
         "count": 2
-      },
-      "crap_moderate": {
-        "count": 1
       }
     },
     "packages/desktop/src/components/editor/git/checkpoint-panel.tsx": {
@@ -170,13 +197,10 @@
         "count": 1
       },
       "crap_critical": {
-        "count": 1
+        "count": 2
       },
       "crap_high": {
-        "count": 4
-      },
-      "crap_moderate": {
-        "count": 1
+        "count": 2
       }
     },
     "packages/desktop/src/components/editor/icon-sidebar.tsx": {
@@ -184,46 +208,29 @@
         "count": 1
       }
     },
-    "packages/desktop/src/components/editor/plugins/comment-kit.tsx": {
-      "crap_high": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/editor/plugins/suggestion-kit.tsx": {
-      "crap_critical": {
-        "count": 1
-      }
-    },
     "packages/desktop/src/components/editor/search-panel.tsx": {
+      "complexity_critical": {
+        "count": 1
+      },
       "crap_critical": {
         "count": 2
-      },
-      "crap_moderate": {
-        "count": 1
       }
     },
     "packages/desktop/src/components/editor/settings-modal.tsx": {
+      "complexity_critical": {
+        "count": 1
+      },
       "crap_critical": {
         "count": 1
       }
     },
     "packages/desktop/src/components/editor/sidebar.tsx": {
-      "crap_moderate": {
-        "count": 2
+      "complexity_high": {
+        "count": 1
       }
     },
     "packages/desktop/src/components/editor/status-bar.tsx": {
       "crap_critical": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/editor/text-editor.tsx": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/editor/transforms.ts": {
-      "crap_high": {
         "count": 1
       }
     },
@@ -232,250 +239,35 @@
         "count": 1
       }
     },
-    "packages/desktop/src/components/ui/block-context-menu.tsx": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/block-discussion.tsx": {
-      "complexity_critical": {
-        "count": 1
-      },
-      "crap_critical": {
-        "count": 1
-      },
-      "crap_moderate": {
-        "count": 3
-      }
-    },
-    "packages/desktop/src/components/ui/block-draggable.tsx": {
-      "crap_critical": {
-        "count": 1
-      },
+    "packages/desktop/src/components/text-prompt-dialog.tsx": {
       "crap_high": {
         "count": 1
-      },
-      "crap_moderate": {
-        "count": 2
       }
     },
-    "packages/desktop/src/components/ui/block-list-static.tsx": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/block-list.tsx": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/block-selection-after-editable.tsx": {
-      "crap_moderate": {
-        "count": 2
-      }
-    },
-    "packages/desktop/src/components/ui/block-selection.tsx": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/block-suggestion.tsx": {
+    "packages/desktop/src/components/tunnel/pair-dialog.tsx": {
       "complexity_high": {
         "count": 1
       },
-      "crap_critical": {
-        "count": 2
-      },
       "crap_high": {
-        "count": 3
-      },
-      "crap_moderate": {
-        "count": 2
-      }
-    },
-    "packages/desktop/src/components/ui/code-block-node-static.tsx": {
-      "crap_high": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/code-block-node.tsx": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/code-drawing-node-static.tsx": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/code-drawing-node.tsx": {
-      "crap_critical": {
-        "count": 3
-      },
-      "crap_high": {
-        "count": 3
-      }
-    },
-    "packages/desktop/src/components/ui/column-node.tsx": {
-      "crap_high": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/comment-node.tsx": {
-      "crap_high": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/comment.tsx": {
-      "crap_critical": {
-        "count": 1
-      },
-      "crap_moderate": {
-        "count": 2
-      }
-    },
-    "packages/desktop/src/components/ui/date-node-static.tsx": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/date-node.tsx": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/emoji-toolbar-button.tsx": {
-      "crap_high": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/equation-node.tsx": {
-      "crap_high": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/font-size-toolbar-button.tsx": {
-      "crap_high": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/inline-combobox.tsx": {
-      "crap_high": {
-        "count": 1
-      },
-      "crap_moderate": {
-        "count": 2
-      }
-    },
-    "packages/desktop/src/components/ui/link-node.tsx": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/link-toolbar.tsx": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/media-embed-node.tsx": {
-      "crap_critical": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/media-image-node.tsx": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/media-placeholder-node.tsx": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/media-preview-dialog.tsx": {
-      "crap_high": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/media-toolbar.tsx": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/media-upload-toast.tsx": {
-      "crap_high": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/media-video-node.tsx": {
-      "crap_high": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/mention-node.tsx": {
-      "crap_high": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/suggestion-node.tsx": {
-      "crap_critical": {
-        "count": 1
-      },
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/switch.tsx": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/table-node-static.tsx": {
-      "crap_critical": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/table-node.tsx": {
-      "crap_moderate": {
-        "count": 2
-      }
-    },
-    "packages/desktop/src/components/ui/table-toolbar-button.tsx": {
-      "crap_high": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/components/ui/toolbar.tsx": {
-      "crap_moderate": {
         "count": 1
       }
     },
     "packages/desktop/src/components/workspace.tsx": {
-      "crap_moderate": {
-        "count": 3
+      "complexity_high": {
+        "count": 1
+      }
+    },
+    "packages/desktop/src/entities/files.ts": {
+      "complexity_moderate": {
+        "count": 2
       }
     },
     "packages/desktop/src/hooks/use-dockable-tabs.ts": {
-      "crap_critical": {
+      "complexity_high": {
         "count": 1
       },
-      "crap_moderate": {
+      "crap_critical": {
         "count": 1
-      }
-    },
-    "packages/desktop/src/hooks/use-layout-search-param.ts": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/hooks/use-recent-projects.ts": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/hooks/use-updater.ts": {
-      "crap_moderate": {
-        "count": 3
       }
     },
     "packages/desktop/src/lib/markdown-joiner-transform.ts": {
@@ -484,48 +276,15 @@
       },
       "crap_critical": {
         "count": 1
-      },
-      "crap_moderate": {
-        "count": 2
       }
     },
-    "packages/desktop/src/utils/collections.ts": {
-      "complexity_critical": {
-        "count": 1
-      },
-      "crap_critical": {
-        "count": 1
-      },
+    "packages/desktop/src/utils/drop-actions.ts": {
       "crap_high": {
-        "count": 1
-      },
-      "crap_moderate": {
-        "count": 4
+        "count": 2
       }
     },
     "packages/desktop/src/utils/file-sync.ts": {
       "complexity_critical": {
-        "count": 1
-      },
-      "crap_critical": {
-        "count": 1
-      },
-      "crap_high": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/utils/format.ts": {
-      "crap_critical": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/utils/navigation-utils.ts": {
-      "complexity_critical": {
-        "count": 1
-      }
-    },
-    "packages/desktop/src/utils/routing.ts": {
-      "crap_moderate": {
         "count": 1
       }
     },
@@ -535,14 +294,6 @@
       },
       "crap_high": {
         "count": 1
-      },
-      "crap_moderate": {
-        "count": 2
-      }
-    },
-    "packages/marketing/components/ui/carousel.tsx": {
-      "crap_moderate": {
-        "count": 1
       }
     },
     "packages/marketing/components/ui/chart.tsx": {
@@ -551,16 +302,10 @@
       },
       "crap_high": {
         "count": 1
-      },
-      "crap_moderate": {
-        "count": 1
       }
     },
     "packages/marketing/components/ui/sidebar.tsx": {
       "crap_high": {
-        "count": 1
-      },
-      "crap_moderate": {
         "count": 1
       }
     },
@@ -574,95 +319,46 @@
         "count": 1
       }
     },
-    "packages/marketing/theme.config.tsx": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/shared/src/parsing/markdown.ts": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/themes/metrists-theme-next/components/patterns/theme-switch.tsx": {
-      "crap_moderate": {
-        "count": 1
-      }
-    },
     "packages/themes/metrists-theme-next/lib/utils.ts": {
       "crap_high": {
-        "count": 1
-      },
-      "crap_moderate": {
         "count": 1
       }
     }
   },
   "runtime_coverage_findings": [],
   "target_keys": [
-    "packages/marketing/components/ui/tooltip.tsx:dead code",
-    "packages/marketing/components/ui/resizable.tsx:dead code",
-    "packages/desktop/src/components/ui/tabs.tsx:dead code",
-    "packages/marketing/components/ui/avatar.tsx:dead code",
-    "packages/marketing/components/ui/accordion.tsx:dead code",
-    "packages/marketing/components/ui/alert.tsx:dead code",
-    "packages/marketing/components/ui/tabs.tsx:dead code",
-    "packages/cli/lib/utils/rc.util.ts:dead code",
-    "packages/marketing/components/ui/hover-card.tsx:dead code",
-    "packages/marketing/components/ui/popover.tsx:dead code",
-    "packages/cli/lib/utils/template-config.util.ts:dead code",
-    "packages/themes/metrists-theme-next/components/ui/button.tsx:circular dependency",
-    "packages/desktop/src/components/editor/transforms.ts:dead code",
-    "packages/desktop/src/components/ui/inline-combobox.tsx:dead code",
-    "packages/themes/metrists-theme-next/components/patterns/chapter-navigation.tsx:circular dependency",
-    "packages/marketing/components/ui/toast.tsx:dead code",
-    "packages/desktop/src/components/ui/table-node-static.tsx:dead code",
-    "packages/themes/metrists-theme-next/lib/utils.ts:circular dependency",
-    "packages/desktop/src/utils/hash.ts:dead code",
-    "packages/marketing/hooks/use-toast.ts:dead code",
-    "packages/desktop/src/lib/markdown-joiner-transform.ts:complexity",
-    "packages/themes/metrists-theme-next/components/ui/toast.tsx:dead code",
-    "packages/marketing/components/ui/chart.tsx:dead code",
-    "packages/desktop/src/components/ui/list-toolbar-button.tsx:dead code",
-    "packages/desktop/src/utils/routing.ts:dead code",
-    "packages/themes/metrists-theme-next/pages/[chapter].tsx:dead code",
-    "packages/desktop/src/components/ui/heading-node-static.tsx:dead code",
-    "packages/cli/tests/e2e/test-helpers.ts:dead code",
-    "packages/desktop/src/components/ui/equation-node-static.tsx:dead code",
-    "packages/marketing/components/ui/carousel.tsx:dead code",
-    "packages/marketing/components/ui/use-toast.ts:dead code",
-    "packages/themes/metrists-theme-next/components/ui/drawer.tsx:dead code",
-    "packages/marketing/components/ui/dialog.tsx:dead code",
-    "packages/marketing/components/ui/sheet.tsx:dead code",
-    "packages/desktop/src/components/ui/code-block-node-static.tsx:dead code",
-    "packages/desktop/src/components/ui/column-node-static.tsx:dead code",
-    "packages/marketing/components/ui/pagination.tsx:dead code",
-    "packages/marketing/components/ui/form.tsx:dead code",
-    "packages/marketing/components/ui/alert-dialog.tsx:dead code",
-    "packages/marketing/components/ui/command.tsx:dead code",
-    "packages/desktop/src/components/ui/button-group.tsx:dead code",
-    "packages/marketing/components/ui/breadcrumb.tsx:dead code",
-    "packages/marketing/components/ui/card.tsx:dead code",
-    "packages/marketing/components/ui/input-otp.tsx:dead code",
-    "packages/marketing/components/ui/table.tsx:dead code",
-    "packages/themes/metrists-theme-next/components/ui/card.tsx:dead code",
-    "packages/marketing/components/ui/context-menu.tsx:dead code",
-    "packages/marketing/components/ui/drawer.tsx:dead code",
-    "packages/marketing/components/ui/dropdown-menu.tsx:dead code",
-    "packages/marketing/components/ui/menubar.tsx:dead code",
-    "packages/marketing/components/ui/select.tsx:dead code",
-    "packages/themes/metrists-theme-next/components/ui/menubar.tsx:dead code",
-    "packages/marketing/components/ui/navigation-menu.tsx:dead code",
-    "packages/desktop/src/components/logo.tsx:dead code",
-    "packages/marketing/components/ui/sidebar.tsx:dead code",
-    "packages/desktop/src/components/ui/emoji-toolbar-button.tsx:dead code",
-    "packages/desktop/src/components/ui/font-color-toolbar-button.tsx:dead code",
-    "packages/desktop/src/components/ui/select.tsx:dead code",
+    "packages/desktop/src/components/workspace.tsx:complexity",
+    "packages/desktop/src/agent/agent-service.ts:circular dependency",
+    "packages/desktop/src/components/editor/editor-store.ts:circular dependency",
     "packages/cli/lib/utils/logger.util.ts:high impact",
+    "packages/desktop/src/utils/file-sync.ts:circular dependency",
+    "packages/desktop/src/components/editor/search-panel.tsx:complexity",
+    "packages/desktop/src/agent/agents.ts:circular dependency",
+    "packages/desktop/src/components/editor/blobs/blob-actions.ts:circular dependency",
+    "packages/desktop/src/agent/mcp-server.ts:circular dependency",
+    "packages/desktop/src/entities/files.ts:circular dependency",
+    "packages/desktop/src/agent/widget-context-resource.ts:circular dependency",
+    "packages/desktop/src/entities/tabs.ts:circular dependency",
+    "packages/desktop/src/components/editor/blobs/blob-registry.ts:circular dependency",
+    "packages/desktop/src/components/editor/ai-prompt-node.tsx:circular dependency",
+    "packages/desktop/src/components/editor/file-tree.tsx:complexity",
+    "packages/themes/metrists-theme-next/lib/utils.ts:circular dependency",
+    "packages/desktop/src/hooks/use-dockable-tabs.ts:complexity",
     "packages/desktop/src/components/debug-panel.tsx:complexity",
-    "packages/cli/lib/utils/elevenlabs.util.ts:untested risk",
-    "packages/desktop/src/components/ui/table-icons.tsx:dead code",
-    "packages/desktop/src/utils/navigation-utils.ts:complexity",
-    "packages/desktop/src/utils/file-sync.ts:complexity"
+    "packages/desktop/src/components/editor/tiptap-editor-kit.tsx:circular dependency",
+    "packages/desktop/src/components/agent/blob-session-store.ts:circular dependency",
+    "packages/desktop/src/components/editor/blobs/question.blob.tsx:circular dependency",
+    "packages/desktop/src/components/agent/permission-card.tsx:circular dependency",
+    "packages/desktop/src/components/agent/agent-chat-tab.tsx:circular dependency",
+    "packages/desktop/src/components/editor/blobs/approval.blob.tsx:circular dependency",
+    "packages/desktop/src/components/agent/prompt-blob.tsx:complexity",
+    "packages/desktop/src/agent/acp-client.ts:circular dependency",
+    "packages/desktop/src/components/editor/git/checkpoint-panel.tsx:complexity",
+    "packages/desktop/src/components/editor/blobs/blob-node-view.tsx:circular dependency",
+    "packages/desktop/src/components/editor/blobs/jump-to-blob.ts:circular dependency",
+    "packages/themes/metrists-theme-next/components/ui/button.tsx:circular dependency",
+    "packages/desktop/src/components/editor/blobs/use-blob-answer.ts:circular dependency",
+    "packages/desktop/src/lib/markdown-joiner-transform.ts:complexity",
+    "packages/themes/metrists-theme-next/components/patterns/chapter-navigation.tsx:circular dependency"
   ]
 }

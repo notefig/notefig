@@ -1,0 +1,14 @@
+#!/bin/sh
+
+set -eu
+
+# Fallow quality gate (config: .fallowrc.json, gate=new-only): fails only on
+# findings introduced relative to the merge-base with the branch upstream
+# (fallback: origin default branch). Baselines live in .fallow/baselines —
+# if the audit reports "baseline matched 0 findings", re-save them:
+#   npx fallow dead-code --save-baseline .fallow/baselines/dead-code.json
+#   npx fallow health    --save-baseline .fallow/baselines/health.json
+#   npx fallow dupes     --save-baseline .fallow/baselines/dupes.json
+# Skip once with: git commit --no-verify
+echo "Running fallow audit before commit..."
+npx --no-install fallow audit
