@@ -26,7 +26,9 @@ import {
 } from "@/components/editor/editor-store";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLiveQuery } from "@tanstack/react-db";
-import type { GitError, RepoStatus } from "@metrists/git";
+// Type-only import — erased at runtime, so the crash panel stays
+// self-sufficient (its only runtime dependency is the QueryClient).
+import type { GitRow } from "@/entities/git";
 import {
   agentEntriesCollection,
   agentPermissionRequestsCollection,
@@ -272,15 +274,21 @@ function DebugPanelContent({
   );
   useQueryCacheTick();
   const queryClient = useQueryClient();
-  const gitStatusQueryKey = basePath
-    ? (["git", basePath, "status"] as const)
+  // Key hand-inlined on purpose (self-sufficiency): matches entities/git.ts's
+  // gitQueryKey — the git collection stores its GitRow[] in the query cache.
+  const gitStatusQueryKey = basePath ? (["git", basePath] as const) : null;
+  const latestGitRows = gitStatusQueryKey
+    ? (queryClient.getQueryData<GitRow[]>(gitStatusQueryKey) ?? null)
     : null;
-  const latestGitStatus = gitStatusQueryKey
-    ? (queryClient.getQueryData<RepoStatus>(gitStatusQueryKey) ?? null)
-    : null;
-  const latestGitStatusError = gitStatusQueryKey
-    ? (queryClient.getQueryState<RepoStatus, GitError>(gitStatusQueryKey)
-        ?.error ?? null)
+  const latestGitRepoRow =
+    latestGitRows?.find(
+      (row): row is GitRow & { kind: "repo" } => row.kind === "repo",
+    ) ?? null;
+  const latestGitStatus = latestGitRows;
+  const latestGitStatusError: { message: string } | null = gitStatusQueryKey
+    ? ((queryClient.getQueryState(gitStatusQueryKey)?.error as Error | null) ??
+      latestGitRepoRow?.statusError ??
+      null)
     : null;
   const latestGitStatusUpdatedAt = gitStatusQueryKey
     ? (queryClient.getQueryState(gitStatusQueryKey)?.dataUpdatedAt ?? 0)

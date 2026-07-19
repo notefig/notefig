@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from "vitest";
 // is pure, so a stub adapter keeps this a plain unit test.
 vi.mock("@/adapters", () => ({ platformAdapter: {} }));
 
-import { describeTaskMeta, type AgentTaskMeta } from "../use-agent-tasks";
+import { describeTaskMeta, type AgentTaskMeta } from "./agents";
 import type { AgentTaskRow } from "@/agent/agent-collections";
 
 function meta(overrides: Partial<AgentTaskMeta> = {}): AgentTaskMeta {

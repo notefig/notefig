@@ -55,7 +55,7 @@ import {
   peekSharedSession,
   adoptSharedSession,
 } from "./blob-session-store";
-import { describeTaskMeta, useAgentTaskList } from "@/hooks/use-agent-tasks";
+import { describeTaskMeta, useAgentTaskList } from "@/entities/agents";
 import { docHasRealContent } from "@/components/editor/ai-prompt-utils";
 import {
   getPromptBlob,

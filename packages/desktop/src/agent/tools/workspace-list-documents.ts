@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { AgentTool } from "@metrists/shared/agent";
-import { getOrCreateWorkspaceCollections } from "@/utils/collections";
+import { getOrCreateWorkspaceCollections } from "@/entities/files";
 import { getFileName } from "@/utils/fs";
 
 const InputSchema = z.object({});

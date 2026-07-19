@@ -11,7 +11,7 @@ import { useEffect, useRef } from "react";
 import type { Editor, JSONContent } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import type { FileEntry } from "@/utils/fs";
-import { writeFileContent } from "@/utils/collections";
+import { writeFileContent } from "@/entities/files";
 import { isRecentSelfWrite } from "@/utils/file-sync";
 import { getDocumentSync } from "@/utils/markdown-conversion";
 import { UI_ONLY_TRANSACTION_META } from "@/components/editor/editor-schema-kit";

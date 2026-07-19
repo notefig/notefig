@@ -3,7 +3,7 @@ import type { AgentTool } from "@metrists/shared/agent";
 import {
   getWorkspaceEditorContext,
   type WorkspaceEditorContext,
-} from "@/components/editor/editor-store";
+} from "@/entities/editors";
 
 const InputSchema = z.object({});
 

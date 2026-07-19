@@ -12,7 +12,8 @@ import {
   isWorkspaceAccessError,
 } from "@/adapters/platform-adapter.interface";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
-import { clearWorkspaceCollections, queryClient } from "@/utils/collections";
+import { clearWorkspaceCollections } from "@/entities/files";
+import { queryClient } from "@/entities/query-client";
 import { isWeb } from "@/utils/platform";
 
 interface WorkspaceErrorBoundaryProps {

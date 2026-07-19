@@ -14,11 +14,11 @@ import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
 import type { FileEntry } from "@/utils/fs";
 import { calculateContentHash } from "@/utils/hash";
 
-vi.mock("@/utils/collections", () => ({
+vi.mock("@/entities/files", () => ({
   writeFileContent: vi.fn(async () => {}),
 }));
 
-import { writeFileContent } from "@/utils/collections";
+import { writeFileContent } from "@/entities/files";
 import {
   parseMarkdown,
   serializeDoc,

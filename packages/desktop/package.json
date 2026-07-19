@@ -26,7 +26,6 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@metrists/git": "*",
     "@metrists/shared": "*",
-    "@metrists/workspace": "*",
     "@radix-ui/react-alert-dialog": "^1.1.4",
     "@radix-ui/react-context-menu": "^2.2.4",
     "@radix-ui/react-dialog": "^1.1.4",

@@ -21,8 +21,8 @@ import {
 import {
   getMarkdownEditor,
   getSelectedText,
-  getWorkspaceEditorContext,
 } from "@/components/editor/editor-store";
+import { getWorkspaceEditorContext } from "@/entities/editors";
 import { readWorkspaceTextFile } from "@/utils/file-sync";
 import { resolveWorkspacePath } from "@/utils/fs";
 import type { WidgetContextRef } from "./widget-context-uri";

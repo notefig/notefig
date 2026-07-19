@@ -7,10 +7,10 @@
 
 import type { PayloadOfKind } from "@/utils/drag-protocol";
 import {
-  getFileEntry,
+  file,
   refreshDirectoryMetadata,
   renameFileOrDirectory,
-} from "@/utils/collections";
+} from "@/entities/files";
 import {
   getAllEditorPaths,
   getMarkdownEditor,
@@ -95,7 +95,7 @@ async function moveImageAsset(
     return;
   }
 
-  if (getFileEntry(payload.workspaceRoot, payload.absolutePath)) {
+  if (file(payload.workspaceRoot, payload.absolutePath).exists()) {
     await renameFileOrDirectory(
       payload.workspaceRoot,
       payload.absolutePath,

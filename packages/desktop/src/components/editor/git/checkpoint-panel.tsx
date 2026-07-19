@@ -11,14 +11,8 @@ import {
   Undo2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  type UseMutateFunction,
-} from "@tanstack/react-query";
+import { useMutation, type UseMutateFunction } from "@tanstack/react-query";
 
-import type { GitError, GitService, RepoStatus } from "@metrists/git";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {
@@ -36,10 +30,19 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
-  getOrCreateWorkspaceGitService,
-  gitQueryKeys,
-  initializeWorkspaceGit,
-} from "@/utils/git-service-store";
+  abortRevert as abortRevertAction,
+  deriveSyncState,
+  initializeGit,
+  refetchGit,
+  revertToCheckpoint,
+  saveCheckpoint as saveCheckpointAction,
+  useGitCheckpoints,
+  useGitFetching,
+  useGitSummary,
+  type GitSummary,
+  type SerializedGitError,
+  type SyncState,
+} from "@/entities/git";
 
 interface CheckpointPanelProps {
   workspacePath: string;
@@ -59,57 +62,17 @@ interface RecoveryAction {
   disabled?: boolean;
 }
 
-interface QueryState {
+interface PanelErrorState {
   checkpoints: CheckpointListItem[];
-  error: GitError | null;
+  error: SerializedGitError | null;
 }
-
-interface SaveCheckpointMutationContext {
-  previousCheckpoints: CheckpointListItem[];
-  optimisticId: string;
-}
-
-type SyncState = "uncommitted" | "unsynced" | "synced";
 
 type PanelState = "uninitialized" | "error" | "empty" | "ready";
 
 type MutableT = (key: string, defaultValue: string) => string;
 
-function isRepoNotFoundError(error: GitError | null | undefined): boolean {
-  return error?.code === "RepoNotFound";
-}
-
-async function loadCheckpointsQuery(
-  workspacePath: string,
-  service: GitService,
-): Promise<CheckpointListItem[]> {
-  const entries = await service.log({ repoPath: workspacePath, depth: 100 });
-
-  return entries.map((entry) => ({
-    id: entry.oid,
-    hash: entry.oid.slice(0, 7),
-    timestamp: new Date(entry.commit.committer.timestamp * 1000),
-    message: entry.commit.message.split("\n")[0] || "Commit",
-  }));
-}
-
-async function saveCheckpointMutation(
-  workspacePath: string,
-  service: GitService,
-  description?: string,
-): Promise<string | null> {
-  return service.addAllAndCommit({
-    repoPath: workspacePath,
-    message: description?.trim() || "Commit",
-    author: {
-      name: "Metrists",
-      email: "git@metrists.com",
-    },
-  });
-}
-
 function getErrorPresentation(
-  error: GitError,
+  error: SerializedGitError,
   t: MutableT,
 ): { title: string; message: string } {
   switch (error.code) {
@@ -167,23 +130,19 @@ function getErrorPresentation(
 }
 
 function derivePanelState({
-  status,
-  statusError,
-  checkpointsError,
+  summary,
   initializeError,
   checkpoints,
 }: {
-  status: RepoStatus | undefined;
-  statusError: GitError | null;
-  checkpointsError: GitError | null;
-  initializeError: GitError | null;
+  summary: GitSummary | undefined;
+  initializeError: SerializedGitError | null;
   checkpoints: CheckpointListItem[];
 }): PanelState {
-  if (isRepoNotFoundError(statusError) && !status && checkpoints.length === 0) {
+  if (summary && !summary.initialized && checkpoints.length === 0) {
     return "uninitialized";
   }
 
-  if (initializeError || checkpointsError || statusError) {
+  if (initializeError || summary?.statusError || summary?.logError) {
     return "error";
   }
 
@@ -192,33 +151,6 @@ function derivePanelState({
   }
 
   return "ready";
-}
-
-function deriveSyncState(
-  status: {
-    staged: unknown[];
-    unstaged: unknown[];
-    untracked: unknown[];
-    ahead?: number;
-  } | null,
-): SyncState {
-  if (!status) {
-    return "synced";
-  }
-
-  if (
-    status.staged.length > 0 ||
-    status.unstaged.length > 0 ||
-    status.untracked.length > 0
-  ) {
-    return "uncommitted";
-  }
-
-  if ((status.ahead ?? 0) > 0) {
-    return "unsynced";
-  }
-
-  return "synced";
 }
 
 function getSyncStatePresentation(
@@ -249,137 +181,49 @@ function getSyncStatePresentation(
 
 export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
   const { t } = useTranslation();
-  const queryClient = useQueryClient();
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
   const [description, setDescription] = useState("");
   const [stablePanelState, setStablePanelState] = useState<PanelState | null>(
     null,
   );
-  const [revertError, setRevertError] = useState<GitError | null>(null);
+  const [revertError, setRevertError] = useState<SerializedGitError | null>(
+    null,
+  );
   const [activeRevertId, setActiveRevertId] = useState<string | null>(null);
 
-  const service = useMemo(
-    () => getOrCreateWorkspaceGitService(workspacePath),
-    [workspacePath],
+  const summary = useGitSummary(workspacePath);
+  const checkpointRows = useGitCheckpoints(workspacePath);
+  const checkpoints: CheckpointListItem[] = useMemo(
+    () =>
+      checkpointRows.map((row) => ({
+        id: row.oid || row.id,
+        hash: row.hash,
+        timestamp: new Date(row.timestamp),
+        message: row.message,
+      })),
+    [checkpointRows],
   );
 
-  const commitAuthor = useMemo(
-    () => ({ name: "Metrists", email: "git@metrists.com" }),
-    [],
-  );
-
-  const keys = useMemo(() => gitQueryKeys(workspacePath), [workspacePath]);
-
-  const statusQuery = useQuery<RepoStatus, GitError>({
-    queryKey: keys.status,
-    queryFn: async () => service.status({ repoPath: workspacePath }),
-    retry: false,
-    staleTime: 1_000,
-    refetchOnWindowFocus: true,
+  // The optimistic checkpoint row and its rollback live in the git
+  // collection's insert handler — the mutations here only track pending/
+  // error state for the buttons.
+  const saveCheckpoint = useMutation<void, SerializedGitError, string | undefined>({
+    mutationFn: (value) => saveCheckpointAction(workspacePath, value),
   });
 
-  const checkpointsQuery = useQuery<CheckpointListItem[], GitError>({
-    queryKey: keys.checkpoints,
-    queryFn: async () => loadCheckpointsQuery(workspacePath, service),
-    retry: false,
-    staleTime: 5_000,
-    enabled: !isRepoNotFoundError(statusQuery.error),
-    placeholderData: (previous) => previous,
+  const initializeTimeline = useMutation<void, SerializedGitError, void>({
+    mutationFn: () => initializeGit(workspacePath),
   });
 
-  const saveCheckpoint = useMutation<
-    string | null,
-    GitError,
-    string | undefined,
-    SaveCheckpointMutationContext
-  >({
-    mutationFn: async (value) =>
-      saveCheckpointMutation(workspacePath, service, value),
-    onMutate: async (value) => {
-      await queryClient.cancelQueries({ queryKey: keys.checkpoints });
-
-      const previousCheckpoints =
-        queryClient.getQueryData<CheckpointListItem[]>(keys.checkpoints) ?? [];
-      const optimisticId = `optimistic-${Date.now()}`;
-
-      const optimisticEntry: CheckpointListItem = {
-        id: optimisticId,
-        hash: "pending",
-        timestamp: new Date(),
-        message: value?.trim() || "Commit",
-      };
-
-      queryClient.setQueryData<CheckpointListItem[]>(keys.checkpoints, [
-        optimisticEntry,
-        ...previousCheckpoints,
-      ]);
-
-      return { previousCheckpoints, optimisticId };
-    },
-    onError: (_error, _value, context) => {
-      if (!context) return;
-      queryClient.setQueryData(keys.checkpoints, context.previousCheckpoints);
-    },
-    onSuccess: (oid, _value, context) => {
-      if (!context) return;
-
-      if (!oid) {
-        queryClient.setQueryData(keys.checkpoints, context.previousCheckpoints);
-        return;
-      }
-
-      queryClient.setQueryData<CheckpointListItem[] | undefined>(
-        keys.checkpoints,
-        (current) => {
-          if (!current) return current;
-          return current.map((item) =>
-            item.id === context.optimisticId
-              ? {
-                  ...item,
-                  id: oid,
-                  hash: oid.slice(0, 7),
-                }
-              : item,
-          );
-        },
-      );
-
-      void queryClient.invalidateQueries({ queryKey: keys.checkpoints });
-      void queryClient.invalidateQueries({ queryKey: keys.status });
-    },
-    onSettled: async () => {
-      await queryClient.refetchQueries({
-        queryKey: keys.status,
-        type: "active",
-      });
-    },
-  });
-
-  const initializeTimeline = useMutation<void, GitError, void>({
-    mutationFn: async () => {
-      await initializeWorkspaceGit(workspacePath);
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: keys.checkpoints });
-      void queryClient.invalidateQueries({ queryKey: keys.status });
-    },
-  });
-
-  const statusError = statusQuery.error ?? null;
-  const checkpointsError = checkpointsQuery.error ?? null;
   const initializeError = initializeTimeline.error ?? null;
-  const effectiveStatusError = statusQuery.data ? null : statusError;
 
   const panelState = derivePanelState({
-    status: statusQuery.data,
-    statusError: effectiveStatusError,
-    checkpointsError,
+    summary,
     initializeError,
-    checkpoints: checkpointsQuery.data ?? [],
+    checkpoints,
   });
 
-  const isBackgroundFetching =
-    statusQuery.isFetching || checkpointsQuery.isFetching;
+  const isBackgroundFetching = useGitFetching(workspacePath);
 
   useEffect(() => {
     if (stablePanelState === null) {
@@ -394,19 +238,19 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
 
   const renderPanelState = stablePanelState ?? panelState;
 
-  const state: QueryState = {
-    checkpoints: checkpointsQuery.data ?? [],
+  const state: PanelErrorState = {
+    checkpoints,
     error:
       renderPanelState === "error"
-        ? (initializeError ?? checkpointsError ?? effectiveStatusError)
+        ? (initializeError ??
+          summary?.logError ??
+          summary?.statusError ??
+          null)
         : null,
   };
 
   const runRetry = () => {
-    if (renderPanelState !== "uninitialized") {
-      void checkpointsQuery.refetch();
-    }
-    void statusQuery.refetch();
+    void refetchGit(workspacePath);
   };
 
   const errorActions =
@@ -419,64 +263,35 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
           initialize: initializeTimeline.mutate,
         });
 
-  const syncState = deriveSyncState(statusQuery.data ?? null);
-  const hasChanges = Boolean(
-    statusQuery.data &&
-    (statusQuery.data.staged.length > 0 ||
-      statusQuery.data.unstaged.length > 0 ||
-      statusQuery.data.untracked.length > 0),
-  );
+  const syncState = deriveSyncState(summary);
+  const hasChanges = summary?.hasChanges ?? false;
   const canSave = renderPanelState !== "uninitialized" && hasChanges;
 
-  const revertCommit = useMutation<string | null, GitError, CheckpointListItem>(
-    {
-      mutationFn: async (checkpoint) => {
-        const status = await service.status({ repoPath: workspacePath });
-        const hasLocalChanges =
-          status.staged.length > 0 ||
-          status.unstaged.length > 0 ||
-          status.untracked.length > 0;
-
-        if (hasLocalChanges) {
-          await service.addAllAndCommit({
-            repoPath: workspacePath,
-            message: `WIP before revert ${checkpoint.hash}`,
-            author: commitAuthor,
-          });
-        }
-
-        return service.revertCommit({
-          repoPath: workspacePath,
-          oid: checkpoint.id,
-          message: `Revert ${checkpoint.hash}`,
-          author: commitAuthor,
-        });
-      },
-      onMutate: (checkpoint) => {
-        setRevertError(null);
-        setActiveRevertId(checkpoint.id);
-      },
-      onSuccess: async () => {
-        setRevertError(null);
-        await queryClient.invalidateQueries({ queryKey: keys.checkpoints });
-        await queryClient.invalidateQueries({ queryKey: keys.status });
-      },
-      onError: (error) => {
-        setRevertError(error);
-      },
-      onSettled: () => {
-        setActiveRevertId(null);
-      },
-    },
-  );
-
-  const abortRevert = useMutation<void, GitError, void>({
-    mutationFn: async () => {
-      await service.abortRevert({ repoPath: workspacePath });
-    },
-    onSuccess: async () => {
+  const revertCommit = useMutation<void, SerializedGitError, CheckpointListItem>({
+    mutationFn: (checkpoint) =>
+      revertToCheckpoint(workspacePath, {
+        oid: checkpoint.id,
+        hash: checkpoint.hash,
+      }),
+    onMutate: (checkpoint) => {
       setRevertError(null);
-      await queryClient.invalidateQueries({ queryKey: keys.status });
+      setActiveRevertId(checkpoint.id);
+    },
+    onSuccess: () => {
+      setRevertError(null);
+    },
+    onError: (error) => {
+      setRevertError(error);
+    },
+    onSettled: () => {
+      setActiveRevertId(null);
+    },
+  });
+
+  const abortRevert = useMutation<void, SerializedGitError, void>({
+    mutationFn: () => abortRevertAction(workspacePath),
+    onSuccess: () => {
+      setRevertError(null);
     },
   });
 
@@ -573,10 +388,10 @@ function getRecoveryActions({
   retry,
   initialize,
 }: {
-  error: GitError;
+  error: SerializedGitError;
   t: MutableT;
   retry: () => void;
-  initialize: UseMutateFunction<void, GitError, void, unknown>;
+  initialize: UseMutateFunction<void, SerializedGitError, void, unknown>;
 }): RecoveryAction[] {
   switch (error.code) {
     case "RepoNotFound":
@@ -615,7 +430,7 @@ function getRecoveryActions({
 }
 
 interface RecoveryBannerProps {
-  error: GitError;
+  error: SerializedGitError;
   actions: RecoveryAction[];
   t: MutableT;
 }

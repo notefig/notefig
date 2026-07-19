@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useHotkey } from "@tanstack/react-hotkeys";
-import { useIsFetching } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { Dockable } from "@/components/dockable";
 import { IconSidebar } from "@/components/editor/icon-sidebar";
@@ -14,11 +13,8 @@ import { StatusBar } from "@/components/editor/status-bar";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
-import {
-  getOrCreateWorkspaceCollections,
-  queryClient,
-} from "@/utils/collections";
-import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
+import { useContentFetching } from "@/entities/files";
+import { useWorkspaceTabs } from "@/entities/tabs";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import { useProjectSettings } from "@/utils/project-settings";
@@ -38,13 +34,7 @@ import {
 import { disposeAllEditors, getEditor } from "@/components/editor/editor-store";
 import { AgentChatTab } from "@/components/agent/agent-chat-tab";
 import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
-import { useAgentTasksReady } from "@/hooks/use-agent-tasks";
-import { agentTasksCollection } from "@/agent/agent-collections";
-import {
-  agentTabId,
-  agentTaskIdFromTabId,
-  isAgentTabId,
-} from "@/utils/agent-tab-id";
+import { agentTabId, isAgentTabId } from "@/entities/tabs";
 import {
   type FileTreeMode,
   FILE_TREE_IDLE,
@@ -57,7 +47,6 @@ export const Workspace = () => {
     return null;
   }
 
-  const { metadata, content } = getOrCreateWorkspaceCollections(workspacePath);
   useThrowWorkspaceAccessError(workspacePath);
   const { t } = useTranslation();
   const dockableRef = useRef<HTMLDivElement>(null);
@@ -96,57 +85,15 @@ export const Workspace = () => {
       void disposeWorkspaceTaskManager(workspacePath);
     };
   }, [workspacePath]);
-  const agentTasksReady = useAgentTasksReady();
 
-  // Agent chat tabs share the layout with file tabs but are keyed
-  // `agent:<taskId>` — split them out so every file-path code path
-  // (metadata queries, content watching, missing-file pruning) sees only
-  // real paths.
-  const fileOpenTabIds = useMemo(
-    () => openTabs.filter((tabId) => !isAgentTabId(tabId)),
-    [openTabs],
-  );
-  const agentOpenTaskIds = useMemo(
-    () =>
-      openTabs
-        .map(agentTaskIdFromTabId)
-        .filter((taskId): taskId is string => taskId !== null),
-    [openTabs],
-  );
-
-  // Query metadata and content for all open tabs
-  // Uses left join so files appear immediately (metadata loads eagerly)
-  // Content loads on-demand; PolymorphicEditor shows a placeholder until it arrives
-  const { data: fileDataWithContent = [] } = useLiveQuery(
-    (q) =>
-      fileOpenTabIds.length === 0
-        ? undefined
-        : q
-            .from({ file: metadata })
-            .where(({ file }) => inArray(file.path, fileOpenTabIds))
-            .leftJoin({ content }, ({ file, content }) =>
-              eq(file.path, content.path),
-            )
-            .select(({ file, content }) => ({
-              ...file,
-              content: content?.content ?? "",
-              contentHash: content?.contentHash ?? "",
-              isContentLoaded: content !== undefined,
-              contentError: content?.error,
-            })),
-    [workspacePath, ...fileOpenTabIds],
-  );
-
-  // Task rows for open agent tabs. Chat tab titles/state track the rows live.
-  const { data: openAgentTaskRows = [] } = useLiveQuery(
-    (q) =>
-      agentOpenTaskIds.length === 0
-        ? undefined
-        : q
-            .from({ task: agentTasksCollection })
-            .where(({ task }) => inArray(task.taskId, agentOpenTaskIds)),
-    [...agentOpenTaskIds],
-  );
+  // The open-tabs cross-entity join (agent/file split, metadata ⋈ content
+  // rows, agent task rows, stale-tab detection) lives on the tabs entity.
+  const {
+    fileTabIds: fileOpenTabIds,
+    fileRows: fileDataWithContent,
+    agentTaskRows: openAgentTaskRows,
+    staleTabIds,
+  } = useWorkspaceTabs(workspacePath, openTabs);
 
   const agentDockableTabs = useMemo(
     () =>
@@ -203,29 +150,6 @@ export const Workspace = () => {
   );
   const currentContent = activeFileData?.content || "";
 
-  const existingOpenTabIds = useMemo(
-    () => new Set(fileDataWithContent.map((file) => file.path)),
-    [fileDataWithContent],
-  );
-
-  const missingOpenTabIds = useMemo(
-    () => fileOpenTabIds.filter((tabId) => !existingOpenTabIds.has(tabId)),
-    [fileOpenTabIds, existingOpenTabIds],
-  );
-
-  // Agent tabs whose task row is gone. Persisted sessions come back as
-  // "restored" rows (MET-54), so pruning waits for the collection's boot
-  // load — only tabs whose task genuinely no longer exists (deleted
-  // session, corrupt row) are dropped.
-  const missingAgentTabIds = useMemo(
-    () =>
-      agentTasksReady
-        ? agentOpenTaskIds
-            .filter((taskId) => !agentTasksCollection.get(taskId))
-            .map(agentTabId)
-        : [],
-    [agentOpenTaskIds, openAgentTaskRows, agentTasksReady],
-  );
 
   const [searchParams, setUrlSearchParams] = useSearchParams();
   const isSidebarCollapsed = searchParams.get("sidebar") === "collapsed";
@@ -295,23 +219,11 @@ export const Workspace = () => {
     [updateProjectSettings],
   );
 
-  const isFetchingContent = useIsFetching(
-    { queryKey: ["file-content", workspacePath] },
-    queryClient,
-  );
-  const isFetchingMetadata = useIsFetching(
-    { queryKey: ["file-metadata", workspacePath] },
-    queryClient,
-  );
+  const isFetchingContent = useContentFetching(workspacePath);
 
   useEffect(() => {
-    // File tabs wait out the metadata fetch; agent tabs need no gate (their
-    // collection is local-only). One pass so concurrent prunes can't race
-    // each other's layout writes.
-    const staleTabIds = [
-      ...(isFetchingMetadata > 0 ? [] : missingOpenTabIds),
-      ...missingAgentTabIds,
-    ];
+    // One pass so concurrent prunes can't race each other's layout writes;
+    // the fetch/boot-load gating already happened inside useWorkspaceTabs.
     if (staleTabIds.length === 0) return;
 
     const sanitizedLayout = staleTabIds.reduce(
@@ -320,15 +232,9 @@ export const Workspace = () => {
     );
 
     handleLayoutChange(sanitizedLayout);
-  }, [
-    missingOpenTabIds,
-    missingAgentTabIds,
-    layout,
-    handleLayoutChange,
-    isFetchingMetadata,
-  ]);
+  }, [staleTabIds, layout, handleLayoutChange]);
 
-  const isSynced = isFetchingContent === 0;
+  const isSynced = !isFetchingContent;
   const { wordCount, characterCount } = useMemo(() => {
     const words = currentContent
       .trim()

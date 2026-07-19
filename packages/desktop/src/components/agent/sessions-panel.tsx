@@ -34,9 +34,9 @@ import { ensureAgentRuntime } from "@/agent/tunnel/require-connection";
 import {
   describeTaskMeta,
   useAgentTaskList,
-} from "@/hooks/use-agent-tasks";
+} from "@/entities/agents";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
-import { agentTabId } from "@/utils/agent-tab-id";
+import { agentTabId } from "@/entities/tabs";
 import {
   useActiveHarnesses,
   useDefaultHarness,

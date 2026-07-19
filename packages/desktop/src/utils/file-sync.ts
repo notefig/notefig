@@ -3,8 +3,11 @@ import type {
   ContentChangeEvent,
 } from "@/adapters/platform-adapter.interface";
 import { FsError } from "@/adapters/platform-adapter.interface";
-import { getOrCreateWorkspaceCollections, queryClient } from "./collections";
-import { gitQueryKeys } from "./git-service-store";
+// Circular with @/entities/files (which imports this module); safe because
+// both sides only reference each other's exports inside function bodies.
+import { getOrCreateWorkspaceCollections } from "@/entities/files";
+import { queryClient } from "@/entities/query-client";
+import { invalidateGit } from "@/entities/git";
 import {
   projectSettingsPath,
   projectSettingsQueryKey,
@@ -163,12 +166,10 @@ export function invalidateDerivedState(workspaceId: string): void {
     workspaceId,
     setTimeout(() => {
       invalidationTimers.delete(workspaceId);
-      const keys = gitQueryKeys(workspaceId);
       queryClient.invalidateQueries({
         queryKey: ["search-content", workspaceId],
       });
-      queryClient.invalidateQueries({ queryKey: keys.status });
-      queryClient.invalidateQueries({ queryKey: keys.checkpoints });
+      invalidateGit(workspaceId);
     }, INVALIDATE_DEBOUNCE_MS),
   );
 }

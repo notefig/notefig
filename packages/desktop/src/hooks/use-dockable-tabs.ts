@@ -9,7 +9,7 @@ import {
 } from "react";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import type { LayoutNode, TabProps } from "@/components/dockable";
-import { useLayoutSearchParam } from "./use-layout-search-param";
+import { useLayoutSearchParam } from "@/entities/tabs";
 import {
   findFirstWindow,
   findWindowById,

@@ -19,28 +19,30 @@
  * - We control when to refetch via manual .refetch() calls
  */
 
-import { createCollection } from "@tanstack/react-db";
+import { useMemo } from "react";
+import { createCollection, useLiveQuery, eq, inArray } from "@tanstack/react-db";
+import { useIsFetching } from "@tanstack/react-query";
 import {
   queryCollectionOptions,
   parseLoadSubsetOptions,
 } from "@tanstack/query-db-collection";
-import { QueryClient } from "@tanstack/query-core";
 import { platformAdapter } from "@/adapters";
 import {
   FsError,
   isWorkspaceAccessError,
 } from "@/adapters/platform-adapter.interface";
-import type { FileEntry } from "./fs";
-import { calculateContentHash } from "./hash";
-// Circular with ./file-sync (which imports this module); safe because both
-// sides only reference each other's exports inside function bodies.
-import { invalidateDerivedState, recordSelfWrite } from "./file-sync";
-import type { FileSnapshot } from "@metrists/workspace";
+import type { FileEntry } from "@/utils/fs";
+import { calculateContentHash } from "@/utils/hash";
+// Circular with @/utils/file-sync (which imports this module); safe because
+// both sides only reference each other's exports inside function bodies.
+import { invalidateDerivedState, recordSelfWrite } from "@/utils/file-sync";
+// Sibling entity — only referenced inside function bodies (cycle rule).
+import { readOpenTabIds } from "./tabs";
+import { queryClient } from "./query-client";
 
-// Global QueryClient instance for TanStack Query
-export const queryClient = new QueryClient({
-  defaultOptions: {},
-});
+// The shared QueryClient moved to the entities/query-client leaf; re-exported
+// here so existing `@/utils/collections` import sites keep working.
+export { queryClient };
 
 const METADATA_REFETCH_INTERVAL_MS = 30_000;
 
@@ -851,15 +853,109 @@ export function clearWorkspaceCollections(workspaceId: string): void {
   queryClient.removeQueries({ queryKey: ["file-content", workspaceId] });
 }
 
-// Read-side of @metrists/workspace's FileHandle — a plain function matching
-// FileProvider's shape. Wiring it in (registerFileProvider) is centralized
-// in workspace-providers.ts; kept here because only this module owns
-// `getFileEntry`.
-export function readFileSnapshot(
-  workspaceId: string,
-  filePath: string,
-): FileSnapshot | undefined {
-  const entry = getFileEntry(workspaceId, filePath);
-  if (!entry) return undefined;
-  return { content: entry.content, exists: true };
+// ---------------------------------------------------------------------------
+// Reactive hooks — the way UI reads this entity
+// ---------------------------------------------------------------------------
+
+/**
+ * The workspace's collections as a render-stable pair.
+ */
+export function useFileCollections(workspacePath: string): WorkspaceCollections {
+  return useMemo(
+    () => getOrCreateWorkspaceCollections(workspacePath),
+    [workspacePath],
+  );
+}
+
+/**
+ * A file row shaped for open tabs: metadata joined with content.
+ * Content loads on demand; `isContentLoaded` is false until it arrives.
+ */
+export interface OpenFileRow extends FileMetadata {
+  content: string;
+  isContentLoaded: boolean;
+  contentError?: string;
+}
+
+/**
+ * Metadata ⋈ content left-join for a set of open files. Files appear as soon
+ * as metadata is in (metadata loads eagerly); content follows on demand.
+ */
+export function useOpenFileRows(
+  workspacePath: string,
+  paths: string[],
+): OpenFileRow[] {
+  const { metadata, content } = useFileCollections(workspacePath);
+  const { data = [] } = useLiveQuery(
+    (q) =>
+      paths.length === 0
+        ? undefined
+        : q
+            .from({ file: metadata })
+            .where(({ file }) => inArray(file.path, paths))
+            .leftJoin({ content }, ({ file, content }) =>
+              eq(file.path, content.path),
+            )
+            .select(({ file, content }) => ({
+              ...file,
+              content: content?.content ?? "",
+              contentHash: content?.contentHash ?? "",
+              isContentLoaded: content !== undefined,
+              contentError: content?.error,
+            })),
+    [workspacePath, ...paths],
+  );
+  return data as OpenFileRow[];
+}
+
+/** Whether the workspace's eager metadata load is still in flight. */
+export function useMetadataFetching(workspacePath: string): boolean {
+  return (
+    useIsFetching({ queryKey: ["file-metadata", workspacePath] }, queryClient) >
+    0
+  );
+}
+
+/** Whether any on-demand content load for the workspace is in flight. */
+export function useContentFetching(workspacePath: string): boolean {
+  return (
+    useIsFetching({ queryKey: ["file-content", workspacePath] }, queryClient) >
+    0
+  );
+}
+
+// ---------------------------------------------------------------------------
+// One-shot reads — for non-React callers (agent tools, prompt composers).
+// Identity + zero-arg methods, re-resolved live on every call, never cached.
+// ---------------------------------------------------------------------------
+
+export interface FileHandle {
+  readonly workspacePath: string;
+  readonly filePath: string;
+  exists(): boolean;
+  metadata(): FileMetadata | undefined;
+  /**
+   * Collection-cached content (undefined until loaded). NOT for write
+   * paths — anything that patches-then-saves must read fresh from disk via
+   * the platform adapter, or it risks clobbering a newer on-disk version.
+   */
+  content(): string | undefined;
+  /** Open tab ids showing this file (tab ids are file paths). */
+  tabs(): string[];
+}
+
+export function file(workspacePath: string, filePath: string): FileHandle {
+  return {
+    workspacePath,
+    filePath,
+    exists: () =>
+      getOrCreateWorkspaceCollections(workspacePath).metadata.get(filePath) !==
+      undefined,
+    metadata: () =>
+      getOrCreateWorkspaceCollections(workspacePath).metadata.get(filePath),
+    content: () =>
+      getOrCreateWorkspaceCollections(workspacePath).content.get(filePath)
+        ?.content,
+    tabs: () => readOpenTabIds().filter((tabId) => tabId === filePath),
+  };
 }

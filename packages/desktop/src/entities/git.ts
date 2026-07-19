@@ -1,0 +1,537 @@
+/**
+ * Git entity — one TanStack DB collection per workspace holding everything
+ * git-derived, as discriminated rows:
+ *
+ *   - `repo`       (one row): branch, ahead/behind, initialized flag, and
+ *                  errors-as-data (a failed status/log lands on this row
+ *                  instead of throwing, so panel state derives from rows)
+ *   - `file`       (one per changed path): staged/unstaged/untracked/
+ *                  conflicted flags, keyed `file:<absolute path>`
+ *   - `checkpoint` (one per commit): oid/hash/message/timestamp, keyed
+ *                  `cp:<oid>`; optimistic saves insert a `pending` row
+ *
+ * One queryFn fetches status + log together — they derive from the same
+ * repo walk and were always invalidated together. Only workspace-access
+ * errors escape the queryFn (to reach WorkspaceErrorBoundary, same as the
+ * file metadata collection).
+ */
+import { useMemo } from "react";
+import { createCollection, useLiveQuery, eq } from "@tanstack/react-db";
+import { queryCollectionOptions } from "@tanstack/query-db-collection";
+import { useIsFetching } from "@tanstack/react-query";
+import {
+  GitError,
+  IsomorphicGitService,
+  type GitErrorCode,
+  type RepoStatus,
+} from "@metrists/git";
+import { platformAdapter } from "@/adapters";
+import { isWorkspaceAccessError } from "@/adapters/platform-adapter.interface";
+import { normalizePath } from "@/utils/fs";
+import { queryClient } from "./query-client";
+
+// ---------------------------------------------------------------------------
+// Construction + registry — git services
+// ---------------------------------------------------------------------------
+
+const gitServiceRegistry = new Map<string, IsomorphicGitService>();
+const gitInitRegistry = new Map<string, Promise<void>>();
+
+export function getOrCreateWorkspaceGitService(
+  workspacePath: string,
+): IsomorphicGitService {
+  const normalizedWorkspacePath = normalizePath(workspacePath);
+  let service = gitServiceRegistry.get(normalizedWorkspacePath);
+
+  if (!service) {
+    service = new IsomorphicGitService(
+      platformAdapter.getGitStorageHost(normalizedWorkspacePath),
+    );
+    gitServiceRegistry.set(normalizedWorkspacePath, service);
+  }
+
+  return service;
+}
+
+export async function ensureWorkspaceGitInitialized(
+  workspacePath: string,
+): Promise<IsomorphicGitService> {
+  const normalizedWorkspacePath = normalizePath(workspacePath);
+  const service = getOrCreateWorkspaceGitService(normalizedWorkspacePath);
+
+  const inFlight = gitInitRegistry.get(normalizedWorkspacePath);
+  if (inFlight) {
+    await inFlight;
+    return service;
+  }
+
+  const initialization = (async () => {
+    await service.init({
+      repoPath: normalizedWorkspacePath,
+      defaultBranch: "main",
+    });
+  })().finally(() => {
+    gitInitRegistry.delete(normalizedWorkspacePath);
+  });
+
+  gitInitRegistry.set(normalizedWorkspacePath, initialization);
+  await initialization;
+  return service;
+}
+
+export async function initializeWorkspaceGit(
+  workspacePath: string,
+): Promise<IsomorphicGitService> {
+  return ensureWorkspaceGitInitialized(workspacePath);
+}
+
+export function disposeWorkspaceGitService(workspacePath: string): void {
+  const normalizedWorkspacePath = normalizePath(workspacePath);
+  gitServiceRegistry.delete(normalizedWorkspacePath);
+  gitInitRegistry.delete(normalizedWorkspacePath);
+}
+
+export function clearWorkspaceGitServices(): void {
+  gitServiceRegistry.clear();
+  gitInitRegistry.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Rows + collection
+// ---------------------------------------------------------------------------
+
+/** A GitError flattened to data so it can live on a row. */
+export interface SerializedGitError {
+  code: GitErrorCode | "Unknown";
+  message: string;
+}
+
+export interface GitRepoRow {
+  id: "repo";
+  kind: "repo";
+  branch: string;
+  ahead?: number;
+  behind?: number;
+  /** false ⇔ status failed with RepoNotFound */
+  initialized: boolean;
+  statusError?: SerializedGitError;
+  logError?: SerializedGitError;
+}
+
+export interface GitFileRow {
+  id: string; // `file:<absolute path>`
+  kind: "file";
+  path: string; // absolute
+  staged: boolean;
+  unstaged: boolean;
+  untracked: boolean;
+  conflicted: boolean;
+}
+
+export interface GitCheckpointRow {
+  id: string; // `cp:<oid>` (or `cp:optimistic-*` while pending)
+  kind: "checkpoint";
+  oid: string;
+  hash: string;
+  message: string;
+  timestamp: number;
+  pending?: boolean;
+}
+
+export type GitRow = GitRepoRow | GitFileRow | GitCheckpointRow;
+
+export const COMMIT_AUTHOR = { name: "Metrists", email: "git@metrists.com" };
+
+const CHECKPOINT_LOG_DEPTH = 100;
+
+// debug-panel.tsx (the crash fallback — deliberately self-sufficient) peeks
+// this key raw with a hand-inlined ["git", basePath]. If this key shape ever
+// changes, update debug-panel in the same commit.
+function gitQueryKey(workspacePath: string) {
+  return ["git", workspacePath] as const;
+}
+
+function serializeGitError(error: unknown): SerializedGitError {
+  if (error instanceof GitError) {
+    return { code: error.code, message: error.message };
+  }
+  return {
+    code: "Unknown",
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
+
+function fileRowId(absolutePath: string): string {
+  return `file:${absolutePath}`;
+}
+
+function toAbsolute(workspacePath: string, repoRelativePath: string): string {
+  return repoRelativePath.startsWith(workspacePath)
+    ? repoRelativePath
+    : `${workspacePath}/${repoRelativePath}`;
+}
+
+function fileRowsFromStatus(
+  workspacePath: string,
+  status: RepoStatus,
+): GitFileRow[] {
+  const rows = new Map<string, GitFileRow>();
+  const mark = (
+    repoRelativePath: string,
+    flag: "staged" | "unstaged" | "untracked" | "conflicted",
+  ) => {
+    const path = toAbsolute(workspacePath, repoRelativePath);
+    let row = rows.get(path);
+    if (!row) {
+      row = {
+        id: fileRowId(path),
+        kind: "file",
+        path,
+        staged: false,
+        unstaged: false,
+        untracked: false,
+        conflicted: false,
+      };
+      rows.set(path, row);
+    }
+    row[flag] = true;
+  };
+
+  for (const change of status.staged) mark(change.path, "staged");
+  for (const change of status.unstaged) mark(change.path, "unstaged");
+  for (const path of status.untracked) mark(path, "untracked");
+  for (const path of status.conflicts) mark(path, "conflicted");
+  return [...rows.values()];
+}
+
+/** Exported for unit tests; the collection's queryFn. */
+export async function fetchGitRows(workspacePath: string): Promise<GitRow[]> {
+  const service = getOrCreateWorkspaceGitService(workspacePath);
+  const rows: GitRow[] = [];
+
+  let status: RepoStatus | undefined;
+  let statusError: SerializedGitError | undefined;
+  try {
+    status = await service.status({ repoPath: workspacePath });
+  } catch (error) {
+    // Only workspace-access errors escape (WorkspaceErrorBoundary); every
+    // git failure becomes data on the repo row — no component observes a
+    // collection-level error state.
+    if (isWorkspaceAccessError(error)) throw error;
+    statusError = serializeGitError(error);
+  }
+
+  const uninitialized = statusError?.code === "RepoNotFound";
+
+  let logError: SerializedGitError | undefined;
+  if (!uninitialized) {
+    try {
+      const entries = await service.log({
+        repoPath: workspacePath,
+        depth: CHECKPOINT_LOG_DEPTH,
+      });
+      for (const entry of entries) {
+        rows.push({
+          id: `cp:${entry.oid}`,
+          kind: "checkpoint",
+          oid: entry.oid,
+          hash: entry.oid.slice(0, 7),
+          message: entry.commit.message.split("\n")[0] || "Commit",
+          timestamp: entry.commit.committer.timestamp * 1000,
+        });
+      }
+    } catch (error) {
+      if (isWorkspaceAccessError(error)) throw error;
+      logError = serializeGitError(error);
+    }
+  }
+
+  if (status) {
+    rows.push(...fileRowsFromStatus(workspacePath, status));
+  }
+
+  rows.push({
+    id: "repo",
+    kind: "repo",
+    branch: status?.currentBranch ?? "",
+    ahead: status?.ahead,
+    behind: status?.behind,
+    initialized: !uninitialized,
+    statusError,
+    logError,
+  });
+
+  return rows;
+}
+
+function createGitCollection(workspacePath: string) {
+  return createCollection(
+    queryCollectionOptions<GitRow, string>({
+      queryKey: gitQueryKey(workspacePath),
+      queryClient,
+      retry: false,
+      staleTime: 2_000,
+      queryFn: () => fetchGitRows(workspacePath),
+      getKey: (row) => row.id,
+
+      // The only collection mutation is the optimistic checkpoint save —
+      // insert a `pending` checkpoint row, commit in the handler. A throw
+      // rolls the optimistic row back automatically; that deletes the old
+      // hand-rolled cancelQueries/setQueryData/onError choreography.
+      onInsert: async ({ transaction, collection }) => {
+        for (const mutation of transaction.mutations) {
+          const row = mutation.modified;
+          if (row.kind !== "checkpoint") {
+            throw new Error(
+              "Only checkpoint rows can be inserted into the git collection",
+            );
+          }
+
+          const service = getOrCreateWorkspaceGitService(workspacePath);
+          const oid = await service.addAllAndCommit({
+            repoPath: workspacePath,
+            message: row.message,
+            author: COMMIT_AUTHOR,
+          });
+
+          // The optimistic row lives in the transaction overlay and drops on
+          // its own when this handler resolves; direct-write the real commit
+          // into the synced store so the list doesn't blink while the
+          // refetch below reconciles status/file rows. `oid === null` means
+          // nothing to commit — nothing to write. Direct writes need an
+          // active sync (a subscriber); without one the refetch reconciles
+          // on its own.
+          if (oid && collection.status === "ready") {
+            collection.utils.writeUpsert({
+              ...row,
+              id: `cp:${oid}`,
+              oid,
+              hash: oid.slice(0, 7),
+              pending: false,
+            });
+          }
+        }
+
+        void refetchGit(workspacePath);
+        return { refetch: false };
+      },
+    }),
+  );
+}
+
+export type GitCollection = ReturnType<typeof createGitCollection>;
+
+const gitCollectionsRegistry = new Map<string, GitCollection>();
+
+export function getOrCreateGitCollection(workspacePath: string): GitCollection {
+  const normalized = normalizePath(workspacePath);
+  let collection = gitCollectionsRegistry.get(normalized);
+  if (!collection) {
+    collection = createGitCollection(normalized);
+    gitCollectionsRegistry.set(normalized, collection);
+  }
+  return collection;
+}
+
+export function clearGitCollection(workspacePath: string): void {
+  const normalized = normalizePath(workspacePath);
+  gitCollectionsRegistry.delete(normalized);
+  queryClient.removeQueries({ queryKey: gitQueryKey(normalized) });
+}
+
+// ---------------------------------------------------------------------------
+// Reactive hooks — the way UI reads this entity
+// ---------------------------------------------------------------------------
+
+export interface GitSummary {
+  initialized: boolean;
+  branch: string;
+  ahead?: number;
+  behind?: number;
+  statusError?: SerializedGitError;
+  logError?: SerializedGitError;
+  /** Any staged/unstaged/untracked/conflicted file. */
+  hasChanges: boolean;
+}
+
+/** The repo summary row + change flag; undefined until the first fetch lands. */
+export function useGitSummary(
+  workspacePath: string | undefined,
+): GitSummary | undefined {
+  const collection = useMemo(
+    () => (workspacePath ? getOrCreateGitCollection(workspacePath) : undefined),
+    [workspacePath],
+  );
+  const { data = [] } = useLiveQuery(
+    (q) => (collection ? q.from({ git: collection }) : undefined),
+    [workspacePath],
+  );
+  return useMemo(() => {
+    const repo = (data as GitRow[]).find(
+      (row): row is GitRepoRow => row.kind === "repo",
+    );
+    if (!repo) return undefined;
+    return {
+      initialized: repo.initialized,
+      branch: repo.branch,
+      ahead: repo.ahead,
+      behind: repo.behind,
+      statusError: repo.statusError,
+      logError: repo.logError,
+      hasChanges: (data as GitRow[]).some((row) => row.kind === "file"),
+    };
+  }, [data]);
+}
+
+/** Checkpoints newest-first (a pending optimistic save sorts first). */
+export function useGitCheckpoints(workspacePath: string): GitCheckpointRow[] {
+  const collection = useMemo(
+    () => getOrCreateGitCollection(workspacePath),
+    [workspacePath],
+  );
+  const { data = [] } = useLiveQuery(
+    (q) =>
+      q.from({ git: collection }).where(({ git }) => eq(git.kind, "checkpoint")),
+    [workspacePath],
+  );
+  return useMemo(
+    () =>
+      (data as GitCheckpointRow[])
+        .slice()
+        .sort((a, b) => b.timestamp - a.timestamp),
+    [data],
+  );
+}
+
+/** Per-file git flags; undefined when the file has no pending change. */
+export function useFileGitState(
+  workspacePath: string,
+  filePath: string,
+): GitFileRow | undefined {
+  const collection = useMemo(
+    () => getOrCreateGitCollection(workspacePath),
+    [workspacePath],
+  );
+  const { data = [] } = useLiveQuery(
+    (q) =>
+      q.from({ git: collection }).where(({ git }) => eq(git.id, fileRowId(filePath))),
+    [workspacePath, filePath],
+  );
+  return (data as GitFileRow[])[0];
+}
+
+/** Whether the workspace's git fetch is in flight (anti-flicker gates). */
+export function useGitFetching(workspacePath: string): boolean {
+  return (
+    useIsFetching({ queryKey: gitQueryKey(workspacePath) }, queryClient) > 0
+  );
+}
+
+// ---------------------------------------------------------------------------
+// One-shot reads
+// ---------------------------------------------------------------------------
+
+/** Non-reactive per-file read of the same row `useFileGitState` serves. */
+export function readFileGitState(
+  workspacePath: string,
+  filePath: string,
+): GitFileRow | undefined {
+  const row = getOrCreateGitCollection(workspacePath).get(fileRowId(filePath));
+  return row?.kind === "file" ? row : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Pure selectors (shared by status bar + checkpoint panel)
+// ---------------------------------------------------------------------------
+
+export type SyncState = "uncommitted" | "unsynced" | "synced";
+
+export function deriveSyncState(summary: GitSummary | undefined): SyncState {
+  if (!summary) return "synced";
+  if (summary.hasChanges) return "uncommitted";
+  if ((summary.ahead ?? 0) > 0) return "unsynced";
+  return "synced";
+}
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+
+/** Refetch the workspace's git rows (status + checkpoints in one pass). */
+export async function refetchGit(workspacePath: string): Promise<void> {
+  await getOrCreateGitCollection(workspacePath).utils.refetch();
+}
+
+/** Debounce-friendly invalidation for file-sync's derived-state pass. */
+export function invalidateGit(workspacePath: string): void {
+  void queryClient.invalidateQueries({ queryKey: gitQueryKey(workspacePath) });
+}
+
+/**
+ * Save a checkpoint: optimistic `pending` row now, `addAllAndCommit` in the
+ * collection's onInsert handler. Resolves when the commit persisted; rejects
+ * (and rolls the row back) when it failed.
+ */
+export async function saveCheckpoint(
+  workspacePath: string,
+  description?: string,
+): Promise<void> {
+  const collection = getOrCreateGitCollection(workspacePath);
+  const now = Date.now();
+  const tx = collection.insert({
+    id: `cp:optimistic-${now}`,
+    kind: "checkpoint",
+    oid: "",
+    hash: "pending",
+    message: description?.trim() || "Commit",
+    timestamp: now,
+    pending: true,
+  });
+  await tx.isPersisted.promise;
+}
+
+/**
+ * Revert to a checkpoint, committing any local changes first (WIP commit) so
+ * nothing is lost. A repo operation, not a row edit — plain async action.
+ */
+export async function revertToCheckpoint(
+  workspacePath: string,
+  checkpoint: { oid: string; hash: string },
+): Promise<void> {
+  const service = getOrCreateWorkspaceGitService(workspacePath);
+  const status = await service.status({ repoPath: workspacePath });
+  const hasLocalChanges =
+    status.staged.length > 0 ||
+    status.unstaged.length > 0 ||
+    status.untracked.length > 0;
+
+  if (hasLocalChanges) {
+    await service.addAllAndCommit({
+      repoPath: workspacePath,
+      message: `WIP before revert ${checkpoint.hash}`,
+      author: COMMIT_AUTHOR,
+    });
+  }
+
+  try {
+    await service.revertCommit({
+      repoPath: workspacePath,
+      oid: checkpoint.oid,
+      message: `Revert ${checkpoint.hash}`,
+      author: COMMIT_AUTHOR,
+    });
+  } finally {
+    await refetchGit(workspacePath);
+  }
+}
+
+export async function abortRevert(workspacePath: string): Promise<void> {
+  const service = getOrCreateWorkspaceGitService(workspacePath);
+  await service.abortRevert({ repoPath: workspacePath });
+  await refetchGit(workspacePath);
+}
+
+export async function initializeGit(workspacePath: string): Promise<void> {
+  await initializeWorkspaceGit(workspacePath);
+  await refetchGit(workspacePath);
+}

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("@/utils/collections", () => ({
+vi.mock("@/entities/files", () => ({
   getOrCreateWorkspaceCollections: vi.fn(() => ({
     metadata: {
       toArray: [

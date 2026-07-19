@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { getWorkspaceEditorContext } from "@/components/editor/editor-store";
+import { getWorkspaceEditorContext } from "@/entities/editors";
 import type { LayoutNode } from "@/components/dockable";
 
 function setLayout(nodes: LayoutNode[]): void {

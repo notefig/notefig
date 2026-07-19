@@ -3,7 +3,7 @@ import {
   agentTabId,
   agentTaskIdFromTabId,
   isAgentTabId,
-} from "../agent-tab-id";
+} from "./tabs";
 
 describe("agent-tab-id", () => {
   it("round-trips a taskId through the tab id", () => {
