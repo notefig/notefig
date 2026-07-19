@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { useHotkey } from "@tanstack/react-hotkeys";
 import { useSearchParams } from "react-router-dom";
 import { Dockable } from "@/components/dockable";
 import { IconSidebar } from "@/components/editor/icon-sidebar";
@@ -13,25 +12,21 @@ import { StatusBar } from "@/components/editor/status-bar";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
-import { useContentFetching } from "@/entities/files";
+import { useContentFetching, useFileWatchers } from "@/entities/files";
 import { useWorkspaceTabs } from "@/entities/tabs";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import { useProjectSettings } from "@/utils/project-settings";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
+import { useWorkspaceCommands } from "@/hooks/use-workspace-commands";
 import type { FileEntry } from "@/utils/fs";
 import { getFileName } from "@/utils/fs";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { WorkspaceTabsProvider } from "@/components/workspace-tabs-provider";
 import { useThrowWorkspaceAccessError } from "@/components/workspace-error-boundary";
-import { platformAdapter } from "@/adapters";
 import { retryOnAnimationFrame } from "@/utils/retry-on-animation-frame";
-import {
-  handleMetadataFileSystemChange,
-  handleContentFileSystemChange,
-} from "@/utils/file-sync";
-import { disposeAllEditors, getEditor } from "@/components/editor/editor-store";
+import { disposeAllEditors } from "@/components/editor/editor-store";
 import { AgentChatTab } from "@/components/agent/agent-chat-tab";
 import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
 import { agentTabId, isAgentTabId } from "@/entities/tabs";
@@ -262,48 +257,6 @@ export const Workspace = () => {
     );
   }, [isSidebarCollapsed, setUrlSearchParams]);
 
-  const handleNewFile = useCallback(() => {
-    openSidebarIfCollapsed();
-    setFileTreeMode({
-      type: "creating",
-      parentPath: workspacePath,
-      itemType: "file",
-    });
-  }, [workspacePath, openSidebarIfCollapsed]);
-
-  const handleNewDirectory = useCallback(() => {
-    openSidebarIfCollapsed();
-    setFileTreeMode({
-      type: "creating",
-      parentPath: workspacePath,
-      itemType: "directory",
-    });
-  }, [workspacePath, openSidebarIfCollapsed]);
-
-  const runEditorHistoryAction = useCallback(
-    (action: "undo" | "redo") => {
-      const focusedTabId = getFocusedTabId();
-      if (!focusedTabId) return;
-
-      const editor = getEditor(focusedTabId) as
-        | { undo?: () => void; redo?: () => void }
-        | undefined;
-
-      if (action === "undo") {
-        editor?.undo?.();
-      } else {
-        editor?.redo?.();
-      }
-    },
-    [getFocusedTabId],
-  );
-
-  const handleToggleFullscreen = useCallback(() => {
-    platformAdapter.toggleFullscreen().catch((error: unknown) => {
-      console.error("Failed to toggle fullscreen:", error);
-    });
-  }, []);
-
   const handleOpenSettings = useCallback(() => {
     setUrlSearchParams(
       (prev) => {
@@ -340,39 +293,6 @@ export const Workspace = () => {
     [setUrlSearchParams],
   );
 
-  /** Mod+F — search within the active file */
-  const handleSearchInFile = useCallback(() => {
-    const selectedText = getSelectedText();
-
-    if (activeTabId) {
-      openSearchPanel({
-        filePattern: getFileName(activeTabId),
-        initialQuery: selectedText,
-      });
-    } else {
-      openSearchPanel({ initialQuery: selectedText });
-    }
-  }, [activeTabId, getSelectedText, openSearchPanel]);
-
-  /** Mod+Shift+F — global search across all files */
-  const handleSearchInFiles = useCallback(() => {
-    const selectedText = getSelectedText();
-
-    openSearchPanel({ initialQuery: selectedText });
-  }, [openSearchPanel]);
-
-  useHotkey("Mod+N", () => {
-    handleNewFile();
-  });
-
-  useHotkey("Mod+F", () => {
-    handleSearchInFile();
-  });
-
-  useHotkey("Mod+Shift+F", () => {
-    handleSearchInFiles();
-  });
-
   /** Mod+Shift+A — the agent sessions menu in the left sidebar. */
   const openSessionsSidebar = useCallback(() => {
     setUrlSearchParams(
@@ -386,54 +306,25 @@ export const Workspace = () => {
     );
   }, [setUrlSearchParams]);
 
-  useHotkey("Mod+Shift+A", () => {
-    openSessionsSidebar();
+  const {
+    handleNewFile,
+    handleNewDirectory,
+    runEditorHistoryAction,
+    handleToggleFullscreen,
+    handleSearchInFile,
+    handleSearchInFiles,
+  } = useWorkspaceCommands({
+    workspacePath,
+    activeTabId,
+    getFocusedTabId,
+    getSelectedText,
+    openSidebarIfCollapsed,
+    setFileTreeMode,
+    openSearchPanel,
+    openSessionsSidebar,
   });
 
-  useEffect(() => {
-    const metadataWatchId = `metadata-${workspacePath}`;
-    const contentWatchId = `content-${workspacePath}`;
-    let eventCleanup: (() => void) | undefined;
-    let isActive = true;
-
-    const setupWatchers = async () => {
-      try {
-        eventCleanup = platformAdapter.addEventListener((event) => {
-          if (!isActive) return;
-          if (event.type === "fs-metadata-changed") {
-            handleMetadataFileSystemChange(event.payload, workspacePath);
-          } else if (event.type === "fs-content-changed") {
-            handleContentFileSystemChange(event.payload, workspacePath);
-          }
-        });
-
-        await platformAdapter.startWatchingMetadata(
-          [workspacePath],
-          metadataWatchId,
-        );
-
-        if (fileOpenTabIds.length > 0) {
-          await platformAdapter.startWatchingContent(
-            fileOpenTabIds,
-            contentWatchId,
-          );
-        }
-      } catch (error) {
-        console.error("Failed to setup watchers:", error);
-      }
-    };
-
-    setupWatchers();
-
-    return () => {
-      isActive = false;
-      eventCleanup?.();
-      platformAdapter.stopWatching(metadataWatchId);
-      if (fileOpenTabIds.length > 0) {
-        platformAdapter.stopWatching(contentWatchId);
-      }
-    };
-  }, [workspacePath, fileOpenTabIds.join(",")]);
+  useFileWatchers(workspacePath, fileOpenTabIds);
 
   return (
     <WorkspaceTabsProvider openFile={openFileInTabs} openAgentTab={openAgentTab}>
