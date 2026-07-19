@@ -1,11 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { platformAdapter } from "@/adapters";
 import { FsError } from "@/adapters/platform-adapter.interface";
-import {
-  readWorkspaceTextFile,
-  writeWorkspaceTextFile,
-  isRecentSelfWrite,
-} from "../file-sync";
+import { readWorkspaceTextFile, writeWorkspaceTextFile } from "../file-sync";
+import { isRecentSelfWrite } from "../file-write-effects";
 import { calculateContentHash } from "../hash";
 import { getDocumentSync } from "../markdown-conversion";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";

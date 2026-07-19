@@ -19,7 +19,7 @@
  * - We control when to refetch via manual .refetch() calls
  */
 
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { createCollection, useLiveQuery, eq, inArray } from "@tanstack/react-db";
 import { useIsFetching } from "@tanstack/react-query";
 import {
@@ -33,16 +33,10 @@ import {
 } from "@/adapters/platform-adapter.interface";
 import type { FileEntry } from "@/utils/fs";
 import { calculateContentHash } from "@/utils/hash";
-// Circular with @/utils/file-sync (which imports this module); safe because
-// both sides only reference each other's exports inside function bodies.
 import {
-  handleContentFileSystemChange,
-  handleMetadataFileSystemChange,
   invalidateDerivedState,
   recordSelfWrite,
-} from "@/utils/file-sync";
-// Sibling entity — only referenced inside function bodies (cycle rule).
-import { readOpenTabIds } from "./tabs";
+} from "@/utils/file-write-effects";
 import { queryClient } from "./query-client";
 
 // The shared QueryClient moved to the entities/query-client leaf; re-exported
@@ -913,64 +907,6 @@ export function useOpenFileRows(
   return data as OpenFileRow[];
 }
 
-/**
- * File-system watcher lifecycle for a workspace: watches the whole tree for
- * metadata changes and the open files for content changes, routing events
- * into file-sync's change handlers. Re-arms when the open-file set changes.
- */
-export function useFileWatchers(
-  workspacePath: string,
-  openFilePaths: string[],
-): void {
-  useEffect(() => {
-    const metadataWatchId = `metadata-${workspacePath}`;
-    const contentWatchId = `content-${workspacePath}`;
-    let eventCleanup: (() => void) | undefined;
-    let isActive = true;
-
-    const setupWatchers = async () => {
-      try {
-        eventCleanup = platformAdapter.addEventListener((event) => {
-          if (!isActive) return;
-          if (event.type === "fs-metadata-changed") {
-            handleMetadataFileSystemChange(event.payload, workspacePath);
-          } else if (event.type === "fs-content-changed") {
-            handleContentFileSystemChange(event.payload, workspacePath);
-          }
-        });
-
-        await platformAdapter.startWatchingMetadata(
-          [workspacePath],
-          metadataWatchId,
-        );
-
-        if (openFilePaths.length > 0) {
-          await platformAdapter.startWatchingContent(
-            openFilePaths,
-            contentWatchId,
-          );
-        }
-      } catch (error) {
-        console.error("Failed to setup watchers:", error);
-      }
-    };
-
-    setupWatchers();
-
-    return () => {
-      isActive = false;
-      eventCleanup?.();
-      platformAdapter.stopWatching(metadataWatchId);
-      if (openFilePaths.length > 0) {
-        platformAdapter.stopWatching(contentWatchId);
-      }
-    };
-    // Join: re-arm only when the actual set of open paths changes, not on
-    // every render's fresh array identity.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspacePath, openFilePaths.join(",")]);
-}
-
 /** Whether the workspace's eager metadata load is still in flight. */
 export function useMetadataFetching(workspacePath: string): boolean {
   return (
@@ -1003,8 +939,6 @@ export interface FileHandle {
    * the platform adapter, or it risks clobbering a newer on-disk version.
    */
   content(): string | undefined;
-  /** Open tab ids showing this file (tab ids are file paths). */
-  tabs(): string[];
 }
 
 export function file(workspacePath: string, filePath: string): FileHandle {
@@ -1019,6 +953,5 @@ export function file(workspacePath: string, filePath: string): FileHandle {
     content: () =>
       getOrCreateWorkspaceCollections(workspacePath).content.get(filePath)
         ?.content,
-    tabs: () => readOpenTabIds().filter((tabId) => tabId === filePath),
   };
 }
