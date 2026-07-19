@@ -129,13 +129,12 @@ export interface GitFileRow {
 }
 
 export interface GitCheckpointRow {
-  id: string; // `cp:<oid>` (or `cp:optimistic-*` while pending)
+  id: string; // `cp:<oid>`
   kind: "checkpoint";
   oid: string;
   hash: string;
   message: string;
   timestamp: number;
-  pending?: boolean;
 }
 
 export type GitRow = GitRepoRow | GitFileRow | GitCheckpointRow;
@@ -274,47 +273,12 @@ function createGitCollection(workspacePath: string) {
       queryFn: () => fetchGitRows(workspacePath),
       getKey: (row) => row.id,
 
-      // The only collection mutation is the optimistic checkpoint save —
-      // insert a `pending` checkpoint row, commit in the handler. A throw
-      // rolls the optimistic row back automatically; that deletes the old
-      // hand-rolled cancelQueries/setQueryData/onError choreography.
-      onInsert: async ({ transaction, collection }) => {
-        for (const mutation of transaction.mutations) {
-          const row = mutation.modified;
-          if (row.kind !== "checkpoint") {
-            throw new Error(
-              "Only checkpoint rows can be inserted into the git collection",
-            );
-          }
-
-          const service = getOrCreateWorkspaceGitService(workspacePath);
-          const oid = await service.addAllAndCommit({
-            repoPath: workspacePath,
-            message: row.message,
-            author: COMMIT_AUTHOR,
-          });
-
-          // The optimistic row lives in the transaction overlay and drops on
-          // its own when this handler resolves; direct-write the real commit
-          // into the synced store so the list doesn't blink while the
-          // refetch below reconciles status/file rows. `oid === null` means
-          // nothing to commit — nothing to write. Direct writes need an
-          // active sync (a subscriber); without one the refetch reconciles
-          // on its own.
-          if (oid && collection.status === "ready") {
-            collection.utils.writeUpsert({
-              ...row,
-              id: `cp:${oid}`,
-              oid,
-              hash: oid.slice(0, 7),
-              pending: false,
-            });
-          }
-        }
-
-        void refetchGit(workspacePath);
-        return { refetch: false };
-      },
+      // Deliberately NO mutation handlers: every git write (save/revert/
+      // abort/initialize) is a plain async action + refetch. An optimistic
+      // insert with a synthetic key that sync never confirms (a "pending"
+      // checkpoint row) permanently strands its ghost in derived live
+      // queries (@tanstack/db 0.6.1 — covered by the save regression
+      // test); the pending entry is UI state in checkpoint-panel instead.
     }),
   );
 }
@@ -383,7 +347,7 @@ export function useGitSummary(
   }, [data]);
 }
 
-/** Checkpoints newest-first (a pending optimistic save sorts first). */
+/** Checkpoints newest-first. */
 export function useGitCheckpoints(workspacePath: string): GitCheckpointRow[] {
   const collection = useMemo(
     () => getOrCreateGitCollection(workspacePath),
@@ -464,30 +428,39 @@ export async function refetchGit(workspacePath: string): Promise<void> {
 
 /** Debounce-friendly invalidation for file-sync's derived-state pass. */
 export function invalidateGit(workspacePath: string): void {
-  void queryClient.invalidateQueries({ queryKey: gitQueryKey(workspacePath) });
+  void queryClient.invalidateQueries({
+    queryKey: gitQueryKey(normalizePath(workspacePath)),
+  });
 }
 
 /**
- * Save a checkpoint: optimistic `pending` row now, `addAllAndCommit` in the
- * collection's onInsert handler. Resolves when the commit persisted; rejects
- * (and rolls the row back) when it failed.
+ * Save a checkpoint: `addAllAndCommit`, then refetch. Plain async action —
+ * the caller (checkpoint-panel) renders its own pending entry while this is
+ * in flight. Returns the new commit oid, or null when there was nothing to
+ * commit.
  */
 export async function saveCheckpoint(
   workspacePath: string,
   description?: string,
-): Promise<void> {
-  const collection = getOrCreateGitCollection(workspacePath);
-  const now = Date.now();
-  const tx = collection.insert({
-    id: `cp:optimistic-${now}`,
-    kind: "checkpoint",
-    oid: "",
-    hash: "pending",
-    message: description?.trim() || "Commit",
-    timestamp: now,
-    pending: true,
-  });
-  await tx.isPersisted.promise;
+): Promise<string | null> {
+  const normalized = normalizePath(workspacePath);
+  const service = getOrCreateWorkspaceGitService(normalized);
+
+  // Cancel any in-flight fetch so a stale pre-commit response can't land
+  // after the commit's own refetch (the old code's cancelQueries guard, at
+  // the entity level).
+  await queryClient.cancelQueries({ queryKey: gitQueryKey(normalized) });
+
+  try {
+    return await service.addAllAndCommit({
+      repoPath: normalized,
+      message: description?.trim() || "Commit",
+      author: COMMIT_AUTHOR,
+    });
+  } finally {
+    // Refetch even on failure — a partial add may have changed status.
+    await refetchGit(normalized);
+  }
 }
 
 /**

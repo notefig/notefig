@@ -193,23 +193,35 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
 
   const summary = useGitSummary(workspacePath);
   const checkpointRows = useGitCheckpoints(workspacePath);
-  const checkpoints: CheckpointListItem[] = useMemo(
-    () =>
-      checkpointRows.map((row) => ({
-        id: row.oid || row.id,
-        hash: row.hash,
-        timestamp: new Date(row.timestamp),
-        message: row.message,
-      })),
-    [checkpointRows],
-  );
 
-  // The optimistic checkpoint row and its rollback live in the git
-  // collection's insert handler — the mutations here only track pending/
-  // error state for the buttons.
-  const saveCheckpoint = useMutation<void, SerializedGitError, string | undefined>({
+  const saveCheckpoint = useMutation<
+    string | null,
+    SerializedGitError,
+    string | undefined
+  >({
     mutationFn: (value) => saveCheckpointAction(workspacePath, value),
   });
+
+  // While the commit is in flight, show it as a pending list entry. Purely
+  // render-level — an optimistic collection row with a key sync never
+  // confirms would strand a ghost in the live query (see entities/git.ts).
+  const checkpoints: CheckpointListItem[] = useMemo(() => {
+    const items: CheckpointListItem[] = checkpointRows.map((row) => ({
+      id: row.oid || row.id,
+      hash: row.hash,
+      timestamp: new Date(row.timestamp),
+      message: row.message,
+    }));
+    if (saveCheckpoint.isPending) {
+      items.unshift({
+        id: "pending-save",
+        hash: "pending",
+        timestamp: new Date(),
+        message: saveCheckpoint.variables?.trim() || "Commit",
+      });
+    }
+    return items;
+  }, [checkpointRows, saveCheckpoint.isPending, saveCheckpoint.variables]);
 
   const initializeTimeline = useMutation<void, SerializedGitError, void>({
     mutationFn: () => initializeGit(workspacePath),

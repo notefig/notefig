@@ -155,11 +155,9 @@ describe("fetchGitRows", () => {
   });
 });
 
-describe("saveCheckpoint (optimistic insert)", () => {
-  it("replaces the pending row with the real commit on success", async () => {
+describe("saveCheckpoint (plain action + refetch)", () => {
+  it("commits and the refetched rows include the new checkpoint", async () => {
     addAllAndCommitMock.mockImplementation(async () => {
-      // After the commit, the real git log would include it — the trailing
-      // refetch must not wipe the direct-written row.
       logMock.mockResolvedValue([
         {
           oid: "feedbeef00",
@@ -173,14 +171,18 @@ describe("saveCheckpoint (optimistic insert)", () => {
     });
 
     // Start the collection's sync (in the app a live-query subscription
-    // does this) so the handler's direct writes apply.
+    // does this) so the post-commit refetch lands in the synced store.
     await getOrCreateGitCollection(WS).preload();
-    await saveCheckpoint(WS, "did things");
+    const oid = await saveCheckpoint(WS, "did things");
 
-    const collection = getOrCreateGitCollection(WS);
-    const rows = collection.toArray as GitCheckpointRow[];
-    const pending = rows.filter((r) => r.pending);
-    expect(pending).toHaveLength(0);
+    expect(oid).toBe("feedbeef00");
+    expect(addAllAndCommitMock).toHaveBeenCalledWith({
+      repoPath: WS,
+      message: "did things",
+      author: { name: "Metrists", email: "git@metrists.com" },
+    });
+
+    const rows = getOrCreateGitCollection(WS).toArray as GitCheckpointRow[];
     const committed = rows.find((r) => r.id === "cp:feedbeef00");
     expect(committed).toMatchObject({
       hash: "feedbee",
@@ -188,7 +190,7 @@ describe("saveCheckpoint (optimistic insert)", () => {
     });
   });
 
-  it("rolls the pending row back when the commit fails", async () => {
+  it("rejects when the commit fails, leaving no checkpoint row behind", async () => {
     addAllAndCommitMock.mockRejectedValue(
       new MockGitError("LockUnavailable", "busy"),
     );
@@ -205,16 +207,9 @@ describe("saveCheckpoint (optimistic insert)", () => {
     ).toHaveLength(0);
   });
 
-  it("drops the pending row when there is nothing to commit (null oid)", async () => {
+  it("returns null when there is nothing to commit", async () => {
     addAllAndCommitMock.mockResolvedValue(null);
 
-    await saveCheckpoint(WS, "empty");
-
-    const collection = getOrCreateGitCollection(WS);
-    expect(
-      collection.toArray.filter(
-        (r) => r.kind === "checkpoint" && r.message === "empty",
-      ),
-    ).toHaveLength(0);
+    await expect(saveCheckpoint(WS, "empty")).resolves.toBeNull();
   });
 });
