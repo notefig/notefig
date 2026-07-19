@@ -9,6 +9,7 @@ import { AppUpdaterBootstrap } from "@/components/app-updater";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { queryClient } from "@/utils/collections";
+import { installWorkspaceProviders } from "@/workspace-providers";
 import { App } from "./App";
 
 import "./styles.css";
@@ -16,6 +17,8 @@ import "./styles.css";
 if (typeof globalThis.Buffer === "undefined") {
   globalThis.Buffer = Buffer;
 }
+
+installWorkspaceProviders();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

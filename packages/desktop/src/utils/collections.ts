@@ -35,6 +35,7 @@ import { calculateContentHash } from "./hash";
 // Circular with ./file-sync (which imports this module); safe because both
 // sides only reference each other's exports inside function bodies.
 import { invalidateDerivedState, recordSelfWrite } from "./file-sync";
+import type { FileSnapshot } from "@metrists/workspace";
 
 // Global QueryClient instance for TanStack Query
 export const queryClient = new QueryClient({
@@ -848,4 +849,17 @@ export function clearWorkspaceCollections(workspaceId: string): void {
   // replaying a stale error or stale data.
   queryClient.removeQueries({ queryKey: ["file-metadata", workspaceId] });
   queryClient.removeQueries({ queryKey: ["file-content", workspaceId] });
+}
+
+// Read-side of @metrists/workspace's FileHandle — a plain function matching
+// FileProvider's shape. Wiring it in (registerFileProvider) is centralized
+// in workspace-providers.ts; kept here because only this module owns
+// `getFileEntry`.
+export function readFileSnapshot(
+  workspaceId: string,
+  filePath: string,
+): FileSnapshot | undefined {
+  const entry = getFileEntry(workspaceId, filePath);
+  if (!entry) return undefined;
+  return { content: entry.content, exists: true };
 }

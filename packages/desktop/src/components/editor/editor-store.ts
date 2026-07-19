@@ -36,6 +36,8 @@ import {
   composeDropHandlers,
   createProtocolDropHandler,
 } from "@/utils/drag-protocol";
+import type { EditorSnapshot } from "@metrists/workspace";
+import { createMarkdownCodec } from "./markdown-codec";
 
 export type { EditorLocation };
 
@@ -577,4 +579,32 @@ export function getWorkspaceEditorContext(
     activeFile: activeFile && activeFile.startsWith(workspacePath) ? activeFile : null,
     selection: activeFile ? getSelectedText(activeFile) !== undefined : undefined,
   };
+}
+
+// Read-side of @metrists/workspace's EditorHandle/TabHandle graph. These are
+// plain functions matching that package's EditorProvider/TabSource shapes —
+// wiring them in (registerEditorProvider/registerTabSource) is centralized
+// in workspace-providers.ts, not here, so the full set of what desktop hands
+// to @metrists/workspace is visible in one place. Kept in this file because
+// only it has private access to `editorInstances`.
+const workspaceEditorCodec = createMarkdownCodec();
+
+export function readEditorSnapshot(filePath: string): EditorSnapshot | undefined {
+  const instance = editorInstances.get(filePath);
+  if (!instance) return undefined;
+  return {
+    focus: () => instance.focus(),
+    isFocusable: () => instance.isFocusable(),
+    isMarkdown: () => isMarkdownInstance(instance),
+    markdownText: () =>
+      isMarkdownInstance(instance)
+        ? workspaceEditorCodec.serialize(instance.editor.getJSON())
+        : undefined,
+  };
+}
+
+export function readOpenTabIds(): string[] {
+  const params = new URLSearchParams(window.location.search);
+  const layout = parseLayout(params.get(LAYOUT_PARAM));
+  return extractTabIds(layout);
 }
