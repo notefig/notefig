@@ -1,5 +1,6 @@
 export * from "./registry";
 export * from "./provider";
+export * from "./handle";
 export * from "./tab-id";
 export * from "./editors";
 export * from "./files";

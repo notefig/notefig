@@ -9,6 +9,7 @@
  * `registerEditorProvider`.
  */
 import { createProvider } from "./provider";
+import { createHandle } from "./handle";
 import { file, type FileHandle } from "./files";
 import { tab, type TabHandle } from "./tabs";
 
@@ -37,24 +38,15 @@ export interface EditorHandle {
 }
 
 export function editor(workspacePath: string, filePath: string): EditorHandle {
-  return {
-    workspacePath,
-    filePath,
-    isMounted() {
-      return editorProvider.resolve(filePath) !== undefined;
-    },
-    focus() {
-      return editorProvider.resolve(filePath)?.focus() ?? false;
-    },
-    markdownText() {
-      return editorProvider.resolve(filePath)?.markdownText();
-    },
-    file() {
-      return file(workspacePath, filePath);
-    },
-    tab() {
+  return createHandle(
+    { workspacePath, filePath },
+    {
+      isMounted: (self) => editorProvider.resolve(self.filePath) !== undefined,
+      focus: (self) => editorProvider.resolve(self.filePath)?.focus() ?? false,
+      markdownText: (self) => editorProvider.resolve(self.filePath)?.markdownText(),
+      file: (self) => file(self.workspacePath, self.filePath),
       // File tab ids are the file path, by convention (tab-id.ts).
-      return tab(workspacePath, filePath);
+      tab: (self) => tab(self.workspacePath, self.filePath),
     },
-  };
+  );
 }

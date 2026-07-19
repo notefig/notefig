@@ -7,6 +7,7 @@
  */
 import type { RepoStatus, GitFileChange } from "@metrists/git";
 import { createProvider } from "./provider";
+import { createHandle } from "./handle";
 
 export type FileGitState =
   | { kind: "clean" }
@@ -61,13 +62,14 @@ function deriveState(status: RepoStatus, relativePath: string): FileGitState {
 }
 
 export function gitStatus(workspacePath: string, filePath: string): GitStatusHandle {
-  return {
-    workspacePath,
-    filePath,
-    state() {
-      const status = gitStatusProvider.resolve(workspacePath);
-      if (!status) return undefined;
-      return deriveState(status, relativize(workspacePath, filePath));
+  return createHandle(
+    { workspacePath, filePath },
+    {
+      state: (self) => {
+        const status = gitStatusProvider.resolve(self.workspacePath);
+        if (!status) return undefined;
+        return deriveState(status, relativize(self.workspacePath, self.filePath));
+      },
     },
-  };
+  );
 }

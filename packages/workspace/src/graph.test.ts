@@ -69,6 +69,12 @@ describe("tab -> file -> blob -> file round trip", () => {
     // and back through the file to the same tab we started from
     expect(f.tabs()[0]?.tabId).toBe(FILE_PATH);
   });
+
+  it("FileHandle.editor() links forward to match EditorHandle.file() coming back", () => {
+    const f = file(WORKSPACE, FILE_PATH);
+    expect(f.editor().filePath).toBe(FILE_PATH);
+    expect(f.editor().file().filePath).toBe(f.filePath);
+  });
 });
 
 describe("agent tabs short-circuit the file-shaped chain", () => {

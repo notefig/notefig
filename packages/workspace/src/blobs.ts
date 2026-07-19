@@ -7,6 +7,7 @@
  */
 import { findBlobs, type BlobEnvelope, type BlobLocation } from "@metrists/shared";
 import { createProvider } from "./provider";
+import { createHandle } from "./handle";
 import { editor } from "./editors";
 import { file, type FileHandle } from "./files";
 
@@ -41,24 +42,20 @@ function currentContent(workspacePath: string, filePath: string): string | undef
 }
 
 export function blob(workspacePath: string, filePath: string, blobId: string): BlobHandle {
-  return {
-    workspacePath,
-    filePath,
-    blobId,
-    envelope() {
-      const content = currentContent(workspacePath, filePath);
-      if (content === undefined) return undefined;
-      return findBlobs(content).find(
-        (loc: BlobLocation) => loc.blob.envelope.id === blobId,
-      )?.blob.envelope;
+  return createHandle(
+    { workspacePath, filePath, blobId },
+    {
+      envelope: (self) => {
+        const content = currentContent(self.workspacePath, self.filePath);
+        if (content === undefined) return undefined;
+        return findBlobs(content).find(
+          (loc: BlobLocation) => loc.blob.envelope.id === self.blobId,
+        )?.blob.envelope;
+      },
+      file: (self) => file(self.workspacePath, self.filePath),
+      authorTask: (self) => authorTaskProvider.resolve(self.blobId),
     },
-    file() {
-      return file(workspacePath, filePath);
-    },
-    authorTask() {
-      return authorTaskProvider.resolve(blobId);
-    },
-  };
+  );
 }
 
 /** All blobs currently present in a file's content — backs both

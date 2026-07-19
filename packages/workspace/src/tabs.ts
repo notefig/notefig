@@ -9,6 +9,7 @@
  * they aren't backed by a file at all.
  */
 import { createProvider } from "./provider";
+import { createHandle } from "./handle";
 import { isAgentTabId } from "./tab-id";
 import { editor, type EditorHandle } from "./editors";
 import { file, type FileHandle } from "./files";
@@ -31,26 +32,16 @@ export interface TabHandle {
 }
 
 export function tab(workspacePath: string, tabId: string): TabHandle {
-  const isAgent = isAgentTabId(tabId);
-  return {
-    workspacePath,
-    tabId,
-    isOpen() {
-      return tabSourceProvider.resolve(workspacePath).includes(tabId);
+  return createHandle(
+    { workspacePath, tabId },
+    {
+      isOpen: (self) => tabSourceProvider.resolve(self.workspacePath).includes(self.tabId),
+      isAgentTab: (self) => isAgentTabId(self.tabId),
+      editor: (self) => (isAgentTabId(self.tabId) ? undefined : editor(self.workspacePath, self.tabId)),
+      file: (self) => (isAgentTabId(self.tabId) ? undefined : file(self.workspacePath, self.tabId)),
+      blobs: (self) => (isAgentTabId(self.tabId) ? [] : blobsForFile(self.workspacePath, self.tabId)),
     },
-    isAgentTab() {
-      return isAgent;
-    },
-    editor() {
-      return isAgent ? undefined : editor(workspacePath, tabId);
-    },
-    file() {
-      return isAgent ? undefined : file(workspacePath, tabId);
-    },
-    blobs() {
-      return isAgent ? [] : blobsForFile(workspacePath, tabId);
-    },
-  };
+  );
 }
 
 /** Open tabs whose id resolves to this file path — backs `FileHandle.tabs()`. */
