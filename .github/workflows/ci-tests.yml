@@ -184,7 +184,9 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          # fallow (pinned in root package.json, picked up by the action)
+          # requires Node >= 22
+          node-version: "22"
           cache: "npm"
 
       - name: Install dependencies
@@ -215,7 +217,9 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          # fallow (pinned in root package.json, picked up by the action)
+          # requires Node >= 22
+          node-version: "22"
           cache: "npm"
 
       - name: Install dependencies
