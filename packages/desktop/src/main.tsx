@@ -8,7 +8,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { AppUpdaterBootstrap } from "@/components/app-updater";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { queryClient } from "@/utils/collections";
+import { queryClient } from "@/entities/query-client";
 import { App } from "./App";
 
 import "./styles.css";

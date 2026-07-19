@@ -1,6 +1,6 @@
 import { useLiveQuery, createCollection } from "@tanstack/react-db";
 import { queryCollectionOptions } from "@tanstack/query-db-collection";
-import { queryClient } from "./collections";
+import { queryClient } from "@/entities/query-client";
 import { platformAdapter } from "@/adapters";
 
 export interface KvRow {

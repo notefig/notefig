@@ -9,12 +9,12 @@ import {
 import { SessionsPanel } from "@/components/agent/sessions-panel";
 import { CheckpointPanel } from "@/components/editor/git/checkpoint-panel";
 import {
-  getOrCreateWorkspaceCollections,
+  useFileCollections,
   deleteFileOrDirectory,
   renameFileOrDirectory,
   createFile,
   createDirectory,
-} from "@/utils/collections";
+} from "@/entities/files";
 import {
   ensureNewFileNameHasDefaultMarkdownExtension,
   getDirectoryPath,
@@ -48,7 +48,7 @@ export function Sidebar({
   onModeChange,
   searchPanelRef,
 }: SidebarProps) {
-  const { metadata } = getOrCreateWorkspaceCollections(workspacePath);
+  const { metadata } = useFileCollections(workspacePath);
 
   const [searchParams, setUrlSearchParams] = useSearchParams();
   const sortOrder = (searchParams.get("sort") as SortOrder) || "name-asc";

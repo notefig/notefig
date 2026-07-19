@@ -1,3 +1,9 @@
+// Pre-existing tangle: this module reaches the editor/blob component graph
+// via mcp-server → widget-context-resource → editor-store, and prompt-blob
+// reaches back through the agents facade. Untangling means relocating the
+// editor registry to a leaf module (see file-sync's editor-store import
+// comment); new cycles elsewhere still gate.
+// fallow-ignore-file circular-dependency
 import {
   newTaskId,
   newTurnId,

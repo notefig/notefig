@@ -20,13 +20,23 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import type { LayoutNode } from "@/components/dockable";
+// Pure zero-dependency leaf — safe for the crash fallback (unlike entity
+// modules, which must never be runtime imports here).
+import {
+  LAYOUT_PARAM,
+  parseLayout,
+  extractTabIds,
+  findLayoutSelectedTab,
+} from "@/utils/layout-codec";
 import {
   getEditor,
   isMarkdownInstance,
 } from "@/components/editor/editor-store";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLiveQuery } from "@tanstack/react-db";
-import type { GitError, RepoStatus } from "@metrists/git";
+// Type-only import — erased at runtime, so the crash panel stays
+// self-sufficient (its only runtime dependency is the QueryClient).
+import type { GitRow } from "@/entities/git";
 import {
   agentEntriesCollection,
   agentPermissionRequestsCollection,
@@ -74,44 +84,21 @@ const LEVEL_BG: Record<ConsoleLevel, string> = {
 };
 
 const MAX_CONSOLE_ENTRIES = 500;
-const LAYOUT_PARAM = "layout";
 
-// ── Layout parsing (self-sufficient — no props needed) ──
-
-function parseLayout(raw: string | null): LayoutNode[] {
-  if (!raw) return [];
+async function copyTextWithFallback(text: string): Promise<void> {
   try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed as LayoutNode[];
-    return [];
+    await navigator.clipboard.writeText(text);
   } catch {
-    return [];
+    // Fallback for environments where clipboard API is blocked
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textarea);
   }
-}
-
-function extractTabIds(nodes: LayoutNode[]): string[] {
-  const ids: string[] = [];
-  for (const node of nodes) {
-    if (node.type === "Window") {
-      ids.push(...node.children);
-    } else if (node.type === "Panel") {
-      ids.push(...extractTabIds(node.children));
-    }
-  }
-  return ids;
-}
-
-function findSelectedTab(nodes: LayoutNode[]): string | null {
-  for (const node of nodes) {
-    if (node.type === "Window" && node.selected) {
-      return node.selected;
-    }
-    if (node.type === "Panel") {
-      const found = findSelectedTab(node.children);
-      if (found) return found;
-    }
-  }
-  return null;
 }
 
 // ── Console capture hook ──
@@ -267,20 +254,26 @@ function DebugPanelContent({
     [dockableLayout],
   );
   const activeTabId = useMemo(
-    () => findSelectedTab(dockableLayout),
+    () => findLayoutSelectedTab(dockableLayout),
     [dockableLayout],
   );
   useQueryCacheTick();
   const queryClient = useQueryClient();
-  const gitStatusQueryKey = basePath
-    ? (["git", basePath, "status"] as const)
+  // Key hand-inlined on purpose (self-sufficiency): matches entities/git.ts's
+  // gitQueryKey — the git collection stores its GitRow[] in the query cache.
+  const gitStatusQueryKey = basePath ? (["git", basePath] as const) : null;
+  const latestGitRows = gitStatusQueryKey
+    ? (queryClient.getQueryData<GitRow[]>(gitStatusQueryKey) ?? null)
     : null;
-  const latestGitStatus = gitStatusQueryKey
-    ? (queryClient.getQueryData<RepoStatus>(gitStatusQueryKey) ?? null)
-    : null;
-  const latestGitStatusError = gitStatusQueryKey
-    ? (queryClient.getQueryState<RepoStatus, GitError>(gitStatusQueryKey)
-        ?.error ?? null)
+  const latestGitRepoRow =
+    latestGitRows?.find(
+      (row): row is GitRow & { kind: "repo" } => row.kind === "repo",
+    ) ?? null;
+  const latestGitStatus = latestGitRows;
+  const latestGitStatusError: { message: string } | null = gitStatusQueryKey
+    ? ((queryClient.getQueryState(gitStatusQueryKey)?.error as Error | null) ??
+      latestGitRepoRow?.statusError ??
+      null)
     : null;
   const latestGitStatusUpdatedAt = gitStatusQueryKey
     ? (queryClient.getQueryState(gitStatusQueryKey)?.dataUpdatedAt ?? 0)
@@ -464,24 +457,9 @@ function DebugPanelContent({
   ]);
 
   const copyDebugReport = useCallback(async () => {
-    const report = buildDebugReport();
-    try {
-      await navigator.clipboard.writeText(report);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Fallback for environments where clipboard API is blocked
-      const textarea = document.createElement("textarea");
-      textarea.value = report;
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      document.body.removeChild(textarea);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
+    await copyTextWithFallback(buildDebugReport());
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }, [buildDebugReport]);
 
   // ── Copy Plate AST ──
@@ -522,24 +500,9 @@ function DebugPanelContent({
   }, [openTabs]);
 
   const copyPlateAst = useCallback(async () => {
-    const report = buildPlateAstReport();
-    try {
-      await navigator.clipboard.writeText(report);
-      setAstCopied(true);
-      setTimeout(() => setAstCopied(false), 2000);
-    } catch {
-      // Fallback for environments where clipboard API is blocked
-      const textarea = document.createElement("textarea");
-      textarea.value = report;
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      document.body.removeChild(textarea);
-      setAstCopied(true);
-      setTimeout(() => setAstCopied(false), 2000);
-    }
+    await copyTextWithFallback(buildPlateAstReport());
+    setAstCopied(true);
+    setTimeout(() => setAstCopied(false), 2000);
   }, [buildPlateAstReport]);
 
   // ── Agent session history (task transcript dump) ──
@@ -682,24 +645,9 @@ function DebugPanelContent({
   const [sessionCopied, setSessionCopied] = useState(false);
 
   const copySessionReport = useCallback(async () => {
-    const report = buildSessionReport();
-    try {
-      await navigator.clipboard.writeText(report);
-      setSessionCopied(true);
-      setTimeout(() => setSessionCopied(false), 2000);
-    } catch {
-      // Fallback for environments where clipboard API is blocked
-      const textarea = document.createElement("textarea");
-      textarea.value = report;
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      document.body.removeChild(textarea);
-      setSessionCopied(true);
-      setTimeout(() => setSessionCopied(false), 2000);
-    }
+    await copyTextWithFallback(buildSessionReport());
+    setSessionCopied(true);
+    setTimeout(() => setSessionCopied(false), 2000);
   }, [buildSessionReport]);
 
   // ── Collapsible sections ──

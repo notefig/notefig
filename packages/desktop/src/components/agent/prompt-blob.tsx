@@ -1,3 +1,8 @@
+// Pre-existing tangle: editor-store builds the editor kit with
+// ai-prompt-node, whose node view renders this component. Untangling means
+// relocating the editor registry to a leaf module (see file-sync's
+// editor-store import comment); new cycles elsewhere still gate.
+// fallow-ignore-file circular-dependency
 import {
   memo,
   useCallback,
@@ -55,7 +60,7 @@ import {
   peekSharedSession,
   adoptSharedSession,
 } from "./blob-session-store";
-import { describeTaskMeta, useAgentTaskList } from "@/hooks/use-agent-tasks";
+import { describeTaskMeta, useAgentTaskList } from "@/entities/agents";
 import { docHasRealContent } from "@/components/editor/ai-prompt-utils";
 import {
   getPromptBlob,

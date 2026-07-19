@@ -1,13 +1,124 @@
+/**
+ * Agents entity — the app-facing import point over `src/agent/`.
+ *
+ * `src/agent/` stays the implementation directory (service, collections,
+ * transports, tools); this module re-exports the facade + collections and
+ * owns the consolidated reactive hooks, so per-task joins (task row, turns,
+ * entries, pending permissions) are written once instead of per component.
+ */
 import { useEffect, useMemo, useState } from "react";
-import { useLiveQuery, eq } from "@tanstack/react-db";
-import {
-  agentTasksCollection,
-  agentTurnsCollection,
-  type AgentTaskRow,
-} from "@/agent/agent-collections";
+import { useLiveQuery, eq, and, inArray } from "@tanstack/react-db";
 import { normalizePath } from "@/utils/fs";
 import { formatTimeAgo } from "@/utils/format";
 import i18n from "@/utils/intl";
+import {
+  agentTasksCollection,
+  agentTurnsCollection,
+  agentEntriesCollection,
+  agentPermissionRequestsCollection,
+  type AgentTaskRow,
+  type AgentTurn,
+  type AgentEntry,
+  type AgentPermissionRequestRow,
+} from "@/agent/agent-collections";
+
+// One-shot handles + actions live on the facade (identity + actions,
+// re-resolved live, typed failures) — the pattern this entity layer
+// generalized from.
+export { agents } from "@/agent/agents";
+export {
+  agentTasksCollection,
+  agentTurnsCollection,
+  agentEntriesCollection,
+  agentPermissionRequestsCollection,
+  agentEntriesForTask,
+  agentTurnsForTask,
+} from "@/agent/agent-collections";
+export type {
+  AgentTaskRow,
+  AgentTaskStatus,
+  AgentTurn,
+  AgentTurnStatus,
+  AgentEntry,
+  AgentEntryType,
+  AgentPermissionRequestRow,
+} from "@/agent/agent-collections";
+
+// ---------------------------------------------------------------------------
+// Reactive hooks — per-task reads, written once
+// ---------------------------------------------------------------------------
+
+/** The task's collection row; undefined until it exists (or after deletion). */
+export function useTaskRow(taskId: string): AgentTaskRow | undefined {
+  const { data = [] } = useLiveQuery(
+    (q) =>
+      q
+        .from({ task: agentTasksCollection })
+        .where(({ task }) => eq(task.taskId, taskId)),
+    [taskId],
+  );
+  return data[0];
+}
+
+/** Task rows for a set of ids (e.g. the open agent tabs). */
+export function useAgentTaskRowsById(taskIds: string[]): AgentTaskRow[] {
+  const { data = [] } = useLiveQuery(
+    (q) =>
+      taskIds.length === 0
+        ? undefined
+        : q
+            .from({ task: agentTasksCollection })
+            .where(({ task }) => inArray(task.taskId, taskIds)),
+    [...taskIds],
+  );
+  return data;
+}
+
+/** All turns of a task (unsorted — order by turnId/status at the call site). */
+export function useTaskTurns(taskId: string): AgentTurn[] {
+  const { data = [] } = useLiveQuery(
+    (q) =>
+      q
+        .from({ turn: agentTurnsCollection })
+        .where(({ turn }) => eq(turn.taskId, taskId)),
+    [taskId],
+  );
+  return data;
+}
+
+/** All transcript entries of a task. */
+export function useTaskEntries(taskId: string): AgentEntry[] {
+  const { data = [] } = useLiveQuery(
+    (q) =>
+      q
+        .from({ entry: agentEntriesCollection })
+        .where(({ entry }) => eq(entry.taskId, taskId)),
+    [taskId],
+  );
+  return data;
+}
+
+/**
+ * The task's pending permission requests, oldest first (ids sort
+ * chronological: `taskId_perm_N`) — `[0]` is the head to render.
+ */
+export function usePendingPermissions(
+  taskId: string,
+): AgentPermissionRequestRow[] {
+  const { data = [] } = useLiveQuery(
+    (q) =>
+      q
+        .from({ req: agentPermissionRequestsCollection })
+        .where(({ req }) =>
+          and(eq(req.taskId, taskId), eq(req.status, "pending")),
+        ),
+    [taskId],
+  );
+  return useMemo(
+    () => [...data].sort((a, b) => (a.id < b.id ? -1 : 1)),
+    [data],
+  );
+}
 
 /**
  * One workspace task with the derived state the session pickers render.

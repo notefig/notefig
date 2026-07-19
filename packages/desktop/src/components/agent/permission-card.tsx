@@ -1,8 +1,7 @@
-import { useLiveQuery, eq, and } from "@tanstack/react-db";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { respondToAgentPermission } from "@/agent/agent-service";
-import { agentPermissionRequestsCollection } from "@/agent/agent-collections";
+import { usePendingPermissions } from "@/entities/agents";
 import type { PermissionOption } from "@metrists/shared/agent";
 
 /** ACP option kind → button emphasis. Options render verbatim otherwise. */
@@ -29,17 +28,9 @@ export function PermissionCard({
    *  widget) that already wrap it in an equivalently-tinted container. */
   bare?: boolean;
 }) {
-  const { data: pending = [] } = useLiveQuery(
-    (q) =>
-      q
-        .from({ req: agentPermissionRequestsCollection })
-        .where(({ req }) =>
-          and(eq(req.taskId, taskId), eq(req.status, "pending")),
-        ),
-    [taskId],
-  );
-  // Ids sort chronological (taskId_perm_N); render the oldest pending head.
-  const head = [...pending].sort((a, b) => (a.id < b.id ? -1 : 1))[0];
+  const pending = usePendingPermissions(taskId);
+  // Ids sort chronological; the hook returns oldest-first.
+  const head = pending[0];
   if (!head) return null;
 
   const options = head.options as PermissionOption[];

@@ -9,12 +9,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { TunnelStatus } from "@/components/tunnel/tunnel-status";
-import { useQuery } from "@tanstack/react-query";
-import {
-  getOrCreateWorkspaceGitService,
-  gitQueryKeys,
-} from "@/utils/git-service-store";
-import type { GitError, RepoStatus } from "@metrists/git";
+import { useGitSummary } from "@/entities/git";
 
 interface StatusBarProps {
   wordCount: number;
@@ -43,21 +38,6 @@ function useDebouncedSyncState(
   return debouncedSynced;
 }
 
-function useGitStatus(workspacePath: string | undefined) {
-  return useQuery<RepoStatus, GitError>({
-    queryKey: gitQueryKeys(workspacePath ?? "").status,
-    queryFn: async () => {
-      if (!workspacePath) throw new Error("No workspace");
-      const service = getOrCreateWorkspaceGitService(workspacePath);
-      return service.status({ repoPath: workspacePath });
-    },
-    enabled: !!workspacePath,
-    retry: false,
-    staleTime: 2_000,
-    refetchOnWindowFocus: true,
-  });
-}
-
 export function StatusBar({
   wordCount,
   isSynced,
@@ -67,15 +47,10 @@ export function StatusBar({
   const isRtl = direction === "rtl";
   const { t } = useTranslation();
   const debouncedSynced = useDebouncedSyncState(isSynced);
-  const { data: gitStatus, isError: gitError } = useGitStatus(workspacePath);
+  const gitSummary = useGitSummary(workspacePath);
 
-  const hasGitChanges =
-    gitStatus &&
-    (gitStatus.staged.length > 0 ||
-      gitStatus.unstaged.length > 0 ||
-      gitStatus.untracked.length > 0);
-
-  const showGit = !!workspacePath && !gitError;
+  const hasGitChanges = gitSummary?.hasChanges;
+  const showGit = !!workspacePath && !gitSummary?.statusError;
 
   return (
     <div

@@ -35,14 +35,14 @@ vi.mock("@/adapters", () => ({
   platformAdapter: platformAdapterMock,
 }));
 
-describe("git-service-store", () => {
+describe("git service registry (entities/git)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     initMock.mockResolvedValue(undefined);
   });
 
   it("returns singleton git service per normalized workspace", async () => {
-    const store = await import("./git-service-store");
+    const store = await import("./git");
     store.clearWorkspaceGitServices();
 
     const first = store.getOrCreateWorkspaceGitService("/workspace/");
@@ -56,7 +56,7 @@ describe("git-service-store", () => {
   });
 
   it("initializes repository once per in-flight workspace", async () => {
-    const store = await import("./git-service-store");
+    const store = await import("./git");
     store.clearWorkspaceGitServices();
 
     await Promise.all([
@@ -72,7 +72,7 @@ describe("git-service-store", () => {
   });
 
   it("re-runs init on later ensure calls", async () => {
-    const store = await import("./git-service-store");
+    const store = await import("./git");
     store.clearWorkspaceGitServices();
 
     await store.ensureWorkspaceGitInitialized("/workspace");
@@ -82,7 +82,7 @@ describe("git-service-store", () => {
   });
 
   it("disposes a workspace service entry", async () => {
-    const store = await import("./git-service-store");
+    const store = await import("./git");
     store.clearWorkspaceGitServices();
 
     const first = store.getOrCreateWorkspaceGitService("/workspace");

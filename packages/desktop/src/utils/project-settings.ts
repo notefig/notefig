@@ -11,7 +11,7 @@
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { platformAdapter } from "@/adapters";
-import { queryClient } from "@/utils/collections";
+import { queryClient } from "@/entities/query-client";
 
 export const PROJECT_SETTINGS_FILENAME = "metrists.json";
 

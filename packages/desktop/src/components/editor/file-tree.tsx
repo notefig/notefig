@@ -29,10 +29,7 @@ import {
   type FileEntries,
   type SortOrder,
 } from "@/utils/fs";
-import {
-  getOrCreateWorkspaceCollections,
-  prefetchFileContent,
-} from "@/utils/collections";
+import { useFileCollections, prefetchFileContent } from "@/entities/files";
 import { useLiveQuery } from "@tanstack/react-db";
 import { FileTreeContextMenu } from "./file-tree-context-menu";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
@@ -574,7 +571,7 @@ export function FileTree({
   onModeChange,
 }: FileTreeProps) {
   const { t } = useTranslation();
-  const { metadata } = getOrCreateWorkspaceCollections(basePath);
+  const { metadata } = useFileCollections(basePath);
   const [pendingDelete, setPendingDelete] = useState<{
     path: string;
     type: "file" | "directory";

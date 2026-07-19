@@ -19,12 +19,6 @@ import {
   flushDocumentSync,
   getDocumentSync,
 } from "@/utils/markdown-conversion";
-import {
-  LAYOUT_PARAM,
-  parseLayout,
-  extractTabIds,
-  findLayoutSelectedTab,
-} from "@/hooks/use-layout-search-param";
 import { focusArbiter } from "@/utils/focus-arbiter";
 import { isSidebarTextEntryActive } from "@/utils/focus-arbiter";
 import { resolveEditorLocation, type EditorLocation } from "./editor-position";
@@ -542,39 +536,3 @@ export function navigateToLocation(
   return instance.goToLocation(location);
 }
 
-export interface WorkspaceEditorContext {
-  openFiles: Array<{ path: string; dirty: boolean; active: boolean }>;
-  activeFile: string | null;
-  /** Coarse for Stage 1: whether the active file has a non-empty selection. */
-  selection?: boolean;
-}
-
-/**
- * Read-only snapshot of what the user has open, scoped to one workspace.
- * Sourced from the URL (the layout's single source of truth — see
- * `use-layout-search-param.ts`) rather than a React hook, so non-React
- * callers (agent tools, the prompt composer) can call it directly. Not
- * reactive: callers that need live updates should still go through
- * `useLayoutSearchParam`/`useDockableTabs`.
- */
-export function getWorkspaceEditorContext(
-  workspacePath: string,
-): WorkspaceEditorContext {
-  const params = new URLSearchParams(window.location.search);
-  const layout = parseLayout(params.get(LAYOUT_PARAM));
-  const activeFile = findLayoutSelectedTab(layout);
-
-  const openFiles = extractTabIds(layout)
-    .filter((path) => path.startsWith(workspacePath))
-    .map((path) => ({
-      path,
-      dirty: getDocumentSync(path).isDirty(),
-      active: path === activeFile,
-    }));
-
-  return {
-    openFiles,
-    activeFile: activeFile && activeFile.startsWith(workspacePath) ? activeFile : null,
-    selection: activeFile ? getSelectedText(activeFile) !== undefined : undefined,
-  };
-}

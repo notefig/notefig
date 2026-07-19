@@ -3,7 +3,7 @@ import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import {
   getOrCreateWorkspaceCollections,
   refreshDirectoryMetadata,
-} from "@/utils/collections";
+} from "@/entities/files";
 
 export function Loader({ children }: { children: React.ReactNode }) {
   const { workspacePath } = useWorkspaceParams();

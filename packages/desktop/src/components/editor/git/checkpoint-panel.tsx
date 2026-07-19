@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import {
   Check,
@@ -11,14 +11,8 @@ import {
   Undo2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  type UseMutateFunction,
-} from "@tanstack/react-query";
+import { useMutation, type UseMutateFunction } from "@tanstack/react-query";
 
-import type { GitError, GitService, RepoStatus } from "@metrists/git";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {
@@ -36,10 +30,19 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
-  getOrCreateWorkspaceGitService,
-  gitQueryKeys,
-  initializeWorkspaceGit,
-} from "@/utils/git-service-store";
+  abortRevert as abortRevertAction,
+  deriveSyncState,
+  initializeGit,
+  refetchGit,
+  revertToCheckpoint,
+  saveCheckpoint as saveCheckpointAction,
+  useGitCheckpoints,
+  useGitFetching,
+  useGitSummary,
+  type GitSummary,
+  type SerializedGitError,
+  type SyncState,
+} from "@/entities/git";
 
 interface CheckpointPanelProps {
   workspacePath: string;
@@ -59,57 +62,12 @@ interface RecoveryAction {
   disabled?: boolean;
 }
 
-interface QueryState {
-  checkpoints: CheckpointListItem[];
-  error: GitError | null;
-}
-
-interface SaveCheckpointMutationContext {
-  previousCheckpoints: CheckpointListItem[];
-  optimisticId: string;
-}
-
-type SyncState = "uncommitted" | "unsynced" | "synced";
-
 type PanelState = "uninitialized" | "error" | "empty" | "ready";
 
 type MutableT = (key: string, defaultValue: string) => string;
 
-function isRepoNotFoundError(error: GitError | null | undefined): boolean {
-  return error?.code === "RepoNotFound";
-}
-
-async function loadCheckpointsQuery(
-  workspacePath: string,
-  service: GitService,
-): Promise<CheckpointListItem[]> {
-  const entries = await service.log({ repoPath: workspacePath, depth: 100 });
-
-  return entries.map((entry) => ({
-    id: entry.oid,
-    hash: entry.oid.slice(0, 7),
-    timestamp: new Date(entry.commit.committer.timestamp * 1000),
-    message: entry.commit.message.split("\n")[0] || "Commit",
-  }));
-}
-
-async function saveCheckpointMutation(
-  workspacePath: string,
-  service: GitService,
-  description?: string,
-): Promise<string | null> {
-  return service.addAllAndCommit({
-    repoPath: workspacePath,
-    message: description?.trim() || "Commit",
-    author: {
-      name: "Metrists",
-      email: "git@metrists.com",
-    },
-  });
-}
-
 function getErrorPresentation(
-  error: GitError,
+  error: SerializedGitError,
   t: MutableT,
 ): { title: string; message: string } {
   switch (error.code) {
@@ -166,59 +124,43 @@ function getErrorPresentation(
   }
 }
 
+function firstPanelError(
+  summary: GitSummary | undefined,
+  initializeError: SerializedGitError | null | undefined,
+): SerializedGitError | null {
+  return initializeError ?? summary?.statusError ?? summary?.logError ?? null;
+}
+
+/** The error the panel surfaces — only once the panel is in error state. */
+function visiblePanelError(
+  renderPanelState: PanelState,
+  summary: GitSummary | undefined,
+  initializeError: SerializedGitError | null | undefined,
+): SerializedGitError | null {
+  if (renderPanelState !== "error") return null;
+  return firstPanelError(summary, initializeError);
+}
+
+function deriveCanSave(
+  renderPanelState: PanelState,
+  summary: GitSummary | undefined,
+): boolean {
+  return renderPanelState !== "uninitialized" && summary?.hasChanges === true;
+}
+
 function derivePanelState({
-  status,
-  statusError,
-  checkpointsError,
+  summary,
   initializeError,
   checkpoints,
 }: {
-  status: RepoStatus | undefined;
-  statusError: GitError | null;
-  checkpointsError: GitError | null;
-  initializeError: GitError | null;
+  summary: GitSummary | undefined;
+  initializeError: SerializedGitError | null | undefined;
   checkpoints: CheckpointListItem[];
 }): PanelState {
-  if (isRepoNotFoundError(statusError) && !status && checkpoints.length === 0) {
-    return "uninitialized";
-  }
-
-  if (initializeError || checkpointsError || statusError) {
-    return "error";
-  }
-
-  if (checkpoints.length === 0) {
-    return "empty";
-  }
-
-  return "ready";
-}
-
-function deriveSyncState(
-  status: {
-    staged: unknown[];
-    unstaged: unknown[];
-    untracked: unknown[];
-    ahead?: number;
-  } | null,
-): SyncState {
-  if (!status) {
-    return "synced";
-  }
-
-  if (
-    status.staged.length > 0 ||
-    status.unstaged.length > 0 ||
-    status.untracked.length > 0
-  ) {
-    return "uncommitted";
-  }
-
-  if ((status.ahead ?? 0) > 0) {
-    return "unsynced";
-  }
-
-  return "synced";
+  const empty = checkpoints.length === 0;
+  if (summary?.initialized === false && empty) return "uninitialized";
+  if (firstPanelError(summary, initializeError)) return "error";
+  return empty ? "empty" : "ready";
 }
 
 function getSyncStatePresentation(
@@ -247,260 +189,262 @@ function getSyncStatePresentation(
   }
 }
 
-export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
-  const { t } = useTranslation();
-  const queryClient = useQueryClient();
-  const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
-  const [description, setDescription] = useState("");
+/**
+ * Hold the rendered panel state steady while a background fetch is in
+ * flight, so transient loading states don't flicker the panel.
+ */
+function useStablePanelState(
+  panelState: PanelState,
+  isBackgroundFetching: boolean,
+): PanelState {
   const [stablePanelState, setStablePanelState] = useState<PanelState | null>(
     null,
   );
-  const [revertError, setRevertError] = useState<GitError | null>(null);
-  const [activeRevertId, setActiveRevertId] = useState<string | null>(null);
-
-  const service = useMemo(
-    () => getOrCreateWorkspaceGitService(workspacePath),
-    [workspacePath],
-  );
-
-  const commitAuthor = useMemo(
-    () => ({ name: "Metrists", email: "git@metrists.com" }),
-    [],
-  );
-
-  const keys = useMemo(() => gitQueryKeys(workspacePath), [workspacePath]);
-
-  const statusQuery = useQuery<RepoStatus, GitError>({
-    queryKey: keys.status,
-    queryFn: async () => service.status({ repoPath: workspacePath }),
-    retry: false,
-    staleTime: 1_000,
-    refetchOnWindowFocus: true,
-  });
-
-  const checkpointsQuery = useQuery<CheckpointListItem[], GitError>({
-    queryKey: keys.checkpoints,
-    queryFn: async () => loadCheckpointsQuery(workspacePath, service),
-    retry: false,
-    staleTime: 5_000,
-    enabled: !isRepoNotFoundError(statusQuery.error),
-    placeholderData: (previous) => previous,
-  });
-
-  const saveCheckpoint = useMutation<
-    string | null,
-    GitError,
-    string | undefined,
-    SaveCheckpointMutationContext
-  >({
-    mutationFn: async (value) =>
-      saveCheckpointMutation(workspacePath, service, value),
-    onMutate: async (value) => {
-      await queryClient.cancelQueries({ queryKey: keys.checkpoints });
-
-      const previousCheckpoints =
-        queryClient.getQueryData<CheckpointListItem[]>(keys.checkpoints) ?? [];
-      const optimisticId = `optimistic-${Date.now()}`;
-
-      const optimisticEntry: CheckpointListItem = {
-        id: optimisticId,
-        hash: "pending",
-        timestamp: new Date(),
-        message: value?.trim() || "Commit",
-      };
-
-      queryClient.setQueryData<CheckpointListItem[]>(keys.checkpoints, [
-        optimisticEntry,
-        ...previousCheckpoints,
-      ]);
-
-      return { previousCheckpoints, optimisticId };
-    },
-    onError: (_error, _value, context) => {
-      if (!context) return;
-      queryClient.setQueryData(keys.checkpoints, context.previousCheckpoints);
-    },
-    onSuccess: (oid, _value, context) => {
-      if (!context) return;
-
-      if (!oid) {
-        queryClient.setQueryData(keys.checkpoints, context.previousCheckpoints);
-        return;
-      }
-
-      queryClient.setQueryData<CheckpointListItem[] | undefined>(
-        keys.checkpoints,
-        (current) => {
-          if (!current) return current;
-          return current.map((item) =>
-            item.id === context.optimisticId
-              ? {
-                  ...item,
-                  id: oid,
-                  hash: oid.slice(0, 7),
-                }
-              : item,
-          );
-        },
-      );
-
-      void queryClient.invalidateQueries({ queryKey: keys.checkpoints });
-      void queryClient.invalidateQueries({ queryKey: keys.status });
-    },
-    onSettled: async () => {
-      await queryClient.refetchQueries({
-        queryKey: keys.status,
-        type: "active",
-      });
-    },
-  });
-
-  const initializeTimeline = useMutation<void, GitError, void>({
-    mutationFn: async () => {
-      await initializeWorkspaceGit(workspacePath);
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: keys.checkpoints });
-      void queryClient.invalidateQueries({ queryKey: keys.status });
-    },
-  });
-
-  const statusError = statusQuery.error ?? null;
-  const checkpointsError = checkpointsQuery.error ?? null;
-  const initializeError = initializeTimeline.error ?? null;
-  const effectiveStatusError = statusQuery.data ? null : statusError;
-
-  const panelState = derivePanelState({
-    status: statusQuery.data,
-    statusError: effectiveStatusError,
-    checkpointsError,
-    initializeError,
-    checkpoints: checkpointsQuery.data ?? [],
-  });
-
-  const isBackgroundFetching =
-    statusQuery.isFetching || checkpointsQuery.isFetching;
 
   useEffect(() => {
-    if (stablePanelState === null) {
-      setStablePanelState(panelState);
-      return;
-    }
-
-    if (!isBackgroundFetching) {
+    if (stablePanelState === null || !isBackgroundFetching) {
       setStablePanelState(panelState);
     }
   }, [panelState, isBackgroundFetching, stablePanelState]);
 
-  const renderPanelState = stablePanelState ?? panelState;
+  return stablePanelState ?? panelState;
+}
 
-  const state: QueryState = {
-    checkpoints: checkpointsQuery.data ?? [],
-    error:
-      renderPanelState === "error"
-        ? (initializeError ?? checkpointsError ?? effectiveStatusError)
-        : null,
-  };
-
-  const runRetry = () => {
-    if (renderPanelState !== "uninitialized") {
-      void checkpointsQuery.refetch();
+/**
+ * The checkpoint rows shaped for the list, with an in-flight save shown as
+ * a pending entry. Purely render-level — an optimistic collection row with
+ * a key sync never confirms would strand a ghost in the live query (see
+ * entities/git.ts).
+ */
+function useCheckpointItems(
+  checkpointRows: ReturnType<typeof useGitCheckpoints>,
+  save: { isPending: boolean; variables?: string },
+): CheckpointListItem[] {
+  return useMemo(() => {
+    const items: CheckpointListItem[] = checkpointRows.map((row) => ({
+      id: row.oid || row.id,
+      hash: row.hash,
+      timestamp: new Date(row.timestamp),
+      message: row.message,
+    }));
+    if (save.isPending) {
+      items.unshift({
+        id: "pending-save",
+        hash: "pending",
+        timestamp: new Date(),
+        message: save.variables?.trim() || "Commit",
+      });
     }
-    void statusQuery.refetch();
-  };
+    return items;
+  }, [checkpointRows, save.isPending, save.variables]);
+}
 
-  const errorActions =
-    state.error === null
-      ? []
-      : getRecoveryActions({
-          error: state.error,
-          t,
-          retry: runRetry,
-          initialize: initializeTimeline.mutate,
-        });
-
-  const syncState = deriveSyncState(statusQuery.data ?? null);
-  const hasChanges = Boolean(
-    statusQuery.data &&
-    (statusQuery.data.staged.length > 0 ||
-      statusQuery.data.unstaged.length > 0 ||
-      statusQuery.data.untracked.length > 0),
+/** The revert/abort mutations plus their banner state, as one unit. */
+function useRevertController(workspacePath: string) {
+  const [revertError, setRevertError] = useState<SerializedGitError | null>(
+    null,
   );
-  const canSave = renderPanelState !== "uninitialized" && hasChanges;
+  const [activeRevertId, setActiveRevertId] = useState<string | null>(null);
 
-  const revertCommit = useMutation<string | null, GitError, CheckpointListItem>(
-    {
-      mutationFn: async (checkpoint) => {
-        const status = await service.status({ repoPath: workspacePath });
-        const hasLocalChanges =
-          status.staged.length > 0 ||
-          status.unstaged.length > 0 ||
-          status.untracked.length > 0;
-
-        if (hasLocalChanges) {
-          await service.addAllAndCommit({
-            repoPath: workspacePath,
-            message: `WIP before revert ${checkpoint.hash}`,
-            author: commitAuthor,
-          });
-        }
-
-        return service.revertCommit({
-          repoPath: workspacePath,
-          oid: checkpoint.id,
-          message: `Revert ${checkpoint.hash}`,
-          author: commitAuthor,
-        });
-      },
-      onMutate: (checkpoint) => {
-        setRevertError(null);
-        setActiveRevertId(checkpoint.id);
-      },
-      onSuccess: async () => {
-        setRevertError(null);
-        await queryClient.invalidateQueries({ queryKey: keys.checkpoints });
-        await queryClient.invalidateQueries({ queryKey: keys.status });
-      },
-      onError: (error) => {
-        setRevertError(error);
-      },
-      onSettled: () => {
-        setActiveRevertId(null);
-      },
-    },
-  );
-
-  const abortRevert = useMutation<void, GitError, void>({
-    mutationFn: async () => {
-      await service.abortRevert({ repoPath: workspacePath });
-    },
-    onSuccess: async () => {
+  const revertCommit = useMutation<
+    void,
+    SerializedGitError,
+    CheckpointListItem
+  >({
+    mutationFn: (checkpoint) =>
+      revertToCheckpoint(workspacePath, {
+        oid: checkpoint.id,
+        hash: checkpoint.hash,
+      }),
+    onMutate: (checkpoint) => {
       setRevertError(null);
-      await queryClient.invalidateQueries({ queryKey: keys.status });
+      setActiveRevertId(checkpoint.id);
+    },
+    onSuccess: () => {
+      setRevertError(null);
+    },
+    onError: (error) => {
+      setRevertError(error);
+    },
+    onSettled: () => {
+      setActiveRevertId(null);
     },
   });
 
-  const revertActions: RecoveryAction[] = useMemo(() => {
-    if (!revertError) return [];
-    if (revertError.code === "MergeRequired") {
-      return [
-        {
-          id: "abort",
-          label: t("abortRevert", "Abort revert"),
-          onClick: () => abortRevert.mutate(),
-          disabled: abortRevert.isPending,
-        },
-      ];
-    }
+  const abortRevert = useMutation<void, SerializedGitError, void>({
+    mutationFn: () => abortRevertAction(workspacePath),
+    onSuccess: () => {
+      setRevertError(null);
+    },
+  });
 
+  const dismissRevertError = useCallback(() => setRevertError(null), []);
+
+  return {
+    revertCommit,
+    abortRevert,
+    revertError,
+    dismissRevertError,
+    activeRevertId,
+  };
+}
+
+function buildErrorActions({
+  panelError,
+  t,
+  retry,
+  initialize,
+}: {
+  panelError: SerializedGitError | null;
+  t: MutableT;
+  retry: () => void;
+  initialize: UseMutateFunction<void, SerializedGitError, void, unknown>;
+}): RecoveryAction[] {
+  if (!panelError) return [];
+  return getRecoveryActions({ error: panelError, t, retry, initialize });
+}
+
+function buildRevertActions({
+  revertError,
+  abortRevert,
+  dismiss,
+  t,
+}: {
+  revertError: SerializedGitError | null;
+  abortRevert: { mutate: () => void; isPending: boolean };
+  dismiss: () => void;
+  t: MutableT;
+}): RecoveryAction[] {
+  if (!revertError) return [];
+  if (revertError.code === "MergeRequired") {
     return [
       {
-        id: "dismiss",
-        label: t("dismiss", "Dismiss"),
-        onClick: () => setRevertError(null),
+        id: "abort",
+        label: t("abortRevert", "Abort revert"),
+        onClick: () => abortRevert.mutate(),
+        disabled: abortRevert.isPending,
       },
     ];
-  }, [abortRevert, revertError, t]);
+  }
+  return [
+    {
+      id: "dismiss",
+      label: t("dismiss", "Dismiss"),
+      onClick: dismiss,
+    },
+  ];
+}
+
+function buildListActions({
+  panelState,
+  errorActions,
+  initialize,
+  save,
+  canSave,
+  t,
+}: {
+  panelState: PanelState;
+  errorActions: RecoveryAction[];
+  initialize: () => void;
+  save: { mutate: (value?: string) => void; isPending: boolean };
+  canSave: boolean;
+  t: MutableT;
+}): RecoveryAction[] {
+  if (panelState === "uninitialized") {
+    return [
+      {
+        id: "initialize",
+        label: t("initializeTimeline", "Initialize commit history"),
+        onClick: initialize,
+      },
+    ];
+  }
+  if (panelState === "empty") {
+    return [
+      {
+        id: "retry",
+        label: t("saveCheckpoint", "Save commit"),
+        onClick: () => save.mutate(undefined),
+        disabled: !canSave || save.isPending,
+      },
+    ];
+  }
+  return errorActions;
+}
+
+function buildListMessage({
+  panelState,
+  error,
+  t,
+}: {
+  panelState: PanelState;
+  error: SerializedGitError | null;
+  t: MutableT;
+}): string | null {
+  if (panelState === "uninitialized") {
+    return t(
+      "timelineNotInitializedMessage",
+      "Project commit history is not initialized.",
+    );
+  }
+  if (panelState === "empty") {
+    return t("noCheckpointsYet", "No commits yet. Save your first one!");
+  }
+  return error ? getErrorPresentation(error, t).message : null;
+}
+
+export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
+  const { t } = useTranslation();
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
+  const [description, setDescription] = useState("");
+
+  const summary = useGitSummary(workspacePath);
+  const checkpointRows = useGitCheckpoints(workspacePath);
+  const isBackgroundFetching = useGitFetching(workspacePath);
+
+  const saveCheckpoint = useMutation<
+    string | null,
+    SerializedGitError,
+    string | undefined
+  >({
+    mutationFn: (value) => saveCheckpointAction(workspacePath, value),
+  });
+
+  const initializeTimeline = useMutation<void, SerializedGitError, void>({
+    mutationFn: () => initializeGit(workspacePath),
+  });
+
+  const checkpoints = useCheckpointItems(checkpointRows, saveCheckpoint);
+  const {
+    revertCommit,
+    abortRevert,
+    revertError,
+    dismissRevertError,
+    activeRevertId,
+  } = useRevertController(workspacePath);
+
+  const initializeError = initializeTimeline.error;
+  const panelState = derivePanelState({ summary, initializeError, checkpoints });
+  const renderPanelState = useStablePanelState(panelState, isBackgroundFetching);
+
+  const panelError = visiblePanelError(renderPanelState, summary, initializeError);
+
+  const errorActions = buildErrorActions({
+    panelError,
+    t,
+    retry: () => void refetchGit(workspacePath),
+    initialize: initializeTimeline.mutate,
+  });
+
+  const syncState = deriveSyncState(summary);
+  const canSave = deriveCanSave(renderPanelState, summary);
+
+  const revertActions = buildRevertActions({
+    revertError,
+    abortRevert,
+    dismiss: dismissRevertError,
+    t,
+  });
 
   return (
     <div className="flex h-full flex-col">
@@ -522,44 +466,25 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
 
       <CheckpointsList
         panelState={renderPanelState}
-        checkpoints={state.checkpoints}
+        checkpoints={checkpoints}
         isReverting={revertCommit.isPending}
         activeRevertId={activeRevertId}
         onRevert={(checkpoint: CheckpointListItem) =>
           revertCommit.mutate(checkpoint)
         }
-        actions={
-          renderPanelState === "uninitialized"
-            ? [
-                {
-                  id: "initialize",
-                  label: t("initializeTimeline", "Initialize commit history"),
-                  onClick: () => initializeTimeline.mutate(),
-                },
-              ]
-            : renderPanelState === "empty"
-              ? [
-                  {
-                    id: "retry",
-                    label: t("saveCheckpoint", "Save commit"),
-                    onClick: () => saveCheckpoint.mutate(undefined),
-                    disabled: !canSave || saveCheckpoint.isPending,
-                  },
-                ]
-              : errorActions
-        }
-        message={
-          renderPanelState === "uninitialized"
-            ? t(
-                "timelineNotInitializedMessage",
-                "Project commit history is not initialized.",
-              )
-            : renderPanelState === "empty"
-              ? t("noCheckpointsYet", "No commits yet. Save your first one!")
-              : state.error
-                ? getErrorPresentation(state.error, t).message
-                : null
-        }
+        actions={buildListActions({
+          panelState: renderPanelState,
+          errorActions,
+          initialize: () => initializeTimeline.mutate(),
+          save: saveCheckpoint,
+          canSave,
+          t,
+        })}
+        message={buildListMessage({
+          panelState: renderPanelState,
+          error: panelError,
+          t,
+        })}
         isError={renderPanelState === "error"}
         t={t}
       />
@@ -573,10 +498,10 @@ function getRecoveryActions({
   retry,
   initialize,
 }: {
-  error: GitError;
+  error: SerializedGitError;
   t: MutableT;
   retry: () => void;
-  initialize: UseMutateFunction<void, GitError, void, unknown>;
+  initialize: UseMutateFunction<void, SerializedGitError, void, unknown>;
 }): RecoveryAction[] {
   switch (error.code) {
     case "RepoNotFound":
@@ -615,7 +540,7 @@ function getRecoveryActions({
 }
 
 interface RecoveryBannerProps {
-  error: GitError;
+  error: SerializedGitError;
   actions: RecoveryAction[];
   t: MutableT;
 }

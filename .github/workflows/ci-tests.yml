@@ -184,13 +184,15 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          # fallow (pinned in root package.json, picked up by the action)
+          # requires Node >= 22
+          node-version: "22"
           cache: "npm"
 
       - name: Install dependencies
         run: npm ci
 
-      - uses: fallow-rs/fallow@v2
+      - uses: fallow-rs/fallow@v3
         id: fallow
         with:
           command: audit
@@ -201,6 +203,17 @@ jobs:
           annotations: true
           comment: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # The rendered surfaces (annotations/comment) don't always show every
+      # gating finding — keep the raw results inspectable.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fallow-audit-results
+          path: |
+            fallow-results.json
+            fallow-results-scoped.json
+          if-no-files-found: ignore
 
   fallow-health:
     name: Fallow Health (Advisory)
@@ -215,13 +228,15 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          # fallow (pinned in root package.json, picked up by the action)
+          # requires Node >= 22
+          node-version: "22"
           cache: "npm"
 
       - name: Install dependencies
         run: npm ci
 
-      - uses: fallow-rs/fallow@v2
+      - uses: fallow-rs/fallow@v3
         with:
           command: health
           format: sarif

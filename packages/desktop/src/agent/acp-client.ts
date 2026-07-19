@@ -20,6 +20,11 @@ import type {
 import { transportToStreams } from "./agent-transport.interface";
 import type { AgentTransport } from "./agent-transport.interface";
 import type { PermissionBroker } from "./permission-broker";
+// Pre-existing tangle: file-sync reaches editor-store for write adoption,
+// and the editor/blob component graph reaches back to agent-service →
+// acp-client. Untangling means relocating the editor registry to a leaf
+// module (tracked in file-sync's editor-store import comment).
+// fallow-ignore-file circular-dependency
 import {
   readWorkspaceTextFile,
   writeWorkspaceTextFile,

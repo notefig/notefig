@@ -179,7 +179,7 @@ import { useEditorFileSync } from "../use-editor-file-sync";
 import {
   getOrCreateWorkspaceCollections,
   type FileMetadata,
-} from "@/utils/collections";
+} from "@/entities/files";
 import {
   closeDocumentSync,
   resetConverterForTests,

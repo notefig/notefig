@@ -1,3 +1,8 @@
+// Pre-existing tangle: the editor component graph (jump-to-blob →
+// editor-store → ai-prompt-node → prompt-blob) reaches back to this tab.
+// Untangling means relocating the editor registry to a leaf module (see
+// file-sync's editor-store import comment); new cycles elsewhere still gate.
+// fallow-ignore-file circular-dependency
 import {
   useCallback,
   useEffect,
@@ -6,7 +11,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useLiveQuery, eq } from "@tanstack/react-db";
 import { useTranslation } from "react-i18next";
 import {
   ArrowRightLeft,
@@ -50,12 +54,12 @@ import {
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { cn } from "@/lib/utils";
 import {
-  agentEntriesCollection,
-  agentTasksCollection,
-  agentTurnsCollection,
+  useTaskRow,
+  useTaskEntries,
+  useTaskTurns,
   type AgentEntry,
   type AgentTaskRow,
-} from "@/agent/agent-collections";
+} from "@/entities/agents";
 import {
   authenticateAgentTask,
   cancelAgentTask,
@@ -96,14 +100,7 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
     [taskId],
   );
 
-  const { data: taskRows = [] } = useLiveQuery(
-    (q) =>
-      q
-        .from({ task: agentTasksCollection })
-        .where(({ task }) => eq(task.taskId, taskId)),
-    [taskId],
-  );
-  const taskRow = taskRows[0];
+  const taskRow = useTaskRow(taskId);
   const isRunning = taskRow?.status === "running";
   const isUnavailable = taskRow?.status === "unavailable";
 
@@ -311,20 +308,8 @@ function Transcript({
   bottomInset: number;
 }) {
   const { t } = useTranslation();
-  const { data: entries = [] } = useLiveQuery(
-    (q) =>
-      q
-        .from({ entry: agentEntriesCollection })
-        .where(({ entry }) => eq(entry.taskId, taskId)),
-    [taskId],
-  );
-  const { data: turns = [] } = useLiveQuery(
-    (q) =>
-      q
-        .from({ turn: agentTurnsCollection })
-        .where(({ turn }) => eq(turn.taskId, taskId)),
-    [taskId],
-  );
+  const entries = useTaskEntries(taskId);
+  const turns = useTaskTurns(taskId);
   const turnErrors = useMemo(
     () => turns.filter((t) => t.status === "error" && t.error),
     [turns],

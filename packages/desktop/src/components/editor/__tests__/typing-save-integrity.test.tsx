@@ -181,7 +181,7 @@ import {
   getOrCreateWorkspaceCollections,
   writeFileContent,
   type FileMetadata,
-} from "@/utils/collections";
+} from "@/entities/files";
 import {
   closeDocumentSync,
   resetConverterForTests,
