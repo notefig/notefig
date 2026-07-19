@@ -16,6 +16,12 @@
 import { useMemo, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { LayoutNode } from "@/components/dockable";
+import {
+  LAYOUT_PARAM,
+  parseLayout,
+  extractTabIds,
+  findLayoutSelectedTab,
+} from "@/utils/layout-codec";
 // Sibling entities — only referenced inside hook bodies (cycle rule).
 import { useOpenFileRows, useMetadataFetching, type OpenFileRow } from "./files";
 import {
@@ -26,56 +32,12 @@ import {
 } from "./agents";
 
 // ---------------------------------------------------------------------------
-// Pure layout codec
+// Pure layout codec — lives in the layout-codec leaf (so the crash-fallback
+// debug panel can share it without importing entity modules); re-exported
+// here as the entity's public API.
 // ---------------------------------------------------------------------------
 
-export const LAYOUT_PARAM = "layout";
-
-/**
- * Parse a JSON-encoded LayoutNode[] from a string. Returns [] on any failure.
- */
-export function parseLayout(raw: string | null): LayoutNode[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed as LayoutNode[];
-    return [];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Walk the LayoutNode tree and collect all tab IDs.
- */
-export function extractTabIds(nodes: LayoutNode[]): string[] {
-  const ids: string[] = [];
-  for (const node of nodes) {
-    if (node.type === "Window") {
-      ids.push(...node.children);
-    } else if (node.type === "Panel") {
-      ids.push(...extractTabIds(node.children));
-    }
-  }
-  return ids;
-}
-
-/**
- * Find the selected tab in the first window that has one.
- * This is layout-derived state, not focus-derived active UI state.
- */
-export function findLayoutSelectedTab(nodes: LayoutNode[]): string | null {
-  for (const node of nodes) {
-    if (node.type === "Window" && node.selected) {
-      return node.selected;
-    }
-    if (node.type === "Panel") {
-      const found = findLayoutSelectedTab(node.children);
-      if (found) return found;
-    }
-  }
-  return null;
-}
+export { LAYOUT_PARAM, parseLayout, extractTabIds, findLayoutSelectedTab };
 
 // ---------------------------------------------------------------------------
 // Agent tab-id convention

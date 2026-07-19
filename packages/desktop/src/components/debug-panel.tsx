@@ -20,6 +20,14 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import type { LayoutNode } from "@/components/dockable";
+// Pure zero-dependency leaf — safe for the crash fallback (unlike entity
+// modules, which must never be runtime imports here).
+import {
+  LAYOUT_PARAM,
+  parseLayout,
+  extractTabIds,
+  findLayoutSelectedTab,
+} from "@/utils/layout-codec";
 import {
   getEditor,
   isMarkdownInstance,
@@ -76,45 +84,6 @@ const LEVEL_BG: Record<ConsoleLevel, string> = {
 };
 
 const MAX_CONSOLE_ENTRIES = 500;
-const LAYOUT_PARAM = "layout";
-
-// ── Layout parsing (self-sufficient — no props needed) ──
-
-function parseLayout(raw: string | null): LayoutNode[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed as LayoutNode[];
-    return [];
-  } catch {
-    return [];
-  }
-}
-
-function extractTabIds(nodes: LayoutNode[]): string[] {
-  const ids: string[] = [];
-  for (const node of nodes) {
-    if (node.type === "Window") {
-      ids.push(...node.children);
-    } else if (node.type === "Panel") {
-      ids.push(...extractTabIds(node.children));
-    }
-  }
-  return ids;
-}
-
-function findSelectedTab(nodes: LayoutNode[]): string | null {
-  for (const node of nodes) {
-    if (node.type === "Window" && node.selected) {
-      return node.selected;
-    }
-    if (node.type === "Panel") {
-      const found = findSelectedTab(node.children);
-      if (found) return found;
-    }
-  }
-  return null;
-}
 
 // ── Console capture hook ──
 
@@ -269,7 +238,7 @@ function DebugPanelContent({
     [dockableLayout],
   );
   const activeTabId = useMemo(
-    () => findSelectedTab(dockableLayout),
+    () => findLayoutSelectedTab(dockableLayout),
     [dockableLayout],
   );
   useQueryCacheTick();
