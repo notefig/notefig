@@ -72,6 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -81,9 +82,14 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing (OIDC) needs npm >= 11.5.1; setup-node's bundled
+      # npm can lag behind that.
+      - name: Update npm
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         run: npm ci
@@ -100,11 +106,21 @@ jobs:
         working-directory: packages/cli
         run: npm run build
 
+      # Authenticates via OIDC trusted publishing (no NPM_TOKEN) and attaches
+      # provenance automatically.
       - name: Publish to npm
         working-directory: packages/cli
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Pack tarball for GitHub release
+        working-directory: packages/cli
+        run: npm pack
+
+      - name: Upload tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-tarball
+          path: packages/cli/metrists-${{ inputs.version }}.tgz
 
   create-release:
     name: Create GitHub Release
@@ -118,24 +134,47 @@ jobs:
         with:
           ref: "cli-v${{ inputs.version }}"
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+      - name: Download tarball artifact
+        uses: actions/download-artifact@v4
         with:
-          tag_name: "cli-v${{ inputs.version }}"
-          name: "CLI v${{ inputs.version }}"
-          body: |
-            ## CLI Release v${{ inputs.version }}
+          name: cli-tarball
 
-            This release contains the CLI package published to npm.
-
-            **Installation:**
-            ```bash
-            npm install -g metrists@${{ inputs.version }}
-            ```
-
-            **Changelog:**
-            See commits since last release.
-          draft: false
-          prerelease: ${{ inputs.prerelease }}
+      # Draft-first so a re-run after a partial failure doesn't collide with
+      # an already-published, now-immutable release.
+      - name: Create draft GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "cli-v${{ inputs.version }}" --repo ${{ github.repository }} || \
+          gh release create "cli-v${{ inputs.version }}" \
+            --repo ${{ github.repository }} \
+            --title "CLI v${{ inputs.version }}" \
+            --draft \
+            --notes "## CLI Release v${{ inputs.version }}
+
+          This release contains the CLI package published to npm.
+
+          **Installation:**
+          \`\`\`bash
+          npm install -g metrists@${{ inputs.version }}
+          \`\`\`
+
+          **Verify this release:**
+          \`\`\`bash
+          gh release verify-asset cli-v${{ inputs.version }} metrists-${{ inputs.version }}.tgz -R ${{ github.repository }}
+          \`\`\`
+
+          **Changelog:**
+          See commits since last release."
+
+      - name: Upload release asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "cli-v${{ inputs.version }}" "metrists-${{ inputs.version }}.tgz" --repo ${{ github.repository }} --clobber
+
+      - name: Publish release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "cli-v${{ inputs.version }}" --repo ${{ github.repository }} --draft=false --prerelease=${{ inputs.prerelease }}
