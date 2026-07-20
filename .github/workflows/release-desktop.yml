@@ -161,6 +161,23 @@ jobs:
           tagName: "desktop-v${{ inputs.version }}"
           releaseName: "Metrists Desktop v${{ inputs.version }}"
           releaseBody: "See the assets to download this version and install."
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Only after every matrix leg has uploaded its bundles does the release
+      # go non-draft — this is also the moment latest.json starts serving the
+      # new version to the in-app updater, so partially-uploaded releases are
+      # never visible to it.
+      - name: Publish release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "desktop-v${{ inputs.version }}" --repo ${{ github.repository }} --draft=false --latest
