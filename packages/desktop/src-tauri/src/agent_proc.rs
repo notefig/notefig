@@ -214,14 +214,18 @@ pub async fn run_shell_command(script: String) -> AgentResult<ShellCommandOutput
 }
 
 /// Spawn an ACP adapter as a child process with piped stdio.
+///
+/// Runtime-generic so it registers on both `Wry` and the test `MockRuntime`
+/// through the shared `register_handlers` (MET-73); the captured `AppHandle<R>`
+/// still emits the stdout/stderr/exit events below.
 #[tauri::command]
-pub async fn spawn_agent(
+pub async fn spawn_agent<R: tauri::Runtime>(
     proc_id: String,
     program: String,
     args: Vec<String>,
     cwd: String,
     env: HashMap<String, String>,
-    app_handle: AppHandle,
+    app_handle: AppHandle<R>,
 ) -> AgentResult<SpawnInfo> {
     let mut cmd = Command::new(&program);
     cmd.args(&args)

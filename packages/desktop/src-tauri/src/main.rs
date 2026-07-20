@@ -1,12 +1,10 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod agent_proc;
-mod file_watcher;
-mod fs_ops;
-mod mcp_bridge;
-mod search;
-mod walkdir_utils;
+// Command modules + the shared handler registration live in the library crate
+// so the app binary, the mock-app dispatch tests, and the e2e shim all share
+// one command list (MET-73).
+use metrists::{agent_proc, mcp_bridge, register_handlers};
 
 use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager};
@@ -147,7 +145,7 @@ fn main() {
         return;
     }
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
@@ -213,39 +211,9 @@ fn main() {
                 }
                 _ => {}
             }
-        })
-        .invoke_handler(tauri::generate_handler![
-            // File system commands (errors-as-values pattern)
-            fs_ops::read_directory,
-            fs_ops::create_directories,
-            fs_ops::delete_directories,
-            fs_ops::move_directory,
-            fs_ops::read_files,
-            fs_ops::read_binary_files,
-            fs_ops::write_files,
-            fs_ops::create_files,
-            fs_ops::delete_files,
-            fs_ops::move_file,
-            fs_ops::copy_file,
-            fs_ops::check_exists,
-            fs_ops::get_metadata,
-            fs_ops::write_binary_files,
-            // File watcher commands
-            file_watcher::start_watching_metadata,
-            file_watcher::start_watching_content,
-            file_watcher::stop_watching,
-            // Search commands
-            search::search_content,
-            // Agent process host (errors-as-values pattern)
-            agent_proc::spawn_agent,
-            agent_proc::write_agent_stdin,
-            agent_proc::kill_agent,
-            agent_proc::run_shell_command,
-            // MCP tool bridge (Stage 3.5, errors-as-values pattern)
-            mcp_bridge::start_mcp_relay,
-            mcp_bridge::stop_mcp_relay,
-            mcp_bridge::write_mcp_line,
-        ])
+        });
+
+    register_handlers(builder)
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, event| {
