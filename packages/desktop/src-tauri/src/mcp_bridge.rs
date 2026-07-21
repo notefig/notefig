@@ -112,8 +112,14 @@ fn current_exe_path() -> String {
 /// Start a loopback listener for one task; returns the app's own executable
 /// path + relay args, ready to hand the harness as an `McpServer::Stdio`
 /// entry's `command`/`args`.
+// Runtime-generic so the same command registers on both the real `Wry` runtime
+// and the test `MockRuntime` through the shared `register_handlers` (MET-73);
+// `AppHandle<R>` still implements `Emitter` for the event fan-out below.
 #[tauri::command]
-pub async fn start_mcp_relay(task_id: String, app_handle: AppHandle) -> AgentResult<McpRelayInfo> {
+pub async fn start_mcp_relay<R: tauri::Runtime>(
+    task_id: String,
+    app_handle: AppHandle<R>,
+) -> AgentResult<McpRelayInfo> {
     let listener = match TcpListener::bind("127.0.0.1:0").await {
         Ok(listener) => listener,
         Err(e) => {
@@ -202,10 +208,10 @@ where
 /// removes only its own entry — other concurrent connections from the same
 /// harness (OpenCode spawns the server command several times) stay wired,
 /// and no transport-level close is implied.
-async fn handle_connection(
+async fn handle_connection<R: tauri::Runtime>(
     stream: TcpStream,
     task_id: String,
-    app_handle: AppHandle,
+    app_handle: AppHandle<R>,
     token: String,
 ) {
     let (read_half, write_half) = stream.into_split();

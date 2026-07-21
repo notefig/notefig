@@ -32,6 +32,10 @@ grep = "0.3"
 grep-regex = "0.1"
 regex = "1.10"
 
+# Real-backend e2e shim (MET-73): a test-only HTTP/WS server that calls the same
+# command functions the app registers, over a real temp filesystem. Optional and
+# gated behind the `shim` feature so none of this ships in the app binary.
+axum = { version = "0.7", optional = true, features = ["ws"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"
@@ -43,8 +47,23 @@ tauri-plugin-window-state = "2"
 
 [dev-dependencies]
 tempfile = "3"
+# Gates `tauri::test::mock_builder`/`MockRuntime` for the command-dispatch
+# tests (MET-73). Test-only so it never ships in the app binary.
+tauri = { version = "2", features = ["test"] }
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
 custom-protocol = ["tauri/custom-protocol"]
 cargo-clippy = []
+# Builds the real-backend e2e shim (MET-73). Off by default, so the app binary
+# never pulls in axum or the shim code. `tauri/test` gives the shim a
+# `MockRuntime` app so it dispatches invokes through the shared handler list
+# (no per-command glue).
+shim = ["dep:axum", "tokio/rt-multi-thread", "tauri/test"]
+
+# The e2e shim binary — only built when the `shim` feature is enabled
+# (`cargo build --features shim --bin test-shim`), never in a normal app build.
+[[bin]]
+name = "test-shim"
+path = "src/bin/test-shim.rs"
+required-features = ["shim"]

@@ -155,7 +155,7 @@ fn collect_directory_paths(
 // ========== Event Processing ==========
 
 /// Process file system events and emit to frontend
-async fn process_events(events: Vec<Event>, app_handle: &AppHandle) {
+async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppHandle<R>) {
     let mut metadata_changes = Vec::new();
     let mut content_changes = Vec::new();
 
@@ -372,10 +372,10 @@ async fn process_events(events: Vec<Event>, app_handle: &AppHandle) {
 /// Start watching directories for metadata changes only (creates, deletes, renames)
 /// Uses RecursiveMode::Recursive to watch entire directory trees
 #[tauri::command]
-pub async fn start_watching_metadata(
+pub async fn start_watching_metadata<R: tauri::Runtime>(
     paths: Vec<String>,
     watch_id: String,
-    app_handle: AppHandle,
+    app_handle: AppHandle<R>,
 ) -> Result<(), String> {
     let app_handle_clone = app_handle.clone();
 
@@ -430,10 +430,10 @@ pub async fn start_watching_metadata(
 /// Only watches the specific files provided, not recursively
 /// Automatically reconciles: adds new files, removes files no longer in the list
 #[tauri::command]
-pub async fn start_watching_content(
+pub async fn start_watching_content<R: tauri::Runtime>(
     paths: Vec<String>,
     watch_id: String,
-    app_handle: AppHandle,
+    app_handle: AppHandle<R>,
 ) -> Result<(), String> {
     let mut watchers = WATCHERS.lock().unwrap();
     let new_paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();

@@ -17,6 +17,7 @@
     "test:tauri:watch": "cd src-tauri && cargo test -- --watch",
     "test:all": "npm run test:unit && npm run test:tauri && npm run test:e2e",
     "test:e2e": "playwright test",
+    "test:e2e:shim": "playwright test --config playwright.shim.config.ts",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:debug": "playwright test --debug"
   },

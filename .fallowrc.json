@@ -66,14 +66,20 @@
     "maxCyclomatic": 20,
     "maxCognitive": 15,
     "maxCrap": 50,
-    "ignore": ["**/*.generated.ts"]
+    "ignore": [
+      "**/*.generated.ts",
+      "packages/desktop/src/testing/shim-transport.ts"
+    ]
   },
   "duplicates": {
     "mode": "mild",
     "minTokens": 50,
     "minLines": 5,
     "threshold": 10,
-    "ignore": ["**/components/ui/**"],
+    "ignore": [
+      "**/components/ui/**",
+      "packages/desktop/src/testing/shim-transport.ts"
+    ],
     "skipLocal": false
   },
   "audit": {
