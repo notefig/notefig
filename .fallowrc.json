@@ -36,7 +36,8 @@
   ],
   "usedClassMembers": [
     { "implements": "IPlatformAdapter", "members": ["*"] },
-    { "extends": "BaseBrowserAdapter", "members": ["*"] }
+    { "extends": "BaseBrowserAdapter", "members": ["*"] },
+    { "implements": "GitStorageHost", "members": ["*"] }
   ],
   "dynamicallyLoaded": [
     "packages/cli/commands/*.command.ts"

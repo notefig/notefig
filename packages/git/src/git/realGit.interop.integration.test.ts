@@ -1,193 +1,29 @@
-import {
-  chmod,
-  lstat,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  readlink,
-  rename,
-  rm,
-  stat,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
-import { spawn, spawnSync } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join } from "node:path";
 
 import { IsomorphicGitService } from "./isomorphicGitService";
-import type {
-  GitHostDirEntry,
-  GitHostLStatResult,
-  GitHostStatResult,
-  GitStorageHost,
-} from "./types";
+import {
+  NodeGitStorageHost,
+  commitViaGit,
+  hasSystemGit,
+  runGit,
+  stubCompressionStreams,
+} from "./realGit.test-helpers";
 
-class NodeGitStorageHost implements GitStorageHost {
-  private locks = new Set<string>();
-
-  constructor(private readonly rootDir: string) {}
-
-  private resolvePath(path: string): string {
-    return path.startsWith("/") ? path : resolve(this.rootDir, path);
-  }
-
-  async readFile(path: string): Promise<Uint8Array> {
-    const buffer = await readFile(this.resolvePath(path));
-    return new Uint8Array(buffer);
-  }
-
-  async writeFileAtomic(path: string, data: Uint8Array): Promise<void> {
-    const absolutePath = this.resolvePath(path);
-    await mkdir(dirname(absolutePath), { recursive: true });
-    await writeFile(absolutePath, Uint8Array.from(data));
-  }
-
-  async renameAtomic(from: string, to: string): Promise<void> {
-    const fromPath = this.resolvePath(from);
-    const toPath = this.resolvePath(to);
-    await mkdir(dirname(toPath), { recursive: true });
-    await rename(fromPath, toPath);
-  }
-
-  async deleteFile(path: string): Promise<void> {
-    await rm(this.resolvePath(path));
-  }
-
-  async stat(path: string): Promise<GitHostStatResult> {
-    try {
-      const stats = await stat(this.resolvePath(path));
-      return {
-        exists: true,
-        isFile: stats.isFile(),
-        isDir: stats.isDirectory(),
-        size: stats.size,
-        mode: stats.mode,
-        mtimeMs: stats.mtimeMs,
-      };
-    } catch {
-      return { exists: false, isFile: false, isDir: false };
-    }
-  }
-
-  async lstat(path: string): Promise<GitHostLStatResult> {
-    try {
-      const stats = await lstat(this.resolvePath(path));
-      return {
-        exists: true,
-        isFile: stats.isFile(),
-        isDir: stats.isDirectory(),
-        isSymbolicLink: stats.isSymbolicLink(),
-        size: stats.size,
-        mode: stats.mode,
-        mtimeMs: stats.mtimeMs,
-      };
-    } catch {
-      return {
-        exists: false,
-        isFile: false,
-        isDir: false,
-        isSymbolicLink: false,
-      };
-    }
-  }
-
-  async readDir(path: string): Promise<GitHostDirEntry[]> {
-    const entries = await readdir(this.resolvePath(path), {
-      withFileTypes: true,
-    });
-    return entries.map((entry) => ({
-      name: entry.name,
-      isFile: entry.isFile(),
-      isDir: entry.isDirectory(),
-      isSymbolicLink: entry.isSymbolicLink(),
-    }));
-  }
-
-  async createDir(path: string): Promise<void> {
-    await mkdir(this.resolvePath(path), { recursive: true });
-  }
-
-  async removeDir(path: string): Promise<void> {
-    await rm(this.resolvePath(path), { recursive: true, force: false });
-  }
-
-  async readLink(path: string): Promise<string> {
-    return readlink(this.resolvePath(path));
-  }
-
-  async createSymlink(target: string, path: string): Promise<void> {
-    await symlink(target, this.resolvePath(path));
-  }
-
-  async chmod(path: string, mode: number): Promise<void> {
-    await chmod(this.resolvePath(path), mode);
-  }
-
-  async lock(name: string): Promise<void> {
-    if (this.locks.has(name)) {
-      throw new Error(`Lock '${name}' already held`);
-    }
-    this.locks.add(name);
-  }
-
-  async unlock(name: string): Promise<void> {
-    this.locks.delete(name);
-  }
-}
-
-function runGit(repoPath: string, args: string[]): Promise<string> {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn("git", args, { cwd: repoPath });
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    child.on("error", (error) => reject(error));
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolvePromise(stdout.trim());
-        return;
-      }
-
-      reject(new Error(`git ${args.join(" ")} failed: ${stderr.trim()}`));
-    });
-  });
-}
-
-const hasSystemGit =
-  spawnSync("git", ["--version"], { stdio: "ignore" }).status === 0;
 const describeRealGit = hasSystemGit ? describe : describe.skip;
 
 describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
   let repoDir: string;
   let service: IsomorphicGitService;
-  const originalCompressionStream = globalThis.CompressionStream;
-  const originalDecompressionStream = globalThis.DecompressionStream;
+  let restoreCompressionStreams: () => void;
 
   beforeAll(() => {
-    (
-      globalThis as { CompressionStream?: typeof CompressionStream }
-    ).CompressionStream = undefined;
-    (
-      globalThis as { DecompressionStream?: typeof DecompressionStream }
-    ).DecompressionStream = undefined;
+    restoreCompressionStreams = stubCompressionStreams();
   });
 
   afterAll(() => {
-    (
-      globalThis as { CompressionStream?: typeof CompressionStream }
-    ).CompressionStream = originalCompressionStream;
-    (
-      globalThis as { DecompressionStream?: typeof DecompressionStream }
-    ).DecompressionStream = originalDecompressionStream;
+    restoreCompressionStreams();
   });
 
   beforeEach(async () => {
@@ -308,5 +144,181 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
 
     expect(fileAtHead).toBe("one");
     expect(status).toBe("");
+  });
+
+  // ---------------------------------------------------------------------------
+  // MET-83 Phase 1 — reverse direction: a system-git operation must be
+  // faithfully reflected in the app's reported state (status / log / branches).
+  // ---------------------------------------------------------------------------
+  describe("system git → app-reported state", () => {
+    it("reflects a commit made by system git in service.log and service.status", async () => {
+      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      await writeFile(join(repoDir, "note.md"), "hello\n", "utf8");
+
+      await runGit(repoDir, ["add", "note.md"]);
+      await commitViaGit(repoDir, "system commit");
+      const head = await runGit(repoDir, ["rev-parse", "HEAD"]);
+
+      const log = await service.log({ repoPath: repoDir });
+      expect(log[0]?.oid).toBe(head);
+      expect(log[0]?.commit.message.trim()).toBe("system commit");
+
+      const status = await service.status({ repoPath: repoDir });
+      expect(status.staged).toEqual([]);
+      expect(status.unstaged).toEqual([]);
+      expect(status.untracked).toEqual([]);
+    });
+
+    it("reflects a branch created and checked out by system git", async () => {
+      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      await writeFile(join(repoDir, "note.md"), "hello\n", "utf8");
+      await runGit(repoDir, ["add", "note.md"]);
+      await commitViaGit(repoDir, "base");
+
+      await runGit(repoDir, ["branch", "feature"]);
+      await runGit(repoDir, ["checkout", "feature"]);
+
+      const branches = await service.listBranches({ repoPath: repoDir });
+      expect(branches).toEqual(expect.arrayContaining(["feature", "main"]));
+
+      const status = await service.status({ repoPath: repoDir });
+      expect(status.currentBranch).toBe("feature");
+    });
+
+    it("surfaces an external working-tree edit as unstaged", async () => {
+      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      await writeFile(join(repoDir, "note.md"), "one\n", "utf8");
+      await runGit(repoDir, ["add", "note.md"]);
+      await commitViaGit(repoDir, "base");
+
+      await writeFile(join(repoDir, "note.md"), "two\n", "utf8");
+
+      const status = await service.status({ repoPath: repoDir });
+      expect(status.unstaged.map((change) => change.path)).toContain("note.md");
+      expect(status.staged).toEqual([]);
+    });
+
+    it("surfaces a change staged by system git as staged", async () => {
+      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      await writeFile(join(repoDir, "note.md"), "one\n", "utf8");
+      await runGit(repoDir, ["add", "note.md"]);
+      await commitViaGit(repoDir, "base");
+
+      await writeFile(join(repoDir, "note.md"), "two\n", "utf8");
+      await runGit(repoDir, ["add", "note.md"]);
+
+      const status = await service.status({ repoPath: repoDir });
+      expect(status.staged.map((change) => change.path)).toContain("note.md");
+      expect(status.unstaged).toEqual([]);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // MET-83 Phase 2 — compatibility scenarios with deterministic assertions:
+  // .gitignore, status parity, log parity, branch/switch roundtrip, checkout
+  // restore. Each asserts the app agrees with the system `git` binary.
+  // ---------------------------------------------------------------------------
+  describe("git compatibility scenarios", () => {
+    it("excludes .gitignore-ignored files from untracked status (parity with system git)", async () => {
+      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      await writeFile(join(repoDir, ".gitignore"), "ignored.txt\n", "utf8");
+      await writeFile(join(repoDir, "ignored.txt"), "secret\n", "utf8");
+      await writeFile(join(repoDir, "tracked.txt"), "visible\n", "utf8");
+
+      const status = await service.status({ repoPath: repoDir });
+      expect(status.untracked).toEqual(
+        expect.arrayContaining([".gitignore", "tracked.txt"]),
+      );
+      expect(status.untracked).not.toContain("ignored.txt");
+
+      const porcelain = await runGit(repoDir, ["status", "--porcelain"]);
+      expect(porcelain).toContain("tracked.txt");
+      expect(porcelain).not.toContain("ignored.txt");
+    });
+
+    it("status parity: service categories agree with git status --porcelain", async () => {
+      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      await writeFile(join(repoDir, "keep.md"), "keep\n", "utf8");
+      await runGit(repoDir, ["add", "keep.md"]);
+      await commitViaGit(repoDir, "base");
+
+      await writeFile(join(repoDir, "keep.md"), "keep changed\n", "utf8");
+      await writeFile(join(repoDir, "new.md"), "new\n", "utf8");
+
+      const status = await service.status({ repoPath: repoDir });
+      const porcelain = await runGit(repoDir, ["status", "--porcelain"]);
+
+      expect(new Set(status.unstaged.map((change) => change.path))).toEqual(
+        new Set(["keep.md"]),
+      );
+      expect(new Set(status.untracked)).toEqual(new Set(["new.md"]));
+      expect(porcelain).toContain("M keep.md");
+      expect(porcelain).toContain("?? new.md");
+    });
+
+    it("log parity: service.log matches system git log order and messages", async () => {
+      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      const messages = ["first", "second", "third"];
+      for (const message of messages) {
+        await writeFile(join(repoDir, `${message}.md`), `${message}\n`, "utf8");
+        await runGit(repoDir, ["add", `${message}.md`]);
+        await commitViaGit(repoDir, message);
+      }
+
+      const log = await service.log({ repoPath: repoDir });
+      const gitOids = (await runGit(repoDir, ["log", "--format=%H"])).split("\n");
+      const gitMessages = (
+        await runGit(repoDir, ["log", "--format=%s"])
+      ).split("\n");
+
+      expect(log.map((entry) => entry.oid)).toEqual(gitOids);
+      expect(log.map((entry) => entry.commit.message.trim())).toEqual(
+        gitMessages,
+      );
+    });
+
+    it("branch/switch roundtrip works in both directions", async () => {
+      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      await writeFile(join(repoDir, "note.md"), "hello\n", "utf8");
+      await runGit(repoDir, ["add", "note.md"]);
+      await commitViaGit(repoDir, "base");
+
+      // App creates + switches → system git observes the current branch.
+      await service.createBranch({ repoPath: repoDir, ref: "feature" });
+      await service.switchBranch({ repoPath: repoDir, ref: "feature" });
+      expect(await runGit(repoDir, ["branch", "--show-current"])).toBe(
+        "feature",
+      );
+
+      // System git creates + switches → the app observes the current branch.
+      await service.switchBranch({ repoPath: repoDir, ref: "main" });
+      await runGit(repoDir, ["checkout", "-b", "hotfix"]);
+      const status = await service.status({ repoPath: repoDir });
+      expect(status.currentBranch).toBe("hotfix");
+
+      const branches = await service.listBranches({ repoPath: repoDir });
+      expect(branches).toEqual(
+        expect.arrayContaining(["main", "feature", "hotfix"]),
+      );
+    });
+
+    it("checkoutPaths restores a file to its committed content on disk and per system git", async () => {
+      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      await writeFile(join(repoDir, "note.md"), "one\n", "utf8");
+      await runGit(repoDir, ["add", "note.md"]);
+      await commitViaGit(repoDir, "base");
+
+      await writeFile(join(repoDir, "note.md"), "two\n", "utf8");
+      await service.checkoutPaths({
+        repoPath: repoDir,
+        ref: "HEAD",
+        filepaths: ["note.md"],
+        force: true,
+      });
+
+      const onDisk = await readFile(join(repoDir, "note.md"), "utf8");
+      expect(onDisk).toBe("one\n");
+      expect(await runGit(repoDir, ["status", "--porcelain"])).toBe("");
+    });
   });
 });
