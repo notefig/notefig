@@ -7,7 +7,7 @@
  * the `git` binary, and hermetic commit helpers — so neither is duplicated.
  *
  * Not a test file on purpose: jest's `testMatch` skips it (no suite runs here),
- * and it is kept out of the package build via a dedicated `.testkit.ts` exclude
+ * and it is kept out of the package build via a dedicated `test-helpers` exclude
  * in tsconfig alongside the test-file exclude.
  */
 import {
@@ -36,6 +36,7 @@ import type {
 /** A `GitStorageHost` backed directly by the real filesystem via `node:fs`. */
 export class NodeGitStorageHost implements GitStorageHost {
   private locks = new Set<string>();
+  private writeSeq = 0;
 
   constructor(private readonly rootDir: string) {}
 
@@ -51,7 +52,14 @@ export class NodeGitStorageHost implements GitStorageHost {
   async writeFileAtomic(path: string, data: Uint8Array): Promise<void> {
     const absolutePath = this.resolvePath(path);
     await mkdir(dirname(absolutePath), { recursive: true });
-    await writeFile(absolutePath, Uint8Array.from(data));
+    // Write-temp-then-rename, mirroring production's Rust `fs_ops::atomic_write`.
+    // isomorphic-git funnels *every* write (refs, index, loose objects) through
+    // writeFileAtomic and relies on it being atomic — a plain writeFile lets a
+    // concurrent reader (e.g. the system `git` binary) observe a torn file, which
+    // the production host never produces. Same-directory rename is atomic on POSIX.
+    const tempPath = `${absolutePath}.tmp-${process.pid}-${(this.writeSeq += 1)}`;
+    await writeFile(tempPath, Uint8Array.from(data));
+    await rename(tempPath, absolutePath);
   }
 
   async renameAtomic(from: string, to: string): Promise<void> {

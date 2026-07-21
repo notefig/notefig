@@ -9,7 +9,7 @@ import {
   hasSystemGit,
   runGit,
   stubCompressionStreams,
-} from "./realGit.testkit";
+} from "./realGit.test-helpers";
 
 const describeRealGit = hasSystemGit ? describe : describe.skip;
 
