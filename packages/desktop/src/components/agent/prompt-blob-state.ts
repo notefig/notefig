@@ -11,6 +11,7 @@ import type {
   AgentTurn,
 } from "@/agent/agent-collections";
 import {
+  widgetRespond,
   WidgetRespondInputSchema,
   type WidgetResponse,
 } from "@/agent/tools/widget-respond";
@@ -112,6 +113,13 @@ export function deriveLatestAssistantLine(
  * Malformed or missing `rawInput` (an adapter that doesn't stream it) is
  * skipped, so the caller falls back to the plain done face — the same
  * degradation as a harness that never calls the tool at all.
+ *
+ * Matching on `title` is deliberate, not a typo for a name field: ACP's
+ * ToolCallUpdate has NO tool-name field — the identity only travels in
+ * `title`, which harnesses mint from the MCP tool name and the service
+ * normalizes (normalizeMcpToolName strips the `mcp__metrists__`/
+ * `metrists_` prefixes) so entries carry the plain name here. Same
+ * contract findBlobAuthorTask matches against.
  */
 export function deriveWidgetResponse(
   entries: AgentEntry[],
@@ -119,7 +127,7 @@ export function deriveWidgetResponse(
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
     if (entry.type !== "tool_call") continue;
-    if (entry.toolCall?.title !== "widget_respond") continue;
+    if (entry.toolCall?.title !== widgetRespond.name) continue;
     const parsed = WidgetRespondInputSchema.safeParse(entry.toolCall.rawInput);
     if (parsed.success) return parsed.data;
   }
