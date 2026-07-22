@@ -46,7 +46,7 @@ export default defineConfig({
   webServer: [
     {
       // The real Rust backend, over HTTP/WS, on a real filesystem.
-      command: `cargo run --features shim --bin test-shim -- --port ${SHIM_PORT}`,
+      command: `cargo run -p test-shim -- --port ${SHIM_PORT}`,
       cwd: "src-tauri",
       url: `http://127.0.0.1:${SHIM_PORT}/health`,
       reuseExistingServer: !process.env.CI,

@@ -5,7 +5,7 @@
 //! exactly one source of truth (MET-73):
 //!   - the app binary (`main.rs`) on the real `Wry` runtime,
 //!   - the `MockRuntime` dispatch tests (`test_support`),
-//!   - the real-backend e2e shim (`bin/test-shim.rs`).
+//!   - the real-backend e2e shim (`test-shim` crate, a workspace sibling).
 
 pub mod agent_proc;
 pub mod file_watcher;

@@ -25,8 +25,9 @@
 //! WS is the follow-up. The fs round-trip the smoke proves rides optimistic UI
 //! state + real disk writes, which needs no push events.
 //!
-//! Only compiled under the `shim` feature (`--features shim --bin test-shim`),
-//! so none of this — nor axum, nor `tauri/test` — is reachable from the app.
+//! Lives in its own workspace crate (`cargo run -p test-shim`), a sibling of
+//! the app package, so none of this — nor axum, nor `tauri/test` — is
+//! reachable from (or bundled with) the app.
 
 use std::net::SocketAddr;
 

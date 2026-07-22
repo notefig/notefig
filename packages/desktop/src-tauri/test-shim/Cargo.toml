@@ -1,0 +1,14 @@
+[package]
+name = "test-shim"
+version = "0.0.1"
+description = "Real-backend e2e shim (MET-73) — test infrastructure, never shipped"
+authors = ["you"]
+edition = "2021"
+publish = false
+
+[dependencies]
+metrists = { path = ".." }
+tauri = { version = "2", features = ["test"] }
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "net", "macros"] }
+serde_json = "1"
