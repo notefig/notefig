@@ -316,6 +316,20 @@ describe("deriveComposerKeyAction", () => {
     ).toEqual({ type: "none" });
   });
 
+  it("backtick and arrow keys are never intercepted (MET-90)", () => {
+    for (const key of ["`", "~", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]) {
+      for (const shiftKey of [false, true]) {
+        for (const draftEmpty of [false, true]) {
+          for (const canRevert of [false, true]) {
+            expect(
+              deriveComposerKeyAction({ key, shiftKey, draftEmpty, canRevert }),
+            ).toEqual({ type: "none" });
+          }
+        }
+      }
+    }
+  });
+
   it("Backspace dismisses only on an empty, revertible (summoned) composer", () => {
     expect(
       deriveComposerKeyAction({

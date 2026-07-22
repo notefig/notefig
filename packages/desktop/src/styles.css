@@ -12,6 +12,15 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* The typography plugin wraps inline code in `` ` `` pseudo-characters
+   (code::before/::after). In the editor they read as real text but aren't:
+   they can't be selected, and the caret at a code boundary renders on the
+   wrong side of them. Unlayered so it beats the plugin's utility-layer rule. */
+.prose code::before,
+.prose code::after {
+  content: none;
+}
+
 /* Map the design tokens (defined as :root/.dark CSS variables below) onto
    Tailwind v4's utility theme. `inline` keeps the var reference at the point
    of use so runtime theme switching (.dark overriding the variables) works.
