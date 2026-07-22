@@ -37,32 +37,49 @@ function serverInstructions(): string {
   const names = toolRegistry.map((tool) => tool.name).join(", ");
   return (
     `This server exposes the Metrists writing app's native tools (${names}) — ` +
-    `you are running as an agent inside that app. Prefer these tools over generic ` +
-    `file-read/write or shell tools when working with this workspace's documents — ` +
-    `they see live editor state (unsaved edits, open tabs) and document history ` +
-    `that generic tools don't. In particular, use \`author_blob\` whenever the ` +
-    `user asks you to add an interactive question, approval, or status block to a ` +
-    `document — not plain text — it renders as an answerable widget, and you'll get a ` +
-    `follow-up prompt with the user's answer once they respond. Metrists registers ` +
-    `this server automatically for the session via a per-task, ephemeral config — it ` +
-    `will not appear in your global or project config files, and you don't need to ` +
-    `locate or verify it. A prompt sent from an in-document widget always carries a ` +
-    `\`resource_link\` — call \`resources/read\` on its URI as your FIRST action, before ` +
-    `\`workspace_read_document\` or any native file-read tool. Its payload (document title, ` +
-    `the full heading outline, the text surrounding the prompt's position, the current ` +
-    `selection, and the other files open in the workspace) is deliberately sized to be ` +
-    `enough context to act on most requests directly — treat it as your default context, ` +
-    `not an optional extra. Do NOT read the entire document by default: that wastes context ` +
-    `on documents where the request only concerns a few paragraphs. Only fall back to ` +
-    `\`workspace_read_document\` (optionally with \`line\`/\`limit\` for a partial read) or a ` +
-    `full file read when the resource's outline and surrounding text genuinely don't cover ` +
-    `what the request needs — e.g. editing a different section you can see named in the ` +
-    `outline but whose text isn't in the surrounding-text window. Most requests that ` +
-    `reference a document — including anything phrased as an instruction about "this ` +
-    `section" or "this doc" — expect you to edit the document directly with your editing ` +
-    `tools, not to reply with prose describing what you would do; treat the document named ` +
-    `in that resource payload as the default subject unless the user is clearly asking a ` +
-    `question instead.`
+    `you are running as an agent inside that app. Metrists registers this server ` +
+    `automatically for the session via a per-task, ephemeral config — it will not ` +
+    `appear in your global or project config files, and you don't need to locate ` +
+    `or verify it. Four of these are your PRIMARY tools — keep them top of mind; ` +
+    `everything else is secondary, for when the task specifically calls for it. ` +
+    `(1) The widget-context resource: a prompt sent from an in-document widget ` +
+    `always carries a \`resource_link\` — call \`resources/read\` on its URI as ` +
+    `your FIRST action, before \`workspace_read_document\` or any native ` +
+    `file-read tool. Its payload (document title, the full heading outline, the ` +
+    `text surrounding the prompt's position, the current selection, and the other ` +
+    `files open in the workspace) is deliberately sized to be enough context to ` +
+    `act on most requests directly — treat it as your default context, not an ` +
+    `optional extra. ` +
+    `(2) \`widget_respond\`: when a prompt carries that widget-context ` +
+    `resource_link, you MUST deliver your final response by calling ` +
+    `\`widget_respond\` before ending the turn — kind "answer" for the response ` +
+    `itself, kind "issue" if you hit a blocker or need to flag a problem. This ` +
+    `holds ESPECIALLY for turns that need no tool actions at all: a widget prompt ` +
+    `answered with prose alone still ends with \`widget_respond\` — for widget ` +
+    `prompts, plain assistant text is progress notes, never the deliverable. When ` +
+    `a prompt has no resource_link (it came from the chat panel), do NOT call ` +
+    `\`widget_respond\` — answer in chat as normal. ` +
+    `(3) \`author_blob\` with a multiple-choice question: whenever you need the ` +
+    `user to decide or clarify something — or they ask you to add an interactive ` +
+    `question, approval, or status block to a document — author a block instead ` +
+    `of asking in prose. It renders as an answerable widget, and you'll get a ` +
+    `follow-up prompt with the user's answer once they respond — don't re-ask or ` +
+    `wait synchronously. ` +
+    `(4) \`workspace_read_document\`: the fallback when the widget context ` +
+    `genuinely doesn't cover what the request needs — e.g. editing a different ` +
+    `section you can see named in the outline but whose text isn't in the ` +
+    `surrounding-text window. Do NOT read the entire document by default: that ` +
+    `wastes context on documents where the request only concerns a few paragraphs ` +
+    `— prefer a partial read with \`line\`/\`limit\`. ` +
+    `Prefer all of these tools over generic file-read/write or shell tools when ` +
+    `working with this workspace's documents — they see live editor state ` +
+    `(unsaved edits, open tabs) and document history that generic tools don't. ` +
+    `Most requests that reference a document — including anything phrased as an ` +
+    `instruction about "this section" or "this doc" — expect you to edit the ` +
+    `document directly with your editing tools, not to reply with prose ` +
+    `describing what you would do; treat the document named in that resource ` +
+    `payload as the default subject unless the user is clearly asking a question ` +
+    `instead.`
   );
 }
 
@@ -91,7 +108,10 @@ export type JsonRpcMessage = {
   error?: { code: number; message: string; data?: unknown };
 };
 
-function jsonrpcResult(id: JsonRpcMessage["id"], result: unknown): JsonRpcMessage {
+function jsonrpcResult(
+  id: JsonRpcMessage["id"],
+  result: unknown,
+): JsonRpcMessage {
   return { jsonrpc: "2.0", id, result };
 }
 
@@ -115,11 +135,16 @@ function jsonrpcError(
  */
 function authorBlobInputJsonSchema(): unknown {
   const blobTypes = getAllBlobTypes();
-  const payloadSchemas = blobTypes.map((blobType) => toJsonSchema(blobType.schema));
+  const payloadSchemas = blobTypes.map((blobType) =>
+    toJsonSchema(blobType.schema),
+  );
   return {
     type: "object",
     properties: {
-      path: { type: "string", description: "Workspace-relative document path." },
+      path: {
+        type: "string",
+        description: "Workspace-relative document path.",
+      },
       type: {
         type: "string",
         enum: blobTypes.map((t) => t.type),
@@ -131,7 +156,8 @@ function authorBlobInputJsonSchema(): unknown {
         description: 'Unique block id, e.g. "question_8f2a".',
       },
       payload: {
-        description: "Shape depends on `type` — matches the corresponding entry below.",
+        description:
+          "Shape depends on `type` — matches the corresponding entry below.",
         anyOf: payloadSchemas,
       },
     },
@@ -140,7 +166,9 @@ function authorBlobInputJsonSchema(): unknown {
 }
 
 function toolInputJsonSchema(tool: AgentTool<unknown, unknown>): unknown {
-  return tool.name === "author_blob" ? authorBlobInputJsonSchema() : toJsonSchema(tool.input);
+  return tool.name === "author_blob"
+    ? authorBlobInputJsonSchema()
+    : toJsonSchema(tool.input);
 }
 
 /**
@@ -171,7 +199,9 @@ async function dispatchToolCall(
     if (denied) {
       return {
         isError: true,
-        content: [{ type: "text", text: `permission denied for "${tool.name}"` }],
+        content: [
+          { type: "text", text: `permission denied for "${tool.name}"` },
+        ],
       };
     }
   }
@@ -187,8 +217,11 @@ async function dispatchToolCall(
  * object/array, return a copy with those values parsed; undefined when
  * nothing qualified (caller keeps the original failure).
  */
-function parseStringifiedObjectValues(args: unknown): Record<string, unknown> | undefined {
-  if (typeof args !== "object" || args === null || Array.isArray(args)) return undefined;
+function parseStringifiedObjectValues(
+  args: unknown,
+): Record<string, unknown> | undefined {
+  if (typeof args !== "object" || args === null || Array.isArray(args))
+    return undefined;
   let repairedAny = false;
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(args)) {
@@ -221,17 +254,23 @@ export type McpHandlerDeps = {
 export function createMcpRequestHandler(
   deps: McpHandlerDeps,
 ): (body: JsonRpcMessage) => Promise<JsonRpcMessage | null> {
-  return async function handleMcpRequest(body: JsonRpcMessage): Promise<JsonRpcMessage | null> {
+  return async function handleMcpRequest(
+    body: JsonRpcMessage,
+  ): Promise<JsonRpcMessage | null> {
     const { id, method, params } = body;
 
-    if (method === "notifications/initialized" || method === "notifications/cancelled") {
+    if (
+      method === "notifications/initialized" ||
+      method === "notifications/cancelled"
+    ) {
       return null;
     }
 
     if (method === "initialize") {
       return jsonrpcResult(id, {
         protocolVersion:
-          (params as { protocolVersion?: string } | undefined)?.protocolVersion ?? "2024-11-05",
+          (params as { protocolVersion?: string } | undefined)
+            ?.protocolVersion ?? "2024-11-05",
         capabilities: { tools: {}, resources: {} },
         serverInfo: { name: MCP_SERVER_NAME, version: "1.0.0" },
         instructions: serverInstructions(),
@@ -262,22 +301,42 @@ export function createMcpRequestHandler(
 
     if (method === "resources/read") {
       const uri = (params as { uri?: string } | undefined)?.uri;
-      const ref = typeof uri === "string" ? decodeWidgetContextUri(uri) : undefined;
+      const ref =
+        typeof uri === "string" ? decodeWidgetContextUri(uri) : undefined;
       if (!ref || !uri) {
-        return jsonrpcError(id, -32602, `unknown resource uri: ${uri ?? "(missing)"}`);
+        return jsonrpcError(
+          id,
+          -32602,
+          `unknown resource uri: ${uri ?? "(missing)"}`,
+        );
       }
-      const payload = await buildWidgetContextPayload(deps.ctx.workspacePath, ref);
+      const payload = await buildWidgetContextPayload(
+        deps.ctx.workspacePath,
+        ref,
+      );
       return jsonrpcResult(id, {
-        contents: [{ uri, mimeType: "application/json", text: JSON.stringify(payload, null, 2) }],
+        contents: [
+          {
+            uri,
+            mimeType: "application/json",
+            text: JSON.stringify(payload, null, 2),
+          },
+        ],
       });
     }
 
     if (method === "tools/call") {
-      const callParams = params as { name?: string; arguments?: unknown } | undefined;
+      const callParams = params as
+        | { name?: string; arguments?: unknown }
+        | undefined;
       const name = callParams?.name;
       const tool = name ? getTool(name) : undefined;
       if (!tool) {
-        return jsonrpcError(id, -32602, `unknown tool: ${name ?? "(missing name)"}`);
+        return jsonrpcError(
+          id,
+          -32602,
+          `unknown tool: ${name ?? "(missing name)"}`,
+        );
       }
       const args = callParams?.arguments ?? {};
       let parsed = tool.input.safeParse(args);
@@ -290,9 +349,18 @@ export function createMcpRequestHandler(
         if (repaired) parsed = tool.input.safeParse(repaired);
       }
       if (!parsed.success) {
-        return jsonrpcError(id, -32602, `invalid input for ${tool.name}: ${parsed.error.message}`);
+        return jsonrpcError(
+          id,
+          -32602,
+          `invalid input for ${tool.name}: ${parsed.error.message}`,
+        );
       }
-      const result = await dispatchToolCall(tool, deps.ctx, deps.permissionBroker, parsed.data);
+      const result = await dispatchToolCall(
+        tool,
+        deps.ctx,
+        deps.permissionBroker,
+        parsed.data,
+      );
       return jsonrpcResult(id, result);
     }
 
@@ -321,7 +389,11 @@ export function attachMcpEndpoint(
       } catch (error) {
         respond(
           JSON.stringify(
-            jsonrpcError(null, -32700, error instanceof Error ? error.message : String(error)),
+            jsonrpcError(
+              null,
+              -32700,
+              error instanceof Error ? error.message : String(error),
+            ),
           ),
         );
         return;

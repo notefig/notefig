@@ -11,7 +11,9 @@
  * and a stale bound turn (rows gone) simply renders as composing again.
  */
 export type PromptBlobRecord = {
-  /** Composer text (survives tab unmount). */
+  /** Composer text (survives tab unmount). Shared by the initial composer
+   *  and the done/error reply row — Edit's `draft || lastSentPrompt`
+   *  fallback then means a half-typed reply is never destroyed. */
   draft: string;
   /** The turn this widget is watching, or null while composing. */
   boundTurnId: string | null;
@@ -20,9 +22,6 @@ export type PromptBlobRecord = {
   boundTaskId: string | null;
   /** Last sent prompt text, for the Edit affordance. */
   lastSentPrompt: string;
-  /** Done phase renders collapsed to a tiny icon by default; false once the
-   *  user has clicked to expand it. Resets to true on every fresh send. */
-  doneCollapsed: boolean;
 };
 
 const EMPTY_RECORD: PromptBlobRecord = {
@@ -30,7 +29,6 @@ const EMPTY_RECORD: PromptBlobRecord = {
   boundTurnId: null,
   boundTaskId: null,
   lastSentPrompt: "",
-  doneCollapsed: true,
 };
 
 const records = new Map<string, PromptBlobRecord>();
@@ -58,7 +56,6 @@ export function clearPromptBlobTurn(blobId: string): void {
   updatePromptBlob(blobId, {
     boundTurnId: null,
     boundTaskId: null,
-    doneCollapsed: true,
   });
 }
 

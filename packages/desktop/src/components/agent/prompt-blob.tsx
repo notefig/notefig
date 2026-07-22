@@ -23,12 +23,13 @@ import {
   Pencil,
   RotateCw,
   Square,
+  TriangleAlert,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 import type { Editor } from "@tiptap/core";
 import { useAutosizeTextarea } from "@/hooks/use-autosize-textarea";
 import { Button } from "@/components/ui/button";
-import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,6 +48,8 @@ import {
 } from "@/agent/agent-collections";
 import { agents } from "@/agent/agents";
 import { cancelAgentTask, removeQueuedPrompt } from "@/agent/agent-service";
+import { getRegisteredTask } from "@/agent/task-registry";
+import type { WidgetResponse } from "@/agent/tools/widget-respond";
 import { ensureAgentRuntime } from "@/agent/tunnel/require-connection";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
 import { suppressEditorFocus } from "@/components/editor/editor-store";
@@ -77,6 +80,10 @@ import {
   deriveTouchedFiles,
   deriveQueuePosition,
   deriveComposerKeyAction,
+  deriveWidgetResponse,
+  deriveDoneLine,
+  widgetPromptTarget,
+  blobCardClass,
   type BlobPhase,
 } from "./prompt-blob-state";
 
@@ -131,14 +138,32 @@ export const PromptBlob = memo(function PromptBlob({
     () => getPromptBlob(blobId),
   );
   const { boundTurnId, boundTaskId } = record;
-  const [isSending, setIsSending] = useState(false);
-  const [confirmTrust, setConfirmTrust] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { defaultHarness } = useDefaultHarness();
-  const kv = useKv<boolean>("agent");
-  const trustKey = `trust:${normalizePath(workspacePath)}`;
   const { openFile, openAgentTab } = useWorkspaceTabs();
+  const {
+    isSending,
+    confirmTrust,
+    setDraft,
+    send,
+    sendFollowUp,
+    editPrompt,
+    retry,
+    stop,
+    dismiss,
+    revertToSlash,
+    backspaceDismiss,
+  } = usePromptBlobActions({
+    blobId,
+    workspacePath,
+    documentPath,
+    editor,
+    getPos,
+    summoned,
+    removeNode,
+    textareaRef,
+  });
 
   // Live rows for the bound turn (sentinel ids keep the hooks unconditional).
   const turnKey = boundTurnId ?? " none";
@@ -234,146 +259,28 @@ export const PromptBlob = memo(function PromptBlob({
     focusComposer();
   }, [blobId, editor, focusComposer]);
 
-  const setDraft = useCallback(
-    (draft: string) => updatePromptBlob(blobId, { draft }),
-    [blobId],
-  );
-
-  const send = useCallback(async () => {
-    const text = getPromptBlob(blobId).draft.trim();
-    if (!text || isSending) return;
-    if (!ensureAgentRuntime()) return;
-    if (!kv.get(trustKey) && !confirmTrust) {
-      setConfirmTrust(true);
-      return;
-    }
-    if (confirmTrust) {
-      kv.set(trustKey, true);
-      setConfirmTrust(false);
-    }
-    setIsSending(true);
-    try {
-      const { taskId } = await getOrStartSharedSession(
-        workspacePath,
-        defaultHarness,
-      );
-      const relative = documentPath.startsWith(workspacePath + "/")
-        ? documentPath.slice(workspacePath.length + 1)
-        : documentPath;
-
-      const doc = editor.state.doc;
-      const { turnId } = agents.task(taskId).promptFromWidget(text, {
-        path: relative,
-        pos: getPos?.() ?? doc.content.size,
-        isDocEmpty: !docHasRealContent(doc),
-      });
-      updatePromptBlob(blobId, {
-        boundTurnId: turnId,
-        boundTaskId: taskId,
-        lastSentPrompt: text,
-        draft: "",
-        doneCollapsed: true,
-      });
-    } catch (error) {
-      console.error("Prompt blob send failed:", error);
-    } finally {
-      setIsSending(false);
-    }
-  }, [
-    blobId,
-    documentPath,
-    isSending,
-    kv,
-    trustKey,
-    confirmTrust,
-    workspacePath,
-    defaultHarness,
-    editor,
-    getPos,
-  ]);
-
-  // Edit: pull the sent prompt back into the composer. A queued turn is
-  // withdrawn; a running/finished one keeps going — re-send is a new turn.
-  const editPrompt = useCallback(() => {
-    const current = getPromptBlob(blobId);
-    if (
-      current.boundTaskId &&
-      current.boundTurnId &&
-      agentTurnsCollection.get(current.boundTurnId)?.status === "queued"
-    ) {
-      removeQueuedPrompt(current.boundTaskId, current.boundTurnId);
-    }
-    updatePromptBlob(blobId, {
-      draft: current.draft || current.lastSentPrompt,
-      boundTurnId: null,
-      boundTaskId: null,
-    });
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [blobId]);
-
-  // Retry: pull the failed prompt back into the composer and immediately
-  // re-send it, no re-typing required. editPrompt writes the restored draft
-  // into the module-level store synchronously, so send() (which reads the
-  // draft at call time) sees it right away.
-  const retry = useCallback(() => {
-    editPrompt();
-    void send();
-  }, [editPrompt, send]);
-
-  const stop = useCallback(() => {
-    if (!boundTaskId || !boundTurnId) return;
-    if (turn?.status === "queued") {
-      removeQueuedPrompt(boundTaskId, boundTurnId);
-      clearPromptBlobTurn(blobId);
-    } else {
-      void cancelAgentTask(boundTaskId);
-    }
-  }, [boundTaskId, boundTurnId, turn?.status, blobId]);
-
-  // In a doc with real content the widget is transient — ✕ removes the
-  // node outright. In an empty doc removal is pointless (the keeper would
-  // reinsert), so just reset to composing.
-  const dismiss = useCallback(() => {
-    clearPromptBlobTurn(blobId);
-    if (removeNode && docHasRealContent(editor.state.doc)) removeNode();
-  }, [blobId, removeNode, editor]);
-
-  // The revert half of the "/" summon: Esc or a second "/" while the
-  // composer is still empty turns the widget back into a literal "/".
-  const revertToSlash = useMemo(
-    () =>
-      summoned && removeNode
-        ? () => removeNode({ insertSlash: true })
-        : undefined,
-    [summoned, removeNode],
-  );
-
-  // Backspace on an empty, summoned composer: unlike revertToSlash, no
-  // literal "/" is left behind — the widget just disappears, as if "/" was
-  // never typed. Same "summoned instances only" guard as revertToSlash.
-  const backspaceDismiss = useMemo(
-    () =>
-      summoned && removeNode
-        ? () => removeNode({ restoreParagraph: true })
-        : undefined,
-    [summoned, removeNode],
-  );
-
   const touchedFiles = useMemo(
     () =>
       phase === "done" ? deriveTouchedFiles(sortedEntries, workspacePath) : [],
     [phase, sortedEntries, workspacePath],
   );
+  const widgetResponse = useMemo(
+    () => (phase === "done" ? deriveWidgetResponse(sortedEntries) : null),
+    [phase, sortedEntries],
+  );
   const rawActiveToolLine =
     phase === "running" ? deriveActiveToolLine(sortedEntries) : null;
   const activeToolLine = useDebouncedActiveToolLine(rawActiveToolLine);
+  // Running: live teaser under the status line. Done: the fallback summary
+  // line when the turn has no widget_respond response.
   const assistantTeaser =
-    phase === "running" ? deriveLatestAssistantLine(sortedEntries) : null;
+    phase === "running" || phase === "done"
+      ? deriveLatestAssistantLine(sortedEntries)
+      : null;
   const queueAhead =
     phase === "queued" && boundTurnId
       ? deriveQueuePosition(taskTurns, boundTurnId)
       : 0;
-  const collapsedDone = phase === "done" && record.doneCollapsed;
 
   return (
     <div
@@ -384,24 +291,10 @@ export const PromptBlob = memo(function PromptBlob({
       className="w-full"
     >
       <AnimatedHeight>
-        {collapsedDone ? (
-          <CollapsedDone
-            cancelled={turn?.status === "cancelled"}
-            prompt={record.lastSentPrompt}
-            touchedFiles={touchedFiles}
-            onExpand={() => updatePromptBlob(blobId, { doneCollapsed: false })}
-          />
-        ) : (
         <div
           className={cn(
-            "rounded-lg border shadow-lg shadow-black/5 dark:shadow-black/40",
-            phase === "needs-auth" &&
-              "border-amber-500/40 bg-background bg-gradient-to-b from-amber-500/10 to-amber-500/10",
-            phase === "needs-permission" &&
-              "border-border bg-background bg-gradient-to-b from-muted/40 to-muted/40",
-            phase !== "needs-auth" &&
-              phase !== "needs-permission" &&
-              "border-border bg-card",
+            "rounded-lg border",
+            blobCardClass(phase, widgetResponse?.kind === "issue"),
           )}
         >
           {phase === "composing" && (
@@ -476,13 +369,19 @@ export const PromptBlob = memo(function PromptBlob({
           {phase === "done" && (
             <DoneState
               cancelled={turn?.status === "cancelled"}
+              response={widgetResponse}
+              fallbackText={assistantTeaser}
               touchedFiles={touchedFiles}
               onOpenFile={(path) =>
                 openFile({ tabId: path, intent: "new-tab" })
               }
               onOpenChat={() => boundTaskId && openAgentTab(boundTaskId)}
-              onEdit={editPrompt}
               onDismiss={dismiss}
+              replyDraft={record.draft}
+              setReplyDraft={setDraft}
+              onReply={() => void sendFollowUp()}
+              onReplyEscape={() => editor.commands.focus()}
+              replyDisabled={isSending}
             />
           )}
 
@@ -492,14 +391,237 @@ export const PromptBlob = memo(function PromptBlob({
               onRetry={retry}
               onEdit={editPrompt}
               onDismiss={dismiss}
+              replyDraft={record.draft}
+              setReplyDraft={setDraft}
+              onReply={() => void sendFollowUp()}
+              onReplyEscape={() => editor.commands.focus()}
+              replyDisabled={isSending}
             />
           )}
         </div>
-        )}
       </AnimatedHeight>
     </div>
   );
 });
+
+/**
+ * The widget's imperative actions, extracted from PromptBlob so the
+ * component body stays layout + phase branching (the callbacks were the
+ * bulk of its size). Every callback reads the module store / collections at
+ * call time rather than closing over live-query rows, so the hook needs no
+ * reactive inputs and its callbacks stay stable across phase changes.
+ */
+function usePromptBlobActions({
+  blobId,
+  workspacePath,
+  documentPath,
+  editor,
+  getPos,
+  summoned,
+  removeNode,
+  textareaRef,
+}: {
+  blobId: string;
+  workspacePath: string;
+  documentPath: string;
+  editor: Editor;
+  getPos?: () => number | undefined;
+  summoned: boolean;
+  removeNode?: (options?: {
+    insertSlash?: boolean;
+    restoreParagraph?: boolean;
+  }) => void;
+  textareaRef: React.RefObject<HTMLTextAreaElement>;
+}) {
+  const { t } = useTranslation();
+  const { defaultHarness } = useDefaultHarness();
+  const kv = useKv<boolean>("agent");
+  const trustKey = `trust:${normalizePath(workspacePath)}`;
+  const [isSending, setIsSending] = useState(false);
+  const [confirmTrust, setConfirmTrust] = useState(false);
+
+  const setDraft = useCallback(
+    (draft: string) => updatePromptBlob(blobId, { draft }),
+    [blobId],
+  );
+
+  // The one prompt dispatch both send paths share: they differ only in
+  // which task they target and whether the rebind captures it. The
+  // widget-context facts are read fresh on every call — a reply may follow
+  // a round that filled the doc or moved the node.
+  const dispatchPrompt = useCallback(
+    (taskId: string, text: string) => {
+      const doc = editor.state.doc;
+      return agents.task(taskId).promptFromWidget(
+        text,
+        widgetPromptTarget({
+          documentPath,
+          workspacePath,
+          pos: getPos?.(),
+          docContentSize: doc.content.size,
+          isDocEmpty: !docHasRealContent(doc),
+        }),
+      ).turnId;
+    },
+    [documentPath, workspacePath, editor, getPos],
+  );
+
+  const send = useCallback(async () => {
+    const text = getPromptBlob(blobId).draft.trim();
+    if (!text || isSending) return;
+    if (!ensureAgentRuntime()) return;
+    if (!kv.get(trustKey) && !confirmTrust) {
+      setConfirmTrust(true);
+      return;
+    }
+    if (confirmTrust) {
+      kv.set(trustKey, true);
+      setConfirmTrust(false);
+    }
+    setIsSending(true);
+    try {
+      const { taskId } = await getOrStartSharedSession(
+        workspacePath,
+        defaultHarness,
+      );
+      const turnId = dispatchPrompt(taskId, text);
+      updatePromptBlob(blobId, {
+        boundTurnId: turnId,
+        boundTaskId: taskId,
+        lastSentPrompt: text,
+        draft: "",
+      });
+    } catch (error) {
+      console.error("Prompt blob send failed:", error);
+    } finally {
+      setIsSending(false);
+    }
+  }, [
+    blobId,
+    isSending,
+    kv,
+    trustKey,
+    confirmTrust,
+    workspacePath,
+    defaultHarness,
+    dispatchPrompt,
+  ]);
+
+  // Reply (MET-92): continue the conversation on the BOUND task — never the
+  // shared session, which the picker may have re-targeted since this
+  // widget's first round. A new FIFO turn on the same ACP session; the
+  // rebind below is the whole "replace the round behind the scenes". No
+  // trust gate: round one already required it for this workspace.
+  const sendFollowUp = useCallback(async () => {
+    const current = getPromptBlob(blobId);
+    const text = current.draft.trim();
+    const taskId = current.boundTaskId;
+    if (!text || isSending || !taskId) return;
+    if (!ensureAgentRuntime()) return;
+    // agents.task().prompt is infallible: a missing task mints a turnId
+    // with no row, and binding to it would trip the stale-turn reset —
+    // silently wiping this reply. Check first; on a dead task keep the
+    // draft and fall back to composing (re-send starts a fresh session).
+    if (!getRegisteredTask(taskId)) {
+      toast(t("promptBlobSessionGone"));
+      clearPromptBlobTurn(blobId);
+      return;
+    }
+    setIsSending(true);
+    try {
+      const turnId = dispatchPrompt(taskId, text);
+      updatePromptBlob(blobId, {
+        boundTurnId: turnId,
+        lastSentPrompt: text,
+        draft: "",
+      });
+    } finally {
+      setIsSending(false);
+    }
+  }, [blobId, isSending, dispatchPrompt, t]);
+
+  // Edit: pull the sent prompt back into the composer. A queued turn is
+  // withdrawn; a running/finished one keeps going — re-send is a new turn.
+  const editPrompt = useCallback(() => {
+    const current = getPromptBlob(blobId);
+    if (
+      current.boundTaskId &&
+      current.boundTurnId &&
+      agentTurnsCollection.get(current.boundTurnId)?.status === "queued"
+    ) {
+      removeQueuedPrompt(current.boundTaskId, current.boundTurnId);
+    }
+    updatePromptBlob(blobId, {
+      draft: current.draft || current.lastSentPrompt,
+      boundTurnId: null,
+      boundTaskId: null,
+    });
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [blobId, textareaRef]);
+
+  // Retry: pull the failed prompt back into the composer and immediately
+  // re-send it, no re-typing required. editPrompt writes the restored draft
+  // into the module-level store synchronously, so send() (which reads the
+  // draft at call time) sees it right away.
+  const retry = useCallback(() => {
+    editPrompt();
+    void send();
+  }, [editPrompt, send]);
+
+  const stop = useCallback(() => {
+    const { boundTaskId, boundTurnId } = getPromptBlob(blobId);
+    if (!boundTaskId || !boundTurnId) return;
+    if (agentTurnsCollection.get(boundTurnId)?.status === "queued") {
+      removeQueuedPrompt(boundTaskId, boundTurnId);
+      clearPromptBlobTurn(blobId);
+    } else {
+      void cancelAgentTask(boundTaskId);
+    }
+  }, [blobId]);
+
+  // In a doc with real content the widget is transient — ✕ removes the
+  // node outright. In an empty doc removal is pointless (the keeper would
+  // reinsert), so just reset to composing.
+  const dismiss = useCallback(() => {
+    clearPromptBlobTurn(blobId);
+    if (removeNode && docHasRealContent(editor.state.doc)) removeNode();
+  }, [blobId, removeNode, editor]);
+
+  // The revert half of the "/" summon: Esc or a second "/" while the
+  // composer is still empty turns the widget back into a literal "/".
+  const revertToSlash = useMemo(
+    () =>
+      summoned && removeNode
+        ? () => removeNode({ insertSlash: true })
+        : undefined,
+    [summoned, removeNode],
+  );
+
+  // Backspace on an empty, summoned composer: unlike revertToSlash, no
+  // literal "/" is left behind — the widget just disappears, as if "/" was
+  // never typed. Same "summoned instances only" guard as revertToSlash.
+  const backspaceDismiss = useMemo(
+    () =>
+      summoned && removeNode
+        ? () => removeNode({ restoreParagraph: true })
+        : undefined,
+    [summoned, removeNode],
+  );
+
+  return {
+    isSending,
+    confirmTrust,
+    setDraft,
+    send,
+    sendFollowUp,
+    editPrompt,
+    retry,
+    stop,
+    dismiss,
+    revertToSlash,
+    backspaceDismiss,
+  };
+}
 
 /**
  * Debounces the tool-activity label the same way the editor status bar
@@ -604,8 +726,7 @@ function Composer({
             event.preventDefault();
             if (action.type === "send") onSend();
             else if (action.type === "revert") onRevert?.();
-            else if (action.type === "backspaceDismiss")
-              onBackspaceDismiss?.();
+            else if (action.type === "backspaceDismiss") onBackspaceDismiss?.();
             else onEscape();
           }}
           placeholder={t("promptBlobPlaceholder")}
@@ -797,78 +918,176 @@ function StatusRow({
   );
 }
 
-/** Done, collapsed: a plain bordered Marker row in place of the card —
- *  click to expand. Icon reflects what the turn actually did (touched
- *  files vs. a plain text answer) rather than a generic checkmark;
- *  cancelled still gets its own X, since that's a status, not a result. */
-function CollapsedDone({
-  cancelled,
-  prompt,
-  touchedFiles,
-  onExpand,
+/**
+ * The follow-up composer shared by DoneState and ErrorState (MET-92): same
+ * store draft as the initial Composer (a half-typed reply survives tab
+ * unmount, and Edit's `draft || lastSentPrompt` fallback never destroys it).
+ * No SessionControl — the whole point of the row is that the destination is
+ * fixed to the bound session. canRevert:false collapses the key map to:
+ * Enter sends, Shift+Enter newlines, Escape returns focus to the editor.
+ */
+function ReplyRow({
+  draft,
+  setDraft,
+  onSend,
+  onEscape,
+  disabled,
 }: {
-  cancelled: boolean;
-  prompt: string;
-  touchedFiles: string[];
-  onExpand: () => void;
+  draft: string;
+  setDraft: (value: string) => void;
+  onSend: () => void;
+  onEscape: () => void;
+  disabled: boolean;
 }) {
   const { t } = useTranslation();
-  const Icon = cancelled ? X : touchedFiles.length > 0 ? FileText : MessageSquare;
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useAutosizeTextarea(textareaRef, draft);
   return (
-    <Marker
-      asChild
-      variant="border"
-      className="w-full cursor-pointer justify-start px-2.5 py-1 text-left text-xs [&_svg]:size-3"
-    >
-      <button
-        type="button"
-        title={t("promptBlobShowResult")}
-        aria-label={t("promptBlobShowResult")}
-        onClick={onExpand}
-      >
-        <MarkerIcon>
-          <Icon />
-        </MarkerIcon>
-        <MarkerContent className="flex-1 truncate text-left">
-          {prompt.trim() || t("promptBlobDone")}
-        </MarkerContent>
-      </button>
-    </Marker>
+    <textarea
+      ref={textareaRef}
+      value={draft}
+      disabled={disabled}
+      onChange={(event) => setDraft(event.target.value)}
+      onKeyDown={(event) => {
+        const action = deriveComposerKeyAction({
+          key: event.key,
+          shiftKey: event.shiftKey,
+          draftEmpty: draft.trim().length === 0,
+          canRevert: false,
+        });
+        if (action.type === "none") return;
+        event.preventDefault();
+        if (action.type === "send") onSend();
+        else if (action.type === "escape") onEscape();
+      }}
+      placeholder={t("promptBlobReply")}
+      rows={1}
+      className="mt-1 min-h-[24px] w-full resize-none overflow-hidden border-t border-border/60 bg-transparent px-0.5 pt-1.5 text-xs placeholder:text-muted-foreground focus-visible:outline-none"
+    />
   );
 }
 
-/** Done: touched-document chips (each opens its tab), open-chat, edit, ✕. */
-function DoneState({
-  cancelled,
-  touchedFiles,
-  onOpenFile,
-  onOpenChat,
-  onEdit,
-  onDismiss,
+/** The done face's first row: status icon + the one-line outcome summary.
+ *  The line doubles as the expand/collapse toggle when there's a body to
+ *  show (disabled otherwise — a bare Done/Stopped label has nothing to
+ *  expand). Amber tint mirrors the issue callout below. */
+function DoneSummaryLine({
+  summary,
+  expandable,
+  expanded,
+  isIssue,
+  onToggle,
 }: {
-  cancelled: boolean;
-  touchedFiles: string[];
-  onOpenFile: (path: string) => void;
-  onOpenChat: () => void;
-  onEdit: () => void;
-  onDismiss: () => void;
+  summary: string;
+  expandable: boolean;
+  expanded: boolean;
+  isIssue: boolean;
+  onToggle: () => void;
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-1 px-2.5 py-1.5">
+    <>
+      {isIssue ? (
+        <TriangleAlert className="size-3 shrink-0 text-amber-600 dark:text-amber-400" />
+      ) : (
+        <Check className="size-3 shrink-0 text-green-600/80 dark:text-green-400/80" />
+      )}
+      <button
+        type="button"
+        disabled={!expandable}
+        title={
+          expandable
+            ? expanded
+              ? t("promptBlobShowLess")
+              : t("promptBlobShowMore")
+            : undefined
+        }
+        className={cn(
+          "min-w-0 flex-1 truncate text-left text-xs",
+          isIssue
+            ? "text-amber-600 dark:text-amber-400"
+            : "text-muted-foreground",
+          expandable &&
+            "cursor-pointer transition-colors hover:text-foreground",
+        )}
+        onClick={onToggle}
+      >
+        {summary}
+      </button>
+    </>
+  );
+}
+
+/** Done: the widget's single resting face — one truncated line of the
+ *  turn's outcome, the same ellipsis treatment as the running teaser. The
+ *  line prefers the `widget_respond` response (title, else the markdown
+ *  itself) and falls back to the turn's last assistant text, so even a
+ *  harness that never calls the tool leaves something readable behind.
+ *  Clicking the line toggles the full text below (pre-wrap, selectable —
+ *  same plain-text treatment as chat's assistant bubbles; the app has no
+ *  markdown renderer, and upgrading both surfaces later is one change).
+ *  No Edit here: Reply continues the session, ✕ dismisses; rewriting from
+ *  scratch is what a fresh widget is for. */
+function DoneState({
+  cancelled,
+  response,
+  fallbackText,
+  touchedFiles,
+  onOpenFile,
+  onOpenChat,
+  onDismiss,
+  replyDraft,
+  setReplyDraft,
+  onReply,
+  onReplyEscape,
+  replyDisabled,
+}: {
+  cancelled: boolean;
+  response: WidgetResponse | null;
+  /** Latest assistant text of the bound turn — the summary line when the
+   *  agent didn't deliver a widget_respond response. */
+  fallbackText: string | null;
+  touchedFiles: string[];
+  onOpenFile: (path: string) => void;
+  onOpenChat: () => void;
+  onDismiss: () => void;
+  replyDraft: string;
+  setReplyDraft: (value: string) => void;
+  onReply: () => void;
+  onReplyEscape: () => void;
+  replyDisabled: boolean;
+}) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const { summary, body, isIssue } = deriveDoneLine({
+    response,
+    fallbackText,
+    cancelled,
+    expanded,
+    labels: {
+      done: t("promptBlobDone"),
+      stopped: t("promptBlobStopped"),
+      issue: t("promptBlobIssue"),
+    },
+  });
+  return (
+    <div className="flex flex-col gap-0.5 px-2 py-1">
       <div className="flex items-center gap-1.5">
-        <Check className="size-3 shrink-0 text-green-600 dark:text-green-400" />
-        <span className="min-w-0 flex-1 truncate text-xs font-medium">
-          {cancelled ? t("promptBlobStopped") : t("promptBlobDone")}
-        </span>
+        <DoneSummaryLine
+          summary={summary}
+          expandable={body !== null}
+          expanded={expanded}
+          isIssue={isIssue}
+          onToggle={() => setExpanded((value) => !value)}
+        />
         <button
           type="button"
-          title={t("promptBlobEdit")}
-          aria-label={t("promptBlobEdit")}
+          title={t("promptBlobOpenChat")}
+          aria-label={t("promptBlobOpenChat")}
           className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          onClick={onEdit}
+          onClick={onOpenChat}
         >
-          <Pencil className="size-3" />
+          <MessageSquare className="size-3" />
         </button>
         <button
           type="button"
@@ -880,79 +1099,115 @@ function DoneState({
           <X className="size-3" />
         </button>
       </div>
-      {/* Zero touched files still shows open-chat — the answer text lives
-          in the transcript. */}
-      <div className="flex flex-wrap items-center gap-1">
-        {touchedFiles.map((path) => (
-          <button
-            key={path}
-            type="button"
-            className="flex cursor-pointer items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            onClick={() => onOpenFile(path)}
-          >
-            <FileText className="size-3" />
-            {getFileName(path)}
-          </button>
-        ))}
-        <button
-          type="button"
-          className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
-          onClick={onOpenChat}
+      {expanded && body && (
+        <div
+          className={cn(
+            "select-text whitespace-pre-wrap text-xs leading-relaxed",
+            // Issue text mirrors ErrorState's uniform tinted text, in amber
+            // — the card border (blobCardClass) carries the rest; no filled
+            // callout box.
+            isIssue
+              ? "text-amber-600 dark:text-amber-400"
+              : "text-foreground/80",
+          )}
         >
-          <MessageSquare className="size-3" />
-          {t("promptBlobOpenChat")}
-        </button>
-      </div>
+          {body}
+        </div>
+      )}
+      {touchedFiles.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          {touchedFiles.map((path) => (
+            <button
+              key={path}
+              type="button"
+              className="flex cursor-pointer items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              onClick={() => onOpenFile(path)}
+            >
+              <FileText className="size-3" />
+              {getFileName(path)}
+            </button>
+          ))}
+        </div>
+      )}
+      <ReplyRow
+        draft={replyDraft}
+        setDraft={setReplyDraft}
+        onSend={onReply}
+        onEscape={onReplyEscape}
+        disabled={replyDisabled}
+      />
     </div>
   );
 }
 
+/** Failed: the turn error plus Retry (same prompt again) / Edit (rewrite
+ *  from scratch, fresh shared-session path) / Dismiss, and the reply row
+ *  (say something new on the SAME session — errors don't kill it). */
 function ErrorState({
   message,
   onRetry,
   onEdit,
   onDismiss,
+  replyDraft,
+  setReplyDraft,
+  onReply,
+  onReplyEscape,
+  replyDisabled,
 }: {
   message: string | undefined;
   onRetry: () => void;
   onEdit: () => void;
   onDismiss: () => void;
+  replyDraft: string;
+  setReplyDraft: (value: string) => void;
+  onReply: () => void;
+  onReplyEscape: () => void;
+  replyDisabled: boolean;
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center gap-2 px-2.5 py-1.5">
-      <X className="size-3.5 shrink-0 text-destructive" />
-      <span className="min-w-0 flex-1 truncate text-xs text-destructive">
-        {t("promptBlobFailed")}
-        {message ? ` ${message}` : ""}
-      </span>
-      <button
-        type="button"
-        title={t("promptBlobRetry")}
-        aria-label={t("promptBlobRetry")}
-        className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        onClick={onRetry}
-      >
-        <RotateCw className="size-3.5" />
-      </button>
-      <button
-        type="button"
-        title={t("promptBlobEdit")}
-        aria-label={t("promptBlobEdit")}
-        className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        onClick={onEdit}
-      >
-        <Pencil className="size-3.5" />
-      </button>
-      <button
-        type="button"
-        title={t("promptBlobDismiss")}
-        aria-label={t("promptBlobDismiss")}
-        className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        onClick={onDismiss}
-      >
-        <X className="size-3.5" />
-      </button>
+    <div className="flex flex-col px-2.5 py-1.5">
+      <div className="flex items-center gap-2">
+        <X className="size-3.5 shrink-0 text-destructive" />
+        <span className="min-w-0 flex-1 truncate text-xs text-destructive">
+          {t("promptBlobFailed")}
+          {message ? ` ${message}` : ""}
+        </span>
+        <button
+          type="button"
+          title={t("promptBlobRetry")}
+          aria-label={t("promptBlobRetry")}
+          className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          onClick={onRetry}
+        >
+          <RotateCw className="size-3.5" />
+        </button>
+        <button
+          type="button"
+          title={t("promptBlobEdit")}
+          aria-label={t("promptBlobEdit")}
+          className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          onClick={onEdit}
+        >
+          <Pencil className="size-3.5" />
+        </button>
+        <button
+          type="button"
+          title={t("promptBlobDismiss")}
+          aria-label={t("promptBlobDismiss")}
+          className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          onClick={onDismiss}
+        >
+          <X className="size-3.5" />
+        </button>
+      </div>
+      <ReplyRow
+        draft={replyDraft}
+        setDraft={setReplyDraft}
+        onSend={onReply}
+        onEscape={onReplyEscape}
+        disabled={replyDisabled}
+      />
     </div>
   );
 }

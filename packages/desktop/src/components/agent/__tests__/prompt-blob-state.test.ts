@@ -15,6 +15,10 @@ import {
   deriveTouchedFiles,
   deriveQueuePosition,
   deriveComposerKeyAction,
+  deriveWidgetResponse,
+  deriveDoneLine,
+  widgetPromptTarget,
+  blobCardClass,
 } from "../prompt-blob-state";
 
 function turn(overrides: Partial<AgentTurn> = {}): AgentTurn {
@@ -41,10 +45,7 @@ function task(overrides: Partial<AgentTaskRow> = {}): AgentTaskRow {
   };
 }
 
-function toolEntry(
-  id: string,
-  toolCall: Partial<ToolCallUpdate>,
-): AgentEntry {
+function toolEntry(id: string, toolCall: Partial<ToolCallUpdate>): AgentEntry {
   return {
     id,
     taskId: "task_1",
@@ -94,7 +95,11 @@ describe("derivePhase", () => {
   it("auth block outranks queued/running/error but not completed", () => {
     const authTask = task({ authRequired: true });
     expect(
-      derivePhase({ ...base, task: authTask, turn: turn({ status: "queued" }) }),
+      derivePhase({
+        ...base,
+        task: authTask,
+        turn: turn({ status: "queued" }),
+      }),
     ).toBe("needs-auth");
     expect(
       derivePhase({ ...base, task: authTask, turn: turn({ status: "error" }) }),
@@ -132,10 +137,14 @@ describe("deriveActiveToolLine", () => {
 
   it("falls back to title alone, and to null when nothing is in flight", () => {
     expect(
-      deriveActiveToolLine([toolEntry("evt_1", { title: "Search", status: "pending" })]),
+      deriveActiveToolLine([
+        toolEntry("evt_1", { title: "Search", status: "pending" }),
+      ]),
     ).toBe("Search");
     expect(
-      deriveActiveToolLine([toolEntry("evt_1", { title: "Search", status: "completed" })]),
+      deriveActiveToolLine([
+        toolEntry("evt_1", { title: "Search", status: "completed" }),
+      ]),
     ).toBeNull();
     expect(deriveActiveToolLine([])).toBeNull();
   });
@@ -171,8 +180,12 @@ describe("deriveLatestAssistantLine", () => {
   });
 
   it("never returns an empty string for whitespace-only text", () => {
-    expect(deriveLatestAssistantLine([assistantEntry("evt_1", "   ")])).toBeNull();
-    expect(deriveLatestAssistantLine([assistantEntry("evt_1", undefined)])).toBeNull();
+    expect(
+      deriveLatestAssistantLine([assistantEntry("evt_1", "   ")]),
+    ).toBeNull();
+    expect(
+      deriveLatestAssistantLine([assistantEntry("evt_1", undefined)]),
+    ).toBeNull();
   });
 
   it("returns null for an empty entries array", () => {
@@ -200,7 +213,10 @@ describe("deriveTouchedFiles", () => {
         locations: [{ path: "/ws/b.md" }],
       }),
     ];
-    expect(deriveTouchedFiles(entries, "/ws")).toEqual(["/ws/a.md", "/ws/b.md"]);
+    expect(deriveTouchedFiles(entries, "/ws")).toEqual([
+      "/ws/a.md",
+      "/ws/b.md",
+    ]);
   });
 
   it("excludes reads/searches and resolves relative diff paths", () => {
@@ -317,7 +333,14 @@ describe("deriveComposerKeyAction", () => {
   });
 
   it("backtick and arrow keys are never intercepted (MET-90)", () => {
-    for (const key of ["`", "~", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]) {
+    for (const key of [
+      "`",
+      "~",
+      "ArrowLeft",
+      "ArrowRight",
+      "ArrowUp",
+      "ArrowDown",
+    ]) {
       for (const shiftKey of [false, true]) {
         for (const draftEmpty of [false, true]) {
           for (const canRevert of [false, true]) {
@@ -370,5 +393,209 @@ describe("deriveQueuePosition", () => {
     ];
     expect(deriveQueuePosition(turns, "trn_4")).toBe(2);
     expect(deriveQueuePosition(turns, "trn_2")).toBe(0);
+  });
+});
+
+describe("deriveWidgetResponse", () => {
+  const respond = (id: string, rawInput: unknown) =>
+    toolEntry(id, {
+      title: "widget_respond",
+      rawInput,
+    } as Partial<ToolCallUpdate>);
+
+  it("returns the parsed response from a widget_respond tool_call entry", () => {
+    const entries = [
+      assistantEntry("evt_1", "working on it"),
+      respond("evt_2", {
+        kind: "answer",
+        markdown: "Here you go.",
+        title: "Summary",
+      }),
+    ];
+    expect(deriveWidgetResponse(entries)).toEqual({
+      kind: "answer",
+      markdown: "Here you go.",
+      title: "Summary",
+    });
+  });
+
+  it("last write wins when the agent calls the tool twice", () => {
+    const entries = [
+      respond("evt_1", { kind: "answer", markdown: "first draft" }),
+      respond("evt_2", { kind: "issue", markdown: "actually, a blocker" }),
+    ];
+    expect(deriveWidgetResponse(entries)?.kind).toBe("issue");
+    expect(deriveWidgetResponse(entries)?.markdown).toBe("actually, a blocker");
+  });
+
+  it("skips malformed or missing rawInput and falls back to an earlier valid call", () => {
+    const entries = [
+      respond("evt_1", { kind: "answer", markdown: "the real one" }),
+      respond("evt_2", { kind: "nonsense", markdown: "" }),
+      respond("evt_3", undefined),
+    ];
+    expect(deriveWidgetResponse(entries)?.markdown).toBe("the real one");
+  });
+
+  it("ignores other tool calls and returns null when no response exists", () => {
+    const entries = [
+      toolEntry("evt_1", {
+        title: "author_blob",
+        rawInput: { kind: "answer", markdown: "not me" },
+      } as Partial<ToolCallUpdate>),
+      assistantEntry("evt_2", "plain chat text"),
+    ];
+    expect(deriveWidgetResponse(entries)).toBeNull();
+    expect(deriveWidgetResponse([])).toBeNull();
+  });
+});
+
+describe("widgetPromptTarget", () => {
+  it("slices the document path to workspace-relative", () => {
+    expect(
+      widgetPromptTarget({
+        documentPath: "/ws/docs/pricing.md",
+        workspacePath: "/ws",
+        pos: 42,
+        docContentSize: 100,
+        isDocEmpty: false,
+      }),
+    ).toEqual({ path: "docs/pricing.md", pos: 42, isDocEmpty: false });
+  });
+
+  it("passes a path outside the workspace through untouched", () => {
+    expect(
+      widgetPromptTarget({
+        documentPath: "/elsewhere/a.md",
+        workspacePath: "/ws",
+        pos: 1,
+        docContentSize: 5,
+        isDocEmpty: false,
+      }).path,
+    ).toBe("/elsewhere/a.md");
+  });
+
+  it("does not treat a sibling-prefix directory as inside the workspace", () => {
+    expect(
+      widgetPromptTarget({
+        documentPath: "/ws-other/a.md",
+        workspacePath: "/ws",
+        pos: 1,
+        docContentSize: 5,
+        isDocEmpty: false,
+      }).path,
+    ).toBe("/ws-other/a.md");
+  });
+
+  it("falls back to end-of-doc when the node view has no position", () => {
+    expect(
+      widgetPromptTarget({
+        documentPath: "/ws/a.md",
+        workspacePath: "/ws",
+        pos: undefined,
+        docContentSize: 77,
+        isDocEmpty: true,
+      }),
+    ).toEqual({ path: "a.md", pos: 77, isDocEmpty: true });
+  });
+});
+
+describe("deriveDoneLine", () => {
+  const labels = { done: "Done", stopped: "Stopped", issue: "Issue" };
+  const base = {
+    fallbackText: null,
+    cancelled: false,
+    expanded: false,
+    labels,
+  };
+
+  it("collapsed line prefers title, then markdown, then fallback, then label", () => {
+    expect(
+      deriveDoneLine({
+        ...base,
+        response: { kind: "answer", markdown: "Full text.", title: "Summary" },
+      }).summary,
+    ).toBe("Summary");
+    expect(
+      deriveDoneLine({
+        ...base,
+        response: { kind: "answer", markdown: "Full text." },
+      }).summary,
+    ).toBe("Full text.");
+    expect(
+      deriveDoneLine({ ...base, response: null, fallbackText: "last words" })
+        .summary,
+    ).toBe("last words");
+    expect(deriveDoneLine({ ...base, response: null }).summary).toBe("Done");
+    expect(
+      deriveDoneLine({ ...base, response: null, cancelled: true }).summary,
+    ).toBe("Stopped");
+  });
+
+  it("expanded line shows the heading only, so it doesn't echo the body", () => {
+    expect(
+      deriveDoneLine({
+        ...base,
+        expanded: true,
+        response: { kind: "answer", markdown: "Full text." },
+      }).summary,
+    ).toBe("Done");
+    expect(
+      deriveDoneLine({
+        ...base,
+        expanded: true,
+        response: { kind: "issue", markdown: "A blocker." },
+      }).summary,
+    ).toBe("Issue");
+    expect(
+      deriveDoneLine({
+        ...base,
+        expanded: true,
+        response: { kind: "issue", markdown: "A blocker.", title: "Bad ref" },
+      }).summary,
+    ).toBe("Bad ref");
+  });
+
+  it("body is the response markdown, else the assistant fallback, else null", () => {
+    expect(
+      deriveDoneLine({
+        ...base,
+        response: { kind: "answer", markdown: "md" },
+        fallbackText: "chat",
+      }).body,
+    ).toBe("md");
+    expect(
+      deriveDoneLine({ ...base, response: null, fallbackText: "chat" }).body,
+    ).toBe("chat");
+    expect(deriveDoneLine({ ...base, response: null }).body).toBeNull();
+  });
+
+  it("flags issue kind", () => {
+    expect(
+      deriveDoneLine({ ...base, response: { kind: "issue", markdown: "x" } })
+        .isIssue,
+    ).toBe(true);
+    expect(
+      deriveDoneLine({ ...base, response: { kind: "answer", markdown: "x" } })
+        .isIssue,
+    ).toBe(false);
+  });
+});
+
+describe("blobCardClass", () => {
+  it("done rests muted; a flagged issue borrows the amber error treatment", () => {
+    expect(blobCardClass("done", false)).toBe("border-border/60 bg-card/80");
+    expect(blobCardClass("done", true)).toBe("border-amber-500/40 bg-card/80");
+  });
+
+  it("active phases keep the raised card; attention states get their washes", () => {
+    expect(blobCardClass("running", false)).toContain("shadow-lg");
+    expect(blobCardClass("running", false)).toContain("border-border bg-card");
+    expect(blobCardClass("needs-auth", false)).toContain("border-amber-500/40");
+    expect(blobCardClass("needs-permission", false)).toContain("from-muted/40");
+    // Issue-ness only matters at rest — an active phase ignores it.
+    expect(blobCardClass("running", true)).toBe(
+      blobCardClass("running", false),
+    );
   });
 });

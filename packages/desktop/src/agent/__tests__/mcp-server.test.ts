@@ -114,7 +114,17 @@ describe("createMcpRequestHandler", () => {
     // Steering is directive, not optional: resources/read first, and full
     // document reads are the fallback, not the default (context-size ask).
     expect(instructions).toContain("FIRST action");
-    expect(instructions).toContain("Do NOT read the entire document by default");
+    expect(instructions).toContain(
+      "Do NOT read the entire document by default",
+    );
+    // MET-92: widget-originated prompts must land in the widget, not chat —
+    // and the rule is directive (MET-68 finding: suggestions get ignored),
+    // keyed off the resource_link so chat-originated prompts are untouched.
+    expect(instructions).toContain("widget_respond");
+    expect(instructions).toContain(
+      "you MUST deliver your final response by calling `widget_respond`",
+    );
+    expect(instructions).toContain("do NOT call `widget_respond`");
   });
 
   it("resources/list returns an empty catalog (self-contained URIs, nothing to enumerate)", async () => {
@@ -202,6 +212,7 @@ describe("createMcpRequestHandler", () => {
         "history_checkpoint",
         "history_restore",
         "author_blob",
+        "widget_respond",
       ]),
     );
     // Every tool has a human-readable title distinct from its snake_case name.
@@ -219,6 +230,38 @@ describe("createMcpRequestHandler", () => {
     expect(schema.properties.type.enum).toEqual(
       expect.arrayContaining(["question", "approval", "status"]),
     );
+  });
+
+  // MET-92: execute is validate-and-acknowledge only — the tool_call
+  // transcript entry the service writes is the record the widget derives
+  // from (deriveWidgetResponse), so there's no state to assert here beyond
+  // the ack round-trip and the schema gate.
+  it("tools/call: widget_respond acknowledges valid input and rejects a bad kind", async () => {
+    const ok = await handler()({
+      jsonrpc: "2.0",
+      id: 40,
+      method: "tools/call",
+      params: {
+        name: "widget_respond",
+        arguments: { kind: "answer", markdown: "Two options stand out." },
+      },
+    });
+    const result = ok?.result as {
+      content: Array<{ type: string; text: string }>;
+    };
+    expect(JSON.parse(result.content[0].text)).toEqual({ recorded: true });
+
+    const bad = await handler()({
+      jsonrpc: "2.0",
+      id: 41,
+      method: "tools/call",
+      params: {
+        name: "widget_respond",
+        arguments: { kind: "summary", markdown: "x" },
+      },
+    });
+    expect(bad?.error?.code).toBe(-32602);
+    expect(bad?.error?.message).toContain("widget_respond");
   });
 
   it("tools/call: unknown tool returns a JSON-RPC error", async () => {

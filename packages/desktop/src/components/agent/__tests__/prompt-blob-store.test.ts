@@ -16,7 +16,6 @@ describe("prompt-blob-store", () => {
       boundTurnId: null,
       boundTaskId: null,
       lastSentPrompt: "",
-      doneCollapsed: true,
     });
   });
 
@@ -47,14 +46,6 @@ describe("prompt-blob-store", () => {
       boundTaskId: null,
       lastSentPrompt: "sent",
     });
-  });
-
-  it("doneCollapsed defaults true and clearPromptBlobTurn resets it", () => {
-    expect(getPromptBlob("/ws/h.md").doneCollapsed).toBe(true);
-    updatePromptBlob("/ws/h.md", { doneCollapsed: false });
-    expect(getPromptBlob("/ws/h.md").doneCollapsed).toBe(false);
-    clearPromptBlobTurn("/ws/h.md");
-    expect(getPromptBlob("/ws/h.md").doneCollapsed).toBe(true);
   });
 
   it("notifies subscribers on its path only, until unsubscribed", () => {
