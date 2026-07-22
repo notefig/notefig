@@ -410,8 +410,13 @@ i18n
           promptBlobFailed: "Failed.",
           promptBlobRetry: "Retry",
           promptBlobDismiss: "Dismiss",
-          promptBlobShowResult: "Show result",
           promptBlobOpenChat: "Open chat",
+          promptBlobReply: "Reply…",
+          promptBlobShowMore: "Show more",
+          promptBlobShowLess: "Show less",
+          promptBlobIssue: "Issue",
+          promptBlobSessionGone:
+            "That session is no longer available — your reply was kept. Sending again starts a new session.",
           promptBlobNewSession: "Start a new session",
           promptBlobTrustWarning:
             "Spawns {{name}} with access to this folder. Press Enter again to continue.",
@@ -474,6 +479,7 @@ i18n
           agentToolHistoryCheckpoint: "Save Checkpoint",
           agentToolHistoryRestore: "Restore Version",
           agentToolAuthorBlob: "Add Interactive Block",
+          agentToolWidgetRespond: "Respond in Widget",
         },
       },
     },

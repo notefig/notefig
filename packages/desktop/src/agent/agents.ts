@@ -103,8 +103,11 @@ function taskHandle(taskId: string): AgentTaskHandle {
       if (widget.isDocEmpty) {
         // The one deliberately-embedded exception: the agent can't
         // discover "this doc is empty" by reading a resource it doesn't
-        // know to ask for, so this stays inline in the prompt text.
-        const framing = `${widget.path} is currently empty. Author directly into it — do not just describe what you would write.\n\n`;
+        // know to ask for, so this stays inline in the prompt text. The
+        // widget_respond directive rides along too — this branch carries
+        // no resource_link, so the resource_link-keyed steering in
+        // serverInstructions() (mcp-server.ts) never fires for it.
+        const framing = `${widget.path} is currently empty. Author directly into it — do not just describe what you would write. When finished, deliver a brief confirmation (or any issues) via the \`widget_respond\` tool, not as plain chat text.\n\n`;
         return promptImpl(framing + text);
       }
       const uri = encodeWidgetContextUri({

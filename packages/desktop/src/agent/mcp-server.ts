@@ -62,7 +62,13 @@ function serverInstructions(): string {
     `section" or "this doc" — expect you to edit the document directly with your editing ` +
     `tools, not to reply with prose describing what you would do; treat the document named ` +
     `in that resource payload as the default subject unless the user is clearly asking a ` +
-    `question instead.`
+    `question instead. When a prompt carries that widget-context resource_link, you MUST ` +
+    `deliver your final response by calling \`widget_respond\` before ending the turn — ` +
+    `kind "answer" for the response itself, kind "issue" if you hit a blocker or need to ` +
+    `flag a problem — and keep plain assistant text to brief progress notes: the user is ` +
+    `reading the in-document widget, not the chat transcript. When a prompt has no ` +
+    `resource_link (it came from the chat panel), do NOT call \`widget_respond\` — answer ` +
+    `in chat as normal.`
   );
 }
 
@@ -91,7 +97,10 @@ export type JsonRpcMessage = {
   error?: { code: number; message: string; data?: unknown };
 };
 
-function jsonrpcResult(id: JsonRpcMessage["id"], result: unknown): JsonRpcMessage {
+function jsonrpcResult(
+  id: JsonRpcMessage["id"],
+  result: unknown,
+): JsonRpcMessage {
   return { jsonrpc: "2.0", id, result };
 }
 
@@ -115,11 +124,16 @@ function jsonrpcError(
  */
 function authorBlobInputJsonSchema(): unknown {
   const blobTypes = getAllBlobTypes();
-  const payloadSchemas = blobTypes.map((blobType) => toJsonSchema(blobType.schema));
+  const payloadSchemas = blobTypes.map((blobType) =>
+    toJsonSchema(blobType.schema),
+  );
   return {
     type: "object",
     properties: {
-      path: { type: "string", description: "Workspace-relative document path." },
+      path: {
+        type: "string",
+        description: "Workspace-relative document path.",
+      },
       type: {
         type: "string",
         enum: blobTypes.map((t) => t.type),
@@ -131,7 +145,8 @@ function authorBlobInputJsonSchema(): unknown {
         description: 'Unique block id, e.g. "question_8f2a".',
       },
       payload: {
-        description: "Shape depends on `type` — matches the corresponding entry below.",
+        description:
+          "Shape depends on `type` — matches the corresponding entry below.",
         anyOf: payloadSchemas,
       },
     },
@@ -140,7 +155,9 @@ function authorBlobInputJsonSchema(): unknown {
 }
 
 function toolInputJsonSchema(tool: AgentTool<unknown, unknown>): unknown {
-  return tool.name === "author_blob" ? authorBlobInputJsonSchema() : toJsonSchema(tool.input);
+  return tool.name === "author_blob"
+    ? authorBlobInputJsonSchema()
+    : toJsonSchema(tool.input);
 }
 
 /**
@@ -171,7 +188,9 @@ async function dispatchToolCall(
     if (denied) {
       return {
         isError: true,
-        content: [{ type: "text", text: `permission denied for "${tool.name}"` }],
+        content: [
+          { type: "text", text: `permission denied for "${tool.name}"` },
+        ],
       };
     }
   }
@@ -187,8 +206,11 @@ async function dispatchToolCall(
  * object/array, return a copy with those values parsed; undefined when
  * nothing qualified (caller keeps the original failure).
  */
-function parseStringifiedObjectValues(args: unknown): Record<string, unknown> | undefined {
-  if (typeof args !== "object" || args === null || Array.isArray(args)) return undefined;
+function parseStringifiedObjectValues(
+  args: unknown,
+): Record<string, unknown> | undefined {
+  if (typeof args !== "object" || args === null || Array.isArray(args))
+    return undefined;
   let repairedAny = false;
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(args)) {
@@ -221,17 +243,23 @@ export type McpHandlerDeps = {
 export function createMcpRequestHandler(
   deps: McpHandlerDeps,
 ): (body: JsonRpcMessage) => Promise<JsonRpcMessage | null> {
-  return async function handleMcpRequest(body: JsonRpcMessage): Promise<JsonRpcMessage | null> {
+  return async function handleMcpRequest(
+    body: JsonRpcMessage,
+  ): Promise<JsonRpcMessage | null> {
     const { id, method, params } = body;
 
-    if (method === "notifications/initialized" || method === "notifications/cancelled") {
+    if (
+      method === "notifications/initialized" ||
+      method === "notifications/cancelled"
+    ) {
       return null;
     }
 
     if (method === "initialize") {
       return jsonrpcResult(id, {
         protocolVersion:
-          (params as { protocolVersion?: string } | undefined)?.protocolVersion ?? "2024-11-05",
+          (params as { protocolVersion?: string } | undefined)
+            ?.protocolVersion ?? "2024-11-05",
         capabilities: { tools: {}, resources: {} },
         serverInfo: { name: MCP_SERVER_NAME, version: "1.0.0" },
         instructions: serverInstructions(),
@@ -262,22 +290,42 @@ export function createMcpRequestHandler(
 
     if (method === "resources/read") {
       const uri = (params as { uri?: string } | undefined)?.uri;
-      const ref = typeof uri === "string" ? decodeWidgetContextUri(uri) : undefined;
+      const ref =
+        typeof uri === "string" ? decodeWidgetContextUri(uri) : undefined;
       if (!ref || !uri) {
-        return jsonrpcError(id, -32602, `unknown resource uri: ${uri ?? "(missing)"}`);
+        return jsonrpcError(
+          id,
+          -32602,
+          `unknown resource uri: ${uri ?? "(missing)"}`,
+        );
       }
-      const payload = await buildWidgetContextPayload(deps.ctx.workspacePath, ref);
+      const payload = await buildWidgetContextPayload(
+        deps.ctx.workspacePath,
+        ref,
+      );
       return jsonrpcResult(id, {
-        contents: [{ uri, mimeType: "application/json", text: JSON.stringify(payload, null, 2) }],
+        contents: [
+          {
+            uri,
+            mimeType: "application/json",
+            text: JSON.stringify(payload, null, 2),
+          },
+        ],
       });
     }
 
     if (method === "tools/call") {
-      const callParams = params as { name?: string; arguments?: unknown } | undefined;
+      const callParams = params as
+        | { name?: string; arguments?: unknown }
+        | undefined;
       const name = callParams?.name;
       const tool = name ? getTool(name) : undefined;
       if (!tool) {
-        return jsonrpcError(id, -32602, `unknown tool: ${name ?? "(missing name)"}`);
+        return jsonrpcError(
+          id,
+          -32602,
+          `unknown tool: ${name ?? "(missing name)"}`,
+        );
       }
       const args = callParams?.arguments ?? {};
       let parsed = tool.input.safeParse(args);
@@ -290,9 +338,18 @@ export function createMcpRequestHandler(
         if (repaired) parsed = tool.input.safeParse(repaired);
       }
       if (!parsed.success) {
-        return jsonrpcError(id, -32602, `invalid input for ${tool.name}: ${parsed.error.message}`);
+        return jsonrpcError(
+          id,
+          -32602,
+          `invalid input for ${tool.name}: ${parsed.error.message}`,
+        );
       }
-      const result = await dispatchToolCall(tool, deps.ctx, deps.permissionBroker, parsed.data);
+      const result = await dispatchToolCall(
+        tool,
+        deps.ctx,
+        deps.permissionBroker,
+        parsed.data,
+      );
       return jsonrpcResult(id, result);
     }
 
@@ -321,7 +378,11 @@ export function attachMcpEndpoint(
       } catch (error) {
         respond(
           JSON.stringify(
-            jsonrpcError(null, -32700, error instanceof Error ? error.message : String(error)),
+            jsonrpcError(
+              null,
+              -32700,
+              error instanceof Error ? error.message : String(error),
+            ),
           ),
         );
         return;

@@ -10,6 +10,10 @@ import type {
   AgentTaskRow,
   AgentTurn,
 } from "@/agent/agent-collections";
+import {
+  WidgetRespondInputSchema,
+  type WidgetResponse,
+} from "@/agent/tools/widget-respond";
 import { getFileName } from "@/utils/fs";
 
 export type BlobPhase =
@@ -87,7 +91,9 @@ export function deriveActiveToolLine(entries: AgentEntry[]): string | null {
  * deriveActiveToolLine). Same hygiene: stop at the first match scanning
  * backward, never return "".
  */
-export function deriveLatestAssistantLine(entries: AgentEntry[]): string | null {
+export function deriveLatestAssistantLine(
+  entries: AgentEntry[],
+): string | null {
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
     if (entry.type !== "assistant") continue;
@@ -95,6 +101,95 @@ export function deriveLatestAssistantLine(entries: AgentEntry[]): string | null 
     return text ? text : null;
   }
   return null;
+}
+
+/**
+ * The turn's widget response (MET-92), derived from the transcript rather
+ * than stored anywhere: the `widget_respond` tool's `tool_call` entry IS the
+ * record (its execute is validate-and-acknowledge; see widget-respond.ts),
+ * the same transcript-as-record design `findBlobAuthorTask` uses for blob
+ * routing. Backward scan = last-write-wins when the agent calls it twice.
+ * Malformed or missing `rawInput` (an adapter that doesn't stream it) is
+ * skipped, so the caller falls back to the plain done face — the same
+ * degradation as a harness that never calls the tool at all.
+ */
+export function deriveWidgetResponse(
+  entries: AgentEntry[],
+): WidgetResponse | null {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry.type !== "tool_call") continue;
+    if (entry.toolCall?.title !== "widget_respond") continue;
+    const parsed = WidgetRespondInputSchema.safeParse(entry.toolCall.rawInput);
+    if (parsed.success) return parsed.data;
+  }
+  return null;
+}
+
+/**
+ * The card chrome per phase. Done is the widget's resting face — it sits in
+ * the document long-term, so it sheds the card shadow and softens to stay
+ * out of the prose's way; every other phase keeps the raised look of an
+ * active control, with amber/muted washes for the two attention states.
+ * (The caller composes this with the invariant "rounded-lg border".)
+ */
+export function blobCardClass(phase: BlobPhase): string {
+  if (phase === "done") return "border-border/60 bg-card/80";
+  const raised = "shadow-lg shadow-black/5 dark:shadow-black/40";
+  if (phase === "needs-auth") {
+    return `${raised} border-amber-500/40 bg-background bg-gradient-to-b from-amber-500/10 to-amber-500/10`;
+  }
+  if (phase === "needs-permission") {
+    return `${raised} border-border bg-background bg-gradient-to-b from-muted/40 to-muted/40`;
+  }
+  return `${raised} border-border bg-card`;
+}
+
+/**
+ * The `promptFromWidget` target for a prompt sent from this widget: the
+ * workspace-relative document path (a path outside the workspace passes
+ * through untouched), the anchor position (node view's live pos, falling
+ * back to end-of-doc when the view can't provide one), and the empty-doc
+ * flag. Shared by the initial send and the reply path — the file-path
+ * slicing lives here once, testable, instead of twice in the component.
+ */
+export function widgetPromptTarget(params: {
+  documentPath: string;
+  workspacePath: string;
+  pos: number | undefined;
+  docContentSize: number;
+  isDocEmpty: boolean;
+}): { path: string; pos: number; isDocEmpty: boolean } {
+  const { documentPath, workspacePath, pos, docContentSize, isDocEmpty } =
+    params;
+  const path = documentPath.startsWith(workspacePath + "/")
+    ? documentPath.slice(workspacePath.length + 1)
+    : documentPath;
+  return { path, pos: pos ?? docContentSize, isDocEmpty };
+}
+
+/**
+ * The done face's one-line summary + expandable body. Collapsed, the line
+ * is the outcome itself: response title, else the response markdown, else
+ * the turn's last assistant text, else the bare Done/Stopped label.
+ * Expanded, the line shows only the heading (title or label) so it doesn't
+ * echo the body rendered below it. `body` null means there is nothing to
+ * expand. Labels arrive resolved (this module stays i18n-free).
+ */
+export function deriveDoneLine(params: {
+  response: WidgetResponse | null;
+  fallbackText: string | null;
+  cancelled: boolean;
+  expanded: boolean;
+  labels: { done: string; stopped: string; issue: string };
+}): { summary: string; body: string | null; isIssue: boolean } {
+  const { response, fallbackText, cancelled, expanded, labels } = params;
+  const isIssue = response?.kind === "issue";
+  const body = response?.markdown ?? fallbackText;
+  const doneLabel = cancelled ? labels.stopped : labels.done;
+  const heading = response?.title ?? (isIssue ? labels.issue : doneLabel);
+  const summary = expanded ? heading : (response?.title ?? body ?? doneLabel);
+  return { summary, body, isIssue };
 }
 
 /** Kinds that mean "this call changed a document". */
