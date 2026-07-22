@@ -359,8 +359,8 @@ function Transcript({
             ))}
             {turnErrors.map((turn) => (
               <MessageScrollerItem key={turn.turnId} messageId={`error-${turn.turnId}`}>
-                <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
-                  <span className="font-medium">{t("agentTurnFailed")}</span> {turn.error}
+                <div className="select-text rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+                  <span className="select-text font-medium">{t("agentTurnFailed")}</span> {turn.error}
                 </div>
               </MessageScrollerItem>
             ))}
@@ -403,7 +403,7 @@ function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
     <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm",
+          "max-w-[85%] select-text whitespace-pre-wrap rounded-lg px-3 py-2 text-sm",
           isUser
             ? "bg-primary text-primary-foreground"
             : "bg-muted text-foreground",
@@ -469,7 +469,7 @@ function ThoughtEntry({ text }: { text?: string }) {
   return (
     <details className="w-full max-w-[85%] rounded-lg border border-border/60 bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
       <summary className="cursor-pointer select-none">{t("agentThinking")}</summary>
-      <p className="mt-1 whitespace-pre-wrap">{text}</p>
+      <p className="mt-1 select-text whitespace-pre-wrap">{text}</p>
     </details>
   );
 }
