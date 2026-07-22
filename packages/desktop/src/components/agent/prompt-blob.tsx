@@ -291,7 +291,12 @@ export const PromptBlob = memo(function PromptBlob({
       className="w-full"
     >
       <AnimatedHeight>
-        <div className={cn("rounded-lg border", blobCardClass(phase))}>
+        <div
+          className={cn(
+            "rounded-lg border",
+            blobCardClass(phase, widgetResponse?.kind === "issue"),
+          )}
+        >
           {phase === "composing" && (
             <Composer
               draft={record.draft}
@@ -1000,7 +1005,7 @@ function DoneSummaryLine({
         className={cn(
           "min-w-0 flex-1 truncate text-left text-xs",
           isIssue
-            ? "text-amber-700 dark:text-amber-300"
+            ? "text-amber-600 dark:text-amber-400"
             : "text-muted-foreground",
           expandable &&
             "cursor-pointer transition-colors hover:text-foreground",
@@ -1097,9 +1102,13 @@ function DoneState({
       {expanded && body && (
         <div
           className={cn(
-            "select-text whitespace-pre-wrap text-xs leading-relaxed text-foreground/80",
-            isIssue &&
-              "rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-amber-700 dark:text-amber-300",
+            "select-text whitespace-pre-wrap text-xs leading-relaxed",
+            // Issue text mirrors ErrorState's uniform tinted text, in amber
+            // — the card border (blobCardClass) carries the rest; no filled
+            // callout box.
+            isIssue
+              ? "text-amber-600 dark:text-amber-400"
+              : "text-foreground/80",
           )}
         >
           {body}

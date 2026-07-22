@@ -131,10 +131,17 @@ export function deriveWidgetResponse(
  * the document long-term, so it sheds the card shadow and softens to stay
  * out of the prose's way; every other phase keeps the raised look of an
  * active control, with amber/muted washes for the two attention states.
- * (The caller composes this with the invariant "rounded-lg border".)
+ * A done turn whose response flags an issue borrows the error face's
+ * treatment — tinted border, tinted text — in warning amber rather than
+ * destructive red. (The caller composes this with the invariant
+ * "rounded-lg border".)
  */
-export function blobCardClass(phase: BlobPhase): string {
-  if (phase === "done") return "border-border/60 bg-card/80";
+export function blobCardClass(phase: BlobPhase, hasIssue: boolean): string {
+  if (phase === "done") {
+    return hasIssue
+      ? "border-amber-500/40 bg-card/80"
+      : "border-border/60 bg-card/80";
+  }
   const raised = "shadow-lg shadow-black/5 dark:shadow-black/40";
   if (phase === "needs-auth") {
     return `${raised} border-amber-500/40 bg-background bg-gradient-to-b from-amber-500/10 to-amber-500/10`;

@@ -38,8 +38,10 @@ export const widgetRespond: AgentTool<WidgetResponse, { recorded: true }> = {
     `Deliver your final answer (kind: "answer") or flag a problem/blocker ` +
     `(kind: "issue") to the in-document widget the prompt came from. Call this ` +
     `once, at the end of the turn, with your complete response in \`markdown\` ` +
-    `(an optional short \`title\` becomes the widget's heading). Only for ` +
-    `prompts that carried a widget-context resource_link or an ` +
+    `(an optional short \`title\` becomes the widget's heading). Call it even ` +
+    `when the request needed no edits or tool actions — a prose-only answer to ` +
+    `a widget prompt is still delivered through this tool, not as chat text. ` +
+    `Only for prompts that carried a widget-context resource_link or an ` +
     `empty-document widget framing — never for chat conversations.`,
   input: WidgetRespondInputSchema,
   async execute() {
