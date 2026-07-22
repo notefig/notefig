@@ -1,6 +1,6 @@
 [package]
 name = "metrists"
-version = "0.0.85"
+version = "0.0.86"
 # Two binaries exist since the shim (MET-73); `cargo run`/`tauri dev` need an
 # unambiguous default, and the app is it.
 default-run = "metrists"
