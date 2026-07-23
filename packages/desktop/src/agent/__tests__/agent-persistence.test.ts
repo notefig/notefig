@@ -341,6 +341,55 @@ describe("revival via session/load", () => {
     await disposeWorkspaceTaskManager("/ws");
   });
 
+  it("replayed tool calls stuck pending/in_progress resolve as completed", async () => {
+    restoredRow();
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    transportFactory.current = () => client;
+    // Adapters replay tool calls with whatever status they were snapshotted
+    // at — a call that was mid-flight replays as in_progress (or with no
+    // status at all) and nothing will ever finish it: the replay turn is
+    // synthetic and no live turn boundary resolves its lingerers.
+    agent.onLoadSession = async (params, a) => {
+      a.update(params.sessionId, {
+        sessionUpdate: "tool_call",
+        toolCallId: "tc_pending",
+        title: "Edit",
+        status: "in_progress",
+        rawInput: { file_path: "notes.md" },
+      });
+      a.update(params.sessionId, {
+        sessionUpdate: "tool_call",
+        toolCallId: "tc_statusless",
+        title: "Read",
+        rawInput: { file_path: "readme.md" },
+      });
+      a.update(params.sessionId, {
+        sessionUpdate: "tool_call",
+        toolCallId: "tc_failed",
+        title: "Bash",
+        status: "failed",
+        rawInput: { command: "exit 1" },
+      });
+      return {};
+    };
+
+    await reviveAgentTask("task_a")!.started;
+
+    const statuses = Object.fromEntries(
+      agentEntriesCollection.toArray
+        .filter((e) => e.taskId === "task_a" && e.type === "tool_call")
+        .map((e) => [e.toolCallId, e.toolCall?.status]),
+    );
+    expect(statuses).toEqual({
+      tc_pending: "completed",
+      tc_statusless: "completed",
+      // A terminal status replayed from history is kept, not overwritten.
+      tc_failed: "failed",
+    });
+    await disposeWorkspaceTaskManager("/ws");
+  });
+
   it("prompting a restored task revives it and queues the prompt", async () => {
     restoredRow();
     const [client, agentSide] = createLoopbackPair();

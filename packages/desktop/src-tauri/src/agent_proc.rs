@@ -327,7 +327,24 @@ pub async fn spawn_agent<R: tauri::Runtime>(
                 }
                 status = child.wait() => status.ok(),
             };
-            AGENT_PROCS.lock().unwrap().remove(&id);
+            // Deregister and report only while this monitor's process still
+            // owns the id. A respawn under the same proc_id (session revival
+            // after a webview reload, with the old adapter still alive)
+            // replaces the registry entry and kills this child — removing
+            // the entry or emitting exit here would then unregister the NEW
+            // process's stdin and tear down its just-attached transport
+            // (the exit topic is keyed by proc_id alone). A kill_agent call
+            // already removed the entry itself, and its caller closes the
+            // transport locally without waiting for an exit event.
+            {
+                let mut procs = AGENT_PROCS.lock().unwrap();
+                match procs.get(&id) {
+                    Some(current) if Arc::ptr_eq(current, &handle) => {
+                        procs.remove(&id);
+                    }
+                    _ => return,
+                }
+            }
             let code = status.and_then(|s| s.code());
             let _ = app.emit(&format!("agent-proc://{}/exit", id), ExitPayload { code });
         });

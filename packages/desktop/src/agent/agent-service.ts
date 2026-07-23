@@ -461,7 +461,14 @@ export class AgentTask {
       this.sessionId = sessionId;
     } finally {
       const turn = this.currentTurn;
-      if (turn) this.closeRun(turn);
+      if (turn) {
+        this.closeRun(turn);
+        // Replayed tool calls carry whatever status they streamed with; one
+        // still pending/in_progress can't actually be running (this history
+        // already happened), and the replay turn never passes through
+        // finishTurn — resolve them here so nothing spins forever.
+        this.resolveLingeringToolCalls(turn.turnId, "completed");
+      }
       this.currentTurn = null;
     }
   }

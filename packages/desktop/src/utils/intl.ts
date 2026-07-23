@@ -393,6 +393,7 @@ i18n
           agentQueuedBadge: "queued",
           agentRemoveFromQueue: "Remove from queue",
           agentPromptPlaceholder: "Ask anything, @models, /prompts …",
+          agentLoadingSession: "Loading session…",
           agentSend: "Send (⏎)",
           agentQueue: "Queue (⏎)",
           agentStop: "Stop",

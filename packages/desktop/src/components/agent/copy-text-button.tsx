@@ -40,7 +40,9 @@ export function CopyTextButton({
       title={t("copyMessage")}
       aria-label={t("copyMessage")}
       className={cn(
-        "flex shrink-0 cursor-pointer items-center gap-1 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+        // Ghost: hover only brightens the glyph — a background block behind
+        // a tiny inline icon reads as a jarring flash, not an affordance.
+        "flex shrink-0 cursor-pointer items-center gap-1 rounded p-1 text-muted-foreground transition-colors hover:text-foreground",
         className,
       )}
       onClick={() => void copy()}

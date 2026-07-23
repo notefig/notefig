@@ -39,6 +39,7 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
+  useMessageScroller,
 } from "@/components/ui/message-scroller";
 import { cn } from "@/lib/utils";
 import {
@@ -83,7 +84,20 @@ import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
  * composer-draft-store.
  */
 export function AgentChatTab({ taskId }: { taskId: string }) {
+  return (
+    // Conventional chat scrolling: pinned to the live edge while the reader
+    // is at the bottom, hands-off once they scroll up, and a reopened task
+    // lands at the end. The provider wraps the whole tab (not just the
+    // transcript) so the composer can jump to the end on send.
+    <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+      <AgentChatTabBody taskId={taskId} />
+    </MessageScrollerProvider>
+  );
+}
+
+function AgentChatTabBody({ taskId }: { taskId: string }) {
   const { t } = useTranslation();
+  const { scrollToEnd } = useMessageScroller();
   const [draft, setDraftState] = useState(() => getComposerDraft(taskId));
   const setDraft = useCallback(
     (value: string) => {
@@ -96,6 +110,13 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
   const taskRow = useTaskRow(taskId);
   const isRunning = taskRow?.status === "running";
   const isUnavailable = taskRow?.status === "unavailable";
+  // The session/load window (MET-54): a restored row waiting for its revive,
+  // or one whose revival is mid-flight ("starting" + a sessionId — a brand
+  // new task spawns as "starting" but has no sessionId yet). History is
+  // streaming into the transcript; the composer must not accept input.
+  const isLoadingSession =
+    taskRow?.status === "restored" ||
+    (taskRow?.status === "starting" && taskRow.sessionId != null);
 
   // A restored session revives transparently when its tab is viewed: the
   // dock mounts only the selected tab, so this fires on open/selection, and
@@ -112,7 +133,11 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
     setLastSentPrompt(taskId, text);
     setDraftState("");
     clearComposerDraft(taskId);
-  }, [draft, taskId]);
+    // Jump to the live edge so the sent message is in view even when the
+    // reader had scrolled up into history; this also re-enters follow mode
+    // for the streamed reply.
+    scrollToEnd({ behavior: "auto" });
+  }, [draft, taskId, scrollToEnd]);
 
   const stopTask = useCallback(() => {
     void cancelAgentTask(taskId);
@@ -198,6 +223,7 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
             onStop={stopTask}
             onCancelRestore={cancelAndRestore}
             isRunning={isRunning}
+            disabled={isLoadingSession}
             harnessId={taskRow.harnessId}
           />
         )}
@@ -337,54 +363,44 @@ function Transcript({
   );
 
   return (
-    // MessageScroller owns all scroll behavior: user prompts are anchors (a
-    // new turn lands near the top with a peek of the previous one), streamed
-    // replies are followed only while the reader is at the live edge, and a
-    // reopened task lands on its last turn instead of the absolute bottom.
-    <MessageScrollerProvider
-      autoScroll
-      defaultScrollPosition="last-anchor"
-      scrollPreviousItemPeek={48}
-    >
-      <MessageScroller className="flex-1 min-h-0">
-        <MessageScrollerViewport>
-          {/* Bottom padding clears the floating composer overlay: its
-              measured height (pb-36 as the pre-measurement fallback), plus
-              one gap. */}
-          <MessageScrollerContent
-            className="gap-3 p-3"
-            style={{ paddingBottom: Math.max(bottomInset, 144) + 12 }}
-          >
-            {sortedEntries.map((entry) => (
-              <MessageScrollerItem
-                key={entry.id}
-                messageId={entry.id}
-                scrollAnchor={entry.type === "user"}
-              >
-                <EntryView
-                  entry={entry}
-                  queued={entry.type === "user" && queuedTurnIds.has(entry.turnId)}
-                />
-              </MessageScrollerItem>
-            ))}
-            {turnErrors.map((turn) => (
-              <MessageScrollerItem key={turn.turnId} messageId={`error-${turn.turnId}`}>
-                <div className="select-text rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
-                  <span className="select-text font-medium">{t("agentTurnFailed")}</span> {turn.error}
-                </div>
-              </MessageScrollerItem>
-            ))}
-          </MessageScrollerContent>
-        </MessageScrollerViewport>
-        {/* Tucked into the corner just above the composer cards: the overlay
-            begins with ~40px of transparent gradient (pt-10), so backing off
-            from its measured top keeps the button visually next to the
-            prompt box rather than floating high above it. */}
-        <MessageScrollerButton
-          style={{ bottom: Math.max(bottomInset, 144) - 32 }}
-        />
-      </MessageScroller>
-    </MessageScrollerProvider>
+    // The provider (owning scroll state) wraps the whole tab in AgentChatTab;
+    // this is just the scroll surface. Streamed replies are followed while
+    // the reader is at the live edge; scrolling up detaches until they
+    // return to the bottom (or send, which jumps there).
+    <MessageScroller className="flex-1 min-h-0">
+      <MessageScrollerViewport>
+        {/* Bottom padding clears the floating composer overlay: its
+            measured height (pb-36 as the pre-measurement fallback), plus
+            one gap — so the scrollable end never sits under the overlay. */}
+        <MessageScrollerContent
+          className="gap-3 p-3"
+          style={{ paddingBottom: Math.max(bottomInset, 144) + 12 }}
+        >
+          {sortedEntries.map((entry) => (
+            <MessageScrollerItem key={entry.id} messageId={entry.id}>
+              <EntryView
+                entry={entry}
+                queued={entry.type === "user" && queuedTurnIds.has(entry.turnId)}
+              />
+            </MessageScrollerItem>
+          ))}
+          {turnErrors.map((turn) => (
+            <MessageScrollerItem key={turn.turnId} messageId={`error-${turn.turnId}`}>
+              <div className="select-text rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+                <span className="select-text font-medium">{t("agentTurnFailed")}</span> {turn.error}
+              </div>
+            </MessageScrollerItem>
+          ))}
+        </MessageScrollerContent>
+      </MessageScrollerViewport>
+      {/* Tucked into the corner just above the composer cards: the overlay
+          begins with ~40px of transparent gradient (pt-10), so backing off
+          from its measured top keeps the button visually next to the
+          prompt box rather than floating high above it. */}
+      <MessageScrollerButton
+        style={{ bottom: Math.max(bottomInset, 144) - 32 }}
+      />
+    </MessageScroller>
   );
 }
 
@@ -422,7 +438,7 @@ function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
         className={cn(
           "select-text whitespace-pre-wrap",
           isUser
-            ? "max-w-[85%] rounded-lg bg-primary px-2.5 py-1.5 text-xs text-primary-foreground"
+            ? "max-w-[85%] rounded-lg bg-primary px-2 py-1 text-xs text-primary-foreground"
             : "w-full text-sm leading-relaxed text-foreground",
           queued && "opacity-70",
         )}
@@ -828,6 +844,7 @@ function PromptBox({
   onStop,
   onCancelRestore,
   isRunning,
+  disabled = false,
   harnessId,
 }: {
   value: string;
@@ -837,18 +854,26 @@ function PromptBox({
   /** Escape while a turn runs: cancel it and restore the sent prompt. */
   onCancelRestore: () => void;
   isRunning: boolean;
+  /** Session history is loading (session/load) — no inputs until it lands. */
+  disabled?: boolean;
   harnessId: string;
 }) {
   const { t } = useTranslation();
   const harnessLabel = useHarnessLabel(harnessId);
-  const canSend = value.trim().length > 0;
+  const canSend = value.trim().length > 0 && !disabled;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useAutosizeTextarea(textareaRef, value);
+  // autoFocus can't fire on a disabled textarea — refocus once the session
+  // load finishes and the composer opens up.
+  useEffect(() => {
+    if (!disabled) textareaRef.current?.focus();
+  }, [disabled]);
   return (
     <div className="pointer-events-auto rounded-2xl border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40">
       <textarea
         ref={textareaRef}
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         // autoFocus: mount == tab selected (the dock unmounts unselected
         // tabs), and pulling focus into the dock is also what keeps the
@@ -871,9 +896,11 @@ function PromptBox({
           if (action.type === "send") onSend();
           else onCancelRestore();
         }}
-        placeholder={t("agentPromptPlaceholder")}
+        placeholder={
+          disabled ? t("agentLoadingSession") : t("agentPromptPlaceholder")
+        }
         rows={2}
-        className="min-h-[44px] w-full resize-none overflow-hidden bg-transparent px-4 pt-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
+        className="min-h-[44px] w-full resize-none overflow-hidden bg-transparent px-4 pt-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:opacity-60"
       />
       <div className="flex items-center gap-1 px-2 pb-2">
         {/* The session is pinned to one harness — a passive indicator, not

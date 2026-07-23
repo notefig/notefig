@@ -75,10 +75,13 @@ function MessageScrollerItem({
     <MessageScrollerPrimitive.Item
       data-slot="message-scroller-item"
       scrollAnchor={scrollAnchor}
-      className={cn(
-        "min-w-0 shrink-0 [contain-intrinsic-size:auto_10rem] [content-visibility:auto]",
-        className
-      )}
+      // Diverges from the registry default: no [content-visibility:auto] /
+      // [contain-intrinsic-size:auto_10rem]. The placeholder estimate is far
+      // off real entry heights (one-line messages are ~20px, not 10rem), so
+      // items re-rendering at true size while scrolling shifted the content
+      // and made the viewport jump; transcripts are small enough to skip
+      // render-culling entirely.
+      className={cn("min-w-0 shrink-0", className)}
       {...props}
     />
   )
