@@ -13,30 +13,19 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  ArrowRightLeft,
   ArrowUp,
-  Brain,
   Check,
   ChevronRight,
-  Eye,
-  Globe,
   Loader2,
-  Pencil,
-  Search,
   Sparkles,
   Square,
-  SquareTerminal,
-  Trash2,
-  Wrench,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import type {
   AuthMethod,
   ToolCallContent,
   ToolCallStatus,
   ToolCallUpdate,
-  ToolKind,
   PlanEntry,
 } from "@metrists/shared/agent";
 import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
@@ -51,7 +40,6 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
-import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { cn } from "@/lib/utils";
 import {
   useTaskRow,
@@ -186,16 +174,15 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
         ref={setComposerEl}
         className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-2 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-3 pt-10"
       >
+        {/* Bare shimmer text, no pill/spinner — the transcript is flat,
+            and so is its thinking indicator. */}
         {isRunning && (
-          <Marker
+          <span
             role="status"
-            className="pointer-events-auto self-start rounded-full border border-border bg-card/80 px-3 py-1 backdrop-blur"
+            className="shimmer pointer-events-auto self-start px-1 text-xs text-muted-foreground"
           >
-            <MarkerIcon>
-              <Loader2 className="animate-spin" />
-            </MarkerIcon>
-            <MarkerContent className="shimmer">{t("agentWorking")}</MarkerContent>
-          </Marker>
+            {t("agentWorking")}
+          </span>
         )}
         <div className="pointer-events-auto empty:hidden">
           <PermissionCard taskId={taskId} />
@@ -429,12 +416,14 @@ function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
         isUser ? "items-end" : "items-start",
       )}
     >
+      {/* opencode-style: agent replies are flat full-width text — the
+          bubble is the user's alone, and a compact one at that. */}
       <div
         className={cn(
-          "max-w-[85%] select-text whitespace-pre-wrap rounded-lg px-3 py-2 text-sm",
+          "select-text whitespace-pre-wrap",
           isUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted text-foreground",
+            ? "max-w-[85%] rounded-lg bg-primary px-2.5 py-1.5 text-xs text-primary-foreground"
+            : "w-full text-sm leading-relaxed text-foreground",
           queued && "opacity-70",
         )}
       >
@@ -497,7 +486,7 @@ function PlanView({ plan }: { plan: unknown }) {
   const entries = (plan as { entries?: PlanEntry[] } | undefined)?.entries ?? [];
   if (entries.length === 0) return null;
   return (
-    <div className="w-full max-w-[85%] rounded-lg border border-border bg-card px-2.5 py-2 text-xs">
+    <div className="w-full rounded-lg border border-border bg-card px-2.5 py-2 text-xs">
       {entries.map((planEntry, i) => (
         <div key={i} className="flex items-center gap-2 py-0.5">
           {planEntry.status === "completed" ? (
@@ -527,9 +516,13 @@ function ThoughtEntry({ text }: { text?: string }) {
   const { t } = useTranslation();
   if (!text) return null;
   return (
-    <details className="w-full max-w-[85%] rounded-lg border border-border/60 bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
-      <summary className="cursor-pointer select-none">{t("agentThinking")}</summary>
-      <p className="mt-1 select-text whitespace-pre-wrap">{text}</p>
+    <details className="w-full text-sm text-muted-foreground">
+      <summary className="cursor-pointer select-none font-semibold">
+        {t("agentThinking")}
+      </summary>
+      <p className="mt-1 select-text whitespace-pre-wrap text-xs leading-relaxed">
+        {text}
+      </p>
     </details>
   );
 }
@@ -558,8 +551,8 @@ function AuthorBlobCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
   const jumpPath = call.locations?.[0]?.path ?? rawInput.path;
   const fileName = rawInput.path.split("/").pop();
   return (
-    <div className="flex w-full max-w-[85%] items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs">
-      <Sparkles className="size-3.5 shrink-0 text-muted-foreground" />
+    <div className="flex w-full items-center gap-2 text-xs text-muted-foreground">
+      <Sparkles className="size-3.5 shrink-0" />
       <span className="flex-1">
         {t("agentAuthoredBlob", { type: rawInput.type })}{" "}
         <button
@@ -575,99 +568,181 @@ function AuthorBlobCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
   );
 }
 
-const TOOL_KIND_ICON: Record<ToolKind, LucideIcon> = {
-  read: Eye,
-  edit: Pencil,
-  delete: Trash2,
-  move: ArrowRightLeft,
-  search: Search,
-  execute: SquareTerminal,
-  think: Brain,
-  fetch: Globe,
-  switch_mode: Wrench,
-  other: Wrench,
-};
-
 /**
- * One tool call, coalesced into a single row upstream. Header (kind icon +
- * title + live status) is always shown; the body — file diffs, command/tool
- * output, or the raw input for tools with no content — is collapsible and
- * defaults open while the call is active or failed, collapsed once completed.
+ * One tool call, opencode-style (MET-94 follow-up): calls with file diffs
+ * get the changed-files treatment; everything else is a flat line — bold
+ * title, muted one-line preview (command, path, or raw input) — that
+ * expands in place to the output/input blocks. No card chrome: tool calls
+ * are peers of flat text, not framed widgets.
  */
 function ToolCallCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
-  const kind = call.kind ?? "other";
   const status: ToolCallStatus = call.status ?? "pending";
-  const title = call.title ?? kind;
+  const title = call.title ?? call.kind ?? "other";
   const content = call.content ?? [];
-  const locations = call.locations ?? [];
+  const diffs = content.filter(
+    (item): item is Extract<ToolCallContent, { type: "diff" }> =>
+      item.type === "diff",
+  );
+  if (diffs.length > 0) {
+    return <ChangedFilesCard diffs={diffs} status={status} />;
+  }
+
   const rawInput = call.rawInput;
-  const Icon = TOOL_KIND_ICON[kind] ?? Wrench;
-
   const failed = status === "failed";
-  const hasBody =
-    content.length > 0 ||
-    locations.length > 0 ||
-    (content.length === 0 && rawInput != null);
+  const inFlight = status === "pending" || status === "in_progress";
+  // An empty/absent input must not leave an expandable box with nothing
+  // in it — "{}" is nothing.
+  const rawInputText = rawInput != null ? rawInputPreview(rawInput) : "";
+  const hasRawInput = rawInputText !== "" && rawInputText !== "{}";
+  const hasBody = content.length > 0 || hasRawInput;
 
-  // null = follow the default (open while active/failed); a boolean is an
-  // explicit user toggle that then sticks.
+  // null = follow the default (open when failed — errors must be seen);
+  // a boolean is an explicit user toggle that then sticks.
   const [override, setOverride] = useState<boolean | null>(null);
-  const defaultOpen = status !== "completed";
-  const open = override ?? defaultOpen;
+  const open = override ?? failed;
 
   return (
-    <div
-      className={cn(
-        "w-full max-w-[85%] overflow-hidden rounded-lg border text-xs",
-        failed ? "border-destructive/40 bg-destructive/5" : "border-border bg-card",
-      )}
-    >
+    <div className="w-full text-xs">
       <button
         type="button"
         onClick={() => hasBody && setOverride(!open)}
         className={cn(
-          "flex w-full items-center gap-2 px-2.5 py-1.5 text-left",
+          "group/tool flex w-full items-center gap-2 text-left",
           hasBody && "cursor-pointer",
         )}
       >
-        <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
-        <ToolStatusIcon status={status} />
+        <span
+          className={cn(
+            "shrink-0 font-semibold",
+            failed && "text-destructive",
+            // In flight, the title's own shimmer IS the loading state —
+            // no spinner, no placeholder box.
+            inFlight && "shimmer text-muted-foreground",
+          )}
+        >
+          {title}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground/70">
+          {toolPreview(call)}
+        </span>
         {hasBody && (
           <ChevronRight
             className={cn(
               "size-3.5 shrink-0 text-muted-foreground transition-transform",
-              open && "rotate-90",
+              open ? "rotate-90" : "opacity-0 group-hover/tool:opacity-100",
             )}
           />
         )}
       </button>
 
       {hasBody && open && (
-        <div className="flex flex-col gap-2 border-t border-border/60 px-2.5 py-2">
+        <div className="mt-1.5 flex flex-col gap-2">
           {content.map((item, i) => (
             <ToolContentView key={i} item={item} />
           ))}
-          {content.length === 0 && rawInput != null && (
-            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/60 p-2 font-mono text-[11px] text-muted-foreground">
-              {rawInputPreview(rawInput)}
+          {content.length === 0 && hasRawInput && (
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-border/60 p-2 font-mono text-[11px] text-muted-foreground">
+              {rawInputText}
             </pre>
-          )}
-          {locations.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {locations.map((loc, i) => (
-                <span
-                  key={i}
-                  className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
-                >
-                  {loc.path.split("/").pop()}
-                  {loc.line != null ? `:${loc.line}` : ""}
-                </span>
-              ))}
-            </div>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** The collapsed line's context: the command for shell-ish calls, the
+ *  primary file for file-ish ones, raw input as the fallback. */
+function toolPreview(call: ToolCallUpdate): string {
+  const rawInput = call.rawInput as { command?: unknown } | undefined;
+  if (typeof rawInput?.command === "string") return rawInput.command;
+  const path = call.locations?.[0]?.path;
+  if (path) return path;
+  return call.rawInput ? rawInputPreview(call.rawInput) : "";
+}
+
+/**
+ * The diff-bearing call's special face (kept from the card era, restyled):
+ * a "N changed files" headline with total +/− line counts, then one row
+ * per file — dimmed directory, bold basename, per-file counts — each
+ * expanding to its diff text in place.
+ */
+function ChangedFilesCard({
+  diffs,
+  status,
+}: {
+  diffs: Extract<ToolCallContent, { type: "diff" }>[];
+  status: ToolCallStatus;
+}) {
+  const { t } = useTranslation();
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const counts = diffs.map((diff) => ({
+    added: diff.newText ? diff.newText.split("\n").length : 0,
+    removed: diff.oldText != null ? diff.oldText.split("\n").length : 0,
+  }));
+  const totalAdded = counts.reduce((sum, c) => sum + c.added, 0);
+  const totalRemoved = counts.reduce((sum, c) => sum + c.removed, 0);
+  const inFlight = status === "pending" || status === "in_progress";
+
+  return (
+    <div className="w-full text-xs">
+      <div className="flex items-center gap-2">
+        <span
+          className={cn(
+            "font-semibold",
+            inFlight && "shimmer text-muted-foreground",
+          )}
+        >
+          {t("agentChangedFiles", { count: diffs.length })}
+        </span>
+        <span className="text-green-600 dark:text-green-400">
+          +{totalAdded}
+        </span>
+        {totalRemoved > 0 && (
+          <span className="text-destructive">−{totalRemoved}</span>
+        )}
+      </div>
+      <div className="mt-1.5 divide-y divide-border/60 overflow-hidden rounded-lg border border-border">
+        {diffs.map((diff, i) => {
+          const slash = diff.path.lastIndexOf("/");
+          const dir = slash >= 0 ? diff.path.slice(0, slash + 1) : "";
+          const base = slash >= 0 ? diff.path.slice(slash + 1) : diff.path;
+          const open = openIndex === i;
+          return (
+            <div key={`${diff.path}-${i}`}>
+              <button
+                type="button"
+                onClick={() => setOpenIndex(open ? null : i)}
+                className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted/40"
+              >
+                <span className="min-w-0 flex-1 truncate">
+                  <span className="text-muted-foreground">{dir}</span>
+                  <span className="font-semibold">{base}</span>
+                </span>
+                <span className="shrink-0 text-green-600 dark:text-green-400">
+                  +{counts[i].added}
+                </span>
+                {diff.oldText != null && (
+                  <span className="shrink-0 text-destructive">
+                    −{counts[i].removed}
+                  </span>
+                )}
+                <ChevronRight
+                  className={cn(
+                    "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                    open && "rotate-90",
+                  )}
+                />
+              </button>
+              {open && (
+                <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all border-t border-border/60 p-2 font-mono text-[11px]">
+                  {diff.newText}
+                </pre>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -716,7 +791,7 @@ function ToolContentView({ item }: { item: ToolCallContent }) {
   const block = item.content;
   if (block.type === "text") {
     return (
-      <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/60 p-2 text-[11px]">
+      <pre className="max-h-56 select-text overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/60 p-2 font-mono text-[11px]">
         {block.text}
       </pre>
     );

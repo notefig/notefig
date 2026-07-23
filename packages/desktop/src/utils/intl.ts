@@ -399,6 +399,8 @@ i18n
           copyMessage: "Copy message",
           copied: "Copied",
           agentAuthoredBlob: "authored a {{type}} in",
+          agentChangedFiles_one: "{{count}} changed file",
+          agentChangedFiles_other: "{{count}} changed files",
           agentTerminal: "Terminal {{id}}",
           agentContentOfType: "{{type}} content",
 
