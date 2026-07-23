@@ -244,6 +244,7 @@ describe("deriveComposerKeyAction", () => {
         shiftKey: false,
         draftEmpty: false,
         canRevert: false,
+        inFlight: false,
       }),
     ).toEqual({ type: "send" });
     expect(
@@ -252,6 +253,7 @@ describe("deriveComposerKeyAction", () => {
         shiftKey: false,
         draftEmpty: true,
         canRevert: true,
+        inFlight: false,
       }),
     ).toEqual({ type: "send" });
   });
@@ -263,6 +265,7 @@ describe("deriveComposerKeyAction", () => {
         shiftKey: true,
         draftEmpty: false,
         canRevert: false,
+        inFlight: false,
       }),
     ).toEqual({ type: "none" });
   });
@@ -274,6 +277,7 @@ describe("deriveComposerKeyAction", () => {
         shiftKey: false,
         draftEmpty: true,
         canRevert: true,
+        inFlight: false,
       }),
     ).toEqual({ type: "revert" });
     expect(
@@ -282,6 +286,7 @@ describe("deriveComposerKeyAction", () => {
         shiftKey: false,
         draftEmpty: false,
         canRevert: true,
+        inFlight: false,
       }),
     ).toEqual({ type: "escape" });
     expect(
@@ -290,8 +295,37 @@ describe("deriveComposerKeyAction", () => {
         shiftKey: false,
         draftEmpty: true,
         canRevert: false,
+        inFlight: false,
       }),
     ).toEqual({ type: "escape" });
+  });
+
+  it("Escape with a turn in flight is cancelRestore, beating revert/escape (MET-94)", () => {
+    for (const draftEmpty of [false, true]) {
+      for (const canRevert of [false, true]) {
+        expect(
+          deriveComposerKeyAction({
+            key: "Escape",
+            shiftKey: false,
+            draftEmpty,
+            canRevert,
+            inFlight: true,
+          }),
+        ).toEqual({ type: "cancelRestore" });
+      }
+    }
+  });
+
+  it("Enter still sends (queues) while a turn is in flight", () => {
+    expect(
+      deriveComposerKeyAction({
+        key: "Enter",
+        shiftKey: false,
+        draftEmpty: false,
+        canRevert: false,
+        inFlight: true,
+      }),
+    ).toEqual({ type: "send" });
   });
 
   it('"/" reverts only on an empty, revertible composer ("//" path)', () => {
@@ -301,6 +335,7 @@ describe("deriveComposerKeyAction", () => {
         shiftKey: false,
         draftEmpty: true,
         canRevert: true,
+        inFlight: false,
       }),
     ).toEqual({ type: "revert" });
     expect(
@@ -309,6 +344,7 @@ describe("deriveComposerKeyAction", () => {
         shiftKey: false,
         draftEmpty: false,
         canRevert: true,
+        inFlight: false,
       }),
     ).toEqual({ type: "none" });
     expect(
@@ -317,6 +353,7 @@ describe("deriveComposerKeyAction", () => {
         shiftKey: false,
         draftEmpty: true,
         canRevert: false,
+        inFlight: false,
       }),
     ).toEqual({ type: "none" });
   });
@@ -328,6 +365,7 @@ describe("deriveComposerKeyAction", () => {
         shiftKey: false,
         draftEmpty: true,
         canRevert: true,
+        inFlight: false,
       }),
     ).toEqual({ type: "none" });
   });
@@ -344,9 +382,17 @@ describe("deriveComposerKeyAction", () => {
       for (const shiftKey of [false, true]) {
         for (const draftEmpty of [false, true]) {
           for (const canRevert of [false, true]) {
-            expect(
-              deriveComposerKeyAction({ key, shiftKey, draftEmpty, canRevert }),
-            ).toEqual({ type: "none" });
+            for (const inFlight of [false, true]) {
+              expect(
+                deriveComposerKeyAction({
+                  key,
+                  shiftKey,
+                  draftEmpty,
+                  canRevert,
+                  inFlight,
+                }),
+              ).toEqual({ type: "none" });
+            }
           }
         }
       }
@@ -360,6 +406,7 @@ describe("deriveComposerKeyAction", () => {
         shiftKey: false,
         draftEmpty: true,
         canRevert: true,
+        inFlight: false,
       }),
     ).toEqual({ type: "backspaceDismiss" });
     // Non-empty draft: default behavior (deletes a character).
@@ -369,6 +416,7 @@ describe("deriveComposerKeyAction", () => {
         shiftKey: false,
         draftEmpty: false,
         canRevert: true,
+        inFlight: false,
       }),
     ).toEqual({ type: "none" });
     // Keeper widgets (summoned=false) never dismiss via Backspace.
@@ -378,6 +426,7 @@ describe("deriveComposerKeyAction", () => {
         shiftKey: false,
         draftEmpty: true,
         canRevert: false,
+        inFlight: false,
       }),
     ).toEqual({ type: "none" });
   });

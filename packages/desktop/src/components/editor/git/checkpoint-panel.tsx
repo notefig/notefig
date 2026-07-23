@@ -15,6 +15,7 @@ import { useMutation, type UseMutateFunction } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
+import { copyTextToClipboard } from "@/utils/clipboard";
 import {
   Popover,
   PopoverContent,
@@ -829,9 +830,7 @@ function CheckpointsList({
                 <button
                   type="button"
                   className="h-auto w-auto p-0 font-mono leading-none hover:text-foreground"
-                  onClick={() =>
-                    void navigator.clipboard.writeText(checkpoint.hash)
-                  }
+                  onClick={() => void copyTextToClipboard(checkpoint.hash)}
                   aria-label={t("copyCommitHash", "Copy commit hash")}
                 >
                   {checkpoint.hash}

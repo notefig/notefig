@@ -142,7 +142,13 @@ export type AgentEntry = {
   /** unknown: the full unrecognized session-update payload, kept verbatim
    * (D4) so a later stage can render it (e.g. agent_thought_chunk) for free */
   raw?: unknown;
-  createdAt: number;
+  /**
+   * Wall-clock insert time — absent on session/load replay (MET-94): ACP
+   * carries no timestamps, so a replayed entry's true time is unknowable
+   * and a revival-time stamp would lie. NEVER use this for ordering — ids
+   * are the chronological order, present or not.
+   */
+  createdAt?: number;
 };
 
 export type AgentPermissionRequestRow = {

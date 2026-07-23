@@ -13,30 +13,19 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  ArrowRightLeft,
   ArrowUp,
-  Brain,
   Check,
   ChevronRight,
-  Eye,
-  Globe,
   Loader2,
-  Pencil,
-  Search,
   Sparkles,
   Square,
-  SquareTerminal,
-  Trash2,
-  Wrench,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import type {
   AuthMethod,
   ToolCallContent,
   ToolCallStatus,
   ToolCallUpdate,
-  ToolKind,
   PlanEntry,
 } from "@metrists/shared/agent";
 import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
@@ -50,8 +39,8 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
+  useMessageScroller,
 } from "@/components/ui/message-scroller";
-import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { cn } from "@/lib/utils";
 import {
   useTaskRow,
@@ -63,6 +52,7 @@ import {
 import {
   authenticateAgentTask,
   cancelAgentTask,
+  cancelAgentTurnAndForget,
   deleteAgentSession,
   promptAgentTask,
   removeQueuedPrompt,
@@ -75,7 +65,11 @@ import {
   clearComposerDraft,
   getComposerDraft,
   setComposerDraft,
+  getLastSentPrompt,
+  setLastSentPrompt,
 } from "./composer-draft-store";
+import { deriveComposerKeyAction } from "./prompt-blob-state";
+import { CopyTextButton } from "./copy-text-button";
 import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
 
 /**
@@ -90,7 +84,20 @@ import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
  * composer-draft-store.
  */
 export function AgentChatTab({ taskId }: { taskId: string }) {
+  return (
+    // Conventional chat scrolling: pinned to the live edge while the reader
+    // is at the bottom, hands-off once they scroll up, and a reopened task
+    // lands at the end. The provider wraps the whole tab (not just the
+    // transcript) so the composer can jump to the end on send.
+    <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+      <AgentChatTabBody taskId={taskId} />
+    </MessageScrollerProvider>
+  );
+}
+
+function AgentChatTabBody({ taskId }: { taskId: string }) {
   const { t } = useTranslation();
+  const { scrollToEnd } = useMessageScroller();
   const [draft, setDraftState] = useState(() => getComposerDraft(taskId));
   const setDraft = useCallback(
     (value: string) => {
@@ -102,7 +109,13 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
 
   const taskRow = useTaskRow(taskId);
   const isRunning = taskRow?.status === "running";
-  const isUnavailable = taskRow?.status === "unavailable";
+  // The session/load window (MET-54): a restored row waiting for its revive,
+  // or one whose revival is mid-flight ("starting" + a sessionId — a brand
+  // new task spawns as "starting" but has no sessionId yet). History is
+  // streaming into the transcript; the composer must not accept input.
+  const isLoadingSession =
+    taskRow?.status === "restored" ||
+    (taskRow?.status === "starting" && taskRow.sessionId != null);
 
   // A restored session revives transparently when its tab is viewed: the
   // dock mounts only the selected tab, so this fires on open/selection, and
@@ -116,28 +129,40 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
     const text = draft.trim();
     if (!text) return;
     promptAgentTask(taskId, text);
+    setLastSentPrompt(taskId, text);
     setDraftState("");
     clearComposerDraft(taskId);
-  }, [draft, taskId]);
+    // Jump to the live edge so the sent message is in view even when the
+    // reader had scrolled up into history; this also re-enters follow mode
+    // for the streamed reply.
+    scrollToEnd({ behavior: "auto" });
+  }, [draft, taskId, scrollToEnd]);
 
   const stopTask = useCallback(() => {
     void cancelAgentTask(taskId);
   }, [taskId]);
 
+  // Escape while a turn runs (MET-94): cancel it and — when the agent
+  // hadn't responded yet — drop its round from the transcript and put the
+  // sent prompt back into the composer. Once a response exists the round
+  // stays (forgetting it would hide context the session still holds) and
+  // nothing is restored: the prompt is right there in the round. The
+  // restore never clobbers a half-typed follow-up, and reads the draft
+  // store at resolve time — the closure's `draft` predates the await.
+  const cancelAndRestore = useCallback(() => {
+    void cancelAgentTurnAndForget(taskId).then((forgot) => {
+      if (!forgot) return;
+      if (getComposerDraft(taskId).trim() !== "") return;
+      const lastSent = getLastSentPrompt(taskId);
+      if (lastSent) setDraft(lastSent);
+    });
+  }, [taskId, setDraft]);
+
   // The floating composer overlay's live height (it grows when permission/
   // auth cards stack above the prompt box); the transcript pads its scroll
   // end by this much so no entry ever sits underneath the overlay.
   const [composerEl, setComposerEl] = useState<HTMLDivElement | null>(null);
-  const [composerHeight, setComposerHeight] = useState(0);
-  useEffect(() => {
-    if (!composerEl) return;
-    const observer = new ResizeObserver(() =>
-      setComposerHeight(composerEl.offsetHeight),
-    );
-    observer.observe(composerEl);
-    setComposerHeight(composerEl.offsetHeight);
-    return () => observer.disconnect();
-  }, [composerEl]);
+  const composerHeight = useMeasuredHeight(composerEl);
 
   // The tab can outlive the task row for a frame (workspace teardown clears
   // rows before the layout prunes the tab).
@@ -154,44 +179,98 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
     // its own positioning context for the absolute composer overlay.
     <div className="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
       <Transcript taskId={taskId} bottomInset={composerHeight} />
+      <ComposerOverlay
+        containerRef={setComposerEl}
+        taskRow={taskRow}
+        draft={draft}
+        onChangeDraft={setDraft}
+        onSend={sendPrompt}
+        onStop={stopTask}
+        onCancelRestore={cancelAndRestore}
+        isRunning={isRunning}
+        isLoadingSession={isLoadingSession}
+      />
+    </div>
+  );
+}
 
-      {/* Floating composer pinned to the bottom of the tab. The gradient
-          fades the transcript out behind it; the wrapper is click-through
-          (pointer-events-none) so only the cards inside catch pointers.
-          Measured so the transcript can pad past it — the overlay grows
-          when permission/auth cards stack above the prompt box. */}
-      <div
-        ref={setComposerEl}
-        className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-2 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-3 pt-10"
-      >
-        {isRunning && (
-          <Marker
-            role="status"
-            className="pointer-events-auto self-start rounded-full border border-border bg-card/80 px-3 py-1 backdrop-blur"
-          >
-            <MarkerIcon>
-              <Loader2 className="animate-spin" />
-            </MarkerIcon>
-            <MarkerContent className="shimmer">{t("agentWorking")}</MarkerContent>
-          </Marker>
-        )}
-        <div className="pointer-events-auto empty:hidden">
-          <PermissionCard taskId={taskId} />
-        </div>
-        {taskRow.authRequired && <AuthCard task={taskRow} />}
-        {isUnavailable ? (
-          <UnavailableCard taskId={taskId} />
-        ) : (
-          <PromptBox
-            value={draft}
-            onChange={setDraft}
-            onSend={sendPrompt}
-            onStop={stopTask}
-            isRunning={isRunning}
-            harnessId={taskRow.harnessId}
-          />
-        )}
+/** An element's live rendered height, tracked through a ResizeObserver
+ *  (0 until the element mounts and is first measured). */
+function useMeasuredHeight(element: HTMLElement | null): number {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    if (!element) return;
+    const observer = new ResizeObserver(() => setHeight(element.offsetHeight));
+    observer.observe(element);
+    setHeight(element.offsetHeight);
+    return () => observer.disconnect();
+  }, [element]);
+  return height;
+}
+
+/**
+ * Floating composer pinned to the bottom of the tab: working shimmer,
+ * permission/auth cards, then the prompt box (or the unavailable notice).
+ * The gradient fades the transcript out behind it; the wrapper is
+ * click-through (pointer-events-none) so only the cards inside catch
+ * pointers. Measured via containerRef so the transcript can pad past it —
+ * the overlay grows when permission/auth cards stack above the prompt box.
+ */
+function ComposerOverlay({
+  containerRef,
+  taskRow,
+  draft,
+  onChangeDraft,
+  onSend,
+  onStop,
+  onCancelRestore,
+  isRunning,
+  isLoadingSession,
+}: {
+  containerRef: (el: HTMLDivElement | null) => void;
+  taskRow: AgentTaskRow;
+  draft: string;
+  onChangeDraft: (value: string) => void;
+  onSend: () => void;
+  onStop: () => void;
+  onCancelRestore: () => void;
+  isRunning: boolean;
+  isLoadingSession: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      ref={containerRef}
+      className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-2 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-3 pt-10"
+    >
+      {/* Bare shimmer text, no pill/spinner — the transcript is flat,
+          and so is its thinking indicator. */}
+      {isRunning && (
+        <span
+          role="status"
+          className="shimmer pointer-events-auto self-start px-1 text-xs text-muted-foreground"
+        >
+          {t("agentWorking")}
+        </span>
+      )}
+      <div className="pointer-events-auto empty:hidden">
+        <PermissionCard taskId={taskRow.taskId} />
       </div>
+      {taskRow.authRequired && <AuthCard task={taskRow} />}
+      {taskRow.status === "unavailable" ? (
+        <UnavailableCard taskId={taskRow.taskId} />
+      ) : (
+        <PromptBox
+          value={draft}
+          onChange={onChangeDraft}
+          onSend={onSend}
+          onStop={onStop}
+          onCancelRestore={onCancelRestore}
+          isRunning={isRunning}
+          disabled={isLoadingSession}
+          harnessId={taskRow.harnessId}
+        />
+      )}
     </div>
   );
 }
@@ -327,60 +406,49 @@ function Transcript({
   );
 
   return (
-    // MessageScroller owns all scroll behavior: user prompts are anchors (a
-    // new turn lands near the top with a peek of the previous one), streamed
-    // replies are followed only while the reader is at the live edge, and a
-    // reopened task lands on its last turn instead of the absolute bottom.
-    <MessageScrollerProvider
-      autoScroll
-      defaultScrollPosition="last-anchor"
-      scrollPreviousItemPeek={48}
-    >
-      <MessageScroller className="flex-1 min-h-0">
-        <MessageScrollerViewport>
-          {/* Bottom padding clears the floating composer overlay: its
-              measured height (pb-36 as the pre-measurement fallback), plus
-              one gap. */}
-          <MessageScrollerContent
-            className="gap-3 p-3"
-            style={{ paddingBottom: Math.max(bottomInset, 144) + 12 }}
-          >
-            {sortedEntries.map((entry) => (
-              <MessageScrollerItem
-                key={entry.id}
-                messageId={entry.id}
-                scrollAnchor={entry.type === "user"}
-              >
-                <EntryView
-                  entry={entry}
-                  queued={entry.type === "user" && queuedTurnIds.has(entry.turnId)}
-                />
-              </MessageScrollerItem>
-            ))}
-            {turnErrors.map((turn) => (
-              <MessageScrollerItem key={turn.turnId} messageId={`error-${turn.turnId}`}>
-                <div className="select-text rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
-                  <span className="select-text font-medium">{t("agentTurnFailed")}</span> {turn.error}
-                </div>
-              </MessageScrollerItem>
-            ))}
-          </MessageScrollerContent>
-        </MessageScrollerViewport>
-        {/* Tucked into the corner just above the composer cards: the overlay
-            begins with ~40px of transparent gradient (pt-10), so backing off
-            from its measured top keeps the button visually next to the
-            prompt box rather than floating high above it. */}
-        <MessageScrollerButton
-          style={{ bottom: Math.max(bottomInset, 144) - 32 }}
-        />
-      </MessageScroller>
-    </MessageScrollerProvider>
+    // The provider (owning scroll state) wraps the whole tab in AgentChatTab;
+    // this is just the scroll surface. Streamed replies are followed while
+    // the reader is at the live edge; scrolling up detaches until they
+    // return to the bottom (or send, which jumps there).
+    <MessageScroller className="flex-1 min-h-0">
+      <MessageScrollerViewport>
+        {/* Bottom padding clears the floating composer overlay: its
+            measured height (pb-36 as the pre-measurement fallback), plus
+            one gap — so the scrollable end never sits under the overlay. */}
+        <MessageScrollerContent
+          className="gap-3 p-3"
+          style={{ paddingBottom: Math.max(bottomInset, 144) + 12 }}
+        >
+          {sortedEntries.map((entry) => (
+            <MessageScrollerItem key={entry.id} messageId={entry.id}>
+              <EntryView
+                entry={entry}
+                queued={entry.type === "user" && queuedTurnIds.has(entry.turnId)}
+              />
+            </MessageScrollerItem>
+          ))}
+          {turnErrors.map((turn) => (
+            <MessageScrollerItem key={turn.turnId} messageId={`error-${turn.turnId}`}>
+              <div className="select-text rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+                <span className="select-text font-medium">{t("agentTurnFailed")}</span> {turn.error}
+              </div>
+            </MessageScrollerItem>
+          ))}
+        </MessageScrollerContent>
+      </MessageScrollerViewport>
+      {/* Tucked into the corner just above the composer cards: the overlay
+          begins with ~40px of transparent gradient (pt-10), so backing off
+          from its measured top keeps the button visually next to the
+          prompt box rather than floating high above it. */}
+      <MessageScrollerButton
+        style={{ bottom: Math.max(bottomInset, 144) - 32 }}
+      />
+    </MessageScroller>
   );
 }
 
 /** Render one transcript entry by type; tool calls are peers of text. */
 function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
-  const { t } = useTranslation();
   if (entry.type === "tool_call") {
     if (!entry.toolCall) return null;
     const CustomCard = TOOL_NAME_RENDERER[entry.toolCall.title ?? ""];
@@ -394,42 +462,116 @@ function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
   if (entry.type === "thought") return <ThoughtEntry text={entry.text} />;
   if (entry.type === "unknown") return null; // kept as transcript data only (D4)
 
-  const isUser = entry.type === "user";
   // trim(): models emit whitespace-only chunks around tool calls (a "\n\n"
   // run closed by a tool_call renders as an empty bubble otherwise), and
   // leading/trailing newlines would show inside whitespace-pre-wrap bubbles.
   if (!entry.text?.trim()) return null;
+  return <MessageEntry entry={entry} queued={queued} />;
+}
+
+/** A user or assistant text message: compact bubble (user) or flat
+ *  full-width text (assistant, opencode-style), plus the hover footer. */
+function MessageEntry({
+  entry,
+  queued,
+}: {
+  entry: AgentEntry;
+  queued?: boolean;
+}) {
+  const isUser = entry.type === "user";
+  const text = entry.text?.trim() ?? "";
   return (
-    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+    <div
+      className={cn(
+        "group flex flex-col",
+        isUser ? "items-end" : "items-start",
+      )}
+    >
+      {/* opencode-style: agent replies are flat full-width text — the
+          bubble is the user's alone, and a compact one at that. */}
       <div
         className={cn(
-          "max-w-[85%] select-text whitespace-pre-wrap rounded-lg px-3 py-2 text-sm",
+          "select-text whitespace-pre-wrap",
           isUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted text-foreground",
+            ? "max-w-[85%] rounded-lg bg-primary px-2 py-1 text-xs text-primary-foreground"
+            : "w-full text-sm leading-relaxed text-foreground",
           queued && "opacity-70",
         )}
       >
-        {entry.text.trim()}
-        {queued && (
-          <span className="mt-1 flex items-center justify-end gap-1.5">
-            <span className="rounded-full bg-primary-foreground/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
-              {t("agentQueuedBadge")}
-            </span>
-            <button
-              type="button"
-              title={t("agentRemoveFromQueue")}
-              aria-label={t("agentRemoveFromQueue")}
-              className="rounded-full p-0.5 hover:bg-primary-foreground/20"
-              onClick={() => removeQueuedPrompt(entry.taskId, entry.turnId)}
-            >
-              <X className="size-3" />
-            </button>
-          </span>
-        )}
+        {text}
+        {queued && <QueuedBadge taskId={entry.taskId} turnId={entry.turnId} />}
       </div>
+      <MessageFooter text={text} createdAt={entry.createdAt} isUser={isUser} />
     </div>
   );
+}
+
+/** "queued" chip + withdraw ✕ inside a queued user bubble. */
+function QueuedBadge({ taskId, turnId }: { taskId: string; turnId: string }) {
+  const { t } = useTranslation();
+  return (
+    <span className="mt-1 flex items-center justify-end gap-1.5">
+      <span className="rounded-full bg-primary-foreground/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+        {t("agentQueuedBadge")}
+      </span>
+      <button
+        type="button"
+        title={t("agentRemoveFromQueue")}
+        aria-label={t("agentRemoveFromQueue")}
+        className="rounded-full p-0.5 hover:bg-primary-foreground/20"
+        onClick={() => removeQueuedPrompt(taskId, turnId)}
+      >
+        <X className="size-3" />
+      </button>
+    </span>
+  );
+}
+
+/**
+ * Hover-revealed message footer (opencode-style, MET-94): copy + timestamp
+ * for now; revert and the model name join it later. The row always occupies
+ * its height so revealing it never reflows the transcript — only opacity
+ * changes.
+ */
+function MessageFooter({
+  text,
+  createdAt,
+  isUser,
+}: {
+  text: string;
+  createdAt?: number;
+  isUser: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-1.5 px-1 pt-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100",
+        isUser && "flex-row-reverse",
+      )}
+    >
+      <CopyTextButton
+        text={text}
+        withLabel
+        iconClassName="size-3"
+        className="p-0.5 text-[10px]"
+      />
+      {/* Replayed history has no createdAt — no time beats a wrong one. */}
+      {createdAt !== undefined && (
+        <span className="text-[10px] tabular-nums text-muted-foreground">
+          {formatEntryTime(createdAt)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** The footer's clock time; the transcript is a single day's scroll in
+ *  practice, so hour:minute is enough context. */
+function formatEntryTime(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 /** Compact checklist for a `plan` session update (ACP entries: content/priority/status). */
@@ -437,7 +579,7 @@ function PlanView({ plan }: { plan: unknown }) {
   const entries = (plan as { entries?: PlanEntry[] } | undefined)?.entries ?? [];
   if (entries.length === 0) return null;
   return (
-    <div className="w-full max-w-[85%] rounded-lg border border-border bg-card px-2.5 py-2 text-xs">
+    <div className="w-full rounded-lg border border-border bg-card px-2.5 py-2 text-xs">
       {entries.map((planEntry, i) => (
         <div key={i} className="flex items-center gap-2 py-0.5">
           {planEntry.status === "completed" ? (
@@ -467,9 +609,13 @@ function ThoughtEntry({ text }: { text?: string }) {
   const { t } = useTranslation();
   if (!text) return null;
   return (
-    <details className="w-full max-w-[85%] rounded-lg border border-border/60 bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
-      <summary className="cursor-pointer select-none">{t("agentThinking")}</summary>
-      <p className="mt-1 select-text whitespace-pre-wrap">{text}</p>
+    <details className="w-full text-sm text-muted-foreground">
+      <summary className="cursor-pointer select-none font-semibold">
+        {t("agentThinking")}
+      </summary>
+      <p className="mt-1 select-text whitespace-pre-wrap text-xs leading-relaxed">
+        {text}
+      </p>
     </details>
   );
 }
@@ -498,8 +644,8 @@ function AuthorBlobCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
   const jumpPath = call.locations?.[0]?.path ?? rawInput.path;
   const fileName = rawInput.path.split("/").pop();
   return (
-    <div className="flex w-full max-w-[85%] items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs">
-      <Sparkles className="size-3.5 shrink-0 text-muted-foreground" />
+    <div className="flex w-full items-center gap-2 text-xs text-muted-foreground">
+      <Sparkles className="size-3.5 shrink-0" />
       <span className="flex-1">
         {t("agentAuthoredBlob", { type: rawInput.type })}{" "}
         <button
@@ -515,99 +661,181 @@ function AuthorBlobCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
   );
 }
 
-const TOOL_KIND_ICON: Record<ToolKind, LucideIcon> = {
-  read: Eye,
-  edit: Pencil,
-  delete: Trash2,
-  move: ArrowRightLeft,
-  search: Search,
-  execute: SquareTerminal,
-  think: Brain,
-  fetch: Globe,
-  switch_mode: Wrench,
-  other: Wrench,
-};
-
 /**
- * One tool call, coalesced into a single row upstream. Header (kind icon +
- * title + live status) is always shown; the body — file diffs, command/tool
- * output, or the raw input for tools with no content — is collapsible and
- * defaults open while the call is active or failed, collapsed once completed.
+ * One tool call, opencode-style (MET-94 follow-up): calls with file diffs
+ * get the changed-files treatment; everything else is a flat line — bold
+ * title, muted one-line preview (command, path, or raw input) — that
+ * expands in place to the output/input blocks. No card chrome: tool calls
+ * are peers of flat text, not framed widgets.
  */
 function ToolCallCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
-  const kind = call.kind ?? "other";
   const status: ToolCallStatus = call.status ?? "pending";
-  const title = call.title ?? kind;
+  const title = call.title ?? call.kind ?? "other";
   const content = call.content ?? [];
-  const locations = call.locations ?? [];
+  const diffs = content.filter(
+    (item): item is Extract<ToolCallContent, { type: "diff" }> =>
+      item.type === "diff",
+  );
+  if (diffs.length > 0) {
+    return <ChangedFilesCard diffs={diffs} status={status} />;
+  }
+
   const rawInput = call.rawInput;
-  const Icon = TOOL_KIND_ICON[kind] ?? Wrench;
-
   const failed = status === "failed";
-  const hasBody =
-    content.length > 0 ||
-    locations.length > 0 ||
-    (content.length === 0 && rawInput != null);
+  const inFlight = status === "pending" || status === "in_progress";
+  // An empty/absent input must not leave an expandable box with nothing
+  // in it — "{}" is nothing.
+  const rawInputText = rawInput != null ? rawInputPreview(rawInput) : "";
+  const hasRawInput = rawInputText !== "" && rawInputText !== "{}";
+  const hasBody = content.length > 0 || hasRawInput;
 
-  // null = follow the default (open while active/failed); a boolean is an
-  // explicit user toggle that then sticks.
+  // null = follow the default (open when failed — errors must be seen);
+  // a boolean is an explicit user toggle that then sticks.
   const [override, setOverride] = useState<boolean | null>(null);
-  const defaultOpen = status !== "completed";
-  const open = override ?? defaultOpen;
+  const open = override ?? failed;
 
   return (
-    <div
-      className={cn(
-        "w-full max-w-[85%] overflow-hidden rounded-lg border text-xs",
-        failed ? "border-destructive/40 bg-destructive/5" : "border-border bg-card",
-      )}
-    >
+    <div className="w-full text-xs">
       <button
         type="button"
         onClick={() => hasBody && setOverride(!open)}
         className={cn(
-          "flex w-full items-center gap-2 px-2.5 py-1.5 text-left",
+          "group/tool flex w-full items-center gap-2 text-left",
           hasBody && "cursor-pointer",
         )}
       >
-        <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
-        <ToolStatusIcon status={status} />
+        <span
+          className={cn(
+            "shrink-0 font-semibold",
+            failed && "text-destructive",
+            // In flight, the title's own shimmer IS the loading state —
+            // no spinner, no placeholder box.
+            inFlight && "shimmer text-muted-foreground",
+          )}
+        >
+          {title}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground/70">
+          {toolPreview(call)}
+        </span>
         {hasBody && (
           <ChevronRight
             className={cn(
               "size-3.5 shrink-0 text-muted-foreground transition-transform",
-              open && "rotate-90",
+              open ? "rotate-90" : "opacity-0 group-hover/tool:opacity-100",
             )}
           />
         )}
       </button>
 
       {hasBody && open && (
-        <div className="flex flex-col gap-2 border-t border-border/60 px-2.5 py-2">
+        <div className="mt-1.5 flex flex-col gap-2">
           {content.map((item, i) => (
             <ToolContentView key={i} item={item} />
           ))}
-          {content.length === 0 && rawInput != null && (
-            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/60 p-2 font-mono text-[11px] text-muted-foreground">
-              {rawInputPreview(rawInput)}
+          {content.length === 0 && hasRawInput && (
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-border/60 p-2 font-mono text-[11px] text-muted-foreground">
+              {rawInputText}
             </pre>
-          )}
-          {locations.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {locations.map((loc, i) => (
-                <span
-                  key={i}
-                  className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
-                >
-                  {loc.path.split("/").pop()}
-                  {loc.line != null ? `:${loc.line}` : ""}
-                </span>
-              ))}
-            </div>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** The collapsed line's context: the command for shell-ish calls, the
+ *  primary file for file-ish ones, raw input as the fallback. */
+function toolPreview(call: ToolCallUpdate): string {
+  const rawInput = call.rawInput as { command?: unknown } | undefined;
+  if (typeof rawInput?.command === "string") return rawInput.command;
+  const path = call.locations?.[0]?.path;
+  if (path) return path;
+  return call.rawInput ? rawInputPreview(call.rawInput) : "";
+}
+
+/**
+ * The diff-bearing call's special face (kept from the card era, restyled):
+ * a "N changed files" headline with total +/− line counts, then one row
+ * per file — dimmed directory, bold basename, per-file counts — each
+ * expanding to its diff text in place.
+ */
+function ChangedFilesCard({
+  diffs,
+  status,
+}: {
+  diffs: Extract<ToolCallContent, { type: "diff" }>[];
+  status: ToolCallStatus;
+}) {
+  const { t } = useTranslation();
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const counts = diffs.map((diff) => ({
+    added: diff.newText ? diff.newText.split("\n").length : 0,
+    removed: diff.oldText != null ? diff.oldText.split("\n").length : 0,
+  }));
+  const totalAdded = counts.reduce((sum, c) => sum + c.added, 0);
+  const totalRemoved = counts.reduce((sum, c) => sum + c.removed, 0);
+  const inFlight = status === "pending" || status === "in_progress";
+
+  return (
+    <div className="w-full text-xs">
+      <div className="flex items-center gap-2">
+        <span
+          className={cn(
+            "font-semibold",
+            inFlight && "shimmer text-muted-foreground",
+          )}
+        >
+          {t("agentChangedFiles", { count: diffs.length })}
+        </span>
+        <span className="text-green-600 dark:text-green-400">
+          +{totalAdded}
+        </span>
+        {totalRemoved > 0 && (
+          <span className="text-destructive">−{totalRemoved}</span>
+        )}
+      </div>
+      <div className="mt-1.5 divide-y divide-border/60 overflow-hidden rounded-lg border border-border">
+        {diffs.map((diff, i) => {
+          const slash = diff.path.lastIndexOf("/");
+          const dir = slash >= 0 ? diff.path.slice(0, slash + 1) : "";
+          const base = slash >= 0 ? diff.path.slice(slash + 1) : diff.path;
+          const open = openIndex === i;
+          return (
+            <div key={`${diff.path}-${i}`}>
+              <button
+                type="button"
+                onClick={() => setOpenIndex(open ? null : i)}
+                className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted/40"
+              >
+                <span className="min-w-0 flex-1 truncate">
+                  <span className="text-muted-foreground">{dir}</span>
+                  <span className="font-semibold">{base}</span>
+                </span>
+                <span className="shrink-0 text-green-600 dark:text-green-400">
+                  +{counts[i].added}
+                </span>
+                {diff.oldText != null && (
+                  <span className="shrink-0 text-destructive">
+                    −{counts[i].removed}
+                  </span>
+                )}
+                <ChevronRight
+                  className={cn(
+                    "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                    open && "rotate-90",
+                  )}
+                />
+              </button>
+              {open && (
+                <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all border-t border-border/60 p-2 font-mono text-[11px]">
+                  {diff.newText}
+                </pre>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -656,7 +884,7 @@ function ToolContentView({ item }: { item: ToolCallContent }) {
   const block = item.content;
   if (block.type === "text") {
     return (
-      <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/60 p-2 text-[11px]">
+      <pre className="max-h-56 select-text overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/60 p-2 font-mono text-[11px]">
         {block.text}
       </pre>
     );
@@ -691,26 +919,38 @@ function PromptBox({
   onChange,
   onSend,
   onStop,
+  onCancelRestore,
   isRunning,
+  disabled = false,
   harnessId,
 }: {
   value: string;
   onChange: (value: string) => void;
   onSend: () => void;
   onStop: () => void;
+  /** Escape while a turn runs: cancel it and restore the sent prompt. */
+  onCancelRestore: () => void;
   isRunning: boolean;
+  /** Session history is loading (session/load) — no inputs until it lands. */
+  disabled?: boolean;
   harnessId: string;
 }) {
   const { t } = useTranslation();
   const harnessLabel = useHarnessLabel(harnessId);
-  const canSend = value.trim().length > 0;
+  const canSend = value.trim().length > 0 && !disabled;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useAutosizeTextarea(textareaRef, value);
+  // autoFocus can't fire on a disabled textarea — refocus once the session
+  // load finishes and the composer opens up.
+  useEffect(() => {
+    if (!disabled) textareaRef.current?.focus();
+  }, [disabled]);
   return (
     <div className="pointer-events-auto rounded-2xl border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40">
       <textarea
         ref={textareaRef}
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         // autoFocus: mount == tab selected (the dock unmounts unselected
         // tabs), and pulling focus into the dock is also what keeps the
@@ -718,14 +958,26 @@ function PromptBox({
         // dockable container, the way editors self-focus on tab-select.
         autoFocus
         onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            onSend();
-          }
+          const action = deriveComposerKeyAction({
+            key: event.key,
+            shiftKey: event.shiftKey,
+            draftEmpty: value.trim().length === 0,
+            canRevert: false,
+            inFlight: isRunning,
+          });
+          // Idle "escape" stays a no-op here — the chat tab has no
+          // document editor to hand focus back to.
+          if (action.type !== "send" && action.type !== "cancelRestore")
+            return;
+          event.preventDefault();
+          if (action.type === "send") onSend();
+          else onCancelRestore();
         }}
-        placeholder={t("agentPromptPlaceholder")}
+        placeholder={
+          disabled ? t("agentLoadingSession") : t("agentPromptPlaceholder")
+        }
         rows={2}
-        className="min-h-[44px] w-full resize-none overflow-hidden bg-transparent px-4 pt-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
+        className="min-h-[44px] w-full resize-none overflow-hidden bg-transparent px-4 pt-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:opacity-60"
       />
       <div className="flex items-center gap-1 px-2 pb-2">
         {/* The session is pinned to one harness — a passive indicator, not

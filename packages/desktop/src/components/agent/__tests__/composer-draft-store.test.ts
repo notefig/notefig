@@ -3,6 +3,8 @@ import {
   clearComposerDraft,
   getComposerDraft,
   setComposerDraft,
+  getLastSentPrompt,
+  setLastSentPrompt,
 } from "../composer-draft-store";
 
 describe("composer-draft-store", () => {
@@ -27,5 +29,13 @@ describe("composer-draft-store", () => {
     setComposerDraft("task_d", "draft");
     clearComposerDraft("task_d");
     expect(getComposerDraft("task_d")).toBe("");
+  });
+
+  it("tracks the last sent prompt per task, independent of the draft (MET-94)", () => {
+    setLastSentPrompt("task_e", "sent text");
+    setComposerDraft("task_e", "new draft");
+    expect(getLastSentPrompt("task_e")).toBe("sent text");
+    expect(getComposerDraft("task_e")).toBe("new draft");
+    expect(getLastSentPrompt("task_unknown")).toBe("");
   });
 });
