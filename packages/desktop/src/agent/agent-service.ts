@@ -40,6 +40,7 @@ import {
   agentTasksCollection,
   agentTurnsCollection,
   agentTurnsForTask,
+  type AgentEntry,
   type AgentTaskStatus,
   type AgentTurnStatus,
 } from "./agent-collections";
@@ -463,6 +464,23 @@ export class AgentTask {
       if (turn) this.closeRun(turn);
       this.currentTurn = null;
     }
+  }
+
+  /**
+   * The one insert path for entries mapped from ACP session updates. Live
+   * entries are stamped with wall-clock time; rows belonging to the
+   * synthetic session/load replay turn (stopReason "replay", inserted by
+   * resumeSession before history streams) get NO createdAt — ACP carries
+   * no timestamps (MET-94), so a replayed entry's true time is unknowable
+   * and a revival-time stamp would lie. Ordering never depends on the
+   * stamp (entry ids are mint-ascending).
+   */
+  private insertEntry(row: Omit<AgentEntry, "createdAt">): void {
+    const replayed =
+      agentTurnsCollection.get(row.turnId)?.stopReason === "replay";
+    agentEntriesCollection.insert(
+      replayed ? row : { ...row, createdAt: Date.now() },
+    );
   }
 
   /**
@@ -904,13 +922,12 @@ export class AgentTask {
         // Plans are peers of text/tools; close the open run so a following
         // reply opens a fresh entry after the plan.
         this.closeRun(turn);
-        agentEntriesCollection.insert({
+        this.insertEntry({
           id: newEventId(),
           taskId: this.taskId,
           turnId: turn.turnId,
           type: "plan",
           plan: update,
-          createdAt: Date.now(),
         });
         break;
       }
@@ -922,13 +939,12 @@ export class AgentTask {
         const chunk = contentBlockText(update.content);
         if (!chunk) break;
         this.closeRun(turn);
-        agentEntriesCollection.insert({
+        this.insertEntry({
           id: newEventId(),
           taskId: this.taskId,
           turnId: turn.turnId,
           type: "user",
           text: chunk,
-          createdAt: Date.now(),
         });
         break;
       }
@@ -936,14 +952,13 @@ export class AgentTask {
         // D4: available_commands_update / current_mode_update — not rendered
         // yet, but kept as transcript data rather than dropped. Run
         // boundaries are left alone.
-        agentEntriesCollection.insert({
+        this.insertEntry({
           id: newEventId(),
           taskId: this.taskId,
           turnId: turn.turnId,
           type: "unknown",
           text: update.sessionUpdate,
           raw: update,
-          createdAt: Date.now(),
         });
         break;
     }
@@ -996,7 +1011,7 @@ export class AgentTask {
     if (this.currentTurn) this.closeRun(this.currentTurn);
     const id = newEventId();
     if (toolCallId) this.toolEventIds.set(toolCallId, id);
-    agentEntriesCollection.insert({
+    this.insertEntry({
       id,
       taskId: this.taskId,
       turnId: this.currentTurn?.turnId ?? "",
@@ -1007,7 +1022,6 @@ export class AgentTask {
         title: normalizeMcpToolName(update.title),
         locations: update.locations ?? deriveToolLocations(update.rawInput, this.workspacePath),
       },
-      createdAt: Date.now(),
     });
   }
 
@@ -1042,13 +1056,12 @@ export class AgentTask {
   private appendToRun(turn: TurnState, kind: StreamRun["kind"], text: string): void {
     if (!turn.run || turn.run.kind !== kind) {
       turn.run = { kind, entryId: newEventId(), text };
-      agentEntriesCollection.insert({
+      this.insertEntry({
         id: turn.run.entryId,
         taskId: this.taskId,
         turnId: turn.turnId,
         type: kind,
         text,
-        createdAt: Date.now(),
       });
       return;
     }

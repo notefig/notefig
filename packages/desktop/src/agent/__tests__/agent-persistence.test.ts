@@ -316,6 +316,13 @@ describe("revival via session/load", () => {
       .filter((e) => e.taskId === "task_a")
       .sort((a, b) => (a.id < b.id ? -1 : 1));
     expect(entries.map((e) => e.type)).toEqual(["user", "tool_call", "assistant"]);
+    // Replayed entries carry NO createdAt (MET-94): ACP has no timestamps,
+    // and a revival-time stamp would lie.
+    expect(entries.map((e) => e.createdAt)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
     expect(agentTasksCollection.get("task_a")!.status).toBe("idle");
 
     agent.onPrompt = async () => ({ stopReason: "end_turn" });
@@ -326,6 +333,11 @@ describe("revival via session/load", () => {
       );
       expect(turns.length).toBe(1);
     });
+    // …while live entries after the revival are stamped as usual.
+    const liveUser = agentEntriesCollection.toArray.find(
+      (e) => e.taskId === "task_a" && e.text === "follow-up",
+    );
+    expect(liveUser?.createdAt).toBeTypeOf("number");
     await disposeWorkspaceTaskManager("/ws");
   });
 

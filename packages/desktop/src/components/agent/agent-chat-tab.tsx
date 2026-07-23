@@ -472,9 +472,12 @@ function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
           iconClassName="size-3"
           className="p-0.5 text-[10px]"
         />
-        <span className="text-[10px] tabular-nums text-muted-foreground">
-          {formatEntryTime(entry.createdAt)}
-        </span>
+        {/* Replayed history has no createdAt — no time beats a wrong one. */}
+        {entry.createdAt !== undefined && (
+          <span className="text-[10px] tabular-nums text-muted-foreground">
+            {formatEntryTime(entry.createdAt)}
+          </span>
+        )}
       </div>
     </div>
   );

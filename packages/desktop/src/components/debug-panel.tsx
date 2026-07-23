@@ -602,7 +602,12 @@ function DebugPanelContent({
 
     lines.push(`── Transcript (${sessionEntries.length} entries) ──`);
     for (const entry of sessionEntries) {
-      const time = new Date(entry.createdAt).toISOString();
+      // Replayed entries carry no createdAt (MET-94) — and toISOString()
+      // on an Invalid Date throws, so this guard keeps the report alive.
+      const time =
+        entry.createdAt !== undefined
+          ? new Date(entry.createdAt).toISOString()
+          : "replayed";
       switch (entry.type) {
         case "user":
         case "assistant":
