@@ -466,6 +466,27 @@ export const PromptBlob = memo(function PromptBlob({
 });
 
 /**
+ * The shared first half of Stop and Escape-cancel: resolve the widget's
+ * bound round, and when it's still queued withdraw it (which returns the
+ * prompt text to the composing face — not an empty box, MET-94). Returns
+ * the bound task for the caller's running-turn handling, or null when
+ * there was nothing left to act on (unbound, or withdrawn here).
+ */
+function withdrawIfQueued(
+  blobId: string,
+  restorePromptToDraft: () => void,
+): { taskId: string } | null {
+  const { boundTaskId, boundTurnId } = getPromptBlob(blobId);
+  if (!boundTaskId || !boundTurnId) return null;
+  if (agentTurnsCollection.get(boundTurnId)?.status === "queued") {
+    removeQueuedPrompt(boundTaskId, boundTurnId);
+    restorePromptToDraft();
+    return null;
+  }
+  return { taskId: boundTaskId };
+}
+
+/**
  * The widget's imperative actions, extracted from PromptBlob so the
  * component body stays layout + phase branching (the callbacks were the
  * bulk of its size). Every callback reads the module store / collections at
@@ -638,16 +659,8 @@ function usePromptBlobActions({
   }, [editPrompt, send]);
 
   const stop = useCallback(() => {
-    const { boundTaskId, boundTurnId } = getPromptBlob(blobId);
-    if (!boundTaskId || !boundTurnId) return;
-    if (agentTurnsCollection.get(boundTurnId)?.status === "queued") {
-      removeQueuedPrompt(boundTaskId, boundTurnId);
-      // Withdrawing returns to the composing face — with the prompt text
-      // back in it, not an empty box (MET-94).
-      restorePromptToDraft();
-    } else {
-      void cancelAgentTask(boundTaskId);
-    }
+    const running = withdrawIfQueued(blobId, restorePromptToDraft);
+    if (running) void cancelAgentTask(running.taskId);
   }, [blobId, restorePromptToDraft]);
 
   // Escape while in flight (MET-94): cancel the turn and — when the agent
@@ -659,13 +672,9 @@ function usePromptBlobActions({
   // face, no restore — the prompt is right there in the round). A queued
   // turn is withdrawn, which already deletes its rows.
   const cancelAndRestore = useCallback(() => {
-    const { boundTaskId, boundTurnId } = getPromptBlob(blobId);
-    if (!boundTaskId || !boundTurnId) return;
-    if (agentTurnsCollection.get(boundTurnId)?.status === "queued") {
-      removeQueuedPrompt(boundTaskId, boundTurnId);
-      restorePromptToDraft();
-    } else {
-      void cancelAgentTurnAndForget(boundTaskId).then((forgot) => {
+    const running = withdrawIfQueued(blobId, restorePromptToDraft);
+    if (running) {
+      void cancelAgentTurnAndForget(running.taskId).then((forgot) => {
         if (forgot) restorePromptToDraft();
       });
     }

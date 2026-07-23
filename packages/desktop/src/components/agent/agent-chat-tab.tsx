@@ -109,7 +109,6 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
 
   const taskRow = useTaskRow(taskId);
   const isRunning = taskRow?.status === "running";
-  const isUnavailable = taskRow?.status === "unavailable";
   // The session/load window (MET-54): a restored row waiting for its revive,
   // or one whose revival is mid-flight ("starting" + a sessionId — a brand
   // new task spawns as "starting" but has no sessionId yet). History is
@@ -163,16 +162,7 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
   // auth cards stack above the prompt box); the transcript pads its scroll
   // end by this much so no entry ever sits underneath the overlay.
   const [composerEl, setComposerEl] = useState<HTMLDivElement | null>(null);
-  const [composerHeight, setComposerHeight] = useState(0);
-  useEffect(() => {
-    if (!composerEl) return;
-    const observer = new ResizeObserver(() =>
-      setComposerHeight(composerEl.offsetHeight),
-    );
-    observer.observe(composerEl);
-    setComposerHeight(composerEl.offsetHeight);
-    return () => observer.disconnect();
-  }, [composerEl]);
+  const composerHeight = useMeasuredHeight(composerEl);
 
   // The tab can outlive the task row for a frame (workspace teardown clears
   // rows before the layout prunes the tab).
@@ -189,45 +179,98 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
     // its own positioning context for the absolute composer overlay.
     <div className="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
       <Transcript taskId={taskId} bottomInset={composerHeight} />
+      <ComposerOverlay
+        containerRef={setComposerEl}
+        taskRow={taskRow}
+        draft={draft}
+        onChangeDraft={setDraft}
+        onSend={sendPrompt}
+        onStop={stopTask}
+        onCancelRestore={cancelAndRestore}
+        isRunning={isRunning}
+        isLoadingSession={isLoadingSession}
+      />
+    </div>
+  );
+}
 
-      {/* Floating composer pinned to the bottom of the tab. The gradient
-          fades the transcript out behind it; the wrapper is click-through
-          (pointer-events-none) so only the cards inside catch pointers.
-          Measured so the transcript can pad past it — the overlay grows
-          when permission/auth cards stack above the prompt box. */}
-      <div
-        ref={setComposerEl}
-        className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-2 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-3 pt-10"
-      >
-        {/* Bare shimmer text, no pill/spinner — the transcript is flat,
-            and so is its thinking indicator. */}
-        {isRunning && (
-          <span
-            role="status"
-            className="shimmer pointer-events-auto self-start px-1 text-xs text-muted-foreground"
-          >
-            {t("agentWorking")}
-          </span>
-        )}
-        <div className="pointer-events-auto empty:hidden">
-          <PermissionCard taskId={taskId} />
-        </div>
-        {taskRow.authRequired && <AuthCard task={taskRow} />}
-        {isUnavailable ? (
-          <UnavailableCard taskId={taskId} />
-        ) : (
-          <PromptBox
-            value={draft}
-            onChange={setDraft}
-            onSend={sendPrompt}
-            onStop={stopTask}
-            onCancelRestore={cancelAndRestore}
-            isRunning={isRunning}
-            disabled={isLoadingSession}
-            harnessId={taskRow.harnessId}
-          />
-        )}
+/** An element's live rendered height, tracked through a ResizeObserver
+ *  (0 until the element mounts and is first measured). */
+function useMeasuredHeight(element: HTMLElement | null): number {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    if (!element) return;
+    const observer = new ResizeObserver(() => setHeight(element.offsetHeight));
+    observer.observe(element);
+    setHeight(element.offsetHeight);
+    return () => observer.disconnect();
+  }, [element]);
+  return height;
+}
+
+/**
+ * Floating composer pinned to the bottom of the tab: working shimmer,
+ * permission/auth cards, then the prompt box (or the unavailable notice).
+ * The gradient fades the transcript out behind it; the wrapper is
+ * click-through (pointer-events-none) so only the cards inside catch
+ * pointers. Measured via containerRef so the transcript can pad past it —
+ * the overlay grows when permission/auth cards stack above the prompt box.
+ */
+function ComposerOverlay({
+  containerRef,
+  taskRow,
+  draft,
+  onChangeDraft,
+  onSend,
+  onStop,
+  onCancelRestore,
+  isRunning,
+  isLoadingSession,
+}: {
+  containerRef: (el: HTMLDivElement | null) => void;
+  taskRow: AgentTaskRow;
+  draft: string;
+  onChangeDraft: (value: string) => void;
+  onSend: () => void;
+  onStop: () => void;
+  onCancelRestore: () => void;
+  isRunning: boolean;
+  isLoadingSession: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      ref={containerRef}
+      className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-2 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-3 pt-10"
+    >
+      {/* Bare shimmer text, no pill/spinner — the transcript is flat,
+          and so is its thinking indicator. */}
+      {isRunning && (
+        <span
+          role="status"
+          className="shimmer pointer-events-auto self-start px-1 text-xs text-muted-foreground"
+        >
+          {t("agentWorking")}
+        </span>
+      )}
+      <div className="pointer-events-auto empty:hidden">
+        <PermissionCard taskId={taskRow.taskId} />
       </div>
+      {taskRow.authRequired && <AuthCard task={taskRow} />}
+      {taskRow.status === "unavailable" ? (
+        <UnavailableCard taskId={taskRow.taskId} />
+      ) : (
+        <PromptBox
+          value={draft}
+          onChange={onChangeDraft}
+          onSend={onSend}
+          onStop={onStop}
+          onCancelRestore={onCancelRestore}
+          isRunning={isRunning}
+          disabled={isLoadingSession}
+          harnessId={taskRow.harnessId}
+        />
+      )}
     </div>
   );
 }
@@ -406,7 +449,6 @@ function Transcript({
 
 /** Render one transcript entry by type; tool calls are peers of text. */
 function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
-  const { t } = useTranslation();
   if (entry.type === "tool_call") {
     if (!entry.toolCall) return null;
     const CustomCard = TOOL_NAME_RENDERER[entry.toolCall.title ?? ""];
@@ -420,11 +462,24 @@ function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
   if (entry.type === "thought") return <ThoughtEntry text={entry.text} />;
   if (entry.type === "unknown") return null; // kept as transcript data only (D4)
 
-  const isUser = entry.type === "user";
   // trim(): models emit whitespace-only chunks around tool calls (a "\n\n"
   // run closed by a tool_call renders as an empty bubble otherwise), and
   // leading/trailing newlines would show inside whitespace-pre-wrap bubbles.
   if (!entry.text?.trim()) return null;
+  return <MessageEntry entry={entry} queued={queued} />;
+}
+
+/** A user or assistant text message: compact bubble (user) or flat
+ *  full-width text (assistant, opencode-style), plus the hover footer. */
+function MessageEntry({
+  entry,
+  queued,
+}: {
+  entry: AgentEntry;
+  queued?: boolean;
+}) {
+  const isUser = entry.type === "user";
+  const text = entry.text?.trim() ?? "";
   return (
     <div
       className={cn(
@@ -443,47 +498,69 @@ function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
           queued && "opacity-70",
         )}
       >
-        {entry.text.trim()}
-        {queued && (
-          <span className="mt-1 flex items-center justify-end gap-1.5">
-            <span className="rounded-full bg-primary-foreground/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
-              {t("agentQueuedBadge")}
-            </span>
-            <button
-              type="button"
-              title={t("agentRemoveFromQueue")}
-              aria-label={t("agentRemoveFromQueue")}
-              className="rounded-full p-0.5 hover:bg-primary-foreground/20"
-              onClick={() => removeQueuedPrompt(entry.taskId, entry.turnId)}
-            >
-              <X className="size-3" />
-            </button>
-          </span>
-        )}
+        {text}
+        {queued && <QueuedBadge taskId={entry.taskId} turnId={entry.turnId} />}
       </div>
-      {/* Hover-revealed message footer (opencode-style, MET-94): copy +
-          timestamp for now; revert and the model name join it later. The
-          row always occupies its height so revealing it never reflows
-          the transcript — only opacity changes. */}
-      <div
-        className={cn(
-          "flex items-center gap-1.5 px-1 pt-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100",
-          isUser && "flex-row-reverse",
-        )}
+      <MessageFooter text={text} createdAt={entry.createdAt} isUser={isUser} />
+    </div>
+  );
+}
+
+/** "queued" chip + withdraw ✕ inside a queued user bubble. */
+function QueuedBadge({ taskId, turnId }: { taskId: string; turnId: string }) {
+  const { t } = useTranslation();
+  return (
+    <span className="mt-1 flex items-center justify-end gap-1.5">
+      <span className="rounded-full bg-primary-foreground/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+        {t("agentQueuedBadge")}
+      </span>
+      <button
+        type="button"
+        title={t("agentRemoveFromQueue")}
+        aria-label={t("agentRemoveFromQueue")}
+        className="rounded-full p-0.5 hover:bg-primary-foreground/20"
+        onClick={() => removeQueuedPrompt(taskId, turnId)}
       >
-        <CopyTextButton
-          text={entry.text.trim()}
-          withLabel
-          iconClassName="size-3"
-          className="p-0.5 text-[10px]"
-        />
-        {/* Replayed history has no createdAt — no time beats a wrong one. */}
-        {entry.createdAt !== undefined && (
-          <span className="text-[10px] tabular-nums text-muted-foreground">
-            {formatEntryTime(entry.createdAt)}
-          </span>
-        )}
-      </div>
+        <X className="size-3" />
+      </button>
+    </span>
+  );
+}
+
+/**
+ * Hover-revealed message footer (opencode-style, MET-94): copy + timestamp
+ * for now; revert and the model name join it later. The row always occupies
+ * its height so revealing it never reflows the transcript — only opacity
+ * changes.
+ */
+function MessageFooter({
+  text,
+  createdAt,
+  isUser,
+}: {
+  text: string;
+  createdAt?: number;
+  isUser: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-1.5 px-1 pt-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100",
+        isUser && "flex-row-reverse",
+      )}
+    >
+      <CopyTextButton
+        text={text}
+        withLabel
+        iconClassName="size-3"
+        className="p-0.5 text-[10px]"
+      />
+      {/* Replayed history has no createdAt — no time beats a wrong one. */}
+      {createdAt !== undefined && (
+        <span className="text-[10px] tabular-nums text-muted-foreground">
+          {formatEntryTime(createdAt)}
+        </span>
+      )}
     </div>
   );
 }
