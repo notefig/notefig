@@ -249,16 +249,20 @@ export function deriveTouchedFiles(
  * The composer's keydown decision, pure so it's testable without mounting
  * the textarea. Enter (no Shift) always submits — send() itself no-ops on
  * an empty/sending draft, so this never needs to know draft state to decide
- * "send". Escape and "/" only special-case to "revert" (turn back into a
- * literal "/") when the draft is empty and the widget is summoned; a
- * non-empty draft on Escape falls back to "escape" (return focus to the doc,
- * draft kept). Backspace on an empty, summoned composer dismisses the
- * widget entirely (no literal "/" left behind) — `canRevert` doubles as the
+ * "send"; while a turn runs, sending queues, so Enter still wins over
+ * `inFlight`. Escape with a turn in flight is "cancelRestore" (MET-94):
+ * cancel the turn and put the sent prompt back into the composer. Idle
+ * Escape and "/" only special-case to "revert" (turn back into a literal
+ * "/") when the draft is empty and the widget is summoned; a non-empty
+ * draft on Escape falls back to "escape" (return focus to the doc, draft
+ * kept). Backspace on an empty, summoned composer dismisses the widget
+ * entirely (no literal "/" left behind) — `canRevert` doubles as the
  * "summoned instances only" guard for both, since it's already exactly
  * that condition (see revertToSlash in prompt-blob.tsx).
  */
 export type ComposerKeyAction =
   | { type: "send" }
+  | { type: "cancelRestore" }
   | { type: "revert" }
   | { type: "backspaceDismiss" }
   | { type: "escape" }
@@ -269,10 +273,12 @@ export function deriveComposerKeyAction(params: {
   shiftKey: boolean;
   draftEmpty: boolean;
   canRevert: boolean;
+  inFlight: boolean;
 }): ComposerKeyAction {
-  const { key, shiftKey, draftEmpty, canRevert } = params;
+  const { key, shiftKey, draftEmpty, canRevert, inFlight } = params;
   if (key === "Enter" && !shiftKey) return { type: "send" };
   if (key === "Escape") {
+    if (inFlight) return { type: "cancelRestore" };
     return draftEmpty && canRevert ? { type: "revert" } : { type: "escape" };
   }
   // The "//" path: a second "/" right after summoning means the user

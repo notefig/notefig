@@ -396,6 +396,8 @@ i18n
           agentSend: "Send (⏎)",
           agentQueue: "Queue (⏎)",
           agentStop: "Stop",
+          copyMessage: "Copy message",
+          copied: "Copied",
           agentAuthoredBlob: "authored a {{type}} in",
           agentTerminal: "Terminal {{id}}",
           agentContentOfType: "{{type}} content",

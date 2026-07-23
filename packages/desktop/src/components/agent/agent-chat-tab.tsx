@@ -63,6 +63,7 @@ import {
 import {
   authenticateAgentTask,
   cancelAgentTask,
+  cancelAgentTurnAndForget,
   deleteAgentSession,
   promptAgentTask,
   removeQueuedPrompt,
@@ -75,7 +76,11 @@ import {
   clearComposerDraft,
   getComposerDraft,
   setComposerDraft,
+  getLastSentPrompt,
+  setLastSentPrompt,
 } from "./composer-draft-store";
+import { deriveComposerKeyAction } from "./prompt-blob-state";
+import { CopyTextButton } from "./copy-text-button";
 import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
 
 /**
@@ -116,6 +121,7 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
     const text = draft.trim();
     if (!text) return;
     promptAgentTask(taskId, text);
+    setLastSentPrompt(taskId, text);
     setDraftState("");
     clearComposerDraft(taskId);
   }, [draft, taskId]);
@@ -123,6 +129,22 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
   const stopTask = useCallback(() => {
     void cancelAgentTask(taskId);
   }, [taskId]);
+
+  // Escape while a turn runs (MET-94): cancel it and — when the agent
+  // hadn't responded yet — drop its round from the transcript and put the
+  // sent prompt back into the composer. Once a response exists the round
+  // stays (forgetting it would hide context the session still holds) and
+  // nothing is restored: the prompt is right there in the round. The
+  // restore never clobbers a half-typed follow-up, and reads the draft
+  // store at resolve time — the closure's `draft` predates the await.
+  const cancelAndRestore = useCallback(() => {
+    void cancelAgentTurnAndForget(taskId).then((forgot) => {
+      if (!forgot) return;
+      if (getComposerDraft(taskId).trim() !== "") return;
+      const lastSent = getLastSentPrompt(taskId);
+      if (lastSent) setDraft(lastSent);
+    });
+  }, [taskId, setDraft]);
 
   // The floating composer overlay's live height (it grows when permission/
   // auth cards stack above the prompt box); the transcript pads its scroll
@@ -187,6 +209,7 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
             onChange={setDraft}
             onSend={sendPrompt}
             onStop={stopTask}
+            onCancelRestore={cancelAndRestore}
             isRunning={isRunning}
             harnessId={taskRow.harnessId}
           />
@@ -400,7 +423,12 @@ function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
   // leading/trailing newlines would show inside whitespace-pre-wrap bubbles.
   if (!entry.text?.trim()) return null;
   return (
-    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+    <div
+      className={cn(
+        "group flex flex-col",
+        isUser ? "items-end" : "items-start",
+      )}
+    >
       <div
         className={cn(
           "max-w-[85%] select-text whitespace-pre-wrap rounded-lg px-3 py-2 text-sm",
@@ -428,8 +456,37 @@ function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
           </span>
         )}
       </div>
+      {/* Hover-revealed message footer (opencode-style, MET-94): copy +
+          timestamp for now; revert and the model name join it later. The
+          row always occupies its height so revealing it never reflows
+          the transcript — only opacity changes. */}
+      <div
+        className={cn(
+          "flex items-center gap-1.5 px-1 pt-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100",
+          isUser && "flex-row-reverse",
+        )}
+      >
+        <CopyTextButton
+          text={entry.text.trim()}
+          withLabel
+          iconClassName="size-3"
+          className="p-0.5 text-[10px]"
+        />
+        <span className="text-[10px] tabular-nums text-muted-foreground">
+          {formatEntryTime(entry.createdAt)}
+        </span>
+      </div>
     </div>
   );
+}
+
+/** The footer's clock time; the transcript is a single day's scroll in
+ *  practice, so hour:minute is enough context. */
+function formatEntryTime(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 /** Compact checklist for a `plan` session update (ACP entries: content/priority/status). */
@@ -691,6 +748,7 @@ function PromptBox({
   onChange,
   onSend,
   onStop,
+  onCancelRestore,
   isRunning,
   harnessId,
 }: {
@@ -698,6 +756,8 @@ function PromptBox({
   onChange: (value: string) => void;
   onSend: () => void;
   onStop: () => void;
+  /** Escape while a turn runs: cancel it and restore the sent prompt. */
+  onCancelRestore: () => void;
   isRunning: boolean;
   harnessId: string;
 }) {
@@ -718,10 +778,20 @@ function PromptBox({
         // dockable container, the way editors self-focus on tab-select.
         autoFocus
         onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            onSend();
-          }
+          const action = deriveComposerKeyAction({
+            key: event.key,
+            shiftKey: event.shiftKey,
+            draftEmpty: value.trim().length === 0,
+            canRevert: false,
+            inFlight: isRunning,
+          });
+          // Idle "escape" stays a no-op here — the chat tab has no
+          // document editor to hand focus back to.
+          if (action.type !== "send" && action.type !== "cancelRestore")
+            return;
+          event.preventDefault();
+          if (action.type === "send") onSend();
+          else onCancelRestore();
         }}
         placeholder={t("agentPromptPlaceholder")}
         rows={2}

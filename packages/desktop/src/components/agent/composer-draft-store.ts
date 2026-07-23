@@ -19,3 +19,19 @@ export function setComposerDraft(taskId: string, draft: string): void {
 export function clearComposerDraft(taskId: string): void {
   drafts.delete(taskId);
 }
+
+/**
+ * The last prompt actually sent per session, so Escape-to-cancel (MET-94)
+ * can restore it into the composer after the send cleared the draft. Same
+ * lifetime story as the drafts above.
+ */
+const lastSentPrompts = new Map<string, string>();
+
+export function getLastSentPrompt(taskId: string): string {
+  return lastSentPrompts.get(taskId) ?? "";
+}
+
+export function setLastSentPrompt(taskId: string, text: string): void {
+  if (text) lastSentPrompts.set(taskId, text);
+  else lastSentPrompts.delete(taskId);
+}

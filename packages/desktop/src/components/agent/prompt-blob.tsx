@@ -14,6 +14,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { useLiveQuery, eq, and } from "@tanstack/react-db";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import { useTranslation } from "react-i18next";
 import {
   Check,
@@ -47,7 +48,11 @@ import {
   agentTurnsCollection,
 } from "@/agent/agent-collections";
 import { agents } from "@/agent/agents";
-import { cancelAgentTask, removeQueuedPrompt } from "@/agent/agent-service";
+import {
+  cancelAgentTask,
+  cancelAgentTurnAndForget,
+  removeQueuedPrompt,
+} from "@/agent/agent-service";
 import { getRegisteredTask } from "@/agent/task-registry";
 import type { WidgetResponse } from "@/agent/tools/widget-respond";
 import { ensureAgentRuntime } from "@/agent/tunnel/require-connection";
@@ -56,6 +61,7 @@ import { suppressEditorFocus } from "@/components/editor/editor-store";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "./harness-logo";
 import { AuthCard } from "./agent-chat-tab";
+import { CopyTextButton } from "./copy-text-button";
 import { PermissionCard } from "./permission-card";
 import {
   getOrStartSharedSession,
@@ -86,6 +92,31 @@ import {
   blobCardClass,
   type BlobPhase,
 } from "./prompt-blob-state";
+
+/**
+ * Which mounted widgets currently have a turn in flight, blobId → bound
+ * turnId. Several widgets in one document can be in flight at once, and
+ * each registers the same global Escape hotkey — the one bound to the
+ * newest turn (ids are ascending, same ordering deriveQueuePosition
+ * relies on) is the one Escape acts on.
+ */
+const inFlightEscapeClaims = new Map<string, string>();
+
+function claimInFlightEscape(blobId: string, turnId: string): () => void {
+  inFlightEscapeClaims.set(blobId, turnId);
+  return () => {
+    inFlightEscapeClaims.delete(blobId);
+  };
+}
+
+function holdsLatestInFlightEscape(blobId: string): boolean {
+  const mine = inFlightEscapeClaims.get(blobId);
+  if (!mine) return false;
+  for (const turnId of inFlightEscapeClaims.values()) {
+    if (turnId > mine) return false;
+  }
+  return true;
+}
 
 /**
  * The inline prompt blob: the primary prompting surface, hosted by the
@@ -151,6 +182,7 @@ export const PromptBlob = memo(function PromptBlob({
     editPrompt,
     retry,
     stop,
+    cancelAndRestore,
     dismiss,
     revertToSlash,
     backspaceDismiss,
@@ -219,6 +251,35 @@ export const PromptBlob = memo(function PromptBlob({
     hasPendingPermission: pendingPermissions.length > 0,
     isSending,
   });
+
+  // Escape anywhere cancels this widget's in-flight turn and restores the
+  // prompt into the composer (MET-94). A global hotkey, not a card-level
+  // keydown: after send the composer unmounts and focus returns to the
+  // document, so no element inside the widget could hear the key. The dock
+  // unmounting unselected tabs scopes it to the visible document for free;
+  // "sending" is excluded (nothing to cancel yet — the dispatch is still
+  // racing the session spawn, a sub-second window).
+  const inFlight =
+    phase === "queued" ||
+    phase === "running" ||
+    phase === "needs-permission" ||
+    phase === "needs-auth";
+  useEffect(() => {
+    if (!inFlight || !boundTurnId) return;
+    return claimInFlightEscape(blobId, boundTurnId);
+  }, [inFlight, boundTurnId, blobId]);
+  useHotkey(
+    "Escape",
+    (event) => {
+      // A layer that consumed the key (dialog/menu dismissal) wins.
+      if (event.defaultPrevented) return;
+      if (!holdsLatestInFlightEscape(blobId)) return;
+      cancelAndRestore();
+    },
+    // 'allow': several widgets can legitimately hold this registration;
+    // the latest-sent claim decides which one acts.
+    { enabled: inFlight, conflictBehavior: "allow" },
+  );
 
   // Stale bound turn (app restart / task disposed): rows are gone — unbind
   // and fall back to composing instead of rendering a dead shell.
@@ -445,6 +506,19 @@ function usePromptBlobActions({
     [blobId],
   );
 
+  // Unbind and pull the sent prompt back into the composer, then focus it.
+  // A draft already being typed (a half-written reply) always wins over the
+  // restored prompt. Shared by Edit, Escape-cancel, and queued-Stop.
+  const restorePromptToDraft = useCallback(() => {
+    const current = getPromptBlob(blobId);
+    updatePromptBlob(blobId, {
+      draft: current.draft || current.lastSentPrompt,
+      boundTurnId: null,
+      boundTaskId: null,
+    });
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [blobId, textareaRef]);
+
   // The one prompt dispatch both send paths share: they differ only in
   // which task they target and whether the rebind captures it. The
   // widget-context facts are read fresh on every call — a reply may follow
@@ -543,21 +617,16 @@ function usePromptBlobActions({
   // Edit: pull the sent prompt back into the composer. A queued turn is
   // withdrawn; a running/finished one keeps going — re-send is a new turn.
   const editPrompt = useCallback(() => {
-    const current = getPromptBlob(blobId);
+    const { boundTaskId, boundTurnId } = getPromptBlob(blobId);
     if (
-      current.boundTaskId &&
-      current.boundTurnId &&
-      agentTurnsCollection.get(current.boundTurnId)?.status === "queued"
+      boundTaskId &&
+      boundTurnId &&
+      agentTurnsCollection.get(boundTurnId)?.status === "queued"
     ) {
-      removeQueuedPrompt(current.boundTaskId, current.boundTurnId);
+      removeQueuedPrompt(boundTaskId, boundTurnId);
     }
-    updatePromptBlob(blobId, {
-      draft: current.draft || current.lastSentPrompt,
-      boundTurnId: null,
-      boundTaskId: null,
-    });
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [blobId, textareaRef]);
+    restorePromptToDraft();
+  }, [blobId, restorePromptToDraft]);
 
   // Retry: pull the failed prompt back into the composer and immediately
   // re-send it, no re-typing required. editPrompt writes the restored draft
@@ -573,11 +642,34 @@ function usePromptBlobActions({
     if (!boundTaskId || !boundTurnId) return;
     if (agentTurnsCollection.get(boundTurnId)?.status === "queued") {
       removeQueuedPrompt(boundTaskId, boundTurnId);
-      clearPromptBlobTurn(blobId);
+      // Withdrawing returns to the composing face — with the prompt text
+      // back in it, not an empty box (MET-94).
+      restorePromptToDraft();
     } else {
       void cancelAgentTask(boundTaskId);
     }
-  }, [blobId]);
+  }, [blobId, restorePromptToDraft]);
+
+  // Escape while in flight (MET-94): cancel the turn and — when the agent
+  // hadn't responded yet — return to the composing face with the prompt
+  // restored, its round forgotten (the restored prompt must not also
+  // linger in the history it was pulled out of). Once a response exists
+  // the round is real: forgetting it would hide context the session still
+  // holds, so Escape then degrades to Stop (stay bound, "Stopped" done
+  // face, no restore — the prompt is right there in the round). A queued
+  // turn is withdrawn, which already deletes its rows.
+  const cancelAndRestore = useCallback(() => {
+    const { boundTaskId, boundTurnId } = getPromptBlob(blobId);
+    if (!boundTaskId || !boundTurnId) return;
+    if (agentTurnsCollection.get(boundTurnId)?.status === "queued") {
+      removeQueuedPrompt(boundTaskId, boundTurnId);
+      restorePromptToDraft();
+    } else {
+      void cancelAgentTurnAndForget(boundTaskId).then((forgot) => {
+        if (forgot) restorePromptToDraft();
+      });
+    }
+  }, [blobId, restorePromptToDraft]);
 
   // In a doc with real content the widget is transient — ✕ removes the
   // node outright. In an empty doc removal is pointless (the keeper would
@@ -617,6 +709,7 @@ function usePromptBlobActions({
     editPrompt,
     retry,
     stop,
+    cancelAndRestore,
     dismiss,
     revertToSlash,
     backspaceDismiss,
@@ -721,6 +814,7 @@ function Composer({
               shiftKey: event.shiftKey,
               draftEmpty: draft.trim().length === 0,
               canRevert: onRevert !== undefined,
+              inFlight: false,
             });
             if (action.type === "none") return;
             event.preventDefault();
@@ -954,6 +1048,7 @@ function ReplyRow({
           shiftKey: event.shiftKey,
           draftEmpty: draft.trim().length === 0,
           canRevert: false,
+          inFlight: false,
         });
         if (action.type === "none") return;
         event.preventDefault();
@@ -1080,6 +1175,13 @@ function DoneState({
           isIssue={isIssue}
           onToggle={() => setExpanded((value) => !value)}
         />
+        {body && (
+          <CopyTextButton
+            text={body}
+            className="p-0.5"
+            iconClassName="size-3"
+          />
+        )}
         <button
           type="button"
           title={t("promptBlobOpenChat")}
