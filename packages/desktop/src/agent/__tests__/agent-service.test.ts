@@ -350,6 +350,72 @@ describe("AgentTask vertical slice", () => {
     await vi.waitFor(() => expect(outcome).toEqual({ outcome: "cancelled" }));
   });
 
+  it("cancelAndForgetTurn deletes a response-less round's rows, earlier rounds stay (MET-94)", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    let releaseSecond!: () => void;
+    const secondGate = new Promise<void>((r) => (releaseSecond = r));
+    let promptCount = 0;
+    agent.onPrompt = async () => {
+      if (promptCount++ === 0) return { stopReason: "end_turn" };
+      // No output before the gate — the user escapes before any response.
+      await secondGate;
+      return { stopReason: "cancelled" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "keep me");
+    const keptEntries = entriesFor(task.taskId).length;
+
+    task.prompt("doomed prompt");
+    await vi.waitFor(() =>
+      expect(entriesFor(task.taskId).length).toBeGreaterThan(keptEntries),
+    );
+
+    await expect(task.cancelAndForgetTurn()).resolves.toBe(true);
+    releaseSecond();
+
+    // The aborted round vanished — turn row and entries alike — while the
+    // completed first round is untouched.
+    expect(turnFor(task.taskId)).toHaveLength(1);
+    expect(turnFor(task.taskId)[0].status).toBe("completed");
+    expect(entriesFor(task.taskId)).toHaveLength(keptEntries);
+    expect(textFor(task.taskId, "user")).toBe("keep me");
+  });
+
+  it("cancelAndForgetTurn keeps the round once the agent has responded (MET-94)", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    agent.onPrompt = async (_params, a) => {
+      a.update("sess_test", {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "partial output" },
+      });
+      await gate;
+      return { stopReason: "cancelled" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    task.prompt("interrupted late");
+    await vi.waitFor(() =>
+      expect(textFor(task.taskId, "assistant")).toBe("partial output"),
+    );
+
+    // A response exists — forgetting would hide context the session still
+    // holds, so the round stays as a plain cancelled turn.
+    await expect(task.cancelAndForgetTurn()).resolves.toBe(false);
+    release();
+
+    expect(turnFor(task.taskId)).toHaveLength(1);
+    expect(turnFor(task.taskId)[0].status).toBe("cancelled");
+    expect(textFor(task.taskId, "user")).toBe("interrupted late");
+    expect(textFor(task.taskId, "assistant")).toBe("partial output");
+  });
+
   it("queues prompts sent during a running turn FIFO — none dropped", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);

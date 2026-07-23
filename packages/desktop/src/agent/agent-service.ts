@@ -1101,6 +1101,34 @@ export class AgentTask {
     }
   }
 
+  /**
+   * cancel(), then delete the aborted running turn's transcript rows — the
+   * Escape-to-restore path (MET-94): the prompt text goes back into the
+   * composer, so its round must not linger in the history it was pulled
+   * out of (mirrors removeQueuedPrompt's row cleanup for queued turns).
+   *
+   * Forgetting is only coherent while the agent hasn't responded yet: once
+   * assistant output / tool calls exist, the harness's session context
+   * contains a real exchange, and hiding it would leave the transcript
+   * disagreeing with what the agent knows. So the responded check runs
+   * AFTER cancel() resolves (finishTurn has settled the rows by then —
+   * race-free), and a turn with any non-user entry keeps its rows as a
+   * plain cancelled round. Returns whether the turn was forgotten, so the
+   * caller knows whether to restore the prompt into the composer.
+   */
+  async cancelAndForgetTurn(): Promise<boolean> {
+    const turnId = this.currentTurn?.turnId;
+    await this.cancel();
+    if (!turnId) return false;
+    const turnEntries = agentEntriesForTask(this.taskId).filter(
+      (entry) => entry.turnId === turnId,
+    );
+    if (turnEntries.some((entry) => entry.type !== "user")) return false;
+    for (const entry of turnEntries) agentEntriesCollection.delete(entry.id);
+    agentTurnsCollection.delete(turnId);
+    return true;
+  }
+
   get authHint(): string | undefined {
     return this.authHintValue;
   }
@@ -1420,6 +1448,19 @@ export function removeQueuedPrompt(taskId: string, turnId: string): void {
 /** Cancel a task's running turn and pending permissions. */
 export async function cancelAgentTask(taskId: string): Promise<void> {
   await getRegisteredTask(taskId)?.cancel();
+}
+
+/**
+ * Cancel the running turn and, if the agent hadn't responded yet, remove
+ * its rows from the transcript — Escape-to-restore (MET-94). Resolves true
+ * when the turn was forgotten (the caller should restore the prompt into
+ * the composer); false when a response already existed and the round stays
+ * as a plain cancelled turn.
+ */
+export async function cancelAgentTurnAndForget(
+  taskId: string,
+): Promise<boolean> {
+  return (await getRegisteredTask(taskId)?.cancelAndForgetTurn()) ?? false;
 }
 
 /**
