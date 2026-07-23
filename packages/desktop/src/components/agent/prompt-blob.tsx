@@ -487,33 +487,23 @@ function withdrawIfQueued(
 }
 
 /**
- * The widget's imperative actions, extracted from PromptBlob so the
- * component body stays layout + phase branching (the callbacks were the
- * bulk of its size). Every callback reads the module store / collections at
- * call time rather than closing over live-query rows, so the hook needs no
- * reactive inputs and its callbacks stay stable across phase changes.
+ * The widget's send paths (round one + reply), split out of
+ * usePromptBlobActions so each hook stays readable: this one owns the
+ * trust gate, the in-flight flag, and the prompt dispatch; the parent
+ * composes it with the withdraw/restore/dismiss actions.
  */
-function usePromptBlobActions({
+function usePromptSendActions({
   blobId,
   workspacePath,
   documentPath,
   editor,
   getPos,
-  summoned,
-  removeNode,
-  textareaRef,
 }: {
   blobId: string;
   workspacePath: string;
   documentPath: string;
   editor: Editor;
   getPos?: () => number | undefined;
-  summoned: boolean;
-  removeNode?: (options?: {
-    insertSlash?: boolean;
-    restoreParagraph?: boolean;
-  }) => void;
-  textareaRef: React.RefObject<HTMLTextAreaElement>;
 }) {
   const { t } = useTranslation();
   const { defaultHarness } = useDefaultHarness();
@@ -521,24 +511,6 @@ function usePromptBlobActions({
   const trustKey = `trust:${normalizePath(workspacePath)}`;
   const [isSending, setIsSending] = useState(false);
   const [confirmTrust, setConfirmTrust] = useState(false);
-
-  const setDraft = useCallback(
-    (draft: string) => updatePromptBlob(blobId, { draft }),
-    [blobId],
-  );
-
-  // Unbind and pull the sent prompt back into the composer, then focus it.
-  // A draft already being typed (a half-written reply) always wins over the
-  // restored prompt. Shared by Edit, Escape-cancel, and queued-Stop.
-  const restorePromptToDraft = useCallback(() => {
-    const current = getPromptBlob(blobId);
-    updatePromptBlob(blobId, {
-      draft: current.draft || current.lastSentPrompt,
-      boundTurnId: null,
-      boundTaskId: null,
-    });
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [blobId, textareaRef]);
 
   // The one prompt dispatch both send paths share: they differ only in
   // which task they target and whether the rebind captures it. The
@@ -634,6 +606,64 @@ function usePromptBlobActions({
       setIsSending(false);
     }
   }, [blobId, isSending, dispatchPrompt, t]);
+
+  return { isSending, confirmTrust, send, sendFollowUp };
+}
+
+/**
+ * The widget's imperative actions, extracted from PromptBlob so the
+ * component body stays layout + phase branching (the callbacks were the
+ * bulk of its size). Every callback reads the module store / collections at
+ * call time rather than closing over live-query rows, so the hook needs no
+ * reactive inputs and its callbacks stay stable across phase changes.
+ */
+function usePromptBlobActions({
+  blobId,
+  workspacePath,
+  documentPath,
+  editor,
+  getPos,
+  summoned,
+  removeNode,
+  textareaRef,
+}: {
+  blobId: string;
+  workspacePath: string;
+  documentPath: string;
+  editor: Editor;
+  getPos?: () => number | undefined;
+  summoned: boolean;
+  removeNode?: (options?: {
+    insertSlash?: boolean;
+    restoreParagraph?: boolean;
+  }) => void;
+  textareaRef: React.RefObject<HTMLTextAreaElement>;
+}) {
+  const { isSending, confirmTrust, send, sendFollowUp } = usePromptSendActions({
+    blobId,
+    workspacePath,
+    documentPath,
+    editor,
+    getPos,
+  });
+
+  const setDraft = useCallback(
+    (draft: string) => updatePromptBlob(blobId, { draft }),
+    [blobId],
+  );
+
+  // Unbind and pull the sent prompt back into the composer, then focus it.
+  // A draft already being typed (a half-written reply) always wins over the
+  // restored prompt. Shared by Edit, Escape-cancel, and queued-Stop.
+  const restorePromptToDraft = useCallback(() => {
+    const current = getPromptBlob(blobId);
+    updatePromptBlob(blobId, {
+      draft: current.draft || current.lastSentPrompt,
+      boundTurnId: null,
+      boundTaskId: null,
+    });
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [blobId, textareaRef]);
 
   // Edit: pull the sent prompt back into the composer. A queued turn is
   // withdrawn; a running/finished one keeps going — re-send is a new turn.
