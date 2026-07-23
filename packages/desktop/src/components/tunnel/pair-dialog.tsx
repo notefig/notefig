@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { copyTextToClipboard } from "@/utils/clipboard";
 import { useTunnelConnection } from "@/hooks/use-tunnel-connection";
 import {
   connectWithCode,
@@ -40,18 +41,7 @@ export function PairDialog() {
   const autoConnected = useRef<string | null>(null);
 
   const copyCommand = async () => {
-    const command = "npx metrists agent";
-    try {
-      await navigator.clipboard.writeText(command);
-    } catch {
-      // Clipboard API blocked (insecure context / permission) — fall back.
-      const el = document.createElement("textarea");
-      el.value = command;
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand("copy");
-      document.body.removeChild(el);
-    }
+    await copyTextToClipboard("npx metrists agent");
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
