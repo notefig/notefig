@@ -88,10 +88,30 @@ pub struct SpawnInfo {
 
 /// One live adapter process. The `tokio::process::Child` itself lives inside
 /// the monitor task (so wait/kill never contend a shared lock); we keep only
-/// the stdin sink for writes and a `Notify` the monitor selects on for kills.
+/// the stdin sink for writes, a `Notify` the monitor selects on for kills,
+/// and the pid so app-exit teardown can group-kill synchronously.
 struct AgentHandle {
     stdin: AsyncMutex<ChildStdin>,
     kill: Notify,
+    pid: Option<u32>,
+}
+
+/// Kill the child's entire process group. The spawn puts each adapter in its
+/// own group (`process_group(0)`), so the group id is the child's pid. A
+/// plain `start_kill` only reaches the direct child — for the built-in
+/// harnesses that's an npx wrapper, and the real adapter + claude CLI
+/// grandchildren reparent to launchd and keep running (verified 2026-07-23:
+/// the orphaned adapter survives stdin EOF for minutes).
+fn kill_process_group(pid: Option<u32>) {
+    #[cfg(unix)]
+    if let Some(pid) = pid {
+        unsafe {
+            libc::killpg(pid as i32, libc::SIGKILL);
+        }
+    }
+    // Non-unix: the monitor's `start_kill` / `kill_on_drop` fallback applies.
+    #[cfg(not(unix))]
+    let _ = pid;
 }
 
 lazy_static::lazy_static! {
@@ -236,6 +256,10 @@ pub async fn spawn_agent<R: tauri::Runtime>(
         // Ensure the OS process dies with its Child (covers runtime teardown
         // at app exit even if the monitor task doesn't get scheduled).
         .kill_on_drop(true);
+    // Own process group so kills reach the whole tree (npx wrapper → adapter
+    // shim → claude CLI), not just the wrapper. See kill_process_group.
+    #[cfg(unix)]
+    cmd.process_group(0);
 
     // Replace PATH with the login-shell probe (macOS) so npx/node resolve.
     let resolved_path = resolve_login_path().await;
@@ -279,6 +303,7 @@ pub async fn spawn_agent<R: tauri::Runtime>(
     let handle = Arc::new(AgentHandle {
         stdin: AsyncMutex::new(stdin),
         kill: Notify::new(),
+        pid,
     });
 
     // Replace any stale entry with the same id (kill the old one first).
@@ -322,6 +347,7 @@ pub async fn spawn_agent<R: tauri::Runtime>(
         tauri::async_runtime::spawn(async move {
             let status = tokio::select! {
                 _ = handle.kill.notified() => {
+                    kill_process_group(handle.pid);
                     let _ = child.start_kill();
                     child.wait().await.ok()
                 }
@@ -407,6 +433,10 @@ pub fn kill_all_agents() {
         map.drain().map(|(_, handle)| handle).collect()
     };
     for handle in handles {
+        // Group-kill directly (sync): at app exit the runtime may tear the
+        // monitor down before it reacts to the notify, and kill_on_drop only
+        // reaches the direct child, orphaning the adapter tree.
+        kill_process_group(handle.pid);
         handle.kill.notify_one();
     }
 }
@@ -439,6 +469,39 @@ mod tests {
     async fn kill_unknown_proc_is_idempotent_ok() {
         let json = serde_json::to_value(kill_agent("does-not-exist".to_string()).await).unwrap();
         assert_eq!(json["ok"], true);
+    }
+
+    /// The orphan bug this module guards against: the spawned command is a
+    /// wrapper (npx) whose *grandchild* is the real adapter/CLI. Killing only
+    /// the direct child reparents the grandchild to launchd and leaks it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn kill_process_group_reaps_grandchildren() {
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", "sleep 300 & echo $!; wait"])
+            .stdout(Stdio::piped())
+            .kill_on_drop(true);
+        cmd.process_group(0);
+        let mut child = cmd.spawn().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let mut lines = BufReader::new(stdout).lines();
+        let grandchild: i32 = lines
+            .next_line()
+            .await
+            .unwrap()
+            .expect("shell prints the grandchild pid")
+            .trim()
+            .parse()
+            .unwrap();
+
+        kill_process_group(child.id());
+        let _ = child.wait().await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        // kill(pid, 0) probes liveness without signaling. ESRCH means the
+        // grandchild died with the group; 0 would mean it leaked.
+        let alive = unsafe { libc::kill(grandchild, 0) } == 0;
+        assert!(!alive, "grandchild {} survived the group kill", grandchild);
     }
 
     #[test]

@@ -2317,6 +2317,7 @@ dependencies = [
  "grep",
  "grep-regex",
  "lazy_static",
+ "libc",
  "md5",
  "notify",
  "notify-debouncer-full",
