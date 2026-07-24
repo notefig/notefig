@@ -125,7 +125,6 @@ export function SessionsPanel({
               task={meta.task}
               meta={describeTaskMeta(meta)}
               isRunning={meta.isRunning}
-              isUnavailable={meta.isUnavailable}
               active={agentTabId(meta.task.taskId) === activeTabId}
               onOpen={() => openAgentTab(meta.task.taskId)}
             />
@@ -153,18 +152,16 @@ export function SessionsPanel({
   );
 }
 
-function SessionRow({
+export function SessionRow({
   task,
   meta,
   isRunning,
-  isUnavailable,
   active,
   onOpen,
 }: {
   task: AgentTaskRow;
   meta: string;
   isRunning: boolean;
-  isUnavailable: boolean;
   active: boolean;
   onOpen: () => void;
 }) {
@@ -200,21 +197,49 @@ function SessionRow({
           <Square className="size-3 fill-current" />
         </button>
       )}
-      {isUnavailable && (
-        <button
-          type="button"
-          title={t("agentDeleteSession")}
-          aria-label={t("agentDeleteSession")}
-          className="hidden shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-foreground group-hover:block"
-          onClick={(event) => {
-            event.stopPropagation();
-            void deleteAgentSession(task.taskId);
-          }}
-        >
-          <Trash2 className="size-3" />
-        </button>
-      )}
+      <DeleteSessionButton taskId={task.taskId} />
     </div>
+  );
+}
+
+/**
+ * Two-step inline delete confirm (MET-91): any session is deletable, no
+ * dialog — the first click arms the trash into a labeled destructive
+ * "Delete?" (a red icon alone reads as decoration), the second deletes.
+ * Leaving the button or blurring disarms, so a stray armed button can't
+ * fire on a later stray click.
+ */
+function DeleteSessionButton({ taskId }: { taskId: string }) {
+  const { t } = useTranslation();
+  const [armed, setArmed] = useState(false);
+  const label = t(armed ? "agentDeleteSessionConfirm" : "agentDeleteSession");
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      className={cn(
+        "shrink-0 cursor-pointer rounded",
+        armed
+          ? // Armed: stays visible even if row hover is momentarily lost so
+            // the confirming click always lands on the same button.
+            "flex items-center gap-1 p-0.5 text-[10px] font-medium text-destructive hover:text-destructive/80"
+          : "hidden p-0.5 text-muted-foreground hover:text-foreground group-hover:block",
+      )}
+      onMouseLeave={() => setArmed(false)}
+      onBlur={() => setArmed(false)}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (armed) {
+          void deleteAgentSession(taskId);
+        } else {
+          setArmed(true);
+        }
+      }}
+    >
+      <Trash2 className="size-3" />
+      {armed && <span>{t("agentDeleteSessionArmed")}</span>}
+    </button>
   );
 }
 
@@ -282,18 +307,22 @@ function NewSessionButton({
   );
 }
 
+const STATUS_DOT_COLOR: Record<AgentTaskRow["status"], string> = {
+  starting: "bg-amber-500",
+  running: "bg-blue-500 animate-pulse",
+  idle: "bg-green-500",
+  // A restored session is a normal (idle-equivalent) session whose runtime
+  // revives on first interaction (MET-54).
+  restored: "bg-green-500",
+  cancelled: "bg-muted-foreground",
+  error: "bg-red-500",
+  unavailable: "bg-red-500",
+};
+
 export function StatusDot({ status }: { status: AgentTaskRow["status"] }) {
-  const color =
-    status === "running"
-      ? "bg-blue-500 animate-pulse"
-      : status === "error" || status === "unavailable"
-        ? "bg-red-500"
-        : // A restored session is a normal (idle-equivalent) session whose
-          // runtime revives on first interaction (MET-54).
-        status === "idle" || status === "restored"
-          ? "bg-green-500"
-          : status === "cancelled"
-            ? "bg-muted-foreground"
-            : "bg-amber-500";
-  return <span className={`h-2 w-2 shrink-0 rounded-full ${color}`} />;
+  return (
+    <span
+      className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT_COLOR[status]}`}
+    />
+  );
 }

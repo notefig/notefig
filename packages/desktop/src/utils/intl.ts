@@ -380,6 +380,8 @@ i18n
           agentSessionUnavailableNotice:
             "This session is no longer available — the harness has no record of it.",
           agentDeleteSession: "Delete session",
+          agentDeleteSessionConfirm: "Click again to delete",
+          agentDeleteSessionArmed: "Delete",
           agentBlobAnswerOrphaned:
             "Answer saved to the document, but the session that asked is no longer available.",
 
