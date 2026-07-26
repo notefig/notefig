@@ -292,18 +292,19 @@ export const PromptBlob = memo(function PromptBlob({
   }, [isStale, blobId]);
 
   // Escape back to the document, through the arbiter like every other
-  // focus hand-off: an editor intent carrying an after-node caret placement
-  // (the aiPrompt node is an atom, nodeSize 1) so the cursor lands next to
-  // this widget. Without a position (shouldn't happen while mounted) the
+  // focus hand-off: an editor intent carrying a before-node caret placement
+  // so the cursor returns to where the user was before summoning this
+  // widget. Without a position (shouldn't happen while mounted) the
   // resolver's default collapse applies.
   const escapeToEditor = useCallback(() => {
     const pos = getPos?.();
     requestEditorFocus(documentPath, {
       reason: "blob-escape",
+      // Focus IS in this widget's composer — an explicit hand-off, not an
+      // ambient grab, so it may leave the text entry.
+      steal: true,
       caret:
-        typeof pos === "number"
-          ? { type: "after-node", pos, nodeSize: 1 }
-          : undefined,
+        typeof pos === "number" ? { type: "before-node", pos } : undefined,
     });
   }, [documentPath, getPos]);
 

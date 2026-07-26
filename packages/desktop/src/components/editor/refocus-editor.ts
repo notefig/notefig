@@ -25,23 +25,20 @@ export function collapseStaleSelection(editor: Editor): void {
 }
 
 /**
- * The `after-node` placement: caret in the nearest textblock after the node
- * (or before, when it's the last node) — Escape out of an inline widget
- * lands where the user just was, not wherever the doc's stale selection
- * happened to sit.
+ * The `before-node` placement: caret at the end of the nearest textblock
+ * before the node (or the first one after it, for a leading widget) —
+ * Escape out of an inline widget returns the cursor to where the user was
+ * before summoning it, not wherever the doc's stale selection happened to
+ * sit and not past the widget.
  */
-export function placeCaretAfterNode(
-  editor: Editor,
-  pos: number,
-  nodeSize: number,
-): void {
-  const $after = editor.state.doc.resolve(
-    Math.min(pos + nodeSize, editor.state.doc.content.size),
+export function placeCaretBeforeNode(editor: Editor, pos: number): void {
+  const $before = editor.state.doc.resolve(
+    Math.min(pos, editor.state.doc.content.size),
   );
   // between(), not near(): near() is inherited Selection.near, which happily
-  // returns a leaf NodeSelection; between() seeks a textblock forward then
-  // backward, so a trailing widget still lands the caret in the block above.
+  // returns a leaf NodeSelection; between() seeks a textblock backward then
+  // forward, so a leading widget still lands the caret in the block below.
   editor.view.dispatch(
-    editor.state.tr.setSelection(TextSelection.between($after, $after, 1)),
+    editor.state.tr.setSelection(TextSelection.between($before, $before, -1)),
   );
 }

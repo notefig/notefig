@@ -61,8 +61,7 @@ function appendPromptTr(state: EditorState): Transaction | null {
 }
 
 function AiPromptNodeView(props: NodeViewProps) {
-  const { filePath, basePath } = props.extension
-    .options as AiPromptNodeOptions;
+  const { filePath, basePath } = props.extension.options as AiPromptNodeOptions;
   const blobId = (props.node.attrs.blobId as string | null) ?? null;
 
   // Repair id-less instances (schema defaults survive clipboard round-trips
@@ -107,7 +106,7 @@ function AiPromptNodeView(props: NodeViewProps) {
     <NodeViewWrapper
       data-type="ai-prompt"
       contentEditable={false}
-      className="not-prose my-3"
+      className="not-prose my-1"
     >
       <PromptBlob
         blobId={blobId}

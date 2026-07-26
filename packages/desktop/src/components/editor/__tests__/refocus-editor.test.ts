@@ -10,7 +10,7 @@ import { NodeSelection } from "@tiptap/pm/state";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
 import {
   collapseStaleSelection,
-  placeCaretAfterNode,
+  placeCaretBeforeNode,
 } from "@/components/editor/refocus-editor";
 
 let editor: Editor | null = null;
@@ -63,28 +63,28 @@ describe("collapseStaleSelection", () => {
   });
 });
 
-describe("placeCaretAfterNode", () => {
-  it("puts the caret in the textblock after the node (escape-from-blob)", () => {
+describe("placeCaretBeforeNode", () => {
+  it("puts the caret at the end of the textblock before the node (escape-from-blob)", () => {
     editor = new Editor({
       extensions: editorExtensions,
       content: "<p>Hi</p><img src='x.png'><p>there</p>",
     });
-    // Park a stale range far away to prove it doesn't win.
-    editor.commands.setTextSelection({ from: 1, to: 3 });
+    // Park a stale range elsewhere to prove it doesn't win.
+    editor.commands.setTextSelection({ from: 7, to: 10 });
 
-    placeCaretAfterNode(editor, 4, 1); // the image atom at pos 4
-    expect(editor.state.selection.empty).toBe(true);
-    expect(editor.state.selection.from).toBe(6); // start of "there"
-  });
-
-  it("falls back to the textblock before a trailing node", () => {
-    editor = new Editor({
-      extensions: editorExtensions,
-      content: "<p>Hi</p><img src='x.png'>",
-    });
-
-    placeCaretAfterNode(editor, 4, 1);
+    placeCaretBeforeNode(editor, 4); // the image atom at pos 4
     expect(editor.state.selection.empty).toBe(true);
     expect(editor.state.selection.from).toBe(3); // end of "Hi"
+  });
+
+  it("falls forward to the next textblock for a leading node", () => {
+    editor = new Editor({
+      extensions: editorExtensions,
+      content: "<img src='x.png'><p>there</p>",
+    });
+
+    placeCaretBeforeNode(editor, 0);
+    expect(editor.state.selection.empty).toBe(true);
+    expect(editor.state.selection.from).toBe(2); // start of "there"
   });
 });
