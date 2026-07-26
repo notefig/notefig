@@ -30,6 +30,18 @@
   min-height: 100%;
 }
 
+/* WebKit doesn't paint an outside ::marker for a list item whose content
+   has no inline-level line box — a widget-only item after a "/" summon
+   loses its bullet (Chromium keeps it, MET-93). An inline-block wrapper
+   restores a line box; top-aligned so the marker sits beside the top of
+   the card, matching Chromium. Scoped to bullet/ordered items — task items
+   render a real checkbox, no marker involved. */
+.ProseMirror li > .react-renderer.node-aiPrompt {
+  display: inline-block;
+  width: 100%;
+  vertical-align: top;
+}
+
 /* Task item — checkbox and text side by side */
 ul[data-type="taskList"] > li {
   display: flex;
