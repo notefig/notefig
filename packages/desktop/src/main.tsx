@@ -11,6 +11,7 @@ import { BrowserRouter } from "react-router-dom";
 import "./utils/intl";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AppUpdaterBootstrap } from "@/components/app-updater";
+import { TelemetryBootstrap } from "@/components/telemetry-bootstrap";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { queryClient } from "@/entities/query-client";
@@ -29,6 +30,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
         <ThemeProvider>
           <TooltipProvider>
             <AppUpdaterBootstrap />
+            <TelemetryBootstrap />
             <App />
             <Toaster />
           </TooltipProvider>

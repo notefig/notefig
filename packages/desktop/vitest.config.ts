@@ -1,7 +1,12 @@
 import { defineConfig } from "vitest/config";
 import path from "path";
+import pkg from "./package.json";
 
 export default defineConfig({
+  define: {
+    // Mirror vite.config.ts — telemetry stamps app_version on every event.
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   test: {
     environment: "happy-dom",
     globals: true,

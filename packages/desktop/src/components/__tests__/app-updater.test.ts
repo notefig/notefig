@@ -1,9 +1,27 @@
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
 import {
   deriveUpdaterView,
+  downloadAndInstall,
+  relaunchApp,
+  UPDATE_CHECK_QUERY_KEY,
   type InstallState,
   type UpdateCheckData,
 } from "@/components/app-updater";
+
+const mockCaptureEvent = vi.fn();
+vi.mock("@/telemetry/telemetry", () => ({
+  captureEvent: (...args: unknown[]) => mockCaptureEvent(...args),
+}));
+
+const mockUpdater = {
+  check: vi.fn(),
+  apply: vi.fn(),
+  restart: vi.fn(),
+};
+vi.mock("@/adapters", () => ({
+  platformAdapter: { getUpdater: () => mockUpdater },
+}));
 
 const idleInstall: InstallState = {
   phase: "idle",
@@ -92,5 +110,80 @@ describe("deriveUpdaterView", () => {
     expect(deriveUpdaterView(check(), idleInstall).flow).toBe(
       "download-restart",
     );
+  });
+});
+
+describe("update telemetry", () => {
+  beforeEach(() => {
+    mockCaptureEvent.mockClear();
+    mockUpdater.apply.mockReset();
+    mockUpdater.restart.mockReset();
+  });
+
+  function clientWithAvailableUpdate(): QueryClient {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(UPDATE_CHECK_QUERY_KEY, available);
+    return queryClient;
+  }
+
+  it("captures started and completed on a successful download", async () => {
+    mockUpdater.apply.mockReturnValue(
+      (async function* () {
+        yield { status: "downloading", downloaded: 10, total: 100 };
+        yield { status: "ready" };
+      })(),
+    );
+
+    await downloadAndInstall(clientWithAvailableUpdate());
+
+    expect(mockCaptureEvent).toHaveBeenCalledWith("update_download_started", {
+      to_version: "1.2.3",
+    });
+    expect(mockCaptureEvent).toHaveBeenCalledWith("update_download_completed", {
+      to_version: "1.2.3",
+    });
+  });
+
+  it("captures update_failed (stage download) when the download errors", async () => {
+    mockUpdater.apply.mockReturnValue(
+      (async function* () {
+        yield { status: "error" };
+      })(),
+    );
+
+    await expect(
+      downloadAndInstall(clientWithAvailableUpdate()),
+    ).rejects.toThrow();
+
+    expect(mockCaptureEvent).toHaveBeenCalledWith("update_failed", {
+      stage: "download",
+      to_version: "1.2.3",
+    });
+    expect(mockCaptureEvent).not.toHaveBeenCalledWith(
+      "update_download_completed",
+      expect.anything(),
+    );
+  });
+
+  it("captures update_failed (stage restart) when relaunch errors", async () => {
+    mockUpdater.restart.mockResolvedValue({ status: "error" });
+
+    await relaunchApp(clientWithAvailableUpdate());
+
+    expect(mockCaptureEvent).toHaveBeenCalledWith("update_failed", {
+      stage: "restart",
+      to_version: "1.2.3",
+    });
+  });
+
+  it("falls back to an unknown target version when no check data exists", async () => {
+    mockUpdater.restart.mockResolvedValue({ status: "error" });
+
+    await relaunchApp(new QueryClient());
+
+    expect(mockCaptureEvent).toHaveBeenCalledWith("update_failed", {
+      stage: "restart",
+      to_version: "unknown",
+    });
   });
 });

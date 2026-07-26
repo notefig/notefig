@@ -487,6 +487,23 @@ i18n
           agentToolHistoryRestore: "Restore Version",
           agentToolAuthorBlob: "Add Interactive Block",
           agentToolWidgetRespond: "Respond in Widget",
+
+          // Telemetry consent + Privacy settings
+          telemetryConsentTitle: "Help improve Metrists",
+          telemetryConsentBody:
+            "Metrists can send anonymous reports to help us fix bugs and improve the app. Your documents, file paths, and workspace contents never leave your machine.",
+          telemetryCrashLabel: "Crash reports",
+          telemetryCrashDescription:
+            "Anonymous error reports so we can fix bugs.",
+          telemetryAnalyticsLabel: "Usage analytics",
+          telemetryAnalyticsDescription:
+            "Anonymous counts of feature use. Never your content.",
+          telemetryConsentContinue: "Continue",
+          telemetryConsentFootnote:
+            "You can change this anytime in Settings → Privacy.",
+          privacySettings: "Privacy",
+          telemetryDisabledInBuild:
+            "Telemetry is disabled in this build — no data is ever sent.",
         },
       },
     },

@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { platformAdapter } from "@/adapters";
 import i18n from "@/utils/intl";
 import { isTauri } from "@/utils/platform";
+import { captureEvent } from "@/telemetry/telemetry";
 import type { UpdateFlow } from "@/adapters/platform-adapter.interface";
 
 export type UpdaterStatus =
@@ -249,7 +250,18 @@ export function useAppUpdater(): AppUpdaterView & {
 // Download / restart actions
 // ---------------------------------------------------------------------------
 
+/** The version an in-flight install is heading to, for telemetry. */
+function pendingUpdateVersion(queryClient: QueryClient): string {
+  return (
+    queryClient.getQueryData<UpdateCheckData>(UPDATE_CHECK_QUERY_KEY)
+      ?.updateInfo?.version ?? "unknown"
+  );
+}
+
 export async function downloadAndInstall(queryClient: QueryClient) {
+  const toVersion = pendingUpdateVersion(queryClient);
+  let downloadCompleted = false;
+  captureEvent("update_download_started", { to_version: toVersion });
   patchInstallState(queryClient, {
     phase: "downloading",
     error: null,
@@ -275,6 +287,10 @@ export async function downloadAndInstall(queryClient: QueryClient) {
     }
 
     if (step.status === "ready" || step.status === "applied") {
+      if (!downloadCompleted) {
+        downloadCompleted = true;
+        captureEvent("update_download_completed", { to_version: toVersion });
+      }
       patchInstallState(queryClient, {
         phase: "ready",
         error: null,
@@ -282,6 +298,7 @@ export async function downloadAndInstall(queryClient: QueryClient) {
       continue;
     }
 
+    captureEvent("update_failed", { stage: "download", to_version: toVersion });
     patchInstallState(queryClient, {
       phase: "error",
       error: genericErrorMessage(),
@@ -293,6 +310,10 @@ export async function downloadAndInstall(queryClient: QueryClient) {
 export async function relaunchApp(queryClient: QueryClient) {
   const result = await platformAdapter.getUpdater().restart();
   if (result.status === "error") {
+    captureEvent("update_failed", {
+      stage: "restart",
+      to_version: pendingUpdateVersion(queryClient),
+    });
     patchInstallState(queryClient, {
       phase: "error",
       error: genericErrorMessage(),
@@ -351,6 +372,7 @@ export function AppUpdaterBootstrap() {
     }
 
     lastNotifiedVersionRef.current = updateInfo.version;
+    captureEvent("update_available", { to_version: updateInfo.version });
 
     toast(
       i18n.t("updaterToastAvailableTitle", {

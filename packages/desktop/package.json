@@ -87,6 +87,7 @@
     "lucide-react": "^0.454.0",
     "md5": "^2.3.0",
     "platejs": "^52.3.4",
+    "posthog-js": "^1.407.2",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-i18next": "^16.5.3",

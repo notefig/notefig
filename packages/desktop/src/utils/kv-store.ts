@@ -69,7 +69,7 @@ export function getOrCreateKvCollection(namespace: string) {
 export function useKv<T>(namespace: string) {
   const collection = getOrCreateKvCollection(namespace);
 
-  const { data: rows = [] } = useLiveQuery(
+  const { data: rows = [], isReady } = useLiveQuery(
     (q) =>
       q.from({ item: collection }).select(({ item }) => ({
         key: item.key,
@@ -112,6 +112,7 @@ export function useKv<T>(namespace: string) {
 
   return {
     values,
+    isReady,
     set,
     get,
     remove,
