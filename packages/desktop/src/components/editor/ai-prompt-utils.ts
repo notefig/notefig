@@ -58,13 +58,26 @@ export function newPromptBlobInstanceId(): string {
   return `blob_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/** Ancestor types "/" is allowed to summon through: top-level paragraphs
+ *  and paragraphs nested purely in bullet/ordered/task lists (any indent
+ *  depth). Blockquotes, code blocks, and table cells keep typing "/"
+ *  normally (MET-93 chose lists as the nested context worth summoning in). */
+const SUMMONABLE_ANCESTORS = new Set([
+  "bulletList",
+  "orderedList",
+  "listItem",
+  "taskList",
+  "taskItem",
+]);
+
 /**
  * The "/" summon: replace the empty paragraph the cursor sits in with a
  * `summoned` aiPrompt node. Null unless the cursor is in an empty paragraph
- * that is a direct child of the doc — "/" mid-text, in lists, code blocks,
- * or blockquotes types normally. Deliberately a regular history transaction
- * (⌘Z restores the empty paragraph) and NOT autosave-exempt: dropping a
- * mid-doc empty paragraph can change the serialized blank lines.
+ * that is a direct child of the doc or nested only in lists — "/" mid-text,
+ * in code blocks, or blockquotes types normally. Deliberately a
+ * regular history transaction (⌘Z restores the empty paragraph) and NOT
+ * autosave-exempt: dropping a mid-doc empty paragraph can change the
+ * serialized blank lines.
  */
 export function slashSummonTr(
   state: EditorState,
@@ -73,17 +86,28 @@ export function slashSummonTr(
   const { selection } = state;
   if (!(selection instanceof TextSelection) || !selection.empty) return null;
   const { $from } = selection;
-  if ($from.depth !== 1) return null;
   const paragraph = $from.parent;
   if (paragraph.type.name !== "paragraph" || paragraph.content.size !== 0) {
     return null;
   }
+  const depth = $from.depth;
+  if (depth < 1) return null;
+  for (let d = 1; d < depth; d++) {
+    if (!SUMMONABLE_ANCESTORS.has($from.node(d).type.name)) return null;
+  }
   const type = state.schema.nodes[AiPromptNodeBase.name];
   if (!type) return null;
-  const from = $from.before(1);
+  // Belt over the ancestor allowlist: the parent's content expression must
+  // actually admit the widget where the paragraph sits (listItem does via
+  // PromptHostListItem in editor-schema-kit.ts).
+  const index = $from.index(depth - 1);
+  if (!$from.node(depth - 1).canReplaceWith(index, index + 1, type)) {
+    return null;
+  }
+  const from = $from.before(depth);
   const tr = state.tr.replaceWith(
     from,
-    $from.after(1),
+    $from.after(depth),
     type.create({ summoned: true, blobId }),
   );
   // Explicit, like revertToSlashTr/removeToParagraphTr below — leaving this

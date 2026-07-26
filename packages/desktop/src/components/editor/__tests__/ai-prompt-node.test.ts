@@ -156,17 +156,81 @@ describe('"/" summon', () => {
     expect(findPromptNode(editor)).toBeNull();
   });
 
-  it("types normally inside nested paragraphs (lists) and code blocks", async () => {
+  it("summons inside an empty list item without changing the markdown", async () => {
     // The doc needs real content — a lone empty list counts as "empty",
     // where the keeper widget exists and "/" routes to focusing it.
     editor = await documentEditor("<p>Hi</p><ul><li><p></p></li></ul>");
-    editor.commands.setTextSelection(7); // empty list paragraph, depth > 1
+    const markdownBefore = getEditorMarkdown(editor);
+    editor.commands.setTextSelection(7); // empty list paragraph
+    expect(typeText(editor, "/")).toBe(true);
+    const node = findPromptNode(editor);
+    expect(node?.summoned).toBe(true);
+    // The widget replaced the item's paragraph in place — list intact,
+    // serialized file identical.
+    expect(getEditorMarkdown(editor)).toBe(markdownBefore);
+    expect(consumePendingPromptBlobFocus(node!.blobId!)).toBe(true);
+  });
+
+  it("summons inside an indented (nested) list item", async () => {
+    editor = await documentEditor(
+      "<p>Hi</p><ul><li><p>a</p><ul><li><p></p></li></ul></li></ul>",
+    );
+    editor.commands.setTextSelection(12); // empty paragraph in the nested item
+    expect(typeText(editor, "/")).toBe(true);
+    expect(findPromptNode(editor)?.summoned).toBe(true);
+  });
+
+  it("undo restores the empty list item after a summon", async () => {
+    editor = await documentEditor("<p>Hi</p><ul><li><p></p></li></ul>");
+    const markdownBefore = getEditorMarkdown(editor);
+    editor.commands.setTextSelection(7);
+    typeText(editor, "/");
+    editor.commands.undo();
+    expect(findPromptNode(editor)).toBeNull();
+    expect(getEditorMarkdown(editor)).toBe(markdownBefore);
+    expect(editor.state.selection.from).toBe(7);
+  });
+
+  it("reverts to a literal '/' inside the list item", async () => {
+    editor = await documentEditor("<p>Hi</p><ul><li><p></p></li></ul>");
+    editor.commands.setTextSelection(7);
+    typeText(editor, "/");
+    const node = findPromptNode(editor)!;
+    editor.view.dispatch(
+      revertToSlashTr(editor.state, node.pos, node.nodeSize),
+    );
+    expect(findPromptNode(editor)).toBeNull();
+    expect(getEditorMarkdown(editor)).toBe("Hi\n\n- /");
+    expect(editor.state.selection.from).toBe(node.pos + 2);
+  });
+
+  it("summons inside an empty ordered-list item", async () => {
+    editor = await documentEditor("<p>Hi</p><ol><li><p></p></li></ol>");
+    editor.commands.setTextSelection(7); // empty ordered-list paragraph
+    expect(typeText(editor, "/")).toBe(true);
+    expect(findPromptNode(editor)?.summoned).toBe(true);
+  });
+
+  it("summons inside an empty task item without changing the markdown", async () => {
+    editor = await documentEditor(
+      '<p>Hi</p><ul data-type="taskList"><li data-type="taskItem"><p></p></li></ul>',
+    );
+    const markdownBefore = getEditorMarkdown(editor);
+    editor.commands.setTextSelection(7); // empty paragraph in the task item
+    expect(typeText(editor, "/")).toBe(true);
+    expect(findPromptNode(editor)?.summoned).toBe(true);
+    expect(getEditorMarkdown(editor)).toBe(markdownBefore);
+  });
+
+  it("types normally inside code blocks and blockquotes", async () => {
+    editor = await documentEditor("<pre><code>x</code></pre>");
+    editor.commands.setTextSelection(2);
     expect(typeText(editor, "/")).toBe(false);
     expect(findPromptNode(editor)).toBeNull();
 
     editor.destroy();
-    editor = await documentEditor("<pre><code>x</code></pre>");
-    editor.commands.setTextSelection(2);
+    editor = await documentEditor("<p>Hi</p><blockquote><p></p></blockquote>");
+    editor.commands.setTextSelection(6); // empty paragraph in the blockquote
     expect(typeText(editor, "/")).toBe(false);
     expect(findPromptNode(editor)).toBeNull();
   });

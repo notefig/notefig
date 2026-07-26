@@ -2,8 +2,22 @@ export type FocusDomain = "modal" | "palette" | "sidebar" | "editor" | "misc";
 
 export type FocusTiming = "immediate" | "next-frame" | "when-mounted";
 
+/**
+ * Optional caret placement carried by editor-targeted intents. The arbiter
+ * treats it as opaque data — the editor resolver (editor-store) interprets
+ * it when the intent wins. Without one, the editor's current selection is
+ * left as-is (mount restores its saved selection and must keep it).
+ */
+export type EditorCaretPlacement = {
+  /** Put the caret in the nearest textblock before the node at `pos` —
+   *  Escape out of an inline widget returns the cursor to where the user
+   *  was before summoning it, not past it. */
+  type: "before-node";
+  pos: number;
+};
+
 export type FocusTarget =
-  | { type: "editor"; filePath: string }
+  | { type: "editor"; filePath: string; caret?: EditorCaretPlacement }
   | { type: "element"; key: string };
 
 export interface FocusIntentInput {
@@ -14,6 +28,11 @@ export interface FocusIntentInput {
   reason: string;
   when?: FocusTiming;
   ttlMs?: number;
+  /** An explicit user hand-off (e.g. Escape out of a composer). Resolvers
+   *  may move focus out of an active text entry only when this is set —
+   *  ambient intents (mount, layout reclaim, tab activation) must never
+   *  yank a text entry's focus. */
+  steal?: boolean;
 }
 
 export interface FocusIntent extends FocusIntentInput {
@@ -120,6 +139,7 @@ export class FocusArbiter {
       reason: input.reason,
       when: input.when ?? "immediate",
       ttlMs: input.ttlMs ?? this.defaultTtlMs,
+      steal: input.steal ?? false,
       createdAt: now,
       expiresAt: now + (input.ttlMs ?? this.defaultTtlMs),
       attempts: 0,

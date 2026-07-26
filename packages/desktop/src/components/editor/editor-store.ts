@@ -20,8 +20,13 @@ import {
   getDocumentSync,
 } from "@/utils/markdown-conversion";
 import { focusArbiter } from "@/utils/focus-arbiter";
-import { isSidebarTextEntryActive } from "@/utils/focus-arbiter";
+import {
+  isSidebarTextEntryActive,
+  isTextEntryActive,
+  type EditorCaretPlacement,
+} from "@/utils/focus-arbiter";
 import { resolveEditorLocation, type EditorLocation } from "./editor-position";
+import { placeCaretBeforeNode } from "./refocus-editor";
 import {
   createImageDropHandler,
   createImagePasteHandler,
@@ -43,8 +48,10 @@ export interface EditorInstance {
   /**
    * Focus this editor. Returns true if focus was attempted, false if not applicable.
    * For non-focusable editors (images), this is a no-op that returns false.
+   * `caret` is the intent's placement hint (see EditorCaretPlacement);
+   * without one, the current selection is left untouched.
    */
-  focus(): boolean;
+  focus(caret?: EditorCaretPlacement): boolean;
   /**
    * Dispose of this editor instance. Cleans up any resources.
    */
@@ -106,17 +113,49 @@ const EDITOR_FOCUS_PRIORITY = 70;
 let observedFocusIntentId: string | null = null;
 let observedFocusResult = false;
 
-function focusEditorPath(filePath: string): boolean {
+function focusEditorPath(
+  filePath: string,
+  caret?: EditorCaretPlacement,
+): boolean {
   const instance = editorInstances.get(filePath);
   if (!instance) return false;
 
-  return instance.focus();
+  return instance.focus(caret);
+}
+
+/**
+ * A text entry other than `filePath`'s own ProseMirror surface holds focus.
+ * The widget composer is a textarea INSIDE that surface but still a
+ * distinct entry — only the contenteditable root itself counts as "own".
+ */
+function isForeignTextEntryFocused(filePath: string): boolean {
+  const active = document.activeElement;
+  const instance = editorInstances.get(filePath);
+  if (instance && isMarkdownInstance(instance)) {
+    try {
+      if (active === instance.editor.view.dom) return false;
+    } catch {
+      // Detached view (mid-remount) — nothing to compare against.
+    }
+  }
+  return isTextEntryActive(active);
 }
 
 focusArbiter.registerResolver("editor", (intent) => {
   if (intent.target.type !== "editor") return false;
 
-  const result = focusEditorPath(intent.target.filePath);
+  // Mirror the element resolver's rule: ambient intents (editor mount,
+  // layout reclaim, tab activation) must not yank focus out of an active
+  // text entry — toggling the sidebar re-parents the dock, remounts the
+  // editor, and its mount intent used to steal the widget composer's
+  // focus mid-typing (MET-93). Intents marked `steal` (an explicit
+  // hand-off like the blob's Escape) proceed; when-mounted intents keep
+  // retrying until the entry releases focus or their TTL expires.
+  if (!intent.steal && isForeignTextEntryFocused(intent.target.filePath)) {
+    return false;
+  }
+
+  const result = focusEditorPath(intent.target.filePath, intent.target.caret);
   if (observedFocusIntentId === intent.id) {
     observedFocusResult = result;
   }
@@ -144,11 +183,14 @@ export function requestEditorFocus(
   options: {
     when?: "immediate" | "next-frame" | "when-mounted";
     reason?: string;
+    caret?: EditorCaretPlacement;
+    steal?: boolean;
   } = {},
 ): string {
   return focusArbiter.request({
     domain: "editor",
-    target: { type: "editor", filePath },
+    target: { type: "editor", filePath, caret: options.caret },
+    steal: options.steal,
     priority: EDITOR_FOCUS_PRIORITY,
     reason: options.reason ?? "editor-focus",
     when: options.when ?? "immediate",
@@ -239,8 +281,11 @@ function createMarkdownInstance(
     type: "markdown",
     editor,
     filePath,
-    focus(): boolean {
+    focus(caret?: EditorCaretPlacement): boolean {
       if (isEditorFocusSuppressed()) return false;
+      if (caret?.type === "before-node") {
+        placeCaretBeforeNode(this.editor, caret.pos);
+      }
       this.editor.commands.focus();
       return true;
     },
