@@ -3,6 +3,13 @@
 /** Injected by Vite at build time from package.json version */
 declare const __APP_VERSION__: string;
 
+interface ImportMetaEnv {
+  /** PostHog project key. Absent = telemetry fully disabled (dev/forks). */
+  readonly VITE_POSTHOG_KEY?: string;
+  /** PostHog ingestion host. Defaults to https://us.i.posthog.com. */
+  readonly VITE_POSTHOG_HOST?: string;
+}
+
 // File System Access API types
 interface FileSystemHandle {
   kind: "file" | "directory";

@@ -24,12 +24,17 @@ import {
   AlertCircle,
   Loader2,
   Bot,
+  Shield,
 } from "lucide-react";
+import {
+  updateTelemetryConsent,
+  telemetryAvailable,
+} from "@/telemetry/telemetry";
 import { HarnessSettings } from "@/components/agent/harness-settings";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParamFlag } from "@/hooks/use-search-param-flag";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useAppUpdater,
@@ -59,6 +64,7 @@ const settingsSections: SettingsSection[] = [
       { id: "general", label: "General", icon: Settings },
       { id: "appearance", label: "Appearance", icon: Palette },
       { id: "hotkeys", label: "Hotkeys", icon: Keyboard },
+      { id: "privacy", label: "Privacy", icon: Shield },
     ],
   },
   {
@@ -85,22 +91,8 @@ export function SettingsModal({
   onFocusEditor,
 }: SettingsModalProps) {
   const { t } = useTranslation();
-  const [searchParams, setUrlSearchParams] = useSearchParams();
-  const isSettingsOpen = searchParams.get("settings") === "true";
-  const handleSettingsToggle = (open: boolean) => {
-    setUrlSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        if (open) {
-          next.set("settings", "true");
-        } else {
-          next.delete("settings");
-        }
-        return next;
-      },
-      { replace: true },
-    );
-  };
+  const { isOn: isSettingsOpen, setFlag: handleSettingsToggle } =
+    useSearchParamFlag("settings", { replace: true });
   const handleCloseAutoFocus = (event: Event) => {
     event.preventDefault();
     onFocusEditor();
@@ -128,6 +120,8 @@ export function SettingsModal({
         );
       case "appearance":
         return <AppearanceSettings />;
+      case "privacy":
+        return <PrivacySettings />;
       case "harnesses":
         return <HarnessSettings />;
       default:
@@ -395,24 +389,74 @@ function UpdateSection() {
   );
 }
 
-function DebugModeToggle() {
-  const [searchParams, setUrlSearchParams] = useSearchParams();
-  const isDebugActive = searchParams.get("debug") === "true";
+function PrivacySettings() {
+  const { t } = useTranslation();
+  const { settings, setSetting } = useAppSettings();
+  const available = telemetryAvailable();
 
-  const handleToggle = (checked: boolean) => {
-    setUrlSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        if (checked) {
-          next.set("debug", "true");
-        } else {
-          next.delete("debug");
-        }
-        return next;
-      },
-      { replace: true },
-    );
+  const applyConsent = (
+    key: "crashReportingEnabled" | "analyticsEnabled",
+    checked: boolean,
+  ) => {
+    const next = {
+      crashEnabled:
+        key === "crashReportingEnabled" ? checked : settings.crashReportingEnabled,
+      analyticsEnabled:
+        key === "analyticsEnabled" ? checked : settings.analyticsEnabled,
+    };
+    let installId = settings.telemetryInstallId;
+    if ((next.crashEnabled || next.analyticsEnabled) && !installId) {
+      installId = crypto.randomUUID();
+      setSetting("telemetryInstallId", installId);
+    }
+    setSetting(key, checked);
+    void updateTelemetryConsent({ ...next, installId });
   };
+
+  return (
+    <div className="space-y-8 max-w-3xl">
+      <h2 className="text-lg font-semibold">{t("privacySettings")}</h2>
+
+      {!available && (
+        <p className="text-sm text-muted-foreground">
+          {t("telemetryDisabledInBuild")}
+        </p>
+      )}
+
+      <SettingRow
+        title={t("telemetryCrashLabel")}
+        description={t("telemetryCrashDescription")}
+      >
+        <Switch
+          checked={available && settings.crashReportingEnabled}
+          disabled={!available}
+          onCheckedChange={(checked) =>
+            applyConsent("crashReportingEnabled", checked)
+          }
+        />
+      </SettingRow>
+
+      <SettingRow
+        title={t("telemetryAnalyticsLabel")}
+        description={t("telemetryAnalyticsDescription")}
+      >
+        <Switch
+          checked={available && settings.analyticsEnabled}
+          disabled={!available}
+          onCheckedChange={(checked) =>
+            applyConsent("analyticsEnabled", checked)
+          }
+        />
+      </SettingRow>
+    </div>
+  );
+}
+
+function DebugModeToggle() {
+  const { isOn: isDebugActive, setFlag: handleToggle } = useSearchParamFlag(
+    "debug",
+    { replace: true },
+  );
 
   return (
     <SettingRow

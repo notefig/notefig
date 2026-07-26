@@ -25,6 +25,7 @@ import { useNavigate } from "react-router";
 import { useSearchParams } from "react-router-dom";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { PlainLogo } from "@/components/logo";
+import { useSearchParamFlag } from "@/hooks/use-search-param-flag";
 
 interface IconSidebarProps {
   isCollapsed: boolean;
@@ -98,20 +99,7 @@ export const IconSidebar = memo(function IconSidebar({
     [sidebarView, handleSidebarViewChange],
   );
 
-  const handleSettingsToggle = useCallback(
-    (open: boolean) => {
-      setUrlSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        if (open) {
-          next.set("settings", "true");
-        } else {
-          next.delete("settings");
-        }
-        return next;
-      });
-    },
-    [setUrlSearchParams],
-  );
+  const { setFlag: handleSettingsToggle } = useSearchParamFlag("settings");
 
   const bottomIcons = useMemo(
     () => [
@@ -153,31 +141,7 @@ export const IconSidebar = memo(function IconSidebar({
       </Tooltip>
       <div className="flex flex-col items-center gap-1">
         {topIcons.map((item) => (
-          <Tooltip key={item.id}>
-            <TooltipTrigger asChild>
-              <button
-                onClick={item.onClick}
-                className={cn(
-                  "p-1.5 rounded-md transition-colors hover:bg-sidebar-accent",
-                  item.active && "bg-sidebar-accent",
-                )}
-              >
-                <item.icon
-                  className={cn(
-                    "w-4 h-4",
-                    item.active ? "text-foreground" : "text-muted-foreground",
-                  )}
-                />
-                <span className="sr-only">{item.label}</span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>
-              {item.label}
-            </TooltipContent>
-            <TooltipContent side="left" className="ltr:hidden" sideOffset={8}>
-              {item.label}
-            </TooltipContent>
-          </Tooltip>
+          <SidebarIconButton key={item.id} item={item} />
         ))}
       </div>
       <div className="flex flex-col items-center gap-1 mt-auto">
@@ -205,27 +169,46 @@ export const IconSidebar = memo(function IconSidebar({
           </TooltipContent>
         </Tooltip>
         {bottomIcons.map((item) => (
-          <Tooltip key={item.id}>
-            <TooltipTrigger asChild>
-              <button
-                onClick={item.onClick}
-                className={cn(
-                  "p-1.5 rounded-md transition-colors hover:bg-sidebar-accent",
-                )}
-              >
-                <item.icon className="w-4 h-4 text-muted-foreground" />
-                <span className="sr-only">{item.label}</span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>
-              {item.label}
-            </TooltipContent>
-            <TooltipContent side="left" className="ltr:hidden" sideOffset={8}>
-              {item.label}
-            </TooltipContent>
-          </Tooltip>
+          <SidebarIconButton key={item.id} item={item} />
         ))}
       </div>
     </div>
   );
 });
+
+interface SidebarIconItem {
+  icon: React.ElementType;
+  label: string;
+  onClick: () => void;
+  active?: boolean;
+}
+
+function SidebarIconButton({ item }: { item: SidebarIconItem }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={item.onClick}
+          className={cn(
+            "p-1.5 rounded-md transition-colors hover:bg-sidebar-accent",
+            item.active && "bg-sidebar-accent",
+          )}
+        >
+          <item.icon
+            className={cn(
+              "w-4 h-4",
+              item.active ? "text-foreground" : "text-muted-foreground",
+            )}
+          />
+          <span className="sr-only">{item.label}</span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>
+        {item.label}
+      </TooltipContent>
+      <TooltipContent side="left" className="ltr:hidden" sideOffset={8}>
+        {item.label}
+      </TooltipContent>
+    </Tooltip>
+  );
+}

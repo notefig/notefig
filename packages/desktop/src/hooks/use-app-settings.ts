@@ -3,28 +3,48 @@ import type { Theme } from "@/components/theme-provider";
 
 export const SETTINGS_NAMESPACE = "settings";
 
+/**
+ * Bumped when the telemetry policy changes enough that existing users
+ * should be re-prompted. Consent is "answered" when the stored
+ * telemetryConsentVersion is >= this value.
+ */
+export const CURRENT_TELEMETRY_CONSENT_VERSION = 1;
+
 export interface AppSettings {
   theme: Theme;
   lastPath: string | null;
   zoomLevel: number;
+  crashReportingEnabled: boolean;
+  analyticsEnabled: boolean;
+  telemetryConsentVersion: number;
+  telemetryInstallId: string | null;
 }
 
-const DEFAULT_APP_SETTINGS: AppSettings = {
+export const DEFAULT_APP_SETTINGS: AppSettings = {
   theme: "dark",
   lastPath: null,
   zoomLevel: 1,
+  crashReportingEnabled: true,
+  analyticsEnabled: true,
+  telemetryConsentVersion: 0,
+  telemetryInstallId: null,
 };
 
-export function useAppSettings() {
-  const { values, set } = useKv<unknown>(SETTINGS_NAMESPACE);
+function mergeWithDefaults(values: Record<string, unknown>): AppSettings {
+  const settings = { ...DEFAULT_APP_SETTINGS };
+  for (const key of Object.keys(DEFAULT_APP_SETTINGS) as (keyof AppSettings)[]) {
+    const stored = values[key];
+    if (stored !== undefined && stored !== null) {
+      (settings as Record<string, unknown>)[key] = stored;
+    }
+  }
+  return settings;
+}
 
-  const settings: AppSettings = {
-    theme: (values["theme"] as Theme) ?? DEFAULT_APP_SETTINGS.theme,
-    lastPath:
-      (values["lastPath"] as string | null) ?? DEFAULT_APP_SETTINGS.lastPath,
-    zoomLevel:
-      (values["zoomLevel"] as number) ?? DEFAULT_APP_SETTINGS.zoomLevel,
-  };
+export function useAppSettings() {
+  const { values, set, isReady } = useKv<unknown>(SETTINGS_NAMESPACE);
+
+  const settings = mergeWithDefaults(values);
 
   function setSetting<K extends keyof AppSettings>(
     key: K,
@@ -47,6 +67,7 @@ export function useAppSettings() {
 
   return {
     settings,
+    isReady,
     setSetting,
     setTheme,
     setLastPath,

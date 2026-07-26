@@ -18,7 +18,10 @@ import {
   Check,
   FileJson,
   AlertTriangle,
+  ShieldOff,
 } from "lucide-react";
+import { platformAdapter } from "@/adapters";
+import { SETTINGS_NAMESPACE } from "@/hooks/use-app-settings";
 import type { LayoutNode } from "@/components/dockable";
 // Pure zero-dependency leaf — safe for the crash fallback (unlike entity
 // modules, which must never be runtime imports here).
@@ -84,6 +87,22 @@ const LEVEL_BG: Record<ConsoleLevel, string> = {
 };
 
 const MAX_CONSOLE_ENTRIES = 500;
+
+const TELEMETRY_CONSENT_KEYS = [
+  "telemetryConsentVersion",
+  "crashReportingEnabled",
+  "analyticsEnabled",
+  "telemetryInstallId",
+];
+
+async function resetTelemetryConsent(): Promise<void> {
+  for (const key of TELEMETRY_CONSENT_KEYS) {
+    await platformAdapter.deleteKv(SETTINGS_NAMESPACE, key);
+  }
+  // Reload resets the bootstrap's module-level started flag, so the
+  // first-run consent dialog reappears immediately.
+  window.location.reload();
+}
 
 async function copyTextWithFallback(text: string): Promise<void> {
   try {
@@ -781,6 +800,17 @@ function DebugPanelContent({
             title="Copy Plate AST (includes file content!)"
           >
             <FileJson className="h-3 w-3" />
+          </Button>
+          {/* Reset telemetry consent (dev utility): wipes the stored
+              consent keys and reloads, so the first-run dialog shows again */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={resetTelemetryConsent}
+            title="Reset telemetry consent and reload (shows the first-run dialog again)"
+          >
+            <ShieldOff className="h-3 w-3" />
           </Button>
           {/* Reload */}
           <Button

@@ -15,6 +15,7 @@ import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import { clearWorkspaceCollections } from "@/entities/files";
 import { queryClient } from "@/entities/query-client";
 import { isWeb } from "@/utils/platform";
+import { captureError } from "@/telemetry/telemetry";
 
 interface WorkspaceErrorBoundaryProps {
   children: ReactNode;
@@ -44,6 +45,11 @@ export class WorkspaceErrorBoundary extends Component<
         "[WorkspaceErrorBoundary] Component stack:",
         errorInfo.componentStack,
       );
+    }
+    // Workspace-access errors are expected (fs permission loss) and get
+    // their own recovery UI — never reported as crashes.
+    if (!isWorkspaceAccessError(error)) {
+      captureError(error, { boundary: "workspace" });
     }
   }
 
