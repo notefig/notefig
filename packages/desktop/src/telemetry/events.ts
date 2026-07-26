@@ -7,7 +7,7 @@
  * content, or anything derived from them.
  */
 export type TelemetryEvent =
-  | { name: "app_opened"; properties: { app_version: string; platform: string } }
+  | { name: "app_opened"; properties?: undefined }
   | { name: "workspace_opened"; properties: { is_new: boolean } }
   | { name: "agent_turn_started"; properties: { harness: string } }
   | {
@@ -19,6 +19,13 @@ export type TelemetryEvent =
       };
     }
   | { name: "tunnel_paired"; properties?: undefined }
+  | { name: "update_available"; properties: { to_version: string } }
+  | { name: "update_download_started"; properties: { to_version: string } }
+  | { name: "update_download_completed"; properties: { to_version: string } }
+  | {
+      name: "update_failed";
+      properties: { stage: "download" | "restart"; to_version: string };
+    }
   | { name: "settings_changed"; properties: { setting: string } }
   | {
       name: "telemetry_consent_answered";

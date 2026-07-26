@@ -3,9 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const capture = vi.fn();
 const captureException = vi.fn();
 const init = vi.fn();
+const register = vi.fn();
 
 vi.mock("posthog-js", () => ({
-  default: { init, capture, captureException },
+  default: { init, capture, captureException, register },
 }));
 
 async function loadTelemetry(withKey: boolean) {
@@ -25,6 +26,7 @@ beforeEach(() => {
   capture.mockClear();
   captureException.mockClear();
   init.mockClear();
+  register.mockClear();
 });
 
 describe("telemetry buffering and tiers", () => {
@@ -45,6 +47,20 @@ describe("telemetry buffering and tiers", () => {
       is_new: false,
     });
     expect(captureException).toHaveBeenCalledOnce();
+  });
+
+  it("registers app_version and platform as super properties on init", async () => {
+    const t = await loadTelemetry(true);
+    await t.configureTelemetry({
+      crashEnabled: true,
+      analyticsEnabled: true,
+      installId: "id-1",
+    });
+
+    expect(register).toHaveBeenCalledWith({
+      app_version: expect.stringMatching(/^\d+\.\d+\.\d+$/),
+      platform: expect.any(String),
+    });
   });
 
   it("drops buffered usage events when analytics is declined", async () => {

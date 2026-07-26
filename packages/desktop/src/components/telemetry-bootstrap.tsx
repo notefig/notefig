@@ -15,27 +15,14 @@ import {
   initGlobalErrorHandlers,
   telemetryAvailable,
 } from "@/telemetry/telemetry";
-import { isWeb } from "@/utils/platform";
-
 // Module-level so StrictMode's double-mount can't re-run startup
 // configuration or double-fire app_opened.
 let started = false;
 
 type SetAppSetting = ReturnType<typeof useAppSettings>["setSetting"];
 
-function coarsePlatform(): string {
-  if (isWeb()) return "web";
-  const platform = navigator.platform.toLowerCase();
-  if (platform.includes("mac")) return "macos";
-  if (platform.includes("win")) return "windows";
-  return "linux";
-}
-
 function fireAppOpened() {
-  captureEvent("app_opened", {
-    app_version: __APP_VERSION__,
-    platform: coarsePlatform(),
-  });
+  captureEvent("app_opened");
 }
 
 /**

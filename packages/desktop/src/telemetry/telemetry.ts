@@ -1,5 +1,6 @@
 import { scrubEvent, scrubString } from "./scrub";
 import type { TelemetryEvent } from "./events";
+import { isWeb } from "@/utils/platform";
 
 /**
  * Telemetry singleton. No PostHog code runs until consent is resolved:
@@ -33,6 +34,7 @@ interface PostHogLike {
     error: unknown,
     properties?: Record<string, unknown>,
   ) => void;
+  register: (properties: Record<string, unknown>) => void;
 }
 
 interface TelemetryConsent {
@@ -57,6 +59,14 @@ function tierEnabled(tier: Tier): boolean {
   return consent.analyticsEnabled;
 }
 
+function coarsePlatform(): string {
+  if (isWeb()) return "web";
+  const platform = navigator.platform.toLowerCase();
+  if (platform.includes("mac")) return "macos";
+  if (platform.includes("win")) return "windows";
+  return "linux";
+}
+
 function loadPosthog(installId: string): Promise<PostHogLike | null> {
   if (!posthogLoad) {
     posthogLoad = import("posthog-js")
@@ -71,6 +81,12 @@ function loadPosthog(installId: string): Promise<PostHogLike | null> {
           persistence: "memory",
           bootstrap: { distinctID: installId },
           before_send: scrubEvent,
+        });
+        // Super properties: stamped on every event, including $exception —
+        // per-event properties can't cover autocaptured errors.
+        posthog.register({
+          app_version: __APP_VERSION__,
+          platform: coarsePlatform(),
         });
         return posthog as unknown as PostHogLike;
       })
