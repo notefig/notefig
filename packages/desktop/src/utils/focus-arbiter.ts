@@ -2,8 +2,23 @@ export type FocusDomain = "modal" | "palette" | "sidebar" | "editor" | "misc";
 
 export type FocusTiming = "immediate" | "next-frame" | "when-mounted";
 
+/**
+ * Optional caret placement carried by editor-targeted intents. The arbiter
+ * treats it as opaque data — the editor resolver (editor-store) interprets
+ * it when the intent wins. Without one, the resolver's default applies
+ * (collapse any stale range so regaining focus never re-paints an old
+ * selection).
+ */
+export type EditorCaretPlacement = {
+  /** Put the caret in the nearest textblock after the node at `pos`
+   *  (e.g. Escape out of an inline widget lands next to it). */
+  type: "after-node";
+  pos: number;
+  nodeSize: number;
+};
+
 export type FocusTarget =
-  | { type: "editor"; filePath: string }
+  | { type: "editor"; filePath: string; caret?: EditorCaretPlacement }
   | { type: "element"; key: string };
 
 export interface FocusIntentInput {

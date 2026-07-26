@@ -57,7 +57,10 @@ import { getRegisteredTask } from "@/agent/task-registry";
 import type { WidgetResponse } from "@/agent/tools/widget-respond";
 import { ensureAgentRuntime } from "@/agent/tunnel/require-connection";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
-import { suppressEditorFocus } from "@/components/editor/editor-store";
+import {
+  requestEditorFocus,
+  suppressEditorFocus,
+} from "@/components/editor/editor-store";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "./harness-logo";
 import { AuthCard } from "./agent-chat-tab";
@@ -288,6 +291,22 @@ export const PromptBlob = memo(function PromptBlob({
     if (isStale) clearPromptBlobTurn(blobId);
   }, [isStale, blobId]);
 
+  // Escape back to the document, through the arbiter like every other
+  // focus hand-off: an editor intent carrying an after-node caret placement
+  // (the aiPrompt node is an atom, nodeSize 1) so the cursor lands next to
+  // this widget. Without a position (shouldn't happen while mounted) the
+  // resolver's default collapse applies.
+  const escapeToEditor = useCallback(() => {
+    const pos = getPos?.();
+    requestEditorFocus(documentPath, {
+      reason: "blob-escape",
+      caret:
+        typeof pos === "number"
+          ? { type: "after-node", pos, nodeSize: 1 }
+          : undefined,
+    });
+  }, [documentPath, getPos]);
+
   const focusComposer = useCallback(() => {
     // suppressEditorFocus first: the arbiter routes focus to the editor on
     // new-file creation (and "/" leaves the editor holding focus) — it
@@ -363,7 +382,7 @@ export const PromptBlob = memo(function PromptBlob({
               draft={record.draft}
               setDraft={setDraft}
               onSend={() => void send()}
-              onEscape={() => editor.commands.focus()}
+              onEscape={escapeToEditor}
               onRevert={revertToSlash}
               onBackspaceDismiss={backspaceDismiss}
               confirmTrust={confirmTrust}
@@ -441,7 +460,7 @@ export const PromptBlob = memo(function PromptBlob({
               replyDraft={record.draft}
               setReplyDraft={setDraft}
               onReply={() => void sendFollowUp()}
-              onReplyEscape={() => editor.commands.focus()}
+              onReplyEscape={escapeToEditor}
               replyDisabled={isSending}
             />
           )}
@@ -455,7 +474,7 @@ export const PromptBlob = memo(function PromptBlob({
               replyDraft={record.draft}
               setReplyDraft={setDraft}
               onReply={() => void sendFollowUp()}
-              onReplyEscape={() => editor.commands.focus()}
+              onReplyEscape={escapeToEditor}
               replyDisabled={isSending}
             />
           )}

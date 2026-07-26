@@ -20,8 +20,15 @@ import {
   getDocumentSync,
 } from "@/utils/markdown-conversion";
 import { focusArbiter } from "@/utils/focus-arbiter";
-import { isSidebarTextEntryActive } from "@/utils/focus-arbiter";
+import {
+  isSidebarTextEntryActive,
+  type EditorCaretPlacement,
+} from "@/utils/focus-arbiter";
 import { resolveEditorLocation, type EditorLocation } from "./editor-position";
+import {
+  collapseStaleSelection,
+  placeCaretAfterNode,
+} from "./refocus-editor";
 import {
   createImageDropHandler,
   createImagePasteHandler,
@@ -43,8 +50,10 @@ export interface EditorInstance {
   /**
    * Focus this editor. Returns true if focus was attempted, false if not applicable.
    * For non-focusable editors (images), this is a no-op that returns false.
+   * `caret` is the intent's placement hint (see EditorCaretPlacement);
+   * without one, any stale range selection is collapsed before focusing.
    */
-  focus(): boolean;
+  focus(caret?: EditorCaretPlacement): boolean;
   /**
    * Dispose of this editor instance. Cleans up any resources.
    */
@@ -106,17 +115,20 @@ const EDITOR_FOCUS_PRIORITY = 70;
 let observedFocusIntentId: string | null = null;
 let observedFocusResult = false;
 
-function focusEditorPath(filePath: string): boolean {
+function focusEditorPath(
+  filePath: string,
+  caret?: EditorCaretPlacement,
+): boolean {
   const instance = editorInstances.get(filePath);
   if (!instance) return false;
 
-  return instance.focus();
+  return instance.focus(caret);
 }
 
 focusArbiter.registerResolver("editor", (intent) => {
   if (intent.target.type !== "editor") return false;
 
-  const result = focusEditorPath(intent.target.filePath);
+  const result = focusEditorPath(intent.target.filePath, intent.target.caret);
   if (observedFocusIntentId === intent.id) {
     observedFocusResult = result;
   }
@@ -144,11 +156,12 @@ export function requestEditorFocus(
   options: {
     when?: "immediate" | "next-frame" | "when-mounted";
     reason?: string;
+    caret?: EditorCaretPlacement;
   } = {},
 ): string {
   return focusArbiter.request({
     domain: "editor",
-    target: { type: "editor", filePath },
+    target: { type: "editor", filePath, caret: options.caret },
     priority: EDITOR_FOCUS_PRIORITY,
     reason: options.reason ?? "editor-focus",
     when: options.when ?? "immediate",
@@ -239,8 +252,13 @@ function createMarkdownInstance(
     type: "markdown",
     editor,
     filePath,
-    focus(): boolean {
+    focus(caret?: EditorCaretPlacement): boolean {
       if (isEditorFocusSuppressed()) return false;
+      if (caret?.type === "after-node") {
+        placeCaretAfterNode(this.editor, caret.pos, caret.nodeSize);
+      } else {
+        collapseStaleSelection(this.editor);
+      }
       this.editor.commands.focus();
       return true;
     },

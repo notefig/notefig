@@ -11,6 +11,7 @@
 
 import { Node } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import { ListItem } from "@tiptap/extension-list";
 import { Markdown } from "tiptap-markdown";
 import Underline from "@tiptap/extension-underline";
 import Subscript from "@tiptap/extension-subscript";
@@ -75,6 +76,12 @@ export const MarkdownTaskList = TaskList.extend({
  * missed during parse.
  */
 export const MarkdownTaskItem = TaskItem.extend({
+  // Widened like PromptHostListItem below: the "/" summon may replace the
+  // item's only paragraph with the aiPrompt widget (MET-93). Static override
+  // is safe because this app always configures `nested: false` (stock
+  // content would be `paragraph+`).
+  content: "(paragraph | aiPrompt) paragraph*",
+
   addStorage() {
     return {
       markdown: {
@@ -225,6 +232,18 @@ export const AiPromptNodeBase = Node.create({
 });
 
 /**
+ * ListItem whose content admits the aiPrompt widget in place of the leading
+ * paragraph. The stock `paragraph block*` expression forbids replacing an
+ * item's only paragraph with the widget, which is exactly what the "/"
+ * summon does inside a list (MET-93). Markdown output is unaffected: the
+ * widget serializes to nothing, so a widget-only item round-trips the same
+ * as an empty one.
+ */
+export const PromptHostListItem = ListItem.extend({
+  content: "(paragraph | aiPrompt) block*",
+});
+
+/**
  * The schema-defining extension list, in the same order the editor has
  * always registered them (order can influence schema construction). The
  * image, codeBlock, and aiPrompt extensions are injectable so the renderer
@@ -243,7 +262,11 @@ export function createSchemaExtensions(
       // the standalone configured instances below are the only registrations.
       link: false,
       underline: false,
+      // Replaced by PromptHostListItem below (same node name, widened
+      // content expression).
+      listItem: false,
     }),
+    PromptHostListItem,
     Markdown.configure(markdownOptions),
     Underline,
     Subscript,

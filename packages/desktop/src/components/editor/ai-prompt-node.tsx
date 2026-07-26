@@ -11,7 +11,8 @@
  * fight with reinsertion) and they carry UI_ONLY_TRANSACTION_META so the
  * autosave path ignores them.
  *
- * Summon — typing "/" in an empty top-level paragraph replaces it with a
+ * Summon — typing "/" in an empty paragraph (top-level, or nested purely in
+ * bullet/ordered lists) replaces it with a
  * focused widget (`summoned: true`); Esc or a second "/" while the composer
  * is empty reverts it to a literal "/". In an empty doc the keeper widget
  * already exists, so "/" just focuses it. Docs with content are never
