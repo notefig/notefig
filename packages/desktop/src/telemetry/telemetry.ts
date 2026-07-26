@@ -50,7 +50,9 @@ let buffer: BufferedItem[] = [];
 const recentErrors = new Map<string, number>();
 
 export function telemetryAvailable(): boolean {
-  return Boolean(TELEMETRY_KEY);
+  // Test-backend (e2e shim) runs are never telemetry-eligible, even when
+  // the dev server carries a real key via .env.
+  return Boolean(TELEMETRY_KEY) && !import.meta.env.VITE_TEST_BACKEND;
 }
 
 function tierEnabled(tier: Tier): boolean {

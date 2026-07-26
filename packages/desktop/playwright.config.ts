@@ -20,6 +20,29 @@ export default defineConfig({
     trace: "off",
     screenshot: "off",
     video: "off",
+    // Pre-answer the telemetry consent dialog (both tiers declined) so it
+    // never blocks flows; local dev servers carry a real PostHog key via
+    // .env, which would otherwise arm the first-run dialog. Keys mirror
+    // the browser adapter's KV layout (metrists-kv:<namespace>:<key>).
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin: "http://localhost:1420",
+          localStorage: [
+            {
+              name: "metrists-kv:settings:telemetryConsentVersion",
+              value: "1",
+            },
+            {
+              name: "metrists-kv:settings:crashReportingEnabled",
+              value: "false",
+            },
+            { name: "metrists-kv:settings:analyticsEnabled", value: "false" },
+          ],
+        },
+      ],
+    },
   },
 
   projects: [

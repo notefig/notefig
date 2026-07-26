@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   TelemetryConsentDialog,
   type TelemetryConsentAnswer,
@@ -124,15 +125,25 @@ function mirrorAnswerToSettings(
   if (installId) setSetting("telemetryInstallId", installId);
 }
 
+const NON_WORKSPACE_PATHS = new Set(["/", "/welcome", "/pair"]);
+
+/** The consent dialog waits until the user is actually inside a workspace. */
+function isWorkspaceRoute(pathname: string): boolean {
+  return (
+    !NON_WORKSPACE_PATHS.has(pathname) && !pathname.startsWith("/__harness")
+  );
+}
+
 /**
  * App-global telemetry gate, mounted once in main.tsx (sibling of
  * AppUpdaterBootstrap). Registers global error handlers immediately, then
- * either configures telemetry from stored consent or shows the first-run
- * consent dialog. Route-independent, so it works for both /welcome and
- * restored-workspace launches.
+ * either configures telemetry from stored consent or arms the first-run
+ * consent dialog. The dialog itself is deferred until the user has opened
+ * a workspace — first contact (/welcome) stays prompt-free.
  */
 export function TelemetryBootstrap() {
   const { setSetting } = useAppSettings();
+  const location = useLocation();
   const [showConsent, setShowConsent] = useState(false);
 
   useEffect(() => {
@@ -162,7 +173,12 @@ export function TelemetryBootstrap() {
     })();
   };
 
-  return <TelemetryConsentDialog open={showConsent} onAnswer={handleAnswer} />;
+  return (
+    <TelemetryConsentDialog
+      open={showConsent && isWorkspaceRoute(location.pathname)}
+      onAnswer={handleAnswer}
+    />
+  );
 }
 
 /** Test-only: allow consent-flow tests to remount from a clean slate. */
