@@ -34,9 +34,10 @@
    has no inline-level line box — a widget-only item after a "/" summon
    loses its bullet (Chromium keeps it, MET-93). An inline-block wrapper
    restores a line box; top-aligned so the marker sits beside the top of
-   the card, matching Chromium. Scoped to bullet/ordered items — task items
-   render a real checkbox, no marker involved. */
-.ProseMirror li > .react-renderer.node-aiPrompt {
+   the card, matching Chromium. Scoped to list items — at doc level the
+   widget stays a plain block, and task items render a real checkbox, no
+   marker involved. */
+.ProseMirror li [data-type="ai-prompt"] {
   display: inline-block;
   width: 100%;
   vertical-align: top;

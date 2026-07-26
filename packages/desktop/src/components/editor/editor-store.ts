@@ -26,10 +26,7 @@ import {
   type EditorCaretPlacement,
 } from "@/utils/focus-arbiter";
 import { resolveEditorLocation, type EditorLocation } from "./editor-position";
-import {
-  collapseStaleSelection,
-  placeCaretBeforeNode,
-} from "./refocus-editor";
+import { placeCaretBeforeNode } from "./refocus-editor";
 import {
   createImageDropHandler,
   createImagePasteHandler,
@@ -52,7 +49,7 @@ export interface EditorInstance {
    * Focus this editor. Returns true if focus was attempted, false if not applicable.
    * For non-focusable editors (images), this is a no-op that returns false.
    * `caret` is the intent's placement hint (see EditorCaretPlacement);
-   * without one, any stale range selection is collapsed before focusing.
+   * without one, the current selection is left untouched.
    */
   focus(caret?: EditorCaretPlacement): boolean;
   /**
@@ -288,8 +285,6 @@ function createMarkdownInstance(
       if (isEditorFocusSuppressed()) return false;
       if (caret?.type === "before-node") {
         placeCaretBeforeNode(this.editor, caret.pos);
-      } else {
-        collapseStaleSelection(this.editor);
       }
       this.editor.commands.focus();
       return true;

@@ -5,9 +5,8 @@ export type FocusTiming = "immediate" | "next-frame" | "when-mounted";
 /**
  * Optional caret placement carried by editor-targeted intents. The arbiter
  * treats it as opaque data — the editor resolver (editor-store) interprets
- * it when the intent wins. Without one, the resolver's default applies
- * (collapse any stale range so regaining focus never re-paints an old
- * selection).
+ * it when the intent wins. Without one, the editor's current selection is
+ * left as-is (mount restores its saved selection and must keep it).
  */
 export type EditorCaretPlacement = {
   /** Put the caret in the nearest textblock before the node at `pos` —
