@@ -68,8 +68,10 @@ function readStoredConsent(stored: Record<string, unknown>) {
   const consentVersion = (stored["telemetryConsentVersion"] as number) ?? 0;
   return {
     answered: consentVersion >= CURRENT_TELEMETRY_CONSENT_VERSION,
-    crashEnabled: (stored["crashReportingEnabled"] as boolean) ?? true,
-    analyticsEnabled: (stored["analyticsEnabled"] as boolean) ?? true,
+    // Fail closed: a flag missing despite the answered marker (partial
+    // write, manual store edit) must read as declined, never accepted.
+    crashEnabled: (stored["crashReportingEnabled"] as boolean) ?? false,
+    analyticsEnabled: (stored["analyticsEnabled"] as boolean) ?? false,
     installId: (stored["telemetryInstallId"] as string | null) ?? null,
   };
 }
@@ -89,25 +91,24 @@ async function ensureInstallId(
 }
 
 /**
- * Durable writes straight to the KV store — awaited, so the shown-once
- * flag is on disk before anything else happens. Returns the install ID
- * (fresh when any tier was accepted).
+ * Durable writes straight to the KV store. Write order is load-bearing:
+ * `telemetryConsentVersion` is the "answered" marker and must land LAST,
+ * so a partial failure can never leave consent looking answered while the
+ * actual choices are missing (the dialog re-asks on the next launch).
  */
 async function persistConsentAnswer(
   answer: TelemetryConsentAnswer,
-): Promise<string | null> {
-  const anyEnabled = answer.crashEnabled || answer.analyticsEnabled;
-  const installId = anyEnabled ? crypto.randomUUID() : null;
+  installId: string | null,
+): Promise<void> {
   const entries: Array<[string, unknown]> = [
-    ["telemetryConsentVersion", CURRENT_TELEMETRY_CONSENT_VERSION],
     ["crashReportingEnabled", answer.crashEnabled],
     ["analyticsEnabled", answer.analyticsEnabled],
   ];
   if (installId) entries.push(["telemetryInstallId", installId]);
+  entries.push(["telemetryConsentVersion", CURRENT_TELEMETRY_CONSENT_VERSION]);
   for (const [key, value] of entries) {
     await platformAdapter.setKv(SETTINGS_NAMESPACE, key, value);
   }
-  return installId;
 }
 
 /**
@@ -150,16 +151,35 @@ export function TelemetryBootstrap() {
     if (started) return;
     started = true;
     initGlobalErrorHandlers();
-    void startTelemetry().then((outcome) => {
-      if (outcome === "show-consent") setShowConsent(true);
-    });
+    void startTelemetry()
+      .then((outcome) => {
+        if (outcome === "show-consent") setShowConsent(true);
+      })
+      .catch((error) => {
+        console.error("[telemetry] startup failed:", error);
+        // Resolve the pending buffer as fully disabled instead of leaving
+        // the module stuck in "pending" for the rest of the session.
+        return configureTelemetry({
+          crashEnabled: false,
+          analyticsEnabled: false,
+          installId: null,
+        });
+      });
   }, []);
 
   const handleAnswer = (answer: TelemetryConsentAnswer) => {
     setShowConsent(false);
     void (async () => {
-      const installId = await persistConsentAnswer(answer);
-      mirrorAnswerToSettings(setSetting, answer, installId);
+      const anyEnabled = answer.crashEnabled || answer.analyticsEnabled;
+      const installId = anyEnabled ? crypto.randomUUID() : null;
+      try {
+        await persistConsentAnswer(answer, installId);
+        mirrorAnswerToSettings(setSetting, answer, installId);
+      } catch (error) {
+        // Honor the answer for this session regardless; the version
+        // marker didn't land, so the dialog re-asks on the next launch.
+        console.error("[telemetry] failed to persist consent:", error);
+      }
       await configureTelemetry({
         crashEnabled: answer.crashEnabled,
         analyticsEnabled: answer.analyticsEnabled,
