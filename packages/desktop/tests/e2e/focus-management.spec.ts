@@ -185,6 +185,49 @@ test.describe("Focus Management", () => {
     await expect(editor).toContainText("focused");
   });
 
+  test("new empty file shows the prompt widget first with its composer focused", async ({
+    page,
+  }) => {
+    await page.getByRole("button", { name: "New file" }).click();
+    const createInput = page.locator('input[placeholder="filename.md"]');
+    await createInput.fill("empty-widget-focus.md");
+    await createInput.press("Enter");
+
+    const widget = page.locator('[data-type="ai-prompt"]').first();
+    await expect(widget).toBeVisible();
+
+    // No blank line above the widget: it is the document's first block.
+    // (The node view mounts inside an extra wrapper div, so walk up from
+    // the widget to the .ProseMirror child instead of reading data-type
+    // off firstElementChild directly.)
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const pm = document.querySelector(".ProseMirror");
+          const widgetEl = pm?.querySelector('[data-type="ai-prompt"]');
+          if (!pm || !widgetEl) return false;
+          let block: Element = widgetEl;
+          while (block.parentElement && block.parentElement !== pm) {
+            block = block.parentElement;
+          }
+          return pm.firstElementChild === block;
+        }),
+      )
+      .toBe(true);
+
+    const composer = widget.locator("textarea").first();
+    await expect(composer).toBeFocused();
+
+    // The editor's post-mount reclaim window is 600ms — focus must survive
+    // it, not just land briefly.
+    await page.waitForTimeout(800);
+    await expect(composer).toBeFocused();
+
+    // Typing goes to the composer, not the document.
+    await page.keyboard.type("hello agent");
+    await expect(composer).toHaveValue("hello agent");
+  });
+
   test("multi-dock hotkeys switch tabs inside the active dock window", async ({
     page,
   }) => {

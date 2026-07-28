@@ -12,7 +12,11 @@ import {
   getSelectedText,
   navigateToLocation,
   getMarkdownEditor,
+  requestEditorFocus,
+  setActiveEditorFocusTarget,
 } from "@/components/editor/editor-store";
+import { findPromptNodeId } from "@/components/editor/ai-prompt-utils";
+import { consumePendingPromptBlobFocus } from "@/components/agent/prompt-blob-store";
 
 /** Editors accept only parsed doc JSON (conversion happens in the worker). */
 function docWithText(text: string) {
@@ -77,6 +81,68 @@ describe("editor registry", () => {
     disposeEditor("/ws/a.md");
     const second = getOrCreateEditor("/ws/a.md", MD_CONFIG);
     expect(second).not.toBe(first);
+  });
+});
+
+describe("focus arbiter keeper redirect", () => {
+  const EMPTY_CONFIG = {
+    type: "markdown" as const,
+    content: { type: "doc", content: [{ type: "paragraph" }] },
+  };
+
+  /** Store-created empty doc with the keeper inserted (onCreate is async)
+   *  and its on-create focus request drained, so assertions below observe
+   *  only the arbiter's behavior. */
+  async function emptyKeeperDoc(path: string): Promise<string> {
+    getOrCreateEditor(path, EMPTY_CONFIG);
+    // Editor intents are only eligible for the arbiter's active editor.
+    setActiveEditorFocusTarget(path);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const blobId = findPromptNodeId(getMarkdownEditor(path)!.state.doc);
+    expect(blobId).toBeTruthy();
+    consumePendingPromptBlobFocus(blobId!);
+    return blobId!;
+  }
+
+  afterEach(() => {
+    setActiveEditorFocusTarget(null);
+  });
+
+  it("forwards ambient intents to the keeper composer on empty docs", async () => {
+    const blobId = await emptyKeeperDoc("/ws/empty.md");
+
+    // A tab-activation-style intent: non-steal, while some other control
+    // may hold focus. It must route to the composer, not vanish.
+    requestEditorFocus("/ws/empty.md", { reason: "tab-selected" });
+    await new Promise((resolve) => setTimeout(resolve, 0)); // microtask flush
+
+    expect(consumePendingPromptBlobFocus(blobId)).toBe(true);
+  });
+
+  it("explicit steal hand-offs still reach the editor, not the composer", async () => {
+    const blobId = await emptyKeeperDoc("/ws/empty-steal.md");
+
+    requestEditorFocus("/ws/empty-steal.md", {
+      reason: "blob-escape",
+      steal: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(consumePendingPromptBlobFocus(blobId)).toBe(false);
+  });
+
+  it("does not redirect on documents with content", async () => {
+    getOrCreateEditor("/ws/full.md", MD_CONFIG);
+    setActiveEditorFocusTarget("/ws/full.md");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    requestEditorFocus("/ws/full.md", { reason: "tab-selected" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // No keeper exists on content docs — nothing pending anywhere.
+    expect(findPromptNodeId(getMarkdownEditor("/ws/full.md")!.state.doc)).toBe(
+      null,
+    );
   });
 });
 

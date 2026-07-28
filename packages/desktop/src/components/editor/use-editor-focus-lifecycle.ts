@@ -12,6 +12,11 @@ import {
   saveSelection,
   getSavedSelection,
 } from "@/components/editor/editor-store";
+import {
+  docHasRealContent,
+  findPromptNodeId,
+} from "@/components/editor/ai-prompt-utils";
+import { requestPromptBlobFocus } from "@/components/agent/prompt-blob-store";
 
 /** How long after mount the tab layout may still re-parent the editor DOM. */
 const FOCUS_RECLAIM_WINDOW_MS = 600;
@@ -51,10 +56,22 @@ export function useEditorFocusLifecycle(
         return;
       }
       if (document.activeElement === document.body && !editor.view.hasFocus()) {
-        requestEditorFocus(filePath, {
-          when: "immediate",
-          reason: "focus-lost-after-mount",
-        });
+        // On an empty keeper doc the composer textarea is the rightful
+        // owner (the arbiter declines ambient editor intents there), so
+        // reclaim to it — re-parenting drops its focus just like the
+        // editor's, and nothing else restores it.
+        const doc = editor.state.doc;
+        const keeperId = docHasRealContent(doc)
+          ? null
+          : findPromptNodeId(doc);
+        if (keeperId) {
+          requestPromptBlobFocus(keeperId);
+        } else {
+          requestEditorFocus(filePath, {
+            when: "immediate",
+            reason: "focus-lost-after-mount",
+          });
+        }
       }
       reclaimRaf = requestAnimationFrame(reclaim);
     };
