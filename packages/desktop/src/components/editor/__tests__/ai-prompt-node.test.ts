@@ -62,6 +62,13 @@ describe("aiPrompt markdown serialization", () => {
         content: [{ type: "paragraph" }, { type: "aiPrompt" }],
       }),
     ).toBe("");
+    // The keeper's actual shape: widget first, empty paragraph below.
+    expect(
+      codec.serialize({
+        type: "doc",
+        content: [{ type: "aiPrompt" }, { type: "paragraph" }],
+      }),
+    ).toBe("");
   });
 });
 
@@ -70,6 +77,20 @@ describe("aiPrompt empty-document keeper", () => {
     editor = await documentEditor("");
     expect(hasPromptNode(editor)).toBe(true);
     expect(getEditorMarkdown(editor)).toBe("");
+  });
+
+  it("sits first in the document — no blank line above the widget", async () => {
+    editor = await documentEditor("");
+    expect(editor.state.doc.firstChild?.type.name).toBe("aiPrompt");
+    // The empty paragraph stays below as the caret landing spot.
+    expect(editor.state.doc.lastChild?.type.name).toBe("paragraph");
+  });
+
+  it("requests composer focus for the fresh keeper on create", async () => {
+    editor = await documentEditor("");
+    const keeper = findPromptNode(editor);
+    expect(keeper?.blobId).toBeTruthy();
+    expect(consumePendingPromptBlobFocus(keeper!.blobId!)).toBe(true);
   });
 
   it("does not touch documents that open with content", async () => {
@@ -89,6 +110,19 @@ describe("aiPrompt empty-document keeper", () => {
     expect(hasPromptNode(editor)).toBe(false);
     editor.commands.clearContent(true);
     expect(hasPromptNode(editor)).toBe(true);
+  });
+
+  it("reinserts first without stealing focus when the doc becomes empty", async () => {
+    editor = await documentEditor("<p>Some text</p>");
+    editor.commands.clearContent(true);
+    expect(editor.state.doc.firstChild?.type.name).toBe("aiPrompt");
+    // The user's cursor stays in the editor: the reinsert must not queue a
+    // composer focus request (contrast with the on-create keeper).
+    const keeper = findPromptNode(editor);
+    expect(consumePendingPromptBlobFocus(keeper!.blobId!)).toBe(false);
+    // Selection remains in the paragraph below the widget.
+    const { from } = editor.state.selection;
+    expect(from).toBeGreaterThan(keeper!.pos);
   });
 
   it("stays disarmed on unconfigured (schema-only) instances", async () => {
@@ -239,7 +273,11 @@ describe('"/" summon', () => {
     editor = await documentEditor("");
     const keeper = findPromptNode(editor);
     expect(keeper?.blobId).toBeTruthy();
-    editor.commands.setTextSelection(1);
+    // Drain the on-create focus request so the assertion below proves the
+    // "/" itself re-requests focus on the existing keeper.
+    consumePendingPromptBlobFocus(keeper!.blobId!);
+    // Inside the empty paragraph below the widget (widget occupies 0..1).
+    editor.commands.setTextSelection(2);
     expect(typeText(editor, "/")).toBe(true);
     expect(findPromptNodes(editor)).toHaveLength(1);
     expect(consumePendingPromptBlobFocus(keeper!.blobId!)).toBe(true);

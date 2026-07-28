@@ -6,7 +6,7 @@
  *
  * Keeper — the "active by default on new documents" rule: an editor whose
  * document has no real content always carries exactly one aiPrompt node at
- * its end, and it comes back if deleted while the doc is still empty.
+ * its start, and it comes back if deleted while the doc is still empty.
  * Keeper transactions are UI-only: they don't join the undo history (a ⌘Z
  * fight with reinsertion) and they carry UI_ONLY_TRANSACTION_META so the
  * autosave path ignores them.
@@ -47,17 +47,21 @@ export interface AiPromptNodeOptions {
 }
 
 /** The keeper's insertion, or null when the doc doesn't need one. */
-function appendPromptTr(state: EditorState): Transaction | null {
+function appendPromptTr(
+  state: EditorState,
+): { tr: Transaction; blobId: string } | null {
   if (docHasRealContent(state.doc) || docHasPromptNode(state.doc)) return null;
   const type = state.schema.nodes[AiPromptNodeBase.name];
   if (!type) return null;
-  return state.tr
-    .insert(
-      state.doc.content.size,
-      type.create({ blobId: newPromptBlobInstanceId() }),
-    )
+  const blobId = newPromptBlobInstanceId();
+  // Position 0: the widget sits above the empty paragraph, so a fresh doc
+  // shows no blank line before it. The paragraph below stays as the caret
+  // landing spot for Escape/click-into-editor.
+  const tr = state.tr
+    .insert(0, type.create({ blobId }))
     .setMeta("addToHistory", false)
     .setMeta(UI_ONLY_TRANSACTION_META, true);
+  return { tr, blobId };
 }
 
 function AiPromptNodeView(props: NodeViewProps) {
@@ -131,10 +135,15 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
   },
 
   onCreate() {
-    // Documents open empty (new files) get the widget from the start.
+    // Documents open empty (new files) get the widget from the start,
+    // focused: the pending-focus channel survives the one-React-pass gap
+    // before the node view mounts, and its consumer doesn't bail on the
+    // editor already holding focus (unlike the mount auto-focus effect).
     if (!this.options.filePath) return;
-    const tr = appendPromptTr(this.editor.state);
-    if (tr) this.editor.view.dispatch(tr);
+    const res = appendPromptTr(this.editor.state);
+    if (!res) return;
+    this.editor.view.dispatch(res.tr);
+    requestPromptBlobFocus(res.blobId);
   },
 
   addProseMirrorPlugins() {
@@ -167,7 +176,9 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
         appendTransaction(transactions, _oldState, newState) {
           if (!options.filePath) return null;
           if (!transactions.some((tr) => tr.docChanged)) return null;
-          return appendPromptTr(newState);
+          // Became-empty reinsert: no focus request — the user's cursor is
+          // in the editor and must stay there.
+          return appendPromptTr(newState)?.tr ?? null;
         },
       }),
     ];

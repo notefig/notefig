@@ -26,6 +26,7 @@ import {
   type EditorCaretPlacement,
 } from "@/utils/focus-arbiter";
 import { resolveEditorLocation, type EditorLocation } from "./editor-position";
+import { docHasPromptNode, docHasRealContent } from "./ai-prompt-utils";
 import { placeCaretBeforeNode } from "./refocus-editor";
 import {
   createImageDropHandler,
@@ -141,6 +142,17 @@ function isForeignTextEntryFocused(filePath: string): boolean {
   return isTextEntryActive(active);
 }
 
+/**
+ * An empty document carrying the keeper widget: the composer is the
+ * document's entry point there, so ambient editor focus must stand down.
+ */
+function isEmptyKeeperDoc(filePath: string): boolean {
+  const instance = editorInstances.get(filePath);
+  if (!instance || !isMarkdownInstance(instance)) return false;
+  const doc = instance.editor.state.doc;
+  return !docHasRealContent(doc) && docHasPromptNode(doc);
+}
+
 focusArbiter.registerResolver("editor", (intent) => {
   if (intent.target.type !== "editor") return false;
 
@@ -152,6 +164,15 @@ focusArbiter.registerResolver("editor", (intent) => {
   // hand-off like the blob's Escape) proceed; when-mounted intents keep
   // retrying until the entry releases focus or their TTL expires.
   if (!intent.steal && isForeignTextEntryFocused(intent.target.filePath)) {
+    return false;
+  }
+
+  // On an empty doc the keeper's composer owns focus by default — ambient
+  // intents (mount, tab activation, post-mount reclaim) must not race it,
+  // even while focus momentarily sits on <body> (rAF gap before the
+  // textarea focuses, tab-layout re-parenting). Explicit hand-offs like
+  // the blob's Escape carry `steal` and still land in the editor.
+  if (!intent.steal && isEmptyKeeperDoc(intent.target.filePath)) {
     return false;
   }
 
