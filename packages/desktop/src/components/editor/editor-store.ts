@@ -26,7 +26,8 @@ import {
   type EditorCaretPlacement,
 } from "@/utils/focus-arbiter";
 import { resolveEditorLocation, type EditorLocation } from "./editor-position";
-import { docHasPromptNode, docHasRealContent } from "./ai-prompt-utils";
+import { docHasRealContent, findPromptNodeId } from "./ai-prompt-utils";
+import { requestPromptBlobFocus } from "@/components/agent/prompt-blob-store";
 import { placeCaretBeforeNode } from "./refocus-editor";
 import {
   createImageDropHandler,
@@ -145,12 +146,14 @@ function isForeignTextEntryFocused(filePath: string): boolean {
 /**
  * An empty document carrying the keeper widget: the composer is the
  * document's entry point there, so ambient editor focus must stand down.
+ * Returns the keeper's blobId so the caller can forward focus to it.
  */
-function isEmptyKeeperDoc(filePath: string): boolean {
+function emptyKeeperDocPromptId(filePath: string): string | null {
   const instance = editorInstances.get(filePath);
-  if (!instance || !isMarkdownInstance(instance)) return false;
+  if (!instance || !isMarkdownInstance(instance)) return null;
   const doc = instance.editor.state.doc;
-  return !docHasRealContent(doc) && docHasPromptNode(doc);
+  if (docHasRealContent(doc)) return null;
+  return findPromptNodeId(doc);
 }
 
 focusArbiter.registerResolver("editor", (intent) => {
@@ -170,10 +173,22 @@ focusArbiter.registerResolver("editor", (intent) => {
   // On an empty doc the keeper's composer owns focus by default — ambient
   // intents (mount, tab activation, post-mount reclaim) must not race it,
   // even while focus momentarily sits on <body> (rAF gap before the
-  // textarea focuses, tab-layout re-parenting). Explicit hand-offs like
-  // the blob's Escape carry `steal` and still land in the editor.
-  if (!intent.steal && isEmptyKeeperDoc(intent.target.filePath)) {
-    return false;
+  // textarea focuses, tab-layout re-parenting). Forward the intent to the
+  // composer rather than just declining: on a tab re-activation nothing
+  // else routes focus there (the reclaim loop only watches <body>), and
+  // returning true retires the intent instead of leaving a when-mounted
+  // retry loop spinning. The pending-focus channel covers a widget that
+  // hasn't mounted yet. Explicit hand-offs like the blob's Escape carry
+  // `steal` and still land in the editor.
+  if (!intent.steal) {
+    const keeperId = emptyKeeperDocPromptId(intent.target.filePath);
+    if (keeperId) {
+      requestPromptBlobFocus(keeperId);
+      if (observedFocusIntentId === intent.id) {
+        observedFocusResult = true;
+      }
+      return true;
+    }
   }
 
   const result = focusEditorPath(intent.target.filePath, intent.target.caret);
