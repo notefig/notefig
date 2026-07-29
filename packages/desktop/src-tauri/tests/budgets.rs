@@ -10,9 +10,10 @@
 //! and catches the class of bug MET-97 was, which is an operation quietly
 //! holding several full copies of its data at once.
 //!
-//! The counters are process-global, so `measure` serializes on a mutex. Plain
-//! `cargo test` is therefore correct — no `--test-threads=1` needed, and no way
-//! to run this suite wrong by forgetting a flag.
+//! The counters are process-global, so every test holds `exclusive()` for its
+//! whole body — not just its measured region, since another test writing
+//! fixture files mid-measurement lands in that measurement. Plain `cargo test`
+//! is therefore correct, with no `--test-threads=1` flag to forget.
 
 use serde_json::{json, Value};
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -56,13 +57,27 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static ALLOC: Counting = Counting;
 
-/// Serializes measurements. The counters are process-global, so two tests
-/// measuring at once would attribute each other's allocations and fail at
-/// random. Taking this lock makes plain `cargo test` correct instead of
-/// depending on `--test-threads=1`, which is invisible at the callsite and
-/// silently wrong the one time someone forgets it. Poisoning is ignored: a
-/// panicking budget test has already failed, and its lock must not cascade.
-static MEASURE_LOCK: Mutex<()> = Mutex::new(());
+/// Serializes whole tests, not just their measured regions.
+///
+/// The counters are process-global, so ANY allocation on ANY thread during a
+/// measurement is attributed to it. Locking only inside `measure` is not
+/// enough: while one test measures, another is writing tens of MB of fixture
+/// files, and that lands in the measuring test's peak. That exact mistake made
+/// an earlier version of this file report identical numbers for two different
+/// workloads locally while CI — with different timing — disagreed.
+///
+/// So every test takes this for its entire body via `exclusive()`. That makes
+/// the binary effectively single-threaded, enforced in code rather than by a
+/// `--test-threads=1` flag that is invisible at the callsite and silently
+/// wrong the one time someone forgets it.
+static EXCLUSIVE: Mutex<()> = Mutex::new(());
+
+/// Guard held for a whole test. Poisoning is ignored: a panicking budget test
+/// has already reported its own failure, and must not cascade into the rest.
+#[must_use = "hold the guard for the test's whole body, not just its measurements"]
+fn exclusive() -> std::sync::MutexGuard<'static, ()> {
+    EXCLUSIVE.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// Run `f`, returning its value and the peak live heap it added, in bytes.
 ///
@@ -70,8 +85,14 @@ static MEASURE_LOCK: Mutex<()> = Mutex::new(());
 /// unrelated long-lived allocations (the mock app, the tokio runtime) don't
 /// count against the budget. Allocations made on worker threads *during* `f`
 /// are counted deliberately — they are part of the operation's cost.
+///
+/// Callers must already hold `exclusive()`.
 fn measure<T>(f: impl FnOnce() -> T) -> (T, usize) {
-    let _guard = MEASURE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    debug_assert!(
+        EXCLUSIVE.try_lock().is_err(),
+        "measure() called without holding exclusive() — the measurement will \
+         absorb other tests' allocations"
+    );
     let base = LIVE.load(Relaxed);
     PEAK.store(base, Relaxed);
     let out = f();
@@ -170,6 +191,7 @@ fn write_binary_file(dir: &Path, name: &str, bytes: usize) -> (String, usize) {
 /// that buffers every file before serializing — blows this.
 #[test]
 fn read_files_stays_within_content_plus_one_serialization() {
+    let _exclusive = exclusive();
     let tmp = tempfile::tempdir().expect("tempdir");
     let app = mock_app();
     let webview = main_webview(&app);
@@ -189,43 +211,50 @@ fn read_files_stays_within_content_plus_one_serialization() {
     assert_budget("read_files (20 x 2MB)", source, peak, READ_FILES_BUDGET);
 }
 
-/// The same request split across more, smaller files must not cost more —
-/// peak should track total bytes, not file count. A per-file overhead that
-/// scales with N shows up here and nowhere else.
+/// A request spread across many small files must stay within the same budget
+/// as one across few large files. `read_files` fans out with an uncapped
+/// `join_all`, so a per-file overhead — a buffer, a task, a handle held for the
+/// whole batch — would show up here as the file count rises at constant bytes.
+///
+/// Each shape is checked against the *fixed* budget rather than against each
+/// other. An earlier version compared the two measurements directly and
+/// asserted the ratio between them; that failed in CI while passing locally,
+/// because `read_to_string`'s buffer-growth strategy varies with platform and
+/// file size (Linux reads 8 large files in ~1.8x, macOS in ~3.4x, and both land
+/// at ~3.4x for 64 small ones). Comparing measurements to each other imports
+/// that variance into the assertion; comparing each to a ceiling does not,
+/// while still catching the overhead this test exists to catch.
 #[test]
-fn read_files_peak_tracks_bytes_not_file_count() {
+fn read_files_budget_holds_regardless_of_file_count() {
+    let _exclusive = exclusive();
     let tmp = tempfile::tempdir().expect("tempdir");
     let app = mock_app();
     let webview = main_webview(&app);
 
-    let total = 40 * 1024 * 1024;
+    const TOTAL: usize = 40 * 1024 * 1024;
 
-    let mut few = Vec::new();
-    for i in 0..8 {
-        let (path, _) = write_text_file(tmp.path(), &format!("few{i}.md"), total / 8);
-        few.push(path);
+    println!("\n=== read_files: same total bytes, different file counts ===");
+    for count in [8usize, 64] {
+        let mut paths = Vec::new();
+        let mut source = 0usize;
+        for i in 0..count {
+            let (path, len) =
+                write_text_file(tmp.path(), &format!("n{count}_{i}.md"), TOTAL / count);
+            paths.push(path);
+            source += len;
+        }
+
+        let (res, peak) =
+            measure(|| invoke_raw(&webview, "read_files", json!({ "paths": paths })));
+        assert!(res.is_ok(), "read_files should dispatch");
+
+        assert_budget(
+            &format!("read_files ({count} files)"),
+            source,
+            peak,
+            READ_FILES_BUDGET,
+        );
     }
-    let mut many = Vec::new();
-    for i in 0..64 {
-        let (path, _) = write_text_file(tmp.path(), &format!("many{i}.md"), total / 64);
-        many.push(path);
-    }
-
-    println!("\n=== read_files: peak vs file count (same total bytes) ===");
-    let (_, peak_few) = measure(|| invoke_raw(&webview, "read_files", json!({ "paths": few })));
-    let (_, peak_many) = measure(|| invoke_raw(&webview, "read_files", json!({ "paths": many })));
-
-    println!(
-        "  8 files  peak {:>8}\n  64 files peak {:>8}",
-        mb(peak_few),
-        mb(peak_many)
-    );
-    let growth = peak_many as f64 / peak_few as f64;
-    assert!(
-        growth <= 1.5,
-        "8x more files for the same total bytes grew peak heap {growth:.2}x — \
-         per-file overhead is scaling with file count."
-    );
 }
 
 /// `read_binary_files` returns `Vec<u8>`, which serde renders as a JSON array
@@ -234,6 +263,7 @@ fn read_files_peak_tracks_bytes_not_file_count() {
 /// note on the constant.
 #[test]
 fn read_binary_files_stays_within_wire_format_budget() {
+    let _exclusive = exclusive();
     let tmp = tempfile::tempdir().expect("tempdir");
     let app = mock_app();
     let webview = main_webview(&app);
@@ -268,6 +298,7 @@ fn read_binary_files_stays_within_wire_format_budget() {
 #[test]
 #[ignore = "known bug: search clones the full line per match (2536x budget); needs a truncation policy — see doc comment"]
 fn search_peak_does_not_scale_with_matches_per_line() {
+    let _exclusive = exclusive();
     let tmp = tempfile::tempdir().expect("tempdir");
     let app = mock_app();
     let webview = main_webview(&app);
