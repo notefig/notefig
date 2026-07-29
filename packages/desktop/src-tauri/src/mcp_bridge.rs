@@ -30,8 +30,17 @@
 /// HTTP framing anywhere in this module.
 ///
 /// Contract with the frontend (tauri-mcp-transport.ts):
-/// - `start_mcp_relay(taskId)` / `write_mcp_line(taskId, line)` / `stop_mcp_relay(taskId)`
-/// - events: `mcp-bridge://{taskId}/line` (payload: the line), `mcp-bridge://{taskId}/close`
+/// - `start_mcp_relay(taskId)` / `write_mcp_line(taskId, connId, line)` /
+///   `stop_mcp_relay(taskId)`
+/// - event: `mcp-bridge://{taskId}/lines`, payload `McpLinesPayload`
+///   (`{ connId, lines }`) — a *batch* of lines from one connection in read
+///   order, coalesced by `line_pump.rs`; the transport re-expands it into
+///   per-line request callbacks.
+///
+/// There is deliberately no close/disconnect event: a relay connection ending
+/// is routine churn (OpenCode spawns the server command several times per
+/// task), never endpoint death, so it must not reach the frontend as one. The
+/// endpoint closes only via `stop_mcp_relay`.
 use crate::agent_proc::{AgentProcErrorType, AgentResult};
 use serde::Serialize;
 use std::collections::HashMap;

@@ -43,7 +43,7 @@ Implement, bottom-up:
 
 1. **`src-tauri/src/agent_proc.rs`** — real process host: `tokio::process`
    children in Tauri managed state keyed by `proc_id`; line-buffered
-   stdout/stderr reader tasks emitting `agent-proc://{proc_id}/stdout-line`
+   stdout/stderr reader tasks emitting batched `agent-proc://{proc_id}/stdout-lines`
    etc.; kill-on-drop and kill-all on app exit.
 2. **`tauri-stdio-transport.ts`** — `invoke` + `listen` bridging to the
    `AgentTransport` contract, spawn errors surfaced as `AgentTransportError`.
@@ -126,7 +126,7 @@ Implement, bottom-up:
   one task leaves the other's turn and permission queue untouched, write
   gate serializes interleaved writes to the same path and attributes each.
 - **Rust (`cargo test`)**: spawn a trivial `node -e` echo process — stdin
-  line arrives back as a stdout-line event; kill is idempotent; exit event
+  line arrives back in a stdout-lines batch; kill is idempotent; exit event
   fires; spawning a nonexistent binary returns `spawn_failed` as a value.
 - **Unit**: `transportToStreams` chunk-splitting/joining edge cases (partial
   lines, multiple lines per chunk); PermissionBroker queue semantics; id

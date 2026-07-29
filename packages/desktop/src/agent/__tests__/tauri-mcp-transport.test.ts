@@ -58,8 +58,10 @@ describe("TauriMcpTransport", () => {
     expect(tauri.calls("stop_mcp_relay")).toEqual([{ taskId: "task_1" }]);
 
     // After close, an emitted line no longer produces a write (listeners torn
-    // down; writeTo short-circuits on closed).
-    tauri.emit("mcp-bridge://task_1/line", { connId: 7, line: "late" });
+    // down; writeTo short-circuits on closed). Must use the SAME topic the
+    // transport subscribes to — emitting on a topic nobody listens to would
+    // pass here even if teardown were broken.
+    tauri.emit("mcp-bridge://task_1/lines", { connId: 7, lines: ["late"] });
     await flush();
     expect(tauri.calls("write_mcp_line")).toHaveLength(1);
   });
