@@ -134,6 +134,7 @@ i18n
           updaterIdle: "Click to check for updates.",
           updaterChecking: "Checking for updates...",
           updaterUpToDate: "You're on the latest version.",
+          updaterUpToDateShort: "Up to date",
           updaterAvailable: "Version {{version}} is available.",
           updaterDownloading: "Downloading update...",
           updaterReady: "Update downloaded. Restart to apply.",
@@ -157,7 +158,7 @@ i18n
           relaunch: "Relaunch",
           automaticUpdates: "Automatic updates",
           automaticUpdatesDesc:
-            "Turn this off to prevent the app from checking for updates.",
+            "Download updates in the background and notify you when they're ready to install.",
           language: "Language",
           languageDesc: "Change the display language.",
           learnAddLanguage: "Learn how to add a new language.",

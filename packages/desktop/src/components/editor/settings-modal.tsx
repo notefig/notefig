@@ -2,6 +2,7 @@ import React from "react";
 import { useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -198,7 +199,7 @@ function GeneralSettings({
   onDirectionChange: (direction: "ltr" | "rtl") => void;
 }) {
   return (
-    <div className="space-y-8 max-w-3xl">
+    <div className="space-y-2 max-w-3xl">
       <UpdateSection />
 
       <SettingRow
@@ -246,7 +247,7 @@ function GeneralSettings({
       </SettingRow>
 
       <div className="pt-4">
-        <h2 className="text-lg font-semibold mb-4">Advanced</h2>
+        <h2 className="text-lg font-semibold mb-1">Advanced</h2>
         <DebugModeToggle />
       </div>
     </div>
@@ -264,7 +265,7 @@ function AppearanceSettings() {
   };
 
   return (
-    <div className="space-y-8 max-w-3xl">
+    <div className="space-y-2 max-w-3xl">
       <h2 className="text-lg font-semibold">Appearance</h2>
 
       <SettingRow
@@ -288,105 +289,122 @@ function AppearanceSettings() {
 
 function UpdateSection() {
   const { t } = useTranslation();
-  const queryClient = useQueryClient();
-  const updater = useAppUpdater();
-  const { status, progress, error, updateInfo, flow } = updater;
-
-  const currentVersion = __APP_VERSION__;
-
-  const progressPercent =
-    progress.total && progress.total > 0
-      ? Math.round((progress.downloaded / progress.total) * 100)
-      : null;
+  const { settings, setSetting, isReady } = useAppSettings();
 
   return (
-    <div className="space-y-1">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h3 className="text-base font-medium">Version {currentVersion}</h3>
-
-          {status === "idle" && (
-            <p className="text-sm text-muted-foreground">{t("updaterIdle")}</p>
-          )}
-          {status === "checking" && (
-            <p className="text-sm text-muted-foreground">
-              {t("updaterChecking")}
-            </p>
-          )}
-          {status === "up-to-date" && (
-            <p className="text-sm text-muted-foreground flex items-center gap-1.5">
-              <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-              {t("updaterUpToDate")}
-            </p>
-          )}
-          {status === "available" && updateInfo && (
-            <p className="text-sm text-muted-foreground">
-              {t("updaterAvailable", { version: updateInfo.version })}
-            </p>
-          )}
-          {status === "downloading" && (
-            <div className="space-y-1.5">
-              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                {t("updaterDownloading")}
-                {progressPercent !== null && ` ${progressPercent}%`}
-              </p>
-            </div>
-          )}
-          {status === "ready" && (
-            <p className="text-sm text-muted-foreground">{t("updaterReady")}</p>
-          )}
-          {status === "error" && (
-            <p className="text-sm text-destructive flex items-center gap-1.5">
-              <AlertCircle className="h-3.5 w-3.5" />
-              {error ?? t("updaterGenericError")}
-            </p>
-          )}
-        </div>
+    <div>
+      <div className="flex items-center justify-between gap-4 py-2">
+        <h3 className="min-w-0 flex-1 text-sm font-medium">
+          Version {__APP_VERSION__}
+        </h3>
 
         <div className="shrink-0">
-          {(status === "idle" ||
-            status === "checking" ||
-            status === "up-to-date" ||
-            status === "error") && (
-            <Button
-              variant="secondary"
-              onClick={() => {
-                updater.checkForUpdate();
-              }}
-              disabled={status === "checking"}
-            >
-              {status === "checking" && (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              )}
-              {t("updaterCheckForUpdates")}
-            </Button>
-          )}
-          {status === "available" && (
-            <Button
-              className="bg-primary hover:bg-primary/90 text-primary-foreground"
-              onClick={() => {
-                startDownloadWithToastPromise(queryClient);
-              }}
-            >
-              <Download className="h-4 w-4 mr-1.5" />
-              {flow === "refresh" ? t("updaterRefresh") : t("updaterDownload")}
-            </Button>
-          )}
-          {status === "ready" && (
-            <Button
-              className="bg-primary hover:bg-primary/90 text-primary-foreground"
-              onClick={() => {
-                void relaunchApp(queryClient);
-              }}
-            >
-              {t("updaterRestart")}
-            </Button>
-          )}
+          <UpdaterButton />
         </div>
       </div>
+
+      <label className="flex cursor-pointer items-start gap-3 py-2 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-70">
+        <Checkbox
+          className="mt-0.5"
+          checked={settings.autoUpdateEnabled}
+          disabled={!isReady}
+          onCheckedChange={(checked) =>
+            setSetting("autoUpdateEnabled", checked === true)
+          }
+        />
+        <span className="min-w-0">
+          <span className="block text-sm font-medium">
+            {t("automaticUpdates")}
+          </span>
+          <span className="block text-sm text-muted-foreground">
+            {t("automaticUpdatesDesc")}
+          </span>
+        </span>
+      </label>
     </div>
   );
+}
+
+/** The single updater action button; its face reflects every updater state. */
+function UpdaterButton() {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const updater = useAppUpdater();
+  const { status, progress, error, flow } = updater;
+
+  const check = () => {
+    updater.checkForUpdate();
+  };
+
+  switch (status) {
+    case "checking":
+      return (
+        <Button variant="secondary" size="sm" disabled>
+          <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+          {t("updaterChecking")}
+        </Button>
+      );
+    case "up-to-date":
+      return (
+        <Button variant="secondary" size="sm" onClick={check}>
+          <CheckCircle2 className="h-4 w-4 mr-1.5 text-green-500" />
+          {t("updaterUpToDateShort")}
+        </Button>
+      );
+    case "error":
+      return (
+        <Button
+          variant="secondary"
+          size="sm"
+          title={error ?? t("updaterGenericError")}
+          onClick={check}
+        >
+          <AlertCircle className="h-4 w-4 mr-1.5 text-destructive" />
+          {t("updaterCheckForUpdates")}
+        </Button>
+      );
+    case "available":
+      return (
+        <Button
+          size="sm"
+          onClick={() => {
+            startDownloadWithToastPromise(queryClient);
+          }}
+        >
+          <Download className="h-4 w-4 mr-1.5" />
+          {flow === "refresh" ? t("updaterRefresh") : t("updaterDownload")}
+        </Button>
+      );
+    case "downloading": {
+      const percent =
+        progress.total && progress.total > 0
+          ? Math.round((progress.downloaded / progress.total) * 100)
+          : null;
+      return (
+        <Button size="sm" disabled>
+          <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+          {percent !== null ? `${percent}%` : t("updaterDownloading")}
+        </Button>
+      );
+    }
+    case "ready":
+      return (
+        <Button
+          size="sm"
+          onClick={() => {
+            void relaunchApp(queryClient);
+          }}
+        >
+          {t("updaterRestart")}
+        </Button>
+      );
+    default:
+      return (
+        <Button variant="secondary" size="sm" onClick={check}>
+          {t("updaterCheckForUpdates")}
+        </Button>
+      );
+  }
 }
 
 function PrivacySettings() {
@@ -414,7 +432,7 @@ function PrivacySettings() {
   };
 
   return (
-    <div className="space-y-8 max-w-3xl">
+    <div className="space-y-2 max-w-3xl">
       <h2 className="text-lg font-semibold">{t("privacySettings")}</h2>
 
       {!available && (
@@ -495,7 +513,7 @@ function SettingRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-3 border-b border-border last:border-0">
+    <div className="flex items-start justify-between gap-4 py-2">
       <div className="min-w-0 flex-1">
         <h3 className="text-sm font-medium">{title}</h3>
         <p className="text-sm text-muted-foreground break-words">

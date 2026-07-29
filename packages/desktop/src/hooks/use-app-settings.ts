@@ -16,6 +16,7 @@ export interface AppSettings {
   zoomLevel: number;
   crashReportingEnabled: boolean;
   analyticsEnabled: boolean;
+  autoUpdateEnabled: boolean;
   telemetryConsentVersion: number;
   telemetryInstallId: string | null;
 }
@@ -26,6 +27,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   zoomLevel: 1,
   crashReportingEnabled: true,
   analyticsEnabled: true,
+  autoUpdateEnabled: true,
   telemetryConsentVersion: 0,
   telemetryInstallId: null,
 };
