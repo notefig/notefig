@@ -134,6 +134,7 @@ i18n
           updaterIdle: "Click to check for updates.",
           updaterChecking: "Checking for updates...",
           updaterUpToDate: "You're on the latest version.",
+          updaterUpToDateShort: "Up to date",
           updaterAvailable: "Version {{version}} is available.",
           updaterDownloading: "Downloading update...",
           updaterReady: "Update downloaded. Restart to apply.",
