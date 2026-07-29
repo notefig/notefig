@@ -39,6 +39,16 @@ function genericErrorMessage(): string {
   return i18n.t("updaterGenericError");
 }
 
+/**
+ * Update toasts stay until the user acts on them: they carry an action the
+ * user may not be ready for yet, and a timed dismissal silently loses it.
+ * The close button is what makes them dismissible.
+ */
+const PERSISTENT_TOAST_OPTIONS = {
+  duration: Number.POSITIVE_INFINITY,
+  closeButton: true,
+} as const;
+
 // ---------------------------------------------------------------------------
 // Update check — a real query. TanStack Query provides the proactive
 // behavior: fetch on mount, refetch on window focus (throttled by
@@ -341,6 +351,7 @@ export function startDownloadWithToastPromise(queryClient: QueryClient) {
 
   void downloadPromise.then(() => {
     toast.success(i18n.t("updaterToastReadyToRestart"), {
+      ...PERSISTENT_TOAST_OPTIONS,
       action: {
         label: i18n.t("updaterRestart"),
         onClick: () => {
@@ -379,6 +390,7 @@ export function AppUpdaterBootstrap() {
         version: updateInfo.version,
       }),
       {
+        ...PERSISTENT_TOAST_OPTIONS,
         description:
           data.flow === "refresh"
             ? i18n.t("updaterToastAvailableDescriptionRefresh")
