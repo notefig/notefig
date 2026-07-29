@@ -4,6 +4,7 @@ import {
   deriveUpdaterView,
   downloadAndInstall,
   relaunchApp,
+  resolveUpdateNotification,
   UPDATE_CHECK_QUERY_KEY,
   type InstallState,
   type UpdateCheckData,
@@ -113,6 +114,43 @@ describe("deriveUpdaterView", () => {
   });
 });
 
+describe("resolveUpdateNotification", () => {
+  const base = {
+    autoUpdateEnabled: true,
+    settingsReady: true,
+    flow: "download-restart" as const,
+    installActive: false,
+  };
+
+  it("auto-downloads when the setting is on for the download-restart flow", () => {
+    expect(resolveUpdateNotification(base)).toBe("auto-download");
+  });
+
+  it("prompts when the setting is off", () => {
+    expect(
+      resolveUpdateNotification({ ...base, autoUpdateEnabled: false }),
+    ).toBe("prompt");
+  });
+
+  it("prompts for the refresh flow even with the setting on", () => {
+    expect(resolveUpdateNotification({ ...base, flow: "refresh" })).toBe(
+      "prompt",
+    );
+  });
+
+  it("defers until settings have loaded", () => {
+    expect(resolveUpdateNotification({ ...base, settingsReady: false })).toBe(
+      "none",
+    );
+  });
+
+  it("defers while an install is already in flight", () => {
+    expect(resolveUpdateNotification({ ...base, installActive: true })).toBe(
+      "none",
+    );
+  });
+});
+
 describe("update telemetry", () => {
   beforeEach(() => {
     mockCaptureEvent.mockClear();
@@ -138,9 +176,25 @@ describe("update telemetry", () => {
 
     expect(mockCaptureEvent).toHaveBeenCalledWith("update_download_started", {
       to_version: "1.2.3",
+      trigger: "manual",
     });
     expect(mockCaptureEvent).toHaveBeenCalledWith("update_download_completed", {
       to_version: "1.2.3",
+    });
+  });
+
+  it("tags auto-triggered downloads in telemetry", async () => {
+    mockUpdater.apply.mockReturnValue(
+      (async function* () {
+        yield { status: "ready" };
+      })(),
+    );
+
+    await downloadAndInstall(clientWithAvailableUpdate(), "auto");
+
+    expect(mockCaptureEvent).toHaveBeenCalledWith("update_download_started", {
+      to_version: "1.2.3",
+      trigger: "auto",
     });
   });
 

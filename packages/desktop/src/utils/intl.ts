@@ -157,7 +157,7 @@ i18n
           relaunch: "Relaunch",
           automaticUpdates: "Automatic updates",
           automaticUpdatesDesc:
-            "Turn this off to prevent the app from checking for updates.",
+            "Download updates in the background and notify you when they're ready to install.",
           language: "Language",
           languageDesc: "Change the display language.",
           learnAddLanguage: "Learn how to add a new language.",

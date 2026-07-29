@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { platformAdapter } from "@/adapters";
+import { useAppSettings } from "@/hooks/use-app-settings";
 import i18n from "@/utils/intl";
 import { isTauri } from "@/utils/platform";
 import { captureEvent } from "@/telemetry/telemetry";
@@ -31,7 +32,7 @@ export interface UpdateInfo {
 }
 
 /** How often to re-check for updates while the app is running. */
-const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 /** Focus-triggered refetches are skipped while the result is fresher than this. */
 const UPDATE_CHECK_STALE_TIME_MS = 10 * 60 * 1000;
 
@@ -268,10 +269,15 @@ function pendingUpdateVersion(queryClient: QueryClient): string {
   );
 }
 
-export async function downloadAndInstall(queryClient: QueryClient) {
+export type DownloadTrigger = "auto" | "manual";
+
+export async function downloadAndInstall(
+  queryClient: QueryClient,
+  trigger: DownloadTrigger = "manual",
+) {
   const toVersion = pendingUpdateVersion(queryClient);
   let downloadCompleted = false;
-  captureEvent("update_download_started", { to_version: toVersion });
+  captureEvent("update_download_started", { to_version: toVersion, trigger });
   patchInstallState(queryClient, {
     phase: "downloading",
     error: null,
@@ -350,26 +356,83 @@ export function startDownloadWithToastPromise(queryClient: QueryClient) {
   });
 
   void downloadPromise.then(() => {
-    toast.success(i18n.t("updaterToastReadyToRestart"), {
+    showReadyToRestartToast(queryClient);
+  });
+}
+
+function showReadyToRestartToast(queryClient: QueryClient) {
+  toast.success(i18n.t("updaterToastReadyToRestart"), {
+    ...PERSISTENT_TOAST_OPTIONS,
+    action: {
+      label: i18n.t("updaterRestart"),
+      onClick: () => {
+        void relaunchApp(queryClient);
+      },
+    },
+  });
+}
+
+function showUpdateAvailableToast(
+  queryClient: QueryClient,
+  flow: UpdateFlow,
+  updateInfo: UpdateInfo,
+) {
+  toast(
+    i18n.t("updaterToastAvailableTitle", {
+      version: updateInfo.version,
+    }),
+    {
       ...PERSISTENT_TOAST_OPTIONS,
+      description:
+        flow === "refresh"
+          ? i18n.t("updaterToastAvailableDescriptionRefresh")
+          : i18n.t("updaterToastAvailableDescription"),
       action: {
-        label: i18n.t("updaterRestart"),
+        label:
+          flow === "refresh"
+            ? i18n.t("updaterRefresh")
+            : i18n.t("updaterDownload"),
         onClick: () => {
-          void relaunchApp(queryClient);
+          startDownloadWithToastPromise(queryClient);
         },
       },
-    });
-  });
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Bootstrap — subscribes to the check query (which starts the automatic
-// mount/focus/interval checks) and raises the "update available" toast.
+// mount/focus/interval checks) and reacts to an available update: silent
+// auto-download when the setting allows it, a prompt toast otherwise.
 // ---------------------------------------------------------------------------
+
+export type UpdateNotificationAction = "auto-download" | "prompt" | "none";
+
+/**
+ * Decide how to react to a newly discovered update. "none" defers: settings
+ * not yet loaded (acting on the optimistic default could override an
+ * opt-out) or an install already in flight. The refresh flow never
+ * auto-applies — it relaunches the app, which must stay a user action.
+ */
+export function resolveUpdateNotification(input: {
+  autoUpdateEnabled: boolean;
+  settingsReady: boolean;
+  flow: UpdateFlow;
+  installActive: boolean;
+}): UpdateNotificationAction {
+  if (!input.settingsReady || input.installActive) {
+    return "none";
+  }
+  if (input.autoUpdateEnabled && input.flow === "download-restart") {
+    return "auto-download";
+  }
+  return "prompt";
+}
 
 export function AppUpdaterBootstrap() {
   const queryClient = useQueryClient();
   const { data } = useQuery(getUpdateCheckQueryOptions(queryClient));
+  const { settings, isReady } = useAppSettings();
   const lastNotifiedVersionRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -382,31 +445,34 @@ export function AppUpdaterBootstrap() {
       return;
     }
 
+    const action = resolveUpdateNotification({
+      autoUpdateEnabled: settings.autoUpdateEnabled,
+      settingsReady: isReady,
+      flow: data.flow,
+      installActive: isInstallActive(queryClient),
+    });
+    if (action === "none") {
+      return;
+    }
+
     lastNotifiedVersionRef.current = updateInfo.version;
     captureEvent("update_available", { to_version: updateInfo.version });
 
-    toast(
-      i18n.t("updaterToastAvailableTitle", {
-        version: updateInfo.version,
-      }),
-      {
-        ...PERSISTENT_TOAST_OPTIONS,
-        description:
-          data.flow === "refresh"
-            ? i18n.t("updaterToastAvailableDescriptionRefresh")
-            : i18n.t("updaterToastAvailableDescription"),
-        action: {
-          label:
-            data.flow === "refresh"
-              ? i18n.t("updaterRefresh")
-              : i18n.t("updaterDownload"),
-          onClick: () => {
-            startDownloadWithToastPromise(queryClient);
-          },
-        },
-      },
-    );
-  }, [queryClient, data]);
+    if (action === "auto-download") {
+      // Silent download; the user only hears about it once it's ready. On
+      // failure fall back to the prompt toast so a manual retry is possible.
+      downloadAndInstall(queryClient, "auto")
+        .then(() => {
+          showReadyToRestartToast(queryClient);
+        })
+        .catch(() => {
+          showUpdateAvailableToast(queryClient, data.flow, updateInfo);
+        });
+      return;
+    }
+
+    showUpdateAvailableToast(queryClient, data.flow, updateInfo);
+  }, [queryClient, data, settings.autoUpdateEnabled, isReady]);
 
   return null;
 }

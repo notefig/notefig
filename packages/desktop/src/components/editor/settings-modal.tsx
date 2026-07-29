@@ -291,6 +291,7 @@ function UpdateSection() {
   const queryClient = useQueryClient();
   const updater = useAppUpdater();
   const { status, progress, error, updateInfo, flow } = updater;
+  const { settings, setSetting, isReady } = useAppSettings();
 
   const currentVersion = __APP_VERSION__;
 
@@ -385,6 +386,19 @@ function UpdateSection() {
           )}
         </div>
       </div>
+
+      <SettingRow
+        title={t("automaticUpdates")}
+        description={t("automaticUpdatesDesc")}
+      >
+        <Switch
+          checked={settings.autoUpdateEnabled}
+          disabled={!isReady}
+          onCheckedChange={(checked) =>
+            setSetting("autoUpdateEnabled", checked)
+          }
+        />
+      </SettingRow>
     </div>
   );
 }

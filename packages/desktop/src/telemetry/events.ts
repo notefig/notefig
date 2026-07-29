@@ -20,7 +20,10 @@ export type TelemetryEvent =
     }
   | { name: "tunnel_paired"; properties?: undefined }
   | { name: "update_available"; properties: { to_version: string } }
-  | { name: "update_download_started"; properties: { to_version: string } }
+  | {
+      name: "update_download_started";
+      properties: { to_version: string; trigger: "auto" | "manual" };
+    }
   | { name: "update_download_completed"; properties: { to_version: string } }
   | {
       name: "update_failed";
