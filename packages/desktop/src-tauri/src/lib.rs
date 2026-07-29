@@ -10,6 +10,7 @@
 pub mod agent_proc;
 pub mod file_watcher;
 pub mod fs_ops;
+pub mod line_pump;
 pub mod mcp_bridge;
 pub mod search;
 pub mod walkdir_utils;

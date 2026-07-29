@@ -32,7 +32,9 @@ type SpawnResult = { pid?: number; resolvedPath?: string };
  * Rust side contract (src-tauri/src/agent_proc.rs):
  * - invoke("spawn_agent", options) / invoke("write_agent_stdin", {procId, line})
  *   / invoke("kill_agent", {procId})
- * - events: `agent-proc://{procId}/stdout-line`, `…/stderr-line`, `…/exit`
+ * - events: `agent-proc://{procId}/stdout-lines`, `…/stderr-lines`, `…/exit`.
+ *   The line topics carry a batch (`string[]`) that this transport re-expands
+ *   into per-line `onLine`/`onDiagnostic` callbacks — see line_pump.rs.
  */
 export class TauriStdioTransport implements AgentTransport {
   readonly locus = "local" as const;
@@ -59,17 +61,23 @@ export class TauriStdioTransport implements AgentTransport {
     const { procId } = this.options;
 
     // Register listeners before spawning so no early output is missed.
-    const stdout = await listen<string>(
-      `agent-proc://${procId}/stdout-line`,
+    // Rust coalesces lines into batches (line_pump.rs); re-expand to per-line
+    // here so the ACP layer above never sees the batching.
+    const stdout = await listen<string[]>(
+      `agent-proc://${procId}/stdout-lines`,
       (event) => {
-        for (const cb of this.lineListeners) cb(event.payload);
+        for (const line of event.payload) {
+          for (const cb of this.lineListeners) cb(line);
+        }
       },
     );
-    const stderr = await listen<string>(
-      `agent-proc://${procId}/stderr-line`,
+    const stderr = await listen<string[]>(
+      `agent-proc://${procId}/stderr-lines`,
       (event) => {
         // Out-of-band from the JSON-RPC stream — route to diagnostics.
-        for (const cb of this.diagnosticListeners) cb(event.payload);
+        for (const line of event.payload) {
+          for (const cb of this.diagnosticListeners) cb(line);
+        }
       },
     );
     const exit = await listen<{ code: number | null }>(

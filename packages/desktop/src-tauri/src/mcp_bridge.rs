@@ -30,8 +30,17 @@
 /// HTTP framing anywhere in this module.
 ///
 /// Contract with the frontend (tauri-mcp-transport.ts):
-/// - `start_mcp_relay(taskId)` / `write_mcp_line(taskId, line)` / `stop_mcp_relay(taskId)`
-/// - events: `mcp-bridge://{taskId}/line` (payload: the line), `mcp-bridge://{taskId}/close`
+/// - `start_mcp_relay(taskId)` / `write_mcp_line(taskId, connId, line)` /
+///   `stop_mcp_relay(taskId)`
+/// - event: `mcp-bridge://{taskId}/lines`, payload `McpLinesPayload`
+///   (`{ connId, lines }`) — a *batch* of lines from one connection in read
+///   order, coalesced by `line_pump.rs`; the transport re-expands it into
+///   per-line request callbacks.
+///
+/// There is deliberately no close/disconnect event: a relay connection ending
+/// is routine churn (OpenCode spawns the server command several times per
+/// task), never endpoint death, so it must not reach the frontend as one. The
+/// endpoint closes only via `stop_mcp_relay`.
 use crate::agent_proc::{AgentProcErrorType, AgentResult};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -81,9 +90,10 @@ struct McpConnectionHandle {
 /// are multiplexed per task, never assumed singular.
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct McpLinePayload {
+pub struct McpLinesPayload {
     pub conn_id: u64,
-    pub line: String,
+    /// A batch of lines from one connection, in read order (see line_pump.rs).
+    pub lines: Vec<String>,
 }
 
 static NEXT_CONN_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -230,10 +240,17 @@ async fn handle_connection<R: tauri::Runtime>(
         .or_default()
         .insert(conn_id, McpConnectionHandle { write_half: write_half.clone() });
 
-    let topic = format!("mcp-bridge://{}/line", task_id);
-    while let Ok(Some(line)) = lines.next_line().await {
-        let _ = app_handle.emit(&topic, McpLinePayload { conn_id, line });
-    }
+    let topic = format!("mcp-bridge://{}/lines", task_id);
+    crate::line_pump::pump_batched(&mut lines, |batch| {
+        let _ = app_handle.emit(
+            &topic,
+            McpLinesPayload {
+                conn_id,
+                lines: batch,
+            },
+        );
+    })
+    .await;
 
     if let Some(conns) = MCP_CONNECTIONS.lock().unwrap().get_mut(&task_id) {
         conns.remove(&conn_id);

@@ -49,7 +49,7 @@ The layering that trips people up, made explicit:
 
 There is exactly one ACP client in the system — the app — on both
 platforms. The Rust host and the CLI worker are byte movers. Every ACP
-message the harness sends reaches the app verbatim (desktop: stdout-line
+message the harness sends reaches the app verbatim (desktop: stdout-lines
 events; web: encrypted frames), and every response travels back the same
 way. What *differs* per platform is not who speaks, but which capabilities
 the app advertises (next section).
@@ -479,8 +479,12 @@ stdin, and kill-on-teardown.
   (`AgentProcError` mirroring the `FsError` style)
 - `write_agent_stdin { proc_id, line }`
 - `kill_agent { proc_id }`
-- Emitted events: `agent-proc://{procId}/stdout-line`, `…/stderr-line`,
-  `…/exit`
+- Emitted events: `agent-proc://{procId}/stdout-lines`, `…/stderr-lines`,
+  `…/exit`. The two line topics carry a *batch* (`string[]`, newlines
+  stripped, read order preserved) rather than a single line — see
+  `src-tauri/src/line_pump.rs` for why they are coalesced. The transport
+  re-expands batches into per-line callbacks, so `AgentTransport.onLine`
+  and everything above it are unaffected.
 
 All spawned processes are killed when their window/app closes. One process
 per task: `proc_id = taskId`, so N parallel tasks are N children under the
