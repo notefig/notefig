@@ -176,6 +176,37 @@ mod tests {
         assert_eq!(batches.concat().len(), 12, "lines lost");
     }
 
+    /// The regression guard for MET-97's actual fix: a burst of available lines
+    /// must cost a bounded number of *emits*, because each emit is what buys a
+    /// JSON serialization, a JS-wrapper format!, and an IPC hop through tao's
+    /// unbounded queue. Reverting to one-emit-per-line would make this 1000.
+    ///
+    /// Asserted as an order of magnitude, not an exact count, so it survives
+    /// tuning of MAX_BATCH_LINES without becoming churn.
+    #[tokio::test]
+    async fn a_burst_of_lines_costs_few_emits() {
+        const LINES: usize = 1_000;
+        let input: String = (0..LINES).map(|i| format!("{{\"id\":{i}}}\n")).collect();
+        let input: &'static str = Box::leak(input.into_boxed_str());
+
+        let mut lines = BufReader::new(input.as_bytes()).lines();
+        let mut emits = 0usize;
+        let mut delivered = 0usize;
+        pump_batched(&mut lines, |batch| {
+            emits += 1;
+            delivered += batch.len();
+        })
+        .await;
+
+        assert_eq!(delivered, LINES, "lines were lost");
+        let ceiling = LINES.div_ceil(MAX_BATCH_LINES) + 1;
+        assert!(
+            emits <= ceiling,
+            "{LINES} available lines took {emits} emits (ceiling {ceiling}) — \
+             batching regressed toward per-line emits"
+        );
+    }
+
     /// A single line larger than the byte cap is still delivered whole —
     /// splitting it would corrupt the JSON-RPC frame.
     #[tokio::test]
