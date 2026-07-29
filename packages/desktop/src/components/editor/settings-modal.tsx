@@ -289,97 +289,17 @@ function AppearanceSettings() {
 
 function UpdateSection() {
   const { t } = useTranslation();
-  const queryClient = useQueryClient();
-  const updater = useAppUpdater();
-  const { status, progress, error, flow } = updater;
   const { settings, setSetting, isReady } = useAppSettings();
-
-  const currentVersion = __APP_VERSION__;
-
-  const progressPercent =
-    progress.total && progress.total > 0
-      ? Math.round((progress.downloaded / progress.total) * 100)
-      : null;
 
   return (
     <div>
       <div className="flex items-center justify-between gap-4 py-2">
         <h3 className="min-w-0 flex-1 text-sm font-medium">
-          Version {currentVersion}
+          Version {__APP_VERSION__}
         </h3>
 
         <div className="shrink-0">
-          {(status === "idle" || status === "checking") && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                updater.checkForUpdate();
-              }}
-              disabled={status === "checking"}
-            >
-              {status === "checking" && (
-                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-              )}
-              {status === "checking"
-                ? t("updaterChecking")
-                : t("updaterCheckForUpdates")}
-            </Button>
-          )}
-          {status === "up-to-date" && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                updater.checkForUpdate();
-              }}
-            >
-              <CheckCircle2 className="h-4 w-4 mr-1.5 text-green-500" />
-              {t("updaterUpToDateShort")}
-            </Button>
-          )}
-          {status === "error" && (
-            <Button
-              variant="secondary"
-              size="sm"
-              title={error ?? t("updaterGenericError")}
-              onClick={() => {
-                updater.checkForUpdate();
-              }}
-            >
-              <AlertCircle className="h-4 w-4 mr-1.5 text-destructive" />
-              {t("updaterCheckForUpdates")}
-            </Button>
-          )}
-          {status === "available" && (
-            <Button
-              size="sm"
-              onClick={() => {
-                startDownloadWithToastPromise(queryClient);
-              }}
-            >
-              <Download className="h-4 w-4 mr-1.5" />
-              {flow === "refresh" ? t("updaterRefresh") : t("updaterDownload")}
-            </Button>
-          )}
-          {status === "downloading" && (
-            <Button size="sm" disabled>
-              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-              {progressPercent !== null
-                ? `${progressPercent}%`
-                : t("updaterDownloading")}
-            </Button>
-          )}
-          {status === "ready" && (
-            <Button
-              size="sm"
-              onClick={() => {
-                void relaunchApp(queryClient);
-              }}
-            >
-              {t("updaterRestart")}
-            </Button>
-          )}
+          <UpdaterButton />
         </div>
       </div>
 
@@ -403,6 +323,88 @@ function UpdateSection() {
       </label>
     </div>
   );
+}
+
+/** The single updater action button; its face reflects every updater state. */
+function UpdaterButton() {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const updater = useAppUpdater();
+  const { status, progress, error, flow } = updater;
+
+  const check = () => {
+    updater.checkForUpdate();
+  };
+
+  switch (status) {
+    case "checking":
+      return (
+        <Button variant="secondary" size="sm" disabled>
+          <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+          {t("updaterChecking")}
+        </Button>
+      );
+    case "up-to-date":
+      return (
+        <Button variant="secondary" size="sm" onClick={check}>
+          <CheckCircle2 className="h-4 w-4 mr-1.5 text-green-500" />
+          {t("updaterUpToDateShort")}
+        </Button>
+      );
+    case "error":
+      return (
+        <Button
+          variant="secondary"
+          size="sm"
+          title={error ?? t("updaterGenericError")}
+          onClick={check}
+        >
+          <AlertCircle className="h-4 w-4 mr-1.5 text-destructive" />
+          {t("updaterCheckForUpdates")}
+        </Button>
+      );
+    case "available":
+      return (
+        <Button
+          size="sm"
+          onClick={() => {
+            startDownloadWithToastPromise(queryClient);
+          }}
+        >
+          <Download className="h-4 w-4 mr-1.5" />
+          {flow === "refresh" ? t("updaterRefresh") : t("updaterDownload")}
+        </Button>
+      );
+    case "downloading": {
+      const percent =
+        progress.total && progress.total > 0
+          ? Math.round((progress.downloaded / progress.total) * 100)
+          : null;
+      return (
+        <Button size="sm" disabled>
+          <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+          {percent !== null ? `${percent}%` : t("updaterDownloading")}
+        </Button>
+      );
+    }
+    case "ready":
+      return (
+        <Button
+          size="sm"
+          onClick={() => {
+            void relaunchApp(queryClient);
+          }}
+        >
+          {t("updaterRestart")}
+        </Button>
+      );
+    default:
+      return (
+        <Button variant="secondary" size="sm" onClick={check}>
+          {t("updaterCheckForUpdates")}
+        </Button>
+      );
+  }
 }
 
 function PrivacySettings() {
