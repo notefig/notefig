@@ -50,19 +50,30 @@ const KILL_GRACE_MS = 5_000;
 // Newline framing for child stdio and loopback sockets
 // ========================================================================
 
+/**
+ * Splits a byte stream into lines, delivered as one *batch* per chunk.
+ *
+ * Batching mirrors the desktop line pump (src-tauri/src/line_pump.rs, MET-97):
+ * a streaming agent emits many lines per stdout chunk, and sending one tunnel
+ * frame each costs one encryption pass and one WebSocket frame apiece. Since a
+ * chunk's lines are already in hand, coalescing them adds no latency and needs
+ * no timer — the batch is simply whatever the OS handed us. Deliberately no
+ * cross-chunk buffering, so nothing ever waits on a future read.
+ */
 class LineBuffer {
   private tail = '';
-  constructor(private readonly onLine: (line: string) => void) {}
+  constructor(private readonly onLines: (lines: string[]) => void) {}
   push(chunk: Buffer | string): void {
     const pieces = (this.tail + chunk.toString()).split('\n');
     this.tail = pieces.pop() ?? '';
-    for (const line of pieces) if (line.length > 0) this.onLine(line);
+    const lines = pieces.filter((line) => line.length > 0);
+    if (lines.length > 0) this.onLines(lines);
   }
   flush(): void {
     if (this.tail.length > 0) {
       const line = this.tail;
       this.tail = '';
-      this.onLine(line);
+      this.onLines([line]);
     }
   }
 }
@@ -394,10 +405,16 @@ export class AgentWorker {
     }
     this.tasks.set(taskId, child);
 
-    const stdout = new LineBuffer((line) => this.send({ ch: 'acp', taskId, data: line }));
-    const stderr = new LineBuffer((line) =>
-      this.sendCtl({ op: 'task-diagnostic', taskId, line }),
+    // One frame per batch: `data` is an opaque string to the protocol, and the
+    // ACP stream is newline-delimited already, so a batch is just a slice of
+    // that stream. The browser splits it back into lines on receipt.
+    const stdout = new LineBuffer((lines) =>
+      this.send({ ch: 'acp', taskId, data: lines.join('\n') }),
     );
+    // Diagnostics stay per-line: low volume, and CtlMessage carries one line.
+    const stderr = new LineBuffer((lines) => {
+      for (const line of lines) this.sendCtl({ op: 'task-diagnostic', taskId, line });
+    });
     child.stdout!.on('data', (chunk) => stdout.push(chunk));
     child.stderr!.on('data', (chunk) => stderr.push(chunk));
 
@@ -444,15 +461,17 @@ export class AgentWorker {
 
     listener.server.on('connection', (socket) => {
       let connId: number | null = null;
-      const lines = new LineBuffer((line) => {
+      const lines = new LineBuffer((batch) => {
+        let start = 0;
         if (connId === null) {
           // First line must be the token, else it isn't our relay.
-          if (line !== listener.token) return void socket.destroy();
+          if (batch[0] !== listener.token) return void socket.destroy();
           connId = this.nextConnId++;
           listener.connections.set(connId, socket);
-          return;
+          start = 1;
         }
-        this.send({ ch: 'mcp', taskId, connId, data: line });
+        if (start >= batch.length) return;
+        this.send({ ch: 'mcp', taskId, connId, data: batch.slice(start).join('\n') });
       });
       socket.on('data', (chunk) => lines.push(chunk));
       socket.on('error', () => socket.destroy());

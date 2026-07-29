@@ -39,10 +39,14 @@ describe("TauriMcpTransport", () => {
       env: [{ name: "METRISTS_MCP_TOKEN", value: "tok_abc" }],
     });
 
-    // An emitted bridge line reaches onRequest with a respond bound to its
-    // originating connection.
-    tauri.emit("mcp-bridge://task_1/line", { connId: 7, line: '{"id":1}' });
-    expect(requests).toEqual(['{"id":1}']);
+    // An emitted bridge batch reaches onRequest per line, each with a respond
+    // bound to its originating connection (line_pump.rs coalesces; the
+    // transport re-expands).
+    tauri.emit("mcp-bridge://task_1/lines", {
+      connId: 7,
+      lines: ['{"id":1}', '{"id":2}'],
+    });
+    expect(requests).toEqual(['{"id":1}', '{"id":2}']);
 
     capturedRespond?.('{"result":"ok"}');
     await flush();

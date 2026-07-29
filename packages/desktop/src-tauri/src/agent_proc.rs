@@ -5,8 +5,11 @@
 /// fit user-configured harness commands with a persistent stdin stream.
 /// Contract with the frontend (tauri-stdio-transport.ts):
 /// - commands below, errors-as-values like fs_ops
-/// - line-buffered events: `agent-proc://{proc_id}/stdout-line`,
-///   `agent-proc://{proc_id}/stderr-line`, `agent-proc://{proc_id}/exit`
+/// - line-buffered events: `agent-proc://{proc_id}/stdout-lines`,
+///   `agent-proc://{proc_id}/stderr-lines`, `agent-proc://{proc_id}/exit`.
+///   The two line topics carry a *batch* (`Vec<String>`, newlines stripped,
+///   read order preserved) — see line_pump.rs; the transport re-expands them
+///   to per-line callbacks so the ACP layer is unaffected.
 /// - every spawned process is killed when the app shuts down
 ///   (see `kill_all_agents`, wired to `RunEvent::Exit` in main.rs)
 ///
@@ -315,27 +318,30 @@ pub async fn spawn_agent<R: tauri::Runtime>(
         previous.kill.notify_one();
     }
 
-    // stdout reader: one event per line, newline stripped.
+    // stdout reader: one event per *batch* of lines, newlines stripped. See
+    // line_pump.rs for why these are coalesced rather than emitted per line.
     if let Some(stdout) = stdout {
         let app = app_handle.clone();
-        let topic = format!("agent-proc://{}/stdout-line", proc_id);
+        let topic = format!("agent-proc://{}/stdout-lines", proc_id);
         tauri::async_runtime::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let _ = app.emit(&topic, line);
-            }
+            crate::line_pump::pump_batched(&mut lines, |batch| {
+                let _ = app.emit(&topic, batch);
+            })
+            .await;
         });
     }
 
     // stderr reader.
     if let Some(stderr) = stderr {
         let app = app_handle.clone();
-        let topic = format!("agent-proc://{}/stderr-line", proc_id);
+        let topic = format!("agent-proc://{}/stderr-lines", proc_id);
         tauri::async_runtime::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let _ = app.emit(&topic, line);
-            }
+            crate::line_pump::pump_batched(&mut lines, |batch| {
+                let _ = app.emit(&topic, batch);
+            })
+            .await;
         });
     }
 

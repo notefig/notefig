@@ -31,6 +31,11 @@ import {
 
 const HANDSHAKE_TIMEOUT_MS = 15_000;
 
+/** Split a batched frame payload into lines, dropping empties. */
+function splitLines(data: string): string[] {
+  return data.split("\n").filter((line) => line.length > 0);
+}
+
 /** The minimal socket surface — injectable so tests run an in-memory pair. */
 export interface TunnelSocket {
   send(data: string): void;
@@ -286,21 +291,9 @@ export class TunnelConnection {
   private dispatch(inner: InnerFrame): void {
     switch (inner.ch) {
       case "acp":
-        if (inner.taskId && typeof inner.data === "string") {
-          for (const cb of this.acpListeners) cb(inner.taskId, inner.data);
-        }
-        return;
+        return this.dispatchAcp(inner);
       case "mcp":
-        if (
-          inner.taskId &&
-          typeof inner.connId === "number" &&
-          typeof inner.data === "string"
-        ) {
-          for (const cb of this.mcpListeners) {
-            cb(inner.taskId, inner.connId, inner.data);
-          }
-        }
-        return;
+        return this.dispatchMcp(inner);
       case "ctl": {
         const parsed = CtlMessageSchema.safeParse(inner.data);
         if (parsed.success) {
@@ -308,6 +301,33 @@ export class TunnelConnection {
         }
         return;
       }
+    }
+  }
+
+  /**
+   * An "acp" frame carries one or more newline-delimited lines — the worker
+   * coalesces a stdout chunk's lines into a single frame to save an encryption
+   * pass and a WebSocket frame per line (agent-worker.ts). Both streams are
+   * newline-delimited JSON, which can never contain a raw newline, so
+   * splitting is lossless; a single-line frame splits to itself, keeping this
+   * compatible with an unbatched sender.
+   */
+  private dispatchAcp(inner: InnerFrame): void {
+    const { taskId, data } = inner;
+    if (!taskId || typeof data !== "string") return;
+    for (const line of splitLines(data)) {
+      for (const cb of this.acpListeners) cb(taskId, line);
+    }
+  }
+
+  /** Batched the same way as "acp", plus the originating connection id. */
+  private dispatchMcp(inner: InnerFrame): void {
+    const { taskId, connId, data } = inner;
+    if (!taskId || typeof connId !== "number" || typeof data !== "string") {
+      return;
+    }
+    for (const line of splitLines(data)) {
+      for (const cb of this.mcpListeners) cb(taskId, connId, line);
     }
   }
 

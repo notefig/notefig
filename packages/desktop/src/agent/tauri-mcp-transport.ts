@@ -34,7 +34,8 @@ type McpRelayInfo = {
  * Rust side contract (src-tauri/src/mcp_bridge.rs):
  * - invoke("start_mcp_relay", {taskId}) / invoke("write_mcp_line",
  *   {taskId, connId, line}) / invoke("stop_mcp_relay", {taskId})
- * - event: `mcp-bridge://{taskId}/line` (payload `{ connId, line }`)
+ * - event: `mcp-bridge://{taskId}/lines` (payload `{ connId, lines }`, a batch
+ *   this transport re-expands into per-line request callbacks)
  */
 export class TauriMcpTransport implements McpEndpoint {
   private readonly requestListeners = new Set<
@@ -55,11 +56,15 @@ export class TauriMcpTransport implements McpEndpoint {
   async start(): Promise<void> {
     // Register the event listener before starting the relay so no early
     // line is missed (mirrors TauriStdioTransport's ordering).
-    const line = await listen<{ connId: number; line: string }>(
-      `mcp-bridge://${this.taskId}/line`,
+    // Rust coalesces lines into batches (line_pump.rs); re-expand to per-line
+    // callbacks here so the MCP layer above never sees the batching.
+    const line = await listen<{ connId: number; lines: string[] }>(
+      `mcp-bridge://${this.taskId}/lines`,
       (event) => {
         const respond = (reply: string) => this.writeTo(event.payload.connId, reply);
-        for (const cb of this.requestListeners) cb(event.payload.line, respond);
+        for (const line of event.payload.lines) {
+          for (const cb of this.requestListeners) cb(line, respond);
+        }
       },
     );
     this.unlistenFns.push(line);

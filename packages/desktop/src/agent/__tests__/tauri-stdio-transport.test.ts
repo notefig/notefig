@@ -43,9 +43,14 @@ describe("TauriStdioTransport", () => {
 
     // Emitted stdout/stderr reach the right callbacks (proves listeners were
     // registered before spawn and are wired to the module's fan-out).
-    tauri.emit("agent-proc://p1/stdout-line", '{"jsonrpc":"2.0"}');
-    tauri.emit("agent-proc://p1/stderr-line", "a warning");
-    expect(lines).toEqual(['{"jsonrpc":"2.0"}']);
+    // Rust emits batches (line_pump.rs); the transport re-expands them, so a
+    // multi-line batch must arrive as separate onLine calls, in order.
+    tauri.emit("agent-proc://p1/stdout-lines", [
+      '{"jsonrpc":"2.0"}',
+      '{"id":1}',
+    ]);
+    tauri.emit("agent-proc://p1/stderr-lines", ["a warning"]);
+    expect(lines).toEqual(['{"jsonrpc":"2.0"}', '{"id":1}']);
     expect(diagnostics).toEqual(["a warning"]);
 
     // send() writes stdin through the write_agent_stdin command.
@@ -63,8 +68,8 @@ describe("TauriStdioTransport", () => {
     expect(closes[0]?.message).toMatch(/code 1/);
 
     // Post-exit, listeners are gone: further stdout must not reach onLine.
-    tauri.emit("agent-proc://p1/stdout-line", "after exit");
-    expect(lines).toEqual(['{"jsonrpc":"2.0"}']);
+    tauri.emit("agent-proc://p1/stdout-lines", ["after exit"]);
+    expect(lines).toEqual(['{"jsonrpc":"2.0"}', '{"id":1}']);
   });
 
   it("surfaces a spawn_agent rejection as a spawn_failed error, not a hang", async () => {

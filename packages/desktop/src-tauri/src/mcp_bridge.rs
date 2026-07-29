@@ -81,9 +81,10 @@ struct McpConnectionHandle {
 /// are multiplexed per task, never assumed singular.
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct McpLinePayload {
+pub struct McpLinesPayload {
     pub conn_id: u64,
-    pub line: String,
+    /// A batch of lines from one connection, in read order (see line_pump.rs).
+    pub lines: Vec<String>,
 }
 
 static NEXT_CONN_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -230,10 +231,17 @@ async fn handle_connection<R: tauri::Runtime>(
         .or_default()
         .insert(conn_id, McpConnectionHandle { write_half: write_half.clone() });
 
-    let topic = format!("mcp-bridge://{}/line", task_id);
-    while let Ok(Some(line)) = lines.next_line().await {
-        let _ = app_handle.emit(&topic, McpLinePayload { conn_id, line });
-    }
+    let topic = format!("mcp-bridge://{}/lines", task_id);
+    crate::line_pump::pump_batched(&mut lines, |batch| {
+        let _ = app_handle.emit(
+            &topic,
+            McpLinesPayload {
+                conn_id,
+                lines: batch,
+            },
+        );
+    })
+    .await;
 
     if let Some(conns) = MCP_CONNECTIONS.lock().unwrap().get_mut(&task_id) {
         conns.remove(&conn_id);
