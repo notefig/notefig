@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { retry } from "@metrists/shared/utils";
 
 /** Response shape of the Rust `pull_stream_lines` command (line_stream.rs). */
 export type PullResult = { lines: string[]; ended: boolean };
@@ -10,8 +11,6 @@ export type PullResult = { lines: string[]; ended: boolean };
  * connection with permanently undelivered requests). */
 const MAX_PULL_ATTEMPTS = 5;
 const RETRY_BASE_MS = 50;
-
-const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Drains one Rust line stream through the `pull_stream_lines` command
@@ -98,17 +97,14 @@ export class StreamPuller {
    * the backend is genuinely gone, and the transport's close path reports the
    * real failure. */
   private async pullWithRetry(): Promise<PullResult | undefined> {
-    for (let attempt = 0; attempt < MAX_PULL_ATTEMPTS; attempt++) {
-      if (this.stopped) return undefined;
-      try {
-        return await invoke<PullResult>("pull_stream_lines", {
-          streamId: this.streamId,
-        });
-      } catch {
-        // Transient: back off and retry rather than strand the queue.
-        await delay(RETRY_BASE_MS * (attempt + 1));
-      }
-    }
-    return undefined;
+    const outcome = await retry(
+      () => invoke<PullResult>("pull_stream_lines", { streamId: this.streamId }),
+      {
+        attempts: MAX_PULL_ATTEMPTS,
+        backoffMs: (attempt) => RETRY_BASE_MS * (attempt + 1),
+        aborted: () => this.stopped,
+      },
+    );
+    return outcome.status === "ok" ? outcome.value : undefined;
   }
 }
