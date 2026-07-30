@@ -81,19 +81,25 @@ lazy_static::lazy_static! {
 }
 
 /// Create (or replace) the stream for `id` and register it for pulling.
-/// Replacing drops the registry's handle to any stale stream with the same
-/// id; a stale pump still holding its own Arc writes into an orphan that can
-/// no longer be pulled, which is the same fate the process registries give
-/// stale entries.
+///
+/// Replacing (a respawn under the same proc_id) cancels and wakes any prior
+/// stream first: its pump holds its own `Arc`, so dropping the registry entry
+/// alone would leave a pump parked at the high-water mark blocked forever,
+/// retaining the old process's pipe. Cancelling makes that pump return and
+/// release it — the same wake `remove_prefix` performs.
 pub fn create(id: &str) -> Arc<LineStream> {
     let stream = Arc::new(LineStream {
         state: Mutex::new(StreamState::default()),
         space: Notify::new(),
     });
-    STREAMS
+    let previous = STREAMS
         .lock()
         .unwrap()
         .insert(id.to_string(), stream.clone());
+    if let Some(previous) = previous {
+        previous.state.lock().unwrap().cancelled = true;
+        previous.space.notify_one();
+    }
     stream
 }
 
@@ -336,38 +342,67 @@ mod tests {
     /// remove_prefix while a pump is blocked at the high-water mark must wake
     /// and end it — otherwise the reader holds its pipe/socket forever and the
     /// producer stays blocked on output (the P1 strand from PR #154 review).
-    #[tokio::test]
-    async fn remove_prefix_wakes_a_pump_blocked_at_high_water() {
+    /// Spawn a pump for `id` and park it at the high-water mark: a duplex
+    /// pipe whose write half is held open (returned, so no EOF) fed two big
+    /// frames — the first is admitted, the second blocks the pump. Returns the
+    /// open writer and the pump task; the caller triggers a wake and asserts
+    /// the pump exits.
+    async fn park_pump_at_high_water(
+        id: &str,
+    ) -> (tokio::io::DuplexStream, tokio::task::JoinHandle<()>) {
         use tokio::io::AsyncWriteExt;
 
-        // A duplex pipe whose write half we hold open: the pump reads real
-        // newline-terminated lines but never sees EOF, so once it fills to the
-        // high-water mark it parks — exactly the stranded state.
         let (mut writer, reader) = tokio::io::duplex(HIGH_WATER_BYTES * 4);
         let mut frame = vec![b'y'; HIGH_WATER_BYTES];
         frame.push(b'\n');
-        // Two frames: the first is admitted (queue was empty), the second
-        // parks the pump at the high-water mark.
         writer.write_all(&frame).await.unwrap();
         writer.write_all(&frame).await.unwrap();
 
-        let stream = create("t-cancel");
-        let stream_for_pump = stream.clone();
+        let stream = create(id);
+        let observed = stream.clone();
         let pump_task = tokio::spawn(async move {
             let mut lines = BufReader::new(reader).lines();
-            pump(&stream_for_pump, &mut lines, || {}).await;
+            pump(&stream, &mut lines, || {}).await;
         });
 
-        // Let it reach the high-water park (writer stays open → no EOF).
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // Poll for the actual parked state instead of guessing a sleep: the
+        // first frame is admitted (queue holds one line at exactly the
+        // high-water mark) and the second is blocked in the admit Wait. Once
+        // both hold, the pump is parked with the writer still open (no EOF).
+        for _ in 0..200 {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            let state = observed.state.lock().unwrap();
+            if state.bytes >= HIGH_WATER_BYTES && state.queue.len() == 1 {
+                break;
+            }
+        }
         assert!(!pump_task.is_finished(), "pump should be parked, not done");
+        (writer, pump_task)
+    }
+
+    #[tokio::test]
+    async fn remove_prefix_wakes_a_pump_blocked_at_high_water() {
+        let (writer, pump_task) = park_pump_at_high_water("t-cancel").await;
 
         remove_prefix("t-cancel");
 
-        // The pump must return promptly once cancelled.
         tokio::time::timeout(std::time::Duration::from_secs(2), pump_task)
             .await
             .expect("pump did not exit after remove_prefix — strand not fixed")
+            .expect("pump task panicked");
+        drop(writer);
+    }
+
+    #[tokio::test]
+    async fn create_replacing_a_stream_wakes_the_old_parked_pump() {
+        let (writer, old_pump) = park_pump_at_high_water("t-replace").await;
+
+        // Respawn: same id, a fresh stream replaces the old registry entry.
+        let _new_stream = create("t-replace");
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), old_pump)
+            .await
+            .expect("old pump did not exit after replacement — strand not fixed")
             .expect("pump task panicked");
         drop(writer);
     }
