@@ -1,10 +1,21 @@
 name: Release Desktop App
 
+# Two modes, selected by the version input:
+#   "0.0.93"        — normal release: bump committed to main, tagged, published
+#                     as the latest release the in-app updater serves.
+#   "0.0.93-debug"  — debug build of current main: `tauri build --debug`
+#                     (devtools enabled, debug assertions on). Nothing is
+#                     committed or tagged on main, deploy-web is skipped, and
+#                     the release is published as a prerelease with
+#                     --latest=false. The updater endpoint is
+#                     releases/latest/download/latest.json, and GitHub never
+#                     serves prerelease/non-latest releases there, so debug
+#                     builds can never reach the regular update cycle.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release (e.g. 0.0.3)"
+        description: "Version to release (e.g. 0.0.3, or 0.0.3-debug for a debug build)"
         required: true
         type: string
 
@@ -19,33 +30,40 @@ jobs:
 
       - name: Validate version format
         run: |
-          if ! echo "${{ inputs.version }}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Error: Version must be in semver format (e.g. 0.0.3)"
+          if ! echo "${{ inputs.version }}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-debug)?$'; then
+            echo "Error: Version must be semver (e.g. 0.0.3) or semver-debug (e.g. 0.0.3-debug)"
             exit 1
           fi
 
+      # Debug builds never touch main: no bump commit, no tag. The build job
+      # stamps the version into its own checkout instead.
       - name: Bump version in package.json
+        if: ${{ !contains(inputs.version, '-debug') }}
         working-directory: packages/desktop
         run: |
           sed -i 's/"version": "[^"]*"/"version": "${{ inputs.version }}"/' package.json
 
       - name: Bump version in Cargo.toml
+        if: ${{ !contains(inputs.version, '-debug') }}
         working-directory: packages/desktop/src-tauri
         run: |
           sed -i '0,/^version = "[^"]*"/s//version = "${{ inputs.version }}"/' Cargo.toml
 
       - name: Bump version in tauri.conf.json
+        if: ${{ !contains(inputs.version, '-debug') }}
         working-directory: packages/desktop/src-tauri
         run: |
           sed -i 's/"version": "[^"]*"/"version": "${{ inputs.version }}"/' tauri.conf.json
 
       - name: Update Cargo.lock
+        if: ${{ !contains(inputs.version, '-debug') }}
         working-directory: packages/desktop/src-tauri
         run: |
           rustup default stable
           cargo update --workspace
 
       - name: Commit version bump
+        if: ${{ !contains(inputs.version, '-debug') }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -54,12 +72,14 @@ jobs:
           git push origin main
 
       - name: Create and push tag
+        if: ${{ !contains(inputs.version, '-debug') }}
         run: |
           git tag "desktop-v${{ inputs.version }}"
           git push origin "desktop-v${{ inputs.version }}"
 
   deploy-web:
     needs: bump-and-tag
+    if: ${{ !contains(inputs.version, '-debug') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -125,10 +145,20 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     steps:
+      # Debug builds have no tag — they build whatever main currently is.
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: "desktop-v${{ inputs.version }}"
+          ref: ${{ contains(inputs.version, '-debug') && 'main' || format('desktop-v{0}', inputs.version) }}
+
+      # For debug builds the version was never committed, so stamp it into
+      # this checkout only (BSD sed on macOS runners — hence perl).
+      - name: Stamp debug version
+        if: ${{ contains(inputs.version, '-debug') }}
+        run: |
+          perl -pi -e 's/"version": "[^"]*"/"version": "${{ inputs.version }}"/' packages/desktop/package.json
+          perl -pi -e '$done ||= s/^version = "[^"]*"/version = "${{ inputs.version }}"/' packages/desktop/src-tauri/Cargo.toml
+          perl -pi -e 's/"version": "[^"]*"/"version": "${{ inputs.version }}"/' packages/desktop/src-tauri/tauri.conf.json
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -163,10 +193,12 @@ jobs:
         with:
           projectPath: packages/desktop
           tagName: "desktop-v${{ inputs.version }}"
-          releaseName: "Metrists Desktop v${{ inputs.version }}"
-          releaseBody: "See the assets to download this version and install."
+          releaseName: ${{ contains(inputs.version, '-debug') && format('Metrists Desktop v{0} (debug build)', inputs.version) || format('Metrists Desktop v{0}', inputs.version) }}
+          releaseBody: ${{ contains(inputs.version, '-debug') && 'Debug build with devtools enabled — not for regular use. The in-app updater never serves this version.' || 'See the assets to download this version and install.' }}
           releaseDraft: true
-          prerelease: false
+          prerelease: ${{ contains(inputs.version, '-debug') }}
+          includeDebug: ${{ contains(inputs.version, '-debug') }}
+          includeRelease: ${{ !contains(inputs.version, '-debug') }}
           args: ${{ matrix.args }}
 
   publish-release:
@@ -179,9 +211,15 @@ jobs:
       # Only after every matrix leg has uploaded its bundles does the release
       # go non-draft — this is also the moment latest.json starts serving the
       # new version to the in-app updater, so partially-uploaded releases are
-      # never visible to it.
+      # never visible to it. Debug releases stay prerelease and are published
+      # with --latest=false, which keeps them out of
+      # releases/latest/download/latest.json entirely.
       - name: Publish release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release edit "desktop-v${{ inputs.version }}" --repo ${{ github.repository }} --draft=false --latest
+          if [[ "${{ inputs.version }}" == *-debug ]]; then
+            gh release edit "desktop-v${{ inputs.version }}" --repo ${{ github.repository }} --draft=false --prerelease --latest=false
+          else
+            gh release edit "desktop-v${{ inputs.version }}" --repo ${{ github.repository }} --draft=false --latest
+          fi
