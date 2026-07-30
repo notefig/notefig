@@ -69,6 +69,31 @@ describe("StreamPuller", () => {
     expect(pulls).toBeLessThanOrEqual(3);
   });
 
+  it("recovers from a transient pull rejection instead of stranding queued lines", async () => {
+    // The P1 from PR #154 review: a rejected pull with data still queued
+    // Rust-side must not kill the only loop — no further transition doorbell
+    // will come (the queue is non-empty), so the loop must retry and deliver.
+    let calls = 0;
+    withMockedTauri({
+      pull_stream_lines: (): PullResult => {
+        calls += 1;
+        if (calls === 1) throw new Error("transient IPC failure");
+        if (calls === 2) return { lines: ["recovered"], ended: true };
+        return { lines: [], ended: true };
+      },
+    });
+
+    const delivered: string[] = [];
+    const puller = new StreamPuller("s-retry", (line) => delivered.push(line));
+    puller.schedule();
+
+    // Wait past the first retry backoff (RETRY_BASE_MS = 50ms).
+    await new Promise((r) => setTimeout(r, 120));
+
+    expect(delivered).toEqual(["recovered"]);
+    expect(puller.ended).toBe(true);
+  });
+
   it("stop() halts delivery even mid-batch", async () => {
     let puller: StreamPuller;
     withMockedTauri({

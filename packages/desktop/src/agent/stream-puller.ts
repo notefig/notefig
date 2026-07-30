@@ -3,6 +3,16 @@ import { invoke } from "@tauri-apps/api/core";
 /** Response shape of the Rust `pull_stream_lines` command (line_stream.rs). */
 export type PullResult = { lines: string[]; ended: boolean };
 
+/** Transient pull-failure retry policy. A rejected pull must not abandon the
+ * loop: Rust may still have queued data, and because the queue is non-empty
+ * there is no future empty→non-empty transition to re-ring the doorbell, so
+ * an unretried failure strands that data (truncated agent output / an MCP
+ * connection with permanently undelivered requests). */
+const MAX_PULL_ATTEMPTS = 5;
+const RETRY_BASE_MS = 50;
+
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 /**
  * Drains one Rust line stream through the `pull_stream_lines` command
  * (MET-98). The Rust side queues lines and emits only payload-free
@@ -64,16 +74,8 @@ export class StreamPuller {
   /** One pull + delivery round. Returns whether the loop should continue. */
   private async pullRound(): Promise<boolean> {
     if (this.stopped) return false;
-    let res: PullResult;
-    try {
-      res = await invoke<PullResult>("pull_stream_lines", {
-        streamId: this.streamId,
-      });
-    } catch {
-      // Backend unreachable — the transport's close path reports the real
-      // failure; retrying here would spin.
-      return false;
-    }
+    const res = await this.pullWithRetry();
+    if (!res) return false;
     for (const line of res.lines) {
       if (this.stopped) return false;
       this.deliver(line);
@@ -89,5 +91,24 @@ export class StreamPuller {
     if (!this.scheduled) return false;
     this.scheduled = false;
     return true;
+  }
+
+  /** Pull once, retrying transient rejections with backoff. Returns undefined
+   * only when stopped mid-retry or every attempt failed — the latter means
+   * the backend is genuinely gone, and the transport's close path reports the
+   * real failure. */
+  private async pullWithRetry(): Promise<PullResult | undefined> {
+    for (let attempt = 0; attempt < MAX_PULL_ATTEMPTS; attempt++) {
+      if (this.stopped) return undefined;
+      try {
+        return await invoke<PullResult>("pull_stream_lines", {
+          streamId: this.streamId,
+        });
+      } catch {
+        // Transient: back off and retry rather than strand the queue.
+        await delay(RETRY_BASE_MS * (attempt + 1));
+      }
+    }
+    return undefined;
   }
 }

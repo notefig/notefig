@@ -49,6 +49,10 @@ struct StreamState {
     queue: VecDeque<String>,
     bytes: usize,
     ended: bool,
+    /// Set by `remove_prefix` when the stream is abandoned (kill/stop/replace).
+    /// A pump parked at the high-water mark must observe this and return, or it
+    /// holds its pipe/socket open forever with the producer blocked on output.
+    cancelled: bool,
 }
 
 /// One live stream: a bounded queue plus the reader's space wakeup.
@@ -97,8 +101,28 @@ pub fn create(id: &str) -> Arc<LineStream> {
 /// teardown paths that know the frontend will never pull again (kill_agent,
 /// stop_mcp_relay, stale replacement) so ended-but-undrained queues can't
 /// accumulate.
+///
+/// Each dropped stream is marked cancelled and its reader woken, so a pump
+/// parked at the high-water mark returns and releases its pipe/socket instead
+/// of stranding the blocked producer.
 pub fn remove_prefix(prefix: &str) {
-    STREAMS.lock().unwrap().retain(|id, _| !id.starts_with(prefix));
+    let removed: Vec<Arc<LineStream>> = {
+        let mut streams = STREAMS.lock().unwrap();
+        let mut removed = Vec::new();
+        streams.retain(|id, stream| {
+            if id.starts_with(prefix) {
+                removed.push(stream.clone());
+                false
+            } else {
+                true
+            }
+        });
+        removed
+    };
+    for stream in removed {
+        stream.state.lock().unwrap().cancelled = true;
+        stream.space.notify_one();
+    }
 }
 
 /// Read `lines` to EOF into `stream`'s queue, ringing `doorbell` on every
@@ -125,28 +149,43 @@ where
         // splitting it would corrupt the frame).
         let mut pending = Some(line);
         loop {
-            let admitted_to_empty = {
+            enum Admit {
+                RingAndBreak,
+                Break,
+                Cancelled,
+                Wait,
+            }
+            let action = {
                 let mut state = stream.state.lock().unwrap();
-                if state.bytes < HIGH_WATER_BYTES || state.queue.is_empty() {
+                if state.cancelled {
+                    Admit::Cancelled
+                } else if state.bytes < HIGH_WATER_BYTES || state.queue.is_empty() {
                     let line = pending.take().expect("line admitted twice");
                     let was_empty = state.queue.is_empty();
                     state.bytes += line.len();
                     state.queue.push_back(line);
-                    Some(was_empty)
+                    if was_empty {
+                        Admit::RingAndBreak
+                    } else {
+                        Admit::Break
+                    }
                 } else {
-                    None
+                    Admit::Wait
                 }
             };
-            match admitted_to_empty {
-                Some(true) => {
+            match action {
+                Admit::RingAndBreak => {
                     // Rung outside the lock; the transition itself was
                     // decided under it, so a puller that just drained to
                     // empty is guaranteed a fresh doorbell for this line.
                     doorbell();
                     break;
                 }
-                Some(false) => break,
-                None => stream.space.notified().await,
+                Admit::Break => break,
+                // Abandoned mid-wait: returning drops the reader, closing the
+                // pipe/socket so the blocked producer is released.
+                Admit::Cancelled => return,
+                Admit::Wait => stream.space.notified().await,
             }
         }
     }
@@ -292,6 +331,45 @@ mod tests {
         };
         let _ = (out, ended);
         pump_task.await.expect("pump completed");
+    }
+
+    /// remove_prefix while a pump is blocked at the high-water mark must wake
+    /// and end it — otherwise the reader holds its pipe/socket forever and the
+    /// producer stays blocked on output (the P1 strand from PR #154 review).
+    #[tokio::test]
+    async fn remove_prefix_wakes_a_pump_blocked_at_high_water() {
+        use tokio::io::AsyncWriteExt;
+
+        // A duplex pipe whose write half we hold open: the pump reads real
+        // newline-terminated lines but never sees EOF, so once it fills to the
+        // high-water mark it parks — exactly the stranded state.
+        let (mut writer, reader) = tokio::io::duplex(HIGH_WATER_BYTES * 4);
+        let mut frame = vec![b'y'; HIGH_WATER_BYTES];
+        frame.push(b'\n');
+        // Two frames: the first is admitted (queue was empty), the second
+        // parks the pump at the high-water mark.
+        writer.write_all(&frame).await.unwrap();
+        writer.write_all(&frame).await.unwrap();
+
+        let stream = create("t-cancel");
+        let stream_for_pump = stream.clone();
+        let pump_task = tokio::spawn(async move {
+            let mut lines = BufReader::new(reader).lines();
+            pump(&stream_for_pump, &mut lines, || {}).await;
+        });
+
+        // Let it reach the high-water park (writer stays open → no EOF).
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(!pump_task.is_finished(), "pump should be parked, not done");
+
+        remove_prefix("t-cancel");
+
+        // The pump must return promptly once cancelled.
+        tokio::time::timeout(std::time::Duration::from_secs(2), pump_task)
+            .await
+            .expect("pump did not exit after remove_prefix — strand not fixed")
+            .expect("pump task panicked");
+        drop(writer);
     }
 
     /// A single line above the high-water mark is admitted whole — splitting

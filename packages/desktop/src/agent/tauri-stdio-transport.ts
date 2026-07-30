@@ -91,29 +91,45 @@ export class TauriStdioTransport implements AgentTransport {
     });
 
     // Register doorbell/exit listeners before spawning so no early output is
-    // missed. Doorbells carry no payload — lines travel only via pulls.
-    const stdout = await listen(`agent-proc://${procId}/stdout-doorbell`, () =>
-      this.stdoutPuller?.schedule(),
-    );
-    const stderr = await listen(`agent-proc://${procId}/stderr-doorbell`, () =>
-      this.stderrPuller?.schedule(),
-    );
-    const exit = await listen<{ code: number | null }>(
-      `agent-proc://${procId}/exit`,
-      (event) => {
-        this.exit = { code: event.payload?.code ?? null };
-        // The exit event races the final doorbell-driven pulls: nudge the
-        // puller, close when it reports ended, and fall back to a timer in
-        // case something (an orphaned grandchild) holds stdout open.
-        this.stdoutPuller?.schedule();
-        this.exitTimer = setTimeout(
-          () => this.maybeFinishExit(true),
-          EXIT_DRAIN_TIMEOUT_MS,
-        );
-        this.maybeFinishExit();
-      },
-    );
-    this.unlistenFns.push(stdout, stderr, exit);
+    // missed. Doorbells carry no payload — lines travel only via pulls. Each
+    // resolved unlisten is captured immediately, so if a later listen()
+    // rejects, teardown() still unregisters the earlier ones (no leaked
+    // callbacks for the rest of the session).
+    try {
+      this.unlistenFns.push(
+        await listen(`agent-proc://${procId}/stdout-doorbell`, () =>
+          this.stdoutPuller?.schedule(),
+        ),
+      );
+      this.unlistenFns.push(
+        await listen(`agent-proc://${procId}/stderr-doorbell`, () =>
+          this.stderrPuller?.schedule(),
+        ),
+      );
+      this.unlistenFns.push(
+        await listen<{ code: number | null }>(
+          `agent-proc://${procId}/exit`,
+          (event) => {
+            this.exit = { code: event.payload?.code ?? null };
+            // The exit event races the final doorbell-driven pulls: nudge the
+            // puller, close when it reports ended, and fall back to a timer in
+            // case something (an orphaned grandchild) holds stdout open.
+            this.stdoutPuller?.schedule();
+            this.exitTimer = setTimeout(
+              () => this.maybeFinishExit(true),
+              EXIT_DRAIN_TIMEOUT_MS,
+            );
+            this.maybeFinishExit();
+          },
+        ),
+      );
+    } catch (error) {
+      this.teardown();
+      throw new AgentTransportError(
+        "spawn_failed",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
 
     let result: AgentResult<SpawnResult>;
     try {
