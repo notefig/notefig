@@ -10,7 +10,7 @@
 pub mod agent_proc;
 pub mod file_watcher;
 pub mod fs_ops;
-pub mod line_pump;
+pub mod line_stream;
 pub mod mcp_bridge;
 pub mod search;
 pub mod walkdir_utils;
@@ -53,5 +53,7 @@ pub fn register_handlers<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
         mcp_bridge::start_mcp_relay,
         mcp_bridge::stop_mcp_relay,
         mcp_bridge::write_mcp_line,
+        // Pull-based line streaming (MET-98)
+        line_stream::pull_stream_lines,
     ])
 }

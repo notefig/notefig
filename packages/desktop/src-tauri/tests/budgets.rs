@@ -326,6 +326,142 @@ fn search_peak_does_not_scale_with_matches_per_line() {
     assert_budget("search_content (2MB line)", source, peak, SEARCH_BUDGET);
 }
 
+/// MET-98 repro + regression guard: stream line payloads must never ride
+/// `app.emit` toward the webview — they travel the pull path.
+///
+/// The emit path serializes the payload (`EmitArgs`) and `format!`s it into a
+/// JavaScript source string per receiving webview. For a line in the hundreds
+/// of MB that multiplies into gigabytes of transient heap in the core process
+/// — and the eval script it produces is what WebKit's WebContent process
+/// `CRASH()`es on in `ExternalStringImpl::create` (blank window; see the
+/// crash reports on MET-98). The webview death itself needs a real WKWebView,
+/// so it can't be asserted here — but the amplification that produces the
+/// fatal script CAN be, because `MockRuntime` runs the identical serialize +
+/// format machinery with a no-op eval at the end.
+///
+/// This test measures both paths on the same line, same registered JS
+/// listener:
+///   1. the raw payload emit (what shipped before the pull design) — printed
+///      as evidence, and asserted to still exhibit >2x amplification: if a
+///      tauri upgrade ever makes raw emits cheap, the printed baseline and
+///      this floor tell us the pull design's rationale changed;
+///   2. the production path (`line_stream` pump -> doorbell ->
+///      `pull_stream_lines`), which must stay within
+///      [`OVERSIZED_LINE_BUDGET`] — the line itself plus one serialized
+///      response copy, and crucially *independent of the eval-script
+///      machinery and of line size*.
+#[test]
+fn oversized_agent_line_never_rides_the_eval_path() {
+    use tauri::Emitter;
+
+    let _exclusive = exclusive();
+
+    // The mock context ships an empty ACL (and no permission manifests, so
+    // `add_capability("event:default")` can't resolve either). Hand-build a
+    // resolved ACL that allows `plugin:event|listen`, so the listener
+    // registration below goes through the same dispatch the frontend uses.
+    let mut context = mock_context(noop_assets());
+    let mut resolved = tauri::utils::acl::resolved::Resolved::default();
+    resolved.allowed_commands.insert(
+        "plugin:event|listen".into(),
+        vec![tauri::utils::acl::resolved::ResolvedCommand {
+            windows: vec![glob::Pattern::new("*").expect("glob")],
+            webviews: vec![glob::Pattern::new("*").expect("glob")],
+            ..Default::default()
+        }],
+    );
+    *context.runtime_authority_mut() =
+        tauri::ipc::RuntimeAuthority::new(Default::default(), resolved);
+    let app = metrists::register_handlers(mock_builder())
+        .build(context)
+        .expect("failed to build mock app");
+    let webview = main_webview(&app);
+
+    const TOPIC: &str = "agent-proc://met98-repro/stdout-lines";
+
+    // Register a JS listener for the topic — emit_js only builds the eval
+    // script for webviews that have one, exactly like the real transport's
+    // `listen()` call. Without this the test would measure a no-op.
+    // `tauri://localhost` (not invoke_raw's `http://tauri.localhost`) so the
+    // origin resolves as Local and matches the ACL entry above.
+    let listened = get_ipc_response(
+        &webview,
+        InvokeRequest {
+            cmd: "plugin:event|listen".into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "tauri://localhost".parse().unwrap(),
+            body: tauri::ipc::InvokeBody::Json(
+                json!({ "event": TOPIC, "target": { "kind": "Any" }, "handler": 1 }),
+            ),
+            headers: Default::default(),
+            invoke_key: INVOKE_KEY.to_string(),
+        },
+    );
+    if let Err(e) = &listened {
+        panic!("failed to register mock JS listener: {e:?}");
+    }
+
+    // One 32MB JSON frame — the shape of a tool result embedding a file.
+    // Big enough that ratios are dominated by the payload, small enough for CI.
+    let line = format!(
+        "{{\"jsonrpc\":\"2.0\",\"method\":\"tool_result\",\"params\":{{\"pad\":\"{}\"}}}}",
+        "y".repeat(32 * 1024 * 1024)
+    );
+    let source = line.len();
+
+    println!("\n=== oversized line: raw emit vs gated pull (MET-98) ===");
+
+    // Path 1: what shipped before the gate. The batch is emitted as-is.
+    let (_, raw_peak) = measure(|| {
+        let _ = app.emit(TOPIC, vec![line.clone()]);
+    });
+    let raw_ratio = raw_peak as f64 / source as f64;
+    println!(
+        "  {:<34} source {:>8}  peak {:>8}  ratio {:.2}x  (repro evidence, unasserted ceiling)",
+        "raw emit (pre-fix path)",
+        mb(source),
+        mb(raw_peak),
+        raw_ratio,
+    );
+    assert!(
+        raw_ratio > 2.0,
+        "raw emit measured only {raw_ratio:.2}x — the eval-path amplification this \
+         gate exists for has disappeared (tauri change?). Re-evaluate whether the \
+         oversize gate is still needed before weakening it."
+    );
+
+    // Path 2: the production path since MET-98 — pump into a pull stream,
+    // ring the (payload-free) doorbell, drain via the pull command. The full
+    // round trip is measured: queue admission, doorbell emit, IPC dispatch,
+    // and the serialized response.
+    let ((), pull_peak) = measure(|| {
+        let stream = metrists::line_stream::create("budget/oversized");
+        tauri::async_runtime::block_on(async {
+            let mut reader = tokio::io::AsyncBufReadExt::lines(line.as_bytes());
+            metrists::line_stream::pump(&stream, &mut reader, || {
+                // The doorbell is the ONLY thing that rides the emit/eval
+                // machinery in production, so it's part of the measured cost.
+                let _ = app.emit(TOPIC, ());
+            })
+            .await;
+        });
+        let pulled = invoke_raw(
+            &webview,
+            "pull_stream_lines",
+            json!({ "streamId": "budget/oversized" }),
+        );
+        assert!(pulled.is_ok(), "pull_stream_lines should dispatch");
+    });
+
+    assert_budget(
+        "pull path (production)",
+        source,
+        pull_peak,
+        OVERSIZED_LINE_BUDGET,
+    );
+}
+
 // ===========================================================================
 // Budget constants — see the module docs on why these are ratios, not bytes.
 // ===========================================================================
@@ -346,3 +482,9 @@ const READ_BINARY_BUDGET: f64 = 8.0;
 /// What search *should* cost: the matched lines plus the serialized result set.
 /// Today's code is at 2536x — see the test.
 const SEARCH_BUDGET: f64 = 6.0;
+
+/// The gated path holds the line, its parked copy's move (free), and one
+/// serialized command response — ~2x floor plus reallocation headroom. The
+/// raw emit path this replaces measures far above this; the point of the gate
+/// is that payload size and the eval-script machinery never meet.
+const OVERSIZED_LINE_BUDGET: f64 = 3.0;

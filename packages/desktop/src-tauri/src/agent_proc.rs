@@ -5,11 +5,16 @@
 /// fit user-configured harness commands with a persistent stdin stream.
 /// Contract with the frontend (tauri-stdio-transport.ts):
 /// - commands below, errors-as-values like fs_ops
-/// - line-buffered events: `agent-proc://{proc_id}/stdout-lines`,
-///   `agent-proc://{proc_id}/stderr-lines`, `agent-proc://{proc_id}/exit`.
-///   The two line topics carry a *batch* (`Vec<String>`, newlines stripped,
-///   read order preserved) — see line_pump.rs; the transport re-expands them
-///   to per-line callbacks so the ACP layer is unaffected.
+/// - stdout/stderr are PULL streams (line_stream.rs, MET-98): the events
+///   `agent-proc://{proc_id}/stdout-doorbell` and `…/stderr-doorbell` carry
+///   no payload — they only signal "lines are waiting". The transport drains
+///   `pull_stream_lines("agent-proc://{proc_id}/stdout")` (resp. `stderr`)
+///   until an empty pull, and treats `ended: true` as end-of-stream. Line
+///   payloads NEVER ride an emit — that path amplifies bytes ~6x and a
+///   single oversized frame crashes the WebContent process.
+/// - `agent-proc://{proc_id}/exit` fires on process exit; the transport
+///   closes only after the stdout stream has ended, so exit can't overtake
+///   undelivered lines.
 /// - every spawned process is killed when the app shuts down
 ///   (see `kill_all_agents`, wired to `RunEvent::Exit` in main.rs)
 ///
@@ -318,28 +323,31 @@ pub async fn spawn_agent<R: tauri::Runtime>(
         previous.kill.notify_one();
     }
 
-    // stdout reader: one event per *batch* of lines, newlines stripped. See
-    // line_pump.rs for why these are coalesced rather than emitted per line.
+    // stdout/stderr readers fill pull streams; only payload-free doorbells
+    // are emitted. See line_stream.rs for the design (MET-98).
     if let Some(stdout) = stdout {
         let app = app_handle.clone();
-        let topic = format!("agent-proc://{}/stdout-lines", proc_id);
+        let stream_id = format!("agent-proc://{}/stdout", proc_id);
+        let doorbell_topic = format!("agent-proc://{}/stdout-doorbell", proc_id);
+        let stream = crate::line_stream::create(&stream_id);
         tauri::async_runtime::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
-            crate::line_pump::pump_batched(&mut lines, |batch| {
-                let _ = app.emit(&topic, batch);
+            crate::line_stream::pump(&stream, &mut lines, || {
+                let _ = app.emit(&doorbell_topic, ());
             })
             .await;
         });
     }
 
-    // stderr reader.
     if let Some(stderr) = stderr {
         let app = app_handle.clone();
-        let topic = format!("agent-proc://{}/stderr-lines", proc_id);
+        let stream_id = format!("agent-proc://{}/stderr", proc_id);
+        let doorbell_topic = format!("agent-proc://{}/stderr-doorbell", proc_id);
+        let stream = crate::line_stream::create(&stream_id);
         tauri::async_runtime::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
-            crate::line_pump::pump_batched(&mut lines, |batch| {
-                let _ = app.emit(&topic, batch);
+            crate::line_stream::pump(&stream, &mut lines, || {
+                let _ = app.emit(&doorbell_topic, ());
             })
             .await;
         });
@@ -427,6 +435,9 @@ pub async fn kill_agent(proc_id: String) -> AgentResult<()> {
     if let Some(handle) = handle {
         handle.kill.notify_one();
     }
+    // A kill comes from the transport's own close() — it will never pull
+    // again, so drop the streams rather than leaving ended queues behind.
+    crate::line_stream::remove_prefix(&format!("agent-proc://{}/", proc_id));
     AgentResult::ok(())
 }
 
@@ -514,5 +525,89 @@ mod tests {
     fn nested_session_guard_vars_include_claudecode() {
         // The auth spike found claude-code-acp refuses to start with these set.
         assert!(NESTED_SESSION_GUARD_VARS.contains(&"CLAUDECODE"));
+    }
+
+    /// End-to-end guard for the pull design (MET-98): spawn a real child
+    /// through the production command whose stdout includes a line far above
+    /// the high-water mark, and assert two invariants at the event bus:
+    ///   1. doorbell events carry NO payload — a spawn path that regressed
+    ///      to emitting line data would re-ship the WebContent crash;
+    ///   2. every line (including the oversized one, whole and in order)
+    ///      arrives via `pull_stream_lines`, with `ended` after EOF.
+    #[cfg(unix)]
+    #[test]
+    fn stdout_reaches_the_webview_only_via_pull() {
+        use tauri::Listener;
+
+        let app = crate::test_support::mock_app();
+        let webview = crate::test_support::main_webview(&app);
+
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        app.listen("agent-proc://pull-e2e/stdout-doorbell", move |event| {
+            let _ = tx.send(event.payload().to_string());
+        });
+
+        let oversized = crate::line_stream::HIGH_WATER_BYTES + 1024;
+        let res = crate::test_support::invoke_json(
+            &webview,
+            "spawn_agent",
+            serde_json::json!({
+                "procId": "pull-e2e",
+                "program": "/bin/sh",
+                // A small frame, then one line above the high-water mark,
+                // then exit (EOF marks the stream ended).
+                "args": [
+                    "-c",
+                    format!("echo first; yes y | tr -d '\\n' | head -c {oversized}; echo"),
+                ],
+                "cwd": "/tmp",
+                "env": {},
+            }),
+        )
+        .expect("spawn_agent should return Ok");
+        assert_eq!(res["ok"], serde_json::json!(true), "spawn failed: {res}");
+
+        // Invariant 1: the doorbell is payload-free (tauri serializes the
+        // unit payload as JSON null).
+        let doorbell = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("no doorbell arrived");
+        assert!(
+            doorbell.len() <= "null".len(),
+            "doorbell carried a payload ({} bytes) — line data must never ride an emit",
+            doorbell.len()
+        );
+
+        // Invariant 2: pulls deliver everything, in order, then report end.
+        let mut lines: Vec<String> = Vec::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let res = crate::test_support::invoke_json(
+                &webview,
+                "pull_stream_lines",
+                serde_json::json!({ "streamId": "agent-proc://pull-e2e/stdout" }),
+            )
+            .expect("pull_stream_lines should return Ok");
+            lines.extend(
+                res["lines"]
+                    .as_array()
+                    .expect("lines array")
+                    .iter()
+                    .map(|l| l.as_str().expect("line is a string").to_string()),
+            );
+            if res["ended"] == serde_json::json!(true) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "stream never ended; got {} lines so far",
+                lines.len()
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert_eq!(lines.len(), 2, "expected the small frame plus the big line");
+        assert_eq!(lines[0], "first", "order lost");
+        assert_eq!(lines[1].len(), oversized, "oversized line truncated or split");
     }
 }

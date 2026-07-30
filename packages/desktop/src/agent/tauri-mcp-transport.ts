@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { MCP_SERVER_NAME, type McpServer } from "@metrists/shared/agent";
 import type { McpEndpoint, Unsubscribe } from "./agent-transport.interface";
 import { AgentTransportError } from "./agent-transport.interface";
+import { StreamPuller } from "./stream-puller";
 
 /** Errors-as-values shape returned by the mcp_bridge.rs commands. */
 type AgentResult<T = unknown> = {
@@ -24,18 +25,20 @@ type McpRelayInfo = {
  * harness spawns this app's own binary as a stdio relay (`McpServer::Stdio`),
  * which connects back to a loopback listener `mcp_bridge.rs` opened for this
  * task. Harnesses may spawn several relay instances concurrently (OpenCode
- * spawns three — v2-opencode-config-mcp-spike.md), so the bridge tags every
- * incoming line with the connection it arrived on; that multiplexing stays
- * an internal detail here — consumers get each request with a `respond`
- * already bound to the right connection. Individual relay connections
- * coming and going is routine churn, never endpoint death; the endpoint
- * closes only via close().
+ * spawns three — v2-opencode-config-mcp-spike.md), so each connection gets
+ * its own pull stream; that multiplexing stays an internal detail here —
+ * consumers get each request with a `respond` already bound to the right
+ * connection. Individual relay connections coming and going is routine
+ * churn, never endpoint death; the endpoint closes only via close().
  *
- * Rust side contract (src-tauri/src/mcp_bridge.rs):
+ * Rust side contract (src-tauri/src/mcp_bridge.rs, line_stream.rs — MET-98):
  * - invoke("start_mcp_relay", {taskId}) / invoke("write_mcp_line",
- *   {taskId, connId, line}) / invoke("stop_mcp_relay", {taskId})
- * - event: `mcp-bridge://{taskId}/lines` (payload `{ connId, lines }`, a batch
- *   this transport re-expands into per-line request callbacks)
+ *   {taskId, connId, line}) / invoke("stop_mcp_relay", {taskId}) /
+ *   invoke("pull_stream_lines", {streamId})
+ * - event: `mcp-bridge://{taskId}/doorbell` (payload `{ connId }`, no line
+ *   data) — this transport drains
+ *   `pull_stream_lines("mcp-bridge://{taskId}/{connId}")` per doorbell;
+ *   `ended: true` means that connection closed after its tail was delivered.
  */
 export class TauriMcpTransport implements McpEndpoint {
   private readonly requestListeners = new Set<
@@ -45,6 +48,7 @@ export class TauriMcpTransport implements McpEndpoint {
   private writeChain: Promise<unknown> = Promise.resolve();
   private closed = false;
   private _mcpServer?: McpServer;
+  private readonly pullers = new Map<number, StreamPuller>();
 
   constructor(private readonly taskId: string) {}
 
@@ -54,20 +58,13 @@ export class TauriMcpTransport implements McpEndpoint {
 
   /** Start the listener and register handlers; reject on bind failure. */
   async start(): Promise<void> {
-    // Register the event listener before starting the relay so no early
+    // Register the doorbell listener before starting the relay so no early
     // line is missed (mirrors TauriStdioTransport's ordering).
-    // Rust coalesces lines into batches (line_pump.rs); re-expand to per-line
-    // callbacks here so the MCP layer above never sees the batching.
-    const line = await listen<{ connId: number; lines: string[] }>(
-      `mcp-bridge://${this.taskId}/lines`,
-      (event) => {
-        const respond = (reply: string) => this.writeTo(event.payload.connId, reply);
-        for (const line of event.payload.lines) {
-          for (const cb of this.requestListeners) cb(line, respond);
-        }
-      },
+    const doorbell = await listen<{ connId: number }>(
+      `mcp-bridge://${this.taskId}/doorbell`,
+      (event) => this.pullerFor(event.payload.connId).schedule(),
     );
-    this.unlistenFns.push(line);
+    this.unlistenFns.push(doorbell);
 
     let result: AgentResult<McpRelayInfo>;
     try {
@@ -75,14 +72,14 @@ export class TauriMcpTransport implements McpEndpoint {
         taskId: this.taskId,
       });
     } catch (error) {
-      this.teardownListeners();
+      this.teardown();
       throw new AgentTransportError(
         "spawn_failed",
         error instanceof Error ? error.message : String(error),
       );
     }
     if (!result.ok || !result.value) {
-      this.teardownListeners();
+      this.teardown();
       throw new AgentTransportError(
         "spawn_failed",
         result.error?.message ?? "failed to start mcp relay listener",
@@ -104,6 +101,25 @@ export class TauriMcpTransport implements McpEndpoint {
   ): Unsubscribe {
     this.requestListeners.add(callback);
     return () => this.requestListeners.delete(callback);
+  }
+
+  /** The pull loop for one relay connection, created on its first doorbell.
+   * An ended stream (that connection closed) drops its puller — routine
+   * churn, never endpoint death. */
+  private pullerFor(connId: number): StreamPuller {
+    let puller = this.pullers.get(connId);
+    if (!puller) {
+      const respond = (reply: string) => this.writeTo(connId, reply);
+      puller = new StreamPuller(
+        `mcp-bridge://${this.taskId}/${connId}`,
+        (line) => {
+          for (const cb of this.requestListeners) cb(line, respond);
+        },
+        () => this.pullers.delete(connId),
+      );
+      this.pullers.set(connId, puller);
+    }
+    return puller;
   }
 
   /**
@@ -137,10 +153,12 @@ export class TauriMcpTransport implements McpEndpoint {
     } catch {
       // idempotent: stopping an already-stopped listener is not an error
     }
-    this.teardownListeners();
+    this.teardown();
   }
 
-  private teardownListeners(): void {
+  private teardown(): void {
+    for (const puller of this.pullers.values()) puller.stop();
+    this.pullers.clear();
     for (const unlisten of this.unlistenFns) unlisten();
     this.unlistenFns = [];
   }

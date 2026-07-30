@@ -53,8 +53,9 @@ const KILL_GRACE_MS = 5_000;
 /**
  * Splits a byte stream into lines, delivered as one *batch* per chunk.
  *
- * Batching mirrors the desktop line pump (src-tauri/src/line_pump.rs, MET-97):
- * a streaming agent emits many lines per stdout chunk, and sending one tunnel
+ * Batching is a tunnel-side economy (unrelated to the desktop's pull streams
+ * in src-tauri/src/line_stream.rs — WebSocket frames don't have the desktop's
+ * eval-path hazards): a streaming agent emits many lines per stdout chunk, and sending one tunnel
  * frame each costs one encryption pass and one WebSocket frame apiece. Since a
  * chunk's lines are already in hand, coalescing them adds no latency and needs
  * no timer — the batch is simply whatever the OS handed us. Deliberately no

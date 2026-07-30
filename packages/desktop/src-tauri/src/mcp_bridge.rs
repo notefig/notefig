@@ -32,10 +32,11 @@
 /// Contract with the frontend (tauri-mcp-transport.ts):
 /// - `start_mcp_relay(taskId)` / `write_mcp_line(taskId, connId, line)` /
 ///   `stop_mcp_relay(taskId)`
-/// - event: `mcp-bridge://{taskId}/lines`, payload `McpLinesPayload`
-///   (`{ connId, lines }`) — a *batch* of lines from one connection in read
-///   order, coalesced by `line_pump.rs`; the transport re-expands it into
-///   per-line request callbacks.
+/// - incoming lines are PULL streams (line_stream.rs, MET-98): the event
+///   `mcp-bridge://{taskId}/doorbell` carries only `{ connId }` — the
+///   transport drains `pull_stream_lines("mcp-bridge://{taskId}/{connId}")`
+///   until an empty pull; `ended: true` means that connection closed after
+///   its tail was delivered. Line payloads NEVER ride an emit.
 ///
 /// There is deliberately no close/disconnect event: a relay connection ending
 /// is routine churn (OpenCode spawns the server command several times per
@@ -88,12 +89,12 @@ struct McpConnectionHandle {
 /// server command several times concurrently (OpenCode spawns three —
 /// docs/architecture/spikes/v2-opencode-config-mcp-spike.md), so connections
 /// are multiplexed per task, never assumed singular.
+/// Doorbell payload: which connection has lines waiting to be pulled.
+/// Deliberately no line data — see line_stream.rs (MET-98).
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct McpLinesPayload {
+pub struct McpDoorbell {
     pub conn_id: u64,
-    /// A batch of lines from one connection, in read order (see line_pump.rs).
-    pub lines: Vec<String>,
 }
 
 static NEXT_CONN_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -161,6 +162,7 @@ pub async fn start_mcp_relay<R: tauri::Runtime>(
         previous.stop.notify_one();
     }
     MCP_CONNECTIONS.lock().unwrap().remove(&task_id); // clear any stale entry
+    crate::line_stream::remove_prefix(&format!("mcp-bridge://{}/", task_id));
 
     let accept_task_id = task_id.clone();
     let accept_app = app_handle.clone();
@@ -240,15 +242,13 @@ async fn handle_connection<R: tauri::Runtime>(
         .or_default()
         .insert(conn_id, McpConnectionHandle { write_half: write_half.clone() });
 
-    let topic = format!("mcp-bridge://{}/lines", task_id);
-    crate::line_pump::pump_batched(&mut lines, |batch| {
-        let _ = app_handle.emit(
-            &topic,
-            McpLinesPayload {
-                conn_id,
-                lines: batch,
-            },
-        );
+    // Per-connection pull stream; the doorbell only says which connection
+    // has lines waiting (line_stream.rs, MET-98).
+    let stream_id = format!("mcp-bridge://{}/{}", task_id, conn_id);
+    let doorbell_topic = format!("mcp-bridge://{}/doorbell", task_id);
+    let stream = crate::line_stream::create(&stream_id);
+    crate::line_stream::pump(&stream, &mut lines, || {
+        let _ = app_handle.emit(&doorbell_topic, McpDoorbell { conn_id });
     })
     .await;
 
@@ -304,6 +304,8 @@ pub async fn stop_mcp_relay(task_id: String) -> AgentResult<()> {
         handle.stop.notify_one();
     }
     MCP_CONNECTIONS.lock().unwrap().remove(&task_id);
+    // The endpoint is closing — nothing will pull these streams again.
+    crate::line_stream::remove_prefix(&format!("mcp-bridge://{}/", task_id));
     AgentResult::ok(())
 }
 
