@@ -2314,6 +2314,7 @@ version = "0.0.92"
 dependencies = [
  "futures",
  "getrandom 0.2.17",
+ "glob",
  "grep",
  "grep-regex",
  "lazy_static",

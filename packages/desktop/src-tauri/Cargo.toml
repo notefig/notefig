@@ -56,6 +56,9 @@ libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+# Same version tauri-utils uses — needed to hand-build a resolved ACL entry
+# (`ResolvedCommand.windows: Vec<glob::Pattern>`) in tests/budgets.rs.
+glob = "0.3"
 # Gates `tauri::test::mock_builder`/`MockRuntime` for the command-dispatch
 # tests (MET-73). Test-only so it never ships in the app binary.
 tauri = { version = "2", features = ["test"] }
