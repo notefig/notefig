@@ -18,10 +18,9 @@ interface MockPickDirectoryEvent extends CustomEvent {
 }
 
 /**
- * Mock Directory Picker Dialog
- * This component listens for mock-pick-directory events and displays a dialog
- * where users can enter a directory path for testing in web/non-Tauri environments
- * Used by the BrowserPlatformAdapter
+ * Serves the mock directory picker for web/non-Tauri environments (used by
+ * BrowserPlatformAdapter) — listens for mock-pick-directory events and prompts
+ * for a path for testing.
  */
 export function MockDirectoryPickerDialog() {
   const [isOpen, setIsOpen] = useState(false);
@@ -51,7 +50,7 @@ export function MockDirectoryPickerDialog() {
       callback(path);
     }
     setIsOpen(false);
-    setPath("/workspace/demo-content"); // Reset for next time
+    setPath("/workspace/demo-content");
   };
 
   const handleCancel = () => {
@@ -59,7 +58,7 @@ export function MockDirectoryPickerDialog() {
       callback(null);
     }
     setIsOpen(false);
-    setPath("/workspace/demo-content"); // Reset for next time
+    setPath("/workspace/demo-content");
   };
 
   return (

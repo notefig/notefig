@@ -47,7 +47,6 @@ export const colors = {
   },
 };
 
-// get the user's preferred theme
 const userPreferredTheme = window.matchMedia("(prefers-color-scheme: dark)")
   .matches
   ? "dark"

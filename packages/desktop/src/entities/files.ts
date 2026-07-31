@@ -45,10 +45,7 @@ export { queryClient };
 
 const METADATA_REFETCH_INTERVAL_MS = 30_000;
 
-/**
- * File Metadata Type
- * Excludes content to keep metadata queries lightweight
- */
+/** Excludes content to keep metadata queries lightweight. */
 export interface FileMetadata {
   path: string; // Absolute path - serves as the key
   relativePath?: string; // Relative to workspace (optional for loose files)
@@ -59,10 +56,6 @@ export interface FileMetadata {
   error?: string;
 }
 
-/**
- * File Content Type
- * Contains only path (foreign key) and content
- */
 export interface FileContent {
   path: string; // Absolute path - foreign key to metadata
   content: string;
@@ -70,14 +63,6 @@ export interface FileContent {
   error?: string; // Set when the read failed — content is NOT the file's real content
 }
 
-/**
- * Create a file metadata collection for a workspace
- *
- * Uses TanStack Query to fetch metadata from the file system.
- * Supports both local (Tauri/Browser) and remote (future) adapters.
- *
- * @param workspaceId - Unique identifier for the workspace (typically the basePath)
- */
 export function createFileMetadataCollection(workspaceId: string) {
   return createCollection(
     queryCollectionOptions<FileMetadata, string>({
@@ -94,7 +79,6 @@ export function createFileMetadataCollection(workspaceId: string) {
         !isWorkspaceAccessError(error) && failureCount < 3,
 
       queryFn: async (): Promise<FileMetadata[]> => {
-        // Read the entire workspace directory tree
         const dirResult = await platformAdapter.readDirectory(workspaceId, {
           recursive: true,
           includeFiles: true,
@@ -110,10 +94,8 @@ export function createFileMetadataCollection(workspaceId: string) {
 
         const paths = dirResult.value;
 
-        // Get metadata for all paths
         const metadataResult = await platformAdapter.getMetadata(paths);
 
-        // Map to FileMetadata format
         const metadata: FileMetadata[] = metadataResult.succeeded.map((m) => ({
           path: m.path,
           relativePath: m.path.startsWith(workspaceId)
@@ -125,7 +107,6 @@ export function createFileMetadataCollection(workspaceId: string) {
           contentHash: "", // Will be computed when content is loaded
         }));
 
-        // Log any failures
         if (metadataResult.failed.length > 0) {
           console.warn(
             "Failed to get metadata for some paths:",
@@ -138,10 +119,7 @@ export function createFileMetadataCollection(workspaceId: string) {
 
       getKey: (item) => item.path,
 
-      // Mutation handlers - write changes back to file system
-
       onInsert: async ({ transaction }) => {
-        // Create new files or directories
         const files = transaction.mutations
           .filter((m) => m.modified.type === "file")
           .map((m) => m.modified.path);
@@ -170,8 +148,6 @@ export function createFileMetadataCollection(workspaceId: string) {
       },
 
       onUpdate: async ({ transaction, collection }) => {
-        // Updates to metadata only (we don't update file content here)
-        // This would be used for things like renaming files
         let hasRename = false;
         for (const mutation of transaction.mutations) {
           const oldPath = String(mutation.key);
@@ -179,7 +155,6 @@ export function createFileMetadataCollection(workspaceId: string) {
 
           if (oldPath !== newPath) {
             hasRename = true;
-            // This is a rename/move operation
             const original = mutation.original;
             if (original.type === "file") {
               const moveResult = await platformAdapter.moveFile(
@@ -220,7 +195,6 @@ export function createFileMetadataCollection(workspaceId: string) {
       },
 
       onDelete: async ({ transaction }) => {
-        // Delete files and directories
         const files = transaction.mutations
           .filter((m) => m.original.type === "file")
           .map((m) => String(m.key));
@@ -284,27 +258,22 @@ export function createFileContentCollection(workspaceId: string) {
       queryFn: async (context): Promise<FileContent[]> => {
         const parsed = parseLoadSubsetOptions(context.meta?.loadSubsetOptions);
 
-        // Extract path filters (eq or in operators on 'path' field)
         const pathFilters = parsed.filters.filter(
           (f) =>
             f.field.join(".") === "path" &&
             (f.operator === "eq" || f.operator === "in"),
         );
 
-        // Collect all requested paths
         const requestedPaths = pathFilters.flatMap((f) =>
           Array.isArray(f.value) ? f.value : [f.value],
         );
 
         if (requestedPaths.length === 0) return [];
 
-        // Load file contents from file system
         const result = await platformAdapter.readFiles(requestedPaths);
 
-        // Create entries for all requested paths
         const contentMap = new Map<string, FileContent>();
 
-        // Add succeeded reads
         for (const file of result.succeeded) {
           contentMap.set(file.path, {
             path: file.path,
@@ -359,8 +328,6 @@ export function createFileContentCollection(workspaceId: string) {
 
       enabled: true,
 
-      // Mutation handlers - write content changes back to file system
-
       onInsert: async ({ transaction, collection }) => {
         const files = transaction.mutations.map((m) => ({
           path: m.modified.path,
@@ -388,18 +355,11 @@ export function createFileContentCollection(workspaceId: string) {
   );
 }
 
-/**
- * Type for the combined metadata + content collections for a workspace
- */
 export interface WorkspaceCollections {
   metadata: ReturnType<typeof createFileMetadataCollection>;
   content: ReturnType<typeof createFileContentCollection>;
 }
 
-/**
- * Global registry of workspace collections
- * Maps workspace ID to its collections
- */
 const workspaceCollectionsRegistry = new Map<string, WorkspaceCollections>();
 
 if (import.meta.env.DEV) {
@@ -422,12 +382,6 @@ if (import.meta.env.DEV) {
   };
 }
 
-/**
- * Get or create collections for a workspace
- *
- * @param workspaceId - Unique identifier for the workspace (typically the basePath)
- * @returns The metadata and content collections for the workspace
- */
 export function getOrCreateWorkspaceCollections(
   workspaceId: string,
 ): WorkspaceCollections {
@@ -444,14 +398,7 @@ export function getOrCreateWorkspaceCollections(
   return collections;
 }
 
-/**
- * Refresh directory metadata from the file system
- *
- * Triggers a refetch of the metadata collection, reloading all file/directory metadata.
- * Call this when you know files have changed on disk.
- *
- * @param workspaceId - Unique identifier for the workspace
- */
+/** Refetch the metadata collection; call when files are known to have changed on disk. */
 export async function refreshDirectoryMetadata(
   workspaceId: string,
 ): Promise<void> {
@@ -459,16 +406,6 @@ export async function refreshDirectoryMetadata(
   await collections.metadata.utils.refetch();
 }
 
-/**
- * Write file content to the file system and update collections
- *
- * This uses the collection's mutation handler, which automatically writes to the file system.
- * After writing, it updates the metadata collection with the new timestamp and size.
- *
- * @param workspaceId - Unique identifier for the workspace
- * @param filePath - Absolute path to the file
- * @param content - New file content
- */
 export async function writeFileContent(
   workspaceId: string,
   filePath: string,
@@ -481,7 +418,6 @@ export async function writeFileContent(
   // hash already recorded so it is never mistaken for an external change.
   recordSelfWrite(filePath, contentHash);
 
-  // Update content collection (this triggers onUpdate/onInsert which writes to file system)
   const existingContent = collections.content.get(filePath);
   const tx = existingContent
     ? collections.content.update(filePath, (draft) => {
@@ -499,7 +435,6 @@ export async function writeFileContent(
   // date-sorted views flap between old and new positions.
   await tx.isPersisted.promise;
 
-  // Update metadata with new timestamp and hash
   const metadataResult = await platformAdapter.getMetadata([filePath]);
   if (metadataResult.succeeded.length > 0) {
     const metadata = metadataResult.succeeded[0];
@@ -518,13 +453,6 @@ export async function writeFileContent(
   invalidateDerivedState(workspaceId);
 }
 
-/**
- * Create a new file in the file system
- *
- * @param workspaceId - Unique identifier for the workspace
- * @param filePath - Absolute path to the new file
- * @param content - Initial file content (optional, defaults to empty string)
- */
 export async function createFile(
   workspaceId: string,
   filePath: string,
@@ -532,7 +460,6 @@ export async function createFile(
 ): Promise<void> {
   const collections = getOrCreateWorkspaceCollections(workspaceId);
 
-  // Insert into metadata collection (triggers onCreate which creates the file)
   collections.metadata.insert({
     path: filePath,
     relativePath: filePath.startsWith(workspaceId)
@@ -543,7 +470,6 @@ export async function createFile(
     size: 0,
   });
 
-  // If content is provided, write it
   if (content) {
     await writeFileContent(workspaceId, filePath, content);
   }
@@ -559,19 +485,12 @@ export async function createFile(
   }
 }
 
-/**
- * Create a new directory in the file system
- *
- * @param workspaceId - Unique identifier for the workspace
- * @param dirPath - Absolute path to the new directory
- */
 export async function createDirectory(
   workspaceId: string,
   dirPath: string,
 ): Promise<void> {
   const collections = getOrCreateWorkspaceCollections(workspaceId);
 
-  // Insert into metadata collection (triggers onCreate which creates the directory)
   collections.metadata.insert({
     path: dirPath,
     relativePath: dirPath.startsWith(workspaceId)
@@ -621,34 +540,24 @@ export async function deleteFileOrDirectory(
 
     for (const child of allMetadata) {
       if (child.path.startsWith(childPrefix)) {
-        // Remove child content if loaded
         const childContent = collections.content.get(child.path);
         if (childContent) {
           collections.content.utils.writeDelete(child.path);
         }
-        // Remove child metadata
         collections.metadata.utils.writeDelete(child.path);
       }
     }
   }
 
-  // Delete the entry itself from metadata (triggers onDelete -> platform adapter)
   collections.metadata.delete(path);
 
-  // Also delete content if it exists
   const content = collections.content.get(path);
   if (content) {
     collections.content.delete(path);
   }
 }
 
-/**
- * Get a full FileEntry by joining metadata and content
- *
- * @param workspaceId - Unique identifier for the workspace
- * @param filePath - Absolute path to the file
- * @returns Full FileEntry or null if not found
- */
+/** A full FileEntry joining metadata and content; null if not found. */
 export function getFileEntry(
   workspaceId: string,
   filePath: string,
@@ -678,14 +587,7 @@ export function getFileEntry(
   };
 }
 
-/**
- * Prefetch file content for a specific file
- * This pre-loads file content into the collection cache before the user opens it.
- * Useful for hover-based prefetching to improve perceived performance.
- *
- * @param workspaceId - Unique identifier for the workspace
- * @param filePath - Absolute path to the file to prefetch
- */
+/** Pre-load file content into the collection cache (e.g. hover prefetch). */
 export async function prefetchFileContent(
   workspaceId: string,
   filePath: string,
@@ -752,7 +654,6 @@ export async function renameFileOrDirectory(
     throw new Error(`Cannot rename: no metadata entry found for ${oldPath}`);
   }
 
-  // Check for duplicate at target path
   const existing = collections.metadata.get(newPath);
   if (existing) {
     throw new Error(
@@ -766,7 +667,6 @@ export async function renameFileOrDirectory(
       : undefined;
 
   if (entry.type === "file") {
-    // Move on disk first
     const moveResult = await platformAdapter.moveFile(oldPath, newPath);
     if (!moveResult.ok) {
       throw new Error(
@@ -774,7 +674,6 @@ export async function renameFileOrDirectory(
       );
     }
 
-    // Re-key metadata: delete old, insert new
     collections.metadata.utils.writeDelete(oldPath);
     collections.metadata.utils.writeInsert({
       ...entry,
@@ -782,7 +681,6 @@ export async function renameFileOrDirectory(
       relativePath: computeRelativePath(newPath),
     });
 
-    // Re-key content if loaded
     const contentEntry = collections.content.get(oldPath);
     if (contentEntry) {
       collections.content.utils.writeDelete(oldPath);
@@ -792,7 +690,6 @@ export async function renameFileOrDirectory(
       });
     }
   } else {
-    // Directory rename
     const moveResult = await platformAdapter.moveDirectory(oldPath, newPath);
     if (!moveResult.ok) {
       throw new Error(
@@ -800,7 +697,6 @@ export async function renameFileOrDirectory(
       );
     }
 
-    // Re-key all children
     const childPrefix = oldPath.endsWith("/") ? oldPath : oldPath + "/";
     const allMetadata = collections.metadata.toArray;
 
@@ -808,7 +704,6 @@ export async function renameFileOrDirectory(
       if (child.path.startsWith(childPrefix)) {
         const newChildPath = newPath + child.path.slice(oldPath.length);
 
-        // Re-key child metadata
         collections.metadata.utils.writeDelete(child.path);
         collections.metadata.utils.writeInsert({
           ...child,
@@ -816,7 +711,6 @@ export async function renameFileOrDirectory(
           relativePath: computeRelativePath(newChildPath),
         });
 
-        // Re-key child content if loaded
         const childContent = collections.content.get(child.path);
         if (childContent) {
           collections.content.utils.writeDelete(child.path);
@@ -828,7 +722,6 @@ export async function renameFileOrDirectory(
       }
     }
 
-    // Re-key the directory entry itself
     collections.metadata.utils.writeDelete(oldPath);
     collections.metadata.utils.writeInsert({
       ...entry,
@@ -838,12 +731,6 @@ export async function renameFileOrDirectory(
   }
 }
 
-/**
- * Clear all collections for a workspace
- * Useful when closing a workspace
- *
- * @param workspaceId - Unique identifier for the workspace
- */
 export function clearWorkspaceCollections(workspaceId: string): void {
   workspaceCollectionsRegistry.delete(workspaceId);
   // Drop cached query state too, so a fresh open refetches instead of
@@ -852,13 +739,7 @@ export function clearWorkspaceCollections(workspaceId: string): void {
   queryClient.removeQueries({ queryKey: ["file-content", workspaceId] });
 }
 
-// ---------------------------------------------------------------------------
-// Reactive hooks — the way UI reads this entity
-// ---------------------------------------------------------------------------
-
-/**
- * The workspace's collections as a render-stable pair.
- */
+/** The workspace's collections as a render-stable pair. */
 export function useFileCollections(workspacePath: string): WorkspaceCollections {
   return useMemo(
     () => getOrCreateWorkspaceCollections(workspacePath),

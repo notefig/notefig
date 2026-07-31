@@ -1175,8 +1175,6 @@ export class AgentTask {
     }
   }
 
-  // ===== internal helpers =====
-
   /** Residual observability: signals that used to land in the diagnostics stream. */
   private warn(label: string, detail?: unknown): void {
     console.warn(`[agent ${this.taskId}] ${label}`, detail ?? "");
@@ -1340,8 +1338,6 @@ export function getOrCreateWorkspaceTaskManager(
   }
   return manager;
 }
-
-// ===== app-facing command API (thin free functions; state via collections) =====
 
 /**
  * Create + start an agent task in a workspace. Owns the platform transport

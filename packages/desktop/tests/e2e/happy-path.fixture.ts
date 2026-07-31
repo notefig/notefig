@@ -6,11 +6,9 @@
 const WORKSPACE_PATH = "/workspace/test-happy-path";
 
 export const happyPathFixture = {
-  // Complete demo workspace with nested structure
   demoWorkspace: {
     path: WORKSPACE_PATH,
     files: [
-      // Root README
       {
         path: `${WORKSPACE_PATH}/README.md`,
         content: `# Demo Workspace
@@ -33,7 +31,6 @@ Welcome to Metrists! This is a sample workspace to help you get started.
         type: "file" as const,
       },
 
-      // Docs directory
       {
         path: `${WORKSPACE_PATH}/docs`,
         content: "",
@@ -69,7 +66,6 @@ Metrists comes with powerful features:
         type: "file" as const,
       },
 
-      // Notes directory
       {
         path: `${WORKSPACE_PATH}/notes`,
         content: "",
@@ -105,7 +101,6 @@ Project planning discussion:
         type: "file" as const,
       },
 
-      // Projects directory
       {
         path: `${WORKSPACE_PATH}/projects`,
         content: "",
@@ -132,13 +127,11 @@ Project planning discussion:
     ],
   },
 
-  // Empty workspace for testing initial state
   emptyWorkspace: {
     path: "/workspace/empty-happy-path",
     files: [],
   },
 
-  // Test content for editing verification
   testEdits: {
     simpleHeading: "# Test Heading\n\nThis is a test edit.",
     complexContent: `# Updated Document

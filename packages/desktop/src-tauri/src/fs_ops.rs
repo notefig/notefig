@@ -109,8 +109,6 @@ async fn ensure_parent_dir(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-// Note: is_hidden_path and is_hidden_relative_to are now in walkdir_utils module
-
 #[tauri::command]
 pub async fn read_directory(
     path: String,
@@ -140,7 +138,6 @@ pub async fn read_directory(
     let mut results = Vec::new();
 
     if recursive {
-        // Use shared walk_directory utility for consistent traversal
         let options = WalkOptions {
             follow_links: true,
             exclude_hidden: !include_hidden,
@@ -161,13 +158,11 @@ pub async fn read_directory(
             return Result::err(path, FileSystemErrorType::IoError, e);
         }
     } else {
-        // Non-recursive: read immediate children
         match fs::read_dir(&path_buf).await {
             Ok(mut entries) => {
                 while let Ok(Some(entry)) = entries.next_entry().await {
                     let entry_path = entry.path();
 
-                    // Filter out hidden files/directories unless include_hidden is true
                     if !include_hidden && is_hidden_relative_to(&entry_path, &path_buf) {
                         continue;
                     }
@@ -369,7 +364,6 @@ pub async fn write_files(files: Vec<FileToWrite>) -> BatchResult<String> {
         .map(|file| async move {
             let path_buf = PathBuf::from(&file.path);
 
-            // Ensure parent directory exists
             if let Err(err) = ensure_parent_dir(&path_buf).await {
                 return Err(map_io_error(&file.path, err));
             }
@@ -378,7 +372,6 @@ pub async fn write_files(files: Vec<FileToWrite>) -> BatchResult<String> {
             let hash = compute_content_hash(&file.content);
             register_app_write(file.path.clone(), hash);
 
-            // Use atomic write for safety
             match atomic_write(&path_buf, &file.content).await {
                 Ok(_) => Ok(file.path),
                 Err(err) => Err(map_io_error(&file.path, err)),
@@ -433,7 +426,6 @@ pub async fn delete_files(paths: Vec<String>) -> BatchResult<String> {
             match fs::remove_file(&path).await {
                 Ok(_) => Ok(path),
                 Err(err) => {
-                    // Check if already deleted
                     if err.kind() == std::io::ErrorKind::NotFound {
                         Ok(path)
                     } else {
@@ -477,7 +469,6 @@ pub async fn move_file(old_path: String, new_path: String) -> Result<()> {
         );
     }
 
-    // Ensure parent of new path exists
     if let Err(err) = ensure_parent_dir(&new_path_buf).await {
         return Result::err(new_path, FileSystemErrorType::IoError, err.to_string());
     }
@@ -509,7 +500,6 @@ pub async fn copy_file(from: String, to: String) -> Result<()> {
         );
     }
 
-    // Ensure parent of destination exists
     if let Err(err) = ensure_parent_dir(&to_buf).await {
         return Result::err(to, FileSystemErrorType::IoError, err.to_string());
     }
@@ -625,7 +615,6 @@ pub async fn write_binary_files(files: Vec<BinaryFileWriteRequest>) -> BatchResu
     for file in files {
         let path = PathBuf::from(&file.path);
 
-        // Ensure parent directory exists
         if let Some(parent) = path.parent() {
             if !parent.exists() {
                 if let Err(err) = fs::create_dir_all(parent).await {
@@ -635,7 +624,6 @@ pub async fn write_binary_files(files: Vec<BinaryFileWriteRequest>) -> BatchResu
             }
         }
 
-        // Write binary data
         match fs::write(&path, file.data).await {
             Ok(_) => {
                 result.succeeded.push(file.path);
@@ -676,7 +664,6 @@ mod tests {
         let temp_dir = setup_test_dir();
         let root_path = temp_dir.path().to_string_lossy().to_string();
 
-        // Create test structure
         create_test_file(&temp_dir, "file1.txt", "content1").await;
         create_test_file(&temp_dir, "subdir/file2.txt", "content2").await;
         create_test_file(&temp_dir, "subdir/nested/file3.txt", "content3").await;

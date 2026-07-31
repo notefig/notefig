@@ -245,53 +245,6 @@ export function CommandPalette({
       shortcut: "F11",
       action: onToggleFullscreen,
     },
-    // {
-    //   id: "next-tab",
-    //   label: "Next Tab",
-    //   icon: FileText,
-    //   shortcut: "Ctrl+Tab",
-    //   group: "View",
-    // },
-    // {
-    //   id: "prev-tab",
-    //   label: "Previous Tab",
-    //   icon: FileText,
-    //   shortcut: "Ctrl+Shift+Tab",
-    //   group: "View",
-    // },
-    // {
-    //   id: "go-to-file",
-    //   label: "Go to File",
-    //   icon: FileText,
-    //   shortcut: formatForDisplay("Mod+P"),
-    //   group: "Navigation",
-    // },
-    // {
-    //   id: "go-to-line",
-    //   label: "Go to Line",
-    //   icon: Terminal,
-    //   shortcut: formatForDisplay("Mod+G"),
-    //   group: "Navigation",
-    // },
-    // {
-    //   id: "bookmarks",
-    //   label: "Show Bookmarks",
-    //   icon: Bookmark,
-    //   group: "Navigation",
-    // },
-    // {
-    //   id: "git-status",
-    //   label: "Git Status",
-    //   icon: GitBranch,
-    //   group: "Tools",
-    // },
-    // {
-    //   id: "git-commit",
-    //   label: "Git Commit",
-    //   icon: GitBranch,
-    //   shortcut: formatForDisplay("Mod+Shift+G"),
-    //   group: "Tools",
-    // },
     {
       id: "open-settings",
       labelKey: "openSettings",
@@ -301,13 +254,6 @@ export function CommandPalette({
       shortcut: formatForDisplay("Mod+Shift+,"),
       action: onOpenSettings,
     },
-    // {
-    //   id: "keyboard-shortcuts",
-    //   label: "Keyboard Shortcuts",
-    //   icon: Keyboard,
-    //   shortcut: formatForDisplay("Mod+K") + " " + formatForDisplay("Mod+S"),
-    //   group: "Settings",
-    // },
     {
       id: "toggle-theme",
       labelKey: "toggleTheme",
@@ -316,19 +262,6 @@ export function CommandPalette({
       icon: Moon,
       action: swapTheme,
     },
-    // {
-    //   id: "help",
-    //   label: "Help",
-    //   icon: HelpCircle,
-    //   shortcut: "F1",
-    //   group: "Help",
-    // },
-    // {
-    //   id: "documentation",
-    //   label: "Documentation",
-    //   icon: FileText,
-    //   group: "Help",
-    // },
   ];
 
   const skipFocusRestoreRef = useRef(false);

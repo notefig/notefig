@@ -37,7 +37,6 @@ function countWindows(nodes: LayoutNode[]): number {
   }, 0);
 }
 
-// a list of TabViews with horizontal or vertical orientation
 function PanelView({
   orientation = "row",
   children,
@@ -53,7 +52,6 @@ function PanelView({
 
   const sizes = panels.map((panel) => panel.size || 1);
 
-  // Normalize children to an array
   const childArray = React.Children.toArray(children) as React.ReactElement<
     React.ComponentProps<typeof View>
   >[];

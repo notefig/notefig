@@ -161,9 +161,7 @@ export function HarnessSettings() {
     }
   };
 
-  // ------------------------------------------------------------------
-  // Editor view (replaces the list, mock: "Edit server" with back arrow)
-  // ------------------------------------------------------------------
+  // Editor view (replaces the list): mock "Edit server" with back arrow.
   const editingRow =
     editingId !== null && editingId !== NEW_ENTRY_ID
       ? rows.find((row) => row.definition.id === editingId)
@@ -264,9 +262,6 @@ export function HarnessSettings() {
     );
   }
 
-  // ------------------------------------------------------------------
-  // List view
-  // ------------------------------------------------------------------
   const confirmDeleteRow = rows.find(
     (row) => row.definition.id === confirmDeleteId,
   );

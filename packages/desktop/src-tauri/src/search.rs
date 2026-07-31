@@ -62,13 +62,11 @@ impl<'a> Sink for CollectingSink<'a> {
         _searcher: &Searcher,
         mat: &SinkMatch<'_>,
     ) -> Result<bool, Self::Error> {
-        // Get line content (trim trailing newline)
         let line_content = String::from_utf8_lossy(mat.bytes())
             .trim_end_matches('\n')
             .trim_end_matches('\r')
             .to_string();
 
-        // Find all matches in the line using the matcher
         use grep::matcher::Matcher;
         let mut matches_in_line = Vec::new();
         let _ = self.matcher.find_iter(mat.bytes(), |m| {
@@ -76,7 +74,6 @@ impl<'a> Sink for CollectingSink<'a> {
             true
         });
 
-        // Collect a result for each match in the line
         for (start, end) in matches_in_line {
             if self.results.len() >= self.max_results {
                 return Ok(false);
@@ -123,7 +120,6 @@ impl<'a> Sink for CollectingSink<'a> {
             });
         }
 
-        // Continue searching unless we've hit max results
         Ok(self.results.len() < self.max_results)
     }
 }
@@ -139,19 +135,16 @@ pub async fn search_content(
     file_includes: Option<Vec<String>>,
     max_results: Option<usize>,
 ) -> Result<Vec<SearchMatch>, String> {
-    // Validate query
     if query.is_empty() {
         return Err("Query cannot be empty".to_string());
     }
 
-    // Truncate query if too long
     let query = if query.len() > 1000 {
         query[..1000].to_string()
     } else {
         query
     };
 
-    // Build regex pattern
     let pattern = if use_regex {
         if case_sensitive {
             query.clone()
@@ -180,13 +173,11 @@ pub async fn search_content(
         paths.into_iter().map(PathBuf::from).collect()
     });
 
-    // Create searcher with optimal settings
     let mut searcher = SearcherBuilder::new()
         .line_number(true)
         .binary_detection(BinaryDetection::quit(b'\x00'))
         .build();
 
-    // Set up walk options using shared utilities
     let dir_path = PathBuf::from(&directory);
 
     if !dir_path.exists() {
@@ -204,31 +195,26 @@ pub async fn search_content(
         base_path: dir_path.clone(),
     };
 
-    // Use shared walk_directory utility
     let walk_result = walk_directory(&dir_path, &walk_options, |entry| {
         let path = entry.path();
 
-        // Skip directories - we only search files
         if !path.is_file() {
             return Ok(());
         }
 
-        // Check for circular symlinks
         {
             let mut visited_guard = visited.lock().unwrap();
             if check_circular_symlink(path, &mut visited_guard) {
-                return Ok(()); // Skip circular symlinks
+                return Ok(());
             }
         }
 
-        // If file_includes is set, only search files in that set
         if let Some(ref includes) = file_includes {
             if !includes.contains(&path.to_path_buf()) {
                 return Ok(());
             }
         }
 
-        // Check file pattern filter
         if let Some(ref pattern_str) = file_pattern {
             if !matches_file_pattern(path, pattern_str) {
                 return Ok(());
@@ -240,7 +226,6 @@ pub async fn search_content(
             return Ok(());
         }
 
-        // Set up sink for this file
         let mut sink = CollectingSink {
             file_path: path.to_string_lossy().to_string(),
             results: &mut results,
@@ -248,13 +233,11 @@ pub async fn search_content(
             matcher: &matcher,
         };
 
-        // Search this file
         if let Err(e) = searcher.search_path(&matcher, path, &mut sink) {
             // Log but don't fail - continue searching other files
             eprintln!("Error searching {}: {}", path.display(), e);
         }
 
-        // Check if we've hit max results
         if results.len() >= max {
             return Err("Max results reached".to_string());
         }

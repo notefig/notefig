@@ -126,7 +126,6 @@ test.describe("Content Loading", () => {
       .first();
     await editor.waitFor({ state: "visible", timeout: 10000 });
 
-    // Typing works and persists.
     await editor.click();
     await editor.pressSequentially("Typed into empty file", { delay: 10 });
     await waitForAutoSave(page);

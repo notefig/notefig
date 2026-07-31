@@ -132,7 +132,6 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
       },
     );
 
-    // Group results by file
     const groupedResults = useMemo(() => {
       const groups = new Map<string, SearchMatch[]>();
       for (const match of results) {
@@ -145,7 +144,6 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
         }
       }
 
-      // Sort groups by file name (A to Z)
       const entries = [...groups.entries()];
       entries.sort((a, b) => {
         const nameA = getFileName(a[0]).toLowerCase();
@@ -174,7 +172,6 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
 
     return (
       <div className="flex flex-col h-full">
-        {/* Search input row */}
         <div className="flex items-center gap-1 px-2 pt-2 pb-1">
           <div className="flex-1 min-w-0 flex items-center gap-1.5 rounded-md border border-input bg-background px-2 py-1 text-sm">
             <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
@@ -228,7 +225,6 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
           </button>
         </div>
 
-        {/* Filter row */}
         {showFilters && (
           <div className="px-2 pb-1">
             <input
@@ -241,7 +237,6 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
           </div>
         )}
 
-        {/* Toolbar row */}
         {query.trim() && (
           <div className="flex items-center px-2 py-1 text-xs text-muted-foreground">
             {isSearching ? (
@@ -255,14 +250,12 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
           </div>
         )}
 
-        {/* Error */}
         {error && (
           <div className="px-2 py-1 text-xs text-destructive">
             {error.message}
           </div>
         )}
 
-        {/* Results */}
         <ScrollArea className="flex-1 min-h-0">
           {groupedResults.map(([filePath, matches]) => {
             const isCollapsed = collapsedFiles.has(filePath);
@@ -270,7 +263,6 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
 
             return (
               <div key={filePath}>
-                {/* File header */}
                 <button
                   onClick={() => toggleFileCollapsed(filePath)}
                   className="flex items-center w-full px-2 py-1 text-sm hover:bg-accent/50 transition-colors gap-1"
@@ -286,7 +278,6 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
                   </span>
                 </button>
 
-                {/* Match items */}
                 {!isCollapsed &&
                   matches.map((match, i) => (
                     <SearchResultItem
@@ -311,7 +302,6 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
             );
           })}
 
-          {/* Empty state */}
           {!isSearching && query.trim() && resultCount === 0 && !error && (
             <div className="px-2 py-4 text-sm text-muted-foreground text-center">
               No results found
@@ -336,7 +326,6 @@ function SearchResultItem({
 }) {
   const lineContent = match.content.lineContent;
 
-  // Highlight matched text in the line
   const segments = useMemo(() => {
     if (!query.trim()) return [{ text: lineContent, highlight: false }];
 

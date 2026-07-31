@@ -44,10 +44,6 @@ export type {
   AgentPermissionRequestRow,
 } from "@/agent/agent-collections";
 
-// ---------------------------------------------------------------------------
-// Reactive hooks — per-task reads, written once
-// ---------------------------------------------------------------------------
-
 /** The task's collection row; undefined until it exists (or after deletion). */
 export function useTaskRow(taskId: string): AgentTaskRow | undefined {
   const { data = [] } = useLiveQuery(

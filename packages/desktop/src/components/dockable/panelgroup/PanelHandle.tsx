@@ -26,7 +26,6 @@ function PanelHandle({
     e.stopPropagation();
     onDragStart?.();
 
-    // set cursor
     document.body.style.cursor =
       direction === "row" ? "col-resize" : "row-resize";
 

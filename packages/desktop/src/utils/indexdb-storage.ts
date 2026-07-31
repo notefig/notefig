@@ -5,10 +5,6 @@
 
 import type { FileRowData } from "./demo-data";
 
-/**
- * IndexedDB storage wrapper for file data
- * Uses native IndexedDB API without external dependencies
- */
 export class IndexedDBStorage {
   private dbName: string;
   private db: IDBDatabase | null = null;
@@ -20,10 +16,6 @@ export class IndexedDBStorage {
     this.dbName = encodeURIComponent(workspacePath);
   }
 
-  /**
-   * Initialize the IndexedDB database
-   * Creates the database and object store if they don't exist
-   */
   async initialize(): Promise<void> {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(this.dbName, this.DB_VERSION);
@@ -42,9 +34,7 @@ export class IndexedDBStorage {
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
 
-        // Create object store if it doesn't exist
         if (!db.objectStoreNames.contains(this.STORE_NAME)) {
-          // Use 'path' as the key path
           db.createObjectStore(this.STORE_NAME, { keyPath: "path" });
           console.log(`[IndexedDB] Created object store: ${this.STORE_NAME}`);
         }
@@ -52,10 +42,6 @@ export class IndexedDBStorage {
     });
   }
 
-  /**
-   * Check if the database has any data
-   * Returns true if there are any files stored
-   */
   async hasData(): Promise<boolean> {
     if (!this.db) {
       throw new Error("Database not initialized. Call initialize() first.");
@@ -78,10 +64,6 @@ export class IndexedDBStorage {
     });
   }
 
-  /**
-   * Load all files from IndexedDB
-   * Returns a Record mapping file paths to file data
-   */
   async loadAllFiles(): Promise<Record<string, FileRowData>> {
     if (!this.db) {
       throw new Error("Database not initialized. Call initialize() first.");
@@ -110,10 +92,6 @@ export class IndexedDBStorage {
     });
   }
 
-  /**
-   * Save all files to IndexedDB
-   * Clears existing data and replaces with new data
-   */
   async saveAllFiles(files: Record<string, FileRowData>): Promise<void> {
     if (!this.db) {
       throw new Error("Database not initialized. Call initialize() first.");
@@ -123,11 +101,9 @@ export class IndexedDBStorage {
       const transaction = this.db!.transaction([this.STORE_NAME], "readwrite");
       const objectStore = transaction.objectStore(this.STORE_NAME);
 
-      // Clear existing data
       const clearRequest = objectStore.clear();
 
       clearRequest.onsuccess = () => {
-        // Add all files
         const fileArray = Object.values(files);
         let completed = 0;
         let hasError = false;
@@ -171,10 +147,6 @@ export class IndexedDBStorage {
     });
   }
 
-  /**
-   * Save a single file to IndexedDB
-   * Updates existing file or adds new one
-   */
   async saveFile(file: FileRowData): Promise<void> {
     if (!this.db) {
       throw new Error("Database not initialized. Call initialize() first.");
@@ -195,9 +167,6 @@ export class IndexedDBStorage {
     });
   }
 
-  /**
-   * Delete a file from IndexedDB
-   */
   async deleteFile(path: string): Promise<void> {
     if (!this.db) {
       throw new Error("Database not initialized. Call initialize() first.");
@@ -218,9 +187,6 @@ export class IndexedDBStorage {
     });
   }
 
-  /**
-   * Close the database connection
-   */
   async close(): Promise<void> {
     if (this.db) {
       this.db.close();
@@ -228,10 +194,6 @@ export class IndexedDBStorage {
     }
   }
 
-  /**
-   * Delete the entire database
-   * Useful for resetting a workspace
-   */
   static async deleteDatabase(workspacePath: string): Promise<void> {
     const dbName = encodeURIComponent(workspacePath);
 

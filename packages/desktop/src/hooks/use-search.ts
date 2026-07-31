@@ -38,7 +38,6 @@ export function useSearch(
 ): UseSearchResult {
   const { query, caseSensitive, useRegex, filePattern, maxResults } = options;
 
-  // Debounced query
   const [debouncedQuery, setDebouncedQuery] = useState(query);
   useEffect(() => {
     if (query.trim() === "") {

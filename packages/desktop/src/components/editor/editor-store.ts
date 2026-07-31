@@ -368,9 +368,7 @@ function createImageInstance(filePath: string): ImageInstance {
       }
       return false;
     },
-    dispose(): void {
-      // No-op: stateless viewer
-    },
+    dispose(): void {},
     isFocusable(): boolean {
       return true;
     },
@@ -414,11 +412,9 @@ export function getOrCreateEditor(
 ): EditorInstance {
   const existing = editorInstances.get(filePath);
   if (existing) {
-    // If types match, return existing
     if (existing.type === config.type) {
       return existing;
     }
-    // If types don't match, dispose old and create new
     existing.dispose();
   }
 
@@ -450,41 +446,26 @@ export function getOrCreateEditor(
   return instance;
 }
 
-/**
- * Type guard for markdown instances
- */
 export function isMarkdownInstance(
   instance: EditorInstance | undefined,
 ): instance is MarkdownInstance {
   return instance?.type === "markdown";
 }
 
-/**
- * Type guard for image instances
- */
 export function isImageInstance(
   instance: EditorInstance | undefined,
 ): instance is ImageInstance {
   return instance?.type === "image";
 }
 
-/**
- * Get an existing editor instance by file path.
- */
 export function getEditor(filePath: string): EditorInstance | undefined {
   return editorInstances.get(filePath);
 }
 
-/**
- * Check if an editor instance exists for a file path.
- */
 export function hasEditor(filePath: string): boolean {
   return editorInstances.has(filePath);
 }
 
-/**
- * Check if an editor is focusable.
- */
 export function isEditorFocusable(filePath: string): boolean {
   return editorInstances.get(filePath)?.isFocusable() ?? false;
 }
@@ -573,16 +554,10 @@ export function getSavedSelection(
   return undefined;
 }
 
-/**
- * Get all registered editor paths.
- */
 export function getAllEditorPaths(): string[] {
   return Array.from(editorInstances.keys());
 }
 
-/**
- * Get the currently selected text for a given editor, if any.
- */
 export function getSelectedText(filePath: string): string | undefined {
   const instance = editorInstances.get(filePath);
 

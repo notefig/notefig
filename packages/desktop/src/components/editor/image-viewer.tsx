@@ -21,7 +21,6 @@ interface ImageViewerProps {
  * Must be wrapped in a Suspense boundary.
  */
 export function ImageViewer({ file, basePath }: ImageViewerProps) {
-  // Register this viewer instance
   useEffect(() => {
     getOrCreateEditor(file.path, { type: "image" });
   }, [file.path]);
@@ -34,7 +33,6 @@ export function ImageViewer({ file, basePath }: ImageViewerProps) {
     return () => cancelAnimationFrame(rafId);
   }, [file.path]);
 
-  // This will suspend while loading
   const imageUrl = useImageUrl(file.path, basePath);
 
   return (

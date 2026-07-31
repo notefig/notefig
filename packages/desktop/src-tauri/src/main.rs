@@ -10,10 +10,7 @@ use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilde
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_store::StoreExt;
 
-// Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
-
 fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
-    // File menu items
     let open_folder = MenuItem::with_id(app, "open_folder", "Open Folder...", true, Some("cmd+o"))?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, Some("cmd+q"))?;
 
@@ -25,18 +22,15 @@ fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
     let paste = PredefinedMenuItem::paste(app, None)?;
     let select_all = PredefinedMenuItem::select_all(app, None)?;
 
-    // Theme menu items
     let theme_light = MenuItem::with_id(app, "theme_light", "Light", true, None::<&str>)?;
     let theme_dark = MenuItem::with_id(app, "theme_dark", "Dark", true, None::<&str>)?;
     let theme_system = MenuItem::with_id(app, "theme_system", "System", true, None::<&str>)?;
 
-    // Zoom level menu items
     let zoom_75 = MenuItem::with_id(app, "zoom_75", "75%", true, None::<&str>)?;
     let zoom_100 = MenuItem::with_id(app, "zoom_100", "100%", true, None::<&str>)?;
     let zoom_125 = MenuItem::with_id(app, "zoom_125", "125%", true, None::<&str>)?;
     let zoom_150 = MenuItem::with_id(app, "zoom_150", "150%", true, None::<&str>)?;
 
-    // Build submenus
     let file_submenu = SubmenuBuilder::new(app, "File")
         .item(&open_folder)
         .separator()
@@ -72,7 +66,6 @@ fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
         .item(&zoom_submenu)
         .build()?;
 
-    // Build main menu
     let menu = MenuBuilder::new(app)
         .item(&file_submenu)
         .item(&edit_submenu)
@@ -97,7 +90,6 @@ fn restore_zoom_level(app: &AppHandle) {
             });
             if let Some(zoom_value) = zoom_value {
                 if let Some(zoom) = zoom_value.as_f64() {
-                    // Apply native webview zoom
                     if let Some(webview_window) = app.get_webview_window("main") {
                         if let Err(e) = webview_window.set_zoom(zoom) {
                             eprintln!("Failed to restore native webview zoom: {}", e);
@@ -116,7 +108,6 @@ fn restore_zoom_level(app: &AppHandle) {
 /// Applies native webview zoom; persistence happens on the frontend
 /// (the `zoom-changed` handler writes kv.json).
 fn set_zoom_level(app: &AppHandle, zoom: f64) {
-    // Apply native webview zoom
     if let Some(webview_window) = app.get_webview_window("main") {
         if let Err(e) = webview_window.set_zoom(zoom) {
             eprintln!("Failed to set native webview zoom: {}", e);
@@ -156,10 +147,8 @@ fn main() {
             let menu = create_menu(app.handle())?;
             app.set_menu(menu)?;
 
-            // Restore persisted zoom level
             restore_zoom_level(app.handle());
 
-            // Register updater and process plugins (desktop only)
             #[cfg(desktop)]
             {
                 app.handle()
@@ -186,7 +175,6 @@ fn main() {
                 "quit" => {
                     app.exit(0);
                 }
-                // Theme menu items
                 "theme_light" => {
                     let _ = app.emit("theme-changed", "light");
                 }
@@ -196,7 +184,6 @@ fn main() {
                 "theme_system" => {
                     let _ = app.emit("theme-changed", "system");
                 }
-                // Zoom level menu items
                 "zoom_75" => {
                     set_zoom_level(app, 0.75);
                 }

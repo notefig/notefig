@@ -1,8 +1,4 @@
-/**
- * Options for bounded async concurrency pool.
- */
 export interface ProcessPoolOptions<TResult> {
-  /** Maximum number of concurrent workers */
   concurrency: number;
   /**
    * Called before launching each new worker with the current results array.
@@ -12,13 +8,8 @@ export interface ProcessPoolOptions<TResult> {
   shouldContinue?: (results: TResult[]) => boolean;
 }
 
-/**
- * Result from processPool, containing both successful results and errors.
- */
 export interface ProcessPoolResult<TResult> {
-  /** Flat array of all results from successful workers */
   succeeded: TResult[];
-  /** Errors from workers that threw */
   errors: Error[];
 }
 
@@ -42,19 +33,16 @@ export async function processPool<TItem, TResult>(
   const errors: Error[] = [];
   const inFlight = new Set<Promise<void>>();
 
-  // Resolve to async iterable uniformly
   const asyncItems =
     Symbol.asyncIterator in Object(items)
       ? (items as AsyncIterable<TItem>)
       : toAsyncIterable(items as Iterable<TItem>);
 
   for await (const item of asyncItems) {
-    // Stop launching new workers if caller says to stop
     if (shouldContinue && !shouldContinue(succeeded)) {
       break;
     }
 
-    // Wait for a slot if at capacity
     if (inFlight.size >= concurrency) {
       await Promise.race(inFlight);
     }
@@ -78,7 +66,6 @@ export async function processPool<TItem, TResult>(
     inFlight.add(task);
   }
 
-  // Wait for remaining in-flight workers
   if (inFlight.size > 0) {
     await Promise.all(inFlight);
   }

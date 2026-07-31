@@ -20,10 +20,6 @@ import { readLayout, extractTabIds, findLayoutSelectedTab } from "./tabs";
 
 const markdownCodec = createMarkdownCodec();
 
-// ---------------------------------------------------------------------------
-// One-shot reads
-// ---------------------------------------------------------------------------
-
 export interface EditorHandle {
   readonly filePath: string;
   /** Whether a live editor instance exists for this file. */
@@ -48,10 +44,6 @@ export function editor(filePath: string): EditorHandle {
     },
   };
 }
-
-// ---------------------------------------------------------------------------
-// Cross-entity one-shot join (tabs ⋈ editors) — the canonical non-React read
-// ---------------------------------------------------------------------------
 
 export interface WorkspaceEditorContext {
   openFiles: Array<{ path: string; dirty: boolean; active: boolean }>;

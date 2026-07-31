@@ -16,7 +16,7 @@ export const contentPersistenceFixture = {
     },
     {
       path: `${WORKSPACE_PATH}/large-file.md`,
-      content: generateLargeContent(2000), // 2000 lines
+      content: generateLargeContent(2000),
       type: "file" as const,
     },
     {
@@ -71,9 +71,6 @@ export const contentPersistenceFixture = {
   ],
 };
 
-/**
- * Generate large markdown content for performance testing
- */
 function generateLargeContent(lineCount: number): string {
   const lines: string[] = ["# Large File Test", ""];
 
@@ -92,9 +89,6 @@ function generateLargeContent(lineCount: number): string {
   return lines.join("\n");
 }
 
-/**
- * Content for testing auto-save functionality
- */
 export const autoSaveTestContent = {
   initial: "# Auto-save Test\n\nInitial content for auto-save testing.",
   afterEdit:
@@ -103,12 +97,7 @@ export const autoSaveTestContent = {
     "# Auto-save Test\n\nThis content has been edited multiple times.\n\nLine 1 of edits.\n\nLine 2 of edits.",
 };
 
-/**
- * Expected line count in large file (for scroll position testing)
- */
 export const LARGE_FILE_LINE_COUNT = 2000;
 
-/**
- * Debounce delay for auto-save (matches app implementation)
- */
+// Matches the app's auto-save debounce.
 export const AUTO_SAVE_DEBOUNCE_MS = 500;

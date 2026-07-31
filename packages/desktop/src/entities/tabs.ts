@@ -39,10 +39,6 @@ import {
 
 export { LAYOUT_PARAM, parseLayout, extractTabIds, findLayoutSelectedTab };
 
-// ---------------------------------------------------------------------------
-// Agent tab-id convention
-// ---------------------------------------------------------------------------
-
 export const AGENT_TAB_PREFIX = "agent:";
 
 export function agentTabId(taskId: string): string {
@@ -56,10 +52,6 @@ export function isAgentTabId(tabId: string): boolean {
 export function agentTaskIdFromTabId(tabId: string): string | null {
   return isAgentTabId(tabId) ? tabId.slice(AGENT_TAB_PREFIX.length) : null;
 }
-
-// ---------------------------------------------------------------------------
-// Reactive hooks — the way UI reads this entity
-// ---------------------------------------------------------------------------
 
 export interface UseLayoutSearchParam {
   /** The full Dockable layout tree from the URL */
@@ -190,10 +182,6 @@ export function useWorkspaceTabs(
 
   return { fileTabIds, agentTaskIds, fileRows, agentTaskRows, staleTabIds };
 }
-
-// ---------------------------------------------------------------------------
-// One-shot reads (non-reactive; parse the URL fresh on every call)
-// ---------------------------------------------------------------------------
 
 export function readLayout(): LayoutNode[] {
   const params = new URLSearchParams(window.location.search);

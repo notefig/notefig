@@ -55,13 +55,12 @@ function PanelGroup({
   // in an uncontrolled state, calculate new sizes when children count changes
   const childrenCount = React.Children.count(children);
   useEffect(() => {
-    if (sizes) return; // if sizes are provided, don't calculate new sizes
+    if (sizes) return;
     const newSizes = calcNewSizes();
     setFrSizes(newSizes);
     onResizeEnd?.(newSizes);
   }, [childrenCount, calcNewSizes, sizes, onResizeEnd]);
 
-  // keep sizes in sync with the provided sizes
   useEffect(() => {
     setFrSizes(sizes || Array.from({ length: childrenCount }, () => 1));
   }, [sizes, childrenCount]);
@@ -92,16 +91,14 @@ function PanelGroup({
   function getSizeStyle() {
     const xy = orientation === "row" ? "x" : "y";
 
-    // if we're not dragging, return the sizes as fr
-    // we multiply by a constant because values under 1 might not fill the container
-    // and multiplying proportionally has otherwise no effect on the size
+    // We multiply by a constant because values under 1 might not fill the
+    // container, and multiplying proportionally otherwise has no effect.
     if (draggingIndex === null) {
       return frSizes
         .map((size) => `minmax(${minSize[xy]}px, ${100 * size}fr)`)
         .join(" ");
     }
 
-    // otherwise, we're dragging, so we return the sizes as px which are easier to work with
     return pxSizes
       .map((size) => `minmax(${minSize[xy]}px, ${size}px)`)
       .join(" ");
@@ -116,7 +113,6 @@ function PanelGroup({
     if (index < 0 || index >= sizes.length) return sizes;
     const newSizes = [...sizes];
 
-    // update the sizes with the drag delta
     newSizes[index] += delta;
     newSizes[index + 1] -= delta;
 

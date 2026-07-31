@@ -14,10 +14,7 @@ export interface FileRowData {
   error?: string;
 }
 
-/**
- * Simple hash function for content
- * Not cryptographic - just for demo purposes
- */
+/** Not cryptographic - just for demo purposes. */
 function computeHash(content: string): string {
   let hash = 0;
   for (let i = 0; i < content.length; i++) {
@@ -39,12 +36,10 @@ export function generateDemoFiles(
   const now = Date.now();
   const files: Record<string, FileRowData> = {};
 
-  // Normalize basePath to remove trailing slash for consistency
   const normalizedBasePath = basePath.endsWith("/")
     ? basePath.slice(0, -1)
     : basePath;
 
-  // Helper to create file entry
   const createEntry = (
     relativePath: string,
     type: "file" | "directory",
@@ -62,7 +57,6 @@ export function generateDemoFiles(
     };
   };
 
-  // README.md
   const readmeContent = `# Welcome to Metrists
 
 This is your demo workspace. Metrists is a local-first note-taking and file management application.
@@ -87,7 +81,6 @@ Happy note-taking!
   const readmeEntry = createEntry("README.md", "file", readmeContent);
   files[readmeEntry.path] = readmeEntry;
 
-  // metrists.json
   const metristsConfig = {
     workspace: {
       name: "Demo Workspace",
@@ -103,7 +96,6 @@ Happy note-taking!
   const configEntry = createEntry("metrists.json", "file", configContent);
   files[configEntry.path] = configEntry;
 
-  // docs/getting-started.md
   const gettingStartedContent = `
 Title: The Adventures of Pinocchio
 Author: Carlo Collodi
@@ -1934,7 +1926,6 @@ After a long, long look, Pinocchio said to himself with great content:
   );
   files[gettingStartedEntry.path] = gettingStartedEntry;
 
-  // docs/features.md
   const featuresContent = `# Features
 
 ## Core Features
@@ -1969,7 +1960,6 @@ Stay tuned for updates!
   );
   files[featuresEntry.path] = featuresEntry;
 
-  // notes/2026-02-01.md (daily note)
   const dailyNoteContent = `# 2026-02-01
 
 ## Tasks
@@ -1994,7 +1984,6 @@ Started using Metrists today. The interface is clean and responsive. Looking for
   );
   files[dailyNoteEntry.path] = dailyNoteEntry;
 
-  // notes/meeting-notes.md
   const meetingNotesContent = `# Meeting Notes
 
 ## Team Sync - 2026-02-01
@@ -2027,7 +2016,6 @@ Started using Metrists today. The interface is clean and responsive. Looking for
   );
   files[meetingNotesEntry.path] = meetingNotesEntry;
 
-  // notes/ideas.md
   const ideasContent = `# Ideas
 
 Random thoughts and ideas worth capturing.
@@ -2054,7 +2042,6 @@ Remember: not all ideas need to be implemented. Some are just fun to think about
   const ideasEntry = createEntry("notes/ideas.md", "file", ideasContent);
   files[ideasEntry.path] = ideasEntry;
 
-  // projects/project-alpha.md
   const projectContent = `# Project Alpha
 
 Status: 🟢 Active

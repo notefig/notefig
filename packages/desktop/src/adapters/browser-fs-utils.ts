@@ -7,7 +7,6 @@ import type { FileSystemError } from "./platform-adapter.interface";
  * We prefix with '/' to make it look like a Unix path (e.g., "/my-folder").
  */
 export function normalizeWorkspacePath(name: string): string {
-  // Remove any leading/trailing slashes and re-add a single leading slash
   const cleanName = name.replace(/^\/+|\/+$/g, "");
   return cleanName ? `/${cleanName}` : "/untitled";
 }

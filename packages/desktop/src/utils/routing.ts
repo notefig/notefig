@@ -11,10 +11,6 @@ export function getBasePathFromUrl(basePath?: string): string | undefined {
   return decodePathFromUrl(basePath);
 }
 
-/**
- * Get the absolute file path from URL parameters
- * @param encodedAbsolutePath - URL-encoded absolute path from route param
- */
 export function getAbsolutePathFromUrl(
   encodedAbsolutePath?: string,
 ): string | undefined {
@@ -22,9 +18,6 @@ export function getAbsolutePathFromUrl(
   return decodePathFromUrl(encodedAbsolutePath);
 }
 
-/**
- * Build URL for editing a file using its absolute path
- */
 export function buildEditFileUrl(
   basePath: string,
   absoluteFilePath: string,
@@ -35,9 +28,6 @@ export function buildEditFileUrl(
   return `/${encodePathForUrl(normalizedBasePath)}/edit/${encodePathForUrl(absoluteFilePath)}`;
 }
 
-/**
- * Build URL for previewing a file using its absolute path
- */
 export function buildPreviewFileUrl(
   basePath: string,
   absoluteFilePath: string,
@@ -53,7 +43,6 @@ export function buildDirectoryUrl(basePath: string): string {
   return `/${encodePathForUrl(normalizedPath)}`;
 }
 
-// Legacy functions for backward compatibility (deprecated)
 /** @deprecated Use getAbsolutePathFromUrl instead */
 export function getFilePathFromUrl(
   basePath: string,

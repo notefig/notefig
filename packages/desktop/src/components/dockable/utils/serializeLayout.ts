@@ -33,7 +33,6 @@ function serializeLayout(
     throw new Error("Invalid element");
   }
 
-  // Handle <Panel>
   if (element.type === Panel) {
     const props = element.props as PanelProps;
     const orientation = props.orientation;
@@ -60,7 +59,6 @@ function serializeLayout(
     };
   }
 
-  // Handle <Window>
   if (element.type === Window) {
     const props = element.props as WindowProps;
     const children = React.Children.toArray(

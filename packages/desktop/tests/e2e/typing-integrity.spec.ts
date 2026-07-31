@@ -60,7 +60,6 @@ test.describe("Typing integrity", () => {
 
     const editor = page.locator('[role="textbox"]').first();
     await editor.click();
-    // Caret to the very end of the document.
     await page.keyboard.press("ControlOrMeta+End");
 
     // Six bursts of fast typing with pauses in between. Pauses are the idle

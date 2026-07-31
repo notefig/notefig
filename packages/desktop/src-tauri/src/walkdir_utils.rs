@@ -43,7 +43,6 @@ pub fn walk_directory<F>(path: &Path, options: &WalkOptions, mut callback: F) ->
 where
     F: FnMut(&walkdir::DirEntry) -> Result<(), String>,
 {
-    // Canonicalize the root path for comparison
     let root_canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
     let walker = WalkDir::new(path)
@@ -64,7 +63,6 @@ where
     for entry in walker {
         match entry {
             Ok(entry) => {
-                // Skip the root directory itself
                 if entry.path() == path {
                     continue;
                 }
@@ -97,7 +95,6 @@ fn should_traverse_entry(entry: &walkdir::DirEntry, options: &WalkOptions) -> bo
         return false;
     }
 
-    // Check exclude patterns
     for pattern in &options.exclude_patterns {
         if matches_exclude_pattern(&file_name, pattern) {
             return false;
@@ -131,7 +128,6 @@ pub fn matches_exclude_pattern(file_name: &str, pattern: &str) -> bool {
 /// but we only want to filter based on hidden components within the workspace
 pub fn is_hidden_relative_to(path: &Path, base: &Path) -> bool {
     if let Ok(relative) = path.strip_prefix(base) {
-        // Check if any component of the relative path is hidden
         relative.components().any(|component| {
             if let std::path::Component::Normal(os_str) = component {
                 if let Some(name) = os_str.to_str() {

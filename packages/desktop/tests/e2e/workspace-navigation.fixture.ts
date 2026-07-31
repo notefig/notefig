@@ -6,7 +6,6 @@
 const WORKSPACE_PATH = "/workspace/navigation-test";
 
 export const workspaceNavigationFixture = {
-  // Workspace with multiple files and a subfolder
   populatedWorkspace: {
     path: WORKSPACE_PATH,
     files: [
@@ -48,7 +47,6 @@ This file is in a subdirectory.
     ],
   },
 
-  // Empty workspace with no files
   emptyWorkspace: {
     path: "/workspace/empty-navigation-test",
     files: [],

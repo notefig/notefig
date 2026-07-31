@@ -101,8 +101,6 @@ export class MetristsAcpClient implements Client {
     return this.connection;
   }
 
-  // ===== Agent-side calls (thin wrappers the AgentTask uses) =====
-
   async newSession(
     cwd: string,
     mcpServers: McpServer[] = [],
@@ -166,7 +164,6 @@ export class MetristsAcpClient implements Client {
     return this.agentCapabilities?.promptCapabilities?.embeddedContext ?? false;
   }
 
-  // ===== ACP client-side methods (called by the agent) =====
   // fs/* are only reachable on desktop (remote advertises fs:false; a
   // misbehaving agent calling them anyway gets a JSON-RPC error).
 
