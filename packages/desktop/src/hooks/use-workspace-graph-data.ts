@@ -69,7 +69,7 @@ export function useWorkspaceGraphData(
   const { data: rawMatches = [], isLoading: isSearchLoading } = useQuery({
     queryKey: ["search-content", workspacePath, "graph-links"],
     queryFn: () =>
-      platformAdapter.searchContent(workspacePath, {
+      platformAdapter.fs.searchContent(workspacePath, {
         query: MARKDOWN_LINK_PATTERN,
         useRegex: true,
         filePattern: MARKDOWN_FILE_PATTERN,
@@ -83,8 +83,8 @@ export function useWorkspaceGraphData(
   const graphData = useMemo(() => {
     const rawLinks = rawMatches
       .map((match) => {
-        const href = extractHrefFromMarkdownLink(match.content.matchText);
-        return href ? { sourcePath: match.location.filePath, href } : null;
+        const href = extractHrefFromMarkdownLink(match.matchText);
+        return href ? { sourcePath: match.filePath, href } : null;
       })
       .filter(
         (link): link is { sourcePath: string; href: string } => link !== null,
