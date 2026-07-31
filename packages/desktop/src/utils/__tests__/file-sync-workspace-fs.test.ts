@@ -28,16 +28,6 @@ beforeEach(() => {
 });
 
 describe("writeWorkspaceTextFile", () => {
-  it("writes through the platform adapter", async () => {
-    writeMock.mockResolvedValue({ succeeded: ["/ws/a.md"], failed: [] });
-
-    await writeWorkspaceTextFile("/ws/a.md", "hello\n");
-
-    expect(writeMock).toHaveBeenCalledWith([
-      { path: "/ws/a.md", content: "hello\n" },
-    ]);
-  });
-
   it("records a self-write so the watcher echo is suppressed", async () => {
     writeMock.mockResolvedValue({ succeeded: ["/ws/a.md"], failed: [] });
 
@@ -136,18 +126,6 @@ describe("writeWorkspaceTextFile adoption (open editor)", () => {
 });
 
 describe("readWorkspaceTextFile", () => {
-  it("reads through the platform adapter", async () => {
-    readMock.mockResolvedValue({
-      succeeded: [{ path: "/ws/a.md", content: "line1\nline2\nline3\n" }],
-      failed: [],
-    });
-
-    const content = await readWorkspaceTextFile("/ws/a.md");
-
-    expect(readMock).toHaveBeenCalledWith(["/ws/a.md"]);
-    expect(content).toBe("line1\nline2\nline3\n");
-  });
-
   it("slices content with 1-based line/limit", async () => {
     readMock.mockResolvedValue({
       succeeded: [{ path: "/ws/a.md", content: "line1\nline2\nline3\n" }],

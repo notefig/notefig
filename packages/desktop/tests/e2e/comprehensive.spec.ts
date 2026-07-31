@@ -218,31 +218,6 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       const content = await getEditorContent(page);
       expect(content).toContain("This line was added during the test");
     });
-
-    test("access nested folder file with correct path", async ({ page }) => {
-      const docsButton = page.locator('button:has-text("docs")').first();
-      await docsButton.click();
-      await page.waitForTimeout(300);
-
-      const nestedFile = page
-        .locator('button:has-text("file.md")')
-        .filter({
-          hasText: /file\.md/,
-        })
-        .first();
-
-      if (await nestedFile.isVisible().catch(() => false)) {
-        await nestedFile.click();
-      } else {
-        await openFileInTree(page, "file.md");
-      }
-
-      await page.waitForTimeout(300);
-
-      const content = await getEditorContent(page);
-      const hasContent = content.length > 0;
-      expect(hasContent || true).toBe(true); // Soft check - just verify no crash
-    });
   });
 
   test.describe("Auto-Save & Persistence", () => {

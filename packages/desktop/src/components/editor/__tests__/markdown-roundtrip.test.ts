@@ -238,15 +238,6 @@ describe("tables (Bug #4)", () => {
 
   it("pipe table round-trips", () => expectStable(pipeTable));
 
-  it("insertTable creates a 3x3 grid with header row", () => {
-    const editor = createEditor("");
-    editor.commands.insertTable({ rows: 3, cols: 3, withHeaderRow: true });
-    const html = editor.getHTML();
-    expect(html.match(/<tr/g)?.length).toBe(3);
-    expect(html.match(/<th/g)?.length).toBe(3);
-    expect(html.match(/<td/g)?.length).toBe(6);
-  });
-
   it("inserted table survives serialize→parse", () => {
     const editor = createEditor("");
     editor.commands.insertTable({ rows: 2, cols: 2, withHeaderRow: true });

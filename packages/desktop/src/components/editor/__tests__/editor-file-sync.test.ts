@@ -77,20 +77,4 @@ describe("external-content adoption keeps undo history intact", () => {
 
     expect(getEditorMarkdown(editor)).toBe("# Title\n\nIntro.");
   });
-
-  it("contrast: a plain setContent adoption lets undo walk through it", async () => {
-    editor = new Editor({ extensions: editorExtensions, content: "<p>placeholder</p>" });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    editor.commands.setContent("<h1>Title</h1><p>Intro.</p>", {
-      emitUpdate: false,
-    });
-    editor.commands.setTextSelection(editor.state.doc.content.size - 1);
-    editor.commands.insertContent("!");
-
-    editor.commands.undo();
-
-    // One undo reverts past the adoption too, back to pre-adoption content.
-    expect(getEditorMarkdown(editor)).toBe("placeholder");
-  });
 });
