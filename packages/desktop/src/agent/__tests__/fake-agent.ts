@@ -20,6 +20,11 @@ export class FakeAgent {
   newSessionResult: Json = { sessionId: "sess_test" };
   /** Captured `session/new` params (mcpServers pass-through assertions). */
   newSessionParams: Json | null = null;
+  /** Scripted `session/new`: defaults to returning {@link newSessionResult};
+   *  throwing rejects the call, and a never-resolving promise hangs it (for
+   *  startup-timeout tests). */
+  onNewSession: (params: Json, agent: FakeAgent) => Promise<Json> = async () =>
+    this.newSessionResult;
   /** Scripted turn behavior; may emit updates / request permission via `this`. */
   onPrompt: (params: Json, agent: FakeAgent) => Promise<{ stopReason: string }> =
     async () => ({ stopReason: "end_turn" });
@@ -80,9 +85,20 @@ export class FakeAgent {
     switch (method) {
       case "initialize":
         return this.respond(id, this.initializeResult);
-      case "session/new":
+      case "session/new": {
         this.newSessionParams = params;
-        return this.respond(id, this.newSessionResult);
+        try {
+          const result = await this.onNewSession(params, this);
+          this.respond(id, result);
+        } catch (error) {
+          this.respondError(
+            id,
+            -32603,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+        return;
+      }
       case "session/load": {
         this.loadSessionParams = params;
         try {
