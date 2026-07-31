@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { retry } from "@metrists/shared/utils";
+import { Effect, Fiber, Queue, Schedule, Stream } from "effect";
 
 /** Response shape of the Rust `pull_stream_lines` command (line_stream.rs). */
 export type PullResult = { lines: string[]; ended: boolean };
@@ -21,17 +21,20 @@ const RETRY_BASE_MS = 50;
  * the core process's memory bounded and stops giant frames from ever riding
  * `evaluateJavaScript`.
  *
- * Doorbell/loop coalescing: a doorbell that lands while the loop is running
- * sets a flag the loop re-checks before stopping, so the transition-only
- * doorbell contract (one ring per empty→non-empty, not per line) can't
- * strand lines between a final empty pull and the next ring.
+ * (MET-72 spike) Implemented over Effect: the doorbell is a single-slot
+ * `Queue.sliding(1)` (its coalescing replaces the old `scheduled` flag), a
+ * forked fiber consumes it (one drain per ring; a ring that lands mid-drain
+ * waits in the queue and drives the next one), and the pull retry is a
+ * `Schedule` instead of the hand-rolled backoff loop.
  */
 export class StreamPuller {
-  private pulling = false;
-  private scheduled = false;
   private stopped = false;
   /** True once the Rust side reported end-of-stream (source EOF, fully drained). */
   ended = false;
+
+  /** Single-slot doorbell + the fiber draining it; both created on first ring. */
+  private doorbell?: Queue.Queue<void>;
+  private consumer?: Fiber.RuntimeFiber<void>;
 
   constructor(
     private readonly streamId: string,
@@ -39,72 +42,66 @@ export class StreamPuller {
     private readonly onEnded?: () => void,
   ) {}
 
-  /** Handle one doorbell: start the pull loop, or fold into the running one. */
+  /** Handle one doorbell: start the drain fiber (once), then ring. */
   schedule(): void {
     if (this.stopped || this.ended) return;
-    if (this.pulling) {
-      this.scheduled = true;
-      return;
+    if (!this.doorbell) {
+      const doorbell = Effect.runSync(Queue.sliding<void>(1));
+      this.doorbell = doorbell;
+      this.consumer = Effect.runFork(
+        Stream.fromQueue(doorbell).pipe(
+          Stream.mapEffect(() => this.drain()),
+          Stream.runDrain,
+        ),
+      );
     }
-    void this.loop();
+    // Never blocks: a sliding queue drops the extra ring rather than buffering
+    // one drain per doorbell.
+    Effect.runSync(Queue.offer(this.doorbell, undefined));
   }
 
   /** Stop pulling and delivering (transport closed). Idempotent. */
   stop(): void {
     this.stopped = true;
+    if (this.consumer) void Effect.runPromise(Fiber.interrupt(this.consumer));
   }
 
-  private async loop(): Promise<void> {
-    this.pulling = true;
-    try {
-      while (await this.pullRound()) {
-        // Each round pulls once and delivers; rounds continue until the
-        // queue is drained, the stream ends, or the puller is stopped.
+  /** Drain the queue for one doorbell: pull-and-deliver rounds until the queue
+   * looks empty, the stream ends, or we're stopped. A doorbell that raced in
+   * during the final empty pull is already sitting in the queue, so the fiber
+   * simply runs this again — no `scheduled` re-check needed. */
+  private drain(): Effect.Effect<void> {
+    return Effect.gen(this, function* () {
+      while (!this.stopped && !this.ended) {
+        const res = yield* this.pull();
+        if (!res) return; // stopped mid-retry, or every attempt failed
+        for (const line of res.lines) {
+          if (this.stopped) return; // stop() mid-batch halts the next line
+          this.deliver(line);
+        }
+        if (res.ended) {
+          this.ended = true;
+          this.onEnded?.();
+          return;
+        }
+        if (res.lines.length === 0) return; // drained; park for the next ring
       }
-    } finally {
-      this.pulling = false;
-      if (this.scheduled && !this.stopped && !this.ended) {
-        this.scheduled = false;
-        void this.loop();
-      }
-    }
+    });
   }
 
-  /** One pull + delivery round. Returns whether the loop should continue. */
-  private async pullRound(): Promise<boolean> {
-    if (this.stopped) return false;
-    const res = await this.pullWithRetry();
-    if (!res) return false;
-    for (const line of res.lines) {
-      if (this.stopped) return false;
-      this.deliver(line);
-    }
-    if (res.ended) {
-      this.ended = true;
-      this.onEnded?.();
-      return false;
-    }
-    if (res.lines.length > 0) return true;
-    // Empty pull: the queue looked drained. A doorbell that raced in during
-    // this round means a line landed right after the pull — go once more.
-    if (!this.scheduled) return false;
-    this.scheduled = false;
-    return true;
-  }
-
-  /** Pull once, retrying transient rejections with backoff. Returns undefined
-   * only when stopped mid-retry or every attempt failed — the latter means
-   * the backend is genuinely gone, and the transport's close path reports the
-   * real failure. */
-  private async pullWithRetry(): Promise<PullResult | undefined> {
-    const outcome = await retry(
-      () => invoke<PullResult>("pull_stream_lines", { streamId: this.streamId }),
-      {
-        attempts: MAX_PULL_ATTEMPTS,
-        backoffMs: (attempt) => RETRY_BASE_MS * (attempt + 1),
-        aborted: () => this.stopped,
-      },
+  /** Pull once, retrying transient rejections with backoff. Resolves to
+   * undefined when every attempt failed — the backend is genuinely gone and
+   * the transport's close path reports the real failure. */
+  private pull(): Effect.Effect<PullResult | undefined> {
+    return Effect.tryPromise(() =>
+      invoke<PullResult>("pull_stream_lines", { streamId: this.streamId }),
+    ).pipe(
+      Effect.retry(
+        Schedule.linear(`${RETRY_BASE_MS} millis`).pipe(
+          Schedule.intersect(Schedule.recurs(MAX_PULL_ATTEMPTS - 1)),
+        ),
+      ),
+      Effect.catchAll(() => Effect.succeed(undefined)),
     );
-    return outcome.status === "ok" ? outcome.value : undefined;
   }
 }
