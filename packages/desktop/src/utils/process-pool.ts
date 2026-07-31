@@ -1,3 +1,5 @@
+import { Effect, Stream } from "effect";
+
 export interface ProcessPoolOptions<TResult> {
   concurrency: number;
   /**
@@ -22,6 +24,11 @@ export interface ProcessPoolResult<TResult> {
  *
  * When `shouldContinue` returns false, no new workers are launched but
  * in-flight ones are allowed to finish. The caller should truncate if needed.
+ *
+ * (MET-72 spike) Implemented over Effect's `Stream`: the iterable becomes a
+ * stream, `takeWhile` is the `shouldContinue` gate, and `mapEffect`'s
+ * `concurrency` option replaces the hand-rolled `Set<Promise>` + `Promise.race`
+ * bounding. Errors are caught per-item so one failure never aborts the pool.
  */
 export async function processPool<TItem, TResult>(
   items: AsyncIterable<TItem> | Iterable<TItem>,
@@ -31,50 +38,37 @@ export async function processPool<TItem, TResult>(
   const { concurrency, shouldContinue } = options;
   const succeeded: TResult[] = [];
   const errors: Error[] = [];
-  const inFlight = new Set<Promise<void>>();
 
-  const asyncItems =
+  const source =
     Symbol.asyncIterator in Object(items)
-      ? (items as AsyncIterable<TItem>)
-      : toAsyncIterable(items as Iterable<TItem>);
+      ? Stream.fromAsyncIterable(items as AsyncIterable<TItem>, toError)
+      : Stream.fromIterable(items as Iterable<TItem>);
 
-  for await (const item of asyncItems) {
-    if (shouldContinue && !shouldContinue(succeeded)) {
-      break;
-    }
+  const program = source.pipe(
+    // One element per chunk. Without this, `fromIterable` emits a single chunk
+    // of every item and the `takeWhile` below evaluates against an unchanged
+    // `succeeded` for the whole batch — the stateful gate would never fire.
+    Stream.rechunk(1),
+    // Gate before each item reaches a worker. `takeWhile` drops the first item
+    // that fails the predicate and ends the stream, so no further workers
+    // launch — while any already past this gate run to completion.
+    Stream.takeWhile(() => !shouldContinue || shouldContinue(succeeded)),
+    Stream.mapEffect(
+      (item) =>
+        Effect.tryPromise({ try: () => processor(item), catch: toError }).pipe(
+          Effect.match({
+            onSuccess: (batch) => succeeded.push(...batch),
+            onFailure: (error) => errors.push(error),
+          }),
+        ),
+      { concurrency },
+    ),
+    Stream.runDrain,
+  );
 
-    if (inFlight.size >= concurrency) {
-      await Promise.race(inFlight);
-    }
-
-    // Check again after awaiting — results may have grown
-    if (shouldContinue && !shouldContinue(succeeded)) {
-      break;
-    }
-
-    const task = processor(item)
-      .then((batch) => {
-        succeeded.push(...batch);
-      })
-      .catch((err: unknown) => {
-        errors.push(err instanceof Error ? err : new Error(String(err)));
-      })
-      .finally(() => {
-        inFlight.delete(task);
-      });
-
-    inFlight.add(task);
-  }
-
-  if (inFlight.size > 0) {
-    await Promise.all(inFlight);
-  }
-
+  await Effect.runPromise(program);
   return { succeeded, errors };
 }
 
-async function* toAsyncIterable<T>(iter: Iterable<T>): AsyncIterable<T> {
-  for (const item of iter) {
-    yield item;
-  }
-}
+const toError = (e: unknown): Error =>
+  e instanceof Error ? e : new Error(String(e));

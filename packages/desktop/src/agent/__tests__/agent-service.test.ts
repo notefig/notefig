@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock the platform adapter singleton the file-sync helpers and task service use.
 // vi.hoisted so the fns exist before the hoisted vi.mock factory runs.
-const { writeFiles, readFiles } = vi.hoisted(() => ({
+const { writeFiles, readFiles, deleteFiles, mcpEndpoints } = vi.hoisted(() => ({
   writeFiles: vi.fn(async (files: { path: string; content: string }[]) => ({
     succeeded: files.map((f) => f.path),
     failed: [] as unknown[],
@@ -11,6 +11,13 @@ const { writeFiles, readFiles } = vi.hoisted(() => ({
     succeeded: paths.map((p) => ({ path: p, content: "old contents\n" })),
     failed: [] as unknown[],
   })),
+  deleteFiles: vi.fn(async (paths: string[]) => ({
+    succeeded: paths,
+    failed: [] as unknown[],
+  })),
+  // Every McpEndpoint the fake constructs, in order — lets dispose tests
+  // assert the endpoint's close() ran.
+  mcpEndpoints: [] as { close: ReturnType<typeof vi.fn> }[],
 }));
 vi.mock("@/adapters", () => ({
   platformAdapter: {
@@ -20,22 +27,23 @@ vi.mock("@/adapters", () => ({
     deleteKv: vi.fn(),
     writeFiles,
     readFiles,
-    deleteFiles: vi.fn(async (paths: string[]) => ({
-      succeeded: paths,
-      failed: [] as unknown[],
-    })),
+    deleteFiles,
     // A fake McpEndpoint: nothing in these tests drives real traffic over
     // the MCP channel (that's exercised at the tool-call level via
     // FakeAgent's scripted ACP session/update notifications instead), so
     // this just has to satisfy attachMcpEndpoint's onRequest + dispose's
     // close. Dumb sync constructor, matching createAgentTransport's contract
     // — AgentTask.start() calls .start() and reads .mcpServer itself.
-    createMcpEndpoint: vi.fn(() => ({
-      mcpServer: { name: "metrists", command: "metrists", args: [], env: [] },
-      start: vi.fn(async () => {}),
-      onRequest: vi.fn(() => () => {}),
-      close: vi.fn(async () => {}),
-    })),
+    createMcpEndpoint: vi.fn(() => {
+      const endpoint = {
+        mcpServer: { name: "metrists", command: "metrists", args: [], env: [] },
+        start: vi.fn(async () => {}),
+        onRequest: vi.fn(() => () => {}),
+        close: vi.fn(async () => {}),
+      };
+      mcpEndpoints.push(endpoint);
+      return endpoint;
+    }),
   },
 }));
 // History auto-checkpointing (Stage 2) is exercised separately; keep these
@@ -108,11 +116,17 @@ async function runPrompt(task: AgentTask, text: string): Promise<void> {
 beforeEach(() => {
   writeFiles.mockClear();
   readFiles.mockClear();
+  deleteFiles.mockClear();
+  mcpEndpoints.length = 0;
   for (const e of agentEntriesCollection.toArray) agentEntriesCollection.delete(e.id);
   for (const t of agentTurnsCollection.toArray) agentTurnsCollection.delete(t.turnId);
   for (const t of agentTasksCollection.toArray) agentTasksCollection.delete(t.taskId);
   for (const r of agentPermissionRequestsCollection.toArray)
     agentPermissionRequestsCollection.delete(r.id);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("AgentTask vertical slice", () => {
@@ -445,6 +459,35 @@ describe("AgentTask vertical slice", () => {
     );
   });
 
+  it("prompt({ front: true }) jumps ahead of already-queued prompts", async () => {
+    // `front` means "ahead of everything queued, behind whatever is already
+    // running" — the running turn was shifted out synchronously when it was
+    // sent, so front-insert lands between it and the rest of the queue.
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const seen: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    agent.onPrompt = async (params) => {
+      const text = lastPromptText(params);
+      if (text === "first") await gate; // hold the running turn open
+      seen.push(text);
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+
+    const firstDone = task.prompt("first").completed; // starts running immediately
+    const secondDone = task.prompt("second").completed; // queues behind it
+    const thirdDone = task.prompt("third", { front: true }).completed; // jumps "second"
+
+    release();
+    await Promise.all([firstDone, secondDone, thirdDone]);
+
+    expect(seen).toEqual(["first", "third", "second"]);
+  });
+
   it("renders queued prompts as transcript rows and promotes the same rows to running", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
@@ -588,6 +631,23 @@ describe("AgentTask vertical slice", () => {
     await vi.waitFor(() =>
       expect(turnFor(task.taskId)[0]?.status).toBe("error"),
     );
+  });
+
+  it("marks the task errored when the transport closes while idle", async () => {
+    // The idle-close branch of handleTransportClose: no turn is running, so
+    // there's nothing to fail — the task itself flips to error.
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async () => ({ stopReason: "end_turn" });
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "hi"); // task settles to idle
+    expect(task.currentStatus).toBe("idle");
+
+    await client.close(); // transport drops with no turn running
+
+    expect(task.currentStatus).toBe("error");
   });
 
   it("coalesces a tool call's updates into one row by toolCallId", async () => {
@@ -1140,6 +1200,25 @@ describe("Stage 4: auth flows", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(seen).toEqual(["go"]);
   });
+
+  it("re-arms the block when the retried prompt fails auth again", async () => {
+    const { client, seen } = authScriptedPair(2); // fails twice, then would pass
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "go"); // attempt 1 → auth block armed
+    expect(seen).toEqual(["go"]);
+    expect(agentTasksCollection.get(task.taskId)?.authRequired).toBe(true);
+
+    const result = await task.authenticate("claude-login");
+    expect(result).toEqual({ ok: true }); // the login call itself succeeded
+
+    // …but the retried prompt hit the same wall — the block re-arms rather
+    // than clearing, so the user is asked to sign in again.
+    await vi.waitFor(() => {
+      expect(seen).toEqual(["go", "go"]);
+      expect(agentTasksCollection.get(task.taskId)?.authRequired).toBe(true);
+    });
+  });
 });
 
 describe("task updatedAt (last-activity ordering, MET-48)", () => {
@@ -1265,5 +1344,61 @@ describe("Stage 4: per-harness MCP registration", () => {
 
     expect(toolEntries(task.taskId)[0].toolCall?.title).toBe("author_blob");
     expect(findBlobAuthorTask("question_oc01")?.taskId).toBe(task.taskId);
+  });
+});
+
+describe("AgentTask startup timeout (MET-72)", () => {
+  const STARTUP_STEP_TIMEOUT_MS = 60_000; // mirrors the module-private constant
+
+  it("a timed-out session/load lands the row on error (not unavailable) and tears down", async () => {
+    vi.useFakeTimers();
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onLoadSession = () => new Promise<never>(() => {}); // hang forever
+
+    const task = new TaskManager("/ws").createTask(harness);
+    const startPromise = task
+      .start(() => client, { resumeSessionId: "sess_old" })
+      .catch((e) => e as Error);
+
+    await vi.advanceTimersByTimeAsync(STARTUP_STEP_TIMEOUT_MS + 10);
+    const result = await startPromise;
+
+    expect(result).toBeInstanceOf(Error);
+    // A *timed-out* revival is a plain error — distinct from the "unavailable"
+    // verdict a REJECTED (evicted-session) load produces.
+    expect(task.currentStatus).toBe("error");
+    expect(mcpEndpoints.at(-1)!.close).toHaveBeenCalled(); // teardown ran
+  });
+});
+
+describe("AgentTask dispose (MET-72)", () => {
+  const opencodeHarness = BUILT_IN_HARNESSES.find((h) => h.id === "opencode")!;
+
+  it("closes the transport and the MCP endpoint", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    new FakeAgent(agentSide);
+    const closeSpy = vi.spyOn(client, "close");
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+
+    await task.dispose();
+
+    expect(closeSpy).toHaveBeenCalled();
+    expect(mcpEndpoints.at(-1)!.close).toHaveBeenCalled();
+  });
+
+  it("deletes the per-task opencode config it wrote", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    new FakeAgent(agentSide);
+    const task = new TaskManager("/ws").createTask(opencodeHarness);
+    await task.start(() => client);
+    expect(writeFiles).toHaveBeenCalled(); // config written on start
+
+    await task.dispose();
+
+    expect(deleteFiles).toHaveBeenCalledWith([
+      expect.stringContaining(`opencode-${task.taskId}.json`),
+    ]);
   });
 });
