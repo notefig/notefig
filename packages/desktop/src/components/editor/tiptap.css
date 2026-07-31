@@ -127,6 +127,15 @@ ul[data-type="taskList"] > li > div p {
   cursor: col-resize;
 }
 
+/* Text the file-link picker is about to link (link-target-highlight-extension.ts).
+   Its Popover moves focus into a search input, and ProseMirror's native
+   selection highlight only renders while the editor itself is focused, so
+   this decoration stands in for it while the picker is open. */
+.file-link-target-highlight {
+  background-color: hsl(var(--primary) / 0.25);
+  border-radius: 2px;
+}
+
 /* Drag handle — the plugin positions a portal at left-start of each
    hovered block. The handle must sit at or inside the block edge; any
    negative margin pushes it outside the block's hover zone and the

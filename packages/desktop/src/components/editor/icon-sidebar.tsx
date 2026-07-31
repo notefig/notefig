@@ -14,6 +14,7 @@ import {
   HelpCircle,
   PanelLeftClose,
   PanelLeft,
+  Waypoints,
 } from "lucide-react";
 import {
   Tooltip,
@@ -26,19 +27,25 @@ import { useSearchParams } from "react-router-dom";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { PlainLogo } from "@/components/logo";
 import { useSearchParamFlag } from "@/hooks/use-search-param-flag";
+import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
+import { isGraphTabId } from "@/utils/graph-tab-id";
 
 interface IconSidebarProps {
   isCollapsed: boolean;
   onToggleCollapse: () => void;
+  activeTabId: string | null;
 }
 
 export const IconSidebar = memo(function IconSidebar({
   isCollapsed,
   onToggleCollapse,
+  activeTabId,
 }: IconSidebarProps) {
   const [searchParams, setUrlSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const sidebarView = searchParams.get("sidebarView") || "files";
+  const { openGraphTab } = useWorkspaceTabs();
+  const isGraphActive = activeTabId !== null && isGraphTabId(activeTabId);
 
   useHotkey("Mod+\\", () => {
     onToggleCollapse();
@@ -143,6 +150,31 @@ export const IconSidebar = memo(function IconSidebar({
         {topIcons.map((item) => (
           <SidebarIconButton key={item.id} item={item} />
         ))}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={openGraphTab}
+              className={cn(
+                "p-1.5 rounded-md transition-colors hover:bg-sidebar-accent",
+                isGraphActive && "bg-sidebar-accent",
+              )}
+            >
+              <Waypoints
+                className={cn(
+                  "w-4 h-4",
+                  isGraphActive ? "text-foreground" : "text-muted-foreground",
+                )}
+              />
+              <span className="sr-only">Graph View</span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>
+            Graph View
+          </TooltipContent>
+          <TooltipContent side="left" className="ltr:hidden" sideOffset={8}>
+            Graph View
+          </TooltipContent>
+        </Tooltip>
       </div>
       <div className="flex flex-col items-center gap-1 mt-auto">
         <Tooltip>

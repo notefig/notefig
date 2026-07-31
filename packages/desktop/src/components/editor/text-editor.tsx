@@ -73,7 +73,12 @@ export function TextEditor({
 
   return (
     <div className="flex flex-col flex-1 min-h-0 w-full z-0">
-      <TiptapToolbar editor={editor} onLinkToggle={handleLinkToggle} />
+      <TiptapToolbar
+        editor={editor}
+        onLinkToggle={handleLinkToggle}
+        basePath={basePath}
+        filePath={file.path}
+      />
       <div
         // Drop zone: files open as tabs in this editor's window; image
         // files insert into the document at the drop point.

@@ -4,6 +4,7 @@ import {
   resolvePath,
   buildInternalCandidates,
   normalizeLinkInput,
+  relativeHrefFromDir,
 } from "../tiptap-link-utils";
 
 describe("isExternalUrl", () => {
@@ -56,6 +57,37 @@ describe("resolvePath", () => {
 
   it("handles a root base dir", () => {
     expect(resolvePath("/", "a.md")).toBe("/a.md");
+  });
+
+  it("decodes percent-encoded segments (relativeHrefFromDir's output)", () => {
+    expect(resolvePath("/ws/docs", "lihan%20%3C%3E%20andrew.md")).toBe(
+      "/ws/docs/lihan <> andrew.md",
+    );
+  });
+
+  it("tolerates a literal % that isn't a valid escape instead of throwing", () => {
+    expect(resolvePath("/ws/docs", "100%.md")).toBe("/ws/docs/100%.md");
+  });
+});
+
+describe("relativeHrefFromDir", () => {
+  it("computes a plain sibling-file relative href", () => {
+    expect(relativeHrefFromDir("/ws/docs", "/ws/docs/notes.md")).toBe(
+      "notes.md",
+    );
+  });
+
+  it("walks up to a shared ancestor", () => {
+    expect(relativeHrefFromDir("/ws/docs/sub", "/ws/notes.md")).toBe(
+      "../../notes.md",
+    );
+  });
+
+  it("percent-encodes characters an unwrapped markdown link destination can't carry, and round-trips through resolvePath", () => {
+    const href = relativeHrefFromDir("/ws/docs", "/ws/docs/lihan <> andrew.md");
+    expect(href).toBe("lihan%20%3C%3E%20andrew.md");
+    expect(href).not.toMatch(/\s/);
+    expect(resolvePath("/ws/docs", href)).toBe("/ws/docs/lihan <> andrew.md");
   });
 });
 
