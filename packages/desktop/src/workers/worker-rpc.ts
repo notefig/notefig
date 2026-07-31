@@ -11,7 +11,19 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import { Cause, Deferred, Duration, Effect, Exit, Fiber } from "effect";
+
 export type WorkerApi = Record<string, (...args: any[]) => any>;
+
+/**
+ * Boundary unwrap: `Effect.runPromise` rejects with a `FiberFailure` wrapper,
+ * but callers here catch the raw `WorkerRpcError` (e.g. `error.workerDead`).
+ * `runPromiseExit` + `Cause.squash` hands back the original error unchanged.
+ */
+const toPromise = <A>(effect: Effect.Effect<A, WorkerRpcError>): Promise<A> =>
+  Effect.runPromiseExit(effect).then((exit) =>
+    Exit.isSuccess(exit) ? exit.value : Promise.reject(Cause.squash(exit.cause)),
+  );
 
 export type WorkerClient<T extends WorkerApi> = {
   [K in keyof T]: (
@@ -88,54 +100,58 @@ export function createWorkerClient<T extends WorkerApi>(
 ): WorkerClientHandle<T> {
   let nextId = 1;
   let dead = false;
-  const pending = new Map<
-    number,
-    { resolve: (value: unknown) => void; reject: (error: Error) => void }
-  >();
+  // Each pending call and the ready handshake are `Deferred`s: they complete
+  // exactly once, so `failAll` racing a late response can never double-settle,
+  // and there is no `readyResolve!`/`readyReject!` escape-hatch pair.
+  const pending = new Map<number, Deferred.Deferred<unknown, WorkerRpcError>>();
+  const ready = Effect.runSync(Deferred.make<void, WorkerRpcError>());
 
-  let readyResolve!: () => void;
-  let readyReject!: (error: Error) => void;
-  const ready = new Promise<void>((resolve, reject) => {
-    readyResolve = resolve;
-    readyReject = reject;
-  });
-  const readyTimer = setTimeout(() => {
-    readyReject(
-      new WorkerRpcError(
-        `Worker did not become ready within ${readyTimeoutMs}ms`,
-        true,
+  // Ready budget as a forked timer; interrupted below when the handshake lands
+  // (the structured-concurrency equivalent of clearTimeout).
+  const readyTimer = Effect.runFork(
+    Effect.sleep(Duration.millis(readyTimeoutMs)).pipe(
+      Effect.zipRight(
+        Effect.sync(() =>
+          Deferred.unsafeDone(
+            ready,
+            Effect.fail(
+              new WorkerRpcError(
+                `Worker did not become ready within ${readyTimeoutMs}ms`,
+                true,
+              ),
+            ),
+          ),
+        ),
       ),
-    );
-  }, readyTimeoutMs);
-  // A caller may only consume `ready` via Promise.race or not at all.
-  ready.catch(() => {});
+    ),
+  );
 
   const failAll = (message: string) => {
     dead = true;
-    clearTimeout(readyTimer);
-    readyReject(new WorkerRpcError(message, true));
-    pending.forEach(({ reject }) =>
-      reject(new WorkerRpcError(message, true)),
-    );
+    Effect.runFork(Fiber.interrupt(readyTimer));
+    const error = () => Effect.fail(new WorkerRpcError(message, true));
+    Deferred.unsafeDone(ready, error());
+    for (const deferred of pending.values()) Deferred.unsafeDone(deferred, error());
     pending.clear();
   };
 
   worker.onmessage = (event: MessageEvent) => {
     if (event.data === READY_MESSAGE) {
-      clearTimeout(readyTimer);
-      readyResolve();
+      Effect.runFork(Fiber.interrupt(readyTimer));
+      Deferred.unsafeDone(ready, Effect.void);
       return;
     }
     const response = event.data as RpcResponse;
     if (!response || response.rpc !== true) return;
-    const entry = pending.get(response.id);
-    if (!entry) return;
+    const deferred = pending.get(response.id);
+    if (!deferred) return;
     pending.delete(response.id);
-    if (response.ok) {
-      entry.resolve(response.result);
-    } else {
-      entry.reject(new WorkerRpcError(response.error ?? "RPC failed", false));
-    }
+    Deferred.unsafeDone(
+      deferred,
+      response.ok
+        ? Effect.succeed(response.result)
+        : Effect.fail(new WorkerRpcError(response.error ?? "RPC failed", false)),
+    );
   };
 
   worker.onerror = (event) => {
@@ -149,22 +165,26 @@ export function createWorkerClient<T extends WorkerApi>(
       // symbol) would post the runtime's resolve/reject callbacks to the
       // worker — functions are not structured-cloneable.
       if (typeof method !== "string" || method === "then") return undefined;
-      return (...args: unknown[]) =>
-        new Promise((resolve, reject) => {
-          if (dead) {
-            reject(new WorkerRpcError("Worker is dead", true));
-            return;
-          }
-          const id = nextId++;
-          pending.set(id, { resolve, reject });
-          worker.postMessage({ rpc: true, id, method, args } as RpcRequest);
-        });
+      return (...args: unknown[]) => {
+        if (dead) {
+          return Promise.reject(new WorkerRpcError("Worker is dead", true));
+        }
+        const id = nextId++;
+        const deferred = Effect.runSync(Deferred.make<unknown, WorkerRpcError>());
+        pending.set(id, deferred);
+        worker.postMessage({ rpc: true, id, method, args } as RpcRequest);
+        return toPromise(Deferred.await(deferred));
+      };
     },
   });
 
+  const readyPromise = toPromise(Deferred.await(ready));
+  // A caller may only consume `ready` via Promise.race or not at all.
+  readyPromise.catch(() => {});
+
   return {
     client,
-    ready,
+    ready: readyPromise,
     terminate: () => {
       failAll("Worker terminated");
       worker.terminate();
