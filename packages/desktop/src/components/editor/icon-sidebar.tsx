@@ -46,6 +46,7 @@ export const IconSidebar = memo(function IconSidebar({
   const sidebarView = searchParams.get("sidebarView") || "files";
   const { openGraphTab } = useWorkspaceTabs();
   const isGraphActive = activeTabId !== null && isGraphTabId(activeTabId);
+  const collapseToggleLabel = isCollapsed ? "Expand sidebar" : "Collapse sidebar";
 
   useHotkey("Mod+\\", () => {
     onToggleCollapse();
@@ -150,31 +151,14 @@ export const IconSidebar = memo(function IconSidebar({
         {topIcons.map((item) => (
           <SidebarIconButton key={item.id} item={item} />
         ))}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={openGraphTab}
-              className={cn(
-                "p-1.5 rounded-md transition-colors hover:bg-sidebar-accent",
-                isGraphActive && "bg-sidebar-accent",
-              )}
-            >
-              <Waypoints
-                className={cn(
-                  "w-4 h-4",
-                  isGraphActive ? "text-foreground" : "text-muted-foreground",
-                )}
-              />
-              <span className="sr-only">Graph View</span>
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>
-            Graph View
-          </TooltipContent>
-          <TooltipContent side="left" className="ltr:hidden" sideOffset={8}>
-            Graph View
-          </TooltipContent>
-        </Tooltip>
+        <SidebarIconButton
+          item={{
+            icon: Waypoints,
+            label: "Graph View",
+            active: isGraphActive,
+            onClick: openGraphTab,
+          }}
+        />
       </div>
       <div className="flex flex-col items-center gap-1 mt-auto">
         <Tooltip>
@@ -188,16 +172,14 @@ export const IconSidebar = memo(function IconSidebar({
               ) : (
                 <PanelLeftClose className="w-4 h-4 text-muted-foreground" />
               )}
-              <span className="sr-only">
-                {isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              </span>
+              <span className="sr-only">{collapseToggleLabel}</span>
             </button>
           </TooltipTrigger>
           <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>
-            {isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            {collapseToggleLabel}
           </TooltipContent>
           <TooltipContent side="left" className="ltr:hidden" sideOffset={8}>
-            {isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            {collapseToggleLabel}
           </TooltipContent>
         </Tooltip>
         {bottomIcons.map((item) => (
