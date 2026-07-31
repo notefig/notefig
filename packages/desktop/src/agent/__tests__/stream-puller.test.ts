@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { withMockedTauri } from "@/testing/tauri-mock";
+
+const { captureError } = vi.hoisted(() => ({ captureError: vi.fn() }));
+vi.mock("@/telemetry/telemetry", () => ({ captureError }));
+
 import { StreamPuller, type PullResult } from "../stream-puller";
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -113,5 +117,38 @@ describe("StreamPuller", () => {
     await flush();
 
     expect(delivered).toEqual(["one", "two"]);
+  });
+
+  it("survives a throwing line listener — a later doorbell still delivers, and the error is tracked (PR #157)", async () => {
+    // A delivery that throws must not permanently kill the consumer fiber; the
+    // next doorbell has to keep draining, or all subsequent output strands.
+    captureError.mockClear();
+    const responses: PullResult[] = [
+      { lines: ["boom"], ended: false }, // drain #1: this delivery throws
+      { lines: ["after"], ended: false }, // drain #2 (next doorbell): must run
+      { lines: [], ended: false },
+    ];
+    withMockedTauri({
+      pull_stream_lines: () => responses.shift() ?? { lines: [], ended: false },
+    });
+
+    const delivered: string[] = [];
+    const puller = new StreamPuller("s-throw", (line) => {
+      if (line === "boom") throw new Error("listener blew up");
+      delivered.push(line);
+    });
+
+    puller.schedule();
+    await flush();
+    // First drain died on "boom"; ring again — a dead consumer would strand this.
+    puller.schedule();
+    await flush();
+
+    expect(delivered).toEqual(["after"]);
+    // The swallowed defect is surfaced to error tracking, not lost.
+    expect(captureError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "listener blew up" }),
+      { boundary: "stream-puller", streamId: "s-throw" },
+    );
   });
 });

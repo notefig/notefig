@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { Effect, Fiber, Queue, Schedule, Stream } from "effect";
+import { captureError } from "@/telemetry/telemetry";
 
 /** Response shape of the Rust `pull_stream_lines` command (line_stream.rs). */
 export type PullResult = { lines: string[]; ended: boolean };
@@ -50,7 +51,27 @@ export class StreamPuller {
       this.doorbell = doorbell;
       this.consumer = Effect.runFork(
         Stream.fromQueue(doorbell).pipe(
-          Stream.mapEffect(() => this.drain()),
+          Stream.mapEffect(() =>
+            // A throwing `deliver` (or `onEnded`) must not kill the sole
+            // consumer — it has to survive to drain later doorbells, or all
+            // future output/MCP traffic strands (the old loop reset its
+            // `pulling` flag in a `finally` for exactly this reason). Catch
+            // defects only: `stop()`'s interrupt is a different cause and must
+            // still terminate the fiber.
+            this.drain().pipe(
+              Effect.catchAllDefect((defect) =>
+                Effect.sync(() =>
+                  // A delivery that throws is a real bug in a downstream
+                  // listener — surface it to error tracking rather than
+                  // swallowing it, while the fiber lives on for later doorbells.
+                  captureError(defect, {
+                    boundary: "stream-puller",
+                    streamId: this.streamId,
+                  }),
+                ),
+              ),
+            ),
+          ),
           Stream.runDrain,
         ),
       );
