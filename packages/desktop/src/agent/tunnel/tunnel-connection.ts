@@ -24,6 +24,7 @@ import {
 } from "@metrists/shared/tunnel";
 import { base64ToBytes } from "@metrists/shared/tunnel";
 import type { z } from "zod";
+import { Cause, Deferred, Duration, Effect, Exit } from "effect";
 import {
   AgentTransportError,
   type Unsubscribe,
@@ -88,7 +89,9 @@ export class TunnelConnection {
     (error: AgentTransportError) => void
   >();
 
-  constructor(private readonly socketFactory: TunnelSocketFactory = webSocketFactory) {}
+  constructor(
+    private readonly socketFactory: TunnelSocketFactory = webSocketFactory,
+  ) {}
 
   getState(): TunnelConnectionState {
     return this.state;
@@ -139,23 +142,16 @@ export class TunnelConnection {
   }
 
   private handshake(pairing: TunnelPairing): Promise<WorkerInfo> {
-    return new Promise<WorkerInfo>((resolve, reject) => {
-      const socket = this.socketFactory(pairing.url);
-      this.socket = socket;
-      let settled = false;
-      const fail = (error: Error) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        reject(error);
-      };
-      const timeout = setTimeout(
-        () =>
-          fail(
-            new AgentTransportError("relay_unreachable", "handshake timed out"),
-          ),
-        HANDSHAKE_TIMEOUT_MS,
-      );
+    const socket = this.socketFactory(pairing.url);
+    this.socket = socket;
+
+    const program = Effect.gen(this, function* () {
+      const result = yield* Deferred.make<WorkerInfo, AgentTransportError>();
+      const done = () => Effect.runSync(Deferred.isDone(result));
+      const fail = (error: AgentTransportError) =>
+        Deferred.unsafeDone(result, Effect.fail(error));
+      const succeed = (info: WorkerInfo) =>
+        Deferred.unsafeDone(result, Effect.succeed(info));
 
       socket.onError(() =>
         fail(
@@ -166,9 +162,12 @@ export class TunnelConnection {
         ),
       );
       socket.onClose(() => {
-        if (!settled) {
+        if (!done()) {
           fail(
-            new AgentTransportError("peer_disconnected", "socket closed during handshake"),
+            new AgentTransportError(
+              "peer_disconnected",
+              "socket closed during handshake",
+            ),
           );
           return;
         }
@@ -222,10 +221,12 @@ export class TunnelConnection {
             this.socket?.close();
             return;
           }
-          if (!settled) {
+          if (!done()) {
             // The first decrypted frame must be pair-ack.
             const ack =
-              inner.ch === "ctl" ? CtlMessageSchema.safeParse(inner.data) : null;
+              inner.ch === "ctl"
+                ? CtlMessageSchema.safeParse(inner.data)
+                : null;
             if (!ack?.success || ack.data.op !== "pair-ack") {
               fail(new AgentTransportError("pairing_failed", "no pair-ack"));
               this.socket?.close();
@@ -241,14 +242,41 @@ export class TunnelConnection {
               this.socket?.close();
               return;
             }
-            settled = true;
-            clearTimeout(timeout);
-            resolve(ack.data.worker);
+            succeed(ack.data.worker);
             return;
           }
           this.dispatch(inner);
         })();
       });
+
+      // Forked child: fails the handshake if it outruns the budget. When the
+      // await below settles, this fiber ends and the timer is interrupted —
+      // the structured-concurrency equivalent of clearTimeout.
+      yield* Effect.forkScoped(
+        Effect.sleep(Duration.millis(HANDSHAKE_TIMEOUT_MS)).pipe(
+          Effect.zipRight(
+            Effect.sync(() =>
+              fail(
+                new AgentTransportError(
+                  "relay_unreachable",
+                  "handshake timed out",
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      return yield* Deferred.await(result);
+    });
+
+    // Boundary unwrap: `runPromise` would reject with a `FiberFailure`
+    // wrapper, but callers (connect's catch) inspect the raw
+    // `AgentTransportError`. `runPromiseExit` + `Cause.squash` hands back the
+    // original typed error unchanged.
+    return Effect.runPromiseExit(Effect.scoped(program)).then((exit) => {
+      if (Exit.isSuccess(exit)) return exit.value;
+      throw Cause.squash(exit.cause);
     });
   }
 
@@ -277,7 +305,10 @@ export class TunnelConnection {
 
   private sendFrame(inner: InnerFrame): void {
     if (!this.socket || !this.cipher) {
-      throw new AgentTransportError("relay_unreachable", "tunnel is not connected");
+      throw new AgentTransportError(
+        "relay_unreachable",
+        "tunnel is not connected",
+      );
     }
     this.socket.send(JSON.stringify(this.cipher.seal(inner)));
   }
