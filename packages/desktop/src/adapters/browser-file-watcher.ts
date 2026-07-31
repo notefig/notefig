@@ -82,7 +82,6 @@ export class BrowserFileWatcher {
 
   private consumeAppWrite(path: string, contentHash: string): boolean {
     const now = Date.now();
-    // Garbage collect while we're here
     this.appWrites = this.appWrites.filter(
       (w) => now - w.timestamp < APP_WRITE_TTL,
     );
@@ -112,13 +111,10 @@ export class BrowserFileWatcher {
   }
 
   async startWatchingMetadata(paths: string[], watchId: string): Promise<void> {
-    // Stop existing watcher if any
     this.stopWatching(watchId);
 
-    // Take initial snapshot
     const snapshot = await this.takeMetadataSnapshot(paths);
 
-    // Create watcher state
     const state: MetadataWatchState = {
       watchId,
       paths,
@@ -246,7 +242,6 @@ export class BrowserFileWatcher {
         paths,
       );
     } else {
-      // Create new watcher
       const snapshot = await this.takeContentSnapshot(paths);
 
       const state: ContentWatchState = {
@@ -300,9 +295,7 @@ export class BrowserFileWatcher {
         const contentHash = calculateContentHash(file.content);
         const oldSnapshot = state.snapshot.get(file.path);
 
-        // Check if content actually changed
         if (!oldSnapshot || oldSnapshot.contentHash !== contentHash) {
-          // Check if this was an app write
           if (this.consumeAppWrite(file.path, contentHash)) {
             state.snapshot.set(file.path, {
               path: file.path,

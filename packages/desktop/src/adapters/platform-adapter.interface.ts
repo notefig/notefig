@@ -3,9 +3,6 @@ import type { GitStorageHost } from "@metrists/git";
 import type { HarnessDefinition } from "@metrists/shared/agent";
 import type { AgentTransport, McpEndpoint } from "@/agent/agent-transport.interface";
 
-/**
- * Error types for file system operations
- */
 export type FileSystemErrorType =
   | "not_found"
   | "permission_denied"
@@ -18,9 +15,6 @@ export type FileSystemErrorType =
   | "io_error"
   | "unknown";
 
-/**
- * File system operation error
- */
 export type FileSystemError = {
   path: string;
   type: FileSystemErrorType;
@@ -54,24 +48,15 @@ export function isWorkspaceAccessError(error: unknown): error is FsError {
   );
 }
 
-/**
- * Result type for operations that can fail
- */
 export type Result<T, E = FileSystemError> =
   | { ok: true; value: T }
   | { ok: false; error: E };
 
-/**
- * Batch operation result with partial success/failure
- */
 export type BatchResult<T> = {
   succeeded: T[];
   failed: FileSystemError[];
 };
 
-/**
- * File system metadata
- */
 export type FileSystemMetadata = {
   path: string;
   type: "file" | "directory";
@@ -80,9 +65,6 @@ export type FileSystemMetadata = {
   createdAt: Date;
 };
 
-/**
- * Options for the single-line text prompt affordance
- */
 export type TextPromptOptions = {
   title: string;
   message?: string;
@@ -91,13 +73,10 @@ export type TextPromptOptions = {
   confirmLabel?: string;
 };
 
-/**
- * Metadata change event (batched)
- */
 export type MetadataChange = {
   type: "created" | "deleted" | "renamed";
   path: string;
-  oldPath?: string; // For rename events
+  oldPath?: string; // populated only for rename events
   isDirectory: boolean;
 };
 
@@ -105,9 +84,6 @@ export type MetadataChangeEvent = {
   changes: MetadataChange[];
 };
 
-/**
- * Content change event (batched)
- */
 export type ContentChange = {
   path: string;
   content: string;
@@ -118,15 +94,9 @@ export type ContentChangeEvent = {
   changes: ContentChange[];
 };
 
-/**
- * Search options for workspace-wide search
- */
 export type SearchOptions = {
-  /** Search query string */
   query: string;
-  /** Treat query as regex pattern */
   useRegex?: boolean;
-  /** Case-sensitive search */
   caseSensitive?: boolean;
   /** File pattern filter (e.g., "*.md", "*.txt") */
   filePattern?: string;
@@ -136,9 +106,6 @@ export type SearchOptions = {
   maxResults?: number;
 };
 
-/**
- * Position in a file (1-indexed)
- */
 export type FilePosition = {
   /** 1-indexed line number */
   line: number;
@@ -146,46 +113,28 @@ export type FilePosition = {
   column: number;
 };
 
-/**
- * Location of a search match
- */
 export type SearchMatchLocation = {
   /** Absolute path to the file */
   filePath: string;
-  /** Range of the match */
   range: {
     start: FilePosition;
     end: FilePosition;
   };
 };
 
-/**
- * Content and context of a search match
- */
 export type SearchMatchContent = {
-  /** The matched text */
   matchText: string;
   /** Full content of the line containing the match */
   lineContent: string;
-  /** Lines before the match (for context) */
   beforeContext: string[];
-  /** Lines after the match (for context) */
   afterContext: string[];
 };
 
-/**
- * A single search match result
- */
 export type SearchMatch = {
-  /** Where the match was found */
   location: SearchMatchLocation;
-  /** What was matched and surrounding context */
   content: SearchMatchContent;
 };
 
-/**
- * Platform events that can be emitted
- */
 export type PlatformEvent =
   | { type: "theme-changed"; payload: Theme }
   | { type: "folder-selected"; payload: string }
@@ -194,9 +143,6 @@ export type PlatformEvent =
   | { type: "fs-content-changed"; payload: ContentChangeEvent }
   | { type: "zoom-changed"; payload: number };
 
-/**
- * Generic event listener callback
- */
 export type PlatformEventListener = (event: PlatformEvent) => void;
 
 export type UpdateFlow = "download-restart" | "refresh";
@@ -255,7 +201,6 @@ export interface PlatformUpdater {
  * (Tauri vs Browser)
  */
 export interface IPlatformAdapter {
-  // ========== Directory Picker ==========
   /**
    * Opens a directory picker dialog
    * @param title - Title for the picker dialog
@@ -263,7 +208,6 @@ export interface IPlatformAdapter {
    */
   pickDirectory(title: string): Promise<string | null>;
 
-  // ========== Workspace Access ==========
   /**
    * (Re)acquire access to a workspace folder after a permission failure.
    * On web this MUST run inside a user gesture (it calls
@@ -271,7 +215,6 @@ export interface IPlatformAdapter {
    */
   requestWorkspaceAccess(workspacePath: string): Promise<boolean>;
 
-  // ========== Text Prompt ==========
   /**
    * Ask the user for a single line of text (e.g. a link URL).
    * window.prompt is not implemented inside the Tauri webview, so callers
@@ -286,7 +229,6 @@ export interface IPlatformAdapter {
    */
   openExternal(url: string): Promise<void>;
 
-  // ========== Directory Operations ==========
   /**
    * Read directory contents
    * @returns Result with array of absolute paths
@@ -323,7 +265,6 @@ export interface IPlatformAdapter {
    */
   moveDirectory(oldPath: string, newPath: string): Promise<Result<void>>;
 
-  // ========== File Operations ==========
   /**
    * Read file contents
    * @returns Batch result with file data for succeeded reads and errors for failures
@@ -394,7 +335,6 @@ export interface IPlatformAdapter {
    */
   resolveAssetUrl(relativePath: string, workspacePath: string): Promise<string>;
 
-  // ========== Metadata & Existence ==========
   /**
    * Check if paths exist
    * @returns Array of existence results (never fails, returns exists: false for errors)
@@ -409,7 +349,6 @@ export interface IPlatformAdapter {
    */
   getMetadata(paths: string[]): Promise<BatchResult<FileSystemMetadata>>;
 
-  // ========== File Watching ==========
   /**
    * Start watching directories for metadata changes (creates, deletes, renames)
    * Watches recursively - will detect all changes within the directory tree
@@ -436,7 +375,6 @@ export interface IPlatformAdapter {
    */
   stopWatching(watchId: string): Promise<void>;
 
-  // ========== Event Listeners ==========
   /**
    * Adds a generic platform event listener
    * @param callback - Function to call when events are emitted

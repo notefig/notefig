@@ -38,20 +38,15 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
   });
 
   test.afterEach(async ({ page }) => {
-    // Cleanup with timeout to prevent hanging
+    // Timeout guards against cleanup hanging and wedging the whole run.
     await Promise.race([
       clearTestDatabase(page),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Cleanup timeout")), 5000),
       ),
-    ]).catch(() => {
-      // Ignore cleanup errors
-    });
+    ]).catch(() => {});
   });
 
-  /**
-   * TEST SUITE 1: File Watcher & External Changes
-   */
   test.describe("File Watcher", () => {
     // See the annotation on "detects external file modification" — one test
     // intermittently trips a real content-loading bug under parallel load;
@@ -61,12 +56,10 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
     test("detects external file creation and updates tree", async ({
       page,
     }) => {
-      // Initially, the new file should not exist
       const newFileName = "externally-created.md";
       let exists = await fileExistsInTree(page, newFileName);
       expect(exists).toBe(false);
 
-      // Simulate external file creation
       const newFilePath = `${e2eTestFixture.workspacePath}/${newFileName}`;
       await simulateExternalFileCreation(
         page,
@@ -83,7 +76,6 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       // point-in-time visibility check races under parallel load.
       await waitForFileTree(page, newFileName);
 
-      // File should now appear in tree
       exists = await fileExistsInTree(page, newFileName);
       expect(exists).toBe(true);
     });
@@ -137,7 +129,6 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
         throw error;
       }
 
-      // Simulate external modification in IndexedDB
       const newContent =
         "# Watched File\n\nThis content was modified externally!";
       await simulateExternalFileChange(
@@ -160,7 +151,6 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
         )
         .toContain("modified externally");
 
-      // After reload, the new content should be visible
       await page.reload();
       await waitForFileTree(page);
       await openFileInTree(page, "watched-file.md");
@@ -173,17 +163,14 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
     test("detects external file deletion and removes from tree", async ({
       page,
     }) => {
-      // Verify file exists initially
       let exists = await fileExistsInTree(page, "file-to-delete.md");
       expect(exists).toBe(true);
 
-      // Simulate external deletion
       await simulateExternalFileDeletion(
         page,
         `${e2eTestFixture.workspacePath}/file-to-delete.md`,
       );
 
-      // Wait for watcher to detect
       await waitForWatcherDetection(page, "metadata");
       await page.reload();
       // Anchor on a file that persists so we know the tree finished
@@ -197,59 +184,46 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
     });
   });
 
-  /**
-   * TEST SUITE 2: Core File Operations
-   */
   test.describe("Core File Operations", () => {
     test("workspace opens and file tree renders correctly", async ({
       page,
     }) => {
-      // Check root files are visible
       await expect(page.locator('button:has-text("readme.md")')).toBeVisible();
       await expect(page.locator('button:has-text("docs")')).toBeVisible();
 
-      // Expand docs folder
       const docsButton = page.locator('button:has-text("docs")').first();
       await docsButton.click();
       await page.waitForTimeout(300);
 
-      // Check nested files appear
       await expect(page.locator('button:has-text("guide.md")')).toBeVisible();
     });
 
     test("open file, edit content, and persist on tab switch", async ({
       page,
     }) => {
-      // Open file to edit
       await openFileInTree(page, "file-to-edit.md");
 
-      // Edit content
       await replaceEditorContent(
         page,
         `# File to Edit\n\n${editContent.edited}`,
       );
       await waitForAutoSave(page);
 
-      // Open another file to switch tabs
       await openFileInTree(page, "readme.md");
       await page.waitForTimeout(500);
 
-      // Switch back to edited file
       await openFileInTree(page, "file-to-edit.md");
       await page.waitForTimeout(300);
 
-      // Verify content persisted
       const content = await getEditorContent(page);
       expect(content).toContain("This line was added during the test");
     });
 
     test("access nested folder file with correct path", async ({ page }) => {
-      // Expand docs folder first
       const docsButton = page.locator('button:has-text("docs")').first();
       await docsButton.click();
       await page.waitForTimeout(300);
 
-      // Look for the nested file directly (file watcher shows full paths)
       const nestedFile = page
         .locator('button:has-text("file.md")')
         .filter({
@@ -260,40 +234,31 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       if (await nestedFile.isVisible().catch(() => false)) {
         await nestedFile.click();
       } else {
-        // Try navigating through nested structure if available
         await openFileInTree(page, "file.md");
       }
 
       await page.waitForTimeout(300);
 
-      // Verify file opened (content or path)
       const content = await getEditorContent(page);
-      // File might show content or we verify via IndexedDB
       const hasContent = content.length > 0;
       expect(hasContent || true).toBe(true); // Soft check - just verify no crash
     });
   });
 
-  /**
-   * TEST SUITE 3: Auto-Save & Persistence
-   */
   test.describe("Auto-Save & Persistence", () => {
     test("auto-saves edits after debounce without manual action", async ({
       page,
     }) => {
-      // Open file
       await openFileInTree(page, "file-to-edit.md");
 
-      // Edit content
       await replaceEditorContent(
         page,
         "# Auto-save Test\n\nContent added via auto-save test.",
       );
 
-      // Don't manually save - wait for auto-save debounce
+      // No manual save — only the debounce should trigger the write.
       await waitForAutoSave(page);
 
-      // Verify saved to IndexedDB
       const savedContent = await getIndexedDBContent(
         page,
         e2eTestFixture.workspacePath,
@@ -303,14 +268,12 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
     });
 
     test("recovers content after page reload", async ({ page }) => {
-      // Open file and make edits
       await openFileInTree(page, "file-to-edit.md");
       const editedContent =
         "# Recovery Test\n\nThis content was edited before reload.";
       await replaceEditorContent(page, editedContent);
       await waitForAutoSave(page);
 
-      // Verify saved before reload
       const savedBefore = await getIndexedDBContent(
         page,
         e2eTestFixture.workspacePath,
@@ -318,14 +281,11 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       );
       expect(savedBefore).toContain("edited before reload");
 
-      // Simulate reload
       await page.reload();
       await waitForFileTree(page);
 
-      // Re-open file
       await openFileInTree(page, "file-to-edit.md");
 
-      // Verify content recovered from IndexedDB
       const savedAfter = await getIndexedDBContent(
         page,
         e2eTestFixture.workspacePath,
@@ -333,20 +293,16 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       );
       expect(savedAfter).toContain("edited before reload");
 
-      // Verify editor shows content
       const recoveredContent = await getEditorContent(page);
       expect(recoveredContent).toContain("edited before reload");
     });
   });
 
-  /**
-   * TEST SUITE 4: Tabs
-   */
   test.describe("Tabs", () => {
     test("multiple tabs - open several files, switch between, content correct", async ({
       page,
     }) => {
-      // Open three files (use new-tab for 2nd and 3rd to keep multiple tabs open)
+      // new-tab for the 2nd and 3rd so all three stay open.
       await openFileInTree(page, "tab-a.md");
       await page.waitForTimeout(300);
 
@@ -356,7 +312,6 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       await openFileInNewTab(page, "tab-c.md");
       await page.waitForTimeout(300);
 
-      // Verify tabs exist (look for tab buttons with file names inside the tab bar)
       const tabBar = page.locator('[data-testid="tab-bar"]');
       const tabA = tabBar
         .locator('.cursor-pointer:has-text("tab-a.md")')
@@ -372,19 +327,16 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       await expect(tabB).toBeVisible();
       await expect(tabC).toBeVisible();
 
-      // Switch to tab A and verify content
       await tabA.click();
       await page.waitForTimeout(300);
       let content = await getEditorContent(page);
       expect(content).toContain("Content for tab A");
 
-      // Switch to tab B and verify content
       await tabB.click();
       await page.waitForTimeout(300);
       content = await getEditorContent(page);
       expect(content).toContain("Content for tab B");
 
-      // Switch to tab C and verify content
       await tabC.click();
       await page.waitForTimeout(300);
       content = await getEditorContent(page);
@@ -394,15 +346,12 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
     test("tab state preserved - cursor position maintained on switch", async ({
       page,
     }) => {
-      // Open file A and place cursor
       await openFileInTree(page, "tab-a.md");
       await page.waitForTimeout(300);
 
-      // Click on a specific element to place cursor
       await page.locator('[role="textbox"]').first().click();
-      await page.keyboard.press("End"); // Go to end of line
+      await page.keyboard.press("End");
 
-      // Get cursor position before switch
       const cursorBefore = await page.evaluate(() => {
         const sel = window.getSelection();
         return {
@@ -411,11 +360,9 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
         };
       });
 
-      // Open file B in a new tab so both tabs remain open
       await openFileInNewTab(page, "tab-b.md");
       await page.waitForTimeout(500);
 
-      // Switch back to file A
       const tabBar = page.locator('[data-testid="tab-bar"]');
       const tabA = tabBar
         .locator('.cursor-pointer:has-text("tab-a.md")')
@@ -423,7 +370,6 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       await tabA.click();
       await page.waitForTimeout(500);
 
-      // Verify cursor is restored (or at least editor is focused)
       const cursorAfter = await page.evaluate(() => {
         const sel = window.getSelection();
         return {
@@ -432,7 +378,6 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
         };
       });
 
-      // Cursor should be in the same text node
       expect(cursorAfter.anchorText).toBe(cursorBefore.anchorText);
     });
 
@@ -473,7 +418,6 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       await page.goto(`/${encodedPath}?layout=${encodedLayout}`);
       await waitForFileTree(page);
 
-      // Focus the right dock/editor (tab-c.md)
       const rightEditor = page
         .locator('[role="textbox"]')
         .filter({ hasText: "Content for tab C" })
@@ -491,34 +435,26 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
     });
   });
 
-  /**
-   * TEST SUITE 5: Large File Handling
-   */
   test.describe("Large File Handling", () => {
     test("open and edit large file without lag", async ({ page }) => {
-      // Open large file (2000 lines)
       await openFileInTree(page, "large-file.md");
-      await page.waitForTimeout(1000); // Give extra time for large file
+      await page.waitForTimeout(1000);
 
-      // Verify file opened by checking content in IndexedDB
       const dbContent = await getIndexedDBContent(
         page,
         e2eTestFixture.workspacePath,
         `${e2eTestFixture.workspacePath}/large-file.md`,
       );
       expect(dbContent).toContain("# Large File Test");
-      expect(dbContent).toContain("Section 20"); // Should have 20 sections
+      expect(dbContent).toContain("Section 20");
 
-      // Make a simple edit using replaceEditorContent
       await replaceEditorContent(
         page,
         "# EDITED Large File\n\nThis large file was edited.",
       );
 
-      // Wait for auto-save
       await waitForAutoSave(page);
 
-      // Verify edit persisted
       const updatedContent = await getIndexedDBContent(
         page,
         e2eTestFixture.workspacePath,
@@ -528,22 +464,15 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
     });
   });
 
-  /**
-   * TEST SUITE 6: Settings & UI State
-   */
   test.describe("Settings & UI State", () => {
     test("theme toggle persists after reload", async ({ page }) => {
-      // Get initial theme
       const initialTheme = await getCurrentTheme(page);
 
-      // Toggle theme if button exists
       await toggleTheme(page);
       await page.waitForTimeout(300);
 
-      // Get new theme
       const newTheme = await getCurrentTheme(page);
 
-      // If theme changed, verify it persists after reload
       if (newTheme !== initialTheme) {
         await page.reload();
         await waitForFileTree(page);
@@ -562,45 +491,35 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       const readmeExists = await fileExistsInTree(page, "readme.md");
       expect(readmeExists).toBe(true);
 
-      // Reload page
       await page.reload();
       await waitForFileTree(page, "readme.md");
 
-      // Verify workspace still loaded
       const readmeStillExists = await fileExistsInTree(page, "readme.md");
       expect(readmeStillExists).toBe(true);
     });
   });
 
-  /**
-   * TEST SUITE 7: Block Operations (Editor)
-   */
   test.describe("Block Operations", () => {
     test("reorder content blocks via drag", async ({ page }) => {
-      // Open a file with multiple paragraphs
       await openFileInTree(page, "tab-a.md");
       await page.waitForTimeout(500);
 
-      // Find drag handles (the grip icons on the left)
       const dragHandles = page.locator(
         '[role="textbox"] .slate-blockToolbar button, [role="textbox"] button:has(.lucide-grip-vertical)',
       );
       const count = await dragHandles.count();
 
       if (count > 0) {
-        // Drag first block down
         const firstHandle = dragHandles.first();
         const box = await firstHandle.boundingBox();
 
         if (box) {
-          // Perform drag operation
           await firstHandle.dragTo(page.locator('[role="textbox"]'), {
             targetPosition: { x: box.x, y: box.y + 100 },
           });
 
           await page.waitForTimeout(500);
 
-          // Verify the editor still works after drag
           const content = await getEditorContent(page);
           expect(content.length).toBeGreaterThan(0);
         }
@@ -608,15 +527,8 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
     });
   });
 
-  /**
-   * TEST SUITE 8: Drag & Drop
-   */
   test.describe("Drag & Drop", () => {
     test("drag file to folder updates path correctly", async ({ page }) => {
-      // This test simulates file drag and drop in the file tree
-      // Note: Actual implementation depends on your drag-drop library
-
-      // Expand target folder first
       const targetFolder = page
         .locator('button:has-text("target-folder")')
         .first();
@@ -624,15 +536,12 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
       await page.waitForTimeout(200);
 
       try {
-        // Attempt to drag source-file.md into target-folder
         await dragFileToFolder(page, "source-file.md", "target-folder");
         await page.waitForTimeout(1000);
 
-        // Verify the file was moved (may need to reload)
         await page.reload();
         await waitForFileTree(page);
 
-        // Check if file exists in new location (via IndexedDB)
         const files = await page.evaluate(() => {
           return new Promise<Array<{ path: string }>>((resolve) => {
             const dbName =
@@ -651,24 +560,17 @@ test.describe("Metrists E2E Comprehensive Tests", () => {
           });
         });
 
-        // Check for file in target folder
         const movedFile = files.find((f) =>
           f.path.includes("target-folder/source-file.md"),
         );
-        // Note: This may fail if drag-drop isn't fully implemented
-        // Just verify the drag operation didn't crash the app
         expect(files.length).toBeGreaterThan(0);
       } catch (e) {
-        // If drag-to-folder isn't implemented, verify at least the UI didn't crash
         console.log("Drag-to-folder may not be implemented yet");
         expect(await fileExistsInTree(page, "source-file.md")).toBe(true);
       }
     });
   });
 
-  /**
-   * TEST SUITE 9: Single-Tab UX
-   */
   test.describe("Single-Tab UX", () => {
     test("default open replaces current tab, modifier/context menu open in new tab", async ({
       page,

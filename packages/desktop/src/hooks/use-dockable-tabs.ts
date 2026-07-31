@@ -28,86 +28,51 @@ import {
 import type { FileTreeNode } from "@/utils/fs";
 
 export interface UseDockableTabsOptions {
-  /**
-   * Called when tabs need to be rendered.
-   * Return an array of Dockable.Tab elements.
-   */
   renderTabs: (tabIds: string[]) => ReactElement<TabProps>[];
 
-  /**
-   * Optional filter function to determine if a file can be opened as a tab.
-   * If not provided, all files can be opened.
-   */
   canOpenFile?: (file: FileTreeNode) => boolean;
 
-  /**
-   * Optional container ref used to detect the focused dockable window.
-   */
   dockableRef?: RefObject<HTMLElement | null>;
 }
 
 export interface UseDockableTabsResult {
-  /** Current layout state */
   layout: LayoutNode[];
 
-  /** All open tab IDs */
   openTabs: string[];
 
-  /** Currently active tab ID */
   activeTabId: string | null;
 
-  /** Rendered tab elements */
   tabs: ReactElement<TabProps>[];
 
-  /** Handle file selection from file tree */
   handleFileSelect: (
     file: FileTreeNode,
     options?: Omit<OpenFileInLayoutOptions, "tabId">,
   ) => void;
 
-  /** Handle layout changes from Dockable */
   handleLayoutChange: (newLayout: LayoutNode[]) => void;
 
-  /** Programmatically open a file with explicit intent */
   openFile: (options: OpenFileInLayoutOptions) => void;
 
-  /** Programmatically close a tab */
   closeTab: (tabId: string) => void;
 
-  /** Get the selected tab in the focused window */
   getFocusedTabId: () => string | null;
 
-  /** Close the selected tab in the focused window */
   closeActiveTab: () => void;
 
-  /** Programmatically switch to a tab */
   selectTab: (tabId: string) => void;
 
-  /** Switch to a tab by index within the focused window */
   selectTabAtIndex: (index: number) => void;
 
-  /** Switch to the next tab (wraps around) */
   selectNextTab: () => void;
 
-  /** Switch to the previous tab (wraps around) */
   selectPrevTab: () => void;
 
-  /** Focus the editor of the currently focused tab (last-focused window aware) */
   focusActiveEditor: () => boolean;
 
-  /** Get selected text from the currently focused tab's editor */
   getSelectedText: () => string | undefined;
 }
 
 /**
- * Hook for managing dockable tabs with URL-based state persistence.
- *
- * Handles:
- * - Opening/closing tabs
- * - Tab selection
- * - Layout state synchronization with URL
- * - Editor instance cleanup
- *
  * @example
  * ```tsx
  * const { tabs, layout, handleLayoutChange, handleFileSelect } = useDockableTabs({
@@ -135,7 +100,6 @@ export function useDockableTabs(
   const lastFocusedWindowIdRef = useRef<string | null>(null);
   const [, setFocusedWindowId] = useState<string | null>(null);
 
-  // Render tabs using the provided render function
   const tabs = useMemo(() => renderTabs(openTabs), [renderTabs, openTabs]);
 
   useEffect(() => {
@@ -231,12 +195,10 @@ export function useDockableTabs(
     return getActiveWindow()?.id ?? null;
   }, [getActiveWindow]);
 
-  // Handle file selection from file tree
   const handleFileSelect = useCallback(
     (file: FileTreeNode, options?: Omit<OpenFileInLayoutOptions, "tabId">) => {
       if (file.type !== "file") return;
 
-      // Check if file can be opened (if filter provided)
       if (canOpenFile && !canOpenFile(file)) {
         console.warn(`File cannot be opened as tab: ${file.path}`);
         return;
@@ -254,7 +216,6 @@ export function useDockableTabs(
     [setLayout, canOpenFile, getActiveWindowId],
   );
 
-  // Handle layout changes from Dockable
   const handleLayoutChange = useCallback(
     (newLayout: LayoutNode[]) => {
       // Dispose editors for any tabs that Dockable removed (e.g. via drag to close)
@@ -262,13 +223,11 @@ export function useDockableTabs(
       const removed = openTabs.filter((id) => !newTabIds.includes(id));
       removed.forEach((id) => disposeEditor(id));
 
-      // Write the full layout to the URL
       setLayout(newLayout);
     },
     [openTabs, setLayout],
   );
 
-  // Programmatic tab management
   const openFile = useCallback(
     (options: OpenFileInLayoutOptions) => {
       setLayout((currentLayout) =>

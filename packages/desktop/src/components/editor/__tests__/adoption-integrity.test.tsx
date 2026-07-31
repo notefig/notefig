@@ -34,11 +34,8 @@ import { act, useState, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { Editor } from "@tiptap/core";
 
-// ---------------------------------------------------------------------------
 // In-memory platform adapter (hoisted for vi.mock). Fixed small latencies —
 // determinism is the point of this suite.
-// ---------------------------------------------------------------------------
-
 const fake = vi.hoisted(() => {
   const store = new Map<string, { content: string; modifiedAt: Date }>();
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -144,10 +141,7 @@ beforeAll(() => {
   resetConverterForTests();
 });
 
-// ---------------------------------------------------------------------------
 // Harness: real hook, real editor, prop-controlled file entry
-// ---------------------------------------------------------------------------
-
 let workspaceCounter = 0;
 let WS: string;
 let FILE: string;
@@ -231,10 +225,6 @@ afterEach(async () => {
   editor.destroy();
   closeDocumentSync(FILE);
 });
-
-// ---------------------------------------------------------------------------
-// The invariants
-// ---------------------------------------------------------------------------
 
 describe("adoption integrity: self-writes vs external writes vs typing", () => {
   it("a row holding an earlier self-save never replaces the editor (MET-70 jump-back)", async () => {

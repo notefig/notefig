@@ -75,9 +75,6 @@ export function selectTabInLayout(
   });
 }
 
-/**
- * Find the first window node in the layout tree.
- */
 export function findFirstWindow(nodes: LayoutNode[]): WindowNode | null {
   for (const node of nodes) {
     if (node.type === "Window") {
@@ -95,9 +92,6 @@ export function findFirstWindow(nodes: LayoutNode[]): WindowNode | null {
   return null;
 }
 
-/**
- * Find a window node by its id.
- */
 export function findWindowById(
   nodes: LayoutNode[],
   windowId: string,
@@ -118,9 +112,6 @@ export function findWindowById(
   return null;
 }
 
-/**
- * Find the first window that contains the given tab id.
- */
 export function findWindowContainingTab(
   nodes: LayoutNode[],
   tabId: string,
@@ -244,9 +235,6 @@ export function openFileInLayout(
   return openTabInWindow(layout, resolvedTargetWindowId, tabId, intent);
 }
 
-/**
- * Create an initial layout with a single window containing one tab.
- */
 export function createInitialLayout(tabId: string): LayoutNode[] {
   return [
     {
@@ -273,10 +261,8 @@ export function removeTabFromLayout(
         if (node.type === "Window") {
           const newChildren = node.children.filter((id) => id !== tabId);
 
-          // If window is empty, remove it (return null to be filtered)
           if (newChildren.length === 0) return null;
 
-          // If selected tab was removed, select first remaining tab
           const newSelected =
             node.selected === tabId ? newChildren[0] : node.selected;
 
@@ -288,7 +274,6 @@ export function removeTabFromLayout(
         }
         if (node.type === "Panel") {
           const newChildren = walk(node.children);
-          // If panel has no children left, remove it
           if (newChildren.length === 0) return null;
           return { ...node, children: newChildren };
         }

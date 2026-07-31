@@ -175,7 +175,6 @@ export function Welcome() {
         <ThemeToggle />
       </nav>
 
-      {/* Main Content */}
       <div className="relative z-0 flex flex-1 flex-col overflow-hidden">
         <div className="flex flex-1 flex-col items-center justify-center px-6 py-12 lg:px-8">
           <div className="w-full max-w-2xl">
@@ -190,7 +189,6 @@ export function Welcome() {
 
             <ScrollArea className="h-[calc(100vh-400px)] max-h-[400px]">
               <div className="space-y-2 pr-4">
-                {/* New Document Button */}
                 <button
                   ref={newProjectRef}
                   onClick={handleNewDocument}
@@ -218,7 +216,6 @@ export function Welcome() {
                   </div>
                 </button>
 
-                {/* Recent Projects */}
                 {recentProjects.length > 0 ? (
                   recentProjects.map((project) => (
                     <button
@@ -263,7 +260,6 @@ export function Welcome() {
         </div>
       </div>
 
-      {/* Settings Modal */}
       <SettingsModal
         direction="ltr"
         onDirectionChange={() => {}}

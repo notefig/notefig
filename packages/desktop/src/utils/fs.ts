@@ -16,27 +16,17 @@ export type FileEntries = Record<FileEntry["path"], FileEntry>;
 
 export type SortOrder = "name-asc" | "name-desc" | "date-modified";
 
-/**
- * Extended FileEntry interface for tree structure representation
- * Adds children array for hierarchical display and optional UI properties
- */
 export interface FileTreeNode extends FileEntry {
   children?: FileTreeNode[];
   label?: string;
 }
 
-/**
- * Get the file or directory name from a file path
- */
 export function getFileName(filePath: string): string {
   if (!filePath) return "";
   const parts = filePath.split("/").filter((p) => p.length > 0);
   return parts.length > 0 ? parts[parts.length - 1] : filePath;
 }
 
-/**
- * Get the file extension from a file path
- */
 export function getFileExtension(filePath: string): string {
   const parts = filePath.split(".");
   return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : "";
@@ -65,7 +55,6 @@ export function isImageFile(filePath: string): boolean {
 export function isTextFile(filePath: string): boolean {
   const extension = getFileExtension(filePath);
 
-  // Common text file extensions
   const textExtensions = new Set([
     // Markdown
     "md",
@@ -129,26 +118,17 @@ export function isTextFile(filePath: string): boolean {
   return textExtensions.has(extension);
 }
 
-/**
- * Get the file name without extension from a file path
- */
 export function getFileNameWithoutExtension(filePath: string): string {
   const fileName = filePath.split("/").pop() || filePath;
   const parts = fileName.split(".");
   return parts.length > 1 ? parts.slice(0, -1).join(".") : fileName;
 }
 
-/**
- * Get the directory path from a file path
- */
 export function getDirectoryPath(filePath: string): string {
   const parts = filePath.split("/");
   return parts.slice(0, -1).join("/") || "/";
 }
 
-/**
- * Join path components
- */
 export function joinPaths(...paths: string[]): string {
   return paths
     .filter((path) => path && path.length > 0)
@@ -164,9 +144,7 @@ export function joinPaths(...paths: string[]): string {
 export function normalizePath(filePath: string): string {
   if (!filePath) return "/";
 
-  let normalized = filePath
-    .replace(/\\/g, "/") // Convert backslashes to forward slashes
-    .replace(/\/+/g, "/"); // Remove duplicate slashes
+  let normalized = filePath.replace(/\\/g, "/").replace(/\/+/g, "/");
 
   // Ensure leading slash
   if (!normalized.startsWith("/")) {
@@ -242,7 +220,6 @@ export function flatEntriesToTree(
   const pathMap = new Map<string, FileTreeNode>();
   const rootNodes: FileTreeNode[] = [];
 
-  // Normalize basePath for comparison
   const normalizedBasePath = normalizePath(basePath);
 
   // First pass: Create all directory nodes that might not exist in flatFiles
@@ -261,7 +238,6 @@ export function flatEntriesToTree(
     }
   });
 
-  // Create missing directory nodes
   directoriesNeeded.forEach((relPath) => {
     const absolutePath = `${normalizedBasePath}/${relPath}`;
     if (!flatFiles[absolutePath]) {
@@ -277,7 +253,6 @@ export function flatEntriesToTree(
     }
   });
 
-  // Add all existing file entries
   Object.entries(flatFiles).forEach(([absolutePath, entry]) => {
     const node: FileTreeNode = {
       ...entry,
@@ -307,10 +282,8 @@ export function flatEntriesToTree(
     const parts = node.relativePath.split("/").filter((p) => p.length > 0);
 
     if (parts.length === 1) {
-      // Top-level entry
       rootNodes.push(node);
     } else {
-      // Nested entry - find parent
       const parentRelativePath = parts.slice(0, -1).join("/");
       const parentAbsolutePath = `${normalizedBasePath}/${parentRelativePath}`;
       const parent = pathMap.get(parentAbsolutePath);
@@ -324,7 +297,6 @@ export function flatEntriesToTree(
     }
   });
 
-  // Sort children based on sort order
   const sortChildren = (nodes: FileTreeNode[]) => {
     nodes.sort((a, b) => {
       switch (sortOrder) {
@@ -360,12 +332,6 @@ export function flatEntriesToTree(
   return rootNodes;
 }
 
-/**
- * Opens a directory picker dialog
- * Delegates to the platform adapter for platform-specific implementation
- * @param title - Optional title for the picker dialog
- * @returns Promise that resolves to the selected directory path or null if cancelled
- */
 /**
  * Validate a new file/directory name.
  * Returns an error message string, or null if valid.

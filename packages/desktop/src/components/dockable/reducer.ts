@@ -6,9 +6,7 @@ import type {
 } from "./utils/serializeLayout";
 import { arrayMove } from "@dnd-kit/sortable";
 
-type State = PanelNode & {
-  // children: ParsedNode[];
-};
+type State = PanelNode;
 
 export type ResizeAction = {
   type: "resize";
@@ -80,7 +78,6 @@ const appReducer = createReducer<State, Action>({
   resize: (state, { sizes, address }: ResizeAction) => {
     const children = getNodeFromAddress(state, address).children as PanelNode[];
 
-    // update the size of the panels
     children.forEach((p, i) => {
       p.size = sizes[i];
     });
@@ -112,7 +109,6 @@ const appReducer = createReducer<State, Action>({
 
     targetParent.children.splice(targetIndex + 1, 0, newPanel);
 
-    // Update source window's selected tab
     if (sourceWindow.children.length === 0) {
       sourceWindow.selected = "";
     } else {
@@ -155,13 +151,11 @@ const appReducer = createReducer<State, Action>({
       targetWindowAddress,
     ) as WindowNode;
 
-    // dont need to move it if it's the same window
     if (sourceWindow === targetWindow) return;
 
     const activeIndex = sourceWindow.children.indexOf(tabId);
     const overIndex = targetWindow.children.length; // always the last tab
 
-    // Remove tab from active parent
     sourceWindow.children.splice(activeIndex, 1);
 
     // Insert tab into target window BEFORE cleanup (so tab is not lost)
@@ -172,7 +166,6 @@ const appReducer = createReducer<State, Action>({
     if (sourceWindow.children.length === 0) {
       sourceWindow.selected = "";
     } else if (sourceWindow.selected === tabId) {
-      // If active tab was selected, select first remaining tab
       sourceWindow.selected = sourceWindow.children[0];
     }
 
@@ -196,12 +189,10 @@ const appReducer = createReducer<State, Action>({
       targetWindowAddress.slice(-1)[0],
     ];
 
-    // if the source window is the same as the target window and the source window has only one tab, we don't need to do anything
     if (sourceWindow === targetWindow && sourceWindow.children.length === 1) {
       return;
     }
 
-    // remove tab from the source window
     const tabIndex = sourceWindow.children.indexOf(tabId);
     sourceWindow.children.splice(tabIndex, 1);
 
@@ -213,7 +204,6 @@ const appReducer = createReducer<State, Action>({
       sourceWindow.selected = sourceWindow.children[0];
     }
 
-    // create new window
     const newWindow: WindowNode = {
       type: "Window",
       id: "window-" + Date.now(),
@@ -266,7 +256,6 @@ function cleanup(root: LayoutNode) {
 
     if (node.type === "Window") {
       const windowNode = node as WindowNode;
-      // If window has no tabs, remove it
       if (windowNode.children.length === 0) {
         children.splice(i, 1);
         normalize(children);
@@ -274,7 +263,6 @@ function cleanup(root: LayoutNode) {
     } else if (node.type === "Panel") {
       const panelNode = node as PanelNode;
 
-      // Recursively process child panels
       cleanup(node);
 
       // if a panel-child has a single child that is also a panel, we can inline the grandchildren
@@ -285,7 +273,6 @@ function cleanup(root: LayoutNode) {
           child.children.length === 1 &&
           child.children[0].type === "Panel"
         ) {
-          // renormalize the size of the grandchild and push it into the new children array
           child.children[0].children.forEach((grandchild) => {
             const grandchildSize = grandchild.size || 1;
             const parentSize = child.size || 1;
@@ -297,7 +284,6 @@ function cleanup(root: LayoutNode) {
         }
       });
 
-      // normalize the sizes of the children
       normalize(newChildren);
       panelNode.children = newChildren;
 
@@ -321,15 +307,12 @@ function normalize(children: LayoutNode[]) {
 }
 
 function getNodeFromAddress(root: LayoutNode, address: number[]): LayoutNode {
-  // if the address is empty, we found the node
   if (address.length === 0) return root;
 
   const children = root.children as LayoutNode[];
 
-  // if the address has only one element, we return the panel at that index
   if (address.length === 1) return children[address[0]];
 
-  // otherwise, recursively call the function, slicing off the first index each time
   return getNodeFromAddress(children[address[0]], address.slice(1));
 }
 

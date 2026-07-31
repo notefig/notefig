@@ -61,8 +61,6 @@ function useQueryCacheTick(): number {
   return tick;
 }
 
-// ── Types ──
-
 interface ConsoleEntry {
   id: number;
   level: "log" | "info" | "warn" | "error";
@@ -120,8 +118,6 @@ async function copyTextWithFallback(text: string): Promise<void> {
   }
 }
 
-// ── Console capture hook ──
-
 function useConsoleCapture(active: boolean) {
   const entriesRef = useRef<ConsoleEntry[]>([]);
   const idCounterRef = useRef(0);
@@ -143,7 +139,6 @@ function useConsoleCapture(active: boolean) {
   useEffect(() => {
     if (!active) return;
 
-    // Save originals once
     if (!originalsRef.current) {
       originalsRef.current = {
         log: console.log.bind(console),
@@ -166,7 +161,6 @@ function useConsoleCapture(active: boolean) {
 
     const capture = (level: ConsoleLevel) => {
       return (...args: unknown[]) => {
-        // Call original
         originals[level](...args);
 
         const message = args
@@ -203,7 +197,6 @@ function useConsoleCapture(active: boolean) {
 
     return () => {
       if (flushTimer) clearTimeout(flushTimer);
-      // Restore originals
       console.log = originals.log;
       console.info = originals.info;
       console.warn = originals.warn;
@@ -213,8 +206,6 @@ function useConsoleCapture(active: boolean) {
 
   return { entries, clear };
 }
-
-// ── Debug Panel ──
 
 interface DebugPanelProps {
   /** When true, panel renders regardless of ?debug= search param */
@@ -263,7 +254,6 @@ function DebugPanelContent({
 }) {
   const { basePath, "*": filePath } = useParams();
 
-  // ── Derive tab/layout state from URL (self-sufficient) ──
   const dockableLayout = useMemo(
     () => parseLayout(searchParams.get(LAYOUT_PARAM)),
     [searchParams],
@@ -298,12 +288,10 @@ function DebugPanelContent({
     ? (queryClient.getQueryState(gitStatusQueryKey)?.dataUpdatedAt ?? 0)
     : 0;
 
-  // ── Console capture ──
   const [isCapturing, setIsCapturing] = useState(false);
   const { entries: consoleEntries, clear: clearConsole } =
     useConsoleCapture(isCapturing);
 
-  // ── Console filters ──
   const [consoleFilter, setConsoleFilter] = useState("");
   const [activeLevels, setActiveLevels] = useState<Set<ConsoleLevel>>(
     new Set(["log", "info", "warn", "error"]),
@@ -338,7 +326,6 @@ function DebugPanelContent({
     });
   };
 
-  // ── Auto-scroll ──
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
@@ -348,7 +335,6 @@ function DebugPanelContent({
     }
   }, [filteredEntries, autoScroll]);
 
-  // ── URL editor ──
   const currentRawUrl = window.location.pathname + window.location.search;
   const [urlDraft, setUrlDraft] = useState(currentRawUrl);
 
@@ -374,7 +360,6 @@ function DebugPanelContent({
     }
   };
 
-  // ── Copy debug report ──
   const [copied, setCopied] = useState(false);
 
   const buildDebugReport = useCallback(() => {
@@ -392,7 +377,6 @@ function DebugPanelContent({
     lines.push(`User Agent: ${navigator.userAgent}`);
     lines.push("");
 
-    // Error (if from error boundary)
     if (error) {
       lines.push("── Error ──");
       lines.push(`Message: ${error.message}`);
@@ -402,7 +386,6 @@ function DebugPanelContent({
       lines.push("");
     }
 
-    // Route state
     lines.push("── Route State ──");
     lines.push(`URL (raw): ${rawUrl}`);
     if (decoded !== rawUrl) {
@@ -416,7 +399,6 @@ function DebugPanelContent({
     lines.push(`searchParams: ${displayParams.toString() || "(none)"}`);
     lines.push("");
 
-    // Tabs
     lines.push("── Open Tabs ──");
     lines.push(`Count: ${openTabs.length}`);
     lines.push(`Active: ${activeTabId || "null"}`);
@@ -426,14 +408,12 @@ function DebugPanelContent({
     });
     lines.push("");
 
-    // Dockable layout
     if (dockableLayout.length > 0) {
       lines.push("── Dockable Layout ──");
       lines.push(JSON.stringify(dockableLayout, null, 2));
       lines.push("");
     }
 
-    // Git status cache snapshot
     lines.push("── Git Status Cache ──");
     lines.push(
       `updatedAt: ${latestGitStatusUpdatedAt ? new Date(latestGitStatusUpdatedAt).toISOString() : "(none)"}`,
@@ -444,7 +424,6 @@ function DebugPanelContent({
     lines.push(JSON.stringify(latestGitStatus, null, 2));
     lines.push("");
 
-    // Console entries
     if (consoleEntries.length > 0) {
       lines.push(`── Console Output (${consoleEntries.length} entries) ──`);
       consoleEntries.forEach((entry) => {
@@ -481,7 +460,6 @@ function DebugPanelContent({
     setTimeout(() => setCopied(false), 2000);
   }, [buildDebugReport]);
 
-  // ── Copy Plate AST ──
   const [astCopied, setAstCopied] = useState(false);
   const [showAstWarning, setShowAstWarning] = useState(false);
 
@@ -524,7 +502,6 @@ function DebugPanelContent({
     setTimeout(() => setAstCopied(false), 2000);
   }, [buildPlateAstReport]);
 
-  // ── Agent session history (task transcript dump) ──
   const workspacePath = basePath ? decodeURIComponent(basePath) : null;
 
   // Query everything unconditionally (rules of hooks) and filter client-side —
@@ -674,13 +651,11 @@ function DebugPanelContent({
     setTimeout(() => setSessionCopied(false), 2000);
   }, [buildSessionReport]);
 
-  // ── Collapsible sections ──
   const [showLayout, setShowLayout] = useState(false);
   const [activeTab, setActiveTab] = useState<"state" | "console" | "session">(
     error ? "state" : "state",
   );
 
-  // Build search params string without 'debug' and 'layout' for cleaner display
   const displaySearchParams = new URLSearchParams(searchParams);
   displaySearchParams.delete("debug");
   const searchParamsStr = displaySearchParams.toString();
@@ -692,7 +667,6 @@ function DebugPanelContent({
         forceOpen ? "h-full" : "max-h-[40vh]",
       )}
     >
-      {/* ── Error banner (if from error boundary) ── */}
       {error && (
         <div className="px-3 py-2 bg-destructive/10 border-b border-destructive/30 shrink-0">
           <div className="text-destructive font-semibold text-xs mb-1">
@@ -727,10 +701,8 @@ function DebugPanelContent({
         </div>
       )}
 
-      {/* ── Header ── */}
       <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border bg-muted/50 shrink-0">
         <div className="flex items-center gap-1">
-          {/* Tab switcher */}
           <button
             onClick={() => setActiveTab("state")}
             className={cn(
@@ -777,7 +749,6 @@ function DebugPanelContent({
         </div>
 
         <div className="flex items-center gap-1">
-          {/* Copy debug report */}
           <Button
             variant="ghost"
             size="icon"
@@ -791,7 +762,6 @@ function DebugPanelContent({
               <Copy className="h-3 w-3" />
             )}
           </Button>
-          {/* Copy Plate AST (with warning about file content) */}
           <Button
             variant="ghost"
             size="icon"
@@ -801,8 +771,6 @@ function DebugPanelContent({
           >
             <FileJson className="h-3 w-3" />
           </Button>
-          {/* Reset telemetry consent (dev utility): wipes the stored
-              consent keys and reloads, so the first-run dialog shows again */}
           <Button
             variant="ghost"
             size="icon"
@@ -812,7 +780,6 @@ function DebugPanelContent({
           >
             <ShieldOff className="h-3 w-3" />
           </Button>
-          {/* Reload */}
           <Button
             variant="ghost"
             size="icon"
@@ -822,7 +789,6 @@ function DebugPanelContent({
           >
             <RotateCw className="h-3 w-3" />
           </Button>
-          {/* Close */}
           {onClose && (
             <Button
               variant="ghost"
@@ -837,7 +803,6 @@ function DebugPanelContent({
         </div>
       </div>
 
-      {/* ── Plate AST Warning ── */}
       {showAstWarning && (
         <div className="px-3 py-2 bg-amber-500/10 border-b border-amber-500/30 shrink-0">
           <div className="flex items-start gap-2">
@@ -886,7 +851,6 @@ function DebugPanelContent({
         </div>
       )}
 
-      {/* ── URL Editor ── */}
       <div className="px-3 py-1.5 border-b border-border bg-muted/30 shrink-0 space-y-1">
         <div className="flex items-center gap-1.5">
           <span className="text-muted-foreground text-[10px] uppercase tracking-wider shrink-0">
@@ -918,11 +882,9 @@ function DebugPanelContent({
         )}
       </div>
 
-      {/* ── Tab Content ── */}
       <ScrollArea className="flex-1 min-h-0">
         {activeTab === "state" ? (
           <div className="p-3 space-y-2">
-            {/* Route state */}
             <div className="space-y-1">
               <Row label="Current URL (raw)">
                 {window.location.pathname}
@@ -938,7 +900,6 @@ function DebugPanelContent({
               <Row label="searchParams">{searchParamsStr || "(none)"}</Row>
             </div>
 
-            {/* Tab state */}
             <div className="border-t border-border pt-2">
               <Row label={`openTabs (${openTabs.length})`}>
                 {openTabs.length === 0 ? "(none)" : ""}
@@ -966,7 +927,6 @@ function DebugPanelContent({
               <Row label="activeTabId">{activeTabId || "null"}</Row>
             </div>
 
-            {/* Dockable layout */}
             {dockableLayout.length > 0 && (
               <div className="border-t border-border pt-2">
                 <button
@@ -988,7 +948,6 @@ function DebugPanelContent({
               </div>
             )}
 
-            {/* Git status snapshot */}
             <div className="border-t border-border pt-2">
               <Row label="gitStatus.updatedAt">
                 {latestGitStatusUpdatedAt
@@ -1007,7 +966,6 @@ function DebugPanelContent({
           </div>
         ) : activeTab === "session" ? (
           <div className="flex flex-col h-full">
-            {/* Session controls */}
             <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border shrink-0">
               <span className="text-muted-foreground text-[10px] uppercase tracking-wider shrink-0">
                 Task
@@ -1042,7 +1000,6 @@ function DebugPanelContent({
               </Button>
             </div>
 
-            {/* Session transcript */}
             <div className="flex-1 overflow-auto min-h-0 p-3">
               {!sessionTask ? (
                 <div className="flex items-center justify-center h-full p-4 text-muted-foreground text-[11px]">
@@ -1057,9 +1014,7 @@ function DebugPanelContent({
           </div>
         ) : (
           <div className="flex flex-col h-full">
-            {/* Console controls */}
             <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border shrink-0">
-              {/* Capture toggle */}
               <Button
                 variant={isCapturing ? "secondary" : "ghost"}
                 size="icon"
@@ -1073,7 +1028,6 @@ function DebugPanelContent({
                   <Play className="h-3 w-3" />
                 )}
               </Button>
-              {/* Clear */}
               <Button
                 variant="ghost"
                 size="icon"
@@ -1083,7 +1037,6 @@ function DebugPanelContent({
               >
                 <Trash2 className="h-3 w-3" />
               </Button>
-              {/* Level filters */}
               <div className="flex items-center gap-0.5 ml-1">
                 {(["log", "info", "warn", "error"] as ConsoleLevel[]).map(
                   (level) => (
@@ -1102,14 +1055,12 @@ function DebugPanelContent({
                   ),
                 )}
               </div>
-              {/* Filter */}
               <Input
                 value={consoleFilter}
                 onChange={(e) => setConsoleFilter(e.target.value)}
                 placeholder="Filter (regex)..."
                 className="h-6 text-[11px] font-mono bg-background border-border px-1.5 py-0 flex-1 ml-1"
               />
-              {/* Auto-scroll toggle */}
               <button
                 onClick={() => setAutoScroll(!autoScroll)}
                 className={cn(
@@ -1124,7 +1075,6 @@ function DebugPanelContent({
               </button>
             </div>
 
-            {/* Console entries */}
             <div className="flex-1 overflow-auto min-h-0">
               {!isCapturing && consoleEntries.length === 0 ? (
                 <div className="flex items-center justify-center h-full p-4 text-muted-foreground text-[11px]">
@@ -1174,8 +1124,6 @@ function DebugPanelContent({
     </div>
   );
 }
-
-// ── Helpers ──
 
 function Row({
   label,

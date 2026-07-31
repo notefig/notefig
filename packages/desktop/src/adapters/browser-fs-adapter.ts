@@ -60,7 +60,6 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
 
   constructor() {
     super();
-    // Initialize file watcher with bound methods
     this.fileWatcher = new BrowserFileWatcher(
       this.readDirectory.bind(this),
       this.readFiles.bind(this),
@@ -225,7 +224,6 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
 
     const workspacePath = normalizeWorkspacePath(handle.name);
 
-    // Store the handle indexed by the workspace path
     await this.storeHandle(workspacePath, handle);
     this.handleCache.set(workspacePath, handle);
 
@@ -503,7 +501,6 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
 
       try {
         if (!last) {
-          // This is the root workspace directory
           await this.getRootHandle(workspaceRoot);
           results.push({ path, exists: true, type: "directory" });
           continue;
@@ -553,7 +550,6 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
 
       try {
         if (!name) {
-          // Root directory
           await this.getRootHandle(workspaceRoot);
           const now = new Date();
           succeeded.push({
@@ -640,7 +636,6 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     relativePath: string,
     workspacePath: string,
   ): Promise<string> {
-    // If path is already absolute, use it directly; otherwise join with workspace
     const absolutePath = relativePath.startsWith("/")
       ? relativePath
       : `${workspacePath}/${relativePath}`.replace(/\/+/g, "/");

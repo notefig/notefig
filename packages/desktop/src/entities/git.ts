@@ -30,10 +30,6 @@ import { isWorkspaceAccessError } from "@/adapters/platform-adapter.interface";
 import { normalizePath } from "@/utils/fs";
 import { queryClient } from "./query-client";
 
-// ---------------------------------------------------------------------------
-// Construction + registry — git services
-// ---------------------------------------------------------------------------
-
 const gitServiceRegistry = new Map<string, IsomorphicGitService>();
 const gitInitRegistry = new Map<string, Promise<void>>();
 
@@ -95,10 +91,6 @@ export function clearWorkspaceGitServices(): void {
   gitServiceRegistry.clear();
   gitInitRegistry.clear();
 }
-
-// ---------------------------------------------------------------------------
-// Rows + collection
-// ---------------------------------------------------------------------------
 
 /** A GitError flattened to data so it can live on a row. */
 export interface SerializedGitError {
@@ -303,10 +295,6 @@ export function clearGitCollection(workspacePath: string): void {
   queryClient.removeQueries({ queryKey: gitQueryKey(normalized) });
 }
 
-// ---------------------------------------------------------------------------
-// Reactive hooks — the way UI reads this entity
-// ---------------------------------------------------------------------------
-
 export interface GitSummary {
   initialized: boolean;
   branch: string;
@@ -396,10 +384,6 @@ export function useGitFetching(workspacePath: string): boolean {
   );
 }
 
-// ---------------------------------------------------------------------------
-// One-shot reads
-// ---------------------------------------------------------------------------
-
 /** Non-reactive per-file read of the same row `useFileGitState` serves. */
 export function readFileGitState(
   workspacePath: string,
@@ -409,10 +393,6 @@ export function readFileGitState(
   return row?.kind === "file" ? row : undefined;
 }
 
-// ---------------------------------------------------------------------------
-// Pure selectors (shared by status bar + checkpoint panel)
-// ---------------------------------------------------------------------------
-
 export type SyncState = "uncommitted" | "unsynced" | "synced";
 
 export function deriveSyncState(summary: GitSummary | undefined): SyncState {
@@ -421,10 +401,6 @@ export function deriveSyncState(summary: GitSummary | undefined): SyncState {
   if ((summary.ahead ?? 0) > 0) return "unsynced";
   return "synced";
 }
-
-// ---------------------------------------------------------------------------
-// Actions
-// ---------------------------------------------------------------------------
 
 /** Refetch the workspace's git rows (status + checkpoints in one pass). */
 export async function refetchGit(workspacePath: string): Promise<void> {

@@ -176,7 +176,6 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   }
 
   openExternal(url: string): Promise<void> {
-    // Only allow http, https, and mailto schemes
     const allowed = /^(https?|mailto):/i;
     if (allowed.test(url)) {
       window.open(url, "_blank", "noopener,noreferrer");
@@ -287,7 +286,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   }
 
   addEventListener(_callback: PlatformEventListener): () => void {
-    // No-op in browser - return empty cleanup function
+    // No-op in browser
     return () => {};
   }
 
@@ -620,7 +619,6 @@ export function filterFilePaths(
 ): string[] {
   let filtered = paths;
 
-  // If fileIncludes is set, only search those files
   if (options.fileIncludes?.length) {
     const includeSet = new Set(options.fileIncludes);
     filtered = filtered.filter((p) => includeSet.has(p));
@@ -654,9 +652,6 @@ export function buildSearchPattern(options: SearchOptions): RegExp | null {
   }
 }
 
-/**
- * Search a file's content string for pattern matches.
- */
 export function searchFileContent(
   filePath: string,
   content: string,

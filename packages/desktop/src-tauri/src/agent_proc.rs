@@ -189,8 +189,6 @@ const NESTED_SESSION_GUARD_VARS: &[&str] = &[
     "CLAUDE_CODE_CHILD_SESSION",
 ];
 
-// ========== Tauri commands ==========
-
 /// Result of `run_shell_command`.
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]

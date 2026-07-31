@@ -274,7 +274,6 @@ export const Workspace = () => {
       const filePattern = options?.filePattern;
       const initialQuery = options?.initialQuery;
 
-      // Switch sidebar to search view and expand it
       setUrlSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);

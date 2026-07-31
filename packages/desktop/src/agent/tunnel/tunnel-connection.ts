@@ -90,8 +90,6 @@ export class TunnelConnection {
 
   constructor(private readonly socketFactory: TunnelSocketFactory = webSocketFactory) {}
 
-  // ========== state ==========
-
   getState(): TunnelConnectionState {
     return this.state;
   }
@@ -110,8 +108,6 @@ export class TunnelConnection {
     this.state = state;
     for (const listener of this.stateListeners) listener();
   }
-
-  // ========== connect / disconnect ==========
 
   async connect(pairing: TunnelPairing): Promise<WorkerInfo> {
     if (this.state.status !== "disconnected") {
@@ -279,8 +275,6 @@ export class TunnelConnection {
     for (const listener of this.closedListeners) listener(error);
   }
 
-  // ========== frame IO ==========
-
   private sendFrame(inner: InnerFrame): void {
     if (!this.socket || !this.cipher) {
       throw new AgentTransportError("relay_unreachable", "tunnel is not connected");
@@ -330,8 +324,6 @@ export class TunnelConnection {
       for (const cb of this.mcpListeners) cb(taskId, connId, line);
     }
   }
-
-  // ========== typed channel surfaces ==========
 
   sendAcp(taskId: string, line: string): void {
     this.sendFrame({ ch: "acp", taskId, data: line });

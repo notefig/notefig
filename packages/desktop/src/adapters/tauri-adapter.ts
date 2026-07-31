@@ -299,7 +299,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     relativePath: string,
     workspacePath: string,
   ): Promise<string> {
-    // If path is already absolute, use it directly; otherwise join with workspace
     const absolutePath = relativePath.startsWith("/")
       ? relativePath
       : `${workspacePath}/${relativePath}`.replace(/\/+/g, "/");
@@ -315,7 +314,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       >("check_exists", { paths });
       return result;
     } catch {
-      // On error, mark all as non-existent
       return paths.map((path) => ({ path, exists: false }));
     }
   }
@@ -477,9 +475,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     await window.setFullscreen(!isFullscreen);
   }
 
-  /**
-   * Search content in files within a directory, returning all matches.
-   */
   async searchContent(
     directory: string,
     options: SearchOptions,

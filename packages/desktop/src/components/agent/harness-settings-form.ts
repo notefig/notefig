@@ -195,10 +195,6 @@ export function newCustomHarnessId(): string {
   return `custom:${crypto.randomUUID()}`;
 }
 
-// ---------------------------------------------------------------------------
-// List rows
-// ---------------------------------------------------------------------------
-
 export type HarnessSettingsRow = {
   definition: HarnessDefinition;
   origin: "builtin" | "overridden" | "custom";
@@ -252,9 +248,7 @@ export function deriveHarnessSettingsRows(
   );
 }
 
-// ---------------------------------------------------------------------------
-// Write helpers (immutable — callers kv.set the result)
-// ---------------------------------------------------------------------------
+// Write helpers (immutable — callers kv.set the result).
 
 /** Flip a built-in's enabled flag, preserving any materially-overridden
  *  fields. When the new state matches the natural default (found ⇒ on,

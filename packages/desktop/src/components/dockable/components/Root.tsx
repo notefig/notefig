@@ -112,9 +112,7 @@ export function DockableRoot({
     setActive({ id: active.id.toString(), type, children });
   }
 
-  function handleDragCancel() {
-    // console.log("drag cancel");
-  }
+  function handleDragCancel() {}
 
   function handleDragEnd({ active, over }: DragEndEvent) {
     if (!over) return;

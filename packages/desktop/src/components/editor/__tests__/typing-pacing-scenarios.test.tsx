@@ -36,10 +36,7 @@ import { createElement, Fragment } from "react";
 import { Editor } from "@tiptap/core";
 import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
 
-// ---------------------------------------------------------------------------
 // In-memory platform adapter with jittered async latency (hoisted for vi.mock)
-// ---------------------------------------------------------------------------
-
 const fake = vi.hoisted(() => {
   interface FakeFile {
     content: string;
@@ -203,10 +200,7 @@ beforeAll(() => {
   resetConverterForTests();
 });
 
-// ---------------------------------------------------------------------------
 // Harness: workspace.tsx data path, minus the chrome
-// ---------------------------------------------------------------------------
-
 let workspaceCounter = 0;
 let WS: string;
 let FILE: string;
@@ -428,10 +422,6 @@ function expectConverged(expected: string) {
     expected,
   );
 }
-
-// ---------------------------------------------------------------------------
-// Scenarios
-// ---------------------------------------------------------------------------
 
 const AUTOSAVE_DEBOUNCE_MS = 500;
 

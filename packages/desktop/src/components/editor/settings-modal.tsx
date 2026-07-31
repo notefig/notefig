@@ -142,7 +142,6 @@ export function SettingsModal({
         <DialogTitle className="sr-only">Settings</DialogTitle>
 
         <div dir={direction} className="flex h-full overflow-hidden">
-          {/* Settings Sidebar */}
           <div className="w-56 shrink-0 border-e border-border bg-sidebar">
             <ScrollArea className="h-full p-0">
               <div className="py-1">
@@ -175,7 +174,6 @@ export function SettingsModal({
           </div>
 
           <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
-            {/* Scrollable content */}
             <ScrollArea className="flex-1">
               <div className="p-6">{renderSettingsContent()}</div>
             </ScrollArea>
@@ -186,7 +184,6 @@ export function SettingsModal({
   );
 }
 
-// General Settings Panel
 function GeneralSettings({
   settings,
   setSettings,

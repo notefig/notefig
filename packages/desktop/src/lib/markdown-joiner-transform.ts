@@ -15,7 +15,6 @@ export const markdownJoinerTransform =
 
     return new TransformStream<TextStreamPart<TOOLS>, TextStreamPart<TOOLS>>({
       async flush(controller) {
-        // Only flush if we haven't seen text-end yet
         if (!textStreamEnded) {
           const remaining = joiner.flush();
           if (remaining && lastTextDeltaId) {
@@ -39,7 +38,6 @@ export const markdownJoinerTransform =
             await delay(joiner.delayInMs);
           }
         } else if (chunk.type === 'text-end') {
-          // Flush any remaining buffer before text-end
           const remaining = joiner.flush();
           if (remaining && lastTextDeltaId) {
             controller.enqueue({
@@ -206,11 +204,9 @@ export class MarkdownJoiner {
           output += this.buffer;
           this.clearBuffer();
         } else if (this.isFalsePositive(char)) {
-          // False positive - flush buffer as raw text
           output += this.buffer;
           this.clearBuffer();
         }
-        // Check if we should start buffering
       } else if (
         char === '*' ||
         char === '<' ||
@@ -222,7 +218,6 @@ export class MarkdownJoiner {
         this.buffer = char;
         this.isBuffering = true;
       } else {
-        // Pass through character directly
         output += char;
       }
     }

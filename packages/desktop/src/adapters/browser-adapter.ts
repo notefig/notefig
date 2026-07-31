@@ -98,7 +98,6 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
       const pathParts = relativePath.split("/");
 
       if (recursive) {
-        // Add all parent directories
         let currentPath = normalizedPath;
         for (let i = 0; i < pathParts.length - 1; i++) {
           currentPath += pathParts[i] + "/";
@@ -108,7 +107,6 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
           }
         }
       } else {
-        // Only add direct child directories
         if (pathParts.length > 1) {
           const dirPath = normalizedPath + pathParts[0];
           if (!isHiddenPath(dirPath)) {
@@ -144,7 +142,6 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     try {
       const db = await this.ensureDB();
 
-      // Check if demo data already exists
       const transaction = db.transaction([this.STORE_NAME], "readonly");
       const store = transaction.objectStore(this.STORE_NAME);
 
@@ -694,7 +691,6 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     relativePath: string,
     workspacePath: string,
   ): Promise<string> {
-    // If path is already absolute, use it directly; otherwise join with workspace
     const absolutePath = relativePath.startsWith("/")
       ? relativePath
       : `${workspacePath}/${relativePath}`.replace(/\/+/g, "/");
@@ -836,7 +832,6 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
 
       for (const path of paths) {
         try {
-          // Check if it exists as a file in IndexedDB
           const fileExists = await new Promise<boolean>((resolve) => {
             const request = store.get(path);
             request.onsuccess = () => resolve(!!request.result);
@@ -846,7 +841,6 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
           if (fileExists) {
             results.push({ path, exists: true, type: "file" });
           } else {
-            // Check if it exists as a directory (has children)
             const isDir = await this.isDirectory(db, path);
             if (isDir) {
               results.push({ path, exists: true, type: "directory" });
@@ -883,7 +877,6 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
 
       for (const path of paths) {
         try {
-          // Try to get as file first
           const data: any = await new Promise((resolve, reject) => {
             const request = store.get(path);
             request.onsuccess = () => {
@@ -897,7 +890,6 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
           });
 
           if (data) {
-            // It's a file
             succeeded.push({
               path,
               type: "file",
@@ -906,7 +898,6 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
               createdAt: data.createdAt || new Date(),
             });
           } else {
-            // Check if it's a directory
             const isDir = await this.isDirectory(db, path);
             if (isDir) {
               succeeded.push({
@@ -976,7 +967,6 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     const pattern = buildSearchPattern(options);
     if (!pattern) return [];
 
-    // Use processPool for bounded concurrency
     const { succeeded } = await processPool(
       filePaths,
       async (filePath: string) => {

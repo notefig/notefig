@@ -76,7 +76,6 @@ export default function Logo({
   );
 }
 
-// Preset exports for convenience
 export function AnimatedLogo(props: Omit<LogoProps, "animated">) {
   return <Logo {...props} animated={true} />;
 }

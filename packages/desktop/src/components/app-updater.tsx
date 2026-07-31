@@ -50,11 +50,9 @@ const PERSISTENT_TOAST_OPTIONS = {
   closeButton: true,
 } as const;
 
-// ---------------------------------------------------------------------------
 // Update check — a real query. TanStack Query provides the proactive
 // behavior: fetch on mount, refetch on window focus (throttled by
 // staleTime), refetch on an interval, and dedupe of concurrent checks.
-// ---------------------------------------------------------------------------
 
 export const UPDATE_CHECK_QUERY_KEY = ["app-update-check"] as const;
 
@@ -105,11 +103,9 @@ export function getUpdateCheckQueryOptions(queryClient: QueryClient) {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Install state — download/restart progress. This is mutation-style state
 // shared across components (settings modal, toasts), so it lives in the
 // query cache as a passive entry that the install functions patch.
-// ---------------------------------------------------------------------------
 
 export const UPDATE_INSTALL_QUERY_KEY = ["app-update-install"] as const;
 
@@ -161,10 +157,6 @@ function isInstallActive(queryClient: QueryClient): boolean {
   const phase = getInstallState(queryClient).phase;
   return phase === "downloading" || phase === "ready";
 }
-
-// ---------------------------------------------------------------------------
-// Combined view for the UI
-// ---------------------------------------------------------------------------
 
 export interface AppUpdaterView {
   status: UpdaterStatus;
@@ -256,10 +248,6 @@ export function useAppUpdater(): AppUpdaterView & {
     },
   };
 }
-
-// ---------------------------------------------------------------------------
-// Download / restart actions
-// ---------------------------------------------------------------------------
 
 /** The version an in-flight install is heading to, for telemetry. */
 function pendingUpdateVersion(queryClient: QueryClient): string {
@@ -400,11 +388,9 @@ function showUpdateAvailableToast(
   );
 }
 
-// ---------------------------------------------------------------------------
 // Bootstrap — subscribes to the check query (which starts the automatic
 // mount/focus/interval checks) and reacts to an available update: silent
 // auto-download when the setting allows it, a prompt toast otherwise.
-// ---------------------------------------------------------------------------
 
 export type UpdateNotificationAction = "auto-download" | "prompt" | "none";
 

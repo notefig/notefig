@@ -847,7 +847,6 @@ function ToolStatusIcon({ status }: { status: ToolCallStatus }) {
   if (status === "failed") {
     return <X className="size-3.5 shrink-0 text-destructive" />;
   }
-  // pending / in_progress
   return <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />;
 }
 

@@ -1,6 +1,3 @@
-// File watching module
-// Provides file system change detection using notify crate
-
 use crate::walkdir_utils::is_hidden_path;
 use notify::{
     event::{CreateKind, ModifyKind, RemoveKind, RenameMode},
@@ -14,8 +11,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use tokio::fs;
-
-// ========== Event Types ==========
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -46,8 +41,6 @@ pub struct ContentChangeEvent {
     pub changes: Vec<ContentChange>,
 }
 
-// ========== Watcher State ==========
-
 struct AppWrite {
     path: PathBuf,
     content_hash: String,
@@ -65,8 +58,6 @@ lazy_static::lazy_static! {
     static ref WATCHERS: WatcherMap = Arc::new(Mutex::new(HashMap::new()));
     static ref APP_WRITES: Arc<Mutex<Vec<AppWrite>>> = Arc::new(Mutex::new(Vec::new()));
 }
-
-// ========== Helper Functions ==========
 
 pub fn register_app_write(path: String, content_hash: String) {
     let mut writes = APP_WRITES.lock().unwrap();
@@ -90,18 +81,14 @@ pub fn register_app_write(path: String, content_hash: String) {
 /// pipeline leak the echo to the frontend on virtually every save.
 fn is_recent_app_write(path: &Path, content_hash: &str) -> bool {
     let mut writes = APP_WRITES.lock().unwrap();
-    // Garbage-collect stale entries while we have the lock
     writes.retain(|w| w.timestamp.elapsed().as_secs() < 5);
     writes
         .iter()
         .any(|w| w.path == path && w.content_hash == content_hash)
 }
 
-// Note: is_hidden_path is now in walkdir_utils module
-
 /// Check if a path should be filtered (hidden files, temp files, etc.)
 fn should_filter_path(path: &Path) -> bool {
-    // Filter hidden files/directories
     if is_hidden_path(path) {
         return true;
     }
@@ -140,7 +127,6 @@ fn collect_directory_paths(
                 let is_directory = path.is_dir();
                 results.push((path.clone(), is_directory));
 
-                // Recurse into subdirectories
                 if is_directory {
                     let sub_results = collect_directory_paths(path).await;
                     results.extend(sub_results);
@@ -152,8 +138,6 @@ fn collect_directory_paths(
     })
 }
 
-// ========== Event Processing ==========
-
 /// Process file system events and emit to frontend
 async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppHandle<R>) {
     let mut metadata_changes = Vec::new();
@@ -161,7 +145,6 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
 
     for event in events {
         match event.kind {
-            // CREATE events
             EventKind::Create(CreateKind::File) => {
                 for path in event.paths {
                     if should_filter_path(&path) {
@@ -182,10 +165,8 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                         continue;
                     }
 
-                    // Collect all files in the new directory
                     let dir_contents = collect_directory_paths(path.clone()).await;
 
-                    // Emit directory creation
                     metadata_changes.push(MetadataChange {
                         change_type: "created".to_string(),
                         path: path.to_string_lossy().to_string(),
@@ -193,7 +174,6 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                         is_directory: true,
                     });
 
-                    // Emit all child files/directories
                     for (child_path, is_dir) in dir_contents {
                         metadata_changes.push(MetadataChange {
                             change_type: "created".to_string(),
@@ -205,7 +185,6 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                 }
             }
 
-            // DELETE events
             EventKind::Remove(RemoveKind::File) => {
                 for path in event.paths {
                     if should_filter_path(&path) {
@@ -237,7 +216,6 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                 }
             }
 
-            // MODIFY events (content changes)
             // Handle Data(_), Any, and Other - macOS FSEvents often emits Any for atomic writes
             // (like those from Chrome's File System Access API)
             EventKind::Modify(ModifyKind::Data(_))
@@ -267,8 +245,6 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
             // RENAME events with Name(Any) - Chrome's File System Access API uses atomic writes
             // which emit Name(Any) with a single path when the temp file is renamed to the target
             EventKind::Modify(ModifyKind::Name(RenameMode::Any)) => {
-                // Single path means atomic write completion (temp renamed to target)
-                // We treat this as a content change
                 for path in event.paths {
                     if should_filter_path(&path) {
                         continue;
@@ -302,10 +278,8 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                     let is_directory = new_path.is_dir();
 
                     if is_directory {
-                        // For directory renames, collect all affected files
                         let dir_contents = collect_directory_paths(new_path.clone()).await;
 
-                        // Emit the directory rename
                         metadata_changes.push(MetadataChange {
                             change_type: "renamed".to_string(),
                             path: new_path.to_string_lossy().to_string(),
@@ -313,14 +287,12 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                             is_directory: true,
                         });
 
-                        // Emit renames for all children
                         let old_path_str = old_path.to_string_lossy();
                         let new_path_str = new_path.to_string_lossy();
 
                         for (child_new_path, is_dir) in dir_contents {
                             let child_new_str = child_new_path.to_string_lossy();
 
-                            // Compute old path by replacing prefix
                             if let Some(suffix) = child_new_str.strip_prefix(new_path_str.as_ref())
                             {
                                 let child_old_path = format!("{}{}", old_path_str, suffix);
@@ -334,7 +306,6 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                             }
                         }
                     } else {
-                        // Single file rename
                         metadata_changes.push(MetadataChange {
                             change_type: "renamed".to_string(),
                             path: new_path.to_string_lossy().to_string(),
@@ -345,13 +316,10 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                 }
             }
 
-            _ => {
-                // Ignore other event types
-            }
+            _ => {}
         }
     }
 
-    // Emit events if we have changes
     if !metadata_changes.is_empty() {
         let event = MetadataChangeEvent {
             changes: metadata_changes,
@@ -367,8 +335,6 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
     }
 }
 
-// ========== Tauri Commands ==========
-
 /// Start watching directories for metadata changes only (creates, deletes, renames)
 /// Uses RecursiveMode::Recursive to watch entire directory trees
 #[tauri::command]
@@ -379,7 +345,6 @@ pub async fn start_watching_metadata<R: tauri::Runtime>(
 ) -> Result<(), String> {
     let app_handle_clone = app_handle.clone();
 
-    // Create debounced watcher (100ms debounce)
     let mut debouncer = new_debouncer(
         Duration::from_millis(100),
         None,
@@ -388,7 +353,6 @@ pub async fn start_watching_metadata<R: tauri::Runtime>(
 
             match result {
                 Ok(events) => {
-                    // Process events asynchronously
                     tauri::async_runtime::spawn(async move {
                         let notify_events: Vec<Event> =
                             events.into_iter().map(|e| e.event).collect();
@@ -405,7 +369,6 @@ pub async fn start_watching_metadata<R: tauri::Runtime>(
 
     let path_bufs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
 
-    // Watch all requested paths recursively
     for path in &path_bufs {
         debouncer
             .watcher()
@@ -413,7 +376,6 @@ pub async fn start_watching_metadata<R: tauri::Runtime>(
             .map_err(|e| format!("Failed to watch path {}: {}", path.display(), e))?;
     }
 
-    // Store the watcher with paths
     let mut watchers = WATCHERS.lock().unwrap();
     watchers.insert(
         watch_id,
@@ -438,20 +400,17 @@ pub async fn start_watching_content<R: tauri::Runtime>(
     let mut watchers = WATCHERS.lock().unwrap();
     let new_paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
 
-    // Check if watcher already exists
     if let Some(state) = watchers.get_mut(&watch_id) {
-        // Reconcile: determine which paths to add and which to remove
+        // Reconcile: which paths to add and which to remove
         let old_paths_set: std::collections::HashSet<_> = state.watched_paths.iter().collect();
         let new_paths_set: std::collections::HashSet<_> = new_paths.iter().collect();
 
-        // Paths to stop watching (in old but not in new)
         for old_path in &state.watched_paths {
             if !new_paths_set.contains(old_path) {
                 let _ = state.debouncer.watcher().unwatch(old_path);
             }
         }
 
-        // Paths to start watching (in new but not in old)
         for new_path in &new_paths {
             if !old_paths_set.contains(new_path) {
                 state
@@ -462,10 +421,8 @@ pub async fn start_watching_content<R: tauri::Runtime>(
             }
         }
 
-        // Update tracked paths
         state.watched_paths = new_paths;
     } else {
-        // Create new watcher for content changes
         let app_handle_clone = app_handle.clone();
 
         let mut debouncer = new_debouncer(
@@ -490,7 +447,6 @@ pub async fn start_watching_content<R: tauri::Runtime>(
         )
         .map_err(|e| format!("Failed to create watcher: {}", e))?;
 
-        // Watch all files (non-recursively, these are individual files)
         for path in &new_paths {
             debouncer
                 .watcher()

@@ -117,8 +117,6 @@ export class FakeWorker {
     { connId: number; received: string[]; send: (line: string) => void }
   >();
 
-  // ========== internals ==========
-
   private toBrowser(data: string): void {
     if (this.closed) return;
     for (const cb of this.browserSide.message) cb(data);
