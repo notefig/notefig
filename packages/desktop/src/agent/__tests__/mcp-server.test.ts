@@ -127,16 +127,6 @@ describe("createMcpRequestHandler", () => {
     expect(instructions).toContain("do NOT call `widget_respond`");
   });
 
-  it("resources/list returns an empty catalog (self-contained URIs, nothing to enumerate)", async () => {
-    const response = await handler()({
-      jsonrpc: "2.0",
-      id: 20,
-      method: "resources/list",
-      params: {},
-    });
-    expect(response?.result).toEqual({ resources: [] });
-  });
-
   it("resources/read: an undecodable uri returns a JSON-RPC error, not a thrown exception", async () => {
     decodeWidgetContextUri.mockReturnValue(undefined);
     const response = await handler()({

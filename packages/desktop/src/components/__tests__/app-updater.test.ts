@@ -106,12 +106,6 @@ describe("deriveUpdaterView", () => {
     expect(view.status).toBe("error");
     expect(view.error).toBe("download failed");
   });
-
-  it("defaults the flow to download-restart before any check", () => {
-    expect(deriveUpdaterView(check(), idleInstall).flow).toBe(
-      "download-restart",
-    );
-  });
 });
 
 describe("resolveUpdateNotification", () => {

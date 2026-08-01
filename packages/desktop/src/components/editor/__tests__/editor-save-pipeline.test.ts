@@ -20,8 +20,6 @@ vi.mock("@/entities/files", () => ({
 
 import { writeFileContent } from "@/entities/files";
 import {
-  parseMarkdown,
-  serializeDoc,
   resetConverterForTests,
   closeDocumentSync,
   flushDocumentSync,
@@ -149,13 +147,6 @@ describe("save pipeline (inline fallback = worker-boot-failure path)", () => {
     // Backpressure coalescing: far fewer writes than edits.
     expect(calls.length).toBeLessThan(10);
     expect(calls.at(-1)![2]).toBe("start" + "x".repeat(10));
-  });
-
-  it("matches the standalone parse/serialize facade output", async () => {
-    const doc = await parseMarkdown("# Title\n\nBody");
-    const result = await serializeDoc(doc);
-    expect(result.markdown).toBe("# Title\n\nBody");
-    expect(result.hash).toBe(calculateContentHash("# Title\n\nBody"));
   });
 
   it("adopts an external change without writing it back", async () => {

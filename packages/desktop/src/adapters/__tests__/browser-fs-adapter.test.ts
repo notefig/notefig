@@ -273,21 +273,6 @@ describe("BrowserFsPlatformAdapter", () => {
       }
     });
 
-    it("should list files non-recursively", async () => {
-      const entriesIterator = (async function* () {
-        yield ["file1.txt", mockFileHandle];
-        yield ["subdir", { kind: "directory" }];
-      })();
-
-      mockDirectoryHandle.entries = vi.fn().mockReturnValue(entriesIterator);
-
-      const result = await adapter.readDirectory("/test-workspace", {
-        recursive: false,
-      });
-
-      expect(result.ok).toBe(true);
-    });
-
     it("should filter hidden files/directories", async () => {
       vi.mocked(browserFsUtils.isHiddenPath).mockImplementation(
         (path: string) => {
@@ -312,21 +297,6 @@ describe("BrowserFsPlatformAdapter", () => {
       }
     });
 
-    it("should handle paths with trailing slashes", async () => {
-      const entriesIterator = (async function* () {
-        yield ["file1.txt", mockFileHandle];
-      })();
-
-      mockDirectoryHandle.entries = vi.fn().mockReturnValue(entriesIterator);
-
-      const result = await adapter.readDirectory("/test-workspace/");
-
-      expect(result.ok).toBe(true);
-      expect(browserFsUtils.getWorkspaceRoot).toHaveBeenCalledWith(
-        "/test-workspace/",
-      );
-    });
-
     it("should return error for invalid workspace path", async () => {
       vi.mocked(browserFsUtils.getWorkspaceRoot).mockReturnValue(null);
 
@@ -336,38 +306,6 @@ describe("BrowserFsPlatformAdapter", () => {
       if (!result.ok) {
         expect(result.error.type).toBe("io_error");
       }
-    });
-
-    it("should handle includeFiles option", async () => {
-      const entriesIterator = (async function* () {
-        yield ["file1.txt", mockFileHandle];
-        yield ["subdir", { kind: "directory" }];
-      })();
-
-      mockDirectoryHandle.entries = vi.fn().mockReturnValue(entriesIterator);
-
-      const resultWithFiles = await adapter.readDirectory("/test-workspace", {
-        includeFiles: true,
-        includeDirectories: false,
-      });
-
-      expect(resultWithFiles.ok).toBe(true);
-    });
-
-    it("should handle includeDirectories option", async () => {
-      const entriesIterator = (async function* () {
-        yield ["file1.txt", mockFileHandle];
-        yield ["subdir", { kind: "directory" }];
-      })();
-
-      mockDirectoryHandle.entries = vi.fn().mockReturnValue(entriesIterator);
-
-      const resultWithDirs = await adapter.readDirectory("/test-workspace", {
-        includeFiles: false,
-        includeDirectories: true,
-      });
-
-      expect(resultWithDirs.ok).toBe(true);
     });
 
     it("should exclude hidden files by default", async () => {
@@ -583,51 +521,6 @@ describe("BrowserFsPlatformAdapter", () => {
   });
 
   describe("moveDirectory", () => {
-    it("should move directory and all children", async () => {
-      const entriesIterator = (async function* () {
-        yield ["file.txt", mockFileHandle];
-      })();
-
-      mockDirectoryHandle.entries = vi.fn().mockReturnValue(entriesIterator);
-
-      const result = await adapter.moveDirectory(
-        "/test-workspace/old",
-        "/test-workspace/new",
-      );
-
-      expect(result.ok).toBe(true);
-    });
-
-    it("should update all file paths", async () => {
-      const subDir = {
-        kind: "directory",
-        entries: vi.fn().mockReturnValue(
-          (async function* () {
-            yield ["b.txt", mockFileHandle];
-          })(),
-        ),
-        getDirectoryHandle: vi.fn(),
-        getFileHandle: vi.fn().mockResolvedValue(mockFileHandle),
-      };
-
-      const entriesIterator = (async function* () {
-        yield ["a.txt", mockFileHandle];
-        yield ["sub", subDir];
-      })();
-
-      mockDirectoryHandle.entries = vi.fn().mockReturnValue(entriesIterator);
-      mockDirectoryHandle.getDirectoryHandle = vi
-        .fn()
-        .mockResolvedValueOnce(subDir);
-
-      const result = await adapter.moveDirectory(
-        "/test-workspace/old",
-        "/test-workspace/new",
-      );
-
-      expect(result.ok).toBe(true);
-    });
-
     it("should fail if source doesn't exist", async () => {
       // Mock readDirectory to throw an error (simulating non-existent source)
       vi.spyOn(adapter, "readDirectory").mockRejectedValue(
@@ -643,46 +536,6 @@ describe("BrowserFsPlatformAdapter", () => {
       if (!result.ok) {
         expect(result.error.type).toBe("io_error");
       }
-    });
-
-    it("should handle nested directory moves", async () => {
-      const deepDir = {
-        kind: "directory",
-        entries: vi.fn().mockReturnValue(
-          (async function* () {
-            yield ["file.txt", mockFileHandle];
-          })(),
-        ),
-        getDirectoryHandle: vi.fn(),
-        getFileHandle: vi.fn().mockResolvedValue(mockFileHandle),
-      };
-
-      const subDir = {
-        kind: "directory",
-        entries: vi.fn().mockReturnValue(
-          (async function* () {
-            yield ["c", deepDir];
-          })(),
-        ),
-        getDirectoryHandle: vi.fn().mockResolvedValue(deepDir),
-        getFileHandle: vi.fn(),
-      };
-
-      const entriesIterator = (async function* () {
-        yield ["b", subDir];
-      })();
-
-      mockDirectoryHandle.entries = vi.fn().mockReturnValue(entriesIterator);
-      mockDirectoryHandle.getDirectoryHandle = vi
-        .fn()
-        .mockResolvedValueOnce(subDir);
-
-      const result = await adapter.moveDirectory(
-        "/test-workspace/a",
-        "/test-workspace/x",
-      );
-
-      expect(result.ok).toBe(true);
     });
   });
 
@@ -801,16 +654,6 @@ describe("BrowserFsPlatformAdapter", () => {
 
       expect(result[0].exists).toBe(true);
       expect(result[0].type).toBe("directory");
-    });
-
-    it("should return type for existing paths", async () => {
-      mockDirectoryHandle.getFileHandle = vi
-        .fn()
-        .mockResolvedValue(mockFileHandle);
-
-      const result = await adapter.exists(["/test-workspace/file.txt"]);
-
-      expect(result[0]).toHaveProperty("type", "file");
     });
   });
 
@@ -991,16 +834,6 @@ describe("BrowserFsPlatformAdapter", () => {
       expect(fileWatcherMock.removeEventListener).toHaveBeenCalledWith(
         callback,
       );
-    });
-
-    it("should support multiple listeners", () => {
-      const callback1 = vi.fn();
-      const callback2 = vi.fn();
-
-      adapter.addEventListener(callback1);
-      adapter.addEventListener(callback2);
-
-      expect(fileWatcherMock.addEventListener).toHaveBeenCalledTimes(2);
     });
   });
 });

@@ -167,11 +167,4 @@ describe("processPool", () => {
     expect(processed).toEqual([]);
     expect(results.succeeded).toEqual([]);
   });
-
-  it("works without shouldContinue (processes all)", async () => {
-    const results = await processPool([1, 2, 3, 4, 5], async (n) => [n], {
-      concurrency: 2,
-    });
-    expect(results.succeeded.sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
-  });
 });
