@@ -120,6 +120,86 @@ describe("file create → write → read round-trip", () => {
   });
 });
 
+describe("lazy stat hydration", () => {
+  let SUB = "";
+  let A = "";
+  let B = "";
+
+  beforeEach(() => {
+    SUB = `${WS}/sub`;
+    A = `${WS}/a.md`;
+    B = `${WS}/sub/b.md`;
+    // The listing queryFn walks files and directories separately.
+    adapter.readDirectory.mockImplementation(
+      async (
+        _path: string,
+        options?: { includeFiles?: boolean; includeDirectories?: boolean },
+      ) => ({
+        ok: true,
+        value:
+          options?.includeDirectories && !options?.includeFiles
+            ? [SUB]
+            : [A, B],
+      }),
+    );
+    adapter.getMetadata.mockImplementation(async (paths: string[]) =>
+      ok(
+        paths.map((path) => ({
+          ...metadata(path, 7),
+          type: path === SUB ? ("directory" as const) : ("file" as const),
+        })),
+      ),
+    );
+  });
+
+  it("the listing writes typed rows without stats and without a stat batch", async () => {
+    adapter.getMetadata.mockClear();
+    await files.refreshDirectoryMetadata(WS);
+
+    const { metadata: rows } = files.getOrCreateWorkspaceCollections(WS);
+    expect(rows.get(A)).toMatchObject({ type: "file", relativePath: "a.md" });
+    expect(rows.get(SUB)?.type).toBe("directory");
+    expect(rows.get(A)?.modified).toBeUndefined();
+    expect(rows.get(B)?.modified).toBeUndefined();
+    // No hydrated dirs yet — the refetch must not stat anything.
+    expect(adapter.getMetadata).not.toHaveBeenCalled();
+  });
+
+  it("hydrateDirectoryStats stats direct children only", async () => {
+    await files.refreshDirectoryMetadata(WS);
+    adapter.getMetadata.mockClear();
+
+    await files.hydrateDirectoryStats(WS, WS);
+
+    expect(adapter.getMetadata).toHaveBeenCalledTimes(1);
+    const statted = adapter.getMetadata.mock.calls[0][0] as string[];
+    expect(new Set(statted)).toEqual(new Set([SUB, A]));
+
+    const { metadata: rows } = files.getOrCreateWorkspaceCollections(WS);
+    expect(rows.get(A)?.modified).toBeInstanceOf(Date);
+    expect(rows.get(SUB)?.modified).toBeInstanceOf(Date);
+    // b.md lives one level deeper — untouched.
+    expect(rows.get(B)?.modified).toBeUndefined();
+  });
+
+  it("refetch preserves hydrated stats and re-stats hydrated dirs", async () => {
+    await files.refreshDirectoryMetadata(WS);
+    await files.hydrateDirectoryStats(WS, WS);
+
+    // Stat source dries up: carried-forward stats must survive the refetch.
+    adapter.getMetadata.mockClear();
+    adapter.getMetadata.mockResolvedValue(ok([]));
+    await files.refreshDirectoryMetadata(WS);
+
+    // The refetch re-attempted the hydrated dir's children...
+    const statted = adapter.getMetadata.mock.calls[0][0] as string[];
+    expect(new Set(statted)).toEqual(new Set([SUB, A]));
+    // ...and kept the previous stats when nothing came back.
+    const { metadata: rows } = files.getOrCreateWorkspaceCollections(WS);
+    expect(rows.get(A)?.modified).toBeInstanceOf(Date);
+  });
+});
+
 describe("file delete", () => {
   it("deleteFileOrDirectory removes the row and calls the fs seam", async () => {
     await files.createFile(WS, FILE, "hello");

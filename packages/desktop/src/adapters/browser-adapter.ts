@@ -5,6 +5,7 @@ import type {
   FileSystemMetadata,
   SearchMatch,
   SearchOptions,
+  IgnoreRulesOption,
 } from "./platform-adapter.interface";
 import {
   BaseBrowserAdapter,
@@ -13,7 +14,7 @@ import {
   buildSearchPattern,
   searchFileContent,
 } from "./base-browser-adapter";
-import { isHiddenPath } from "./browser-fs-utils";
+import { isHiddenPath, matchesIgnoreRules } from "./browser-fs-utils";
 import { processPool } from "@/utils/process-pool";
 
 export class BrowserPlatformAdapter extends BaseBrowserAdapter {
@@ -201,6 +202,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
       includeFiles?: boolean;
       includeDirectories?: boolean;
       includeHidden?: boolean;
+      ignore?: IgnoreRulesOption;
     },
   ): Promise<Result<string[]>> {
     try {
@@ -251,6 +253,8 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
 
           if (!recursive && relativePath.includes("/")) return false;
 
+          if (matchesIgnoreRules(relativePath, options?.ignore)) return false;
+
           return true;
         });
         results.push(...filePaths);
@@ -258,7 +262,15 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
 
       if (includeDirectories) {
         const directoryPaths = await this.getDirectories(db, path, recursive);
-        results.push(...directoryPaths);
+        results.push(
+          ...directoryPaths.filter(
+            (dirPath) =>
+              !matchesIgnoreRules(
+                dirPath.slice(normalizedPath.length),
+                options?.ignore,
+              ),
+          ),
+        );
       }
 
       return { ok: true, value: results };
@@ -955,6 +967,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
         recursive: true,
         includeFiles: true,
         includeDirectories: false,
+        ignore: options.ignore,
       });
 
       if (!dirResult.ok) {

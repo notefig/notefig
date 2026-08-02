@@ -950,6 +950,7 @@ describe("BrowserFsPlatformAdapter", () => {
       expect(fileWatcherMock.startWatchingMetadata).toHaveBeenCalledWith(
         ["/test-workspace"],
         "watch-1",
+        undefined,
       );
     });
 

@@ -6,6 +6,7 @@ import type {
   SearchMatch,
   SearchOptions,
   PlatformEventListener,
+  IgnoreRulesOption,
 } from "./platform-adapter.interface";
 import { FsError } from "./platform-adapter.interface";
 import {
@@ -14,7 +15,7 @@ import {
   filterFilePaths,
   buildSearchPattern,
 } from "./base-browser-adapter";
-import { isHiddenPath } from "./browser-fs-utils";
+import { isHiddenPath, createEntryIgnoreFilter } from "./browser-fs-utils";
 import {
   normalizeWorkspacePath,
   getWorkspaceRoot,
@@ -247,6 +248,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
       includeFiles?: boolean;
       includeDirectories?: boolean;
       includeHidden?: boolean;
+      ignore?: IgnoreRulesOption;
     },
   ): Promise<Result<string[]>> {
     try {
@@ -260,6 +262,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
       const includeDirectories = options?.includeDirectories !== false;
       const recursive = options?.recursive ?? false;
       const includeHidden = options?.includeHidden ?? false;
+      const isIgnoredEntry = createEntryIgnoreFilter(options?.ignore);
 
       const results: string[] = [];
 
@@ -271,6 +274,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
         for await (const entry of iterator as AsyncIterable<[string, any]>) {
           const [name, sub] = entry;
           if (!includeHidden && isHiddenPath(name)) continue;
+          if (isIgnoredEntry(name, sub.kind === "file")) continue;
           const nextRel = currentRel ? `${currentRel}/${name}` : name;
           if (sub.kind === "file") {
             if (includeFiles) {
@@ -653,8 +657,12 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     }
   }
 
-  async startWatchingMetadata(paths: string[], watchId: string): Promise<void> {
-    await this.fileWatcher.startWatchingMetadata(paths, watchId);
+  async startWatchingMetadata(
+    paths: string[],
+    watchId: string,
+    options?: { ignore?: IgnoreRulesOption },
+  ): Promise<void> {
+    await this.fileWatcher.startWatchingMetadata(paths, watchId, options);
   }
 
   async startWatchingContent(paths: string[], watchId: string): Promise<void> {
@@ -693,6 +701,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
         recursive: true,
         includeFiles: true,
         includeDirectories: false,
+        ignore: options.ignore,
       });
 
       if (!dirResult.ok) {

@@ -22,7 +22,12 @@ describe("TauriPlatformAdapter watch lifecycle", () => {
     await adapter.stopWatching("watch-1");
 
     expect(tauri.calls("start_watching_metadata")).toEqual([
-      { paths: ["/ws"], watchId: "watch-1" },
+      {
+        paths: ["/ws"],
+        watchId: "watch-1",
+        ignoreDirectories: null,
+        ignoreExtensions: null,
+      },
     ]);
     expect(tauri.calls("start_watching_content")).toEqual([
       { paths: ["/ws/a.md"], watchId: "watch-1" },
@@ -53,5 +58,75 @@ describe("TauriPlatformAdapter watch lifecycle", () => {
 
     // Must resolve, not reject — stopping an already-gone watcher is routine.
     await expect(adapter.stopWatching("watch-3")).resolves.toBeUndefined();
+  });
+});
+
+describe("ignore rules plumbing", () => {
+  const IGNORE = { directories: ["node_modules"], extensions: ["mp4"] };
+
+  it("forwards ignore lists on readDirectory and startWatchingMetadata", async () => {
+    const tauri = withMockedTauri({
+      read_directory: () => ({ ok: true, value: [] }),
+      start_watching_metadata: () => null,
+    });
+    const adapter = new TauriPlatformAdapter();
+
+    await adapter.readDirectory("/ws", { recursive: true, ignore: IGNORE });
+    await adapter.startWatchingMetadata(["/ws"], "watch-1", {
+      ignore: IGNORE,
+    });
+
+    expect(tauri.calls("read_directory")).toEqual([
+      {
+        path: "/ws",
+        recursive: true,
+        includeFiles: true,
+        includeDirectories: true,
+        includeHidden: false,
+        ignoreDirectories: ["node_modules"],
+        ignoreExtensions: ["mp4"],
+      },
+    ]);
+    expect(tauri.calls("start_watching_metadata")).toEqual([
+      {
+        paths: ["/ws"],
+        watchId: "watch-1",
+        ignoreDirectories: ["node_modules"],
+        ignoreExtensions: ["mp4"],
+      },
+    ]);
+  });
+
+  it("git storage host readDir never opts into ignore filtering", async () => {
+    // The regression that matters: git must see the complete tree —
+    // .git internals AND dependency dirs — regardless of app ignore rules.
+    const tauri = withMockedTauri({
+      read_directory: () => ({
+        ok: true,
+        value: ["/ws/.git", "/ws/node_modules"],
+      }),
+      check_exists: (args) =>
+        (args.paths as string[]).map((path) => ({
+          path,
+          exists: true,
+          type: "directory" as const,
+        })),
+    });
+    const adapter = new TauriPlatformAdapter();
+
+    const entries = await adapter.getGitStorageHost("/ws").readDir("/ws");
+
+    expect(tauri.calls("read_directory")).toEqual([
+      {
+        path: "/ws",
+        recursive: false,
+        includeFiles: true,
+        includeDirectories: true,
+        includeHidden: true,
+        ignoreDirectories: null,
+        ignoreExtensions: null,
+      },
+    ]);
+    expect(entries.map((e) => e.name)).toEqual([".git", "node_modules"]);
   });
 });

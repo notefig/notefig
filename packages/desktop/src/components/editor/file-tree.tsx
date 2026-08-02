@@ -30,6 +30,7 @@ import {
   type SortOrder,
 } from "@/utils/fs";
 import { useFileCollections, prefetchFileContent } from "@/entities/files";
+import { useDirectoryStatHydration } from "./use-directory-stat-hydration";
 import { useLiveQuery } from "@tanstack/react-db";
 import { FileTreeContextMenu } from "./file-tree-context-menu";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
@@ -311,6 +312,8 @@ function FileTreeItem({
   onModeChange,
 }: FileTreeItemProps) {
   const [isExpanded, setIsExpanded] = useState(depth === 0);
+  useDirectoryStatHydration(basePath, node, isExpanded);
+
   const isMetaHeld = useKeyHold("Meta");
   const isControlHeld = useKeyHold("Control");
   const isModHeld = isMetaHeld || isControlHeld;
@@ -607,6 +610,14 @@ export function FileTree({
   const filesTree = useMemo(() => {
     return flatEntriesToTree(files, basePath, sortOrder);
   }, [files, basePath, sortOrder]);
+
+  // Root-level rows aren't inside any expandable directory — hydrate them
+  // here, always "expanded".
+  useDirectoryStatHydration(
+    basePath,
+    { path: basePath, type: "directory", children: filesTree },
+    true,
+  );
 
   const isCreatingAtRoot =
     mode.type === "creating" && mode.parentPath === basePath;

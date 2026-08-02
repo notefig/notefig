@@ -1,5 +1,8 @@
 use crate::file_watcher::{compute_content_hash, register_app_write};
-use crate::walkdir_utils::{is_hidden_relative_to, walk_directory, WalkOptions};
+use crate::walkdir_utils::{
+    has_ignored_extension, is_hidden_relative_to, matches_exclude_pattern, walk_directory,
+    WalkOptions,
+};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
@@ -109,6 +112,10 @@ async fn ensure_parent_dir(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Ignore filtering is opt-in per call: the frontend passes its ignore
+/// config (utils/ignore.ts) only for workspace listings. Callers that must
+/// see the complete tree — notably the git storage host — pass nothing and
+/// get today's unfiltered behavior.
 #[tauri::command]
 pub async fn read_directory(
     path: String,
@@ -116,6 +123,8 @@ pub async fn read_directory(
     include_files: bool,
     include_directories: bool,
     include_hidden: bool,
+    ignore_directories: Option<Vec<String>>,
+    ignore_extensions: Option<Vec<String>>,
 ) -> Result<Vec<String>> {
     let path_buf = PathBuf::from(&path);
 
@@ -136,18 +145,24 @@ pub async fn read_directory(
     }
 
     let mut results = Vec::new();
+    let ignore_directories = ignore_directories.unwrap_or_default();
+    let ignore_extensions = ignore_extensions.unwrap_or_default();
 
     if recursive {
         let options = WalkOptions {
             follow_links: true,
             exclude_hidden: !include_hidden,
-            exclude_patterns: vec![],
+            exclude_patterns: ignore_directories,
             base_path: path_buf.clone(),
         };
 
         if let Err(e) = walk_directory(&path_buf, &options, |entry| {
             let entry_path = entry.path();
             let is_dir = entry_path.is_dir();
+
+            if !is_dir && has_ignored_extension(entry_path, &ignore_extensions) {
+                return Ok(());
+            }
 
             if (is_dir && include_directories) || (!is_dir && include_files) {
                 results.push(entry_path.to_string_lossy().to_string());
@@ -167,7 +182,19 @@ pub async fn read_directory(
                         continue;
                     }
 
+                    let entry_name = entry.file_name().to_string_lossy().to_lowercase();
+                    if ignore_directories
+                        .iter()
+                        .any(|p| matches_exclude_pattern(&entry_name, p))
+                    {
+                        continue;
+                    }
+
                     let is_dir = entry_path.is_dir();
+                    if !is_dir && has_ignored_extension(&entry_path, &ignore_extensions) {
+                        continue;
+                    }
+
                     if (is_dir && include_directories) || (!is_dir && include_files) {
                         results.push(entry_path.to_string_lossy().to_string());
                     }
@@ -668,7 +695,7 @@ mod tests {
         create_test_file(&temp_dir, "subdir/file2.txt", "content2").await;
         create_test_file(&temp_dir, "subdir/nested/file3.txt", "content3").await;
 
-        let result = read_directory(root_path.clone(), true, true, false, false).await;
+        let result = read_directory(root_path.clone(), true, true, false, false, None, None).await;
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
@@ -687,12 +714,95 @@ mod tests {
         create_test_file(&temp_dir, "file1.txt", "content1").await;
         create_test_file(&temp_dir, "subdir/file2.txt", "content2").await;
 
-        let result = read_directory(root_path.clone(), false, true, false, false).await;
+        let result = read_directory(root_path.clone(), false, true, false, false, None, None).await;
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
             assert_eq!(value.len(), 1);
             assert!(value[0].contains("file1.txt"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_directory_applies_ignore_rules_recursively() {
+        let temp_dir = setup_test_dir();
+        let root_path = temp_dir.path().to_string_lossy().to_string();
+
+        create_test_file(&temp_dir, "chapter.md", "content").await;
+        create_test_file(&temp_dir, "LICENSE", "license").await;
+        create_test_file(&temp_dir, "clip.mp4", "video").await;
+        create_test_file(&temp_dir, "node_modules/pkg/index.js", "js").await;
+        create_test_file(&temp_dir, "docs/dist/out.md", "built").await;
+
+        let ignore_dirs = Some(vec!["node_modules".to_string(), "dist".to_string()]);
+        let ignore_exts = Some(vec!["mp4".to_string()]);
+        let result = read_directory(
+            root_path.clone(),
+            true,
+            true,
+            true,
+            false,
+            ignore_dirs,
+            ignore_exts,
+        )
+        .await;
+
+        assert!(matches!(result, Result::Ok { .. }));
+        if let Result::Ok { value, .. } = result {
+            assert!(value.iter().any(|p| p.contains("chapter.md")));
+            // Extensionless files stay tracked (denylist, not allowlist).
+            assert!(value.iter().any(|p| p.contains("LICENSE")));
+            assert!(value.iter().any(|p| p.ends_with("docs")));
+            assert!(!value.iter().any(|p| p.contains("clip.mp4")));
+            assert!(!value.iter().any(|p| p.contains("node_modules")));
+            assert!(!value.iter().any(|p| p.contains("dist")));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_directory_applies_ignore_rules_non_recursively() {
+        let temp_dir = setup_test_dir();
+        let root_path = temp_dir.path().to_string_lossy().to_string();
+
+        create_test_file(&temp_dir, "chapter.md", "content").await;
+        create_test_file(&temp_dir, "archive.ZIP", "zip").await;
+        create_test_file(&temp_dir, "node_modules/pkg/index.js", "js").await;
+
+        let ignore_dirs = Some(vec!["node_modules".to_string()]);
+        let ignore_exts = Some(vec!["zip".to_string()]);
+        let result = read_directory(
+            root_path.clone(),
+            false,
+            true,
+            true,
+            false,
+            ignore_dirs,
+            ignore_exts,
+        )
+        .await;
+
+        assert!(matches!(result, Result::Ok { .. }));
+        if let Result::Ok { value, .. } = result {
+            assert_eq!(value.len(), 1);
+            assert!(value[0].contains("chapter.md"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_directory_without_ignore_args_is_unfiltered() {
+        // The git storage host path: no ignore args ⇒ complete listing.
+        let temp_dir = setup_test_dir();
+        let root_path = temp_dir.path().to_string_lossy().to_string();
+
+        create_test_file(&temp_dir, "node_modules/pkg/index.js", "js").await;
+        create_test_file(&temp_dir, "clip.mp4", "video").await;
+
+        let result = read_directory(root_path.clone(), true, true, true, false, None, None).await;
+
+        assert!(matches!(result, Result::Ok { .. }));
+        if let Result::Ok { value, .. } = result {
+            assert!(value.iter().any(|p| p.contains("index.js")));
+            assert!(value.iter().any(|p| p.contains("clip.mp4")));
         }
     }
 
@@ -705,7 +815,7 @@ mod tests {
         create_test_file(&temp_dir, ".hidden.txt", "hidden").await;
         create_test_file(&temp_dir, ".git/config", "git config").await;
 
-        let result = read_directory(root_path.clone(), true, true, true, false).await;
+        let result = read_directory(root_path.clone(), true, true, true, false, None, None).await;
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
@@ -724,7 +834,7 @@ mod tests {
         create_test_file(&temp_dir, ".hidden.txt", "hidden").await;
         create_test_file(&temp_dir, ".git/config", "git config").await;
 
-        let result = read_directory(root_path.clone(), true, true, true, true).await;
+        let result = read_directory(root_path.clone(), true, true, true, true, None, None).await;
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
@@ -742,7 +852,7 @@ mod tests {
 
         create_test_file(&temp_dir, "file1.txt", "content1").await;
 
-        let result = read_directory(root_path, false, true, false, false).await;
+        let result = read_directory(root_path, false, true, false, false, None, None).await;
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
@@ -752,7 +862,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_directory_returns_error_for_invalid_workspace_path() {
-        let result = read_directory("".to_string(), false, true, true, false).await;
+        let result = read_directory("".to_string(), false, true, true, false, None, None).await;
 
         assert!(matches!(result, Result::Err { .. }));
     }
@@ -767,7 +877,7 @@ mod tests {
             .await
             .expect("Failed to create dir");
 
-        let result = read_directory(root_path.clone(), false, true, false, false).await;
+        let result = read_directory(root_path.clone(), false, true, false, false, None, None).await;
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
@@ -786,7 +896,7 @@ mod tests {
             .await
             .expect("Failed to create dir");
 
-        let result = read_directory(root_path.clone(), false, false, true, false).await;
+        let result = read_directory(root_path.clone(), false, false, true, false, None, None).await;
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {

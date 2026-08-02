@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { platformAdapter } from "@/adapters";
+import { IGNORE_RULES } from "@/utils/ignore";
 import type {
   SearchOptions,
   SearchMatch,
@@ -56,6 +57,7 @@ export function useSearch(
     useRegex,
     filePattern: filePattern || undefined,
     maxResults,
+    ignore: IGNORE_RULES,
   };
 
   const { data, isFetching, error } = useQuery<SearchMatch[], Error>({

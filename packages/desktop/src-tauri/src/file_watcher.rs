@@ -54,9 +54,55 @@ struct WatcherState {
 
 type WatcherMap = Arc<Mutex<HashMap<String, WatcherState>>>;
 
+/// App-side ignore rules for a metadata watch, keyed by watch_id. Roots are
+/// the watched workspace paths: directory-name checks apply only to
+/// components *inside* a root, so a workspace living under e.g.
+/// ~/Documents/build/ is not swallowed by its own prefix.
+#[derive(Clone, Default)]
+struct WatchIgnoreConfig {
+    roots: Vec<PathBuf>,
+    directories: Vec<String>,
+    extensions: Vec<String>,
+}
+
 lazy_static::lazy_static! {
     static ref WATCHERS: WatcherMap = Arc::new(Mutex::new(HashMap::new()));
     static ref APP_WRITES: Arc<Mutex<Vec<AppWrite>>> = Arc::new(Mutex::new(Vec::new()));
+    static ref WATCH_IGNORES: Arc<Mutex<HashMap<String, WatchIgnoreConfig>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+}
+
+/// Whether any registered watch's ignore config filters this path.
+/// Lists arrive lowercased from the frontend (utils/ignore.ts).
+fn is_ignored_by_watch_config(path: &Path) -> bool {
+    let configs = WATCH_IGNORES.lock().unwrap();
+    for config in configs.values() {
+        for root in &config.roots {
+            if let Ok(relative) = path.strip_prefix(root) {
+                let ignored_component = relative.components().any(|component| {
+                    if let std::path::Component::Normal(os_str) = component {
+                        if let Some(name) = os_str.to_str() {
+                            return config
+                                .directories
+                                .iter()
+                                .any(|d| *d == name.to_lowercase());
+                        }
+                    }
+                    false
+                });
+                if ignored_component {
+                    return true;
+                }
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    let ext_lower = ext.to_lowercase();
+                    if config.extensions.iter().any(|e| *e == ext_lower) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 pub fn register_app_write(path: String, content_hash: String) {
@@ -100,7 +146,7 @@ fn should_filter_path(path: &Path) -> bool {
         }
     }
 
-    false
+    is_ignored_by_watch_config(path)
 }
 
 /// Compute content hash using MD5 (simple and deterministic)
@@ -341,6 +387,8 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
 pub async fn start_watching_metadata<R: tauri::Runtime>(
     paths: Vec<String>,
     watch_id: String,
+    ignore_directories: Option<Vec<String>>,
+    ignore_extensions: Option<Vec<String>>,
     app_handle: AppHandle<R>,
 ) -> Result<(), String> {
     let app_handle_clone = app_handle.clone();
@@ -374,6 +422,18 @@ pub async fn start_watching_metadata<R: tauri::Runtime>(
             .watcher()
             .watch(path, RecursiveMode::Recursive)
             .map_err(|e| format!("Failed to watch path {}: {}", path.display(), e))?;
+    }
+
+    {
+        let mut ignores = WATCH_IGNORES.lock().unwrap();
+        ignores.insert(
+            watch_id.clone(),
+            WatchIgnoreConfig {
+                roots: path_bufs.clone(),
+                directories: ignore_directories.unwrap_or_default(),
+                extensions: ignore_extensions.unwrap_or_default(),
+            },
+        );
     }
 
     let mut watchers = WATCHERS.lock().unwrap();
@@ -469,6 +529,7 @@ pub async fn start_watching_content<R: tauri::Runtime>(
 /// Stop watching (works for both metadata and content watchers)
 #[tauri::command]
 pub async fn stop_watching(watch_id: String) -> Result<(), String> {
+    WATCH_IGNORES.lock().unwrap().remove(&watch_id);
     let mut watchers = WATCHERS.lock().unwrap();
 
     if watchers.remove(&watch_id).is_some() {

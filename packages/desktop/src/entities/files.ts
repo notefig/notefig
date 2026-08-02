@@ -32,6 +32,7 @@ import {
   isWorkspaceAccessError,
 } from "@/adapters/platform-adapter.interface";
 import type { FileEntry } from "@/utils/fs";
+import { IGNORE_RULES } from "@/utils/ignore";
 import { calculateContentHash } from "@/utils/hash";
 import {
   invalidateDerivedState,
@@ -78,43 +79,80 @@ export function createFileMetadataCollection(workspaceId: string) {
       retry: (failureCount, error) =>
         !isWorkspaceAccessError(error) && failureCount < 3,
 
+      // Listing only — no per-path stat batch. Stats (modified/size)
+      // hydrate per directory via hydrateDirectoryStats when the tree
+      // shows it; the refetch re-stats already-hydrated directories so the
+      // 30s cycle stays cheap on large workspaces. Two walks (files, then
+      // dirs) because the listing API returns bare paths and rows need a
+      // type; the walk is the cheap half of the old scan.
       queryFn: async (): Promise<FileMetadata[]> => {
-        const dirResult = await platformAdapter.readDirectory(workspaceId, {
-          recursive: true,
-          includeFiles: true,
-          includeDirectories: true,
+        const walkOptions = { recursive: true, ignore: IGNORE_RULES };
+        const [filesResult, dirsResult] = await Promise.all([
+          platformAdapter.readDirectory(workspaceId, {
+            ...walkOptions,
+            includeFiles: true,
+            includeDirectories: false,
+          }),
+          platformAdapter.readDirectory(workspaceId, {
+            ...walkOptions,
+            includeFiles: false,
+            includeDirectories: true,
+          }),
+        ]);
+
+        for (const result of [filesResult, dirsResult]) {
+          if (!result.ok) {
+            // Rethrow typed so WorkspaceErrorBoundary can recognize
+            // permission failures and render the recovery fallback instead
+            // of DebugPanel.
+            const { type, path, message } = result.error;
+            throw new FsError(type, path, message);
+          }
+        }
+        if (!filesResult.ok || !dirsResult.ok) return []; // narrowing only
+
+        const entries: { path: string; type: "file" | "directory" }[] = [
+          ...dirsResult.value.map((p) => ({
+            path: p,
+            type: "directory" as const,
+          })),
+          ...filesResult.value.map((p) => ({ path: p, type: "file" as const })),
+        ];
+
+        // Re-stat children of hydrated directories so their stats stay
+        // fresh across refetches instead of pinning to hydration time.
+        const hydrated = hydratedDirsFor(workspaceId);
+        const pathsToStat = entries
+          .filter((e) => hydrated.has(parentDirectory(e.path)))
+          .map((e) => e.path);
+        const statMap = new Map<string, { modifiedAt: Date; size: number }>();
+        if (pathsToStat.length > 0) {
+          const statResult = await platformAdapter.getMetadata(pathsToStat);
+          for (const m of statResult.succeeded) {
+            statMap.set(m.path, { modifiedAt: m.modifiedAt, size: m.size });
+          }
+        }
+
+        // Merge, don't wipe: full-replace sync would erase hydrated stats
+        // and self-write bookkeeping for rows the walk still sees.
+        const previousRows = workspaceCollectionsRegistry.get(
+          workspaceId,
+        )?.metadata;
+
+        return entries.map(({ path, type }) => {
+          const stat = statMap.get(path);
+          const previous = previousRows?.get(path);
+          return {
+            path,
+            relativePath: path.startsWith(workspaceId)
+              ? path.slice(workspaceId.length + 1)
+              : undefined,
+            type,
+            modified: stat?.modifiedAt ?? previous?.modified,
+            size: stat?.size ?? previous?.size,
+            contentHash: previous?.contentHash ?? "",
+          };
         });
-
-        if (!dirResult.ok) {
-          // Rethrow typed so WorkspaceErrorBoundary can recognize permission
-          // failures and render the recovery fallback instead of DebugPanel.
-          const { type, path, message } = dirResult.error;
-          throw new FsError(type, path, message);
-        }
-
-        const paths = dirResult.value;
-
-        const metadataResult = await platformAdapter.getMetadata(paths);
-
-        const metadata: FileMetadata[] = metadataResult.succeeded.map((m) => ({
-          path: m.path,
-          relativePath: m.path.startsWith(workspaceId)
-            ? m.path.slice(workspaceId.length + 1)
-            : undefined,
-          type: m.type,
-          modified: m.modifiedAt,
-          size: m.size,
-          contentHash: "", // Will be computed when content is loaded
-        }));
-
-        if (metadataResult.failed.length > 0) {
-          console.warn(
-            "Failed to get metadata for some paths:",
-            metadataResult.failed,
-          );
-        }
-
-        return metadata;
       },
 
       getKey: (item) => item.path,
@@ -362,6 +400,91 @@ export interface WorkspaceCollections {
 
 const workspaceCollectionsRegistry = new Map<string, WorkspaceCollections>();
 
+// ---------------------------------------------------------------------------
+// Lazy stat hydration. Rows enter the collection from the listing walk with
+// no modified/size; a directory's children get stat'd when the tree shows
+// it. The hydrated set feeds the queryFn's re-stat on refetch.
+// ---------------------------------------------------------------------------
+
+const hydratedDirsRegistry = new Map<string, Set<string>>();
+const hydrationInFlight = new Map<string, Promise<void>>();
+
+function hydratedDirsFor(workspaceId: string): Set<string> {
+  let dirs = hydratedDirsRegistry.get(workspaceId);
+  if (!dirs) {
+    dirs = new Set();
+    hydratedDirsRegistry.set(workspaceId, dirs);
+  }
+  return dirs;
+}
+
+function parentDirectory(path: string): string {
+  const separator = path.lastIndexOf("/");
+  return separator > 0 ? path.slice(0, separator) : "/";
+}
+
+/** Drop hydration bookkeeping for a directory subtree (delete/rename). */
+function pruneHydratedDirs(workspaceId: string, path: string): void {
+  const dirs = hydratedDirsRegistry.get(workspaceId);
+  if (!dirs) return;
+  const prefix = path.endsWith("/") ? path : path + "/";
+  for (const dir of dirs) {
+    if (dir === path || dir.startsWith(prefix)) {
+      dirs.delete(dir);
+    }
+  }
+}
+
+/**
+ * Stat a directory's direct children and write modified/size into their
+ * rows. Callers re-invoke freely (tree expand, child-count changes) — one
+ * stat batch per directory is cheap, concurrent calls per directory
+ * coalesce, and rows the collection doesn't hold yet are simply picked up
+ * by a later call or the periodic refetch's hydrated-dir re-stat.
+ */
+export function hydrateDirectoryStats(
+  workspaceId: string,
+  dirPath: string,
+): Promise<void> {
+  const key = `${workspaceId} ${dirPath}`;
+  const inFlight = hydrationInFlight.get(key);
+  if (inFlight) return inFlight;
+
+  const promise = (async () => {
+    const collections = workspaceCollectionsRegistry.get(workspaceId);
+    if (!collections) return;
+
+    const prefix = dirPath.endsWith("/") ? dirPath : dirPath + "/";
+    const children = collections.metadata.toArray.filter(
+      (row) =>
+        row.path.startsWith(prefix) &&
+        !row.path.slice(prefix.length).includes("/"),
+    );
+
+    if (children.length > 0) {
+      const result = await platformAdapter.getMetadata(
+        children.map((c) => c.path),
+      );
+      const updates: FileMetadata[] = [];
+      for (const m of result.succeeded) {
+        const row = collections.metadata.get(m.path);
+        if (!row) continue;
+        updates.push({ ...row, modified: m.modifiedAt, size: m.size });
+      }
+      if (updates.length > 0) {
+        collections.metadata.utils.writeUpsert(updates);
+      }
+    }
+
+    hydratedDirsFor(workspaceId).add(dirPath);
+  })().finally(() => {
+    hydrationInFlight.delete(key);
+  });
+
+  hydrationInFlight.set(key, promise);
+  return promise;
+}
+
 if (import.meta.env.DEV) {
   // Diagnostic hook for e2e failure dumps (dev builds only).
   (window as unknown as Record<string, unknown>).__metristsDebugContentRow = (
@@ -550,6 +673,7 @@ export async function deleteFileOrDirectory(
   }
 
   collections.metadata.delete(path);
+  pruneHydratedDirs(workspaceId, path);
 
   const content = collections.content.get(path);
   if (content) {
@@ -728,11 +852,15 @@ export async function renameFileOrDirectory(
       path: newPath,
       relativePath: computeRelativePath(newPath),
     });
+    // Hydration state keys on paths; the renamed subtree re-hydrates when
+    // the tree shows it again.
+    pruneHydratedDirs(workspaceId, oldPath);
   }
 }
 
 export function clearWorkspaceCollections(workspaceId: string): void {
   workspaceCollectionsRegistry.delete(workspaceId);
+  hydratedDirsRegistry.delete(workspaceId);
   // Drop cached query state too, so a fresh open refetches instead of
   // replaying a stale error or stale data.
   queryClient.removeQueries({ queryKey: ["file-metadata", workspaceId] });
