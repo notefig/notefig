@@ -1,4 +1,6 @@
-use crate::walkdir_utils::{check_circular_symlink, walk_directory, WalkOptions};
+use crate::walkdir_utils::{
+    check_circular_symlink, has_ignored_extension, walk_directory, WalkOptions,
+};
 use grep::searcher::{BinaryDetection, Searcher, SearcherBuilder, Sink, SinkMatch};
 use grep_regex::RegexMatcher;
 use serde::Serialize;
@@ -134,6 +136,8 @@ pub async fn search_content(
     file_pattern: Option<String>,
     file_includes: Option<Vec<String>>,
     max_results: Option<usize>,
+    ignore_directories: Option<Vec<String>>,
+    ignore_extensions: Option<Vec<String>>,
 ) -> Result<Vec<SearchMatch>, String> {
     if query.is_empty() {
         return Err("Query cannot be empty".to_string());
@@ -188,10 +192,11 @@ pub async fn search_content(
         return Err(format!("Path is not a directory: {}", directory));
     }
 
+    let ignore_extensions = ignore_extensions.unwrap_or_default();
     let walk_options = WalkOptions {
         follow_links: true,
         exclude_hidden: true,
-        exclude_patterns: vec![],
+        exclude_patterns: ignore_directories.unwrap_or_default(),
         base_path: dir_path.clone(),
     };
 
@@ -199,6 +204,10 @@ pub async fn search_content(
         let path = entry.path();
 
         if !path.is_file() {
+            return Ok(());
+        }
+
+        if has_ignored_extension(path, &ignore_extensions) {
             return Ok(());
         }
 

@@ -4,6 +4,7 @@ import type {
   ContentChangeEvent,
   MetadataChange,
   ContentChange,
+  IgnoreRulesOption,
 } from "./platform-adapter.interface";
 import { calculateContentHash } from "@/utils/hash";
 
@@ -23,6 +24,7 @@ interface AppWrite {
 interface MetadataWatchState {
   watchId: string;
   paths: string[];
+  ignore?: IgnoreRulesOption;
   snapshot: Map<string, FileSnapshot>;
   intervalId: number;
 }
@@ -51,6 +53,7 @@ export class BrowserFileWatcher {
         recursive?: boolean;
         includeFiles?: boolean;
         includeDirectories?: boolean;
+        ignore?: IgnoreRulesOption;
       },
     ) => Promise<{ ok: true; value: string[] } | { ok: false; error: unknown }>,
     private readFiles: (paths: string[]) => Promise<{
@@ -110,14 +113,19 @@ export class BrowserFileWatcher {
     this.eventListeners.forEach((callback) => callback(event));
   }
 
-  async startWatchingMetadata(paths: string[], watchId: string): Promise<void> {
+  async startWatchingMetadata(
+    paths: string[],
+    watchId: string,
+    options?: { ignore?: IgnoreRulesOption },
+  ): Promise<void> {
     this.stopWatching(watchId);
 
-    const snapshot = await this.takeMetadataSnapshot(paths);
+    const snapshot = await this.takeMetadataSnapshot(paths, options?.ignore);
 
     const state: MetadataWatchState = {
       watchId,
       paths,
+      ignore: options?.ignore,
       snapshot,
       intervalId: window.setInterval(() => {
         this.pollMetadataChanges(watchId);
@@ -133,6 +141,7 @@ export class BrowserFileWatcher {
 
   private async takeMetadataSnapshot(
     directoryPaths: string[],
+    ignore?: IgnoreRulesOption,
   ): Promise<Map<string, FileSnapshot>> {
     const snapshot = new Map<string, FileSnapshot>();
 
@@ -141,6 +150,7 @@ export class BrowserFileWatcher {
         recursive: true,
         includeFiles: true,
         includeDirectories: true,
+        ignore,
       });
 
       if (!result.ok) {
@@ -171,7 +181,10 @@ export class BrowserFileWatcher {
     if (!state) return;
 
     try {
-      const newSnapshot = await this.takeMetadataSnapshot(state.paths);
+      const newSnapshot = await this.takeMetadataSnapshot(
+        state.paths,
+        state.ignore,
+      );
       const changes = this.diffMetadataSnapshots(state.snapshot, newSnapshot);
 
       if (changes.length > 0) {

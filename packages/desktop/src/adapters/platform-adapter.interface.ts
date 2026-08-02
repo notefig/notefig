@@ -94,6 +94,17 @@ export type ContentChangeEvent = {
   changes: ContentChange[];
 };
 
+/**
+ * App-side ignore rules for listing/search/watch operations. Opt-in per
+ * call: callers that must see the complete tree (notably the git storage
+ * host) simply never pass them. Lists come from utils/ignore.ts and are
+ * lowercased there.
+ */
+export type IgnoreRulesOption = {
+  directories: string[];
+  extensions: string[];
+};
+
 export type SearchOptions = {
   query: string;
   useRegex?: boolean;
@@ -104,6 +115,8 @@ export type SearchOptions = {
   fileIncludes?: string[];
   /** Maximum number of results (default: 1000) */
   maxResults?: number;
+  /** Skip ignored directories/extensions while discovering files. */
+  ignore?: IgnoreRulesOption;
 };
 
 export type FilePosition = {
@@ -240,6 +253,8 @@ export interface IPlatformAdapter {
       includeFiles?: boolean;
       includeDirectories?: boolean;
       includeHidden?: boolean;
+      /** Opt-in ignore filtering; omitted ⇒ complete listing (git host path). */
+      ignore?: IgnoreRulesOption;
     },
   ): Promise<Result<string[]>>;
 
@@ -354,9 +369,14 @@ export interface IPlatformAdapter {
    * Watches recursively - will detect all changes within the directory tree
    * @param paths - Directory paths to watch
    * @param watchId - Unique identifier for this watch session
+   * @param options.ignore - Drop events for ignored directories/extensions
    * @returns Promise that resolves when watching starts
    */
-  startWatchingMetadata(paths: string[], watchId: string): Promise<void>;
+  startWatchingMetadata(
+    paths: string[],
+    watchId: string,
+    options?: { ignore?: IgnoreRulesOption },
+  ): Promise<void>;
 
   /**
    * Start or update watching individual files for content changes

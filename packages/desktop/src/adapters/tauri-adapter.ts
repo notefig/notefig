@@ -11,6 +11,7 @@ import type {
   SearchOptions,
   SearchMatch,
   TextPromptOptions,
+  IgnoreRulesOption,
 } from "./platform-adapter.interface";
 import { FsError } from "./platform-adapter.interface";
 import { requestTextPrompt } from "@/utils/text-prompt";
@@ -38,6 +39,21 @@ function classifyInvokeError(path: string, error: unknown): FileSystemError {
   const isPermission =
     /permission denied|os error 1\b|not allowed|forbidden|scope/i.test(message);
   return new FsError(isPermission ? "permission_denied" : "io_error", path, message);
+}
+
+/**
+ * Ignore config as Rust command args. Absent ⇒ nulls, i.e. no filtering —
+ * the shape every caller that must see the complete tree (git storage
+ * host) gets by simply not passing `ignore`.
+ */
+function ignoreArgs(ignore?: IgnoreRulesOption): {
+  ignoreDirectories: string[] | null;
+  ignoreExtensions: string[] | null;
+} {
+  return {
+    ignoreDirectories: ignore?.directories ?? null,
+    ignoreExtensions: ignore?.extensions ?? null,
+  };
 }
 
 export class TauriPlatformAdapter implements IPlatformAdapter {
@@ -86,6 +102,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       includeFiles?: boolean;
       includeDirectories?: boolean;
       includeHidden?: boolean;
+      ignore?: IgnoreRulesOption;
     },
   ): Promise<Result<string[]>> {
     try {
@@ -99,6 +116,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
         includeFiles: options?.includeFiles ?? true,
         includeDirectories: options?.includeDirectories ?? true,
         includeHidden: options?.includeHidden ?? false,
+        ...ignoreArgs(options?.ignore),
       });
 
       if (result.ok && result.value) {
@@ -333,9 +351,17 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  async startWatchingMetadata(paths: string[], watchId: string): Promise<void> {
+  async startWatchingMetadata(
+    paths: string[],
+    watchId: string,
+    options?: { ignore?: IgnoreRulesOption },
+  ): Promise<void> {
     try {
-      await invoke("start_watching_metadata", { paths, watchId });
+      await invoke("start_watching_metadata", {
+        paths,
+        watchId,
+        ...ignoreArgs(options?.ignore),
+      });
     } catch (error) {
       console.error("Failed to start watching metadata:", error);
       throw error;
@@ -487,6 +513,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       filePattern: options.filePattern ?? null,
       fileIncludes: options.fileIncludes ?? null,
       maxResults: options.maxResults ?? 1000,
+      ...ignoreArgs(options.ignore),
     });
   }
 

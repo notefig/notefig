@@ -9,6 +9,7 @@ import type {
   SearchMatch,
   SearchOptions,
   TextPromptOptions,
+  IgnoreRulesOption,
 } from "./platform-adapter.interface";
 import { requestTextPrompt } from "@/utils/text-prompt";
 import type { GitStorageHost } from "@metrists/git";
@@ -189,6 +190,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
       includeFiles?: boolean;
       includeDirectories?: boolean;
       includeHidden?: boolean;
+      ignore?: IgnoreRulesOption;
     },
   ): Promise<Result<string[]>>;
   abstract createDirectories(paths: string[]): Promise<BatchResult<string>>;
@@ -268,6 +270,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   async startWatchingMetadata(
     _paths: string[],
     _watchId: string,
+    _options?: { ignore?: IgnoreRulesOption },
   ): Promise<void> {
     // TODO: Implement polling + BroadcastChannel; no-op for now
     console.log("[BrowserAdapter] Metadata watching not yet implemented");

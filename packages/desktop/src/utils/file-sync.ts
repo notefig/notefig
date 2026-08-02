@@ -15,6 +15,7 @@ import {
   projectSettingsPath,
   projectSettingsQueryKey,
 } from "./project-settings";
+import { IGNORE_RULES, isIgnoredPath } from "./ignore";
 import { calculateContentHash } from "./hash";
 import { getDocumentSync } from "./markdown-conversion";
 // Conscious utils → components import (direct-imports-over-injection house
@@ -139,6 +140,11 @@ async function applyMetadataCreated(
   workspaceId: string,
   change: MetadataChange,
 ): Promise<void> {
+  // Authoritative backstop for ignore rules: the platform watchers filter
+  // too (cheaply, Rust-side), but browser adapters and event races can
+  // still surface ignored paths — nothing ignored may enter the collection.
+  if (isIgnoredPath(change.path, workspaceId)) return;
+
   const metadataResult = await platformAdapter.getMetadata([change.path]);
   const metadata = metadataResult.succeeded[0];
   if (!metadata || collections.metadata.get(change.path)) return;
@@ -175,8 +181,19 @@ async function applyMetadataRenamed(
     return;
   }
 
+  // Renamed INTO ignored space: the file leaves the tracked tree.
+  if (isIgnoredPath(change.path, workspaceId)) {
+    applyMetadataDeleted(collections, { ...change, path: change.oldPath });
+    return;
+  }
+
   const oldMetadata = collections.metadata.get(change.oldPath);
-  if (!oldMetadata) return;
+  if (!oldMetadata) {
+    // Renamed OUT of untracked space (ignored dir, or a path we never held
+    // a row for): surfaces as a fresh create at the new path.
+    await applyMetadataCreated(collections, workspaceId, change);
+    return;
+  }
 
   const metadataResult = await platformAdapter.getMetadata([change.path]);
   const metadata = metadataResult.succeeded[0];
@@ -320,6 +337,7 @@ export function useFileWatchers(
         await platformAdapter.startWatchingMetadata(
           [workspacePath],
           metadataWatchId,
+          { ignore: IGNORE_RULES },
         );
 
         if (openFilePaths.length > 0) {

@@ -1,5 +1,8 @@
 import { FsError } from "./platform-adapter.interface";
-import type { FileSystemError } from "./platform-adapter.interface";
+import type {
+  FileSystemError,
+  IgnoreRulesOption,
+} from "./platform-adapter.interface";
 
 /**
  * Normalize a path for use as a workspace identifier.
@@ -75,6 +78,53 @@ export function isHiddenPath(path: string): boolean {
   return parts.some(
     (part) => part.startsWith(".") && part.length > 1 && part !== "..",
   );
+}
+
+/**
+ * App-side ignore checks for browser adapters. Lists arrive lowercased
+ * from utils/ignore.ts via the opt-in `ignore` option — callers that need
+ * the complete tree (the git storage host) never pass it.
+ */
+export function isIgnoredName(
+  name: string,
+  ignore: IgnoreRulesOption,
+): boolean {
+  return ignore.directories.includes(name.toLowerCase());
+}
+
+export function hasIgnoredExtension(
+  name: string,
+  ignore: IgnoreRulesOption,
+): boolean {
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0 || dot === name.length - 1) return false;
+  return ignore.extensions.includes(name.slice(dot + 1).toLowerCase());
+}
+
+/** Whether a path (relative to the listing root) matches the ignore rules. */
+export function matchesIgnoreRules(
+  relativePath: string,
+  ignore?: IgnoreRulesOption,
+): boolean {
+  if (!ignore) return false;
+  const parts = relativePath.split("/").filter((p) => p.length > 0);
+  if (parts.length === 0) return false;
+  if (parts.some((p) => isIgnoredName(p, ignore))) return true;
+  return hasIgnoredExtension(parts[parts.length - 1], ignore);
+}
+
+/**
+ * A per-entry ignore predicate for directory walks. Built once per listing
+ * so the walk body stays a single branch (and costs nothing when the
+ * caller opted out of filtering, e.g. the git storage host).
+ */
+export function createEntryIgnoreFilter(
+  ignore?: IgnoreRulesOption,
+): (name: string, isFile: boolean) => boolean {
+  if (!ignore) return () => false;
+  return (name, isFile) =>
+    isIgnoredName(name, ignore) ||
+    (isFile && hasIgnoredExtension(name, ignore));
 }
 
 /**

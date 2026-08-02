@@ -95,13 +95,30 @@ fn should_traverse_entry(entry: &walkdir::DirEntry, options: &WalkOptions) -> bo
         return false;
     }
 
+    // Case-insensitive: patterns arrive lowercased from the frontend ignore
+    // config (utils/ignore.ts), and macOS filesystems are case-insensitive.
+    let file_name_lower = file_name.to_lowercase();
     for pattern in &options.exclude_patterns {
-        if matches_exclude_pattern(&file_name, pattern) {
+        if matches_exclude_pattern(&file_name_lower, pattern) {
             return false;
         }
     }
 
     true
+}
+
+/// Whether a path's extension is in the (lowercased) ignore list.
+pub fn has_ignored_extension(path: &Path, extensions: &[String]) -> bool {
+    if extensions.is_empty() {
+        return false;
+    }
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) => {
+            let ext_lower = ext.to_lowercase();
+            extensions.iter().any(|e| *e == ext_lower)
+        }
+        None => false,
+    }
 }
 
 /// Check if a filename matches an exclude pattern
