@@ -151,6 +151,7 @@ export type SearchMatch = {
 export type PlatformEvent =
   | { type: "theme-changed"; payload: Theme }
   | { type: "folder-selected"; payload: string }
+  | { type: "file-selected"; payload: string }
   | { type: "file-dropped"; payload: string[] }
   | { type: "fs-metadata-changed"; payload: MetadataChangeEvent }
   | { type: "fs-content-changed"; payload: ContentChangeEvent }
@@ -220,6 +221,14 @@ export interface IPlatformAdapter {
    * @returns Promise that resolves to the selected directory path or null if cancelled
    */
   pickDirectory(title: string): Promise<string | null>;
+
+  /**
+   * Opens a single-file picker dialog (loose-file open). Desktop-only —
+   * web adapters resolve to null (their fs access is rooted in directory
+   * handles, so there is no standalone-file grant to acquire).
+   * @returns the selected file's absolute path, or null if cancelled
+   */
+  pickFile(title: string): Promise<string | null>;
 
   /**
    * (Re)acquire access to a workspace folder after a permission failure.

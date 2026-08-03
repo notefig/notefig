@@ -24,7 +24,7 @@ import {
 } from "@/components/editor/editor-store";
 import { getWorkspaceEditorContext } from "@/entities/editors";
 import { readWorkspaceTextFile } from "@/utils/file-sync";
-import { resolveWorkspacePath } from "@/utils/fs";
+import { resolveEditablePath } from "@/entities/files";
 import type { WidgetContextRef } from "./widget-context-uri";
 
 // Same schema-construction pattern as markdown-codec.ts, for the fallback
@@ -58,7 +58,7 @@ export async function buildWidgetContextPayload(
   workspacePath: string,
   ref: WidgetContextRef,
 ): Promise<WidgetContextPayload> {
-  const resolved = resolveWorkspacePath(workspacePath, ref.path);
+  const resolved = resolveEditablePath(workspacePath, ref.path);
   if (!resolved.ok) throw new Error(resolved.error);
 
   const liveEditor = getMarkdownEditor(resolved.absolute);

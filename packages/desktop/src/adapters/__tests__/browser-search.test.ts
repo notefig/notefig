@@ -24,6 +24,9 @@ class TestAdapter extends BaseBrowserAdapter {
   async pickDirectory(): Promise<string | null> {
     return null;
   }
+  async pickFile(): Promise<string | null> {
+    return null;
+  }
 
   async readDirectory(
     path: string,

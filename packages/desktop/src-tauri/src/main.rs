@@ -4,7 +4,7 @@
 // Command modules + the shared handler registration live in the library crate
 // so the app binary, the mock-app dispatch tests, and the e2e shim all share
 // one command list (MET-73).
-use metrists::{agent_proc, mcp_bridge, register_handlers};
+use metrists::{agent_proc, mcp_bridge, opened_files, register_handlers};
 
 use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager};
@@ -12,6 +12,7 @@ use tauri_plugin_store::StoreExt;
 
 fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
     let open_folder = MenuItem::with_id(app, "open_folder", "Open Folder...", true, Some("cmd+o"))?;
+    let open_file = MenuItem::with_id(app, "open_file", "Open File...", true, Some("cmd+shift+o"))?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, Some("cmd+q"))?;
 
     // Edit menu items - using predefined items for native OS behavior
@@ -33,6 +34,7 @@ fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
 
     let file_submenu = SubmenuBuilder::new(app, "File")
         .item(&open_folder)
+        .item(&open_file)
         .separator()
         .item(&quit)
         .build()?;
@@ -137,6 +139,12 @@ fn main() {
     }
 
     let builder = tauri::Builder::default()
+        // Single-instance must be the first registered plugin. A second
+        // launch (e.g. OS "open with" while running) forwards its argv here
+        // and exits; any document paths open in the running instance.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            opened_files::handle_opened_paths(app, opened_files::file_paths_from_args(argv));
+        }))
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
@@ -144,6 +152,14 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_nspanel::init())
         .setup(|app| {
+            // Windows/Linux file associations deliver the document as an
+            // argv entry on first launch. Best-effort emit — see the
+            // opened_files module doc for the cold-start caveat.
+            opened_files::handle_opened_paths(
+                app.handle(),
+                opened_files::file_paths_from_args(std::env::args()),
+            );
+
             let menu = create_menu(app.handle())?;
             app.set_menu(menu)?;
 
@@ -168,6 +184,18 @@ fn main() {
                         move |folder_path| {
                             if let Some(path) = folder_path {
                                 let _ = app_handle.emit("folder-selected", path.to_string());
+                            }
+                        },
+                    );
+                }
+                "open_file" => {
+                    use tauri_plugin_dialog::DialogExt;
+
+                    let app_handle = app.clone();
+                    app.dialog().file().set_title("Open File").pick_file(
+                        move |file_path| {
+                            if let Some(path) = file_path {
+                                let _ = app_handle.emit("file-selected", path.to_string());
                             }
                         },
                     );
@@ -203,10 +231,24 @@ fn main() {
     register_handlers(builder)
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, event| {
-            // Kill every spawned agent process when the app exits.
-            if let tauri::RunEvent::Exit = event {
-                agent_proc::kill_all_agents();
+        .run(|app_handle, event| {
+            match event {
+                // Kill every spawned agent process when the app exits.
+                tauri::RunEvent::Exit => {
+                    agent_proc::kill_all_agents();
+                }
+                // macOS file-association opens (Finder double-click,
+                // `open -a`) arrive as file:// URLs, before or after setup.
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Opened { urls } => {
+                    let paths = urls
+                        .into_iter()
+                        .filter_map(|url| url.to_file_path().ok())
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .collect();
+                    opened_files::handle_opened_paths(app_handle, paths);
+                }
+                _ => {}
             }
         });
 }

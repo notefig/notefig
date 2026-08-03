@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { AgentTool } from "@metrists/shared/agent";
 import { readWorkspaceTextFile } from "@/utils/file-sync";
-import { resolveWorkspacePath } from "@/utils/fs";
+import { resolveEditablePath } from "@/entities/files";
 
 const InputSchema = z.object({
   path: z.string().min(1),
@@ -22,7 +22,7 @@ export const workspaceReadDocument: AgentTool<
     "outline and surrounding text don't cover what you need.",
   input: InputSchema,
   async execute(ctx, input) {
-    const resolved = resolveWorkspacePath(ctx.workspacePath, input.path);
+    const resolved = resolveEditablePath(ctx.workspacePath, input.path);
     if (!resolved.ok) return { ok: false, error: resolved.error };
     try {
       const value = await readWorkspaceTextFile(resolved.absolute, {

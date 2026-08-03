@@ -12,6 +12,7 @@ import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { platformAdapter } from "@/adapters";
 import { queryClient } from "@/entities/query-client";
+import { isLooseWorkspace } from "./loose-workspace";
 
 export const PROJECT_SETTINGS_FILENAME = "metrists.json";
 
@@ -116,21 +117,27 @@ export async function updateProjectSettings(
 }
 
 export function useProjectSettings(workspacePath: string) {
+  // The loose-file sentinel workspace has no root, hence no metrists.json:
+  // serve defaults, never read or write.
+  const isLoose = isLooseWorkspace(workspacePath);
   const { data, isLoading } = useQuery({
     queryKey: projectSettingsQueryKey(workspacePath),
     queryFn: () => readProjectSettings(workspacePath),
     staleTime: Infinity,
+    enabled: !isLoose,
   });
 
   const update = useCallback(
     (patch: Partial<ProjectSettings>) =>
-      updateProjectSettings(workspacePath, patch),
+      isLooseWorkspace(workspacePath)
+        ? Promise.resolve()
+        : updateProjectSettings(workspacePath, patch),
     [workspacePath],
   );
 
   return {
     settings: resolveProjectSettings(data ?? {}),
-    isLoading,
+    isLoading: isLoose ? false : isLoading,
     update,
   } as const;
 }

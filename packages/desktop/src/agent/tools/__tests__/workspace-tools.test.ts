@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("@/entities/files", () => ({
+vi.mock("@/entities/files", async (importOriginal) => ({
+  // Real resolveEditablePath/loose-registry (pure, no fs) — only the
+  // collection accessor is mocked.
+  ...(await importOriginal<typeof import("@/entities/files")>()),
   getOrCreateWorkspaceCollections: vi.fn(() => ({
     metadata: {
       toArray: [

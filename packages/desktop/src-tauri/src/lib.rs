@@ -12,6 +12,7 @@ pub mod file_watcher;
 pub mod fs_ops;
 pub mod line_stream;
 pub mod mcp_bridge;
+pub mod opened_files;
 pub mod search;
 pub mod walkdir_utils;
 

@@ -23,7 +23,12 @@ import {
   findLayoutSelectedTab,
 } from "@/utils/layout-codec";
 // Sibling entities — only referenced inside hook bodies (cycle rule).
-import { useOpenFileRows, useMetadataFetching, type OpenFileRow } from "./files";
+import {
+  useOpenFileRows,
+  useMetadataFetching,
+  useLooseFileRegistration,
+  type OpenFileRow,
+} from "./files";
 import {
   agentTasksCollection,
   useAgentTasksReady,
@@ -153,6 +158,14 @@ export function useWorkspaceTabs(
     [openTabs],
   );
 
+  // Ordered before useOpenFileRows: out-of-root tabs register as loose
+  // files during render so their rows exist (or are in flight) by the time
+  // the live query and stale-tab detection run.
+  const pendingLoosePaths = useLooseFileRegistration(
+    workspacePath,
+    fileTabIds,
+  );
+
   const fileRows = useOpenFileRows(workspacePath, fileTabIds);
   const isFetchingMetadata = useMetadataFetching(workspacePath);
   const agentTasksReady = useAgentTasksReady();
@@ -160,12 +173,16 @@ export function useWorkspaceTabs(
   const agentTaskRows = useAgentTaskRowsById(agentTaskIds);
 
   const staleTabIds = useMemo(() => {
-    // File tabs wait out the metadata fetch; agent tabs wait out the tasks
+    // File tabs wait out the metadata fetch; loose tabs additionally wait
+    // out their initial stat + row insert; agent tabs wait out the tasks
     // collection's boot load (restored sessions come back as rows).
     const existingFilePaths = new Set(fileRows.map((row) => row.path));
     const missingFileTabIds = isFetchingMetadata
       ? []
-      : fileTabIds.filter((tabId) => !existingFilePaths.has(tabId));
+      : fileTabIds.filter(
+          (tabId) =>
+            !existingFilePaths.has(tabId) && !pendingLoosePaths.has(tabId),
+        );
     const missingAgentTabIds = agentTasksReady
       ? agentTaskIds
           .filter((taskId) => !agentTasksCollection.get(taskId))
@@ -178,6 +195,7 @@ export function useWorkspaceTabs(
     agentTaskIds,
     isFetchingMetadata,
     agentTasksReady,
+    pendingLoosePaths,
   ]);
 
   return { fileTabIds, agentTaskIds, fileRows, agentTaskRows, staleTabIds };

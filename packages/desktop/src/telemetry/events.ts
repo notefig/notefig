@@ -9,6 +9,10 @@
 export type TelemetryEvent =
   | { name: "app_opened"; properties?: undefined }
   | { name: "workspace_opened"; properties: { is_new: boolean } }
+  | {
+      name: "external_file_opened";
+      properties: { with_workspace: boolean };
+    }
   | { name: "agent_turn_started"; properties: { harness: string } }
   | {
       name: "agent_turn_completed";

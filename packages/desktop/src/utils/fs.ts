@@ -369,6 +369,10 @@ export function ensureNewFileNameHasDefaultMarkdownExtension(
   return `${fileName}.md`;
 }
 
+export async function pickFile(title: string): Promise<string | null> {
+  return platformAdapter.pickFile(title);
+}
+
 export async function pickDirectory(title: string): Promise<string | null> {
   return platformAdapter.pickDirectory(title);
 }

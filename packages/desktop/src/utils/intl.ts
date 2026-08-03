@@ -32,6 +32,8 @@ i18n
           chooseFolderHint: "Choose a folder to browse your files",
           clickFileHint: "Click any file to start editing",
           pickDirectory: "Select Directory",
+          openSingleFile: "Open File",
+          openSingleFileDescription: "Edit a single file without a workspace",
 
           // Workspace Access Recovery
           fsAccessLostTitle: "Folder access lost",

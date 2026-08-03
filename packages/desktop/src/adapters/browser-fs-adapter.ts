@@ -200,6 +200,13 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     return await dir.getFileHandle(fileName, { create: createFile });
   }
 
+  async pickFile(_title: string): Promise<string | null> {
+    // Loose files are desktop-only — this adapter resolves every path
+    // through a workspace root DirectoryHandle, so a standalone file has
+    // no handle to resolve against.
+    return null;
+  }
+
   async pickDirectory(title: string): Promise<string | null> {
     this.ensureSupported();
     void title;
