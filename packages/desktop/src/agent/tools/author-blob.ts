@@ -3,7 +3,7 @@ import type { AgentTool } from "@metrists/shared/agent";
 import { BlobEnvelopeSchema, findBlobs, serializeBlobBlock } from "@metrists/shared/blobs";
 import { getAllBlobTypes, getBlobType } from "@/components/editor/blobs/blob-registry";
 import { readWorkspaceTextFile, writeWorkspaceTextFile } from "@/utils/file-sync";
-import { resolveWorkspacePath } from "@/utils/fs";
+import { resolveEditablePath } from "@/entities/files";
 
 const InputSchema = z.object({
   path: z.string().min(1),
@@ -50,7 +50,7 @@ export const authorBlob: AgentTool<z.infer<typeof InputSchema>, { blobId: string
   async execute(ctx, input) {
     // Agents send workspace-relative paths; an unresolved one would land
     // relative to the process CWD (src-tauri/ in dev — see resolveWorkspacePath).
-    const resolved = resolveWorkspacePath(ctx.workspacePath, input.path);
+    const resolved = resolveEditablePath(ctx.workspacePath, input.path);
     if (!resolved.ok) return { ok: false, error: resolved.error };
 
     const blobType = getBlobType(input.type);

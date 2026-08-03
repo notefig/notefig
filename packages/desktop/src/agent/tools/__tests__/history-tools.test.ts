@@ -14,15 +14,20 @@ const { readTextFile, log, addAllAndCommit } = vi.hoisted(() => ({
   addAllAndCommit: vi.fn(async (..._args: unknown[]) => "def456"),
 }));
 
-vi.mock("@/utils/history-service", () => ({
+vi.mock("@/utils/history-service", async () => ({
+  // Real containment resolution (pure); only the git plumbing is mocked.
+  resolveHistoryDocumentPath: (await import("@/utils/fs")).resolveWorkspacePath,
   ensureWorkspaceHistoryInitialized: vi.fn(async () => ({
     readTextFile,
     log,
     addAllAndCommit,
   })),
   checkpointWorkspaceHistory: vi.fn(
-    async (_ws: string, message: string, author: { name: string; email: string }) =>
-      addAllAndCommit({ message, author }),
+    async (
+      _ws: string,
+      message: string,
+      author: { name: string; email: string },
+    ) => addAllAndCommit({ message, author }),
   ),
   historyGitDir: vi.fn((ws: string) => `${ws}/.metrists/history`),
 }));
@@ -73,7 +78,9 @@ describe("historyDiff", () => {
 
 describe("historyCheckpoint", () => {
   it("commits an explicit checkpoint", async () => {
-    const result = await historyCheckpoint.execute(ctx, { message: "manual save" });
+    const result = await historyCheckpoint.execute(ctx, {
+      message: "manual save",
+    });
     expect(result).toEqual({ ok: true, value: { oid: "def456" } });
     expect(addAllAndCommit).toHaveBeenCalledWith(
       expect.objectContaining({ message: "manual save" }),
@@ -89,7 +96,10 @@ describe("historyRestore", () => {
       checkpoint: "abc123",
     });
     expect(result).toEqual({ ok: true, value: undefined });
-    expect(writeWorkspaceTextFile).toHaveBeenCalledWith("/ws/notes.md", "old content");
+    expect(writeWorkspaceTextFile).toHaveBeenCalledWith(
+      "/ws/notes.md",
+      "old content",
+    );
   });
 
   it("is marked as requiring permission", () => {

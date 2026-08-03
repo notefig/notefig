@@ -19,8 +19,13 @@
  * - We control when to refetch via manual .refetch() calls
  */
 
-import { useMemo } from "react";
-import { createCollection, useLiveQuery, eq, inArray } from "@tanstack/react-db";
+import { useEffect, useMemo, useReducer } from "react";
+import {
+  createCollection,
+  useLiveQuery,
+  eq,
+  inArray,
+} from "@tanstack/react-db";
 import { useIsFetching } from "@tanstack/react-query";
 import {
   queryCollectionOptions,
@@ -31,8 +36,13 @@ import {
   FsError,
   isWorkspaceAccessError,
 } from "@/adapters/platform-adapter.interface";
-import type { FileEntry } from "@/utils/fs";
+import {
+  resolveWorkspacePath,
+  type FileEntry,
+  type WorkspacePathResolution,
+} from "@/utils/fs";
 import { IGNORE_RULES } from "@/utils/ignore";
+import { isLooseWorkspace } from "@/utils/loose-workspace";
 import { calculateContentHash } from "@/utils/hash";
 import {
   invalidateDerivedState,
@@ -64,6 +74,47 @@ export interface FileContent {
   error?: string; // Set when the read failed — content is NOT the file's real content
 }
 
+/**
+ * The metadata queryFn's listing walk: files + directories, ignore-filtered,
+ * bare paths only (stats hydrate lazily). The loose sentinel workspace has
+ * no root directory — its listing is empty; only registered loose rows
+ * exist there.
+ */
+async function listWorkspaceEntries(
+  workspaceId: string,
+): Promise<{ path: string; type: "file" | "directory" }[]> {
+  if (isLooseWorkspace(workspaceId)) return [];
+
+  const walkOptions = { recursive: true, ignore: IGNORE_RULES };
+  const [filesResult, dirsResult] = await Promise.all([
+    platformAdapter.readDirectory(workspaceId, {
+      ...walkOptions,
+      includeFiles: true,
+      includeDirectories: false,
+    }),
+    platformAdapter.readDirectory(workspaceId, {
+      ...walkOptions,
+      includeFiles: false,
+      includeDirectories: true,
+    }),
+  ]);
+
+  for (const result of [filesResult, dirsResult]) {
+    if (!result.ok) {
+      // Rethrow typed so WorkspaceErrorBoundary can recognize permission
+      // failures and render the recovery fallback instead of DebugPanel.
+      const { type, path, message } = result.error;
+      throw new FsError(type, path, message);
+    }
+  }
+  if (!filesResult.ok || !dirsResult.ok) return []; // narrowing only
+
+  return [
+    ...dirsResult.value.map((p) => ({ path: p, type: "directory" as const })),
+    ...filesResult.value.map((p) => ({ path: p, type: "file" as const })),
+  ];
+}
+
 export function createFileMetadataCollection(workspaceId: string) {
   return createCollection(
     queryCollectionOptions<FileMetadata, string>({
@@ -86,45 +137,23 @@ export function createFileMetadataCollection(workspaceId: string) {
       // dirs) because the listing API returns bare paths and rows need a
       // type; the walk is the cheap half of the old scan.
       queryFn: async (): Promise<FileMetadata[]> => {
-        const walkOptions = { recursive: true, ignore: IGNORE_RULES };
-        const [filesResult, dirsResult] = await Promise.all([
-          platformAdapter.readDirectory(workspaceId, {
-            ...walkOptions,
-            includeFiles: true,
-            includeDirectories: false,
-          }),
-          platformAdapter.readDirectory(workspaceId, {
-            ...walkOptions,
-            includeFiles: false,
-            includeDirectories: true,
-          }),
-        ]);
+        const entries = await listWorkspaceEntries(workspaceId);
 
-        for (const result of [filesResult, dirsResult]) {
-          if (!result.ok) {
-            // Rethrow typed so WorkspaceErrorBoundary can recognize
-            // permission failures and render the recovery fallback instead
-            // of DebugPanel.
-            const { type, path, message } = result.error;
-            throw new FsError(type, path, message);
-          }
-        }
-        if (!filesResult.ok || !dirsResult.ok) return []; // narrowing only
-
-        const entries: { path: string; type: "file" | "directory" }[] = [
-          ...dirsResult.value.map((p) => ({
-            path: p,
-            type: "directory" as const,
-          })),
-          ...filesResult.value.map((p) => ({ path: p, type: "file" as const })),
-        ];
+        // Loose files aren't reachable from the walk; stat them every
+        // refetch — the stat doubles as their freshness/existence backstop
+        // (no recursive watcher covers their metadata).
+        const walkedPaths = new Set(entries.map((e) => e.path));
+        const loosePaths = getLooseFilePaths(workspaceId).filter(
+          (p) => !walkedPaths.has(p),
+        );
 
         // Re-stat children of hydrated directories so their stats stay
         // fresh across refetches instead of pinning to hydration time.
         const hydrated = hydratedDirsFor(workspaceId);
         const pathsToStat = entries
           .filter((e) => hydrated.has(parentDirectory(e.path)))
-          .map((e) => e.path);
+          .map((e) => e.path)
+          .concat(loosePaths);
         const statMap = new Map<string, { modifiedAt: Date; size: number }>();
         if (pathsToStat.length > 0) {
           const statResult = await platformAdapter.getMetadata(pathsToStat);
@@ -135,11 +164,10 @@ export function createFileMetadataCollection(workspaceId: string) {
 
         // Merge, don't wipe: full-replace sync would erase hydrated stats
         // and self-write bookkeeping for rows the walk still sees.
-        const previousRows = workspaceCollectionsRegistry.get(
-          workspaceId,
-        )?.metadata;
+        const previousRows =
+          workspaceCollectionsRegistry.get(workspaceId)?.metadata;
 
-        return entries.map(({ path, type }) => {
+        const rows = entries.map(({ path, type }): FileMetadata => {
           const stat = statMap.get(path);
           const previous = previousRows?.get(path);
           return {
@@ -153,6 +181,24 @@ export function createFileMetadataCollection(workspaceId: string) {
             contentHash: previous?.contentHash ?? "",
           };
         });
+
+        // A loose path whose stat failed (deleted/moved externally) emits
+        // no row — the tab goes stale and closes, same as a workspace file.
+        for (const path of loosePaths) {
+          const stat = statMap.get(path);
+          if (!stat) continue;
+          const previous = previousRows?.get(path);
+          rows.push({
+            path,
+            relativePath: undefined,
+            type: "file",
+            modified: stat.modifiedAt,
+            size: stat.size,
+            contentHash: previous?.contentHash ?? "",
+          });
+        }
+
+        return rows;
       },
 
       getKey: (item) => item.path,
@@ -399,6 +445,207 @@ export interface WorkspaceCollections {
 }
 
 const workspaceCollectionsRegistry = new Map<string, WorkspaceCollections>();
+
+// ---------------------------------------------------------------------------
+// Loose files — files explicitly opened from outside the workspace root.
+// They live in the same collections and follow the same lifecycle as
+// workspace files (save, watchers, adoption, stale-tab close); the registry
+// is what keeps their rows alive across the metadata queryFn's full-replace
+// refetch, since the directory walk never sees them.
+// ---------------------------------------------------------------------------
+
+const looseFilesRegistry = new Map<string, Set<string>>();
+
+function looseFilesFor(workspaceId: string): Set<string> {
+  let paths = looseFilesRegistry.get(workspaceId);
+  if (!paths) {
+    paths = new Set();
+    looseFilesRegistry.set(workspaceId, paths);
+  }
+  return paths;
+}
+
+export function isLooseFile(workspaceId: string, path: string): boolean {
+  return looseFilesRegistry.get(workspaceId)?.has(path) ?? false;
+}
+
+export function getLooseFilePaths(workspaceId: string): string[] {
+  return Array.from(looseFilesRegistry.get(workspaceId) ?? []);
+}
+
+const looseRowInFlight = new Map<string, Promise<void>>();
+
+/**
+ * Register a file outside the workspace root as loose. The registry add is
+ * synchronous — a metadata refetch racing the open must still merge the
+ * row back in — while the initial stat + row insert follows asynchronously
+ * so the tab can render without waiting on the 30s cycle.
+ */
+export function registerLooseFile(
+  workspaceId: string,
+  path: string,
+): Promise<void> {
+  const key = `${workspaceId} ${path}`;
+  const paths = looseFilesFor(workspaceId);
+  if (paths.has(path)) {
+    return looseRowInFlight.get(key) ?? Promise.resolve();
+  }
+  paths.add(path);
+  const promise = ensureLooseRow(workspaceId, path).finally(() => {
+    looseRowInFlight.delete(key);
+  });
+  looseRowInFlight.set(key, promise);
+  return promise;
+}
+
+/** Whether a loose file's initial stat + row insert hasn't settled yet. */
+function isLooseRowPending(workspaceId: string, path: string): boolean {
+  return looseRowInFlight.has(`${workspaceId} ${path}`);
+}
+
+async function ensureLooseRow(
+  workspaceId: string,
+  path: string,
+): Promise<void> {
+  const collections = workspaceCollectionsRegistry.get(workspaceId);
+  if (!collections || collections.metadata.get(path)) return;
+
+  const result = await platformAdapter.getMetadata([path]);
+  const metadata = result.succeeded[0];
+  if (!metadata || collections.metadata.get(path)) return;
+
+  try {
+    collections.metadata.utils.writeInsert({
+      path,
+      relativePath: undefined,
+      type: metadata.type,
+      modified: metadata.modifiedAt,
+      size: metadata.size,
+      contentHash: "",
+    });
+  } catch (error) {
+    // Metadata sync starts with the collection's first subscriber; a
+    // registration landing before then is picked up by the initial queryFn.
+    if (error instanceof Error && error.name === "SyncNotInitializedError") {
+      return;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Tab-derived loose-file registration: registers every open out-of-root
+ * file path and unregisters registered paths whose tab closed. Registration
+ * happens during render (idempotent set-add) so it is ordered before the
+ * open-tab live query and any in-flight refetch's loose-row merge-back.
+ *
+ * Returns the paths whose initial row insert is still pending — stale-tab
+ * pruning must not close those (row absence just means the stat hasn't
+ * landed).
+ */
+export function useLooseFileRegistration(
+  workspaceId: string,
+  candidatePaths: string[],
+): Set<string> {
+  const [version, bump] = useReducer((c: number) => c + 1, 0);
+
+  const loosePaths = candidatePaths.filter(
+    (p) => p.startsWith("/") && !p.startsWith(workspaceId + "/"),
+  );
+
+  for (const path of loosePaths) {
+    if (!isLooseFile(workspaceId, path)) {
+      // Re-render when the insert settles so staleness re-evaluates with
+      // the row (or its definitive absence) in place.
+      registerLooseFile(workspaceId, path).finally(bump);
+    }
+  }
+
+  const looseKey = loosePaths.join(",");
+
+  useEffect(() => {
+    const open = new Set(loosePaths);
+    for (const path of getLooseFilePaths(workspaceId)) {
+      if (!open.has(path)) {
+        unregisterLooseFile(workspaceId, path);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, looseKey]);
+
+  return useMemo(
+    () =>
+      new Set(
+        loosePaths.filter((path) => isLooseRowPending(workspaceId, path)),
+      ),
+    // `version` re-derives the set when an in-flight insert settles.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [workspaceId, looseKey, version],
+  );
+}
+
+/**
+ * Match an input path against the loose registry: absolute, `.`/`..`
+ * collapsed, exact membership. Returns the registered absolute path, or
+ * null.
+ */
+export function matchLooseFile(
+  workspaceId: string,
+  inputPath: string,
+): string | null {
+  const raw = inputPath.replace(/\\/g, "/");
+  if (!raw.startsWith("/")) return null;
+  const segments: string[] = [];
+  for (const segment of raw.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      if (segments.length === 0) return null;
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  const absolute = "/" + segments.join("/");
+  return isLooseFile(workspaceId, absolute) ? absolute : null;
+}
+
+/**
+ * The agent-facing path gate: workspace containment (resolveWorkspacePath)
+ * widened by the loose-file allowlist. Only files the user explicitly
+ * opened (the registry) pass — an arbitrary out-of-root path still fails
+ * with the containment error.
+ */
+export function resolveEditablePath(
+  workspaceId: string,
+  inputPath: string,
+): WorkspacePathResolution {
+  const contained = resolveWorkspacePath(workspaceId, inputPath);
+  if (contained.ok) return contained;
+
+  const loose = matchLooseFile(workspaceId, inputPath);
+  if (loose) {
+    // No workspace-relative form exists for a loose file; carry the
+    // absolute path in both halves so display code stays unambiguous.
+    return { ok: true, absolute: loose, relative: loose };
+  }
+  return contained;
+}
+
+/** Drop a loose file's registration and its collection rows (tab closed). */
+export function unregisterLooseFile(workspaceId: string, path: string): void {
+  const paths = looseFilesRegistry.get(workspaceId);
+  if (!paths?.has(path)) return;
+  paths.delete(path);
+
+  const collections = workspaceCollectionsRegistry.get(workspaceId);
+  if (!collections) return;
+  if (collections.metadata.get(path)) {
+    collections.metadata.utils.writeDelete(path);
+  }
+  if (collections.content.get(path)) {
+    collections.content.utils.writeDelete(path);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Lazy stat hydration. Rows enter the collection from the listing walk with
@@ -739,10 +986,7 @@ export async function prefetchFileContent(
       // The content collection uses on-demand sync — its write context is
       // only initialized when a live query subscribes (a file tab opens).
       // Hover-prefetch before any tab opens hits this; silently skip.
-      if (
-        error instanceof Error &&
-        error.name === "SyncNotInitializedError"
-      ) {
+      if (error instanceof Error && error.name === "SyncNotInitializedError") {
         return;
       }
       throw error;
@@ -861,6 +1105,7 @@ export async function renameFileOrDirectory(
 export function clearWorkspaceCollections(workspaceId: string): void {
   workspaceCollectionsRegistry.delete(workspaceId);
   hydratedDirsRegistry.delete(workspaceId);
+  looseFilesRegistry.delete(workspaceId);
   // Drop cached query state too, so a fresh open refetches instead of
   // replaying a stale error or stale data.
   queryClient.removeQueries({ queryKey: ["file-metadata", workspaceId] });
@@ -868,7 +1113,9 @@ export function clearWorkspaceCollections(workspaceId: string): void {
 }
 
 /** The workspace's collections as a render-stable pair. */
-export function useFileCollections(workspacePath: string): WorkspaceCollections {
+export function useFileCollections(
+  workspacePath: string,
+): WorkspaceCollections {
   return useMemo(
     () => getOrCreateWorkspaceCollections(workspacePath),
     [workspacePath],

@@ -73,6 +73,16 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     return Array.isArray(result) ? result[0] : result;
   }
 
+  async pickFile(title: string): Promise<string | null> {
+    const result = await open({
+      title: title,
+      directory: false,
+      multiple: false,
+    });
+
+    return Array.isArray(result) ? result[0] : result;
+  }
+
   async requestWorkspaceAccess(_workspacePath: string): Promise<boolean> {
     // Desktop has no permission prompt to trigger — the user flips the OS
     // setting (macOS Files and Folders) and retries.
@@ -422,6 +432,14 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       });
     });
     this.unlistenFns.push(folderUnlisten);
+
+    const fileUnlisten = listen("file-selected", (event) => {
+      const filePath = event.payload as string;
+      this.eventListeners.forEach((callback) => {
+        callback({ type: "file-selected", payload: filePath });
+      });
+    });
+    this.unlistenFns.push(fileUnlisten);
 
     const metadataUnlisten = listen("fs-metadata-changed", (event) => {
       const payload = event.payload as MetadataChangeEvent;

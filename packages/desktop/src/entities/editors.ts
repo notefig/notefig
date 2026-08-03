@@ -17,6 +17,7 @@ import {
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { getDocumentSync } from "@/utils/markdown-conversion";
 import { readLayout, extractTabIds, findLayoutSelectedTab } from "./tabs";
+import { isLooseFile } from "./files";
 
 const markdownCodec = createMarkdownCodec();
 
@@ -65,8 +66,13 @@ export function getWorkspaceEditorContext(
   const layout = readLayout();
   const activeFile = findLayoutSelectedTab(layout);
 
+  // Workspace files plus registered loose files — both are user-opened
+  // documents agents may see. Agent tabs (`agent:` ids) match neither.
+  const belongsToWorkspace = (path: string) =>
+    path.startsWith(workspacePath) || isLooseFile(workspacePath, path);
+
   const openFiles = extractTabIds(layout)
-    .filter((path) => path.startsWith(workspacePath))
+    .filter(belongsToWorkspace)
     .map((path) => ({
       path,
       dirty: editor(path).isDirty(),
@@ -76,7 +82,7 @@ export function getWorkspaceEditorContext(
   return {
     openFiles,
     activeFile:
-      activeFile && activeFile.startsWith(workspacePath) ? activeFile : null,
+      activeFile && belongsToWorkspace(activeFile) ? activeFile : null,
     selection: activeFile
       ? getSelectedText(activeFile) !== undefined
       : undefined,

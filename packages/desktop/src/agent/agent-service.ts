@@ -24,7 +24,8 @@ import {
   type TurnOutcome,
 } from "@metrists/shared/agent";
 import { platformAdapter } from "@/adapters";
-import { normalizePath, resolveWorkspacePath } from "@/utils/fs";
+import { normalizePath } from "@/utils/fs";
+import { resolveEditablePath } from "@/entities/files";
 import { getOrCreateKvCollection } from "@/utils/kv-store";
 import { MarkdownJoiner } from "@/lib/markdown-joiner-transform";
 import { PermissionBroker } from "./permission-broker";
@@ -143,7 +144,7 @@ function deriveToolLocations(
   workspacePath: string,
 ): Array<{ path: string }> | undefined {
   if (!isPlainObject(rawInput) || typeof rawInput.path !== "string") return undefined;
-  const resolved = resolveWorkspacePath(workspacePath, rawInput.path);
+  const resolved = resolveEditablePath(workspacePath, rawInput.path);
   return [{ path: resolved.ok ? resolved.absolute : rawInput.path }];
 }
 

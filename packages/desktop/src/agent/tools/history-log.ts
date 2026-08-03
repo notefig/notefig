@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { resolveWorkspacePath } from "@/utils/fs";
 import type { AgentTool } from "@metrists/shared/agent";
 import {
   ensureWorkspaceHistoryInitialized,
   historyGitDir,
+  resolveHistoryDocumentPath,
 } from "@/utils/history-service";
 
 const InputSchema = z.object({
@@ -30,12 +30,17 @@ export const historyLog: AgentTool<
     // `path` is an optional scope filter; git wants it workspace-relative.
     let filepath: string | undefined;
     if (input.path) {
-      const resolved = resolveWorkspacePath(ctx.workspacePath, input.path);
+      const resolved = resolveHistoryDocumentPath(
+        ctx.workspacePath,
+        input.path,
+      );
       if (!resolved.ok) return { ok: false, error: resolved.error };
       filepath = resolved.relative;
     }
     try {
-      const service = await ensureWorkspaceHistoryInitialized(ctx.workspacePath);
+      const service = await ensureWorkspaceHistoryInitialized(
+        ctx.workspacePath,
+      );
       const commits = await service.log({
         repoPath: ctx.workspacePath,
         gitDir: historyGitDir(ctx.workspacePath),

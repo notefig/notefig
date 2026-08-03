@@ -8,7 +8,31 @@
  */
 import { IsomorphicGitService } from "@metrists/git";
 import { platformAdapter } from "@/adapters";
-import { normalizePath } from "@/utils/fs";
+import {
+  normalizePath,
+  resolveWorkspacePath,
+  type WorkspacePathResolution,
+} from "@/utils/fs";
+import { matchLooseFile } from "@/entities/files";
+
+/**
+ * Resolve a history-tool document path. History only tracks workspace
+ * files, so loose files (editable, but outside the root) get a clearer
+ * error than the generic containment failure.
+ */
+export function resolveHistoryDocumentPath(
+  workspacePath: string,
+  inputPath: string,
+): WorkspacePathResolution {
+  const resolved = resolveWorkspacePath(workspacePath, inputPath);
+  if (!resolved.ok && matchLooseFile(workspacePath, inputPath)) {
+    return {
+      ok: false,
+      error: `"${inputPath}" is a loose file outside the workspace - document history only tracks workspace files`,
+    };
+  }
+  return resolved;
+}
 
 const historyServiceRegistry = new Map<string, IsomorphicGitService>();
 const historyInitRegistry = new Map<string, Promise<void>>();

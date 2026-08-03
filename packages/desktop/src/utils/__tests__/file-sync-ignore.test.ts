@@ -4,6 +4,7 @@ import { handleMetadataFileSystemChange } from "../file-sync";
 import {
   getOrCreateWorkspaceCollections,
   clearWorkspaceCollections,
+  registerLooseFile,
 } from "@/entities/files";
 
 // The frontend backstop for ignore rules: whatever the platform watchers
@@ -124,5 +125,40 @@ describe("watcher event backstop", () => {
 
     const { metadata } = getOrCreateWorkspaceCollections(WS);
     expect(metadata.get(`${WS}/rescued.md`)).toMatchObject({ type: "file" });
+  });
+
+  it("adopts created events for registered loose files despite ignored-looking components", async () => {
+    // Out-of-root path with an ignored directory component: isIgnoredPath
+    // has no matching base to strip, so without the loose bypass this
+    // event would be dropped.
+    const LOOSE = "/elsewhere/build/notes.md";
+    await registerLooseFile(WS, LOOSE);
+
+    // Simulate the row having been dropped (e.g. transient stat failure on
+    // a refetch) so the created event exercises the adoption path.
+    const { metadata } = getOrCreateWorkspaceCollections(WS);
+    metadata.utils.writeDelete(LOOSE);
+
+    await handleMetadataFileSystemChange(
+      { changes: [{ type: "created", path: LOOSE, isDirectory: false }] },
+      WS,
+    );
+
+    expect(metadata.get(LOOSE)).toMatchObject({
+      type: "file",
+      relativePath: undefined,
+    });
+  });
+
+  it("still drops created events for unregistered out-of-root ignored paths", async () => {
+    const OUTSIDE = "/elsewhere/build/other.md";
+
+    await handleMetadataFileSystemChange(
+      { changes: [{ type: "created", path: OUTSIDE, isDirectory: false }] },
+      WS,
+    );
+
+    const { metadata } = getOrCreateWorkspaceCollections(WS);
+    expect(metadata.get(OUTSIDE)).toBeUndefined();
   });
 });

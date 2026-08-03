@@ -164,6 +164,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   private gitLocks = new Set<string>();
 
   abstract pickDirectory(title: string): Promise<string | null>;
+  abstract pickFile(title: string): Promise<string | null>;
 
   // The pure-IndexedDB adapter has no permission surface; the FS Access
   // adapter overrides this.

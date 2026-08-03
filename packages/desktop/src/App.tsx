@@ -5,7 +5,7 @@ import { Welcome } from "@/components/welcome";
 import { RootRedirect } from "@/components/root-redirect";
 import { MockDirectoryPickerDialog } from "@/components/mock-directory-picker-dialog";
 import { TextPromptDialog } from "@/components/text-prompt-dialog";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useTheme } from "@/components/theme-provider";
 import { platformAdapter } from "@/adapters";
 import { isWeb } from "@/utils/platform";
@@ -21,6 +21,10 @@ import {
   watchCrossTabPairing,
 } from "@/agent/tunnel/connect-flow";
 import { hadDeepLinkPairing } from "@/agent/tunnel/pair-dialog-store";
+import { LAYOUT_PARAM, parseLayout } from "@/utils/layout-codec";
+import { openFileInLayout } from "@/utils/dockable-layout";
+import { buildLooseFileUrl } from "@/utils/loose-workspace";
+import { captureEvent } from "@/telemetry/telemetry";
 
 export const App = () => {
   const { setTheme } = useTheme();
@@ -71,6 +75,43 @@ export const App = () => {
     }
   }, [location.pathname, location.search, setLastPath]);
 
+  // A file arriving from outside the app (Open File menu, OS "open with"):
+  // merge it into the current workspace's layout as a loose tab — the
+  // tab-derived registration (useLooseFileRegistration) picks it up from
+  // the URL — or, with no workspace open, edit it in the loose sentinel
+  // workspace. Reads the URL fresh: event listeners would otherwise close
+  // over a stale location.
+  const openExternalFile = useCallback(
+    (filePath: string) => {
+      const pathname = window.location.pathname;
+      const isWorkspaceRoute =
+        pathname !== "/" &&
+        pathname !== "/welcome" &&
+        pathname !== "/pair" &&
+        !pathname.startsWith("/__harness");
+      // Canary for OS "open with" delivery: cold-start emits (app launched
+      // BY opening a file) have unverified delivery and no buffering — if
+      // association usage in the wild shows only with_workspace opens,
+      // that's the signal the cold-start path needs solving.
+      captureEvent("external_file_opened", {
+        with_workspace: isWorkspaceRoute,
+      });
+      if (!isWorkspaceRoute) {
+        navigate(buildLooseFileUrl(filePath));
+        return;
+      }
+      const params = new URLSearchParams(window.location.search);
+      const layout = parseLayout(params.get(LAYOUT_PARAM));
+      const nextLayout = openFileInLayout(layout, {
+        tabId: filePath,
+        intent: "new-tab",
+      });
+      params.set(LAYOUT_PARAM, JSON.stringify(nextLayout));
+      navigate(`${pathname}?${params.toString()}`);
+    },
+    [navigate],
+  );
+
   useEffect(() => {
     const cleanup = platformAdapter.addEventListener((event) => {
       switch (event.type) {
@@ -83,6 +124,9 @@ export const App = () => {
           navigate(`/${encodedPath}`);
           break;
         }
+        case "file-selected":
+          openExternalFile(event.payload);
+          break;
         case "file-dropped":
           console.log({ app: event.payload });
           break;
@@ -93,7 +137,7 @@ export const App = () => {
     });
 
     return cleanup;
-  }, [setTheme, persistTheme, navigate, setZoomLevel]);
+  }, [setTheme, persistTheme, navigate, setZoomLevel, openExternalFile]);
 
   return (
     <div className="flex h-screen flex-col text-foreground overflow-hidden">

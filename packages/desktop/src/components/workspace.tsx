@@ -21,7 +21,7 @@ import { useProjectSettings } from "@/utils/project-settings";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
 import { useWorkspaceCommands } from "@/hooks/use-workspace-commands";
 import type { FileEntry } from "@/utils/fs";
-import { getFileName } from "@/utils/fs";
+import { getDirectoryPath, getFileName } from "@/utils/fs";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { WorkspaceTabsProvider } from "@/components/workspace-tabs-provider";
@@ -35,6 +35,20 @@ import {
   type FileTreeMode,
   FILE_TREE_IDLE,
 } from "@/components/editor/file-tree";
+import { isLooseWorkspace } from "@/utils/loose-workspace";
+
+/**
+ * Loose files (no relativePath ⇒ outside the root) resolve relative
+ * assets/links against their own directory instead of the workspace root.
+ */
+function editorBasePath(
+  fileEntry: { path: string; relativePath?: string },
+  workspacePath: string,
+): string {
+  return fileEntry.relativePath === undefined
+    ? getDirectoryPath(fileEntry.path)
+    : workspacePath;
+}
 
 export const Workspace = () => {
   const { workspacePath } = useWorkspaceParams();
@@ -42,6 +56,18 @@ export const Workspace = () => {
   if (!workspacePath) {
     return null;
   }
+
+  // Split so the inner component's hooks never follow a conditional return.
+  return <WorkspaceInner workspacePath={workspacePath} />;
+};
+
+// Pre-existing Workspace body, renamed in the wrapper split
+// (hooks-after-early-return fix); not newly complex.
+// fallow-ignore-next-line complexity
+const WorkspaceInner = ({ workspacePath }: { workspacePath: string }) => {
+  // Loose sentinel mode (no folder open, only loose file tabs): no file
+  // tree/git/agents sidebar, no git status, no project settings file.
+  const isLoose = isLooseWorkspace(workspacePath);
 
   useThrowWorkspaceAccessError(workspacePath);
   const { t } = useTranslation();
@@ -77,10 +103,11 @@ export const Workspace = () => {
   // MET-54). On mount, kick the collection's boot load so restored sessions
   // are in place before tab pruning runs.
   useEffect(() => {
+    if (isLoose) return;
     return () => {
       void disposeWorkspaceTaskManager(workspacePath);
     };
-  }, [workspacePath]);
+  }, [workspacePath, isLoose]);
 
   // The open-tabs cross-entity join (agent/file split, metadata ⋈ content
   // rows, agent task rows, stale-tab detection) lives on the tabs entity.
@@ -127,7 +154,7 @@ export const Workspace = () => {
         >
           <PolymorphicEditor
             file={fileEntry as FileEntry}
-            basePath={workspacePath}
+            basePath={editorBasePath(fileEntry, workspacePath)}
             isContentLoaded={fileEntry.isContentLoaded}
             contentError={fileEntry.contentError}
           />
@@ -145,7 +172,6 @@ export const Workspace = () => {
     (f) => f.path === activeTabId,
   );
   const currentContent = activeFileData?.content || "";
-
 
   const [searchParams, setUrlSearchParams] = useSearchParams();
   const isSidebarCollapsed = searchParams.get("sidebar") === "collapsed";
@@ -327,30 +353,35 @@ export const Workspace = () => {
   useFileWatchers(workspacePath, fileOpenTabIds);
 
   return (
-    <WorkspaceTabsProvider openFile={openFileInTabs} openAgentTab={openAgentTab}>
+    <WorkspaceTabsProvider
+      openFile={openFileInTabs}
+      openAgentTab={openAgentTab}
+    >
       <div
         dir={direction}
         className="relative flex h-full w-full overflow-hidden p-2"
       >
-        <div className="flex h-full shrink-0 overflow-hidden rounded-xl border border-border">
-          <IconSidebar
-            isCollapsed={isSidebarCollapsed}
-            onToggleCollapse={toggleSidebarCollapsed}
-          />
-
-          {!isSidebarCollapsed && (
-            <Sidebar
-              workspacePath={workspacePath}
-              activeTabId={activeTabId}
-              openTabs={openTabs}
-              onFileSelect={handleFileSelect}
-              closeTab={closeTab}
-              mode={fileTreeMode}
-              onModeChange={setFileTreeMode}
-              searchPanelRef={searchPanelRef}
+        {!isLoose && (
+          <div className="flex h-full shrink-0 overflow-hidden rounded-xl border border-border">
+            <IconSidebar
+              isCollapsed={isSidebarCollapsed}
+              onToggleCollapse={toggleSidebarCollapsed}
             />
-          )}
-        </div>
+
+            {!isSidebarCollapsed && (
+              <Sidebar
+                workspacePath={workspacePath}
+                activeTabId={activeTabId}
+                openTabs={openTabs}
+                onFileSelect={handleFileSelect}
+                closeTab={closeTab}
+                mode={fileTreeMode}
+                onModeChange={setFileTreeMode}
+                searchPanelRef={searchPanelRef}
+              />
+            )}
+          </div>
+        )}
 
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <DebugPanel />
@@ -381,7 +412,7 @@ export const Workspace = () => {
         <StatusBar
           wordCount={wordCount}
           isSynced={isSynced}
-          workspacePath={workspacePath}
+          workspacePath={isLoose ? undefined : workspacePath}
         />
 
         <SettingsModal

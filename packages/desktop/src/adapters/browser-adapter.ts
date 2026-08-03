@@ -120,6 +120,12 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return Array.from(directories);
   }
 
+  async pickFile(_title: string): Promise<string | null> {
+    // Loose files are desktop-only — browser fs access is rooted in
+    // directory handles, so there is no standalone-file grant.
+    return null;
+  }
+
   async pickDirectory(title: string): Promise<string | null> {
     return new Promise((resolve) => {
       const event = new CustomEvent("mock-pick-directory", {

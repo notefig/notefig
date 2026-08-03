@@ -46,23 +46,42 @@ let testCounter = 0;
 let WS = "";
 let FILE = "";
 
+// The walk's view of disk, kept faithful to the mutation seams: files a
+// test creates appear in subsequent listings and deleted ones disappear.
+// Without this, a background refetch's full-replace races the assertions
+// and wipes freshly created rows — a wipe that can't happen against a real
+// fs, where the walk sees what was just written.
+let listedFiles: string[] = [];
+
 let files: typeof import("./files");
 
 beforeEach(async () => {
   vi.clearAllMocks();
   WS = `/ws-files-test-${testCounter++}`;
   FILE = `${WS}/notes.md`;
-  adapter.createFiles.mockResolvedValue(ok([FILE]));
+  listedFiles = [];
+  adapter.createFiles.mockImplementation(async (paths: string[]) => {
+    listedFiles.push(...paths);
+    return ok(paths);
+  });
   adapter.writeFiles.mockResolvedValue(ok([FILE]));
-  adapter.deleteFiles.mockResolvedValue(ok([FILE]));
+  adapter.deleteFiles.mockImplementation(async (paths: string[]) => {
+    listedFiles = listedFiles.filter((p) => !paths.includes(p));
+    return ok(paths);
+  });
   // Honor the requested paths — the metadata queryFn calls this with the
-  // directory listing (empty here), so a blanket return would seed the
-  // collection with FILE before createFile ever runs.
+  // directory listing, so a blanket return would seed the collection with
+  // FILE before createFile ever runs.
   adapter.getMetadata.mockImplementation(async (paths: string[]) =>
     ok(paths.includes(FILE) ? [metadata(FILE, 5)] : []),
   );
   adapter.readFiles.mockResolvedValue(ok([{ path: FILE, content: "hello" }]));
-  adapter.readDirectory.mockResolvedValue({ ok: true, value: [] });
+  adapter.readDirectory.mockImplementation(
+    async (_path: string, options?: { includeFiles?: boolean }) => ({
+      ok: true,
+      value: options?.includeFiles === false ? [] : [...listedFiles],
+    }),
+  );
 
   files = await import("./files");
 
@@ -197,6 +216,130 @@ describe("lazy stat hydration", () => {
     // ...and kept the previous stats when nothing came back.
     const { metadata: rows } = files.getOrCreateWorkspaceCollections(WS);
     expect(rows.get(A)?.modified).toBeInstanceOf(Date);
+  });
+});
+
+describe("loose files", () => {
+  let LOOSE = "";
+  let A = "";
+
+  beforeEach(() => {
+    LOOSE = `/elsewhere/loose-${testCounter}.md`;
+    A = `${WS}/a.md`;
+    adapter.readDirectory.mockImplementation(
+      async (
+        _path: string,
+        options?: { includeFiles?: boolean; includeDirectories?: boolean },
+      ) => ({
+        ok: true,
+        value: options?.includeFiles ? [A] : [],
+      }),
+    );
+    adapter.getMetadata.mockImplementation(async (paths: string[]) =>
+      ok(
+        paths.filter((p) => p === LOOSE || p === A).map((p) => metadata(p, 9)),
+      ),
+    );
+  });
+
+  it("registerLooseFile inserts a row with no relativePath", async () => {
+    await files.registerLooseFile(WS, LOOSE);
+
+    const { metadata: rows } = files.getOrCreateWorkspaceCollections(WS);
+    expect(rows.get(LOOSE)).toMatchObject({
+      path: LOOSE,
+      type: "file",
+      relativePath: undefined,
+    });
+    expect(rows.get(LOOSE)?.modified).toBeInstanceOf(Date);
+    expect(files.isLooseFile(WS, LOOSE)).toBe(true);
+  });
+
+  it("the loose row survives the queryFn's full-replace refetch", async () => {
+    await files.registerLooseFile(WS, LOOSE);
+    await files.refreshDirectoryMetadata(WS);
+
+    const { metadata: rows } = files.getOrCreateWorkspaceCollections(WS);
+    // Walked row and loose row coexist after the full replace.
+    expect(rows.get(A)).toMatchObject({ relativePath: "a.md" });
+    expect(rows.get(LOOSE)).toMatchObject({ relativePath: undefined });
+  });
+
+  it("a loose path whose stat fails drops out on refetch (stale-tab path)", async () => {
+    await files.registerLooseFile(WS, LOOSE);
+    expect(
+      files.getOrCreateWorkspaceCollections(WS).metadata.get(LOOSE),
+    ).toBeDefined();
+
+    // File deleted externally: the stat no longer returns it.
+    adapter.getMetadata.mockImplementation(async (paths: string[]) =>
+      ok(paths.filter((p) => p === A).map((p) => metadata(p, 9))),
+    );
+    await files.refreshDirectoryMetadata(WS);
+
+    const { metadata: rows } = files.getOrCreateWorkspaceCollections(WS);
+    expect(rows.get(LOOSE)).toBeUndefined();
+    // Registration stays — reconciliation (tab close) is what unregisters.
+    expect(files.isLooseFile(WS, LOOSE)).toBe(true);
+  });
+
+  it("unregisterLooseFile drops the registration and both rows", async () => {
+    await files.registerLooseFile(WS, LOOSE);
+    await files.writeFileContent(WS, LOOSE, "loose content");
+    // Let writeFileContent's un-awaited metadata refresh transaction commit;
+    // unregistering mid-commit leaves the optimistic overlay row until the
+    // next refetch excludes it (acceptable transient in the app).
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    files.unregisterLooseFile(WS, LOOSE);
+
+    const collections = files.getOrCreateWorkspaceCollections(WS);
+    expect(files.isLooseFile(WS, LOOSE)).toBe(false);
+    expect(collections.metadata.get(LOOSE)).toBeUndefined();
+    expect(collections.content.get(LOOSE)).toBeUndefined();
+
+    // And a refetch does not resurrect it.
+    await files.refreshDirectoryMetadata(WS);
+    expect(collections.metadata.get(LOOSE)).toBeUndefined();
+  });
+
+  it("resolveEditablePath admits registered loose paths only", async () => {
+    await files.registerLooseFile(WS, LOOSE);
+
+    // Registered loose file: allowed, absolute in both halves.
+    expect(files.resolveEditablePath(WS, LOOSE)).toEqual({
+      ok: true,
+      absolute: LOOSE,
+      relative: LOOSE,
+    });
+    // Dot-segment obfuscation of the same path still matches.
+    expect(
+      files.resolveEditablePath(WS, `/elsewhere/./${LOOSE.split("/").pop()}`),
+    ).toMatchObject({ ok: true, absolute: LOOSE });
+    // Unregistered out-of-root path: still rejected.
+    expect(
+      files.resolveEditablePath(WS, "/elsewhere/not-registered.md").ok,
+    ).toBe(false);
+    // Workspace-relative resolution unchanged.
+    expect(files.resolveEditablePath(WS, "notes.md")).toMatchObject({
+      ok: true,
+      absolute: `${WS}/notes.md`,
+      relative: "notes.md",
+    });
+  });
+
+  it("writeFileContent refreshes the loose row's metadata after save", async () => {
+    await files.registerLooseFile(WS, LOOSE);
+    adapter.writeFiles.mockResolvedValue(ok([LOOSE]));
+
+    await files.writeFileContent(WS, LOOSE, "hello loose");
+
+    const entry = files.getFileEntry(WS, LOOSE);
+    expect(entry?.content).toBe("hello loose");
+    // The metadata row existed, so mtime/size/hash refreshed (files.ts
+    // guards this update on row presence).
+    expect(entry?.contentHash).toBeTruthy();
+    expect(entry?.modified).toBeInstanceOf(Date);
   });
 });
 

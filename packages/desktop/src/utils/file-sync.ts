@@ -4,7 +4,7 @@ import type {
   ContentChangeEvent,
 } from "@/adapters/platform-adapter.interface";
 import { FsError } from "@/adapters/platform-adapter.interface";
-import { getOrCreateWorkspaceCollections } from "@/entities/files";
+import { getOrCreateWorkspaceCollections, isLooseFile } from "@/entities/files";
 import { queryClient } from "@/entities/query-client";
 import {
   invalidateDerivedState,
@@ -16,6 +16,7 @@ import {
   projectSettingsQueryKey,
 } from "./project-settings";
 import { IGNORE_RULES, isIgnoredPath } from "./ignore";
+import { isLooseWorkspace } from "./loose-workspace";
 import { calculateContentHash } from "./hash";
 import { getDocumentSync } from "./markdown-conversion";
 // Conscious utils → components import (direct-imports-over-injection house
@@ -143,7 +144,14 @@ async function applyMetadataCreated(
   // Authoritative backstop for ignore rules: the platform watchers filter
   // too (cheaply, Rust-side), but browser adapters and event races can
   // still surface ignored paths — nothing ignored may enter the collection.
-  if (isIgnoredPath(change.path, workspaceId)) return;
+  // Loose files are exempt: explicitly opened paths are never ignored (and
+  // isIgnoredPath misjudges out-of-root paths, which lack a matching base).
+  if (
+    !isLooseFile(workspaceId, change.path) &&
+    isIgnoredPath(change.path, workspaceId)
+  ) {
+    return;
+  }
 
   const metadataResult = await platformAdapter.getMetadata([change.path]);
   const metadata = metadataResult.succeeded[0];
@@ -181,8 +189,12 @@ async function applyMetadataRenamed(
     return;
   }
 
-  // Renamed INTO ignored space: the file leaves the tracked tree.
-  if (isIgnoredPath(change.path, workspaceId)) {
+  // Renamed INTO ignored space: the file leaves the tracked tree. Loose
+  // files are exempt (explicitly opened paths are never ignored).
+  if (
+    !isLooseFile(workspaceId, change.path) &&
+    isIgnoredPath(change.path, workspaceId)
+  ) {
     applyMetadataDeleted(collections, { ...change, path: change.oldPath });
     return;
   }
@@ -334,11 +346,16 @@ export function useFileWatchers(
           }
         });
 
-        await platformAdapter.startWatchingMetadata(
-          [workspacePath],
-          metadataWatchId,
-          { ignore: IGNORE_RULES },
-        );
+        // The loose sentinel has no root directory to watch; loose files'
+        // content (and delete/rename) events come from the content watcher
+        // below, and the 30s metadata refetch re-stats them.
+        if (!isLooseWorkspace(workspacePath)) {
+          await platformAdapter.startWatchingMetadata(
+            [workspacePath],
+            metadataWatchId,
+            { ignore: IGNORE_RULES },
+          );
+        }
 
         if (openFilePaths.length > 0) {
           await platformAdapter.startWatchingContent(
@@ -356,7 +373,9 @@ export function useFileWatchers(
     return () => {
       isActive = false;
       eventCleanup?.();
-      platformAdapter.stopWatching(metadataWatchId);
+      if (!isLooseWorkspace(workspacePath)) {
+        platformAdapter.stopWatching(metadataWatchId);
+      }
       if (openFilePaths.length > 0) {
         platformAdapter.stopWatching(contentWatchId);
       }

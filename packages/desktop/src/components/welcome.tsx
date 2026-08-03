@@ -1,5 +1,14 @@
 import { useState, useEffect, useRef } from "react";
-import { Plus, Github, Settings, Book, Moon, Sun, Monitor } from "lucide-react";
+import {
+  Plus,
+  Github,
+  Settings,
+  Book,
+  Moon,
+  Sun,
+  Monitor,
+  FileText,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -7,7 +16,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { pickDirectory } from "@/utils/fs";
+import { pickDirectory, pickFile } from "@/utils/fs";
+import { buildLooseFileUrl } from "@/utils/loose-workspace";
+import { isWeb } from "@/utils/platform";
 import { FsError } from "@/adapters/platform-adapter.interface";
 import { toast } from "sonner";
 import { PlainLogo } from "@/components/logo";
@@ -103,6 +114,20 @@ export function Welcome() {
         toast.error(t("pickerPermissionDenied"));
       } else {
         throw error;
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenFile = async () => {
+    setLoading(true);
+    try {
+      // Desktop-only (web adapters resolve pickFile to null) — a single
+      // file edited in the loose sentinel workspace, no folder open.
+      const selectedPath = await pickFile("Open File");
+      if (selectedPath) {
+        navigate(buildLooseFileUrl(selectedPath));
       }
     } finally {
       setLoading(false);
@@ -215,6 +240,34 @@ export function Welcome() {
                     </div>
                   </div>
                 </button>
+
+                {!isWeb() && (
+                  <button
+                    onClick={handleOpenFile}
+                    disabled={loading}
+                    className={`
+                      ${projectButtonStyles}
+                      border-border bg-card text-foreground
+                      hover:border-primary hover:bg-accent
+                      focus-visible:border-primary focus-visible:bg-accent
+                      disabled:opacity-50 disabled:cursor-not-allowed
+                    `}
+                  >
+                    <div className="flex flex-1 items-center gap-3 min-w-0">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted">
+                        <FileText className="h-5 w-5 text-primary" />
+                      </div>
+                      <div className="min-w-0 flex-1 text-left">
+                        <h4 className="truncate text-sm font-medium text-foreground">
+                          {t("openSingleFile")}
+                        </h4>
+                        <p className="text-xs text-muted-foreground">
+                          {t("openSingleFileDescription")}
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                )}
 
                 {recentProjects.length > 0 ? (
                   recentProjects.map((project) => (
