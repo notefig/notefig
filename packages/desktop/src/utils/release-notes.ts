@@ -44,8 +44,8 @@ export const releaseNotes: ReleaseNote[] = Object.entries(noteModules)
       ? { version, title: heading[1].trim(), markdown }
       : {
           version,
-          title: `Version ${version}`,
-          markdown: `# Version ${version}\n\n${markdown}`,
+          title: `Release Notes v${version}`,
+          markdown: `# Release Notes v${version}\n\n${markdown}`,
         };
   })
   .sort((a, b) => compareVersionsDesc(a.version, b.version));

@@ -94,20 +94,17 @@ const editorInstances = new Map<string, EditorInstance>();
 
 if (import.meta.env.DEV) {
   // Diagnostic hook for e2e failure dumps (dev builds only).
-  (window as unknown as Record<string, unknown>).__metristsDebugEditors =
-    () =>
-      Array.from(editorInstances.entries()).map(([path, instance]) => {
-        const editor = isMarkdownInstance(instance)
-          ? instance.editor
-          : undefined;
-        return {
-          path,
-          type: instance.type,
-          destroyed: editor?.isDestroyed,
-          docLength: editor?.state.doc.textContent.length,
-          docHead: editor?.state.doc.textContent.slice(0, 40),
-        };
-      });
+  (window as unknown as Record<string, unknown>).__metristsDebugEditors = () =>
+    Array.from(editorInstances.entries()).map(([path, instance]) => {
+      const editor = isMarkdownInstance(instance) ? instance.editor : undefined;
+      return {
+        path,
+        type: instance.type,
+        destroyed: editor?.isDestroyed,
+        docLength: editor?.state.doc.textContent.length,
+        docHead: editor?.state.doc.textContent.slice(0, 40),
+      };
+    });
 }
 
 const EDITOR_FOCUS_PRIORITY = 70;
@@ -250,7 +247,11 @@ function createMarkdownInstance(
     ),
     // filePath lets the image node view declare its drag-protocol payload
     // (which document to rewrite when the asset is moved elsewhere).
-    MarkdownImage.configure({ allowBase64: true, workspaceRoot, filePath } as any),
+    MarkdownImage.configure({
+      allowBase64: true,
+      workspaceRoot,
+      filePath,
+    } as any),
     // filePath lets BlobNodeView address answerBlob at the right document;
     // lowlight must be re-specified since configure() replaces options wholesale.
     MarkdownCodeBlock.configure({ lowlight, filePath } as any),
@@ -353,14 +354,23 @@ function createMarkdownInstance(
   return instance;
 }
 
-function createImageInstance(filePath: string): ImageInstance {
-  const instance: ImageInstance = {
-    type: "image",
+/**
+ * Focus-only instance for tabs without a ProseMirror surface (image viewer,
+ * release-notes tab): focus lands on the tab's `[data-editor-container]`
+ * element, which keeps the dockable hotkeys alive and lets the arbiter's
+ * tab-selected intents resolve like any editor's.
+ */
+function createContainerInstance(
+  type: "image" | "release-notes",
+  filePath: string,
+): EditorInstance {
+  const instance: EditorInstance & { filePath: string } = {
+    type,
     filePath,
     focus(): boolean {
       if (isEditorFocusSuppressed()) return false;
 
-      const selector = `[data-editor-container="${this.filePath}"]`;
+      const selector = `[data-editor-container="${filePath}"]`;
       const el = document.querySelector(selector);
       if (el instanceof HTMLElement) {
         el.focus();
@@ -376,7 +386,6 @@ function createImageInstance(filePath: string): ImageInstance {
       return false;
     },
   };
-
   return instance;
 }
 
@@ -391,7 +400,11 @@ interface ImageConfig {
   type: "image";
 }
 
-type EditorConfig = MarkdownConfig | ImageConfig;
+interface ReleaseNotesConfig {
+  type: "release-notes";
+}
+
+type EditorConfig = MarkdownConfig | ImageConfig | ReleaseNotesConfig;
 
 /**
  * Get an existing editor for a file path, or create one with the given configuration.
@@ -436,7 +449,8 @@ export function getOrCreateEditor(
       );
       break;
     case "image":
-      instance = createImageInstance(filePath);
+    case "release-notes":
+      instance = createContainerInstance(config.type, filePath);
       break;
     default:
       throw new Error(`Unknown editor type: ${(config as any).type}`);
@@ -591,4 +605,3 @@ export function navigateToLocation(
   }
   return instance.goToLocation(location);
 }
-

@@ -154,7 +154,7 @@ export const Workspace = () => {
             <Dockable.Tab
               key={RELEASE_NOTES_TAB_ID}
               id={RELEASE_NOTES_TAB_ID}
-              name={latestReleaseTitle ?? t("whatsNew")}
+              name={latestReleaseTitle ?? t("releaseNotesTitle")}
               onClose={() => closeTab(RELEASE_NOTES_TAB_ID)}
             >
               <ReleaseNotesTab />

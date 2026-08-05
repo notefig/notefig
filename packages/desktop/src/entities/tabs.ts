@@ -45,7 +45,7 @@ export { LAYOUT_PARAM, parseLayout, extractTabIds, findLayoutSelectedTab };
 
 export const AGENT_TAB_PREFIX = "agent:";
 
-/** Singleton release-notes ("What's New") tab. */
+/** Singleton release-notes tab. */
 export const RELEASE_NOTES_TAB_ID = "release:";
 
 export function agentTabId(taskId: string): string {

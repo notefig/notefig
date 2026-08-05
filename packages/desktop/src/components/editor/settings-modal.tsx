@@ -323,7 +323,7 @@ function UpdateSection() {
               onClick={openWhatsNew}
               className="cursor-pointer text-sm text-primary hover:underline"
             >
-              {t("whatsNew")}
+              {t("releaseNotesTitle")}
             </button>
           )}
         </div>

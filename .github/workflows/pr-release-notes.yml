@@ -1,0 +1,30 @@
+name: PR Release Notes
+
+# Every PR must carry a "## Release notes" section: user-facing bullets that
+# the desktop release workflow assembles into release-notes/v<version>.md
+# (the in-app release-notes tab), or the literal `_none_` for internal-only
+# changes. Runs on `edited` too, so fixing the body re-runs the check.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  check:
+    name: Require release-notes section
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR body
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          SECTION=$(printf '%s' "$BODY" | tr -d '\r' | \
+            awk '/^##[[:space:]]+[Rr]elease notes/{found=1; next} /^##[[:space:]]/{found=0} found' | \
+            perl -0pe 's/<!--.*?-->//gs' | sed '/^[[:space:]]*$/d')
+
+          if [ -z "$SECTION" ]; then
+            echo '::error::The PR body needs a "## Release notes" section with at least one user-facing entry, or the literal `_none_` for internal-only changes. Edit the PR description to re-run this check.'
+            exit 1
+          fi
+
+          echo "Release notes:"
+          echo "$SECTION"

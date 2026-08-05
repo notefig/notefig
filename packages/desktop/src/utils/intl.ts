@@ -155,8 +155,8 @@ i18n
           installerVersion: "Installer version:",
           newVersionReady: "A new version is ready to be installed.",
           readChangelog: "Read the changelog.",
-          whatsNew: "What's New",
-          whatsNewEmpty: "No release notes yet.",
+          releaseNotesTitle: "Release Notes",
+          releaseNotesEmpty: "No release notes yet.",
           relaunch: "Relaunch",
           automaticUpdates: "Automatic updates",
           automaticUpdatesDesc:
