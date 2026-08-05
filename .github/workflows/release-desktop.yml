@@ -239,10 +239,16 @@ jobs:
         id: notes
         if: ${{ !contains(inputs.version, '-debug') }}
         run: |
+          # Random per-run delimiter: the notes file carries PR-authored text,
+          # so a fixed delimiter could be embedded in a PR body to terminate
+          # this value early and inject arbitrary step outputs.
+          DELIMITER="RELEASE_NOTES_$(uuidgen)"
           {
-            echo "body<<RELEASE_NOTES_EOF"
+            echo "body<<${DELIMITER}"
             cat "packages/desktop/release-notes/v${{ inputs.version }}.md"
-            echo "RELEASE_NOTES_EOF"
+            # Leading \n so a file without a trailing newline can't glue the
+            # closing delimiter onto its last content line.
+            printf '\n%s\n' "${DELIMITER}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Build and release Tauri app
