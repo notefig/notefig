@@ -3,6 +3,10 @@
 /** Injected by Vite at build time from package.json version */
 declare const __APP_VERSION__: string;
 
+/** Injected by Vite at build time: raw markdown of release-notes/v<version>.md
+ * for the current package.json version, or "" when the file doesn't exist. */
+declare const __LATEST_RELEASE_NOTES__: string;
+
 interface ImportMetaEnv {
   /** PostHog project key. Absent = telemetry fully disabled (dev/forks). */
   readonly VITE_POSTHOG_KEY?: string;

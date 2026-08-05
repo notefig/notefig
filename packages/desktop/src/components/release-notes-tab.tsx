@@ -7,14 +7,14 @@ import {
   focusEditor,
 } from "@/components/editor/editor-store";
 import { RELEASE_NOTES_TAB_ID } from "@/entities/tabs";
-import { releaseNotesMarkdown } from "@/utils/release-notes";
+import { latestReleaseMarkdown } from "@/utils/release-notes";
 import "@/components/editor/tiptap.css";
 
 /**
  * The release-notes tab — renders the bundled release notes read-only through
  * the same Tiptap schema the editor uses (the Markdown extension parses the
- * string content). Each release document carries its own `# ` title, so the
- * tab renders the concatenated documents verbatim. The wrapper/prose classes
+ * string content). Only the newest version's document is shown — older
+ * bundled notes stay on disk but don't render. The wrapper/prose classes
  * mirror text-editor.tsx exactly, so the notes column has the same width and
  * centering as an open file. The outer `w-full` matters: without it the tab
  * content shrinks inside the Dockable window and `mx-auto` has nothing to
@@ -24,7 +24,7 @@ export function ReleaseNotesTab() {
   const { t } = useTranslation();
   const editor = useEditor({
     extensions: createSchemaExtensions(),
-    content: releaseNotesMarkdown,
+    content: latestReleaseMarkdown,
     editable: false,
   });
 
@@ -50,7 +50,7 @@ export function ReleaseNotesTab() {
         tabIndex={-1}
         className="flex-1 min-h-0 overflow-auto outline-none"
       >
-        {releaseNotesMarkdown ? (
+        {latestReleaseMarkdown ? (
           <EditorContent
             editor={editor}
             className="prose prose-sm dark:prose-invert max-w-2xl mx-auto p-4 outline-none"

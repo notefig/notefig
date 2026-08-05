@@ -1,11 +1,23 @@
 import { defineConfig } from "vitest/config";
+import fs from "fs";
 import path from "path";
 import pkg from "./package.json";
+
+const latestReleaseNotesFile = path.resolve(
+  __dirname,
+  `release-notes/v${pkg.version}.md`,
+);
 
 export default defineConfig({
   define: {
     // Mirror vite.config.ts — telemetry stamps app_version on every event.
     __APP_VERSION__: JSON.stringify(pkg.version),
+    // Mirror vite.config.ts — the release-notes tab renders this.
+    __LATEST_RELEASE_NOTES__: JSON.stringify(
+      fs.existsSync(latestReleaseNotesFile)
+        ? fs.readFileSync(latestReleaseNotesFile, "utf8")
+        : "",
+    ),
   },
   test: {
     environment: "happy-dom",
