@@ -19,7 +19,6 @@ import { useTranslation } from "react-i18next";
 import {
   Check,
   FileText,
-  Loader2,
   MessageSquare,
   Pencil,
   RotateCw,
@@ -31,6 +30,7 @@ import { toast } from "sonner";
 import type { Editor } from "@tiptap/core";
 import { useAutosizeTextarea } from "@/hooks/use-autosize-textarea";
 import { Button } from "@/components/ui/button";
+import { OrbLoader } from "@/components/ui/orb-loader";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -303,8 +303,7 @@ export const PromptBlob = memo(function PromptBlob({
       // Focus IS in this widget's composer — an explicit hand-off, not an
       // ambient grab, so it may leave the text entry.
       steal: true,
-      caret:
-        typeof pos === "number" ? { type: "before-node", pos } : undefined,
+      caret: typeof pos === "number" ? { type: "before-node", pos } : undefined,
     });
   }, [documentPath, getPos]);
 
@@ -1018,7 +1017,7 @@ function StatusRow({
   return (
     <div className="flex items-center gap-2 px-2.5 py-1.5">
       {shimmer && (
-        <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+        <OrbLoader state="connecting" className="text-muted-foreground" />
       )}
       <div className="min-w-0 flex-1">
         {label?.trim() && (
