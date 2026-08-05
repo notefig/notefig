@@ -64,3 +64,11 @@ export function useWorkspaceTabs(): WorkspaceTabsContextValue {
   }
   return context;
 }
+
+/** For components that render both inside and outside a workspace (the
+ * settings modal): undefined when no tab surface exists. */
+export function useWorkspaceTabsOptional():
+  | WorkspaceTabsContextValue
+  | undefined {
+  return useContext(WorkspaceTabsContext);
+}

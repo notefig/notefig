@@ -19,6 +19,11 @@ export interface AppSettings {
   autoUpdateEnabled: boolean;
   telemetryConsentVersion: number;
   telemetryInstallId: string | null;
+  /**
+   * The app version the user last ran. Used to open the release-notes tab
+   * exactly once after an update; null means fresh install (no notes shown).
+   */
+  lastSeenVersion: string | null;
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -30,11 +35,14 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   autoUpdateEnabled: true,
   telemetryConsentVersion: 0,
   telemetryInstallId: null,
+  lastSeenVersion: null,
 };
 
 function mergeWithDefaults(values: Record<string, unknown>): AppSettings {
   const settings = { ...DEFAULT_APP_SETTINGS };
-  for (const key of Object.keys(DEFAULT_APP_SETTINGS) as (keyof AppSettings)[]) {
+  for (const key of Object.keys(
+    DEFAULT_APP_SETTINGS,
+  ) as (keyof AppSettings)[]) {
     const stored = values[key];
     if (stored !== undefined && stored !== null) {
       (settings as Record<string, unknown>)[key] = stored;

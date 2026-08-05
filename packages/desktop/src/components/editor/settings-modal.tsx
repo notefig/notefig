@@ -36,6 +36,14 @@ import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useSearchParamFlag } from "@/hooks/use-search-param-flag";
+import { useWorkspaceTabsOptional } from "@/components/workspace-tabs-provider";
+import {
+  RELEASE_NOTES_TAB_ID,
+  LAYOUT_PARAM,
+  parseLayout,
+} from "@/entities/tabs";
+import { openFileInLayout } from "@/utils/dockable-layout";
+import { useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useAppUpdater,
@@ -287,13 +295,38 @@ function AppearanceSettings() {
 function UpdateSection() {
   const { t } = useTranslation();
   const { settings, setSetting, isReady } = useAppSettings();
+  const workspaceTabs = useWorkspaceTabsOptional();
+  const [, setUrlSearchParams] = useSearchParams();
+
+  // One atomic URL write for close-modal + open-tab: two writers in the same
+  // tick would each read the pre-update location and clobber the other.
+  const openWhatsNew = () => {
+    setUrlSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("settings");
+      const nextLayout = openFileInLayout(parseLayout(next.get(LAYOUT_PARAM)), {
+        tabId: RELEASE_NOTES_TAB_ID,
+        intent: "new-tab",
+      });
+      next.set(LAYOUT_PARAM, JSON.stringify(nextLayout));
+      return next;
+    });
+  };
 
   return (
     <div>
       <div className="flex items-center justify-between gap-4 py-2">
-        <h3 className="min-w-0 flex-1 text-sm font-medium">
-          Version {__APP_VERSION__}
-        </h3>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-medium">Version {__APP_VERSION__}</h3>
+          {workspaceTabs && (
+            <button
+              onClick={openWhatsNew}
+              className="cursor-pointer text-sm text-primary hover:underline"
+            >
+              {t("whatsNew")}
+            </button>
+          )}
+        </div>
 
         <div className="shrink-0">
           <UpdaterButton />
@@ -415,7 +448,9 @@ function PrivacySettings() {
   ) => {
     const next = {
       crashEnabled:
-        key === "crashReportingEnabled" ? checked : settings.crashReportingEnabled,
+        key === "crashReportingEnabled"
+          ? checked
+          : settings.crashReportingEnabled,
       analyticsEnabled:
         key === "analyticsEnabled" ? checked : settings.analyticsEnabled,
     };

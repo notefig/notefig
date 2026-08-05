@@ -23,7 +23,11 @@ import {
   findLayoutSelectedTab,
 } from "@/utils/layout-codec";
 // Sibling entities — only referenced inside hook bodies (cycle rule).
-import { useOpenFileRows, useMetadataFetching, type OpenFileRow } from "./files";
+import {
+  useOpenFileRows,
+  useMetadataFetching,
+  type OpenFileRow,
+} from "./files";
 import {
   agentTasksCollection,
   useAgentTasksReady,
@@ -41,6 +45,9 @@ export { LAYOUT_PARAM, parseLayout, extractTabIds, findLayoutSelectedTab };
 
 export const AGENT_TAB_PREFIX = "agent:";
 
+/** Singleton release-notes ("What's New") tab. */
+export const RELEASE_NOTES_TAB_ID = "release:";
+
 export function agentTabId(taskId: string): string {
   return `${AGENT_TAB_PREFIX}${taskId}`;
 }
@@ -51,6 +58,31 @@ export function isAgentTabId(tabId: string): boolean {
 
 export function agentTaskIdFromTabId(tabId: string): string | null {
   return isAgentTabId(tabId) ? tabId.slice(AGENT_TAB_PREFIX.length) : null;
+}
+
+export function isReleaseNotesTabId(tabId: string): boolean {
+  return tabId === RELEASE_NOTES_TAB_ID;
+}
+
+export type TabRef =
+  | { type: "file"; path: string }
+  | { type: "agent"; taskId: string }
+  | { type: "release-notes" };
+
+/**
+ * The single place that knows the tab-id encoding. Ids with a known scheme
+ * prefix are non-file tabs; everything else is a workspace file path (file
+ * paths are absolute, so they can never collide with a scheme).
+ */
+export function parseTabId(tabId: string): TabRef {
+  if (isReleaseNotesTabId(tabId)) {
+    return { type: "release-notes" };
+  }
+  const taskId = agentTaskIdFromTabId(tabId);
+  if (taskId !== null) {
+    return { type: "agent", taskId };
+  }
+  return { type: "file", path: tabId };
 }
 
 export interface UseLayoutSearchParam {
@@ -122,6 +154,8 @@ export interface WorkspaceTabsState {
   fileRows: OpenFileRow[];
   /** Task rows for the open agent tabs. */
   agentTaskRows: AgentTaskRow[];
+  /** Whether the release-notes tab is in the layout. */
+  isReleaseNotesTabOpen: boolean;
   /**
    * Open tab ids (file paths / `agent:<taskId>`) whose backing entity no
    * longer exists — already gated on the metadata fetch and the agent
@@ -142,7 +176,7 @@ export function useWorkspaceTabs(
   openTabs: string[],
 ): WorkspaceTabsState {
   const fileTabIds = useMemo(
-    () => openTabs.filter((tabId) => !isAgentTabId(tabId)),
+    () => openTabs.filter((tabId) => parseTabId(tabId).type === "file"),
     [openTabs],
   );
   const agentTaskIds = useMemo(
@@ -150,6 +184,10 @@ export function useWorkspaceTabs(
       openTabs
         .map(agentTaskIdFromTabId)
         .filter((taskId): taskId is string => taskId !== null),
+    [openTabs],
+  );
+  const isReleaseNotesTabOpen = useMemo(
+    () => openTabs.some(isReleaseNotesTabId),
     [openTabs],
   );
 
@@ -172,15 +210,16 @@ export function useWorkspaceTabs(
           .map(agentTabId)
       : [];
     return [...missingFileTabIds, ...missingAgentTabIds];
-  }, [
-    fileRows,
+  }, [fileRows, fileTabIds, agentTaskIds, isFetchingMetadata, agentTasksReady]);
+
+  return {
     fileTabIds,
     agentTaskIds,
-    isFetchingMetadata,
-    agentTasksReady,
-  ]);
-
-  return { fileTabIds, agentTaskIds, fileRows, agentTaskRows, staleTabIds };
+    fileRows,
+    agentTaskRows,
+    isReleaseNotesTabOpen,
+    staleTabIds,
+  };
 }
 
 export function readLayout(): LayoutNode[] {
