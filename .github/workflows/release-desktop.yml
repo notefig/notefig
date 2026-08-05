@@ -27,6 +27,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Full history: the release-notes assembly walks merges since the
+          # previous desktop-v* tag.
+          fetch-depth: 0
 
       - name: Validate version format
         run: |
@@ -34,6 +38,55 @@ jobs:
             echo "Error: Version must be semver (e.g. 0.0.3) or semver-debug (e.g. 0.0.3-debug)"
             exit 1
           fi
+
+      # The version's release notes ship inside the app (the release-notes
+      # tab bundles release-notes/*.md) and become the GitHub release body
+      # and latest.json notes. A hand-written release-notes/v<version>.md
+      # committed beforehand wins; otherwise the file is assembled from the
+      # "## Release notes" sections of every PR merged since the previous
+      # release. No file and no PR entries fails the release.
+      - name: Assemble release notes
+        if: ${{ !contains(inputs.version, '-debug') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          NOTES_FILE="packages/desktop/release-notes/v${VERSION}.md"
+          if [ -s "$NOTES_FILE" ]; then
+            echo "Using hand-written $NOTES_FILE"
+            cat "$NOTES_FILE"
+            exit 0
+          fi
+
+          PREV_TAG=$(git tag -l 'desktop-v*' --sort=-v:refname | grep -v -- '-debug' | head -1)
+          echo "Collecting entries from PRs merged since ${PREV_TAG:-the beginning}"
+          RANGE=${PREV_TAG:+$PREV_TAG..HEAD}
+
+          ENTRIES=""
+          for PR in $(git log $RANGE --merges --pretty=%s | grep -oE 'Merge pull request #[0-9]+' | grep -oE '[0-9]+'); do
+            SECTION=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body --jq .body | tr -d '\r' | \
+              awk '/^##[[:space:]]+[Rr]elease notes/{found=1; next} /^##[[:space:]]/{found=0} found' | \
+              perl -0pe 's/<!--.*?-->//gs' | sed '/^[[:space:]]*$/d' | \
+              grep -viE '^[-*[:space:]]*_*none_*\.?$' || true)
+            if [ -n "$SECTION" ]; then
+              echo "PR #$PR:"; echo "$SECTION"
+              ENTRIES="${ENTRIES}${SECTION}"$'\n'
+            fi
+          done
+
+          if [ -z "$ENTRIES" ]; then
+            echo "::error::No release notes for v${VERSION}: ${NOTES_FILE} does not exist and no PR merged since ${PREV_TAG:-repo start} carries a '## Release notes' section with entries. Commit the file by hand or add notes to the PRs, then re-run."
+            exit 1
+          fi
+
+          mkdir -p packages/desktop/release-notes
+          {
+            echo "# Release Notes v${VERSION}"
+            echo
+            printf '%s' "$ENTRIES"
+          } > "$NOTES_FILE"
+          echo "Assembled $NOTES_FILE:"
+          cat "$NOTES_FILE"
 
       # Debug builds never touch main: no bump commit, no tag. The build job
       # stamps the version into its own checkout instead.
@@ -67,7 +120,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add packages/desktop/package.json packages/desktop/src-tauri/Cargo.toml packages/desktop/src-tauri/tauri.conf.json packages/desktop/src-tauri/Cargo.lock
+          git add packages/desktop/package.json packages/desktop/src-tauri/Cargo.toml packages/desktop/src-tauri/tauri.conf.json packages/desktop/src-tauri/Cargo.lock "packages/desktop/release-notes/v${{ inputs.version }}.md"
           git commit -m "desktop: bump to v${{ inputs.version }}"
           git push origin main
 
@@ -103,14 +156,12 @@ jobs:
       - name: Create updater manifest for web
         working-directory: packages/desktop
         run: |
-          cat > dist/latest.json << JSON
-          {
-            "version": "${{ inputs.version }}",
-            "notes": "See the assets to download this version and install.",
-            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "platforms": {}
-          }
-          JSON
+          jq -n \
+            --arg version "${{ inputs.version }}" \
+            --arg notes "$(cat "release-notes/v${{ inputs.version }}.md")" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{version: $version, notes: $notes, pub_date: $pub_date, platforms: {}}' \
+            > dist/latest.json
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
@@ -180,6 +231,26 @@ jobs:
         working-directory: packages/desktop
         run: npm install
 
+      # The bundled notes file doubles as the GitHub release body (and, via
+      # tauri-action's updater manifest, latest.json's `notes` — what the
+      # in-app update toast receives as update.body). Failing `cat` here also
+      # backstops a tag that somehow lacks the file.
+      - name: Read release notes
+        id: notes
+        if: ${{ !contains(inputs.version, '-debug') }}
+        run: |
+          # Random per-run delimiter: the notes file carries PR-authored text,
+          # so a fixed delimiter could be embedded in a PR body to terminate
+          # this value early and inject arbitrary step outputs.
+          DELIMITER="RELEASE_NOTES_$(uuidgen)"
+          {
+            echo "body<<${DELIMITER}"
+            cat "packages/desktop/release-notes/v${{ inputs.version }}.md"
+            # Leading \n so a file without a trailing newline can't glue the
+            # closing delimiter onto its last content line.
+            printf '\n%s\n' "${DELIMITER}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and release Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -194,7 +265,7 @@ jobs:
           projectPath: packages/desktop
           tagName: "desktop-v${{ inputs.version }}"
           releaseName: ${{ contains(inputs.version, '-debug') && format('Metrists Desktop v{0} (debug build)', inputs.version) || format('Metrists Desktop v{0}', inputs.version) }}
-          releaseBody: ${{ contains(inputs.version, '-debug') && 'Debug build with devtools enabled — not for regular use. The in-app updater never serves this version.' || 'See the assets to download this version and install.' }}
+          releaseBody: ${{ contains(inputs.version, '-debug') && 'Debug build with devtools enabled — not for regular use. The in-app updater never serves this version.' || steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: ${{ contains(inputs.version, '-debug') }}
           includeDebug: ${{ contains(inputs.version, '-debug') }}

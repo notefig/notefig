@@ -29,8 +29,16 @@ import { useThrowWorkspaceAccessError } from "@/components/workspace-error-bound
 import { retryOnAnimationFrame } from "@/utils/retry-on-animation-frame";
 import { disposeAllEditors } from "@/components/editor/editor-store";
 import { AgentChatTab } from "@/components/agent/agent-chat-tab";
+import { ReleaseNotesTab } from "@/components/release-notes-tab";
 import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
-import { agentTabId, isAgentTabId } from "@/entities/tabs";
+import {
+  agentTabId,
+  isAgentTabId,
+  isReleaseNotesTabId,
+  RELEASE_NOTES_TAB_ID,
+} from "@/entities/tabs";
+import { useReleaseNotesOnUpdate } from "@/hooks/use-release-notes-on-update";
+import { latestReleaseTitle } from "@/utils/release-notes";
 import {
   type FileTreeMode,
   FILE_TREE_IDLE,
@@ -88,8 +96,11 @@ export const Workspace = () => {
     fileTabIds: fileOpenTabIds,
     fileRows: fileDataWithContent,
     agentTaskRows: openAgentTaskRows,
+    isReleaseNotesTabOpen,
     staleTabIds,
   } = useWorkspaceTabs(workspacePath, openTabs);
+
+  useReleaseNotesOnUpdate(openFile);
 
   const agentDockableTabs = useMemo(
     () =>
@@ -136,16 +147,32 @@ export const Workspace = () => {
     [fileDataWithContent, workspacePath, closeTab],
   );
 
+  const releaseNotesDockableTabs = useMemo(
+    () =>
+      isReleaseNotesTabOpen
+        ? [
+            <Dockable.Tab
+              key={RELEASE_NOTES_TAB_ID}
+              id={RELEASE_NOTES_TAB_ID}
+              name={latestReleaseTitle ?? t("releaseNotesTitle")}
+              onClose={() => closeTab(RELEASE_NOTES_TAB_ID)}
+            >
+              <ReleaseNotesTab />
+            </Dockable.Tab>,
+          ]
+        : [],
+    [isReleaseNotesTabOpen, closeTab, t],
+  );
+
   const allDockableTabs = useMemo(
-    () => [...dockableTabs, ...agentDockableTabs],
-    [dockableTabs, agentDockableTabs],
+    () => [...dockableTabs, ...agentDockableTabs, ...releaseNotesDockableTabs],
+    [dockableTabs, agentDockableTabs, releaseNotesDockableTabs],
   );
 
   const activeFileData = fileDataWithContent.find(
     (f) => f.path === activeTabId,
   );
   const currentContent = activeFileData?.content || "";
-
 
   const [searchParams, setUrlSearchParams] = useSearchParams();
   const isSidebarCollapsed = searchParams.get("sidebar") === "collapsed";
@@ -182,7 +209,11 @@ export const Workspace = () => {
   // (link menu, search panel) can open files as tabs.
   const openFileInTabs = useCallback(
     (options: OpenFileInLayoutOptions) => {
-      if (!isAgentTabId(options.tabId) && !canOpenInEditor(options.tabId)) {
+      if (
+        !isAgentTabId(options.tabId) &&
+        !isReleaseNotesTabId(options.tabId) &&
+        !canOpenInEditor(options.tabId)
+      ) {
         return false;
       }
       openFile(options);
@@ -327,7 +358,10 @@ export const Workspace = () => {
   useFileWatchers(workspacePath, fileOpenTabIds);
 
   return (
-    <WorkspaceTabsProvider openFile={openFileInTabs} openAgentTab={openAgentTab}>
+    <WorkspaceTabsProvider
+      openFile={openFileInTabs}
+      openAgentTab={openAgentTab}
+    >
       <div
         dir={direction}
         className="relative flex h-full w-full overflow-hidden p-2"
