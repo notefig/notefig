@@ -9,7 +9,7 @@ members = ["test-shim"]
 
 [package]
 name = "metrists"
-version = "0.0.96"
+version = "0.0.97"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
