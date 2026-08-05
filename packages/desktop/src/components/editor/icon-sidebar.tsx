@@ -3,9 +3,9 @@
 import { memo, useCallback, useMemo } from "react";
 
 import {
-  Bot,
   FileText,
   Search,
+  Sparkles,
   Bookmark,
   LayoutGrid,
   Clock,
@@ -90,7 +90,7 @@ export const IconSidebar = memo(function IconSidebar({
       },
       {
         id: "sessions",
-        icon: Bot,
+        icon: Sparkles,
         label: "Agent Sessions",
         active: sidebarView === "sessions",
         onClick: () => handleSidebarViewChange("sessions"),
