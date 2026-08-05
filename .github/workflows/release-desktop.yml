@@ -64,8 +64,13 @@ jobs:
 
           ENTRIES=""
           for PR in $(git log $RANGE --merges --pretty=%s | grep -oE 'Merge pull request #[0-9]+' | grep -oE '[0-9]+'); do
+            # Section ends at ANY heading or structural block, not just "## ":
+            # review bots (Greptile) append summaries to the PR description
+            # using <h3>/<details>/<sub> HTML, which swept straight into the
+            # v0.0.96 release notes. Markdown headings of any depth, HTML
+            # headings/details/sub, and thematic breaks all terminate it.
             SECTION=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body --jq .body | tr -d '\r' | \
-              awk '/^##[[:space:]]+[Rr]elease notes/{found=1; next} /^##[[:space:]]/{found=0} found' | \
+              awk '/^##[[:space:]]+[Rr]elease notes/{found=1; next} /^#/ || /^<(h[1-6]|details|summary|sub|hr)[ >\/]/ || /^---[[:space:]]*$/{found=0} found' | \
               perl -0pe 's/<!--.*?-->//gs' | sed '/^[[:space:]]*$/d' | \
               grep -viE '^[-*[:space:]]*_*none_*\.?$' || true)
             if [ -n "$SECTION" ]; then

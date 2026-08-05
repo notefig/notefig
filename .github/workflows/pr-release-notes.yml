@@ -17,8 +17,11 @@ jobs:
         env:
           BODY: ${{ github.event.pull_request.body }}
         run: |
+          # Same terminator set as the release workflow's assembly step:
+          # any heading depth, bot-appended HTML (<h3>/<details>/<sub>), or
+          # a thematic break ends the section.
           SECTION=$(printf '%s' "$BODY" | tr -d '\r' | \
-            awk '/^##[[:space:]]+[Rr]elease notes/{found=1; next} /^##[[:space:]]/{found=0} found' | \
+            awk '/^##[[:space:]]+[Rr]elease notes/{found=1; next} /^#/ || /^<(h[1-6]|details|summary|sub|hr)[ >\/]/ || /^---[[:space:]]*$/{found=0} found' | \
             perl -0pe 's/<!--.*?-->//gs' | sed '/^[[:space:]]*$/d')
 
           if [ -z "$SECTION" ]; then
