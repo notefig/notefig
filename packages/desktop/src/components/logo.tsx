@@ -1,5 +1,5 @@
 interface LogoProps {
-  size?: number;
+  size?: number | string;
   animated?: boolean;
   hoverAnimate?: boolean;
   showBackground?: boolean;

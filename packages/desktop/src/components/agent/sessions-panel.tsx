@@ -180,7 +180,7 @@ export function SessionRow({
     >
       <StatusDot status={task.status} />
       <span className="min-w-0 flex-1 truncate">{task.title}</span>
-      <span className="shrink-0 text-[11px] text-muted-foreground">
+      <span className="shrink-0 text-[0.6875rem] text-muted-foreground">
         {meta}
       </span>
       {isRunning && (
@@ -223,7 +223,7 @@ function DeleteSessionButton({ taskId }: { taskId: string }) {
         armed
           ? // Armed: stays visible even if row hover is momentarily lost so
             // the confirming click always lands on the same button.
-            "flex items-center gap-1 p-0.5 text-[10px] font-medium text-destructive hover:text-destructive/80"
+            "flex items-center gap-1 p-0.5 text-[0.625rem] font-medium text-destructive hover:text-destructive/80"
           : "hidden p-0.5 text-muted-foreground hover:text-foreground group-hover:block",
       )}
       onMouseLeave={() => setArmed(false)}

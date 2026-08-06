@@ -672,11 +672,11 @@ function DebugPanelContent({
           <div className="text-destructive font-semibold text-xs mb-1">
             Workspace crashed
           </div>
-          <div className="text-destructive/80 text-[11px] break-all">
+          <div className="text-destructive/80 text-[0.6875rem] break-all">
             {error.message}
           </div>
           {error.stack && (
-            <pre className="mt-1 text-[10px] text-destructive/60 whitespace-pre-wrap break-all max-h-32 overflow-auto">
+            <pre className="mt-1 text-[0.625rem] text-destructive/60 whitespace-pre-wrap break-all max-h-32 overflow-auto">
               {error.stack}
             </pre>
           )}
@@ -684,7 +684,7 @@ function DebugPanelContent({
             <Button
               variant="outline"
               size="sm"
-              className="h-6 text-[11px] border-destructive/30 text-destructive hover:bg-destructive/10"
+              className="h-6 text-[0.6875rem] border-destructive/30 text-destructive hover:bg-destructive/10"
               onClick={() => window.location.reload()}
             >
               Reload page
@@ -692,7 +692,7 @@ function DebugPanelContent({
             <Button
               variant="outline"
               size="sm"
-              className="h-6 text-[11px] border-destructive/30 text-destructive hover:bg-destructive/10"
+              className="h-6 text-[0.6875rem] border-destructive/30 text-destructive hover:bg-destructive/10"
               onClick={copyDebugReport}
             >
               {copied ? "Copied!" : "Copy debug report"}
@@ -725,7 +725,7 @@ function DebugPanelContent({
           >
             Console
             {consoleEntries.length > 0 && (
-              <span className="ml-1 text-[10px] text-muted-foreground">
+              <span className="ml-1 text-[0.625rem] text-muted-foreground">
                 ({consoleEntries.length})
               </span>
             )}
@@ -741,7 +741,7 @@ function DebugPanelContent({
           >
             Session
             {workspaceTasks.length > 0 && (
-              <span className="ml-1 text-[10px] text-muted-foreground">
+              <span className="ml-1 text-[0.625rem] text-muted-foreground">
                 ({workspaceTasks.length})
               </span>
             )}
@@ -811,7 +811,7 @@ function DebugPanelContent({
               <div className="text-amber-700 dark:text-amber-400 font-semibold text-xs mb-1">
                 Warning: File content will be copied
               </div>
-              <div className="text-amber-600/80 dark:text-amber-300/70 text-[11px] mb-2">
+              <div className="text-amber-600/80 dark:text-amber-300/70 text-[0.6875rem] mb-2">
                 The Plate AST includes the full content of your open files. Only
                 share this with trusted parties.
               </div>
@@ -819,7 +819,7 @@ function DebugPanelContent({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-6 text-[11px] border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
+                  className="h-6 text-[0.6875rem] border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
                   onClick={() => {
                     copyPlateAst();
                     setShowAstWarning(false);
@@ -840,7 +840,7 @@ function DebugPanelContent({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-6 text-[11px] text-muted-foreground hover:text-foreground"
+                  className="h-6 text-[0.6875rem] text-muted-foreground hover:text-foreground"
                   onClick={() => setShowAstWarning(false)}
                 >
                   Cancel
@@ -853,7 +853,7 @@ function DebugPanelContent({
 
       <div className="px-3 py-1.5 border-b border-border bg-muted/30 shrink-0 space-y-1">
         <div className="flex items-center gap-1.5">
-          <span className="text-muted-foreground text-[10px] uppercase tracking-wider shrink-0">
+          <span className="text-muted-foreground text-[0.625rem] uppercase tracking-wider shrink-0">
             URL
           </span>
           <Input
@@ -876,7 +876,7 @@ function DebugPanelContent({
           </Button>
         </div>
         {decodedPreview !== urlDraft && (
-          <div className="text-[10px] text-muted-foreground truncate pl-7">
+          <div className="text-[0.625rem] text-muted-foreground truncate pl-7">
             Decoded: {decodedPreview}
           </div>
         )}
@@ -910,7 +910,7 @@ function DebugPanelContent({
                     <li
                       key={tab}
                       className={cn(
-                        "text-[11px] break-all",
+                        "text-[0.6875rem] break-all",
                         tab === activeTabId
                           ? "text-foreground font-medium"
                           : "text-muted-foreground",
@@ -941,7 +941,7 @@ function DebugPanelContent({
                   Dockable Layout
                 </button>
                 {showLayout && (
-                  <pre className="mt-1 p-2 rounded bg-muted text-[10px] leading-tight whitespace-pre-wrap break-all border border-border select-text">
+                  <pre className="mt-1 p-2 rounded bg-muted text-[0.625rem] leading-tight whitespace-pre-wrap break-all border border-border select-text">
                     {JSON.stringify(dockableLayout, null, 2)}
                   </pre>
                 )}
@@ -959,7 +959,7 @@ function DebugPanelContent({
                   {latestGitStatusError.message}
                 </Row>
               ) : null}
-              <pre className="mt-1 rounded bg-muted p-2 text-[10px] leading-tight whitespace-pre-wrap break-all border border-border select-text">
+              <pre className="mt-1 rounded bg-muted p-2 text-[0.625rem] leading-tight whitespace-pre-wrap break-all border border-border select-text">
                 {JSON.stringify(latestGitStatus, null, 2)}
               </pre>
             </div>
@@ -967,13 +967,13 @@ function DebugPanelContent({
         ) : activeTab === "session" ? (
           <div className="flex flex-col h-full">
             <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border shrink-0">
-              <span className="text-muted-foreground text-[10px] uppercase tracking-wider shrink-0">
+              <span className="text-muted-foreground text-[0.625rem] uppercase tracking-wider shrink-0">
                 Task
               </span>
               <select
                 value={selectedSessionTaskId ?? ""}
                 onChange={(e) => setSelectedSessionTaskId(e.target.value || null)}
-                className="h-6 text-[11px] font-mono bg-background border border-border rounded px-1.5 flex-1 min-w-0"
+                className="h-6 text-[0.6875rem] font-mono bg-background border border-border rounded px-1.5 flex-1 min-w-0"
               >
                 {workspaceTasks.length === 0 && (
                   <option value="">(no tasks in this workspace)</option>
@@ -1002,11 +1002,11 @@ function DebugPanelContent({
 
             <div className="flex-1 overflow-auto min-h-0 p-3">
               {!sessionTask ? (
-                <div className="flex items-center justify-center h-full p-4 text-muted-foreground text-[11px]">
+                <div className="flex items-center justify-center h-full p-4 text-muted-foreground text-[0.6875rem]">
                   No agent session in this workspace yet.
                 </div>
               ) : (
-                <pre className="text-[10px] leading-tight whitespace-pre-wrap break-all select-text">
+                <pre className="text-[0.625rem] leading-tight whitespace-pre-wrap break-all select-text">
                   {buildSessionReport()}
                 </pre>
               )}
@@ -1044,7 +1044,7 @@ function DebugPanelContent({
                       key={level}
                       onClick={() => toggleLevel(level)}
                       className={cn(
-                        "px-1.5 py-0.5 rounded text-[10px] transition-colors",
+                        "px-1.5 py-0.5 rounded text-[0.625rem] transition-colors",
                         activeLevels.has(level)
                           ? cn("bg-accent", LEVEL_COLORS[level])
                           : "text-muted-foreground/50 line-through",
@@ -1059,12 +1059,12 @@ function DebugPanelContent({
                 value={consoleFilter}
                 onChange={(e) => setConsoleFilter(e.target.value)}
                 placeholder="Filter (regex)..."
-                className="h-6 text-[11px] font-mono bg-background border-border px-1.5 py-0 flex-1 ml-1"
+                className="h-6 text-[0.6875rem] font-mono bg-background border-border px-1.5 py-0 flex-1 ml-1"
               />
               <button
                 onClick={() => setAutoScroll(!autoScroll)}
                 className={cn(
-                  "text-[10px] px-1.5 py-0.5 rounded transition-colors whitespace-nowrap",
+                  "text-[0.625rem] px-1.5 py-0.5 rounded transition-colors whitespace-nowrap",
                   autoScroll
                     ? "bg-accent text-accent-foreground"
                     : "text-muted-foreground hover:text-foreground",
@@ -1077,11 +1077,11 @@ function DebugPanelContent({
 
             <div className="flex-1 overflow-auto min-h-0">
               {!isCapturing && consoleEntries.length === 0 ? (
-                <div className="flex items-center justify-center h-full p-4 text-muted-foreground text-[11px]">
+                <div className="flex items-center justify-center h-full p-4 text-muted-foreground text-[0.6875rem]">
                   Press play to start capturing console output
                 </div>
               ) : filteredEntries.length === 0 ? (
-                <div className="flex items-center justify-center h-full p-4 text-muted-foreground text-[11px]">
+                <div className="flex items-center justify-center h-full p-4 text-muted-foreground text-[0.6875rem]">
                   {consoleEntries.length > 0
                     ? "No entries match the current filter"
                     : "No console output captured yet"}
@@ -1096,7 +1096,7 @@ function DebugPanelContent({
                         LEVEL_BG[entry.level],
                       )}
                     >
-                      <span className="text-muted-foreground text-[10px] shrink-0 tabular-nums pt-px">
+                      <span className="text-muted-foreground text-[0.625rem] shrink-0 tabular-nums pt-px">
                         {new Date(entry.timestamp).toLocaleTimeString("en-US", {
                           hour12: false,
                           hour: "2-digit",
@@ -1106,7 +1106,7 @@ function DebugPanelContent({
                       </span>
                       <span
                         className={cn(
-                          "text-[11px] whitespace-pre-wrap break-all",
+                          "text-[0.6875rem] whitespace-pre-wrap break-all",
                           LEVEL_COLORS[entry.level],
                         )}
                       >
@@ -1133,7 +1133,7 @@ function Row({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex gap-2 text-[11px]">
+    <div className="flex gap-2 text-[0.6875rem]">
       <span className="text-muted-foreground shrink-0">{label}:</span>
       <span className="text-foreground break-all">{children}</span>
     </div>

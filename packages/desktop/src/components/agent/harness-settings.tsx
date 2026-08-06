@@ -397,7 +397,7 @@ function HarnessRow({
       >
         {definition.label}
         {origin !== "builtin" && (
-          <span className="ms-1.5 align-middle text-[10px] font-normal text-muted-foreground">
+          <span className="ms-1.5 align-middle text-[0.625rem] font-normal text-muted-foreground">
             {origin === "custom"
               ? t("harnessOriginCustom")
               : t("harnessOriginOverridden")}

@@ -156,17 +156,22 @@ test.describe("drag handle (Bug #3)", () => {
     const handleBox = await handle.boundingBox();
     const paragraphBox = await paragraph.boundingBox();
     const editorBox = await page.locator(".ProseMirror").boundingBox();
+    // Size thresholds in rem so the test tracks the app-wide UI scale
+    // (root font-size is the 1.5x baseline — see styles.css).
+    const rem = await page.evaluate(() =>
+      parseFloat(getComputedStyle(document.documentElement).fontSize),
+    );
 
     expect(handleBox).not.toBeNull();
     // Block-scoped: icon-sized, not stretched over the editor
-    expect(handleBox!.width).toBeLessThan(40);
-    expect(handleBox!.height).toBeLessThan(40);
+    expect(handleBox!.width).toBeLessThan(2.5 * rem);
+    expect(handleBox!.height).toBeLessThan(2.5 * rem);
     expect(handleBox!.width).toBeLessThan(editorBox!.width / 4);
     // Anchored to the hovered paragraph's line, to its left
     const handleCenter = handleBox!.y + handleBox!.height / 2;
     expect(
       Math.abs(handleCenter - (paragraphBox!.y + paragraphBox!.height / 2)),
-    ).toBeLessThan(paragraphBox!.height + 8);
+    ).toBeLessThan(paragraphBox!.height + 0.5 * rem);
     expect(handleBox!.x).toBeLessThan(paragraphBox!.x);
   });
 

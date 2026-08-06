@@ -46,7 +46,7 @@ export function TextPromptDialog() {
         if (!open) settle(null);
       }}
     >
-      <DialogContent className="sm:max-w-[420px]">
+      <DialogContent className="sm:max-w-[26.25rem]">
         <form
           onSubmit={(e) => {
             e.preventDefault();

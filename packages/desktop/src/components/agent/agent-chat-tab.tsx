@@ -511,7 +511,7 @@ function QueuedBadge({ taskId, turnId }: { taskId: string; turnId: string }) {
   const { t } = useTranslation();
   return (
     <span className="mt-1 flex items-center justify-end gap-1.5">
-      <span className="rounded-full bg-primary-foreground/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+      <span className="rounded-full bg-primary-foreground/20 px-1.5 py-0.5 text-[0.625rem] uppercase tracking-wide">
         {t("agentQueuedBadge")}
       </span>
       <button
@@ -553,11 +553,11 @@ function MessageFooter({
         text={text}
         withLabel
         iconClassName="size-3"
-        className="p-0.5 text-[10px]"
+        className="p-0.5 text-[0.625rem]"
       />
       {/* Replayed history has no createdAt — no time beats a wrong one. */}
       {createdAt !== undefined && (
-        <span className="text-[10px] tabular-nums text-muted-foreground">
+        <span className="text-[0.625rem] tabular-nums text-muted-foreground">
           {formatEntryTime(createdAt)}
         </span>
       )}
@@ -734,7 +734,7 @@ function ToolCallCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
             <ToolContentView key={i} item={item} />
           ))}
           {content.length === 0 && hasRawInput && (
-            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-border/60 p-2 font-mono text-[11px] text-muted-foreground">
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-border/60 p-2 font-mono text-[0.6875rem] text-muted-foreground">
               {rawInputText}
             </pre>
           )}
@@ -828,7 +828,7 @@ function ChangedFilesCard({
                 />
               </button>
               {open && (
-                <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all border-t border-border/60 p-2 font-mono text-[11px]">
+                <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all border-t border-border/60 p-2 font-mono text-[0.6875rem]">
                   {diff.newText}
                 </pre>
               )}
@@ -857,7 +857,7 @@ function ToolContentView({ item }: { item: ToolCallContent }) {
     const removed = item.oldText ? item.oldText.split("\n").length : 0;
     return (
       <div className="overflow-hidden rounded border border-border/60">
-        <div className="flex items-center gap-2 bg-muted/60 px-2 py-1 font-mono text-[11px]">
+        <div className="flex items-center gap-2 bg-muted/60 px-2 py-1 font-mono text-[0.6875rem]">
           <span className="min-w-0 flex-1 truncate">{item.path}</span>
           <span className="shrink-0 text-green-600 dark:text-green-400">
             +{added}
@@ -866,7 +866,7 @@ function ToolContentView({ item }: { item: ToolCallContent }) {
             <span className="shrink-0 text-destructive">−{removed}</span>
           )}
         </div>
-        <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all p-2 font-mono text-[11px]">
+        <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all p-2 font-mono text-[0.6875rem]">
           {item.newText}
         </pre>
       </div>
@@ -874,7 +874,7 @@ function ToolContentView({ item }: { item: ToolCallContent }) {
   }
   if (item.type === "terminal") {
     return (
-      <span className="font-mono text-[11px] text-muted-foreground">
+      <span className="font-mono text-[0.6875rem] text-muted-foreground">
         {t("agentTerminal", { id: item.terminalId })}
       </span>
     );
@@ -883,13 +883,13 @@ function ToolContentView({ item }: { item: ToolCallContent }) {
   const block = item.content;
   if (block.type === "text") {
     return (
-      <pre className="max-h-56 select-text overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/60 p-2 font-mono text-[11px]">
+      <pre className="max-h-56 select-text overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/60 p-2 font-mono text-[0.6875rem]">
         {block.text}
       </pre>
     );
   }
   return (
-    <span className="text-[11px] text-muted-foreground">
+    <span className="text-[0.6875rem] text-muted-foreground">
       {t("agentContentOfType", { type: block.type })}
     </span>
   );
@@ -976,12 +976,12 @@ function PromptBox({
           disabled ? t("agentLoadingSession") : t("agentPromptPlaceholder")
         }
         rows={2}
-        className="min-h-[44px] w-full resize-none overflow-hidden bg-transparent px-4 pt-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:opacity-60"
+        className="min-h-[2.75rem] w-full resize-none overflow-hidden bg-transparent px-4 pt-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:opacity-60"
       />
       <div className="flex items-center gap-1 px-2 pb-2">
         {/* The session is pinned to one harness — a passive indicator, not
             a picker (the sidebar's new-session split button chooses). */}
-        <span className="flex items-center gap-1.5 px-1.5 text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1.5 px-1.5 text-[0.6875rem] text-muted-foreground">
           <HarnessLogo harnessId={harnessId} className="size-3" />
           {harnessLabel}
         </span>
