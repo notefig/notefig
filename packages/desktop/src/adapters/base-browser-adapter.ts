@@ -353,10 +353,6 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     await document.documentElement.requestFullscreen();
   }
 
-  async setZoom(): Promise<void> {
-    // Browsers manage their own tab zoom; nothing to do.
-  }
-
   abstract searchContent(
     directory: string,
     options: SearchOptions,

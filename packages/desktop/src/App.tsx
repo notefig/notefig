@@ -28,28 +28,14 @@ export const App = () => {
   const location = useLocation();
   const {
     settings,
-    isReady: settingsReady,
     setTheme: persistTheme,
     setLastPath,
     setZoomLevel,
-    setSetting,
   } = useAppSettings();
 
   useEffect(() => {
     setTheme(settings.theme);
   }, [settings.theme, setTheme]);
-
-  // One-time zoom rebaseline: the UI now scales 1.5x via root font-size, so
-  // a persisted webview zoom that compensated for the old small UI would
-  // compound on top of it. Reset zoom to 1 once; users can still zoom after.
-  useEffect(() => {
-    if (!settingsReady || settings.zoomRebaselined) return;
-    setSetting("zoomRebaselined", true);
-    if (settings.zoomLevel !== 1) {
-      setZoomLevel(1);
-      void platformAdapter.setZoom(1);
-    }
-  }, [settingsReady, settings.zoomRebaselined]);
 
   // One harness-discovery scan per app session (self-guarded; StrictMode's
   // double-invoke and remounts are no-ops).
