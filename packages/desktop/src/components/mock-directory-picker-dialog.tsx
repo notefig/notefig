@@ -63,7 +63,7 @@ export function MockDirectoryPickerDialog() {
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[31.25rem]">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>

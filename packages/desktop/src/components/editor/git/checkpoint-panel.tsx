@@ -563,7 +563,7 @@ function RecoveryBanner({ error, actions, t }: RecoveryBannerProps) {
             key={action.id}
             variant="outline"
             size="sm"
-            className="h-6 border-destructive/30 text-[11px] text-destructive hover:bg-destructive/10"
+            className="h-6 border-destructive/30 text-[0.6875rem] text-destructive hover:bg-destructive/10"
             onClick={action.onClick}
             disabled={action.disabled}
           >
@@ -657,7 +657,7 @@ function QuickSaveCheckpoint({
                 </Button>
               </PopoverTrigger>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="px-2 py-1 text-[11px]">
+            <TooltipContent side="bottom" className="px-2 py-1 text-[0.6875rem]">
               {t(
                 "saveCheckpointWithDescription",
                 "Save commit with description",
@@ -689,7 +689,7 @@ function QuickSaveCheckpoint({
                   )}
                   value={description}
                   onChange={(event) => onDescriptionChange(event.target.value)}
-                  className="min-h-[84px] resize-none text-sm"
+                  className="min-h-[5.25rem] resize-none text-sm"
                 />
                 <div className="flex justify-end">
                   <Button
@@ -711,7 +711,7 @@ function QuickSaveCheckpoint({
                   <p className="text-xs font-medium">
                     {t("autoSaveCheckpoints", "Auto-save commits")}
                   </p>
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-[0.6875rem] text-muted-foreground">
                     {t("autoSaveCheckpointsHint", "After each change")}
                   </p>
                 </div>
@@ -726,7 +726,7 @@ function QuickSaveCheckpoint({
         </Popover>
       </ButtonGroup>
 
-      <span className="inline-flex h-6 max-w-24 min-w-0 items-center gap-1 overflow-hidden rounded-md border px-1.5 text-[11px] leading-none">
+      <span className="inline-flex h-6 max-w-24 min-w-0 items-center gap-1 overflow-hidden rounded-md border px-1.5 text-[0.6875rem] leading-none">
         <syncPresentation.Icon className="h-3.5 w-3.5 shrink-0" />
         <span className="min-w-0 truncate">{syncPresentation.label}</span>
       </span>
@@ -779,8 +779,8 @@ function CheckpointsList({
                   size="sm"
                   className={
                     isError
-                      ? "h-6 border-destructive/30 text-[11px] text-destructive hover:bg-destructive/10"
-                      : "h-6 text-[11px]"
+                      ? "h-6 border-destructive/30 text-[0.6875rem] text-destructive hover:bg-destructive/10"
+                      : "h-6 text-[0.6875rem]"
                   }
                   onClick={action.onClick}
                   disabled={action.disabled}
@@ -807,12 +807,12 @@ function CheckpointsList({
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
                 {checkpoint.message ? (
-                  <span className="truncate text-[11px] font-medium">
+                  <span className="truncate text-[0.6875rem] font-medium">
                     {checkpoint.message}
                   </span>
                 ) : (
                   <time
-                    className="truncate text-[11px] text-muted-foreground"
+                    className="truncate text-[0.6875rem] text-muted-foreground"
                     dateTime={checkpoint.timestamp.toISOString()}
                   >
                     {formatDistanceToNow(checkpoint.timestamp, {
@@ -821,12 +821,12 @@ function CheckpointsList({
                   </time>
                 )}
                 {index === 0 ? (
-                  <span className="inline-flex h-4 max-w-16 shrink-0 items-center truncate whitespace-nowrap rounded-md bg-secondary px-1.5 text-[10px] text-secondary-foreground">
+                  <span className="inline-flex h-4 max-w-16 shrink-0 items-center truncate whitespace-nowrap rounded-md bg-secondary px-1.5 text-[0.625rem] text-secondary-foreground">
                     {t("latest", "Latest")}
                   </span>
                 ) : null}
               </div>
-              <div className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+              <div className="mt-0.5 flex items-center gap-1 text-[0.625rem] text-muted-foreground">
                 <button
                   type="button"
                   className="h-auto w-auto p-0 font-mono leading-none hover:text-foreground"
@@ -884,7 +884,7 @@ function CheckpointActions({
             <Undo2 className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="left" className="px-2 py-1 text-[11px]">
+        <TooltipContent side="left" className="px-2 py-1 text-[0.6875rem]">
           {t("restoreCheckpoint", "Restore commit")}
         </TooltipContent>
       </Tooltip>

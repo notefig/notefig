@@ -158,6 +158,8 @@
   html {
     @apply bg-background;
     color-scheme: light;
+    /* App-wide 1.5x scale baseline; all rem-based sizing keys off this. */
+    font-size: 150%;
   }
 
   html.dark {
@@ -374,7 +376,9 @@
    Uses absolute stroke width technique from Lucide docs:
    https://lucide.dev/guide/advanced/global-styling#absolute-stroke-width */
 .lucide {
-  stroke-width: 1.75 !important;
+  /* 1.75 tuned pre-scale-up; ×1.5 to match the 150% root font-size baseline,
+     since non-scaling-stroke keeps strokes at CSS-px size while icons grew. */
+  stroke-width: 2.625 !important;
 }
 
 .lucide * {

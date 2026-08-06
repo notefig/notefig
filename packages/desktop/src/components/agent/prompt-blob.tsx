@@ -883,11 +883,11 @@ function Composer({
           }}
           placeholder={t("promptBlobPlaceholder")}
           rows={1}
-          className="min-h-[28px] min-w-0 flex-1 resize-none overflow-hidden bg-transparent pt-1 pb-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
+          className="min-h-[1.75rem] min-w-0 flex-1 resize-none overflow-hidden bg-transparent pt-1 pb-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
         />
       </div>
       {confirmTrust && (
-        <span className="px-3 pb-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+        <span className="px-3 pb-1.5 text-[0.6875rem] text-amber-600 dark:text-amber-400">
           {t("promptBlobTrustWarning", { name: trustName })}
         </span>
       )}
@@ -963,7 +963,7 @@ function SessionControl({ workspacePath }: { workspacePath: string }) {
                 <span className="min-w-0 flex-1 truncate">
                   {meta.task.title}
                 </span>
-                <span className="shrink-0 text-[11px] text-muted-foreground">
+                <span className="shrink-0 text-[0.6875rem] text-muted-foreground">
                   {describeTaskMeta(meta)}
                 </span>
               </DropdownMenuItem>
@@ -1031,7 +1031,7 @@ function StatusRow({
           </div>
         )}
         {secondLine.trim() && (
-          <div className="truncate text-[11px] text-muted-foreground">
+          <div className="truncate text-[0.6875rem] text-muted-foreground">
             {secondLine}
           </div>
         )}
@@ -1115,7 +1115,7 @@ function ReplyRow({
       }}
       placeholder={t("promptBlobReply")}
       rows={1}
-      className="mt-1 min-h-[24px] w-full resize-none overflow-hidden border-t border-border/60 bg-transparent px-0.5 pt-1.5 text-xs placeholder:text-muted-foreground focus-visible:outline-none"
+      className="mt-1 min-h-[1.5rem] w-full resize-none overflow-hidden border-t border-border/60 bg-transparent px-0.5 pt-1.5 text-xs placeholder:text-muted-foreground focus-visible:outline-none"
     />
   );
 }
@@ -1280,7 +1280,7 @@ function DoneState({
             <button
               key={path}
               type="button"
-              className="flex cursor-pointer items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="flex cursor-pointer items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[0.6875rem] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               onClick={() => onOpenFile(path)}
             >
               <FileText className="size-3" />

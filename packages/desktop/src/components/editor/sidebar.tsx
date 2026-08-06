@@ -67,7 +67,14 @@ export function Sidebar({
     [setUrlSearchParams],
   );
 
-  const [sidebarWidth, setSidebarWidth] = useState(240);
+  // Widths in rem so they track the root font-size (app-wide UI scale).
+  const SIDEBAR_DEFAULT_REM = 15;
+  const SIDEBAR_MIN_REM = 9.375;
+  const SIDEBAR_MAX_REM = 25;
+  // Must match the icon rail's w-9 (2.25rem) in icon-sidebar.tsx.
+  const ICON_SIDEBAR_REM = 2.25;
+
+  const [sidebarWidth, setSidebarWidth] = useState(`${SIDEBAR_DEFAULT_REM}rem`);
   const [isResizing, setIsResizing] = useState(false);
   const resizeRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -75,10 +82,15 @@ export function Sidebar({
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
-      const iconSidebarWidth = 48;
-      const newWidth = e.clientX - iconSidebarWidth;
-      const clampedWidth = Math.max(150, Math.min(400, newWidth));
-      setSidebarWidth(clampedWidth);
+      const remPx = parseFloat(
+        getComputedStyle(document.documentElement).fontSize,
+      );
+      const newWidthRem = (e.clientX - ICON_SIDEBAR_REM * remPx) / remPx;
+      const clampedRem = Math.max(
+        SIDEBAR_MIN_REM,
+        Math.min(SIDEBAR_MAX_REM, newWidthRem),
+      );
+      setSidebarWidth(`${clampedRem}rem`);
     };
 
     const handleMouseUp = () => {

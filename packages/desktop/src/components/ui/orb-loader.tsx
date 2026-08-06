@@ -572,12 +572,12 @@ function useReducedMotion(): boolean {
 
 export function OrbLoader({
   state = "working",
-  size = 14,
+  size = "0.875rem",
   animateOnHover = false,
   className,
 }: {
   state?: OrbState;
-  size?: number;
+  size?: number | string;
   /** Rest on a frozen frame and animate only while the parent element is
    *  hovered, resuming from the frozen pose. Default: animate always. */
   animateOnHover?: boolean;

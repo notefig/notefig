@@ -501,6 +501,10 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     await window.setFullscreen(!isFullscreen);
   }
 
+  async setZoom(zoom: number): Promise<void> {
+    await getCurrentWebview().setZoom(zoom);
+  }
+
   async searchContent(
     directory: string,
     options: SearchOptions,

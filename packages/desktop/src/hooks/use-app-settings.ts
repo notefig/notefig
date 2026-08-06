@@ -14,6 +14,12 @@ export interface AppSettings {
   theme: Theme;
   lastPath: string | null;
   zoomLevel: number;
+  /**
+   * One-time migration flag: the UI was rebaselined to a 1.5x root
+   * font-size, so a webview zoom that compensated for the old small UI
+   * (typically 1.5) must be reset to 1 exactly once.
+   */
+  zoomRebaselined: boolean;
   crashReportingEnabled: boolean;
   analyticsEnabled: boolean;
   autoUpdateEnabled: boolean;
@@ -30,6 +36,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   theme: "dark",
   lastPath: null,
   zoomLevel: 1,
+  zoomRebaselined: false,
   crashReportingEnabled: true,
   analyticsEnabled: true,
   autoUpdateEnabled: true,

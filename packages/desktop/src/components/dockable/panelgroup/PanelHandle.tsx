@@ -91,9 +91,9 @@ function PanelHandle({
         <span className={styles.line} />
         <span className={styles.icon}>
           {direction === "row" ? (
-            <GripVertical size={18} />
+            <GripVertical className="size-[1.125rem]" />
           ) : (
-            <GripHorizontal size={18} />
+            <GripHorizontal className="size-[1.125rem]" />
           )}
         </span>
         <span className={styles.line} />

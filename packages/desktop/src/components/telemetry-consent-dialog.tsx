@@ -35,7 +35,7 @@ export function TelemetryConsentDialog({
   return (
     <Dialog open={open}>
       <DialogContent
-        className="sm:max-w-[440px]"
+        className="sm:max-w-[27.5rem]"
         showCloseButton={false}
         onOpenAutoFocus={(e) => e.preventDefault()}
         onPointerDownOutside={(e) => e.preventDefault()}

@@ -78,7 +78,7 @@ export function LinkBubbleMenu({
           ) : (
             <FileText className="h-3.5 w-3.5 shrink-0" />
           )}
-          <span className="max-w-[160px] truncate">{href}</span>
+          <span className="max-w-[10rem] truncate">{href}</span>
         </button>
         <button
           className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"

@@ -24,11 +24,11 @@
     "windows": [
       {
         "title": "Metrists",
-        "width": 1200,
-        "height": 800,
+        "width": 1440,
+        "height": 900,
         "zoomHotkeysEnabled": true,
-        "minWidth": 800,
-        "minHeight": 600,
+        "minWidth": 1000,
+        "minHeight": 700,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "dragDropEnabled": false,

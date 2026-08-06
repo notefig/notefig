@@ -3,9 +3,9 @@
   flex-shrink: 1;
   overflow: visible;
   text-align: center;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: bold;
-  line-height: 12px;
+  line-height: 0.75rem;
   border-radius: var(--dockable-radius) var(--dockable-radius) 0 0;
   box-sizing: border-box;
   cursor: pointer;
@@ -25,7 +25,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1 1 auto;
-  padding: 8px 16px;
+  padding: 0.5rem 1rem;
 }
 
 .tab.selected {
