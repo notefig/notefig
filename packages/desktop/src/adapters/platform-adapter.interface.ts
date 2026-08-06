@@ -444,12 +444,6 @@ export interface IPlatformAdapter {
   toggleFullscreen(): Promise<void>;
 
   /**
-   * Set the native webview zoom factor. No-op on platforms without
-   * native zoom (browser tabs zoom themselves).
-   */
-  setZoom(zoom: number): Promise<void>;
-
-  /**
    * Search content in files within a directory.
    *
    * @param directory - Directory path to search in

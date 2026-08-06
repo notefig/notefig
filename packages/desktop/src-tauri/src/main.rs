@@ -83,17 +83,6 @@ fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
 fn restore_zoom_level(app: &AppHandle) {
     match app.store("kv.json") {
         Ok(store) => {
-            // Until the frontend has run its one-time zoom rebaseline
-            // migration (UI moved to a 1.5x root font-size), a persisted
-            // zoom is compensation for the old small UI — don't restore it,
-            // or it would compound with the new baseline.
-            let rebaselined = store
-                .get("settings:zoomRebaselined")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            if !rebaselined {
-                return;
-            }
             let zoom_value = store.get("settings:zoomLevel").or_else(|| {
                 app.store("settings.json")
                     .ok()
