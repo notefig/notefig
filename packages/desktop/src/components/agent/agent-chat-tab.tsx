@@ -68,7 +68,10 @@ import {
   getLastSentPrompt,
   setLastSentPrompt,
 } from "./composer-draft-store";
-import { deriveComposerKeyAction } from "./prompt-blob-state";
+import {
+  deriveComposerButton,
+  deriveComposerKeyAction,
+} from "./prompt-blob-state";
 import { CopyTextButton } from "./copy-text-button";
 import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
 
@@ -89,7 +92,14 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
     // is at the bottom, hands-off once they scroll up, and a reopened task
     // lands at the end. The provider wraps the whole tab (not just the
     // transcript) so the composer can jump to the end on send.
-    <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+    // scrollEdgeThreshold: the primitive's 8px default is too tight for a
+    // transcript whose rich content reflows — a sub-threshold residue keeps
+    // "at end" false and blocks follow mode from re-arming (MET-104).
+    <MessageScrollerProvider
+      autoScroll
+      defaultScrollPosition="end"
+      scrollEdgeThreshold={48}
+    >
       <AgentChatTabBody taskId={taskId} />
     </MessageScrollerProvider>
   );
@@ -387,6 +397,7 @@ function Transcript({
   bottomInset: number;
 }) {
   const { t } = useTranslation();
+  const { scrollToEnd } = useMessageScroller();
   const entries = useTaskEntries(taskId);
   const turns = useTaskTurns(taskId);
   const turnErrors = useMemo(
@@ -411,14 +422,29 @@ function Transcript({
     // the reader is at the live edge; scrolling up detaches until they
     // return to the bottom (or send, which jumps there).
     <MessageScroller className="flex-1 min-h-0">
-      <MessageScrollerViewport>
-        {/* Bottom padding clears the floating composer overlay: its
-            measured height (pb-36 as the pre-measurement fallback), plus
-            one gap — so the scrollable end never sits under the overlay. */}
-        <MessageScrollerContent
-          className="gap-3 p-3"
-          style={{ paddingBottom: Math.max(bottomInset, 144) + 12 }}
-        >
+      {/* The primitive drops follow mode on ANY wheel event — even a
+          downward nudge while already pinned — and only re-arms from a
+          scroll event, which a nudge at max scrollTop never produces
+          (MET-104). Re-arm by hand: a non-upward wheel at the live edge
+          re-enters follow mode via scrollToEnd. */}
+      <MessageScrollerViewport
+        onWheel={(event) => {
+          const viewport = event.currentTarget;
+          if (
+            event.deltaY >= 0 &&
+            viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 48
+          ) {
+            scrollToEnd({ behavior: "auto" });
+          }
+        }}
+      >
+        {/* The composer clearance is a real spacer child, NOT paddingBottom
+            on Content: padding changes don't alter the content box, so the
+            primitive's ResizeObserver would never see the overlay growing
+            (permission/auth cards) and the last entry would sit under it
+            with follow mode blind to the gap (MET-104). 144px matches the
+            pre-measurement fallback of the old pb-36. */}
+        <MessageScrollerContent className="gap-3 p-3">
           {sortedEntries.map((entry) => (
             <MessageScrollerItem key={entry.id} messageId={entry.id}>
               <EntryView
@@ -434,6 +460,7 @@ function Transcript({
               </div>
             </MessageScrollerItem>
           ))}
+          <div aria-hidden style={{ height: Math.max(bottomInset, 144) }} />
         </MessageScrollerContent>
       </MessageScrollerViewport>
       {/* Tucked into the corner just above the composer cards: the overlay
@@ -491,7 +518,9 @@ function MessageEntry({
           bubble is the user's alone, and a compact one at that. */}
       <div
         className={cn(
-          "select-text whitespace-pre-wrap",
+          // break-words: an unbroken run (a URL, a long path) must wrap
+          // inside the bubble, not push past the chat width.
+          "select-text whitespace-pre-wrap break-words",
           isUser
             ? "max-w-[85%] rounded-lg bg-primary px-2 py-1 text-xs text-primary-foreground"
             : "w-full text-sm leading-relaxed text-foreground",
@@ -646,7 +675,7 @@ function AuthorBlobCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
   return (
     <div className="flex w-full items-center gap-2 text-xs text-muted-foreground">
       <Sparkles className="size-3.5 shrink-0" />
-      <span className="flex-1">
+      <span className="min-w-0 flex-1 truncate">
         {t("agentAuthoredBlob", { type: rawInput.type })}{" "}
         <button
           type="button"
@@ -706,7 +735,10 @@ function ToolCallCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
       >
         <span
           className={cn(
-            "shrink-0 font-semibold",
+            // min-w-0 + truncate, not shrink-0: adapters mint titles from
+            // whatever they like (a full shell command, a long MCP name) —
+            // the row must ellipsize inside the chat width, never overflow.
+            "min-w-0 shrink truncate font-semibold",
             failed && "text-destructive",
             // In flight, the title's own shimmer IS the loading state —
             // no spinner, no placeholder box.
@@ -782,7 +814,7 @@ function ChangedFilesCard({
       <div className="flex items-center gap-2">
         <span
           className={cn(
-            "font-semibold",
+            "min-w-0 truncate font-semibold",
             inFlight && "shimmer text-muted-foreground",
           )}
         >
@@ -907,11 +939,11 @@ function rawInputPreview(rawInput: Record<string, unknown>): string {
 
 /**
  * The floating composer: a rounded card pinned to the bottom of the tab with
- * the prompt input above a toolbar row. Send stays enabled while a turn runs
- * — sending then queues the prompt (FIFO, lossless) — with Stop available
- * alongside (⏎ sends, ⇧⏎ inserts a newline). The left affordances mirror
- * the target design; they are visual placeholders until wired to real
- * actions.
+ * the prompt input above a toolbar row. One action button (MET-104): Stop
+ * while a turn runs and the input is empty; typing flips it to Send, which
+ * queues the prompt while running (FIFO, lossless). ⏎ sends, ⇧⏎ inserts a
+ * newline. The left affordances mirror the target design; they are visual
+ * placeholders until wired to real actions.
  */
 function PromptBox({
   value,
@@ -936,7 +968,6 @@ function PromptBox({
 }) {
   const { t } = useTranslation();
   const harnessLabel = useHarnessLabel(harnessId);
-  const canSend = value.trim().length > 0 && !disabled;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useAutosizeTextarea(textareaRef, value);
   // autoFocus can't fire on a disabled textarea — refocus once the session
@@ -987,31 +1018,57 @@ function PromptBox({
         </span>
 
         <div className="ms-auto flex items-center gap-1">
-          {isRunning && (
-            <Button
-              size="icon"
-              variant="outline"
-              onClick={onStop}
-              className="size-9 rounded-xl"
-              title={t("agentStop")}
-              aria-label={t("agentStop")}
-            >
-              <Square className="fill-current" />
-            </Button>
-          )}
-          <Button
-            size="icon"
-            onClick={onSend}
-            disabled={!canSend}
-            className="size-9 rounded-xl"
-            title={isRunning ? t("agentQueue") : t("agentSend")}
-            aria-label={isRunning ? t("agentQueue") : t("agentSend")}
-          >
-            <ArrowUp />
-          </Button>
+          <ComposerActionButton
+            isRunning={isRunning}
+            draftEmpty={value.trim().length === 0}
+            inputsDisabled={disabled}
+            onSend={onSend}
+            onStop={onStop}
+          />
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The composer's single morphing action button (MET-104): Stop while a turn
+ * runs and nothing is typed, Send otherwise — which queues while running.
+ * The mode/enabled decision lives in the pure deriveComposerButton.
+ */
+function ComposerActionButton({
+  isRunning,
+  draftEmpty,
+  inputsDisabled,
+  onSend,
+  onStop,
+}: {
+  isRunning: boolean;
+  draftEmpty: boolean;
+  inputsDisabled: boolean;
+  onSend: () => void;
+  onStop: () => void;
+}) {
+  const { t } = useTranslation();
+  const button = deriveComposerButton({ isRunning, draftEmpty, inputsDisabled });
+  const label =
+    button.mode === "stop"
+      ? t("agentStop")
+      : button.mode === "queue"
+        ? t("agentQueue")
+        : t("agentSend");
+  return (
+    <Button
+      size="icon"
+      variant={button.mode === "stop" ? "outline" : "default"}
+      onClick={button.mode === "stop" ? onStop : onSend}
+      disabled={!button.enabled}
+      className="size-9 rounded-xl"
+      title={label}
+      aria-label={label}
+    >
+      {button.mode === "stop" ? <Square className="fill-current" /> : <ArrowUp />}
+    </Button>
   );
 }
 

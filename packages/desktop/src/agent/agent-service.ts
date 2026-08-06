@@ -1037,7 +1037,10 @@ export class AgentTask {
    * the turn ended: completed turns close them as "completed"; errored or
    * cancelled turns close them as "failed" (ACP's ToolCallStatus has no
    * "cancelled" — "failed" is the honest terminal state either way: the
-   * tool did not finish).
+   * tool did not finish). Turnless entries (`turnId: ""` — a tool_call that
+   * arrived when no turn was current, e.g. an adapter straggler after
+   * cancel) are swept too: no later turn will ever claim them, and they'd
+   * otherwise spin forever (MET-104).
    */
   private resolveLingeringToolCalls(
     turnId: string,
@@ -1045,7 +1048,8 @@ export class AgentTask {
   ): void {
     const terminal = turnStatus === "completed" ? "completed" : "failed";
     for (const entry of agentEntriesForTask(this.taskId)) {
-      if (entry.type !== "tool_call" || entry.turnId !== turnId) continue;
+      if (entry.type !== "tool_call") continue;
+      if (entry.turnId !== turnId && entry.turnId !== "") continue;
       const status = entry.toolCall?.status;
       if (status === "pending" || status === "in_progress" || status == null) {
         agentEntriesCollection.update(entry.id, (draft) => {
