@@ -769,6 +769,75 @@ describe("AgentTask vertical slice", () => {
     expect(tools[0].toolCall?.content?.[0]).toMatchObject({ type: "diff" });
   });
 
+  it("applies a terminal update carrying adapter-shaped rawOutput mid-turn", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async (_p, a) => {
+      a.update("sess_test", {
+        sessionUpdate: "tool_call",
+        toolCallId: "t1",
+        title: "Run tests",
+        kind: "execute",
+        status: "in_progress",
+      });
+      // claude-agent-acp attaches the raw Anthropic tool_result content — an
+      // array (or bare string) — which agent-client-protocol 0.4.5's schema
+      // rejects, silently dropping the whole frame. sanitizeAcpFrame must
+      // keep it valid or the tool shimmers until turn end (MET-104).
+      a.update("sess_test", {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "t1",
+        status: "completed",
+        rawOutput: [{ type: "text", text: "ok" }],
+      });
+      // Hold the turn open until the status lands: the turn-end sweep would
+      // otherwise complete the call itself and mask a dropped frame.
+      await vi.waitFor(() =>
+        expect(toolEntries(task.taskId)[0]?.toolCall?.status).toBe("completed"),
+      );
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "test");
+
+    // The boxed shape the sanitizer wraps non-object payloads into.
+    expect(toolEntries(task.taskId)[0].toolCall?.rawOutput).toEqual({
+      output: [{ type: "text", text: "ok" }],
+    });
+  });
+
+  it("sweeps turnless straggler tool calls at the next turn end", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async () => ({ stopReason: "end_turn" });
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "one");
+
+    // A brand-new tool_call with no turn to attach to (adapter straggler
+    // after the turn boundary) inserts with turnId "" — the sweep must
+    // still close it or it spins forever (MET-104).
+    task.handleSessionUpdate({
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "t9",
+        title: "Straggler",
+        kind: "execute",
+        status: "in_progress",
+      },
+    } as unknown as Parameters<typeof task.handleSessionUpdate>[0]);
+
+    await runPrompt(task, "two");
+
+    const straggler = toolEntries(task.taskId).find(
+      (entry) => entry.toolCallId === "t9",
+    );
+    expect(straggler?.toolCall?.status).toBe("completed");
+  });
+
   it("interleaves text and tool calls in order", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);

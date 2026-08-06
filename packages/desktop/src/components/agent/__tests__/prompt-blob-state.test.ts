@@ -14,6 +14,7 @@ import {
   deriveLatestAssistantLine,
   deriveTouchedFiles,
   deriveQueuePosition,
+  deriveComposerButton,
   deriveComposerKeyAction,
   deriveWidgetResponse,
   deriveDoneLine,
@@ -429,6 +430,55 @@ describe("deriveComposerKeyAction", () => {
         inFlight: false,
       }),
     ).toEqual({ type: "none" });
+  });
+});
+
+describe("deriveComposerButton", () => {
+  it("is Stop while running with an empty draft", () => {
+    expect(
+      deriveComposerButton({
+        isRunning: true,
+        draftEmpty: true,
+        inputsDisabled: false,
+      }),
+    ).toEqual({ mode: "stop", enabled: true });
+  });
+
+  it("flips to a queueing Send when text is typed mid-turn", () => {
+    expect(
+      deriveComposerButton({
+        isRunning: true,
+        draftEmpty: false,
+        inputsDisabled: false,
+      }),
+    ).toEqual({ mode: "queue", enabled: true });
+  });
+
+  it("is a plain Send when idle, disabled until there is a draft", () => {
+    expect(
+      deriveComposerButton({
+        isRunning: false,
+        draftEmpty: true,
+        inputsDisabled: false,
+      }),
+    ).toEqual({ mode: "send", enabled: false });
+    expect(
+      deriveComposerButton({
+        isRunning: false,
+        draftEmpty: false,
+        inputsDisabled: false,
+      }),
+    ).toEqual({ mode: "send", enabled: true });
+  });
+
+  it("session/load window disables Send even with a draft", () => {
+    expect(
+      deriveComposerButton({
+        isRunning: false,
+        draftEmpty: false,
+        inputsDisabled: true,
+      }),
+    ).toEqual({ mode: "send", enabled: false });
   });
 });
 

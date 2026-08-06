@@ -290,6 +290,28 @@ export function deriveComposerKeyAction(params: {
   return { type: "none" };
 }
 
+export type ComposerButtonMode = "send" | "queue" | "stop";
+
+/**
+ * The chat composer's single action button (MET-104): one slot that is Stop
+ * while a turn runs and nothing is typed, and Send otherwise — sending
+ * mid-turn queues, so "queue" is send with queueing labels. Stop is always
+ * actionable; Send needs a non-empty draft and open inputs (the session/load
+ * window disables the composer wholesale).
+ */
+export function deriveComposerButton(params: {
+  isRunning: boolean;
+  draftEmpty: boolean;
+  inputsDisabled: boolean;
+}): { mode: ComposerButtonMode; enabled: boolean } {
+  const { isRunning, draftEmpty, inputsDisabled } = params;
+  if (isRunning && draftEmpty) return { mode: "stop", enabled: true };
+  return {
+    mode: isRunning ? "queue" : "send",
+    enabled: !draftEmpty && !inputsDisabled,
+  };
+}
+
 /** How many queued turns run before mine (turn ids are ascending). */
 export function deriveQueuePosition(
   taskTurns: AgentTurn[],

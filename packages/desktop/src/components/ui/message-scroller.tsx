@@ -44,8 +44,14 @@ function MessageScrollerViewport({
       data-slot="message-scroller-viewport"
       className={cn(
         // base-nova's scrollbar/scroll-fade utilities dropped — this
-        // workspace's Tailwind theme doesn't define them.
-        "size-full min-h-0 min-w-0 overflow-y-auto overscroll-contain contain-content",
+        // workspace's Tailwind theme doesn't define them. contain-content
+        // dropped too: it made the viewport a containing block, which
+        // interferes with the absolutely-positioned scroll button.
+        // overflow-anchor:none — the primitive never disables browser
+        // scroll anchoring, whose spontaneous scrollTop adjustments during
+        // streaming reflow read as "user scrolled up" and detach follow
+        // mode (MET-104).
+        "size-full min-h-0 min-w-0 overflow-y-auto overscroll-contain [overflow-anchor:none]",
         className
       )}
       {...props}

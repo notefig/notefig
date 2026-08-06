@@ -362,6 +362,12 @@ export const PromptBlob = memo(function PromptBlob({
       ? deriveQueuePosition(taskTurns, boundTurnId)
       : 0;
 
+  // One click from any bound phase to the session's full transcript
+  // (MET-104) — the done face has its own copy of this in DoneState.
+  const openBoundChat = boundTaskId
+    ? () => openAgentTab(boundTaskId)
+    : undefined;
+
   return (
     <div
       // The widget claims its pointer events wholesale: ProseMirror must
@@ -405,6 +411,7 @@ export const PromptBlob = memo(function PromptBlob({
               onEdit={editPrompt}
               onStop={stop}
               stopLabel={t("agentRemoveFromQueue")}
+              onOpenChat={openBoundChat}
             />
           )}
 
@@ -422,6 +429,7 @@ export const PromptBlob = memo(function PromptBlob({
                 onEdit={editPrompt}
                 onStop={stop}
                 stopLabel={t("agentStop")}
+                onOpenChat={openBoundChat}
               />
               {phase === "needs-permission" && boundTaskId && (
                 <div className="px-2.5 pb-2">
@@ -439,6 +447,7 @@ export const PromptBlob = memo(function PromptBlob({
                 onEdit={editPrompt}
                 onStop={stop}
                 stopLabel={t("agentStop")}
+                onOpenChat={openBoundChat}
               />
               <div className="px-2.5 pb-2">
                 <AuthCard task={task} bare />
@@ -1001,6 +1010,7 @@ function StatusRow({
   onEdit,
   onStop,
   stopLabel,
+  onOpenChat,
 }: {
   label?: string;
   shimmer?: boolean;
@@ -1011,6 +1021,9 @@ function StatusRow({
   onEdit?: () => void;
   onStop?: () => void;
   stopLabel?: string;
+  /** Jump to the bound session's chat (MET-104) — present in every bound
+   *  phase, so a pending prompt is one click from its full transcript. */
+  onOpenChat?: () => void;
 }) {
   const { t } = useTranslation();
   const secondLine = teaser ?? prompt;
@@ -1036,6 +1049,21 @@ function StatusRow({
           </div>
         )}
       </div>
+      <button
+        type="button"
+        title={t("promptBlobOpenChat")}
+        aria-label={t("promptBlobOpenChat")}
+        disabled={!onOpenChat}
+        className={cn(
+          "shrink-0 rounded p-1 text-muted-foreground transition-colors",
+          onOpenChat
+            ? "cursor-pointer hover:bg-accent hover:text-foreground"
+            : "invisible",
+        )}
+        onClick={onOpenChat}
+      >
+        <MessageSquare className="size-3.5" />
+      </button>
       <button
         type="button"
         title={t("promptBlobEdit")}
