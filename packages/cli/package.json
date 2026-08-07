@@ -1,6 +1,6 @@
 {
   "name": "notefig",
-  "version": "0.8.4",
+  "version": "0.9.0",
   "description": "notefig - publish markdown files as a book",
   "publishConfig": {
     "access": "public"
