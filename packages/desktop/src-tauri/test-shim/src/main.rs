@@ -39,7 +39,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use metrists::register_handlers;
+use notefig::register_handlers;
 use serde_json::{json, Value};
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
 use tauri::webview::InvokeRequest;

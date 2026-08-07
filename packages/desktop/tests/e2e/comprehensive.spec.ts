@@ -28,7 +28,7 @@ import {
   editContent,
 } from "./comprehensive.fixture";
 
-test.describe("Metrists E2E Comprehensive Tests", () => {
+test.describe("Notefig E2E Comprehensive Tests", () => {
   test.beforeEach(async ({ page }) => {
     await setupTestDatabase(page, "comprehensive-e2e");
     await openWorkspace(page, e2eTestFixture.workspacePath);

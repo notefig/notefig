@@ -36,8 +36,8 @@ function toolTitle(tool: Pick<AgentTool<unknown, unknown>, "title">): string {
 function serverInstructions(): string {
   const names = toolRegistry.map((tool) => tool.name).join(", ");
   return (
-    `This server exposes the Metrists writing app's native tools (${names}) — ` +
-    `you are running as an agent inside that app. Metrists registers this server ` +
+    `This server exposes the Notefig writing app's native tools (${names}) — ` +
+    `you are running as an agent inside that app. Notefig registers this server ` +
     `automatically for the session via a per-task, ephemeral config — it will not ` +
     `appear in your global or project config files, and you don't need to locate ` +
     `or verify it. Four of these are your PRIMARY tools — keep them top of mind; ` +

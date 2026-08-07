@@ -4,7 +4,7 @@
 // Command modules + the shared handler registration live in the library crate
 // so the app binary, the mock-app dispatch tests, and the e2e shim all share
 // one command list (MET-73).
-use metrists::{agent_proc, mcp_bridge, register_handlers};
+use notefig::{agent_proc, mcp_bridge, register_handlers};
 
 use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager};
@@ -118,6 +118,47 @@ fn set_zoom_level(app: &AppHandle, zoom: f64) {
     let _ = app.emit("zoom-changed", zoom);
 }
 
+/// One-time app-data migration for the com.metrists.dev -> com.notefig.app
+/// identifier change: Tauri derives the app-data dir from the bundle
+/// identifier, so without this every existing install would come up with
+/// empty settings. Copies (never moves — old builds may still run and read
+/// their dir) the store and window-state files into the new dir, and only
+/// when the new dir has no kv.json yet so an already-migrated install is
+/// never overwritten.
+fn migrate_app_data(old_dir: &std::path::Path, new_dir: &std::path::Path) {
+    if new_dir.join("kv.json").exists() || !old_dir.is_dir() {
+        return;
+    }
+    if let Err(e) = std::fs::create_dir_all(new_dir) {
+        eprintln!("app-data migration: cannot create {new_dir:?}: {e}");
+        return;
+    }
+    for name in ["kv.json", "settings.json", ".window-state.json"] {
+        let src = old_dir.join(name);
+        if src.is_file() {
+            if let Err(e) = std::fs::copy(&src, new_dir.join(name)) {
+                eprintln!("app-data migration: copying {name} failed: {e}");
+            }
+        }
+    }
+    eprintln!("app-data migration: copied store files from {old_dir:?} to {new_dir:?}");
+}
+
+#[cfg(target_os = "macos")]
+fn migrate_app_data_from_old_identifier() {
+    // Paths match Tauri v2's app_data_dir resolution on macOS
+    // ($HOME/Library/Application Support/<identifier>). Other platforms have
+    // no shipped installs under the old identifier, so nothing to migrate.
+    let Ok(home) = std::env::var("HOME") else {
+        return;
+    };
+    let support = std::path::Path::new(&home).join("Library/Application Support");
+    migrate_app_data(&support.join("com.metrists.dev"), &support.join("com.notefig.app"));
+}
+
+#[cfg(not(target_os = "macos"))]
+fn migrate_app_data_from_old_identifier() {}
+
 fn main() {
     // MCP stdio relay mode (Stage 3.5, mcp_bridge.rs): a harness process
     // spawns this same binary with this flag to bridge its stdio to the
@@ -135,6 +176,10 @@ fn main() {
         mcp_bridge::run_mcp_stdio_relay(port);
         return;
     }
+
+    // Must run before the builder chain: tauri_plugin_window_state reads its
+    // file at plugin init and restore_zoom_level opens kv.json in setup.
+    migrate_app_data_from_old_identifier();
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::new().build())
@@ -209,4 +254,68 @@ fn main() {
                 agent_proc::kill_all_agents();
             }
         });
+}
+
+#[cfg(test)]
+mod app_data_migration_tests {
+    use super::migrate_app_data;
+    use std::fs;
+
+    fn dirs() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let old = tmp.path().join("com.metrists.dev");
+        let new = tmp.path().join("com.notefig.app");
+        (tmp, old, new)
+    }
+
+    #[test]
+    fn copies_store_files_when_new_dir_is_empty() {
+        let (_tmp, old, new) = dirs();
+        fs::create_dir_all(&old).unwrap();
+        fs::write(old.join("kv.json"), "{\"k\":1}").unwrap();
+        fs::write(old.join("settings.json"), "{}").unwrap();
+        fs::write(old.join(".window-state.json"), "{}").unwrap();
+
+        migrate_app_data(&old, &new);
+
+        assert_eq!(fs::read_to_string(new.join("kv.json")).unwrap(), "{\"k\":1}");
+        assert!(new.join("settings.json").exists());
+        assert!(new.join(".window-state.json").exists());
+        // Copy, not move: old files must survive for older builds.
+        assert!(old.join("kv.json").exists());
+    }
+
+    #[test]
+    fn never_overwrites_an_already_migrated_dir() {
+        let (_tmp, old, new) = dirs();
+        fs::create_dir_all(&old).unwrap();
+        fs::write(old.join("kv.json"), "old").unwrap();
+        fs::create_dir_all(&new).unwrap();
+        fs::write(new.join("kv.json"), "new").unwrap();
+
+        migrate_app_data(&old, &new);
+
+        assert_eq!(fs::read_to_string(new.join("kv.json")).unwrap(), "new");
+    }
+
+    #[test]
+    fn no_op_on_fresh_install_without_old_dir() {
+        let (_tmp, old, new) = dirs();
+
+        migrate_app_data(&old, &new);
+
+        assert!(!new.exists());
+    }
+
+    #[test]
+    fn skips_missing_files_without_failing() {
+        let (_tmp, old, new) = dirs();
+        fs::create_dir_all(&old).unwrap();
+        fs::write(old.join("kv.json"), "{}").unwrap(); // no settings.json / window state
+
+        migrate_app_data(&old, &new);
+
+        assert!(new.join("kv.json").exists());
+        assert!(!new.join("settings.json").exists());
+    }
 }

@@ -13,7 +13,7 @@ export const happyPathFixture = {
         path: `${WORKSPACE_PATH}/README.md`,
         content: `# Demo Workspace
 
-Welcome to Metrists! This is a sample workspace to help you get started.
+Welcome to Notefig! This is a sample workspace to help you get started.
 
 ## Quick Start
 
@@ -40,7 +40,7 @@ Welcome to Metrists! This is a sample workspace to help you get started.
         path: `${WORKSPACE_PATH}/docs/getting-started.md`,
         content: `# Getting Started
 
-Let's learn how to use Metrists effectively.
+Let's learn how to use Notefig effectively.
 
 ## Opening Files
 
@@ -56,7 +56,7 @@ Just start typing! Your changes are automatically saved.
         path: `${WORKSPACE_PATH}/docs/features.md`,
         content: `# Features
 
-Metrists comes with powerful features:
+Notefig comes with powerful features:
 
 - Real-time markdown editing
 - Tab-based file management
@@ -77,7 +77,7 @@ Metrists comes with powerful features:
 
 ## Today I Learned
 
-- How to use Metrists for note-taking
+- How to use Notefig for note-taking
 - Markdown is a great format for notes
 
 ## Ideas

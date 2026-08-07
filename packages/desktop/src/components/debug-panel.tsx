@@ -372,7 +372,7 @@ function DebugPanelContent({
     }
 
     const lines: string[] = [];
-    lines.push("=== Metrists Debug Report ===");
+    lines.push("=== Notefig Debug Report ===");
     lines.push(`Timestamp: ${new Date().toISOString()}`);
     lines.push(`User Agent: ${navigator.userAgent}`);
     lines.push("");
@@ -569,7 +569,7 @@ function DebugPanelContent({
     if (!sessionTask) return "(no task selected)";
 
     const lines: string[] = [];
-    lines.push("=== Metrists Agent Session Report ===");
+    lines.push("=== Notefig Agent Session Report ===");
     lines.push(`Generated: ${new Date().toISOString()}`);
     lines.push("");
 

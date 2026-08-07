@@ -51,7 +51,7 @@ test.describe("Happy Path - Complete User Flow", () => {
 
     const originalContent = await getEditorContent(page);
     expect(originalContent).toContain("Demo Workspace");
-    expect(originalContent).toContain("Welcome to Metrists");
+    expect(originalContent).toContain("Welcome to Notefig");
 
     await replaceEditorContent(
       page,

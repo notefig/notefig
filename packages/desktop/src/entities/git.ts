@@ -131,7 +131,7 @@ export interface GitCheckpointRow {
 
 export type GitRow = GitRepoRow | GitFileRow | GitCheckpointRow;
 
-export const COMMIT_AUTHOR = { name: "Metrists", email: "git@notefig.com" };
+export const COMMIT_AUTHOR = { name: "Notefig", email: "git@notefig.com" };
 
 const CHECKPOINT_LOG_DEPTH = 100;
 

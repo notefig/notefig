@@ -57,9 +57,9 @@ export function generateDemoFiles(
     };
   };
 
-  const readmeContent = `# Welcome to Metrists
+  const readmeContent = `# Welcome to Notefig
 
-This is your demo workspace. Metrists is a local-first note-taking and file management application.
+This is your demo workspace. Notefig is a local-first note-taking and file management application.
 
 ## Features
 
@@ -1969,7 +1969,7 @@ Stay tuned for updates!
 
 ## Notes
 
-Started using Metrists today. The interface is clean and responsive. Looking forward to organizing all my notes here.
+Started using Notefig today. The interface is clean and responsive. Looking forward to organizing all my notes here.
 
 ## Ideas
 - Could use this for project management

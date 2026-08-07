@@ -25,7 +25,7 @@ use tauri::webview::InvokeRequest;
 use tauri::{App, WebviewWindow, WebviewWindowBuilder};
 
 fn mock_app() -> App<MockRuntime> {
-    metrists::register_handlers(mock_builder())
+    notefig::register_handlers(mock_builder())
         .build(mock_context(noop_assets()))
         .expect("failed to build mock app")
 }

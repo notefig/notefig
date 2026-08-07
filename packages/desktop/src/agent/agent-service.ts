@@ -882,7 +882,7 @@ export class AgentTask {
     try {
       await checkpointWorkspaceHistory(this.workspacePath, message, {
         name: this.harness.id,
-        email: "agent@metrists.local",
+        email: "agent@notefig.local",
       });
     } catch (error) {
       // Best-effort: history is a convenience, never block/fail the turn on it.

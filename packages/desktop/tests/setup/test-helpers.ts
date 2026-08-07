@@ -1,7 +1,7 @@
 import { expect, Page } from "@playwright/test";
 
 /**
- * Test Helpers for Metrists E2E Tests
+ * Test Helpers for Notefig E2E Tests
  *
  * FIXTURE PATTERN:
  * Each test file should have a corresponding .fixture.ts file:

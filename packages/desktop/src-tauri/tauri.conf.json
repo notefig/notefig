@@ -6,9 +6,9 @@
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },
-  "productName": "Metrists",
+  "productName": "Notefig",
   "version": "0.0.101",
-  "identifier": "com.metrists.dev",
+  "identifier": "com.notefig.app",
   "plugins": {
     "shell": {
       "open": true
@@ -23,7 +23,7 @@
   "app": {
     "windows": [
       {
-        "title": "Metrists",
+        "title": "Notefig",
         "width": 1440,
         "height": 900,
         "zoomHotkeysEnabled": true,

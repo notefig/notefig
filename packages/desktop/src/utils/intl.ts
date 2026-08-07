@@ -15,11 +15,10 @@ i18n
       en: {
         translation: {
           // Welcome
-          welcome: "Welcome to Metrists",
           welcomeDescription:
             "Open a folder to start browsing and editing your files.",
-          welcomeTitle: "You are a",
-          welcomeTitleHighlight: "Metrist.",
+          welcomeTitle: "Welcome to",
+          welcomeTitleHighlight: "Notefig.",
           newDocument: "Open Workspace",
           createBlankDocument: "Open a blank workspace",
           modified: "Modified",
@@ -435,7 +434,7 @@ i18n
           agentSettings: "Agent",
           harnessSettingsTitle: "Harnesses",
           harnessSettingsDescription:
-            "Agents Metrists can launch. Discovery checks which are installed on this machine; entries you customize stay available either way.",
+            "Agents Notefig can launch. Discovery checks which are installed on this machine; entries you customize stay available either way.",
           harnessRescan: "Rescan",
           harnessRescanFailed: "Couldn't scan this machine for harnesses.",
           harnessAdd: "Add harness",
@@ -492,9 +491,9 @@ i18n
           agentToolWidgetRespond: "Respond in Widget",
 
           // Telemetry consent + Privacy settings
-          telemetryConsentTitle: "Help improve Metrists",
+          telemetryConsentTitle: "Help improve Notefig",
           telemetryConsentBody:
-            "Metrists can send anonymous reports to help us fix bugs and improve the app. Your documents, file paths, and workspace contents never leave your machine.",
+            "Notefig can send anonymous reports to help us fix bugs and improve the app. Your documents, file paths, and workspace contents never leave your machine.",
           telemetryCrashLabel: "Crash reports",
           telemetryCrashDescription:
             "Anonymous error reports so we can fix bugs.",

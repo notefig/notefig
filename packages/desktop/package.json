@@ -9,7 +9,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "dev-debug": "npm run tauri build -- --debug && open \"src-tauri/target/debug/bundle/macos/Metrists.app\"",
+    "dev-debug": "npm run tauri build -- --debug && open \"src-tauri/target/debug/bundle/macos/Notefig.app\"",
     "test": "npm run test:unit && npm run test:tauri",
     "test:watch": "vitest",
     "test:unit": "vitest run",

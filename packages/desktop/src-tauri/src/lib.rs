@@ -1,4 +1,4 @@
-//! Library crate for the Metrists desktop backend.
+//! Library crate for the Notefig desktop backend.
 //!
 //! Holds the Tauri command modules and the single `register_handlers`
 //! registration shared by three consumers so the 27-command handler list has

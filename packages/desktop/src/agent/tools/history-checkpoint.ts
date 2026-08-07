@@ -18,7 +18,7 @@ export const historyCheckpoint: AgentTool<
     try {
       const oid = await checkpointWorkspaceHistory(ctx.workspacePath, input.message, {
         name: "agent",
-        email: "agent@metrists.local",
+        email: "agent@notefig.local",
       });
       return { ok: true, value: { oid } };
     } catch (error) {

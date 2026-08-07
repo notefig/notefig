@@ -1,5 +1,5 @@
 {
-  "name": "Metrists Desktop",
+  "name": "Notefig Desktop",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
 
   "features": {

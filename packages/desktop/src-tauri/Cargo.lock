@@ -2309,38 +2309,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "metrists"
-version = "0.0.101"
-dependencies = [
- "futures",
- "getrandom 0.2.17",
- "glob",
- "grep",
- "grep-regex",
- "lazy_static",
- "libc",
- "md5",
- "notify",
- "notify-debouncer-full",
- "regex",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-nspanel",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "tauri-plugin-opener",
- "tauri-plugin-process",
- "tauri-plugin-store",
- "tauri-plugin-updater",
- "tauri-plugin-window-state",
- "tempfile",
- "tokio",
- "walkdir",
-]
-
-[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2447,6 +2415,38 @@ name = "nodrop"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72ef4a56884ca558e5ddb05a1d1e7e1bfd9a68d9ed024c21704cc98872dae1bb"
+
+[[package]]
+name = "notefig"
+version = "0.0.101"
+dependencies = [
+ "futures",
+ "getrandom 0.2.17",
+ "glob",
+ "grep",
+ "grep-regex",
+ "lazy_static",
+ "libc",
+ "md5",
+ "notify",
+ "notify-debouncer-full",
+ "regex",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-nspanel",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "tauri-plugin-opener",
+ "tauri-plugin-process",
+ "tauri-plugin-store",
+ "tauri-plugin-updater",
+ "tauri-plugin-window-state",
+ "tempfile",
+ "tokio",
+ "walkdir",
+]
 
 [[package]]
 name = "notify"
@@ -4574,7 +4574,7 @@ name = "test-shim"
 version = "0.0.1"
 dependencies = [
  "axum",
- "metrists",
+ "notefig",
  "serde_json",
  "tauri",
  "tokio",

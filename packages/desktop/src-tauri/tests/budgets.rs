@@ -130,7 +130,7 @@ fn assert_budget(label: &str, source_bytes: usize, peak_bytes: usize, limit: f64
 // ===========================================================================
 
 fn mock_app() -> App<MockRuntime> {
-    metrists::register_handlers(mock_builder())
+    notefig::register_handlers(mock_builder())
         .build(mock_context(noop_assets()))
         .expect("failed to build mock app")
 }
@@ -372,7 +372,7 @@ fn oversized_agent_line_never_rides_the_eval_path() {
     );
     *context.runtime_authority_mut() =
         tauri::ipc::RuntimeAuthority::new(Default::default(), resolved);
-    let app = metrists::register_handlers(mock_builder())
+    let app = notefig::register_handlers(mock_builder())
         .build(context)
         .expect("failed to build mock app");
     let webview = main_webview(&app);
@@ -436,10 +436,10 @@ fn oversized_agent_line_never_rides_the_eval_path() {
     // round trip is measured: queue admission, doorbell emit, IPC dispatch,
     // and the serialized response.
     let ((), pull_peak) = measure(|| {
-        let stream = metrists::line_stream::create("budget/oversized");
+        let stream = notefig::line_stream::create("budget/oversized");
         tauri::async_runtime::block_on(async {
             let mut reader = tokio::io::AsyncBufReadExt::lines(line.as_bytes());
-            metrists::line_stream::pump(&stream, &mut reader, || {
+            notefig::line_stream::pump(&stream, &mut reader, || {
                 // The doorbell is the ONLY thing that rides the emit/eval
                 // machinery in production, so it's part of the measured cost.
                 let _ = app.emit(TOPIC, ());

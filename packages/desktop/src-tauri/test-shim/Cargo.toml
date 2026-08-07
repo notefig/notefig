@@ -7,7 +7,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-metrists = { path = ".." }
+notefig = { path = ".." }
 tauri = { version = "2", features = ["test"] }
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "net", "macros"] }

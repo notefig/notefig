@@ -179,7 +179,7 @@ describe("saveCheckpoint (plain action + refetch)", () => {
     expect(addAllAndCommitMock).toHaveBeenCalledWith({
       repoPath: WS,
       message: "did things",
-      author: { name: "Metrists", email: "git@notefig.com" },
+      author: { name: "Notefig", email: "git@notefig.com" },
     });
 
     const rows = getOrCreateGitCollection(WS).toArray as GitCheckpointRow[];

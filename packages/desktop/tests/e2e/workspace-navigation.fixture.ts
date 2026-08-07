@@ -13,7 +13,7 @@ export const workspaceNavigationFixture = {
         path: `${WORKSPACE_PATH}/README.md`,
         content: `# Demo Workspace
 
-This is a demo workspace for testing Metrists navigation.
+This is a demo workspace for testing Notefig navigation.
 
 ## Features
 

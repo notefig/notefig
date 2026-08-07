@@ -8,10 +8,10 @@
 members = ["test-shim"]
 
 [package]
-name = "metrists"
+name = "notefig"
 version = "0.0.101"
-description = "A Tauri App"
-authors = ["you"]
+description = "Notefig desktop app backend"
+authors = ["Parsa"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
