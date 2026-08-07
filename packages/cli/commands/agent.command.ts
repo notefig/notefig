@@ -47,7 +47,7 @@ export class AgentCommand extends AbstractCommand {
       )
       .option(
         '--app-url <url>',
-        'web app to open/pair with (default: https://app.metrists.com, or METRISTS_APP_URL)',
+        'web app to open/pair with (default: https://app.notefig.com, or METRISTS_APP_URL)',
       )
       .option('--no-open', "don't auto-open the browser to pair");
   }

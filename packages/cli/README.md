@@ -1,14 +1,14 @@
-# <img src="https://metrists.com/images/metrists-abstract.svg" height="25" />&nbsp;&nbsp;Metrists [![Downloads Per Month](https://img.shields.io/npm/dm/metrists)](https://www.npmjs.com/package/metrists) [![Top Language](https://img.shields.io/github/languages/top/metrists/metrists)](https://github.com/metrists/metrists/) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![CI Tests](https://github.com/metrists/metrists/actions/workflows/ci-tests.yml/badge.svg)](https://github.com/metrists/metrists/actions/workflows/ci-tests.yml) [![Desktop Release](https://github.com/metrists/metrists/actions/workflows/release-desktop.yml/badge.svg)](https://github.com/metrists/metrists/actions/workflows/release-desktop.yml)
+# <img src="https://notefig.com/images/metrists-abstract.svg" height="25" />&nbsp;&nbsp;Metrists [![Downloads Per Month](https://img.shields.io/npm/dm/metrists)](https://www.npmjs.com/package/metrists) [![Top Language](https://img.shields.io/github/languages/top/metrists/metrists)](https://github.com/metrists/metrists/) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![CI Tests](https://github.com/metrists/metrists/actions/workflows/ci-tests.yml/badge.svg)](https://github.com/metrists/metrists/actions/workflows/ci-tests.yml) [![Desktop Release](https://github.com/metrists/metrists/actions/workflows/release-desktop.yml/badge.svg)](https://github.com/metrists/metrists/actions/workflows/release-desktop.yml)
 
 ---
 
-Metrists publishes text artifacts — written and refined with the help of AI agents — from markdown source. The primary way to work with Metrists is the **[desktop app](https://metrists.com)** — a local editor that facilitates you and your agents collaborating on the same files in real time.
+Metrists publishes text artifacts — written and refined with the help of AI agents — from markdown source. The primary way to work with Metrists is the **[desktop app](https://notefig.com)** — a local editor that facilitates you and your agents collaborating on the same files in real time.
 
 This repo also contains the **Metrists CLI**, which powers the desktop app under the hood (builds, publishing, agent pairing) and remains fully usable on its own if you'd rather drive things from the terminal.
 
 ## Getting Started
 
-The fastest way in is the desktop app: [download it from metrists.com](https://metrists.com), open a folder, and start writing — agents can read and edit the same files you do.
+The fastest way in is the desktop app: [download it from notefig.com](https://notefig.com), open a folder, and start writing — agents can read and edit the same files you do.
 
 Prefer the terminal? Create a new directory and run:
 
@@ -49,7 +49,7 @@ Options:
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `--dir <path>`       | Folder the agent operates on (default: current dir).                                                                                                         |
 | `--port <n>`         | Pin the local WebSocket port (default: ephemeral).                                                                                                           |
-| `--app-url <url>`    | Web app to open/pair with (default: `https://app.metrists.com`; or set `METRISTS_APP_URL`).                                                                  |
+| `--app-url <url>`    | Web app to open/pair with (default: `https://app.notefig.com`; or set `METRISTS_APP_URL`).                                                                  |
 | `--no-open`          | Don't auto-open the browser.                                                                                                                                 |
 | `--tunnel-url <url>` | Pair over a `wss://` tunnel you provide (ngrok, Tailscale Funnel, your own proxy) instead of `ws://127.0.0.1` — for reaching the worker from another device. |
 
@@ -59,7 +59,7 @@ connection. See the app's "Connect a machine" dialog for pairing.
 
 ### Documentation
 
-Follow [the full documentation](https://metrists.com/docs) to get started building your own project.
+Follow [the full documentation](https://notefig.com/docs) to get started building your own project.
 
 ## Features
 
@@ -70,7 +70,7 @@ Follow [the full documentation](https://metrists.com/docs) to get started buildi
 
 ## Roadmap
 
-See [our docs](https://metrists.com/docs) for more information about where we are taking metrists.
+See [our docs](https://notefig.com/docs) for more information about where we are taking metrists.
 
 ## Contributing
 

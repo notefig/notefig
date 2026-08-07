@@ -1,0 +1,5 @@
+# The web-build updater manifest is fetched by pages that may sit on a
+# different origin after the metrists.com -> notefig.com domain migration
+# (301-redirected requests become cross-origin). Allow any origin to read it.
+/latest.json
+  Access-Control-Allow-Origin: *

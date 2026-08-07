@@ -101,7 +101,7 @@ function isBinaryByExtension(filePath: string): boolean {
 }
 
 const UPDATER_MANIFEST_URL =
-  "https://app.metrists.com/latest.json";
+  "https://app.notefig.com/latest.json";
 
 function normalizeVersion(version: string): number[] {
   const sanitized = version.trim().replace(/^v/i, "");

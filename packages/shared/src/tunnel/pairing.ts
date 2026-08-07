@@ -7,7 +7,7 @@
  * Trust model (Happy Coder precedent): the pairing code IS the out-of-band
  * channel, so a symmetric key derived from it is equivalent to a full ECDH
  * handshake and far simpler to audit. The secret rides URL *fragments* only
- * (`https://app.metrists.com/pair#<code>`) — fragments never reach a server.
+ * (`https://app.notefig.com/pair#<code>`) — fragments never reach a server.
  */
 
 import {
@@ -128,7 +128,7 @@ export function decodePairingCode(code: string): {
   return { secret, url };
 }
 
-export const DEFAULT_APP_URL = "https://app.metrists.com";
+export const DEFAULT_APP_URL = "https://app.notefig.com";
 
 /**
  * Shareable pairing links. The code lives in the fragment so it never
