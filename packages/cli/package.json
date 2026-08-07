@@ -1,7 +1,7 @@
 {
-  "name": "metrists",
+  "name": "notefig",
   "version": "0.8.4",
-  "description": "metrists - publish markdown files as a book",
+  "description": "notefig - publish markdown files as a book",
   "publishConfig": {
     "access": "public"
   },
@@ -9,7 +9,8 @@
     "node": ">=18.17.0"
   },
   "bin": {
-    "metrists": "./dist/bin/metrists.js"
+    "notefig": "./dist/bin/notefig.js",
+    "metrists": "./dist/bin/notefig.js"
   },
   "files": [
     "dist",
@@ -19,7 +20,7 @@
   ],
   "scripts": {
     "build": "tsc && node esbuild.config.mjs && node scripts/copy-themes.mjs",
-    "dev": "ts-node ./bin/metrists.ts",
+    "dev": "ts-node ./bin/notefig.ts",
     "dev:build": "nodemon --config nodemon.json --exec npm run build",
     "lint": "eslint . --ext .ts",
     "test": "jest",

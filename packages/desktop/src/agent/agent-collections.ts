@@ -12,7 +12,7 @@ import {
 } from "@tanstack/react-db";
 import { queryCollectionOptions } from "@tanstack/query-db-collection";
 import { QueryClient } from "@tanstack/query-core";
-import type { AuthMethod, ToolCallUpdate } from "@metrists/shared/agent";
+import type { AuthMethod, ToolCallUpdate } from "@notefig/shared/agent";
 import { platformAdapter } from "@/adapters";
 import { getRegisteredTask } from "./task-registry";
 import {

@@ -6,7 +6,7 @@
  * `git-service-store.ts`'s registry convention exactly (lazy per-workspace
  * singleton + in-flight-init dedup map + dispose/clear).
  */
-import { IsomorphicGitService } from "@metrists/git";
+import { IsomorphicGitService } from "@notefig/git";
 import { platformAdapter } from "@/adapters";
 import { normalizePath } from "@/utils/fs";
 

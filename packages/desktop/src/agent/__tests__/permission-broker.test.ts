@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { PermissionBroker } from "../permission-broker";
 import { agentPermissionRequestsCollection } from "../agent-collections";
-import type { RequestPermissionRequest } from "@metrists/shared/agent";
+import type { RequestPermissionRequest } from "@notefig/shared/agent";
 
 function req(title: string): RequestPermissionRequest {
   return {

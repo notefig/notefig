@@ -1,6 +1,6 @@
 import type { Theme } from "@/components/theme-provider";
-import type { GitStorageHost } from "@metrists/git";
-import type { HarnessDefinition } from "@metrists/shared/agent";
+import type { GitStorageHost } from "@notefig/git";
+import type { HarnessDefinition } from "@notefig/shared/agent";
 import type { AgentTransport, McpEndpoint } from "@/agent/agent-transport.interface";
 
 export type FileSystemErrorType =

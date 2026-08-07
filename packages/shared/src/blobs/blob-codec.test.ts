@@ -8,7 +8,7 @@ import {
 } from "./blob-codec";
 
 describe("parseBlobBlock", () => {
-  it("rejects a language tag without the metrists: prefix", () => {
+  it("rejects a language tag without the notefig: prefix", () => {
     const result = parseBlobBlock("typescript", "id: q_8f2a\n");
     expect(result).toEqual({
       ok: false,
@@ -18,20 +18,20 @@ describe("parseBlobBlock", () => {
   });
 
   it("rejects invalid YAML", () => {
-    const result = parseBlobBlock("metrists:question", "not: [valid: yaml");
+    const result = parseBlobBlock("notefig:question", "not: [valid: yaml");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe("invalid_yaml");
   });
 
   it("rejects YAML that doesn't satisfy the envelope schema", () => {
-    const result = parseBlobBlock("metrists:question", "id: not-a-valid-id\n");
+    const result = parseBlobBlock("notefig:question", "id: not-a-valid-id\n");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe("invalid_envelope");
   });
 
   it("parses a well-formed blob, defaulting status/createdBy", () => {
     const result = parseBlobBlock(
-      "metrists:question",
+      "notefig:question",
       "id: q_8f2a\nprompt: Which tier?\n",
     );
     expect(result.ok).toBe(true);
@@ -51,11 +51,11 @@ describe("parseBlobBlock", () => {
 });
 
 describe("findBlobs", () => {
-  it("finds every metrists:* fence and skips invalid ones", () => {
+  it("finds every notefig:* fence and skips invalid ones", () => {
     const markdown = [
       "# Doc",
       "",
-      "```metrists:question",
+      "```notefig:question",
       "id: q_8f2a",
       "prompt: Which tier?",
       "```",
@@ -64,11 +64,11 @@ describe("findBlobs", () => {
       "const x = 1;",
       "```",
       "",
-      "```metrists:question",
+      "```notefig:question",
       "not: [valid: yaml",
       "```",
       "",
-      "```metrists:approval",
+      "```notefig:approval",
       "id: ap_1b2c",
       "prompt: Delete it?",
       "```",
@@ -90,17 +90,17 @@ describe("findBlobs", () => {
 describe("serializeBlobBlock", () => {
   it("round-trips a freshly-authored blob through parseBlobBlock", () => {
     const parsed = parseBlobBlock(
-      "metrists:question",
+      "notefig:question",
       "id: q_zz99\nprompt: Keep this?\n",
     );
     if (!parsed.ok) throw new Error("fixture should parse");
     const fence = serializeBlobBlock(parsed.value);
-    expect(fence).toMatch(/^```metrists:question\n/);
+    expect(fence).toMatch(/^```notefig:question\n/);
     expect(fence.trim().endsWith("```")).toBe(true);
 
-    const bodyMatch = /```metrists:question\n([\s\S]*)\n```/.exec(fence);
+    const bodyMatch = /```notefig:question\n([\s\S]*)\n```/.exec(fence);
     expect(bodyMatch).not.toBeNull();
-    const reparsed = parseBlobBlock("metrists:question", bodyMatch![1]);
+    const reparsed = parseBlobBlock("notefig:question", bodyMatch![1]);
     expect(reparsed.ok).toBe(true);
     if (reparsed.ok) {
       expect(reparsed.value.envelope.id).toBe("q_zz99");
@@ -114,7 +114,7 @@ describe("patchBlobInMarkdown", () => {
     "",
     "Intro paragraph.",
     "",
-    "```metrists:question",
+    "```notefig:question",
     "id: q_8f2a",
     "status: pending",
     "prompt: Which tier?",
@@ -160,7 +160,7 @@ describe("patchBlobInMarkdown", () => {
       "",
       "Intro paragraph.",
       "",
-      "```metrists:question",
+      "```notefig:question",
       "id: q_crlf1",
       "status: pending",
       "prompt: Which tier?",
@@ -192,7 +192,7 @@ describe("patchBlobInMarkdown", () => {
         fc.string({ minLength: 0, maxLength: 30 }).filter((s) => !s.includes("```")),
         fc.string({ minLength: 1, maxLength: 20 }).filter((s) => /^[a-zA-Z0-9 ]*$/.test(s)),
         (before, after, answer) => {
-          const doc = `${before}\n\n\`\`\`metrists:question\nid: q_prop1\nstatus: pending\nprompt: test\n\`\`\`\n\n${after}`;
+          const doc = `${before}\n\n\`\`\`notefig:question\nid: q_prop1\nstatus: pending\nprompt: test\n\`\`\`\n\n${after}`;
           const result = patchBlobInMarkdown(doc, "q_prop1", { answer });
           expect(result.ok).toBe(true);
           if (!result.ok) return;

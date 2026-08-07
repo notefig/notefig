@@ -179,7 +179,7 @@ async fn probe_login_path() -> Option<String> {
 }
 
 /// Guard vars that make claude-code-acp refuse to start ("cannot be launched
-/// inside another Claude Code session"). Inherited whenever Metrists itself is
+/// inside another Claude Code session"). Inherited whenever Notefig itself is
 /// launched from a Claude Code terminal (dev/CI/e2e).
 const NESTED_SESSION_GUARD_VARS: &[&str] = &[
     "CLAUDECODE",

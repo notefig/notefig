@@ -11,7 +11,7 @@ Agent processes (Claude Code, opencode, pi, …) run on the user's machine:
 
 - **Desktop (Tauri)** — spawned locally as child processes.
 - **Web** — reached through a tiny self-hostable **relay server** plus a
-  **CLI worker** (`metrists agent`) running on the user's machine.
+  **CLI worker** (`notefig agent`) running on the user's machine.
 
 Everything is open source. The relay is a spec, not a service: the app can
 point at any relay URL that implements `packages/relay/PROTOCOL.md`.
@@ -23,7 +23,7 @@ point at any relay URL that implements `packages/relay/PROTOCOL.md`.
    (`@zed-industries/claude-code-acp`, `gemini --experimental-acp`, …). A
    future Metrists-owned harness is just another ACP agent — no fork decision
    needed now.
-2. **Deferred blobs** are fenced code blocks with a `metrists:<type>` language
+2. **Deferred blobs** are fenced code blocks with a `notefig:<type>` language
    tag and a YAML payload. They degrade to plain code blocks in any other
    markdown renderer and round-trip byte-identically through our codec.
 3. **The relay is a dumb encrypted pipe.** It forwards opaque frames between
@@ -44,7 +44,7 @@ The layering that trips people up, made explicit:
 | --- | --- | --- |
 | App TypeScript (webview, both platforms) | **ACP client**: initialize, sessions, prompts, permission responses; receives all `session/update` | Touch a process handle directly |
 | `src-tauri/agent_proc.rs` (desktop) | Nothing. Spawns processes, pumps stdio lines as events, kills | Parse a single JSON-RPC message |
-| CLI worker `metrists agent` (web) | Nothing above the tunnel. Pairing, per-task process supervision, encrypted byte pump, file-watch events | Parse ACP; answer any protocol method |
+| CLI worker `notefig agent` (web) | Nothing above the tunnel. Pairing, per-task process supervision, encrypted byte pump, file-watch events | Parse ACP; answer any protocol method |
 | Harness adapter (claude-code-acp, …) | **ACP agent** side | — |
 
 There is exactly one ACP client in the system — the app — on both
@@ -84,7 +84,7 @@ TaskManager                     per-workspace registry of AgentTasks
   └─ AgentTask (× N parallel)   one transport + ACP session + permission
   ↕ typed events                queue + turn state per task
 ACP client layer                ClientSideConnection (official lib) +
-  ↕ AgentTransport              MetristsAcpClient (capabilities per locus)
+  ↕ AgentTransport              NotefigAcpClient (capabilities per locus)
   │
   ├─ TauriStdioTransport        desktop: invoke → src-tauri agent_proc.rs
   ├─ RelayTransport             web: WebSocket + E2E-encrypted frames
@@ -92,7 +92,7 @@ ACP client layer                ClientSideConnection (official lib) +
                                      │
                               packages/relay (dumb pipe: rooms, TTL, limits)
                                      │
-                              CLI worker `metrists agent` (thin)
+                              CLI worker `notefig agent` (thin)
                               pairing + one spawned adapter process per task
                               + encrypted byte pump + chokidar watch channel
 ```
@@ -211,7 +211,7 @@ Inside the encrypted payload, frames are multiplexed by channel and task:
   process), `stop-task`, `list-tasks`, and `task-exit` events
 
 v1 scope note: in web mode the worker *owns* the folder
-(`metrists agent --dir ./book`); the browser does not also mount it through
+(`notefig agent --dir ./book`); the browser does not also mount it through
 File System Access. This avoids split-brain between two local sources of
 truth.
 
@@ -239,7 +239,7 @@ re-exported through `packages/shared/src/agent/acp-types.ts` — a spec bump is
 one file.
 
 `mcpServers` is `[]` in v1; later phases pass a Metrists MCP server exposing a
-`metrists_await_blob` tool so agents can block on a blob answer mid-turn.
+`notefig_await_blob` tool so agents can block on a blob answer mid-turn.
 
 ## Tasks and parallelism
 
@@ -271,7 +271,7 @@ A **task** is the unit of parallel agent work — "rewrite chapter 3" and
 
 ### Identity
 
-We adopt opencode's id scheme (`@metrists/shared/agent` `ids.ts`):
+We adopt opencode's id scheme (`@notefig/shared/agent` `ids.ts`):
 `prefix_` + 16 hex chars (64-bit big-endian: ms-timestamp × 4096 + a
 per-millisecond counter) + 10 random base62 chars. The id **is** the sort
 key — no separate ordering columns anywhere.
@@ -324,14 +324,14 @@ continuation prompt. The document is the **durable record** of the
 interaction — portable, git-diffable, readable in any renderer — not the
 message bus. If prompt-guided authoring proves unreliable (persistent
 malformed fences) or mid-turn blocking becomes necessary, the upgrade path
-is the Phase 4 MCP server (`metrists_ask_user` et al.), where the agent
+is the Phase 4 MCP server (`notefig_ask_user` et al.), where the agent
 calls a tool and the app materializes the blob — same lifecycle, different
 authoring channel.
 
 ### Wire format
 
 ````markdown
-```metrists:question
+```notefig:question
 id: q_8f2a
 status: pending
 prompt: Which pricing tier does this doc target?
@@ -339,7 +339,7 @@ options: [Free, Pro, Enterprise]
 ```
 ````
 
-- Language tag `metrists:<type>`; body is YAML.
+- Language tag `notefig:<type>`; body is YAML.
 - Canonical envelope (Zod, `packages/shared/src/blobs/blob-envelope.ts`):
   `id` (`/^[a-z]+_[a-z0-9]{4,}$/`), `status`
   (`pending → answered | dismissed | superseded`), `createdBy`
@@ -351,11 +351,11 @@ options: [Free, Pro, Enterprise]
 ### Why a code block, not a new node
 
 In ProseMirror the blob **stays a `codeBlock` node** with
-`language: "metrists:question"`. The editor schema
+`language: "notefig:question"`. The editor schema
 (`editor-schema-kit.ts`) and the worker codec are untouched, so the
 byte-identical round-trip guarantee holds *by construction* — a blob is a
 code block with a fancy node view. `blob-node-view.tsx` decorates code blocks
-whose language starts with `metrists:`, parses the YAML lazily, validates
+whose language starts with `notefig:`, parses the YAML lazily, validates
 against the registry schema, and renders the type's widget (or the raw-fence
 fallback).
 
@@ -386,7 +386,7 @@ user answered blob q_8f2a in docs/pricing.md: 'Pro'"). Blob → task
 attribution is recorded when the fence is first detected (the task whose
 turn wrote it), so answers route to the right task's continuation prompt.
 The task triggers the continuation automatically when idle with queued
-answers. The MCP `metrists_await_blob` tool is the Phase 4 upgrade for
+answers. The MCP `notefig_await_blob` tool is the Phase 4 upgrade for
 mid-turn blocking.
 
 ### One-file blob type DX
@@ -449,11 +449,11 @@ a full ECDH handshake:
 
 The hosted relay is still treated as untrusted; E2E makes that acceptable.
 
-### CLI worker (`metrists agent`)
+### CLI worker (`notefig agent`)
 
-Lives in `packages/cli` (users already install `metrists`; one install covers
+Lives in `packages/cli` (users already install `notefig`; one install covers
 publish + worker; the relay client is small and shared types come from
-`@metrists/shared`). It is deliberately thin — four responsibilities, zero
+`@notefig/shared`). It is deliberately thin — four responsibilities, zero
 protocol awareness:
 
 1. Connect to the relay, print the pairing code, complete challenge/ack.
@@ -515,7 +515,7 @@ tests): [agent-harness-phases.md](./agent-harness-phases.md).
 2. **Blobs** — shared codec + registry + node view + question/approval/status;
    answered-blob → continuation-prompt loop with blob→task attribution.
 3. **Relay + CLI worker** — web parity: relay package, pairing crypto,
-   `metrists agent` (thin: supervise + pump + watch), RelayTransport.
+   `notefig agent` (thin: supervise + pump + watch), RelayTransport.
 4. **Depth** — MCP interaction server (upgrade from prompt-guided fences),
    terminals (Rust pty + capability flip), `session/load` resume,
    multi-harness settings UI, relay reconnect replay.

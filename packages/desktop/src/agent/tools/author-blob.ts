@@ -1,6 +1,6 @@
 import { z } from "zod";
-import type { AgentTool } from "@metrists/shared/agent";
-import { BlobEnvelopeSchema, findBlobs, serializeBlobBlock } from "@metrists/shared/blobs";
+import type { AgentTool } from "@notefig/shared/agent";
+import { BlobEnvelopeSchema, findBlobs, serializeBlobBlock } from "@notefig/shared/blobs";
 import { getAllBlobTypes, getBlobType } from "@/components/editor/blobs/blob-registry";
 import { readWorkspaceTextFile, writeWorkspaceTextFile } from "@/utils/file-sync";
 import { resolveWorkspacePath } from "@/utils/fs";

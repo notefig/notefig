@@ -351,10 +351,10 @@ i18n
             "This spawns {{harness}} as a local process with access to the files in this folder. Only continue for workspaces you trust.",
           agentTrustConfirm: "Trust & start",
 
-          // Remote agent tunnel (pairing with `metrists agent`)
+          // Remote agent tunnel (pairing with `notefig agent`)
           tunnelPairTitle: "Connect to a machine",
           tunnelPairDescription:
-            "Run `npx metrists agent` on your computer, then scan the QR code or paste the pairing code below.",
+            "Run `npx notefig agent` on your computer, then scan the QR code or paste the pairing code below.",
           tunnelPairCodePlaceholder: "Paste pairing code",
           tunnelPairConnect: "Connect",
           tunnelPairConnecting: "Connecting…",

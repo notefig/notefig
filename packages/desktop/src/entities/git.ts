@@ -24,7 +24,7 @@ import {
   IsomorphicGitService,
   type GitErrorCode,
   type RepoStatus,
-} from "@metrists/git";
+} from "@notefig/git";
 import { platformAdapter } from "@/adapters";
 import { isWorkspaceAccessError } from "@/adapters/platform-adapter.interface";
 import { normalizePath } from "@/utils/fs";

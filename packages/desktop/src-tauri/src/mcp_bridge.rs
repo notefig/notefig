@@ -16,7 +16,7 @@
 /// least one real adapter). The loopback listener the relay connects back to
 /// is still an open local port, though, so each task gets a random token:
 /// `start_mcp_relay` mints it, the frontend hands it to the harness via the
-/// relay's env (`METRISTS_MCP_TOKEN`), the relay presents it as its first
+/// relay's env (`NOTEFIG_MCP_TOKEN`), the relay presents it as its first
 /// line, and `handle_connection` drops any connection that doesn't lead with
 /// it. Threat model stays local-process — this only closes the race where
 /// the first local process to find the ephemeral port wins the tool channel.
@@ -65,7 +65,7 @@ pub struct McpRelayInfo {
 
 /// Env var the relay reads its connection token from (set by the harness,
 /// sourced from the `McpServer` entry the frontend builds).
-pub const MCP_TOKEN_ENV: &str = "METRISTS_MCP_TOKEN";
+pub const MCP_TOKEN_ENV: &str = "NOTEFIG_MCP_TOKEN";
 
 /// How long an accepted connection gets to present its token.
 const TOKEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -115,7 +115,7 @@ fn current_exe_path() -> String {
         .get_or_init(|| {
             std::env::current_exe()
                 .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| "metrists".to_string())
+                .unwrap_or_else(|_| "notefig".to_string())
         })
         .clone()
 }
@@ -325,7 +325,7 @@ pub fn run_mcp_stdio_relay(port: u16) {
         Err(_) => std::process::exit(1),
     };
 
-    // Token handshake: present METRISTS_MCP_TOKEN (from the harness-provided
+    // Token handshake: present NOTEFIG_MCP_TOKEN (from the harness-provided
     // env) as the first line; the app-side listener drops us without it.
     if let Ok(token) = std::env::var(MCP_TOKEN_ENV) {
         if writeln!(write_stream, "{token}").is_err() {

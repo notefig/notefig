@@ -6,7 +6,7 @@ This is a monorepo containing the Metrists CLI and Desktop applications, along w
 
 ```
 packages/
-├── cli/              # CLI package (published to npm as 'metrists')
+├── cli/              # CLI package (published to npm as 'notefig')
 ├── desktop/          # Desktop app (Tauri + React, published as binaries)
 ├── shared/           # Internal shared package (not published)
 │   ├── src/
@@ -50,7 +50,7 @@ When adding code that both CLI and Desktop need:
 
 1. Add to `packages/shared/src/` in appropriate folder
 2. Export from `packages/shared/src/index.ts`
-3. Import in CLI/Desktop: `import { something } from "@metrists/shared"`
+3. Import in CLI/Desktop: `import { something } from "@notefig/shared"`
 
 Example:
 ```typescript
@@ -61,7 +61,7 @@ export function parseMarkdown(content: string) { ... }
 export * from "./parsing/index.js";
 
 // In CLI or Desktop
-import { parseMarkdown } from "@metrists/shared";
+import { parseMarkdown } from "@notefig/shared";
 ```
 
 ## Release Process
@@ -120,7 +120,7 @@ cd packages/shared
 npm install some-package
 ```
 
-Both CLI and Desktop already have `@metrists/shared` as a dependency.
+Both CLI and Desktop already have `@notefig/shared` as a dependency.
 
 ## TypeScript Configuration
 
@@ -160,8 +160,8 @@ window.addEventListener('mock-pick-directory', (e) => {
 
 ## Important Notes
 
-1. **Desktop package name changed**: Was `metrists`, now `@metrists/desktop` (private)
-2. **CLI package name unchanged**: Still `metrists` (published to npm)
+1. **Desktop package name changed**: Was `metrists`, now `@notefig/desktop` (private)
+2. **CLI package name**: `notefig` (published to npm; renamed from `metrists`)
 3. **Shared is private**: Never publish `packages/shared/`
 4. **Always build shared first** before building CLI or Desktop
 5. **Desktop workflow untouched**: The release logic is identical, only file location changed
@@ -171,4 +171,4 @@ window.addEventListener('mock-pick-directory', (e) => {
 If you see references to:
 - `packages/cli/.github/workflows/` - Moved to root, now deleted
 - Manual npm publish from root - Use `release-cli.yml` workflow instead
-- Desktop as `metrists` package - Now `@metrists/desktop`
+- Desktop as `metrists` package - Now `@notefig/desktop`

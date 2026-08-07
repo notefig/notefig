@@ -41,7 +41,7 @@ export function PairDialog() {
   const autoConnected = useRef<string | null>(null);
 
   const copyCommand = async () => {
-    await copyTextToClipboard("npx metrists agent");
+    await copyTextToClipboard("npx notefig agent");
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -138,7 +138,7 @@ export function PairDialog() {
               title={t("copy")}
               className="flex w-full items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-xs hover:bg-muted"
             >
-              <span className="truncate">npx metrists agent</span>
+              <span className="truncate">npx notefig agent</span>
               {copied ? (
                 <Check className="h-3.5 w-3.5 shrink-0 text-green-500" />
               ) : (

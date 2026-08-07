@@ -12,8 +12,8 @@ import type {
   IgnoreRulesOption,
 } from "./platform-adapter.interface";
 import { requestTextPrompt } from "@/utils/text-prompt";
-import type { GitStorageHost } from "@metrists/git";
-import type { HarnessDefinition } from "@metrists/shared/agent";
+import type { GitStorageHost } from "@notefig/git";
+import type { HarnessDefinition } from "@notefig/shared/agent";
 import type { AgentTransport, McpEndpoint } from "@/agent/agent-transport.interface";
 import { tunnelConnection } from "@/agent/tunnel/tunnel-connection";
 import { TunnelTransport } from "@/agent/tunnel/tunnel-transport";
@@ -297,6 +297,8 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     // No-op in browser
   }
 
+  // KEEP: localStorage keys under this prefix already exist in users'
+  // browsers; renaming would orphan their settings and pairing state.
   private readonly KV_PREFIX = "metrists-kv:";
 
   private buildKvKey(namespace: string, key: string): string {
@@ -525,7 +527,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     workspacePath: string;
     extraEnv: Record<string, string>;
   }): AgentTransport {
-    // Agents on web run on a paired `metrists agent` worker: the harness is
+    // Agents on web run on a paired `notefig agent` worker: the harness is
     // a child process there and its ACP stdio tunnels through as bytes. No
     // worker paired ⇒ no agent runtime (files still work via this adapter,
     // but there's nothing to spawn the agent on).
@@ -533,7 +535,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
       return new TunnelTransport(spec);
     }
     throw new Error(
-      "Agents need a paired machine on the web — run `metrists agent` and pair.",
+      "Agents need a paired machine on the web — run `notefig agent` and pair.",
     );
   }
 
@@ -542,7 +544,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
       return new TunnelMcpEndpoint(spec.taskId);
     }
     throw new Error(
-      "Agents need a paired machine on the web — run `metrists agent` and pair.",
+      "Agents need a paired machine on the web — run `notefig agent` and pair.",
     );
   }
 

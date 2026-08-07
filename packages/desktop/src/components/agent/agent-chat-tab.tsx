@@ -27,8 +27,8 @@ import type {
   ToolCallStatus,
   ToolCallUpdate,
   PlanEntry,
-} from "@metrists/shared/agent";
-import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
+} from "@notefig/shared/agent";
+import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import { useActiveHarnesses } from "@/hooks/use-harness-selection";
 import { useAutosizeTextarea } from "@/hooks/use-autosize-textarea";
 import { Button } from "@/components/ui/button";

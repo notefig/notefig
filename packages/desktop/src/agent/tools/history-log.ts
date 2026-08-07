@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { resolveWorkspacePath } from "@/utils/fs";
-import type { AgentTool } from "@metrists/shared/agent";
+import type { AgentTool } from "@notefig/shared/agent";
 import {
   ensureWorkspaceHistoryInitialized,
   historyGitDir,

@@ -94,13 +94,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # The CLI's `lib/shared.ts` re-exports @metrists/shared, which resolves
+      # The CLI's `lib/shared.ts` re-exports @notefig/shared, which resolves
       # through its package.json `exports` to ./dist. A fresh `npm ci` does not
       # build workspace packages, so shared/dist is absent and the CLI's tsc
-      # (and esbuild vendoring) fail with "Cannot find module @metrists/shared".
+      # (and esbuild vendoring) fail with "Cannot find module @notefig/shared".
       # Build shared first.
       - name: Build shared workspace
-        run: npm run build -w @metrists/shared
+        run: npm run build -w @notefig/shared
 
       - name: Build CLI
         working-directory: packages/cli
@@ -120,7 +120,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cli-tarball
-          path: packages/cli/metrists-${{ inputs.version }}.tgz
+          path: packages/cli/notefig-${{ inputs.version }}.tgz
 
   create-release:
     name: Create GitHub Release
@@ -156,12 +156,12 @@ jobs:
 
           **Installation:**
           \`\`\`bash
-          npm install -g metrists@${{ inputs.version }}
+          npm install -g notefig@${{ inputs.version }}
           \`\`\`
 
           **Verify this release:**
           \`\`\`bash
-          gh release verify-asset cli-v${{ inputs.version }} metrists-${{ inputs.version }}.tgz -R ${{ github.repository }}
+          gh release verify-asset cli-v${{ inputs.version }} notefig-${{ inputs.version }}.tgz -R ${{ github.repository }}
           \`\`\`
 
           **Changelog:**
@@ -171,7 +171,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "cli-v${{ inputs.version }}" "metrists-${{ inputs.version }}.tgz" --repo ${{ github.repository }} --clobber
+          gh release upload "cli-v${{ inputs.version }}" "notefig-${{ inputs.version }}.tgz" --repo ${{ github.repository }} --clobber
 
       - name: Publish release
         env:

@@ -17,7 +17,7 @@ vi.mock("@/adapters", () => ({
     writeFiles,
     readFiles,
     createMcpEndpoint: vi.fn(() => ({
-      mcpServer: { name: "metrists", command: "metrists", args: [], env: [] },
+      mcpServer: { name: "notefig", command: "notefig", args: [], env: [] },
       start: vi.fn(async () => {}),
       onRequest: vi.fn(() => () => {}),
       close: vi.fn(async () => {}),
@@ -38,7 +38,7 @@ import {
   agentTasksCollection,
   agentTurnsCollection,
 } from "../agent-collections";
-import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
+import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 
 const harness = BUILT_IN_HARNESSES[0];
 
@@ -104,7 +104,7 @@ describe("agents facade (Stage 1)", () => {
     const handle = agents.task(task.taskId);
     await handle.prompt("hello", {
       contextParts: [
-        { kind: "resource_link", path: "metrists://widget-context/abc123" },
+        { kind: "resource_link", path: "notefig://widget-context/abc123" },
       ],
     }).completed;
 
@@ -116,8 +116,8 @@ describe("agents facade (Stage 1)", () => {
         { type: "text", text: "hello" },
         {
           type: "resource_link",
-          uri: "metrists://widget-context/abc123",
-          name: "metrists://widget-context/abc123",
+          uri: "notefig://widget-context/abc123",
+          name: "notefig://widget-context/abc123",
         },
       ]),
     );
@@ -149,7 +149,7 @@ describe("agents facade (Stage 1)", () => {
     ).prompt;
     expect(prompt[0]).toEqual({ type: "text", text: "expand this section" });
     const resourceLink = prompt.find((b) => b.type === "resource_link");
-    expect(resourceLink?.uri).toContain("metrists://widget-context?");
+    expect(resourceLink?.uri).toContain("notefig://widget-context?");
     expect(resourceLink?.uri).toContain("path=notes.md");
     expect(resourceLink?.uri).toContain("pos=42");
   });

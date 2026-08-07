@@ -17,7 +17,7 @@
  * the agent service has to hold state for. The agent's turn that authored
  * the blob already finished; this is just a new turn on the same session.
  */
-import { findBlobs, patchBlobInMarkdown } from "@metrists/shared/blobs";
+import { findBlobs, patchBlobInMarkdown } from "@notefig/shared/blobs";
 import { toast } from "sonner";
 import { agents } from "@/agent/agents";
 import i18n from "@/utils/intl";

@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 /**
  * The agent asks the user a contextual question inside the document.
  *
- * ```metrists:question
+ * ```notefig:question
  * id: q_8f2a
  * status: pending
  * prompt: Which pricing tier does this doc target?
@@ -129,7 +129,7 @@ export default defineBlobType({
       `The user answered your question block ${blobId}${question} in ${path}: ${answer}\n\n` +
       `Now replace that answered block in ${path} with the content the answer resolves to, ` +
       `using your normal editing tools: fold the answer into the document and remove the ` +
-      `\`\`\`metrists:question fence with id ${blobId} — it has served its purpose. ` +
+      `\`\`\`notefig:question fence with id ${blobId} — it has served its purpose. ` +
       `Do not re-ask the question.`
     );
   },

@@ -3,10 +3,10 @@
  * connection (frames are tagged by taskId). The worker spawns the adapter
  * on ctl start-task; ACP lines ride "acp" frames both ways; stderr rides
  * ctl task-diagnostic; process death rides ctl task-exit. `locus: "remote"`
- * makes MetristsAcpClient advertise fs:false (the harness uses its own
+ * makes NotefigAcpClient advertise fs:false (the harness uses its own
  * native fs on the worker machine).
  */
-import type { HarnessDefinition } from "@metrists/shared/agent";
+import type { HarnessDefinition } from "@notefig/shared/agent";
 import {
   AgentTransportError,
   type AgentTransport,

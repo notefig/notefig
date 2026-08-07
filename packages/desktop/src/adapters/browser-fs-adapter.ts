@@ -72,6 +72,8 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     if (this.db) return this.db;
 
     return new Promise((resolve, reject) => {
+      // KEEP: renaming the handles DB would drop users' persisted
+      // directory permissions.
       const request = indexedDB.open("metrists-fs-handles", HANDLE_DB_VERSION);
 
       request.onerror = () => reject(request.error);

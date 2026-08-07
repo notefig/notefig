@@ -54,10 +54,10 @@
     "packages/desktop/tests/setup/test-helpers.ts:372-379|packages/desktop/tests/setup/test-helpers.ts:417-424|packages/desktop/tests/setup/test-helpers.ts:466-473|packages/desktop/tests/setup/test-helpers.ts:506-513",
     "packages/desktop/tests/setup/test-helpers.ts:416-425|packages/desktop/tests/setup/test-helpers.ts:465-474|packages/desktop/tests/setup/test-helpers.ts:505-514",
     "packages/desktop/tests/setup/test-helpers.ts:465-476|packages/desktop/tests/setup/test-helpers.ts:505-516",
-    "packages/marketing/hooks/use-toast.ts:11-161|packages/themes/metrists-theme-next/lib/utils.ts:166-316",
-    "packages/marketing/hooks/use-toast.ts:162-194|packages/themes/metrists-theme-next/lib/utils.ts:317-349",
-    "packages/marketing/styles/globals.css:15-35|packages/themes/metrists-theme-next/styles/globals.css:5-33",
-    "packages/marketing/styles/globals.css:49-70|packages/themes/metrists-theme-next/styles/globals.css:35-65",
-    "packages/marketing/tailwind.config.ts:24-85|packages/themes/metrists-theme-next/tailwind.config.ts:23-84"
+    "packages/marketing/hooks/use-toast.ts:11-161|packages/themes/notefig-theme-next/lib/utils.ts:166-316",
+    "packages/marketing/hooks/use-toast.ts:162-194|packages/themes/notefig-theme-next/lib/utils.ts:317-349",
+    "packages/marketing/styles/globals.css:15-35|packages/themes/notefig-theme-next/styles/globals.css:5-33",
+    "packages/marketing/styles/globals.css:49-70|packages/themes/notefig-theme-next/styles/globals.css:35-65",
+    "packages/marketing/tailwind.config.ts:24-85|packages/themes/notefig-theme-next/tailwind.config.ts:23-84"
   ]
 }

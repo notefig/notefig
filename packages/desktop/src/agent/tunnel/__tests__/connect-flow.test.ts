@@ -15,7 +15,7 @@ vi.mock("@/adapters", () => ({
   },
 }));
 
-import { encodePairingCode, generatePairingSecret } from "@metrists/shared/tunnel";
+import { encodePairingCode, generatePairingSecret } from "@notefig/shared/tunnel";
 import {
   autoConnectStoredPairing,
   connectWithCode,

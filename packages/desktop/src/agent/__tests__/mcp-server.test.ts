@@ -53,7 +53,7 @@ vi.mock("../widget-context-uri", () => ({ decodeWidgetContextUri }));
 import { createMcpRequestHandler } from "../mcp-server";
 import { PermissionBroker } from "../permission-broker";
 import { agentPermissionRequestsCollection } from "../agent-collections";
-import type { ToolContext } from "@metrists/shared/agent";
+import type { ToolContext } from "@notefig/shared/agent";
 
 // vi.hoisted can't reference `z` (hoisted above the "zod" import); assign
 // real schemas onto the mocked blob types now that imports have resolved.
@@ -102,7 +102,7 @@ describe("createMcpRequestHandler", () => {
       result: {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {}, resources: {} },
-        serverInfo: { name: "metrists", version: "1.0.0" },
+        serverInfo: { name: "notefig", version: "1.0.0" },
       },
     });
     const instructions = (response?.result as { instructions?: string })
@@ -133,7 +133,7 @@ describe("createMcpRequestHandler", () => {
       jsonrpc: "2.0",
       id: 21,
       method: "resources/read",
-      params: { uri: "metrists://widget-context?bogus=1" },
+      params: { uri: "notefig://widget-context?bogus=1" },
     });
     expect(response?.error?.code).toBe(-32602);
     expect(buildWidgetContextPayload).not.toHaveBeenCalled();
@@ -153,7 +153,7 @@ describe("createMcpRequestHandler", () => {
     decodeWidgetContextUri.mockReturnValue(ref);
     buildWidgetContextPayload.mockResolvedValue(payload);
 
-    const uri = "metrists://widget-context?path=notes.md&pos=0";
+    const uri = "notefig://widget-context?path=notes.md&pos=0";
     const response = await handler()({
       jsonrpc: "2.0",
       id: 22,

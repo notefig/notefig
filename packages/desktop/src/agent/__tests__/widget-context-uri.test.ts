@@ -7,7 +7,7 @@ import {
 describe("encodeWidgetContextUri / decodeWidgetContextUri", () => {
   it("round-trips a path and position", () => {
     const uri = encodeWidgetContextUri({ path: "notes.md", pos: 42 });
-    expect(uri.startsWith("metrists://widget-context?")).toBe(true);
+    expect(uri.startsWith("notefig://widget-context?")).toBe(true);
     expect(decodeWidgetContextUri(uri)).toEqual({ path: "notes.md", pos: 42 });
   });
 
@@ -28,20 +28,20 @@ describe("encodeWidgetContextUri / decodeWidgetContextUri", () => {
 
   it("returns undefined when the path param is missing", () => {
     expect(
-      decodeWidgetContextUri("metrists://widget-context?pos=1"),
+      decodeWidgetContextUri("notefig://widget-context?pos=1"),
     ).toBeUndefined();
   });
 
   it("returns undefined when the pos param is missing", () => {
     expect(
-      decodeWidgetContextUri("metrists://widget-context?path=notes.md"),
+      decodeWidgetContextUri("notefig://widget-context?path=notes.md"),
     ).toBeUndefined();
   });
 
   it("returns undefined when pos is not a finite number", () => {
     expect(
       decodeWidgetContextUri(
-        "metrists://widget-context?path=notes.md&pos=not-a-number",
+        "notefig://widget-context?path=notes.md&pos=not-a-number",
       ),
     ).toBeUndefined();
   });

@@ -1,8 +1,8 @@
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronDown, Plus, Square, Trash2 } from "lucide-react";
-import type { HarnessDefinition } from "@metrists/shared/agent";
-import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
+import type { HarnessDefinition } from "@notefig/shared/agent";
+import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {

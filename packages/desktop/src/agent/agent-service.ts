@@ -22,13 +22,13 @@ import {
   type SessionNotification,
   type ToolCallUpdate,
   type TurnOutcome,
-} from "@metrists/shared/agent";
+} from "@notefig/shared/agent";
 import { platformAdapter } from "@/adapters";
 import { normalizePath, resolveWorkspacePath } from "@/utils/fs";
 import { getOrCreateKvCollection } from "@/utils/kv-store";
 import { MarkdownJoiner } from "@/lib/markdown-joiner-transform";
 import { PermissionBroker } from "./permission-broker";
-import { MetristsAcpClient } from "./acp-client";
+import { NotefigAcpClient } from "./acp-client";
 import type { AgentTransport, McpEndpoint } from "./agent-transport.interface";
 import { AgentTransportError } from "./agent-transport.interface";
 import { attachMcpEndpoint, createMcpRequestHandler } from "./mcp-server";
@@ -191,7 +191,7 @@ function errorMessage(error: unknown): string {
 export class AgentTask {
   readonly permissionBroker: PermissionBroker;
 
-  private client: MetristsAcpClient | null = null;
+  private client: NotefigAcpClient | null = null;
   private transport: AgentTransport | null = null;
   private sessionId: string | null = null;
 
@@ -342,7 +342,7 @@ export class AgentTask {
         );
       }
 
-      this.client = new MetristsAcpClient({
+      this.client = new NotefigAcpClient({
         taskId: this.taskId,
         transport,
         permissionBroker: this.permissionBroker,
@@ -978,7 +978,7 @@ export class AgentTask {
    * the task level so updates land even after the turn that started them ends.
    * Tool entries are first-class — not nested under a message.
    *
-   * MCP tool names arrive prefixed (`mcp__metrists__author_blob`, confirmed
+   * MCP tool names arrive prefixed (`mcp__notefig__author_blob`, confirmed
    * on claude-agent-acp) and without `locations` — normalize the former and
    * derive the latter from `rawInput.path` so app tools render and address
    * (`findBlobAuthorTask`) exactly like any other tool call.

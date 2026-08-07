@@ -16,7 +16,7 @@ import type {
   SessionNotification,
   WriteTextFileRequest,
   WriteTextFileResponse,
-} from "@metrists/shared/agent";
+} from "@notefig/shared/agent";
 import { transportToStreams } from "./agent-transport.interface";
 import type { AgentTransport } from "./agent-transport.interface";
 import type { PermissionBroker } from "./permission-broker";
@@ -67,7 +67,7 @@ export type AcpClientDeps = {
  * transport-agnostic by construction. The app is the sole ACP client on
  * both platforms; Rust/CLI-worker layers never parse the protocol.
  */
-export class MetristsAcpClient implements Client {
+export class NotefigAcpClient implements Client {
   private connection: ClientSideConnection | null = null;
   /** From the initialize response — drives auth affordance and capability gating. */
   private authMethods: AuthMethod[] = [];

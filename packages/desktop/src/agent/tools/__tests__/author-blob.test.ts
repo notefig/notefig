@@ -50,7 +50,7 @@ describe("authorBlob", () => {
     expect(result).toEqual({ ok: true, value: { blobId: "question_8f2a" } });
     expect(writeWorkspaceTextFile).toHaveBeenCalledWith(
       "/ws/notes.md",
-      expect.stringContaining("```metrists:question"),
+      expect.stringContaining("```notefig:question"),
     );
     const written = writeWorkspaceTextFile.mock.calls[0][1] as string;
     expect(written).toContain("id: question_8f2a");
@@ -66,7 +66,7 @@ describe("authorBlob", () => {
       payload: { prompt: "OK?" },
     });
     const written = writeWorkspaceTextFile.mock.calls.at(-1)?.[1] as string;
-    expect(written.startsWith("# Doc\n\nSome text.\n\n```metrists:question")).toBe(true);
+    expect(written.startsWith("# Doc\n\nSome text.\n\n```notefig:question")).toBe(true);
   });
 
   it("rejects an unknown blob type", async () => {
@@ -97,7 +97,7 @@ describe("authorBlob", () => {
 
   it("rejects a duplicate id already present in the document", async () => {
     readWorkspaceTextFile.mockResolvedValueOnce(
-      "```metrists:question\nid: question_dupe\nprompt: Already here\n```\n",
+      "```notefig:question\nid: question_dupe\nprompt: Already here\n```\n",
     );
     const result = await authorBlob.execute(ctx, {
       path: "/ws/notes.md",

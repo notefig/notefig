@@ -7,7 +7,7 @@ import {
   type CustomHarnessEntry,
   type HarnessDiscoveryResult,
   type HarnessOverride,
-} from "@metrists/shared/agent";
+} from "@notefig/shared/agent";
 
 /**
  * All domain knowledge for harness discovery lives here: the probe script,

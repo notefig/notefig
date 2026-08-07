@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AgentTool } from "@metrists/shared/agent";
+import type { AgentTool } from "@notefig/shared/agent";
 import {
   getWorkspaceEditorContext,
   type WorkspaceEditorContext,

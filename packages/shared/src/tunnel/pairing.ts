@@ -21,6 +21,10 @@ import {
 
 export const PAIRING_SECRET_BYTES = 32;
 
+// KEEP "metrists" in these HKDF info labels: they are inputs to key
+// derivation, so renaming them changes every derived key and silently breaks
+// pairing between desktop/CLI builds from opposite sides of the rebrand.
+// Revisit only with a versioned protocol bump (…-v2).
 const FRAME_KEY_INFO = "metrists-tunnel-frame-key-v1";
 const SESSION_KEY_INFO = "metrists-tunnel-session-key-v1";
 
@@ -141,6 +145,8 @@ export function pairingLink(
 ): { web: string; deepLink: string } {
   return {
     web: `${appBaseUrl.replace(/\/$/, "")}/pair#${code}`,
+    // KEEP the metrists:// scheme: documented public contract
+    // (docs/architecture/agent-harness-phases.md) printed by shipped CLIs.
     deepLink: `metrists://pair#${code}`,
   };
 }

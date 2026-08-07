@@ -12,19 +12,19 @@ const codec = createMarkdownCodec();
 
 const blobFixtures: string[] = [
   // canonical pending question
-  "```metrists:question\nid: q_8f2a\nstatus: pending\nprompt: Which pricing tier does this doc target?\noptions: [Free, Pro, Enterprise]\n```",
+  "```notefig:question\nid: q_8f2a\nstatus: pending\nprompt: Which pricing tier does this doc target?\noptions: [Free, Pro, Enterprise]\n```",
   // answered, with unknown keys and a YAML comment that must survive
-  "```metrists:question\nid: q_8f2a\nstatus: answered\nprompt: Which tier?\nanswer: Pro\nansweredAt: 2026-07-05T00:00:00Z\n# agent-added note\nx-agent-meta: keep-me\n```",
-  "```metrists:approval\nid: ap_1b2c\nstatus: pending\nprompt: Delete the old chapter?\n```",
-  "```metrists:status\nid: st_9d4e\nstatus: pending\ntitle: Rewriting introduction\nstate: working\n```",
+  "```notefig:question\nid: q_8f2a\nstatus: answered\nprompt: Which tier?\nanswer: Pro\nansweredAt: 2026-07-05T00:00:00Z\n# agent-added note\nx-agent-meta: keep-me\n```",
+  "```notefig:approval\nid: ap_1b2c\nstatus: pending\nprompt: Delete the old chapter?\n```",
+  "```notefig:status\nid: st_9d4e\nstatus: pending\ntitle: Rewriting introduction\nstate: working\n```",
   // blob embedded between normal blocks
-  "# Doc\n\nIntro paragraph.\n\n```metrists:question\nid: q_zz99\nstatus: pending\nprompt: Keep this section?\n```\n\nAfter the blob.",
+  "# Doc\n\nIntro paragraph.\n\n```notefig:question\nid: q_zz99\nstatus: pending\nprompt: Keep this section?\n```\n\nAfter the blob.",
   // invalid YAML must still round-trip as a plain code block
-  "```metrists:question\nnot: [valid: yaml\n```",
+  "```notefig:question\nnot: [valid: yaml\n```",
   // nested inside a list item
-  "- Context item\n\n  ```metrists:question\n  id: q_l1st\n  status: pending\n  prompt: Nested in a list?\n  ```",
+  "- Context item\n\n  ```notefig:question\n  id: q_l1st\n  status: pending\n  prompt: Nested in a list?\n  ```",
   // nested inside a blockquote
-  "> ```metrists:question\n> id: q_bq99\n> status: pending\n> prompt: Nested in a blockquote?\n> ```",
+  "> ```notefig:question\n> id: q_bq99\n> status: pending\n> prompt: Nested in a blockquote?\n> ```",
 ];
 
 describe("blob fenced blocks round-trip through the markdown codec", () => {

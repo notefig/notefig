@@ -45,13 +45,13 @@ export type {
 
 /**
  * The MCP server name the desktop app advertises in `session/new.mcpServers`
- * and the prefix adapters mint tool names under (`mcp__metrists__<tool>`).
+ * and the prefix adapters mint tool names under (`mcp__notefig__<tool>`).
  * Single-sourced here, next to the `McpServer` type, so the transport that
  * builds the entry and the server that answers `initialize` can't drift —
  * without dragging the tool/blob registries into the transport's module
  * graph (which importing it from mcp-server.ts would).
  */
-export const MCP_SERVER_NAME = "metrists";
+export const MCP_SERVER_NAME = "notefig";
 
 /** Why the agent stopped a turn (PromptResponse["stopReason"]). */
 export type AcpStopReason =

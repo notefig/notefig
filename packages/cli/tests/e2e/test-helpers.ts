@@ -27,7 +27,7 @@ export function createUniqueTempDir(testSuiteName: string): string {
  */
 export function getCliPath(): string {
   // Resolve from the project root (packages/cli)
-  return resolve(__dirname, '../../dist/bin/metrists.js');
+  return resolve(__dirname, '../../dist/bin/notefig.js');
 }
 
 /**

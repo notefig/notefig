@@ -38,7 +38,7 @@ const codec = createMarkdownCodec();
 const baseMarkdown = [
   "# Doc",
   "",
-  "```metrists:question",
+  "```notefig:question",
   "id: q_test1",
   "status: pending",
   "prompt: Which tier?",

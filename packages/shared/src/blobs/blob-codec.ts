@@ -50,12 +50,12 @@ export class BlobPatchError extends Error {
 export type BlobResult<T, E> = { ok: true; value: T } | { ok: false; error: E };
 
 /**
- * Matches a fenced code block whose language tag starts with `metrists:`,
+ * Matches a fenced code block whose language tag starts with `notefig:`,
  * capturing the type suffix and body. Non-greedy body match stops at the
  * first closing fence on its own line, on either LF or CRLF line endings.
  */
 const BLOB_FENCE_PATTERN =
-  /```metrists:([a-zA-Z0-9_-]+)\r?\n([\s\S]*?)\r?\n```/g;
+  /```notefig:([a-zA-Z0-9_-]+)\r?\n([\s\S]*?)\r?\n```/g;
 
 /**
  * Parse one fenced block's language tag + body into a blob.
@@ -114,7 +114,7 @@ export function serializeBlobBlock(blob: ParsedBlob): string {
 }
 
 /**
- * Find every metrists:* fenced block in a markdown document.
+ * Find every notefig:* fenced block in a markdown document.
  * Blocks that fail blob parsing are skipped (they render as plain code).
  */
 export function findBlobs(markdown: string): BlobLocation[] {

@@ -18,7 +18,7 @@
 import { useState, type FocusEvent } from "react";
 import type { NodeViewProps } from "@tiptap/core";
 import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
-import { BLOB_LANG_PREFIX, parseBlobBlock, type ParsedBlob } from "@metrists/shared/blobs";
+import { BLOB_LANG_PREFIX, parseBlobBlock, type ParsedBlob } from "@notefig/shared/blobs";
 import { getBlobType, type BlobTypeDefinition } from "./blob-registry";
 import { answerBlob, BlobAnswerError } from "./blob-actions";
 

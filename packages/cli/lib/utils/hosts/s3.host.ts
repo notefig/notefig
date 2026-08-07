@@ -145,8 +145,8 @@ jobs:
       - name: Install SST CLI
         run: npm install -g sst
         
-      - name: Initialize metrists template
-        run: npx metrists init
+      - name: Initialize notefig template
+        run: npx notefig init
         
       - name: Deploy to production
         run: sst deploy --stage production

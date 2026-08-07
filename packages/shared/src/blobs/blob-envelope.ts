@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** Language-tag prefix that marks a fenced code block as a deferred blob. */
-export const BLOB_LANG_PREFIX = "metrists:";
+export const BLOB_LANG_PREFIX = "notefig:";
 
 export const BlobStatusSchema = z.enum([
   "pending",
@@ -30,7 +30,7 @@ export type BlobEnvelope = z.infer<typeof BlobEnvelopeSchema>;
 
 /** A blob parsed out of markdown, before type-specific schema validation. */
 export type ParsedBlob = {
-  /** The `<type>` part of the `metrists:<type>` language tag */
+  /** The `<type>` part of the `notefig:<type>` language tag */
   type: string;
   envelope: BlobEnvelope;
   /** Full YAML payload including unknown keys, as parsed */

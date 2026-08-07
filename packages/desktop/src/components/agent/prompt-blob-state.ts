@@ -4,7 +4,7 @@
  * phase/summary logic here makes the micro-interaction states unit-testable
  * without mounting Tiptap.
  */
-import type { ToolCallUpdate } from "@metrists/shared/agent";
+import type { ToolCallUpdate } from "@notefig/shared/agent";
 import type {
   AgentEntry,
   AgentTaskRow,
@@ -117,7 +117,7 @@ export function deriveLatestAssistantLine(
  * Matching on `title` is deliberate, not a typo for a name field: ACP's
  * ToolCallUpdate has NO tool-name field — the identity only travels in
  * `title`, which harnesses mint from the MCP tool name and the service
- * normalizes (normalizeMcpToolName strips the `mcp__metrists__`/
+ * normalizes (normalizeMcpToolName strips the `mcp__notefig__`/
  * `metrists_` prefixes) so entries carry the plain name here. Same
  * contract findBlobAuthorTask matches against.
  */

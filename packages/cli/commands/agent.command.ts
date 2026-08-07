@@ -16,7 +16,7 @@ import { open } from '../lib/utils/open.util';
 import type { Command } from 'commander';
 
 /**
- * `metrists agent` — the CLI worker that gives the Metrists web app access
+ * `notefig agent` — the CLI worker that gives the Notefig web app access
  * to AI harnesses on this machine.
  *
  * The worker itself is a single file (../lib/agent-worker.ts) and does one
@@ -37,7 +37,7 @@ export class AgentCommand extends AbstractCommand {
     return program
       .command('agent')
       .description(
-        'Run the local agent worker so the Metrists web app can use AI harnesses on this machine',
+        'Run the local agent worker so the Notefig web app can use AI harnesses on this machine',
       )
       .option('--dir <path>', 'workspace folder the agent operates on', '.')
       .option('--port <port>', 'local WebSocket port (default: ephemeral)')
@@ -47,7 +47,7 @@ export class AgentCommand extends AbstractCommand {
       )
       .option(
         '--app-url <url>',
-        'web app to open/pair with (default: https://app.notefig.com, or METRISTS_APP_URL)',
+        'web app to open/pair with (default: https://app.notefig.com, or NOTEFIG_APP_URL)',
       )
       .option('--no-open', "don't auto-open the browser to pair");
   }
@@ -72,7 +72,7 @@ export class AgentCommand extends AbstractCommand {
     this.logger.info(`Worker listening on 127.0.0.1:${port}`);
 
     const url = options.tunnelUrl ?? `ws://127.0.0.1:${port}`;
-    const appUrl = options.appUrl ?? process.env.METRISTS_APP_URL ?? undefined;
+    const appUrl = options.appUrl ?? process.env.NOTEFIG_APP_URL ?? undefined;
     const links = this.printPairing(secret, url, workspacePath, harnesses, appUrl);
 
     // commander sets `open` to false for --no-open (the negatable flag).
@@ -133,7 +133,7 @@ export class AgentCommand extends AbstractCommand {
       .join('\n');
 
     console.log('');
-    console.log(chalk.bold('  Pair the Metrists web app with this machine'));
+    console.log(chalk.bold('  Pair the Notefig web app with this machine'));
     console.log('');
     qrcode.generate(links.web, { small: true }, (qr: string) => {
       console.log(qr);

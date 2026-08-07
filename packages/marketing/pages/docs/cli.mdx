@@ -5,13 +5,13 @@ The Metrists CLI converts markdown files into static websites. It handles buildi
 ## Installation
 
 ```bash
-npm install -g metrists
+npm install -g notefig
 ```
 
 Or use npx without installing:
 
 ```bash
-npx metrists <command>
+npx notefig <command>
 ```
 
 ## Commands
@@ -19,27 +19,27 @@ npx metrists <command>
 **init**: Create a new project
 
 ```bash
-metrists init
+notefig init
 ```
 
 **watch**: Start development server
 
 ```bash
-metrists watch
+notefig watch
 ```
 
 **build**: Generate static site
 
 ```bash
-metrists build
+notefig build
 ```
 
 **publish**: Deploy to hosting platform
 
 ```bash
-metrists publish vercel
-metrists publish netlify
-metrists publish s3
+notefig publish vercel
+notefig publish netlify
+notefig publish s3
 ```
 
 ## Configuration
@@ -60,10 +60,10 @@ The CLI works in any CI environment. Example GitHub Actions workflow:
 
 ```yaml
 - name: Build book
-  run: npx metrists build
+  run: npx notefig build
 
 - name: Deploy
-  run: npx metrists publish vercel
+  run: npx notefig publish vercel
 ```
 
 ## Global Options

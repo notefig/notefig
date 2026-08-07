@@ -1,10 +1,10 @@
-# <img src="https://notefig.com/images/metrists-abstract.svg" height="25" />&nbsp;&nbsp;Metrists [![Downloads Per Month](https://img.shields.io/npm/dm/metrists)](https://www.npmjs.com/package/metrists) [![Top Language](https://img.shields.io/github/languages/top/notefig/notefig)](https://github.com/notefig/notefig/) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![CI Tests](https://github.com/notefig/notefig/actions/workflows/ci-tests.yml/badge.svg)](https://github.com/notefig/notefig/actions/workflows/ci-tests.yml) [![Desktop Release](https://github.com/notefig/notefig/actions/workflows/release-desktop.yml/badge.svg)](https://github.com/notefig/notefig/actions/workflows/release-desktop.yml)
+# <img src="https://notefig.com/images/metrists-abstract.svg" height="25" />&nbsp;&nbsp;Notefig [![Downloads Per Month](https://img.shields.io/npm/dm/notefig)](https://www.npmjs.com/package/notefig) [![Top Language](https://img.shields.io/github/languages/top/notefig/notefig)](https://github.com/notefig/notefig/) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![CI Tests](https://github.com/notefig/notefig/actions/workflows/ci-tests.yml/badge.svg)](https://github.com/notefig/notefig/actions/workflows/ci-tests.yml) [![Desktop Release](https://github.com/notefig/notefig/actions/workflows/release-desktop.yml/badge.svg)](https://github.com/notefig/notefig/actions/workflows/release-desktop.yml)
 
 ---
 
-Metrists publishes text artifacts — written and refined with the help of AI agents — from markdown source. The primary way to work with Metrists is the **[desktop app](https://notefig.com)** — a local editor that facilitates you and your agents collaborating on the same files in real time.
+Notefig publishes text artifacts — written and refined with the help of AI agents — from markdown source. The primary way to work with Notefig is the **[desktop app](https://notefig.com)** — a local editor that facilitates you and your agents collaborating on the same files in real time.
 
-This repo also contains the **Metrists CLI**, which powers the desktop app under the hood (builds, publishing, agent pairing) and remains fully usable on its own if you'd rather drive things from the terminal.
+This repo also contains the **Notefig CLI**, which powers the desktop app under the hood (builds, publishing, agent pairing) and remains fully usable on its own if you'd rather drive things from the terminal.
 
 ## Getting Started
 
@@ -13,25 +13,25 @@ The fastest way in is the desktop app: [download it from notefig.com](https://no
 Prefer the terminal? Create a new directory and run:
 
 ```bash
-npx metrists watch --noob
+npx notefig watch --noob
 ```
 
 Modify the markdown files. You can then publish:
 
 ```bash
-npx metrists publish
+npx notefig publish
 ```
 
-That's it. You can push your files to a repository and connect your CI/CD pipeline. From now, every time you push to your repository, Metrists will automatically publish your artifact.
+That's it. You can push your files to a repository and connect your CI/CD pipeline. From now, every time you push to your repository, Notefig will automatically publish your artifact.
 
-## Using AI agents from the web app (`metrists agent`)
+## Using AI agents from the web app (`notefig agent`)
 
-The Metrists web app can drive AI coding agents (Claude Code, OpenCode, …)
+The Notefig web app can drive AI coding agents (Claude Code, OpenCode, …)
 that run on **your** machine. The browser can't spawn processes, so a small
 local worker does it for you:
 
 ```bash
-npx metrists agent
+npx notefig agent
 ```
 
 This starts a local worker in the current folder, prints a QR code + pairing
@@ -49,7 +49,7 @@ Options:
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `--dir <path>`       | Folder the agent operates on (default: current dir).                                                                                                         |
 | `--port <n>`         | Pin the local WebSocket port (default: ephemeral).                                                                                                           |
-| `--app-url <url>`    | Web app to open/pair with (default: `https://app.notefig.com`; or set `METRISTS_APP_URL`).                                                                  |
+| `--app-url <url>`    | Web app to open/pair with (default: `https://app.notefig.com`; or set `NOTEFIG_APP_URL`).                                                                  |
 | `--no-open`          | Don't auto-open the browser.                                                                                                                                 |
 | `--tunnel-url <url>` | Pair over a `wss://` tunnel you provide (ngrok, Tailscale Funnel, your own proxy) instead of `ws://127.0.0.1` — for reaching the worker from another device. |
 
@@ -70,7 +70,7 @@ Follow [the full documentation](https://notefig.com/docs) to get started buildin
 
 ## Roadmap
 
-See [our docs](https://notefig.com/docs) for more information about where we are taking metrists.
+See [our docs](https://notefig.com/docs) for more information about where we are taking Notefig.
 
 ## Contributing
 

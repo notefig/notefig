@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { respondToAgentPermission } from "@/agent/agent-service";
 import { usePendingPermissions } from "@/entities/agents";
-import type { PermissionOption } from "@metrists/shared/agent";
+import type { PermissionOption } from "@notefig/shared/agent";
 
 /** ACP option kind → button emphasis. Options render verbatim otherwise. */
 function variantForKind(

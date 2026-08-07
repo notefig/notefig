@@ -57,7 +57,7 @@ Implement, bottom-up:
    though `load` waits until Phase 4), prompt loop, cancellation, fan-out of
    `session/update` into the task-keyed collections — minting `msg_` ids
    client-side (user message at prompt-send, assistant message at first
-   update; ids from `@metrists/shared/agent` `ids.ts`), message-chunk
+   update; ids from `@notefig/shared/agent` `ids.ts`), message-chunk
    coalescing via `markdown-joiner-transform.ts`. Prompts arriving while a
    turn runs are **queued** (FIFO, promoted on turn end) — steer-style
    mid-turn interjection is a later upgrade.
@@ -143,7 +143,7 @@ Implement, bottom-up:
 
 ### Goal
 
-Agents interact with the user *inside the document*: a `metrists:question`
+Agents interact with the user *inside the document*: a `notefig:question`
 block renders as an answerable widget; the answer is patched into the file
 and fed to the agent's next turn. Users see agent progress via `status`
 blocks. The round-trip guarantee (blob = code block) is already
@@ -183,7 +183,7 @@ test-enforced.
 ### External interfaces and boundaries
 
 - **The blob wire format is a public contract** (other tools/agents may
-  write it): envelope schema in `@metrists/shared/blobs` is the spec;
+  write it): envelope schema in `@notefig/shared/blobs` is the spec;
   document it in `agent-harness.md` §blobs as normative.
 - Editor boundary: only `tiptap-editor-kit.tsx` changes (node view);
   `editor-schema-kit.ts` and the worker codec must show **zero diff**.
@@ -242,7 +242,7 @@ test-enforced.
 
 ### Goal
 
-A web user pairs their browser with `metrists agent` running on their
+A web user pairs their browser with `notefig agent` running on their
 machine and gets the Phase 1+2 experience with no desktop install beyond the
 npm CLI. Anyone can self-host the relay; the app accepts any relay URL.
 
@@ -254,7 +254,7 @@ npm CLI. Anyone can self-host the relay; the app accepts any relay URL.
    `tweetnacl` for XSalsa20-Poly1305 secretbox.
 2. **`packages/relay/src/server.ts`** — finish: room TTL, max frame size,
    per-IP token bucket, peer-left on disconnect. Dockerfile + `npx
-   @metrists/relay` run story. Publish the package.
+   @notefig/relay` run story. Publish the package.
 3. **`relay-transport.ts`** — WebSocket + frame crypto + per-direction
    counters + challenge/ack; one RelayTransport per task (frames tagged
    `taskId` over the shared socket); demultiplex `acp` to the transport
@@ -351,7 +351,7 @@ relay reconnect replay. Each item is independent; ship in any order.
 
 1. **MCP interaction server** (headline) — a Metrists MCP server (stdio,
    spawned per session and passed via `session/new mcpServers`) exposing
-   `metrists_ask_user` / `metrists_await_blob` / `metrists_upsert_blob`:
+   `notefig_ask_user` / `notefig_await_blob` / `notefig_upsert_blob`:
    the agent calls a tool, the app materializes/updates the blob and blocks
    the tool result until the user answers — same app-owned lifecycle,
    different authoring channel. Replaces prompt-preamble guidance where
@@ -425,7 +425,7 @@ relay reconnect replay. Each item is independent; ship in any order.
   identically to a live run (snapshot equality with the Phase 1 fixture
   outcome).
 - MCP: tool-call round-trip test with the MCP SDK test client;
-  `metrists_await_blob` resolves when `answerBlob` fires.
+  `notefig_await_blob` resolves when `answerBlob` fires.
 - Relay replay: kill/rejoin mid-fixture; frames after last acked `seq`
   redelivered once, in order, decrypt cleanly.
 - Settings: KV schema migration tests (old payload → new shape).

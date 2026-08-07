@@ -6,7 +6,7 @@
  * linger in history), then the dialog opens pre-filled to auto-connect.
  */
 import { useSyncExternalStore } from "react";
-import { decodePairingCode } from "@metrists/shared/tunnel";
+import { decodePairingCode } from "@notefig/shared/tunnel";
 
 export type PairDialogState = { open: boolean; prefillCode?: string };
 

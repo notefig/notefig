@@ -16,7 +16,7 @@ import {
   VECTOR_SECRET_HEX,
   VECTOR_SESSION_KEY_HEX,
   VECTOR_WORKER_SEQ0_PAYLOAD_B64,
-} from "@metrists/shared/tunnel";
+} from "@notefig/shared/tunnel";
 
 const hexToBytes = (hex: string) =>
   new Uint8Array(hex.match(/.{2}/g)!.map((b) => parseInt(b, 16)));

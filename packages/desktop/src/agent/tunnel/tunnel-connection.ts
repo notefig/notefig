@@ -1,5 +1,5 @@
 /**
- * The browser's one connection to a `metrists agent` worker: WebSocket +
+ * The browser's one connection to a `notefig agent` worker: WebSocket +
  * pairing handshake + encrypted frame mux/demux, exposed as typed
  * per-channel sub-surfaces (acp / mcp / ctl). Files never cross the tunnel —
  * the browser's own fs adapter owns them. Module-level singleton
@@ -21,8 +21,8 @@ import {
   type CtlMessage,
   type InnerFrame,
   type WorkerInfo,
-} from "@metrists/shared/tunnel";
-import { base64ToBytes } from "@metrists/shared/tunnel";
+} from "@notefig/shared/tunnel";
+import { base64ToBytes } from "@notefig/shared/tunnel";
 import type { z } from "zod";
 import { Cause, Deferred, Duration, Effect, Exit } from "effect";
 import {
@@ -157,7 +157,7 @@ export class TunnelConnection {
         fail(
           new AgentTransportError(
             "relay_unreachable",
-            "could not reach the worker — is `metrists agent` still running?",
+            "could not reach the worker — is `notefig agent` still running?",
           ),
         ),
       );
@@ -184,7 +184,7 @@ export class TunnelConnection {
             fail(
               new AgentTransportError(
                 "unknown",
-                "protocol mismatch — update the metrists CLI and the app to matching versions",
+                "protocol mismatch — update the notefig CLI and the app to matching versions",
               ),
             );
             this.socket?.close();
@@ -236,7 +236,7 @@ export class TunnelConnection {
               fail(
                 new AgentTransportError(
                   "unknown",
-                  "protocol mismatch — update the metrists CLI and the app to matching versions",
+                  "protocol mismatch — update the notefig CLI and the app to matching versions",
                 ),
               );
               this.socket?.close();

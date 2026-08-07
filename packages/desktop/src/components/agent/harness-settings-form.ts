@@ -6,7 +6,7 @@ import {
   type HarnessDefinition,
   type HarnessDiscoveryResult,
   type HarnessOverride,
-} from "@metrists/shared/agent";
+} from "@notefig/shared/agent";
 
 /**
  * Pure state/validation helpers for the harness settings section — no React.

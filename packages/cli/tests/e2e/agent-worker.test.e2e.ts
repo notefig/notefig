@@ -14,9 +14,9 @@ import {
   type CtlMessage,
   type InnerFrame,
   type TunnelEnvelope,
-} from '@metrists/shared';
+} from '@notefig/shared';
 import { AgentWorker } from '../../lib/agent-worker';
-import type { HarnessDefinition } from '@metrists/shared';
+import type { HarnessDefinition } from '@notefig/shared';
 import { Logger, type LogTypes } from '../../lib/utils/logger.util';
 
 const FIXTURE = join(__dirname, 'fixtures', 'scripted-agent.js');
@@ -375,7 +375,7 @@ describe('AgentWorker', () => {
     )) as Extract<CtlMessage, { op: 'mcp-opened' }>;
     const mcpPort = Number(opened.mcpServer.args[0]);
     const token = opened.mcpServer.env.find(
-      (e) => e.name === 'METRISTS_MCP_TOKEN',
+      (e) => e.name === 'NOTEFIG_MCP_TOKEN',
     )!.value;
 
     // A relay that presents the token round-trips a request line as an mcp

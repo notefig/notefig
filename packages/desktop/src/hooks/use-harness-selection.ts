@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { HarnessDefinition } from "@metrists/shared/agent";
+import type { HarnessDefinition } from "@notefig/shared/agent";
 import {
   BUILT_IN_HARNESSES,
   filterDiscoveredHarnesses,
@@ -7,7 +7,7 @@ import {
   parseHarnessDiscovery,
   parseHarnessOverrides,
   resolveEffectiveHarnesses,
-} from "@metrists/shared/agent";
+} from "@notefig/shared/agent";
 import { useKv } from "@/utils/kv-store";
 import {
   HARNESS_CUSTOM_KEY,

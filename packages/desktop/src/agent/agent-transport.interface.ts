@@ -1,10 +1,10 @@
-import type { McpServer } from "@metrists/shared/agent";
+import type { McpServer } from "@notefig/shared/agent";
 
 /**
  * AgentTransport is the seam that keeps the ACP session layer ignorant of
  * where the agent process lives. Desktop pipes a local child process's stdio
  * (TauriStdioTransport); web tunnels the identical newline-delimited JSON-RPC
- * byte stream to a `metrists agent` worker (TunnelTransport, over the
+ * byte stream to a `notefig agent` worker (TunnelTransport, over the
  * encrypted tunnel — packages/shared/src/tunnel); tests use an in-memory
  * pair (LoopbackTransport). Mirrors how worker-rpc.ts gives one typed promise API
  * over any message port. The task's app-tools MCP server rides the separate

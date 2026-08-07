@@ -30,7 +30,7 @@ vi.mock("@/adapters", () => ({
       failed: [],
     })),
     createMcpEndpoint: vi.fn(() => ({
-      mcpServer: { name: "metrists", command: "m", args: [], env: [] },
+      mcpServer: { name: "notefig", command: "m", args: [], env: [] },
       start: vi.fn(async () => {}),
       onRequest: vi.fn(() => () => {}),
       close: vi.fn(async () => {}),
@@ -41,7 +41,7 @@ vi.mock("@/utils/history-service", () => ({
   checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
 }));
 
-import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
+import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import {
   agentEntriesCollection,
   agentPermissionRequestsCollection,
@@ -56,7 +56,7 @@ import { connectWithCode } from "../connect-flow";
 import { tunnelConnection } from "../tunnel-connection";
 import { TunnelTransport } from "../tunnel-transport";
 import { FakeWorker } from "./fake-worker";
-import { encodePairingCode } from "@metrists/shared/tunnel";
+import { encodePairingCode } from "@notefig/shared/tunnel";
 
 const claudeHarness = BUILT_IN_HARNESSES.find((h) => h.id === "claude-code")!;
 const WORKSPACE = "/remote/ws";

@@ -1,7 +1,7 @@
 import type {
   RequestPermissionRequest,
   RequestPermissionResponse,
-} from "@metrists/shared/agent";
+} from "@notefig/shared/agent";
 import { agentPermissionRequestsCollection } from "./agent-collections";
 
 type Pending = {

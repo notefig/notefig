@@ -1,5 +1,5 @@
 /**
- * Metrists drag-and-drop protocol. See docs/dnd-protocol.md.
+ * Notefig drag-and-drop protocol. See docs/dnd-protocol.md.
  *
  * Standardizes drag payloads across the app's DnD contexts without
  * replacing any context's engine:
@@ -62,8 +62,8 @@ export type PayloadOfKind<K extends DragPayloadKind> = Extract<
   { kind: K }
 >;
 
-const JSON_MIME = "application/x-metrists+json";
-const markerMime = (kind: DragPayloadKind) => `application/x-metrists-${kind}`;
+const JSON_MIME = "application/x-notefig+json";
+const markerMime = (kind: DragPayloadKind) => `application/x-notefig-${kind}`;
 
 let currentDrag: DragPayload | null = null;
 

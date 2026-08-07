@@ -45,7 +45,7 @@ vi.mock("@/adapters", () => ({
       mocks.createMcpEndpoint
         ? mocks.createMcpEndpoint(spec)
         : {
-            mcpServer: { name: "metrists", command: "m", args: [], env: [] },
+            mcpServer: { name: "notefig", command: "m", args: [], env: [] },
             start: vi.fn(async () => {}),
             onRequest: vi.fn(() => () => {}),
             close: vi.fn(async () => {}),
@@ -57,7 +57,7 @@ vi.mock("@/utils/history-service", () => ({
   checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
 }));
 
-import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
+import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import { AgentTransportError } from "../../agent-transport.interface";
 import {
   agentEntriesCollection,
@@ -205,14 +205,14 @@ describe("tunnel transport symmetry", () => {
     // The config was written by the browser's OWN fs adapter (not over the
     // tunnel); the worker rewrites this browser path to its --dir at spawn.
     const config = JSON.parse(mocks.fsFiles.get(configPath)!);
-    expect(config.mcp.metrists.command).toEqual([
+    expect(config.mcp.notefig.command).toEqual([
       "/usr/bin/node",
       "/worker/cli.js",
       "mcp-relay",
       "--port",
       "12345",
     ]);
-    expect(config.mcp.metrists.environment.METRISTS_MCP_TOKEN).toBe("fake-token");
+    expect(config.mcp.notefig.environment.NOTEFIG_MCP_TOKEN).toBe("fake-token");
   });
 
   it("answers MCP request lines from a harness relay connection (connId routing)", async () => {

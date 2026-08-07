@@ -1,10 +1,9 @@
 {
-  "name": "metrists-monorepo",
+  "name": "notefig-monorepo",
   "private": true,
   "license": "MIT",
   "workspaces": [
-    "./packages/*",
-    "./themes/*"
+    "./packages/*"
   ],
   "scripts": {
     "build": "npm run build --workspaces",

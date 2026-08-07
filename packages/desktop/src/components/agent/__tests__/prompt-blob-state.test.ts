@@ -7,7 +7,7 @@ import type {
   AgentTaskRow,
   AgentTurn,
 } from "@/agent/agent-collections";
-import type { ToolCallUpdate } from "@metrists/shared/agent";
+import type { ToolCallUpdate } from "@notefig/shared/agent";
 import {
   derivePhase,
   deriveActiveToolLine,

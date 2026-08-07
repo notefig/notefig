@@ -88,7 +88,7 @@ describe("writeWorkspaceTextFile adoption (open editor)", () => {
     writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
     openEditor("# Doc\n");
 
-    const fence = "```metrists:question\nid: q_1234\nstatus: pending\nprompt: OK?\n```\n";
+    const fence = "```notefig:question\nid: q_1234\nstatus: pending\nprompt: OK?\n```\n";
     await writeWorkspaceTextFile(path, `# Doc\n\n${fence}`);
 
     expect(liveMarkdown()).toContain("id: q_1234");

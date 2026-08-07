@@ -27,15 +27,15 @@
       "@/*": [
         "./src/*"
       ],
-      // Resolve @metrists/shared to its TS source, mirroring the vite alias
+      // Resolve @notefig/shared to its TS source, mirroring the vite alias
       // (vite.config.ts). Without this, tsc falls through to the package's
       // `exports` → ./dist, forcing a shared build before every desktop tsc
       // (and breaking a fresh CI checkout). Keeping both resolvers on source
       // avoids stale-dist drift and the build coupling.
-      "@metrists/shared": [
+      "@notefig/shared": [
         "../shared/src/index.ts"
       ],
-      "@metrists/shared/*": [
+      "@notefig/shared/*": [
         "../shared/src/*/index.ts"
       ]
     }

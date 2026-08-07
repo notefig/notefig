@@ -8,7 +8,7 @@
  * facade, not an editor/DOM module) can encode a URI without pulling in any
  * editor state.
  */
-const WIDGET_CONTEXT_SCHEME = "metrists://widget-context";
+const WIDGET_CONTEXT_SCHEME = "notefig://widget-context";
 
 export interface WidgetContextRef {
   /** Workspace-relative document path. */

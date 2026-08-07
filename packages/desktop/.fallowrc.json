@@ -1,6 +1,6 @@
 {
   "extends": ["../../.fallowrc.json"],
-  "publicPackages": ["@metrists/desktop"],
+  "publicPackages": ["@notefig/desktop"],
   "ignoreDependencies": [
     "@radix-ui/react-accordion",
     "@radix-ui/react-aspect-ratio",
@@ -27,8 +27,8 @@
     "@radix-ui/react-dropdown-menu",
     "@radix-ui/react-popover",
     "@radix-ui/react-select",
-    "@metrists/git",
-    "@metrists/shared",
+    "@notefig/git",
+    "@notefig/shared",
     "@tauri-apps/plugin-fs",
     "@tauri-apps/plugin-window-state",
     "@tanstack/query-core",

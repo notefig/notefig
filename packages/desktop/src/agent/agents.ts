@@ -14,7 +14,7 @@ import {
   type PromptContextPart,
   type RequestPermissionResponse,
   type TurnOutcome,
-} from "@metrists/shared/agent";
+} from "@notefig/shared/agent";
 import { agentTurnsCollection, type AgentTurn } from "./agent-collections";
 import { getRegisteredTask } from "./task-registry";
 // Deferred-use import (see agent-service.ts's matching note): only

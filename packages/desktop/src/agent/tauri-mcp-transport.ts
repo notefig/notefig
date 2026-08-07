@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { MCP_SERVER_NAME, type McpServer } from "@metrists/shared/agent";
+import { MCP_SERVER_NAME, type McpServer } from "@notefig/shared/agent";
 import type { McpEndpoint, Unsubscribe } from "./agent-transport.interface";
 import { AgentTransportError } from "./agent-transport.interface";
 import { StreamPuller } from "./stream-puller";
@@ -92,7 +92,7 @@ export class TauriMcpTransport implements McpEndpoint {
       args,
       // The harness passes this env to the relay it spawns; the relay
       // presents it as its first line and the bridge validates before wiring.
-      env: [{ name: "METRISTS_MCP_TOKEN", value: token }],
+      env: [{ name: "NOTEFIG_MCP_TOKEN", value: token }],
     };
   }
 

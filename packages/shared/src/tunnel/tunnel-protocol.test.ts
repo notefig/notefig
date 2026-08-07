@@ -140,7 +140,7 @@ describe("schemas", () => {
           name: "metrists",
           command: "/usr/local/bin/node",
           args: ["cli.js", "mcp-relay", "--port", "1234"],
-          env: [{ name: "METRISTS_MCP_TOKEN", value: "tok" }],
+          env: [{ name: "NOTEFIG_MCP_TOKEN", value: "tok" }],
         },
       },
       { op: "mcp-close", taskId: "t1" },

@@ -17,7 +17,7 @@ import {
   HarnessOverrideSchema,
   type CustomHarnessEntry,
   type HarnessOverride,
-} from "@metrists/shared/agent";
+} from "@notefig/shared/agent";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";

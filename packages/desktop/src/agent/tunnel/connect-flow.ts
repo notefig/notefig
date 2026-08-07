@@ -1,5 +1,5 @@
 /**
- * Turns a pairing code into a live tunnel to a `metrists agent` worker so
+ * Turns a pairing code into a live tunnel to a `notefig agent` worker so
  * the browser can spawn agents on that machine. The tunnel is global — it
  * isn't tied to a workspace; files stay with the browser's own fs adapter.
  * Persists the last pairing in KV so a reload reconnects automatically
@@ -10,7 +10,7 @@ import {
   decodePairingCode,
   encodePairingCode,
   type WorkerInfo,
-} from "@metrists/shared/tunnel";
+} from "@notefig/shared/tunnel";
 import { platformAdapter } from "@/adapters";
 import { disposeAllWorkspaceTaskManagers } from "@/agent/agent-service";
 import { tunnelConnection } from "./tunnel-connection";
@@ -146,6 +146,7 @@ export function disconnectTunnel(): void {
  */
 export function watchCrossTabPairing(): () => void {
   if (typeof window === "undefined") return () => undefined;
+  // KEEP the metrists-kv: prefix (see base-browser-adapter KV_PREFIX).
   const KEY = `metrists-kv:${TUNNEL_KV_NAMESPACE}:${TUNNEL_PAIRING_KEY}`;
   const onStorage = (event: StorageEvent) => {
     if (event.key !== KEY || !event.newValue) return;

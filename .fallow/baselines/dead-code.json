@@ -15,16 +15,16 @@
     "packages/marketing/package.json:@hookform/resolvers",
     "packages/marketing/package.json:autoprefixer",
     "packages/marketing/package.json:zod",
-    "packages/themes/metrists-theme-next/package.json:@radix-ui/react-dialog",
-    "packages/themes/metrists-theme-next/package.json:@radix-ui/react-icons",
-    "packages/themes/metrists-theme-next/package.json:date-fns"
+    "packages/themes/notefig-theme-next/package.json:@radix-ui/react-dialog",
+    "packages/themes/notefig-theme-next/package.json:@radix-ui/react-icons",
+    "packages/themes/notefig-theme-next/package.json:date-fns"
   ],
   "unused_dev_dependencies": [
     "package.json:execa",
     "packages/cli/package.json:eslint-plugin-import",
     "packages/cli/package.json:tsconfig-paths",
     "packages/desktop/package.json:autoprefixer",
-    "packages/themes/metrists-theme-next/package.json:eslint-config-next"
+    "packages/themes/notefig-theme-next/package.json:eslint-config-next"
   ],
   "circular_dependencies": [
     "packages/desktop/src/agent/acp-client.ts->packages/desktop/src/agent/agent-service.ts->packages/desktop/src/components/agent/prompt-blob.tsx->packages/desktop/src/components/editor/ai-prompt-node.tsx->packages/desktop/src/components/editor/editor-store.ts->packages/desktop/src/utils/file-sync.ts",
@@ -47,7 +47,7 @@
     "packages/desktop/src/components/editor/blobs/blob-actions.ts->packages/desktop/src/components/editor/blobs/blob-node-view.tsx->packages/desktop/src/components/editor/editor-store.ts->packages/desktop/src/components/editor/tiptap-editor-kit.tsx->packages/desktop/src/utils/file-sync.ts",
     "packages/desktop/src/entities/files.ts->packages/desktop/src/entities/tabs.ts",
     "packages/desktop/src/entities/files.ts->packages/desktop/src/utils/file-sync.ts",
-    "packages/themes/metrists-theme-next/components/patterns/chapter-navigation.tsx->packages/themes/metrists-theme-next/components/ui/button.tsx->packages/themes/metrists-theme-next/lib/utils.ts"
+    "packages/themes/notefig-theme-next/components/patterns/chapter-navigation.tsx->packages/themes/notefig-theme-next/components/ui/button.tsx->packages/themes/notefig-theme-next/lib/utils.ts"
   ],
   "re_export_cycles": [],
   "unused_optional_dependencies": [],
@@ -72,17 +72,17 @@
   "unused_server_actions": [],
   "unused_load_data_keys": [],
   "unresolved_imports": [
-    "packages/themes/metrists-theme-next/components/patterns/mobile-chapter-drawer.tsx:.contentlayer/generated",
-    "packages/themes/metrists-theme-next/lib/utils.ts:.contentlayer/generated",
-    "packages/themes/metrists-theme-next/lib/utils.ts:.contentlayer/generated"
+    "packages/themes/notefig-theme-next/components/patterns/mobile-chapter-drawer.tsx:.contentlayer/generated",
+    "packages/themes/notefig-theme-next/lib/utils.ts:.contentlayer/generated",
+    "packages/themes/notefig-theme-next/lib/utils.ts:.contentlayer/generated"
   ],
   "unlisted_dependencies": [
     "@jest/globals",
-    "@metrists/shared",
+    "@notefig/shared",
     "@tiptap/core"
   ],
   "duplicate_exports": [
-    "ChapterNavigationProps|packages/themes/metrists-theme-next/components/patterns/chapter-navigation.tsx|packages/themes/metrists-theme-next/components/patterns/mobile-chapter-drawer.tsx",
+    "ChapterNavigationProps|packages/themes/notefig-theme-next/components/patterns/chapter-navigation.tsx|packages/themes/notefig-theme-next/components/patterns/mobile-chapter-drawer.tsx",
     "GetFieldValue|packages/cli/lib/utils/rc.util.ts|packages/cli/lib/utils/template-config.util.ts",
     "getConfigGetter|packages/cli/lib/utils/rc.util.ts|packages/cli/lib/utils/template-config.util.ts"
   ],

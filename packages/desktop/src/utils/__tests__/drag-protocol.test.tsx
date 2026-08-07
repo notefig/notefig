@@ -104,7 +104,7 @@ describe("payload wire format", () => {
 
   it("returns null for malformed or missing JSON", () => {
     const dt = new FakeDataTransfer();
-    dt.setData("application/x-metrists+json", "{nope");
+    dt.setData("application/x-notefig+json", "{nope");
     expect(getDragPayload(dt as unknown as DataTransfer)).toBeNull();
     expect(getDragPayload(new FakeDataTransfer() as unknown as DataTransfer)).toBeNull();
     expect(getDragPayload(null)).toBeNull();
@@ -164,7 +164,7 @@ describe("delegated dispatch", () => {
     const dt = new FakeDataTransfer();
     dragEvent("dragstart", source, dt);
     expect(getCurrentDragPayload()).toEqual(filePayload);
-    expect(dt.types).toContain("application/x-metrists-file");
+    expect(dt.types).toContain("application/x-notefig-file");
     expect(dt.effectAllowed).toBe("copyMove");
   });
 

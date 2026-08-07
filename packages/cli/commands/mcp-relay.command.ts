@@ -6,7 +6,7 @@ import { AbstractCommand } from './abstract.command';
  * Hidden stdio↔TCP relay — the "binary" a harness spawns to reach the app's
  * MCP server (the Node analogue of the desktop's --mcp-stdio-relay mode).
  * Connects to the worker's per-task loopback listener, presents
- * METRISTS_MCP_TOKEN as its first line, then pumps stdin→socket and
+ * NOTEFIG_MCP_TOKEN as its first line, then pumps stdin→socket and
  * socket→stdout untouched. Zero protocol awareness; stdout is the MCP
  * channel, so nothing else may ever print to it.
  */
@@ -20,9 +20,9 @@ export class McpRelayCommand extends AbstractCommand {
 
   public async handle(command: Command) {
     const port = Number(command.opts().port);
-    const token = process.env.METRISTS_MCP_TOKEN;
+    const token = process.env.NOTEFIG_MCP_TOKEN;
     if (!token) {
-      process.stderr.write('METRISTS_MCP_TOKEN is not set\n');
+      process.stderr.write('NOTEFIG_MCP_TOKEN is not set\n');
       process.exit(1);
     }
 

@@ -15,11 +15,11 @@ import {
   validateHarnessForm,
   type HarnessFormState,
 } from "../harness-settings-form";
-import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
+import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import type {
   CustomHarnessEntry,
   HarnessOverride,
-} from "@metrists/shared/agent";
+} from "@notefig/shared/agent";
 
 const opencode = BUILT_IN_HARNESSES.find((h) => h.id === "opencode")!;
 const claude = BUILT_IN_HARNESSES.find((h) => h.id === "claude-code")!;

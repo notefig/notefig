@@ -7,7 +7,7 @@ const { statusMock, logMock, addAllAndCommitMock } = vi.hoisted(() => ({
   addAllAndCommitMock: vi.fn(),
 }));
 
-vi.mock("@metrists/git", () => {
+vi.mock("@notefig/git", () => {
   class MockGitError extends Error {
     constructor(
       readonly code: string,
@@ -35,7 +35,7 @@ vi.mock("@/adapters", () => ({
 
 // The mocked GitError class, for constructing typed failures in tests.
 const { GitError: MockGitError } = (await import(
-  "@metrists/git"
+  "@notefig/git"
 )) as unknown as {
   GitError: new (code: string, message: string) => Error;
 };

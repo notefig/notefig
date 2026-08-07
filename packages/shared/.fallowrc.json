@@ -1,4 +1,4 @@
 {
   "extends": ["../../.fallowrc.json"],
-  "publicPackages": ["@metrists/shared"]
+  "publicPackages": ["@notefig/shared"]
 }

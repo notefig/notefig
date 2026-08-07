@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 import type { z } from "zod";
-import type { BlobEnvelope, ParsedBlob } from "@metrists/shared/blobs";
+import type { BlobEnvelope, ParsedBlob } from "@notefig/shared/blobs";
 
 /**
  * One-file blob type protocol (DX convention shared with drag-protocol):

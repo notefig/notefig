@@ -18,7 +18,7 @@
  * safe against an untrusted relay. There is no bundled tunnel binary.
  *
  * Security boundary: the worker only ever spawns / probes harnesses it knows
- * from @metrists/shared's hardcoded BUILT_IN_HARNESSES — nothing executable
+ * from @notefig/shared's hardcoded BUILT_IN_HARNESSES — nothing executable
  * ever crosses the wire. start-task carries only a harnessId + cwd + env.
  */
 import * as http from 'http';
@@ -493,7 +493,7 @@ export class AgentWorker {
       name: MCP_SERVER_NAME,
       command: relay.command,
       args: relay.args,
-      env: [{ name: 'METRISTS_MCP_TOKEN', value: token }],
+      env: [{ name: 'NOTEFIG_MCP_TOKEN', value: token }],
     };
   }
 

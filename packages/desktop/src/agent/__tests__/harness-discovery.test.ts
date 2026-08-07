@@ -21,7 +21,7 @@ import {
   refreshHarnessDiscovery,
   resetStartupHarnessDiscoveryForTest,
 } from "../harness-discovery";
-import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
+import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 
 beforeEach(() => {
   runShellCommand.mockReset();

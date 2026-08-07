@@ -27,7 +27,7 @@ const platformAdapterMock = {
   exists: vi.fn(),
 };
 
-vi.mock("@metrists/git", () => ({
+vi.mock("@notefig/git", () => ({
   IsomorphicGitService: isomorphicGitServiceCtor,
 }));
 

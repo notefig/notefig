@@ -4,7 +4,7 @@ import {
   newEventId,
   type AgentTool,
   type ToolContext,
-} from "@metrists/shared/agent";
+} from "@notefig/shared/agent";
 import { getAllBlobTypes } from "@/components/editor/blobs/blob-registry";
 import { toolRegistry, getTool } from "./tools";
 import type { PermissionBroker } from "./permission-broker";

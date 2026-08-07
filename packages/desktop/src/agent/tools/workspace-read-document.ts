@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AgentTool } from "@metrists/shared/agent";
+import type { AgentTool } from "@notefig/shared/agent";
 import { readWorkspaceTextFile } from "@/utils/file-sync";
 import { resolveWorkspacePath } from "@/utils/fs";
 

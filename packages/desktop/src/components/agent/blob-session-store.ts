@@ -7,7 +7,7 @@
  * visible in the sessions panel, and any widget bound to one of its turns
  * keeps watching it).
  */
-import type { HarnessDefinition } from "@metrists/shared/agent";
+import type { HarnessDefinition } from "@notefig/shared/agent";
 import { normalizePath } from "@/utils/fs";
 import { agentTasksCollection } from "@/agent/agent-collections";
 import { startAgentTask } from "@/agent/agent-service";

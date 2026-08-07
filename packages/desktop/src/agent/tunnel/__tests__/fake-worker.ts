@@ -19,8 +19,8 @@ import {
   type CtlMessage,
   type InnerFrame,
   type WorkerInfo,
-} from "@metrists/shared/tunnel";
-import { bytesToBase64 } from "@metrists/shared/tunnel";
+} from "@notefig/shared/tunnel";
+import { bytesToBase64 } from "@notefig/shared/tunnel";
 import { createLoopbackPair, type LoopbackTransport } from "../../loopback-transport";
 import { FakeAgent } from "../../__tests__/fake-agent";
 import type { TunnelSocket, TunnelSocketFactory } from "../tunnel-connection";
@@ -262,10 +262,10 @@ export class FakeWorker {
           op: "mcp-opened",
           taskId: message.taskId,
           mcpServer: {
-            name: "metrists",
+            name: "notefig",
             command: "/usr/bin/node",
             args: ["/worker/cli.js", "mcp-relay", "--port", "12345"],
-            env: [{ name: "METRISTS_MCP_TOKEN", value: "fake-token" }],
+            env: [{ name: "NOTEFIG_MCP_TOKEN", value: "fake-token" }],
           },
         });
         return;

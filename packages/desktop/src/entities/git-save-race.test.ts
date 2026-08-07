@@ -6,7 +6,7 @@ const { statusMock, logMock, addAllAndCommitMock } = vi.hoisted(() => ({
   addAllAndCommitMock: vi.fn(),
 }));
 
-vi.mock("@metrists/git", () => {
+vi.mock("@notefig/git", () => {
   class MockGitError extends Error {
     constructor(
       readonly code: string,

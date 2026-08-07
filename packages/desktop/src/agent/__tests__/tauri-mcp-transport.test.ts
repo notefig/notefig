@@ -9,7 +9,7 @@ const relayOk = {
   ok: true,
   value: {
     port: 9000,
-    command: "metrists",
+    command: "notefig",
     args: ["mcp-relay"],
     token: "tok_abc",
   },
@@ -46,8 +46,8 @@ describe("TauriMcpTransport", () => {
     expect(tauri.calls("start_mcp_relay")).toEqual([{ taskId: "task_1" }]);
     // The relay descriptor carries the per-task token as env for the harness.
     expect(transport.mcpServer).toMatchObject({
-      command: "metrists",
-      env: [{ name: "METRISTS_MCP_TOKEN", value: "tok_abc" }],
+      command: "notefig",
+      env: [{ name: "NOTEFIG_MCP_TOKEN", value: "tok_abc" }],
     });
 
     // The doorbell names only the connection; lines arrive via pulls, each

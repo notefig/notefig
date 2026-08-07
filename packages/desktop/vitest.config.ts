@@ -37,16 +37,16 @@ export default defineConfig({
     },
   },
   resolve: {
-    // Mirror vite.config.ts: resolve @metrists/shared to its TS source so
+    // Mirror vite.config.ts: resolve @notefig/shared to its TS source so
     // tests compile the same code the app bundles (no CJS star-re-export
     // named-export gaps, no stale-dist drift).
     alias: [
       {
-        find: /^@metrists\/shared$/,
+        find: /^@notefig\/shared$/,
         replacement: path.resolve(__dirname, "../shared/src/index.ts"),
       },
       {
-        find: /^@metrists\/shared\/(.*)$/,
+        find: /^@notefig\/shared\/(.*)$/,
         replacement: path.resolve(__dirname, "../shared/src/$1/index.ts"),
       },
       { find: "@", replacement: path.resolve(__dirname, "./src") },

@@ -1,13 +1,13 @@
 /**
  * McpEndpoint over the tunnel — the browser half of the MCP inversion. The
  * worker binds a loopback listener per task (ctl mcp-open → mcp-opened) and
- * the harness spawns the metrists CLI's hidden `mcp-relay` command against
+ * the harness spawns the notefig CLI's hidden `mcp-relay` command against
  * it; request lines arrive here as "mcp" frames tagged {taskId, connId} and
  * every request's `respond` closes over its connId — the same
  * structurally-safe routing as the desktop TauriMcpTransport. The request
  * handler itself (mcp-server.ts) stays in the browser, unchanged.
  */
-import type { McpServer } from "@metrists/shared/agent";
+import type { McpServer } from "@notefig/shared/agent";
 import {
   AgentTransportError,
   type McpEndpoint,

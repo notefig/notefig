@@ -1,6 +1,6 @@
 {
   "extends": ["../../.fallowrc.json"],
-  "publicPackages": ["metrists"],
+  "publicPackages": ["notefig"],
   "ignoreDependencies": [
     "execa",
     "eslint-plugin-import",

@@ -36,7 +36,7 @@ vi.mock("@/adapters", () => ({
     // — AgentTask.start() calls .start() and reads .mcpServer itself.
     createMcpEndpoint: vi.fn(() => {
       const endpoint = {
-        mcpServer: { name: "metrists", command: "metrists", args: [], env: [] },
+        mcpServer: { name: "notefig", command: "notefig", args: [], env: [] },
         start: vi.fn(async () => {}),
         onRequest: vi.fn(() => () => {}),
         close: vi.fn(async () => {}),
@@ -61,7 +61,7 @@ import {
   agentTurnsCollection,
   agentTasksCollection,
 } from "../agent-collections";
-import { BUILT_IN_HARNESSES } from "@metrists/shared/agent";
+import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import type { AgentTask } from "../agent-service";
 
 const harness = BUILT_IN_HARNESSES[0];
@@ -312,14 +312,14 @@ describe("AgentTask vertical slice", () => {
     expect(pendingPerms(task.taskId)).toHaveLength(0);
   });
 
-  it("auto-approves permission requests for our own mcp__metrists__* tools, no UI prompt", async () => {
+  it("auto-approves permission requests for our own mcp__notefig__* tools, no UI prompt", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
     let outcome: unknown;
     agent.onPrompt = async (_params, a) => {
       const response = await a.request("session/request_permission", {
         sessionId: "sess_test",
-        toolCall: { toolCallId: "call_1", title: "mcp__metrists__author_blob" },
+        toolCall: { toolCallId: "call_1", title: "mcp__notefig__author_blob" },
         options: [
           { optionId: "allow_once", name: "Allow", kind: "allow_once" },
           { optionId: "allow_always", name: "Always Allow", kind: "allow_always" },
@@ -1016,14 +1016,14 @@ describe("prompt handles (A3, Stage 1)", () => {
 });
 
 describe("MCP tool calls (Stage 3.5)", () => {
-  it("normalizes an mcp__metrists__* tool name and derives locations from rawInput.path", async () => {
+  it("normalizes an mcp__notefig__* tool name and derives locations from rawInput.path", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
     agent.onPrompt = async (_p, a) => {
       a.update("sess_test", {
         sessionUpdate: "tool_call",
         toolCallId: "call_1",
-        title: "mcp__metrists__author_blob",
+        title: "mcp__notefig__author_blob",
         kind: "other",
         status: "pending",
         rawInput: {},
@@ -1055,7 +1055,7 @@ describe("MCP tool calls (Stage 3.5)", () => {
       a.update("sess_test", {
         sessionUpdate: "tool_call",
         toolCallId: "call_1",
-        title: "mcp__metrists__history_restore",
+        title: "mcp__notefig__history_restore",
         kind: "edit",
         status: "pending",
         rawInput: { path: "notes.md", checkpoint: "abc123" },
@@ -1085,7 +1085,7 @@ describe("MCP tool calls (Stage 3.5)", () => {
       a.update("sess_test", {
         sessionUpdate: "tool_call",
         toolCallId: "call_1",
-        title: "mcp__metrists__author_blob",
+        title: "mcp__notefig__author_blob",
         kind: "other",
         status: "completed",
         rawInput: { path: "notes.md", type: "question", id: "question_8f2a" },
@@ -1351,7 +1351,7 @@ describe("Stage 4: per-harness MCP registration", () => {
     await task.start(() => client);
 
     expect(agent.newSessionParams?.mcpServers).toHaveLength(1);
-    expect(agent.newSessionParams?.mcpServers?.[0]?.name).toBe("metrists");
+    expect(agent.newSessionParams?.mcpServers?.[0]?.name).toBe("notefig");
   });
 
   it('"opencode-config" harnesses get a per-task config file + OPENCODE_CONFIG, and empty mcpServers', async () => {
@@ -1374,8 +1374,8 @@ describe("Stage 4: per-harness MCP registration", () => {
       | undefined;
     expect(write).toBeDefined();
     const config = JSON.parse(write!.content);
-    expect(config.mcp.metrists.type).toBe("local");
-    expect(config.mcp.metrists.command).toEqual(["metrists"]);
+    expect(config.mcp.notefig.type).toBe("local");
+    expect(config.mcp.notefig.command).toEqual(["notefig"]);
     expect(agent.newSessionParams?.mcpServers).toEqual([]);
   });
 
@@ -1400,7 +1400,7 @@ describe("Stage 4: per-harness MCP registration", () => {
       a.update("sess_test", {
         sessionUpdate: "tool_call",
         toolCallId: "oc_1",
-        title: "metrists_author_blob",
+        title: "notefig_author_blob",
         kind: "other",
         status: "completed",
         rawInput: { path: "notes.md", type: "question", id: "question_oc01" },
