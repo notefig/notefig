@@ -177,4 +177,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release edit "cli-v${{ inputs.version }}" --repo ${{ github.repository }} --draft=false --prerelease=${{ inputs.prerelease }}
+          # --latest=false: the repo's "latest release" slot is load-bearing —
+          # every installed desktop app polls
+          # releases/latest/download/latest.json, and that file only exists on
+          # desktop-v* releases. A CLI release taking "latest" 404s the
+          # updater for every install (observed with cli-v0.9.0).
+          gh release edit "cli-v${{ inputs.version }}" --repo ${{ github.repository }} --draft=false --prerelease=${{ inputs.prerelease }} --latest=false
