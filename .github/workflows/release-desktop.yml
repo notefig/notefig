@@ -269,7 +269,7 @@ jobs:
         with:
           projectPath: packages/desktop
           tagName: "desktop-v${{ inputs.version }}"
-          releaseName: ${{ contains(inputs.version, '-debug') && format('Metrists Desktop v{0} (debug build)', inputs.version) || format('Metrists Desktop v{0}', inputs.version) }}
+          releaseName: ${{ contains(inputs.version, '-debug') && format('Notefig Desktop v{0} (debug build)', inputs.version) || format('Notefig Desktop v{0}', inputs.version) }}
           releaseBody: ${{ contains(inputs.version, '-debug') && 'Debug build with devtools enabled — not for regular use. The in-app updater never serves this version.' || steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: ${{ contains(inputs.version, '-debug') }}

@@ -104,7 +104,7 @@ export default function WritingLanding() {
           <p className="text-gray-500 text-sm">
             © {new Date().getFullYear()} Metrists.{" "}
             <Link
-              href="https://github.com/metrists/metrists"
+              href="https://github.com/notefig/notefig"
               target="_blank"
               rel="noopener noreferrer"
               className="hover:text-[#1D4528] transition-colors duration-200"

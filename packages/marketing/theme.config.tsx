@@ -24,9 +24,9 @@ const config: DocsThemeConfig = {
     </div>
   ),
   project: {
-    link: "https://github.com/metrists/metrists",
+    link: "https://github.com/notefig/notefig",
   },
-  docsRepositoryBase: "https://github.com/metrists/metrists/tree/main",
+  docsRepositoryBase: "https://github.com/notefig/notefig/tree/main",
   footer: {
     component: () => null,
   },

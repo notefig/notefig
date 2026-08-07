@@ -27,7 +27,7 @@ We are planning to keep this package _without dependencies_. If you need a depen
 
 ## Help needed
 
-Please [open issues](https://github.com/metrists/metrists/issues), if you encounter any issues.
+Please [open issues](https://github.com/notefig/notefig/issues), if you encounter any issues.
 
 Also, please watch the repo and respond to questions/bug reports/feature
 requests! Thanks!

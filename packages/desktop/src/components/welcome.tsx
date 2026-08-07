@@ -133,7 +133,7 @@ export function Welcome() {
 
   const handleOpenGitHub = (e: React.MouseEvent) => {
     e.preventDefault();
-    openExternalLink("https://github.com/metrists/metrists");
+    openExternalLink("https://github.com/notefig/notefig");
   };
 
   return (

@@ -27,13 +27,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/metrists/metrists.git"
+    "url": "git+https://github.com/notefig/notefig.git"
   },
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/metrists/metrists/issues"
+    "url": "https://github.com/notefig/notefig/issues"
   },
-  "homepage": "https://github.com/metrists/metrists#readme",
+  "homepage": "https://github.com/notefig/notefig#readme",
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.20.1",
     "chalk": "^3.0.0",

@@ -16,7 +16,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ4RDc3NEY4MzNGQUM2NkQKUldSdHh2b3orSFRYU1A1amkwbUdoZzJ5VkJnSGRaUGJBcGtEeUJ5Z0tWd2hKUTNFTU9NUEdtdTEK",
       "endpoints": [
-        "https://github.com/metrists/metrists/releases/latest/download/latest.json"
+        "https://github.com/notefig/notefig/releases/latest/download/latest.json"
       ]
     }
   },
