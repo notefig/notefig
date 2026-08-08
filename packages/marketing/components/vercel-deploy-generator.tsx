@@ -24,7 +24,7 @@ export default function VercelDeployGenerator() {
 
       // Generate the Vercel deployment URL
       const params = new URLSearchParams({
-        "demo-description": `Deploy ${cleanRepo} built with Metrists`,
+        "demo-description": `Deploy ${cleanRepo} built with Notefig`,
         "demo-title": cleanRepo,
         "demo-url": githubUrl,
         from: "templates",

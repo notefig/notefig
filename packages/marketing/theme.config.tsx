@@ -19,7 +19,7 @@ const config: DocsThemeConfig = {
         className="font-medium text-[#1D4528] text-2xl italics dark:text-white"
         style={{ fontFamily: "var(--font-playfair)" }}
       >
-        Metrists
+        Notefig
       </span>
     </div>
   ),
@@ -36,11 +36,11 @@ const config: DocsThemeConfig = {
 
     const getPageTitle = () => {
       if (asPath === "/docs" || asPath === "/") {
-        return "Metrists Documentation";
+        return "Notefig Documentation";
       }
 
-      if (title && title !== "Metrists") {
-        return `${title} - Metrists Documentation`;
+      if (title && title !== "Notefig") {
+        return `${title} - Notefig Documentation`;
       }
 
       const cleanPath = asPath.replace("/docs/", "").replace("/docs", "");
@@ -53,10 +53,10 @@ const config: DocsThemeConfig = {
               .replace(/\b\w/g, (l) => l.toUpperCase()),
           )
           .join(" - ");
-        return `${pathTitle} - Metrists Documentation`;
+        return `${pathTitle} - Notefig Documentation`;
       }
 
-      return "Metrists Documentation";
+      return "Notefig Documentation";
     };
 
     return (

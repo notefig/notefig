@@ -16,8 +16,8 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
-  title: "Metrists - Continues Publishing",
-  description: "Metrists is a git-based pipeline that promotes continuesly publishing long-form content.",
+  title: "Notefig - Continuous Publishing",
+  description: "Notefig is a git-based pipeline that promotes continuously publishing long-form content.",
 icons: {
     icon: [
       { url: '/favicon.ico', sizes: 'any' },

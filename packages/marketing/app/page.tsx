@@ -28,14 +28,14 @@ export default function WritingLanding() {
           <div className="mb-8">
             <h2 className="text-4xl md:text-6xl lg:text-7xl font-bold text-gray-900 leading-tight mb-6">
               Write Markdown{" "}
-              <span className="italic text-[#1D4528]">Continuesly</span> Publish
+              <span className="italic text-[#1D4528]">Continuously</span> Publish
             </h2>
           </div>
 
           {/* Philosophy Paragraph */}
           <div className="mb-12">
             <p className="text-lg md:text-xl text-gray-600 font-light max-w-2xl mx-auto leading-relaxed">
-              We believe books shouldn’t be frozen in time. Metrists lets you
+              We believe books shouldn’t be frozen in time. Notefig lets you
               publish long-form content iteratively—just like software.
             </p>
           </div>
@@ -59,11 +59,11 @@ export default function WritingLanding() {
         <div className="max-w-4xl mx-auto">
           <div className="text-center mb-16">
             <h3 className="text-3xl md:text-4xl font-bold text-gray-900 mb-6">
-              Why <span className="italic text-[#1D4528]">Metrists</span>{" "}
+              Why <span className="italic text-[#1D4528]">Notefig</span>{" "}
               matters
             </h3>
             <p className="text-lg text-gray-600 max-w-2xl mx-auto leading-relaxed">
-              High-quality writing isn’t one-and-done. Metrists makes it easy to
+              High-quality writing isn’t one-and-done. Notefig makes it easy to
               keep it alive.
             </p>
           </div>
@@ -102,7 +102,7 @@ export default function WritingLanding() {
       <footer className="px-6 py-12 border-t border-gray-200 bg-[#F8F6F0]">
         <div className="max-w-4xl mx-auto text-center">
           <p className="text-gray-500 text-sm">
-            © {new Date().getFullYear()} Metrists.{" "}
+            © {new Date().getFullYear()} Notefig.{" "}
             <Link
               href="https://github.com/notefig/notefig"
               target="_blank"
