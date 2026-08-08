@@ -47,7 +47,7 @@ test.describe("shim: fs_ops guardrails on a real filesystem", () => {
   let workspace = "";
 
   test.beforeEach(async () => {
-    workspace = await fs.mkdtemp(path.join(os.tmpdir(), "metrists-fsops-"));
+    workspace = await fs.mkdtemp(path.join(os.tmpdir(), "notefig-fsops-"));
   });
 
   test.afterEach(async () => {

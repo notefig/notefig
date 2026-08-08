@@ -32,7 +32,7 @@ export async function seedTestFiles(
   files: Array<{ path: string; content: string; type: "file" | "directory" }>,
 ) {
   await page.evaluate(async (testFiles) => {
-    const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "metrists-fs";
+    const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "notefig-fs";
     const request = indexedDB.open(dbName, 1);
 
     return new Promise<void>((resolve, reject) => {
@@ -200,7 +200,7 @@ export async function typeInEditor(page: Page, text: string) {
  */
 export async function clearTestDatabase(page: Page) {
   await page.evaluate(() => {
-    const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "metrists-fs";
+    const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "notefig-fs";
     return new Promise<void>((resolve, reject) => {
       const request = indexedDB.deleteDatabase(dbName);
       request.onsuccess = () => resolve();
@@ -240,7 +240,7 @@ export async function getFileContentFromDB(
   filePath: string,
 ): Promise<string | null> {
   return page.evaluate(async (path) => {
-    const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "metrists-fs";
+    const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "notefig-fs";
     return new Promise<string | null>((resolve, reject) => {
       const request = indexedDB.open(dbName, 1);
 
@@ -395,7 +395,7 @@ export async function getIndexedDBContent(
     },
     {
       dbName: (await page.evaluate(
-        () => (window as any).__VITE_INDEXEDDB_NAME__ || "metrists-fs",
+        () => (window as any).__VITE_INDEXEDDB_NAME__ || "notefig-fs",
       )) as string,
       path: filePath,
     },
@@ -413,7 +413,7 @@ export async function simulateExternalFileChange(
 ) {
   await page.evaluate(
     async ({ path, content }) => {
-      const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "metrists-fs";
+      const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "notefig-fs";
       const request = indexedDB.open(dbName, 1);
 
       return new Promise<void>((resolve, reject) => {
@@ -462,7 +462,7 @@ export async function simulateExternalFileCreation(
 ) {
   await page.evaluate(
     async ({ path, fileContent, fileType }) => {
-      const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "metrists-fs";
+      const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "notefig-fs";
       const request = indexedDB.open(dbName, 1);
 
       return new Promise<void>((resolve, reject) => {
@@ -502,7 +502,7 @@ export async function simulateExternalFileDeletion(
   filePath: string,
 ) {
   await page.evaluate(async (path) => {
-    const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "metrists-fs";
+    const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "notefig-fs";
     const request = indexedDB.open(dbName, 1);
 
     return new Promise<void>((resolve, reject) => {

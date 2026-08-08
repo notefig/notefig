@@ -128,7 +128,7 @@ describe("watchCrossTabPairing", () => {
     const cleanup = watchCrossTabPairing();
     window.dispatchEvent(
       new StorageEvent("storage", {
-        key: "metrists-kv:tunnel:pairing",
+        key: "notefig-kv:tunnel:pairing",
         newValue: "{}",
       }),
     );
@@ -146,7 +146,7 @@ describe("watchCrossTabPairing", () => {
     );
     window.dispatchEvent(
       new StorageEvent("storage", {
-        key: "metrists-kv:tunnel:pairing",
+        key: "notefig-kv:tunnel:pairing",
         newValue: null,
       }),
     );

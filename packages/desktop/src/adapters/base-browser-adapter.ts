@@ -297,9 +297,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     // No-op in browser
   }
 
-  // KEEP: localStorage keys under this prefix already exist in users'
-  // browsers; renaming would orphan their settings and pairing state.
-  private readonly KV_PREFIX = "metrists-kv:";
+  private readonly KV_PREFIX = "notefig-kv:";
 
   private buildKvKey(namespace: string, key: string): string {
     return `${this.KV_PREFIX}${namespace}:${key}`;

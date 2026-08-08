@@ -146,8 +146,8 @@ export function disconnectTunnel(): void {
  */
 export function watchCrossTabPairing(): () => void {
   if (typeof window === "undefined") return () => undefined;
-  // KEEP the metrists-kv: prefix (see base-browser-adapter KV_PREFIX).
-  const KEY = `metrists-kv:${TUNNEL_KV_NAMESPACE}:${TUNNEL_PAIRING_KEY}`;
+  // Must match base-browser-adapter's KV_PREFIX key layout.
+  const KEY = `notefig-kv:${TUNNEL_KV_NAMESPACE}:${TUNNEL_PAIRING_KEY}`;
   const onStorage = (event: StorageEvent) => {
     if (event.key !== KEY || !event.newValue) return;
     if (tunnelConnection.getState().status === "disconnected") {

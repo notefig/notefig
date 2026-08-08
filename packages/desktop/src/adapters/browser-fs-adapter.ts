@@ -48,7 +48,7 @@ function isAutomatedBrowser(): boolean {
 
 function supportsFsAccess(): boolean {
   // Allow tests to force the pure IndexedDB adapter (no File System Access API needed)
-  if (typeof window !== "undefined" && (window as any).__METRISTS_FORCE_INDEXEDDB__) {
+  if (typeof window !== "undefined" && (window as any).__NOTEFIG_FORCE_INDEXEDDB__) {
     return false;
   }
   return typeof window !== "undefined" && "showDirectoryPicker" in window;
@@ -74,7 +74,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     return new Promise((resolve, reject) => {
       // KEEP: renaming the handles DB would drop users' persisted
       // directory permissions.
-      const request = indexedDB.open("metrists-fs-handles", HANDLE_DB_VERSION);
+      const request = indexedDB.open("notefig-fs-handles", HANDLE_DB_VERSION);
 
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {

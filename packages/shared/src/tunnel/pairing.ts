@@ -1,7 +1,7 @@
 /**
  * Pairing-code key derivation. The CLI worker generates a random 32-byte
  * secret and shows it as a pairing code (base58 secret + tunnel URL, QR, or
- * metrists://pair deep link). Both peers derive the same frame key; the
+ * notefig://pair deep link). Both peers derive the same frame key; the
  * tunnel provider only ever carries ciphertext.
  *
  * Trust model (Happy Coder precedent): the pairing code IS the out-of-band
@@ -145,8 +145,6 @@ export function pairingLink(
 ): { web: string; deepLink: string } {
   return {
     web: `${appBaseUrl.replace(/\/$/, "")}/pair#${code}`,
-    // KEEP the metrists:// scheme: documented public contract
-    // (docs/architecture/agent-harness-phases.md) printed by shipped CLIs.
-    deepLink: `metrists://pair#${code}`,
+    deepLink: `notefig://pair#${code}`,
   };
 }

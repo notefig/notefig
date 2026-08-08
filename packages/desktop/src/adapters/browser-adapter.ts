@@ -27,8 +27,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     if (testOverride) {
       return testOverride;
     }
-    // KEEP: IndexedDB database name — user documents persist under it.
-    return "metrists-fs";
+    return "notefig-fs";
   }
 
   private async ensureDB(): Promise<IDBDatabase> {

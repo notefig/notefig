@@ -48,7 +48,7 @@ async function seedWorkspace(page: Page) {
   await page.addInitScript(() => {
     (
       window as unknown as Record<string, unknown>
-    ).__METRISTS_FORCE_INDEXEDDB__ = true;
+    ).__NOTEFIG_FORCE_INDEXEDDB__ = true;
   });
 
   // Must be on the app origin before touching IndexedDB.
@@ -57,7 +57,7 @@ async function seedWorkspace(page: Page) {
   await page.evaluate(
     async ({ files }) => {
       const db: IDBDatabase = await new Promise((resolve, reject) => {
-        const req = indexedDB.open("metrists-fs", 1);
+        const req = indexedDB.open("notefig-fs", 1);
         req.onerror = () => reject(req.error);
         req.onsuccess = () => resolve(req.result);
         req.onupgradeneeded = (event) => {
@@ -553,7 +553,7 @@ test.describe("image drop and paste", () => {
       .poll(async () =>
         page.evaluate(async () => {
           const db: IDBDatabase = await new Promise((resolve, reject) => {
-            const req = indexedDB.open("metrists-fs", 1);
+            const req = indexedDB.open("notefig-fs", 1);
             req.onerror = () => reject(req.error);
             req.onsuccess = () => resolve(req.result);
           });

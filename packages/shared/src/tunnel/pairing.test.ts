@@ -51,7 +51,7 @@ describe("pairing codes", () => {
   it("builds fragment-carried links", () => {
     const links = pairingLink("CODE");
     expect(links.web).toBe("https://app.notefig.com/pair#CODE");
-    expect(links.deepLink).toBe("metrists://pair#CODE");
+    expect(links.deepLink).toBe("notefig://pair#CODE");
   });
 
   it("honors an app-base-url override (and trims a trailing slash)", () => {

@@ -24,7 +24,7 @@ async function openHarness(page: Page, options: HarnessOptions = {}) {
     ({ options, BASE, DOC }) => {
       (
         window as unknown as Record<string, unknown>
-      ).__METRISTS_FORCE_INDEXEDDB__ = true;
+      ).__NOTEFIG_FORCE_INDEXEDDB__ = true;
       (window as unknown as Record<string, unknown>).__EDITOR_HARNESS__ = {
         basePath: BASE,
         filePath: DOC,

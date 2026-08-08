@@ -44,7 +44,7 @@ async function seedWorkspace(
   await page.addInitScript(() => {
     (
       window as unknown as Record<string, unknown>
-    ).__METRISTS_FORCE_INDEXEDDB__ = true;
+    ).__NOTEFIG_FORCE_INDEXEDDB__ = true;
   });
 
   await page.goto("/welcome");
@@ -52,7 +52,7 @@ async function seedWorkspace(
   await page.evaluate(
     async ({ files }) => {
       const db: IDBDatabase = await new Promise((resolve, reject) => {
-        const req = indexedDB.open("metrists-fs", 1);
+        const req = indexedDB.open("notefig-fs", 1);
         req.onerror = () => reject(req.error);
         req.onsuccess = () => resolve(req.result);
         req.onupgradeneeded = (event) => {

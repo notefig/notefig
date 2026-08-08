@@ -520,7 +520,7 @@ test.describe("Notefig E2E Comprehensive Tests", () => {
         const files = await page.evaluate(() => {
           return new Promise<Array<{ path: string }>>((resolve) => {
             const dbName =
-              (window as any).__VITE_INDEXEDDB_NAME__ || "metrists-fs";
+              (window as any).__VITE_INDEXEDDB_NAME__ || "notefig-fs";
             const request = indexedDB.open(dbName, 1);
             request.onsuccess = () => {
               const db = request.result;
