@@ -183,7 +183,7 @@ export const agentTasksCollection = createCollection(
     queryKey: ["agent-tasks"],
     queryClient: agentTasksQueryClient,
     queryFn: async () => {
-      const raw = await platformAdapter.getAllKv<unknown>(AGENT_TASKS_NAMESPACE);
+      const raw = await platformAdapter.kv.getAllKv<unknown>(AGENT_TASKS_NAMESPACE);
       const rows: AgentTaskRow[] = [];
       for (const stored of parsePersistedAgentTasks(raw)) {
         const task = getRegisteredTask(stored.taskId);
@@ -214,7 +214,7 @@ export const agentTasksCollection = createCollection(
     onInsert: async ({ transaction }) => {
       for (const m of transaction.mutations) {
         try {
-          await platformAdapter.setKv(
+          await platformAdapter.kv.setKv(
             AGENT_TASKS_NAMESPACE,
             m.modified.taskId,
             persistableAgentTaskRow(m.modified),
@@ -227,7 +227,7 @@ export const agentTasksCollection = createCollection(
     onUpdate: async ({ transaction }) => {
       for (const m of transaction.mutations) {
         try {
-          await platformAdapter.setKv(
+          await platformAdapter.kv.setKv(
             AGENT_TASKS_NAMESPACE,
             m.modified.taskId,
             persistableAgentTaskRow(m.modified),
@@ -240,7 +240,7 @@ export const agentTasksCollection = createCollection(
     onDelete: async ({ transaction }) => {
       for (const m of transaction.mutations) {
         try {
-          await platformAdapter.deleteKv(AGENT_TASKS_NAMESPACE, String(m.key));
+          await platformAdapter.kv.deleteKv(AGENT_TASKS_NAMESPACE, String(m.key));
         } catch (error) {
           console.warn("[agent-tasks] delete failed", String(m.key), error);
         }

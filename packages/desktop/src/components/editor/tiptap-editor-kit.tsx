@@ -14,7 +14,7 @@ import {
 
 /**
  * Rendering uses a React node view that resolves local paths through
- * useImageUrl / platformAdapter.resolveAssetUrl (the same async mechanism
+ * useImageUrl / platformAdapter.fs.resolveAssetUrl (the same async mechanism
  * behind ImageViewer). The node attrs always store the canonical markdown
  * path — serialization is unaffected. workspaceRoot is passed per-editor
  * from editor-store.ts so resolution works regardless of the doc's directory.

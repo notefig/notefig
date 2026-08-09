@@ -308,7 +308,7 @@ export class AgentTask {
       // construct-then-start pattern as the ACP transport below:
       // createMcpEndpoint is a dumb sync constructor, we call start()
       // ourselves, and mcpServer only exists on the instance afterward.
-      const mcpEndpoint = platformAdapter.createMcpEndpoint({ taskId: this.taskId });
+      const mcpEndpoint = platformAdapter.proc.createMcpEndpoint({ taskId: this.taskId });
       this.mcpEndpoint = mcpEndpoint;
       await mcpEndpoint.start();
       this.unsubscribers.push(
@@ -522,7 +522,7 @@ export class AgentTask {
         },
       },
     };
-    const result = await platformAdapter.writeFiles([
+    const result = await platformAdapter.fs.writeFiles([
       { path: configPath, content: JSON.stringify(config, null, 2) },
     ]);
     if (result.failed.length > 0) {
@@ -724,7 +724,7 @@ export class AgentTask {
       // A turn that reached the model clears any auth block and marks this
       // harness signed in on this machine (the only reliable signal — there
       // is no ahead-of-time probe, per the auth spike). Written through the
-      // KV collection (not platformAdapter.setKv directly) so the harness
+      // KV collection (not platformAdapter.kv.setKv directly) so the harness
       // picker's indicator updates live.
       this.clearAuthBlock();
       if (!this.signedInMarked) {
@@ -1175,7 +1175,7 @@ export class AgentTask {
     await Promise.all([this.transport?.close(), this.mcpEndpoint?.close()]);
     if (this.opencodeConfigWritten) {
       // Best-effort: a stale per-task config is inert (nothing points at it).
-      void platformAdapter.deleteFiles([this.opencodeConfigPath()]).catch(() => {});
+      void platformAdapter.fs.deleteFiles([this.opencodeConfigPath()]).catch(() => {});
     }
   }
 
@@ -1365,7 +1365,7 @@ export function startAgentTask(
 /** The one place a task's spawn spec meets the platform transport. */
 function transportFactory(task: AgentTask) {
   return ({ extraEnv }: { extraEnv: Record<string, string> }) =>
-    platformAdapter.createAgentTransport({
+    platformAdapter.proc.createAgentTransport({
       taskId: task.taskId,
       harness: task.harness,
       workspacePath: task.workspacePath,

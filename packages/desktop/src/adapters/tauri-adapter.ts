@@ -1,7 +1,13 @@
 import type {
+  FileSystemSurface,
+  FsChangeListener,
   IPlatformAdapter,
+  KvSurface,
+  PlatformEvent,
   PlatformEventListener,
+  PlatformUiSurface,
   PlatformUpdater,
+  ProcessSurface,
   Result,
   BatchResult,
   FileSystemError,
@@ -20,9 +26,11 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-import type { GitStorageHost } from "@notefig/git";
 import type { HarnessDefinition } from "@notefig/shared/agent";
-import type { AgentTransport, McpEndpoint } from "@/agent/agent-transport.interface";
+import type {
+  AgentTransport,
+  McpEndpoint,
+} from "@/agent/agent-transport.interface";
 import { TauriStdioTransport } from "@/agent/tauri-stdio-transport";
 import { TauriMcpTransport } from "@/agent/tauri-mcp-transport";
 
@@ -38,7 +46,11 @@ function classifyInvokeError(path: string, error: unknown): FileSystemError {
   const message = error instanceof Error ? error.message : String(error);
   const isPermission =
     /permission denied|os error 1\b|not allowed|forbidden|scope/i.test(message);
-  return new FsError(isPermission ? "permission_denied" : "io_error", path, message);
+  return new FsError(
+    isPermission ? "permission_denied" : "io_error",
+    path,
+    message,
+  );
 }
 
 /**
@@ -57,13 +69,69 @@ function ignoreArgs(ignore?: IgnoreRulesOption): {
 }
 
 export class TauriPlatformAdapter implements IPlatformAdapter {
-  private eventListeners: Set<PlatformEventListener> = new Set();
+  // Two listener registries, one native subscription. Splitting the bus
+  // across the fs and ui surfaces must not change *when* Tauri's `listen()`
+  // calls happen, so both registries share one refcount: the native
+  // subscriptions are set up when the first listener of either kind arrives
+  // and torn down when the last one leaves, exactly as the single bus did.
+  private uiListeners: Set<PlatformEventListener> = new Set();
+  private fsListeners: Set<FsChangeListener> = new Set();
   private unlistenFns: Promise<UnlistenFn>[] = [];
   private kvStore = new LazyStore("kv.json");
-  private gitLocks = new Set<string>();
-  private updater: PlatformUpdater | null = null;
 
-  async pickDirectory(title: string): Promise<string | null> {
+  readonly fs: FileSystemSurface = {
+    requestWorkspaceAccess: this.requestWorkspaceAccess.bind(this),
+    readDirectory: this.readDirectory.bind(this),
+    createDirectories: this.createDirectories.bind(this),
+    deleteDirectories: this.deleteDirectories.bind(this),
+    moveDirectory: this.moveDirectory.bind(this),
+    readFiles: this.readFiles.bind(this),
+    readBinaryFiles: this.readBinaryFiles.bind(this),
+    writeFiles: this.writeFiles.bind(this),
+    createFiles: this.createFiles.bind(this),
+    deleteFiles: this.deleteFiles.bind(this),
+    moveFile: this.moveFile.bind(this),
+    copyFile: this.copyFile.bind(this),
+    writeBinaryFiles: this.writeBinaryFiles.bind(this),
+    resolveAssetUrl: this.resolveAssetUrl.bind(this),
+    exists: this.exists.bind(this),
+    getMetadata: this.getMetadata.bind(this),
+    startWatchingMetadata: this.startWatchingMetadata.bind(this),
+    startWatchingContent: this.startWatchingContent.bind(this),
+    stopWatching: this.stopWatching.bind(this),
+    onFsEvent: this.onFsEvent.bind(this),
+    searchContent: this.searchContent.bind(this),
+  };
+
+  readonly proc: ProcessSurface = {
+    createAgentTransport: this.createAgentTransport.bind(this),
+    createMcpEndpoint: this.createMcpEndpoint.bind(this),
+    runShellCommand: this.runShellCommand.bind(this),
+  };
+
+  readonly kv: KvSurface = {
+    getKv: this.getKv.bind(this),
+    setKv: this.setKv.bind(this),
+    deleteKv: this.deleteKv.bind(this),
+    getAllKv: this.getAllKv.bind(this),
+  };
+
+  readonly ui: PlatformUiSurface = {
+    pickDirectory: this.pickDirectory.bind(this),
+    promptText: this.promptText.bind(this),
+    openExternal: this.openExternal.bind(this),
+    toggleFullscreen: this.toggleFullscreen.bind(this),
+    addEventListener: this.addEventListener.bind(this),
+    removeEventListener: this.removeEventListener.bind(this),
+  };
+
+  // Built once so `check()` and `apply()` share the `pendingUpdate` closure —
+  // the same instance the old `getUpdater()` memoized. Construction is a
+  // plain object literal (the plugin imports are inside the methods), so
+  // building it eagerly does no work at boot.
+  readonly updates: PlatformUpdater = this.createUpdater();
+
+  private async pickDirectory(title: string): Promise<string | null> {
     const result = await open({
       title: title,
       directory: true,
@@ -73,19 +141,21 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     return Array.isArray(result) ? result[0] : result;
   }
 
-  async requestWorkspaceAccess(_workspacePath: string): Promise<boolean> {
+  private async requestWorkspaceAccess(
+    _workspacePath: string,
+  ): Promise<boolean> {
     // Desktop has no permission prompt to trigger — the user flips the OS
     // setting (macOS Files and Folders) and retries.
     return true;
   }
 
-  async promptText(options: TextPromptOptions): Promise<string | null> {
+  private async promptText(options: TextPromptOptions): Promise<string | null> {
     // The Tauri dialog plugin has no text-input dialog, and window.prompt is
     // a no-op inside the webview — use the in-app dialog bridge.
     return requestTextPrompt(options);
   }
 
-  openExternal(url: string): Promise<void> {
+  private openExternal(url: string): Promise<void> {
     // x-apple.systempreferences deep-links into macOS System Settings
     // (e.g. Privacy & Security → Files and Folders for fs re-grants).
     const allowed = /^(https?|mailto):|^x-apple\.systempreferences:/i;
@@ -95,7 +165,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     return Promise.resolve();
   }
 
-  async readDirectory(
+  private async readDirectory(
     path: string,
     options?: {
       recursive?: boolean;
@@ -129,7 +199,9 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  async createDirectories(paths: string[]): Promise<BatchResult<string>> {
+  private async createDirectories(
+    paths: string[],
+  ): Promise<BatchResult<string>> {
     try {
       const result = await invoke<BatchResult<string>>("create_directories", {
         paths,
@@ -143,7 +215,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  async deleteDirectories(
+  private async deleteDirectories(
     paths: string[],
     options?: { recursive?: boolean },
   ): Promise<BatchResult<string>> {
@@ -161,7 +233,10 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  async moveDirectory(oldPath: string, newPath: string): Promise<Result<void>> {
+  private async moveDirectory(
+    oldPath: string,
+    newPath: string,
+  ): Promise<Result<void>> {
     try {
       const result = await invoke<{ ok: boolean; error?: FileSystemError }>(
         "move_directory",
@@ -178,7 +253,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  async readFiles(
+  private async readFiles(
     paths: string[],
   ): Promise<BatchResult<{ path: string; content: string }>> {
     try {
@@ -194,7 +269,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  async readBinaryFiles(
+  private async readBinaryFiles(
     paths: string[],
   ): Promise<BatchResult<{ path: string; data: Uint8Array }>> {
     try {
@@ -216,7 +291,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  async writeFiles(
+  private async writeFiles(
     files: { path: string; content: string }[],
   ): Promise<BatchResult<string>> {
     try {
@@ -232,7 +307,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  async createFiles(paths: string[]): Promise<BatchResult<string>> {
+  private async createFiles(paths: string[]): Promise<BatchResult<string>> {
     try {
       const result = await invoke<BatchResult<string>>("create_files", {
         paths,
@@ -246,7 +321,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  async deleteFiles(paths: string[]): Promise<BatchResult<string>> {
+  private async deleteFiles(paths: string[]): Promise<BatchResult<string>> {
     try {
       const result = await invoke<BatchResult<string>>("delete_files", {
         paths,
@@ -260,7 +335,10 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  async moveFile(oldPath: string, newPath: string): Promise<Result<void>> {
+  private async moveFile(
+    oldPath: string,
+    newPath: string,
+  ): Promise<Result<void>> {
     try {
       const result = await invoke<{ ok: boolean; error?: FileSystemError }>(
         "move_file",
@@ -277,7 +355,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  async copyFile(from: string, to: string): Promise<Result<void>> {
+  private async copyFile(from: string, to: string): Promise<Result<void>> {
     try {
       const result = await invoke<{ ok: boolean; error?: FileSystemError }>(
         "copy_file",
@@ -294,7 +372,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  async writeBinaryFiles(
+  private async writeBinaryFiles(
     files: { path: string; data: Uint8Array }[],
   ): Promise<BatchResult<string>> {
     try {
@@ -313,7 +391,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  async resolveAssetUrl(
+  private async resolveAssetUrl(
     relativePath: string,
     workspacePath: string,
   ): Promise<string> {
@@ -323,7 +401,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     return convertFileSrc(absolutePath);
   }
 
-  async exists(
+  private async exists(
     paths: string[],
   ): Promise<{ path: string; exists: boolean; type?: "file" | "directory" }[]> {
     try {
@@ -336,7 +414,9 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  async getMetadata(paths: string[]): Promise<BatchResult<FileSystemMetadata>> {
+  private async getMetadata(
+    paths: string[],
+  ): Promise<BatchResult<FileSystemMetadata>> {
     try {
       const result = await invoke<BatchResult<FileSystemMetadata>>(
         "get_metadata",
@@ -351,7 +431,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  async startWatchingMetadata(
+  private async startWatchingMetadata(
     paths: string[],
     watchId: string,
     options?: { ignore?: IgnoreRulesOption },
@@ -368,7 +448,10 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  async startWatchingContent(paths: string[], watchId: string): Promise<void> {
+  private async startWatchingContent(
+    paths: string[],
+    watchId: string,
+  ): Promise<void> {
     try {
       await invoke("start_watching_content", { paths, watchId });
     } catch (error) {
@@ -377,7 +460,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  async stopWatching(watchId: string): Promise<void> {
+  private async stopWatching(watchId: string): Promise<void> {
     try {
       await invoke("stop_watching", { watchId });
     } catch (error) {
@@ -386,10 +469,15 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
-  addEventListener(callback: PlatformEventListener): () => void {
-    this.eventListeners.add(callback);
+  /** Total across both registries — drives the native subscribe/unsubscribe. */
+  private listenerCount(): number {
+    return this.uiListeners.size + this.fsListeners.size;
+  }
 
-    if (this.eventListeners.size === 1) {
+  private addEventListener(callback: PlatformEventListener): () => void {
+    this.uiListeners.add(callback);
+
+    if (this.listenerCount() === 1) {
       this.setupListeners();
     }
 
@@ -398,63 +486,75 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     };
   }
 
-  removeEventListener(callback: PlatformEventListener): void {
-    this.eventListeners.delete(callback);
+  private removeEventListener(callback: PlatformEventListener): void {
+    this.uiListeners.delete(callback);
 
-    if (this.eventListeners.size === 0) {
+    if (this.listenerCount() === 0) {
       this.cleanupListeners();
     }
+  }
+
+  private onFsEvent(listener: FsChangeListener): () => void {
+    this.fsListeners.add(listener);
+
+    if (this.listenerCount() === 1) {
+      this.setupListeners();
+    }
+
+    return () => {
+      this.fsListeners.delete(listener);
+
+      if (this.listenerCount() === 0) {
+        this.cleanupListeners();
+      }
+    };
+  }
+
+  private emitUi(event: PlatformEvent): void {
+    this.uiListeners.forEach((callback) => callback(event));
   }
 
   private setupListeners(): void {
     const themeUnlisten = listen("theme-changed", (event) => {
       const theme = event.payload as any;
-      this.eventListeners.forEach((callback) => {
-        callback({ type: "theme-changed", payload: theme });
-      });
+      this.emitUi({ type: "theme-changed", payload: theme });
     });
     this.unlistenFns.push(themeUnlisten);
 
     const folderUnlisten = listen("folder-selected", (event) => {
       const folderPath = event.payload as string;
-      this.eventListeners.forEach((callback) => {
-        callback({ type: "folder-selected", payload: folderPath });
-      });
+      this.emitUi({ type: "folder-selected", payload: folderPath });
     });
     this.unlistenFns.push(folderUnlisten);
 
     const metadataUnlisten = listen("fs-metadata-changed", (event) => {
       const payload = event.payload as MetadataChangeEvent;
-      this.eventListeners.forEach((callback) => {
-        callback({ type: "fs-metadata-changed", payload });
+      this.fsListeners.forEach((listener) => {
+        listener({ type: "fs-metadata-changed", payload });
       });
     });
     this.unlistenFns.push(metadataUnlisten);
 
     const contentUnlisten = listen("fs-content-changed", (event) => {
       const payload = event.payload as ContentChangeEvent;
-      this.eventListeners.forEach((callback) => {
-        callback({ type: "fs-content-changed", payload });
+      this.fsListeners.forEach((listener) => {
+        listener({ type: "fs-content-changed", payload });
       });
     });
     this.unlistenFns.push(contentUnlisten);
 
     const zoomUnlisten = listen("zoom-changed", (event) => {
       const zoom = event.payload as number;
-      this.eventListeners.forEach((callback) => {
-        callback({ type: "zoom-changed", payload: zoom });
-      });
+      this.emitUi({ type: "zoom-changed", payload: zoom });
     });
     this.unlistenFns.push(zoomUnlisten);
 
     getCurrentWebview()
       .onDragDropEvent((event) => {
         if (event.payload.type === "drop") {
-          this.eventListeners.forEach((callback) => {
-            callback({
-              type: "file-dropped",
-              payload: (event.payload as any as { paths: string[] }).paths,
-            });
+          this.emitUi({
+            type: "file-dropped",
+            payload: (event.payload as any as { paths: string[] }).paths,
           });
         }
       })
@@ -465,23 +565,30 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     return `${namespace}:${key}`;
   }
 
-  async getKv<T>(namespace: string, key: string): Promise<T | undefined> {
+  private async getKv<T>(
+    namespace: string,
+    key: string,
+  ): Promise<T | undefined> {
     const fullKey = this.buildKvKey(namespace, key);
     const value = await this.kvStore.get<T>(fullKey);
     return value ?? undefined;
   }
 
-  async setKv<T>(namespace: string, key: string, value: T): Promise<void> {
+  private async setKv<T>(
+    namespace: string,
+    key: string,
+    value: T,
+  ): Promise<void> {
     const fullKey = this.buildKvKey(namespace, key);
     await this.kvStore.set(fullKey, value);
   }
 
-  async deleteKv(namespace: string, key: string): Promise<void> {
+  private async deleteKv(namespace: string, key: string): Promise<void> {
     const fullKey = this.buildKvKey(namespace, key);
     await this.kvStore.delete(fullKey);
   }
 
-  async getAllKv<T>(namespace: string): Promise<Record<string, T>> {
+  private async getAllKv<T>(namespace: string): Promise<Record<string, T>> {
     const allEntries = await this.kvStore.entries<T>();
     const prefix = `${namespace}:`;
     const result: Record<string, T> = {};
@@ -495,13 +602,13 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     return result;
   }
 
-  async toggleFullscreen(): Promise<void> {
+  private async toggleFullscreen(): Promise<void> {
     const window = getCurrentWindow();
     const isFullscreen = await window.isFullscreen();
     await window.setFullscreen(!isFullscreen);
   }
 
-  async searchContent(
+  private async searchContent(
     directory: string,
     options: SearchOptions,
   ): Promise<SearchMatch[]> {
@@ -517,167 +624,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     });
   }
 
-  getGitStorageHost(workspacePath: string): GitStorageHost {
-    const toEpochMs = (value: Date | number): number => {
-      if (value instanceof Date) {
-        return value.getTime();
-      }
-      return value;
-    };
-
-    const requireSuccess = <T>(
-      path: string,
-      result: BatchResult<T>,
-      errorKind: "read" | "write",
-    ): T => {
-      if (result.succeeded.length > 0) {
-        return result.succeeded[0];
-      }
-
-      const failed = result.failed[0];
-      const reason = failed?.message ?? "Unknown error";
-      throw new Error(`Git host ${errorKind} failed for '${path}': ${reason}`);
-    };
-
-    const host: GitStorageHost = {
-      readFile: async (path: string): Promise<Uint8Array> => {
-        const result = await this.readBinaryFiles([path]);
-        const entry = requireSuccess(path, result, "read");
-        return entry.data;
-      },
-
-      writeFileAtomic: async (
-        path: string,
-        data: Uint8Array,
-      ): Promise<void> => {
-        const result = await this.writeBinaryFiles([{ path, data }]);
-        requireSuccess(path, result, "write");
-      },
-
-      renameAtomic: async (from: string, to: string): Promise<void> => {
-        const result = await this.moveFile(from, to);
-        if (!result.ok) {
-          throw new Error(
-            `Git host rename failed for '${from}' -> '${to}': ${result.error.message}`,
-          );
-        }
-      },
-
-      deleteFile: async (path: string): Promise<void> => {
-        const result = await this.deleteFiles([path]);
-        requireSuccess(path, result, "write");
-      },
-
-      stat: async (path: string) => {
-        const exists = await this.exists([path]);
-        const entry = exists[0];
-        if (!entry?.exists) {
-          return {
-            exists: false as const,
-            isFile: false as const,
-            isDir: false as const,
-          };
-        }
-
-        const metadataResult = await this.getMetadata([path]);
-        const metadata = requireSuccess(path, metadataResult, "read");
-        const isDir = metadata.type === "directory";
-
-        return {
-          exists: true as const,
-          isFile: !isDir,
-          isDir,
-          size: metadata.size,
-          mode: isDir ? 0o040755 : 0o100644,
-          mtimeMs: toEpochMs(metadata.modifiedAt),
-        };
-      },
-
-      lstat: async (path: string) => {
-        const info = await host.stat(path);
-        if (!info.exists) {
-          return {
-            exists: false as const,
-            isFile: false as const,
-            isDir: false as const,
-            isSymbolicLink: false as const,
-          };
-        }
-
-        return {
-          ...info,
-          isSymbolicLink: false,
-        };
-      },
-
-      readDir: async (path: string) => {
-        const result = await this.readDirectory(path, {
-          recursive: false,
-          includeFiles: true,
-          includeDirectories: true,
-          includeHidden: true,
-        });
-
-        if (!result.ok) {
-          throw new Error(
-            `Git host readdir failed for '${path}': ${result.error.message}`,
-          );
-        }
-
-        const childExists = await this.exists(result.value);
-        return childExists
-          .filter((entry) => entry.exists)
-          .map((entry) => ({
-            name: entry.path.split("/").filter(Boolean).pop() ?? entry.path,
-            isFile: entry.type === "file",
-            isDir: entry.type === "directory",
-            isSymbolicLink: false,
-          }));
-      },
-
-      createDir: async (path: string): Promise<void> => {
-        const result = await this.createDirectories([path]);
-        requireSuccess(path, result, "write");
-      },
-
-      removeDir: async (path: string): Promise<void> => {
-        const result = await this.deleteDirectories([path], {
-          recursive: false,
-        });
-        requireSuccess(path, result, "write");
-      },
-
-      readLink: async () => {
-        throw new Error("Git host readLink is not supported on this adapter.");
-      },
-
-      createSymlink: async () => {
-        throw new Error(
-          "Git host createSymlink is not supported on this adapter.",
-        );
-      },
-
-      chmod: async () => {
-        throw new Error("Git host chmod is not supported on this adapter.");
-      },
-
-      lock: async (name: string): Promise<void> => {
-        const key = `${workspacePath}::${name}`;
-        if (this.gitLocks.has(key)) {
-          throw new Error(`Git lock '${name}' is already held.`);
-        }
-        this.gitLocks.add(key);
-      },
-
-      unlock: async (name: string): Promise<void> => {
-        this.gitLocks.delete(`${workspacePath}::${name}`);
-      },
-    };
-
-    return host;
-  }
-
-  createAgentTransport(spec: {
+  private createAgentTransport(spec: {
     taskId: string;
     harness: HarnessDefinition;
     workspacePath: string;
@@ -696,11 +643,11 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     });
   }
 
-  createMcpEndpoint(spec: { taskId: string }): McpEndpoint {
+  private createMcpEndpoint(spec: { taskId: string }): McpEndpoint {
     return new TauriMcpTransport(spec.taskId);
   }
 
-  async runShellCommand(
+  private async runShellCommand(
     script: string,
   ): Promise<{ stdout: string; exitCode: number }> {
     const result = await invoke<
@@ -710,19 +657,18 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     if (!result.ok) {
       throw new Error(result.error.message);
     }
-    return { stdout: result.value.stdout, exitCode: result.value.exitCode ?? -1 };
+    return {
+      stdout: result.value.stdout,
+      exitCode: result.value.exitCode ?? -1,
+    };
   }
 
-  getUpdater(): PlatformUpdater {
-    if (this.updater) {
-      return this.updater;
-    }
-
+  private createUpdater(): PlatformUpdater {
     let pendingUpdate: Awaited<
       ReturnType<Awaited<typeof import("@tauri-apps/plugin-updater")>["check"]>
     > = null;
 
-    this.updater = {
+    return {
       check: async () => {
         try {
           const { check } = await import("@tauri-apps/plugin-updater");
@@ -810,8 +756,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
         }
       },
     };
-
-    return this.updater;
   }
 
   private cleanupListeners(): void {

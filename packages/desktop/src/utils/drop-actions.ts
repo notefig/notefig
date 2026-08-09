@@ -86,7 +86,7 @@ async function moveImageAsset(
   if (!editor) {
     // Without the live document we can't rewrite the reference, so copy
     // instead of move — the original path keeps working.
-    const result = await platformAdapter.copyFile(
+    const result = await platformAdapter.fs.copyFile(
       payload.absolutePath,
       newPath,
     );
@@ -103,7 +103,7 @@ async function moveImageAsset(
     );
   } else {
     // Asset exists on disk but isn't tracked in collections yet.
-    const result = await platformAdapter.moveFile(
+    const result = await platformAdapter.fs.moveFile(
       payload.absolutePath,
       newPath,
     );

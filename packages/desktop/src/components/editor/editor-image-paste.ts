@@ -30,7 +30,7 @@ export async function dedupeAssetName(
 
   let candidate = name;
   for (let i = 1; ; i++) {
-    const result = await platformAdapter.exists([
+    const result = await platformAdapter.fs.exists([
       `${workspaceRoot}/assets/${candidate}`,
     ]);
     if (!result[0]?.exists) return candidate;
@@ -48,7 +48,7 @@ async function writeAssetAndInsert(
   const destPath = `${workspaceRoot}/assets/${name}`;
   const data = new Uint8Array(await file.arrayBuffer());
 
-  await platformAdapter.writeBinaryFiles([{ path: destPath, data }]);
+  await platformAdapter.fs.writeBinaryFiles([{ path: destPath, data }]);
 
   view.dispatch(
     view.state.tr.insert(

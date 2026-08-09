@@ -60,7 +60,7 @@ function ThemeToggle() {
 import { platformAdapter } from "@/adapters";
 
 function openExternalLink(url: string) {
-  platformAdapter.openExternal(url);
+  platformAdapter.ui.openExternal(url);
 }
 
 const projectButtonStyles = `

@@ -147,7 +147,7 @@ const fake = vi.hoisted(() => {
       return { ok: true as const, value: undefined };
     },
 
-    addEventListener(cb: (event: unknown) => void) {
+    onFsEvent(cb: (event: unknown) => void) {
       listeners.add(cb);
       return () => listeners.delete(cb);
     },
@@ -167,8 +167,10 @@ const fake = vi.hoisted(() => {
   return { store, adapter, listeners, hooks, reseed };
 });
 
+// One flat fake serving both surfaces it touches — the extra keys on each
+// are harmless, and keeping a single object keeps the fs state in one place.
 vi.mock("@/adapters", () => ({
-  platformAdapter: fake.adapter,
+  platformAdapter: { fs: fake.adapter, ui: fake.adapter },
 }));
 
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";

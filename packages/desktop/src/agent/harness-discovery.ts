@@ -11,7 +11,7 @@ import {
 
 /**
  * All domain knowledge for harness discovery lives here: the probe script,
- * its sentinel format, and result parsing. `platformAdapter.runShellCommand`
+ * its sentinel format, and result parsing. `platformAdapter.proc.runShellCommand`
  * is a generic "run this script locally" primitive — it never hears the
  * word "harness".
  *
@@ -81,7 +81,7 @@ export async function discoverHarnesses(
 
   let probed: { found: boolean; resolvedPath?: string }[];
   try {
-    const { stdout } = await platformAdapter.runShellCommand(
+    const { stdout } = await platformAdapter.proc.runShellCommand(
       buildProbeScript(entries),
     );
     probed = parseProbeOutput(entries.length, stdout);
@@ -121,7 +121,7 @@ export function candidateProbeEntries(
 /** Run discovery for every known harness and persist the results. Trigger
  *  sites: app startup, settings "Rescan". Read-only w.r.t. `overrides`/
  *  `custom` — discovery only ever writes the `discovery` key. Written
- *  through the KV collection (not platformAdapter.setKv directly) so
+ *  through the KV collection (not platformAdapter.kv.setKv directly) so
  *  useKv subscribers — the pickers — update live, not on next launch
  *  (same rationale as the auth mark in agent-service.ts). A failed probe
  *  (null) persists nothing: existing results stay as they were. */
@@ -156,11 +156,11 @@ export function ensureStartupHarnessDiscovery(): void {
   void (async () => {
     try {
       const [rawOverrides, rawCustom] = await Promise.all([
-        platformAdapter.getKv<unknown>(
+        platformAdapter.kv.getKv<unknown>(
           HARNESS_SETTINGS_NAMESPACE,
           HARNESS_OVERRIDES_KEY,
         ),
-        platformAdapter.getKv<unknown>(
+        platformAdapter.kv.getKv<unknown>(
           HARNESS_SETTINGS_NAMESPACE,
           HARNESS_CUSTOM_KEY,
         ),

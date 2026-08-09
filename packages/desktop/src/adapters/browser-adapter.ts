@@ -120,7 +120,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return Array.from(directories);
   }
 
-  async pickDirectory(title: string): Promise<string | null> {
+  protected async pickDirectory(title: string): Promise<string | null> {
     return new Promise((resolve) => {
       const event = new CustomEvent("mock-pick-directory", {
         detail: {
@@ -195,7 +195,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     }
   }
 
-  async readDirectory(
+  protected async readDirectory(
     path: string,
     options?: {
       recursive?: boolean;
@@ -286,11 +286,13 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     }
   }
 
-  async createDirectories(paths: string[]): Promise<BatchResult<string>> {
+  protected async createDirectories(
+    paths: string[],
+  ): Promise<BatchResult<string>> {
     return { succeeded: paths, failed: [] };
   }
 
-  async deleteDirectories(
+  protected async deleteDirectories(
     paths: string[],
     options?: { recursive?: boolean },
   ): Promise<BatchResult<string>> {
@@ -369,7 +371,10 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async moveDirectory(oldPath: string, newPath: string): Promise<Result<void>> {
+  protected async moveDirectory(
+    oldPath: string,
+    newPath: string,
+  ): Promise<Result<void>> {
     try {
       const db = await this.ensureDB();
       const normalizedOldPath = oldPath.endsWith("/") ? oldPath : oldPath + "/";
@@ -431,7 +436,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     }
   }
 
-  async readFiles(
+  protected async readFiles(
     paths: string[],
   ): Promise<BatchResult<{ path: string; content: string }>> {
     const succeeded: Array<{ path: string; content: string }> = [];
@@ -488,7 +493,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async readBinaryFiles(
+  protected async readBinaryFiles(
     paths: string[],
   ): Promise<BatchResult<{ path: string; data: Uint8Array }>> {
     const succeeded: Array<{ path: string; data: Uint8Array }> = [];
@@ -560,7 +565,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async writeFiles(
+  protected async writeFiles(
     files: { path: string; content: string }[],
   ): Promise<BatchResult<string>> {
     const succeeded: string[] = [];
@@ -628,7 +633,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async writeBinaryFiles(
+  protected async writeBinaryFiles(
     files: { path: string; data: Uint8Array }[],
   ): Promise<BatchResult<string>> {
     const succeeded: string[] = [];
@@ -699,7 +704,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async resolveAssetUrl(
+  protected async resolveAssetUrl(
     relativePath: string,
     workspacePath: string,
   ): Promise<string> {
@@ -774,7 +779,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return mimeTypes[ext] || "application/octet-stream";
   }
 
-  async deleteFiles(paths: string[]): Promise<BatchResult<string>> {
+  protected async deleteFiles(paths: string[]): Promise<BatchResult<string>> {
     const succeeded: string[] = [];
     const failed: FileSystemError[] = [];
 
@@ -824,7 +829,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async exists(
+  protected async exists(
     paths: string[],
   ): Promise<{ path: string; exists: boolean; type?: "file" | "directory" }[]> {
     const results: {
@@ -874,7 +879,9 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return results;
   }
 
-  async getMetadata(paths: string[]): Promise<BatchResult<FileSystemMetadata>> {
+  protected async getMetadata(
+    paths: string[],
+  ): Promise<BatchResult<FileSystemMetadata>> {
     const succeeded: FileSystemMetadata[] = [];
     const failed: FileSystemError[] = [];
 
@@ -951,7 +958,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async searchContent(
+  protected async searchContent(
     directory: string,
     options: SearchOptions,
   ): Promise<SearchMatch[]> {

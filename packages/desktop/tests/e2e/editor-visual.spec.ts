@@ -327,7 +327,7 @@ test.describe("task item input rule (Bug #7 UX path)", () => {
     page,
   }) => {
     // window.prompt is unavailable in the Tauri webview — the button must go
-    // through platformAdapter.promptText / TextPromptDialog on all platforms.
+    // through platformAdapter.ui.promptText / TextPromptDialog on all platforms.
     await openFixtureFile(page);
 
     // click first to establish a healthy focus state (see discovered bug

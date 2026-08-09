@@ -51,18 +51,18 @@ async function persistPairing(code: string, worker: WorkerInfo): Promise<void> {
     workspacePath: worker.workspacePath,
     pairedAt: Date.now(),
   };
-  await platformAdapter.setKv(TUNNEL_KV_NAMESPACE, TUNNEL_PAIRING_KEY, stored);
+  await platformAdapter.kv.setKv(TUNNEL_KV_NAMESPACE, TUNNEL_PAIRING_KEY, stored);
 }
 
 export async function getStoredPairing(): Promise<StoredPairing | undefined> {
-  return platformAdapter.getKv<StoredPairing>(
+  return platformAdapter.kv.getKv<StoredPairing>(
     TUNNEL_KV_NAMESPACE,
     TUNNEL_PAIRING_KEY,
   );
 }
 
 export async function forgetPairing(): Promise<void> {
-  await platformAdapter.deleteKv(TUNNEL_KV_NAMESPACE, TUNNEL_PAIRING_KEY);
+  await platformAdapter.kv.deleteKv(TUNNEL_KV_NAMESPACE, TUNNEL_PAIRING_KEY);
 }
 
 /**

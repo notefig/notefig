@@ -7,11 +7,13 @@ import { platformAdapter } from "@/adapters";
 
 vi.mock("@/adapters", () => ({
   platformAdapter: {
-    exists: vi.fn(),
+    fs: {
+      exists: vi.fn(),
+    },
   },
 }));
 
-const existsMock = vi.mocked(platformAdapter.exists);
+const existsMock = vi.mocked(platformAdapter.fs.exists);
 
 /** Make exists() report the given asset paths as taken. */
 function seedExisting(paths: string[]) {

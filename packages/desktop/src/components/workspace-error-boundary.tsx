@@ -168,7 +168,7 @@ function WorkspaceAccessError({
   };
 
   const handleRepick = async () => {
-    const picked = await platformAdapter
+    const picked = await platformAdapter.ui
       .pickDirectory(t("pickDirectory"))
       .catch(() => null);
     if (!picked) return;
@@ -182,7 +182,7 @@ function WorkspaceAccessError({
     const target = workspacePath ?? error.path;
     // Web: must call requestPermission inside this click. Desktop: no-op
     // true — the retry refetch will surface the error again if still denied.
-    const granted = await platformAdapter.requestWorkspaceAccess(target);
+    const granted = await platformAdapter.fs.requestWorkspaceAccess(target);
     if (!granted) {
       toast.error(t("fsAccessLostBodyWeb"));
       return;
@@ -209,7 +209,7 @@ function WorkspaceAccessError({
             <Button
               variant="secondary"
               onClick={() =>
-                platformAdapter.openExternal(
+                platformAdapter.ui.openExternal(
                   MACOS_FILES_AND_FOLDERS_SETTINGS_URL,
                 )
               }
@@ -224,7 +224,7 @@ function WorkspaceAccessError({
             <button
               className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
               onClick={() =>
-                platformAdapter.openExternal(CHROME_SITE_PERMISSIONS_HELP_URL)
+                platformAdapter.ui.openExternal(CHROME_SITE_PERMISSIONS_HELP_URL)
               }
             >
               {t("fsSitePermissionsHelp")}

@@ -14,13 +14,15 @@ import {
 
 vi.mock("@/adapters", () => ({
   platformAdapter: {
-    readFiles: vi.fn(),
-    writeFiles: vi.fn(),
+    fs: {
+      readFiles: vi.fn(),
+      writeFiles: vi.fn(),
+    },
   },
 }));
 
-const readMock = vi.mocked(platformAdapter.readFiles);
-const writeMock = vi.mocked(platformAdapter.writeFiles);
+const readMock = vi.mocked(platformAdapter.fs.readFiles);
+const writeMock = vi.mocked(platformAdapter.fs.writeFiles);
 
 beforeEach(() => {
   readMock.mockReset();
@@ -33,9 +35,9 @@ describe("writeWorkspaceTextFile", () => {
 
     await writeWorkspaceTextFile("/ws/a.md", "hello\n");
 
-    expect(
-      isRecentSelfWrite("/ws/a.md", calculateContentHash("hello\n")),
-    ).toBe(true);
+    expect(isRecentSelfWrite("/ws/a.md", calculateContentHash("hello\n"))).toBe(
+      true,
+    );
   });
 
   it("throws FsError on adapter failure", async () => {
@@ -88,7 +90,8 @@ describe("writeWorkspaceTextFile adoption (open editor)", () => {
     writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
     openEditor("# Doc\n");
 
-    const fence = "```notefig:question\nid: q_1234\nstatus: pending\nprompt: OK?\n```\n";
+    const fence =
+      "```notefig:question\nid: q_1234\nstatus: pending\nprompt: OK?\n```\n";
     await writeWorkspaceTextFile(path, `# Doc\n\n${fence}`);
 
     expect(liveMarkdown()).toContain("id: q_1234");

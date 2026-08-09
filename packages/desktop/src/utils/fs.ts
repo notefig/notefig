@@ -370,11 +370,11 @@ export function ensureNewFileNameHasDefaultMarkdownExtension(
 }
 
 export async function pickDirectory(title: string): Promise<string | null> {
-  return platformAdapter.pickDirectory(title);
+  return platformAdapter.ui.pickDirectory(title);
 }
 
 export async function promptText(
   options: TextPromptOptions,
 ): Promise<string | null> {
-  return platformAdapter.promptText(options);
+  return platformAdapter.ui.promptText(options);
 }
