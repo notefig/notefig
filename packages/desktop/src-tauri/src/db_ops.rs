@@ -242,6 +242,53 @@ fn resolve_db_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathB
     Ok(directory.join(DB_FILE_NAME))
 }
 
+/// Reads one numeric value out of a persisted KV collection, for the startup
+/// paths that need a setting before the webview exists (native zoom).
+///
+/// Deliberately NOT routed through `with_connection`: that would open the
+/// shared connection at boot and create `notefig.db`, breaking the lazy-open
+/// invariant for everyone who never writes a setting. This opens its own
+/// read-only handle, which fails harmlessly when the file is absent, and drops
+/// it immediately.
+///
+/// It reaches into the persistence layer's own table layout, which is the same
+/// coupling the old `kv.json` read had — the table name comes from
+/// `collection_registry` rather than being recomputed, since the JS side hashes
+/// long collection ids.
+pub fn read_persisted_number<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    collection_id: &str,
+    key: &str,
+) -> Option<f64> {
+    read_persisted_number_at(&resolve_db_path(app).ok()?, collection_id, key)
+}
+
+fn read_persisted_number_at(path: &Path, collection_id: &str, key: &str) -> Option<f64> {
+    let connection = Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .ok()?;
+
+    let table: String = connection
+        .query_row(
+            "SELECT table_name FROM collection_registry WHERE collection_id = ?1",
+            [collection_id],
+            |row| row.get(0),
+        )
+        .ok()?;
+
+    // Keys are stored encoded so string and number keys can share one column;
+    // `s:` is the string prefix.
+    connection
+        .query_row(
+            &format!("SELECT json_extract(value, '$.value') FROM \"{table}\" WHERE key = ?1"),
+            [format!("s:{key}")],
+            |row| row.get::<_, f64>(0),
+        )
+        .ok()
+}
+
 /// Runs `operation` against the connection, opening it first if needed — the
 /// lazy-open invariant: no filesystem work until a command actually arrives.
 fn with_connection<R, T>(
@@ -450,5 +497,113 @@ mod tests {
     fn deleting_a_database_that_was_never_created_succeeds() {
         let (_dir, path) = temp_db();
         delete_files_at(&path).expect("absent database is already in the desired state");
+    }
+
+    /// Mirrors the layout `@tanstack/db-sqlite-persistence-core` writes: a
+    /// `collection_registry` row naming the table, keys encoded with the `s:`
+    /// string prefix, and the row itself stored as `{key, value}` JSON. The
+    /// frontend half of this contract is pinned by `node-db.ts`'s `storedRows`.
+    fn seed_persisted_kv(path: &Path, collection_id: &str, table: &str, key: &str, value: &str) {
+        let connection = open_at(path).expect("open");
+        connection
+            .execute_batch(&format!(
+                "CREATE TABLE collection_registry (
+                   collection_id TEXT PRIMARY KEY,
+                   table_name TEXT NOT NULL UNIQUE,
+                   tombstone_table_name TEXT NOT NULL UNIQUE,
+                   schema_version INTEGER NOT NULL,
+                   updated_at INTEGER NOT NULL
+                 );
+                 CREATE TABLE \"{table}\" (
+                   key TEXT PRIMARY KEY,
+                   value TEXT NOT NULL,
+                   metadata TEXT,
+                   row_version INTEGER NOT NULL
+                 );"
+            ))
+            .expect("schema");
+        connection
+            .execute(
+                "INSERT INTO collection_registry VALUES (?1, ?2, ?3, 1, 0)",
+                rusqlite::params![collection_id, table, format!("t_{table}")],
+            )
+            .expect("registry row");
+        connection
+            .execute(
+                &format!("INSERT INTO \"{table}\" VALUES (?1, ?2, NULL, 1)"),
+                rusqlite::params![format!("s:{key}"), value],
+            )
+            .expect("kv row");
+    }
+
+    #[test]
+    fn reads_a_setting_written_by_the_persistence_layer() {
+        let (_dir, path) = temp_db();
+        seed_persisted_kv(
+            &path,
+            "kv:settings",
+            "c_settings",
+            "zoomLevel",
+            r#"{"key":"zoomLevel","value":1.25}"#,
+        );
+
+        assert_eq!(
+            read_persisted_number_at(&path, "kv:settings", "zoomLevel"),
+            Some(1.25)
+        );
+    }
+
+    /// A whole-number zoom is stored as a JSON integer, and reading it as a
+    /// float must still succeed — otherwise 100% zoom would silently not restore.
+    #[test]
+    fn reads_an_integer_valued_setting_as_a_float() {
+        let (_dir, path) = temp_db();
+        seed_persisted_kv(
+            &path,
+            "kv:settings",
+            "c_settings",
+            "zoomLevel",
+            r#"{"key":"zoomLevel","value":1}"#,
+        );
+
+        assert_eq!(
+            read_persisted_number_at(&path, "kv:settings", "zoomLevel"),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn a_missing_key_or_collection_reads_as_absent() {
+        let (_dir, path) = temp_db();
+        seed_persisted_kv(
+            &path,
+            "kv:settings",
+            "c_settings",
+            "zoomLevel",
+            r#"{"key":"zoomLevel","value":1.5}"#,
+        );
+
+        assert_eq!(
+            read_persisted_number_at(&path, "kv:settings", "theme"),
+            None
+        );
+        assert_eq!(
+            read_persisted_number_at(&path, "kv:other", "zoomLevel"),
+            None
+        );
+    }
+
+    /// The startup read must not be what creates the database — MET-123's
+    /// lazy-open invariant is that a user who never writes a setting never gets
+    /// a file. Opening read-only is what enforces it.
+    #[test]
+    fn reading_before_any_database_exists_creates_nothing() {
+        let (_dir, path) = temp_db();
+
+        assert_eq!(
+            read_persisted_number_at(&path, "kv:settings", "zoomLevel"),
+            None
+        );
+        assert!(!path.exists(), "the read created a database file");
     }
 }

@@ -1,68 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { DatabaseSync } from "node:sqlite";
 import { createCollection } from "@tanstack/react-db";
-import {
-  createTauriSQLitePersistence,
-  persistedCollectionOptions,
-} from "@tanstack/tauri-db-sqlite-persistence";
+import { persistedCollectionOptions } from "@tanstack/tauri-db-sqlite-persistence";
 import type { PersistedCollectionPersistence } from "@tanstack/db-sqlite-persistence-core";
+import { createNodeTestDb } from "@/testing/node-db";
 
 /**
  * The persistence stack, everything except the IPC hop (MET-123). Drives the
- * real `createTauriSQLitePersistence` against an in-process SQLite; the rusqlite
- * commands are covered by `db_ops.rs`'s tests and `tests/shim/db-ops.spec.ts`.
+ * real `createTauriSQLitePersistence` — via the shared `node:sqlite` test db —
+ * against an in-process SQLite; the rusqlite commands are covered by
+ * `db_ops.rs`'s tests and `tests/shim/db-ops.spec.ts`.
  */
-
-/**
- * A `TauriSQLiteDatabaseLike` over `node:sqlite`. The bound-parameter handling
- * is an assertion, not incidental: the driver rewrites `?` into `$1, $2, …`, and
- * `node:sqlite` only accepts those as *bare named* parameters — so this double
- * works at all only if the rewrite really happens.
- */
-function nodeDatabase(): {
-  path: string;
-  execute: (
-    sql: string,
-    params?: unknown[],
-  ) => Promise<{ rowsAffected: number; lastInsertId: number }>;
-  select: <T>(sql: string, params?: unknown[]) => Promise<T>;
-  close: () => Promise<boolean>;
-} {
-  const database = new DatabaseSync(":memory:");
-
-  const prepare = (sql: string, params?: unknown[]) => {
-    const statement = database.prepare(sql);
-    if (!params?.length) return { statement, bindings: undefined };
-    statement.setAllowBareNamedParameters(true);
-    const bindings: Record<string, unknown> = {};
-    params.forEach((value, index) => {
-      bindings[String(index + 1)] = value;
-    });
-    return { statement, bindings };
-  };
-
-  return {
-    path: "memory.db",
-    execute: async (sql, params) => {
-      const { statement, bindings } = prepare(sql, params);
-      const result = bindings ? statement.run(bindings) : statement.run();
-      return {
-        rowsAffected: Number(result.changes),
-        lastInsertId: Number(result.lastInsertRowid),
-      };
-    },
-    select: async <T>(sql: string, params?: unknown[]) => {
-      const { statement, bindings } = prepare(sql, params);
-      const rows = bindings ? statement.all(bindings) : statement.all();
-      // Rows come back null-prototyped; spread them so assertions compare cleanly.
-      return rows.map((row: Record<string, unknown>) => ({ ...row })) as T;
-    },
-    close: async () => {
-      database.close();
-      return true;
-    },
-  };
-}
 
 type Note = { id: string; title: string };
 
@@ -87,10 +34,7 @@ function noteCollection(
 
 describe("SQLite persistence through the official Tauri driver", () => {
   it("round-trips inserts, updates and deletes", async () => {
-    const persistence = createTauriSQLitePersistence({
-      database: nodeDatabase(),
-      schemaMismatchPolicy: "reset",
-    });
+    const persistence = createNodeTestDb().get();
     const notes = noteCollection(persistence, { id: "notes" });
     await notes.preload();
 
@@ -112,10 +56,7 @@ describe("SQLite persistence through the official Tauri driver", () => {
   it("restores rows into a second collection built on the same persistence", async () => {
     // The durability claim: the second instance never sees the inserts in
     // memory, so anything it reports came back out of SQLite.
-    const persistence = createTauriSQLitePersistence({
-      database: nodeDatabase(),
-      schemaMismatchPolicy: "reset",
-    });
+    const persistence = createNodeTestDb().get();
 
     const first = noteCollection(persistence, { id: "notes" });
     await first.preload();
@@ -137,10 +78,7 @@ describe("SQLite persistence through the official Tauri driver", () => {
   });
 
   it("keeps collections with different ids in separate tables", async () => {
-    const persistence = createTauriSQLitePersistence({
-      database: nodeDatabase(),
-      schemaMismatchPolicy: "reset",
-    });
+    const persistence = createNodeTestDb().get();
 
     const notes = noteCollection(persistence, { id: "notes" });
     const drafts = noteCollection(persistence, { id: "drafts" });
@@ -166,10 +104,7 @@ describe("SQLite persistence through the official Tauri driver", () => {
     // `reset` over the default `sync-absent-error`: there is no migration API
     // upstream, and a local-only collection that throws on open would take the
     // feature down rather than lose a cache.
-    const persistence = createTauriSQLitePersistence({
-      database: nodeDatabase(),
-      schemaMismatchPolicy: "reset",
-    });
+    const persistence = createNodeTestDb().get();
 
     const v1 = noteCollection(persistence, { id: "notes", schemaVersion: 1 });
     await v1.preload();
@@ -191,10 +126,7 @@ describe("driver transaction semantics", () => {
    * keeps itself private, so these are observed through collection writes.
    */
   it("rolls a failed write back rather than leaving a partial row behind", async () => {
-    const persistence = createTauriSQLitePersistence({
-      database: nodeDatabase(),
-      schemaMismatchPolicy: "reset",
-    });
+    const persistence = createNodeTestDb().get();
     const notes = noteCollection(persistence, { id: "notes" });
     await notes.preload();
 
@@ -216,10 +148,7 @@ describe("driver transaction semantics", () => {
   it("serializes concurrent mutation batches instead of interleaving them", async () => {
     // Bypassing the driver's queue would overlap two BEGIN IMMEDIATE blocks, and
     // SQLite would either error or lose a write.
-    const persistence = createTauriSQLitePersistence({
-      database: nodeDatabase(),
-      schemaMismatchPolicy: "reset",
-    });
+    const persistence = createNodeTestDb().get();
     const notes = noteCollection(persistence, { id: "notes" });
     await notes.preload();
 

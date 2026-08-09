@@ -1,23 +1,23 @@
 /**
- * Persistence shape for agent task rows (MET-54). The tasks collection is
- * storage-backed (agent-collections.ts: a query collection over the KV seam,
- * write-through on every mutation — the same unified-storage idiom as the
- * file collections over fs), so there is no mirror, no restore step, and no
- * sync choreography. This module owns only the pure parts: the persisted
- * schema, validate-on-read, and the boot mapping that turns a stored row
- * back into a live one.
+ * Persistence shape for agent task rows (MET-54, re-based on SQLite in
+ * MET-124). The tasks collection is a persisted local-only collection
+ * (agent-collections.ts) — SQLite *is* its source of truth, so there is no
+ * mirror, no restore step, and no sync choreography. This module owns only the
+ * pure parts: the persisted schema, validate-on-read, and the boot mapping that
+ * turns a stored row back into a live one.
  */
 import { z } from "zod";
 import type { AgentTaskRow } from "./agent-collections";
 
-export const AGENT_TASKS_NAMESPACE = "agent-tasks";
+/** The collection id, and so the SQLite table this data lands in. */
+export const AGENT_TASKS_COLLECTION_ID = "agent-tasks";
 
 /**
  * Full-row persistence: what's written is the collection row itself (plus
  * whatever runtime fields happened to be on it — tolerated on read via
- * passthrough, dropped by the boot mapping). kv.json is a plain on-disk
- * file; anything hand-edited into garbage is dropped instead of reaching
- * revival/spawn.
+ * passthrough, dropped by the boot mapping). Validate-on-read survives the move
+ * off hand-editable kv.json: a row can still predate a schema change, and a
+ * garbage row must be dropped rather than reach revival/spawn.
  */
 export const PersistedAgentTaskSchema = z
   .object({
@@ -37,15 +37,12 @@ export const PersistedAgentTaskSchema = z
 
 export type PersistedAgentTask = z.infer<typeof PersistedAgentTaskSchema>;
 
-export function parsePersistedAgentTasks(
-  raw: Record<string, unknown>,
-): PersistedAgentTask[] {
-  const rows: PersistedAgentTask[] = [];
-  for (const value of Object.values(raw)) {
-    const parsed = PersistedAgentTaskSchema.safeParse(value);
-    if (parsed.success) rows.push(parsed.data);
-  }
-  return rows;
+/** A single stored row, or null if it is not one we can trust. */
+export function parsePersistedAgentTask(
+  value: unknown,
+): PersistedAgentTask | null {
+  const parsed = PersistedAgentTaskSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 /**
@@ -67,14 +64,4 @@ export function bootAgentTaskRow(row: PersistedAgentTask): AgentTaskRow | null {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
-}
-
-/** Rows carry TanStack's enumerable `$`-prefixed virtual props (`$synced`,
- *  `$origin`, …) — strip them so kv.json stores plain data. */
-export function persistableAgentTaskRow(
-  row: AgentTaskRow,
-): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(row).filter(([key]) => !key.startsWith("$")),
-  );
 }

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("@/adapters", () => ({ platformAdapter: {} }));
+vi.mock("@/adapters", async () => ({
+  platformAdapter: {
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+  },
+}));
 
 import {
   definitionToForm,
@@ -36,7 +40,9 @@ function form(partial: Partial<HarnessFormState> = {}): HarnessFormState {
   };
 }
 
-function customEntry(partial: Partial<CustomHarnessEntry> = {}): CustomHarnessEntry {
+function customEntry(
+  partial: Partial<CustomHarnessEntry> = {},
+): CustomHarnessEntry {
   return {
     id: "custom:1",
     label: "L",
@@ -241,14 +247,19 @@ describe("deriveHarnessSettingsRows", () => {
 
   it("annotates origin and discovery per row", () => {
     const rows = deriveHarnessSettingsRows({}, [customEntry()], {
-      "custom:1": { harnessId: "custom:1", found: true, resolvedPath: "/x", probedAt: 0 },
+      "custom:1": {
+        harnessId: "custom:1",
+        found: true,
+        resolvedPath: "/x",
+        probedAt: 0,
+      },
     });
     const row = rows.find((r) => r.definition.id === "custom:1")!;
     expect(row.origin).toBe("custom");
     expect(row.discovery?.resolvedPath).toBe("/x");
-    expect(
-      rows.find((r) => r.definition.id === "claude-code")!.origin,
-    ).toBe("builtin");
+    expect(rows.find((r) => r.definition.id === "claude-code")!.origin).toBe(
+      "builtin",
+    );
   });
 
   it("defaults a not-found built-in to OFF when no explicit setting exists", () => {
@@ -290,7 +301,9 @@ describe("deriveHarnessSettingsRows", () => {
       [customEntry({ enabled: false })],
       {},
     );
-    expect(rows.find((r) => r.definition.id === "opencode")!.definition.command).toBe("ocv");
+    expect(
+      rows.find((r) => r.definition.id === "opencode")!.definition.command,
+    ).toBe("ocv");
     const custom = rows.find((r) => r.definition.id === "custom:1")!;
     expect(custom.enabled).toBe(false);
   });
@@ -318,9 +331,9 @@ describe("toggle helpers", () => {
     const pinnedOn: Record<string, HarnessOverride> = {
       "gemini-cli": { id: "gemini-cli", enabled: true },
     };
-    expect(
-      toggleOverrideEnabled(pinnedOn, "gemini-cli", false, false),
-    ).toEqual({});
+    expect(toggleOverrideEnabled(pinnedOn, "gemini-cli", false, false)).toEqual(
+      {},
+    );
     // No row + natural state = still no row.
     expect(toggleOverrideEnabled({}, "opencode", true, true)).toEqual({});
   });

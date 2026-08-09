@@ -1,5 +1,11 @@
 import "./App.css";
-import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
+import {
+  Routes,
+  Route,
+  Navigate,
+  useNavigate,
+  useLocation,
+} from "react-router-dom";
 import { Workspace } from "@/components/workspace";
 import { Welcome } from "@/components/welcome";
 import { RootRedirect } from "@/components/root-redirect";
@@ -15,6 +21,7 @@ import { useAppSettings } from "@/hooks/use-app-settings";
 import { WorkspaceErrorBoundary } from "@/components/workspace-error-boundary";
 import { EditorHarness } from "@/test-harness/editor-harness";
 import { ensureStartupHarnessDiscovery } from "@/agent/harness-discovery";
+import { ensureAgentTasksReconciled } from "@/agent/agent-collections";
 import { PairDialog } from "@/components/tunnel/pair-dialog";
 import {
   autoConnectStoredPairing,
@@ -41,6 +48,13 @@ export const App = () => {
   // double-invoke and remounts are no-ops).
   useEffect(() => {
     ensureStartupHarnessDiscovery();
+  }, []);
+
+  // Bring persisted agent tasks in line with this session: rows without a live
+  // runtime demote to "restored", rows with no session at all are dropped.
+  // Same self-guarded, fire-and-forget shape as the scan above.
+  useEffect(() => {
+    ensureAgentTasksReconciled();
   }, []);
 
   // Web only: reconnect to a previously paired worker on boot. Non-fatal —

@@ -20,29 +20,6 @@ export default defineConfig({
     trace: "off",
     screenshot: "off",
     video: "off",
-    // Pre-answer the telemetry consent dialog (both tiers declined) so it
-    // never blocks flows; local dev servers carry a real PostHog key via
-    // .env, which would otherwise arm the first-run dialog. Keys mirror
-    // the browser adapter's KV layout (notefig-kv:<namespace>:<key>).
-    storageState: {
-      cookies: [],
-      origins: [
-        {
-          origin: "http://localhost:1420",
-          localStorage: [
-            {
-              name: "notefig-kv:settings:telemetryConsentVersion",
-              value: "1",
-            },
-            {
-              name: "notefig-kv:settings:crashReportingEnabled",
-              value: "false",
-            },
-            { name: "notefig-kv:settings:analyticsEnabled", value: "false" },
-          ],
-        },
-      ],
-    },
   },
 
   projects: [
@@ -62,7 +39,11 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: "npm run dev",
+    // Keeps the first-run telemetry consent dialog from opening over the first
+    // workspace route. Note `reuseExistingServer`: a dev server you already had
+    // running does not carry this, so the guarantee holds for a server
+    // Playwright starts (as CI always does).
+    command: "VITE_TELEMETRY_DISABLED=1 npm run dev",
     url: "http://localhost:1420",
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,

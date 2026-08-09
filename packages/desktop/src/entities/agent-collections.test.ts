@@ -11,8 +11,11 @@ import {
 // keeps this focused on the collection-maintained taskId indexes that the
 // service's maintenance passes (replay purge, lingering-tool resolution)
 // depend on — not on persistence.
-vi.mock("@/adapters", () => ({
-  platformAdapter: { kv: { getAllKv: vi.fn() } },
+vi.mock("@/adapters", async () => ({
+  platformAdapter: {
+    kv: { getAllKv: vi.fn() },
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+  },
 }));
 
 import {

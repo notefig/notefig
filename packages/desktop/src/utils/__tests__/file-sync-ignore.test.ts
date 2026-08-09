@@ -10,8 +10,9 @@ import {
 // let through (browser adapters have no Rust-side filter), nothing ignored
 // may enter the metadata collection via watcher events.
 
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
     fs: {
       getMetadata: vi.fn(),
       readDirectory: vi.fn(),

@@ -16,7 +16,12 @@ const adapter = {
   readDirectory: vi.fn(),
 };
 
-vi.mock("@/adapters", () => ({ platformAdapter: { fs: adapter } }));
+vi.mock("@/adapters", async () => ({
+  platformAdapter: {
+    fs: adapter,
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+  },
+}));
 
 // Watcher self-write ledger — harmless in a unit test, but stub it so we don't
 // depend on its timers.

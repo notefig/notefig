@@ -4,11 +4,10 @@
 // Command modules + the shared handler registration live in the library crate
 // so the app binary, the mock-app dispatch tests, and the e2e shim all share
 // one command list (MET-73).
-use notefig::{agent_proc, mcp_bridge, register_handlers};
+use notefig::{agent_proc, db_ops, mcp_bridge, register_handlers};
 
 use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_store::StoreExt;
 
 fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
     let open_folder = MenuItem::with_id(app, "open_folder", "Open Folder...", true, Some("cmd+o"))?;
@@ -76,37 +75,25 @@ fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
 }
 
 /// Reads the persisted zoom level and applies native webview zoom.
-/// Zoom lives in the frontend's KV store (kv.json, key `settings:zoomLevel`);
-/// the frontend is the sole writer — Rust only reads it back at startup.
-/// Falls back to the legacy settings.json store for values persisted before
-/// the stores were unified.
+/// Zoom lives in the frontend's `settings` KV collection (`notefig.db`, key
+/// `zoomLevel`); the frontend is the sole writer — Rust only reads it back at
+/// startup, so the zoom is right on the first painted frame instead of jumping
+/// once the collection hydrates. A missing database or key simply leaves the
+/// webview at 1.0.
 fn restore_zoom_level(app: &AppHandle) {
-    match app.store("kv.json") {
-        Ok(store) => {
-            let zoom_value = store.get("settings:zoomLevel").or_else(|| {
-                app.store("settings.json")
-                    .ok()
-                    .and_then(|legacy| legacy.get("zoomLevel"))
-            });
-            if let Some(zoom_value) = zoom_value {
-                if let Some(zoom) = zoom_value.as_f64() {
-                    if let Some(webview_window) = app.get_webview_window("main") {
-                        if let Err(e) = webview_window.set_zoom(zoom) {
-                            eprintln!("Failed to restore native webview zoom: {}", e);
-                        }
-                    }
-                    let _ = app.emit("zoom-changed", zoom);
-                }
-            }
-        }
-        Err(e) => {
-            eprintln!("Failed to open kv store for zoom restore: {}", e);
+    let Some(zoom) = db_ops::read_persisted_number(app, "kv:settings", "zoomLevel") else {
+        return;
+    };
+    if let Some(webview_window) = app.get_webview_window("main") {
+        if let Err(e) = webview_window.set_zoom(zoom) {
+            eprintln!("Failed to restore native webview zoom: {}", e);
         }
     }
+    let _ = app.emit("zoom-changed", zoom);
 }
 
 /// Applies native webview zoom; persistence happens on the frontend
-/// (the `zoom-changed` handler writes kv.json).
+/// (the `zoom-changed` handler writes the `settings` collection).
 fn set_zoom_level(app: &AppHandle, zoom: f64) {
     if let Some(webview_window) = app.get_webview_window("main") {
         if let Err(e) = webview_window.set_zoom(zoom) {
@@ -120,28 +107,29 @@ fn set_zoom_level(app: &AppHandle, zoom: f64) {
 
 /// One-time app-data migration for the com.metrists.dev -> com.notefig.app
 /// identifier change: Tauri derives the app-data dir from the bundle
-/// identifier, so without this every existing install would come up with
-/// empty settings. Copies (never moves — old builds may still run and read
-/// their dir) the store and window-state files into the new dir, and only
-/// when the new dir has no kv.json yet so an already-migrated install is
-/// never overwritten.
+/// identifier, so an existing install would otherwise come up with a default
+/// window. Copies (never moves — old builds may still run and read their dir)
+/// the window-state file into the new dir, and only when the new dir has none,
+/// so an already-migrated install is never overwritten.
+///
+/// Settings are deliberately NOT carried across: MET-124 moved them off the
+/// JSON stores onto SQLite as a clean break, so `kv.json` and `settings.json`
+/// have no reader left and copying them would only leave dead files behind.
 fn migrate_app_data(old_dir: &std::path::Path, new_dir: &std::path::Path) {
-    if new_dir.join("kv.json").exists() || !old_dir.is_dir() {
+    const WINDOW_STATE: &str = ".window-state.json";
+    let source = old_dir.join(WINDOW_STATE);
+    if new_dir.join(WINDOW_STATE).exists() || !source.is_file() {
         return;
     }
     if let Err(e) = std::fs::create_dir_all(new_dir) {
         eprintln!("app-data migration: cannot create {new_dir:?}: {e}");
         return;
     }
-    for name in ["kv.json", "settings.json", ".window-state.json"] {
-        let src = old_dir.join(name);
-        if src.is_file() {
-            if let Err(e) = std::fs::copy(&src, new_dir.join(name)) {
-                eprintln!("app-data migration: copying {name} failed: {e}");
-            }
-        }
+    if let Err(e) = std::fs::copy(&source, new_dir.join(WINDOW_STATE)) {
+        eprintln!("app-data migration: copying {WINDOW_STATE} failed: {e}");
+        return;
     }
-    eprintln!("app-data migration: copied store files from {old_dir:?} to {new_dir:?}");
+    eprintln!("app-data migration: copied window state from {old_dir:?} to {new_dir:?}");
 }
 
 #[cfg(target_os = "macos")]
@@ -153,7 +141,10 @@ fn migrate_app_data_from_old_identifier() {
         return;
     };
     let support = std::path::Path::new(&home).join("Library/Application Support");
-    migrate_app_data(&support.join("com.metrists.dev"), &support.join("com.notefig.app"));
+    migrate_app_data(
+        &support.join("com.metrists.dev"),
+        &support.join("com.notefig.app"),
+    );
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -178,12 +169,11 @@ fn main() {
     }
 
     // Must run before the builder chain: tauri_plugin_window_state reads its
-    // file at plugin init and restore_zoom_level opens kv.json in setup.
+    // file at plugin init.
     migrate_app_data_from_old_identifier();
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::new().build())
-        .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
@@ -203,46 +193,45 @@ fn main() {
 
             Ok(())
         })
-        .on_menu_event(|app, event| {
-            match event.id().as_ref() {
-                "open_folder" => {
-                    use tauri_plugin_dialog::DialogExt;
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "open_folder" => {
+                use tauri_plugin_dialog::DialogExt;
 
-                    let app_handle = app.clone();
-                    app.dialog().file().set_title("Select Folder").pick_folder(
-                        move |folder_path| {
-                            if let Some(path) = folder_path {
-                                let _ = app_handle.emit("folder-selected", path.to_string());
-                            }
-                        },
-                    );
-                }
-                "quit" => {
-                    app.exit(0);
-                }
-                "theme_light" => {
-                    let _ = app.emit("theme-changed", "light");
-                }
-                "theme_dark" => {
-                    let _ = app.emit("theme-changed", "dark");
-                }
-                "theme_system" => {
-                    let _ = app.emit("theme-changed", "system");
-                }
-                "zoom_75" => {
-                    set_zoom_level(app, 0.75);
-                }
-                "zoom_100" => {
-                    set_zoom_level(app, 1.0);
-                }
-                "zoom_125" => {
-                    set_zoom_level(app, 1.25);
-                }
-                "zoom_150" => {
-                    set_zoom_level(app, 1.5);
-                }
-                _ => {}
+                let app_handle = app.clone();
+                app.dialog()
+                    .file()
+                    .set_title("Select Folder")
+                    .pick_folder(move |folder_path| {
+                        if let Some(path) = folder_path {
+                            let _ = app_handle.emit("folder-selected", path.to_string());
+                        }
+                    });
             }
+            "quit" => {
+                app.exit(0);
+            }
+            "theme_light" => {
+                let _ = app.emit("theme-changed", "light");
+            }
+            "theme_dark" => {
+                let _ = app.emit("theme-changed", "dark");
+            }
+            "theme_system" => {
+                let _ = app.emit("theme-changed", "system");
+            }
+            "zoom_75" => {
+                set_zoom_level(app, 0.75);
+            }
+            "zoom_100" => {
+                set_zoom_level(app, 1.0);
+            }
+            "zoom_125" => {
+                set_zoom_level(app, 1.25);
+            }
+            "zoom_150" => {
+                set_zoom_level(app, 1.5);
+            }
+            _ => {}
         });
 
     register_handlers(builder)
@@ -269,33 +258,51 @@ mod app_data_migration_tests {
     }
 
     #[test]
-    fn copies_store_files_when_new_dir_is_empty() {
+    fn copies_window_state_when_new_dir_is_empty() {
         let (_tmp, old, new) = dirs();
         fs::create_dir_all(&old).unwrap();
-        fs::write(old.join("kv.json"), "{\"k\":1}").unwrap();
+        fs::write(old.join(".window-state.json"), "{\"w\":1}").unwrap();
+
+        migrate_app_data(&old, &new);
+
+        assert_eq!(
+            fs::read_to_string(new.join(".window-state.json")).unwrap(),
+            "{\"w\":1}"
+        );
+        // Copy, not move: old files must survive for older builds.
+        assert!(old.join(".window-state.json").exists());
+    }
+
+    #[test]
+    fn leaves_the_retired_json_stores_behind() {
+        // MET-124 made settings a clean break, so carrying these across would
+        // only plant dead files in the new app-data dir.
+        let (_tmp, old, new) = dirs();
+        fs::create_dir_all(&old).unwrap();
+        fs::write(old.join("kv.json"), "{}").unwrap();
         fs::write(old.join("settings.json"), "{}").unwrap();
         fs::write(old.join(".window-state.json"), "{}").unwrap();
 
         migrate_app_data(&old, &new);
 
-        assert_eq!(fs::read_to_string(new.join("kv.json")).unwrap(), "{\"k\":1}");
-        assert!(new.join("settings.json").exists());
-        assert!(new.join(".window-state.json").exists());
-        // Copy, not move: old files must survive for older builds.
-        assert!(old.join("kv.json").exists());
+        assert!(!new.join("kv.json").exists());
+        assert!(!new.join("settings.json").exists());
     }
 
     #[test]
     fn never_overwrites_an_already_migrated_dir() {
         let (_tmp, old, new) = dirs();
         fs::create_dir_all(&old).unwrap();
-        fs::write(old.join("kv.json"), "old").unwrap();
+        fs::write(old.join(".window-state.json"), "old").unwrap();
         fs::create_dir_all(&new).unwrap();
-        fs::write(new.join("kv.json"), "new").unwrap();
+        fs::write(new.join(".window-state.json"), "new").unwrap();
 
         migrate_app_data(&old, &new);
 
-        assert_eq!(fs::read_to_string(new.join("kv.json")).unwrap(), "new");
+        assert_eq!(
+            fs::read_to_string(new.join(".window-state.json")).unwrap(),
+            "new"
+        );
     }
 
     #[test]
@@ -308,14 +315,13 @@ mod app_data_migration_tests {
     }
 
     #[test]
-    fn skips_missing_files_without_failing() {
+    fn no_op_when_the_old_dir_has_no_window_state() {
         let (_tmp, old, new) = dirs();
         fs::create_dir_all(&old).unwrap();
-        fs::write(old.join("kv.json"), "{}").unwrap(); // no settings.json / window state
+        fs::write(old.join("kv.json"), "{}").unwrap();
 
         migrate_app_data(&old, &new);
 
-        assert!(new.join("kv.json").exists());
-        assert!(!new.join("settings.json").exists());
+        assert!(!new.exists());
     }
 }

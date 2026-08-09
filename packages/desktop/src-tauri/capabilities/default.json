@@ -45,7 +45,6 @@
       "identifier": "fs:allow-stat",
       "allow": [{ "path": "$HOME/**" }]
     },
-    "store:default",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",

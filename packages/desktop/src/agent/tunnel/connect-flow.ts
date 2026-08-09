@@ -11,7 +11,12 @@ import {
   encodePairingCode,
   type WorkerInfo,
 } from "@notefig/shared/tunnel";
-import { platformAdapter } from "@/adapters";
+import {
+  getOrCreateKvCollection,
+  readKv,
+  removeKv,
+  writeKv,
+} from "@/utils/kv-store";
 import { disposeAllWorkspaceTaskManagers } from "@/agent/agent-service";
 import { tunnelConnection } from "./tunnel-connection";
 
@@ -51,18 +56,15 @@ async function persistPairing(code: string, worker: WorkerInfo): Promise<void> {
     workspacePath: worker.workspacePath,
     pairedAt: Date.now(),
   };
-  await platformAdapter.kv.setKv(TUNNEL_KV_NAMESPACE, TUNNEL_PAIRING_KEY, stored);
+  await writeKv(TUNNEL_KV_NAMESPACE, TUNNEL_PAIRING_KEY, stored);
 }
 
 export async function getStoredPairing(): Promise<StoredPairing | undefined> {
-  return platformAdapter.kv.getKv<StoredPairing>(
-    TUNNEL_KV_NAMESPACE,
-    TUNNEL_PAIRING_KEY,
-  );
+  return readKv<StoredPairing>(TUNNEL_KV_NAMESPACE, TUNNEL_PAIRING_KEY);
 }
 
 export async function forgetPairing(): Promise<void> {
-  await platformAdapter.kv.deleteKv(TUNNEL_KV_NAMESPACE, TUNNEL_PAIRING_KEY);
+  await removeKv(TUNNEL_KV_NAMESPACE, TUNNEL_PAIRING_KEY);
 }
 
 /**
@@ -139,21 +141,46 @@ export function disconnectTunnel(): void {
 }
 
 /**
- * Cross-tab sync: when another tab pairs (e.g. the tab the CLI opened), it
- * writes the pairing to localStorage. The `storage` event fires only in the
- * OTHER tabs — so a tab that's already open and still disconnected picks up
- * the new pairing and connects too. Returns a cleanup fn.
+ * Cross-tab sync: when another tab pairs (e.g. the tab the CLI opened), a tab
+ * that is already open and still disconnected picks the pairing up and connects
+ * too. Returns a cleanup fn.
  */
 export function watchCrossTabPairing(): () => void {
-  if (typeof window === "undefined") return () => undefined;
-  // Must match base-browser-adapter's KV_PREFIX key layout.
-  const KEY = `notefig-kv:${TUNNEL_KV_NAMESPACE}:${TUNNEL_PAIRING_KEY}`;
-  const onStorage = (event: StorageEvent) => {
-    if (event.key !== KEY || !event.newValue) return;
-    if (tunnelConnection.getState().status === "disconnected") {
+  // Was a `storage` event on a hand-built localStorage key, which meant this
+  // file had to mirror the browser adapter's key layout. Since MET-124 the
+  // pairing lives in a persisted collection whose coordinator (BroadcastChannel
+  // + Web Locks) already replicates another tab's commits into this one, so the
+  // collection's own change stream is both the real signal and layout-free.
+  const collection = getOrCreateKvCollection(TUNNEL_KV_NAMESPACE);
+  const storedCode = () =>
+    (collection.get(TUNNEL_PAIRING_KEY)?.value as StoredPairing | undefined)
+      ?.code;
+
+  let subscription: { unsubscribe: () => void } | null = null;
+  let cancelled = false;
+
+  // Subscribe only once the collection has hydrated. Otherwise the pairing this
+  // tab already had on disk arrives as a change and reads as "another tab just
+  // paired" — auto-connecting behind App.tsx's back, which deliberately skips
+  // the stored reconnect when the load carried a deep-link code.
+  void collection.preload().then(() => {
+    if (cancelled) return;
+    let lastSeen = storedCode();
+    subscription = collection.subscribeChanges((changes) => {
+      if (!changes.some((change) => change.key === TUNNEL_PAIRING_KEY)) return;
+      const code = storedCode();
+      const isNewPairing = code !== undefined && code !== lastSeen;
+      lastSeen = code;
+      // Only a disconnected tab follows along — a tab already on a tunnel must
+      // not be yanked onto another one.
+      if (!isNewPairing) return;
+      if (tunnelConnection.getState().status !== "disconnected") return;
       void autoConnectStoredPairing();
-    }
+    });
+  });
+
+  return () => {
+    cancelled = true;
+    subscription?.unsubscribe();
   };
-  window.addEventListener("storage", onStorage);
-  return () => window.removeEventListener("storage", onStorage);
 }

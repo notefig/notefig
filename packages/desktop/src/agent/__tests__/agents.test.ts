@@ -10,8 +10,9 @@ const { writeFiles, readFiles } = vi.hoisted(() => ({
     failed: [] as unknown[],
   })),
 }));
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
     fs: {
       writeFiles,
       readFiles,
@@ -23,10 +24,6 @@ vi.mock("@/adapters", () => ({
         onRequest: vi.fn(() => () => {}),
         close: vi.fn(async () => {}),
       })),
-    },
-    kv: {
-      setKv: vi.fn(),
-      getKv: vi.fn(),
     },
   },
 }));

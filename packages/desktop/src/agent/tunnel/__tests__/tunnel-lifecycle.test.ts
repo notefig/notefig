@@ -9,8 +9,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { kv } = vi.hoisted(() => ({ kv: new Map<string, unknown>() }));
 
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
     fs: {
       writeFiles: vi.fn(async (files: any[]) => ({
         succeeded: files.map((f) => f.path),
@@ -32,16 +33,6 @@ vi.mock("@/adapters", () => ({
         onRequest: vi.fn(() => () => {}),
         close: vi.fn(async () => {}),
       })),
-    },
-    kv: {
-      getKv: vi.fn(async (ns: string, key: string) => kv.get(`${ns}:${key}`)),
-      setKv: vi.fn(async (ns: string, key: string, value: unknown) => {
-        kv.set(`${ns}:${key}`, value);
-      }),
-      deleteKv: vi.fn(async (ns: string, key: string) =>
-        kv.delete(`${ns}:${key}`),
-      ),
-      getAllKv: vi.fn(async () => ({})),
     },
   },
 }));

@@ -20,14 +20,9 @@ const { mocks } = vi.hoisted(() => {
   return { mocks };
 });
 
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
-    kv: {
-      setKv: vi.fn(),
-      getKv: vi.fn(),
-      getAllKv: vi.fn(async () => ({})),
-      deleteKv: vi.fn(),
-    },
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
     fs: {
       writeFiles: vi.fn(async (files: { path: string; content: string }[]) => {
         for (const file of files) mocks.fsFiles.set(file.path, file.content);

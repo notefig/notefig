@@ -29,8 +29,11 @@ vi.mock("@notefig/git", () => ({
   IsomorphicGitService: isomorphicGitServiceCtor,
 }));
 
-vi.mock("@/adapters", () => ({
-  platformAdapter: { fs: fsMock },
+vi.mock("@/adapters", async () => ({
+  platformAdapter: {
+    fs: fsMock,
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+  },
 }));
 
 // The git host moved above the adapter (MET-122); the registry's contract is

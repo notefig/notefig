@@ -19,18 +19,13 @@ const { writeFiles, readFiles, deleteFiles, mcpEndpoints } = vi.hoisted(() => ({
   // assert the endpoint's close() ran.
   mcpEndpoints: [] as { close: ReturnType<typeof vi.fn> }[],
 }));
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
     fs: {
       writeFiles,
       readFiles,
       deleteFiles,
-    },
-    kv: {
-      setKv: vi.fn(),
-      getKv: vi.fn(),
-      getAllKv: vi.fn(async () => ({})),
-      deleteKv: vi.fn(),
     },
     proc: {
       // A fake McpEndpoint: nothing in these tests drives real traffic over

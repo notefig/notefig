@@ -2,7 +2,11 @@ import { describe, it, expect, vi } from "vitest";
 
 // The hook module reaches @/adapters via @/utils/fs; describeTaskMeta itself
 // is pure, so a stub adapter keeps this a plain unit test.
-vi.mock("@/adapters", () => ({ platformAdapter: {} }));
+vi.mock("@/adapters", async () => ({
+  platformAdapter: {
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+  },
+}));
 
 import { describeTaskMeta, type AgentTaskMeta } from "./agents";
 import type { AgentTaskRow } from "@/agent/agent-collections";

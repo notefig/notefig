@@ -5,8 +5,9 @@ import {
 } from "@/components/editor/editor-image-paste";
 import { platformAdapter } from "@/adapters";
 
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
     fs: {
       exists: vi.fn(),
     },
