@@ -279,4 +279,57 @@ test.describe("search", () => {
       )
       .toContain(`${BASE}/notes/a.md`);
   });
+
+  test("clicking a match places the cursor on that occurrence", async ({
+    page,
+  }) => {
+    // Markdown-rich doc where the raw file has many lines (fences, table
+    // delimiter rows, blank lines) that don't exist in the rendered text —
+    // the clicked occurrence must still be the one selected.
+    await openHarness(page, {
+      content: [
+        "# Notes",
+        "",
+        "The first needle sits here.",
+        "",
+        "```js",
+        "const app = start();",
+        "```",
+        "",
+        "| Key | Value |",
+        "| --- | ----- |",
+        "| a   | 1     |",
+        "",
+        "The second needle sits here.",
+        "",
+        "The third needle sits here.",
+        "",
+      ].join("\n"),
+    });
+
+    const input = page.getByPlaceholder(/search/i).first();
+    await input.fill("needle");
+
+    // The search rows render the raw line content; scope to buttons so we
+    // don't click the editor's copy of the same text.
+    await page
+      .locator("button", { hasText: "The first needle sits here." })
+      .click();
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const sel = window.getSelection();
+          return {
+            text: sel?.toString() ?? "",
+            block:
+              sel?.anchorNode?.parentElement?.closest("p")?.textContent ?? "",
+          };
+        }),
+      )
+      .toEqual({
+        text: "needle",
+        block: "The first needle sits here.",
+      });
+  });
 });

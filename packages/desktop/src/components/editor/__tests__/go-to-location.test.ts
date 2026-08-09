@@ -1,10 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { Editor } from "@tiptap/core";
-import {
-  resolveLineColumn,
-  textOffsetToDocPos,
-} from "@/components/editor/editor-position";
-import { fuzzyFind } from "@/utils/navigation-utils";
+import { resolveEditorLocation } from "@/components/editor/editor-position";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
 
 /**
@@ -22,10 +18,17 @@ function rawLineColumn(rawMarkdown: string, term: string) {
   return { line: 1, column: 1 };
 }
 
+/** The raw markdown goToLocation passes to resolveEditorLocation. */
+function getMarkdown(editor: Editor): string {
+  return (
+    editor.storage as unknown as { markdown: { getMarkdown: () => string } }
+  ).markdown.getMarkdown();
+}
+
 /**
- * Replicates goToLocation's core position logic:
- * 1. resolveLineColumn from raw markdown coordinates
- * 2. fuzzyFind override when expectedText available
+ * goToLocation's core position logic: resolve raw search coordinates
+ * against the live doc with the serialized markdown as the raw
+ * coordinate space.
  */
 function resolveSearchPosition(
   editor: Editor,
@@ -33,37 +36,28 @@ function resolveSearchPosition(
   column: number,
   expectedText?: string,
 ): { from: number; to: number } {
-  const doc = editor.state.doc;
-  const fullText = doc.textBetween(0, doc.content.size, "\n", "\n");
-  let startPos = resolveLineColumn(doc, fullText, line, column);
-  let endPos = startPos;
-
-  if (expectedText) {
-    const fuzzyOffset = fuzzyFind(fullText, expectedText, startPos - 1);
-    if (fuzzyOffset !== -1) {
-      let startSep = 0,
-        endSep = 0;
-      const textEnd = fuzzyOffset + expectedText.length;
-      for (let i = 0; i < textEnd; i++) {
-        if (fullText[i] === "\n") {
-          if (i < fuzzyOffset) startSep++;
-          endSep++;
-        }
-      }
-      startPos = textOffsetToDocPos(doc, fuzzyOffset - startSep);
-      endPos = textOffsetToDocPos(doc, textEnd - 1 - endSep) + 1;
-    }
-  }
-
-  return { from: startPos, to: endPos };
+  return resolveEditorLocation(
+    editor.state.doc,
+    { line, column, expectedText },
+    getMarkdown(editor),
+  );
 }
 
+const editors: Editor[] = [];
+
 function createEditor(content: string) {
-  return new Editor({
+  const editor = new Editor({
     extensions: editorExtensions,
     content,
   });
+  editors.push(editor);
+  return editor;
 }
+
+afterEach(() => {
+  editors.forEach((e) => e.destroy());
+  editors.length = 0;
+});
 
 describe("resolveSearchPosition (goToLocation core)", () => {
   it("plain text — line:col maps 1:1", () => {
@@ -74,10 +68,9 @@ describe("resolveSearchPosition (goToLocation core)", () => {
 
     expect(editor.state.doc.textBetween(from, to)).toBe("Hello");
     expect(to - from).toBe("Hello".length);
-    editor.destroy();
   });
 
-  it("heading — ## prefix shifts raw column, fuzzyFind corrects", () => {
+  it("heading — ## prefix shifts raw column", () => {
     const markdown = "## Hello World";
     const editor = createEditor(markdown);
     // raw markdown: "## Hello" → search gives line 1, column 4
@@ -87,9 +80,7 @@ describe("resolveSearchPosition (goToLocation core)", () => {
     const { from, to } = resolveSearchPosition(editor, line, column, "Hello");
 
     expect(editor.state.doc.textBetween(from, to)).toBe("Hello");
-    // Hello starts at position 2 in Tiptap (after heading node boundary)
     expect(to - from).toBe(5);
-    editor.destroy();
   });
 
   it("bullet list — - prefix shifts raw column", () => {
@@ -101,7 +92,6 @@ describe("resolveSearchPosition (goToLocation core)", () => {
     const { from, to } = resolveSearchPosition(editor, line, column, "First");
 
     expect(editor.state.doc.textBetween(from, to)).toBe("First");
-    editor.destroy();
   });
 
   it("ordered list — 1. prefix shifts raw column", () => {
@@ -113,7 +103,6 @@ describe("resolveSearchPosition (goToLocation core)", () => {
     const { from, to } = resolveSearchPosition(editor, line, column, "First");
 
     expect(editor.state.doc.textBetween(from, to)).toBe("First");
-    editor.destroy();
   });
 
   it("task list — - [ ] prefix shifts raw column", () => {
@@ -125,7 +114,6 @@ describe("resolveSearchPosition (goToLocation core)", () => {
     const { from, to } = resolveSearchPosition(editor, line, column, "Task");
 
     expect(editor.state.doc.textBetween(from, to)).toBe("Task");
-    editor.destroy();
   });
 
   it("checked task — - [x] prefix shifts raw column", () => {
@@ -137,7 +125,6 @@ describe("resolveSearchPosition (goToLocation core)", () => {
     const { from, to } = resolveSearchPosition(editor, line, column, "Done");
 
     expect(editor.state.doc.textBetween(from, to)).toBe("Done");
-    editor.destroy();
   });
 
   it("blockquote — > prefix shifts raw column", () => {
@@ -149,7 +136,6 @@ describe("resolveSearchPosition (goToLocation core)", () => {
     const { from, to } = resolveSearchPosition(editor, line, column, "quote");
 
     expect(editor.state.doc.textBetween(from, to)).toBe("quote");
-    editor.destroy();
   });
 
   it("code block — fenced code line maps correctly", () => {
@@ -162,7 +148,6 @@ describe("resolveSearchPosition (goToLocation core)", () => {
     const { from, to } = resolveSearchPosition(editor, line, column, "const");
 
     expect(editor.state.doc.textBetween(from, to)).toBe("const");
-    editor.destroy();
   });
 
   it("table cell — no pipe/formatting chars in Tiptap text", () => {
@@ -174,13 +159,12 @@ describe("resolveSearchPosition (goToLocation core)", () => {
     const { from, to } = resolveSearchPosition(editor, line, column, "Alice");
 
     expect(editor.state.doc.textBetween(from, to)).toBe("Alice");
-    editor.destroy();
   });
 
-  it("text found via fuzzyFind produces non-empty selection", () => {
-    // Even when resolveLineColumn gives a bad hint (raw-line empty lines
-    // are compacted in Tiptap), fuzzyFind always locates the text somewhere
-    // in the document rather than producing an empty/collapsed selection.
+  it("stale line hint still lands on the expected text", () => {
+    // Even when the caller passes a wrong line hint (here: line 3 points at
+    // a different paragraph), the resolver locates the expected text rather
+    // than producing an empty/collapsed selection.
     const markdown = [
       "First para.",
       "",
@@ -193,14 +177,12 @@ describe("resolveSearchPosition (goToLocation core)", () => {
     const { from, to } = resolveSearchPosition(editor, 3, 1, "Third");
     expect(editor.state.doc.textBetween(from, to)).toBe("Third");
     expect(to).toBeGreaterThan(from);
-    editor.destroy();
   });
 
   it("multi-word match — full phrase selected", () => {
     const markdown = "First paragraph for drag handle checks.";
     const editor = createEditor(markdown);
     const { line, column } = rawLineColumn(markdown, "drag handle");
-    // raw line 1, column starts at 'd' in "drag"
     expect(line).toBe(1);
 
     const { from, to } = resolveSearchPosition(
@@ -212,7 +194,6 @@ describe("resolveSearchPosition (goToLocation core)", () => {
 
     expect(editor.state.doc.textBetween(from, to)).toBe("drag handle");
     expect(to - from).toBe(11);
-    editor.destroy();
   });
 
   it("text at document end — no trailing newline", () => {
@@ -222,7 +203,6 @@ describe("resolveSearchPosition (goToLocation core)", () => {
     const { from, to } = resolveSearchPosition(editor, line, column, "hello");
 
     expect(editor.state.doc.textBetween(from, to)).toBe("hello");
-    editor.destroy();
   });
 
   it("empty document — clamps to 1", () => {
@@ -231,19 +211,17 @@ describe("resolveSearchPosition (goToLocation core)", () => {
 
     expect(from).toBe(1);
     expect(to).toBe(1);
-    editor.destroy();
   });
 
-  it("text not in document — fuzzyFind returns -1, falls back to line:col", () => {
+  it("text not in document — falls back to line:col", () => {
     const markdown = "hello world";
     const editor = createEditor(markdown);
     const { from, to } = resolveSearchPosition(editor, 1, 7, "xyz");
 
-    // fuzzyFind failed, so from = resolveLineColumn(1, 7) = 7
-    // endPos = from (since no expectedText match)
+    // "xyz" isn't in the rendered text, so line 1 col 7 resolves directly:
+    // the caret lands before "world" (doc pos 7), collapsed.
     expect(from).toBe(7);
     expect(to).toBe(7);
-    editor.destroy();
   });
 
   it("hello in a task list — matches user's exact document", () => {
@@ -254,6 +232,5 @@ describe("resolveSearchPosition (goToLocation core)", () => {
     const selected = editor.state.doc.textBetween(from, to);
     expect(selected).toBe("hello");
     expect(to).toBeGreaterThan(from);
-    editor.destroy();
   });
 });

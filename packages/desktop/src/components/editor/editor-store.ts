@@ -334,9 +334,16 @@ function createMarkdownInstance(
     },
     goToLocation(location: EditorLocation): boolean {
       try {
+        // Search coordinates live in the raw markdown's coordinate space;
+        // the serializer output is that same space (round-trip identity).
+        const storage = this.editor.storage as unknown as {
+          markdown?: { getMarkdown?: () => string };
+        };
+        const rawMarkdown = storage.markdown?.getMarkdown?.();
         const { from, to } = resolveEditorLocation(
           this.editor.state.doc,
           location,
+          rawMarkdown,
         );
 
         this.editor.commands.setTextSelection({ from, to });
