@@ -20,7 +20,7 @@ import {
   AlertTriangle,
   ShieldOff,
 } from "lucide-react";
-import { platformAdapter } from "@/adapters";
+import { removeKv } from "@/utils/kv-store";
 import { SETTINGS_NAMESPACE } from "@/hooks/use-app-settings";
 import type { LayoutNode } from "@/components/dockable";
 // Pure zero-dependency leaf — safe for the crash fallback (unlike entity
@@ -95,7 +95,7 @@ const TELEMETRY_CONSENT_KEYS = [
 
 async function resetTelemetryConsent(): Promise<void> {
   for (const key of TELEMETRY_CONSENT_KEYS) {
-    await platformAdapter.kv.deleteKv(SETTINGS_NAMESPACE, key);
+    await removeKv(SETTINGS_NAMESPACE, key);
   }
   // Reload resets the bootstrap's module-level started flag, so the
   // first-run consent dialog reappears immediately.
@@ -523,7 +523,9 @@ function DebugPanelContent({
   const workspaceTasks = useMemo(
     () =>
       [...allTasks]
-        .filter((task) => !workspacePath || task.workspacePath === workspacePath)
+        .filter(
+          (task) => !workspacePath || task.workspacePath === workspacePath,
+        )
         // Newest-first (task ids sort descending by construction).
         .sort((a, b) => (a.taskId < b.taskId ? -1 : 1)),
     [allTasks, workspacePath],
@@ -544,7 +546,8 @@ function DebugPanelContent({
   }, [workspaceTasks, selectedSessionTaskId]);
 
   const sessionTask = useMemo(
-    () => allTasks.find((task) => task.taskId === selectedSessionTaskId) ?? null,
+    () =>
+      allTasks.find((task) => task.taskId === selectedSessionTaskId) ?? null,
     [allTasks, selectedSessionTaskId],
   );
   const sessionTurns = useMemo(
@@ -562,7 +565,10 @@ function DebugPanelContent({
     [allEntries, selectedSessionTaskId],
   );
   const sessionPermissionRequests = useMemo(
-    () => allPermissionRequests.filter((req) => req.taskId === selectedSessionTaskId),
+    () =>
+      allPermissionRequests.filter(
+        (req) => req.taskId === selectedSessionTaskId,
+      ),
     [allPermissionRequests, selectedSessionTaskId],
   );
   const buildSessionReport = useCallback(() => {
@@ -607,7 +613,9 @@ function DebugPanelContent({
       switch (entry.type) {
         case "user":
         case "assistant":
-          lines.push(`[${time}] [${entry.type.toUpperCase()}] ${entry.text ?? ""}`);
+          lines.push(
+            `[${time}] [${entry.type.toUpperCase()}] ${entry.text ?? ""}`,
+          );
           break;
         case "tool_call":
           lines.push(
@@ -632,7 +640,9 @@ function DebugPanelContent({
     lines.push("");
 
     if (sessionPermissionRequests.length > 0) {
-      lines.push(`── Permission requests (${sessionPermissionRequests.length}) ──`);
+      lines.push(
+        `── Permission requests (${sessionPermissionRequests.length}) ──`,
+      );
       for (const req of sessionPermissionRequests) {
         lines.push(`[${req.id}] ${req.title} status=${req.status}`);
       }
@@ -972,7 +982,9 @@ function DebugPanelContent({
               </span>
               <select
                 value={selectedSessionTaskId ?? ""}
-                onChange={(e) => setSelectedSessionTaskId(e.target.value || null)}
+                onChange={(e) =>
+                  setSelectedSessionTaskId(e.target.value || null)
+                }
                 className="h-6 text-[0.6875rem] font-mono bg-background border border-border rounded px-1.5 flex-1 min-w-0"
               >
                 {workspaceTasks.length === 0 && (

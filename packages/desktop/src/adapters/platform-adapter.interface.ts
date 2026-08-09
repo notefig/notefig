@@ -466,29 +466,6 @@ export interface ProcessSurface {
 }
 
 /**
- * Namespaced key-value storage.
- *
- * Temporary surface: MET-124 retires it in favour of the SQLite-backed `db`
- * surface, so the four methods are grouped verbatim rather than renamed.
- */
-export interface KvSurface {
-  /**
-   * Get a value from a namespaced key-value store.
-   * @returns The stored value, or undefined if not found.
-   */
-  getKv<T>(namespace: string, key: string): Promise<T | undefined>;
-
-  /** Set a value in a namespaced key-value store. */
-  setKv<T>(namespace: string, key: string, value: T): Promise<void>;
-
-  /** Delete a key from a namespaced key-value store. */
-  deleteKv(namespace: string, key: string): Promise<void>;
-
-  /** Get all key-value pairs in a namespace. */
-  getAllKv<T>(namespace: string): Promise<Record<string, T>>;
-}
-
-/**
  * SQLite-backed storage for persisted TanStack DB collections.
  *
  * Driver-level only: the adapter never names a collection. Ids, schemas and
@@ -553,7 +530,6 @@ export interface PlatformUiSurface {
 export interface IPlatformAdapter {
   fs: FileSystemSurface;
   proc: ProcessSurface;
-  kv: KvSurface;
   db: DbSurface;
   ui: PlatformUiSurface;
   updates: PlatformUpdater;

@@ -1,5 +1,5 @@
 import { platformAdapter } from "@/adapters";
-import { getOrCreateKvCollection } from "@/utils/kv-store";
+import { readKv, writeKv } from "@/utils/kv-store";
 import {
   BUILT_IN_HARNESSES,
   parseCustomHarnessEntries,
@@ -114,17 +114,21 @@ export function candidateProbeEntries(
   }));
   const customEntries = custom
     .filter((c) => c.enabled !== false)
-    .map((c) => ({ id: c.id, command: c.command, probeCommand: c.probeCommand }));
+    .map((c) => ({
+      id: c.id,
+      command: c.command,
+      probeCommand: c.probeCommand,
+    }));
   return [...builtins, ...customEntries];
 }
 
 /** Run discovery for every known harness and persist the results. Trigger
  *  sites: app startup, settings "Rescan". Read-only w.r.t. `overrides`/
- *  `custom` — discovery only ever writes the `discovery` key. Written
- *  through the KV collection (not platformAdapter.kv.setKv directly) so
- *  useKv subscribers — the pickers — update live, not on next launch
- *  (same rationale as the auth mark in agent-service.ts). A failed probe
- *  (null) persists nothing: existing results stay as they were. */
+ *  `custom` — discovery only ever writes the `discovery` key. `writeKv` goes
+ *  through the KV collection, so useKv subscribers — the pickers — update
+ *  live rather than on next launch (same rationale as the auth mark in
+ *  agent-service.ts). A failed probe (null) persists nothing: existing
+ *  results stay as they were. */
 export async function refreshHarnessDiscovery(
   overrides: Record<string, HarnessOverride>,
   custom: CustomHarnessEntry[],
@@ -133,13 +137,7 @@ export async function refreshHarnessDiscovery(
     candidateProbeEntries(overrides, custom),
   );
   if (results === null) return null;
-  const kv = getOrCreateKvCollection(HARNESS_SETTINGS_NAMESPACE);
-  const tx = kv.get(HARNESS_DISCOVERY_KEY)
-    ? kv.update(HARNESS_DISCOVERY_KEY, (draft) => {
-        draft.value = results;
-      })
-    : kv.insert({ key: HARNESS_DISCOVERY_KEY, value: results });
-  await tx.isPersisted.promise;
+  await writeKv(HARNESS_SETTINGS_NAMESPACE, HARNESS_DISCOVERY_KEY, results);
   return results;
 }
 
@@ -156,14 +154,8 @@ export function ensureStartupHarnessDiscovery(): void {
   void (async () => {
     try {
       const [rawOverrides, rawCustom] = await Promise.all([
-        platformAdapter.kv.getKv<unknown>(
-          HARNESS_SETTINGS_NAMESPACE,
-          HARNESS_OVERRIDES_KEY,
-        ),
-        platformAdapter.kv.getKv<unknown>(
-          HARNESS_SETTINGS_NAMESPACE,
-          HARNESS_CUSTOM_KEY,
-        ),
+        readKv<unknown>(HARNESS_SETTINGS_NAMESPACE, HARNESS_OVERRIDES_KEY),
+        readKv<unknown>(HARNESS_SETTINGS_NAMESPACE, HARNESS_CUSTOM_KEY),
       ]);
       await refreshHarnessDiscovery(
         parseHarnessOverrides(rawOverrides),

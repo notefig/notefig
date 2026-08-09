@@ -6,7 +6,6 @@ import type {
   FileSystemSurface,
   FsChangeListener,
   IPlatformAdapter,
-  KvSurface,
   PlatformUiSurface,
   PlatformUpdater,
   PlatformEventListener,
@@ -199,13 +198,6 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     runShellCommand: this.runShellCommand.bind(this),
   };
 
-  readonly kv: KvSurface = {
-    getKv: this.getKv.bind(this),
-    setKv: this.setKv.bind(this),
-    deleteKv: this.deleteKv.bind(this),
-    getAllKv: this.getAllKv.bind(this),
-  };
-
   // Shared by both web variants — the OPFS database is per-origin.
   readonly db: DbSurface = createBrowserDb();
 
@@ -373,61 +365,6 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   // overrides this with its polling watcher.
   protected onFsEvent(_listener: FsChangeListener): () => void {
     return () => {};
-  }
-
-  private readonly KV_PREFIX = "notefig-kv:";
-
-  private buildKvKey(namespace: string, key: string): string {
-    return `${this.KV_PREFIX}${namespace}:${key}`;
-  }
-
-  protected async getKv<T>(
-    namespace: string,
-    key: string,
-  ): Promise<T | undefined> {
-    const raw = localStorage.getItem(this.buildKvKey(namespace, key));
-    if (raw === null) return undefined;
-    try {
-      return JSON.parse(raw) as T;
-    } catch {
-      return undefined;
-    }
-  }
-
-  protected async setKv<T>(
-    namespace: string,
-    key: string,
-    value: T,
-  ): Promise<void> {
-    localStorage.setItem(
-      this.buildKvKey(namespace, key),
-      JSON.stringify(value),
-    );
-  }
-
-  protected async deleteKv(namespace: string, key: string): Promise<void> {
-    localStorage.removeItem(this.buildKvKey(namespace, key));
-  }
-
-  protected async getAllKv<T>(namespace: string): Promise<Record<string, T>> {
-    const prefix = `${this.KV_PREFIX}${namespace}:`;
-    const result: Record<string, T> = {};
-
-    for (let i = 0; i < localStorage.length; i++) {
-      const storageKey = localStorage.key(i);
-      if (storageKey && storageKey.startsWith(prefix)) {
-        const key = storageKey.slice(prefix.length);
-        const raw = localStorage.getItem(storageKey);
-        if (raw !== null) {
-          try {
-            result[key] = JSON.parse(raw) as T;
-          } catch {
-            // skip malformed values
-          }
-        }
-      }
-    }
-    return result;
   }
 
   protected async toggleFullscreen(): Promise<void> {

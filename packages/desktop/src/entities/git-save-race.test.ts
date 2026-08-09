@@ -26,7 +26,12 @@ vi.mock("@notefig/git", () => {
   };
 });
 
-vi.mock("@/adapters", () => ({ platformAdapter: { fs: {} } }));
+vi.mock("@/adapters", async () => ({
+  platformAdapter: {
+    fs: {},
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+  },
+}));
 vi.mock("@/adapters/git-storage-host", () => ({
   createGitStorageHost: vi.fn(() => ({})),
 }));

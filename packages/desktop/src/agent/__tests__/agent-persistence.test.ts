@@ -1,23 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Map-backed adapter mock: the storage-backed tasks collection reads and
-// writes through this "disk", so tests exercise the real write-through +
-// boot-mapping behavior end to end.
-const { kvBackend, setKv, deleteKv, transportFactory } = vi.hoisted(() => {
-  const kvBackend = new Map<string, unknown>(); // "<namespace>:<key>"
-  return {
-    kvBackend,
-    setKv: vi.fn(async (namespace: string, key: string, value: unknown) => {
-      kvBackend.set(`${namespace}:${key}`, value);
-    }),
-    deleteKv: vi.fn(async (namespace: string, key: string) => {
-      kvBackend.delete(`${namespace}:${key}`);
-    }),
-    transportFactory: { current: null as null | (() => unknown) },
-  };
-});
-vi.mock("@/adapters", () => ({
+// The tasks collection persists into a real (in-memory) SQLite through the
+// same driver the desktop uses, so these tests exercise write-through and the
+// boot mapping end to end rather than against a stub.
+const { dbRef, transportFactory } = vi.hoisted(() => ({
+  dbRef: { current: null as null | import("@/testing/node-db").NodeTestDb },
+  transportFactory: { current: null as null | (() => unknown) },
+}));
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
+    db: (dbRef.current = (
+      await import("@/testing/node-db")
+    ).createNodeTestDb()),
     fs: {
       writeFiles: vi.fn(async () => ({ succeeded: [], failed: [] })),
       readFiles: vi.fn(async () => ({ succeeded: [], failed: [] })),
@@ -35,22 +29,6 @@ vi.mock("@/adapters", () => ({
       })),
       createAgentTransport: vi.fn(() => transportFactory.current!()),
     },
-    kv: {
-      setKv,
-      deleteKv,
-      getKv: vi.fn(async (namespace: string, key: string) =>
-        kvBackend.get(`${namespace}:${key}`),
-      ),
-      getAllKv: vi.fn(async (namespace: string) => {
-        const out: Record<string, unknown> = {};
-        for (const [full, value] of kvBackend) {
-          if (full.startsWith(`${namespace}:`)) {
-            out[full.slice(namespace.length + 1)] = value;
-          }
-        }
-        return out;
-      }),
-    },
   },
 }));
 vi.mock("@/utils/history-service", () => ({
@@ -60,10 +38,9 @@ vi.mock("@/utils/history-service", () => ({
 import { createLoopbackPair } from "../loopback-transport";
 import { FakeAgent } from "./fake-agent";
 import {
-  AGENT_TASKS_NAMESPACE,
+  AGENT_TASKS_COLLECTION_ID,
   bootAgentTaskRow,
-  parsePersistedAgentTasks,
-  persistableAgentTaskRow,
+  parsePersistedAgentTask,
 } from "../agent-persistence";
 import {
   deleteAgentSession,
@@ -75,6 +52,7 @@ import {
   agentEntriesCollection,
   agentTasksCollection,
   agentTurnsCollection,
+  reconcileAgentTasksAtBoot,
   type AgentTaskRow,
 } from "../agent-collections";
 import { registerTask, unregisterTask } from "../task-registry";
@@ -94,52 +72,54 @@ function taskRow(overrides: Partial<AgentTaskRow> = {}): AgentTaskRow {
   };
 }
 
-function seedDisk(overrides: Partial<AgentTaskRow> = {}): void {
-  const row = taskRow(overrides);
-  kvBackend.set(`${AGENT_TASKS_NAMESPACE}:${row.taskId}`, row);
+/** A row as a previous session would have left it behind in storage. */
+async function seedDisk(overrides: Partial<AgentTaskRow> = {}): Promise<void> {
+  await agentTasksCollection.insert(taskRow(overrides)).isPersisted.promise;
 }
 
-function onDisk(taskId: string): unknown {
-  return kvBackend.get(`${AGENT_TASKS_NAMESPACE}:${taskId}`);
+function onDisk(taskId: string): Record<string, unknown> | undefined {
+  return dbRef
+    .current!.storedRows(AGENT_TASKS_COLLECTION_ID)
+    .find((row) => row.key === taskId)?.value;
 }
 
-async function refetch(): Promise<void> {
-  await agentTasksCollection.utils.refetch();
+/** What App.tsx runs at startup, once the collection has hydrated. */
+async function boot(): Promise<void> {
+  await reconcileAgentTasksAtBoot();
 }
 
 beforeEach(async () => {
+  // Before the cleanup below, not after: a still-broken db would fail these
+  // deletes and leak rows into the next test.
+  dbRef.current!.repairWrites();
   transportFactory.current = null;
   for (const e of agentEntriesCollection.toArray)
     agentEntriesCollection.delete(e.id);
   for (const t of agentTurnsCollection.toArray)
     agentTurnsCollection.delete(t.turnId);
+  // Awaited to durability, unlike the two above: the tasks collection is the
+  // persisted one, and a delete still in flight when a test breaks writes would
+  // roll back and resurrect the row.
   for (const t of agentTasksCollection.toArray) {
     unregisterTask(t.taskId);
-    agentTasksCollection.delete(t.taskId);
+    await agentTasksCollection.delete(t.taskId).isPersisted.promise;
   }
-  kvBackend.clear();
-  setKv.mockClear();
-  deleteKv.mockClear();
   await agentTasksCollection.preload(); // start the collection (idempotent)
-  await refetch();
 });
 
 describe("pure helpers", () => {
-  it("parsePersistedAgentTasks keeps valid rows, drops garbage", () => {
-    const rows = parsePersistedAgentTasks({
-      good: taskRow(),
-      junk: "hello",
-      alsoJunk: null,
-      missingFields: { taskId: "task_x" },
-    });
-    expect(rows.map((r) => r.taskId)).toEqual(["task_a"]);
+  it("parsePersistedAgentTask keeps a valid row, drops garbage", () => {
+    expect(parsePersistedAgentTask(taskRow())?.taskId).toBe("task_a");
+    for (const junk of ["hello", null, { taskId: "task_x" }]) {
+      expect(parsePersistedAgentTask(junk)).toBeNull();
+    }
   });
 
   it("accepts status-less rows written by the pre-full-row design", () => {
     const { status: _dropped, ...legacy } = taskRow();
-    const rows = parsePersistedAgentTasks({ legacy });
-    expect(rows).toHaveLength(1);
-    expect(bootAgentTaskRow(rows[0])).toMatchObject({
+    const parsed = parsePersistedAgentTask(legacy);
+    expect(parsed).not.toBeNull();
+    expect(bootAgentTaskRow(parsed!)).toMatchObject({
       taskId: "task_a",
       status: "restored",
     });
@@ -155,34 +135,47 @@ describe("pure helpers", () => {
     expect(bootAgentTaskRow(taskRow({ sessionId: undefined }))).toBeNull();
   });
 
-  it("persistableAgentTaskRow strips TanStack's $-virtual props", () => {
-    const cleaned = persistableAgentTaskRow({
-      ...taskRow(),
-      $synced: true,
-      $origin: "local",
-    } as unknown as AgentTaskRow);
-    expect(Object.keys(cleaned).some((k) => k.startsWith("$"))).toBe(false);
-    expect(cleaned.taskId).toBe("task_a");
-  });
 });
 
-describe("storage-backed tasks collection", () => {
-  it("boot load maps dead sessionful rows to restored, drops sessionless ones", async () => {
-    seedDisk({ status: "running" });
-    seedDisk({ taskId: "task_never", sessionId: undefined, status: "error" });
-    await refetch();
+describe("persisted tasks collection", () => {
+  it("boot demotes dead sessionful rows to restored and drops sessionless ones", async () => {
+    await seedDisk({ status: "running" });
+    await seedDisk({
+      taskId: "task_never",
+      sessionId: undefined,
+      status: "error",
+    });
+
+    await boot();
 
     expect(agentTasksCollection.get("task_a")).toMatchObject({
       status: "restored",
       title: "Rewrite chapter 3",
     });
+    // Nothing to revive without a session — and it leaves storage too, rather
+    // than lingering as a row no boot will ever surface.
     expect(agentTasksCollection.get("task_never")).toBeUndefined();
+    expect(onDisk("task_never")).toBeUndefined();
   });
 
-  it("a refetch never clobbers a task with a live runtime", async () => {
-    seedDisk({ status: "running" });
+  it("boot drops runtime-only fields along with the demotion", async () => {
+    await seedDisk({ status: "running", authHint: "run `claude login`" });
+
+    await boot();
+
+    expect(agentTasksCollection.get("task_a")).toMatchObject({
+      status: "restored",
+    });
+    expect(agentTasksCollection.get("task_a")).not.toHaveProperty("authHint");
+    expect(onDisk("task_a")).not.toHaveProperty("authHint");
+  });
+
+  it("boot never clobbers a task with a live runtime", async () => {
+    await seedDisk({ status: "running" });
     registerTask({ taskId: "task_a" } as unknown as AgentTask);
-    await refetch();
+
+    await boot();
+
     expect(agentTasksCollection.get("task_a")).toMatchObject({
       status: "running",
     });
@@ -190,57 +183,84 @@ describe("storage-backed tasks collection", () => {
   });
 
   it("a foreign status on a live task's stored row falls back to the runtime status", async () => {
-    // kv.json is hand-editable; a garbage status must not enter the union.
-    seedDisk({ status: "bogus" as AgentTaskRow["status"] });
+    // The schema only validates status as a string, so a row written by a
+    // future/older build must not smuggle a value into the union.
+    await seedDisk({ status: "bogus" as AgentTaskRow["status"] });
     registerTask({
       taskId: "task_a",
       currentStatus: "running",
     } as unknown as AgentTask);
-    await refetch();
+
+    await boot();
+
     expect(agentTasksCollection.get("task_a")).toMatchObject({
       status: "running",
     });
     unregisterTask("task_a");
   });
 
-  it("a failed KV write never rolls back the in-memory row", async () => {
-    setKv.mockImplementationOnce(async () => {
-      throw new Error("disk full");
-    });
-    agentTasksCollection.insert(taskRow());
-    await vi.waitFor(() => {
-      // Memory keeps the row (no optimistic rollback); disk missed the write.
-      expect(agentTasksCollection.get("task_a")).toMatchObject({
-        status: "idle",
-      });
-    });
-    expect(onDisk("task_a")).toBeUndefined();
+  it("boot deletes a stored row that no longer validates", async () => {
+    await seedDisk();
+    // Corrupt it the way an older build or a schema change would.
+    await agentTasksCollection.update("task_a", (draft) => {
+      (draft as unknown as { workspacePath: unknown }).workspacePath = 42;
+    }).isPersisted.promise;
 
-    // The next write-through repairs the disk.
-    agentTasksCollection.update("task_a", (draft) => {
-      draft.status = "running";
-    });
-    await vi.waitFor(() => {
-      expect(onDisk("task_a")).toMatchObject({ status: "running" });
+    await boot();
+
+    expect(agentTasksCollection.get("task_a")).toBeUndefined();
+    expect(onDisk("task_a")).toBeUndefined();
+  });
+
+  it("boot is idempotent — a second run changes nothing", async () => {
+    await seedDisk({ status: "running" });
+    await boot();
+    const afterFirst = onDisk("task_a");
+
+    await boot();
+
+    expect(onDisk("task_a")).toEqual(afterFirst);
+    expect(agentTasksCollection.get("task_a")).toMatchObject({
+      status: "restored",
     });
   });
 
-  it("mutations write through: insert/update persist a clean row, delete removes it", async () => {
-    agentTasksCollection.insert(taskRow());
+  it("rolls a mutation back when the write cannot be committed", async () => {
+    // The tradeoff MET-124 accepted: the persistence wrapper commits after our
+    // handlers and its throw is not interceptable, so persistence is no longer
+    // best-effort. Asserted rather than assumed, because it is a behavior
+    // change from the KV era.
+    dbRef.current!.breakWrites("disk full");
+
+    await expect(
+      agentTasksCollection.insert(taskRow()).isPersisted.promise,
+    ).rejects.toThrow(/disk full/);
+
+    // The rollback lands after the rejection settles.
+    await vi.waitFor(() => {
+      expect(agentTasksCollection.get("task_a")).toBeUndefined();
+    });
+  });
+
+  it("mutations persist a clean row, and delete removes it", async () => {
+    await agentTasksCollection.insert(taskRow()).isPersisted.promise;
     expect(onDisk("task_a")).toMatchObject({
       taskId: "task_a",
       status: "idle",
     });
+    // TanStack's enumerable `$`-virtuals (`$origin`, `$synced`, …) must not
+    // reach storage. The wrapper gives us no hook to strip them, so if upstream
+    // ever starts persisting them this is what catches it.
     expect(
-      Object.keys(onDisk("task_a") as object).some((k) => k.startsWith("$")),
+      Object.keys(onDisk("task_a")!).some((key) => key.startsWith("$")),
     ).toBe(false);
 
-    agentTasksCollection.update("task_a", (draft) => {
+    await agentTasksCollection.update("task_a", (draft) => {
       draft.status = "running";
-    });
+    }).isPersisted.promise;
     expect(onDisk("task_a")).toMatchObject({ status: "running" });
 
-    agentTasksCollection.delete("task_a");
+    await agentTasksCollection.delete("task_a").isPersisted.promise;
     expect(onDisk("task_a")).toBeUndefined();
   });
 });
@@ -258,8 +278,12 @@ describe("lifecycle", () => {
       status: "restored",
     });
     expect(agentTasksCollection.get("task_never")).toBeUndefined();
-    expect(onDisk("task_a")).toMatchObject({ status: "restored" });
-    expect(onDisk("task_never")).toBeUndefined();
+    // dispose does not await durability — it demotes optimistically and lets
+    // the commits land behind it.
+    await vi.waitFor(() => {
+      expect(onDisk("task_a")).toMatchObject({ status: "restored" });
+      expect(onDisk("task_never")).toBeUndefined();
+    });
   });
 
   it("deleteAgentSession removes the row, its transcript rows, and the disk row", async () => {
@@ -289,7 +313,7 @@ describe("lifecycle", () => {
     expect(
       agentTurnsCollection.toArray.filter((t) => t.taskId === "task_a"),
     ).toEqual([]);
-    expect(onDisk("task_a")).toBeUndefined();
+    await vi.waitFor(() => expect(onDisk("task_a")).toBeUndefined());
   });
 });
 

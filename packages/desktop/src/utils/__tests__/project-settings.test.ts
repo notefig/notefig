@@ -8,8 +8,9 @@ import {
   DEFAULT_PROJECT_SETTINGS,
 } from "../project-settings";
 
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
     fs: {
       readFiles: vi.fn(),
       writeFiles: vi.fn(),

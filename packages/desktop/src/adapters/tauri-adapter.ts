@@ -3,7 +3,6 @@ import type {
   FileSystemSurface,
   FsChangeListener,
   IPlatformAdapter,
-  KvSurface,
   PlatformEvent,
   PlatformEventListener,
   PlatformUiSurface,
@@ -37,7 +36,6 @@ import { TauriStdioTransport } from "@/agent/tauri-stdio-transport";
 import { TauriMcpTransport } from "@/agent/tauri-mcp-transport";
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { LazyStore } from "@tauri-apps/plugin-store";
 
 /**
  * Classify a *thrown* invoke error (capability/scope violations, OS-level
@@ -79,7 +77,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   private uiListeners: Set<PlatformEventListener> = new Set();
   private fsListeners: Set<FsChangeListener> = new Set();
   private unlistenFns: Promise<UnlistenFn>[] = [];
-  private kvStore = new LazyStore("kv.json");
 
   readonly fs: FileSystemSurface = {
     requestWorkspaceAccess: this.requestWorkspaceAccess.bind(this),
@@ -109,13 +106,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     createAgentTransport: this.createAgentTransport.bind(this),
     createMcpEndpoint: this.createMcpEndpoint.bind(this),
     runShellCommand: this.runShellCommand.bind(this),
-  };
-
-  readonly kv: KvSurface = {
-    getKv: this.getKv.bind(this),
-    setKv: this.setKv.bind(this),
-    deleteKv: this.deleteKv.bind(this),
-    getAllKv: this.getAllKv.bind(this),
   };
 
   readonly db: DbSurface = createTauriDb();
@@ -563,47 +553,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
         }
       })
       .then((unlisten) => this.unlistenFns.push(Promise.resolve(unlisten)));
-  }
-
-  private buildKvKey(namespace: string, key: string): string {
-    return `${namespace}:${key}`;
-  }
-
-  private async getKv<T>(
-    namespace: string,
-    key: string,
-  ): Promise<T | undefined> {
-    const fullKey = this.buildKvKey(namespace, key);
-    const value = await this.kvStore.get<T>(fullKey);
-    return value ?? undefined;
-  }
-
-  private async setKv<T>(
-    namespace: string,
-    key: string,
-    value: T,
-  ): Promise<void> {
-    const fullKey = this.buildKvKey(namespace, key);
-    await this.kvStore.set(fullKey, value);
-  }
-
-  private async deleteKv(namespace: string, key: string): Promise<void> {
-    const fullKey = this.buildKvKey(namespace, key);
-    await this.kvStore.delete(fullKey);
-  }
-
-  private async getAllKv<T>(namespace: string): Promise<Record<string, T>> {
-    const allEntries = await this.kvStore.entries<T>();
-    const prefix = `${namespace}:`;
-    const result: Record<string, T> = {};
-
-    for (const [key, value] of allEntries) {
-      if (key.startsWith(prefix)) {
-        const shortKey = key.slice(prefix.length);
-        result[shortKey] = value;
-      }
-    }
-    return result;
   }
 
   private async toggleFullscreen(): Promise<void> {

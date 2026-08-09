@@ -1,5 +1,5 @@
 /**
- * Minimal ambient types for `node:sqlite`, used only by `db-conformance.test.ts`.
+ * Minimal ambient types for `node:sqlite`, used only by `testing/node-db.ts`.
  * The repo runs Node 22, where the module needs no flag, but `@types/node` is
  * pinned at ^20 and predates it. Delete this when that moves to 22+.
  */
@@ -12,8 +12,9 @@ declare module "node:sqlite" {
   class StatementSync {
     /** Allows `$1` to bind as the bare named parameter `1`. */
     setAllowBareNamedParameters(allow: boolean): void;
-    run(namedParameters?: Record<string, unknown>): StatementResultingChanges;
-    all(namedParameters?: Record<string, unknown>): Record<string, unknown>[];
+    /** Accepts either a bare-named record or positional `?` parameters. */
+    run(...params: unknown[]): StatementResultingChanges;
+    all(...params: unknown[]): Record<string, unknown>[];
   }
 
   export class DatabaseSync {
