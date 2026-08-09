@@ -1,4 +1,5 @@
 import type {
+  DbSurface,
   FileSystemSurface,
   FsChangeListener,
   IPlatformAdapter,
@@ -20,6 +21,7 @@ import type {
   IgnoreRulesOption,
 } from "./platform-adapter.interface";
 import { FsError } from "./platform-adapter.interface";
+import { createTauriDb } from "./tauri-db";
 import { requestTextPrompt } from "@/utils/text-prompt";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -115,6 +117,8 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     deleteKv: this.deleteKv.bind(this),
     getAllKv: this.getAllKv.bind(this),
   };
+
+  readonly db: DbSurface = createTauriDb();
 
   readonly ui: PlatformUiSurface = {
     pickDirectory: this.pickDirectory.bind(this),

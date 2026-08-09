@@ -31,18 +31,19 @@ export type TelemetryEvent =
     }
   | { name: "settings_changed"; properties: { setting: string } }
   | {
+      // The local database was unreadable and got recreated, losing whatever
+      // it held — rare and destructive, so the rate is worth knowing.
+      name: "db_corruption_reset";
+      properties: { platform: "tauri" | "browser" };
+    }
+  | {
       name: "telemetry_consent_answered";
       properties: { crash_enabled: boolean; analytics_enabled: boolean };
     };
 
 export type TelemetryEventName = TelemetryEvent["name"];
 
-export type DurationBucket =
-  | "<10s"
-  | "10s-1m"
-  | "1m-5m"
-  | "5m-15m"
-  | ">15m";
+export type DurationBucket = "<10s" | "10s-1m" | "1m-5m" | "5m-15m" | ">15m";
 
 export function toDurationBucket(ms: number): DurationBucket {
   if (ms < 10_000) return "<10s";

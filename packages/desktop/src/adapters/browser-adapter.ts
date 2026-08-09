@@ -18,7 +18,8 @@ import { isHiddenPath, matchesIgnoreRules } from "./browser-fs-utils";
 import { processPool } from "@/utils/process-pool";
 
 export class BrowserPlatformAdapter extends BaseBrowserAdapter {
-  private db: IDBDatabase | null = null;
+  // `idbHandle`, not `db` — `db` is now the SQLite surface (MET-123).
+  private idbHandle: IDBDatabase | null = null;
   private readonly DB_VERSION = 1;
   private readonly STORE_NAME = "files";
 
@@ -31,8 +32,8 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
   }
 
   private async ensureDB(): Promise<IDBDatabase> {
-    if (this.db) {
-      return this.db;
+    if (this.idbHandle) {
+      return this.idbHandle;
     }
 
     const dbName = this.getDBName();
@@ -42,9 +43,9 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
 
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
-        this.db = request.result;
+        this.idbHandle = request.result;
         console.log("[BrowserAdapter] Opened database:", dbName);
-        resolve(this.db);
+        resolve(this.idbHandle);
       };
 
       request.onupgradeneeded = (event) => {
