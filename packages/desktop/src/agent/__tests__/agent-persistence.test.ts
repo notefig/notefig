@@ -166,7 +166,12 @@ describe("persisted tasks collection", () => {
     expect(agentTasksCollection.get("task_a")).toMatchObject({
       status: "restored",
     });
-    expect(agentTasksCollection.get("task_a")).not.toHaveProperty("authHint");
+    // In memory the key lingers holding `undefined` — the strip is an
+    // assignment, because a draft ignores `delete` and a delete-then-insert
+    // pair could not be made atomic. Every consumer reads that as absent...
+    expect(agentTasksCollection.get("task_a")!.authHint).toBeUndefined();
+    // ...and it really is absent in storage, so the next launch loads the
+    // clean boot shape.
     expect(onDisk("task_a")).not.toHaveProperty("authHint");
   });
 

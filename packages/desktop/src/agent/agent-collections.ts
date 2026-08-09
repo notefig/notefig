@@ -188,8 +188,11 @@ export const agentTasksCollection = createCollection(
 
 /** Whether a hydrated row already matches what the boot mapping would produce. */
 function matchesBootRow(row: AgentTaskRow, boot: AgentTaskRow): boolean {
+  // `undefined` counts as absent: that is how a stripped field looks in memory
   const significant = (task: AgentTaskRow) =>
-    Object.entries(task).filter(([key]) => !key.startsWith("$"));
+    Object.entries(task).filter(
+      ([key, value]) => !key.startsWith("$") && value !== undefined,
+    );
   const rowEntries = significant(row);
   const bootEntries = significant(boot);
   if (rowEntries.length !== bootEntries.length) return false;
@@ -245,8 +248,13 @@ export async function reconcileAgentTasksAtBoot(): Promise<void> {
     // (authHint, authMethods, …), and a draft mutation can only add or change.
     // Each step is awaited to durability so the next launch cannot observe a
     // half-applied replacement.
-    await agentTasksCollection.delete(stored.taskId).isPersisted.promise;
-    await agentTasksCollection.insert(boot).isPersisted.promise;
+    await agentTasksCollection.update(stored.taskId, (draft) => {
+      Object.assign(draft, boot);
+      for (const key of Object.keys(draft)) {
+        if (key.startsWith("$") || key in boot) continue;
+        (draft as Record<string, unknown>)[key] = undefined;
+      }
+    }).isPersisted.promise;
   }
 }
 
