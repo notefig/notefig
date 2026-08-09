@@ -52,8 +52,15 @@ async function removeOpfsDatabase(): Promise<void> {
   for (const suffix of ["", "-wal", "-shm", "-journal"]) {
     try {
       await root.removeEntry(`${DATABASE_NAME}${suffix}`);
-    } catch {
-      // Already gone is the desired end state.
+    } catch (error) {
+      // Absent is the desired end state, so `NotFoundError` is success.
+      // Anything else — notably `NoModificationAllowedError`, raised while a
+      // sync access handle is still open — means the file is still on disk, and
+      // swallowing it would let the caller report a recovery that did not
+      // happen and then retry against the same corrupt database.
+      if ((error as DOMException | undefined)?.name !== "NotFoundError") {
+        throw error;
+      }
     }
   }
 }
@@ -69,7 +76,14 @@ export function createBrowserDb(): DbSurface {
       // At first use rather than at boot — the result gates nothing.
       await navigator.storage?.persist?.().catch(() => false);
       return openBrowserWASQLiteOPFSDatabase({ databaseName: DATABASE_NAME });
-    })();
+    })().catch((error: unknown) => {
+      // Never cache a failed open. OPFS is transiently unavailable often
+      // enough — a sync access handle still held by a closing tab, a worker
+      // that lost a race at startup — and a retained rejection would make
+      // every later query fail until the page reloads.
+      openPromise = null;
+      throw error;
+    });
     return openPromise;
   };
 
