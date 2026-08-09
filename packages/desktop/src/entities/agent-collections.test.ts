@@ -1,4 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  BasicIndex,
+  CollectionConfigurationError,
+  createCollection,
+  localOnlyCollectionOptions,
+} from "@tanstack/react-db";
 
 // The tasks collection's queryFn reaches @/adapters (getAllKv) and the task
 // registry; turns/entries are local-only and touch neither. A stub adapter
@@ -83,5 +89,64 @@ describe("agent-collections taskId index derivation", () => {
   it("returns an empty array for a task with no rows", () => {
     expect(agentTurnsForTask("task_none")).toEqual([]);
     expect(agentEntriesForTask("task_none")).toEqual([]);
+  });
+});
+
+/**
+ * Pins the @tanstack/db 0.6 indexing contract, because it is easy to get
+ * wrong from the changelog alone: there is no `@tanstack/db/indexing`
+ * subpath (index types are root exports, re-exported by react-db), and
+ * `autoIndex` defaults to "off" — the 0.6 break is that an explicit
+ * "eager" now throws without `defaultIndexType`, not that the default
+ * flipped. If a future release flips it, this fails at bump time rather
+ * than as a silent full-scan in the transcript panel.
+ */
+describe("@tanstack/db 0.6 indexing contract", () => {
+  it("re-exports index types from the package root, not an /indexing subpath", () => {
+    expect(BasicIndex).toBeTypeOf("function");
+  });
+
+  it("defaults autoIndex to off — no index is created without an explicit one", () => {
+    const collection = createCollection(
+      localOnlyCollectionOptions({
+        id: "autoindex-default-probe",
+        getKey: (row: { id: string; taskId: string }) => row.id,
+      }),
+    );
+    collection.insert({ id: "r1", taskId: "task_a" });
+
+    expect(collection.config.autoIndex).toBe("off");
+    expect([...collection.indexes.values()]).toHaveLength(0);
+  });
+
+  it("throws when autoIndex is 'eager' without a defaultIndexType", () => {
+    expect(() =>
+      createCollection(
+        localOnlyCollectionOptions({
+          id: "autoindex-eager-probe",
+          getKey: (row: { id: string }) => row.id,
+          autoIndex: "eager",
+        }),
+      ),
+    ).toThrow(CollectionConfigurationError);
+  });
+
+  it("supports an explicit indexType whose equalityLookup returns only matching keys", () => {
+    // Mirrors agent-collections.ts's entriesByTask/turnsByTask construction.
+    const collection = createCollection(
+      localOnlyCollectionOptions({
+        id: "explicit-indextype-probe",
+        getKey: (row: { id: string; taskId: string }) => row.id,
+      }),
+    );
+    const byTask = collection.createIndex((row) => row.taskId, { indexType: BasicIndex });
+
+    collection.insert({ id: "r1", taskId: "task_a" });
+    collection.insert({ id: "r2", taskId: "task_b" });
+    collection.insert({ id: "r3", taskId: "task_a" });
+
+    expect([...byTask.equalityLookup("task_a")].map(String).sort()).toEqual(["r1", "r3"]);
+    expect([...byTask.equalityLookup("task_b")].map(String)).toEqual(["r2"]);
+    expect([...byTask.equalityLookup("task_missing")]).toEqual([]);
   });
 });
