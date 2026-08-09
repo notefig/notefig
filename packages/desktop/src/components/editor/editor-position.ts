@@ -35,6 +35,18 @@ export interface EditorLocation {
   column?: number;
   /** Expected text at location for verification/occurrence matching */
   expectedText?: string;
+  /**
+   * Raw content of the line containing the match (search results).
+   * Primary disambiguator between occurrences of expectedText — it works
+   * even when the disk file's bytes differ from the doc's serialization.
+   */
+  lineText?: string;
+  /**
+   * 0-indexed occurrence of expectedText among all search matches with the
+   * same text in this file. Tie-break when lineText can't disambiguate
+   * (identical lines).
+   */
+  occurrence?: number;
   /** Selection range end line (for multi-line selections) */
   endLine?: number;
   /** Selection range end column */
@@ -279,14 +291,7 @@ export function resolveEditorLocation(
   const column = location.column ?? 1;
 
   if (location.expectedText) {
-    const selection = resolveByExpectedText(
-      lines,
-      rendered,
-      location.line,
-      column,
-      location.expectedText,
-      rawMarkdown,
-    );
+    const selection = resolveByExpectedText(lines, rendered, location, rawMarkdown);
     if (selection) return selection;
   }
 
@@ -307,52 +312,172 @@ export function resolveEditorLocation(
   return { from, to };
 }
 
-function resolveByExpectedText(
+/** Rendered line index containing a character offset in the joined text. */
+function lineIndexAtOffset(lines: RenderedLine[], offset: number): number {
+  let remaining = offset;
+  for (let i = 0; i < lines.length; i++) {
+    if (remaining <= lines[i].text.length) return i;
+    remaining -= lines[i].text.length + 1;
+  }
+  return lines.length - 1;
+}
+
+/**
+ * How much does a rendered line look like the raw file line a search match
+ * came from? 1 for equality; containment scores by the contained share so
+ * a trivially short line can't outrank the real one; otherwise the share
+ * of the raw line's words present in the rendered line. Robust to disk
+ * bytes the serializer would normalize (wrapping, punctuation, syntax).
+ */
+function lineSimilarity(rawLine: string, renderedLine: string): number {
+  const raw = rawLine.trim();
+  const r = renderedLine.trim();
+  if (!raw || !r) return 0;
+  if (raw === r) return 1;
+
+  let score = 0;
+  if (raw.includes(r)) score = r.length / raw.length;
+  if (r.includes(raw)) score = Math.max(score, raw.length / r.length);
+
+  const words = raw.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 1);
+  if (words.length > 0) {
+    const hits = words.filter((w) => r.includes(w)).length;
+    score = Math.max(score, hits / words.length);
+  }
+  return score;
+}
+
+/** All offsets of `needle` in `haystack`. */
+function allOffsetsOf(haystack: string, needle: string): number[] {
+  const offsets: number[] = [];
+  let idx = haystack.indexOf(needle);
+  while (idx !== -1) {
+    offsets.push(idx);
+    idx = haystack.indexOf(needle, idx + 1);
+  }
+  return offsets;
+}
+
+/**
+ * Keep the candidate offsets whose rendered line best resembles the raw
+ * line the match came from. Works even when the disk file's bytes differ
+ * from the serialization (frontmatter, wrapped paragraphs, punctuation
+ * normalization). Keeps everything when nothing scores.
+ */
+function narrowByLineText(
   lines: RenderedLine[],
-  rendered: string,
+  candidates: number[],
+  lineText: string,
+): number[] {
+  const scored = candidates.map((o) => ({
+    o,
+    s: lineSimilarity(lineText, lines[lineIndexAtOffset(lines, o)].text),
+  }));
+  const best = Math.max(...scored.map((x) => x.s));
+  if (best === 0) return candidates;
+  return scored.filter((x) => x.s === best).map((x) => x.o);
+}
+
+/**
+ * Which occurrence of `expectedText` do the raw coordinates point at?
+ * Only answers when the raw offset verifiably holds the text (i.e. the
+ * serialized markdown matches the coordinates' source bytes).
+ */
+function occurrenceIndexInRaw(
+  rawMarkdown: string,
   line: number,
   column: number,
   expectedText: string,
+): number | undefined {
+  const rawOffset = rawLineColumnToOffset(rawMarkdown.split("\n"), line, column);
+  if (!rawMarkdown.startsWith(expectedText, rawOffset)) return undefined;
+  let n = 0;
+  let j = rawMarkdown.indexOf(expectedText);
+  while (j !== -1 && j < rawOffset) {
+    n++;
+    j = rawMarkdown.indexOf(expectedText, j + 1);
+  }
+  return n;
+}
+
+function resolveByExpectedText(
+  lines: RenderedLine[],
+  rendered: string,
+  location: EditorLocation,
   rawMarkdown?: string,
 ): { from: number; to: number } | null {
-  const occurrences: number[] = [];
-  let idx = rendered.indexOf(expectedText);
-  while (idx !== -1) {
-    occurrences.push(idx);
-    idx = rendered.indexOf(expectedText, idx + 1);
-  }
+  const expectedText = location.expectedText as string;
+  const line = location.line;
+  const column = location.column ?? 1;
+
+  const occurrences = allOffsetsOf(rendered, expectedText);
   if (occurrences.length === 0) return null;
 
-  let chosen: number | undefined;
-
-  if (rawMarkdown !== undefined) {
-    // Occurrence-index match: which occurrence of expectedText do the raw
-    // coordinates point at? Select the same occurrence in the rendered
-    // text. Verify the raw offset actually holds the text first — stale
-    // coordinates fall through to the nearest-occurrence heuristic.
-    const rawLines = rawMarkdown.split("\n");
-    const rawOffset = rawLineColumnToOffset(rawLines, line, column);
-    if (rawMarkdown.startsWith(expectedText, rawOffset)) {
-      let n = 0;
-      let j = rawMarkdown.indexOf(expectedText);
-      while (j !== -1 && j < rawOffset) {
-        n++;
-        j = rawMarkdown.indexOf(expectedText, j + 1);
-      }
-      if (n < occurrences.length) chosen = occurrences[n];
-    }
+  // Tier 1 — lineText similarity narrowing.
+  let candidates = occurrences;
+  if (location.lineText !== undefined && candidates.length > 1) {
+    candidates = narrowByLineText(lines, candidates, location.lineText);
   }
 
-  if (chosen === undefined) {
-    const hint = mapRawLineColumn(lines, line, column, rawMarkdown);
-    const hintOffset = renderedLineStartOffset(lines, hint.li) + hint.offset;
-    chosen = occurrences.reduce((best, o) =>
-      Math.abs(o - hintOffset) < Math.abs(best - hintOffset) ? o : best,
-    );
-  }
+  const chosen =
+    candidates.length === 1
+      ? candidates[0]
+      : chooseByOccurrenceArithmetic(
+          occurrences,
+          candidates,
+          location,
+          rawMarkdown,
+        ) ??
+        chooseNearestToHint(lines, candidates, line, column, rawMarkdown);
 
   return {
     from: posAtRenderedOffset(lines, chosen),
     to: posAtRenderedOffset(lines, chosen + expectedText.length - 1) + 1,
   };
+}
+
+/**
+ * Tier 2 — occurrence arithmetic. The panel's occurrence index applies
+ * when no narrowing happened (indices still line up); the serialized
+ * markdown's own count applies when the file is canonical.
+ */
+function chooseByOccurrenceArithmetic(
+  occurrences: number[],
+  candidates: number[],
+  location: EditorLocation,
+  rawMarkdown?: string,
+): number | undefined {
+  if (candidates.length === occurrences.length) {
+    const n = location.occurrence;
+    if (n !== undefined && n >= 0 && n < occurrences.length) {
+      return occurrences[n];
+    }
+  }
+  if (rawMarkdown !== undefined) {
+    const n = occurrenceIndexInRaw(
+      rawMarkdown,
+      location.line,
+      location.column ?? 1,
+      location.expectedText as string,
+    );
+    if (n !== undefined && candidates.includes(occurrences[n])) {
+      return occurrences[n];
+    }
+  }
+  return undefined;
+}
+
+/** Tier 3 — nearest candidate to the aligned line hint. */
+function chooseNearestToHint(
+  lines: RenderedLine[],
+  candidates: number[],
+  line: number,
+  column: number,
+  rawMarkdown?: string,
+): number {
+  const hint = mapRawLineColumn(lines, line, column, rawMarkdown);
+  const hintOffset = renderedLineStartOffset(lines, hint.li) + hint.offset;
+  return candidates.reduce((best, o) =>
+    Math.abs(o - hintOffset) < Math.abs(best - hintOffset) ? o : best,
+  );
 }

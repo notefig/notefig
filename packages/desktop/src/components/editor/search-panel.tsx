@@ -48,12 +48,11 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
 
     const handleMatchClick = useCallback(
       (
-        filePath: string,
-        line: number,
-        column: number,
-        matchText?: string,
+        match: SearchMatch,
+        occurrence: number,
         options?: Omit<OpenFileInLayoutOptions, "tabId">,
       ) => {
+        const filePath = match.location.filePath;
         openFile({ tabId: filePath, intent: options?.intent ?? "replace" });
         // Retry navigation until editor is mounted and ready (up to ~2s)
         let attempt = 0;
@@ -62,9 +61,11 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
           attempt++;
           if (
             navigateToLocation(filePath, {
-              line,
-              column,
-              expectedText: matchText,
+              line: match.location.range.start.line,
+              column: match.location.range.start.column,
+              expectedText: match.content.matchText,
+              lineText: match.content.lineContent,
+              occurrence,
             })
           )
             return;
@@ -287,10 +288,15 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
                       caseSensitive={caseSensitive}
                       onClick={() =>
                         handleMatchClick(
-                          filePath,
-                          match.location.range.start.line,
-                          match.location.range.start.column,
-                          match.content.matchText,
+                          match,
+                          // Which occurrence of this exact matched text the
+                          // user clicked — matches arrive in file order.
+                          matches
+                            .slice(0, i)
+                            .filter(
+                              (m) =>
+                                m.content.matchText === match.content.matchText,
+                            ).length,
                           {
                             intent: isModHeld ? "new-tab" : "replace",
                           },

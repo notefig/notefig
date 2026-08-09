@@ -32,6 +32,17 @@ function createEditor(markdown: string): Editor {
   return editor;
 }
 
+function createEditorFromDoc(doc: object): Editor {
+  const editor = new Editor({
+    extensions: editorExtensions,
+    content: doc,
+    editable: true,
+    autofocus: false,
+  });
+  editors.push(editor);
+  return editor;
+}
+
 /** The raw markdown goToLocation passes to resolveEditorLocation. */
 function getMarkdown(editor: Editor): string {
   return (
@@ -61,7 +72,8 @@ function searchMatch(markdown: string, query: string, occurrence = 0) {
           location: {
             range: { start: { line: lineIdx + 1, column: col + 1 } },
           },
-          content: { matchText: query },
+          content: { matchText: query, lineContent: lines[lineIdx] },
+          occurrence,
         };
       }
       seen++;
@@ -88,6 +100,8 @@ function navigateToMatch(
       line: match.location.range.start.line,
       column: match.location.range.start.column,
       expectedText: match.content.matchText,
+      lineText: match.content.lineContent,
+      occurrence: match.occurrence,
     },
     getMarkdown(editor),
   );
@@ -275,6 +289,151 @@ describe("plain go-to-line (no expectedText) in a markdown-rich document", () =>
 
     const word = editor.state.doc.textBetween(from, from + "landmark".length);
     expect(word).toBe("landmark");
+  });
+});
+
+describe("non-canonical disk files (file bytes ≠ serialized markdown)", () => {
+  // Real-world repro (canto-xii): the file on disk was authored by hand /
+  // other tools, so its bytes differ from the editor's serialization —
+  // frontmatter, hard-wrapped paragraphs, straight-vs-curly punctuation.
+  // Search coordinates come from the DISK bytes; any resolution strategy
+  // that verifies them against the serialized markdown falls apart. The
+  // search panel's occurrence index must carry navigation instead.
+  const DISK = [
+    "---",
+    "title: What this directory is",
+    "status: draft",
+    "---",
+    "",
+    "# What this directory is",
+    "",
+    "**Short version:** `the-inferno` isn't a book project. It's a test",
+    "workspace for the Metrists writing app, with public-domain literature",
+    "used as filler text.",
+    "",
+    "hello world. is this even working like it's supposed to.",
+    "",
+    "## The setup",
+    "",
+    "The hidden `.metrists/` directory holds the app itself (a Next.js",
+    "project), and `.gitignore` contains exactly one line.",
+    "",
+    "There's also a `.gittt/` directory that looks like a typo'd stray",
+    "copy of `.git`.",
+  ].join("\n");
+
+  // What the editor actually holds (parsed AST — one paragraph per block,
+  // curly apostrophes, no frontmatter), mirroring the user's doc dump.
+  function createAstEditor(): Editor {
+    return createEditorFromDoc({
+      type: "doc",
+      content: [
+        {
+          type: "heading",
+          attrs: { level: 1 },
+          content: [{ type: "text", text: "What this directory is" }],
+        },
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", marks: [{ type: "bold" }], text: "Short version:" },
+            { type: "text", text: " " },
+            { type: "text", marks: [{ type: "code" }], text: "the-inferno" },
+            {
+              type: "text",
+              text: " isn’t a book project. It’s a test workspace for the Metrists writing app, with public-domain literature used as filler text.",
+            },
+          ],
+        },
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: "hello world. is this even working like it’s supposed to.",
+            },
+          ],
+        },
+        {
+          type: "heading",
+          attrs: { level: 2 },
+          content: [{ type: "text", text: "The setup" }],
+        },
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "The hidden " },
+            { type: "text", marks: [{ type: "code" }], text: ".metrists/" },
+            {
+              type: "text",
+              text: " directory holds the app itself (a Next.js project), and ",
+            },
+            { type: "text", marks: [{ type: "code" }], text: ".gitignore" },
+            { type: "text", text: " contains exactly one line." },
+          ],
+        },
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "There’s also a " },
+            { type: "text", marks: [{ type: "code" }], text: ".gittt/" },
+            {
+              type: "text",
+              text: " directory that looks like a typo’d stray copy of ",
+            },
+            { type: "text", marks: [{ type: "code" }], text: ".git" },
+            { type: "text", text: "." },
+          ],
+        },
+      ],
+    });
+  }
+
+  // "directory" occurrences in DISK: 0 = frontmatter title (raw-only!),
+  // 1 = heading, 2 = .metrists paragraph, 3 = .gittt paragraph.
+
+  it("heading occurrence resolves despite the frontmatter echo above it", () => {
+    const editor = createAstEditor();
+    const match = searchMatch(DISK, "directory", 1);
+    expect(match.location.range.start.line).toBe(6); // shifted by frontmatter
+
+    const { from, to } = navigateToMatch(editor, match);
+
+    expect(editor.state.doc.textBetween(from, to)).toBe("directory");
+    expect(blockTextAt(editor, from)).toBe("What this directory is");
+  });
+
+  it("match on a wrapped paragraph line resolves despite punctuation drift", () => {
+    const editor = createAstEditor();
+    const match = searchMatch(DISK, "directory", 2);
+
+    const { from, to } = navigateToMatch(editor, match);
+
+    expect(editor.state.doc.textBetween(from, to)).toBe("directory");
+    expect(blockTextAt(editor, from)).toContain("directory holds the app");
+  });
+
+  it("last occurrence resolves to the .gittt paragraph", () => {
+    const editor = createAstEditor();
+    const match = searchMatch(DISK, "directory", 3);
+
+    const { from, to } = navigateToMatch(editor, match);
+
+    expect(editor.state.doc.textBetween(from, to)).toBe("directory");
+    expect(blockTextAt(editor, from)).toContain("stray copy");
+  });
+
+  it("clicking the frontmatter match lands on the heading (best effort)", () => {
+    // The frontmatter title exists only in the raw bytes; the closest
+    // rendered line is the heading that echoes it.
+    const editor = createAstEditor();
+    const match = searchMatch(DISK, "directory", 0);
+    expect(match.location.range.start.line).toBe(2);
+
+    const { from, to } = navigateToMatch(editor, match);
+
+    expect(editor.state.doc.textBetween(from, to)).toBe("directory");
+    expect(blockTextAt(editor, from)).toBe("What this directory is");
   });
 });
 
