@@ -76,7 +76,7 @@ export function EditorHarness() {
     (async () => {
       // Seed the doc + any extra files through the adapter so autosave,
       // image assets and search all operate on a consistent store.
-      await platformAdapter.writeFiles([
+      await platformAdapter.fs.writeFiles([
         { path: config.filePath, content: config.content },
         ...(config.files ?? []),
       ]);
@@ -97,7 +97,7 @@ export function EditorHarness() {
         return editor ? getEditorMarkdown(editor) : null;
       },
       readFile: async (path: string) => {
-        const result = await platformAdapter.readFiles([path]);
+        const result = await platformAdapter.fs.readFiles([path]);
         return result.succeeded[0]?.content ?? null;
       },
       opened,

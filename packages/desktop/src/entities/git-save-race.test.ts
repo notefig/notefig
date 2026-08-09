@@ -26,16 +26,13 @@ vi.mock("@notefig/git", () => {
   };
 });
 
-vi.mock("@/adapters", () => ({
-  platformAdapter: { getGitStorageHost: vi.fn(() => ({})) },
+vi.mock("@/adapters", () => ({ platformAdapter: { fs: {} } }));
+vi.mock("@/adapters/git-storage-host", () => ({
+  createGitStorageHost: vi.fn(() => ({})),
 }));
 
 import { createLiveQueryCollection, eq } from "@tanstack/react-db";
-import {
-  getOrCreateGitCollection,
-  invalidateGit,
-  saveCheckpoint,
-} from "./git";
+import { getOrCreateGitCollection, invalidateGit, saveCheckpoint } from "./git";
 
 const WS = "/tmp/ws-git-save-race-test";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

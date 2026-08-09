@@ -95,7 +95,7 @@ const TELEMETRY_CONSENT_KEYS = [
 
 async function resetTelemetryConsent(): Promise<void> {
   for (const key of TELEMETRY_CONSENT_KEYS) {
-    await platformAdapter.deleteKv(SETTINGS_NAMESPACE, key);
+    await platformAdapter.kv.deleteKv(SETTINGS_NAMESPACE, key);
   }
   // Reload resets the bootstrap's module-level started flag, so the
   // first-run consent dialog reappears immediately.

@@ -1,7 +1,9 @@
 import type { Theme } from "@/components/theme-provider";
-import type { GitStorageHost } from "@notefig/git";
 import type { HarnessDefinition } from "@notefig/shared/agent";
-import type { AgentTransport, McpEndpoint } from "@/agent/agent-transport.interface";
+import type {
+  AgentTransport,
+  McpEndpoint,
+} from "@/agent/agent-transport.interface";
 
 export type FileSystemErrorType =
   | "not_found"
@@ -148,12 +150,23 @@ export type SearchMatch = {
   content: SearchMatchContent;
 };
 
+/**
+ * Watcher events, delivered on the fs surface rather than the general
+ * platform bus so that surface is self-contained. The `fs-` prefixed names
+ * are kept deliberately: they are the same strings the Rust watcher emits
+ * (`file_watcher.rs`), so the wire name stays greppable from the consumer.
+ */
+export type FsChangeEvent =
+  | { type: "fs-metadata-changed"; payload: MetadataChangeEvent }
+  | { type: "fs-content-changed"; payload: ContentChangeEvent };
+
+export type FsChangeListener = (event: FsChangeEvent) => void;
+
+/** Window/OS-level events. Watcher events live on the fs surface instead. */
 export type PlatformEvent =
   | { type: "theme-changed"; payload: Theme }
   | { type: "folder-selected"; payload: string }
   | { type: "file-dropped"; payload: string[] }
-  | { type: "fs-metadata-changed"; payload: MetadataChangeEvent }
-  | { type: "fs-content-changed"; payload: ContentChangeEvent }
   | { type: "zoom-changed"; payload: number };
 
 export type PlatformEventListener = (event: PlatformEvent) => void;
@@ -209,38 +222,18 @@ export interface PlatformUpdater {
 }
 
 /**
- * Platform adapter interface
- * Provides a unified interface for platform-specific operations
- * (Tauri vs Browser)
+ * File system surface: files, directories, metadata, watching, search, and
+ * the two properties of the fs backend that callers must be able to reach
+ * alongside it (asset URL resolution and permission re-acquisition — the FS
+ * Access API needs both).
  */
-export interface IPlatformAdapter {
-  /**
-   * Opens a directory picker dialog
-   * @param title - Title for the picker dialog
-   * @returns Promise that resolves to the selected directory path or null if cancelled
-   */
-  pickDirectory(title: string): Promise<string | null>;
-
+export interface FileSystemSurface {
   /**
    * (Re)acquire access to a workspace folder after a permission failure.
    * On web this MUST run inside a user gesture (it calls
    * handle.requestPermission); elsewhere it's a no-op returning true.
    */
   requestWorkspaceAccess(workspacePath: string): Promise<boolean>;
-
-  /**
-   * Ask the user for a single line of text (e.g. a link URL).
-   * window.prompt is not implemented inside the Tauri webview, so callers
-   * must go through this affordance instead.
-   * @returns the entered text, or null if the user cancelled
-   */
-  promptText(options: TextPromptOptions): Promise<string | null>;
-
-  /**
-   * Open a URL in the system's default browser.
-   * @param url — must be http(s) or mailto; other schemes are ignored
-   */
-  openExternal(url: string): Promise<void>;
 
   /**
    * Read directory contents
@@ -396,52 +389,13 @@ export interface IPlatformAdapter {
   stopWatching(watchId: string): Promise<void>;
 
   /**
-   * Adds a generic platform event listener
-   * @param callback - Function to call when events are emitted
+   * Subscribe to watcher change events for every active watch session.
+   * Events are not scoped per watchId — the platform emits them for the
+   * whole app, and callers filter by workspace themselves (see
+   * utils/file-sync.ts).
    * @returns Cleanup function to remove the listener
    */
-  addEventListener(callback: PlatformEventListener): () => void;
-
-  /**
-   * Removes a platform event listener
-   * @param callback - The callback function to remove
-   */
-  removeEventListener(callback: PlatformEventListener): void;
-
-  /**
-   * Get a value from a namespaced key-value store.
-   * @param namespace - The namespace/category for the key
-   * @param key - The key within the namespace
-   * @returns The stored value, or undefined if not found.
-   */
-  getKv<T>(namespace: string, key: string): Promise<T | undefined>;
-
-  /**
-   * Set a value in a namespaced key-value store.
-   * @param namespace - The namespace/category for the key
-   * @param key - The key within the namespace
-   * @param value - The value to store
-   */
-  setKv<T>(namespace: string, key: string, value: T): Promise<void>;
-
-  /**
-   * Delete a key from a namespaced key-value store.
-   * @param namespace - The namespace/category for the key
-   * @param key - The key to delete
-   */
-  deleteKv(namespace: string, key: string): Promise<void>;
-
-  /**
-   * Get all values from a namespaced key-value store.
-   * @param namespace - The namespace/category
-   * @returns Record of all key-value pairs in the namespace
-   */
-  getAllKv<T>(namespace: string): Promise<Record<string, T>>;
-
-  /**
-   * Toggle application fullscreen state.
-   */
-  toggleFullscreen(): Promise<void>;
+  onFsEvent(listener: FsChangeListener): () => void;
 
   /**
    * Search content in files within a directory.
@@ -454,13 +408,13 @@ export interface IPlatformAdapter {
     directory: string,
     options: SearchOptions,
   ): Promise<SearchMatch[]>;
+}
 
-  /**
-   * Create a GitStorageHost bound to a workspace root.
-   * This enables one-line Git service initialization per workspace.
-   */
-  getGitStorageHost(workspacePath: string): GitStorageHost;
-
+/**
+ * Local process surface. Per MET-119 these keep their agent-specific
+ * contracts verbatim — they are regrouped here, not generalized.
+ */
+export interface ProcessSurface {
   /**
    * Create the agent transport for a new task. Desktop spawns the harness as
    * a local child process (Tauri stdio transport); other platforms plug in
@@ -505,10 +459,84 @@ export interface IPlatformAdapter {
    * web/relay platform, so non-desktop adapters reject it, same as
    * `createAgentTransport`'s placeholder above.
    */
-  runShellCommand(script: string): Promise<{ stdout: string; exitCode: number }>;
+  runShellCommand(
+    script: string,
+  ): Promise<{ stdout: string; exitCode: number }>;
+}
+
+/**
+ * Namespaced key-value storage.
+ *
+ * Temporary surface: MET-124 retires it in favour of the SQLite-backed `db`
+ * surface, so the four methods are grouped verbatim rather than renamed.
+ */
+export interface KvSurface {
+  /**
+   * Get a value from a namespaced key-value store.
+   * @returns The stored value, or undefined if not found.
+   */
+  getKv<T>(namespace: string, key: string): Promise<T | undefined>;
+
+  /** Set a value in a namespaced key-value store. */
+  setKv<T>(namespace: string, key: string, value: T): Promise<void>;
+
+  /** Delete a key from a namespaced key-value store. */
+  deleteKv(namespace: string, key: string): Promise<void>;
+
+  /** Get all key-value pairs in a namespace. */
+  getAllKv<T>(namespace: string): Promise<Record<string, T>>;
+}
+
+/** Window/OS-level shell: dialogs, external links, chrome, platform events. */
+export interface PlatformUiSurface {
+  /**
+   * Opens a directory picker dialog
+   * @param title - Title for the picker dialog
+   * @returns the selected directory path, or null if cancelled
+   */
+  pickDirectory(title: string): Promise<string | null>;
 
   /**
-   * Create updater actions for the current platform.
+   * Ask the user for a single line of text (e.g. a link URL).
+   * window.prompt is not implemented inside the Tauri webview, so callers
+   * must go through this affordance instead.
+   * @returns the entered text, or null if the user cancelled
    */
-  getUpdater(): PlatformUpdater;
+  promptText(options: TextPromptOptions): Promise<string | null>;
+
+  /**
+   * Open a URL in the system's default browser.
+   * @param url — must be http(s) or mailto; other schemes are ignored
+   */
+  openExternal(url: string): Promise<void>;
+
+  /** Toggle application fullscreen state. */
+  toggleFullscreen(): Promise<void>;
+
+  /**
+   * Adds a platform event listener.
+   * @returns Cleanup function to remove the listener
+   */
+  addEventListener(callback: PlatformEventListener): () => void;
+
+  /** Removes a platform event listener. */
+  removeEventListener(callback: PlatformEventListener): void;
+}
+
+/**
+ * Platform adapter: one object composed of per-concern surfaces, so each
+ * surface is self-contained and can be reasoned about (and swapped) on its
+ * own. Construction is synchronous and side-effect free — see the lifecycle
+ * invariance note on MET-118.
+ *
+ * Note `getGitStorageHost` is deliberately absent: the git host is built
+ * purely on fs operations and now lives above the adapter, in
+ * `createGitStorageHost` (git-storage-host.ts).
+ */
+export interface IPlatformAdapter {
+  fs: FileSystemSurface;
+  proc: ProcessSurface;
+  kv: KvSurface;
+  ui: PlatformUiSurface;
+  updates: PlatformUpdater;
 }

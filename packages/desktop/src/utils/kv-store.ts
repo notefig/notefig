@@ -20,7 +20,7 @@ function createKvCollection(namespace: string) {
       queryClient,
 
       queryFn: async (): Promise<KvRow[]> => {
-        const raw = await platformAdapter.getAllKv<unknown>(namespace);
+        const raw = await platformAdapter.kv.getAllKv<unknown>(namespace);
         return Object.entries(raw).map(([key, value]) => ({ key, value }));
       },
 
@@ -28,7 +28,7 @@ function createKvCollection(namespace: string) {
 
       onInsert: async ({ transaction }) => {
         for (const m of transaction.mutations) {
-          await platformAdapter.setKv(
+          await platformAdapter.kv.setKv(
             namespace,
             m.modified.key,
             m.modified.value,
@@ -38,7 +38,7 @@ function createKvCollection(namespace: string) {
 
       onUpdate: async ({ transaction }) => {
         for (const m of transaction.mutations) {
-          await platformAdapter.setKv(
+          await platformAdapter.kv.setKv(
             namespace,
             m.modified.key,
             m.modified.value,
@@ -48,7 +48,7 @@ function createKvCollection(namespace: string) {
 
       onDelete: async ({ transaction }) => {
         for (const m of transaction.mutations) {
-          await platformAdapter.deleteKv(namespace, m.key);
+          await platformAdapter.kv.deleteKv(namespace, m.key);
         }
       },
     }),

@@ -26,6 +26,7 @@ import {
   type RepoStatus,
 } from "@notefig/git";
 import { platformAdapter } from "@/adapters";
+import { createGitStorageHost } from "@/adapters/git-storage-host";
 import { isWorkspaceAccessError } from "@/adapters/platform-adapter.interface";
 import { normalizePath } from "@/utils/fs";
 import { queryClient } from "./query-client";
@@ -41,7 +42,7 @@ export function getOrCreateWorkspaceGitService(
 
   if (!service) {
     service = new IsomorphicGitService(
-      platformAdapter.getGitStorageHost(normalizedWorkspacePath),
+      createGitStorageHost(platformAdapter.fs, normalizedWorkspacePath),
     );
     gitServiceRegistry.set(normalizedWorkspacePath, service);
   }

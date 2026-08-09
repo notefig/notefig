@@ -88,12 +88,12 @@ export function createFileMetadataCollection(workspaceId: string) {
       queryFn: async (): Promise<FileMetadata[]> => {
         const walkOptions = { recursive: true, ignore: IGNORE_RULES };
         const [filesResult, dirsResult] = await Promise.all([
-          platformAdapter.readDirectory(workspaceId, {
+          platformAdapter.fs.readDirectory(workspaceId, {
             ...walkOptions,
             includeFiles: true,
             includeDirectories: false,
           }),
-          platformAdapter.readDirectory(workspaceId, {
+          platformAdapter.fs.readDirectory(workspaceId, {
             ...walkOptions,
             includeFiles: false,
             includeDirectories: true,
@@ -127,7 +127,7 @@ export function createFileMetadataCollection(workspaceId: string) {
           .map((e) => e.path);
         const statMap = new Map<string, { modifiedAt: Date; size: number }>();
         if (pathsToStat.length > 0) {
-          const statResult = await platformAdapter.getMetadata(pathsToStat);
+          const statResult = await platformAdapter.fs.getMetadata(pathsToStat);
           for (const m of statResult.succeeded) {
             statMap.set(m.path, { modifiedAt: m.modifiedAt, size: m.size });
           }
@@ -167,7 +167,7 @@ export function createFileMetadataCollection(workspaceId: string) {
           .map((m) => m.modified.path);
 
         if (files.length > 0) {
-          const result = await platformAdapter.createFiles(files);
+          const result = await platformAdapter.fs.createFiles(files);
           if (result.failed.length > 0) {
             throw new Error(
               `Failed to create files: ${result.failed.map((f) => f.message).join(", ")}`,
@@ -176,7 +176,7 @@ export function createFileMetadataCollection(workspaceId: string) {
         }
 
         if (directories.length > 0) {
-          const result = await platformAdapter.createDirectories(directories);
+          const result = await platformAdapter.fs.createDirectories(directories);
           if (result.failed.length > 0) {
             throw new Error(
               `Failed to create directories: ${result.failed.map((f) => f.message).join(", ")}`,
@@ -195,7 +195,7 @@ export function createFileMetadataCollection(workspaceId: string) {
             hasRename = true;
             const original = mutation.original;
             if (original.type === "file") {
-              const moveResult = await platformAdapter.moveFile(
+              const moveResult = await platformAdapter.fs.moveFile(
                 oldPath,
                 newPath,
               );
@@ -205,7 +205,7 @@ export function createFileMetadataCollection(workspaceId: string) {
                 );
               }
             } else {
-              const moveResult = await platformAdapter.moveDirectory(
+              const moveResult = await platformAdapter.fs.moveDirectory(
                 oldPath,
                 newPath,
               );
@@ -242,7 +242,7 @@ export function createFileMetadataCollection(workspaceId: string) {
           .map((m) => String(m.key));
 
         if (files.length > 0) {
-          const result = await platformAdapter.deleteFiles(files);
+          const result = await platformAdapter.fs.deleteFiles(files);
           if (result.failed.length > 0) {
             throw new Error(
               `Failed to delete files: ${result.failed.map((f) => f.message).join(", ")}`,
@@ -251,7 +251,7 @@ export function createFileMetadataCollection(workspaceId: string) {
         }
 
         if (directories.length > 0) {
-          const result = await platformAdapter.deleteDirectories(directories, {
+          const result = await platformAdapter.fs.deleteDirectories(directories, {
             recursive: true,
           });
           if (result.failed.length > 0) {
@@ -308,7 +308,7 @@ export function createFileContentCollection(workspaceId: string) {
 
         if (requestedPaths.length === 0) return [];
 
-        const result = await platformAdapter.readFiles(requestedPaths);
+        const result = await platformAdapter.fs.readFiles(requestedPaths);
 
         const contentMap = new Map<string, FileContent>();
 
@@ -346,7 +346,7 @@ export function createFileContentCollection(workspaceId: string) {
           content: m.modified.content,
         }));
 
-        const result = await platformAdapter.writeFiles(files);
+        const result = await platformAdapter.fs.writeFiles(files);
         if (result.failed.length > 0) {
           throw new Error(
             `Failed to write files: ${result.failed.map((f) => f.message).join(", ")}`,
@@ -372,7 +372,7 @@ export function createFileContentCollection(workspaceId: string) {
           content: m.modified.content,
         }));
 
-        const result = await platformAdapter.writeFiles(files);
+        const result = await platformAdapter.fs.writeFiles(files);
         if (result.failed.length > 0) {
           throw new Error(
             `Failed to write files: ${result.failed.map((f) => f.message).join(", ")}`,
@@ -462,7 +462,7 @@ export function hydrateDirectoryStats(
     );
 
     if (children.length > 0) {
-      const result = await platformAdapter.getMetadata(
+      const result = await platformAdapter.fs.getMetadata(
         children.map((c) => c.path),
       );
       const updates: FileMetadata[] = [];
@@ -558,7 +558,7 @@ export async function writeFileContent(
   // date-sorted views flap between old and new positions.
   await tx.isPersisted.promise;
 
-  const metadataResult = await platformAdapter.getMetadata([filePath]);
+  const metadataResult = await platformAdapter.fs.getMetadata([filePath]);
   if (metadataResult.succeeded.length > 0) {
     const metadata = metadataResult.succeeded[0];
     const existingMetadata = collections.metadata.get(filePath);
@@ -598,7 +598,7 @@ export async function createFile(
   }
 
   // Refresh metadata to get accurate timestamps
-  const metadataResult = await platformAdapter.getMetadata([filePath]);
+  const metadataResult = await platformAdapter.fs.getMetadata([filePath]);
   if (metadataResult.succeeded.length > 0) {
     const metadata = metadataResult.succeeded[0];
     collections.metadata.update(filePath, (draft) => {
@@ -624,7 +624,7 @@ export async function createDirectory(
   });
 
   // Refresh metadata to get accurate timestamps
-  const metadataResult = await platformAdapter.getMetadata([dirPath]);
+  const metadataResult = await platformAdapter.fs.getMetadata([dirPath]);
   if (metadataResult.succeeded.length > 0) {
     const metadata = metadataResult.succeeded[0];
     collections.metadata.update(dirPath, (draft) => {
@@ -641,7 +641,7 @@ export async function createDirectory(
  * - All child metadata and content entries are removed from collections via direct writes
  *   (bypasses mutation handlers since the recursive FS delete handles them on disk)
  * - The directory entry itself is deleted via the mutation handler which calls
- *   platformAdapter.deleteDirectories with recursive: true
+ *   platformAdapter.fs.deleteDirectories with recursive: true
  *
  * @param workspaceId - Unique identifier for the workspace
  * @param path - Absolute path to delete
@@ -723,7 +723,7 @@ export async function prefetchFileContent(
     return;
   }
 
-  const result = await platformAdapter.readFiles([filePath]);
+  const result = await platformAdapter.fs.readFiles([filePath]);
 
   if (result.succeeded.length > 0) {
     const file = result.succeeded[0];
@@ -791,7 +791,7 @@ export async function renameFileOrDirectory(
       : undefined;
 
   if (entry.type === "file") {
-    const moveResult = await platformAdapter.moveFile(oldPath, newPath);
+    const moveResult = await platformAdapter.fs.moveFile(oldPath, newPath);
     if (!moveResult.ok) {
       throw new Error(
         `Failed to rename file ${oldPath} to ${newPath}: ${moveResult.error.message}`,
@@ -814,7 +814,7 @@ export async function renameFileOrDirectory(
       });
     }
   } else {
-    const moveResult = await platformAdapter.moveDirectory(oldPath, newPath);
+    const moveResult = await platformAdapter.fs.moveDirectory(oldPath, newPath);
     if (!moveResult.ok) {
       throw new Error(
         `Failed to rename directory ${oldPath} to ${newPath}: ${moveResult.error.message}`,

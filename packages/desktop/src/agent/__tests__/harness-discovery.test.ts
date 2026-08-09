@@ -7,10 +7,14 @@ const getAllKv = vi.fn(async () => ({}));
 
 vi.mock("@/adapters", () => ({
   platformAdapter: {
-    runShellCommand: (...args: unknown[]) => runShellCommand(...args),
-    setKv: (...args: unknown[]) => setKv(...args),
-    getKv: (...args: unknown[]) => getKv(...args),
-    getAllKv: () => getAllKv(),
+    proc: {
+      runShellCommand: (...args: unknown[]) => runShellCommand(...args),
+    },
+    kv: {
+      setKv: (...args: unknown[]) => setKv(...args),
+      getKv: (...args: unknown[]) => getKv(...args),
+      getAllKv: () => getAllKv(),
+    },
   },
 }));
 

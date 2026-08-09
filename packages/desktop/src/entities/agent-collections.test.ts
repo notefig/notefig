@@ -11,7 +11,9 @@ import {
 // keeps this focused on the collection-maintained taskId indexes that the
 // service's maintenance passes (replay purge, lingering-tool resolution)
 // depend on — not on persistence.
-vi.mock("@/adapters", () => ({ platformAdapter: { getAllKv: vi.fn() } }));
+vi.mock("@/adapters", () => ({
+  platformAdapter: { kv: { getAllKv: vi.fn() } },
+}));
 
 import {
   agentEntriesCollection,
@@ -22,7 +24,9 @@ import {
   type AgentTurn,
 } from "@/agent/agent-collections";
 
-function turn(overrides: Partial<AgentTurn> & Pick<AgentTurn, "turnId" | "taskId">): AgentTurn {
+function turn(
+  overrides: Partial<AgentTurn> & Pick<AgentTurn, "turnId" | "taskId">,
+): AgentTurn {
   return {
     sessionId: "sess_1",
     status: "running",
@@ -63,15 +67,27 @@ describe("agent-collections taskId index derivation", () => {
     agentTurnsCollection.insert(turn({ turnId: "trn_b1", taskId: "task_b" }));
     agentTurnsCollection.insert(turn({ turnId: "trn_a2", taskId: "task_a" }));
 
-    agentEntriesCollection.insert(entry({ id: "evt_a1", taskId: "task_a", turnId: "trn_a1" }));
-    agentEntriesCollection.insert(entry({ id: "evt_b1", taskId: "task_b", turnId: "trn_b1" }));
-    agentEntriesCollection.insert(entry({ id: "evt_a2", taskId: "task_a", turnId: "trn_a2" }));
+    agentEntriesCollection.insert(
+      entry({ id: "evt_a1", taskId: "task_a", turnId: "trn_a1" }),
+    );
+    agentEntriesCollection.insert(
+      entry({ id: "evt_b1", taskId: "task_b", turnId: "trn_b1" }),
+    );
+    agentEntriesCollection.insert(
+      entry({ id: "evt_a2", taskId: "task_a", turnId: "trn_a2" }),
+    );
 
-    const turnsA = agentTurnsForTask("task_a").map((t) => t.turnId).sort();
+    const turnsA = agentTurnsForTask("task_a")
+      .map((t) => t.turnId)
+      .sort();
     expect(turnsA).toEqual(["trn_a1", "trn_a2"]);
-    expect(agentTurnsForTask("task_b").map((t) => t.turnId)).toEqual(["trn_b1"]);
+    expect(agentTurnsForTask("task_b").map((t) => t.turnId)).toEqual([
+      "trn_b1",
+    ]);
 
-    const entriesA = agentEntriesForTask("task_a").map((e) => e.id).sort();
+    const entriesA = agentEntriesForTask("task_a")
+      .map((e) => e.id)
+      .sort();
     expect(entriesA).toEqual(["evt_a1", "evt_a2"]);
     expect(agentEntriesForTask("task_b").map((e) => e.id)).toEqual(["evt_b1"]);
   });
@@ -139,13 +155,18 @@ describe("@tanstack/db 0.6 indexing contract", () => {
         getKey: (row: { id: string; taskId: string }) => row.id,
       }),
     );
-    const byTask = collection.createIndex((row) => row.taskId, { indexType: BasicIndex });
+    const byTask = collection.createIndex((row) => row.taskId, {
+      indexType: BasicIndex,
+    });
 
     collection.insert({ id: "r1", taskId: "task_a" });
     collection.insert({ id: "r2", taskId: "task_b" });
     collection.insert({ id: "r3", taskId: "task_a" });
 
-    expect([...byTask.equalityLookup("task_a")].map(String).sort()).toEqual(["r1", "r3"]);
+    expect([...byTask.equalityLookup("task_a")].map(String).sort()).toEqual([
+      "r1",
+      "r3",
+    ]);
     expect([...byTask.equalityLookup("task_b")].map(String)).toEqual(["r2"]);
     expect([...byTask.equalityLookup("task_missing")]).toEqual([]);
   });

@@ -31,7 +31,9 @@ function meta(overrides: Partial<AgentTaskMeta> = {}): AgentTaskMeta {
 describe("describeTaskMeta", () => {
   it("sign-in outranks everything", () => {
     expect(
-      describeTaskMeta(meta({ needsAuth: true, isRunning: true, queuedCount: 2 })),
+      describeTaskMeta(
+        meta({ needsAuth: true, isRunning: true, queuedCount: 2 }),
+      ),
     ).toBe("needs sign-in");
   });
 

@@ -5,17 +5,22 @@ const { kv } = vi.hoisted(() => ({ kv: new Map<string, unknown>() }));
 
 vi.mock("@/adapters", () => ({
   platformAdapter: {
-    getKv: vi.fn(async (ns: string, key: string) => kv.get(`${ns}:${key}`)),
-    setKv: vi.fn(async (ns: string, key: string, value: unknown) => {
-      kv.set(`${ns}:${key}`, value);
-    }),
-    deleteKv: vi.fn(async (ns: string, key: string) => {
-      kv.delete(`${ns}:${key}`);
-    }),
+    kv: {
+      getKv: vi.fn(async (ns: string, key: string) => kv.get(`${ns}:${key}`)),
+      setKv: vi.fn(async (ns: string, key: string, value: unknown) => {
+        kv.set(`${ns}:${key}`, value);
+      }),
+      deleteKv: vi.fn(async (ns: string, key: string) => {
+        kv.delete(`${ns}:${key}`);
+      }),
+    },
   },
 }));
 
-import { encodePairingCode, generatePairingSecret } from "@notefig/shared/tunnel";
+import {
+  encodePairingCode,
+  generatePairingSecret,
+} from "@notefig/shared/tunnel";
 import {
   autoConnectStoredPairing,
   connectWithCode,

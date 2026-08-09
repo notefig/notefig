@@ -12,16 +12,22 @@ const { writeFiles, readFiles } = vi.hoisted(() => ({
 }));
 vi.mock("@/adapters", () => ({
   platformAdapter: {
-    setKv: vi.fn(),
-    getKv: vi.fn(),
-    writeFiles,
-    readFiles,
-    createMcpEndpoint: vi.fn(() => ({
-      mcpServer: { name: "notefig", command: "notefig", args: [], env: [] },
-      start: vi.fn(async () => {}),
-      onRequest: vi.fn(() => () => {}),
-      close: vi.fn(async () => {}),
-    })),
+    fs: {
+      writeFiles,
+      readFiles,
+    },
+    proc: {
+      createMcpEndpoint: vi.fn(() => ({
+        mcpServer: { name: "notefig", command: "notefig", args: [], env: [] },
+        start: vi.fn(async () => {}),
+        onRequest: vi.fn(() => () => {}),
+        close: vi.fn(async () => {}),
+      })),
+    },
+    kv: {
+      setKv: vi.fn(),
+      getKv: vi.fn(),
+    },
   },
 }));
 vi.mock("@/utils/history-service", () => ({

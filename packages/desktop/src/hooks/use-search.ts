@@ -29,7 +29,7 @@ const NO_RESULTS: SearchMatch[] = [];
  * Debounced workspace search hook using TanStack Query for data fetching.
  *
  * Debounces the query string by 300ms, then runs
- * platformAdapter.searchContent as a subscribed query. Revalidation on
+ * platformAdapter.fs.searchContent as a subscribed query. Revalidation on
  * filesystem changes happens through the central invalidator in
  * utils/file-sync.ts, which invalidates ["search-content", workspacePath].
  */
@@ -70,7 +70,7 @@ export function useSearch(
       filePattern,
       maxResults,
     ],
-    queryFn: () => platformAdapter.searchContent(workspacePath, searchOptions),
+    queryFn: () => platformAdapter.fs.searchContent(workspacePath, searchOptions),
     enabled: trimmed !== "",
     retry: false,
     placeholderData: (previous) => previous,

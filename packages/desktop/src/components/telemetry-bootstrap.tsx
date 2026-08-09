@@ -45,7 +45,7 @@ async function startTelemetry(): Promise<"show-consent" | "done"> {
   }
 
   const consent = readStoredConsent(
-    await platformAdapter.getAllKv<unknown>(SETTINGS_NAMESPACE),
+    await platformAdapter.kv.getAllKv<unknown>(SETTINGS_NAMESPACE),
   );
   if (!consent.answered) {
     return "show-consent";
@@ -82,7 +82,7 @@ async function ensureInstallId(
 ): Promise<string | null> {
   if (!anyEnabled || existing) return existing;
   const installId = crypto.randomUUID();
-  await platformAdapter.setKv(
+  await platformAdapter.kv.setKv(
     SETTINGS_NAMESPACE,
     "telemetryInstallId",
     installId,
@@ -107,7 +107,7 @@ async function persistConsentAnswer(
   if (installId) entries.push(["telemetryInstallId", installId]);
   entries.push(["telemetryConsentVersion", CURRENT_TELEMETRY_CONSENT_VERSION]);
   for (const [key, value] of entries) {
-    await platformAdapter.setKv(SETTINGS_NAMESPACE, key, value);
+    await platformAdapter.kv.setKv(SETTINGS_NAMESPACE, key, value);
   }
 }
 

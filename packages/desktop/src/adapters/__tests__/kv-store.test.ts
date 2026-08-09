@@ -97,22 +97,22 @@ describe("BaseBrowserAdapter KV Store", () => {
 
   describe("setKv and getKv", () => {
     it("should store and retrieve values", async () => {
-      await adapter.setKv("test", "key1", { name: "value1" });
-      const result = await adapter.getKv("test", "key1");
+      await adapter.kv.setKv("test", "key1", { name: "value1" });
+      const result = await adapter.kv.getKv("test", "key1");
       expect(result).toEqual({ name: "value1" });
     });
 
     it("should return undefined for non-existent keys", async () => {
-      const result = await adapter.getKv("test", "nonexistent");
+      const result = await adapter.kv.getKv("test", "nonexistent");
       expect(result).toBeUndefined();
     });
 
     it("should handle different namespaces independently", async () => {
-      await adapter.setKv("ns1", "key", "value1");
-      await adapter.setKv("ns2", "key", "value2");
+      await adapter.kv.setKv("ns1", "key", "value1");
+      await adapter.kv.setKv("ns2", "key", "value2");
 
-      const result1 = await adapter.getKv("ns1", "key");
-      const result2 = await adapter.getKv("ns2", "key");
+      const result1 = await adapter.kv.getKv("ns1", "key");
+      const result2 = await adapter.kv.getKv("ns2", "key");
 
       expect(result1).toBe("value1");
       expect(result2).toBe("value2");
@@ -125,37 +125,37 @@ describe("BaseBrowserAdapter KV Store", () => {
         string: "test",
         boolean: true,
       };
-      await adapter.setKv("complex", "obj", data);
-      const result = await adapter.getKv("complex", "obj");
+      await adapter.kv.setKv("complex", "obj", data);
+      const result = await adapter.kv.getKv("complex", "obj");
       expect(result).toEqual(data);
     });
   });
 
   describe("deleteKv", () => {
     it("should remove keys", async () => {
-      await adapter.setKv("test", "key", "value");
-      await adapter.deleteKv("test", "key");
-      const result = await adapter.getKv("test", "key");
+      await adapter.kv.setKv("test", "key", "value");
+      await adapter.kv.deleteKv("test", "key");
+      const result = await adapter.kv.getKv("test", "key");
       expect(result).toBeUndefined();
     });
 
     it("should not affect other keys in same namespace", async () => {
-      await adapter.setKv("test", "key1", "value1");
-      await adapter.setKv("test", "key2", "value2");
-      await adapter.deleteKv("test", "key1");
+      await adapter.kv.setKv("test", "key1", "value1");
+      await adapter.kv.setKv("test", "key2", "value2");
+      await adapter.kv.deleteKv("test", "key1");
 
-      const result = await adapter.getKv("test", "key2");
+      const result = await adapter.kv.getKv("test", "key2");
       expect(result).toBe("value2");
     });
   });
 
   describe("getAllKv", () => {
     it("should return all values in a namespace", async () => {
-      await adapter.setKv("test", "key1", "value1");
-      await adapter.setKv("test", "key2", "value2");
-      await adapter.setKv("other", "key3", "value3");
+      await adapter.kv.setKv("test", "key1", "value1");
+      await adapter.kv.setKv("test", "key2", "value2");
+      await adapter.kv.setKv("other", "key3", "value3");
 
-      const result = await adapter.getAllKv("test");
+      const result = await adapter.kv.getAllKv("test");
       expect(result).toEqual({
         key1: "value1",
         key2: "value2",
@@ -163,7 +163,7 @@ describe("BaseBrowserAdapter KV Store", () => {
     });
 
     it("should return empty object for empty namespace", async () => {
-      const result = await adapter.getAllKv("empty");
+      const result = await adapter.kv.getAllKv("empty");
       expect(result).toEqual({});
     });
   });
@@ -176,7 +176,7 @@ describe("BaseBrowserAdapter KV Store", () => {
 
       await adapter.seedBinaryFile(sourcePath, bytes);
 
-      const result = await adapter.copyFile(sourcePath, targetPath);
+      const result = await adapter.fs.copyFile(sourcePath, targetPath);
       expect(result.ok).toBe(true);
 
       const copied = await adapter.readSeededBinaryFile(targetPath);
@@ -190,7 +190,7 @@ describe("BaseBrowserAdapter KV Store", () => {
 
       await adapter.seedBinaryFile(sourcePath, bytes);
 
-      const result = await adapter.moveFile(sourcePath, targetPath);
+      const result = await adapter.fs.moveFile(sourcePath, targetPath);
       expect(result.ok).toBe(true);
 
       const moved = await adapter.readSeededBinaryFile(targetPath);
@@ -202,7 +202,7 @@ describe("BaseBrowserAdapter KV Store", () => {
 
   describe("runShellCommand", () => {
     it("rejects — a browser sandbox can't run local shell scripts", async () => {
-      await expect(adapter.runShellCommand("echo hi")).rejects.toThrow();
+      await expect(adapter.proc.runShellCommand("echo hi")).rejects.toThrow();
     });
   });
 });

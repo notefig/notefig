@@ -60,7 +60,7 @@ export function projectSettingsPath(workspacePath: string): string {
 export async function readProjectSettings(
   workspacePath: string,
 ): Promise<ProjectSettings> {
-  const result = await platformAdapter.readFiles([
+  const result = await platformAdapter.fs.readFiles([
     projectSettingsPath(workspacePath),
   ]);
   if (result.succeeded.length === 0) {
@@ -98,7 +98,7 @@ export async function updateProjectSettings(
     next.settings = { ...current.settings, ...patch.settings };
   }
 
-  const result = await platformAdapter.writeFiles([
+  const result = await platformAdapter.fs.writeFiles([
     {
       path: projectSettingsPath(workspacePath),
       content: JSON.stringify(next, null, 2) + "\n",

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { withMockedTauri } from "@/testing/tauri-mock";
+import { createGitStorageHost } from "../git-storage-host";
 import { TauriPlatformAdapter } from "../tauri-adapter";
 
 // The adapter is ~800 lines and its full init touches LazyStore / window /
@@ -17,9 +18,9 @@ describe("TauriPlatformAdapter watch lifecycle", () => {
     });
     const adapter = new TauriPlatformAdapter();
 
-    await adapter.startWatchingMetadata(["/ws"], "watch-1");
-    await adapter.startWatchingContent(["/ws/a.md"], "watch-1");
-    await adapter.stopWatching("watch-1");
+    await adapter.fs.startWatchingMetadata(["/ws"], "watch-1");
+    await adapter.fs.startWatchingContent(["/ws/a.md"], "watch-1");
+    await adapter.fs.stopWatching("watch-1");
 
     expect(tauri.calls("start_watching_metadata")).toEqual([
       {
@@ -44,7 +45,7 @@ describe("TauriPlatformAdapter watch lifecycle", () => {
     const adapter = new TauriPlatformAdapter();
 
     await expect(
-      adapter.startWatchingMetadata(["/ws"], "watch-2"),
+      adapter.fs.startWatchingMetadata(["/ws"], "watch-2"),
     ).rejects.toThrow(/watcher backend unavailable/);
   });
 
@@ -57,7 +58,7 @@ describe("TauriPlatformAdapter watch lifecycle", () => {
     const adapter = new TauriPlatformAdapter();
 
     // Must resolve, not reject — stopping an already-gone watcher is routine.
-    await expect(adapter.stopWatching("watch-3")).resolves.toBeUndefined();
+    await expect(adapter.fs.stopWatching("watch-3")).resolves.toBeUndefined();
   });
 });
 
@@ -71,8 +72,8 @@ describe("ignore rules plumbing", () => {
     });
     const adapter = new TauriPlatformAdapter();
 
-    await adapter.readDirectory("/ws", { recursive: true, ignore: IGNORE });
-    await adapter.startWatchingMetadata(["/ws"], "watch-1", {
+    await adapter.fs.readDirectory("/ws", { recursive: true, ignore: IGNORE });
+    await adapter.fs.startWatchingMetadata(["/ws"], "watch-1", {
       ignore: IGNORE,
     });
 
@@ -114,7 +115,9 @@ describe("ignore rules plumbing", () => {
     });
     const adapter = new TauriPlatformAdapter();
 
-    const entries = await adapter.getGitStorageHost("/ws").readDir("/ws");
+    const entries = await createGitStorageHost(adapter.fs, "/ws").readDir(
+      "/ws",
+    );
 
     expect(tauri.calls("read_directory")).toEqual([
       {

@@ -18,33 +18,39 @@ const { kvBackend, setKv, deleteKv, transportFactory } = vi.hoisted(() => {
 });
 vi.mock("@/adapters", () => ({
   platformAdapter: {
-    setKv,
-    deleteKv,
-    getKv: vi.fn(async (namespace: string, key: string) =>
-      kvBackend.get(`${namespace}:${key}`),
-    ),
-    getAllKv: vi.fn(async (namespace: string) => {
-      const out: Record<string, unknown> = {};
-      for (const [full, value] of kvBackend) {
-        if (full.startsWith(`${namespace}:`)) {
-          out[full.slice(namespace.length + 1)] = value;
+    fs: {
+      writeFiles: vi.fn(async () => ({ succeeded: [], failed: [] })),
+      readFiles: vi.fn(async () => ({ succeeded: [], failed: [] })),
+      deleteFiles: vi.fn(async (paths: string[]) => ({
+        succeeded: paths,
+        failed: [],
+      })),
+    },
+    proc: {
+      createMcpEndpoint: vi.fn(() => ({
+        mcpServer: undefined,
+        start: vi.fn(async () => {}),
+        onRequest: vi.fn(() => () => {}),
+        close: vi.fn(async () => {}),
+      })),
+      createAgentTransport: vi.fn(() => transportFactory.current!()),
+    },
+    kv: {
+      setKv,
+      deleteKv,
+      getKv: vi.fn(async (namespace: string, key: string) =>
+        kvBackend.get(`${namespace}:${key}`),
+      ),
+      getAllKv: vi.fn(async (namespace: string) => {
+        const out: Record<string, unknown> = {};
+        for (const [full, value] of kvBackend) {
+          if (full.startsWith(`${namespace}:`)) {
+            out[full.slice(namespace.length + 1)] = value;
+          }
         }
-      }
-      return out;
-    }),
-    writeFiles: vi.fn(async () => ({ succeeded: [], failed: [] })),
-    readFiles: vi.fn(async () => ({ succeeded: [], failed: [] })),
-    deleteFiles: vi.fn(async (paths: string[]) => ({
-      succeeded: paths,
-      failed: [],
-    })),
-    createMcpEndpoint: vi.fn(() => ({
-      mcpServer: undefined,
-      start: vi.fn(async () => {}),
-      onRequest: vi.fn(() => () => {}),
-      close: vi.fn(async () => {}),
-    })),
-    createAgentTransport: vi.fn(() => transportFactory.current!()),
+        return out;
+      }),
+    },
   },
 }));
 vi.mock("@/utils/history-service", () => ({
@@ -103,8 +109,10 @@ async function refetch(): Promise<void> {
 
 beforeEach(async () => {
   transportFactory.current = null;
-  for (const e of agentEntriesCollection.toArray) agentEntriesCollection.delete(e.id);
-  for (const t of agentTurnsCollection.toArray) agentTurnsCollection.delete(t.turnId);
+  for (const e of agentEntriesCollection.toArray)
+    agentEntriesCollection.delete(e.id);
+  for (const t of agentTurnsCollection.toArray)
+    agentTurnsCollection.delete(t.turnId);
   for (const t of agentTasksCollection.toArray) {
     unregisterTask(t.taskId);
     agentTasksCollection.delete(t.taskId);
@@ -202,7 +210,9 @@ describe("storage-backed tasks collection", () => {
     agentTasksCollection.insert(taskRow());
     await vi.waitFor(() => {
       // Memory keeps the row (no optimistic rollback); disk missed the write.
-      expect(agentTasksCollection.get("task_a")).toMatchObject({ status: "idle" });
+      expect(agentTasksCollection.get("task_a")).toMatchObject({
+        status: "idle",
+      });
     });
     expect(onDisk("task_a")).toBeUndefined();
 
@@ -217,7 +227,10 @@ describe("storage-backed tasks collection", () => {
 
   it("mutations write through: insert/update persist a clean row, delete removes it", async () => {
     agentTasksCollection.insert(taskRow());
-    expect(onDisk("task_a")).toMatchObject({ taskId: "task_a", status: "idle" });
+    expect(onDisk("task_a")).toMatchObject({
+      taskId: "task_a",
+      status: "idle",
+    });
     expect(
       Object.keys(onDisk("task_a") as object).some((k) => k.startsWith("$")),
     ).toBe(false);
@@ -270,8 +283,12 @@ describe("lifecycle", () => {
     await deleteAgentSession("task_a");
 
     expect(agentTasksCollection.get("task_a")).toBeUndefined();
-    expect(agentEntriesCollection.toArray.filter((e) => e.taskId === "task_a")).toEqual([]);
-    expect(agentTurnsCollection.toArray.filter((t) => t.taskId === "task_a")).toEqual([]);
+    expect(
+      agentEntriesCollection.toArray.filter((e) => e.taskId === "task_a"),
+    ).toEqual([]);
+    expect(
+      agentTurnsCollection.toArray.filter((t) => t.taskId === "task_a"),
+    ).toEqual([]);
     expect(onDisk("task_a")).toBeUndefined();
   });
 });
@@ -315,7 +332,11 @@ describe("revival via session/load", () => {
     const entries = agentEntriesCollection.toArray
       .filter((e) => e.taskId === "task_a")
       .sort((a, b) => (a.id < b.id ? -1 : 1));
-    expect(entries.map((e) => e.type)).toEqual(["user", "tool_call", "assistant"]);
+    expect(entries.map((e) => e.type)).toEqual([
+      "user",
+      "tool_call",
+      "assistant",
+    ]);
     // Replayed entries carry NO createdAt (MET-94): ACP has no timestamps,
     // and a revival-time stamp would lie.
     expect(entries.map((e) => e.createdAt)).toEqual([

@@ -72,7 +72,7 @@ export const App = () => {
   }, [location.pathname, location.search, setLastPath]);
 
   useEffect(() => {
-    const cleanup = platformAdapter.addEventListener((event) => {
+    const cleanup = platformAdapter.ui.addEventListener((event) => {
       switch (event.type) {
         case "theme-changed":
           setTheme(event.payload);
