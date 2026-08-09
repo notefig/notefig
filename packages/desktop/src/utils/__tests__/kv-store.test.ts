@@ -89,9 +89,7 @@ describe("reading and writing", () => {
     await writeKv("recentProjects", "shared-key", "projects value");
 
     expect(await readKv(NS, "shared-key")).toBe("settings value");
-    expect(await readKv("recentProjects", "shared-key")).toBe(
-      "projects value",
-    );
+    expect(await readKv("recentProjects", "shared-key")).toBe("projects value");
   });
 
   it("removes a key, and removing a missing one is not an error", async () => {

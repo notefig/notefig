@@ -43,7 +43,10 @@ interface TelemetryConsent {
 }
 
 let state: "pending" | "configured" = "pending";
-let consent: TelemetryConsent = { crashEnabled: false, analyticsEnabled: false };
+let consent: TelemetryConsent = {
+  crashEnabled: false,
+  analyticsEnabled: false,
+};
 let posthogInstance: PostHogLike | null = null;
 let posthogLoad: Promise<PostHogLike | null> | null = null;
 let buffer: BufferedItem[] = [];

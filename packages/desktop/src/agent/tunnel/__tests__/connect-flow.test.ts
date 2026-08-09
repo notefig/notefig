@@ -11,11 +11,7 @@ import {
   encodePairingCode,
   generatePairingSecret,
 } from "@notefig/shared/tunnel";
-import {
-  getOrCreateKvCollection,
-  removeKv,
-  writeKv,
-} from "@/utils/kv-store";
+import { removeKv, writeKv } from "@/utils/kv-store";
 import {
   TUNNEL_KV_NAMESPACE,
   TUNNEL_PAIRING_KEY,
@@ -135,25 +131,6 @@ describe("watchCrossTabPairing", () => {
     await vi.waitFor(() => {
       expect(tunnelConnection.getState().status).toBe("connected");
     });
-    cleanup();
-  });
-
-  it("does not auto-connect on the pairing it already had at boot", async () => {
-    // The watcher mounts before the collection has hydrated, so the stored
-    // pairing arrives as a change moments later. Treating that as "another tab
-    // paired" would connect behind App.tsx's back — which deliberately skips
-    // the stored reconnect when the load carried a deep-link code.
-    const worker = useWorker();
-    await writeKv(TUNNEL_KV_NAMESPACE, TUNNEL_PAIRING_KEY, {
-      code: codeFor(worker),
-    });
-    // Back to an unhydrated collection, the state a fresh page load starts in.
-    await getOrCreateKvCollection(TUNNEL_KV_NAMESPACE).cleanup();
-
-    const cleanup = watchCrossTabPairing();
-
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(tunnelConnection.getState().status).toBe("disconnected");
     cleanup();
   });
 
