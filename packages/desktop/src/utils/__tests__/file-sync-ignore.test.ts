@@ -10,16 +10,19 @@ import {
 // let through (browser adapters have no Rust-side filter), nothing ignored
 // may enter the metadata collection via watcher events.
 
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
-    getMetadata: vi.fn(),
-    readDirectory: vi.fn(),
-    readFiles: vi.fn(),
-    writeFiles: vi.fn(),
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+    fs: {
+      getMetadata: vi.fn(),
+      readDirectory: vi.fn(),
+      readFiles: vi.fn(),
+      writeFiles: vi.fn(),
+    },
   },
 }));
 
-const getMetadataMock = vi.mocked(platformAdapter.getMetadata);
+const getMetadataMock = vi.mocked(platformAdapter.fs.getMetadata);
 
 let testCounter = 0;
 let WS = "";
@@ -27,7 +30,7 @@ let WS = "";
 beforeEach(async () => {
   vi.clearAllMocks();
   WS = `/ws-file-sync-ignore-${testCounter++}`;
-  vi.mocked(platformAdapter.readDirectory).mockResolvedValue({
+  vi.mocked(platformAdapter.fs.readDirectory).mockResolvedValue({
     ok: true,
     value: [],
   });
@@ -74,7 +77,9 @@ describe("watcher event backstop", () => {
 
   it("still adopts created events for tracked paths", async () => {
     await handleMetadataFileSystemChange(
-      { changes: [{ type: "created", path: `${WS}/a.md`, isDirectory: false }] },
+      {
+        changes: [{ type: "created", path: `${WS}/a.md`, isDirectory: false }],
+      },
       WS,
     );
 
@@ -84,7 +89,9 @@ describe("watcher event backstop", () => {
 
   it("treats a rename INTO ignored space as a delete of the old path", async () => {
     await handleMetadataFileSystemChange(
-      { changes: [{ type: "created", path: `${WS}/a.md`, isDirectory: false }] },
+      {
+        changes: [{ type: "created", path: `${WS}/a.md`, isDirectory: false }],
+      },
       WS,
     );
 

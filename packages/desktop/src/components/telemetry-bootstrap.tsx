@@ -4,11 +4,10 @@ import {
   TelemetryConsentDialog,
   type TelemetryConsentAnswer,
 } from "@/components/telemetry-consent-dialog";
-import { platformAdapter } from "@/adapters";
+import { readAllKv, writeKv } from "@/utils/kv-store";
 import {
   CURRENT_TELEMETRY_CONSENT_VERSION,
   SETTINGS_NAMESPACE,
-  useAppSettings,
 } from "@/hooks/use-app-settings";
 import {
   captureEvent,
@@ -20,16 +19,15 @@ import {
 // configuration or double-fire app_opened.
 let started = false;
 
-type SetAppSetting = ReturnType<typeof useAppSettings>["setSetting"];
-
 function fireAppOpened() {
   captureEvent("app_opened");
 }
 
 /**
- * Consent state is read from and written to the platform KV store
- * DIRECTLY (not through the reactive settings collection) so the
- * shown-once decision never depends on collection hydration timing.
+ * Reads consent straight from storage rather than from `useAppSettings`, so
+ * the shown-once decision never depends on React render timing. Since MET-124
+ * that read hydrates the same collection the hook subscribes to, so the two
+ * can no longer disagree.
  * Returns whether the first-run consent dialog is still owed.
  */
 async function startTelemetry(): Promise<"show-consent" | "done"> {
@@ -45,7 +43,7 @@ async function startTelemetry(): Promise<"show-consent" | "done"> {
   }
 
   const consent = readStoredConsent(
-    await platformAdapter.getAllKv<unknown>(SETTINGS_NAMESPACE),
+    await readAllKv<unknown>(SETTINGS_NAMESPACE),
   );
   if (!consent.answered) {
     return "show-consent";
@@ -82,16 +80,12 @@ async function ensureInstallId(
 ): Promise<string | null> {
   if (!anyEnabled || existing) return existing;
   const installId = crypto.randomUUID();
-  await platformAdapter.setKv(
-    SETTINGS_NAMESPACE,
-    "telemetryInstallId",
-    installId,
-  );
+  await writeKv(SETTINGS_NAMESPACE, "telemetryInstallId", installId);
   return installId;
 }
 
 /**
- * Durable writes straight to the KV store. Write order is load-bearing:
+ * Write order is load-bearing:
  * `telemetryConsentVersion` is the "answered" marker and must land LAST,
  * so a partial failure can never leave consent looking answered while the
  * actual choices are missing (the dialog re-asks on the next launch).
@@ -107,23 +101,8 @@ async function persistConsentAnswer(
   if (installId) entries.push(["telemetryInstallId", installId]);
   entries.push(["telemetryConsentVersion", CURRENT_TELEMETRY_CONSENT_VERSION]);
   for (const [key, value] of entries) {
-    await platformAdapter.setKv(SETTINGS_NAMESPACE, key, value);
+    await writeKv(SETTINGS_NAMESPACE, key, value);
   }
-}
-
-/**
- * Mirror the answer into the reactive collection so Settings → Privacy
- * shows it without a reload.
- */
-function mirrorAnswerToSettings(
-  setSetting: SetAppSetting,
-  answer: TelemetryConsentAnswer,
-  installId: string | null,
-) {
-  setSetting("crashReportingEnabled", answer.crashEnabled);
-  setSetting("analyticsEnabled", answer.analyticsEnabled);
-  setSetting("telemetryConsentVersion", CURRENT_TELEMETRY_CONSENT_VERSION);
-  if (installId) setSetting("telemetryInstallId", installId);
 }
 
 const NON_WORKSPACE_PATHS = new Set(["/", "/welcome", "/pair"]);
@@ -143,7 +122,6 @@ function isWorkspaceRoute(pathname: string): boolean {
  * a workspace — first contact (/welcome) stays prompt-free.
  */
 export function TelemetryBootstrap() {
-  const { setSetting } = useAppSettings();
   const location = useLocation();
   const [showConsent, setShowConsent] = useState(false);
 
@@ -173,8 +151,9 @@ export function TelemetryBootstrap() {
       const anyEnabled = answer.crashEnabled || answer.analyticsEnabled;
       const installId = anyEnabled ? crypto.randomUUID() : null;
       try {
+        // Settings → Privacy picks this up without a reload: the write goes
+        // through the same collection `useAppSettings` subscribes to.
         await persistConsentAnswer(answer, installId);
-        mirrorAnswerToSettings(setSetting, answer, installId);
       } catch (error) {
         // Honor the answer for this session regardless; the version
         // marker didn't land, so the dialog re-asks on the next launch.

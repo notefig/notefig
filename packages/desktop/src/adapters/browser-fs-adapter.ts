@@ -5,7 +5,7 @@ import type {
   Result,
   SearchMatch,
   SearchOptions,
-  PlatformEventListener,
+  FsChangeListener,
   IgnoreRulesOption,
 } from "./platform-adapter.interface";
 import { FsError } from "./platform-adapter.interface";
@@ -48,7 +48,10 @@ function isAutomatedBrowser(): boolean {
 
 function supportsFsAccess(): boolean {
   // Allow tests to force the pure IndexedDB adapter (no File System Access API needed)
-  if (typeof window !== "undefined" && (window as any).__NOTEFIG_FORCE_INDEXEDDB__) {
+  if (
+    typeof window !== "undefined" &&
+    (window as any).__NOTEFIG_FORCE_INDEXEDDB__
+  ) {
     return false;
   }
   return typeof window !== "undefined" && "showDirectoryPicker" in window;
@@ -56,7 +59,8 @@ function supportsFsAccess(): boolean {
 
 export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
   private handleCache = new Map<string, DirectoryHandle>();
-  private db: IDBDatabase | null = null;
+  // `idbHandle`, not `db` — `db` is now the SQLite surface (MET-123).
+  private idbHandle: IDBDatabase | null = null;
   private fileWatcher: BrowserFileWatcher;
 
   constructor() {
@@ -69,7 +73,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
   }
 
   private async ensureDB(): Promise<IDBDatabase> {
-    if (this.db) return this.db;
+    if (this.idbHandle) return this.idbHandle;
 
     return new Promise((resolve, reject) => {
       // KEEP: renaming the handles DB would drop users' persisted
@@ -78,8 +82,8 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
 
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
-        this.db = request.result;
-        resolve(this.db);
+        this.idbHandle = request.result;
+        resolve(this.idbHandle);
       };
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
@@ -202,7 +206,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     return await dir.getFileHandle(fileName, { create: createFile });
   }
 
-  async pickDirectory(title: string): Promise<string | null> {
+  protected async pickDirectory(title: string): Promise<string | null> {
     this.ensureSupported();
     void title;
 
@@ -218,7 +222,11 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
         error instanceof DOMException &&
         (error.name === "NotAllowedError" || error.name === "SecurityError")
       ) {
-        throw new FsError("permission_denied", "directory picker", error.message);
+        throw new FsError(
+          "permission_denied",
+          "directory picker",
+          error.message,
+        );
       }
       throw error;
     }
@@ -233,7 +241,9 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     return workspacePath;
   }
 
-  async requestWorkspaceAccess(workspacePath: string): Promise<boolean> {
+  protected async requestWorkspaceAccess(
+    workspacePath: string,
+  ): Promise<boolean> {
     const handle = await this.loadHandle(workspacePath).catch(() => null);
     if (!handle) return false;
     try {
@@ -243,7 +253,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     }
   }
 
-  async readDirectory(
+  protected async readDirectory(
     path: string,
     options?: {
       recursive?: boolean;
@@ -301,7 +311,9 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     }
   }
 
-  async createDirectories(paths: string[]): Promise<BatchResult<string>> {
+  protected async createDirectories(
+    paths: string[],
+  ): Promise<BatchResult<string>> {
     const succeeded: string[] = [];
     const failed: FileSystemError[] = [];
     for (const path of paths) {
@@ -315,7 +327,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async deleteDirectories(
+  protected async deleteDirectories(
     paths: string[],
     options?: { recursive?: boolean },
   ): Promise<BatchResult<string>> {
@@ -346,32 +358,38 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async moveDirectory(oldPath: string, newPath: string): Promise<Result<void>> {
+  // Composed from other fs operations rather than implemented against the
+  // FS Access API directly, so it dispatches through `this.fs` for the same
+  // reason the base adapter's moveFile/copyFile do.
+  protected async moveDirectory(
+    oldPath: string,
+    newPath: string,
+  ): Promise<Result<void>> {
     try {
-      await this.createDirectories([newPath]);
-      const filesResult = await this.readDirectory(oldPath, {
+      await this.fs.createDirectories([newPath]);
+      const filesResult = await this.fs.readDirectory(oldPath, {
         recursive: true,
         includeFiles: true,
         includeDirectories: false,
       });
       if (filesResult.ok) {
         const filePaths = filesResult.value;
-        const fileData = await this.readBinaryFiles(filePaths);
-        await this.writeBinaryFiles(
+        const fileData = await this.fs.readBinaryFiles(filePaths);
+        await this.fs.writeBinaryFiles(
           fileData.succeeded.map((f) => ({
             path: f.path.replace(oldPath, newPath),
             data: f.data,
           })),
         );
       }
-      await this.deleteDirectories([oldPath], { recursive: true });
+      await this.fs.deleteDirectories([oldPath], { recursive: true });
       return { ok: true, value: undefined };
     } catch (error) {
       return { ok: false, error: classifyBrowserError(oldPath, error) };
     }
   }
 
-  async readFiles(
+  protected async readFiles(
     paths: string[],
   ): Promise<BatchResult<{ path: string; content: string }>> {
     const succeeded: Array<{ path: string; content: string }> = [];
@@ -391,7 +409,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async readBinaryFiles(
+  protected async readBinaryFiles(
     paths: string[],
   ): Promise<BatchResult<{ path: string; data: Uint8Array }>> {
     const succeeded: Array<{ path: string; data: Uint8Array }> = [];
@@ -411,7 +429,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async writeFiles(
+  protected async writeFiles(
     files: { path: string; content: string }[],
   ): Promise<BatchResult<string>> {
     const succeeded: string[] = [];
@@ -455,7 +473,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async deleteFiles(paths: string[]): Promise<BatchResult<string>> {
+  protected async deleteFiles(paths: string[]): Promise<BatchResult<string>> {
     const succeeded: string[] = [];
     const failed: FileSystemError[] = [];
 
@@ -484,7 +502,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async exists(
+  protected async exists(
     paths: string[],
   ): Promise<{ path: string; exists: boolean; type?: "file" | "directory" }[]> {
     const results: {
@@ -536,7 +554,9 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     return results;
   }
 
-  async getMetadata(paths: string[]): Promise<BatchResult<FileSystemMetadata>> {
+  protected async getMetadata(
+    paths: string[],
+  ): Promise<BatchResult<FileSystemMetadata>> {
     const succeeded: FileSystemMetadata[] = [];
     const failed: FileSystemError[] = [];
 
@@ -602,7 +622,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async writeBinaryFiles(
+  protected async writeBinaryFiles(
     files: { path: string; data: Uint8Array }[],
   ): Promise<BatchResult<string>> {
     const succeeded: string[] = [];
@@ -638,7 +658,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async resolveAssetUrl(
+  protected async resolveAssetUrl(
     relativePath: string,
     workspacePath: string,
   ): Promise<string> {
@@ -659,7 +679,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     }
   }
 
-  async startWatchingMetadata(
+  protected async startWatchingMetadata(
     paths: string[],
     watchId: string,
     options?: { ignore?: IgnoreRulesOption },
@@ -667,27 +687,27 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     await this.fileWatcher.startWatchingMetadata(paths, watchId, options);
   }
 
-  async startWatchingContent(paths: string[], watchId: string): Promise<void> {
+  protected async startWatchingContent(
+    paths: string[],
+    watchId: string,
+  ): Promise<void> {
     await this.fileWatcher.startWatchingContent(paths, watchId);
   }
 
-  async stopWatching(watchId: string): Promise<void> {
+  protected async stopWatching(watchId: string): Promise<void> {
     this.fileWatcher.stopWatching(watchId);
   }
 
-  addEventListener(callback: PlatformEventListener): () => void {
-    return this.fileWatcher.addEventListener(callback);
-  }
-
-  removeEventListener(callback: PlatformEventListener): void {
-    this.fileWatcher.removeEventListener(callback);
+  // Only watcher events exist here — the base's no-op ui event bus stands.
+  protected onFsEvent(listener: FsChangeListener): () => void {
+    return this.fileWatcher.onFsEvent(listener);
   }
 
   /**
    * Override searchContent to use streaming — file contents are never
    * fully materialized in memory. Uses file.stream() → searchStream().
    */
-  async searchContent(
+  protected async searchContent(
     directory: string,
     options: SearchOptions,
   ): Promise<SearchMatch[]> {

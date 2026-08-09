@@ -149,3 +149,41 @@ fn mcp_bridge_stop_relay_dispatches() {
 
     assert_eq!(res["ok"], json!(true));
 }
+
+/// db_ops: a write then a read round-trips through IPC. This one does real work
+/// because what's worth proving is that `Vec<Map<String, Value>>` survives
+/// serialization — the driver rejects anything but an array of row objects.
+#[test]
+fn db_ops_execute_and_query_dispatch() {
+    // The connection is a process-global — point it somewhere disposable.
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("NOTEFIG_DB_DIR", dir.path());
+
+    let app = mock_app();
+    let webview = main_webview(&app);
+
+    invoke_json(
+        &webview,
+        "db_execute",
+        json!({ "sql": "CREATE TABLE IF NOT EXISTS dispatch_probe (v TEXT)" }),
+    )
+    .expect("db_execute should return Ok");
+
+    invoke_json(
+        &webview,
+        "db_execute",
+        json!({ "sql": "INSERT INTO dispatch_probe (v) VALUES ($1)", "params": ["hello"] }),
+    )
+    .expect("db_execute with params should return Ok");
+
+    let res = invoke_json(
+        &webview,
+        "db_query",
+        json!({ "sql": "SELECT v FROM dispatch_probe" }),
+    )
+    .expect("db_query should return Ok");
+
+    let rows = res.as_array().expect("expected an array of rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["v"], json!("hello"));
+}

@@ -34,7 +34,7 @@ function loadImageUrl(imagePath: string, basePath: string): CacheEntry {
   }
 
   // Local paths - async resolution
-  const promise = platformAdapter
+  const promise = platformAdapter.fs
     .resolveAssetUrl(imagePath, basePath)
     .then((url) => {
       const entry = cache.get(cacheKey);

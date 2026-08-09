@@ -158,12 +158,12 @@ describe("BrowserFsPlatformAdapter", () => {
       startWatchingMetadata: vi.fn().mockResolvedValue(undefined),
       startWatchingContent: vi.fn().mockResolvedValue(undefined),
       stopWatching: vi.fn(),
-      addEventListener: vi.fn((callback: any) => {
+      onFsEvent: vi.fn((listener: any) => {
         return () => {
-          fileWatcherMock.removeEventListener(callback);
+          fileWatcherMock.unsubscribed.push(listener);
         };
       }),
-      removeEventListener: vi.fn(),
+      unsubscribed: [] as any[],
     };
 
     adapter = new BrowserFsPlatformAdapter();
@@ -184,7 +184,7 @@ describe("BrowserFsPlatformAdapter", () => {
         .spyOn(adapter as any, "storeHandle")
         .mockResolvedValue(undefined);
 
-      const result = await adapter.pickDirectory("Select Folder");
+      const result = await adapter.ui.pickDirectory("Select Folder");
 
       expect(window.showDirectoryPicker).toHaveBeenCalled();
       expect(browserFsUtils.ensurePermission).toHaveBeenCalledWith(
@@ -203,7 +203,7 @@ describe("BrowserFsPlatformAdapter", () => {
         .fn()
         .mockRejectedValue(new DOMException("User cancelled", "AbortError"));
 
-      const result = await adapter.pickDirectory("Select Folder");
+      const result = await adapter.ui.pickDirectory("Select Folder");
 
       expect(result).toBeNull();
     });
@@ -215,7 +215,7 @@ describe("BrowserFsPlatformAdapter", () => {
           new DOMException("Permission denied", "NotAllowedError"),
         );
 
-      await expect(adapter.pickDirectory("Select Folder")).rejects.toThrow(
+      await expect(adapter.ui.pickDirectory("Select Folder")).rejects.toThrow(
         FsError,
       );
     });
@@ -225,7 +225,7 @@ describe("BrowserFsPlatformAdapter", () => {
         new FsError("permission_denied", "test-workspace"),
       );
 
-      await expect(adapter.pickDirectory("Select Folder")).rejects.toThrow(
+      await expect(adapter.ui.pickDirectory("Select Folder")).rejects.toThrow(
         FsError,
       );
     });
@@ -261,7 +261,7 @@ describe("BrowserFsPlatformAdapter", () => {
         .fn()
         .mockResolvedValue(subDirHandle);
 
-      const result = await adapter.readDirectory("/test-workspace", {
+      const result = await adapter.fs.readDirectory("/test-workspace", {
         recursive: true,
       });
 
@@ -288,7 +288,7 @@ describe("BrowserFsPlatformAdapter", () => {
 
       mockDirectoryHandle.entries = vi.fn().mockReturnValue(entriesIterator);
 
-      const result = await adapter.readDirectory("/test-workspace");
+      const result = await adapter.fs.readDirectory("/test-workspace");
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -300,7 +300,7 @@ describe("BrowserFsPlatformAdapter", () => {
     it("should return error for invalid workspace path", async () => {
       vi.mocked(browserFsUtils.getWorkspaceRoot).mockReturnValue(null);
 
-      const result = await adapter.readDirectory("invalid");
+      const result = await adapter.fs.readDirectory("invalid");
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
@@ -317,7 +317,7 @@ describe("BrowserFsPlatformAdapter", () => {
 
       mockDirectoryHandle.entries = vi.fn().mockReturnValue(entriesIterator);
 
-      const result = await adapter.readDirectory("/test-workspace");
+      const result = await adapter.fs.readDirectory("/test-workspace");
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -336,7 +336,7 @@ describe("BrowserFsPlatformAdapter", () => {
 
       mockDirectoryHandle.entries = vi.fn().mockReturnValue(entriesIterator);
 
-      const result = await adapter.readDirectory("/test-workspace", {
+      const result = await adapter.fs.readDirectory("/test-workspace", {
         includeHidden: true,
       });
 
@@ -351,7 +351,7 @@ describe("BrowserFsPlatformAdapter", () => {
 
   describe("readFiles", () => {
     it("should read multiple files in batch", async () => {
-      const result = await adapter.readFiles([
+      const result = await adapter.fs.readFiles([
         "/test-workspace/file1.txt",
         "/test-workspace/file2.txt",
       ]);
@@ -369,7 +369,7 @@ describe("BrowserFsPlatformAdapter", () => {
         .mockResolvedValueOnce(mockFileHandle)
         .mockRejectedValueOnce(new Error("File not found"));
 
-      const result = await adapter.readFiles([
+      const result = await adapter.fs.readFiles([
         "/test-workspace/file1.txt",
         "/test-workspace/missing.txt",
       ]);
@@ -382,7 +382,7 @@ describe("BrowserFsPlatformAdapter", () => {
     it("should return empty content for empty files", async () => {
       mockFile.text = vi.fn().mockResolvedValue("");
 
-      const result = await adapter.readFiles(["/test-workspace/empty.txt"]);
+      const result = await adapter.fs.readFiles(["/test-workspace/empty.txt"]);
 
       expect(result.succeeded.length).toBe(1);
       expect(result.succeeded[0].content).toBe("");
@@ -391,7 +391,7 @@ describe("BrowserFsPlatformAdapter", () => {
 
   describe("readBinaryFiles", () => {
     it("should read multiple binary files in batch", async () => {
-      const result = await adapter.readBinaryFiles([
+      const result = await adapter.fs.readBinaryFiles([
         "/test-workspace/file1.bin",
         "/test-workspace/file2.bin",
       ]);
@@ -407,7 +407,7 @@ describe("BrowserFsPlatformAdapter", () => {
         .mockResolvedValueOnce(mockFileHandle)
         .mockRejectedValueOnce(new Error("File not found"));
 
-      const result = await adapter.readBinaryFiles([
+      const result = await adapter.fs.readBinaryFiles([
         "/test-workspace/file1.bin",
         "/test-workspace/missing.bin",
       ]);
@@ -425,7 +425,7 @@ describe("BrowserFsPlatformAdapter", () => {
         { path: "/test-workspace/file2.txt", content: "content2" },
       ];
 
-      const result = await adapter.writeFiles(files);
+      const result = await adapter.fs.writeFiles(files);
 
       expect(result.succeeded.length).toBe(2);
       expect(mockWritable.write).toHaveBeenCalledWith("content1");
@@ -438,7 +438,7 @@ describe("BrowserFsPlatformAdapter", () => {
         { path: "/test-workspace/special.txt", content: "<&>\"'\n\t" },
       ];
 
-      const result = await adapter.writeFiles(files);
+      const result = await adapter.fs.writeFiles(files);
 
       expect(result.succeeded.length).toBe(1);
       expect(mockWritable.write).toHaveBeenCalledWith("<&>\"'\n\t");
@@ -451,7 +451,7 @@ describe("BrowserFsPlatformAdapter", () => {
 
       const files = [{ path: "/test-workspace/file.txt", content: "content" }];
 
-      const result = await adapter.writeFiles(files);
+      const result = await adapter.fs.writeFiles(files);
 
       expect(result.succeeded.length).toBe(0);
       expect(result.failed.length).toBe(1);
@@ -463,7 +463,7 @@ describe("BrowserFsPlatformAdapter", () => {
     it("should create directories", async () => {
       const paths = ["/test-workspace/newdir", "/test-workspace/nested/dir"];
 
-      const result = await adapter.createDirectories(paths);
+      const result = await adapter.fs.createDirectories(paths);
 
       expect(result.succeeded.length).toBe(2);
       expect(mockDirectoryHandle.getDirectoryHandle).toHaveBeenCalledWith(
@@ -477,7 +477,9 @@ describe("BrowserFsPlatformAdapter", () => {
         .fn()
         .mockRejectedValue(new Error("Permission denied"));
 
-      const result = await adapter.createDirectories(["/test-workspace/dir"]);
+      const result = await adapter.fs.createDirectories([
+        "/test-workspace/dir",
+      ]);
 
       expect(result.succeeded.length).toBe(0);
       expect(result.failed.length).toBe(1);
@@ -486,9 +488,12 @@ describe("BrowserFsPlatformAdapter", () => {
 
   describe("deleteDirectories", () => {
     it("should delete directories and all children with recursive option", async () => {
-      const result = await adapter.deleteDirectories(["/test-workspace/dir"], {
-        recursive: true,
-      });
+      const result = await adapter.fs.deleteDirectories(
+        ["/test-workspace/dir"],
+        {
+          recursive: true,
+        },
+      );
 
       expect(result.succeeded.length).toBe(1);
       expect(mockDirectoryHandle.removeEntry).toHaveBeenCalledWith("dir", {
@@ -501,16 +506,19 @@ describe("BrowserFsPlatformAdapter", () => {
         .fn()
         .mockRejectedValue(new Error("Directory not empty"));
 
-      const result = await adapter.deleteDirectories(["/test-workspace/dir"], {
-        recursive: false,
-      });
+      const result = await adapter.fs.deleteDirectories(
+        ["/test-workspace/dir"],
+        {
+          recursive: false,
+        },
+      );
 
       expect(result.succeeded.length).toBe(0);
       expect(result.failed.length).toBe(1);
     });
 
     it("should handle multiple directories in batch", async () => {
-      const result = await adapter.deleteDirectories(
+      const result = await adapter.fs.deleteDirectories(
         ["/test-workspace/dir1", "/test-workspace/dir2"],
         { recursive: true },
       );
@@ -523,11 +531,11 @@ describe("BrowserFsPlatformAdapter", () => {
   describe("moveDirectory", () => {
     it("should fail if source doesn't exist", async () => {
       // Mock readDirectory to throw an error (simulating non-existent source)
-      vi.spyOn(adapter, "readDirectory").mockRejectedValue(
+      vi.spyOn(adapter.fs, "readDirectory").mockRejectedValue(
         new Error("Source directory not found"),
       );
 
-      const result = await adapter.moveDirectory(
+      const result = await adapter.fs.moveDirectory(
         "/test-workspace/nonexistent",
         "/test-workspace/new",
       );
@@ -541,7 +549,7 @@ describe("BrowserFsPlatformAdapter", () => {
 
   describe("deleteFiles", () => {
     it("should delete multiple files", async () => {
-      const result = await adapter.deleteFiles([
+      const result = await adapter.fs.deleteFiles([
         "/test-workspace/file1.txt",
         "/test-workspace/file2.txt",
       ]);
@@ -555,7 +563,9 @@ describe("BrowserFsPlatformAdapter", () => {
         .fn()
         .mockRejectedValue(new Error("File not found"));
 
-      const result = await adapter.deleteFiles(["/test-workspace/missing.txt"]);
+      const result = await adapter.fs.deleteFiles([
+        "/test-workspace/missing.txt",
+      ]);
 
       expect(result.succeeded.length).toBe(0);
       expect(result.failed.length).toBe(1);
@@ -564,7 +574,7 @@ describe("BrowserFsPlatformAdapter", () => {
 
   describe("moveFile", () => {
     it("should rename file in place", async () => {
-      const result = await adapter.moveFile(
+      const result = await adapter.fs.moveFile(
         "/test-workspace/old.txt",
         "/test-workspace/new.txt",
       );
@@ -574,7 +584,7 @@ describe("BrowserFsPlatformAdapter", () => {
 
     it("should move file between directories", async () => {
       // Mock readBinaryFiles to return source bytes
-      vi.spyOn(adapter, "readBinaryFiles").mockResolvedValue({
+      vi.spyOn(adapter.fs, "readBinaryFiles").mockResolvedValue({
         succeeded: [
           {
             path: "/test-workspace/a/file.txt",
@@ -585,33 +595,33 @@ describe("BrowserFsPlatformAdapter", () => {
       });
 
       // Mock writeBinaryFiles to succeed
-      vi.spyOn(adapter, "writeBinaryFiles").mockResolvedValue({
+      vi.spyOn(adapter.fs, "writeBinaryFiles").mockResolvedValue({
         succeeded: ["/test-workspace/b/file.txt"],
         failed: [],
       });
 
       // Mock deleteFiles to succeed
-      vi.spyOn(adapter, "deleteFiles").mockResolvedValue({
+      vi.spyOn(adapter.fs, "deleteFiles").mockResolvedValue({
         succeeded: ["/test-workspace/a/file.txt"],
         failed: [],
       });
 
-      const result = await adapter.moveFile(
+      const result = await adapter.fs.moveFile(
         "/test-workspace/a/file.txt",
         "/test-workspace/b/file.txt",
       );
 
       expect(result.ok).toBe(true);
-      expect(adapter.readBinaryFiles).toHaveBeenCalledWith([
+      expect(adapter.fs.readBinaryFiles).toHaveBeenCalledWith([
         "/test-workspace/a/file.txt",
       ]);
-      expect(adapter.writeBinaryFiles).toHaveBeenCalledWith([
+      expect(adapter.fs.writeBinaryFiles).toHaveBeenCalledWith([
         {
           path: "/test-workspace/b/file.txt",
           data: new TextEncoder().encode("file content"),
         },
       ]);
-      expect(adapter.deleteFiles).toHaveBeenCalledWith([
+      expect(adapter.fs.deleteFiles).toHaveBeenCalledWith([
         "/test-workspace/a/file.txt",
       ]);
     });
@@ -621,7 +631,7 @@ describe("BrowserFsPlatformAdapter", () => {
         .fn()
         .mockRejectedValue(new Error("Not found"));
 
-      const result = await adapter.moveFile(
+      const result = await adapter.fs.moveFile(
         "/test-workspace/missing.txt",
         "/test-workspace/new.txt",
       );
@@ -636,7 +646,7 @@ describe("BrowserFsPlatformAdapter", () => {
         .fn()
         .mockResolvedValue(mockFileHandle);
 
-      const result = await adapter.exists(["/test-workspace/file.txt"]);
+      const result = await adapter.fs.exists(["/test-workspace/file.txt"]);
 
       expect(result[0].exists).toBe(true);
       expect(result[0].type).toBe("file");
@@ -650,7 +660,7 @@ describe("BrowserFsPlatformAdapter", () => {
         .fn()
         .mockResolvedValue(mockDirectoryHandle);
 
-      const result = await adapter.exists(["/test-workspace/dir"]);
+      const result = await adapter.fs.exists(["/test-workspace/dir"]);
 
       expect(result[0].exists).toBe(true);
       expect(result[0].type).toBe("directory");
@@ -659,7 +669,7 @@ describe("BrowserFsPlatformAdapter", () => {
 
   describe("getMetadata", () => {
     it("should return file metadata (size, dates, type)", async () => {
-      const result = await adapter.getMetadata(["/test-workspace/file.txt"]);
+      const result = await adapter.fs.getMetadata(["/test-workspace/file.txt"]);
 
       expect(result.succeeded.length).toBe(1);
       expect(result.succeeded[0]).toMatchObject({
@@ -679,7 +689,7 @@ describe("BrowserFsPlatformAdapter", () => {
         .fn()
         .mockResolvedValue(mockDirectoryHandle);
 
-      const result = await adapter.getMetadata(["/test-workspace/dir"]);
+      const result = await adapter.fs.getMetadata(["/test-workspace/dir"]);
 
       expect(result.succeeded.length).toBe(1);
       expect(result.succeeded[0]).toMatchObject({
@@ -697,14 +707,14 @@ describe("BrowserFsPlatformAdapter", () => {
         .fn()
         .mockRejectedValue(new Error("Not found"));
 
-      const result = await adapter.getMetadata(["/test-workspace/missing"]);
+      const result = await adapter.fs.getMetadata(["/test-workspace/missing"]);
 
       expect(result.succeeded.length).toBe(0);
       expect(result.failed.length).toBe(1);
     });
 
     it("should handle batch requests", async () => {
-      const result = await adapter.getMetadata([
+      const result = await adapter.fs.getMetadata([
         "/test-workspace/file1.txt",
         "/test-workspace/file2.txt",
       ]);
@@ -718,7 +728,7 @@ describe("BrowserFsPlatformAdapter", () => {
       const data = new Uint8Array([1, 2, 3, 4, 5]);
       const files = [{ path: "/test-workspace/image.png", data }];
 
-      const result = await adapter.writeBinaryFiles(files);
+      const result = await adapter.fs.writeBinaryFiles(files);
 
       expect(result.succeeded.length).toBe(1);
       expect(mockWritable.write).toHaveBeenCalledWith(data);
@@ -730,7 +740,7 @@ describe("BrowserFsPlatformAdapter", () => {
         { path: "/test-workspace/empty.bin", data: new Uint8Array() },
       ];
 
-      const result = await adapter.writeBinaryFiles(files);
+      const result = await adapter.fs.writeBinaryFiles(files);
 
       expect(result.succeeded.length).toBe(1);
       expect(mockWritable.write).toHaveBeenCalledWith(new Uint8Array());
@@ -745,7 +755,7 @@ describe("BrowserFsPlatformAdapter", () => {
         { path: "/test-workspace/file.bin", data: new Uint8Array([1]) },
       ];
 
-      const result = await adapter.writeBinaryFiles(files);
+      const result = await adapter.fs.writeBinaryFiles(files);
 
       expect(result.succeeded.length).toBe(0);
       expect(result.failed.length).toBe(1);
@@ -754,7 +764,7 @@ describe("BrowserFsPlatformAdapter", () => {
 
   describe("resolveAssetUrl", () => {
     it("should create blob URL for binary files", async () => {
-      const result = await adapter.resolveAssetUrl(
+      const result = await adapter.fs.resolveAssetUrl(
         "image.png",
         "/test-workspace",
       );
@@ -768,7 +778,7 @@ describe("BrowserFsPlatformAdapter", () => {
         .fn()
         .mockRejectedValue(new Error("Not found"));
 
-      const result = await adapter.resolveAssetUrl(
+      const result = await adapter.fs.resolveAssetUrl(
         "missing.png",
         "/test-workspace",
       );
@@ -777,7 +787,7 @@ describe("BrowserFsPlatformAdapter", () => {
     });
 
     it("should handle absolute paths", async () => {
-      const result = await adapter.resolveAssetUrl(
+      const result = await adapter.fs.resolveAssetUrl(
         "/test-workspace/image.png",
         "/other-workspace",
       );
@@ -788,7 +798,7 @@ describe("BrowserFsPlatformAdapter", () => {
 
   describe("file watching", () => {
     it("should start watching metadata", async () => {
-      await adapter.startWatchingMetadata(["/test-workspace"], "watch-1");
+      await adapter.fs.startWatchingMetadata(["/test-workspace"], "watch-1");
 
       expect(fileWatcherMock.startWatchingMetadata).toHaveBeenCalledWith(
         ["/test-workspace"],
@@ -798,7 +808,7 @@ describe("BrowserFsPlatformAdapter", () => {
     });
 
     it("should start watching content", async () => {
-      await adapter.startWatchingContent(
+      await adapter.fs.startWatchingContent(
         ["/test-workspace/file.txt"],
         "watch-2",
       );
@@ -810,31 +820,37 @@ describe("BrowserFsPlatformAdapter", () => {
     });
 
     it("should stop watching by watchId", async () => {
-      await adapter.stopWatching("watch-1");
+      await adapter.fs.stopWatching("watch-1");
 
       expect(fileWatcherMock.stopWatching).toHaveBeenCalledWith("watch-1");
     });
   });
 
-  describe("event listeners", () => {
-    it("should register callback for events", () => {
-      const callback = vi.fn();
+  // Watcher events reach consumers through the fs surface (MET-122), not the
+  // general platform bus — the web has no window/OS events to carry.
+  describe("fs change events", () => {
+    it("should register a listener on the file watcher", () => {
+      const listener = vi.fn();
 
-      const unsubscribe = adapter.addEventListener(callback);
+      const unsubscribe = adapter.fs.onFsEvent(listener);
 
-      expect(fileWatcherMock.addEventListener).toHaveBeenCalledWith(callback);
+      expect(fileWatcherMock.onFsEvent).toHaveBeenCalledWith(listener);
       expect(typeof unsubscribe).toBe("function");
     });
 
-    it("should return unsubscribe function", () => {
-      const callback = vi.fn();
+    it("should return an unsubscribe function", () => {
+      const listener = vi.fn();
 
-      const unsubscribe = adapter.addEventListener(callback);
-      unsubscribe();
+      adapter.fs.onFsEvent(listener)();
 
-      expect(fileWatcherMock.removeEventListener).toHaveBeenCalledWith(
-        callback,
-      );
+      expect(fileWatcherMock.unsubscribed).toEqual([listener]);
+    });
+
+    it("has no window/OS event bus on the web", () => {
+      const unsubscribe = adapter.ui.addEventListener(vi.fn());
+
+      expect(typeof unsubscribe).toBe("function");
+      expect(fileWatcherMock.onFsEvent).not.toHaveBeenCalled();
     });
   });
 });

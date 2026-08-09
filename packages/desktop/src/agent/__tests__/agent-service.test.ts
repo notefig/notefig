@@ -19,31 +19,32 @@ const { writeFiles, readFiles, deleteFiles, mcpEndpoints } = vi.hoisted(() => ({
   // assert the endpoint's close() ran.
   mcpEndpoints: [] as { close: ReturnType<typeof vi.fn> }[],
 }));
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
-    setKv: vi.fn(),
-    getKv: vi.fn(),
-    getAllKv: vi.fn(async () => ({})),
-    deleteKv: vi.fn(),
-    writeFiles,
-    readFiles,
-    deleteFiles,
-    // A fake McpEndpoint: nothing in these tests drives real traffic over
-    // the MCP channel (that's exercised at the tool-call level via
-    // FakeAgent's scripted ACP session/update notifications instead), so
-    // this just has to satisfy attachMcpEndpoint's onRequest + dispose's
-    // close. Dumb sync constructor, matching createAgentTransport's contract
-    // — AgentTask.start() calls .start() and reads .mcpServer itself.
-    createMcpEndpoint: vi.fn(() => {
-      const endpoint = {
-        mcpServer: { name: "notefig", command: "notefig", args: [], env: [] },
-        start: vi.fn(async () => {}),
-        onRequest: vi.fn(() => () => {}),
-        close: vi.fn(async () => {}),
-      };
-      mcpEndpoints.push(endpoint);
-      return endpoint;
-    }),
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+    fs: {
+      writeFiles,
+      readFiles,
+      deleteFiles,
+    },
+    proc: {
+      // A fake McpEndpoint: nothing in these tests drives real traffic over
+      // the MCP channel (that's exercised at the tool-call level via
+      // FakeAgent's scripted ACP session/update notifications instead), so
+      // this just has to satisfy attachMcpEndpoint's onRequest + dispose's
+      // close. Dumb sync constructor, matching createAgentTransport's contract
+      // — AgentTask.start() calls .start() and reads .mcpServer itself.
+      createMcpEndpoint: vi.fn(() => {
+        const endpoint = {
+          mcpServer: { name: "notefig", command: "notefig", args: [], env: [] },
+          start: vi.fn(async () => {}),
+          onRequest: vi.fn(() => () => {}),
+          close: vi.fn(async () => {}),
+        };
+        mcpEndpoints.push(endpoint);
+        return endpoint;
+      }),
+    },
   },
 }));
 // History auto-checkpointing (Stage 2) is exercised separately; keep these
@@ -54,7 +55,11 @@ vi.mock("@/utils/history-service", () => ({
 
 import { createLoopbackPair } from "../loopback-transport";
 import { FakeAgent } from "./fake-agent";
-import { TaskManager, respondToAgentPermission, findBlobAuthorTask } from "../agent-service";
+import {
+  TaskManager,
+  respondToAgentPermission,
+  findBlobAuthorTask,
+} from "../agent-service";
 import {
   agentEntriesCollection,
   agentPermissionRequestsCollection,
@@ -118,9 +123,12 @@ beforeEach(() => {
   readFiles.mockClear();
   deleteFiles.mockClear();
   mcpEndpoints.length = 0;
-  for (const e of agentEntriesCollection.toArray) agentEntriesCollection.delete(e.id);
-  for (const t of agentTurnsCollection.toArray) agentTurnsCollection.delete(t.turnId);
-  for (const t of agentTasksCollection.toArray) agentTasksCollection.delete(t.taskId);
+  for (const e of agentEntriesCollection.toArray)
+    agentEntriesCollection.delete(e.id);
+  for (const t of agentTurnsCollection.toArray)
+    agentTurnsCollection.delete(t.turnId);
+  for (const t of agentTasksCollection.toArray)
+    agentTasksCollection.delete(t.taskId);
   for (const r of agentPermissionRequestsCollection.toArray)
     agentPermissionRequestsCollection.delete(r.id);
 });
@@ -158,7 +166,10 @@ describe("AgentTask vertical slice", () => {
   it("records unknown session updates as a catch-all entry (D4)", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
-    const commands = { sessionUpdate: "available_commands_update", availableCommands: [] };
+    const commands = {
+      sessionUpdate: "available_commands_update",
+      availableCommands: [],
+    };
     agent.onPrompt = async (_params, a) => {
       a.update("sess_test", commands);
       return { stopReason: "end_turn" };
@@ -219,7 +230,9 @@ describe("AgentTask vertical slice", () => {
       "thought",
       "assistant",
     ]);
-    const thoughts = entries.filter((e) => e.type === "thought").map((e) => e.text);
+    const thoughts = entries
+      .filter((e) => e.type === "thought")
+      .map((e) => e.text);
     expect(thoughts).toEqual([
       "The user is asking about the workspace.",
       "Looks like Dante's Inferno.",
@@ -287,7 +300,11 @@ describe("AgentTask vertical slice", () => {
         toolCall: { toolCallId: "call_1", title: "Write README.md" },
         options: [
           { optionId: "deny", name: "Deny", kind: "reject_once" },
-          { optionId: "deny_always", name: "Always Deny", kind: "reject_always" },
+          {
+            optionId: "deny_always",
+            name: "Always Deny",
+            kind: "reject_always",
+          },
         ],
       });
       outcome = response.outcome;
@@ -322,7 +339,11 @@ describe("AgentTask vertical slice", () => {
         toolCall: { toolCallId: "call_1", title: "mcp__notefig__author_blob" },
         options: [
           { optionId: "allow_once", name: "Allow", kind: "allow_once" },
-          { optionId: "allow_always", name: "Always Allow", kind: "allow_always" },
+          {
+            optionId: "allow_always",
+            name: "Always Allow",
+            kind: "allow_always",
+          },
           { optionId: "deny", name: "Deny", kind: "reject_once" },
         ],
       });
@@ -519,7 +540,9 @@ describe("AgentTask vertical slice", () => {
     await queuedHandle.completed;
 
     // Promotion reused the same rows (ids stable, no duplicates).
-    expect(agentTurnsCollection.get(queuedHandle.turnId)?.status).toBe("completed");
+    expect(agentTurnsCollection.get(queuedHandle.turnId)?.status).toBe(
+      "completed",
+    );
     expect(
       entriesFor(task.taskId).filter(
         (e) => e.type === "user" && e.turnId === queuedHandle.turnId,
@@ -1201,7 +1224,9 @@ describe("Stage 4: auth flows", () => {
     await runPrompt(task, "go");
 
     // The failed attempt left exactly one user entry + one errored turn.
-    expect(entriesFor(task.taskId).filter((e) => e.type === "user")).toHaveLength(1);
+    expect(
+      entriesFor(task.taskId).filter((e) => e.type === "user"),
+    ).toHaveLength(1);
     expect(turnFor(task.taskId)).toHaveLength(1);
     expect(turnFor(task.taskId)[0].status).toBe("error");
 
@@ -1211,7 +1236,9 @@ describe("Stage 4: auth flows", () => {
     });
 
     // Same rows, promoted — not re-inserted duplicates.
-    const userEntries = entriesFor(task.taskId).filter((e) => e.type === "user");
+    const userEntries = entriesFor(task.taskId).filter(
+      (e) => e.type === "user",
+    );
     expect(userEntries).toHaveLength(1);
     expect(userEntries[0].text).toBe("go");
     const turns = turnFor(task.taskId);
@@ -1291,7 +1318,8 @@ describe("Stage 4: auth flows", () => {
 });
 
 describe("task updatedAt (last-activity ordering, MET-48)", () => {
-  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const sleep = (ms: number) =>
+    new Promise((resolve) => setTimeout(resolve, ms));
 
   async function startedTask(manager: TaskManager) {
     const task = manager.createTask(harness);

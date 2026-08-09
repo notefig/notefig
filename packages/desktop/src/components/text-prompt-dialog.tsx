@@ -16,7 +16,7 @@ import {
 
 /**
  * In-app single-line text prompt, mounted once in App.
- * Serves platformAdapter.promptText() on every platform — window.prompt
+ * Serves platformAdapter.ui.promptText() on every platform — window.prompt
  * does not exist inside the Tauri webview.
  */
 export function TextPromptDialog() {

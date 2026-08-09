@@ -1,22 +1,20 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { kv } = vi.hoisted(() => ({ kv: new Map<string, unknown>() }));
-
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
-    getKv: vi.fn(async (ns: string, key: string) => kv.get(`${ns}:${key}`)),
-    setKv: vi.fn(async (ns: string, key: string, value: unknown) => {
-      kv.set(`${ns}:${key}`, value);
-    }),
-    deleteKv: vi.fn(async (ns: string, key: string) => {
-      kv.delete(`${ns}:${key}`);
-    }),
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
   },
 }));
 
-import { encodePairingCode, generatePairingSecret } from "@notefig/shared/tunnel";
 import {
+  encodePairingCode,
+  generatePairingSecret,
+} from "@notefig/shared/tunnel";
+import { removeKv, writeKv } from "@/utils/kv-store";
+import {
+  TUNNEL_KV_NAMESPACE,
+  TUNNEL_PAIRING_KEY,
   autoConnectStoredPairing,
   connectWithCode,
   forgetPairing,
@@ -40,8 +38,8 @@ function useWorker(options: ConstructorParameters<typeof FakeWorker>[0] = {}) {
   return worker;
 }
 
-beforeEach(() => {
-  kv.clear();
+beforeEach(async () => {
+  await forgetPairing();
 });
 
 afterEach(() => {
@@ -121,17 +119,14 @@ describe("connect-flow", () => {
 describe("watchCrossTabPairing", () => {
   it("connects a disconnected tab when another tab writes a pairing", async () => {
     const worker = useWorker();
-    // Simulate the pairing another tab persisted (KV + the code the storage
-    // event carries). autoConnectStoredPairing reads the stored code.
-    kv.set("tunnel:pairing", { code: codeFor(worker) });
-
     const cleanup = watchCrossTabPairing();
-    window.dispatchEvent(
-      new StorageEvent("storage", {
-        key: "notefig-kv:tunnel:pairing",
-        newValue: "{}",
-      }),
-    );
+
+    // The other tab's write. In the browser its commit reaches this tab through
+    // the collection's coordinator; here, writing to the same collection is the
+    // same signal from this side of that boundary.
+    await writeKv(TUNNEL_KV_NAMESPACE, TUNNEL_PAIRING_KEY, {
+      code: codeFor(worker),
+    });
 
     await vi.waitFor(() => {
       expect(tunnelConnection.getState().status).toBe("connected");
@@ -139,19 +134,23 @@ describe("watchCrossTabPairing", () => {
     cleanup();
   });
 
-  it("ignores unrelated keys and its own null clears", () => {
+  it("ignores other keys in the namespace and the pairing being cleared", async () => {
+    const worker = useWorker();
+    await writeKv(TUNNEL_KV_NAMESPACE, TUNNEL_PAIRING_KEY, {
+      code: codeFor(worker),
+    });
     const cleanup = watchCrossTabPairing();
-    window.dispatchEvent(
-      new StorageEvent("storage", { key: "something-else", newValue: "x" }),
-    );
-    window.dispatchEvent(
-      new StorageEvent("storage", {
-        key: "notefig-kv:tunnel:pairing",
-        newValue: null,
-      }),
-    );
+
+    // A neighbouring key must not look like a pairing...
+    await writeKv(TUNNEL_KV_NAMESPACE, "something-else", "x");
+    // ...and neither must a tab that just signed out, even though the pairing
+    // row it deleted is exactly the key being watched.
+    await forgetPairing();
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(tunnelConnection.getState().status).toBe("disconnected");
     cleanup();
+    await removeKv(TUNNEL_KV_NAMESPACE, "something-else");
   });
 });
 

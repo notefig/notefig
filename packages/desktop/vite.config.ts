@@ -62,4 +62,16 @@ export default defineConfig(async () => ({
   worker: {
     format: "es" as const,
   },
+
+  optimizeDeps: {
+    // The SQLite persistence package loads its OPFS worker with
+    // `new URL("../assets/opfs-worker-*.js", import.meta.url)`. Pre-bundling
+    // rewrites the module into node_modules/.vite/deps/ without copying that
+    // sibling asset, so the URL resolves to a path the dev server answers with
+    // index.html — the worker parses HTML, dies, and every query fails with
+    // "OPFS worker terminated unexpectedly". Excluding it serves the package
+    // from its own directory, where the asset actually sits. Dev-only: the
+    // production build emits the asset correctly either way.
+    exclude: ["@tanstack/browser-db-sqlite-persistence"],
+  },
 }));

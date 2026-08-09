@@ -5,13 +5,16 @@ import {
 } from "@/components/editor/editor-image-paste";
 import { platformAdapter } from "@/adapters";
 
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
-    exists: vi.fn(),
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+    fs: {
+      exists: vi.fn(),
+    },
   },
 }));
 
-const existsMock = vi.mocked(platformAdapter.exists);
+const existsMock = vi.mocked(platformAdapter.fs.exists);
 
 /** Make exists() report the given asset paths as taken. */
 function seedExisting(paths: string[]) {

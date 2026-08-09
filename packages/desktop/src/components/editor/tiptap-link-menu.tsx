@@ -36,14 +36,14 @@ export function LinkBubbleMenu({
     if (!href) return;
 
     if (isExternal) {
-      platformAdapter.openExternal(href);
+      platformAdapter.ui.openExternal(href);
       return;
     }
 
     const fileDir = filePath.substring(0, filePath.lastIndexOf("/")) || "/";
     const candidates = buildInternalCandidates(href, { fileDir, basePath });
 
-    const results = await platformAdapter.exists(candidates);
+    const results = await platformAdapter.fs.exists(candidates);
     const target = candidates.find((candidate) =>
       results.some(
         (r) => r.path === candidate && r.exists && r.type !== "directory",

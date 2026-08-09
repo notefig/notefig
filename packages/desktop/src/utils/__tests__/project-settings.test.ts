@@ -8,15 +8,18 @@ import {
   DEFAULT_PROJECT_SETTINGS,
 } from "../project-settings";
 
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
-    readFiles: vi.fn(),
-    writeFiles: vi.fn(),
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+    fs: {
+      readFiles: vi.fn(),
+      writeFiles: vi.fn(),
+    },
   },
 }));
 
-const readMock = vi.mocked(platformAdapter.readFiles);
-const writeMock = vi.mocked(platformAdapter.writeFiles);
+const readMock = vi.mocked(platformAdapter.fs.readFiles);
+const writeMock = vi.mocked(platformAdapter.fs.writeFiles);
 
 const WORKSPACE = "/workspace";
 const SETTINGS_PATH = projectSettingsPath(WORKSPACE);
@@ -54,9 +57,10 @@ describe("resolveProjectSettings", () => {
   });
 
   it("overlays file values onto defaults", () => {
-    expect(
-      resolveProjectSettings({ settings: { direction: "rtl" } }),
-    ).toEqual({ ...DEFAULT_PROJECT_SETTINGS, direction: "rtl" });
+    expect(resolveProjectSettings({ settings: { direction: "rtl" } })).toEqual({
+      ...DEFAULT_PROJECT_SETTINGS,
+      direction: "rtl",
+    });
   });
 });
 

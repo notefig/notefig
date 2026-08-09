@@ -2,7 +2,11 @@ import { describe, it, expect, vi } from "vitest";
 
 // The hook module reaches @/adapters via @/utils/fs; describeTaskMeta itself
 // is pure, so a stub adapter keeps this a plain unit test.
-vi.mock("@/adapters", () => ({ platformAdapter: {} }));
+vi.mock("@/adapters", async () => ({
+  platformAdapter: {
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+  },
+}));
 
 import { describeTaskMeta, type AgentTaskMeta } from "./agents";
 import type { AgentTaskRow } from "@/agent/agent-collections";
@@ -31,7 +35,9 @@ function meta(overrides: Partial<AgentTaskMeta> = {}): AgentTaskMeta {
 describe("describeTaskMeta", () => {
   it("sign-in outranks everything", () => {
     expect(
-      describeTaskMeta(meta({ needsAuth: true, isRunning: true, queuedCount: 2 })),
+      describeTaskMeta(
+        meta({ needsAuth: true, isRunning: true, queuedCount: 2 }),
+      ),
     ).toBe("needs sign-in");
   });
 

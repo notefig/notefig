@@ -62,7 +62,7 @@ export interface UpdateCheckData {
 }
 
 async function fetchUpdateCheck(): Promise<UpdateCheckData> {
-  const result = await platformAdapter.getUpdater().check();
+  const result = await platformAdapter.updates.check();
 
   if (result.status === "error") {
     throw new Error(result.error);
@@ -275,7 +275,7 @@ export async function downloadAndInstall(
     },
   });
 
-  const updater = platformAdapter.getUpdater();
+  const updater = platformAdapter.updates;
 
   for await (const step of updater.apply()) {
     if (step.status === "downloading") {
@@ -312,7 +312,7 @@ export async function downloadAndInstall(
 }
 
 export async function relaunchApp(queryClient: QueryClient) {
-  const result = await platformAdapter.getUpdater().restart();
+  const result = await platformAdapter.updates.restart();
   if (result.status === "error") {
     captureEvent("update_failed", {
       stage: "restart",

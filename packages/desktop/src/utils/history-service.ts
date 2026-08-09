@@ -8,6 +8,7 @@
  */
 import { IsomorphicGitService } from "@notefig/git";
 import { platformAdapter } from "@/adapters";
+import { createGitStorageHost } from "@/adapters/git-storage-host";
 import { normalizePath } from "@/utils/fs";
 
 const historyServiceRegistry = new Map<string, IsomorphicGitService>();
@@ -25,7 +26,7 @@ export function getOrCreateWorkspaceHistoryService(
 
   if (!service) {
     service = new IsomorphicGitService(
-      platformAdapter.getGitStorageHost(normalizedWorkspacePath),
+      createGitStorageHost(platformAdapter.fs, normalizedWorkspacePath),
     );
     historyServiceRegistry.set(normalizedWorkspacePath, service);
   }
@@ -55,10 +56,10 @@ export async function ensureWorkspaceHistoryInitialized(
     // Exclude .metrists/ from the history repo's own worktree scan
     // (spike finding 3) — gitdir-local, not the workspace's own .gitignore.
     const excludePath = `${gitDir}/info/exclude`;
-    const existing = await platformAdapter.readFiles([excludePath]);
+    const existing = await platformAdapter.fs.readFiles([excludePath]);
     const current = existing.succeeded[0]?.content ?? "";
     if (!current.includes(".metrists/")) {
-      await platformAdapter.writeFiles([
+      await platformAdapter.fs.writeFiles([
         { path: excludePath, content: `${current}\n.metrists/\n` },
       ]);
     }

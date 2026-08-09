@@ -161,6 +161,14 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(4599);
 
+    // Keep the SQLite database out of the real app-data dir, and start empty so
+    // a durability assertion cannot pass on the last run's rows. Per-port so
+    // parallel shims don't share a file.
+    let db_dir = std::env::temp_dir().join(format!("notefig-shim-db-{port}"));
+    let _ = std::fs::remove_dir_all(&db_dir);
+    std::fs::create_dir_all(&db_dir).expect("shim failed to create its db dir");
+    std::env::set_var("NOTEFIG_DB_DIR", &db_dir);
+
     let (tx, rx) = mpsc::unbounded_channel::<InvokeMsg>();
 
     // axum on a worker thread with its own runtime; the Tauri app stays on the

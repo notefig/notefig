@@ -147,7 +147,7 @@ const fake = vi.hoisted(() => {
       return { ok: true as const, value: undefined };
     },
 
-    addEventListener(cb: (event: unknown) => void) {
+    onFsEvent(cb: (event: unknown) => void) {
       listeners.add(cb);
       return () => listeners.delete(cb);
     },
@@ -167,8 +167,14 @@ const fake = vi.hoisted(() => {
   return { store, adapter, listeners, hooks };
 });
 
-vi.mock("@/adapters", () => ({
-  platformAdapter: fake.adapter,
+// One flat fake serving both surfaces it touches — the extra keys on each
+// are harmless, and keeping a single object keeps the fs state in one place.
+vi.mock("@/adapters", async () => ({
+  platformAdapter: {
+    fs: fake.adapter,
+    ui: fake.adapter,
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+  },
 }));
 
 // Real modules — imported after the adapter mock so they bind to the fake fs.
@@ -552,7 +558,11 @@ describe("typing → save → adoption loop integrity", () => {
     await handleContentFileSystemChange(
       {
         changes: [
-          { path: FILE, content: stale, contentHash: calculateContentHash(stale) },
+          {
+            path: FILE,
+            content: stale,
+            contentHash: calculateContentHash(stale),
+          },
         ],
       },
       WS,

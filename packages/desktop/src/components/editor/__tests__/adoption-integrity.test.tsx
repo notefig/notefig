@@ -95,7 +95,7 @@ const fake = vi.hoisted(() => {
     async deleteDirectories(paths: string[]) {
       return { succeeded: paths, failed: [] };
     },
-    addEventListener() {
+    onFsEvent() {
       return () => {};
     },
     async startWatchingMetadata() {},
@@ -112,8 +112,14 @@ const fake = vi.hoisted(() => {
   return { store, adapter };
 });
 
-vi.mock("@/adapters", () => ({
-  platformAdapter: fake.adapter,
+// One flat fake serving both surfaces it touches — the extra keys on each
+// are harmless, and keeping a single object keeps the fs state in one place.
+vi.mock("@/adapters", async () => ({
+  platformAdapter: {
+    fs: fake.adapter,
+    ui: fake.adapter,
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+  },
 }));
 
 // Real modules — imported after the adapter mock so they bind to the fake fs.

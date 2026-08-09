@@ -43,6 +43,11 @@ export const TAURI_COMMANDS = [
   "stop_watching",
   // search
   "search_content",
+  // db_ops
+  "db_execute",
+  "db_query",
+  "db_close",
+  "db_reset",
 ] as const;
 
 export type CommandHandler = (

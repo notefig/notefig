@@ -9,32 +9,31 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { kv } = vi.hoisted(() => ({ kv: new Map<string, unknown>() }));
 
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
-    getKv: vi.fn(async (ns: string, key: string) => kv.get(`${ns}:${key}`)),
-    setKv: vi.fn(async (ns: string, key: string, value: unknown) => {
-      kv.set(`${ns}:${key}`, value);
-    }),
-    deleteKv: vi.fn(async (ns: string, key: string) => kv.delete(`${ns}:${key}`)),
-    getAllKv: vi.fn(async () => ({})),
-    writeFiles: vi.fn(async (files: any[]) => ({
-      succeeded: files.map((f) => f.path),
-      failed: [],
-    })),
-    readFiles: vi.fn(async (paths: string[]) => ({
-      succeeded: paths.map((p) => ({ path: p, content: "" })),
-      failed: [],
-    })),
-    deleteFiles: vi.fn(async (paths: string[]) => ({
-      succeeded: paths,
-      failed: [],
-    })),
-    createMcpEndpoint: vi.fn(() => ({
-      mcpServer: { name: "notefig", command: "m", args: [], env: [] },
-      start: vi.fn(async () => {}),
-      onRequest: vi.fn(() => () => {}),
-      close: vi.fn(async () => {}),
-    })),
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+    fs: {
+      writeFiles: vi.fn(async (files: any[]) => ({
+        succeeded: files.map((f) => f.path),
+        failed: [],
+      })),
+      readFiles: vi.fn(async (paths: string[]) => ({
+        succeeded: paths.map((p) => ({ path: p, content: "" })),
+        failed: [],
+      })),
+      deleteFiles: vi.fn(async (paths: string[]) => ({
+        succeeded: paths,
+        failed: [],
+      })),
+    },
+    proc: {
+      createMcpEndpoint: vi.fn(() => ({
+        mcpServer: { name: "notefig", command: "m", args: [], env: [] },
+        start: vi.fn(async () => {}),
+        onRequest: vi.fn(() => () => {}),
+        close: vi.fn(async () => {}),
+      })),
+    },
   },
 }));
 vi.mock("@/utils/history-service", () => ({
@@ -76,9 +75,12 @@ function tunnelFactory(task: AgentTask) {
 
 beforeEach(() => {
   kv.clear();
-  for (const e of agentEntriesCollection.toArray) agentEntriesCollection.delete(e.id);
-  for (const t of agentTurnsCollection.toArray) agentTurnsCollection.delete(t.turnId);
-  for (const t of agentTasksCollection.toArray) agentTasksCollection.delete(t.taskId);
+  for (const e of agentEntriesCollection.toArray)
+    agentEntriesCollection.delete(e.id);
+  for (const t of agentTurnsCollection.toArray)
+    agentTurnsCollection.delete(t.turnId);
+  for (const t of agentTasksCollection.toArray)
+    agentTasksCollection.delete(t.taskId);
   for (const r of agentPermissionRequestsCollection.toArray)
     agentPermissionRequestsCollection.delete(r.id);
 });
@@ -93,7 +95,8 @@ describe("tunnel lifecycle", () => {
     const worker = new FakeWorker({ workspacePath: WORKSPACE });
     await connect(worker);
 
-    const task = getOrCreateWorkspaceTaskManager(WORKSPACE).createTask(claudeHarness);
+    const task =
+      getOrCreateWorkspaceTaskManager(WORKSPACE).createTask(claudeHarness);
     await task.start(tunnelFactory(task));
     await vi.waitFor(() => {
       expect(agentTasksCollection.get(task.taskId)?.sessionId).toBeTruthy();
@@ -115,7 +118,8 @@ describe("tunnel lifecycle", () => {
     });
     await connect(worker);
 
-    const task = getOrCreateWorkspaceTaskManager(WORKSPACE).createTask(claudeHarness);
+    const task =
+      getOrCreateWorkspaceTaskManager(WORKSPACE).createTask(claudeHarness);
     // start() rejects (spawn error) → row exists but never got a sessionId.
     await task.start(tunnelFactory(task)).catch(() => undefined);
     expect(agentTasksCollection.get(task.taskId)?.sessionId).toBeFalsy();

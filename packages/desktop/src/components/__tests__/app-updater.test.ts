@@ -20,8 +20,16 @@ const mockUpdater = {
   apply: vi.fn(),
   restart: vi.fn(),
 };
-vi.mock("@/adapters", () => ({
-  platformAdapter: { getUpdater: () => mockUpdater },
+// A getter, not a plain property: vi.mock is hoisted above `mockUpdater`'s
+// declaration, so reading it eagerly here would hit the TDZ. The old
+// `getUpdater()` method deferred the read for free; this keeps that.
+vi.mock("@/adapters", async () => ({
+  platformAdapter: {
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+    get updates() {
+      return mockUpdater;
+    },
+  },
 }));
 
 const idleInstall: InstallState = {
@@ -65,9 +73,9 @@ describe("deriveUpdaterView", () => {
   });
 
   it("is up-to-date when the check returned no update", () => {
-    expect(deriveUpdaterView(check({ data: upToDate }), idleInstall).status).toBe(
-      "up-to-date",
-    );
+    expect(
+      deriveUpdaterView(check({ data: upToDate }), idleInstall).status,
+    ).toBe("up-to-date");
   });
 
   it("surfaces check failures as an error with a message", () => {

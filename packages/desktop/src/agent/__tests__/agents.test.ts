@@ -10,18 +10,21 @@ const { writeFiles, readFiles } = vi.hoisted(() => ({
     failed: [] as unknown[],
   })),
 }));
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
-    setKv: vi.fn(),
-    getKv: vi.fn(),
-    writeFiles,
-    readFiles,
-    createMcpEndpoint: vi.fn(() => ({
-      mcpServer: { name: "notefig", command: "notefig", args: [], env: [] },
-      start: vi.fn(async () => {}),
-      onRequest: vi.fn(() => () => {}),
-      close: vi.fn(async () => {}),
-    })),
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+    fs: {
+      writeFiles,
+      readFiles,
+    },
+    proc: {
+      createMcpEndpoint: vi.fn(() => ({
+        mcpServer: { name: "notefig", command: "notefig", args: [], env: [] },
+        start: vi.fn(async () => {}),
+        onRequest: vi.fn(() => () => {}),
+        close: vi.fn(async () => {}),
+      })),
+    },
   },
 }));
 vi.mock("@/utils/history-service", () => ({

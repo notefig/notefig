@@ -1,16 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const runShellCommand = vi.fn();
-const setKv = vi.fn();
-const getKv = vi.fn();
-const getAllKv = vi.fn(async () => ({}));
 
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
-    runShellCommand: (...args: unknown[]) => runShellCommand(...args),
-    setKv: (...args: unknown[]) => setKv(...args),
-    getKv: (...args: unknown[]) => getKv(...args),
-    getAllKv: () => getAllKv(),
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+    proc: {
+      runShellCommand: (...args: unknown[]) => runShellCommand(...args),
+    },
   },
 }));
 
@@ -22,11 +19,32 @@ import {
   resetStartupHarnessDiscoveryForTest,
 } from "../harness-discovery";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
+import {
+  HARNESS_CUSTOM_KEY,
+  HARNESS_DISCOVERY_KEY,
+  HARNESS_OVERRIDES_KEY,
+  HARNESS_SETTINGS_NAMESPACE,
+} from "../harness-discovery";
+import { readKv, removeKv, writeKv } from "@/utils/kv-store";
 
-beforeEach(() => {
+/** Storage is real (in-memory SQLite), so it has to be emptied between tests. */
+async function clearHarnessSettings(): Promise<void> {
+  for (const key of [
+    HARNESS_OVERRIDES_KEY,
+    HARNESS_CUSTOM_KEY,
+    HARNESS_DISCOVERY_KEY,
+  ]) {
+    await removeKv(HARNESS_SETTINGS_NAMESPACE, key);
+  }
+}
+
+function storedDiscovery(): Promise<unknown> {
+  return readKv(HARNESS_SETTINGS_NAMESPACE, HARNESS_DISCOVERY_KEY);
+}
+
+beforeEach(async () => {
   runShellCommand.mockReset();
-  setKv.mockReset();
-  getKv.mockReset();
+  await clearHarnessSettings();
   resetStartupHarnessDiscoveryForTest();
 });
 
@@ -140,16 +158,14 @@ describe("candidateProbeEntries", () => {
 
 describe("ensureStartupHarnessDiscovery", () => {
   it("runs one scan per session, applying stored override commands", async () => {
-    getKv.mockImplementation(async (_ns: string, key: string) =>
-      key === "overrides"
-        ? { opencode: { id: "opencode", enabled: true, command: "ocv" } }
-        : undefined,
-    );
+    await writeKv(HARNESS_SETTINGS_NAMESPACE, HARNESS_OVERRIDES_KEY, {
+      opencode: { id: "opencode", enabled: true, command: "ocv" },
+    });
     runShellCommand.mockResolvedValue({ stdout: "", exitCode: 0 });
 
     ensureStartupHarnessDiscovery();
     ensureStartupHarnessDiscovery(); // second call: no-op
-    await vi.waitFor(() => expect(setKv).toHaveBeenCalledTimes(1));
+    await vi.waitFor(async () => expect(await storedDiscovery()).toBeDefined());
 
     expect(runShellCommand).toHaveBeenCalledTimes(1);
     // The overridden command (ocv) is what got probed, not the built-in.
@@ -157,28 +173,23 @@ describe("ensureStartupHarnessDiscovery", () => {
   });
 
   it("persists nothing when the platform can't run shell scripts", async () => {
-    getKv.mockResolvedValue(undefined);
     runShellCommand.mockRejectedValue(new Error("unsupported"));
     ensureStartupHarnessDiscovery();
     await vi.waitFor(() => expect(runShellCommand).toHaveBeenCalledTimes(1));
     // "Couldn't check" must not overwrite prior results with not-found.
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(setKv).not.toHaveBeenCalled();
+    expect(await storedDiscovery()).toBeUndefined();
   });
 });
 
 describe("refreshHarnessDiscovery", () => {
-  it("writes results to the harness-settings/discovery KV key", async () => {
+  it("writes results to the harness-settings/discovery key", async () => {
     runShellCommand.mockResolvedValue({ stdout: "", exitCode: 0 });
+
     await refreshHarnessDiscovery({}, []);
-    expect(setKv).toHaveBeenCalledWith(
-      "harness-settings",
-      "discovery",
-      expect.objectContaining({
-        [BUILT_IN_HARNESSES[0].id]: expect.objectContaining({
-          harnessId: BUILT_IN_HARNESSES[0].id,
-        }),
-      }),
-    );
+
+    expect(await storedDiscovery()).toMatchObject({
+      [BUILT_IN_HARNESSES[0].id]: { harnessId: BUILT_IN_HARNESSES[0].id },
+    });
   });
 });

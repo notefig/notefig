@@ -22,17 +22,24 @@ const isomorphicGitServiceCtor = vi.fn().mockImplementation(() => ({
   init: initMock,
 }));
 
-const platformAdapterMock = {
-  getGitStorageHost: vi.fn(() => mockHost),
-  exists: vi.fn(),
-};
+const fsMock = { exists: vi.fn() };
+const createGitStorageHostMock = vi.fn(() => mockHost);
 
 vi.mock("@notefig/git", () => ({
   IsomorphicGitService: isomorphicGitServiceCtor,
 }));
 
-vi.mock("@/adapters", () => ({
-  platformAdapter: platformAdapterMock,
+vi.mock("@/adapters", async () => ({
+  platformAdapter: {
+    fs: fsMock,
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+  },
+}));
+
+// The git host moved above the adapter (MET-122); the registry's contract is
+// still "one host per normalized workspace", now asserted on the factory.
+vi.mock("@/adapters/git-storage-host", () => ({
+  createGitStorageHost: createGitStorageHostMock,
 }));
 
 describe("git service registry (entities/git)", () => {
@@ -49,10 +56,8 @@ describe("git service registry (entities/git)", () => {
     const second = store.getOrCreateWorkspaceGitService("/workspace");
 
     expect(first).toBe(second);
-    expect(platformAdapterMock.getGitStorageHost).toHaveBeenCalledTimes(1);
-    expect(platformAdapterMock.getGitStorageHost).toHaveBeenCalledWith(
-      "/workspace",
-    );
+    expect(createGitStorageHostMock).toHaveBeenCalledTimes(1);
+    expect(createGitStorageHostMock).toHaveBeenCalledWith(fsMock, "/workspace");
   });
 
   it("initializes repository once per in-flight workspace", async () => {
@@ -90,6 +95,6 @@ describe("git service registry (entities/git)", () => {
     const second = store.getOrCreateWorkspaceGitService("/workspace");
 
     expect(first).not.toBe(second);
-    expect(platformAdapterMock.getGitStorageHost).toHaveBeenCalledTimes(2);
+    expect(createGitStorageHostMock).toHaveBeenCalledTimes(2);
   });
 });

@@ -10,16 +10,14 @@ import {
   createCollection,
   localOnlyCollectionOptions,
 } from "@tanstack/react-db";
-import { queryCollectionOptions } from "@tanstack/query-db-collection";
-import { QueryClient } from "@tanstack/query-core";
+import { persistedCollectionOptions } from "@tanstack/db-sqlite-persistence-core";
 import type { AuthMethod, ToolCallUpdate } from "@notefig/shared/agent";
 import { platformAdapter } from "@/adapters";
 import { getRegisteredTask } from "./task-registry";
 import {
-  AGENT_TASKS_NAMESPACE,
+  AGENT_TASKS_COLLECTION_ID,
   bootAgentTaskRow,
-  parsePersistedAgentTasks,
-  persistableAgentTaskRow,
+  parsePersistedAgentTask,
 } from "./agent-persistence";
 
 export type AgentTaskStatus =
@@ -162,92 +160,123 @@ export type AgentPermissionRequestRow = {
 };
 
 /**
- * Storage-backed (MET-54): a query collection over the KV seam — the same
- * unified-storage idiom as the file collections over fs. Every mutation
- * writes through; the boot read maps stored rows back to live ones. The one
- * coherence rule lives in the queryFn: a task with a live runtime passes
- * through as stored (write-through keeps disk current, so a refetch can
- * never clobber runtime state); a task without one loads as "restored"
- * (revivable via session/load) or not at all (no session — nothing to
- * revive). Everything else about persistence falls out of this shape: no
- * mirror, no restore step, no dispose bookkeeping.
+ * Persisted (MET-54, on SQLite since MET-124): a local-only collection whose
+ * source of truth is the `db` surface. Every mutation is committed by the
+ * persistence wrapper, and the rows come back on the next launch — so there is
+ * no mirror, no restore step and no dispose bookkeeping.
+ *
+ * Two behavioral notes, both consequences of that wrapper:
+ *
+ * - Persistence is no longer best-effort. The old KV write-through swallowed
+ *   failures so a doomed disk write could not roll back an optimistic mutation
+ *   and visibly revert a task's status under a still-running runtime. The
+ *   wrapper commits after our handlers and its throw is not interceptable, so a
+ *   failed write now rolls the mutation back. The realistic failure modes are
+ *   corruption — which the adapter's guard resets and retries (MET-123) — and a
+ *   full disk.
+ * - Rows load raw. The old `queryFn` reconciled stored rows against the live
+ *   task registry as it read them; that now happens once, explicitly, in
+ *   `reconcileAgentTasksAtBoot` below.
  */
-// Own client, not the shared one from utils/collections: importing that here
-// closes a module cycle (utils/collections ↔ file-sync ↔ editor modules)
-// that leaves queryClient undefined at eval time — and nothing else needs to
-// share this collection's cache.
-const agentTasksQueryClient = new QueryClient();
-
 export const agentTasksCollection = createCollection(
-  queryCollectionOptions<AgentTaskRow, string>({
-    queryKey: ["agent-tasks"],
-    queryClient: agentTasksQueryClient,
-    queryFn: async () => {
-      const raw = await platformAdapter.getAllKv<unknown>(AGENT_TASKS_NAMESPACE);
-      const rows: AgentTaskRow[] = [];
-      for (const stored of parsePersistedAgentTasks(raw)) {
-        const task = getRegisteredTask(stored.taskId);
-        if (task) {
-          // Write-through keeps disk current for live tasks, so the stored
-          // row IS the collection row — except status, which the schema only
-          // validates as a string (kv.json is hand-editable): a foreign value
-          // falls back to the runtime's own status instead of entering the
-          // union unchecked.
-          const row = stored as AgentTaskRow;
-          rows.push(
-            isAgentTaskStatus(stored.status)
-              ? row
-              : { ...row, status: task.currentStatus },
-          );
-          continue;
-        }
-        const boot = bootAgentTaskRow(stored);
-        if (boot) rows.push(boot);
-      }
-      return rows;
-    },
+  persistedCollectionOptions<AgentTaskRow, string>({
+    id: AGENT_TASKS_COLLECTION_ID,
     getKey: (task) => task.taskId,
-    // Persistence is best-effort: a throwing handler would roll back the
-    // optimistic mutation — the row's status would visibly revert while the
-    // runtime keeps going. Memory is the source of truth; a failed KV write
-    // leaves disk stale until the next write-through repairs it.
-    onInsert: async ({ transaction }) => {
-      for (const m of transaction.mutations) {
-        try {
-          await platformAdapter.setKv(
-            AGENT_TASKS_NAMESPACE,
-            m.modified.taskId,
-            persistableAgentTaskRow(m.modified),
-          );
-        } catch (error) {
-          console.warn("[agent-tasks] persist failed", m.modified.taskId, error);
-        }
-      }
-    },
-    onUpdate: async ({ transaction }) => {
-      for (const m of transaction.mutations) {
-        try {
-          await platformAdapter.setKv(
-            AGENT_TASKS_NAMESPACE,
-            m.modified.taskId,
-            persistableAgentTaskRow(m.modified),
-          );
-        } catch (error) {
-          console.warn("[agent-tasks] persist failed", m.modified.taskId, error);
-        }
-      }
-    },
-    onDelete: async ({ transaction }) => {
-      for (const m of transaction.mutations) {
-        try {
-          await platformAdapter.deleteKv(AGENT_TASKS_NAMESPACE, String(m.key));
-        } catch (error) {
-          console.warn("[agent-tasks] delete failed", String(m.key), error);
-        }
-      }
-    },
+    persistence: platformAdapter.db.get(),
   }),
 );
+
+/** Whether a hydrated row already matches what the boot mapping would produce. */
+function matchesBootRow(row: AgentTaskRow, boot: AgentTaskRow): boolean {
+  // `undefined` counts as absent: that is how a stripped field looks in memory
+  const significant = (task: AgentTaskRow) =>
+    Object.entries(task).filter(
+      ([key, value]) => !key.startsWith("$") && value !== undefined,
+    );
+  const rowEntries = significant(row);
+  const bootEntries = significant(boot);
+  if (rowEntries.length !== bootEntries.length) return false;
+  return bootEntries.every(
+    ([key, value]) => row[key as keyof AgentTaskRow] === value,
+  );
+}
+
+/**
+ * Bring hydrated rows in line with this session's reality. Runs once at boot
+ * (App.tsx), and is idempotent, so a second call is a no-op.
+ *
+ * The rules are the ones the pre-MET-124 `queryFn` applied as it read:
+ *
+ * - a task with a live runtime keeps its stored row, since write-through keeps
+ *   storage current — except `status`, which the schema only validates as a
+ *   string; a value outside the union falls back to the runtime's own rather
+ *   than entering it unchecked
+ * - without a runtime but with a session, the row demotes to "restored" and
+ *   sheds runtime-only fields; the first interaction revives it via session/load
+ * - without a session there is nothing to revive, so the row is deleted. The
+ *   old code merely skipped these on read, which left them in storage forever.
+ * - a row that fails validation is deleted for the same reason it was dropped
+ *   before: it must never reach revival or spawn.
+ */
+export async function reconcileAgentTasksAtBoot(): Promise<void> {
+  await agentTasksCollection.preload();
+
+  for (const row of [...agentTasksCollection.values()]) {
+    const stored = parsePersistedAgentTask(row);
+    if (!stored) {
+      await agentTasksCollection.delete(row.taskId).isPersisted.promise;
+      continue;
+    }
+
+    const task = getRegisteredTask(stored.taskId);
+    if (task) {
+      if (!isAgentTaskStatus(stored.status)) {
+        await agentTasksCollection.update(stored.taskId, (draft) => {
+          draft.status = task.currentStatus;
+        }).isPersisted.promise;
+      }
+      continue;
+    }
+
+    const boot = bootAgentTaskRow(stored);
+    if (!boot) {
+      await agentTasksCollection.delete(stored.taskId).isPersisted.promise;
+      continue;
+    }
+    if (matchesBootRow(row, boot)) continue;
+    // Replace rather than patch: the mapping drops runtime-only fields
+    // (authHint, authMethods, …), and a draft mutation can only add or change.
+    // Each step is awaited to durability so the next launch cannot observe a
+    // half-applied replacement.
+    await agentTasksCollection.update(stored.taskId, (draft) => {
+      Object.assign(draft, boot);
+      for (const key of Object.keys(draft)) {
+        if (key.startsWith("$") || key in boot) continue;
+        (draft as Record<string, unknown>)[key] = undefined;
+      }
+    }).isPersisted.promise;
+  }
+}
+
+let reconcileStarted = false;
+
+/**
+ * Fire-and-forget boot trigger, once per app session — StrictMode's
+ * double-invoke and remounts are no-ops. Failures are logged, never thrown: a
+ * task list that could not be reconciled must not take app startup down.
+ */
+export function ensureAgentTasksReconciled(): void {
+  if (reconcileStarted) return;
+  reconcileStarted = true;
+  void reconcileAgentTasksAtBoot().catch((error: unknown) => {
+    console.warn("Agent task reconciliation failed:", error);
+  });
+}
+
+/** Test-only: allow the once-per-session guard to re-arm. */
+export function resetAgentTasksReconciledForTest(): void {
+  reconcileStarted = false;
+}
 
 export const agentTurnsCollection = createCollection(
   localOnlyCollectionOptions({

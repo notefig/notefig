@@ -18,7 +18,8 @@ import { isHiddenPath, matchesIgnoreRules } from "./browser-fs-utils";
 import { processPool } from "@/utils/process-pool";
 
 export class BrowserPlatformAdapter extends BaseBrowserAdapter {
-  private db: IDBDatabase | null = null;
+  // `idbHandle`, not `db` — `db` is now the SQLite surface (MET-123).
+  private idbHandle: IDBDatabase | null = null;
   private readonly DB_VERSION = 1;
   private readonly STORE_NAME = "files";
 
@@ -31,8 +32,8 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
   }
 
   private async ensureDB(): Promise<IDBDatabase> {
-    if (this.db) {
-      return this.db;
+    if (this.idbHandle) {
+      return this.idbHandle;
     }
 
     const dbName = this.getDBName();
@@ -42,9 +43,9 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
 
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
-        this.db = request.result;
+        this.idbHandle = request.result;
         console.log("[BrowserAdapter] Opened database:", dbName);
-        resolve(this.db);
+        resolve(this.idbHandle);
       };
 
       request.onupgradeneeded = (event) => {
@@ -120,7 +121,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return Array.from(directories);
   }
 
-  async pickDirectory(title: string): Promise<string | null> {
+  protected async pickDirectory(title: string): Promise<string | null> {
     return new Promise((resolve) => {
       const event = new CustomEvent("mock-pick-directory", {
         detail: {
@@ -195,7 +196,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     }
   }
 
-  async readDirectory(
+  protected async readDirectory(
     path: string,
     options?: {
       recursive?: boolean;
@@ -286,11 +287,13 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     }
   }
 
-  async createDirectories(paths: string[]): Promise<BatchResult<string>> {
+  protected async createDirectories(
+    paths: string[],
+  ): Promise<BatchResult<string>> {
     return { succeeded: paths, failed: [] };
   }
 
-  async deleteDirectories(
+  protected async deleteDirectories(
     paths: string[],
     options?: { recursive?: boolean },
   ): Promise<BatchResult<string>> {
@@ -369,7 +372,10 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async moveDirectory(oldPath: string, newPath: string): Promise<Result<void>> {
+  protected async moveDirectory(
+    oldPath: string,
+    newPath: string,
+  ): Promise<Result<void>> {
     try {
       const db = await this.ensureDB();
       const normalizedOldPath = oldPath.endsWith("/") ? oldPath : oldPath + "/";
@@ -431,7 +437,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     }
   }
 
-  async readFiles(
+  protected async readFiles(
     paths: string[],
   ): Promise<BatchResult<{ path: string; content: string }>> {
     const succeeded: Array<{ path: string; content: string }> = [];
@@ -488,7 +494,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async readBinaryFiles(
+  protected async readBinaryFiles(
     paths: string[],
   ): Promise<BatchResult<{ path: string; data: Uint8Array }>> {
     const succeeded: Array<{ path: string; data: Uint8Array }> = [];
@@ -560,7 +566,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async writeFiles(
+  protected async writeFiles(
     files: { path: string; content: string }[],
   ): Promise<BatchResult<string>> {
     const succeeded: string[] = [];
@@ -628,7 +634,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async writeBinaryFiles(
+  protected async writeBinaryFiles(
     files: { path: string; data: Uint8Array }[],
   ): Promise<BatchResult<string>> {
     const succeeded: string[] = [];
@@ -699,7 +705,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async resolveAssetUrl(
+  protected async resolveAssetUrl(
     relativePath: string,
     workspacePath: string,
   ): Promise<string> {
@@ -774,7 +780,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return mimeTypes[ext] || "application/octet-stream";
   }
 
-  async deleteFiles(paths: string[]): Promise<BatchResult<string>> {
+  protected async deleteFiles(paths: string[]): Promise<BatchResult<string>> {
     const succeeded: string[] = [];
     const failed: FileSystemError[] = [];
 
@@ -824,7 +830,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async exists(
+  protected async exists(
     paths: string[],
   ): Promise<{ path: string; exists: boolean; type?: "file" | "directory" }[]> {
     const results: {
@@ -874,7 +880,9 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return results;
   }
 
-  async getMetadata(paths: string[]): Promise<BatchResult<FileSystemMetadata>> {
+  protected async getMetadata(
+    paths: string[],
+  ): Promise<BatchResult<FileSystemMetadata>> {
     const succeeded: FileSystemMetadata[] = [];
     const failed: FileSystemError[] = [];
 
@@ -951,7 +959,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
-  async searchContent(
+  protected async searchContent(
     directory: string,
     options: SearchOptions,
   ): Promise<SearchMatch[]> {

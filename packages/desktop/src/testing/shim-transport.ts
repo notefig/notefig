@@ -25,7 +25,11 @@
  */
 
 interface TauriInternals {
-  invoke: (cmd: string, payload?: unknown, options?: unknown) => Promise<unknown>;
+  invoke: (
+    cmd: string,
+    payload?: unknown,
+    options?: unknown,
+  ) => Promise<unknown>;
   transformCallback: (cb: (data: unknown) => void, once?: boolean) => number;
   unregisterCallback: (id: number) => void;
   runCallback: (id: number, data: unknown) => void;
@@ -98,8 +102,18 @@ function installShimTransport(baseUrl: string): void {
     });
     const text = await res.text();
     if (!res.ok) {
-      // Non-2xx mirrors a command that returned Result::Err — reject invoke.
-      throw new Error(text || `shim invoke ${cmd} failed (${res.status})`);
+      // Non-2xx mirrors a command that returned Result::Err. Real Tauri rejects
+      // with the *deserialized payload*, not an Error — code that reads
+      // `error.type` or checks `instanceof Error` behaves differently against
+      // the two, so wrapping here would make the double lie about the boundary.
+      try {
+        throw JSON.parse(text);
+      } catch (parseFailure) {
+        if (parseFailure instanceof SyntaxError) {
+          throw new Error(text || `shim invoke ${cmd} failed (${res.status})`);
+        }
+        throw parseFailure;
+      }
     }
     return text ? JSON.parse(text) : null;
   }

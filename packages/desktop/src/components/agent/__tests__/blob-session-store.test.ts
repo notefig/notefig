@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("@/adapters", () => ({ platformAdapter: {} }));
+vi.mock("@/adapters", async () => ({
+  platformAdapter: {
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+  },
+}));
 vi.mock("@/agent/agent-service", () => ({
   startAgentTask: vi.fn(),
 }));
@@ -118,9 +122,7 @@ describe("adoptSharedSession", () => {
   it("adopts a live task without starting a new one", async () => {
     const taskId = insertTask("/ws");
     adoptSharedSession("/ws", taskId);
-    expect((await getOrStartSharedSession("/ws", HARNESS)).taskId).toBe(
-      taskId,
-    );
+    expect((await getOrStartSharedSession("/ws", HARNESS)).taskId).toBe(taskId);
     expect(startMock).not.toHaveBeenCalled();
   });
 
@@ -146,9 +148,7 @@ describe("adoptSharedSession", () => {
     expect(peekSharedSession("/ws")).toBeNull();
 
     const fresh = stubStart();
-    expect((await getOrStartSharedSession("/ws", HARNESS)).taskId).toBe(
-      fresh,
-    );
+    expect((await getOrStartSharedSession("/ws", HARNESS)).taskId).toBe(fresh);
   });
 
   it("adopted session going dead falls back to starting fresh", async () => {
@@ -160,8 +160,6 @@ describe("adoptSharedSession", () => {
     expect(peekSharedSession("/ws")).toBeNull();
 
     const fresh = stubStart();
-    expect((await getOrStartSharedSession("/ws", HARNESS)).taskId).toBe(
-      fresh,
-    );
+    expect((await getOrStartSharedSession("/ws", HARNESS)).taskId).toBe(fresh);
   });
 });

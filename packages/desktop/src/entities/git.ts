@@ -26,6 +26,7 @@ import {
   type RepoStatus,
 } from "@notefig/git";
 import { platformAdapter } from "@/adapters";
+import { createGitStorageHost } from "@/adapters/git-storage-host";
 import { isWorkspaceAccessError } from "@/adapters/platform-adapter.interface";
 import { normalizePath } from "@/utils/fs";
 import { queryClient } from "./query-client";
@@ -41,7 +42,7 @@ export function getOrCreateWorkspaceGitService(
 
   if (!service) {
     service = new IsomorphicGitService(
-      platformAdapter.getGitStorageHost(normalizedWorkspacePath),
+      createGitStorageHost(platformAdapter.fs, normalizedWorkspacePath),
     );
     gitServiceRegistry.set(normalizedWorkspacePath, service);
   }
@@ -269,8 +270,12 @@ function createGitCollection(workspacePath: string) {
       // abort/initialize) is a plain async action + refetch. An optimistic
       // insert with a synthetic key that sync never confirms (a "pending"
       // checkpoint row) permanently strands its ghost in derived live
-      // queries (@tanstack/db 0.6.1 — covered by the save regression
-      // test); the pending entry is UI state in checkpoint-panel instead.
+      // queries (observed on @tanstack/db 0.6.1 — covered by the save
+      // regression test); the pending entry is UI state in checkpoint-panel
+      // instead. @tanstack/db 0.6.7 claims a fix for exactly this shape
+      // (sync confirming a different server-generated key); MET-125 tracks
+      // whether that lets this workaround retire — note the cancelQueries
+      // guard in saveCheckpoint closes a different race and stays either way.
     }),
   );
 }

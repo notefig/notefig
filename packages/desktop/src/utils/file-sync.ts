@@ -76,7 +76,7 @@ export async function writeWorkspaceTextFile(
 ): Promise<void> {
   assertAbsoluteWorkspacePath(path);
   recordSelfWrite(path, calculateContentHash(content));
-  const result = await platformAdapter.writeFiles([{ path, content }]);
+  const result = await platformAdapter.fs.writeFiles([{ path, content }]);
   const failure = result.failed[0];
   if (failure) {
     throw new FsError(failure.type, failure.path, failure.message);
@@ -98,7 +98,7 @@ export async function readWorkspaceTextFile(
   options?: { line?: number; limit?: number },
 ): Promise<string> {
   assertAbsoluteWorkspacePath(path);
-  const result = await platformAdapter.readFiles([path]);
+  const result = await platformAdapter.fs.readFiles([path]);
   const failure = result.failed[0];
   if (failure) {
     throw new FsError(failure.type, failure.path, failure.message);
@@ -145,7 +145,7 @@ async function applyMetadataCreated(
   // still surface ignored paths — nothing ignored may enter the collection.
   if (isIgnoredPath(change.path, workspaceId)) return;
 
-  const metadataResult = await platformAdapter.getMetadata([change.path]);
+  const metadataResult = await platformAdapter.fs.getMetadata([change.path]);
   const metadata = metadataResult.succeeded[0];
   if (!metadata || collections.metadata.get(change.path)) return;
 
@@ -195,7 +195,7 @@ async function applyMetadataRenamed(
     return;
   }
 
-  const metadataResult = await platformAdapter.getMetadata([change.path]);
+  const metadataResult = await platformAdapter.fs.getMetadata([change.path]);
   const metadata = metadataResult.succeeded[0];
   if (!metadata) return;
 
@@ -325,23 +325,23 @@ export function useFileWatchers(
 
     const setupWatchers = async () => {
       try {
-        eventCleanup = platformAdapter.addEventListener((event) => {
+        eventCleanup = platformAdapter.fs.onFsEvent((event) => {
           if (!isActive) return;
           if (event.type === "fs-metadata-changed") {
             handleMetadataFileSystemChange(event.payload, workspacePath);
-          } else if (event.type === "fs-content-changed") {
+          } else {
             handleContentFileSystemChange(event.payload, workspacePath);
           }
         });
 
-        await platformAdapter.startWatchingMetadata(
+        await platformAdapter.fs.startWatchingMetadata(
           [workspacePath],
           metadataWatchId,
           { ignore: IGNORE_RULES },
         );
 
         if (openFilePaths.length > 0) {
-          await platformAdapter.startWatchingContent(
+          await platformAdapter.fs.startWatchingContent(
             openFilePaths,
             contentWatchId,
           );
@@ -356,9 +356,9 @@ export function useFileWatchers(
     return () => {
       isActive = false;
       eventCleanup?.();
-      platformAdapter.stopWatching(metadataWatchId);
+      platformAdapter.fs.stopWatching(metadataWatchId);
       if (openFilePaths.length > 0) {
-        platformAdapter.stopWatching(contentWatchId);
+        platformAdapter.fs.stopWatching(contentWatchId);
       }
     };
     // Join: re-arm only when the actual set of open paths changes, not on

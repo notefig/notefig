@@ -20,37 +20,38 @@ const { mocks } = vi.hoisted(() => {
   return { mocks };
 });
 
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
-    setKv: vi.fn(),
-    getKv: vi.fn(),
-    getAllKv: vi.fn(async () => ({})),
-    deleteKv: vi.fn(),
-    writeFiles: vi.fn(async (files: { path: string; content: string }[]) => {
-      for (const file of files) mocks.fsFiles.set(file.path, file.content);
-      return { succeeded: files.map((f) => f.path), failed: [] as unknown[] };
-    }),
-    readFiles: vi.fn(async (paths: string[]) => ({
-      succeeded: paths.map((p) => ({
-        path: p,
-        content: mocks.fsFiles.get(p) ?? "",
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+    fs: {
+      writeFiles: vi.fn(async (files: { path: string; content: string }[]) => {
+        for (const file of files) mocks.fsFiles.set(file.path, file.content);
+        return { succeeded: files.map((f) => f.path), failed: [] as unknown[] };
+      }),
+      readFiles: vi.fn(async (paths: string[]) => ({
+        succeeded: paths.map((p) => ({
+          path: p,
+          content: mocks.fsFiles.get(p) ?? "",
+        })),
+        failed: [] as unknown[],
       })),
-      failed: [] as unknown[],
-    })),
-    deleteFiles: vi.fn(async (paths: string[]) => {
-      for (const path of paths) mocks.fsFiles.delete(path);
-      return { succeeded: paths, failed: [] as unknown[] };
-    }),
-    createMcpEndpoint: vi.fn((spec: { taskId: string }) =>
-      mocks.createMcpEndpoint
-        ? mocks.createMcpEndpoint(spec)
-        : {
-            mcpServer: { name: "notefig", command: "m", args: [], env: [] },
-            start: vi.fn(async () => {}),
-            onRequest: vi.fn(() => () => {}),
-            close: vi.fn(async () => {}),
-          },
-    ),
+      deleteFiles: vi.fn(async (paths: string[]) => {
+        for (const path of paths) mocks.fsFiles.delete(path);
+        return { succeeded: paths, failed: [] as unknown[] };
+      }),
+    },
+    proc: {
+      createMcpEndpoint: vi.fn((spec: { taskId: string }) =>
+        mocks.createMcpEndpoint
+          ? mocks.createMcpEndpoint(spec)
+          : {
+              mcpServer: { name: "notefig", command: "m", args: [], env: [] },
+              start: vi.fn(async () => {}),
+              onRequest: vi.fn(() => () => {}),
+              close: vi.fn(async () => {}),
+            },
+      ),
+    },
   },
 }));
 vi.mock("@/utils/history-service", () => ({
@@ -107,7 +108,9 @@ async function runPrompt(task: AgentTask, text: string): Promise<void> {
 }
 
 /** Connect a fresh TunnelConnection to a fresh FakeWorker. */
-async function connectedPair(workerOptions: ConstructorParameters<typeof FakeWorker>[0] = {}) {
+async function connectedPair(
+  workerOptions: ConstructorParameters<typeof FakeWorker>[0] = {},
+) {
   const worker = new FakeWorker({ workspacePath: WORKSPACE, ...workerOptions });
   const connection = new TunnelConnection(worker.socketFactory);
   await connection.connect({ secret: worker.secret, url: "wss://fake" });
@@ -132,9 +135,12 @@ function tunnelFactory(connection: TunnelConnection, task: AgentTask) {
 beforeEach(() => {
   mocks.fsFiles.clear();
   mocks.createMcpEndpoint = null;
-  for (const e of agentEntriesCollection.toArray) agentEntriesCollection.delete(e.id);
-  for (const t of agentTurnsCollection.toArray) agentTurnsCollection.delete(t.turnId);
-  for (const t of agentTasksCollection.toArray) agentTasksCollection.delete(t.taskId);
+  for (const e of agentEntriesCollection.toArray)
+    agentEntriesCollection.delete(e.id);
+  for (const t of agentTurnsCollection.toArray)
+    agentTurnsCollection.delete(t.turnId);
+  for (const t of agentTasksCollection.toArray)
+    agentTasksCollection.delete(t.taskId);
   for (const r of agentPermissionRequestsCollection.toArray)
     agentPermissionRequestsCollection.delete(r.id);
 });
@@ -182,7 +188,9 @@ describe("tunnel transport symmetry", () => {
       },
     });
 
-    const task = new TaskManager("/browser-synthetic").createTask(claudeHarness);
+    const task = new TaskManager("/browser-synthetic").createTask(
+      claudeHarness,
+    );
     await task.start(tunnelFactory(connection, task));
     await runPrompt(task, "hi");
 
@@ -196,7 +204,8 @@ describe("tunnel transport symmetry", () => {
     await task.start(tunnelFactory(connection, task));
 
     const startTask = worker.receivedCtl.find(
-      (m): m is Extract<typeof m, { op: "start-task" }> => m.op === "start-task",
+      (m): m is Extract<typeof m, { op: "start-task" }> =>
+        m.op === "start-task",
     )!;
     const configPath = startTask.extraEnv.OPENCODE_CONFIG;
     expect(configPath).toBe(
@@ -236,7 +245,10 @@ describe("tunnel transport symmetry", () => {
 
   it("surfaces worker spawn errors as an errored task", async () => {
     const { connection } = await connectedPair({
-      spawnError: { harnessId: "claude-code", message: "command not found: npx" },
+      spawnError: {
+        harnessId: "claude-code",
+        message: "command not found: npx",
+      },
     });
 
     const task = new TaskManager(WORKSPACE).createTask(claudeHarness);

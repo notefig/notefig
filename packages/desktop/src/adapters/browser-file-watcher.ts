@@ -1,5 +1,6 @@
 import type {
-  PlatformEventListener,
+  FsChangeEvent,
+  FsChangeListener,
   MetadataChangeEvent,
   ContentChangeEvent,
   MetadataChange,
@@ -41,7 +42,7 @@ const CONTENT_POLL_INTERVAL = 3000;
 const APP_WRITE_TTL = 10000;
 
 export class BrowserFileWatcher {
-  private eventListeners: Set<PlatformEventListener> = new Set();
+  private eventListeners: Set<FsChangeListener> = new Set();
   private metadataWatchers: Map<string, MetadataWatchState> = new Map();
   private contentWatchers: Map<string, ContentWatchState> = new Map();
   private appWrites: AppWrite[] = [];
@@ -100,16 +101,14 @@ export class BrowserFileWatcher {
     return false;
   }
 
-  addEventListener(callback: PlatformEventListener): () => void {
-    this.eventListeners.add(callback);
-    return () => this.removeEventListener(callback);
+  onFsEvent(listener: FsChangeListener): () => void {
+    this.eventListeners.add(listener);
+    return () => {
+      this.eventListeners.delete(listener);
+    };
   }
 
-  removeEventListener(callback: PlatformEventListener): void {
-    this.eventListeners.delete(callback);
-  }
-
-  private emit(event: Parameters<PlatformEventListener>[0]): void {
+  private emit(event: FsChangeEvent): void {
     this.eventListeners.forEach((callback) => callback(event));
   }
 
@@ -362,5 +361,4 @@ export class BrowserFileWatcher {
       console.log(`[BrowserFileWatcher] Stopped content watching: ${watchId}`);
     }
   }
-
 }

@@ -27,18 +27,21 @@ vi.mock("@notefig/git", () => {
   };
 });
 
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
-    getGitStorageHost: vi.fn(() => ({})),
+    fs: {},
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
   },
+}));
+vi.mock("@/adapters/git-storage-host", () => ({
+  createGitStorageHost: vi.fn(() => ({})),
 }));
 
 // The mocked GitError class, for constructing typed failures in tests.
-const { GitError: MockGitError } = (await import(
-  "@notefig/git"
-)) as unknown as {
-  GitError: new (code: string, message: string) => Error;
-};
+const { GitError: MockGitError } =
+  (await import("@notefig/git")) as unknown as {
+    GitError: new (code: string, message: string) => Error;
+  };
 
 import {
   fetchGitRows,

@@ -81,7 +81,7 @@ export function useWorkspaceCommands({
   );
 
   const handleToggleFullscreen = useCallback(() => {
-    platformAdapter.toggleFullscreen().catch((error: unknown) => {
+    platformAdapter.ui.toggleFullscreen().catch((error: unknown) => {
       console.error("Failed to toggle fullscreen:", error);
     });
   }, []);

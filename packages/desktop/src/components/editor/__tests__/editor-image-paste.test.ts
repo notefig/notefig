@@ -8,15 +8,18 @@ import {
 } from "@/components/editor/editor-image-paste";
 import { platformAdapter } from "@/adapters";
 
-vi.mock("@/adapters", () => ({
+vi.mock("@/adapters", async () => ({
   platformAdapter: {
-    exists: vi.fn(),
-    writeBinaryFiles: vi.fn(),
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+    fs: {
+      exists: vi.fn(),
+      writeBinaryFiles: vi.fn(),
+    },
   },
 }));
 
-const existsMock = vi.mocked(platformAdapter.exists);
-const writeMock = vi.mocked(platformAdapter.writeBinaryFiles);
+const existsMock = vi.mocked(platformAdapter.fs.exists);
+const writeMock = vi.mocked(platformAdapter.fs.writeBinaryFiles);
 
 const BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 
