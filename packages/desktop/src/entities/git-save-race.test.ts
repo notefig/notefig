@@ -61,9 +61,14 @@ const OLD_LOG = [
  * query (what useGitCheckpoints renders) must never retain a pending entry
  * after a save completes — even when a watcher-driven invalidation races
  * the commit. An optimistic collection insert with a synthetic key that
- * sync never confirms strands its ghost in derived live queries
- * (@tanstack/db 0.6.1), which is why saveCheckpoint is a plain action and
+ * sync never confirms strands its ghost in derived live queries (observed
+ * on @tanstack/db 0.6.1), which is why saveCheckpoint is a plain action and
  * the pending entry is render-level state in checkpoint-panel.
+ *
+ * The assertions below describe the correct end state, not the bug, so they
+ * hold under either design — which makes this the gate for MET-125, where
+ * @tanstack/db 0.6.7's server-generated-key fix is evaluated against
+ * reintroducing optimistic handlers.
  */
 describe("saveCheckpoint vs derived live queries", () => {
   beforeEach(() => {
