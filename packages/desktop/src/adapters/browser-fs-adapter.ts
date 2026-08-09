@@ -59,7 +59,8 @@ function supportsFsAccess(): boolean {
 
 export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
   private handleCache = new Map<string, DirectoryHandle>();
-  private db: IDBDatabase | null = null;
+  // `idbHandle`, not `db` — `db` is now the SQLite surface (MET-123).
+  private idbHandle: IDBDatabase | null = null;
   private fileWatcher: BrowserFileWatcher;
 
   constructor() {
@@ -72,7 +73,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
   }
 
   private async ensureDB(): Promise<IDBDatabase> {
-    if (this.db) return this.db;
+    if (this.idbHandle) return this.idbHandle;
 
     return new Promise((resolve, reject) => {
       // KEEP: renaming the handles DB would drop users' persisted
@@ -81,8 +82,8 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
 
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
-        this.db = request.result;
-        resolve(this.db);
+        this.idbHandle = request.result;
+        resolve(this.idbHandle);
       };
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;

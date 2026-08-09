@@ -32,6 +32,10 @@ futures = "0.3"
 notify = "6.1"
 notify-debouncer-full = "0.3"
 tauri-plugin-store = "2"
+# `bundled` pins the SQLite build rather than inheriting whatever the host has:
+# the persistence schema uses json_extract (JSON1), and a system SQLite older
+# than 3.38 would fail at runtime on some Linux targets only.
+rusqlite = { version = "0.40", features = ["bundled"] }
 lazy_static = "1.4"
 md5 = "0.8.0"
 # OS randomness for the MCP bridge's per-task connection token

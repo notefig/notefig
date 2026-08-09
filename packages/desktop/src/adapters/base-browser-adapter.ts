@@ -1,5 +1,6 @@
 import type {
   BatchResult,
+  DbSurface,
   FileSystemError,
   FileSystemMetadata,
   FileSystemSurface,
@@ -16,6 +17,7 @@ import type {
   TextPromptOptions,
   IgnoreRulesOption,
 } from "./platform-adapter.interface";
+import { createBrowserDb } from "./browser-db";
 import { requestTextPrompt } from "@/utils/text-prompt";
 import type { HarnessDefinition } from "@notefig/shared/agent";
 import type {
@@ -203,6 +205,9 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     deleteKv: this.deleteKv.bind(this),
     getAllKv: this.getAllKv.bind(this),
   };
+
+  // Shared by both web variants — the OPFS database is per-origin.
+  readonly db: DbSurface = createBrowserDb();
 
   readonly ui: PlatformUiSurface = {
     pickDirectory: this.pickDirectory.bind(this),

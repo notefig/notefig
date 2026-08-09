@@ -8,6 +8,7 @@
 //!   - the real-backend e2e shim (`test-shim` crate, a workspace sibling).
 
 pub mod agent_proc;
+pub mod db_ops;
 pub mod file_watcher;
 pub mod fs_ops;
 pub mod line_stream;
@@ -55,5 +56,10 @@ pub fn register_handlers<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
         mcp_bridge::write_mcp_line,
         // Pull-based line streaming (MET-98)
         line_stream::pull_stream_lines,
+        // SQLite storage behind the adapter's `db` surface (MET-123)
+        db_ops::db_execute,
+        db_ops::db_query,
+        db_ops::db_close,
+        db_ops::db_reset,
     ])
 }

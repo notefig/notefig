@@ -1,4 +1,5 @@
 import type { Theme } from "@/components/theme-provider";
+import type { PersistedCollectionPersistence } from "@tanstack/db-sqlite-persistence-core";
 import type { HarnessDefinition } from "@notefig/shared/agent";
 import type {
   AgentTransport,
@@ -487,6 +488,22 @@ export interface KvSurface {
   getAllKv<T>(namespace: string): Promise<Record<string, T>>;
 }
 
+/**
+ * SQLite-backed storage for persisted TanStack DB collections.
+ *
+ * Driver-level only: the adapter never names a collection. Ids, schemas and
+ * `schemaVersion` belong above it, in the entities layer.
+ */
+export interface DbSurface {
+  /**
+   * The shared persistence every persisted collection is built on. Synchronous
+   * because collections are defined at module scope, and it touches no storage
+   * — the database file, and on web the OPFS entry and its worker, are created
+   * by the first collection query.
+   */
+  get(): PersistedCollectionPersistence;
+}
+
 /** Window/OS-level shell: dialogs, external links, chrome, platform events. */
 export interface PlatformUiSurface {
   /**
@@ -537,6 +554,7 @@ export interface IPlatformAdapter {
   fs: FileSystemSurface;
   proc: ProcessSurface;
   kv: KvSurface;
+  db: DbSurface;
   ui: PlatformUiSurface;
   updates: PlatformUpdater;
 }
