@@ -170,22 +170,19 @@ describe("getSelectedText", () => {
 
 describe("navigateToLocation", () => {
   it("returns false for unknown paths", () => {
-    expect(navigateToLocation("/ws/never-opened.md", { line: 1 })).toBe(false);
+    expect(
+      navigateToLocation("/ws/never-opened.md", {
+        matchText: "x",
+        lineText: "x",
+        occurrence: 0,
+      }),
+    ).toBe(false);
   });
 
-  it("moves the selection to the requested column", () => {
-    // Line→position mapping across blocks is covered exhaustively by
-    // go-to-location.test.ts; this only checks the orchestration wiring.
-    getOrCreateEditor("/ws/a.md", MD_CONFIG);
-
-    expect(navigateToLocation("/ws/a.md", { line: 1, column: 7 })).toBe(true);
-
-    const editor = getMarkdownEditor("/ws/a.md");
-    const { from } = editor!.state.selection;
-    expect(editor!.state.doc.textBetween(from, from + 5)).toBe("world");
-  });
-
-  it("selects the expectedText when it can be found", () => {
+  it("selects the matched text", () => {
+    // Match→position mapping across markdown constructs is covered
+    // exhaustively by go-to-location.test.ts; this only checks the
+    // orchestration wiring.
     getOrCreateEditor("/ws/a.md", {
       type: "markdown",
       content: docWithText("Alpha beta gamma"),
@@ -193,9 +190,9 @@ describe("navigateToLocation", () => {
 
     expect(
       navigateToLocation("/ws/a.md", {
-        line: 1,
-        column: 7,
-        expectedText: "beta",
+        matchText: "beta",
+        lineText: "Alpha beta gamma",
+        occurrence: 0,
       }),
     ).toBe(true);
 

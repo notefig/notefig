@@ -25,7 +25,7 @@ import {
   isTextEntryActive,
   type EditorCaretPlacement,
 } from "@/utils/focus-arbiter";
-import { resolveEditorLocation, type EditorLocation } from "./editor-position";
+import { resolveSearchTarget, type SearchTarget } from "./editor-position";
 import { docHasRealContent, findPromptNodeId } from "./ai-prompt-utils";
 import { requestPromptBlobFocus } from "@/components/agent/prompt-blob-store";
 import { placeCaretBeforeNode } from "./refocus-editor";
@@ -38,7 +38,7 @@ import {
   createProtocolDropHandler,
 } from "@/utils/drag-protocol";
 
-export type { EditorLocation };
+export type { SearchTarget };
 
 import type { EditorType } from "./polymorphic-editor";
 
@@ -63,12 +63,12 @@ export interface EditorInstance {
    */
   isFocusable(): boolean;
   /**
-   * Navigate to a specific location in the editor.
+   * Navigate to a search match in the editor.
    * Sets cursor/selection and scrolls the location into view.
-   * @param location - Target location with line/column coordinates
-   * @returns true if navigation succeeded, false if location is invalid or not applicable
+   * @param target - The match's text, line content and occurrence index
+   * @returns true if navigation succeeded, false if not applicable
    */
-  goToLocation(location: EditorLocation): boolean;
+  goToLocation(target: SearchTarget): boolean;
 }
 
 /**
@@ -340,19 +340,9 @@ function createMarkdownInstance(
     isFocusable(): boolean {
       return true;
     },
-    goToLocation(location: EditorLocation): boolean {
+    goToLocation(target: SearchTarget): boolean {
       try {
-        // Search coordinates live in the raw markdown's coordinate space;
-        // the serializer output is that same space (round-trip identity).
-        const storage = this.editor.storage as unknown as {
-          markdown?: { getMarkdown?: () => string };
-        };
-        const rawMarkdown = storage.markdown?.getMarkdown?.();
-        const { from, to } = resolveEditorLocation(
-          this.editor.state.doc,
-          location,
-          rawMarkdown,
-        );
+        const { from, to } = resolveSearchTarget(this.editor.state.doc, target);
 
         this.editor.commands.setTextSelection({ from, to });
         this.editor.commands.scrollIntoView();
@@ -403,7 +393,7 @@ function createContainerInstance(
     isFocusable(): boolean {
       return true;
     },
-    goToLocation(_location: EditorLocation): boolean {
+    goToLocation(_target: SearchTarget): boolean {
       return false;
     },
   };
@@ -605,21 +595,21 @@ export function getSelectedText(filePath: string): string | undefined {
 }
 
 /**
- * Navigate to a specific location in an editor.
- * This is a convenience function that combines getting the editor and calling goToLocation.
+ * Navigate to a search match in an editor.
+ * Convenience wrapper: looks up the editor and calls goToLocation.
  *
  * @param filePath - The file path of the editor
- * @param location - Target location with line/column coordinates
+ * @param target - The match's text, line content and occurrence index
  * @returns true if navigation succeeded, false if editor doesn't exist or navigation failed
  */
 export function navigateToLocation(
   filePath: string,
-  location: EditorLocation,
+  target: SearchTarget,
 ): boolean {
   const instance = editorInstances.get(filePath);
   if (!instance) {
     console.warn(`No editor instance found for path: ${filePath}`);
     return false;
   }
-  return instance.goToLocation(location);
+  return instance.goToLocation(target);
 }

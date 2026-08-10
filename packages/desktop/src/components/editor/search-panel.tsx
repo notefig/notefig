@@ -62,9 +62,7 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
         const tryNavigate = () => {
           if (
             navigateToLocation(filePath, {
-              line: match.location.range.start.line,
-              column: match.location.range.start.column,
-              expectedText: match.content.matchText,
+              matchText: match.content.matchText,
               lineText: match.content.lineContent,
               occurrence,
             })
