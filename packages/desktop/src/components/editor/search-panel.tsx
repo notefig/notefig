@@ -54,11 +54,12 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
       ) => {
         const filePath = match.location.filePath;
         openFile({ tabId: filePath, intent: options?.intent ?? "replace" });
-        // Retry navigation until editor is mounted and ready (up to ~2s)
-        let attempt = 0;
-        const maxAttempts = 20;
+        // Retry navigation until the editor is mounted and ready. Deadline
+        // is time-based: a cold open of a large document (worker parse +
+        // highlight) can take well over the ~330ms that a frame-counted
+        // loop would allow.
+        const deadline = Date.now() + 5_000;
         const tryNavigate = () => {
-          attempt++;
           if (
             navigateToLocation(filePath, {
               line: match.location.range.start.line,
@@ -69,7 +70,7 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
             })
           )
             return;
-          if (attempt < maxAttempts) {
+          if (Date.now() < deadline) {
             requestAnimationFrame(tryNavigate);
           }
         };

@@ -35,6 +35,10 @@ export function useEditorFocusLifecycle(
       saved.to <= editor.state.doc.content.size
     ) {
       editor.commands.setTextSelection(saved);
+      // A fresh mount starts scrolled to the top; without this, restoring
+      // a selection deeper in the doc (tab switch back, or a search
+      // navigation that raced the remount) leaves it off-screen.
+      editor.commands.scrollIntoView();
     }
 
     requestEditorFocus(filePath, {

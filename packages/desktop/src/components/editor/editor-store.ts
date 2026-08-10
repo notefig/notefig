@@ -78,7 +78,6 @@ export interface MarkdownInstance extends EditorInstance {
   readonly type: "markdown";
   readonly editor: Editor;
   filePath: string;
-  savedSelection?: { from: number; to: number };
 }
 
 /**
@@ -92,17 +91,32 @@ export interface ImageInstance extends EditorInstance {
 /** Module-level store: file path → editor instance */
 const editorInstances = new Map<string, EditorInstance>();
 
+/**
+ * Path-keyed saved selections, deliberately OUTSIDE the instances: a tab
+ * replace dedupes the already-open tab by disposing and recreating its
+ * editor, so anything stored on the instance (including a selection a
+ * search navigation just made) dies with it. The mount lifecycle restores
+ * from here into whichever instance currently backs the path.
+ */
+const savedSelections = new Map<string, { from: number; to: number }>();
+
 if (import.meta.env.DEV) {
   // Diagnostic hook for e2e failure dumps (dev builds only).
   (window as unknown as Record<string, unknown>).__metristsDebugEditors = () =>
     Array.from(editorInstances.entries()).map(([path, instance]) => {
       const editor = isMarkdownInstance(instance) ? instance.editor : undefined;
+      const sel = editor?.state.selection;
       return {
         path,
         type: instance.type,
         destroyed: editor?.isDestroyed,
         docLength: editor?.state.doc.textContent.length,
         docHead: editor?.state.doc.textContent.slice(0, 40),
+        selFrom: sel?.from,
+        selTo: sel?.to,
+        selText: sel ? editor?.state.doc.textBetween(sel.from, sel.to) : "",
+        focused: editor?.isFocused,
+        savedSelection: savedSelections.get(path),
       };
     });
 }
@@ -350,6 +364,12 @@ function createMarkdownInstance(
         this.editor.commands.scrollIntoView();
         this.editor.commands.focus();
 
+        // Navigation may run against a background tab's instance moments
+        // before a tab replace disposes and recreates it; the recreated
+        // editor restores the saved selection on mount, so navigation must
+        // define it — otherwise the pre-switch caret wins.
+        saveSelection(this.filePath, from, to);
+
         return true;
       } catch (error) {
         console.error("Navigation failed:", error);
@@ -518,6 +538,10 @@ export function disposeAllEditors(): void {
     closeDocumentSync(filePath);
   });
   editorInstances.clear();
+  // Paths belong to the closing workspace; positions are meaningless in
+  // the next one. (Per-file disposeEditor deliberately keeps its entry —
+  // tab dedupe recreates the editor and must restore through it.)
+  savedSelections.clear();
 }
 
 /**
@@ -559,20 +583,13 @@ export function saveSelection(
   from: number,
   to: number,
 ): void {
-  const instance = editorInstances.get(filePath);
-  if (isMarkdownInstance(instance)) {
-    instance.savedSelection = { from, to };
-  }
+  savedSelections.set(filePath, { from, to });
 }
 
 export function getSavedSelection(
   filePath: string,
 ): { from: number; to: number } | undefined {
-  const instance = editorInstances.get(filePath);
-  if (isMarkdownInstance(instance)) {
-    return instance.savedSelection;
-  }
-  return undefined;
+  return savedSelections.get(filePath);
 }
 
 export function getAllEditorPaths(): string[] {
