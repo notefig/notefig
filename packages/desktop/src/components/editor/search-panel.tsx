@@ -23,7 +23,7 @@ import type { SearchMatch } from "@/adapters/platform-adapter.interface";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import {
   suppressEditorFocus,
-  navigateToLocation,
+  requestNavigation,
 } from "@/components/editor/editor-store";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
 
@@ -48,31 +48,14 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
 
     const handleMatchClick = useCallback(
       (
-        filePath: string,
-        line: number,
-        column: number,
-        matchText?: string,
+        match: SearchMatch,
         options?: Omit<OpenFileInLayoutOptions, "tabId">,
       ) => {
-        openFile({ tabId: filePath, intent: options?.intent ?? "replace" });
-        // Retry navigation until editor is mounted and ready (up to ~2s)
-        let attempt = 0;
-        const maxAttempts = 20;
-        const tryNavigate = () => {
-          attempt++;
-          if (
-            navigateToLocation(filePath, {
-              line,
-              column,
-              expectedText: matchText,
-            })
-          )
-            return;
-          if (attempt < maxAttempts) {
-            requestAnimationFrame(tryNavigate);
-          }
-        };
-        requestAnimationFrame(tryNavigate);
+        openFile({
+          tabId: match.filePath,
+          intent: options?.intent ?? "replace",
+        });
+        requestNavigation(match.filePath, match);
       },
       [openFile],
     );
@@ -135,7 +118,7 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
     const groupedResults = useMemo(() => {
       const groups = new Map<string, SearchMatch[]>();
       for (const match of results) {
-        const filePath = match.location.filePath;
+        const filePath = match.filePath;
         const existing = groups.get(filePath);
         if (existing) {
           existing.push(match);
@@ -279,22 +262,16 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
                 </button>
 
                 {!isCollapsed &&
-                  matches.map((match, i) => (
+                  matches.map((match) => (
                     <SearchResultItem
-                      key={`${filePath}:${match.location.range.start.line}:${match.location.range.start.column}:${i}`}
+                      key={`${filePath}:${match.matchText}:${match.occurrence}`}
                       match={match}
                       query={query}
                       caseSensitive={caseSensitive}
                       onClick={() =>
-                        handleMatchClick(
-                          filePath,
-                          match.location.range.start.line,
-                          match.location.range.start.column,
-                          match.content.matchText,
-                          {
-                            intent: isModHeld ? "new-tab" : "replace",
-                          },
-                        )
+                        handleMatchClick(match, {
+                          intent: isModHeld ? "new-tab" : "replace",
+                        })
                       }
                     />
                   ))}
@@ -324,7 +301,7 @@ function SearchResultItem({
   caseSensitive: boolean;
   onClick: () => void;
 }) {
-  const lineContent = match.content.lineContent;
+  const lineContent = match.lineText;
 
   const segments = useMemo(() => {
     if (!query.trim()) return [{ text: lineContent, highlight: false }];

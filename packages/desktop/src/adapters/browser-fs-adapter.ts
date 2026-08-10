@@ -787,9 +787,9 @@ export async function searchStream(
   maxResults?: number,
 ): Promise<SearchMatch[]> {
   const results: SearchMatch[] = [];
+  const occurrenceCounts = new Map<string, number>();
   const reader = stream.getReader();
   const decoder = new TextDecoder();
-  let lineNumber = 0;
   let buffer = "";
 
   try {
@@ -798,8 +798,7 @@ export async function searchStream(
 
       if (done) {
         if (buffer.length > 0) {
-          lineNumber++;
-          searchLine(buffer, filePath, pattern, lineNumber, results);
+          searchLine(buffer, filePath, pattern, occurrenceCounts, results);
         }
         break;
       }
@@ -810,8 +809,7 @@ export async function searchStream(
       buffer = lines.pop()!;
 
       for (const line of lines) {
-        lineNumber++;
-        searchLine(line, filePath, pattern, lineNumber, results);
+        searchLine(line, filePath, pattern, occurrenceCounts, results);
 
         if (maxResults !== undefined && results.length >= maxResults) {
           await reader.cancel();
@@ -830,31 +828,18 @@ function searchLine(
   line: string,
   filePath: string,
   pattern: RegExp,
-  lineNumber: number,
+  occurrenceCounts: Map<string, number>,
   results: SearchMatch[],
 ): void {
   pattern.lastIndex = 0;
 
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(line)) !== null) {
-    results.push({
-      location: {
-        filePath,
-        range: {
-          start: { line: lineNumber, column: match.index + 1 },
-          end: {
-            line: lineNumber,
-            column: match.index + match[0].length + 1,
-          },
-        },
-      },
-      content: {
-        matchText: match[0],
-        lineContent: line,
-        beforeContext: [],
-        afterContext: [],
-      },
-    });
+    const matchText = match[0];
+    const occurrence = occurrenceCounts.get(matchText) ?? 0;
+    occurrenceCounts.set(matchText, occurrence + 1);
+
+    results.push({ filePath, matchText, lineText: line, occurrence });
 
     if (match.index === pattern.lastIndex) {
       pattern.lastIndex++;

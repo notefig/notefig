@@ -150,14 +150,14 @@ describe("BaseBrowserAdapter.searchContent", () => {
     });
 
     expect(results).toHaveLength(2);
-    expect(results[0].location.filePath).toBe("/workspace/file1.md");
-    expect(results[0].location.range.start).toEqual({ line: 1, column: 1 });
-    expect(results[0].location.range.end).toEqual({ line: 1, column: 6 });
-    expect(results[0].content.matchText).toBe("hello");
-    expect(results[0].content.lineContent).toBe("hello world");
+    expect(results[0].filePath).toBe("/workspace/file1.md");
+    expect(results[0].matchText).toBe("hello");
+    expect(results[0].lineText).toBe("hello world");
+    expect(results[0].occurrence).toBe(0);
 
-    expect(results[1].location.filePath).toBe("/workspace/file3.md");
-    expect(results[1].location.range.start).toEqual({ line: 1, column: 1 });
+    expect(results[1].filePath).toBe("/workspace/file3.md");
+    // Occurrences count per file, not across the workspace.
+    expect(results[1].occurrence).toBe(0);
   });
 
   it("should find multiple matches on the same line", async () => {
@@ -170,9 +170,7 @@ describe("BaseBrowserAdapter.searchContent", () => {
     });
 
     expect(results).toHaveLength(3);
-    expect(results[0].location.range.start.column).toBe(1);
-    expect(results[1].location.range.start.column).toBe(9);
-    expect(results[2].location.range.start.column).toBe(17);
+    expect(results.map((r) => r.occurrence)).toEqual([0, 1, 2]);
   });
 
   it("should be case-insensitive by default", async () => {
@@ -185,6 +183,14 @@ describe("BaseBrowserAdapter.searchContent", () => {
     });
 
     expect(results).toHaveLength(3);
+    // Differently-cased matches are distinct texts — each gets its own
+    // occurrence counter (occurrence pairs with exact-text matching in
+    // the editor, see resolveSearchTarget).
+    expect(results.map((r) => [r.matchText, r.occurrence])).toEqual([
+      ["Hello", 0],
+      ["HELLO", 0],
+      ["hello", 0],
+    ]);
   });
 
   it("should support case-sensitive search", async () => {
@@ -198,7 +204,8 @@ describe("BaseBrowserAdapter.searchContent", () => {
     });
 
     expect(results).toHaveLength(1);
-    expect(results[0].location.range.start.column).toBe(13);
+    expect(results[0].matchText).toBe("hello");
+    expect(results[0].occurrence).toBe(0);
   });
 
   it("should support regex search", async () => {
@@ -212,8 +219,8 @@ describe("BaseBrowserAdapter.searchContent", () => {
     });
 
     expect(results).toHaveLength(2);
-    expect(results[0].content.matchText).toBe("foo123");
-    expect(results[1].content.matchText).toBe("bar456");
+    expect(results[0].matchText).toBe("foo123");
+    expect(results[1].matchText).toBe("bar456");
   });
 
   it("should return empty for invalid regex", async () => {
@@ -239,7 +246,7 @@ describe("BaseBrowserAdapter.searchContent", () => {
     });
 
     expect(results).toHaveLength(1);
-    expect(results[0].content.matchText).toBe("$100.00");
+    expect(results[0].matchText).toBe("$100.00");
   });
 
   it("should respect maxResults", async () => {
@@ -268,7 +275,7 @@ describe("BaseBrowserAdapter.searchContent", () => {
     });
 
     expect(results).toHaveLength(1);
-    expect(results[0].location.filePath).toBe("/workspace/readme.md");
+    expect(results[0].filePath).toBe("/workspace/readme.md");
   });
 
   it("should filter by fileIncludes", async () => {
@@ -284,7 +291,7 @@ describe("BaseBrowserAdapter.searchContent", () => {
     });
 
     expect(results).toHaveLength(1);
-    expect(results[0].location.filePath).toBe("/workspace/src/app.ts");
+    expect(results[0].filePath).toBe("/workspace/src/app.ts");
   });
 
   it("should skip binary files", async () => {
@@ -299,7 +306,7 @@ describe("BaseBrowserAdapter.searchContent", () => {
     });
 
     expect(results).toHaveLength(1);
-    expect(results[0].location.filePath).toBe("/workspace/readme.md");
+    expect(results[0].filePath).toBe("/workspace/readme.md");
   });
 
   it("should handle multi-line files correctly", async () => {
@@ -312,9 +319,12 @@ describe("BaseBrowserAdapter.searchContent", () => {
     });
 
     expect(results).toHaveLength(3);
-    expect(results[0].location.range.start.line).toBe(1);
-    expect(results[1].location.range.start.line).toBe(2);
-    expect(results[2].location.range.start.line).toBe(3);
+    expect(results.map((r) => r.lineText)).toEqual([
+      "line one",
+      "line two",
+      "line three",
+    ]);
+    expect(results.map((r) => r.occurrence)).toEqual([0, 1, 2]);
   });
 
   it("should return empty array for no matches", async () => {

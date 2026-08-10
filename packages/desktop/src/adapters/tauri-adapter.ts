@@ -565,7 +565,14 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     directory: string,
     options: SearchOptions,
   ): Promise<SearchMatch[]> {
-    return invoke<SearchMatch[]>("search_content", {
+    // Wire format from search.rs. The engine reports raw-file coordinates
+    // (that's what a text search is), but they don't cross the adapter
+    // surface — the editor can't use them (see SearchTarget).
+    type WireMatch = {
+      location: { filePath: string };
+      content: { matchText: string; lineContent: string };
+    };
+    const wire = await invoke<WireMatch[]>("search_content", {
       directory,
       query: options.query,
       useRegex: options.useRegex ?? false,
@@ -574,6 +581,21 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       fileIncludes: options.fileIncludes ?? null,
       maxResults: options.maxResults ?? 1000,
       ...ignoreArgs(options.ignore),
+    });
+
+    // Per-file occurrence counter, keyed by the exact matched text;
+    // matches arrive in file order.
+    const occurrenceCounts = new Map<string, number>();
+    return wire.map((m) => {
+      const key = `${m.location.filePath}\u0000${m.content.matchText}`;
+      const occurrence = occurrenceCounts.get(key) ?? 0;
+      occurrenceCounts.set(key, occurrence + 1);
+      return {
+        filePath: m.location.filePath,
+        matchText: m.content.matchText,
+        lineText: m.content.lineContent,
+        occurrence,
+      };
     });
   }
 

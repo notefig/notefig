@@ -11,6 +11,8 @@ import {
   requestEditorFocus,
   saveSelection,
   getSavedSelection,
+  consumePendingNavigation,
+  navigateToLocation,
 } from "@/components/editor/editor-store";
 import {
   docHasRealContent,
@@ -28,13 +30,21 @@ export function useEditorFocusLifecycle(
   useEffect(() => {
     if (!editor) return;
 
-    const saved = getSavedSelection(filePath);
-    if (
-      saved &&
-      saved.from <= editor.state.doc.content.size &&
-      saved.to <= editor.state.doc.content.size
-    ) {
-      editor.commands.setTextSelection(saved);
+    // A navigation intent (search result click) that arrived while this
+    // editor was unmounted or being recreated lands here; it wins over
+    // the saved-selection restore.
+    const pending = consumePendingNavigation(filePath);
+    if (pending) {
+      navigateToLocation(filePath, pending);
+    } else {
+      const saved = getSavedSelection(filePath);
+      if (
+        saved &&
+        saved.from <= editor.state.doc.content.size &&
+        saved.to <= editor.state.doc.content.size
+      ) {
+        editor.commands.setTextSelection(saved);
+      }
     }
 
     requestEditorFocus(filePath, {

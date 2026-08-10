@@ -80,7 +80,7 @@ export function useSearch(
   const results = trimmed === "" ? NO_RESULTS : (data ?? NO_RESULTS);
 
   const { resultCount, fileCount } = useMemo(() => {
-    const files = new Set(results.map((r) => r.location.filePath));
+    const files = new Set(results.map((r) => r.filePath));
     return { resultCount: results.length, fileCount: files.size };
   }, [results]);
 

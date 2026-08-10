@@ -25,7 +25,7 @@ import {
   isTextEntryActive,
   type EditorCaretPlacement,
 } from "@/utils/focus-arbiter";
-import { resolveEditorLocation, type EditorLocation } from "./editor-position";
+import { resolveSearchTarget, type SearchTarget } from "./editor-position";
 import { docHasRealContent, findPromptNodeId } from "./ai-prompt-utils";
 import { requestPromptBlobFocus } from "@/components/agent/prompt-blob-store";
 import { placeCaretBeforeNode } from "./refocus-editor";
@@ -38,7 +38,7 @@ import {
   createProtocolDropHandler,
 } from "@/utils/drag-protocol";
 
-export type { EditorLocation };
+export type { SearchTarget };
 
 import type { EditorType } from "./polymorphic-editor";
 
@@ -63,12 +63,12 @@ export interface EditorInstance {
    */
   isFocusable(): boolean;
   /**
-   * Navigate to a specific location in the editor.
+   * Navigate to a search match in the editor.
    * Sets cursor/selection and scrolls the location into view.
-   * @param location - Target location with line/column coordinates
-   * @returns true if navigation succeeded, false if location is invalid or not applicable
+   * @param target - The match's text, line content and occurrence index
+   * @returns true if navigation succeeded, false if not applicable
    */
-  goToLocation(location: EditorLocation): boolean;
+  goToLocation(target: SearchTarget): boolean;
 }
 
 /**
@@ -91,6 +91,60 @@ export interface ImageInstance extends EditorInstance {
 
 /** Module-level store: file path → editor instance */
 const editorInstances = new Map<string, EditorInstance>();
+
+/**
+ * Navigation intents waiting for their editor to be ready. Navigation
+ * can't just act on the live instance: re-opening a file whose tab was
+ * replaced away disposes and recreates its editor (the layout-diff
+ * cleanup in use-dockable-tabs), so a selection set before that would die
+ * with the old instance. The intent is stored here and consumed by the
+ * mount lifecycle of whichever instance ends up showing the file; the TTL
+ * keeps an unconsumed intent (tab closed mid-open) from resurfacing on an
+ * unrelated open later.
+ */
+const pendingNavigations = new Map<
+  string,
+  { target: SearchTarget; expiresAt: number }
+>();
+const PENDING_NAVIGATION_TTL_MS = 5_000;
+
+/**
+ * Navigate to a search match, now or when the file's editor next mounts.
+ * The immediate path only counts when the editor's view is attached to
+ * the document — a success against a detached (soon-to-be-recreated)
+ * editor would be lost, so the pending intent stays for the mount.
+ */
+export function requestNavigation(
+  filePath: string,
+  target: SearchTarget,
+): void {
+  pendingNavigations.set(filePath, {
+    target,
+    expiresAt: Date.now() + PENDING_NAVIGATION_TTL_MS,
+  });
+
+  const instance = editorInstances.get(filePath);
+  if (!isMarkdownInstance(instance)) return;
+  let attached = false;
+  try {
+    attached = document.contains(instance.editor.view.dom);
+  } catch {
+    // Detached view (mid-remount) — leave the intent pending.
+  }
+  if (attached && instance.goToLocation(target)) {
+    pendingNavigations.delete(filePath);
+  }
+}
+
+/** Take the pending navigation for a path, if one is still fresh. */
+export function consumePendingNavigation(
+  filePath: string,
+): SearchTarget | undefined {
+  const entry = pendingNavigations.get(filePath);
+  if (!entry) return undefined;
+  pendingNavigations.delete(filePath);
+  return entry.expiresAt >= Date.now() ? entry.target : undefined;
+}
 
 if (import.meta.env.DEV) {
   // Diagnostic hook for e2e failure dumps (dev builds only).
@@ -332,12 +386,9 @@ function createMarkdownInstance(
     isFocusable(): boolean {
       return true;
     },
-    goToLocation(location: EditorLocation): boolean {
+    goToLocation(target: SearchTarget): boolean {
       try {
-        const { from, to } = resolveEditorLocation(
-          this.editor.state.doc,
-          location,
-        );
+        const { from, to } = resolveSearchTarget(this.editor.state.doc, target);
 
         this.editor.commands.setTextSelection({ from, to });
         this.editor.commands.scrollIntoView();
@@ -382,7 +433,7 @@ function createContainerInstance(
     isFocusable(): boolean {
       return true;
     },
-    goToLocation(_location: EditorLocation): boolean {
+    goToLocation(_target: SearchTarget): boolean {
       return false;
     },
   };
@@ -511,6 +562,7 @@ export function disposeAllEditors(): void {
     closeDocumentSync(filePath);
   });
   editorInstances.clear();
+  pendingNavigations.clear();
 }
 
 /**
@@ -587,21 +639,21 @@ export function getSelectedText(filePath: string): string | undefined {
 }
 
 /**
- * Navigate to a specific location in an editor.
- * This is a convenience function that combines getting the editor and calling goToLocation.
+ * Navigate to a search match in an editor.
+ * Convenience wrapper: looks up the editor and calls goToLocation.
  *
  * @param filePath - The file path of the editor
- * @param location - Target location with line/column coordinates
+ * @param target - The match's text, line content and occurrence index
  * @returns true if navigation succeeded, false if editor doesn't exist or navigation failed
  */
 export function navigateToLocation(
   filePath: string,
-  location: EditorLocation,
+  target: SearchTarget,
 ): boolean {
   const instance = editorInstances.get(filePath);
   if (!instance) {
     console.warn(`No editor instance found for path: ${filePath}`);
     return false;
   }
-  return instance.goToLocation(location);
+  return instance.goToLocation(target);
 }
