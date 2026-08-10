@@ -4,7 +4,7 @@ import {
   TelemetryConsentDialog,
   type TelemetryConsentAnswer,
 } from "@/components/telemetry-consent-dialog";
-import { readAllKv, writeKv } from "@/utils/kv-store";
+import { readAllKv, readKv, writeKv } from "@/utils/kv-store";
 import {
   CURRENT_TELEMETRY_CONSENT_VERSION,
   SETTINGS_NAMESPACE,
@@ -149,7 +149,13 @@ export function TelemetryBootstrap() {
     setShowConsent(false);
     void (async () => {
       const anyEnabled = answer.crashEnabled || answer.analyticsEnabled;
-      const installId = anyEnabled ? crypto.randomUUID() : null;
+      // Reuse a stored ID so a consent-version bump (which re-shows this
+      // dialog) doesn't rotate the install identity, matching the Settings
+      // toggles' behavior.
+      const installId = anyEnabled
+        ? ((await readKv<string>(SETTINGS_NAMESPACE, "telemetryInstallId")) ??
+          crypto.randomUUID())
+        : null;
       try {
         // Settings → Privacy picks this up without a reload: the write goes
         // through the same collection `useAppSettings` subscribes to.
