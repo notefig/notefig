@@ -122,33 +122,25 @@ export type SearchOptions = {
   ignore?: IgnoreRulesOption;
 };
 
-export type FilePosition = {
-  /** 1-indexed line number */
-  line: number;
-  /** 1-indexed column number */
-  column: number;
+/**
+ * What a search match reliably knows about itself, independent of raw
+ * file coordinates. Line/columns deliberately don't cross this surface:
+ * the editor renders a parsed document that doesn't contain the file's
+ * bytes, so raw coordinates can never be mapped exactly — these three
+ * facts can (see editor-position.ts).
+ */
+export type SearchTarget = {
+  /** The exact matched text */
+  matchText: string;
+  /** Raw content of the line containing the match */
+  lineText: string;
+  /** 0-indexed occurrence among matches with the same text in this file */
+  occurrence: number;
 };
 
-export type SearchMatchLocation = {
+export type SearchMatch = SearchTarget & {
   /** Absolute path to the file */
   filePath: string;
-  range: {
-    start: FilePosition;
-    end: FilePosition;
-  };
-};
-
-export type SearchMatchContent = {
-  matchText: string;
-  /** Full content of the line containing the match */
-  lineContent: string;
-  beforeContext: string[];
-  afterContext: string[];
-};
-
-export type SearchMatch = {
-  location: SearchMatchLocation;
-  content: SearchMatchContent;
 };
 
 /**

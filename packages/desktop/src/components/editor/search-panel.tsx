@@ -23,7 +23,7 @@ import type { SearchMatch } from "@/adapters/platform-adapter.interface";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import {
   suppressEditorFocus,
-  navigateToLocation,
+  requestNavigation,
 } from "@/components/editor/editor-store";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
 
@@ -49,30 +49,13 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
     const handleMatchClick = useCallback(
       (
         match: SearchMatch,
-        occurrence: number,
         options?: Omit<OpenFileInLayoutOptions, "tabId">,
       ) => {
-        const filePath = match.location.filePath;
-        openFile({ tabId: filePath, intent: options?.intent ?? "replace" });
-        // Retry navigation until the editor is mounted and ready. Deadline
-        // is time-based: a cold open of a large document (worker parse +
-        // highlight) can take well over the ~330ms that a frame-counted
-        // loop would allow.
-        const deadline = Date.now() + 5_000;
-        const tryNavigate = () => {
-          if (
-            navigateToLocation(filePath, {
-              matchText: match.content.matchText,
-              lineText: match.content.lineContent,
-              occurrence,
-            })
-          )
-            return;
-          if (Date.now() < deadline) {
-            requestAnimationFrame(tryNavigate);
-          }
-        };
-        requestAnimationFrame(tryNavigate);
+        openFile({
+          tabId: match.filePath,
+          intent: options?.intent ?? "replace",
+        });
+        requestNavigation(match.filePath, match);
       },
       [openFile],
     );
@@ -135,7 +118,7 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
     const groupedResults = useMemo(() => {
       const groups = new Map<string, SearchMatch[]>();
       for (const match of results) {
-        const filePath = match.location.filePath;
+        const filePath = match.filePath;
         const existing = groups.get(filePath);
         if (existing) {
           existing.push(match);
@@ -279,27 +262,16 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
                 </button>
 
                 {!isCollapsed &&
-                  matches.map((match, i) => (
+                  matches.map((match) => (
                     <SearchResultItem
-                      key={`${filePath}:${match.location.range.start.line}:${match.location.range.start.column}:${i}`}
+                      key={`${filePath}:${match.matchText}:${match.occurrence}`}
                       match={match}
                       query={query}
                       caseSensitive={caseSensitive}
                       onClick={() =>
-                        handleMatchClick(
-                          match,
-                          // Which occurrence of this exact matched text the
-                          // user clicked — matches arrive in file order.
-                          matches
-                            .slice(0, i)
-                            .filter(
-                              (m) =>
-                                m.content.matchText === match.content.matchText,
-                            ).length,
-                          {
-                            intent: isModHeld ? "new-tab" : "replace",
-                          },
-                        )
+                        handleMatchClick(match, {
+                          intent: isModHeld ? "new-tab" : "replace",
+                        })
                       }
                     />
                   ))}
@@ -329,7 +301,7 @@ function SearchResultItem({
   caseSensitive: boolean;
   onClick: () => void;
 }) {
-  const lineContent = match.content.lineContent;
+  const lineContent = match.lineText;
 
   const segments = useMemo(() => {
     if (!query.trim()) return [{ text: lineContent, highlight: false }];

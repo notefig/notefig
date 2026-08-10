@@ -21,15 +21,9 @@
  * inside code blocks are real characters, block boundaries are not.
  */
 
-/** What a search match knows about itself, independent of disk bytes. */
-export interface SearchTarget {
-  /** The exact matched text */
-  matchText: string;
-  /** Raw content of the line containing the match */
-  lineText: string;
-  /** 0-indexed occurrence among matches with the same text in this file */
-  occurrence: number;
-}
+import type { SearchTarget } from "@/adapters/platform-adapter.interface";
+
+export type { SearchTarget };
 
 interface DocLike {
   content: { size: number };

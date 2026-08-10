@@ -522,32 +522,20 @@ export function searchFileContent(
   pattern: RegExp,
 ): SearchMatch[] {
   const results: SearchMatch[] = [];
-  const lines = content.split("\n");
+  // Per-file occurrence counter, keyed by the exact matched text (a
+  // case-insensitive search can yield differently-cased matches).
+  const occurrenceCounts = new Map<string, number>();
 
-  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
-    const line = lines[lineIdx];
+  for (const line of content.split("\n")) {
     pattern.lastIndex = 0;
 
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(line)) !== null) {
-      results.push({
-        location: {
-          filePath,
-          range: {
-            start: { line: lineIdx + 1, column: match.index + 1 },
-            end: {
-              line: lineIdx + 1,
-              column: match.index + match[0].length + 1,
-            },
-          },
-        },
-        content: {
-          matchText: match[0],
-          lineContent: line,
-          beforeContext: [],
-          afterContext: [],
-        },
-      });
+      const matchText = match[0];
+      const occurrence = occurrenceCounts.get(matchText) ?? 0;
+      occurrenceCounts.set(matchText, occurrence + 1);
+
+      results.push({ filePath, matchText, lineText: line, occurrence });
 
       if (match.index === pattern.lastIndex) {
         pattern.lastIndex++;

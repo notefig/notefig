@@ -78,6 +78,7 @@ export interface MarkdownInstance extends EditorInstance {
   readonly type: "markdown";
   readonly editor: Editor;
   filePath: string;
+  savedSelection?: { from: number; to: number };
 }
 
 /**
@@ -92,13 +93,58 @@ export interface ImageInstance extends EditorInstance {
 const editorInstances = new Map<string, EditorInstance>();
 
 /**
- * Path-keyed saved selections, deliberately OUTSIDE the instances: a tab
- * replace dedupes the already-open tab by disposing and recreating its
- * editor, so anything stored on the instance (including a selection a
- * search navigation just made) dies with it. The mount lifecycle restores
- * from here into whichever instance currently backs the path.
+ * Navigation intents waiting for their editor to be ready. Navigation
+ * can't just act on the live instance: re-opening a file whose tab was
+ * replaced away disposes and recreates its editor (the layout-diff
+ * cleanup in use-dockable-tabs), so a selection set before that would die
+ * with the old instance. The intent is stored here and consumed by the
+ * mount lifecycle of whichever instance ends up showing the file; the TTL
+ * keeps an unconsumed intent (tab closed mid-open) from resurfacing on an
+ * unrelated open later.
  */
-const savedSelections = new Map<string, { from: number; to: number }>();
+const pendingNavigations = new Map<
+  string,
+  { target: SearchTarget; expiresAt: number }
+>();
+const PENDING_NAVIGATION_TTL_MS = 5_000;
+
+/**
+ * Navigate to a search match, now or when the file's editor next mounts.
+ * The immediate path only counts when the editor's view is attached to
+ * the document — a success against a detached (soon-to-be-recreated)
+ * editor would be lost, so the pending intent stays for the mount.
+ */
+export function requestNavigation(
+  filePath: string,
+  target: SearchTarget,
+): void {
+  pendingNavigations.set(filePath, {
+    target,
+    expiresAt: Date.now() + PENDING_NAVIGATION_TTL_MS,
+  });
+
+  const instance = editorInstances.get(filePath);
+  if (!isMarkdownInstance(instance)) return;
+  let attached = false;
+  try {
+    attached = document.contains(instance.editor.view.dom);
+  } catch {
+    // Detached view (mid-remount) — leave the intent pending.
+  }
+  if (attached && instance.goToLocation(target)) {
+    pendingNavigations.delete(filePath);
+  }
+}
+
+/** Take the pending navigation for a path, if one is still fresh. */
+export function consumePendingNavigation(
+  filePath: string,
+): SearchTarget | undefined {
+  const entry = pendingNavigations.get(filePath);
+  if (!entry) return undefined;
+  pendingNavigations.delete(filePath);
+  return entry.expiresAt >= Date.now() ? entry.target : undefined;
+}
 
 if (import.meta.env.DEV) {
   // Diagnostic hook for e2e failure dumps (dev builds only).
@@ -348,12 +394,6 @@ function createMarkdownInstance(
         this.editor.commands.scrollIntoView();
         this.editor.commands.focus();
 
-        // Navigation may run against a background tab's instance moments
-        // before a tab replace disposes and recreates it; the recreated
-        // editor restores the saved selection on mount, so navigation must
-        // define it — otherwise the pre-switch caret wins.
-        saveSelection(this.filePath, from, to);
-
         return true;
       } catch (error) {
         console.error("Navigation failed:", error);
@@ -522,10 +562,7 @@ export function disposeAllEditors(): void {
     closeDocumentSync(filePath);
   });
   editorInstances.clear();
-  // Paths belong to the closing workspace; positions are meaningless in
-  // the next one. (Per-file disposeEditor deliberately keeps its entry —
-  // tab dedupe recreates the editor and must restore through it.)
-  savedSelections.clear();
+  pendingNavigations.clear();
 }
 
 /**
@@ -567,13 +604,20 @@ export function saveSelection(
   from: number,
   to: number,
 ): void {
-  savedSelections.set(filePath, { from, to });
+  const instance = editorInstances.get(filePath);
+  if (isMarkdownInstance(instance)) {
+    instance.savedSelection = { from, to };
+  }
 }
 
 export function getSavedSelection(
   filePath: string,
 ): { from: number; to: number } | undefined {
-  return savedSelections.get(filePath);
+  const instance = editorInstances.get(filePath);
+  if (isMarkdownInstance(instance)) {
+    return instance.savedSelection;
+  }
+  return undefined;
 }
 
 export function getAllEditorPaths(): string[] {
