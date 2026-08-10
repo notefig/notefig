@@ -129,6 +129,34 @@ describe("repeated terms select the clicked occurrence", () => {
     expect(blockTextAt(editor, from)).toContain(context);
   });
 
+  it("a repeated cell value selects the clicked row, not a wordier line elsewhere", () => {
+    // Both review scenarios in one fixture: "eng" appears in a prose line
+    // that contains ALL of the row's words (which would out-score the
+    // row's own one-word cells under naive word overlap), and in two
+    // adjacent table rows (where subset-indexing by the file-global
+    // occurrence would land on the wrong row).
+    const doc = [
+      "Team intro: Ada is eng on core.",
+      "",
+      "| Name | Role | Team |",
+      "| ---- | ---- | ---- |",
+      "| Ada  | eng  | core |",
+      "| Lin  | eng  | apps |",
+    ].join("\n");
+    const editor = createEditor(doc);
+
+    // Occurrence 1 = first table row's cell.
+    const first = navigateToMatch(editor, searchMatch(doc, "eng", 1));
+    expect(editor.state.doc.textBetween(first.from, first.to)).toBe("eng");
+    // Occurrence 2 = second row's cell — must be a different position.
+    const second = navigateToMatch(editor, searchMatch(doc, "eng", 2));
+    expect(editor.state.doc.textBetween(second.from, second.to)).toBe("eng");
+    expect(second.from).toBeGreaterThan(first.from);
+    // And occurrence 0 = the prose line.
+    const prose = navigateToMatch(editor, searchMatch(doc, "eng", 0));
+    expect(blockTextAt(editor, prose.from)).toContain("Team intro");
+  });
+
   it("a match after a table lands in its own paragraph (cell-per-line expansion)", () => {
     const doc = [
       "| Name | Role | Team |",

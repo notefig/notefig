@@ -126,16 +126,24 @@ function allOffsetsOf(haystack: string, needle: string): number[] {
 
 /**
  * How much does a rendered line look like the raw file line a search match
- * came from? 1 for equality; containment scores by the contained share so
- * a trivially short line can't outrank the real one; otherwise the share
- * of the raw line's words present in the rendered line. Robust to disk
- * bytes the serializer would normalize (wrapping, punctuation, syntax).
+ * came from? 1 for equality and for a table cell of the raw row (a row
+ * renders one line per cell, so a cell only ever holds a fraction of the
+ * row's words); containment scores by the contained share so a trivially
+ * short line can't outrank the real one; otherwise the share of the raw
+ * line's words present in the rendered line, scaled to stay below the
+ * exact tiers. Robust to disk bytes the serializer would normalize
+ * (wrapping, punctuation, syntax).
  */
 function lineSimilarity(rawLine: string, renderedLine: string): number {
   const raw = rawLine.trim();
   const r = renderedLine.trim();
   if (!raw || !r) return 0;
   if (raw === r) return 1;
+
+  if (raw.includes("|")) {
+    const segments = raw.split("|").map((s) => s.trim());
+    if (segments.includes(r)) return 1;
+  }
 
   let score = 0;
   if (raw.includes(r)) score = r.length / raw.length;
@@ -144,7 +152,7 @@ function lineSimilarity(rawLine: string, renderedLine: string): number {
   const words = raw.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 1);
   if (words.length > 0) {
     const hits = words.filter((w) => r.includes(w)).length;
-    score = Math.max(score, hits / words.length);
+    score = Math.max(score, (hits / words.length) * 0.95);
   }
   return score;
 }
@@ -181,15 +189,22 @@ export function resolveSearchTarget(
   }
 
   // Keep the occurrences whose rendered line best resembles lineText,
-  // then break ties (identical lines) with the occurrence index.
-  const scored = occurrences.map((o) => ({
+  // then break ties (identical lines, repeated table cells) with the
+  // occurrence index. `occurrence` is file-global, so compare against
+  // each candidate's position among ALL rendered occurrences — indexing
+  // the narrowed subset directly would shift after any exclusion.
+  const scored = occurrences.map((o, index) => ({
     o,
+    index,
     s: lineSimilarity(target.lineText, lines[lineIndexAtOffset(lines, o)].text),
   }));
   const best = Math.max(...scored.map((x) => x.s));
-  const candidates = scored.filter((x) => x.s === best).map((x) => x.o);
-  const chosen =
-    candidates[Math.max(0, Math.min(target.occurrence, candidates.length - 1))];
+  const candidates = scored.filter((x) => x.s === best);
+  const chosen = candidates.reduce((a, b) =>
+    Math.abs(b.index - target.occurrence) < Math.abs(a.index - target.occurrence)
+      ? b
+      : a,
+  ).o;
 
   return {
     from: posAtRenderedOffset(lines, chosen),
