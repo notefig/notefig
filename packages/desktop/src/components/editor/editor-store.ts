@@ -105,18 +105,12 @@ if (import.meta.env.DEV) {
   (window as unknown as Record<string, unknown>).__metristsDebugEditors = () =>
     Array.from(editorInstances.entries()).map(([path, instance]) => {
       const editor = isMarkdownInstance(instance) ? instance.editor : undefined;
-      const sel = editor?.state.selection;
       return {
         path,
         type: instance.type,
         destroyed: editor?.isDestroyed,
         docLength: editor?.state.doc.textContent.length,
         docHead: editor?.state.doc.textContent.slice(0, 40),
-        selFrom: sel?.from,
-        selTo: sel?.to,
-        selText: sel ? editor?.state.doc.textBetween(sel.from, sel.to) : "",
-        focused: editor?.isFocused,
-        savedSelection: savedSelections.get(path),
       };
     });
 }
