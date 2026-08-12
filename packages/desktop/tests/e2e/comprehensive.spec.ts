@@ -5,6 +5,7 @@ import {
   seedTestFiles,
   waitForFileTree,
   openFileInTree,
+  expandDirectory,
   openFileInNewTab,
   getEditorContent,
   replaceEditorContent,
@@ -191,9 +192,7 @@ test.describe("Notefig E2E Comprehensive Tests", () => {
       await expect(page.getByRole("treeitem", { name: "readme.md" })).toBeVisible();
       await expect(page.getByRole("treeitem", { name: "docs" })).toBeVisible();
 
-      const docsButton = page.getByRole("treeitem", { name: "docs" }).first();
-      await docsButton.click();
-      await page.waitForTimeout(300);
+      await expandDirectory(page, "docs");
 
       await expect(page.getByRole("treeitem", { name: "guide.md" })).toBeVisible();
     });

@@ -40,7 +40,7 @@ test.describe("Happy Path - Complete User Flow", () => {
 
     await expandDirectory(page, "docs");
 
-    const gettingStartedButton = page.getByRole("button", {
+    const gettingStartedButton = page.getByRole("treeitem", {
       name: "getting-started.md",
     });
     await expect(gettingStartedButton).toBeVisible();
