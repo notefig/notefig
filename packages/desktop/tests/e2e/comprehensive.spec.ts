@@ -5,6 +5,7 @@ import {
   seedTestFiles,
   waitForFileTree,
   openFileInTree,
+  expandDirectory,
   openFileInNewTab,
   getEditorContent,
   replaceEditorContent,
@@ -179,7 +180,7 @@ test.describe("Notefig E2E Comprehensive Tests", () => {
       // assert the deleted file is gone with an auto-retrying expectation.
       await waitForFileTree(page, "readme.md");
       await expect(
-        page.locator('button:has-text("file-to-delete.md")'),
+        page.getByRole("treeitem", { name: "file-to-delete.md" }),
       ).toHaveCount(0);
     });
   });
@@ -188,14 +189,12 @@ test.describe("Notefig E2E Comprehensive Tests", () => {
     test("workspace opens and file tree renders correctly", async ({
       page,
     }) => {
-      await expect(page.locator('button:has-text("readme.md")')).toBeVisible();
-      await expect(page.locator('button:has-text("docs")')).toBeVisible();
+      await expect(page.getByRole("treeitem", { name: "readme.md" })).toBeVisible();
+      await expect(page.getByRole("treeitem", { name: "docs" })).toBeVisible();
 
-      const docsButton = page.locator('button:has-text("docs")').first();
-      await docsButton.click();
-      await page.waitForTimeout(300);
+      await expandDirectory(page, "docs");
 
-      await expect(page.locator('button:has-text("guide.md")')).toBeVisible();
+      await expect(page.getByRole("treeitem", { name: "guide.md" })).toBeVisible();
     });
 
     test("open file, edit content, and persist on tab switch", async ({
@@ -505,7 +504,7 @@ test.describe("Notefig E2E Comprehensive Tests", () => {
   test.describe("Drag & Drop", () => {
     test("drag file to folder updates path correctly", async ({ page }) => {
       const targetFolder = page
-        .locator('button:has-text("target-folder")')
+        .getByRole("treeitem", { name: "target-folder" })
         .first();
       await targetFolder.click();
       await page.waitForTimeout(200);
@@ -568,7 +567,7 @@ test.describe("Notefig E2E Comprehensive Tests", () => {
       );
 
       // Open in new tab via context menu creates a new tab.
-      const tabCInTree = page.locator('button:has-text("tab-c.md")').first();
+      const tabCInTree = page.getByRole("treeitem", { name: "tab-c.md" }).first();
       await tabCInTree.click({ button: "right" });
       await page
         .locator('[role="menuitem"]:has-text("Open in New Tab")')
@@ -585,7 +584,7 @@ test.describe("Notefig E2E Comprehensive Tests", () => {
       ).toBeVisible();
 
       // Context-menu action creates another tab.
-      const tabAInTree = page.locator('button:has-text("tab-a.md")').first();
+      const tabAInTree = page.getByRole("treeitem", { name: "tab-a.md" }).first();
       await tabAInTree.click({ button: "right" });
       await page
         .locator('[role="menuitem"]:has-text("Open in New Tab")')

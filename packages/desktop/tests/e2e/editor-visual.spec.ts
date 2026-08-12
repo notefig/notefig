@@ -97,7 +97,7 @@ async function openFixtureFile(page: Page) {
   await seedWorkspace(page);
   await page.goto(`/${encodeURIComponent(WORKSPACE)}`);
   // deep links mark the file active but don't open a tab — click like a user
-  await page.getByRole("button", { name: FILE_NAME }).click();
+  await page.getByRole("treeitem", { name: FILE_NAME }).click();
   await expect(page.locator(".ProseMirror")).toBeVisible({ timeout: 15_000 });
   await expect(
     page.locator(".ProseMirror h1", { hasText: "E2E Fixture" }),

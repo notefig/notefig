@@ -45,7 +45,7 @@ test.describe("shim: real filesystem round-trip", () => {
     await openWorkspace(page, workspace);
     await waitForFileTree(page, "README.md");
     await expect(
-      page.getByRole("button", { name: "README.md" }),
+      page.getByRole("treeitem", { name: "README.md" }),
     ).toBeVisible();
 
     // Open it and confirm the on-disk content came through read_files → shim.

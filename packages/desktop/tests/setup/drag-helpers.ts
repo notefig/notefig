@@ -64,30 +64,81 @@ export async function syntheticNativeDrag(
   page: Page,
   sourceSelector: string,
   targetSelector: string,
+  options: { whileOverTarget?: () => Promise<void> } = {},
 ) {
-  await page.evaluate(
-    ({ sourceSelector, targetSelector }) => {
-      const source = document.querySelector<HTMLElement>(sourceSelector);
-      const target = document.querySelector<HTMLElement>(targetSelector);
-      if (!source) throw new Error(`missing drag source: ${sourceSelector}`);
-      if (!target) throw new Error(`missing drag target: ${targetSelector}`);
-
-      const rect = target.getBoundingClientRect();
-      const dataTransfer = new DataTransfer();
-      const opts = {
-        bubbles: true,
-        cancelable: true,
-        dataTransfer,
-        clientX: rect.left + rect.width / 2,
-        clientY: rect.bottom - 2,
+  // Phase 1: dragstart on the source + dragover on the target. The shared
+  // DataTransfer is stashed on window so phase 2 can finish the same drag
+  // after an optional mid-hover assertion. Selectors are resolved with a
+  // shadow-piercing query (tree rows live in @pierre/trees' shadow root),
+  // and events are dispatched composed so they cross shadow boundaries the
+  // way real native drag events do.
+  const begin = ({
+    sourceSelector,
+    targetSelector,
+  }: {
+    sourceSelector: string;
+    targetSelector: string;
+  }) => {
+    const deepQuery = (selector: string): HTMLElement | null => {
+      const search = (root: Document | ShadowRoot): HTMLElement | null => {
+        const direct = root.querySelector<HTMLElement>(selector);
+        if (direct) return direct;
+        for (const el of root.querySelectorAll("*")) {
+          if (el.shadowRoot) {
+            const found = search(el.shadowRoot);
+            if (found) return found;
+          }
+        }
+        return null;
       };
-      source.dispatchEvent(new DragEvent("dragstart", opts));
-      target.dispatchEvent(new DragEvent("dragover", opts));
-      target.dispatchEvent(new DragEvent("drop", opts));
-      source.dispatchEvent(
-        new DragEvent("dragend", { bubbles: true, dataTransfer }),
-      );
-    },
-    { sourceSelector, targetSelector },
-  );
+      return search(document);
+    };
+
+    const source = deepQuery(sourceSelector);
+    const target = deepQuery(targetSelector);
+    if (!source) throw new Error(`missing drag source: ${sourceSelector}`);
+    if (!target) throw new Error(`missing drag target: ${targetSelector}`);
+
+    const rect = target.getBoundingClientRect();
+    const dataTransfer = new DataTransfer();
+    const opts = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      dataTransfer,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.bottom - 2,
+    };
+    (window as unknown as Record<string, unknown>).__mtrSyntheticDrag = {
+      source,
+      target,
+      opts,
+    };
+    source.dispatchEvent(new DragEvent("dragstart", opts));
+    target.dispatchEvent(new DragEvent("dragover", opts));
+  };
+
+  const finish = () => {
+    const state = (window as unknown as Record<string, unknown>)
+      .__mtrSyntheticDrag as {
+      source: HTMLElement;
+      target: HTMLElement;
+      opts: DragEventInit;
+    };
+    delete (window as unknown as Record<string, unknown>).__mtrSyntheticDrag;
+    state.target.dispatchEvent(new DragEvent("drop", state.opts));
+    state.source.dispatchEvent(
+      new DragEvent("dragend", {
+        bubbles: true,
+        composed: true,
+        dataTransfer: state.opts.dataTransfer,
+      }),
+    );
+  };
+
+  await page.evaluate(begin, { sourceSelector, targetSelector });
+  if (options.whileOverTarget) {
+    await options.whileOverTarget();
+  }
+  await page.evaluate(finish);
 }

@@ -32,15 +32,15 @@ test.describe("Happy Path - Complete User Flow", () => {
 
     await waitForFileTree(page, "README.md");
 
-    const readmeButton = page.getByRole("button", { name: "README.md" });
+    const readmeButton = page.getByRole("treeitem", { name: "README.md" });
     await expect(readmeButton).toBeVisible();
 
-    const docsButton = page.getByRole("button", { name: "docs" });
+    const docsButton = page.getByRole("treeitem", { name: "docs" });
     await expect(docsButton).toBeVisible();
 
     await expandDirectory(page, "docs");
 
-    const gettingStartedButton = page.getByRole("button", {
+    const gettingStartedButton = page.getByRole("treeitem", {
       name: "getting-started.md",
     });
     await expect(gettingStartedButton).toBeVisible();

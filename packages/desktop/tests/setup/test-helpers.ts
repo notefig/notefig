@@ -51,11 +51,19 @@ export async function seedTestFiles(
         const store = transaction.objectStore("files");
 
         testFiles.forEach((file) => {
+          // Directories are implied by file paths in the IndexedDB adapter
+          // (createDirectories is a no-op there); a directory ROW would be
+          // listed as a file by the adapter's key scan, making the same
+          // path both a file and a directory — the file tree rejects that.
+          // Seed a hidden placeholder child instead so empty directories
+          // still materialize via the prefix scan.
+          const path =
+            file.type === "directory" ? `${file.path}/.keep` : file.path;
           store.put({
-            path: file.path,
+            path,
             content: file.content || "",
-            type: file.type,
-            size: file.type === "file" ? file.content.length : 0,
+            type: "file",
+            size: (file.content || "").length,
             modified: Date.now(),
           });
         });
@@ -82,10 +90,11 @@ export async function waitForFileTree(page: Page, fileName?: string) {
   // 3. The "New file" button (if workspace is empty)
 
   if (fileName) {
-    // Wait for specific file to appear in tree
-    await page.waitForSelector(`button:has-text("${fileName}")`, {
-      timeout: 10000,
-    });
+    // Wait for specific file to appear in tree (shadow-piercing role query)
+    await page
+      .getByRole("treeitem", { name: fileName })
+      .first()
+      .waitFor({ timeout: 10000 });
   } else {
     // Wait for workspace controls to appear
     await page.waitForSelector('button:has-text("New file")', {
@@ -115,9 +124,11 @@ export async function openFileInTree(
   options: { waitForEditor?: boolean } = {},
 ) {
   const { waitForEditor = true } = options;
-  // Wait for the file button to be present
-  // Files have a specific structure: button > div > svg (FileText icon) + span (filename)
-  const fileButton = page.locator(`button:has-text("${fileName}")`).first();
+  // Tree rows render in the @pierre/trees shadow root with role="treeitem"
+  // and the file name as the accessible name (visible text is split into
+  // truncation spans, so :has-text is unreliable). Role queries pierce
+  // open shadow roots.
+  const fileButton = page.getByRole("treeitem", { name: fileName }).first();
 
   await fileButton.waitFor({ timeout: 5000 });
 
@@ -149,7 +160,7 @@ export async function openFileInTree(
  * More reliable than modifier clicks for cross-platform testing.
  */
 export async function openFileInNewTab(page: Page, fileName: string) {
-  const fileButton = page.locator(`button:has-text("${fileName}")`).first();
+  const fileButton = page.getByRole("treeitem", { name: fileName }).first();
 
   await fileButton.waitFor({ timeout: 5000 });
   await fileButton.click({ button: "right" });
@@ -272,22 +283,14 @@ export async function getFileContentFromDB(
  * Directories have Folder/FolderOpen icons (not FileText icons like files)
  */
 export async function expandDirectory(page: Page, dirName: string) {
-  // Find the directory button - it won't be in a tab bar, just in the file tree
-  // We can't easily distinguish tabs from file tree buttons, so we look for the FIRST match
-  // which should be the file tree (tabs come after in DOM order  typically)
-  const allButtons = page.locator(`button:has-text("${dirName}")`);
-  const count = await allButtons.count();
+  // Directory rows are treeitems in the tree's shadow root with a real
+  // aria-expanded state.
+  const dirButton = page.getByRole("treeitem", { name: dirName }).first();
+  const expanded = await dirButton.getAttribute("aria-expanded");
 
-  // If there's only one, use it. If multiple, use the first (file tree)
-  const dirButton = count > 0 ? allButtons.first() : allButtons;
-
-  // Check if it needs expanding by looking for ChevronRight icon (collapsed state)
-  const isCollapsed =
-    (await dirButton.locator("svg.lucide-chevron-right").count()) > 0;
-
-  if (isCollapsed) {
+  if (expanded !== "true") {
     await dirButton.click();
-    // Wait a bit for expansion animation
+    // Wait a bit for expansion re-render
     await page.waitForTimeout(200);
   }
 }
@@ -536,20 +539,23 @@ export async function createNewFile(
 ) {
   // Click "New file" button or right-click folder
   if (folderPath) {
-    // Right-click on folder
+    // Right-click on folder, create via the context menu
     const folderButton = page
-      .locator(`button:has-text("${folderPath.split("/").pop()}")`)
+      .getByRole("treeitem", { name: folderPath.split("/").pop()! })
       .first();
     await folderButton.click({ button: "right" });
-    // TODO: Select "New file" from context menu when implemented
+    await page.locator('[role="menuitem"]:has-text("New File")').click();
   } else {
     // Click main "New file" button
-    await page.click('button:has-text("New file")');
+    await page.getByRole("button", { name: "New file" }).click();
   }
 
-  // Type file name and confirm
-  // This depends on your UI implementation
-  // Assuming a prompt or modal appears
+  // Creation is an inline rename of a placeholder row in the tree's shadow
+  // root, pre-filled with "untitled.md".
+  const createInput = page.locator("file-tree-container input");
+  await createInput.waitFor({ timeout: 5000 });
+  await createInput.fill(fileName);
+  await createInput.press("Enter");
   await page.waitForTimeout(300);
 }
 
@@ -557,7 +563,7 @@ export async function createNewFile(
  * Right-clicks on a file in the tree
  */
 export async function rightClickFile(page: Page, fileName: string) {
-  const fileButton = page.locator(`button:has-text("${fileName}")`).first();
+  const fileButton = page.getByRole("treeitem", { name: fileName }).first();
   await fileButton.click({ button: "right" });
 }
 
@@ -568,7 +574,7 @@ export async function fileExistsInTree(
   page: Page,
   fileName: string,
 ): Promise<boolean> {
-  const fileButton = page.locator(`button:has-text("${fileName}")`).first();
+  const fileButton = page.getByRole("treeitem", { name: fileName }).first();
   return await fileButton.isVisible().catch(() => false);
 }
 
@@ -580,10 +586,12 @@ export async function dragFileToFolder(
   fileName: string,
   folderName: string,
 ) {
-  const fileButton = page.locator(`button:has-text("${fileName}")`).first();
-  const folderButton = page.locator(`button:has-text("${folderName}")`).first();
+  const fileButton = page.getByRole("treeitem", { name: fileName }).first();
+  const folderButton = page
+    .getByRole("treeitem", { name: folderName })
+    .first();
 
-  // Perform drag and drop
+  // Perform drag and drop (the tree's native HTML5 drag engine)
   await fileButton.dragTo(folderButton);
 }
 

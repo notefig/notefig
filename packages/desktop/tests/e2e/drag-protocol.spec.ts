@@ -1,6 +1,7 @@
 /**
  * Cross-context drag-and-drop through the standardized drag protocol
- * (src/utils/drag-protocol.tsx — see docs/dnd-protocol.md).
+ * (src/utils/drag-protocol.tsx — see docs/dnd-protocol.md) and the
+ * @pierre/trees file tree's native drag engine.
  *
  * Covers every shipped interaction plus its guard rails:
  *   file row → tab bar / editor / folder / root; directory guards
@@ -8,8 +9,11 @@
  *   move guards; hover highlight; dnd-kit tab reorder regression; editor
  *   image → folder move with src rewrite; in-editor image move.
  *
- * Drag engines are driven per tests/setup/drag-helpers.ts: real pointer
- * input for dnd-kit sources, synthetic DragEvents for native sources.
+ * Drag engines per tests/setup/drag-helpers.ts: the file tree and
+ * ProseMirror image nodes are NATIVE HTML5 drag sources (tree rows are
+ * additionally tagged with the protocol payload on dragstart, so protocol
+ * zones outside the tree accept them); dockable tabs remain dnd-kit
+ * (pointer) sources. Tree-internal moves use Playwright's real dragTo.
  */
 import { test, expect, type Page } from "@playwright/test";
 import { pointerDrag, syntheticNativeDrag } from "../setup/drag-helpers";
@@ -97,7 +101,7 @@ async function seedWorkspace(
 async function openNotes(page: Page) {
   await seedWorkspace(page);
   await page.goto(`/${encodeURIComponent(WORKSPACE)}`);
-  await page.getByRole("button", { name: NOTES_NAME }).click();
+  await page.getByRole("treeitem", { name: NOTES_NAME }).click();
   await expect(page.locator(".ProseMirror")).toBeVisible({ timeout: 15_000 });
   await expect(
     page.locator(".ProseMirror h1", { hasText: "DnD Fixture" }),
@@ -105,10 +109,13 @@ async function openNotes(page: Page) {
   await expect(page.locator(".ProseMirror")).toBeFocused({ timeout: 5_000 });
 }
 
-const treeRow = (name: string) =>
-  `[data-file-tree-root] button[data-file-path$="/${name}"]`;
-const treeRowExact = (path: string) =>
-  `[data-file-tree-root] button[data-file-path="${path}"]`;
+// Tree rows live in the @pierre/trees shadow root and are keyed by
+// workspace-relative paths — directories carry a trailing slash. Playwright
+// CSS pierces open shadow roots, and syntheticNativeDrag's deep query does
+// too.
+const treeRow = (name: string) => `[data-item-path$="${name}"]`;
+const treeRowExact = (relPath: string) => `[data-item-path="${relPath}"]`;
+const treeDirRow = (relPath: string) => `[data-item-path="${relPath}/"]`;
 
 test.describe("drag protocol: file tree → tabs/editor", () => {
   test("dropping a file row on the tab bar opens it as a tab", async ({
@@ -122,7 +129,11 @@ test.describe("drag protocol: file tree → tabs/editor", () => {
     });
     await expect(page.locator('[data-testid="tab-bar"]')).toBeVisible();
 
-    await pointerDrag(page, treeRow(OTHER_NAME), '[data-testid="tab-bar"]');
+    await syntheticNativeDrag(
+      page,
+      treeRow(OTHER_NAME),
+      '[data-testid="tab-bar"]',
+    );
 
     await expect(
       page.locator('[data-testid="tab-bar"]', { hasText: OTHER_NAME }),
@@ -143,21 +154,29 @@ test.describe("drag protocol: file tree → tabs/editor", () => {
     });
     await expect(page.locator('[data-testid="tab-bar"]')).toBeVisible();
 
-    await pointerDrag(page, treeRow(FOLDER_NAME), '[data-testid="tab-bar"]');
+    await syntheticNativeDrag(
+      page,
+      treeDirRow(FOLDER_NAME),
+      '[data-testid="tab-bar"]',
+    );
 
     await expect(
       page.locator('[data-testid="tab-bar"]', { hasText: FOLDER_NAME }),
     ).not.toBeVisible();
   });
 
-  test("an accepted drag highlights the drop zone while hovering", async ({
+  test("an accepted drag highlights the tree drop zone while hovering", async ({
     page,
   }) => {
     await openNotes(page);
 
-    await pointerDrag(page, treeRow(OTHER_NAME), treeRow(FOLDER_NAME), {
+    // editor image (protocol image-asset source) hovering the tree: the
+    // tree-wide protocol zone carries the hover attribute
+    const imageWrapper = ".ProseMirror [data-drag-handle]";
+    await expect(page.locator(imageWrapper)).toBeVisible();
+
+    await syntheticNativeDrag(page, imageWrapper, treeDirRow(FOLDER_NAME), {
       whileOverTarget: async () => {
-        // the folder's subtree container carries the hover attribute
         await expect(
           page.locator("[data-mtr-drop-over='true']"),
         ).toBeVisible();
@@ -173,7 +192,7 @@ test.describe("drag protocol: file tree → tabs/editor", () => {
   }) => {
     await openNotes(page);
 
-    await pointerDrag(page, treeRow(OTHER_NAME), ".ProseMirror > p");
+    await syntheticNativeDrag(page, treeRow(OTHER_NAME), ".ProseMirror > p");
 
     await expect(
       page.locator('[data-testid="tab-bar"]', { hasText: OTHER_NAME }),
@@ -196,7 +215,7 @@ test.describe("drag protocol: file tree → tabs/editor", () => {
       1,
     );
 
-    await pointerDrag(page, treeRow("photo.png"), ".ProseMirror > p");
+    await syntheticNativeDrag(page, treeRow("photo.png"), ".ProseMirror > p");
 
     // a second image node appears in the document…
     await expect(page.locator(".ProseMirror [data-drag-handle]")).toHaveCount(
@@ -241,45 +260,52 @@ test.describe("drag protocol: file tree → tabs/editor", () => {
     await page.mouse.up();
     await expect(page.locator("[data-dockable-window-id]")).toHaveCount(2);
 
+    // synthetic drags need concrete CSS, so read the window ids
+    const [firstWindowId, secondWindowId] = await page
+      .locator("[data-dockable-window-id]")
+      .evaluateAll((els) =>
+        els.map((el) => el.getAttribute("data-dockable-window-id")),
+      );
+
     // drop a file onto the FIRST window's editor — it must open there,
     // not in the most recently active (second) window
-    await pointerDrag(
+    await syntheticNativeDrag(
       page,
       treeRow("inside.md"),
-      "[data-dockable-window-id] >> nth=0 >> .ProseMirror",
+      `[data-dockable-window-id="${firstWindowId}"] .ProseMirror`,
     );
 
     await expect(
       page.locator(
-        '[data-dockable-window-id] >> nth=0 >> div[title="inside.md"]',
+        `[data-dockable-window-id="${firstWindowId}"] div[title="inside.md"]`,
       ),
     ).toBeVisible({ timeout: 5_000 });
     await expect(
       page.locator(
-        '[data-dockable-window-id] >> nth=1 >> div[title="inside.md"]',
+        `[data-dockable-window-id="${secondWindowId}"] div[title="inside.md"]`,
       ),
     ).toHaveCount(0);
 
     // dragging an ALREADY-OPEN file onto the other window MOVES its tab
     // there (explicit placement gesture) instead of selecting it in place
-    await pointerDrag(
+    await syntheticNativeDrag(
       page,
       treeRow("inside.md"),
-      "[data-dockable-window-id] >> nth=1 >> .ProseMirror",
+      `[data-dockable-window-id="${secondWindowId}"] .ProseMirror`,
     );
     await expect(
       page.locator(
-        '[data-dockable-window-id] >> nth=1 >> div[title="inside.md"]',
+        `[data-dockable-window-id="${secondWindowId}"] div[title="inside.md"]`,
       ),
     ).toBeVisible({ timeout: 5_000 });
     await expect(
       page.locator(
-        '[data-dockable-window-id] >> nth=0 >> div[title="inside.md"]',
+        `[data-dockable-window-id="${firstWindowId}"] div[title="inside.md"]`,
       ),
     ).toHaveCount(0);
   });
 
-  test("drops still register after the tree scrolls mid-drag", async ({
+  test("drops still land from rows revealed by scrolling the tree", async ({
     page,
   }) => {
     // enough filler rows that the tree overflows and can actually scroll
@@ -289,42 +315,34 @@ test.describe("drag protocol: file tree → tabs/editor", () => {
     }));
     await seedWorkspace(page, filler);
     await page.goto(`/${encodeURIComponent(WORKSPACE)}`);
-    await page.getByRole("button", { name: NOTES_NAME }).click();
+    await page.getByRole("treeitem", { name: NOTES_NAME }).click();
     await expect(page.locator(".ProseMirror")).toBeVisible({
       timeout: 15_000,
     });
 
-    // start dragging a row, then scroll its container mid-drag — the same
-    // displacement dnd-kit's auto-scroll produces near the viewport edge
-    const row = (await page.locator(treeRow(OTHER_NAME)).boundingBox())!;
-    await page.mouse.move(row.x + row.width / 2, row.y + row.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(row.x + row.width / 2 + 12, row.y + 12, {
-      steps: 3,
-    });
-
+    // the tree is virtualized inside its shadow root: rows outside the
+    // viewport are not in the DOM at all. Scroll the shadow scroller to
+    // materialize a late filler row, like a user wheeling down the tree.
     await page.evaluate(() => {
-      // the ScrollArea is the overflow-auto parent of the tree root
-      const viewport =
-        document.querySelector("[data-file-tree-root]")?.parentElement;
-      if (!viewport) throw new Error("missing tree scroll viewport");
-      viewport.scrollTop = 300;
-      if (viewport.scrollTop === 0) {
-        throw new Error("tree viewport did not scroll — fixture too short?");
-      }
+      const host = document.querySelector("file-tree-container");
+      const scroller = host?.shadowRoot?.querySelector(
+        '[data-file-tree-virtualized-scroll]',
+      );
+      if (!scroller) throw new Error("missing tree scroller");
+      scroller.scrollTop = scroller.scrollHeight;
     });
+    const lateRow = page.locator(treeRow("zz-filler-50.md"));
+    await expect(lateRow).toBeVisible();
 
-    const editorBox = (await page.locator(".ProseMirror").boundingBox())!;
-    await page.mouse.move(
-      editorBox.x + editorBox.width / 2,
-      editorBox.y + 40,
-      { steps: 10 },
+    await syntheticNativeDrag(
+      page,
+      treeRow("zz-filler-50.md"),
+      ".ProseMirror > p",
     );
-    await page.mouse.up();
 
-    // the drop still lands: other.md opened as a tab
+    // the drop still lands: the filler opened as a tab
     await expect(
-      page.locator('[data-testid="tab-bar"]', { hasText: OTHER_NAME }),
+      page.locator('[data-testid="tab-bar"]', { hasText: "zz-filler-50.md" }),
     ).toBeVisible({ timeout: 5_000 });
   });
 
@@ -333,7 +351,11 @@ test.describe("drag protocol: file tree → tabs/editor", () => {
   }) => {
     await openNotes(page);
 
-    await pointerDrag(page, treeRow(FOLDER_NAME), ".ProseMirror > p");
+    await syntheticNativeDrag(
+      page,
+      treeDirRow(FOLDER_NAME),
+      ".ProseMirror > p",
+    );
 
     await expect(
       page.locator('[data-testid="tab-bar"]', { hasText: FOLDER_NAME }),
@@ -344,30 +366,35 @@ test.describe("drag protocol: file tree → tabs/editor", () => {
   });
 });
 
-test.describe("drag protocol: tree-internal moves", () => {
+test.describe("tree-internal moves (@pierre/trees native drag)", () => {
   test("dropping a file row on a folder moves it into the folder", async ({
     page,
   }) => {
     await openNotes(page);
 
-    await pointerDrag(page, treeRow(OTHER_NAME), treeRow(FOLDER_NAME));
+    await page
+      .locator(treeRow(OTHER_NAME))
+      .dragTo(page.locator(treeDirRow(FOLDER_NAME)));
 
     await expect(
-      page.locator(treeRowExact(`${WORKSPACE}/${FOLDER_NAME}/other.md`)),
+      page.locator(treeRowExact(`${FOLDER_NAME}/other.md`)),
     ).toBeVisible({ timeout: 10_000 });
   });
 
-  test("dropping a nested file on a plain file row moves it to the root", async ({
+  test("dropping a nested file on a root-level file row moves it to the root", async ({
     page,
   }) => {
     await openNotes(page);
 
-    // file rows aren't drop zones; the drop bubbles to the tree root zone
-    await pointerDrag(page, treeRow("inside.md"), treeRow(OTHER_NAME));
+    // dropping on a file row targets that row's parent directory — here
+    // the workspace root
+    await page
+      .locator(treeRowExact(`${FOLDER_NAME}/inside.md`))
+      .dragTo(page.locator(treeRowExact(OTHER_NAME)));
 
-    await expect(
-      page.locator(treeRowExact(`${WORKSPACE}/inside.md`)),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator(treeRowExact("inside.md"))).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
   test("dropping a file on a folder that already has that name is refused", async ({
@@ -375,12 +402,16 @@ test.describe("drag protocol: tree-internal moves", () => {
   }) => {
     await openNotes(page);
 
-    await pointerDrag(page, treeRowExact(DUPE_ROOT_PATH), treeRow(FOLDER_NAME));
+    await page
+      .locator(treeRowExact("dupe.md"))
+      .dragTo(page.locator(treeDirRow(FOLDER_NAME)));
 
     // both files still exist at their original locations
     await page.waitForTimeout(500);
-    await expect(page.locator(treeRowExact(DUPE_ROOT_PATH))).toHaveCount(1);
-    await expect(page.locator(treeRowExact(DUPE_NESTED_PATH))).toHaveCount(1);
+    await expect(page.locator(treeRowExact("dupe.md"))).toHaveCount(1);
+    await expect(
+      page.locator(treeRowExact(`${FOLDER_NAME}/dupe.md`)),
+    ).toHaveCount(1);
   });
 
   test("a folder cannot be dropped into its own descendant", async ({
@@ -390,27 +421,36 @@ test.describe("drag protocol: tree-internal moves", () => {
 
     // sub2 lives inside sub — dropping sub onto sub2's region must no-op.
     // Nested folders start collapsed; expand sub2 so its child renders.
-    await expect(page.locator(treeRow("sub2"))).toBeVisible();
-    await page.locator(treeRow("sub2")).click();
-    await expect(page.locator(treeRowExact(DEEP_PATH))).toBeVisible();
+    const sub2 = page.locator(treeDirRow(`${FOLDER_NAME}/sub2`));
+    await expect(sub2).toBeVisible();
+    await sub2.click();
+    await expect(
+      page.locator(treeRowExact(`${FOLDER_NAME}/sub2/deep.md`)),
+    ).toBeVisible();
 
-    await pointerDrag(page, treeRow(FOLDER_NAME), treeRow("sub2"));
+    await page.locator(treeDirRow(FOLDER_NAME)).dragTo(sub2);
 
     await page.waitForTimeout(500);
-    await expect(page.locator(treeRowExact(INSIDE_PATH))).toHaveCount(1);
-    await expect(page.locator(treeRowExact(DEEP_PATH))).toHaveCount(1);
+    await expect(
+      page.locator(treeRowExact(`${FOLDER_NAME}/inside.md`)),
+    ).toHaveCount(1);
+    await expect(
+      page.locator(treeRowExact(`${FOLDER_NAME}/sub2/deep.md`)),
+    ).toHaveCount(1);
   });
 
   test("a file that is open in a tab is not moved", async ({ page }) => {
     await openNotes(page); // notes.md is open
 
-    await pointerDrag(page, treeRow(NOTES_NAME), treeRow(FOLDER_NAME));
+    await page
+      .locator(treeRowExact(NOTES_NAME))
+      .dragTo(page.locator(treeDirRow(FOLDER_NAME)));
 
     await page.waitForTimeout(500);
     // stays at the root; nothing appeared inside the folder
-    await expect(page.locator(treeRowExact(NOTES_PATH))).toHaveCount(1);
+    await expect(page.locator(treeRowExact(NOTES_NAME))).toHaveCount(1);
     await expect(
-      page.locator(treeRowExact(`${WORKSPACE}/${FOLDER_NAME}/${NOTES_NAME}`)),
+      page.locator(treeRowExact(`${FOLDER_NAME}/${NOTES_NAME}`)),
     ).toHaveCount(0);
     // and the editor keeps working
     await expect(
@@ -469,12 +509,12 @@ test.describe("drag protocol: editor image → sidebar", () => {
     const imageWrapper = ".ProseMirror [data-drag-handle]";
     await expect(page.locator(imageWrapper)).toBeVisible();
 
-    await syntheticNativeDrag(page, imageWrapper, treeRow(FOLDER_NAME));
+    await syntheticNativeDrag(page, imageWrapper, treeDirRow(FOLDER_NAME));
 
     // the asset file moved into the folder (tree updates via collections;
     // root-depth folders render expanded, so the child row appears directly)
     await expect(
-      page.locator(treeRowExact(`${WORKSPACE}/${FOLDER_NAME}/photo.png`)),
+      page.locator(treeRowExact(`${FOLDER_NAME}/photo.png`)),
     ).toBeVisible({ timeout: 10_000 });
 
     // the document's image node now points at the new location (the src
@@ -497,7 +537,7 @@ test.describe("drag protocol: editor image → sidebar", () => {
       .toContain("sub/photo.png");
   });
 
-  test("dropping an image node on tree empty space moves the asset to the root", async ({
+  test("dropping an image node on a plain file row moves the asset to the root", async ({
     page,
   }) => {
     await openNotes(page);
@@ -505,12 +545,12 @@ test.describe("drag protocol: editor image → sidebar", () => {
     const imageWrapper = ".ProseMirror [data-drag-handle]";
     await expect(page.locator(imageWrapper)).toBeVisible();
 
-    // a plain file row is not a zone — the drop lands on the root zone
-    await syntheticNativeDrag(page, imageWrapper, treeRow(OTHER_NAME));
+    // a file row resolves to its parent directory — the workspace root
+    await syntheticNativeDrag(page, imageWrapper, treeRowExact(OTHER_NAME));
 
-    await expect(
-      page.locator(treeRowExact(`${WORKSPACE}/photo.png`)),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator(treeRowExact("photo.png"))).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
   test("dragging an image within the editor still moves the node", async ({
@@ -531,6 +571,8 @@ test.describe("drag protocol: editor image → sidebar", () => {
     // the image node still exists exactly once (moved, not duplicated/lost)
     await expect(page.locator(imageWrapper)).toHaveCount(1);
     // and no asset move happened — photo.png is still under assets/
-    await expect(page.locator(treeRowExact(ASSET_PATH))).toHaveCount(1);
+    await expect(page.locator(treeRowExact("assets/photo.png"))).toHaveCount(
+      1,
+    );
   });
 });

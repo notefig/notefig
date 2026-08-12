@@ -142,7 +142,7 @@ test.describe("Content Loading", () => {
     await waitForFileTree(page, "small-file.md");
 
     await page.getByRole("button", { name: "New file" }).click();
-    const input = page.locator('input[placeholder="filename.md"]');
+    const input = page.locator("file-tree-container input");
     await input.waitFor({ state: "visible", timeout: 5000 });
     await input.fill("brand-new.md");
     await input.press("Enter");

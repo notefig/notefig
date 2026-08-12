@@ -434,3 +434,48 @@
     list-style-type: none;
   }
 }
+
+/* @pierre/trees file tree (file-tree.tsx). The tree renders in a
+   shadow root, so utilities can't reach it; theming goes through the
+   library's --trees-theme-* slots, which resolve our design tokens at the
+   host and inherit inward. color-scheme drives the library's internal
+   light-dark() fallbacks (scrollbars, git lanes) to match the app theme. */
+file-tree-container {
+  color-scheme: light;
+
+  --trees-theme-sidebar-bg: transparent;
+  --trees-theme-sidebar-fg: hsl(var(--foreground));
+  --trees-theme-sidebar-header-fg: hsl(var(--muted-foreground));
+  --trees-theme-sidebar-border: hsl(var(--border));
+  --trees-theme-list-hover-bg: hsl(var(--accent) / 0.5);
+  --trees-theme-list-active-selection-bg: hsl(var(--accent));
+  --trees-theme-list-active-selection-fg: hsl(var(--accent-foreground));
+  --trees-theme-input-bg: hsl(var(--input));
+  --trees-theme-input-fg: hsl(var(--foreground));
+  --trees-theme-focus-ring: hsl(var(--ring));
+  --trees-theme-scrollbar-thumb: hsl(var(--muted-foreground) / 0.3);
+  --trees-accent-override: hsl(var(--ring));
+  --trees-input-bg-override: hsl(var(--input));
+
+  /* Typography tracks the app: text-sm in rem so the 1.5x UI-scale baseline
+     (html font-size) applies inside the shadow root too. */
+  --trees-font-family-override: var(--font-sans);
+  --trees-font-size-override: 0.875rem;
+
+  /* Spacing parity with the built-in tree's rows: 8px inline padding,
+     12px indent per level (the built-in tree uses px here, not rem). */
+  --trees-item-padding-x-override: 8px;
+  --trees-level-gap-override: 12px;
+}
+
+.dark file-tree-container {
+  color-scheme: dark;
+}
+
+/* The host is a focus-delegation stop (focus-arbiter lands here, then we
+   forward to the focused row inside the shadow root) — never show the
+   browser's default outline on the host itself. */
+file-tree-container:focus,
+file-tree-container:focus-visible {
+  outline: none;
+}

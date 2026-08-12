@@ -444,6 +444,9 @@ export function isSidebarTextEntryActive(
 export function isTextEntryActive(activeElement: Element | null): boolean {
   if (!(activeElement instanceof HTMLElement)) return false;
 
+  const shadowActive = activeElement.shadowRoot?.activeElement;
+  if (shadowActive) return isTextEntryActive(shadowActive);
+
   return !!activeElement.closest(
     'input, textarea, [contenteditable="true"], [role="textbox"]',
   );
