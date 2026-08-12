@@ -80,14 +80,14 @@ test.describe("Focus Management", () => {
   });
 
   test("context menu rename keeps input focus @smoke", async ({ page }) => {
-    await page.locator('button:has-text("rename-me.md")').first().click({
+    await page.getByRole("treeitem", { name: "rename-me.md" }).click({
       button: "right",
     });
     await page.locator('[role="menuitem"]:has-text("Rename")').click();
 
-    const renameInput = page.locator(
-      'input[data-focus-key^="file-tree-rename-"]',
-    );
+    // The inline rename input lives in the tree's shadow root; with search
+    // disabled it is the only input inside file-tree-container.
+    const renameInput = page.locator("file-tree-container input");
     await expect(renameInput).toBeVisible();
     await expect(renameInput).toBeFocused();
 
@@ -101,7 +101,7 @@ test.describe("Focus Management", () => {
     await renameInput.press("Enter");
 
     await expect(
-      page.locator('button:has-text("renamed-focus.md")'),
+      page.getByRole("treeitem", { name: "renamed-focus.md" }),
     ).toBeVisible();
   });
 
@@ -164,7 +164,9 @@ test.describe("Focus Management", () => {
   test("creating a new file focuses the opened editor", async ({ page }) => {
     await page.getByRole("button", { name: "New file" }).click();
 
-    const createInput = page.locator('input[placeholder="filename.md"]');
+    // Creation is an inline rename of a placeholder row (shadow root input,
+    // pre-filled with "untitled.md").
+    const createInput = page.locator("file-tree-container input");
     await expect(createInput).toBeVisible();
     await expect(createInput).toBeFocused();
 
@@ -172,7 +174,7 @@ test.describe("Focus Management", () => {
     await createInput.press("Enter");
 
     await expect(
-      page.locator('button:has-text("focus-created-file.md")'),
+      page.getByRole("treeitem", { name: "focus-created-file.md" }),
     ).toBeVisible();
     const editor = page
       .locator('[role="textbox"]')
@@ -189,7 +191,7 @@ test.describe("Focus Management", () => {
     page,
   }) => {
     await page.getByRole("button", { name: "New file" }).click();
-    const createInput = page.locator('input[placeholder="filename.md"]');
+    const createInput = page.locator("file-tree-container input");
     await createInput.fill("empty-widget-focus.md");
     await createInput.press("Enter");
 

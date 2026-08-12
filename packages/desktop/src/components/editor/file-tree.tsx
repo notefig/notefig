@@ -1,5 +1,13 @@
-import { useMemo, useState, useCallback, useRef, useEffect, memo } from "react";
-import { useHotkey, useKeyHold } from "@tanstack/react-hotkeys";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import {
+  FileTree as TreesFileTree,
+  type FileTreeProps as TreesFileTreeProps,
+} from "@pierre/trees/react";
+import type {
+  ContextMenuItem,
+  ContextMenuOpenContext,
+} from "@pierre/trees";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -10,37 +18,28 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useTranslation } from "react-i18next";
-import {
-  FileText,
-  Folder,
-  FolderOpen,
-  ChevronRight,
-  ChevronDown,
-} from "lucide-react";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import {
-  FileTreeNode,
-  flatEntriesToTree,
+  getDirectoryPath,
   getFileName,
-  getFileExtension,
-  validateFileName,
-  type FileEntries,
   type SortOrder,
+  type FileTreeNode,
 } from "@/utils/fs";
-import { useFileCollections, prefetchFileContent } from "@/entities/files";
-import { useDirectoryStatHydration } from "./use-directory-stat-hydration";
-import { useLiveQuery } from "@tanstack/react-db";
-import { FileTreeContextMenu } from "./file-tree-context-menu";
-import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
-import { requestElementFocus } from "@/utils/focus-arbiter";
 import {
-  dropZoneProps,
-  ProtocolDndContext,
-  useProtocolDraggable,
-} from "@/utils/drag-protocol";
+  useFileCollections,
+  renameFileOrDirectory,
+  prefetchFileContent,
+} from "@/entities/files";
+import { useLiveQuery } from "@tanstack/react-db";
+import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
+import { dropZoneProps, tagCurrentDrag } from "@/utils/drag-protocol";
 import { moveIntoFolder } from "@/utils/drop-actions";
+import { attachTreeStatHydration } from "./tree-stat-hydration";
+import {
+  attachExpansionMemory,
+  rememberedExpandedPaths,
+} from "./tree-expansion-memory";
+import { acquireTreeModel } from "./tree-model-cache";
 
 /** Discriminated union representing the file tree's inline-editing state. */
 export type FileTreeMode =
@@ -50,7 +49,33 @@ export type FileTreeMode =
 
 export const FILE_TREE_IDLE: FileTreeMode = { type: "idle" };
 
-interface FileTreeProps {
+/**
+ * The sidebar file tree, rendered by @pierre/trees (virtualized, keyboard
+ * navigable, ARIA tree in a shadow root).
+ *
+ * The model itself lives in tree-model-cache.ts, one per workspace, and
+ * OUTLIVES this component: sidebar view switches and sort changes reattach
+ * the cached model instead of rebuilding it, so expansion/scroll/focus
+ * survive. All trees option callbacks route through the cache entry's
+ * mutable delegate — this component reassigns it every render, so the
+ * long-lived model never holds stale component closures.
+ *
+ * Integration decisions vs. the library defaults:
+ * - No in-tree search yet (fast follow) — also keeps DOM focus on rows
+ *   instead of the search input's fake-focus scheme.
+ * - No git status, no file-type icons.
+ * - Mod+click opens in a new tab (our convention); trees' built-in
+ *   mod/shift multi-select is intercepted before it reaches the model.
+ * - Theming lives in styles.css (`file-tree-container` block) via the
+ *   --trees-theme-* slots + color-scheme; row height is computed from the
+ *   root font-size so the 1.5x UI-scale baseline holds.
+ * - Drag interop: internal moves are trees' native drag; host dragstart
+ *   tags the protocol payload so dockable tab bars accept tree rows, and a
+ *   host-level protocol dropzone routes image-asset drops (dnd-kit pointer
+ *   drags can't see shadow-DOM rows) to the hovered folder by hit-testing
+ *   into the shadow root.
+ */
+interface FileTreeComponentProps {
   selectedFilePath: string | null;
   onFileSelect: (
     file: FileTreeNode,
@@ -70,492 +95,18 @@ interface FileTreeProps {
   onModeChange: (mode: FileTreeMode) => void;
 }
 
-interface FileTreeItemProps {
-  node: FileTreeNode;
-  depth: number;
-  basePath: string;
-  isPrimaryFocusTarget?: boolean;
-  selectedFilePath: string | null;
-  onFileSelect: (
-    file: FileTreeNode,
-    options?: Omit<OpenFileInLayoutOptions, "tabId">,
-  ) => void;
-  onFileHover?: (filePath: string) => void;
-  onDelete?: (path: string) => void;
-  onRequestDelete: (path: string, type: "file" | "directory") => void;
-  onRename?: (oldPath: string, newName: string) => void;
-  onCreate?: (
-    parentPath: string,
-    name: string,
-    type: "file" | "directory",
-  ) => void;
-  openTabs?: string[];
-  mode: FileTreeMode;
-  onModeChange: (mode: FileTreeMode) => void;
+/** Row height in rem: text-sm line-height (1.25rem) + py-1 top/bottom. */
+const ROW_HEIGHT_REM = 1.75;
+
+export function FileTree(props: FileTreeComponentProps) {
+  // Remount per workspace: the inner component's transient state (pending
+  // delete dialog, hover memo) must not leak across workspaces. The MODEL
+  // is cached per workspace either way.
+  return <FileTreeInner key={props.basePath} {...props} />;
 }
 
-/**
- * Isolated rename input component.
- * Manages its own value state and uses a committed ref to prevent
- * double-submission (e.g. blur firing after Enter or Escape).
- */
-interface RenameInputProps {
-  initialName: string;
-  fileType: "file" | "directory";
-  filePath: string;
-  onSubmit: (newName: string) => void;
-  onCancel: () => void;
-}
-
-const RenameInput = memo(function RenameInput({
-  initialName,
-  fileType,
-  filePath,
-  onSubmit,
-  onCancel,
-}: RenameInputProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const focusKey = `file-tree-rename-${filePath}`;
-  const committedRef = useRef(false);
-
-  useSidebarInputFocus(focusKey, "file-tree-rename");
-
-  useEffect(() => {
-    const input = inputRef.current;
-    if (!input) return;
-    if (document.activeElement !== input) return;
-
-    if (fileType === "file") {
-      const ext = getFileExtension(filePath);
-      const nameWithoutExt = ext
-        ? initialName.slice(0, -(ext.length + 1))
-        : initialName;
-      input.setSelectionRange(0, nameWithoutExt.length);
-    } else {
-      input.select();
-    }
-  }, [filePath, fileType, initialName]);
-
-  const commit = useCallback(
-    (value: string) => {
-      if (committedRef.current) return;
-      committedRef.current = true;
-
-      const trimmed = value.trim();
-      const error = validateFileName(trimmed);
-      if (error || trimmed === initialName) {
-        onCancel();
-        return;
-      }
-      onSubmit(trimmed);
-    },
-    [initialName, onSubmit, onCancel],
-  );
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      // Stop all key events from bubbling so parent button/tree doesn't react
-      e.stopPropagation();
-      if (e.key === "Enter") {
-        e.preventDefault();
-        commit(e.currentTarget.value);
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        committedRef.current = true;
-        onCancel();
-      }
-    },
-    [commit, onCancel],
-  );
-
-  const handleBlur = useCallback(
-    (e: React.FocusEvent<HTMLInputElement>) => {
-      commit(e.currentTarget.value);
-    },
-    [commit],
-  );
-
-  return (
-    <input
-      ref={inputRef}
-      data-focus-key={focusKey}
-      autoFocus
-      defaultValue={initialName}
-      className="flex-1 min-w-0 bg-background text-foreground text-sm outline-none border border-ring rounded px-1"
-      onKeyDown={handleKeyDown}
-      onBlur={handleBlur}
-      onClick={(e) => e.stopPropagation()}
-      onDoubleClick={(e) => e.stopPropagation()}
-    />
-  );
-});
-
-/**
- * Input component for creating new files/directories.
- * Starts with an empty value. On commit, validates the name and calls onSubmit.
- * On Escape or empty blur, cancels.
- */
-interface NewFileInputProps {
-  type: "file" | "directory";
-  onSubmit: (name: string) => void;
-  onCancel: () => void;
-  depth: number;
-}
-
-const NewFileInput = memo(function NewFileInput({
-  type,
-  onSubmit,
-  onCancel,
-  depth,
-}: NewFileInputProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const committedRef = useRef(false);
-  const focusKey = `file-tree-create-${depth}-${type}`;
-
-  useSidebarInputFocus(focusKey, "file-tree-create");
-
-  const commit = useCallback(
-    (value: string) => {
-      if (committedRef.current) return;
-      committedRef.current = true;
-
-      const trimmed = value.trim();
-      const error = validateFileName(trimmed);
-      if (error || trimmed.length === 0) {
-        onCancel();
-        return;
-      }
-      onSubmit(trimmed);
-    },
-    [onSubmit, onCancel],
-  );
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      e.stopPropagation();
-      if (e.key === "Enter") {
-        e.preventDefault();
-        commit(e.currentTarget.value);
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        committedRef.current = true;
-        onCancel();
-      }
-    },
-    [commit, onCancel],
-  );
-
-  const handleBlur = useCallback(
-    (e: React.FocusEvent<HTMLInputElement>) => {
-      commit(e.currentTarget.value);
-    },
-    [commit],
-  );
-
-  const paddingValue = depth * 12 + 8;
-
-  return (
-    <div
-      className="flex items-center gap-1 px-2 py-1"
-      style={{
-        paddingInlineStart: `${paddingValue}px`,
-        paddingInlineEnd: "8px",
-      }}
-    >
-      <div className="flex items-center gap-1 flex-1 min-w-0">
-        {type === "directory" ? (
-          <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground rtl:-scale-x-100" />
-        ) : (
-          <span className="w-4 shrink-0" />
-        )}
-        <input
-          ref={inputRef}
-          data-focus-key={focusKey}
-          autoFocus
-          placeholder={type === "file" ? "filename.md" : "folder name"}
-          className="flex-1 min-w-0 bg-background text-foreground text-sm outline-none border border-ring rounded px-1"
-          onKeyDown={handleKeyDown}
-          onBlur={handleBlur}
-          onClick={(e) => e.stopPropagation()}
-          onDoubleClick={(e) => e.stopPropagation()}
-        />
-      </div>
-    </div>
-  );
-});
-
-function useSidebarInputFocus(focusKey: string, reason: string): void {
-  useEffect(() => {
-    requestElementFocus(focusKey, {
-      domain: "sidebar",
-      priority: 85,
-      reason,
-      when: "when-mounted",
-    });
-  }, [focusKey, reason]);
-}
-
-function FileTreeItem({
-  node,
-  depth,
-  basePath,
-  isPrimaryFocusTarget = false,
-  selectedFilePath,
-  onFileSelect,
-  onFileHover,
-  onDelete,
-  onRequestDelete,
-  onRename,
-  onCreate,
-  openTabs,
-  mode,
-  onModeChange,
-}: FileTreeItemProps) {
-  const [isExpanded, setIsExpanded] = useState(depth === 0);
-  useDirectoryStatHydration(basePath, node, isExpanded);
-
-  const isMetaHeld = useKeyHold("Meta");
-  const isControlHeld = useKeyHold("Control");
-  const isModHeld = isMetaHeld || isControlHeld;
-
-  const isRenaming = mode.type === "renaming" && mode.path === node.path;
-  const isCreatingHere =
-    node.type === "directory" &&
-    mode.type === "creating" &&
-    mode.parentPath === node.path;
-  const creatingItemType = mode.type === "creating" ? mode.itemType : null;
-  const name = getFileName(node.path);
-
-  useEffect(() => {
-    if (isCreatingHere && !isExpanded) {
-      setIsExpanded(true);
-    }
-  }, [isCreatingHere]);
-
-  const isOpen = useMemo(() => {
-    if (!openTabs || openTabs.length === 0) return false;
-    if (node.type === "file") {
-      return openTabs.includes(node.path);
-    }
-    const prefix = node.path.endsWith("/") ? node.path : node.path + "/";
-    return openTabs.some((tab) => tab.startsWith(prefix));
-  }, [openTabs, node.path, node.type]);
-
-  const handleClick = () => {
-    if (isRenaming) return;
-    if (node.type === "directory") {
-      setIsExpanded(!isExpanded);
-    } else {
-      onFileSelect(
-        node,
-        isModHeld ? { intent: "new-tab" } : { intent: "replace" },
-      );
-    }
-  };
-
-  const handleMouseEnter = () => {
-    if (node.type === "file" && onFileHover) {
-      onFileHover(node.path);
-    }
-  };
-
-  const handleRenameSubmit = useCallback(
-    (newName: string) => {
-      onRename?.(node.path, newName);
-      onModeChange(FILE_TREE_IDLE);
-    },
-    [node.path, onRename, onModeChange],
-  );
-
-  const handleRenameCancel = useCallback(() => {
-    onModeChange(FILE_TREE_IDLE);
-  }, [onModeChange]);
-
-  const handleCreateSubmit = useCallback(
-    (name: string) => {
-      if (mode.type === "creating") {
-        onCreate?.(mode.parentPath, name, mode.itemType);
-      }
-      onModeChange(FILE_TREE_IDLE);
-    },
-    [mode, onCreate, onModeChange],
-  );
-
-  const handleCreateCancel = useCallback(() => {
-    onModeChange(FILE_TREE_IDLE);
-  }, [onModeChange]);
-
-  const handleNewFileInDir = useCallback(
-    (dirPath: string) => {
-      onModeChange({ type: "creating", parentPath: dirPath, itemType: "file" });
-    },
-    [onModeChange],
-  );
-
-  const handleNewFolderInDir = useCallback(
-    (dirPath: string) => {
-      onModeChange({
-        type: "creating",
-        parentPath: dirPath,
-        itemType: "directory",
-      });
-    },
-    [onModeChange],
-  );
-
-  const handleOpenInNewTab = useCallback(
-    (path: string) => {
-      onFileSelect(
-        {
-          path,
-          type: "file",
-          contentHash: "",
-          content: "",
-        },
-        { intent: "new-tab" },
-      );
-    },
-    [onFileSelect],
-  );
-
-  const paddingValue = depth * 12 + 8;
-
-  const drag = useProtocolDraggable({
-    id: node.path,
-    payload: {
-      kind: "file",
-      path: node.path,
-      fileType: node.type,
-      workspaceRoot: basePath,
-    },
-    disabled: mode.type !== "idle",
-  });
-
-  const buttonElement = (
-    <button
-      ref={drag.setNodeRef}
-      {...drag.listeners}
-      {...drag.attributes}
-      data-focus-key={
-        isPrimaryFocusTarget ? "sidebar-first-file-item" : undefined
-      }
-      data-file-path={node.path}
-      onClick={handleClick}
-      onMouseEnter={handleMouseEnter}
-      className={cn(
-        "w-full flex items-center gap-1 px-2 py-1 text-sm hover:bg-accent/50 transition-colors",
-        selectedFilePath === node.path && node.type === "file" && "bg-accent",
-      )}
-      style={{
-        paddingInlineStart: `${paddingValue}px`,
-        paddingInlineEnd: "8px",
-      }}
-    >
-      {/* Icons and name container - reverses in RTL */}
-      <div className="flex items-center gap-1 flex-1 min-w-0">
-        {node.type === "directory" ? (
-          <>
-            {isExpanded ? (
-              <ChevronDown className="w-4 h-4 shrink-0 text-muted-foreground rtl:-scale-x-100" />
-            ) : (
-              <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground rtl:-scale-x-100" />
-            )}
-          </>
-        ) : (
-          <>
-            <span className="w-4 shrink-0" />
-          </>
-        )}
-        {isRenaming ? (
-          <RenameInput
-            initialName={name}
-            fileType={node.type}
-            filePath={node.path}
-            onSubmit={handleRenameSubmit}
-            onCancel={handleRenameCancel}
-          />
-        ) : (
-          <span className="truncate text-foreground">{name}</span>
-        )}
-      </div>
-      <span className="shrink-0 text-xs text-muted-foreground uppercase tracking-wider"></span>
-    </button>
-  );
-
-  return (
-    <div
-      // Directories accept drops across their whole subtree region.
-      {...(node.type === "directory"
-        ? dropZoneProps({
-            accepts: ["file", "image-asset"],
-            dropEffect: "move",
-            onDrop: (payload) => moveIntoFolder(payload, node.path),
-          })
-        : {})}
-      className={
-        node.type === "directory"
-          ? cn(
-              "rounded-sm transition-colors",
-              "data-[mtr-drop-over=true]:shadow-[0_0_0_1px_hsl(var(--ring))_inset]",
-              "data-[mtr-drop-over=true]:bg-[hsl(var(--ring)/0.12)]",
-            )
-          : undefined
-      }
-    >
-      {onDelete ? (
-        <FileTreeContextMenu
-          path={node.path}
-          type={node.type}
-          onRequestDelete={() => onRequestDelete(node.path, node.type)}
-          onRenameStart={() =>
-            onModeChange({ type: "renaming", path: node.path })
-          }
-          onOpenInNewTab={node.type === "file" ? handleOpenInNewTab : undefined}
-          onNewFile={handleNewFileInDir}
-          onNewFolder={handleNewFolderInDir}
-          disableRename={isOpen}
-        >
-          {buttonElement}
-        </FileTreeContextMenu>
-      ) : (
-        buttonElement
-      )}
-      {node.type === "directory" && isExpanded && (
-        <div>
-          {isCreatingHere && creatingItemType && (
-            <NewFileInput
-              type={creatingItemType}
-              onSubmit={handleCreateSubmit}
-              onCancel={handleCreateCancel}
-              depth={depth + 1}
-            />
-          )}
-          {node.children?.map((child) => (
-            <FileTreeItem
-              key={child.path}
-              node={child}
-              depth={depth + 1}
-              basePath={basePath}
-              isPrimaryFocusTarget={false}
-              selectedFilePath={selectedFilePath}
-              onFileSelect={onFileSelect}
-              onFileHover={onFileHover}
-              onDelete={onDelete}
-              onRequestDelete={onRequestDelete}
-              onRename={onRename}
-              onCreate={onCreate}
-              openTabs={openTabs}
-              mode={mode}
-              onModeChange={onModeChange}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function FileTree({
+// fallow-ignore-next-line complexity
+function FileTreeInner({
   selectedFilePath,
   onFileSelect,
   onDelete,
@@ -566,20 +117,17 @@ export function FileTree({
   sortOrder = "name-asc",
   mode,
   onModeChange,
-}: FileTreeProps) {
+}: FileTreeComponentProps) {
   const { t } = useTranslation();
   const { metadata } = useFileCollections(basePath);
-  const [pendingDelete, setPendingDelete] = useState<{
-    path: string;
-    type: "file" | "directory";
-  } | null>(null);
 
-  const handleFileHover = useCallback(
-    (filePath: string) => {
-      prefetchFileContent(basePath, filePath).catch((error: unknown) => {
-        console.debug(`Failed to prefetch ${filePath}:`, error);
-      });
-    },
+  const toAbs = useCallback(
+    (rel: string) => `${basePath}/${rel.replace(/\/+$/, "")}`,
+    [basePath],
+  );
+  const toRel = useCallback(
+    (abs: string) =>
+      abs.startsWith(basePath) ? abs.slice(basePath.length + 1) : abs,
     [basePath],
   );
 
@@ -590,142 +138,636 @@ export function FileTree({
         relativePath: file.relativePath,
         type: file.type,
         modified: file.modified,
-        size: file.size,
-        contentHash: file.contentHash,
-        error: file.error,
       })),
     [basePath],
   );
 
-  const files: FileEntries = useMemo(() => {
-    return fileMetadataList.reduce((acc, entry) => {
-      acc[entry.path] = {
-        ...entry,
-        content: "", // Metadata doesn't include content
-      };
-      return acc;
-    }, {} as FileEntries);
+  // Trees marks directories with a trailing slash in the input path list.
+  // Collapse duplicate slashes defensively: a malformed segment would make
+  // trees materialize an empty-named phantom directory.
+  const treePaths = useMemo(() => {
+    return fileMetadataList
+      .filter((entry) => entry.relativePath)
+      .map((entry) => {
+        const rel = entry.relativePath!.replace(/\/{2,}/g, "/");
+        return entry.type === "directory" ? `${rel}/` : rel;
+      });
   }, [fileMetadataList]);
 
-  const filesTree = useMemo(() => {
-    return flatEntriesToTree(files, basePath, sortOrder);
-  }, [files, basePath, sortOrder]);
+  const selectedFilePathRef = useRef(selectedFilePath);
+  selectedFilePathRef.current = selectedFilePath;
 
-  // Root-level rows aren't inside any expandable directory — hydrate them
-  // here, always "expanded".
-  useDirectoryStatHydration(
-    basePath,
-    { path: basePath, type: "directory", children: filesTree },
-    true,
+  const openTabsRef = useRef(openTabs);
+  openTabsRef.current = openTabs;
+  const isPathOpenInTab = useCallback((absPath: string) => {
+    const tabs = openTabsRef.current ?? [];
+    const prefix = absPath + "/";
+    return tabs.some((tab) => tab === absPath || tab.startsWith(prefix));
+  }, []);
+
+  const [pendingDelete, setPendingDelete] = useState<{
+    path: string;
+    type: "file" | "directory";
+  } | null>(null);
+
+  // Row height must agree between the model (virtualization math) and the
+  // shadow CSS; both derive from the root font-size so UI scale is honored.
+  const [itemHeightPx] = useState(() =>
+    Math.round(
+      parseFloat(getComputedStyle(document.documentElement).fontSize) *
+        ROW_HEIGHT_REM,
+    ),
   );
 
-  const isCreatingAtRoot =
-    mode.type === "creating" && mode.parentPath === basePath;
-  const rootCreatingItemType = mode.type === "creating" ? mode.itemType : null;
-  const treeRootRef = useRef<HTMLDivElement | null>(null);
+  const entry = useMemo(
+    () =>
+      acquireTreeModel(basePath, {
+        order: sortOrder,
+        itemHeightPx,
+        initialSelectedPaths: selectedFilePathRef.current
+          ? [
+              selectedFilePathRef.current.startsWith(basePath)
+                ? selectedFilePathRef.current.slice(basePath.length + 1)
+                : selectedFilePathRef.current,
+            ]
+          : [],
+        initialExpandedPaths: rememberedExpandedPaths(basePath),
+        delegate: {
+          isPathOpenInTab: () => false,
+          moveFile: () => {},
+          renameFile: () => {},
+          createEntry: () => {},
+        },
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- acquisition
+    // inputs are first-creation-only; the delegate below tracks renders.
+    [basePath, itemHeightPx],
+  );
+  const model = entry.model;
 
-  const handleCreateSubmitRoot = useCallback(
-    (name: string) => {
-      if (mode.type === "creating") {
-        onCreate?.(mode.parentPath, name, mode.itemType);
+  // The long-lived model calls into the app through this delegate — refresh
+  // it every render so it never sees stale props.
+  entry.delegate = {
+    isPathOpenInTab,
+    moveFile: (fromAbs, destAbs) => {
+      renameFileOrDirectory(basePath, fromAbs, destAbs).catch(
+        (error: unknown) => {
+          console.error(`Failed to move ${fromAbs}:`, error);
+        },
+      );
+    },
+    renameFile: (oldAbs, newName) => onRename?.(oldAbs, newName),
+    createEntry: (parentAbs, name, type) => onCreate?.(parentAbs, name, type),
+  };
+
+  // Mutable lookup for the date-modified comparator (the cache's comparator
+  // reads sortState at compare time). Filled synchronously: sorts can run
+  // during this same render pass.
+  entry.sortState.modifiedByRelPath = useMemo(() => {
+    const next = new Map<string, number>();
+    for (const item of fileMetadataList) {
+      if (item.relativePath) {
+        next.set(
+          item.relativePath.replace(/\/{2,}/g, "/"),
+          item.modified ? new Date(item.modified).getTime() : 0,
+        );
       }
-      onModeChange(FILE_TREE_IDLE);
-    },
-    [mode, onCreate, onModeChange],
-  );
-
-  const handleCreateCancelRoot = useCallback(() => {
-    onModeChange(FILE_TREE_IDLE);
-  }, [onModeChange]);
-
-  const handleHotkeyDelete = useCallback(() => {
-    if (!onDelete) return;
-    if (mode.type !== "idle") return;
-
-    const active = document.activeElement;
-    if (
-      active instanceof HTMLButtonElement &&
-      active.dataset.filePath &&
-      active.closest("[data-file-tree-root]")
-    ) {
-      const filePath = active.dataset.filePath;
-      const entry = files[filePath];
-      const type = entry?.type === "directory" ? "directory" : "file";
-      setPendingDelete({ path: filePath, type });
     }
-  }, [mode.type, onDelete, files]);
+    return next;
+  }, [fileMetadataList]);
 
-  const handleRequestDelete = useCallback(
-    (path: string, type: "file" | "directory") => {
-      setPendingDelete({ path, type });
-    },
-    [],
+  const treePathsRef = useRef(treePaths);
+  treePathsRef.current = treePaths;
+
+  // Lazy metadata hydration (MET-99) — see tree-stat-hydration.ts.
+  useEffect(
+    () => attachTreeStatHydration(model, basePath, toAbs),
+    [model, basePath, toAbs],
   );
 
-  useHotkey("Mod+Backspace", handleHotkeyDelete, {
-    enabled: Boolean(onDelete),
-    target: treeRootRef,
-  });
+  // Mirror expansion into the module store — see tree-expansion-memory.ts.
+  // With the cached model, this feeds sort-switch resets and rebuilds after
+  // cache eviction.
+  useEffect(() => attachExpansionMemory(model, basePath), [model, basePath]);
 
-  // Drops on empty space / file rows (not zones) move to workspace root.
-  const rootDrop = dropZoneProps({
-    accepts: ["file", "image-asset"],
+  // Single-selection semantics: item.select() is additive in trees, so clear
+  // the rest whenever we programmatically mirror the active tab.
+  const selectOnly = useCallback(
+    (rel: string) => {
+      for (const selected of model.getSelectedPaths()) {
+        if (selected !== rel) model.getItem(selected)?.deselect();
+      }
+      const item = model.getItem(rel);
+      if (item && !item.isSelected()) item.select();
+    },
+    [model],
+  );
+
+  // Sort changes retune the cached model in place (trees only sorts on
+  // insert/reset): flip the comparator's mode and reset with the remembered
+  // expansion shape.
+  useEffect(() => {
+    if (entry.sortState.order === sortOrder) return;
+    entry.sortState.order = sortOrder;
+    model.resetPaths(treePathsRef.current, {
+      initialExpandedPaths: rememberedExpandedPaths(basePath) ?? [],
+    });
+    if (selectedFilePathRef.current) {
+      selectOnly(toRel(selectedFilePathRef.current));
+    }
+  }, [sortOrder, entry, model, basePath, selectOnly, toRel]);
+
+  // Open files from explicit gestures (click / Enter on a row), NOT from
+  // onSelectionChange: the model applies selection as a side effect of
+  // startRenaming and programmatic sync, which must not open tabs.
+  const openFileAtPath = useCallback(
+    (rel: string, options?: Omit<OpenFileInLayoutOptions, "tabId">) => {
+      const abs = toAbs(rel);
+      if (!options?.intent && abs === selectedFilePathRef.current) return;
+      onFileSelect(
+        { path: abs, type: "file", contentHash: "", content: "" },
+        options,
+      );
+    },
+    [toAbs, onFileSelect],
+  );
+
+  const findRowInComposedPath = useCallback((event: Event) => {
+    for (const target of event.composedPath()) {
+      if (!(target instanceof HTMLElement)) continue;
+      const path = target.dataset.itemPath;
+      if (path && target.dataset.itemType) {
+        return { path, type: target.dataset.itemType };
+      }
+    }
+    return null;
+  }, []);
+
+  const handleHostClick = useCallback(
+    (event: React.MouseEvent) => {
+      const row = findRowInComposedPath(event.nativeEvent);
+      if (row?.type === "file") openFileAtPath(row.path);
+    },
+    [findRowInComposedPath, openFileAtPath],
+  );
+
+  // Our convention: Mod+click opens in a new tab. Trees' own convention is
+  // mod/shift multi-select — intercept in the capture phase so the modifier
+  // click never reaches the model's selection logic.
+  // fallow-ignore-next-line complexity
+  const handleHostClickCapture = useCallback(
+    (event: React.MouseEvent) => {
+      if (!(event.metaKey || event.ctrlKey || event.shiftKey)) return;
+      const row = findRowInComposedPath(event.nativeEvent);
+      if (!row) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (row.type === "file") {
+        const newTab = event.metaKey || event.ctrlKey;
+        openFileAtPath(row.path, newTab ? { intent: "new-tab" } : undefined);
+      } else {
+        const item = model.getItem(row.path);
+        if (item && "toggle" in item) item.toggle();
+      }
+    },
+    [findRowInComposedPath, openFileAtPath, model],
+  );
+
+  // Hover prefetch, same behavior as the previous tree's per-row mouseenter.
+  const lastHoveredRef = useRef<string | null>(null);
+  const handleHostMouseOver = useCallback(
+    (event: React.MouseEvent) => {
+      const row = findRowInComposedPath(event.nativeEvent);
+      if (!row || row.type !== "file") return;
+      if (lastHoveredRef.current === row.path) return;
+      lastHoveredRef.current = row.path;
+      prefetchFileContent(basePath, toAbs(row.path)).catch(
+        (error: unknown) => {
+          console.debug(`Failed to prefetch ${row.path}:`, error);
+        },
+      );
+    },
+    [findRowInComposedPath, basePath, toAbs],
+  );
+
+  // Trees' internal drags are native HTML5. Tag them with the protocol
+  // payload so protocol dropzones outside the tree (dockable tab bars)
+  // accept tree rows; internal tree moves are unaffected.
+  const handleHostDragStart = useCallback(
+    (event: React.DragEvent) => {
+      if (event.defaultPrevented) return;
+      const row = findRowInComposedPath(event.nativeEvent);
+      if (!row || !event.dataTransfer) return;
+      tagCurrentDrag(
+        {
+          kind: "file",
+          path: toAbs(row.path),
+          fileType: row.type === "folder" ? "directory" : "file",
+          workspaceRoot: basePath,
+        },
+        event.dataTransfer,
+      );
+    },
+    [findRowInComposedPath, toAbs, basePath],
+  );
+
+  // Focus-arbiter parity: the arbiter resolves data-focus-key via
+  // document.querySelector, which cannot see into the shadow root. The host
+  // carries the key; when the arbiter focuses it, delegate to the first row.
+  // document.activeElement stays on the host while focus is inside its
+  // shadow tree, so the arbiter's ownership check keeps holding.
+  const pendingFirstFocusRef = useRef(false);
+  const focusFirstRow = useCallback(() => {
+    if (model.getVisibleCount() === 0) {
+      // Rows haven't loaded yet (mount-time arbiter intent races the live
+      // query); complete the hand-off when the first reconcile lands.
+      pendingFirstFocusRef.current = true;
+      return;
+    }
+    pendingFirstFocusRef.current = false;
+    model.focusFirstItem();
+    requestAnimationFrame(() => {
+      const container = model.getFileTreeContainer();
+      const rowButton = container?.shadowRoot?.querySelector<HTMLElement>(
+        '[data-type="item"][tabindex="0"]',
+      );
+      rowButton?.focus({ preventScroll: true });
+    });
+  }, [model]);
+
+  const handleHostFocus = useCallback(
+    (event: React.FocusEvent) => {
+      // Focus events from inside the shadow tree retarget to the host, so
+      // target === currentTarget even when the user clicked a row. Only
+      // delegate when the HOST ITSELF took focus (arbiter hand-off): then
+      // nothing inside the shadow root holds focus.
+      const host = event.currentTarget as HTMLElement;
+      if (host.shadowRoot?.activeElement) return;
+      // An in-flight inline rename owns focus next — delegating now would
+      // blur its input, and blur commits the rename.
+      if (host.shadowRoot?.querySelector("[data-item-rename-input]")) return;
+      // Focus falling out of our own light-DOM children (the slotted
+      // context menu unmounting) is internal churn, not an arbiter grant.
+      if (
+        event.relatedTarget instanceof Node &&
+        host.contains(event.relatedTarget)
+      ) {
+        return;
+      }
+      focusFirstRow();
+    },
+    [focusFirstRow],
+  );
+
+  // Reconcile the model against the live query with add/remove diffs so
+  // expansion and selection state survive watcher updates. The mirror lives
+  // on the cache entry: the watcher keeps writing while the tree is
+  // unmounted, and the next mount diffs from the last state the MODEL saw.
+  // Keys are canonical (no trailing slash); values keep the trailing-slash
+  // directory marker that trees' add() needs.
+  // fallow-ignore-next-line complexity
+  useEffect(() => {
+    const next = new Map(
+      treePaths.map((p) => [p.replace(/\/+$/, ""), p] as const),
+    );
+    const prev = entry.knownPaths ?? new Map<string, string>();
+    entry.knownPaths = next;
+
+    const pending = entry.pendingCreate;
+    const adds: string[] = [];
+    for (const [canonical, inputPath] of next) {
+      if (!prev.has(canonical) && !model.getItem(canonical)) {
+        adds.push(inputPath);
+      }
+    }
+    const removes: string[] = [];
+    for (const canonical of prev.keys()) {
+      if (
+        !next.has(canonical) &&
+        canonical !== pending?.path &&
+        model.getItem(canonical)
+      ) {
+        removes.push(canonical);
+      }
+    }
+
+    // Parents before children in both directions ("dir/" sorts before
+    // "dir/file"). For removes, drop descendants of an already-removed
+    // directory: the recursive parent remove takes them out of the model,
+    // and a second remove for a gone path throws inside batch().
+    adds.sort();
+    removes.sort();
+    const prunedRemoves: string[] = [];
+    let lastKept: string | null = null;
+    for (const canonical of removes) {
+      if (lastKept && canonical.startsWith(lastKept + "/")) continue;
+      prunedRemoves.push(canonical);
+      lastKept = canonical;
+    }
+
+    const ops: Array<
+      | { type: "add"; path: string }
+      | { type: "remove"; path: string; recursive: boolean }
+    > = [
+      ...adds.map((path) => ({ type: "add" as const, path })),
+      ...prunedRemoves.map((path) => ({
+        type: "remove" as const,
+        path,
+        recursive: true,
+      })),
+    ];
+    if (ops.length > 0) {
+      // Snapshot BEFORE the batch: the expansion mirror records the freshly
+      // added (collapsed) directories during the batch, which would erase
+      // the remembered state we're about to restore.
+      const remembered = new Set(rememberedExpandedPaths(basePath) ?? []);
+      model.batch(ops);
+      // Directories that arrive after model construction (the live query
+      // populates late on mount) come in collapsed; replay their remembered
+      // expansion — or, on the workspace's very first tree, the default
+      // shape (root-level directories open).
+      const applyDefault = entry.needsDefaultExpansion;
+      entry.needsDefaultExpansion = false;
+      for (const inputPath of adds) {
+        if (!inputPath.endsWith("/")) continue;
+        const canonical = inputPath.replace(/\/+$/, "");
+        const isRootLevel = !canonical.includes("/");
+        if (!remembered.has(canonical) && !(applyDefault && isRootLevel)) {
+          continue;
+        }
+        const item = model.getItem(canonical);
+        if (item && "expand" in item) item.expand();
+      }
+    }
+
+    // Complete a deferred focus hand-off, but only if the host still holds
+    // focus — never steal it back after the user has moved on.
+    if (
+      pendingFirstFocusRef.current &&
+      model.getVisibleCount() > 0 &&
+      document.activeElement === model.getFileTreeContainer()
+    ) {
+      focusFirstRow();
+    }
+  }, [treePaths, entry, model, basePath, focusFirstRow]);
+
+  // Keep tree selection in sync with the active tab.
+  useEffect(() => {
+    if (!selectedFilePath) return;
+    selectOnly(toRel(selectedFilePath));
+  }, [selectedFilePath, selectOnly, toRel]);
+
+  // Trees only sorts on insert/reset, but date-modified order shifts as
+  // lazily-hydrated stats arrive and as files are saved. Re-sort via
+  // resetPaths when any stat changes, preserving expansion and selection.
+  // (The name sorts don't depend on stats, so they never need this.)
+  const lastStatSignatureRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (sortOrder !== "date-modified") return;
+    const map = entry.sortState.modifiedByRelPath;
+    const signature = treePaths
+      .map((p) => {
+        const canonical = p.replace(/\/+$/, "");
+        return `${canonical}:${map.get(canonical) ?? 0}`;
+      })
+      .sort()
+      .join("\n");
+    if (signature === lastStatSignatureRef.current) return;
+
+    // Never yank an in-progress inline edit (rename/create): retry on the
+    // next data tick instead by leaving the signature unrecorded.
+    const container = model.getFileTreeContainer();
+    if (container?.shadowRoot?.querySelector("[data-item-rename-input]")) {
+      return;
+    }
+    lastStatSignatureRef.current = signature;
+
+    // The expansion mirror knows about dirs hidden under collapsed
+    // ancestors too, unlike a scan of the visible projection.
+    const expanded =
+      rememberedExpandedPaths(basePath) ??
+      model
+        .getVisibleRows(0, model.getVisibleCount())
+        .filter((row) => row.kind === "directory" && row.isExpanded)
+        .map((row) => row.path.replace(/\/+$/, ""));
+    model.resetPaths(treePaths, { initialExpandedPaths: expanded });
+    if (selectedFilePathRef.current) {
+      selectOnly(toRel(selectedFilePathRef.current));
+    }
+  }, [
+    treePaths,
+    fileMetadataList,
+    sortOrder,
+    entry,
+    model,
+    basePath,
+    selectOnly,
+    toRel,
+  ]);
+
+  // Map the externally-owned FileTreeMode onto trees' built-in editing flows,
+  // then release the mode immediately: trees owns the edit session itself.
+  // fallow-ignore-next-line complexity
+  useEffect(() => {
+    if (mode.type === "renaming") {
+      model.startRenaming(toRel(mode.path));
+      onModeChange(FILE_TREE_IDLE);
+    } else if (mode.type === "creating") {
+      const parentRel =
+        mode.parentPath === basePath ? "" : toRel(mode.parentPath);
+      let name = mode.itemType === "file" ? "untitled.md" : "untitled";
+      let candidate = parentRel ? `${parentRel}/${name}` : name;
+      let counter = 2;
+      while (model.getItem(candidate)) {
+        name =
+          mode.itemType === "file"
+            ? `untitled-${counter}.md`
+            : `untitled-${counter}`;
+        candidate = parentRel ? `${parentRel}/${name}` : name;
+        counter += 1;
+      }
+      if (parentRel) {
+        const parent = model.getItem(parentRel);
+        if (parent && "expand" in parent) parent.expand();
+      }
+      model.add(mode.itemType === "directory" ? `${candidate}/` : candidate);
+      entry.pendingCreate = { path: candidate, itemType: mode.itemType };
+      model.scrollToPath(candidate);
+      model.startRenaming(candidate, { removeIfCanceled: true });
+      onModeChange(FILE_TREE_IDLE);
+    }
+  }, [mode, entry, model, basePath, toRel, onModeChange]);
+
+  const renderContextMenu = useCallback(
+    (item: ContextMenuItem, context: ContextMenuOpenContext) => {
+      const abs = toAbs(item.path);
+      const menuButton =
+        "w-full rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50";
+      return (
+        <div
+          role="menu"
+          className="min-w-36 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+          data-file-tree-context-menu-root="true"
+        >
+          {item.kind === "file" && (
+            <button
+              type="button"
+              role="menuitem"
+              className={menuButton}
+              onClick={() => {
+                context.close();
+                openFileAtPath(item.path, { intent: "new-tab" });
+              }}
+            >
+              {t("openInNewTab", "Open in New Tab")}
+            </button>
+          )}
+          {item.kind === "directory" && (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                className={menuButton}
+                onClick={() => {
+                  context.close();
+                  onModeChange({
+                    type: "creating",
+                    parentPath: abs,
+                    itemType: "file",
+                  });
+                }}
+              >
+                {t("newFile", "New File")}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={menuButton}
+                onClick={() => {
+                  context.close();
+                  onModeChange({
+                    type: "creating",
+                    parentPath: abs,
+                    itemType: "directory",
+                  });
+                }}
+              >
+                {t("newFolder", "New Folder")}
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            role="menuitem"
+            className={menuButton}
+            disabled={isPathOpenInTab(abs)}
+            onClick={() => {
+              model.startRenaming(item.path);
+              context.close({ restoreFocus: false });
+            }}
+          >
+            {t("rename", "Rename")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={`${menuButton} text-destructive`}
+            onClick={() => {
+              context.close();
+              setPendingDelete({ path: abs, type: item.kind });
+            }}
+          >
+            {t("delete", "Delete")}
+          </button>
+        </div>
+      );
+    },
+    [toAbs, openFileAtPath, onModeChange, isPathOpenInTab, model, t],
+  );
+
+  const handleHostKeyDown = useCallback<
+    NonNullable<TreesFileTreeProps["onKeyDown"]>
+  >(
+    // fallow-ignore-next-line complexity
+    (event) => {
+      if (event.key === "Enter") {
+        const inEditable = event.nativeEvent
+          .composedPath()
+          .some((t) => t instanceof HTMLInputElement);
+        if (!inEditable) {
+          const focused = model.getFocusedItem();
+          if (focused && !focused.isDirectory()) {
+            openFileAtPath(focused.getPath());
+          }
+        }
+        return;
+      }
+      if (
+        onDelete &&
+        event.key === "Backspace" &&
+        (event.metaKey || event.ctrlKey)
+      ) {
+        const focused = model.getFocusedItem();
+        if (focused) {
+          event.preventDefault();
+          setPendingDelete({
+            path: toAbs(focused.getPath()),
+            type: focused.isDirectory() ? "directory" : "file",
+          });
+        }
+      }
+    },
+    [onDelete, model, toAbs, openFileAtPath],
+  );
+
+  // Protocol drops (dnd-kit pointer drags, e.g. dragging an image out of the
+  // editor) can't target shadow-DOM rows, so the whole tree is one dropzone
+  // and the destination folder comes from hit-testing the drop point.
+  const treeDrop = dropZoneProps({
+    accepts: ["image-asset"],
     dropEffect: "move",
-    onDrop: (payload) => moveIntoFolder(payload, basePath),
+    onDrop: (payload, info) => {
+      let destDir = basePath;
+      const container = model.getFileTreeContainer();
+      const hit = container?.shadowRoot?.elementFromPoint(
+        info.position.x,
+        info.position.y,
+      );
+      const rowEl = hit?.closest<HTMLElement>("[data-item-path]");
+      const rel = rowEl?.dataset.itemPath;
+      if (rel) {
+        destDir =
+          rowEl?.dataset.itemType === "folder"
+            ? toAbs(rel)
+            : getDirectoryPath(toAbs(rel));
+      }
+      moveIntoFolder(payload, destDir);
+    },
   });
 
   return (
-    <ProtocolDndContext
-      overlay={(payload) =>
-        payload.kind === "file" ? (
-          <div className="rounded border border-border bg-popover px-2 py-1 text-sm text-popover-foreground shadow-md">
-            {getFileName(payload.path)}
-          </div>
-        ) : null
-      }
+    <div
+      className={cn(
+        "min-h-0 grow transition-colors",
+        "data-[mtr-drop-over=true]:shadow-[0_0_0_1px_hsl(var(--ring))_inset]",
+        "data-[mtr-drop-over=true]:bg-[hsl(var(--ring)/0.06)]",
+      )}
+      data-mtr-dropzone={treeDrop["data-mtr-dropzone"]}
+      ref={treeDrop.ref}
     >
-      <ScrollArea className="h-full w-full">
-        <div
-          className={cn(
-            "py-1 transition-colors",
-            "data-[mtr-drop-over=true]:shadow-[0_0_0_1px_hsl(var(--ring))_inset]",
-            "data-[mtr-drop-over=true]:bg-[hsl(var(--ring)/0.06)]",
-          )}
-          data-file-tree-root
-          data-mtr-dropzone={rootDrop["data-mtr-dropzone"]}
-          ref={(element) => {
-            treeRootRef.current = element;
-            rootDrop.ref(element);
-          }}
-        >
-        {isCreatingAtRoot && rootCreatingItemType && (
-          <NewFileInput
-            type={rootCreatingItemType}
-            onSubmit={handleCreateSubmitRoot}
-            onCancel={handleCreateCancelRoot}
-            depth={0}
-          />
-        )}
-        {filesTree.map((node) => (
-          <FileTreeItem
-            key={node.path}
-            node={node}
-            depth={0}
-            basePath={basePath}
-            isPrimaryFocusTarget={filesTree[0]?.path === node.path}
-            selectedFilePath={selectedFilePath}
-            onFileSelect={onFileSelect}
-            onFileHover={handleFileHover}
-            onDelete={onDelete}
-            onRequestDelete={handleRequestDelete}
-            onRename={onRename}
-            onCreate={onCreate}
-            openTabs={openTabs}
-            mode={mode}
-            onModeChange={onModeChange}
-          />
-        ))}
-      </div>
+      <TreesFileTree
+        model={model}
+        renderContextMenu={renderContextMenu}
+        onClick={handleHostClick}
+        onClickCapture={handleHostClickCapture}
+        onKeyDown={handleHostKeyDown}
+        onMouseOver={handleHostMouseOver}
+        onDragStart={handleHostDragStart}
+        onFocus={handleHostFocus}
+        tabIndex={-1}
+        data-focus-key="sidebar-first-file-item"
+        style={{ height: "100%" }}
+      />
 
       {pendingDelete && (
         <AlertDialog
@@ -771,7 +813,6 @@ export function FileTree({
           </AlertDialogContent>
         </AlertDialog>
       )}
-      </ScrollArea>
-    </ProtocolDndContext>
+    </div>
   );
 }

@@ -23,13 +23,13 @@ test.describe("Workspace Navigation", () => {
     await page.reload();
     await waitForFileTree(page);
 
-    const readmeButton = page.getByRole("button", { name: "README.md" });
+    const readmeButton = page.getByRole("treeitem", { name: "README.md" });
     await expect(readmeButton).toBeVisible();
 
-    const notesButton = page.getByRole("button", { name: "notes.md" });
+    const notesButton = page.getByRole("treeitem", { name: "notes.md" });
     await expect(notesButton).toBeVisible();
 
-    const subfolderButton = page.getByRole("button", { name: "subfolder" });
+    const subfolderButton = page.getByRole("treeitem", { name: "subfolder" });
     await expect(subfolderButton).toBeVisible();
   });
 
