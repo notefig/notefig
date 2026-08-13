@@ -41,6 +41,7 @@ import {
   MessageScrollerViewport,
   useMessageScroller,
 } from "@/components/ui/message-scroller";
+import { Markdown } from "@/components/ui/markdown";
 import { cn } from "@/lib/utils";
 import {
   useTaskRow,
@@ -294,7 +295,9 @@ function UnavailableCard({ taskId }: { taskId: string }) {
   const { t } = useTranslation();
   return (
     <div className="pointer-events-auto flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
-      <span className="min-w-0 flex-1">{t("agentSessionUnavailableNotice")}</span>
+      <span className="min-w-0 flex-1">
+        {t("agentSessionUnavailableNotice")}
+      </span>
       <Button
         variant="outline"
         size="sm"
@@ -377,10 +380,7 @@ export function AuthCard({
             {method.name ?? method.id}
           </Button>
         ))}
-        <Button
-          size="sm"
-          onClick={() => retryAgentTaskAfterAuth(task.taskId)}
-        >
+        <Button size="sm" onClick={() => retryAgentTaskAfterAuth(task.taskId)}>
           {t("agentSignedInRetry")}
         </Button>
       </div>
@@ -405,7 +405,8 @@ function Transcript({
     [turns],
   );
   const queuedTurnIds = useMemo(
-    () => new Set(turns.filter((t) => t.status === "queued").map((t) => t.turnId)),
+    () =>
+      new Set(turns.filter((t) => t.status === "queued").map((t) => t.turnId)),
     [turns],
   );
 
@@ -432,7 +433,10 @@ function Transcript({
           const viewport = event.currentTarget;
           if (
             event.deltaY >= 0 &&
-            viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 48
+            viewport.scrollHeight -
+              viewport.scrollTop -
+              viewport.clientHeight <=
+              48
           ) {
             scrollToEnd({ behavior: "auto" });
           }
@@ -449,14 +453,22 @@ function Transcript({
             <MessageScrollerItem key={entry.id} messageId={entry.id}>
               <EntryView
                 entry={entry}
-                queued={entry.type === "user" && queuedTurnIds.has(entry.turnId)}
+                queued={
+                  entry.type === "user" && queuedTurnIds.has(entry.turnId)
+                }
               />
             </MessageScrollerItem>
           ))}
           {turnErrors.map((turn) => (
-            <MessageScrollerItem key={turn.turnId} messageId={`error-${turn.turnId}`}>
+            <MessageScrollerItem
+              key={turn.turnId}
+              messageId={`error-${turn.turnId}`}
+            >
               <div className="select-text rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
-                <span className="select-text font-medium">{t("agentTurnFailed")}</span> {turn.error}
+                <span className="select-text font-medium">
+                  {t("agentTurnFailed")}
+                </span>{" "}
+                {turn.error}
               </div>
             </MessageScrollerItem>
           ))}
@@ -520,14 +532,14 @@ function MessageEntry({
         className={cn(
           // break-words: an unbroken run (a URL, a long path) must wrap
           // inside the bubble, not push past the chat width.
-          "select-text whitespace-pre-wrap break-words",
+          "select-text break-words",
           isUser
-            ? "max-w-[85%] rounded-lg bg-primary px-2 py-1 text-xs text-primary-foreground"
-            : "w-full text-sm leading-relaxed text-foreground",
+            ? "max-w-[95%] whitespace-pre-wrap rounded-lg bg-primary px-2 py-1 text-xs text-primary-foreground"
+            : "w-full max-w-[95%] text-sm leading-relaxed text-foreground",
           queued && "opacity-70",
         )}
       >
-        {text}
+        {isUser ? text : <Markdown text={text} />}
         {queued && <QueuedBadge taskId={entry.taskId} turnId={entry.turnId} />}
       </div>
       <MessageFooter text={text} createdAt={entry.createdAt} isUser={isUser} />
@@ -605,7 +617,8 @@ function formatEntryTime(timestamp: number): string {
 
 /** Compact checklist for a `plan` session update (ACP entries: content/priority/status). */
 function PlanView({ plan }: { plan: unknown }) {
-  const entries = (plan as { entries?: PlanEntry[] } | undefined)?.entries ?? [];
+  const entries =
+    (plan as { entries?: PlanEntry[] } | undefined)?.entries ?? [];
   if (entries.length === 0) return null;
   return (
     <div className="w-full rounded-lg border border-border bg-card px-2.5 py-2 text-xs">
@@ -621,7 +634,8 @@ function PlanView({ plan }: { plan: unknown }) {
           <span
             className={cn(
               "flex-1",
-              planEntry.status === "completed" && "text-muted-foreground line-through",
+              planEntry.status === "completed" &&
+                "text-muted-foreground line-through",
             )}
           >
             {planEntry.content}
@@ -656,14 +670,19 @@ function ThoughtEntry({ text }: { text?: string }) {
  * the one case that exists today; promote to a real registry file if a
  * second one shows up.
  */
-const TOOL_NAME_RENDERER: Record<string, (props: { toolCall: ToolCallUpdate }) => ReactNode> = {
+const TOOL_NAME_RENDERER: Record<
+  string,
+  (props: { toolCall: ToolCallUpdate }) => ReactNode
+> = {
   author_blob: AuthorBlobCard,
 };
 
 /** "authored a question in notes.md" instead of the raw {blobId} JSON result. */
 function AuthorBlobCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
   const { t } = useTranslation();
-  const rawInput = call.rawInput as { path?: string; type?: string; id?: string } | undefined;
+  const rawInput = call.rawInput as
+    | { path?: string; type?: string; id?: string }
+    | undefined;
   const status: ToolCallStatus = call.status ?? "pending";
   if (!rawInput?.path || !rawInput.type || !rawInput.id) {
     return <ToolCallCard toolCall={call} />;
@@ -874,12 +893,16 @@ function ChangedFilesCard({
 
 function ToolStatusIcon({ status }: { status: ToolCallStatus }) {
   if (status === "completed") {
-    return <Check className="size-3.5 shrink-0 text-green-600 dark:text-green-400" />;
+    return (
+      <Check className="size-3.5 shrink-0 text-green-600 dark:text-green-400" />
+    );
   }
   if (status === "failed") {
     return <X className="size-3.5 shrink-0 text-destructive" />;
   }
-  return <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />;
+  return (
+    <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+  );
 }
 
 function ToolContentView({ item }: { item: ToolCallContent }) {
@@ -997,8 +1020,7 @@ function PromptBox({
           });
           // Idle "escape" stays a no-op here — the chat tab has no
           // document editor to hand focus back to.
-          if (action.type !== "send" && action.type !== "cancelRestore")
-            return;
+          if (action.type !== "send" && action.type !== "cancelRestore") return;
           event.preventDefault();
           if (action.type === "send") onSend();
           else onCancelRestore();
@@ -1050,7 +1072,11 @@ function ComposerActionButton({
   onStop: () => void;
 }) {
   const { t } = useTranslation();
-  const button = deriveComposerButton({ isRunning, draftEmpty, inputsDisabled });
+  const button = deriveComposerButton({
+    isRunning,
+    draftEmpty,
+    inputsDisabled,
+  });
   const label =
     button.mode === "stop"
       ? t("agentStop")
@@ -1067,7 +1093,11 @@ function ComposerActionButton({
       title={label}
       aria-label={label}
     >
-      {button.mode === "stop" ? <Square className="fill-current" /> : <ArrowUp />}
+      {button.mode === "stop" ? (
+        <Square className="fill-current" />
+      ) : (
+        <ArrowUp />
+      )}
     </Button>
   );
 }

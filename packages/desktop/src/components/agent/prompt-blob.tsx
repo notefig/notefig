@@ -30,6 +30,7 @@ import { toast } from "sonner";
 import type { Editor } from "@tiptap/core";
 import { useAutosizeTextarea } from "@/hooks/use-autosize-textarea";
 import { Button } from "@/components/ui/button";
+import { Markdown } from "@/components/ui/markdown";
 import { OrbLoader } from "@/components/ui/orb-loader";
 import {
   DropdownMenu,
@@ -1288,9 +1289,10 @@ function DoneState({
         </button>
       </div>
       {expanded && body && (
-        <div
+        <Markdown
+          text={body}
           className={cn(
-            "select-text whitespace-pre-wrap text-xs leading-relaxed",
+            "select-text text-xs leading-relaxed",
             // Issue text mirrors ErrorState's uniform tinted text, in amber
             // — the card border (blobCardClass) carries the rest; no filled
             // callout box.
@@ -1298,9 +1300,7 @@ function DoneState({
               ? "text-amber-600 dark:text-amber-400"
               : "text-foreground/80",
           )}
-        >
-          {body}
-        </div>
+        />
       )}
       {touchedFiles.length > 0 && (
         <div className="flex flex-wrap items-center gap-1">
