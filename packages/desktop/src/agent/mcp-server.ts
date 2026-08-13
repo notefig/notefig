@@ -56,7 +56,9 @@ function serverInstructions(): string {
     `itself, kind "issue" if you hit a blocker or need to flag a problem. This ` +
     `holds ESPECIALLY for turns that need no tool actions at all: a widget prompt ` +
     `answered with prose alone still ends with \`widget_respond\` — for widget ` +
-    `prompts, plain assistant text is progress notes, never the deliverable. When ` +
+    `prompts, plain assistant text is progress notes, never the deliverable. ` +
+    `Keep its markdown SHORT (it renders inline in the document): a few ` +
+    `sentences, never a paste-back of content you wrote into the document. When ` +
     `a prompt has no resource_link (it came from the chat panel), do NOT call ` +
     `\`widget_respond\` — answer in chat as normal. ` +
     `(3) \`author_blob\` with a multiple-choice question: whenever you need the ` +
