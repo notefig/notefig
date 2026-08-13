@@ -1200,17 +1200,17 @@ function DoneSummaryLine({
   );
 }
 
-/** Done: the widget's single resting face — one truncated line of the
- *  turn's outcome, the same ellipsis treatment as the running teaser. The
- *  line prefers the `widget_respond` response (title, else the markdown
- *  itself) and falls back to the turn's last assistant text, so even a
- *  harness that never calls the tool leaves something readable behind.
- *  Clicking the line toggles the full text below (pre-wrap, selectable —
- *  same plain-text treatment as chat's assistant bubbles; the app has no
- *  markdown renderer, and upgrading both surfaces later is one change).
+/** Done: the widget's single resting face — the full response body,
+ *  rendered as markdown and visible immediately (MET-133); the heading line
+ *  above it doubles as the collapse toggle back to a one-line summary. The
+ *  content prefers the `widget_respond` response and falls back to the
+ *  turn's last assistant text, so even a harness that never calls the tool
+ *  leaves something readable behind.
  *  No Edit here: Reply continues the session, ✕ dismisses; rewriting from
- *  scratch is what a fresh widget is for. */
-function DoneState({
+ *  scratch is what a fresh widget is for.
+ *  Exported for tests only — mounting the whole PromptBlob needs Tiptap and
+ *  live collections; the done face is testable standalone. */
+export function DoneState({
   cancelled,
   response,
   fallbackText,
@@ -1240,7 +1240,11 @@ function DoneState({
   replyDisabled: boolean;
 }) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
+  // Expanded by default (MET-133): the response body IS the outcome — the
+  // collapsed one-liner is the opt-in resting face, not the landing state.
+  // Component-local on purpose; a dock remount resets to expanded, which is
+  // the desired default anyway.
+  const [expanded, setExpanded] = useState(true);
   const { summary, body, isIssue } = deriveDoneLine({
     response,
     fallbackText,
@@ -1293,6 +1297,10 @@ function DoneState({
           text={body}
           className={cn(
             "select-text text-xs leading-relaxed",
+            // Scroll cap: brevity is steered on the agent side (the
+            // widget_respond directive), but a runaway response must scroll
+            // inside the widget, not swallow the document.
+            "max-h-80 overflow-y-auto",
             // Issue text mirrors ErrorState's uniform tinted text, in amber
             // — the card border (blobCardClass) carries the rest; no filled
             // callout box.
