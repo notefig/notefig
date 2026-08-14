@@ -259,12 +259,35 @@ jobs:
             printf '\n%s\n' "${DELIMITER}"
           } >> "$GITHUB_OUTPUT"
 
+      # The App Store Connect API key (.p8) only exists as a secret; write it
+      # to the runner's temp dir so notarization can read it. The content
+      # never appears in ${{ }} interpolation or logs — it reaches the shell
+      # only through the env, and GitHub masks the secret value anyway.
+      # RUNNER_TEMP is wiped when the (ephemeral) runner job ends.
+      - name: Write App Store Connect API key
+        if: matrix.platform == 'macos-latest'
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+        run: |
+          KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+          umask 077
+          printf '%s' "$APPLE_API_KEY_CONTENT" | base64 --decode > "$KEY_PATH"
+          echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+
       - name: Build and release Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS code signing (Developer ID certificate, base64 .p12) and
+          # notarization via App Store Connect API key. APPLE_API_KEY_PATH is
+          # exported by the step above.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           # PostHog telemetry (opt-in, see packages/desktop/TELEMETRY.md).
           # Absent secrets = telemetry fully disabled in the built app.
           VITE_POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
@@ -279,6 +302,12 @@ jobs:
           includeDebug: ${{ contains(inputs.version, '-debug') }}
           includeRelease: ${{ !contains(inputs.version, '-debug') }}
           args: ${{ matrix.args }}
+
+      # Belt-and-braces: hosted runners are ephemeral, but remove the key as
+      # soon as the build step is done regardless of its outcome.
+      - name: Remove App Store Connect API key
+        if: always() && matrix.platform == 'macos-latest'
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"
 
   publish-release:
     name: Publish GitHub Release
