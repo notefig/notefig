@@ -16,6 +16,20 @@ function render(text: string) {
   act(() => root!.render(createElement(Markdown, { text })));
 }
 
+/** Rendering goes through the conversion worker (inline fallback in jsdom,
+ *  which has no Worker) — poll until the HTML lands. */
+async function renderResolved(text: string) {
+  render(text);
+  for (let i = 0; i < 200; i++) {
+    const prose = container!.querySelector(".prose");
+    if (prose && prose.innerHTML !== "") return;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+  }
+  throw new Error("Markdown never rendered");
+}
+
 afterEach(() => {
   act(() => root?.unmount());
   container?.remove();
@@ -24,22 +38,30 @@ afterEach(() => {
 });
 
 describe("Markdown", () => {
-  it("renders markdown structure (bold, inline code, lists)", () => {
-    render("**bold** and `code`\n\n- one\n- two");
+  it("renders markdown structure (bold, inline code, lists)", async () => {
+    await renderResolved("**bold** and `code`\n\n- one\n- two");
     expect(container!.querySelector("strong")?.textContent).toBe("bold");
     expect(container!.querySelector("code")?.textContent).toBe("code");
     expect(container!.querySelectorAll("li")).toHaveLength(2);
   });
 
-  it("escapes raw HTML in model output instead of rendering it", () => {
-    render('<img src=x onerror="boom()"> hi');
+  it("escapes raw HTML in model output instead of rendering it", async () => {
+    await renderResolved('<img src=x onerror="boom()"> hi');
     expect(container!.querySelector("img")).toBeNull();
     expect(container!.textContent).toContain("<img");
   });
 
-  it("linkifies bare URLs", () => {
-    render("see https://example.com for more");
+  it("linkifies bare URLs", async () => {
+    await renderResolved("see https://example.com for more");
     const anchor = container!.querySelector("a");
     expect(anchor?.getAttribute("href")).toBe("https://example.com");
+  });
+
+  it("renders a re-mount of already-rendered text synchronously (cache)", async () => {
+    await renderResolved("cached **hit**");
+    act(() => root?.unmount());
+    container?.remove();
+    render("cached **hit**");
+    expect(container!.querySelector("strong")?.textContent).toBe("hit");
   });
 });

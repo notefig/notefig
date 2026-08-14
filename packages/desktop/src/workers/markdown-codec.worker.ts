@@ -7,6 +7,7 @@
 
 import { installWorkerDomShim } from "./worker-dom-shim";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
+import { renderMarkdownHtml } from "@/utils/markdown-html";
 import { exposeWorkerApi } from "./worker-rpc";
 import type { JSONContent } from "@tiptap/core";
 
@@ -20,6 +21,9 @@ const api = {
   serialize(doc: JSONContent): { markdown: string; hash: string } {
     const markdown = codec.serialize(doc);
     return { markdown, hash: codec.hash(markdown) };
+  },
+  renderHtml(markdown: string): string {
+    return renderMarkdownHtml(markdown);
   },
 };
 

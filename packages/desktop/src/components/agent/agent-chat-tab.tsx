@@ -4,6 +4,7 @@
 // file-sync's editor-store import comment); new cycles elsewhere still gate.
 // fallow-ignore-file circular-dependency
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -486,8 +487,16 @@ function Transcript({
   );
 }
 
-/** Render one transcript entry by type; tool calls are peers of text. */
-function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
+/** Render one transcript entry by type; tool calls are peers of text.
+ *  Memoized: a stream chunk replaces only the mutating entry's row object,
+ *  so every settled entry skips its re-render (MET-136). */
+const EntryView = memo(function EntryView({
+  entry,
+  queued,
+}: {
+  entry: AgentEntry;
+  queued?: boolean;
+}) {
   if (entry.type === "tool_call") {
     if (!entry.toolCall) return null;
     const CustomCard = TOOL_NAME_RENDERER[entry.toolCall.title ?? ""];
@@ -506,7 +515,7 @@ function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
   // leading/trailing newlines would show inside whitespace-pre-wrap bubbles.
   if (!entry.text?.trim()) return null;
   return <MessageEntry entry={entry} queued={queued} />;
-}
+});
 
 /** A user or assistant text message: compact bubble (user) or flat
  *  full-width text (assistant, opencode-style), plus the hover footer. */
