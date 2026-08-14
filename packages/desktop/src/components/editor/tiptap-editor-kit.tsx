@@ -6,6 +6,7 @@ import CharacterCount from "@tiptap/extension-character-count";
 import { EditorImage } from "./editor-image-node";
 import { BlobNodeView } from "./blobs/blob-node-view";
 import { AiPromptNode } from "./ai-prompt-node";
+import { LinkTargetHighlight } from "./link-target-highlight-extension";
 import {
   createSchemaExtensions,
   MarkdownImageBase,
@@ -46,7 +47,10 @@ export const MarkdownCodeBlock = CodeBlockLowlight.extend({
  * commands and swallow the rest so unmapped items (justify, indent, text
  * direction, …) are no-ops instead of DOM corruption.
  */
-const nativeFormatCommands: Record<string, "toggleBold" | "toggleItalic" | "toggleUnderline" | "toggleStrike"> = {
+const nativeFormatCommands: Record<
+  string,
+  "toggleBold" | "toggleItalic" | "toggleUnderline" | "toggleStrike"
+> = {
   formatBold: "toggleBold",
   formatItalic: "toggleItalic",
   formatUnderline: "toggleUnderline",
@@ -85,4 +89,5 @@ export const editorExtensions = [
   Placeholder.configure({ placeholder: "Type something, or press / for AI…" }),
   CharacterCount,
   NativeFormatIntercept,
+  LinkTargetHighlight,
 ];

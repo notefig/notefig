@@ -338,7 +338,7 @@ test.describe("task item input rule (Bug #7 UX path)", () => {
     await paragraph.click();
     await paragraph.dblclick();
     // Toolbar controls render as radix toggle-group items (role=radio).
-    await page.getByRole("radio", { name: "Link" }).click();
+    await page.getByRole("radio", { name: "Link", exact: true }).click();
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();

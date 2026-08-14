@@ -14,6 +14,7 @@ import {
   HelpCircle,
   PanelLeftClose,
   PanelLeft,
+  Waypoints,
 } from "lucide-react";
 import {
   Tooltip,
@@ -26,19 +27,26 @@ import { useSearchParams } from "react-router-dom";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { PlainLogo } from "@/components/logo";
 import { useSearchParamFlag } from "@/hooks/use-search-param-flag";
+import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
+import { isGraphTabId } from "@/utils/graph-tab-id";
 
 interface IconSidebarProps {
   isCollapsed: boolean;
   onToggleCollapse: () => void;
+  activeTabId: string | null;
 }
 
 export const IconSidebar = memo(function IconSidebar({
   isCollapsed,
   onToggleCollapse,
+  activeTabId,
 }: IconSidebarProps) {
   const [searchParams, setUrlSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const sidebarView = searchParams.get("sidebarView") || "files";
+  const { openGraphTab } = useWorkspaceTabs();
+  const isGraphActive = activeTabId !== null && isGraphTabId(activeTabId);
+  const collapseToggleLabel = isCollapsed ? "Expand sidebar" : "Collapse sidebar";
 
   useHotkey("Mod+\\", () => {
     onToggleCollapse();
@@ -143,6 +151,14 @@ export const IconSidebar = memo(function IconSidebar({
         {topIcons.map((item) => (
           <SidebarIconButton key={item.id} item={item} />
         ))}
+        <SidebarIconButton
+          item={{
+            icon: Waypoints,
+            label: "Graph View",
+            active: isGraphActive,
+            onClick: openGraphTab,
+          }}
+        />
       </div>
       <div className="flex flex-col items-center gap-1 mt-auto">
         <Tooltip>
@@ -156,16 +172,14 @@ export const IconSidebar = memo(function IconSidebar({
               ) : (
                 <PanelLeftClose className="w-4 h-4 text-muted-foreground" />
               )}
-              <span className="sr-only">
-                {isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              </span>
+              <span className="sr-only">{collapseToggleLabel}</span>
             </button>
           </TooltipTrigger>
           <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>
-            {isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            {collapseToggleLabel}
           </TooltipContent>
           <TooltipContent side="left" className="ltr:hidden" sideOffset={8}>
-            {isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            {collapseToggleLabel}
           </TooltipContent>
         </Tooltip>
         {bottomIcons.map((item) => (

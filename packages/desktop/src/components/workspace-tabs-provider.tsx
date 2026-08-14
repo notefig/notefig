@@ -20,6 +20,10 @@ interface WorkspaceTabsContextValue {
    * session never replaces the file tab in view.
    */
   openAgentTab: (taskId: string) => void;
+  /**
+   * Open (or focus) the singleton graph view tab.
+   */
+  openGraphTab: () => void;
 }
 
 const WorkspaceTabsContext = createContext<
@@ -27,20 +31,22 @@ const WorkspaceTabsContext = createContext<
 >(undefined);
 
 const noopOpenAgentTab = () => {};
+const noopOpenGraphTab = () => {};
 
 export function WorkspaceTabsProvider({
   openFile,
   // Optional: hosts without a dockable layout (the editor test harness)
-  // have nowhere to open a chat tab. Consumers still get a callable.
+  // have nowhere to open a chat/graph tab. Consumers still get a callable.
   openAgentTab = noopOpenAgentTab,
+  openGraphTab = noopOpenGraphTab,
   children,
-}: Omit<WorkspaceTabsContextValue, "openAgentTab"> &
-  Partial<Pick<WorkspaceTabsContextValue, "openAgentTab">> & {
+}: Omit<WorkspaceTabsContextValue, "openAgentTab" | "openGraphTab"> &
+  Partial<Pick<WorkspaceTabsContextValue, "openAgentTab" | "openGraphTab">> & {
     children: ReactNode;
   }) {
   const value = useMemo(
-    () => ({ openFile, openAgentTab }),
-    [openFile, openAgentTab],
+    () => ({ openFile, openAgentTab, openGraphTab }),
+    [openFile, openAgentTab, openGraphTab],
   );
 
   // Drop actions (drag protocol) open files through the same entry point.

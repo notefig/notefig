@@ -14,7 +14,13 @@ import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
 import { useContentFetching } from "@/entities/files";
 import { useFileWatchers } from "@/utils/file-sync";
-import { useWorkspaceTabs } from "@/entities/tabs";
+import {
+  useWorkspaceTabs,
+  agentTabId,
+  isAgentTabId,
+  isReleaseNotesTabId,
+  RELEASE_NOTES_TAB_ID,
+} from "@/entities/tabs";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import { useProjectSettings } from "@/utils/project-settings";
@@ -31,14 +37,10 @@ import { disposeAllEditors } from "@/components/editor/editor-store";
 import { AgentChatTab } from "@/components/agent/agent-chat-tab";
 import { ReleaseNotesTab } from "@/components/release-notes-tab";
 import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
-import {
-  agentTabId,
-  isAgentTabId,
-  isReleaseNotesTabId,
-  RELEASE_NOTES_TAB_ID,
-} from "@/entities/tabs";
 import { useReleaseNotesOnUpdate } from "@/hooks/use-release-notes-on-update";
 import { latestReleaseTitle } from "@/utils/release-notes";
+import { GRAPH_TAB_ID, isGraphTabId } from "@/utils/graph-tab-id";
+import { GraphViewTab } from "@/components/graph/graph-view-tab";
 import {
   type FileTreeMode,
   FILE_TREE_IDLE,
@@ -92,13 +94,20 @@ export const Workspace = () => {
 
   // The open-tabs cross-entity join (agent/file split, metadata ⋈ content
   // rows, agent task rows, stale-tab detection) lives on the tabs entity.
+  // The graph tab (`graph:main`) is filtered out first — it isn't a real
+  // file path and has no backing entity for useWorkspaceTabs to join.
+  const nonGraphOpenTabs = useMemo(
+    () => openTabs.filter((tabId) => !isGraphTabId(tabId)),
+    [openTabs],
+  );
   const {
     fileTabIds: fileOpenTabIds,
     fileRows: fileDataWithContent,
     agentTaskRows: openAgentTaskRows,
     isReleaseNotesTabOpen,
     staleTabIds,
-  } = useWorkspaceTabs(workspacePath, openTabs);
+  } = useWorkspaceTabs(workspacePath, nonGraphOpenTabs);
+  const isGraphTabOpen = openTabs.some(isGraphTabId);
 
   useReleaseNotesOnUpdate(openFile);
 
@@ -164,9 +173,26 @@ export const Workspace = () => {
     [isReleaseNotesTabOpen, closeTab, t],
   );
 
+  const graphDockableTabs = useMemo(
+    () =>
+      isGraphTabOpen
+        ? [
+            <Dockable.Tab
+              key={GRAPH_TAB_ID}
+              id={GRAPH_TAB_ID}
+              name="Graph"
+              onClose={() => closeTab(GRAPH_TAB_ID)}
+            >
+              <GraphViewTab workspacePath={workspacePath} />
+            </Dockable.Tab>,
+          ]
+        : [],
+    [isGraphTabOpen, closeTab, workspacePath],
+  );
+
   const allDockableTabs = useMemo(
-    () => [...dockableTabs, ...agentDockableTabs, ...releaseNotesDockableTabs],
-    [dockableTabs, agentDockableTabs, releaseNotesDockableTabs],
+    () => [...dockableTabs, ...agentDockableTabs, ...graphDockableTabs],
+    [dockableTabs, agentDockableTabs, graphDockableTabs],
   );
 
   const activeFileData = fileDataWithContent.find(
@@ -230,6 +256,10 @@ export const Workspace = () => {
     },
     [openFile],
   );
+
+  const openGraphTab = useCallback(() => {
+    openFile({ tabId: GRAPH_TAB_ID, intent: "new-tab" });
+  }, [openFile]);
 
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const { settings: projectSettings, update: updateProjectSettings } =
@@ -361,6 +391,7 @@ export const Workspace = () => {
     <WorkspaceTabsProvider
       openFile={openFileInTabs}
       openAgentTab={openAgentTab}
+      openGraphTab={openGraphTab}
     >
       <div
         dir={direction}
@@ -370,6 +401,7 @@ export const Workspace = () => {
           <IconSidebar
             isCollapsed={isSidebarCollapsed}
             onToggleCollapse={toggleSidebarCollapsed}
+            activeTabId={activeTabId}
           />
 
           {!isSidebarCollapsed && (

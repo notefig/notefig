@@ -5,7 +5,11 @@ import type { Editor } from "@tiptap/core";
 import { toast } from "sonner";
 import { platformAdapter } from "@/adapters";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
-import { isExternalUrl, buildInternalCandidates } from "./tiptap-link-utils";
+import {
+  isExternalUrl,
+  buildInternalCandidates,
+  decodeHrefForDisplay,
+} from "./tiptap-link-utils";
 
 const preventFocusLoss = (e: React.MouseEvent) => e.preventDefault();
 
@@ -31,6 +35,11 @@ export function LinkBubbleMenu({
       (editor.getAttributes("link").href as string) || "",
   });
   const isExternal = isExternalUrl(href);
+  // Internal hrefs are percent-encoded on disk (tiptap-link-utils.ts) so they
+  // survive markdown's link-destination syntax; decode for display so the
+  // user reads the real filename instead of "%20"/"%3C". External URLs are
+  // shown as-is — their own encoding is meaningful, not an artifact.
+  const displayHref = isExternal ? href : decodeHrefForDisplay(href);
 
   const handleOpen = async () => {
     if (!href) return;
@@ -51,11 +60,11 @@ export function LinkBubbleMenu({
     );
 
     if (!target) {
-      toast.error(`File not found: ${href}`);
+      toast.error(`File not found: ${displayHref}`);
       return;
     }
     if (!openFile({ tabId: target, intent: "new-tab" })) {
-      toast.error(`"${href}" can't be opened in the editor`);
+      toast.error(`"${displayHref}" can't be opened in the editor`);
     }
   };
 
@@ -69,7 +78,9 @@ export function LinkBubbleMenu({
           className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
           onClick={handleOpen}
           onMouseDown={preventFocusLoss}
-          title={isExternal ? `Open in browser — ${href}` : "Open in new tab"}
+          title={
+            isExternal ? `Open in browser — ${displayHref}` : "Open in new tab"
+          }
         >
           {/* Show the full href: stripping the scheme would disguise an
               external "https://notes.md" as an internal-looking filename. */}
@@ -78,7 +89,7 @@ export function LinkBubbleMenu({
           ) : (
             <FileText className="h-3.5 w-3.5 shrink-0" />
           )}
-          <span className="max-w-[10rem] truncate">{href}</span>
+          <span className="max-w-[10rem] truncate">{displayHref}</span>
         </button>
         <button
           className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"

@@ -24,13 +24,21 @@ import {
   TiptapLinkButton,
   TiptapTableInsertButton,
 } from "./tiptap-toolbar-buttons";
+import { TiptapFileLinkButton } from "./tiptap-file-link-button";
 
 interface TiptapToolbarProps {
   editor: Editor;
   onLinkToggle: () => void;
+  basePath: string;
+  filePath: string;
 }
 
-export function TiptapToolbar({ editor, onLinkToggle }: TiptapToolbarProps) {
+export function TiptapToolbar({
+  editor,
+  onLinkToggle,
+  basePath,
+  filePath,
+}: TiptapToolbarProps) {
   return (
     <FixedToolbar>
       <ScrollArea className="flex justify-start shrink-0 gap-1">
@@ -116,6 +124,11 @@ export function TiptapToolbar({ editor, onLinkToggle }: TiptapToolbarProps) {
         >
           <LinkIcon />
         </TiptapLinkButton>
+        <TiptapFileLinkButton
+          editor={editor}
+          basePath={basePath}
+          filePath={filePath}
+        />
       </ScrollArea>
     </FixedToolbar>
   );
