@@ -14,15 +14,20 @@ import type { SortOrder } from "@/utils/fs";
  *   must never hold a component instance's closures, so every callback
  *   routes through `entry.delegate`, which the component reassigns on
  *   every render.
- * - The reconcile mirror (`knownPaths`) lives here too: the fs watcher
+ * - The sync signature (`pathsSignature`) lives here too: the fs watcher
  *   keeps updating collections while the tree is unmounted, and the next
- *   mount diffs from the last state the MODEL saw, not from scratch.
+ *   mount compares against the last state the MODEL saw — an unchanged
+ *   remount never resets, so scroll survives.
  */
 export interface TreeDelegate {
   isPathOpenInTab(absPath: string): boolean;
   moveFile(fromAbs: string, toAbs: string): void;
   renameFile(oldAbs: string, newName: string): void;
-  createEntry(parentAbs: string, name: string, type: "file" | "directory"): void;
+  createEntry(
+    parentAbs: string,
+    name: string,
+    type: "file" | "directory",
+  ): void;
 }
 
 export interface TreeSortState {
@@ -36,8 +41,8 @@ export interface TreeModelEntry {
   sortState: TreeSortState;
   delegate: TreeDelegate;
   pendingCreate: { path: string; itemType: "file" | "directory" } | null;
-  /** canonical path → input path (trailing-slash marker for dirs). */
-  knownPaths: Map<string, string> | null;
+  /** Sorted-joined treePaths the model last saw (resetPaths applied). */
+  pathsSignature: string | null;
   /**
    * First-ever mount for this workspace: expand root-level directories once
    * the initial paths arrive. Baking initialExpansion into the model would
@@ -121,12 +126,11 @@ export function acquireTreeModel(
     sortState,
     delegate: init.delegate,
     pendingCreate: null,
-    knownPaths: null,
+    pathsSignature: null,
     needsDefaultExpansion: init.initialExpandedPaths === null,
   };
 
-  const toAbs = (rel: string) =>
-    `${workspacePath}/${rel.replace(/\/+$/, "")}`;
+  const toAbs = (rel: string) => `${workspacePath}/${rel.replace(/\/+$/, "")}`;
 
   entry.model = new FileTree({
     paths: [],
@@ -156,8 +160,7 @@ export function acquireTreeModel(
         // stripping it the destination becomes "docs//name", which round
         // trips through the optimistic collection update as a phantom
         // empty-named directory in the tree.
-        const destDir =
-          event.target.directoryPath?.replace(/\/+$/, "") ?? null;
+        const destDir = event.target.directoryPath?.replace(/\/+$/, "") ?? null;
         for (const dragged of event.draggedPaths) {
           const name = dragged.split("/").filter(Boolean).pop() ?? dragged;
           const destRel = destDir ? `${destDir}/${name}` : name;
@@ -180,8 +183,8 @@ export function acquireTreeModel(
             .join("/");
           const parentAbs = parentRel ? toAbs(parentRel) : workspacePath;
           // The placeholder row simply becomes the real row: the entry is
-          // created on disk and the reconcile diff sees it as already
-          // present. (No model mutations here — mutating inside onRename
+          // created on disk and the next data tick resyncs the model with
+          // it present. (No model mutations here — mutating inside onRename
           // throws.)
           entry.delegate.createEntry(parentAbs, newName, pending.itemType);
         } else {

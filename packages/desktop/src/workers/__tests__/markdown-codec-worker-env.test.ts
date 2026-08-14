@@ -18,9 +18,8 @@ let codec: MarkdownCodec;
 beforeAll(async () => {
   expect(typeof document).toBe("undefined");
   installWorkerDomShim();
-  const { createMarkdownCodec } = await import(
-    "../../components/editor/markdown-codec"
-  );
+  const { createMarkdownCodec } =
+    await import("../../components/editor/markdown-codec");
   codec = createMarkdownCodec();
 });
 
@@ -65,8 +64,7 @@ describe("codec under linkedom shim (worker environment)", () => {
   });
 
   it("tables round-trip to a fixed point", () => {
-    const table =
-      "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n| Bob | 25 |";
+    const table = "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n| Bob | 25 |";
     const once = codec.serialize(codec.parse(table));
     expect(once).toContain("| Alice | 30 |");
     expect(codec.serialize(codec.parse(once))).toBe(once);
@@ -78,5 +76,11 @@ describe("codec under linkedom shim (worker environment)", () => {
 
   it("hash is computable without DOM", () => {
     expect(codec.hash("abc")).toBe("900150983cd24fb0d6963f7d28e17f72");
+  });
+
+  it("chat HTML rendering works in the worker environment", async () => {
+    const { renderMarkdownHtml } = await import("../../utils/markdown-html");
+    expect(renderMarkdownHtml("**bold**")).toContain("<strong>bold</strong>");
+    expect(renderMarkdownHtml("<img src=x>")).not.toContain("<img src");
   });
 });

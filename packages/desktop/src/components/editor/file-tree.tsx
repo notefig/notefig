@@ -4,10 +4,7 @@ import {
   FileTree as TreesFileTree,
   type FileTreeProps as TreesFileTreeProps,
 } from "@pierre/trees/react";
-import type {
-  ContextMenuItem,
-  ContextMenuOpenContext,
-} from "@pierre/trees";
+import type { ContextMenuItem, ContextMenuOpenContext } from "@pierre/trees";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -341,11 +338,9 @@ function FileTreeInner({
       if (!row || row.type !== "file") return;
       if (lastHoveredRef.current === row.path) return;
       lastHoveredRef.current = row.path;
-      prefetchFileContent(basePath, toAbs(row.path)).catch(
-        (error: unknown) => {
-          console.debug(`Failed to prefetch ${row.path}:`, error);
-        },
-      );
+      prefetchFileContent(basePath, toAbs(row.path)).catch((error: unknown) => {
+        console.debug(`Failed to prefetch ${row.path}:`, error);
+      });
     },
     [findRowInComposedPath, basePath, toAbs],
   );
@@ -419,85 +414,60 @@ function FileTreeInner({
     [focusFirstRow],
   );
 
-  // Reconcile the model against the live query with add/remove diffs so
-  // expansion and selection state survive watcher updates. The mirror lives
-  // on the cache entry: the watcher keeps writing while the tree is
-  // unmounted, and the next mount diffs from the last state the MODEL saw.
-  // Keys are canonical (no trailing slash); values keep the trailing-slash
-  // directory marker that trees' add() needs.
-  // fallow-ignore-next-line complexity
+  // Reset the model to the given paths, carrying expansion and selection
+  // over. The expansion mirror knows about dirs hidden under collapsed
+  // ancestors too, unlike a scan of the visible projection.
+  const resetModelPaths = useCallback(
+    (paths: string[], extraExpanded: readonly string[] = []) => {
+      const expanded = new Set(
+        rememberedExpandedPaths(basePath) ??
+          model
+            .getVisibleRows(0, model.getVisibleCount())
+            .filter((row) => row.kind === "directory" && row.isExpanded)
+            .map((row) => row.path.replace(/\/+$/, "")),
+      );
+      for (const path of extraExpanded) expanded.add(path);
+      model.resetPaths(paths, { initialExpandedPaths: [...expanded] });
+      if (selectedFilePathRef.current) {
+        selectOnly(toRel(selectedFilePathRef.current));
+      }
+    },
+    [model, basePath, selectOnly, toRel],
+  );
+
+  // Feed the model the way trees is designed to be fed: resetPaths with the
+  // full list (the same call the sort effects use) — trees reconciles
+  // internally, expansion and selection are re-applied by resetModelPaths.
+  // The signature lives on the cache entry so a remount with unchanged data
+  // never resets (scroll survives), while watcher writes that land during
+  // unmount are picked up on the next mount. (MET-130: the previous
+  // hand-rolled add/remove diff kept a knownPaths mirror that went
+  // permanently stale whenever its batch threw — deleted files stayed on
+  // screen.)
   useEffect(() => {
-    const next = new Map(
-      treePaths.map((p) => [p.replace(/\/+$/, ""), p] as const),
-    );
-    const prev = entry.knownPaths ?? new Map<string, string>();
-    entry.knownPaths = next;
-
-    const pending = entry.pendingCreate;
-    const adds: string[] = [];
-    for (const [canonical, inputPath] of next) {
-      if (!prev.has(canonical) && !model.getItem(canonical)) {
-        adds.push(inputPath);
+    const signature = treePaths.slice().sort().join("\n");
+    if (signature !== entry.pathsSignature) {
+      // Never yank an in-progress inline edit (rename/create): the commit
+      // itself writes to the collection, so a fresh tick re-runs this.
+      const container = model.getFileTreeContainer();
+      if (container?.shadowRoot?.querySelector("[data-item-rename-input]")) {
+        return;
       }
-    }
-    const removes: string[] = [];
-    for (const canonical of prev.keys()) {
-      if (
-        !next.has(canonical) &&
-        canonical !== pending?.path &&
-        model.getItem(canonical)
-      ) {
-        removes.push(canonical);
-      }
-    }
-
-    // Parents before children in both directions ("dir/" sorts before
-    // "dir/file"). For removes, drop descendants of an already-removed
-    // directory: the recursive parent remove takes them out of the model,
-    // and a second remove for a gone path throws inside batch().
-    adds.sort();
-    removes.sort();
-    const prunedRemoves: string[] = [];
-    let lastKept: string | null = null;
-    for (const canonical of removes) {
-      if (lastKept && canonical.startsWith(lastKept + "/")) continue;
-      prunedRemoves.push(canonical);
-      lastKept = canonical;
-    }
-
-    const ops: Array<
-      | { type: "add"; path: string }
-      | { type: "remove"; path: string; recursive: boolean }
-    > = [
-      ...adds.map((path) => ({ type: "add" as const, path })),
-      ...prunedRemoves.map((path) => ({
-        type: "remove" as const,
-        path,
-        recursive: true,
-      })),
-    ];
-    if (ops.length > 0) {
-      // Snapshot BEFORE the batch: the expansion mirror records the freshly
-      // added (collapsed) directories during the batch, which would erase
-      // the remembered state we're about to restore.
-      const remembered = new Set(rememberedExpandedPaths(basePath) ?? []);
-      model.batch(ops);
-      // Directories that arrive after model construction (the live query
-      // populates late on mount) come in collapsed; replay their remembered
-      // expansion — or, on the workspace's very first tree, the default
-      // shape (root-level directories open).
+      entry.pathsSignature = signature;
+      // On the workspace's very first tree the default shape is root-level
+      // directories open — merged in explicitly, because the expansion
+      // mirror attaches (empty) the moment the tree mounts and so can't be
+      // the null-signal.
       const applyDefault = entry.needsDefaultExpansion;
-      entry.needsDefaultExpansion = false;
-      for (const inputPath of adds) {
-        if (!inputPath.endsWith("/")) continue;
-        const canonical = inputPath.replace(/\/+$/, "");
-        const isRootLevel = !canonical.includes("/");
-        if (!remembered.has(canonical) && !(applyDefault && isRootLevel)) {
-          continue;
-        }
-        const item = model.getItem(canonical);
-        if (item && "expand" in item) item.expand();
-      }
+      if (treePaths.length > 0) entry.needsDefaultExpansion = false;
+      resetModelPaths(
+        treePaths,
+        applyDefault
+          ? treePaths
+              .filter((p) => p.endsWith("/") && !p.slice(0, -1).includes("/"))
+              .map((p) => p.replace(/\/+$/, ""))
+          : [],
+      );
     }
 
     // Complete a deferred focus hand-off, but only if the host still holds
@@ -509,7 +479,7 @@ function FileTreeInner({
     ) {
       focusFirstRow();
     }
-  }, [treePaths, entry, model, basePath, focusFirstRow]);
+  }, [treePaths, entry, model, focusFirstRow, resetModelPaths]);
 
   // Keep tree selection in sync with the active tab.
   useEffect(() => {
@@ -542,28 +512,8 @@ function FileTreeInner({
     }
     lastStatSignatureRef.current = signature;
 
-    // The expansion mirror knows about dirs hidden under collapsed
-    // ancestors too, unlike a scan of the visible projection.
-    const expanded =
-      rememberedExpandedPaths(basePath) ??
-      model
-        .getVisibleRows(0, model.getVisibleCount())
-        .filter((row) => row.kind === "directory" && row.isExpanded)
-        .map((row) => row.path.replace(/\/+$/, ""));
-    model.resetPaths(treePaths, { initialExpandedPaths: expanded });
-    if (selectedFilePathRef.current) {
-      selectOnly(toRel(selectedFilePathRef.current));
-    }
-  }, [
-    treePaths,
-    fileMetadataList,
-    sortOrder,
-    entry,
-    model,
-    basePath,
-    selectOnly,
-    toRel,
-  ]);
+    resetModelPaths(treePaths);
+  }, [treePaths, fileMetadataList, sortOrder, entry, model, resetModelPaths]);
 
   // Map the externally-owned FileTreeMode onto trees' built-in editing flows,
   // then release the mode immediately: trees owns the edit session itself.

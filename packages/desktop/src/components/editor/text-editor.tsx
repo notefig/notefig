@@ -60,15 +60,22 @@ export function TextEditor({
     const target = event.target as HTMLElement;
     if (target !== event.currentTarget && !target.matches(".prose")) return;
     event.preventDefault();
+    // Clamp into the contenteditable's rect so clicks on the padding band or
+    // side gutters resolve to the nearest position; posAtCoords returns null
+    // outside the rect, and the old focus("end") fallback yanked the viewport
+    // to the document end.
+    const rect = editor.view.dom.getBoundingClientRect();
     const pos = editor.view.posAtCoords({
-      left: event.clientX,
-      top: event.clientY,
+      left: Math.min(Math.max(event.clientX, rect.left + 1), rect.right - 1),
+      top: Math.min(Math.max(event.clientY, rect.top + 1), rect.bottom - 1),
     });
-    if (pos) {
-      editor.chain().focus().setTextSelection(pos.pos).run();
-    } else {
-      editor.commands.focus("end");
-    }
+    if (!pos) return;
+    // The clicked point is already on screen — never scroll.
+    editor
+      .chain()
+      .focus(null, { scrollIntoView: false })
+      .setTextSelection(pos.pos)
+      .run();
   };
 
   return (

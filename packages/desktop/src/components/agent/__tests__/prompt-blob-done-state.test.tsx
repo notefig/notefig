@@ -50,6 +50,19 @@ function render(props: {
   );
 }
 
+/** Markdown renders through the conversion worker (inline fallback in this
+ *  environment) — poll until the prose container has content. */
+async function settleMarkdown() {
+  for (let i = 0; i < 200; i++) {
+    const prose = container!.querySelector(".prose");
+    if (prose && prose.innerHTML !== "") return;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+  }
+  throw new Error("Markdown never rendered");
+}
+
 function clickSummary() {
   // The summary line is the first button in the header row.
   const button = container!.querySelector("button")!;
@@ -66,17 +79,19 @@ afterEach(() => {
 });
 
 describe("DoneState", () => {
-  it("renders the full response body by default, no click needed (MET-133)", () => {
+  it("renders the full response body by default, no click needed (MET-133)", async () => {
     render({
       response: { kind: "answer", markdown: "**bold** body", title: "Title" },
     });
+    await settleMarkdown();
     expect(container!.querySelector("strong")?.textContent).toBe("bold");
     // Expanded, the summary line shows the heading, not the body echo.
     expect(container!.querySelector("button")?.textContent).toBe("Title");
   });
 
-  it("collapses to the one-line summary on click, and re-expands", () => {
+  it("collapses to the one-line summary on click, and re-expands", async () => {
     render({ response: { kind: "answer", markdown: "the whole answer" } });
+    await settleMarkdown();
     expect(container!.textContent).toContain("the whole answer");
     clickSummary();
     // Collapsed: the body is gone; the summary line echoes it truncated.
@@ -94,8 +109,9 @@ describe("DoneState", () => {
     expect(container!.querySelector(".max-h-80")).not.toBeNull();
   });
 
-  it("shows the fallback assistant text expanded when widget_respond was never called", () => {
+  it("shows the fallback assistant text expanded when widget_respond was never called", async () => {
     render({ fallbackText: "last assistant words" });
+    await settleMarkdown();
     expect(container!.querySelector("p")?.textContent).toBe(
       "last assistant words",
     );

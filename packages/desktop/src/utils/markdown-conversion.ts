@@ -26,9 +26,9 @@ export interface SerializedDoc {
 type Converter = WorkerClient<MarkdownWorkerApi>;
 
 async function createInlineConverter(): Promise<Converter> {
-  const { createMarkdownCodec } = await import(
-    "@/components/editor/markdown-codec"
-  );
+  const { createMarkdownCodec } =
+    await import("@/components/editor/markdown-codec");
+  const { renderMarkdownHtml } = await import("@/utils/markdown-html");
   const codec = createMarkdownCodec();
   return {
     parse: async (markdown: string) => codec.parse(markdown),
@@ -36,6 +36,7 @@ async function createInlineConverter(): Promise<Converter> {
       const markdown = codec.serialize(doc);
       return { markdown, hash: codec.hash(markdown) };
     },
+    renderHtml: async (markdown: string) => renderMarkdownHtml(markdown),
   };
 }
 
@@ -101,6 +102,11 @@ export function parseMarkdown(markdown: string): Promise<JSONContent> {
 
 export function serializeDoc(doc: JSONContent): Promise<SerializedDoc> {
   return withConverter((c) => c.serialize(doc));
+}
+
+/** Chat/LLM output markdown → HTML, off the main thread. */
+export function renderMarkdown(markdown: string): Promise<string> {
+  return withConverter((c) => c.renderHtml(markdown));
 }
 
 /** Test hook: force a fresh boot (e.g. after stubbing Worker). */
