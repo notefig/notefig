@@ -61,12 +61,14 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
 
-  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont,
+  --font-sans:
+    ui-sans-serif, -apple-system, BlinkMacSystemFont,
     "Segoe UI Variable Display", "Segoe UI", Helvetica, "Apple Color Emoji",
     Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
   --font-heading: var(--font-sans);
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    "Liberation Mono", "Courier New", monospace;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
 
   --animate-accordion-down: accordion-down 0.2s ease-out;
   --animate-accordion-up: accordion-up 0.2s ease-out;
@@ -271,6 +273,18 @@
   [data-slate-editor="true"] .list-style-todo [data-slate-placeholder] {
     line-height: inherit !important;
     padding-top: 0 !important;
+  }
+
+  /* select-text opts in its whole subtree (MET-139): user-select doesn't
+     cascade past the universal none above, so markdown-rendered children
+     (p/li/h*) of a select-text container were selectable-but-unpainted in
+     WebKit. Base layer keeps an explicit select-none descendant winning. */
+  .select-text,
+  .select-text * {
+    user-select: text;
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
   }
 
   /* Allow selection in code blocks and pre elements */
