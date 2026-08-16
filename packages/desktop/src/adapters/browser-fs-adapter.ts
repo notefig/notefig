@@ -366,21 +366,41 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     newPath: string,
   ): Promise<Result<void>> {
     try {
-      await this.fs.createDirectories([newPath]);
+      // FS-Access has no rename, so "move" is copy-then-delete. The source
+      // is deleted only after EVERY file verifiably reached the destination
+      // — a partial copy fails with the source intact. (The old tolerant
+      // version deleted unconditionally, which could destroy a directory —
+      // e.g. a legacy history repo mid-migration — on any listing, read, or
+      // write failure.)
       const filesResult = await this.fs.readDirectory(oldPath, {
         recursive: true,
         includeFiles: true,
         includeDirectories: false,
       });
-      if (filesResult.ok) {
-        const filePaths = filesResult.value;
-        const fileData = await this.fs.readBinaryFiles(filePaths);
-        await this.fs.writeBinaryFiles(
-          fileData.succeeded.map((f) => ({
-            path: f.path.replace(oldPath, newPath),
-            data: f.data,
-          })),
-        );
+      if (!filesResult.ok) {
+        return { ok: false, error: filesResult.error };
+      }
+      const fileData = await this.fs.readBinaryFiles(filesResult.value);
+      if (fileData.failed.length > 0) {
+        return { ok: false, error: fileData.failed[0] };
+      }
+      await this.fs.createDirectories([newPath]);
+      const written = await this.fs.writeBinaryFiles(
+        fileData.succeeded.map((f) => ({
+          path: f.path.replace(oldPath, newPath),
+          data: f.data,
+        })),
+      );
+      if (written.failed.length > 0) {
+        // Roll back what did land so a half-copied destination can never
+        // masquerade as the real directory (a migration probe finding a
+        // partial gitdir's HEAD would strand the intact source forever).
+        // Best-effort: rollback failures leave strays, but the returned
+        // error already tells the caller the move didn't happen.
+        if (written.succeeded.length > 0) {
+          await this.fs.deleteFiles(written.succeeded);
+        }
+        return { ok: false, error: written.failed[0] };
       }
       await this.fs.deleteDirectories([oldPath], { recursive: true });
       return { ok: true, value: undefined };

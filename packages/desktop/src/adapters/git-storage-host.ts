@@ -16,11 +16,13 @@ import type {
  */
 
 /**
- * Held git locks, keyed `"<workspacePath>::<name>"`. Module-level rather
- * than per-host: locks must be shared across every host for a workspace, and
- * previously the per-adapter `Set` achieved that only because exactly one
- * adapter instance exists per app. Keying by workspace keeps two workspaces
- * from ever contending.
+ * Held git locks, keyed `"<lockScope>::<name>"` where the scope is the
+ * repo's gitdir. Module-level rather than per-host: locks must be shared
+ * across every host for a repo, and previously the per-adapter `Set`
+ * achieved that only because exactly one adapter instance exists per app.
+ * Keying by gitdir (not workspace) matters because two repos share one
+ * worktree — the user's repo at `<ws>/.git` and the history repo at
+ * `<ws>/.metrists/.git` — and must never contend on each other's locks.
  */
 const gitLocks = new Set<string>();
 
@@ -46,12 +48,14 @@ function requireSuccess<T>(
 }
 
 /**
- * Create a GitStorageHost bound to a workspace root, on demand — callers
- * build one per workspace when git work starts, never eagerly at open.
+ * Create a GitStorageHost on demand — callers build one per repo when git
+ * work starts, never eagerly at open. `lockScope` is the repo's gitdir
+ * (e.g. `<ws>/.git` or `<ws>/.metrists/.git`): it namespaces the lock
+ * registry so repos sharing a worktree never contend.
  */
 export function createGitStorageHost(
   fs: FileSystemSurface,
-  workspacePath: string,
+  lockScope: string,
 ): GitStorageHost {
   const host: GitStorageHost = {
     readFile: async (path: string): Promise<Uint8Array> => {
@@ -177,7 +181,7 @@ export function createGitStorageHost(
     },
 
     lock: async (name: string): Promise<void> => {
-      const key = `${workspacePath}::${name}`;
+      const key = `${lockScope}::${name}`;
       if (gitLocks.has(key)) {
         throw new Error(`Git lock '${name}' is already held.`);
       }
@@ -185,7 +189,7 @@ export function createGitStorageHost(
     },
 
     unlock: async (name: string): Promise<void> => {
-      gitLocks.delete(`${workspacePath}::${name}`);
+      gitLocks.delete(`${lockScope}::${name}`);
     },
   };
 

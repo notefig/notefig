@@ -42,6 +42,11 @@ vi.mock("@/adapters/git-storage-host", () => ({
   createGitStorageHost: createGitStorageHostMock,
 }));
 
+const ensureExcludeLinesMock = vi.fn();
+vi.mock("@/utils/git-exclude", () => ({
+  ensureExcludeLines: ensureExcludeLinesMock,
+}));
+
 describe("git service registry (entities/git)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -57,7 +62,10 @@ describe("git service registry (entities/git)", () => {
 
     expect(first).toBe(second);
     expect(createGitStorageHostMock).toHaveBeenCalledTimes(1);
-    expect(createGitStorageHostMock).toHaveBeenCalledWith(fsMock, "/workspace");
+    expect(createGitStorageHostMock).toHaveBeenCalledWith(
+      fsMock,
+      "/workspace/.git",
+    );
   });
 
   it("initializes repository once per in-flight workspace", async () => {
@@ -74,6 +82,9 @@ describe("git service registry (entities/git)", () => {
       repoPath: "/workspace",
       defaultBranch: "main",
     });
+    expect(ensureExcludeLinesMock).toHaveBeenCalledWith("/workspace/.git", [
+      ".metrists/",
+    ]);
   });
 
   it("re-runs init on later ensure calls", async () => {
