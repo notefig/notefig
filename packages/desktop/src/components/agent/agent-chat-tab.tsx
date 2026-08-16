@@ -4,7 +4,6 @@
 // file-sync's editor-store import comment); new cycles elsewhere still gate.
 // fallow-ignore-file circular-dependency
 import {
-  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -20,6 +19,7 @@ import {
   Loader2,
   Sparkles,
   Square,
+  Undo2,
   X,
 } from "lucide-react";
 import type {
@@ -76,6 +76,7 @@ import {
 } from "./prompt-blob-state";
 import { CopyTextButton } from "./copy-text-button";
 import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
+import { jumpToCheckpoint, useHistoryCheckpoints } from "@/entities/history";
 
 /**
  * One agent session as a dockable tab: streamed turn output (message chunks
@@ -487,16 +488,8 @@ function Transcript({
   );
 }
 
-/** Render one transcript entry by type; tool calls are peers of text.
- *  Memoized: a stream chunk replaces only the mutating entry's row object,
- *  so every settled entry skips its re-render (MET-136). */
-const EntryView = memo(function EntryView({
-  entry,
-  queued,
-}: {
-  entry: AgentEntry;
-  queued?: boolean;
-}) {
+/** Render one transcript entry by type; tool calls are peers of text. */
+function EntryView({ entry, queued }: { entry: AgentEntry; queued?: boolean }) {
   if (entry.type === "tool_call") {
     if (!entry.toolCall) return null;
     const CustomCard = TOOL_NAME_RENDERER[entry.toolCall.title ?? ""];
@@ -515,7 +508,7 @@ const EntryView = memo(function EntryView({
   // leading/trailing newlines would show inside whitespace-pre-wrap bubbles.
   if (!entry.text?.trim()) return null;
   return <MessageEntry entry={entry} queued={queued} />;
-});
+}
 
 /** A user or assistant text message: compact bubble (user) or flat
  *  full-width text (assistant, opencode-style), plus the hover footer. */
@@ -551,7 +544,7 @@ function MessageEntry({
         {isUser ? text : <Markdown text={text} />}
         {queued && <QueuedBadge taskId={entry.taskId} turnId={entry.turnId} />}
       </div>
-      <MessageFooter text={text} createdAt={entry.createdAt} isUser={isUser} />
+      <MessageFooter entry={entry} text={text} isUser={isUser} />
     </div>
   );
 }
@@ -578,18 +571,17 @@ function QueuedBadge({ taskId, turnId }: { taskId: string; turnId: string }) {
 }
 
 /**
- * Hover-revealed message footer (opencode-style, MET-94): copy + timestamp
- * for now; revert and the model name join it later. The row always occupies
- * its height so revealing it never reflows the transcript — only opacity
- * changes.
+ * Hover-revealed message footer (opencode-style, MET-94): copy + timestamp,
+ * plus revert on user messages. The row always occupies its height so
+ * revealing it never reflows the transcript — only opacity changes.
  */
 function MessageFooter({
+  entry,
   text,
-  createdAt,
   isUser,
 }: {
+  entry: AgentEntry;
   text: string;
-  createdAt?: number;
   isUser: boolean;
 }) {
   return (
@@ -605,13 +597,95 @@ function MessageFooter({
         iconClassName="size-3"
         className="p-0.5 text-[0.625rem]"
       />
+      {isUser && (
+        <RevertMessageButton taskId={entry.taskId} turnId={entry.turnId} />
+      )}
       {/* Replayed history has no createdAt — no time beats a wrong one. */}
-      {createdAt !== undefined && (
+      {entry.createdAt !== undefined && (
         <span className="text-[0.625rem] tabular-nums text-muted-foreground">
-          {formatEntryTime(createdAt)}
+          {formatEntryTime(entry.createdAt)}
         </span>
       )}
     </div>
+  );
+}
+
+/**
+ * "Revert" under a user message: jump the workspace back to the state
+ * immediately before this message ran. Turn commits are anchored at turn
+ * END (subject = prompt) with an optional pre-turn "Your edits" fold, both
+ * tagged with the turnId trailer, so the pre-message state is: the fold
+ * commit when one exists (it IS the tree right before the prompt, user
+ * edits included), else the parent of the turn's result commit.
+ *
+ * Hidden when no checkpoint carries this turnId (the turn changed nothing
+ * and had no fold, the commits fell off the log window, or the transcript
+ * predates trailer turnIds) or the tagged commit is the root.
+ */
+function RevertMessageButton({
+  taskId,
+  turnId,
+}: {
+  taskId: string;
+  turnId: string;
+}) {
+  const { t } = useTranslation();
+  const taskRow = useTaskRow(taskId);
+  const workspacePath = taskRow?.workspacePath;
+  const checkpoints = useHistoryCheckpoints(workspacePath);
+  const target = useMemo(() => {
+    const tagged = checkpoints.filter((row) => row.turnId === turnId);
+    if (tagged.length === 0) return undefined;
+    // checkpoints are newest-first; the OLDEST tagged commit is the fold
+    // (role user) or, failing that, the result commit whose parent we want.
+    const oldest = tagged[tagged.length - 1];
+    if (oldest.role === "user") return oldest;
+    if (!oldest.parentOid) return undefined;
+    return (
+      checkpoints.find((row) => row.oid === oldest.parentOid) ?? {
+        // Parent aged out of the log window — a jump only needs the oid.
+        oid: oldest.parentOid,
+        hash: oldest.parentOid.slice(0, 7),
+        subject: `Before: ${oldest.subject}`,
+      }
+    );
+  }, [checkpoints, turnId]);
+  const [reverting, setReverting] = useState(false);
+
+  if (!workspacePath || !target) return null;
+
+  const revert = async () => {
+    if (reverting) return;
+    setReverting(true);
+    try {
+      await jumpToCheckpoint(workspacePath, target);
+    } finally {
+      setReverting(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      title={t(
+        "agentRevertMessageTitle",
+        "Revert the workspace to before this message",
+      )}
+      aria-label={t(
+        "agentRevertMessageTitle",
+        "Revert the workspace to before this message",
+      )}
+      disabled={reverting}
+      className="flex items-center gap-1 rounded p-0.5 text-[0.625rem] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+      onClick={() => void revert()}
+    >
+      {reverting ? (
+        <Loader2 className="size-3 animate-spin" />
+      ) : (
+        <Undo2 className="size-3" />
+      )}
+      {t("agentRevertMessage", "Revert")}
+    </button>
   );
 }
 

@@ -1,15 +1,11 @@
 import { useState, useEffect } from "react";
-import {
-  Cloud,
-  CloudUpload,
-  Type,
-  GitCommitHorizontal,
-  GitPullRequest,
-} from "lucide-react";
+import { Cloud, CloudUpload, Type } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { TunnelStatus } from "@/components/tunnel/tunnel-status";
-import { useGitSummary } from "@/entities/git";
+// Real-git ops are parked while the sidebar panel drives the internal
+// history repo instead; restore this (and the chip below) with them.
+// import { useGitSummary } from "@/entities/git";
 
 interface StatusBarProps {
   wordCount: number;
@@ -42,15 +38,14 @@ export function StatusBar({
   wordCount,
   isSynced,
   direction = "ltr",
-  workspacePath,
+  workspacePath: _workspacePath,
 }: StatusBarProps) {
   const isRtl = direction === "rtl";
   const { t } = useTranslation();
   const debouncedSynced = useDebouncedSyncState(isSynced);
-  const gitSummary = useGitSummary(workspacePath);
-
-  const hasGitChanges = gitSummary?.hasChanges;
-  const showGit = !!workspacePath && !gitSummary?.statusError;
+  // const gitSummary = useGitSummary(workspacePath);
+  // const hasGitChanges = gitSummary?.hasChanges;
+  // const showGit = !!workspacePath && !gitSummary?.statusError;
 
   return (
     <div
@@ -69,6 +64,7 @@ export function StatusBar({
         )}
         <span>{debouncedSynced ? t("saved") : t("saving")}</span>
       </div>
+      {/* Real-git sync chip, parked with the rest of the user-git ops:
       {showGit && (
         <div className="flex items-center justify-center gap-2 min-w-[5.5rem]">
           {hasGitChanges ? (
@@ -78,7 +74,7 @@ export function StatusBar({
           )}
           <span>{hasGitChanges ? t("unchecked") : t("checked")}</span>
         </div>
-      )}
+      )} */}
       <div className="flex items-center justify-center gap-2 w-[6.5rem]">
         <Type className="w-3.5 h-3.5" />
         <span>

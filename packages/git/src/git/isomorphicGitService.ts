@@ -16,6 +16,8 @@ import {
   type GitPushInput,
   type GitReadTextFileInput,
   type GitRemoveInput,
+  type GitRestoreTreeInput,
+  type GitRestoreTreeResult,
   type GitAddAllAndCommitInput,
   type GitAbortRevertInput,
   type GitRevertCommitInput,
@@ -398,11 +400,19 @@ export class IsomorphicGitService implements GitService {
     }
 
     for (const filepath of pathsToAdd) {
-      await this.add({ repoPath: input.repoPath, gitDir: input.gitDir, filepath });
+      await this.add({
+        repoPath: input.repoPath,
+        gitDir: input.gitDir,
+        filepath,
+      });
     }
 
     for (const filepath of pathsToRemove) {
-      await this.remove({ repoPath: input.repoPath, gitDir: input.gitDir, filepath });
+      await this.remove({
+        repoPath: input.repoPath,
+        gitDir: input.gitDir,
+        filepath,
+      });
     }
 
     const afterStage = await this.status({
@@ -440,8 +450,18 @@ export class IsomorphicGitService implements GitService {
     }
 
     const [parentFiles, commitFiles, headOid] = await Promise.all([
-      git.listFiles({ fs: this.fsClient, dir: repoPath, gitdir, ref: parentOid }),
-      git.listFiles({ fs: this.fsClient, dir: repoPath, gitdir, ref: commitOid }),
+      git.listFiles({
+        fs: this.fsClient,
+        dir: repoPath,
+        gitdir,
+        ref: parentOid,
+      }),
+      git.listFiles({
+        fs: this.fsClient,
+        dir: repoPath,
+        gitdir,
+        ref: commitOid,
+      }),
       git.resolveRef({ fs: this.fsClient, dir: repoPath, gitdir, ref: "HEAD" }),
     ]);
 
@@ -654,6 +674,104 @@ export class IsomorphicGitService implements GitService {
         force: input.force ?? true,
         noUpdateHead: input.noUpdateHead ?? true,
       });
+    } catch (error) {
+      throw toGitError(error);
+    }
+  }
+
+  /**
+   * Materialize `ref`'s tree into the worktree by diffing it against HEAD:
+   * only files whose blob differs at the ref (or exist only there) are
+   * checked out (index updated to match), and files tracked at HEAD but
+   * absent at the ref are removed from worktree and index. Untracked/
+   * ignored files are never touched, and HEAD does not move — history
+   * stays append-only; the caller decides whether the resulting dirty
+   * state becomes a new commit.
+   *
+   * The diff is against HEAD, not the worktree: callers must commit any
+   * dirty state first (the jump flow's safety checkpoint), or dirty files
+   * whose committed blob already matches the ref keep their dirty content.
+   */
+  async restoreTree(input: GitRestoreTreeInput): Promise<GitRestoreTreeResult> {
+    if (!input.ref) {
+      throw new GitError("InvalidInput", "restoreTree requires a ref.");
+    }
+
+    const gitdir = resolveGitDir(input);
+    try {
+      const changed: string[] = [];
+      const toDelete: string[] = [];
+      await git.walk({
+        fs: this.fsClient,
+        dir: input.repoPath,
+        gitdir,
+        trees: [git.TREE({ ref: input.ref }), git.TREE({ ref: "HEAD" })],
+        map: async (filepath, [target, head]) => {
+          if (filepath === ".") return true;
+          const [targetType, headType] = await Promise.all([
+            target?.type(),
+            head?.type(),
+          ]);
+          if (targetType === "tree" || headType === "tree") {
+            // Prune identical subtrees — their contents can't differ.
+            if (
+              targetType === "tree" &&
+              headType === "tree" &&
+              (await target!.oid()) === (await head!.oid())
+            ) {
+              return null;
+            }
+            return true;
+          }
+          const [targetOid, headOid] = await Promise.all([
+            target?.oid(),
+            head?.oid(),
+          ]);
+          if (targetOid !== undefined && targetOid !== headOid) {
+            changed.push(filepath);
+          } else if (targetOid === undefined && headOid !== undefined) {
+            toDelete.push(filepath);
+          }
+          return true;
+        },
+      });
+
+      if (changed.length > 0) {
+        await git.checkout({
+          fs: this.fsClient,
+          dir: input.repoPath,
+          gitdir,
+          ref: input.ref,
+          filepaths: changed,
+          force: true,
+          noUpdateHead: true,
+        });
+      }
+
+      for (const filepath of toDelete) {
+        const absolute = joinGitPath(input.repoPath, filepath);
+        // Delete first, verify on failure: host errors are untyped, and a
+        // stat-first check would let a FAILING existence probe (adapters
+        // map stat errors to exists:false) skip the delete yet still clear
+        // the index. Attempting the delete unconditionally means the only
+        // swallowed error is one where the file is verifiably absent —
+        // anything else fails the restore rather than reporting a deletion
+        // that left stale content on disk.
+        try {
+          await this.host.deleteFile(absolute);
+        } catch (error) {
+          const stat = await this.host.stat(absolute);
+          if (stat.exists) throw error;
+        }
+        await git.remove({
+          fs: this.fsClient,
+          dir: input.repoPath,
+          gitdir,
+          filepath,
+        });
+      }
+
+      return { restored: changed, deleted: toDelete };
     } catch (error) {
       throw toGitError(error);
     }

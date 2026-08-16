@@ -34,6 +34,10 @@ import { AgentTransportError } from "./agent-transport.interface";
 import { attachMcpEndpoint, createMcpRequestHandler } from "./mcp-server";
 import { checkpointWorkspaceHistory } from "@/utils/history-service";
 import {
+  formatCheckpointMessage,
+  USER_CHECKPOINT_AUTHOR,
+} from "@/utils/history-trailers";
+import {
   agentEntriesCollection,
   agentEntriesForTask,
   agentPermissionRequestsCollection,
@@ -42,9 +46,14 @@ import {
   agentTurnsForTask,
   type AgentEntry,
   type AgentTaskStatus,
+  type AgentTurn,
   type AgentTurnStatus,
 } from "./agent-collections";
-import { getRegisteredTask, registerTask, unregisterTask } from "./task-registry";
+import {
+  getRegisteredTask,
+  registerTask,
+  unregisterTask,
+} from "./task-registry";
 import {
   HARNESS_SETTINGS_NAMESPACE,
   HARNESS_OVERRIDES_KEY,
@@ -142,7 +151,8 @@ function deriveToolLocations(
   rawInput: unknown,
   workspacePath: string,
 ): Array<{ path: string }> | undefined {
-  if (!isPlainObject(rawInput) || typeof rawInput.path !== "string") return undefined;
+  if (!isPlainObject(rawInput) || typeof rawInput.path !== "string")
+    return undefined;
   const resolved = resolveWorkspacePath(workspacePath, rawInput.path);
   return [{ path: resolved.ok ? resolved.absolute : rawInput.path }];
 }
@@ -154,7 +164,9 @@ function deriveToolLocations(
  * whichever is present so transcript entries and `findBlobAuthorTask` see
  * the plain tool name, same as any other tool call.
  */
-function normalizeMcpToolName(title: string | null | undefined): string | undefined {
+function normalizeMcpToolName(
+  title: string | null | undefined,
+): string | undefined {
   if (!title) return undefined;
   for (const prefix of [`mcp__${MCP_SERVER_NAME}__`, `${MCP_SERVER_NAME}_`]) {
     if (title.startsWith(prefix)) return title.slice(prefix.length);
@@ -214,6 +226,15 @@ export class AgentTask {
   private title = "New task";
 
   private currentTurn: TurnState | null = null;
+  /** session/load replay state (resumeSession): persisted prompt turns
+   *  awaiting re-adoption, the order cursor, the ids touched (for lingering
+   *  tool-call resolution), and the flag insertEntry uses to withhold
+   *  createdAt from replayed entries (their true time is unknowable). */
+  private replayPool: AgentTurn[] = [];
+  private replayCursor = 0;
+  private replayTurnIds: string[] = [];
+  private replaySessionId: string | null = null;
+  private sessionReplaying = false;
   /**
    * toolCallId → event row id. Task-level (not per-turn) so a late
    * tool_call_update — one that arrives at or after the turn boundary — still
@@ -289,7 +310,9 @@ export class AgentTask {
    * via `OPENCODE_CONFIG`) rather than through `session/new.mcpServers`.
    */
   async start(
-    createTransport: (spec: { extraEnv: Record<string, string> }) => AgentTransport,
+    createTransport: (spec: {
+      extraEnv: Record<string, string>;
+    }) => AgentTransport,
     options?: {
       /**
        * Revival (MET-54): resume this harness-stored session via ACP
@@ -308,7 +331,9 @@ export class AgentTask {
       // construct-then-start pattern as the ACP transport below:
       // createMcpEndpoint is a dumb sync constructor, we call start()
       // ourselves, and mcpServer only exists on the instance afterward.
-      const mcpEndpoint = platformAdapter.proc.createMcpEndpoint({ taskId: this.taskId });
+      const mcpEndpoint = platformAdapter.proc.createMcpEndpoint({
+        taskId: this.taskId,
+      });
       this.mcpEndpoint = mcpEndpoint;
       await mcpEndpoint.start();
       this.unsubscribers.push(
@@ -346,7 +371,8 @@ export class AgentTask {
         taskId: this.taskId,
         transport,
         permissionBroker: this.permissionBroker,
-        onSessionUpdate: (notification) => this.handleSessionUpdate(notification),
+        onSessionUpdate: (notification) =>
+          this.handleSessionUpdate(notification),
       });
 
       // Bring the transport live before any ACP traffic; spawn failure
@@ -422,25 +448,42 @@ export class AgentTask {
   /**
    * ACP `session/load` + replay capture. History replays as session/update
    * notifications BEFORE loadSession resolves (verified on both adapters,
-   * MET-54 spike); a synthetic completed turn anchors them so the transcript
-   * rebuilds through the normal handleSessionUpdate pipeline — including
-   * replayed user messages (the `user_message_chunk` case).
+   * MET-54 spike); a synthetic completed turn anchors the preamble, and
+   * each replayed user message re-anchors onto the PERSISTED turn row whose
+   * prompt text matches (the `user_message_chunk` case) — keeping the
+   * original turnIds, which are the join to checkpoint commit trailers, so
+   * per-message revert survives restarts.
    */
   private async resumeSession(
     sessionId: string,
     mcpServers: McpServer[],
   ): Promise<void> {
     if (!this.client) throw new Error("ACP client not connected");
-    // The replay is the authoritative transcript — drop rows kept from this
-    // task's previous life (workspace close → reopen) so history isn't
-    // duplicated. Prompts already queued against this revival keep theirs.
+    // The replay is the authoritative transcript — drop the entry rows from
+    // this task's previous life (they stream again now) and prior synthetic
+    // replay turns. Persisted prompt turns are KEPT for re-adoption;
+    // prompts already queued against this revival keep everything.
     const queued = new Set(this.pendingPrompts.map((p) => p.turnId));
     for (const entry of agentEntriesForTask(this.taskId)) {
       if (!queued.has(entry.turnId)) agentEntriesCollection.delete(entry.id);
     }
+    const pool: AgentTurn[] = [];
     for (const turn of agentTurnsForTask(this.taskId)) {
-      if (!queued.has(turn.turnId)) agentTurnsCollection.delete(turn.turnId);
+      if (queued.has(turn.turnId)) continue;
+      if (turn.stopReason === "replay" || !turn.promptText) {
+        agentTurnsCollection.delete(turn.turnId);
+      } else {
+        pool.push(turn);
+      }
     }
+    // Mint-ascending ids = chronological prompt order, the replay's order.
+    pool.sort((a, b) => (a.turnId < b.turnId ? -1 : 1));
+    this.replayPool = pool;
+    this.replayCursor = 0;
+    this.replayTurnIds = [];
+    this.replaySessionId = sessionId;
+    this.sessionReplaying = true;
+    // Anchor for preamble entries arriving before the first user message.
     const turnId = newTurnId();
     agentTurnsCollection.insert({
       turnId,
@@ -450,6 +493,7 @@ export class AgentTask {
       stopReason: "replay",
       startedAt: Date.now(),
     });
+    this.replayTurnIds.push(turnId);
     this.currentTurn = {
       turnId,
       joiner: new MarkdownJoiner(),
@@ -460,33 +504,91 @@ export class AgentTask {
       await this.client.loadSession(sessionId, this.agentCwd, mcpServers);
       this.sessionId = sessionId;
     } finally {
+      this.sessionReplaying = false;
+      this.replaySessionId = null;
       const turn = this.currentTurn;
-      if (turn) {
-        this.closeRun(turn);
-        // Replayed tool calls carry whatever status they streamed with; one
-        // still pending/in_progress can't actually be running (this history
-        // already happened), and the replay turn never passes through
-        // finishTurn — resolve them here so nothing spins forever.
-        this.resolveLingeringToolCalls(turn.turnId, "completed");
+      if (turn) this.closeRun(turn);
+      // Replayed tool calls carry whatever status they streamed with; one
+      // still pending/in_progress can't actually be running (this history
+      // already happened), and replay turns never pass through finishTurn —
+      // resolve every touched turn so nothing spins forever.
+      for (const touched of this.replayTurnIds) {
+        this.resolveLingeringToolCalls(touched, "completed");
       }
+      this.replayTurnIds = [];
+      this.replayPool = [];
       this.currentTurn = null;
     }
   }
 
   /**
+   * A replayed user message (`user_message_chunk` — only ever observed on
+   * session/load replay; live user entries are inserted by prompt() itself,
+   * and adapters replay each historical message as one chunk, MET-54
+   * spike). Renders as a real user bubble, and begins a historical round:
+   * everything that follows re-anchors onto the round's original persisted
+   * turnId so the transcript↔checkpoint join survives the revival.
+   */
+  private handleReplayedUserMessage(turn: TurnState, chunk: string): void {
+    this.closeRun(turn);
+    if (this.sessionReplaying) this.adoptReplayTurn(chunk);
+    this.insertEntry({
+      id: newEventId(),
+      taskId: this.taskId,
+      turnId: this.currentTurn?.turnId ?? turn.turnId,
+      type: "user",
+      text: chunk,
+    });
+  }
+
+  /**
+   * Re-anchor the replay onto the turn a replayed user message originally
+   * ran as. Scans the persisted-prompt pool forward from the cursor (rounds
+   * the harness dropped — e.g. errored prompts — are skipped, order is
+   * otherwise preserved); no match means history from before turns were
+   * persisted, which gets a fresh synthetic replay turn.
+   */
+  private adoptReplayTurn(promptText: string): void {
+    let adopted: AgentTurn | undefined;
+    for (let i = this.replayCursor; i < this.replayPool.length; i++) {
+      if (this.replayPool[i].promptText === promptText) {
+        adopted = this.replayPool[i];
+        this.replayCursor = i + 1;
+        break;
+      }
+    }
+    const turnId = adopted?.turnId ?? newTurnId();
+    if (!adopted) {
+      agentTurnsCollection.insert({
+        turnId,
+        taskId: this.taskId,
+        sessionId: this.replaySessionId ?? "",
+        status: "completed",
+        stopReason: "replay",
+        startedAt: Date.now(),
+      });
+    }
+    this.replayTurnIds.push(turnId);
+    this.currentTurn = {
+      turnId,
+      joiner: new MarkdownJoiner(),
+      run: null,
+      userText: promptText,
+    };
+  }
+
+  /**
    * The one insert path for entries mapped from ACP session updates. Live
-   * entries are stamped with wall-clock time; rows belonging to the
-   * synthetic session/load replay turn (stopReason "replay", inserted by
-   * resumeSession before history streams) get NO createdAt — ACP carries
-   * no timestamps (MET-94), so a replayed entry's true time is unknowable
-   * and a revival-time stamp would lie. Ordering never depends on the
-   * stamp (entry ids are mint-ascending).
+   * entries are stamped with wall-clock time; rows streamed by session/load
+   * replay get NO createdAt — ACP carries no timestamps (MET-94), so a
+   * replayed entry's true time is unknowable and a revival-time stamp would
+   * lie. The flag (not the turn's stopReason) decides: replay re-adopts
+   * persisted turns whose stopReason is a real one. Ordering never depends
+   * on the stamp (entry ids are mint-ascending).
    */
   private insertEntry(row: Omit<AgentEntry, "createdAt">): void {
-    const replayed =
-      agentTurnsCollection.get(row.turnId)?.stopReason === "replay";
     agentEntriesCollection.insert(
-      replayed ? row : { ...row, createdAt: Date.now() },
+      this.sessionReplaying ? row : { ...row, createdAt: Date.now() },
     );
   }
 
@@ -510,7 +612,8 @@ export class AgentTask {
     }
     const configPath = this.opencodeConfigPath();
     const environment: Record<string, string> = {};
-    for (const entry of mcpServer.env ?? []) environment[entry.name] = entry.value;
+    for (const entry of mcpServer.env ?? [])
+      environment[entry.name] = entry.value;
     const config = {
       $schema: "https://opencode.ai/config.json",
       mcp: {
@@ -526,7 +629,9 @@ export class AgentTask {
       { path: configPath, content: JSON.stringify(config, null, 2) },
     ]);
     if (result.failed.length > 0) {
-      this.warn("opencode mcp config write failed; task runs without app tools");
+      this.warn(
+        "opencode mcp config write failed; task runs without app tools",
+      );
       return {};
     }
     this.opencodeConfigWritten = true;
@@ -575,6 +680,9 @@ export class AgentTask {
       taskId: this.taskId,
       sessionId: this.sessionId ?? "",
       status: "queued",
+      // Persisted with the row: replay re-adopts this turn by matching the
+      // replayed user message against it (resumeSession).
+      promptText: text,
       startedAt: now,
     });
     // Enqueue is activity even when it doesn't change status (queueing onto
@@ -608,7 +716,12 @@ export class AgentTask {
     // Kick the drain unless a running/draining loop will pick this up, a
     // sign-in block holds the queue (authenticate()/retryHeldPrompt()
     // restarts it), or the spawn in flight will (start()'s tail).
-    if (hasSession && !this.currentTurn && !this.draining && !this.authBlocked) {
+    if (
+      hasSession &&
+      !this.currentTurn &&
+      !this.draining &&
+      !this.authBlocked
+    ) {
       void this.drainQueue();
     }
     return { turnId, completed };
@@ -653,7 +766,10 @@ export class AgentTask {
   }
 
   /** Answer a pending permission request this task raised. */
-  respondPermission(requestId: string, response: RequestPermissionResponse): void {
+  respondPermission(
+    requestId: string,
+    response: RequestPermissionResponse,
+  ): void {
     this.permissionBroker.respond(requestId, response);
   }
 
@@ -712,13 +828,28 @@ export class AgentTask {
     this.setStatus("running");
 
     try {
+      // Fold any pre-existing dirt into its own "Your edits" checkpoint
+      // before the agent can touch a file — between-turn manual edits get a
+      // role:user commit instead of riding the agent's result commit (a
+      // no-op commit on a clean tree). Awaited: agent writes must not
+      // precede it.
+      await this.foldUserEditsBeforeTurn(turnId);
+
+      // cancel() may have settled this turn while the fold was pending
+      // (the jump flow cancels, then restores) — finishTurn already sealed
+      // the rows and cleared currentTurn, so prompting now would let a
+      // cancelled agent write files during or after the restore.
+      if (this.currentTurn?.turnId !== turnId) return "cancelled";
+
       // Tool steering rides the MCP server's own initialize.instructions
       // (mcp-server.ts), not a prompt preamble — prompts carry only user
       // content and context parts.
       const blocks = composePrompt({
         text,
         contextParts,
-        capabilities: { embeddedContext: this.client.embeddedContextCapability },
+        capabilities: {
+          embeddedContext: this.client.embeddedContextCapability,
+        },
       });
       const response = await this.client.prompt(this.sessionId, blocks);
       // A turn that reached the model clears any auth block and marks this
@@ -761,7 +892,9 @@ export class AgentTask {
    * rejects, and the UI falls back to showing the method's description as
    * instructions plus the "I've signed in" retry affordance.
    */
-  async authenticate(methodId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  async authenticate(
+    methodId: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
     if (!this.client) return { ok: false, error: "agent task is not started" };
     try {
       await this.client.authenticate(methodId);
@@ -802,7 +935,11 @@ export class AgentTask {
       if (!this.currentTurn && !this.draining) {
         void this.drainQueue();
       }
-    } else if (this.pendingPrompts.length > 0 && !this.currentTurn && !this.draining) {
+    } else if (
+      this.pendingPrompts.length > 0 &&
+      !this.currentTurn &&
+      !this.draining
+    ) {
       // Nothing held, but prompts queued up behind the block — resume them.
       void this.drainQueue();
     }
@@ -870,15 +1007,60 @@ export class AgentTask {
     this.currentTurn = null;
     this.setStatus(turnStatus === "error" ? "error" : "idle");
     if (turnStatus === "completed") {
-      void this.checkpointTurn(turn.userText);
+      // The result commit (anchoring half 2) — the timeline's newest row is
+      // always the last turn's outcome. Fire-and-forget is safe: the write
+      // itself is serialized per workspace (runExclusiveHistoryOp), and its
+      // queue slot is claimed synchronously with this call, so a jump
+      // started right after still orders behind it.
+      void this.checkpointAfterTurn(turn.userText, turn.turnId);
     }
     return turnStatus;
   }
 
-  /** Auto-checkpoint (Track D.3): one commit per completed turn, best-effort. */
-  private async checkpointTurn(promptText: string): Promise<void> {
-    const message =
-      promptText.length > 72 ? `${promptText.slice(0, 69)}…` : promptText;
+  /**
+   * Checkpoint anchoring, half 1 — the pre-turn fold: anything dirty when a
+   * turn starts is the user's own between-turn editing (the previous turn's
+   * result commit captured the agent's work), committed as a role:user
+   * "Your edits" checkpoint tagged with the UPCOMING turn. Reverting that
+   * message jumps here when it exists — the user's edits survive as their
+   * own restorable state instead of being reverted with the agent's work.
+   * Known smear: dirt left by a cancelled/failed turn (which takes no
+   * result commit) is swept in here and attributed to the user.
+   */
+  private async foldUserEditsBeforeTurn(turnId: string): Promise<void> {
+    const message = formatCheckpointMessage({
+      subject: "Your edits",
+      role: "user",
+      taskId: this.taskId,
+      turnId,
+    });
+    try {
+      await checkpointWorkspaceHistory(
+        this.workspacePath,
+        message,
+        USER_CHECKPOINT_AUTHOR,
+      );
+    } catch (error) {
+      // Best-effort: history is a convenience, never block/fail the turn on it.
+      this.warn("pre-turn fold failed", errorMessage(error));
+    }
+  }
+
+  /**
+   * Checkpoint anchoring, half 2 — the post-turn result commit, labeled
+   * with the prompt. Trailers are the durable transcript↔checkpoint
+   * linkage; with turn rows persisted they survive restarts on both sides.
+   */
+  private async checkpointAfterTurn(
+    promptText: string,
+    turnId: string,
+  ): Promise<void> {
+    const message = formatCheckpointMessage({
+      subject: promptText,
+      role: "agent",
+      taskId: this.taskId,
+      turnId,
+    });
     try {
       await checkpointWorkspaceHistory(this.workspacePath, message, {
         name: this.harness.id,
@@ -912,7 +1094,9 @@ export class AgentTask {
         // A reply after a thought closes the thought run (order-preserving);
         // assistant text additionally rides the markdown joiner.
         if (turn.run?.kind === "thought") this.closeRun(turn);
-        const flushable = turn.joiner.processText(contentBlockText(update.content));
+        const flushable = turn.joiner.processText(
+          contentBlockText(update.content),
+        );
         if (flushable) this.appendToRun(turn, "assistant", flushable);
         break;
       }
@@ -939,20 +1123,8 @@ export class AgentTask {
         break;
       }
       case "user_message_chunk": {
-        // Only ever observed on session/load replay — live user entries are
-        // inserted by prompt() itself, and adapters replay each historical
-        // user message as a single chunk (MET-54 spike). Render as a real
-        // user bubble so a revived transcript reads like the original.
         const chunk = contentBlockText(update.content);
-        if (!chunk) break;
-        this.closeRun(turn);
-        this.insertEntry({
-          id: newEventId(),
-          taskId: this.taskId,
-          turnId: turn.turnId,
-          type: "user",
-          text: chunk,
-        });
+        if (chunk) this.handleReplayedUserMessage(turn, chunk);
         break;
       }
       default:
@@ -1007,7 +1179,9 @@ export class AgentTask {
           ...update,
           title: normalizeMcpToolName(update.title) ?? previous?.title,
           locations:
-            update.locations ?? deriveToolLocations(update.rawInput, this.workspacePath) ?? previous?.locations,
+            update.locations ??
+            deriveToolLocations(update.rawInput, this.workspacePath) ??
+            previous?.locations,
         };
       });
       return;
@@ -1027,7 +1201,9 @@ export class AgentTask {
       toolCall: {
         ...update,
         title: normalizeMcpToolName(update.title),
-        locations: update.locations ?? deriveToolLocations(update.rawInput, this.workspacePath),
+        locations:
+          update.locations ??
+          deriveToolLocations(update.rawInput, this.workspacePath),
       },
     });
   }
@@ -1064,7 +1240,11 @@ export class AgentTask {
    * transcript entry) if none of this kind is open. Callers close a
    * different-kind run first — this only extends or opens.
    */
-  private appendToRun(turn: TurnState, kind: StreamRun["kind"], text: string): void {
+  private appendToRun(
+    turn: TurnState,
+    kind: StreamRun["kind"],
+    text: string,
+  ): void {
     if (!turn.run || turn.run.kind !== kind) {
       turn.run = { kind, entryId: newEventId(), text };
       this.insertEntry({
@@ -1175,7 +1355,9 @@ export class AgentTask {
     await Promise.all([this.transport?.close(), this.mcpEndpoint?.close()]);
     if (this.opencodeConfigWritten) {
       // Best-effort: a stale per-task config is inert (nothing points at it).
-      void platformAdapter.fs.deleteFiles([this.opencodeConfigPath()]).catch(() => {});
+      void platformAdapter.fs
+        .deleteFiles([this.opencodeConfigPath()])
+        .catch(() => {});
     }
   }
 
@@ -1233,7 +1415,11 @@ export class AgentTask {
     // transport — the difference between a silent dead task and a real reason.
     this.warn("transport closed", error?.message ?? "transport closed");
     if (this.currentTurn) {
-      this.finishTurn(undefined, "error", error?.message ?? "agent process ended");
+      this.finishTurn(
+        undefined,
+        "error",
+        error?.message ?? "agent process ended",
+      );
     } else if (this.currentStatus !== "unavailable") {
       // "unavailable" (failed session/load) must survive the adapter process
       // exiting afterward — it's a distinct, deletable end state, not an error.
@@ -1267,7 +1453,12 @@ export class TaskManager {
     harness: HarnessDefinition,
     parentTaskId?: string,
   ): AgentTask {
-    const task = new AgentTask(taskId, this.workspacePath, harness, parentTaskId);
+    const task = new AgentTask(
+      taskId,
+      this.workspacePath,
+      harness,
+      parentTaskId,
+    );
     this.tasks.set(taskId, task);
     registerTask(task);
     return task;
@@ -1379,13 +1570,16 @@ function transportFactory(task: AgentTask) {
  * register the task in the same tick so a prompt can queue immediately.
  * Falls back to the built-in definition when settings aren't loaded yet.
  */
-function effectiveHarnessById(harnessId: string): HarnessDefinition | undefined {
+function effectiveHarnessById(
+  harnessId: string,
+): HarnessDefinition | undefined {
   const kv = getOrCreateKvCollection(HARNESS_SETTINGS_NAMESPACE);
   const overrides = parseHarnessOverrides(kv.get(HARNESS_OVERRIDES_KEY)?.value);
   const custom = parseCustomHarnessEntries(kv.get(HARNESS_CUSTOM_KEY)?.value);
   return (
-    resolveEffectiveHarnesses(overrides, custom).find((h) => h.id === harnessId) ??
-    BUILT_IN_HARNESSES.find((h) => h.id === harnessId)
+    resolveEffectiveHarnesses(overrides, custom).find(
+      (h) => h.id === harnessId,
+    ) ?? BUILT_IN_HARNESSES.find((h) => h.id === harnessId)
   );
 }
 
@@ -1508,6 +1702,74 @@ export function respondToAgentPermission(
   response: RequestPermissionResponse,
 ): void {
   getRegisteredTask(taskId)?.respondPermission(requestId, response);
+}
+
+// --- Workspace rewind (checkpoint jumps; entities/history.ts) ---
+//
+// The conversation is append-only, like the history repo itself: a jump is
+// an event IN the conversation — the agent is told via an immediate prompt,
+// never a truncation. ACP has no session rewind, and the session stays
+// alive. Deliberate simplicity tradeoff: only LIVE tasks are told (a task
+// restored from disk and revived later replays its pre-rewind context
+// unwarned), and the notification spends a real turn per task.
+
+export interface RewindInfo {
+  hash: string;
+  subject: string;
+}
+
+/**
+ * The notification prompt. First sentence doubles as the auto-checkpoint
+ * subject (checkpointAfterTurn's message truncates at 72 chars), so it
+ * leads with the short fact and the steering follows.
+ */
+export function rewindPrompt(info: RewindInfo): string {
+  return (
+    `Workspace rewound to checkpoint ${info.hash} — ${info.subject}. ` +
+    `File contents read earlier in this conversation may no longer match ` +
+    `what is on disk; re-read any file before relying on it or editing it. ` +
+    `Do not take any action in response to this message — acknowledge ` +
+    `briefly and wait for the next message.`
+  );
+}
+
+/**
+ * Cancel the in-flight turn and queued prompts on every live task in the
+ * workspace (AgentTask.cancel() does both; a no-op when idle). Must complete
+ * before restoreTree starts rewriting files: a still-streaming turn would
+ * race the restore, and the safety checkpoint taken just before it has to
+ * capture the final pre-jump state.
+ */
+export async function cancelWorkspaceAgentTurns(
+  workspacePath: string,
+): Promise<void> {
+  await Promise.all(
+    liveWorkspaceTasks(workspacePath).map((task) => task.cancel()),
+  );
+}
+
+/**
+ * Announce a rewind that actually happened (call only after restoreTree
+ * succeeds) by prompting each live task right away. Fire-and-forget:
+ * prompt() is infallible and the acknowledgment turn runs behind the jump.
+ */
+export function notifyWorkspaceRewound(
+  workspacePath: string,
+  info: RewindInfo,
+): void {
+  for (const task of liveWorkspaceTasks(workspacePath)) {
+    task.prompt(rewindPrompt(info));
+  }
+}
+
+function liveWorkspaceTasks(workspacePath: string): AgentTask[] {
+  const normalized = normalizePath(workspacePath);
+  return agentTasksCollection.toArray
+    .filter((row) => row.workspacePath === normalized)
+    .flatMap((row) => {
+      const task = getRegisteredTask(row.taskId);
+      return task ? [task] : [];
+    });
 }
 
 /**

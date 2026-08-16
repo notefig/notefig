@@ -1013,6 +1013,237 @@ describe("IsomorphicGitService with a detached gitDir (gitdir separate from work
     expect(restored).toBe(contentAtOid1);
   });
 
+  it("restoreTree jumps the worktree back and forward between snapshots", async () => {
+    await service.init({
+      repoPath: workspaceDir,
+      gitDir,
+      defaultBranch: "main",
+    });
+    const author = { name: "second", email: "second@example.com" };
+
+    // Snapshot A: notes.md plus a file that never changes across snapshots.
+    await writeFile(join(workspaceDir, "notes.md"), "v1\n");
+    await writeFile(join(workspaceDir, "stable.md"), "unchanging\n");
+    const oidA = (await service.addAllAndCommit({
+      repoPath: workspaceDir,
+      gitDir,
+      message: "A",
+      author,
+    })) as string;
+
+    // Snapshot B: notes.md changed (different length — a same-size write in
+    // the same millisecond is invisible to statusMatrix's stat shortcut),
+    // extra.md added.
+    await writeFile(join(workspaceDir, "notes.md"), "v2 with more text\n");
+    await writeFile(join(workspaceDir, "extra.md"), "later\n");
+    const oidB = (await service.addAllAndCommit({
+      repoPath: workspaceDir,
+      gitDir,
+      message: "B",
+      author,
+    })) as string;
+
+    // An untracked file the restore must never touch, and a tracked file
+    // identical in both snapshots that a surgical restore must not rewrite.
+    await writeFile(join(workspaceDir, "scratch.txt"), "untracked\n");
+    const stableBefore = await stat(join(workspaceDir, "stable.md"));
+
+    // Back to A: notes.md reverts, extra.md is deleted, scratch.txt stays.
+    const back = await service.restoreTree({
+      repoPath: workspaceDir,
+      gitDir,
+      ref: oidA,
+    });
+    expect(back.restored).toEqual(["notes.md"]);
+    expect(back.deleted).toEqual(["extra.md"]);
+    expect(await readFile(join(workspaceDir, "notes.md"), "utf8")).toBe("v1\n");
+    await expect(
+      readFile(join(workspaceDir, "extra.md"), "utf8"),
+    ).rejects.toThrow();
+    expect(await readFile(join(workspaceDir, "scratch.txt"), "utf8")).toBe(
+      "untracked\n",
+    );
+    // Unchanged file untouched on disk — not rewritten by the checkout.
+    const stableAfter = await stat(join(workspaceDir, "stable.md"));
+    expect(stableAfter.mtimeMs).toBe(stableBefore.mtimeMs);
+
+    // restoreTree diffs against HEAD, so the restored state must be
+    // committed before the next jump — exactly what the jump flow's safety
+    // checkpoint does. This also sweeps in the untracked scratch.txt.
+    const oidSafety = await service.addAllAndCommit({
+      repoPath: workspaceDir,
+      gitDir,
+      message: "safety",
+      author,
+    });
+    expect(oidSafety).toBeTruthy();
+
+    // Forward to B: extra.md comes back, notes.md advances, and scratch.txt
+    // (absent at B, tracked by the safety commit) is removed — a jump
+    // materializes the full snapshot.
+    const forward = await service.restoreTree({
+      repoPath: workspaceDir,
+      gitDir,
+      ref: oidB,
+    });
+    expect(forward.restored.sort()).toEqual(["extra.md", "notes.md"]);
+    expect(forward.deleted).toEqual(["scratch.txt"]);
+    expect(await readFile(join(workspaceDir, "notes.md"), "utf8")).toBe(
+      "v2 with more text\n",
+    );
+    expect(await readFile(join(workspaceDir, "extra.md"), "utf8")).toBe(
+      "later\n",
+    );
+  });
+
+  it("restoreTree tolerates a file already gone from the worktree — its index entry still clears", async () => {
+    await service.init({
+      repoPath: workspaceDir,
+      gitDir,
+      defaultBranch: "main",
+    });
+    const author = { name: "second", email: "second@example.com" };
+
+    await writeFile(join(workspaceDir, "notes.md"), "keep\n");
+    const oidA = (await service.addAllAndCommit({
+      repoPath: workspaceDir,
+      gitDir,
+      message: "A",
+      author,
+    })) as string;
+    await writeFile(join(workspaceDir, "extra.md"), "temp\n");
+    await service.addAllAndCommit({
+      repoPath: workspaceDir,
+      gitDir,
+      message: "B",
+      author,
+    });
+
+    // The user (or another process) already deleted the file on disk.
+    await rm(join(workspaceDir, "extra.md"));
+
+    const back = await service.restoreTree({
+      repoPath: workspaceDir,
+      gitDir,
+      ref: oidA,
+    });
+    expect(back.deleted).toEqual(["extra.md"]);
+
+    // Index reconciled: the deletion commits cleanly (no phantom index
+    // entry), and after that the tree really is clean.
+    const after = await service.addAllAndCommit({
+      repoPath: workspaceDir,
+      gitDir,
+      message: "after",
+      author,
+    });
+    expect(after).toBeTruthy();
+    const clean = await service.addAllAndCommit({
+      repoPath: workspaceDir,
+      gitDir,
+      message: "clean",
+      author,
+    });
+    expect(clean).toBeNull();
+  });
+
+  it("restoreTree deletes even when the existence probe is broken (delete-first, not stat-first)", async () => {
+    // Adapters map stat errors to exists:false. A stat-first delete would
+    // read that as "already gone", skip the delete, and clear the index
+    // over stale content — delete-first only consults stat to excuse a
+    // delete that FAILED.
+    class BrokenStatHost extends MockPlatformStorageHost {
+      override async stat(path: string): Promise<GitHostStatResult> {
+        if (path.endsWith("extra.md")) {
+          return { exists: false, isFile: false, isDir: false };
+        }
+        return super.stat(path);
+      }
+    }
+    const brokenService = new IsomorphicGitService(
+      new BrokenStatHost(workspaceDir),
+    );
+    await brokenService.init({
+      repoPath: workspaceDir,
+      gitDir,
+      defaultBranch: "main",
+    });
+    const author = { name: "second", email: "second@example.com" };
+
+    await writeFile(join(workspaceDir, "notes.md"), "keep\n");
+    const oidA = (await brokenService.addAllAndCommit({
+      repoPath: workspaceDir,
+      gitDir,
+      message: "A",
+      author,
+    })) as string;
+    await writeFile(join(workspaceDir, "extra.md"), "stale if skipped\n");
+    await brokenService.addAllAndCommit({
+      repoPath: workspaceDir,
+      gitDir,
+      message: "B",
+      author,
+    });
+
+    const back = await brokenService.restoreTree({
+      repoPath: workspaceDir,
+      gitDir,
+      ref: oidA,
+    });
+    expect(back.deleted).toEqual(["extra.md"]);
+    // The file really is gone — the probe's lie never entered the path.
+    await expect(
+      readFile(join(workspaceDir, "extra.md"), "utf8"),
+    ).rejects.toThrow();
+  });
+
+  it("restoreTree fails loudly when a worktree deletion fails — never a silent partial restore", async () => {
+    class FailingDeleteHost extends MockPlatformStorageHost {
+      override async deleteFile(path: string): Promise<void> {
+        if (path.endsWith("extra.md")) {
+          throw new Error("EACCES: permission denied");
+        }
+        return super.deleteFile(path);
+      }
+    }
+    const failingService = new IsomorphicGitService(
+      new FailingDeleteHost(workspaceDir),
+    );
+    await failingService.init({
+      repoPath: workspaceDir,
+      gitDir,
+      defaultBranch: "main",
+    });
+    const author = { name: "second", email: "second@example.com" };
+
+    await writeFile(join(workspaceDir, "notes.md"), "keep\n");
+    const oidA = (await failingService.addAllAndCommit({
+      repoPath: workspaceDir,
+      gitDir,
+      message: "A",
+      author,
+    })) as string;
+    await writeFile(join(workspaceDir, "extra.md"), "cannot delete\n");
+    await failingService.addAllAndCommit({
+      repoPath: workspaceDir,
+      gitDir,
+      message: "B",
+      author,
+    });
+
+    await expect(
+      failingService.restoreTree({
+        repoPath: workspaceDir,
+        gitDir,
+        ref: oidA,
+      }),
+    ).rejects.toThrow(/permission denied/);
+    // The stale file really is still there — the error told the truth.
+    expect(await readFile(join(workspaceDir, "extra.md"), "utf8")).toBe(
+      "cannot delete\n",
+    );
+  });
+
   it("two repos over one worktree stay independent when the primary excludes the secondary's dir", async () => {
     // The worktree's OWN default-gitdir repo (no gitDir override).
     await service.init({ repoPath: workspaceDir, defaultBranch: "main" });

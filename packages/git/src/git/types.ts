@@ -15,8 +15,8 @@ import type {
 
 type WithRepoPath<T> = Omit<T, "fs" | "dir" | "gitdir"> & {
   repoPath: string;
-  /** Defaults to `<repoPath>/.git`. Set to point at a repo whose gitdir is
-   *  separate from its worktree (e.g. Metrists' document-history repo). */
+  /** Defaults to `<repoPath>/.git`. Set to operate on a repo whose gitdir
+   *  is detached from its worktree (git's `--git-dir`/`--work-tree`). */
   gitDir?: string;
 };
 
@@ -187,6 +187,22 @@ export type GitReadTextFileInput = {
   filepath: string;
 };
 
+export type GitRestoreTreeInput = {
+  repoPath: string;
+  gitDir?: string;
+  /** Commit oid or ref whose tree is materialized into the worktree. */
+  ref: string;
+};
+
+export type GitRestoreTreeResult = {
+  /** Repo-relative paths whose content differed from HEAD, checked out from
+   *  the ref. Callers reconcile UI state for exactly these files. */
+  restored: string[];
+  /** Repo-relative paths tracked at the current head but absent at the ref,
+   *  removed from worktree and index. */
+  deleted: string[];
+};
+
 export interface GitService {
   init(input: GitInitInput): ReturnType<typeof igInit>;
   status(input: GitStatusInput): Promise<RepoStatus>;
@@ -197,6 +213,7 @@ export interface GitService {
   addAllAndCommit(input: GitAddAllAndCommitInput): Promise<string | null>;
   revertCommit(input: GitRevertCommitInput): Promise<string | null>;
   abortRevert(input: GitAbortRevertInput): Promise<void>;
+  restoreTree(input: GitRestoreTreeInput): Promise<GitRestoreTreeResult>;
   listBranches(input: GitListBranchesInput): ReturnType<typeof igListBranches>;
   createBranch(input: GitCreateBranchInput): ReturnType<typeof igBranch>;
   switchBranch(input: GitSwitchBranchInput): ReturnType<typeof igCheckout>;

@@ -4,8 +4,9 @@
  * (watcher/adoption) — can use them without importing each other.
  */
 import { queryClient } from "@/entities/query-client";
-// Only referenced inside a function body below, never at module-eval time.
-import { invalidateGit } from "@/entities/git";
+// Real-git ops are parked; the sidebar panel now derives from the internal
+// history repo instead. Restore alongside entities/git's consumers.
+// import { invalidateGit } from "@/entities/git";
 
 /**
  * Frontend-side suppression of the app's own write echoes.
@@ -70,7 +71,13 @@ export function invalidateDerivedState(workspaceId: string): void {
       queryClient.invalidateQueries({
         queryKey: ["search-content", workspaceId],
       });
-      invalidateGit(workspaceId);
+      // invalidateGit(workspaceId);
+      // Key hand-inlined (matches entities/history.ts's historyQueryKey):
+      // importing the entity here would close a files → file-write-effects
+      // → history → files import cycle. This module must stay a leaf.
+      queryClient.invalidateQueries({
+        queryKey: ["history", workspaceId],
+      });
     }, INVALIDATE_DEBOUNCE_MS),
   );
 }

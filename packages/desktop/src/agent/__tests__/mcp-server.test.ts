@@ -6,7 +6,7 @@ import { z } from "zod";
 // rationale as agent-service.test.ts).
 vi.mock("@/utils/history-service", () => ({
   ensureWorkspaceHistoryInitialized: vi.fn(),
-  historyGitDir: vi.fn(() => "/ws/.metrists/history"),
+  historyGitDir: vi.fn(() => "/ws/.metrists/.git"),
   checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
 }));
 

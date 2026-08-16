@@ -47,10 +47,15 @@ vi.mock("@/adapters", async () => ({
     },
   },
 }));
-// History auto-checkpointing (Stage 2) is exercised separately; keep these
-// tests focused on the turn machinery, not git plumbing.
+// History auto-checkpointing's git plumbing is exercised separately; the
+// hoisted handle lets the pre-turn anchoring tests assert call ordering.
+const { checkpointHistoryMock } = vi.hoisted(() => ({
+  checkpointHistoryMock: vi.fn<(...args: unknown[]) => Promise<string | null>>(
+    () => Promise.resolve(null),
+  ),
+}));
 vi.mock("@/utils/history-service", () => ({
-  checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
+  checkpointWorkspaceHistory: checkpointHistoryMock,
 }));
 
 import { createLoopbackPair } from "../loopback-transport";
@@ -59,6 +64,9 @@ import {
   TaskManager,
   respondToAgentPermission,
   findBlobAuthorTask,
+  cancelWorkspaceAgentTurns,
+  notifyWorkspaceRewound,
+  rewindPrompt,
 } from "../agent-service";
 import {
   agentEntriesCollection,
@@ -122,6 +130,8 @@ beforeEach(() => {
   writeFiles.mockClear();
   readFiles.mockClear();
   deleteFiles.mockClear();
+  checkpointHistoryMock.mockClear();
+  checkpointHistoryMock.mockImplementation(() => Promise.resolve(null));
   mcpEndpoints.length = 0;
   for (const e of agentEntriesCollection.toArray)
     agentEntriesCollection.delete(e.id);
@@ -1497,5 +1507,295 @@ describe("AgentTask dispose (MET-72)", () => {
     expect(deleteFiles).toHaveBeenCalledWith([
       expect.stringContaining(`opencode-${task.taskId}.json`),
     ]);
+  });
+});
+
+describe("turn checkpoint anchoring (pre-turn fold + post-turn result)", () => {
+  async function startTask(workspacePath = "/ws") {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const task = new TaskManager(workspacePath).createTask(harness);
+    await task.start(() => client);
+    return { task, agent };
+  }
+
+  it("folds pre-turn edits (awaited, before the prompt) and commits the result at turn end", async () => {
+    const { task, agent } = await startTask();
+    let release!: (oid: string | null) => void;
+    // Only the FIRST call (the fold) is gated; the result commit resolves.
+    checkpointHistoryMock.mockImplementationOnce(
+      () => new Promise<string | null>((resolve) => (release = resolve)),
+    );
+    const prompted: string[] = [];
+    agent.onPrompt = async (params) => {
+      prompted.push(lastPromptText(params));
+      return { stopReason: "end_turn" };
+    };
+
+    task.prompt("write the intro");
+    await vi.waitFor(() => expect(checkpointHistoryMock).toHaveBeenCalled());
+    // The fold is awaited: no agent write can precede its commit.
+    expect(prompted).toEqual([]);
+
+    release(null);
+    await vi.waitFor(() =>
+      expect(turnFor(task.taskId)[0]?.status).toBe("completed"),
+    );
+    expect(prompted).toEqual(["write the intro"]);
+
+    // Two commits per turn: the role:user fold, then the agent result.
+    await vi.waitFor(() =>
+      expect(checkpointHistoryMock).toHaveBeenCalledTimes(2),
+    );
+    const turnId = turnFor(task.taskId)[0].turnId;
+    const [foldWs, foldMessage, foldAuthor] = checkpointHistoryMock.mock
+      .calls[0] as [string, string, { name: string }];
+    expect(foldWs).toBe("/ws");
+    expect(foldMessage).toContain("Your edits");
+    expect(foldMessage).toContain("Notefig-Role: user");
+    expect(foldMessage).toContain(`Notefig-Turn: ${turnId}`);
+    expect(foldAuthor.name).toBe("user");
+
+    const [, resultMessage] = checkpointHistoryMock.mock.calls[1] as [
+      string,
+      string,
+    ];
+    expect(resultMessage).toContain("write the intro");
+    expect(resultMessage).toContain(`Notefig-Task: ${task.taskId}`);
+    expect(resultMessage).toContain(`Notefig-Turn: ${turnId}`);
+    expect(resultMessage).toContain("Notefig-Role: agent");
+  });
+
+  it("a failed checkpoint is best-effort — the turn still runs", async () => {
+    const { task, agent } = await startTask();
+    checkpointHistoryMock.mockImplementation(() =>
+      Promise.reject(new Error("git broke")),
+    );
+    const prompted: string[] = [];
+    agent.onPrompt = async (params) => {
+      prompted.push(lastPromptText(params));
+      return { stopReason: "end_turn" };
+    };
+
+    await runPrompt(task, "still works");
+
+    expect(turnFor(task.taskId)[0]?.status).toBe("completed");
+    expect(prompted).toEqual(["still works"]);
+  });
+
+  it("a turn cancelled while its checkpoint is pending never prompts the agent", async () => {
+    const { task, agent } = await startTask();
+    let release!: (oid: string | null) => void;
+    checkpointHistoryMock.mockImplementation(
+      () => new Promise<string | null>((resolve) => (release = resolve)),
+    );
+    const prompted: string[] = [];
+    agent.onPrompt = async (params) => {
+      prompted.push(lastPromptText(params));
+      return { stopReason: "end_turn" };
+    };
+
+    // The jump sequence: cancel lands while the pre-turn fold is still in
+    // flight, then the fold resolves. The settled turn must NOT resume — a
+    // cancelled agent prompting now could write files during or after the
+    // jump's restore.
+    task.prompt("doomed turn");
+    await vi.waitFor(() => expect(checkpointHistoryMock).toHaveBeenCalled());
+    await task.cancel();
+    expect(turnFor(task.taskId)[0]?.status).toBe("cancelled");
+
+    release(null);
+    // Give a resumed runTurn every chance to (incorrectly) prompt.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(prompted).toEqual([]);
+    expect(turnFor(task.taskId)[0]?.status).toBe("cancelled");
+    // No result commit either — the turn never completed.
+    expect(checkpointHistoryMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("session/load replay re-adopts persisted turn rows", () => {
+  it("replayed user messages keep their original turnIds; unknown prompts mint replay turns", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const task = new TaskManager("/ws").createTask(harness);
+    // Turn rows from a previous life — persisted, ids referenced by
+    // checkpoint commit trailers.
+    agentTurnsCollection.insert({
+      turnId: "trn_replay_001",
+      taskId: task.taskId,
+      sessionId: "sess_old",
+      status: "completed",
+      stopReason: "end_turn",
+      promptText: "first prompt",
+      startedAt: 1,
+    });
+    agentTurnsCollection.insert({
+      turnId: "trn_replay_002",
+      taskId: task.taskId,
+      sessionId: "sess_old",
+      status: "completed",
+      stopReason: "end_turn",
+      promptText: "second prompt",
+      startedAt: 2,
+    });
+    agent.onLoadSession = async (_params, a) => {
+      const say = (sessionUpdate: string, text: string) =>
+        a.update("sess_old", {
+          sessionUpdate,
+          content: { type: "text", text },
+        });
+      say("user_message_chunk", "first prompt");
+      say("agent_message_chunk", "reply one");
+      say("user_message_chunk", "second prompt");
+      say("agent_message_chunk", "reply two");
+      // History from before turns were persisted — no stored row matches.
+      say("user_message_chunk", "unknown prompt");
+      return {};
+    };
+
+    await task.start(() => client, { resumeSessionId: "sess_old" });
+
+    const userEntries = entriesFor(task.taskId).filter(
+      (e) => e.type === "user",
+    );
+    expect(userEntries.map((e) => e.text)).toEqual([
+      "first prompt",
+      "second prompt",
+      "unknown prompt",
+    ]);
+    // Adopted: original persisted ids — the revert join survives revival.
+    expect(userEntries[0].turnId).toBe("trn_replay_001");
+    expect(userEntries[1].turnId).toBe("trn_replay_002");
+    // Unknown history gets a fresh synthetic turn, not a stolen id.
+    expect(userEntries[2].turnId).not.toBe("trn_replay_001");
+    expect(userEntries[2].turnId).not.toBe("trn_replay_002");
+    // Replies ride the adopted turn of the message that produced them.
+    const assistantEntries = entriesFor(task.taskId).filter(
+      (e) => e.type === "assistant",
+    );
+    expect(assistantEntries[0].turnId).toBe("trn_replay_001");
+    expect(assistantEntries[1].turnId).toBe("trn_replay_002");
+    // Replayed entries carry no createdAt (true time unknowable, MET-94).
+    expect(userEntries[0].createdAt).toBeUndefined();
+    // The persisted rows survived the revival untouched.
+    expect(agentTurnsCollection.get("trn_replay_001")?.promptText).toBe(
+      "first prompt",
+    );
+  });
+});
+
+describe("workspace rewind (checkpoint jumps)", () => {
+  const info = { hash: "abc1234", subject: "Fix login" };
+
+  async function startTask(workspacePath = "/ws") {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const task = new TaskManager(workspacePath).createTask(harness);
+    await task.start(() => client);
+    return { task, agent };
+  }
+
+  it("notify prompts each live task in the workspace right away; other workspaces untouched", async () => {
+    const { task, agent } = await startTask("/ws");
+    const { task: otherTask, agent: otherAgent } = await startTask("/other");
+    const sent: string[] = [];
+    agent.onPrompt = async (params) => {
+      sent.push(lastPromptText(params));
+      return { stopReason: "end_turn" };
+    };
+    const otherSent: string[] = [];
+    otherAgent.onPrompt = async (params) => {
+      otherSent.push(lastPromptText(params));
+      return { stopReason: "end_turn" };
+    };
+
+    notifyWorkspaceRewound("/ws", info);
+    await vi.waitFor(() =>
+      expect(turnFor(task.taskId)[0]?.status).toBe("completed"),
+    );
+
+    expect(sent).toEqual([rewindPrompt(info)]);
+    expect(sent[0]).toContain("abc1234 — Fix login");
+    // A real turn: the notice is the round's user entry.
+    expect(textFor(task.taskId, "user")).toBe(rewindPrompt(info));
+    expect(otherSent).toEqual([]);
+    expect(entriesFor(otherTask.taskId)).toHaveLength(0);
+  });
+
+  it("notify skips non-live (restored) rows — nothing to prompt", async () => {
+    agentTasksCollection.insert({
+      taskId: "task_restored",
+      workspacePath: "/ws",
+      title: "old task",
+      status: "restored",
+      harnessId: harness.id,
+      sessionId: "sess_old",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    notifyWorkspaceRewound("/ws", info);
+
+    expect(entriesFor("task_restored")).toHaveLength(0);
+    expect(turnFor("task_restored")).toHaveLength(0);
+  });
+
+  it("cancelWorkspaceAgentTurns cancels the running turn and queued prompts", async () => {
+    const { task, agent } = await startTask();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    agent.onPrompt = async () => {
+      await gate;
+      return { stopReason: "cancelled" };
+    };
+
+    task.prompt("running");
+    task.prompt("queued");
+    await vi.waitFor(() =>
+      expect(turnFor(task.taskId)[0]?.status).toBe("running"),
+    );
+
+    await cancelWorkspaceAgentTurns("/ws");
+    release();
+
+    expect(turnFor(task.taskId).map((t) => t.status)).toEqual([
+      "cancelled",
+      "cancelled",
+    ]);
+  });
+
+  it("a cancelled task still receives the rewind notice as a fresh turn (jump sequence)", async () => {
+    const { task, agent } = await startTask();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const sent: string[] = [];
+    let first = true;
+    agent.onPrompt = async (params) => {
+      sent.push(lastPromptText(params));
+      if (first) {
+        first = false;
+        await gate;
+        return { stopReason: "cancelled" };
+      }
+      return { stopReason: "end_turn" };
+    };
+
+    // The exact jumpToCheckpoint sequence: cancel mid-turn, then notify.
+    task.prompt("interrupted work");
+    await vi.waitFor(() =>
+      expect(turnFor(task.taskId)[0]?.status).toBe("running"),
+    );
+    await cancelWorkspaceAgentTurns("/ws");
+    release();
+    notifyWorkspaceRewound("/ws", info);
+
+    await vi.waitFor(() => {
+      const turns = turnFor(task.taskId);
+      expect(turns).toHaveLength(2);
+      expect(turns[1].status).toBe("completed");
+    });
+    expect(sent[sent.length - 1]).toBe(rewindPrompt(info));
   });
 });
