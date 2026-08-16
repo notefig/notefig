@@ -49,6 +49,12 @@ export function getOrCreateWorkspaceHistoryService(
  * Best-effort rename of a legacy `.metrists/history` gitdir to
  * `.metrists/.git`. On any failure the old dir is left untouched and init
  * proceeds with a fresh repo — history is a convenience, never a blocker.
+ *
+ * The skip-check below trusts a destination HEAD because moveDirectory is
+ * all-or-nothing: the browser copy-then-delete implementation rolls back
+ * partially written destination files on failure, so a present HEAD means
+ * either a completed migration or a legitimately re-initialized fresh
+ * repo — never a half-copy masking the intact legacy dir.
  */
 async function migrateLegacyHistoryGitDir(
   workspacePath: string,

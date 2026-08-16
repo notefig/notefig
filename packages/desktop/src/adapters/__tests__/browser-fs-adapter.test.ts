@@ -581,13 +581,16 @@ describe("BrowserFsPlatformAdapter", () => {
       expect(del).not.toHaveBeenCalled();
     });
 
-    it("never deletes the source when a destination write fails", async () => {
+    it("never deletes the source when a destination write fails, and rolls back the partial copy", async () => {
       vi.spyOn(adapter.fs, "readDirectory").mockResolvedValue({
         ok: true,
-        value: ["/src/a.md"],
+        value: ["/src/HEAD", "/src/a.md"],
       });
       vi.spyOn(adapter.fs, "readBinaryFiles").mockResolvedValue({
-        succeeded: [{ path: "/src/a.md", data: new Uint8Array([1]) }],
+        succeeded: [
+          { path: "/src/HEAD", data: new Uint8Array([1]) },
+          { path: "/src/a.md", data: new Uint8Array([2]) },
+        ],
         failed: [],
       });
       vi.spyOn(adapter.fs, "createDirectories").mockResolvedValue({
@@ -595,15 +598,21 @@ describe("BrowserFsPlatformAdapter", () => {
         failed: [],
       });
       vi.spyOn(adapter.fs, "writeBinaryFiles").mockResolvedValue({
-        succeeded: [],
+        succeeded: ["/dst/HEAD"],
         failed: [{ path: "/dst/a.md", type: "io_error", message: "full" }],
       });
+      const delFiles = vi
+        .spyOn(adapter.fs, "deleteFiles")
+        .mockResolvedValue({ succeeded: ["/dst/HEAD"], failed: [] });
       const del = vi.spyOn(adapter.fs, "deleteDirectories");
 
       const result = await adapter.fs.moveDirectory("/src", "/dst");
 
       expect(result.ok).toBe(false);
       expect(del).not.toHaveBeenCalled();
+      // The half-copied destination is cleaned up — a stray HEAD there
+      // would make migration probes treat the partial copy as real.
+      expect(delFiles).toHaveBeenCalledWith(["/dst/HEAD"]);
     });
 
     it("deletes the source only after a fully successful copy", async () => {

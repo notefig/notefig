@@ -392,6 +392,14 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
         })),
       );
       if (written.failed.length > 0) {
+        // Roll back what did land so a half-copied destination can never
+        // masquerade as the real directory (a migration probe finding a
+        // partial gitdir's HEAD would strand the intact source forever).
+        // Best-effort: rollback failures leave strays, but the returned
+        // error already tells the caller the move didn't happen.
+        if (written.succeeded.length > 0) {
+          await this.fs.deleteFiles(written.succeeded);
+        }
         return { ok: false, error: written.failed[0] };
       }
       await this.fs.deleteDirectories([oldPath], { recursive: true });
