@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -266,10 +266,12 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
       }
 
       const log = await service.log({ repoPath: repoDir });
-      const gitOids = (await runGit(repoDir, ["log", "--format=%H"])).split("\n");
-      const gitMessages = (
-        await runGit(repoDir, ["log", "--format=%s"])
-      ).split("\n");
+      const gitOids = (await runGit(repoDir, ["log", "--format=%H"])).split(
+        "\n",
+      );
+      const gitMessages = (await runGit(repoDir, ["log", "--format=%s"])).split(
+        "\n",
+      );
 
       expect(log.map((entry) => entry.oid)).toEqual(gitOids);
       expect(log.map((entry) => entry.commit.message.trim())).toEqual(
@@ -322,3 +324,142 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
     });
   });
 });
+
+describeRealGit(
+  "[real-git] detached gitDir: a second repo over an existing repo's worktree",
+  () => {
+    let workspaceDir: string;
+    let detachedGitDir: string;
+    let service: IsomorphicGitService;
+    let restoreCompressionStreams: () => void;
+
+    beforeAll(() => {
+      restoreCompressionStreams = stubCompressionStreams();
+    });
+
+    afterAll(() => {
+      restoreCompressionStreams();
+    });
+
+    beforeEach(async () => {
+      workspaceDir = await mkdtemp(join(tmpdir(), "detached-gitdir-real-"));
+      detachedGitDir = join(workspaceDir, ".meta", ".git");
+      service = new IsomorphicGitService(new NodeGitStorageHost(workspaceDir));
+    });
+
+    afterEach(async () => {
+      await rm(workspaceDir, { recursive: true, force: true });
+    });
+
+    it("leaves the primary repo's real git status untouched and stays readable by system git", async () => {
+      // The primary repo, made with real git.
+      await runGit(workspaceDir, ["init", "-b", "main"]);
+      await writeFile(join(workspaceDir, "README.md"), "# readme\n", "utf8");
+      await runGit(workspaceDir, ["add", "README.md"]);
+      await commitViaGit(workspaceDir, "init project");
+
+      // Hide the secondary repo's dir via the primary's gitdir-local exclude.
+      const primaryExclude = join(workspaceDir, ".git", "info", "exclude");
+      const stock = await readFile(primaryExclude, "utf8").catch(() => "");
+      await writeFile(primaryExclude, `${stock}.meta/\n`, "utf8");
+
+      // The secondary repo via the service, detached gitdir under .meta/.
+      await service.init({
+        repoPath: workspaceDir,
+        gitDir: detachedGitDir,
+        defaultBranch: "main",
+      });
+      await writeFile(
+        join(detachedGitDir, "info", "exclude"),
+        ".meta/\n.git/\n",
+        "utf8",
+      );
+      await writeFile(join(workspaceDir, "notes.md"), "draft\n", "utf8");
+      const oid = await service.addAllAndCommit({
+        repoPath: workspaceDir,
+        gitDir: detachedGitDir,
+        message: "checkpoint: draft",
+        author: { name: "second", email: "second@example.com" },
+      });
+      expect(oid).toBeTruthy();
+
+      // Real git honors the exclude: the secondary repo is invisible.
+      const status = await runGit(workspaceDir, ["status", "--porcelain"]);
+      expect(status).toBe("?? notes.md");
+
+      // The detached-gitdir repo is a real repo system git can read in place.
+      const secondaryLog = await runGit(workspaceDir, [
+        "--git-dir",
+        detachedGitDir,
+        "--work-tree",
+        workspaceDir,
+        "log",
+        "--format=%H %s",
+      ]);
+      expect(secondaryLog).toBe(`${oid} checkpoint: draft`);
+
+      // And its commit captured the worktree without the primary's .git.
+      const committedFiles = await runGit(workspaceDir, [
+        "--git-dir",
+        detachedGitDir,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "HEAD",
+      ]);
+      const files = committedFiles.split("\n").filter(Boolean);
+      expect(files).toContain("notes.md");
+      expect(files).toContain("README.md");
+      expect(files.some((file) => file.startsWith(".git/"))).toBe(false);
+      expect(files.some((file) => file.startsWith(".meta/"))).toBe(false);
+    });
+
+    it("honors the worktree .gitignore — addAllAndCommit never sweeps ignored files", async () => {
+      await writeFile(
+        join(workspaceDir, ".gitignore"),
+        "node_modules/\n*.log\n",
+        "utf8",
+      );
+      await mkdir(join(workspaceDir, "node_modules", "dep"), {
+        recursive: true,
+      });
+      await writeFile(
+        join(workspaceDir, "node_modules", "dep", "index.js"),
+        "module.exports = 1;\n",
+        "utf8",
+      );
+      await writeFile(join(workspaceDir, "debug.log"), "noise\n", "utf8");
+      await writeFile(join(workspaceDir, "notes.md"), "draft\n", "utf8");
+
+      await service.init({
+        repoPath: workspaceDir,
+        gitDir: detachedGitDir,
+        defaultBranch: "main",
+      });
+      const oid = await service.addAllAndCommit({
+        repoPath: workspaceDir,
+        gitDir: detachedGitDir,
+        message: "checkpoint",
+        author: { name: "second", email: "second@example.com" },
+      });
+      expect(oid).toBeTruthy();
+
+      const committedFiles = await runGit(workspaceDir, [
+        "--git-dir",
+        detachedGitDir,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "HEAD",
+      ]);
+      const files = committedFiles.split("\n").filter(Boolean);
+      expect(files).toContain("notes.md");
+      // .gitignore itself is tracked content, so it IS committed.
+      expect(files).toContain(".gitignore");
+      expect(files.some((file) => file.startsWith("node_modules/"))).toBe(
+        false,
+      );
+      expect(files).not.toContain("debug.log");
+    });
+  },
+);

@@ -1,20 +1,28 @@
 /**
  * Registry for the per-workspace document-history git repo — a second,
  * Metrists-owned git repo layered over the same worktree as the user's
- * files, gitdir at `<workspace>/.metrists/history`, never interfering with
- * a workspace that's already its own git repo. Mirrors
- * `git-service-store.ts`'s registry convention exactly (lazy per-workspace
- * singleton + in-flight-init dedup map + dispose/clear).
+ * files, gitdir at `<workspace>/.metrists/.git`, never interfering with a
+ * workspace that's already its own git repo: `.metrists/` (the app's
+ * ephemeral-files root) is hidden from the user's repo via its
+ * `.git/info/exclude`. Mirrors `git-service-store.ts`'s registry convention
+ * exactly (lazy per-workspace singleton + in-flight-init dedup map +
+ * dispose/clear).
  */
 import { IsomorphicGitService } from "@notefig/git";
 import { platformAdapter } from "@/adapters";
 import { createGitStorageHost } from "@/adapters/git-storage-host";
 import { normalizePath } from "@/utils/fs";
+import { ensureExcludeLines } from "@/utils/git-exclude";
 
 const historyServiceRegistry = new Map<string, IsomorphicGitService>();
 const historyInitRegistry = new Map<string, Promise<void>>();
 
 export function historyGitDir(workspacePath: string): string {
+  return `${normalizePath(workspacePath)}/.metrists/.git`;
+}
+
+/** Pre-rename location of the history gitdir; only read for migration. */
+function legacyHistoryGitDir(workspacePath: string): string {
   return `${normalizePath(workspacePath)}/.metrists/history`;
 }
 
@@ -26,12 +34,47 @@ export function getOrCreateWorkspaceHistoryService(
 
   if (!service) {
     service = new IsomorphicGitService(
-      createGitStorageHost(platformAdapter.fs, normalizedWorkspacePath),
+      createGitStorageHost(
+        platformAdapter.fs,
+        historyGitDir(normalizedWorkspacePath),
+      ),
     );
     historyServiceRegistry.set(normalizedWorkspacePath, service);
   }
 
   return service;
+}
+
+/**
+ * Best-effort rename of a legacy `.metrists/history` gitdir to
+ * `.metrists/.git`. On any failure the old dir is left untouched and init
+ * proceeds with a fresh repo — history is a convenience, never a blocker.
+ */
+async function migrateLegacyHistoryGitDir(
+  workspacePath: string,
+  gitDir: string,
+): Promise<void> {
+  try {
+    const legacyDir = legacyHistoryGitDir(workspacePath);
+    const [newHead, legacyHead] = await platformAdapter.fs.exists([
+      `${gitDir}/HEAD`,
+      `${legacyDir}/HEAD`,
+    ]);
+    if (newHead?.exists || !legacyHead?.exists) {
+      return;
+    }
+    const moved = await platformAdapter.fs.moveDirectory(legacyDir, gitDir);
+    if (!moved.ok) {
+      console.warn(
+        `History gitdir migration failed for '${workspacePath}'; re-initializing fresh: ${moved.error.message}`,
+      );
+    }
+  } catch (error) {
+    console.warn(
+      `History gitdir migration failed for '${workspacePath}'; re-initializing fresh:`,
+      error,
+    );
+  }
 }
 
 export async function ensureWorkspaceHistoryInitialized(
@@ -48,20 +91,41 @@ export async function ensureWorkspaceHistoryInitialized(
 
   const gitDir = historyGitDir(normalizedWorkspacePath);
   const initialization = (async () => {
+    await migrateLegacyHistoryGitDir(normalizedWorkspacePath, gitDir);
     await service.init({
       repoPath: normalizedWorkspacePath,
       gitDir,
       defaultBranch: "main",
     });
-    // Exclude .metrists/ from the history repo's own worktree scan
-    // (spike finding 3) — gitdir-local, not the workspace's own .gitignore.
-    const excludePath = `${gitDir}/info/exclude`;
-    const existing = await platformAdapter.fs.readFiles([excludePath]);
-    const current = existing.succeeded[0]?.content ?? "";
-    if (!current.includes(".metrists/")) {
-      await platformAdapter.fs.writeFiles([
-        { path: excludePath, content: `${current}\n.metrists/\n` },
-      ]);
+
+    // Exclude .metrists/ (this repo's own gitdir + agent configs) and the
+    // user's .git/ from the history repo's worktree scan — its storage host
+    // walks with includeHidden and no ignore rules, so without these the
+    // scan would descend into both.
+    try {
+      await ensureExcludeLines(gitDir, [".metrists/", ".git/"]);
+    } catch (error) {
+      console.warn(
+        `Failed to update the history repo's exclude for '${normalizedWorkspacePath}':`,
+        error,
+      );
+    }
+
+    // Hide .metrists/ from the user's own repo via its gitdir-local
+    // exclude (never the tracked .gitignore). Runs on every ensure call —
+    // this block re-executes per checkpoint, so a repo the user inits
+    // *after* history exists gets the exclude on the next turn.
+    try {
+      const userGitDir = `${normalizedWorkspacePath}/.git`;
+      const [userGit] = await platformAdapter.fs.exists([userGitDir]);
+      if (userGit?.exists && userGit.type === "directory") {
+        await ensureExcludeLines(userGitDir, [".metrists/"]);
+      }
+    } catch (error) {
+      console.warn(
+        `Failed to update the user repo's exclude for '${normalizedWorkspacePath}':`,
+        error,
+      );
     }
   })().finally(() => {
     historyInitRegistry.delete(normalizedWorkspacePath);

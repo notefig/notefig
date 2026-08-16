@@ -90,6 +90,16 @@ export default defineConfig(async () => ({
         replacement: path.resolve(__dirname, "../shared/src/$1/index.ts"),
       },
       { find: "@", replacement: path.resolve(__dirname, "./src") },
+      // isomorphic-git's packfile reader calls node's crypto.createHash
+      // directly (everything else in it uses a browser-safe sha.js
+      // fallback). Without this, Vite stubs `crypto` and any repo with
+      // packfiles fails its first packed-object read — the git panel shows
+      // "commit history metadata is inconsistent" on every real cloned
+      // repo. See src/polyfills/node-crypto.ts.
+      {
+        find: /^crypto$/,
+        replacement: path.resolve(__dirname, "./src/polyfills/node-crypto.ts"),
+      },
     ],
   },
 

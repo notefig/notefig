@@ -29,6 +29,7 @@ import { platformAdapter } from "@/adapters";
 import { createGitStorageHost } from "@/adapters/git-storage-host";
 import { isWorkspaceAccessError } from "@/adapters/platform-adapter.interface";
 import { normalizePath } from "@/utils/fs";
+import { ensureExcludeLines } from "@/utils/git-exclude";
 import { queryClient } from "./query-client";
 
 const gitServiceRegistry = new Map<string, IsomorphicGitService>();
@@ -42,7 +43,10 @@ export function getOrCreateWorkspaceGitService(
 
   if (!service) {
     service = new IsomorphicGitService(
-      createGitStorageHost(platformAdapter.fs, normalizedWorkspacePath),
+      createGitStorageHost(
+        platformAdapter.fs,
+        `${normalizedWorkspacePath}/.git`,
+      ),
     );
     gitServiceRegistry.set(normalizedWorkspacePath, service);
   }
@@ -67,6 +71,20 @@ export async function ensureWorkspaceGitInitialized(
       repoPath: normalizedWorkspacePath,
       defaultBranch: "main",
     });
+    // Hide the app's ephemeral root from the repo via its gitdir-local
+    // exclude, so a repo initialized through the app never shows
+    // .metrists/ as untracked. Best-effort: history-service re-ensures
+    // this on every checkpoint.
+    try {
+      await ensureExcludeLines(`${normalizedWorkspacePath}/.git`, [
+        ".metrists/",
+      ]);
+    } catch (error) {
+      console.warn(
+        `Failed to update the repo's exclude for '${normalizedWorkspacePath}':`,
+        error,
+      );
+    }
   })().finally(() => {
     gitInitRegistry.delete(normalizedWorkspacePath);
   });
@@ -134,7 +152,12 @@ export type GitRow = GitRepoRow | GitFileRow | GitCheckpointRow;
 
 export const COMMIT_AUTHOR = { name: "Notefig", email: "git@notefig.com" };
 
-const CHECKPOINT_LOG_DEPTH = 100;
+// Measured on the metrists monorepo (packed repo, shim harness): log is
+// ~3.3ms/commit on the main thread, so 100 cost ~330ms per refetch while
+// the panel realistically shows a screenful. The first-open stall on real
+// repos is statusMatrix's one-time packfile parse (~20s), not the log —
+// moving that off the main thread is tracked separately.
+const CHECKPOINT_LOG_DEPTH = 25;
 
 // debug-panel.tsx (the crash fallback — deliberately self-sufficient) peeks
 // this key raw with a hand-inlined ["git", basePath]. If this key shape ever
@@ -356,7 +379,9 @@ export function useGitCheckpoints(workspacePath: string): GitCheckpointRow[] {
   const collection = useGitCollection(workspacePath);
   const { data = [] } = useLiveQuery(
     (q) =>
-      q.from({ git: collection }).where(({ git }) => eq(git.kind, "checkpoint")),
+      q
+        .from({ git: collection })
+        .where(({ git }) => eq(git.kind, "checkpoint")),
     [workspacePath],
   );
   return useMemo(
@@ -376,7 +401,9 @@ export function useFileGitState(
   const collection = useGitCollection(workspacePath);
   const { data = [] } = useLiveQuery(
     (q) =>
-      q.from({ git: collection }).where(({ git }) => eq(git.id, fileRowId(filePath))),
+      q
+        .from({ git: collection })
+        .where(({ git }) => eq(git.id, fileRowId(filePath))),
     [workspacePath, filePath],
   );
   return (data as GitFileRow[])[0];

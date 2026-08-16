@@ -901,7 +901,7 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
   });
 });
 
-describe("IsomorphicGitService with a separate gitDir (Stage 2 history repo)", () => {
+describe("IsomorphicGitService with a detached gitDir (gitdir separate from worktree)", () => {
   let workspaceDir: string;
   let gitDir: string;
   let host: MockPlatformStorageHost;
@@ -928,8 +928,8 @@ describe("IsomorphicGitService with a separate gitDir (Stage 2 history repo)", (
   });
 
   beforeEach(async () => {
-    workspaceDir = await mkdtemp(join(tmpdir(), "metrists-history-it-"));
-    gitDir = join(workspaceDir, ".metrists", "history");
+    workspaceDir = await mkdtemp(join(tmpdir(), "detached-gitdir-it-"));
+    gitDir = join(workspaceDir, ".meta", ".git");
     host = new MockPlatformStorageHost(workspaceDir);
     service = new IsomorphicGitService(host);
   });
@@ -939,17 +939,27 @@ describe("IsomorphicGitService with a separate gitDir (Stage 2 history repo)", (
   });
 
   it("never writes into <repoPath>/.git when gitDir is set", async () => {
-    await service.init({ repoPath: workspaceDir, gitDir, defaultBranch: "main" });
+    await service.init({
+      repoPath: workspaceDir,
+      gitDir,
+      defaultBranch: "main",
+    });
 
     const defaultGitDir = await host.stat(join(workspaceDir, ".git"));
     expect(defaultGitDir.exists).toBe(false);
 
     const historyHead = await host.readFile(join(gitDir, "HEAD"));
-    expect(Buffer.from(historyHead).toString("utf8")).toContain("refs/heads/main");
+    expect(Buffer.from(historyHead).toString("utf8")).toContain(
+      "refs/heads/main",
+    );
   });
 
   it("round-trips checkpoint -> log -> diff (readTextFile) -> restore on a single file", async () => {
-    await service.init({ repoPath: workspaceDir, gitDir, defaultBranch: "main" });
+    await service.init({
+      repoPath: workspaceDir,
+      gitDir,
+      defaultBranch: "main",
+    });
 
     await writeFile(join(workspaceDir, "notes.md"), "# Notes\n\nfirst draft\n");
     const oid1 = await service.addAllAndCommit({
@@ -1003,8 +1013,8 @@ describe("IsomorphicGitService with a separate gitDir (Stage 2 history repo)", (
     expect(restored).toBe(contentAtOid1);
   });
 
-  it("workspace-is-also-a-repo sees only .metrists/ as untracked from its own .git", async () => {
-    // The workspace's OWN default-gitdir repo (no gitDir override).
+  it("two repos over one worktree stay independent when the primary excludes the secondary's dir", async () => {
+    // The worktree's OWN default-gitdir repo (no gitDir override).
     await service.init({ repoPath: workspaceDir, defaultBranch: "main" });
     await writeFile(join(workspaceDir, "README.md"), "# project readme\n");
     await service.addAllAndCommit({
@@ -1013,28 +1023,33 @@ describe("IsomorphicGitService with a separate gitDir (Stage 2 history repo)", (
       author: { name: "user", email: "user@example.com" },
     });
 
-    // The SEPARATE history repo, same worktree.
-    await service.init({ repoPath: workspaceDir, gitDir, defaultBranch: "main" });
+    // Hide the secondary repo's directory from the primary via the
+    // gitdir-local exclude (standard git: `.git/info/exclude`, never the
+    // tracked .gitignore). init already created a stock file — append.
+    const primaryExclude = join(workspaceDir, ".git", "info", "exclude");
+    const stock = await readFile(primaryExclude, "utf8");
+    await writeFile(primaryExclude, `${stock}.meta/\n`);
+
+    // The SECONDARY detached-gitdir repo, same worktree.
+    await service.init({
+      repoPath: workspaceDir,
+      gitDir,
+      defaultBranch: "main",
+    });
     await writeFile(join(workspaceDir, "notes.md"), "draft\n");
     await service.addAllAndCommit({
       repoPath: workspaceDir,
       gitDir,
       message: "checkpoint",
-      author: { name: "claude-code", email: "agent@metrists.local" },
+      author: { name: "second", email: "second@example.com" },
     });
 
     const ownStatus = await service.status({ repoPath: workspaceDir });
-    // notes.md was never added to the outer repo, and README.md is
-    // committed so it's absent from untracked. isomorphic-git's statusMatrix
-    // walks files individually (unlike `git status`'s directory collapsing),
-    // so everything else untracked must live under .metrists/ — no
-    // submodule marker, no nested-.git confusion from the history repo.
-    expect(ownStatus.untracked).toContain("notes.md");
-    expect(ownStatus.untracked).not.toContain("README.md");
-    expect(
-      ownStatus.untracked.every(
-        (path) => path === "notes.md" || path.startsWith(".metrists/"),
-      ),
-    ).toBe(true);
+    // notes.md was never added to the primary repo, README.md is committed,
+    // and the exclude hides everything under .meta/ — so the primary's
+    // status must contain exactly one untracked path. A tolerant
+    // "everything else is .meta/" assertion would pass vacuously; the
+    // exact match is what proves the isolation.
+    expect(ownStatus.untracked).toEqual(["notes.md"]);
   });
 });
