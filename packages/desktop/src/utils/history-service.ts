@@ -143,22 +143,54 @@ export async function ensureWorkspaceHistoryInitialized(
 }
 
 /**
+ * Per-workspace serialization of history-repo WRITE operations. The git
+ * lock throws on contention instead of waiting (git-storage-host), and a
+ * checkpoint/restore is a multi-step sequence over shared index state — so
+ * two overlapping ops mean either a hard "history is busy" error or a
+ * commit of an intermediate tree. Every mutating op joins this chain;
+ * reads (log) stay lock-free and unqueued.
+ */
+const historyOpChains = new Map<string, Promise<unknown>>();
+
+export function runExclusiveHistoryOp<T>(
+  workspacePath: string,
+  op: () => Promise<T>,
+): Promise<T> {
+  const key = normalizePath(workspacePath);
+  const prev = historyOpChains.get(key) ?? Promise.resolve();
+  // The stored link swallows failures so one failed op never poisons the
+  // chain; callers still see their own op's rejection via `run`.
+  const run = prev.then(op);
+  historyOpChains.set(
+    key,
+    run.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return run;
+}
+
+/**
  * Commit a checkpoint of everything currently dirty in the history repo's
  * worktree. Returns the new commit oid, or null if there was nothing to
- * commit (mirrors `IsomorphicGitService.addAllAndCommit`).
+ * commit (mirrors `IsomorphicGitService.addAllAndCommit`). Serialized per
+ * workspace via `runExclusiveHistoryOp`.
  */
-export async function checkpointWorkspaceHistory(
+export function checkpointWorkspaceHistory(
   workspacePath: string,
   message: string,
   author: { name: string; email: string },
 ): Promise<string | null> {
-  const service = await ensureWorkspaceHistoryInitialized(workspacePath);
-  const normalizedWorkspacePath = normalizePath(workspacePath);
-  return service.addAllAndCommit({
-    repoPath: normalizedWorkspacePath,
-    gitDir: historyGitDir(normalizedWorkspacePath),
-    message,
-    author,
+  return runExclusiveHistoryOp(workspacePath, async () => {
+    const service = await ensureWorkspaceHistoryInitialized(workspacePath);
+    const normalizedWorkspacePath = normalizePath(workspacePath);
+    return service.addAllAndCommit({
+      repoPath: normalizedWorkspacePath,
+      gitDir: historyGitDir(normalizedWorkspacePath),
+      message,
+      author,
+    });
   });
 }
 
@@ -166,9 +198,11 @@ export function disposeWorkspaceHistoryService(workspacePath: string): void {
   const normalizedWorkspacePath = normalizePath(workspacePath);
   historyServiceRegistry.delete(normalizedWorkspacePath);
   historyInitRegistry.delete(normalizedWorkspacePath);
+  historyOpChains.delete(normalizedWorkspacePath);
 }
 
 export function clearWorkspaceHistoryServices(): void {
   historyServiceRegistry.clear();
   historyInitRegistry.clear();
+  historyOpChains.clear();
 }

@@ -39,7 +39,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLiveQuery } from "@tanstack/react-db";
 // Type-only import — erased at runtime, so the crash panel stays
 // self-sufficient (its only runtime dependency is the QueryClient).
-import type { GitRow } from "@/entities/git";
+import type { HistoryRow } from "@/entities/history";
 import {
   agentEntriesCollection,
   agentPermissionRequestsCollection,
@@ -268,20 +268,21 @@ function DebugPanelContent({
   );
   useQueryCacheTick();
   const queryClient = useQueryClient();
-  // Key hand-inlined on purpose (self-sufficiency): matches entities/git.ts's
-  // gitQueryKey — the git collection stores its GitRow[] in the query cache.
-  const gitStatusQueryKey = basePath ? (["git", basePath] as const) : null;
+  // Key hand-inlined on purpose (self-sufficiency): matches
+  // entities/history.ts's historyQueryKey — the internal-history collection
+  // stores its HistoryRow[] in the query cache.
+  const gitStatusQueryKey = basePath ? (["history", basePath] as const) : null;
   const latestGitRows = gitStatusQueryKey
-    ? (queryClient.getQueryData<GitRow[]>(gitStatusQueryKey) ?? null)
+    ? (queryClient.getQueryData<HistoryRow[]>(gitStatusQueryKey) ?? null)
     : null;
   const latestGitRepoRow =
     latestGitRows?.find(
-      (row): row is GitRow & { kind: "repo" } => row.kind === "repo",
+      (row): row is HistoryRow & { kind: "repo" } => row.kind === "repo",
     ) ?? null;
   const latestGitStatus = latestGitRows;
   const latestGitStatusError: { message: string } | null = gitStatusQueryKey
     ? ((queryClient.getQueryState(gitStatusQueryKey)?.error as Error | null) ??
-      latestGitRepoRow?.statusError ??
+      latestGitRepoRow?.error ??
       null)
     : null;
   const latestGitStatusUpdatedAt = gitStatusQueryKey

@@ -21,10 +21,13 @@ vi.mock("@/utils/history-service", () => ({
     addAllAndCommit,
   })),
   checkpointWorkspaceHistory: vi.fn(
-    async (_ws: string, message: string, author: { name: string; email: string }) =>
-      addAllAndCommit({ message, author }),
+    async (
+      _ws: string,
+      message: string,
+      author: { name: string; email: string },
+    ) => addAllAndCommit({ message, author }),
   ),
-  historyGitDir: vi.fn((ws: string) => `${ws}/.metrists/history`),
+  historyGitDir: vi.fn((ws: string) => `${ws}/.metrists/.git`),
 }));
 
 const { writeWorkspaceTextFile } = vi.hoisted(() => ({
@@ -73,10 +76,16 @@ describe("historyDiff", () => {
 
 describe("historyCheckpoint", () => {
   it("commits an explicit checkpoint", async () => {
-    const result = await historyCheckpoint.execute(ctx, { message: "manual save" });
+    const result = await historyCheckpoint.execute(ctx, {
+      message: "manual save",
+    });
     expect(result).toEqual({ ok: true, value: { oid: "def456" } });
+    // Subject + trailers: the commit message is the durable linkage back to
+    // the task that wrote it (see utils/history-trailers.ts).
     expect(addAllAndCommit).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "manual save" }),
+      expect.objectContaining({
+        message: `manual save\n\nNotefig-Task: ${ctx.taskId}\nNotefig-Role: agent\n`,
+      }),
     );
   });
 });
@@ -89,7 +98,10 @@ describe("historyRestore", () => {
       checkpoint: "abc123",
     });
     expect(result).toEqual({ ok: true, value: undefined });
-    expect(writeWorkspaceTextFile).toHaveBeenCalledWith("/ws/notes.md", "old content");
+    expect(writeWorkspaceTextFile).toHaveBeenCalledWith(
+      "/ws/notes.md",
+      "old content",
+    );
   });
 
   it("is marked as requiring permission", () => {

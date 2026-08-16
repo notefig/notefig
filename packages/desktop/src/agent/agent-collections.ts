@@ -103,6 +103,14 @@ export type AgentTurn = {
   stopReason?: string;
   /** Failure reason when status is "error" — the "why did it fail?" answer. */
   error?: string;
+  /**
+   * The prompt that started this turn. Persisted so session/load replay can
+   * re-adopt the original turnId for each replayed user message — the id is
+   * the join key to checkpoint commit trailers, and it must survive
+   * restarts or every revived transcript loses its revert anchors. Absent
+   * on synthetic replay turns.
+   */
+  promptText?: string;
   startedAt: number;
 };
 
@@ -256,6 +264,30 @@ export async function reconcileAgentTasksAtBoot(): Promise<void> {
       }
     }).isPersisted.promise;
   }
+
+  await reconcileAgentTurnsAtBoot();
+}
+
+/**
+ * Turns persist too (their ids are the prompt↔checkpoint join). Purge rows
+ * whose task is gone, and settle statuses nothing can still be driving: a
+ * fresh launch has no runtimes, so "running"/"queued" are artifacts of a
+ * previous life (crash, hard quit) and read as cancelled. Runs after the
+ * task pass so its deletions cascade here in the same boot.
+ */
+async function reconcileAgentTurnsAtBoot(): Promise<void> {
+  await agentTurnsCollection.preload();
+  for (const turn of [...agentTurnsCollection.values()]) {
+    if (!agentTasksCollection.get(turn.taskId)) {
+      await agentTurnsCollection.delete(turn.turnId).isPersisted.promise;
+      continue;
+    }
+    if (turn.status === "running" || turn.status === "queued") {
+      await agentTurnsCollection.update(turn.turnId, (draft) => {
+        draft.status = "cancelled";
+      }).isPersisted.promise;
+    }
+  }
 }
 
 let reconcileStarted = false;
@@ -278,10 +310,18 @@ export function resetAgentTasksReconciledForTest(): void {
   reconcileStarted = false;
 }
 
+/**
+ * Persisted like tasks (same SQLite surface): turn rows carry the turnId
+ * that checkpoint commit trailers reference, so they must survive restarts
+ * — session/load replay re-adopts them per replayed user message instead of
+ * re-minting (agent-service resumeSession). Entries stay in-memory: the
+ * harness session is the transcript's source of truth and replays it.
+ */
 export const agentTurnsCollection = createCollection(
-  localOnlyCollectionOptions({
+  persistedCollectionOptions<AgentTurn, string>({
     id: "agent-turns",
-    getKey: (turn: AgentTurn) => turn.turnId,
+    getKey: (turn) => turn.turnId,
+    persistence: platformAdapter.db.get(),
   }),
 );
 

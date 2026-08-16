@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { AgentTool } from "@notefig/shared/agent";
 import { checkpointWorkspaceHistory } from "@/utils/history-service";
+import { formatCheckpointMessage } from "@/utils/history-trailers";
 
 const InputSchema = z.object({
   message: z.string().min(1),
@@ -16,10 +17,18 @@ export const historyCheckpoint: AgentTool<
   input: InputSchema,
   async execute(ctx, input) {
     try {
-      const oid = await checkpointWorkspaceHistory(ctx.workspacePath, input.message, {
-        name: "agent",
-        email: "agent@notefig.local",
-      });
+      const oid = await checkpointWorkspaceHistory(
+        ctx.workspacePath,
+        formatCheckpointMessage({
+          subject: input.message,
+          role: "agent",
+          taskId: ctx.taskId,
+        }),
+        {
+          name: "agent",
+          email: "agent@notefig.local",
+        },
+      );
       return { ok: true, value: { oid } };
     } catch (error) {
       return {

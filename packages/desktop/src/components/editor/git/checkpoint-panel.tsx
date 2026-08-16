@@ -1,17 +1,24 @@
+/**
+ * The sidebar "Git" panel, repurposed for the INTERNAL history repo
+ * (`<ws>/.metrists/.git`): a timeline of checkpoints written per agent turn
+ * (plus manual saves), which the user can jump back and forth between.
+ * Jumping never rewrites history — a safety checkpoint is taken first, so
+ * "forward" is just another jump target.
+ *
+ * The real-git panel this replaced lives on in entities/git.ts (intact but
+ * unmounted) for when user-facing git ops return.
+ */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import {
-  Check,
+  Bot,
   ChevronDown,
-  CircleDashed,
-  CloudUpload,
   GitCommitHorizontal,
   History,
-  TriangleAlert,
-  Undo2,
+  User,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useMutation, type UseMutateFunction } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
@@ -22,8 +29,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
@@ -31,19 +36,17 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
-  abortRevert as abortRevertAction,
-  deriveSyncState,
-  initializeGit,
-  refetchGit,
-  revertToCheckpoint,
-  saveCheckpoint as saveCheckpointAction,
-  useGitCheckpoints,
-  useGitFetching,
-  useGitSummary,
-  type GitSummary,
-  type SerializedGitError,
-  type SyncState,
-} from "@/entities/git";
+  jumpToCheckpoint,
+  refetchHistory,
+  saveManualCheckpoint,
+  useHistoryCheckpoints,
+  useHistoryFetching,
+  useHistorySummary,
+  type HistorySummary,
+  type SerializedHistoryError,
+  type HistoryCheckpointRow,
+} from "@/entities/history";
+import type { CheckpointRole } from "@/utils/history-trailers";
 
 interface CheckpointPanelProps {
   workspacePath: string;
@@ -51,65 +54,40 @@ interface CheckpointPanelProps {
 
 interface CheckpointListItem {
   id: string;
-  timestamp: Date;
+  oid: string;
   hash: string;
-  message: string;
+  subject: string;
+  role: CheckpointRole;
+  timestamp: Date;
 }
 
 interface RecoveryAction {
-  id: "initialize" | "repair" | "retry" | "abort" | "dismiss";
+  id: "retry" | "dismiss";
   label: string;
   onClick: () => void;
   disabled?: boolean;
 }
 
-type PanelState = "uninitialized" | "error" | "empty" | "ready";
+type PanelState = "error" | "empty" | "ready";
 
 type MutableT = (key: string, defaultValue: string) => string;
 
 function getErrorPresentation(
-  error: SerializedGitError,
+  error: SerializedHistoryError,
   t: MutableT,
 ): { title: string; message: string } {
   switch (error.code) {
-    case "RepoNotFound":
-      return {
-        title: t(
-          "timelineNotInitializedTitle",
-          "Commit history not initialized",
-        ),
-        message: t(
-          "timelineNotInitializedMessage",
-          "Project commit history is not initialized.",
-        ),
-      };
     case "LockUnavailable":
       return {
-        title: t("timelineBusyTitle", "Commit history is busy"),
-        message: t("timelineBusyMessage", "Project commit history is busy."),
+        title: t("timelineBusyTitle", "Checkpoint history is busy"),
+        message: t("timelineBusyMessage", "Checkpoint history is busy."),
       };
     case "CorruptRepository":
       return {
-        title: t("timelineCorruptTitle", "Commit history needs repair"),
+        title: t("timelineCorruptTitle", "Checkpoint history needs repair"),
         message: t(
           "timelineCorruptMessage",
-          "Project commit history metadata is inconsistent.",
-        ),
-      };
-    case "MergeRequired":
-      return {
-        title: t("timelineMergeRequiredTitle", "Revert needs attention"),
-        message: t(
-          "timelineMergeRequiredMessage",
-          "Revert would conflict with current changes.",
-        ),
-      };
-    case "UnsupportedOperation":
-      return {
-        title: t("timelineUnsupportedTitle", "Action unavailable"),
-        message: t(
-          "timelineUnsupportedMessage",
-          "This action is not available in this environment.",
+          "Checkpoint history metadata is inconsistent.",
         ),
       };
     case "InvalidInput":
@@ -119,75 +97,21 @@ function getErrorPresentation(
       };
     default:
       return {
-        title: t("timelineUnexpectedTitle", "Commit history error"),
+        title: t("timelineUnexpectedTitle", "Checkpoint history error"),
         message: error.message,
       };
   }
 }
 
-function firstPanelError(
-  summary: GitSummary | undefined,
-  initializeError: SerializedGitError | null | undefined,
-): SerializedGitError | null {
-  return initializeError ?? summary?.statusError ?? summary?.logError ?? null;
-}
-
-/** The error the panel surfaces — only once the panel is in error state. */
-function visiblePanelError(
-  renderPanelState: PanelState,
-  summary: GitSummary | undefined,
-  initializeError: SerializedGitError | null | undefined,
-): SerializedGitError | null {
-  if (renderPanelState !== "error") return null;
-  return firstPanelError(summary, initializeError);
-}
-
-function deriveCanSave(
-  renderPanelState: PanelState,
-  summary: GitSummary | undefined,
-): boolean {
-  return renderPanelState !== "uninitialized" && summary?.hasChanges === true;
-}
-
 function derivePanelState({
   summary,
-  initializeError,
   checkpoints,
 }: {
-  summary: GitSummary | undefined;
-  initializeError: SerializedGitError | null | undefined;
+  summary: HistorySummary | undefined;
   checkpoints: CheckpointListItem[];
 }): PanelState {
-  const empty = checkpoints.length === 0;
-  if (summary?.initialized === false && empty) return "uninitialized";
-  if (firstPanelError(summary, initializeError)) return "error";
-  return empty ? "empty" : "ready";
-}
-
-function getSyncStatePresentation(
-  state: SyncState,
-  t: MutableT,
-): {
-  label: string;
-  Icon: typeof TriangleAlert;
-} {
-  switch (state) {
-    case "uncommitted":
-      return {
-        label: t("timelineStateUncommitted", "Unchecked"),
-        Icon: CircleDashed,
-      };
-    case "unsynced":
-      return {
-        label: t("timelineStateUnsynced", "Not synced"),
-        Icon: CloudUpload,
-      };
-    default:
-      return {
-        label: t("timelineStateSynced", "Synced"),
-        Icon: Check,
-      };
-  }
+  if (summary?.error) return "error";
+  return checkpoints.length === 0 ? "empty" : "ready";
 }
 
 /**
@@ -218,274 +142,143 @@ function useStablePanelState(
  * entities/git.ts).
  */
 function useCheckpointItems(
-  checkpointRows: ReturnType<typeof useGitCheckpoints>,
+  checkpointRows: HistoryCheckpointRow[],
   save: { isPending: boolean; variables?: string },
 ): CheckpointListItem[] {
   return useMemo(() => {
     const items: CheckpointListItem[] = checkpointRows.map((row) => ({
-      id: row.oid || row.id,
+      id: row.oid,
+      oid: row.oid,
       hash: row.hash,
+      subject: row.subject,
+      role: row.role,
       timestamp: new Date(row.timestamp),
-      message: row.message,
     }));
     if (save.isPending) {
       items.unshift({
         id: "pending-save",
+        oid: "pending",
         hash: "pending",
+        subject: save.variables?.trim() || "Manual checkpoint",
+        role: "user",
         timestamp: new Date(),
-        message: save.variables?.trim() || "Commit",
       });
     }
     return items;
   }, [checkpointRows, save.isPending, save.variables]);
 }
 
-/** The revert/abort mutations plus their banner state, as one unit. */
-function useRevertController(workspacePath: string) {
-  const [revertError, setRevertError] = useState<SerializedGitError | null>(
+/** The jump mutation plus its banner state, as one unit. */
+function useJumpController(workspacePath: string) {
+  const [jumpError, setJumpError] = useState<SerializedHistoryError | null>(
     null,
   );
-  const [activeRevertId, setActiveRevertId] = useState<string | null>(null);
+  const [activeJumpId, setActiveJumpId] = useState<string | null>(null);
 
-  const revertCommit = useMutation<
-    void,
-    SerializedGitError,
-    CheckpointListItem
-  >({
+  const jump = useMutation<void, SerializedHistoryError, CheckpointListItem>({
     mutationFn: (checkpoint) =>
-      revertToCheckpoint(workspacePath, {
-        oid: checkpoint.id,
+      jumpToCheckpoint(workspacePath, {
+        oid: checkpoint.oid,
         hash: checkpoint.hash,
+        subject: checkpoint.subject,
       }),
     onMutate: (checkpoint) => {
-      setRevertError(null);
-      setActiveRevertId(checkpoint.id);
-    },
-    onSuccess: () => {
-      setRevertError(null);
+      setJumpError(null);
+      setActiveJumpId(checkpoint.id);
     },
     onError: (error) => {
-      setRevertError(error);
+      setJumpError(error);
     },
     onSettled: () => {
-      setActiveRevertId(null);
+      setActiveJumpId(null);
     },
   });
 
-  const abortRevert = useMutation<void, SerializedGitError, void>({
-    mutationFn: () => abortRevertAction(workspacePath),
-    onSuccess: () => {
-      setRevertError(null);
-    },
-  });
+  const dismissJumpError = useCallback(() => setJumpError(null), []);
 
-  const dismissRevertError = useCallback(() => setRevertError(null), []);
-
-  return {
-    revertCommit,
-    abortRevert,
-    revertError,
-    dismissRevertError,
-    activeRevertId,
-  };
-}
-
-function buildErrorActions({
-  panelError,
-  t,
-  retry,
-  initialize,
-}: {
-  panelError: SerializedGitError | null;
-  t: MutableT;
-  retry: () => void;
-  initialize: UseMutateFunction<void, SerializedGitError, void, unknown>;
-}): RecoveryAction[] {
-  if (!panelError) return [];
-  return getRecoveryActions({ error: panelError, t, retry, initialize });
-}
-
-function buildRevertActions({
-  revertError,
-  abortRevert,
-  dismiss,
-  t,
-}: {
-  revertError: SerializedGitError | null;
-  abortRevert: { mutate: () => void; isPending: boolean };
-  dismiss: () => void;
-  t: MutableT;
-}): RecoveryAction[] {
-  if (!revertError) return [];
-  if (revertError.code === "MergeRequired") {
-    return [
-      {
-        id: "abort",
-        label: t("abortRevert", "Abort revert"),
-        onClick: () => abortRevert.mutate(),
-        disabled: abortRevert.isPending,
-      },
-    ];
-  }
-  return [
-    {
-      id: "dismiss",
-      label: t("dismiss", "Dismiss"),
-      onClick: dismiss,
-    },
-  ];
-}
-
-function buildListActions({
-  panelState,
-  errorActions,
-  initialize,
-  save,
-  canSave,
-  t,
-}: {
-  panelState: PanelState;
-  errorActions: RecoveryAction[];
-  initialize: () => void;
-  save: { mutate: (value?: string) => void; isPending: boolean };
-  canSave: boolean;
-  t: MutableT;
-}): RecoveryAction[] {
-  if (panelState === "uninitialized") {
-    return [
-      {
-        id: "initialize",
-        label: t("initializeTimeline", "Initialize commit history"),
-        onClick: initialize,
-      },
-    ];
-  }
-  if (panelState === "empty") {
-    return [
-      {
-        id: "retry",
-        label: t("saveCheckpoint", "Save commit"),
-        onClick: () => save.mutate(undefined),
-        disabled: !canSave || save.isPending,
-      },
-    ];
-  }
-  return errorActions;
-}
-
-function buildListMessage({
-  panelState,
-  error,
-  t,
-}: {
-  panelState: PanelState;
-  error: SerializedGitError | null;
-  t: MutableT;
-}): string | null {
-  if (panelState === "uninitialized") {
-    return t(
-      "timelineNotInitializedMessage",
-      "Project commit history is not initialized.",
-    );
-  }
-  if (panelState === "empty") {
-    return t("noCheckpointsYet", "No commits yet. Save your first one!");
-  }
-  return error ? getErrorPresentation(error, t).message : null;
+  return { jump, jumpError, dismissJumpError, activeJumpId };
 }
 
 export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
   const { t } = useTranslation();
-  const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
   const [description, setDescription] = useState("");
 
-  const summary = useGitSummary(workspacePath);
-  const checkpointRows = useGitCheckpoints(workspacePath);
-  const isBackgroundFetching = useGitFetching(workspacePath);
+  const summary = useHistorySummary(workspacePath);
+  const checkpointRows = useHistoryCheckpoints(workspacePath);
+  const isBackgroundFetching = useHistoryFetching(workspacePath);
 
   const saveCheckpoint = useMutation<
     string | null,
-    SerializedGitError,
+    SerializedHistoryError,
     string | undefined
   >({
-    mutationFn: (value) => saveCheckpointAction(workspacePath, value),
-  });
-
-  const initializeTimeline = useMutation<void, SerializedGitError, void>({
-    mutationFn: () => initializeGit(workspacePath),
+    mutationFn: (value) => saveManualCheckpoint(workspacePath, value),
   });
 
   const checkpoints = useCheckpointItems(checkpointRows, saveCheckpoint);
-  const {
-    revertCommit,
-    abortRevert,
-    revertError,
-    dismissRevertError,
-    activeRevertId,
-  } = useRevertController(workspacePath);
+  const { jump, jumpError, dismissJumpError, activeJumpId } =
+    useJumpController(workspacePath);
 
-  const initializeError = initializeTimeline.error;
-  const panelState = derivePanelState({ summary, initializeError, checkpoints });
-  const renderPanelState = useStablePanelState(panelState, isBackgroundFetching);
+  const panelState = derivePanelState({ summary, checkpoints });
+  const renderPanelState = useStablePanelState(
+    panelState,
+    isBackgroundFetching,
+  );
 
-  const panelError = visiblePanelError(renderPanelState, summary, initializeError);
-
-  const errorActions = buildErrorActions({
-    panelError,
-    t,
-    retry: () => void refetchGit(workspacePath),
-    initialize: initializeTimeline.mutate,
-  });
-
-  const syncState = deriveSyncState(summary);
-  const canSave = deriveCanSave(renderPanelState, summary);
-
-  const revertActions = buildRevertActions({
-    revertError,
-    abortRevert,
-    dismiss: dismissRevertError,
-    t,
-  });
+  const panelError =
+    renderPanelState === "error" ? (summary?.error ?? null) : null;
 
   return (
     <div className="flex h-full flex-col">
-      <QuickSaveCheckpoint
+      <SaveCheckpointBar
         isSaving={saveCheckpoint.isPending}
-        autoSaveEnabled={autoSaveEnabled}
-        onAutoSaveToggle={setAutoSaveEnabled}
         description={description}
         onDescriptionChange={setDescription}
         onSave={(value) => saveCheckpoint.mutate(value)}
-        syncState={syncState}
-        canSave={canSave}
         t={t}
       />
 
-      {revertError ? (
-        <RecoveryBanner error={revertError} actions={revertActions} t={t} />
+      {jumpError ? (
+        <RecoveryBanner
+          error={jumpError}
+          actions={[
+            {
+              id: "dismiss",
+              label: t("dismiss", "Dismiss"),
+              onClick: dismissJumpError,
+            },
+          ]}
+          t={t}
+        />
       ) : null}
 
       <CheckpointsList
         panelState={renderPanelState}
         checkpoints={checkpoints}
-        isReverting={revertCommit.isPending}
-        activeRevertId={activeRevertId}
-        onRevert={(checkpoint: CheckpointListItem) =>
-          revertCommit.mutate(checkpoint)
+        isJumping={jump.isPending}
+        activeJumpId={activeJumpId}
+        onJump={(checkpoint: CheckpointListItem) => jump.mutate(checkpoint)}
+        actions={
+          renderPanelState === "error"
+            ? [
+                {
+                  id: "retry",
+                  label: t("retry", "Retry"),
+                  onClick: () => void refetchHistory(workspacePath),
+                },
+              ]
+            : []
         }
-        actions={buildListActions({
-          panelState: renderPanelState,
-          errorActions,
-          initialize: () => initializeTimeline.mutate(),
-          save: saveCheckpoint,
-          canSave,
-          t,
-        })}
-        message={buildListMessage({
-          panelState: renderPanelState,
-          error: panelError,
-          t,
-        })}
+        message={
+          renderPanelState === "empty"
+            ? t(
+                "noHistoryCheckpointsYet",
+                "No checkpoints yet. They appear as you work with the agent.",
+              )
+            : panelError
+              ? getErrorPresentation(panelError, t).message
+              : null
+        }
         isError={renderPanelState === "error"}
         t={t}
       />
@@ -493,55 +286,8 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
   );
 }
 
-function getRecoveryActions({
-  error,
-  t,
-  retry,
-  initialize,
-}: {
-  error: SerializedGitError;
-  t: MutableT;
-  retry: () => void;
-  initialize: UseMutateFunction<void, SerializedGitError, void, unknown>;
-}): RecoveryAction[] {
-  switch (error.code) {
-    case "RepoNotFound":
-      return [
-        {
-          id: "initialize",
-          label: t("initializeTimeline", "Initialize commit history"),
-          onClick: () => initialize(),
-        },
-      ];
-    case "CorruptRepository":
-      return [
-        {
-          id: "repair",
-          label: t("repairTimeline", "Repair commit history"),
-          onClick: () => initialize(),
-        },
-      ];
-    case "LockUnavailable":
-      return [
-        {
-          id: "retry",
-          label: t("retry", "Retry"),
-          onClick: retry,
-        },
-      ];
-    default:
-      return [
-        {
-          id: "retry",
-          label: t("retry", "Retry"),
-          onClick: retry,
-        },
-      ];
-  }
-}
-
 interface RecoveryBannerProps {
-  error: SerializedGitError;
+  error: SerializedHistoryError;
   actions: RecoveryAction[];
   t: MutableT;
 }
@@ -575,31 +321,22 @@ function RecoveryBanner({ error, actions, t }: RecoveryBannerProps) {
   );
 }
 
-interface QuickSaveCheckpointProps {
+interface SaveCheckpointBarProps {
   isSaving?: boolean;
-  autoSaveEnabled: boolean;
-  onAutoSaveToggle: (enabled: boolean) => void;
   description: string;
   onDescriptionChange: (value: string) => void;
   onSave: (description?: string) => void;
-  syncState: SyncState;
-  canSave: boolean;
   t: MutableT;
 }
 
-function QuickSaveCheckpoint({
+function SaveCheckpointBar({
   isSaving = false,
-  autoSaveEnabled,
-  onAutoSaveToggle,
   description,
   onDescriptionChange,
   onSave,
-  syncState,
-  canSave,
   t,
-}: QuickSaveCheckpointProps) {
+}: SaveCheckpointBarProps) {
   const [open, setOpen] = useState(false);
-  const syncPresentation = getSyncStatePresentation(syncState, t);
 
   const saveQuick = () => {
     onSave(undefined);
@@ -620,15 +357,15 @@ function QuickSaveCheckpoint({
           type="button"
           variant="ghost"
           className="h-6 gap-1 px-1.5 text-xs text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 [&_svg]:size-3.5"
-          disabled={isSaving || !canSave}
+          disabled={isSaving}
           onClick={saveQuick}
-          aria-label={t("saveCheckpoint", "Save commit")}
+          aria-label={t("saveHistoryCheckpoint", "Save checkpoint")}
         >
           <GitCommitHorizontal className="h-3.5 w-3.5" />
           <span className="truncate">
             {isSaving
-              ? t("checkpointSaving", "Saving commit...")
-              : t("saveCheckpoint", "Save commit")}
+              ? t("historyCheckpointSaving", "Saving checkpoint...")
+              : t("saveHistoryCheckpoint", "Save checkpoint")}
           </span>
         </Button>
 
@@ -643,7 +380,7 @@ function QuickSaveCheckpoint({
                   className="h-6 w-6 text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 [&_svg]:size-3.5"
                   aria-label={t(
                     "saveCheckpointWithDescription",
-                    "Save commit with description",
+                    "Save checkpoint with description",
                   )}
                   disabled={isSaving}
                 >
@@ -651,16 +388,19 @@ function QuickSaveCheckpoint({
                   <span className="sr-only">
                     {t(
                       "saveCheckpointWithDescription",
-                      "Save commit with description",
+                      "Save checkpoint with description",
                     )}
                   </span>
                 </Button>
               </PopoverTrigger>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="px-2 py-1 text-[0.6875rem]">
+            <TooltipContent
+              side="bottom"
+              className="px-2 py-1 text-[0.6875rem]"
+            >
               {t(
                 "saveCheckpointWithDescription",
-                "Save commit with description",
+                "Save checkpoint with description",
               )}
             </TooltipContent>
           </Tooltip>
@@ -670,7 +410,7 @@ function QuickSaveCheckpoint({
                 <h4 className="text-sm font-medium">
                   {t(
                     "saveCheckpointWithDescription",
-                    "Save commit with description",
+                    "Save checkpoint with description",
                   )}
                 </h4>
                 <p className="text-xs text-muted-foreground">
@@ -697,39 +437,16 @@ function QuickSaveCheckpoint({
                     size="sm"
                     className="h-8 shrink-0 text-xs"
                     onClick={saveWithDescription}
-                    disabled={isSaving || !canSave}
+                    disabled={isSaving}
                   >
-                    {t("saveCheckpoint", "Save commit")}
+                    {t("saveHistoryCheckpoint", "Save checkpoint")}
                   </Button>
                 </div>
-              </div>
-
-              <Separator className="my-1" />
-
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-medium">
-                    {t("autoSaveCheckpoints", "Auto-save commits")}
-                  </p>
-                  <p className="text-[0.6875rem] text-muted-foreground">
-                    {t("autoSaveCheckpointsHint", "After each change")}
-                  </p>
-                </div>
-                <Switch
-                  checked={autoSaveEnabled}
-                  onCheckedChange={onAutoSaveToggle}
-                  disabled
-                />
               </div>
             </div>
           </PopoverContent>
         </Popover>
       </ButtonGroup>
-
-      <span className="inline-flex h-6 max-w-24 min-w-0 items-center gap-1 overflow-hidden rounded-md border px-1.5 text-[0.6875rem] leading-none">
-        <syncPresentation.Icon className="h-3.5 w-3.5 shrink-0" />
-        <span className="min-w-0 truncate">{syncPresentation.label}</span>
-      </span>
     </div>
   );
 }
@@ -741,9 +458,9 @@ interface CheckpointsListProps {
   message: string | null;
   isError: boolean;
   t: MutableT;
-  onRevert: (checkpoint: CheckpointListItem) => void;
-  isReverting: boolean;
-  activeRevertId: string | null;
+  onJump: (checkpoint: CheckpointListItem) => void;
+  isJumping: boolean;
+  activeJumpId: string | null;
 }
 
 function CheckpointsList({
@@ -753,11 +470,11 @@ function CheckpointsList({
   message,
   isError,
   t,
-  onRevert,
-  isReverting,
-  activeRevertId,
+  onJump,
+  isJumping,
+  activeJumpId,
 }: CheckpointsListProps) {
-  if (panelState === "uninitialized" || panelState === "empty" || isError) {
+  if (panelState === "empty" || isError) {
     return (
       <div className="flex flex-1 items-center justify-center p-8">
         <div className="space-y-3 text-center">
@@ -806,9 +523,10 @@ function CheckpointsList({
           >
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
-                {checkpoint.message ? (
+                <RoleBadge role={checkpoint.role} t={t} />
+                {checkpoint.subject ? (
                   <span className="truncate text-[0.6875rem] font-medium">
-                    {checkpoint.message}
+                    {checkpoint.subject}
                   </span>
                 ) : (
                   <time
@@ -826,27 +544,31 @@ function CheckpointsList({
                   </span>
                 ) : null}
               </div>
-              <div className="mt-0.5 flex items-center gap-1 text-[0.625rem] text-muted-foreground">
+              <div className="mt-0.5 flex items-center gap-1.5 text-[0.625rem] text-muted-foreground">
                 <button
                   type="button"
                   className="h-auto w-auto p-0 font-mono leading-none hover:text-foreground"
                   onClick={() => void copyTextToClipboard(checkpoint.hash)}
-                  aria-label={t("copyCommitHash", "Copy commit hash")}
+                  aria-label={t("copyCheckpointHash", "Copy checkpoint hash")}
                 >
                   {checkpoint.hash}
                 </button>
+                <time dateTime={checkpoint.timestamp.toISOString()}>
+                  {formatDistanceToNow(checkpoint.timestamp, {
+                    addSuffix: true,
+                  })}
+                </time>
               </div>
             </div>
 
             <CheckpointActions
               disabled={
-                index === 0 ||
                 checkpoint.hash === "pending" ||
-                isReverting ||
-                activeRevertId === checkpoint.id
+                isJumping ||
+                activeJumpId === checkpoint.id
               }
-              isReverting={isReverting && activeRevertId === checkpoint.id}
-              onRevert={() => onRevert(checkpoint)}
+              isJumping={isJumping && activeJumpId === checkpoint.id}
+              onJump={() => onJump(checkpoint)}
               t={t}
             />
           </div>
@@ -856,18 +578,44 @@ function CheckpointsList({
   );
 }
 
+function RoleBadge({ role, t }: { role: CheckpointRole; t: MutableT }) {
+  const isUser = role === "user";
+  const Icon = isUser ? User : Bot;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground"
+          aria-label={
+            isUser
+              ? t("checkpointByYou", "Saved by you")
+              : t("checkpointByAgent", "Saved by the agent")
+          }
+        >
+          <Icon className="h-3 w-3" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right" className="px-2 py-1 text-[0.6875rem]">
+        {isUser
+          ? t("checkpointByYou", "Saved by you")
+          : t("checkpointByAgent", "Saved by the agent")}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 interface CheckpointActionsProps {
   disabled?: boolean;
   t: MutableT;
-  onRevert: () => void;
-  isReverting: boolean;
+  onJump: () => void;
+  isJumping: boolean;
 }
 
 function CheckpointActions({
   disabled = false,
   t,
-  onRevert,
-  isReverting,
+  onJump,
+  isJumping,
 }: CheckpointActionsProps) {
   return (
     <div className="flex items-center gap-0.5">
@@ -877,15 +625,15 @@ function CheckpointActions({
             variant="ghost"
             size="icon"
             className="h-6 w-6 text-muted-foreground [&_svg]:size-3.5"
-            aria-label={t("restoreCheckpoint", "Restore commit")}
-            disabled={disabled || isReverting}
-            onClick={onRevert}
+            aria-label={t("jumpToCheckpoint", "Jump to this checkpoint")}
+            disabled={disabled || isJumping}
+            onClick={onJump}
           >
-            <Undo2 className="h-3.5 w-3.5" />
+            <History className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
         <TooltipContent side="left" className="px-2 py-1 text-[0.6875rem]">
-          {t("restoreCheckpoint", "Restore commit")}
+          {t("jumpToCheckpoint", "Jump to this checkpoint")}
         </TooltipContent>
       </Tooltip>
     </div>
