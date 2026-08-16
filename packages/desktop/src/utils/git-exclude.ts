@@ -19,6 +19,14 @@ export async function ensureExcludeLines(
 ): Promise<void> {
   const excludePath = `${gitDir}/info/exclude`;
   const existing = await platformAdapter.fs.readFiles([excludePath]);
+  // Only a verifiably-missing file may be created fresh. Any other read
+  // failure (permissions, transient I/O) must abort: treating it as an
+  // empty file would rewrite the exclude with only the app's entries,
+  // destroying user-authored patterns.
+  const failure = existing.failed[0];
+  if (failure && failure.type !== "not_found") {
+    throw new Error(`Failed to read '${excludePath}': ${failure.message}`);
+  }
   const current = existing.succeeded[0]?.content ?? "";
 
   const present = new Set(current.split("\n").map((line) => line.trim()));

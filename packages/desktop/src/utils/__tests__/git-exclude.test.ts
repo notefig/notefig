@@ -25,7 +25,13 @@ function fileExists(content: string) {
 function fileMissing() {
   readFilesMock.mockResolvedValue({
     succeeded: [],
-    failed: [{ path: "/ws/.git/info/exclude", message: "not found" }],
+    failed: [
+      {
+        path: "/ws/.git/info/exclude",
+        type: "not_found",
+        message: "not found",
+      },
+    ],
   });
 }
 
@@ -77,6 +83,25 @@ describe("ensureExcludeLines", () => {
         content: "user-pattern.log\n.metrists/\n",
       },
     ]);
+  });
+
+  it("aborts on a non-not_found read failure — never rewrites over unreadable user content", async () => {
+    readFilesMock.mockResolvedValue({
+      succeeded: [],
+      failed: [
+        {
+          path: "/ws/.git/info/exclude",
+          type: "permission_denied",
+          message: "EACCES",
+        },
+      ],
+    });
+
+    await expect(
+      ensureExcludeLines("/ws/.git", [".metrists/"]),
+    ).rejects.toThrow(/EACCES/);
+    // The file was NOT replaced with only the app's entries.
+    expect(writeFilesMock).not.toHaveBeenCalled();
   });
 
   it("throws when the write fails so callers can decide how loud to be", async () => {

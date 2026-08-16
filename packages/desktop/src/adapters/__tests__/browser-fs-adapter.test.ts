@@ -545,6 +545,95 @@ describe("BrowserFsPlatformAdapter", () => {
         expect(result.error.type).toBe("io_error");
       }
     });
+
+    // "Move" is copy-then-delete here (FS-Access has no rename) — the
+    // source may only be deleted after EVERY file verifiably reached the
+    // destination. A lossy move destroys data (e.g. a legacy history repo
+    // mid-migration).
+    it("never deletes the source when the listing fails", async () => {
+      vi.spyOn(adapter.fs, "readDirectory").mockResolvedValue({
+        ok: false,
+        error: { path: "/src", type: "permission_denied", message: "denied" },
+      });
+      const del = vi.spyOn(adapter.fs, "deleteDirectories");
+
+      const result = await adapter.fs.moveDirectory("/src", "/dst");
+
+      expect(result.ok).toBe(false);
+      expect(del).not.toHaveBeenCalled();
+    });
+
+    it("never deletes the source when a file fails to read during the copy", async () => {
+      vi.spyOn(adapter.fs, "readDirectory").mockResolvedValue({
+        ok: true,
+        value: ["/src/a.md", "/src/b.md"],
+      });
+      vi.spyOn(adapter.fs, "readBinaryFiles").mockResolvedValue({
+        succeeded: [{ path: "/src/a.md", data: new Uint8Array([1]) }],
+        failed: [{ path: "/src/b.md", type: "io_error", message: "boom" }],
+      });
+      const del = vi.spyOn(adapter.fs, "deleteDirectories");
+
+      const result = await adapter.fs.moveDirectory("/src", "/dst");
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.path).toBe("/src/b.md");
+      expect(del).not.toHaveBeenCalled();
+    });
+
+    it("never deletes the source when a destination write fails", async () => {
+      vi.spyOn(adapter.fs, "readDirectory").mockResolvedValue({
+        ok: true,
+        value: ["/src/a.md"],
+      });
+      vi.spyOn(adapter.fs, "readBinaryFiles").mockResolvedValue({
+        succeeded: [{ path: "/src/a.md", data: new Uint8Array([1]) }],
+        failed: [],
+      });
+      vi.spyOn(adapter.fs, "createDirectories").mockResolvedValue({
+        succeeded: ["/dst"],
+        failed: [],
+      });
+      vi.spyOn(adapter.fs, "writeBinaryFiles").mockResolvedValue({
+        succeeded: [],
+        failed: [{ path: "/dst/a.md", type: "io_error", message: "full" }],
+      });
+      const del = vi.spyOn(adapter.fs, "deleteDirectories");
+
+      const result = await adapter.fs.moveDirectory("/src", "/dst");
+
+      expect(result.ok).toBe(false);
+      expect(del).not.toHaveBeenCalled();
+    });
+
+    it("deletes the source only after a fully successful copy", async () => {
+      vi.spyOn(adapter.fs, "readDirectory").mockResolvedValue({
+        ok: true,
+        value: ["/src/a.md"],
+      });
+      vi.spyOn(adapter.fs, "readBinaryFiles").mockResolvedValue({
+        succeeded: [{ path: "/src/a.md", data: new Uint8Array([1]) }],
+        failed: [],
+      });
+      vi.spyOn(adapter.fs, "createDirectories").mockResolvedValue({
+        succeeded: ["/dst"],
+        failed: [],
+      });
+      const write = vi
+        .spyOn(adapter.fs, "writeBinaryFiles")
+        .mockResolvedValue({ succeeded: ["/dst/a.md"], failed: [] });
+      const del = vi
+        .spyOn(adapter.fs, "deleteDirectories")
+        .mockResolvedValue({ succeeded: ["/src"], failed: [] });
+
+      const result = await adapter.fs.moveDirectory("/src", "/dst");
+
+      expect(result.ok).toBe(true);
+      expect(write).toHaveBeenCalledWith([
+        { path: "/dst/a.md", data: new Uint8Array([1]) },
+      ]);
+      expect(del).toHaveBeenCalledWith(["/src"], { recursive: true });
+    });
   });
 
   describe("deleteFiles", () => {
