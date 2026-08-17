@@ -17,6 +17,7 @@ import { useFileWatchers } from "@/utils/file-sync";
 import { useWorkspaceTabs } from "@/entities/tabs";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
+import { useNavigationPersistence } from "@/hooks/use-recent-projects";
 import { useProjectSettings } from "@/utils/project-settings";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
 import { useWorkspaceCommands } from "@/hooks/use-workspace-commands";
@@ -52,6 +53,7 @@ export const Workspace = () => {
   }
 
   useThrowWorkspaceAccessError(workspacePath);
+  useNavigationPersistence();
   const { t } = useTranslation();
   const dockableRef = useRef<HTMLDivElement>(null);
   const searchPanelRef = useRef<SearchPanelHandle>(null);
