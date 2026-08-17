@@ -208,6 +208,13 @@ test.describe("shim: db_ops against real rusqlite", () => {
  * on the desktop path while every direct-invoke test stayed green.
  */
 test.describe("shim: persisted collections over the real transport", () => {
+  test.beforeEach(async () => {
+    // Fresh database: the probe insert below assumes its row doesn't exist
+    // yet, and a lastPath left by another spec would make `goto("/")` boot a
+    // whole workspace whose collections transact concurrently with the probe.
+    await ok("db_reset");
+  });
+
   const driveCollection = (insert: boolean) => `
     (async () => {
       const [adapters, reactDb, persist] = await Promise.all([
@@ -237,7 +244,16 @@ test.describe("shim: persisted collections over the real transport", () => {
       const text = message.text();
       // Upstream logs its schema-migration failure as a warning and carries on
       // with a half-initialized database, so a passing write is not enough.
-      if (/persisted .*startup|persistence/i.test(text) && /fail/i.test(text)) {
+      // "Failed to fetch" is excluded: goto/reload aborts in-flight boot
+      // fetches (harness discovery, collection loopback startup), and those
+      // benign aborts carry "...persistence.js" frames in their stack, which
+      // this filter would otherwise match. A genuinely dead transport still
+      // fails the data assertions below.
+      if (
+        /persisted .*startup|persistence/i.test(text) &&
+        /fail/i.test(text) &&
+        !text.includes("Failed to fetch")
+      ) {
         failures.push(text);
       }
     });
