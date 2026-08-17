@@ -16,6 +16,23 @@ import { test, expect } from "@playwright/test";
 
 const NS = "settings";
 
+const SHIM_PORT = Number(process.env.SHIM_PORT ?? 4599);
+
+/**
+ * Fresh database per test. Without this, a `lastPath` persisted by an earlier
+ * spec's workspace visit makes `goto("/")` restore that workspace, whose
+ * collections then transact on the shim's shared SQLite connection
+ * concurrently with this spec's writes ("cannot start a transaction within a
+ * transaction").
+ */
+async function dbReset() {
+  const res = await fetch(
+    `http://127.0.0.1:${SHIM_PORT}/invoke/db_reset`,
+    { method: "POST", headers: { "content-type": "text/plain" }, body: "{}" },
+  );
+  if (!res.ok) throw new Error(`db_reset failed (${res.status})`);
+}
+
 /** Drives the app's own kv-store module, not a probe collection. */
 const writeSettings = `
   (async () => {
@@ -35,6 +52,8 @@ const readSettings = `
 `;
 
 test.describe("shim: KV persistence over the real transport", () => {
+  test.beforeEach(dbReset);
+
   test("settings written from the page survive a reload", async ({ page }) => {
     await page.goto("/");
 
