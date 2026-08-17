@@ -109,16 +109,6 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
 
 function AgentChatTabBody({ taskId }: { taskId: string }) {
   const { t } = useTranslation();
-  const { scrollToEnd } = useMessageScroller();
-  const [draft, setDraftState] = useState(() => getComposerDraft(taskId));
-  const setDraft = useCallback(
-    (value: string) => {
-      setDraftState(value);
-      setComposerDraft(taskId, value);
-    },
-    [taskId],
-  );
-
   const taskRow = useTaskRow(taskId);
   const isRunning = taskRow?.status === "running";
   // The session/load window (MET-54): a restored row waiting for its revive,
@@ -136,6 +126,88 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
   useEffect(() => {
     if (status === "restored") reviveAgentTask(taskId);
   }, [status, taskId]);
+
+  // The floating composer overlay's live height (it grows when permission/
+  // auth cards stack above the prompt box); the transcript pads its scroll
+  // end by this much so no entry ever sits underneath the overlay.
+  const [composerEl, setComposerEl] = useState<HTMLDivElement | null>(null);
+  const composerHeight = useMeasuredHeight(composerEl);
+
+  // The tab can outlive the task row for a frame (workspace teardown clears
+  // rows before the layout prunes the tab).
+  if (!taskRow) {
+    return (
+      <div className="flex h-full w-full flex-1 items-center justify-center text-sm text-muted-foreground">
+        {t("agentSessionEnded")}
+      </div>
+    );
+  }
+
+  return (
+    // The dock's content wrapper is a plain flex box, so this root brings
+    // its own positioning context for the absolute composer overlay.
+    <div className="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
+      <Transcript taskId={taskId} bottomInset={composerHeight} />
+      <ComposerOverlay
+        containerRef={setComposerEl}
+        taskRow={taskRow}
+        isRunning={isRunning}
+        isLoadingSession={isLoadingSession}
+      />
+    </div>
+  );
+}
+
+/** An element's live rendered height, tracked through a ResizeObserver
+ *  (0 until the element mounts and is first measured). */
+function useMeasuredHeight(element: HTMLElement | null): number {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    if (!element) return;
+    const observer = new ResizeObserver(() => setHeight(element.offsetHeight));
+    observer.observe(element);
+    setHeight(element.offsetHeight);
+    return () => observer.disconnect();
+  }, [element]);
+  return height;
+}
+
+/**
+ * Floating composer pinned to the bottom of the tab: working shimmer,
+ * permission/auth cards, then the prompt box (or the unavailable notice).
+ * The gradient fades the transcript out behind it; the wrapper is
+ * click-through (pointer-events-none) so only the cards inside catch
+ * pointers. Measured via containerRef so the transcript can pad past it —
+ * the overlay grows when permission/auth cards stack above the prompt box.
+ *
+ * Owns the draft state (MET-139): keystrokes must re-render only this
+ * overlay, never AgentChatTabBody and the transcript above it — with the
+ * draft lifted there, every keypress reconciled one scroller item per
+ * entry. The session is pinned to one taskId for the tab's lifetime, so
+ * the useState initializer reading the draft store is safe.
+ */
+function ComposerOverlay({
+  containerRef,
+  taskRow,
+  isRunning,
+  isLoadingSession,
+}: {
+  containerRef: (el: HTMLDivElement | null) => void;
+  taskRow: AgentTaskRow;
+  isRunning: boolean;
+  isLoadingSession: boolean;
+}) {
+  const { t } = useTranslation();
+  const { scrollToEnd } = useMessageScroller();
+  const taskId = taskRow.taskId;
+  const [draft, setDraftState] = useState(() => getComposerDraft(taskId));
+  const setDraft = useCallback(
+    (value: string) => {
+      setDraftState(value);
+      setComposerDraft(taskId, value);
+    },
+    [taskId],
+  );
 
   const sendPrompt = useCallback(() => {
     const text = draft.trim();
@@ -170,86 +242,6 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
     });
   }, [taskId, setDraft]);
 
-  // The floating composer overlay's live height (it grows when permission/
-  // auth cards stack above the prompt box); the transcript pads its scroll
-  // end by this much so no entry ever sits underneath the overlay.
-  const [composerEl, setComposerEl] = useState<HTMLDivElement | null>(null);
-  const composerHeight = useMeasuredHeight(composerEl);
-
-  // The tab can outlive the task row for a frame (workspace teardown clears
-  // rows before the layout prunes the tab).
-  if (!taskRow) {
-    return (
-      <div className="flex h-full w-full flex-1 items-center justify-center text-sm text-muted-foreground">
-        {t("agentSessionEnded")}
-      </div>
-    );
-  }
-
-  return (
-    // The dock's content wrapper is a plain flex box, so this root brings
-    // its own positioning context for the absolute composer overlay.
-    <div className="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
-      <Transcript taskId={taskId} bottomInset={composerHeight} />
-      <ComposerOverlay
-        containerRef={setComposerEl}
-        taskRow={taskRow}
-        draft={draft}
-        onChangeDraft={setDraft}
-        onSend={sendPrompt}
-        onStop={stopTask}
-        onCancelRestore={cancelAndRestore}
-        isRunning={isRunning}
-        isLoadingSession={isLoadingSession}
-      />
-    </div>
-  );
-}
-
-/** An element's live rendered height, tracked through a ResizeObserver
- *  (0 until the element mounts and is first measured). */
-function useMeasuredHeight(element: HTMLElement | null): number {
-  const [height, setHeight] = useState(0);
-  useEffect(() => {
-    if (!element) return;
-    const observer = new ResizeObserver(() => setHeight(element.offsetHeight));
-    observer.observe(element);
-    setHeight(element.offsetHeight);
-    return () => observer.disconnect();
-  }, [element]);
-  return height;
-}
-
-/**
- * Floating composer pinned to the bottom of the tab: working shimmer,
- * permission/auth cards, then the prompt box (or the unavailable notice).
- * The gradient fades the transcript out behind it; the wrapper is
- * click-through (pointer-events-none) so only the cards inside catch
- * pointers. Measured via containerRef so the transcript can pad past it —
- * the overlay grows when permission/auth cards stack above the prompt box.
- */
-function ComposerOverlay({
-  containerRef,
-  taskRow,
-  draft,
-  onChangeDraft,
-  onSend,
-  onStop,
-  onCancelRestore,
-  isRunning,
-  isLoadingSession,
-}: {
-  containerRef: (el: HTMLDivElement | null) => void;
-  taskRow: AgentTaskRow;
-  draft: string;
-  onChangeDraft: (value: string) => void;
-  onSend: () => void;
-  onStop: () => void;
-  onCancelRestore: () => void;
-  isRunning: boolean;
-  isLoadingSession: boolean;
-}) {
-  const { t } = useTranslation();
   return (
     <div
       ref={containerRef}
@@ -274,10 +266,10 @@ function ComposerOverlay({
       ) : (
         <PromptBox
           value={draft}
-          onChange={onChangeDraft}
-          onSend={onSend}
-          onStop={onStop}
-          onCancelRestore={onCancelRestore}
+          onChange={setDraft}
+          onSend={sendPrompt}
+          onStop={stopTask}
+          onCancelRestore={cancelAndRestore}
           isRunning={isRunning}
           disabled={isLoadingSession}
           harnessId={taskRow.harnessId}
@@ -389,7 +381,10 @@ export function AuthCard({
   );
 }
 
-function Transcript({
+/** Memoized (MET-139): the body re-renders on task-row status flips that
+ *  don't concern the transcript; its own collection hooks pull in entry
+ *  changes regardless. Shallow compare suffices — both props are scalars. */
+const Transcript = memo(function Transcript({
   taskId,
   bottomInset,
 }: {
@@ -485,7 +480,7 @@ function Transcript({
       />
     </MessageScroller>
   );
-}
+});
 
 /** Render one transcript entry by type; tool calls are peers of text.
  *  Memoized: a stream chunk replaces only the mutating entry's row object,

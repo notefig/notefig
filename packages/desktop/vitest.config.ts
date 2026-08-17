@@ -32,7 +32,7 @@ export default defineConfig({
       deps: {
         // Externalized deps resolve react via Node and can grab the hoisted
         // root copy; inlining routes them through Vite so dedupe applies.
-        inline: ["@tanstack/react-db", "@tanstack/db"],
+        inline: ["@tanstack/react-db", "@tanstack/db", "@shadcn/react"],
       },
     },
   },
