@@ -1,0 +1,27 @@
+---
+title: Publishing
+description: Build a web version of your book and generate configuration for popular hosting providers.
+order: 4
+---
+# Publishing Your Book
+
+Notefig can build a web version of your book and create the right configuration for all popular hosting providers.
+
+```bash
+npx notefig publish [platform]
+```
+
+This will:
+
+1. Build your book for production
+2. Create platform-specific configuration files
+
+## Supported Platforms
+
+Choose your hosting platform to see specific setup instructions:
+
+- [Vercel](/docs/publish-vercel) - Easy deployment with zero configuration
+- [Netlify](/docs/publish-netlify) - Continuous deployment from Git
+- [Railway](/docs/publish-railway) - Simple railway deployment
+- [Coolify](/docs/publish-coolify) - Self-hosted deployment solution
+- [AWS S3](/docs/publish-s3) - Static hosting on Amazon Web Services

@@ -1,0 +1,24 @@
+---
+title: Introduction
+description: Notefig transforms markdown files into published artifacts — write and deliver continuously.
+order: 0
+---
+# Notefig
+
+Notefig transforms markdown files into published artifacts. It handles the conversion, formatting, and publishing so you can write and deliver continuously.
+
+The project has three components:
+
+- **Editor**: A desktop application for writing and publishing
+- **CLI**: Command-line tools for automation and scripting
+- **Git integration**: Version control for tracking changes and collaborating
+
+Your content stays in plain markdown files. You own your work. No proprietary formats. No lock-in.
+
+## Core Principles
+
+**Incremental publishing**: Content evolves. Publish chapters as you write them. Update content after release. Track changes with git.
+
+**File-first**: Text files are portable, universal, and future-proof. Your content will always be in Markdown; it's just the artifacts that change.
+
+**Automation**: Set up a publishing workflow once. Publish continuously, book updates automatically.

@@ -1,0 +1,36 @@
+---
+title: CLI Reference
+description: Reference for all Notefig CLI commands and global options.
+order: 13
+---
+# CLI Commands Reference
+
+## Core Commands
+
+All commands automatically initialize if the project hasn't been set up yet:
+
+- `watch` (`w`) - Start development server with live reload
+- `build` (`b`) - Build production version (requires `-o <output-dir>`)
+- `publish` (`p`) - Deploy to hosting platform
+- `init` (`i`) - Explicitly initialize a new Notefig project
+- `prune` - Clean build artifacts
+
+### Global Options
+
+- `--noob` - Beginner-friendly output (recommended for new users)
+- `--verbose` - Detailed logging for troubleshooting
+- `--version` - Show version information
+- `--help` - Show help for commands
+
+## Examples
+
+```bash
+# Start development (auto-initializes)
+npx notefig watch
+
+# Build for production (auto-initializes)
+npx notefig build -o ./dist
+
+# Publish to platform (auto-initializes and builds)
+npx notefig publish netlify
+```

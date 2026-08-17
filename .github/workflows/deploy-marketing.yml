@@ -1,0 +1,51 @@
+name: Deploy Marketing Site
+
+# The marketing site is a browser build of the desktop app itself (MET-141):
+# same source, marketing composition root (src/marketing/), seeded IndexedDB
+# workspace, prerendered routes for SEO. Deploys on every push to main that
+# touches anything the marketing bundle is built from — which includes the
+# shared desktop source, unlike deploy-docs.yml's narrow filter.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/desktop/src/**"
+      - "packages/desktop/marketing-content/**"
+      - "packages/desktop/public-marketing/**"
+      - "packages/desktop/index.marketing.html"
+      - "packages/desktop/vite.marketing.config.ts"
+      - "packages/desktop/scripts/prerender-marketing.mjs"
+      - "packages/desktop/package.json"
+      - "packages/shared/src/**"
+      - "packages/git/src/**"
+      - ".github/workflows/deploy-marketing.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright browser (prerender)
+        working-directory: packages/desktop
+        run: npx playwright install --with-deps chromium
+
+      - name: Build and prerender
+        working-directory: packages/desktop
+        run: npm run build:marketing
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist-marketing --project-name=notefig-marketing --branch=main --commit-dirty=true
+          workingDirectory: packages/desktop
