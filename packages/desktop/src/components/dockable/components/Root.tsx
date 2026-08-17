@@ -109,12 +109,21 @@ export function DockableRoot({
   function handleDragStart({ active }: DragStartEvent) {
     const type = active.data.current?.type;
     const children = active.data.current?.children;
+    // Nothing may be selectable while a drag is in flight (see styles.css):
+    // macOS WKWebView hands mouse gestures over to its native text-selection
+    // handling the moment the pointer crosses static user-select:text content
+    // (e.g. a chat transcript), which kills the dnd-kit drag. dnd-kit's own
+    // selectionchange clearing is too late for that native gesture.
+    document.body.setAttribute("data-dockable-dragging", "");
     setActive({ id: active.id.toString(), type, children });
   }
 
-  function handleDragCancel() {}
+  function handleDragCancel() {
+    document.body.removeAttribute("data-dockable-dragging");
+  }
 
   function handleDragEnd({ active, over }: DragEndEvent) {
+    document.body.removeAttribute("data-dockable-dragging");
     if (!over) return;
     switch (over.data.current?.type) {
       case "tab-bar": {

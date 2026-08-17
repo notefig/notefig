@@ -287,6 +287,18 @@
     -ms-user-select: text;
   }
 
+  /* While a dockable drag is in flight nothing is selectable. The subtree
+     opt-in above made chat transcripts static selectable text, and macOS
+     WKWebView hands the mouse gesture to its native text-selection handling
+     when a tab drag sweeps over such content — killing the drag. dnd-kit
+     only clears selection after the fact (selectionchange), which doesn't
+     stop the native gesture; !important beats every opt-in during the drag.
+     Set/removed by DockableRoot's drag handlers. */
+  body[data-dockable-dragging] * {
+    user-select: none !important;
+    -webkit-user-select: none !important;
+  }
+
   /* Allow selection in code blocks and pre elements */
   pre,
   code {
