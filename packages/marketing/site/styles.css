@@ -36,18 +36,16 @@
   transform: scale(calc(0.78 + 0.22 * var(--takeover-ease)))
     translateY(calc((1 - var(--takeover-ease)) * -7vh));
   border-radius: calc((1 - var(--takeover-ease)) * 20px);
-  box-shadow: 0 2.5rem 5rem -1.5rem
-    rgb(0 0 0 / calc(0.7 * (1 - var(--takeover-ease))));
+  /* Depth, not dimming: the app reads as a lit object floating above the
+     page — a hairline edge to separate it from a near-identical
+     background, then two casts to lift it off. All fade out as it lands. */
+  box-shadow:
+    0 0 0 1px hsl(var(--border) / calc(1 - var(--takeover-ease))),
+    0 1.5rem 3rem -1rem rgb(0 0 0 / calc(0.75 * (1 - var(--takeover-ease)))),
+    0 4rem 7rem -2rem rgb(0 0 0 / calc(0.65 * (1 - var(--takeover-ease))));
   will-change: transform;
 }
 
-/* The app is scenery until it owns the screen: dimmed, and click-through to
-   the "enter" button that scrolls it into place. */
-.app-veil {
-  opacity: calc(0.6 * (1 - var(--takeover-ease)));
-}
-
-.site-stage[data-taken-over="true"] .app-veil,
 .site-stage[data-taken-over="true"] .app-enter {
   display: none;
 }

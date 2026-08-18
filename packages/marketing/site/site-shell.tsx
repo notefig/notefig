@@ -62,16 +62,13 @@ function SitePage({
         style={{ height: `${RUNWAY_VH}vh` }}
         className="relative"
       >
-        <div className="sticky top-0 h-screen overflow-hidden">
+        {/* No clipping: the frame's shadow is what lifts it off the page. */}
+        <div className="sticky top-0 h-screen">
           <div
             ref={frameRef as React.RefObject<HTMLDivElement>}
             className="app-frame absolute inset-0 overflow-hidden bg-background"
           >
             {workspaceReady && <AppSurface />}
-            <div
-              className="app-veil pointer-events-none absolute inset-0 bg-background"
-              aria-hidden="true"
-            />
           </div>
           {/* Until the app owns the viewport, a click on it means "let me in"
               rather than "put the caret there". */}

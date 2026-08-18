@@ -147,7 +147,11 @@ async function prerenderPages(page, shellHtml, pages) {
 }
 
 function writeSitemap(pages) {
-  const routes = ["/", ...pages.map((entry) => entry.route)];
+  // The default page is listed as "/" — its own route canonicalises there.
+  const routes = [
+    "/",
+    ...pages.filter((entry) => !entry.isDefault).map((entry) => entry.route),
+  ];
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${routes
     .map((route) => `  <url><loc>${SITE_ORIGIN}${route}</loc></url>`)
     .join("\n")}\n</urlset>\n`;
