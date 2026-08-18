@@ -133,6 +133,21 @@ test.describe("drag protocol: file tree → tabs/editor", () => {
       page,
       treeRow(OTHER_NAME),
       '[data-testid="tab-bar"]',
+      {
+        // Tree rows are @pierre/trees' own native drag, which permits moves
+        // only; the zone prefers "copy". Asserts the zone still accepts the
+        // drag. It cannot reproduce the bug this guards against — a zone
+        // advertising an effect the source forbids is cancelled by the
+        // *browser*, which synthetic events never do (resolveDropEffect's
+        // unit tests cover that) — but it does catch the zone refusing a
+        // move-only drag outright.
+        effectAllowed: "move",
+        whileOverTarget: async () => {
+          await expect(
+            page.locator("[data-mtr-drop-over='true']"),
+          ).toBeVisible();
+        },
+      },
     );
 
     await expect(
