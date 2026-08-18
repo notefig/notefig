@@ -6,3 +6,51 @@
  */
 @import "../../desktop/src/styles.css";
 @source "../../desktop/src";
+
+/*
+ * Hero → app takeover. `--takeover` is written by use-app-takeover.ts on
+ * every scroll frame (0 = the app sits framed under the hero, 1 = it owns
+ * the viewport); everything below is derived from it in CSS so that
+ * scrolling never re-renders the app.
+ */
+.site-stage {
+  --takeover: 0;
+}
+
+.site-header {
+  opacity: calc(1 - var(--takeover));
+  transform: translateY(calc(var(--takeover) * -100%));
+}
+
+.site-stage[data-taken-over="true"] .site-header {
+  pointer-events: none;
+}
+
+.app-frame {
+  /* Scale, not width/height: the app relayouting on every scroll frame
+     would be ruinous, and a transform stays on the compositor. */
+  transform: scale(calc(0.9 + 0.1 * var(--takeover)))
+    translateY(calc((1 - var(--takeover)) * -2vh));
+  border-radius: calc((1 - var(--takeover)) * 16px);
+  box-shadow: 0 2.5rem 5rem -1.5rem
+    rgb(0 0 0 / calc(0.6 * (1 - var(--takeover))));
+  will-change: transform;
+}
+
+/* The app is scenery until it owns the screen: dimmed, and click-through to
+   the "enter" button that scrolls it into place. */
+.app-veil {
+  opacity: calc(0.45 * (1 - var(--takeover)));
+}
+
+.site-stage[data-taken-over="true"] .app-veil,
+.site-stage[data-taken-over="true"] .app-enter {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-frame {
+    transform: none;
+    border-radius: 0;
+  }
+}

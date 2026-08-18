@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   MARKETING_WORKSPACE,
-  adjacentDocs,
   defaultDoc,
   findDoc,
   manifestHash,
@@ -65,25 +64,5 @@ describe("marketing manifest", () => {
 
   it("derives a content-addressed manifest hash", () => {
     expect(manifestHash).toMatch(/^[0-9a-f]{32}$/);
-  });
-});
-
-describe("adjacentDocs", () => {
-  it("walks the docs in reading order", () => {
-    const [first, second, third] = marketingDocs;
-    expect(adjacentDocs(second.slug)).toEqual({
-      previous: first,
-      next: third,
-    });
-  });
-
-  it("has no neighbour past either end", () => {
-    const last = marketingDocs[marketingDocs.length - 1];
-    expect(adjacentDocs(marketingDocs[0].slug).previous).toBeUndefined();
-    expect(adjacentDocs(last.slug).next).toBeUndefined();
-  });
-
-  it("yields nothing for an unknown slug", () => {
-    expect(adjacentDocs("nope")).toEqual({});
   });
 });

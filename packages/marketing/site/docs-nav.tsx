@@ -1,8 +1,7 @@
 import { useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { adjacentDocs, marketingDocs, type MarketingDoc } from "./content-manifest";
+import { marketingDocs } from "./content-manifest";
 
 /**
  * A docs anchor whose `href` is always the clean canonical path, while an
@@ -15,10 +14,12 @@ import { adjacentDocs, marketingDocs, type MarketingDoc } from "./content-manife
 export function DocsLink({
   slug,
   className,
+  onNavigate,
   children,
 }: {
   slug: string;
   className?: string;
+  onNavigate?: () => void;
   children: React.ReactNode;
 }) {
   const navigate = useNavigate();
@@ -29,8 +30,9 @@ export function DocsLink({
       if (!isPlainLeftClick(event)) return; // new tab / download / etc.
       event.preventDefault();
       navigate({ pathname: `/docs/${slug}`, search: location.search });
+      onNavigate?.();
     },
-    [navigate, location.search, slug],
+    [navigate, location.search, slug, onNavigate],
   );
 
   return (
@@ -59,77 +61,41 @@ export function isPlainLeftClick(event: {
   );
 }
 
-function AdjacentLink({
-  doc,
-  direction,
-}: {
-  doc: MarketingDoc;
-  direction: "previous" | "next";
-}) {
-  const isNext = direction === "next";
-  return (
-    <DocsLink
-      slug={doc.slug}
-      className={cn(
-        "group flex max-w-[48%] items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground",
-        isNext && "ml-auto flex-row-reverse text-right",
-      )}
-    >
-      {isNext ? (
-        <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
-      ) : (
-        <ChevronLeft className="size-4 shrink-0" aria-hidden="true" />
-      )}
-      <span className="truncate">
-        <span className="text-xs uppercase tracking-wide opacity-60">
-          {direction}
-        </span>{" "}
-        {doc.title}
-      </span>
-    </DocsLink>
-  );
-}
-
 /**
- * The docs link graph, present on every page (and therefore in every
- * prerendered snapshot). The file tree is the primary navigation for humans,
- * but it renders into a shadow root and its rows are not anchors, so it is
- * invisible to crawlers — without this footer every doc page would be an
- * orphan reachable only from sitemap.xml.
+ * The docs link graph, rendered in the hero and therefore present in every
+ * prerendered snapshot. The workspace's file tree is the primary navigation
+ * for humans, but it renders into a shadow root and its rows are not
+ * anchors — without these links every page would be an orphan reachable only
+ * from sitemap.xml.
  */
-export function DocsFooterNav({ activeSlug }: { activeSlug: string }) {
-  const { previous, next } = adjacentDocs(activeSlug);
-
+export function DocsLinkRow({
+  activeSlug,
+  onNavigate,
+}: {
+  activeSlug?: string;
+  onNavigate?: () => void;
+}) {
   return (
-    // The app's status bar is `fixed bottom-0 right-0`; the bottom padding
-    // leaves it a strip to sit in instead of covering the link list.
-    <footer className="shrink-0 border-t border-border bg-background px-4 pb-9 pt-3">
-      {(previous || next) && (
-        <div className="mb-3 flex items-center gap-4">
-          {previous && <AdjacentLink doc={previous} direction="previous" />}
-          {next && <AdjacentLink doc={next} direction="next" />}
-        </div>
-      )}
-      <nav aria-label="All documentation">
-        <h2 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
-          All documentation
-        </h2>
-        <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
-          {marketingDocs.map((doc) => (
-            <li key={doc.slug}>
-              <DocsLink
-                slug={doc.slug}
-                className={cn(
-                  "text-muted-foreground hover:text-foreground hover:underline",
-                  doc.slug === activeSlug && "font-medium text-foreground",
-                )}
-              >
-                {doc.title}
-              </DocsLink>
-            </li>
-          ))}
-        </ul>
-      </nav>
-    </footer>
+    <nav aria-label="Documentation" className="max-w-3xl">
+      <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
+        Open a page below
+      </h2>
+      <ul className="flex flex-wrap gap-x-3 gap-y-1.5 text-sm">
+        {marketingDocs.map((doc) => (
+          <li key={doc.slug}>
+            <DocsLink
+              slug={doc.slug}
+              onNavigate={onNavigate}
+              className={cn(
+                "text-muted-foreground hover:text-foreground hover:underline",
+                doc.slug === activeSlug && "font-medium text-foreground",
+              )}
+            >
+              {doc.title}
+            </DocsLink>
+          </li>
+        ))}
+      </ul>
+    </nav>
   );
 }

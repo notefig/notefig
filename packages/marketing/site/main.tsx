@@ -5,16 +5,14 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Buffer } from "buffer";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter } from "react-router-dom";
 import "@/utils/intl";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TextPromptDialog } from "@/components/text-prompt-dialog";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { queryClient } from "@/entities/query-client";
-import { MarketingHeader } from "./marketing-header";
-import { Landing } from "./landing";
-import { DocsRoute } from "./docs-route";
+import { SiteShell } from "./site-shell";
 import { marketingDocs } from "./content-manifest";
 
 // The site-local wrapper around @/styles.css — registers the desktop source
@@ -35,24 +33,21 @@ if (typeof globalThis.Buffer === "undefined") {
     description,
   }));
 
+// The site scrolls, and it decides its own scroll position on arrival
+// (top for `/`, the app for a deep link) — a restored offset would land the
+// visitor mid-transition.
+if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+
 /**
  * The marketing composition root: the same app, assembled without the
  * desktop-only surfaces (updater, telemetry, tunnel pairing, welcome flow).
- * Routes `/docs/:slug` through `/:basePath/:slug?` so the unmodified core
- * Workspace derives its workspace root from the URL.
+ * Every URL renders the same shell, so the workspace survives navigation.
  */
 const MarketingApp = () => (
-  <div className="flex h-screen flex-col bg-background text-foreground overflow-hidden">
-    <MarketingHeader />
+  <>
     <TextPromptDialog />
-    <div className="flex min-h-0 flex-1 flex-col">
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/:basePath/:slug?" element={<DocsRoute />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </div>
-  </div>
+    <SiteShell />
+  </>
 );
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
