@@ -1,4 +1,27 @@
-# SPA fallback for the marketing build. Prerendered routes exist as real
-# static files (docs/<slug>/index.html) and Cloudflare Pages serves static
-# assets before redirect rules, so this only catches non-prerendered paths.
+# Nextra's URLs → this site's. These were live on notefig.com and are
+# indexed, so they redirect rather than falling through to the SPA rule
+# below, which would answer every one of them with the landing page at
+# status 200 — a soft 404 that search engines keep in the index.
+# Both forms are listed because Nextra linked some paths with a trailing
+# slash. First match wins, so these must precede /*.
+/docs/publish              /docs/publishing       301
+/docs/publish/             /docs/publishing       301
+/docs/publish/vercel       /docs/publish-vercel   301
+/docs/publish/vercel/      /docs/publish-vercel   301
+/docs/publish/netlify      /docs/publish-netlify  301
+/docs/publish/netlify/     /docs/publish-netlify  301
+/docs/publish/railway      /docs/publish-railway  301
+/docs/publish/railway/     /docs/publish-railway  301
+/docs/publish/coolify      /docs/publish-coolify  301
+/docs/publish/coolify/     /docs/publish-coolify  301
+/docs/publish/s3           /docs/publish-s3       301
+/docs/publish/s3/          /docs/publish-s3       301
+/docs/advanced/git-server  /docs/git-server       301
+/docs/advanced/git-server/ /docs/git-server       301
+/docs/advanced/runners     /docs/runners          301
+/docs/advanced/runners/    /docs/runners          301
+
+# SPA fallback. Prerendered routes exist as real static files
+# (docs/<slug>.html) and Cloudflare Pages serves static assets before
+# redirect rules, so this only catches non-prerendered paths.
 /*    /index.html   200

@@ -3,9 +3,12 @@ name: Deploy Marketing Site
 # The marketing site is a browser build of the desktop app itself (MET-141),
 # owned by packages/marketing (site/ composition root, content/, site-public/,
 # scripts/prerender.mjs) and importing all app modules from packages/desktop.
-# Deploys on every push to main that touches anything the site bundle is
-# built from — which includes the shared desktop source, unlike
-# deploy-docs.yml's narrow filter.
+#
+# This is what serves notefig.com: the `metrists-docs` Pages project owns that
+# domain (and www.), and this workflow replaced the Nextra site that used to
+# feed it. Deploys on every push to main that touches anything the bundle is
+# built from — which includes the shared desktop source, since the site IS the
+# app.
 on:
   push:
     branches: [main]
@@ -33,8 +36,9 @@ jobs:
         with:
           node-version: "lts/*"
 
+      # The site bundles desktop sources, so the whole workspace is installed.
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Install Playwright browser (prerender)
         working-directory: packages/marketing
@@ -49,5 +53,5 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist-site --project-name=notefig-marketing --branch=main --commit-dirty=true
+          command: pages deploy dist-site --project-name=metrists-docs --branch=main --commit-dirty=true
           workingDirectory: packages/marketing
