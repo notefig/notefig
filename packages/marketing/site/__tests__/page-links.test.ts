@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isPlainLeftClick } from "../docs-nav";
+import { isPlainLeftClick } from "../page-links";
 
 const plainClick = {
   button: 0,

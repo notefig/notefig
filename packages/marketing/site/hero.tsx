@@ -1,17 +1,25 @@
-import { ArrowDown } from "lucide-react";
+import { findPageByRoute } from "./content-manifest";
 import { APP_URL, RELEASES_URL } from "./links";
-import { DocsLinkRow } from "./docs-nav";
+import { PageLink, PageLinkRow } from "./page-links";
+
+const DOWNLOAD_PAGE = findPageByRoute("/download");
 
 /**
  * The only prose the site keeps outside the app: a short pitch and the two
  * CTAs. Everything else a visitor reads lives in the workspace below, as
  * files they can open, edit and copy.
  */
-export function Hero({ onEnterApp }: { onEnterApp: () => void }) {
+export function Hero({
+  activeRoute,
+  onEnterApp,
+}: {
+  activeRoute?: string;
+  onEnterApp: () => void;
+}) {
   return (
     // Sized in viewport heights so the app always peeks above the fold: the
     // hero is the promise, the app underneath is the proof.
-    <section className="mx-auto flex min-h-[68vh] max-w-5xl flex-col justify-center gap-6 px-6 pb-10 pt-20">
+    <section className="mx-auto flex min-h-[62vh] max-w-5xl flex-col justify-center gap-6 px-6 pb-8 pt-20">
       <h1 className="max-w-3xl text-4xl font-semibold leading-[1.08] tracking-tight sm:text-6xl">
         Write markdown.
         <br />
@@ -30,24 +38,26 @@ export function Hero({ onEnterApp }: { onEnterApp: () => void }) {
         >
           Open the web app
         </a>
-        <a
-          href={RELEASES_URL}
-          className="rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-accent"
-          rel="noopener"
-        >
-          Download for macOS
-        </a>
-        <button
-          type="button"
-          onClick={onEnterApp}
-          className="flex items-center gap-1.5 px-1 py-2 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowDown className="size-4" aria-hidden="true" />
-          Or try it right here
-        </button>
+        {DOWNLOAD_PAGE ? (
+          <PageLink
+            page={DOWNLOAD_PAGE}
+            onNavigate={onEnterApp}
+            className="rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-accent"
+          >
+            Download for macOS
+          </PageLink>
+        ) : (
+          <a
+            href={RELEASES_URL}
+            className="rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-accent"
+            rel="noopener"
+          >
+            Download for macOS
+          </a>
+        )}
       </div>
 
-      <DocsLinkRow onNavigate={onEnterApp} />
+      <PageLinkRow activeRoute={activeRoute} onNavigate={onEnterApp} />
     </section>
   );
 }

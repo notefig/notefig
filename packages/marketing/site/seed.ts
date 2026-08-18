@@ -6,12 +6,12 @@
  */
 import type { IPlatformAdapter } from "@/adapters";
 import {
-  MARKETING_WORKSPACE,
+  WORKSPACE_ROOT,
   manifestHash,
-  marketingDocs,
+  marketingPages,
 } from "./content-manifest";
 
-const HASH_FILE = `${MARKETING_WORKSPACE}/.notefig-marketing-manifest`;
+const HASH_FILE = `${WORKSPACE_ROOT}/.notefig-marketing-manifest`;
 
 export async function ensureMarketingWorkspaceSeeded(
   fs: IPlatformAdapter["fs"],
@@ -21,9 +21,9 @@ export async function ensureMarketingWorkspaceSeeded(
     return;
   }
 
-  const files = marketingDocs.map((doc) => ({
-    path: doc.path,
-    content: doc.markdown,
+  const files = marketingPages.map((page) => ({
+    path: page.filePath,
+    content: page.markdown,
   }));
 
   const result = await fs.writeFiles(files);

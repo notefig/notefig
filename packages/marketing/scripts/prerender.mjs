@@ -107,7 +107,7 @@ async function prerenderLanding(page, shellHtml) {
   const snapshot = await snapshotRoute(page, "/");
   // The route list lives in the app (window.__MARKETING_ROUTES__, set by
   // site/main.tsx from the content manifest) — one parser total.
-  const docs = await page.evaluate(() => window.__MARKETING_ROUTES__);
+  const pages = await page.evaluate(() => window.__MARKETING_ROUTES__);
   const html = composePage(shellHtml, {
     title: "Notefig — Write Markdown. Continuously Publish.",
     description:
@@ -117,39 +117,37 @@ async function prerenderLanding(page, shellHtml) {
   });
   fs.writeFileSync(path.join(outDir, "index.html"), html);
   console.log("prerendered /");
-  return docs;
+  return pages;
 }
 
-async function prerenderDocs(page, shellHtml, docs) {
-  const routes = [
-    { route: "/docs", doc: docs[0], file: path.join(outDir, "docs.html") },
-    ...docs.map((doc) => ({
-      route: `/docs/${doc.slug}`,
-      doc,
-      file: path.join(outDir, "docs", `${doc.slug}.html`),
-    })),
-  ];
+// `/docs/cli` → `dist-site/docs/cli.html`, mirroring the content tree.
+function routeFile(route) {
+  return path.join(outDir, ...route.split("/").filter(Boolean)) + ".html";
+}
 
-  for (const { route, doc, file } of routes) {
-    const snapshot = await snapshotRoute(page, route);
-    if (!snapshot.includes(doc.title.split(" ")[0])) {
-      console.warn(`warning: snapshot for ${route} may be missing content`);
+async function prerenderPages(page, shellHtml, pages) {
+  for (const entry of pages) {
+    const snapshot = await snapshotRoute(page, entry.route);
+    if (!snapshot.includes(entry.title.split(" ")[0])) {
+      console.warn(`warning: snapshot for ${entry.route} may be missing content`);
     }
     writeRoute(
-      file,
+      routeFile(entry.route),
       composePage(shellHtml, {
-        title: `${doc.title} — Notefig Docs`,
-        description: doc.description,
-        canonicalPath: route === "/docs" ? "/docs" : route,
+        title: `${entry.title} — Notefig`,
+        description: entry.description,
+        // The landing page shows this same content; point search engines
+        // there rather than competing with ourselves for it.
+        canonicalPath: entry.isDefault ? "/" : entry.route,
         snapshot,
       }),
     );
-    console.log(`prerendered ${route}`);
+    console.log(`prerendered ${entry.route}`);
   }
 }
 
-function writeSitemap(docs) {
-  const routes = ["/", "/docs", ...docs.map((doc) => `/docs/${doc.slug}`)];
+function writeSitemap(pages) {
+  const routes = ["/", ...pages.map((entry) => entry.route)];
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${routes
     .map((route) => `  <url><loc>${SITE_ORIGIN}${route}</loc></url>`)
     .join("\n")}\n</urlset>\n`;
@@ -176,10 +174,10 @@ async function main() {
     // every subsequent route boots against the seeded workspace.
     const page = await browser.newContext().then((context) => context.newPage());
 
-    const docs = await prerenderLanding(page, shellHtml);
-    await prerenderDocs(page, shellHtml, docs);
+    const pages = await prerenderLanding(page, shellHtml);
+    await prerenderPages(page, shellHtml, pages);
     await browser.close();
-    writeSitemap(docs);
+    writeSitemap(pages);
   } finally {
     preview.kill();
   }

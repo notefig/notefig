@@ -1,44 +1,44 @@
 import { useEffect, useRef } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { AppSurface } from "./app-surface";
-import { type MarketingDoc } from "./content-manifest";
+import { type MarketingPage } from "./content-manifest";
 import { Hero } from "./hero";
 import { MarketingHeader } from "./marketing-header";
 import { usePrerenderHandoff } from "./prerender";
-import { docForPathname, titleForRoute } from "./route-doc";
+import { pageForPathname, titleForRoute } from "./route-page";
 import { RUNWAY_VH, useAppTakeover } from "./use-app-takeover";
-import { useDocsWorkspaceReady } from "./use-docs-workspace";
+import { useWorkspaceReady } from "./use-workspace-ready";
 
 /**
  * The whole site: one page, always. A short hero on top and the real app
  * directly under it, which grows into the full viewport as the visitor
- * scrolls (see use-app-takeover.ts). `/docs/<slug>` is the same page with a
- * different file open and the app already taken over — that URL exists so
- * each page has something crawlable and shareable of its own, not because
- * there is a separate docs site to visit.
+ * scrolls (see use-app-takeover.ts). `/docs/cli` and `/download` are the same
+ * page with a different file open and the app already taken over — those URLs
+ * exist so each page has something crawlable and shareable of its own, not
+ * because there is a second site to visit.
  */
 export function SiteShell() {
   const location = useLocation();
-  const doc = docForPathname(location.pathname);
-  if (!doc) return <Navigate to="/" replace />;
-  return <SitePage doc={doc} isDeepLink={location.pathname !== "/"} />;
+  const page = pageForPathname(location.pathname);
+  if (!page) return <Navigate to="/" replace />;
+  return <SitePage page={page} isDeepLink={location.pathname !== "/"} />;
 }
 
 function SitePage({
-  doc,
+  page,
   isDeepLink,
 }: {
-  doc: MarketingDoc;
+  page: MarketingPage;
   isDeepLink: boolean;
 }) {
-  const workspaceReady = useDocsWorkspaceReady(doc);
+  const workspaceReady = useWorkspaceReady(page);
   const { runwayRef, stageRef, frameRef, scrollToApp, jumpToApp } =
     useAppTakeover();
 
   usePrerenderHandoff(workspaceReady ? ".ProseMirror" : ".never");
-  useDocumentTitle(doc, isDeepLink);
+  useDocumentTitle(page, isDeepLink);
 
-  // A visitor arriving on /docs/<slug> (search result, shared link) came for
+  // A visitor arriving on a page URL (search result, shared link) came for
   // that page, so start immersed — the hero is still one scroll up. Landing
   // on `/` always starts at the top, whatever the browser restored.
   const jumped = useRef(false);
@@ -55,7 +55,7 @@ function SitePage({
       className="site-stage bg-background text-foreground"
     >
       <MarketingHeader onEnterApp={scrollToApp} />
-      <Hero onEnterApp={scrollToApp} />
+      <Hero activeRoute={page.route} onEnterApp={scrollToApp} />
 
       <section
         ref={runwayRef as React.RefObject<HTMLElement>}
@@ -67,7 +67,7 @@ function SitePage({
             ref={frameRef as React.RefObject<HTMLDivElement>}
             className="app-frame absolute inset-0 overflow-hidden bg-background"
           >
-            {workspaceReady && <AppSurface slug={doc.slug} />}
+            {workspaceReady && <AppSurface />}
             <div
               className="app-veil pointer-events-none absolute inset-0 bg-background"
               aria-hidden="true"
@@ -89,8 +89,8 @@ function SitePage({
 }
 
 /** Keeps the tab title in step with SPA navigation and the prerendered HTML. */
-function useDocumentTitle(doc: MarketingDoc, isDeepLink: boolean): void {
+function useDocumentTitle(page: MarketingPage, isDeepLink: boolean): void {
   useEffect(() => {
-    document.title = titleForRoute(doc, isDeepLink);
-  }, [doc, isDeepLink]);
+    document.title = titleForRoute(page, isDeepLink);
+  }, [page, isDeepLink]);
 }

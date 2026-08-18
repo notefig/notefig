@@ -13,7 +13,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { queryClient } from "@/entities/query-client";
 import { SiteShell } from "./site-shell";
-import { marketingDocs } from "./content-manifest";
+import { defaultPage, marketingPages } from "./content-manifest";
 
 // The site-local wrapper around @/styles.css — registers the desktop source
 // tree with Tailwind, whose auto-detection cannot see outside this package.
@@ -27,10 +27,12 @@ if (typeof globalThis.Buffer === "undefined") {
 // per-page metadata from the running app, so the manifest never needs a
 // second, node-side frontmatter parser.
 (window as unknown as { __MARKETING_ROUTES__: unknown }).__MARKETING_ROUTES__ =
-  marketingDocs.map(({ slug, title, description }) => ({
-    slug,
+  marketingPages.map(({ route, title, description }) => ({
+    route,
     title,
     description,
+    // `/` shows this page too, so it is the canonical home for it.
+    isDefault: route === defaultPage.route,
   }));
 
 // The site scrolls, and it decides its own scroll position on arrival

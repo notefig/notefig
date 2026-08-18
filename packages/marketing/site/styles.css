@@ -15,11 +15,14 @@
  */
 .site-stage {
   --takeover: 0;
+  /* Eased progress: most of the growth happens early in the runway, so the
+     app snaps to full screen instead of creeping the last few percent. */
+  --takeover-ease: calc(1 - (1 - var(--takeover)) * (1 - var(--takeover)));
 }
 
 .site-header {
-  opacity: calc(1 - var(--takeover));
-  transform: translateY(calc(var(--takeover) * -100%));
+  opacity: calc(1 - var(--takeover-ease) * 1.6);
+  transform: translateY(calc(var(--takeover-ease) * -100%));
 }
 
 .site-stage[data-taken-over="true"] .site-header {
@@ -28,19 +31,20 @@
 
 .app-frame {
   /* Scale, not width/height: the app relayouting on every scroll frame
-     would be ruinous, and a transform stays on the compositor. */
-  transform: scale(calc(0.9 + 0.1 * var(--takeover)))
-    translateY(calc((1 - var(--takeover)) * -2vh));
-  border-radius: calc((1 - var(--takeover)) * 16px);
+     would be ruinous, and a transform stays on the compositor. The app
+     starts small and far, and rushes forward — parallax, not a pan. */
+  transform: scale(calc(0.78 + 0.22 * var(--takeover-ease)))
+    translateY(calc((1 - var(--takeover-ease)) * -7vh));
+  border-radius: calc((1 - var(--takeover-ease)) * 20px);
   box-shadow: 0 2.5rem 5rem -1.5rem
-    rgb(0 0 0 / calc(0.6 * (1 - var(--takeover))));
+    rgb(0 0 0 / calc(0.7 * (1 - var(--takeover-ease))));
   will-change: transform;
 }
 
 /* The app is scenery until it owns the screen: dimmed, and click-through to
    the "enter" button that scrolls it into place. */
 .app-veil {
-  opacity: calc(0.45 * (1 - var(--takeover)));
+  opacity: calc(0.6 * (1 - var(--takeover-ease)));
 }
 
 .site-stage[data-taken-over="true"] .app-veil,

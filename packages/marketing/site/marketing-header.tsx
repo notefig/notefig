@@ -1,5 +1,9 @@
 import { Link } from "react-router-dom";
+import { findPageByRoute } from "./content-manifest";
 import { APP_URL, GITHUB_URL, RELEASES_URL } from "./links";
+import { PageLink } from "./page-links";
+
+const DOWNLOAD_PAGE = findPageByRoute("/download");
 
 /**
  * Site chrome: real anchors on every page so crawlers can reach the app and
@@ -29,13 +33,23 @@ export function MarketingHeader({ onEnterApp }: { onEnterApp: () => void }) {
         >
           GitHub
         </a>
-        <a
-          href={RELEASES_URL}
-          className="hidden text-muted-foreground hover:text-foreground sm:block"
-          rel="noopener"
-        >
-          Download
-        </a>
+        {DOWNLOAD_PAGE ? (
+          <PageLink
+            page={DOWNLOAD_PAGE}
+            onNavigate={onEnterApp}
+            className="hidden text-muted-foreground hover:text-foreground sm:block"
+          >
+            Download
+          </PageLink>
+        ) : (
+          <a
+            href={RELEASES_URL}
+            className="hidden text-muted-foreground hover:text-foreground sm:block"
+            rel="noopener"
+          >
+            Download
+          </a>
+        )}
       </nav>
       <a
         href={APP_URL}

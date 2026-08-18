@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { IPlatformAdapter } from "@/adapters/platform-adapter.interface";
-import { manifestHash, marketingDocs } from "../content-manifest";
+import { manifestHash, marketingPages } from "../content-manifest";
 import { ensureMarketingWorkspaceSeeded } from "../seed";
 
 type Fs = IPlatformAdapter["fs"];
@@ -21,18 +21,18 @@ function makeFs(storedHash: string | null) {
 }
 
 describe("ensureMarketingWorkspaceSeeded", () => {
-  it("seeds every doc plus the hash file into a fresh workspace", async () => {
+  it("seeds every page plus the hash file into a fresh workspace", async () => {
     const { fs, writeFiles } = makeFs(null);
     await ensureMarketingWorkspaceSeeded(fs);
 
     expect(writeFiles).toHaveBeenCalledTimes(2);
     const seeded = writeFiles.mock.calls[0][0];
     expect(seeded.map((file) => file.path)).toEqual(
-      marketingDocs.map((doc) => doc.path),
+      marketingPages.map((page) => page.filePath),
     );
     // The hash marker is written last, so an interrupted seed re-runs.
     expect(writeFiles.mock.calls[1][0]).toEqual([
-      { path: "docs/.notefig-marketing-manifest", content: manifestHash },
+      { path: "notefig/.notefig-marketing-manifest", content: manifestHash },
     ]);
   });
 

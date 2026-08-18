@@ -3,9 +3,11 @@ import { useCallback, useEffect, useRef } from "react";
 /**
  * Height of the scroll runway that holds the sticky app, in viewport
  * heights. The app pins for `RUNWAY_VH - 100` of scrolling, which is the
- * distance over which it grows from framed-under-the-hero to full screen.
+ * distance over which it grows from framed-under-the-hero to full screen —
+ * deliberately short, so the takeover feels like the app seizing the page
+ * rather than a slow crossfade.
  */
-export const RUNWAY_VH = 190;
+export const RUNWAY_VH = 145;
 
 /** Progress at which the app is close enough to full screen to be live. */
 const INTERACTIVE_AT = 0.995;
