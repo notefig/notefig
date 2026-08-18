@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en" class="antialiased dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Notefig — Write Markdown. Continuously Publish.</title>
+    <meta
+      name="description"
+      content="Notefig turns plain markdown files into published books and sites. Your content stays in files you own — write, commit, and every change ships itself."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Notefig" />
+    <meta
+      property="og:title"
+      content="Notefig — Write Markdown. Continuously Publish."
+    />
+    <meta
+      property="og:description"
+      content="Notefig turns plain markdown files into published books and sites. Your content stays in files you own."
+    />
+    <link rel="canonical" href="https://notefig.com/" />
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <!-- Prerendered routes append a #prerender snapshot overlay here; the
+         live app removes it when the same content is mounted for real
+         (site/prerender.ts). -->
+    <style>
+      #prerender {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        overflow: hidden;
+      }
+      html[data-marketing-ready] #prerender {
+        display: none;
+      }
+    </style>
+    <script type="module" src="/main.tsx"></script>
+  </body>
+</html>

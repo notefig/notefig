@@ -1,0 +1,4 @@
+# SPA fallback for the marketing build. Prerendered routes exist as real
+# static files (docs/<slug>/index.html) and Cloudflare Pages serves static
+# assets before redirect rules, so this only catches non-prerendered paths.
+/*    /index.html   200

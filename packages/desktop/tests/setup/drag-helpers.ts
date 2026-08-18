@@ -64,7 +64,15 @@ export async function syntheticNativeDrag(
   page: Page,
   sourceSelector: string,
   targetSelector: string,
-  options: { whileOverTarget?: () => Promise<void> } = {},
+  options: {
+    whileOverTarget?: () => Promise<void>;
+    /**
+     * What the drag source permits, as a real source would declare it.
+     * Defaults to a browser-initiated drag nobody has constrained;
+     * `@pierre/trees` rows, for one, declare "move".
+     */
+    effectAllowed?: string;
+  } = {},
 ) {
   // Phase 1: dragstart on the source + dragover on the target. The shared
   // DataTransfer is stashed on window so phase 2 can finish the same drag
@@ -75,9 +83,11 @@ export async function syntheticNativeDrag(
   const begin = ({
     sourceSelector,
     targetSelector,
+    effectAllowed,
   }: {
     sourceSelector: string;
     targetSelector: string;
+    effectAllowed: string;
   }) => {
     const deepQuery = (selector: string): HTMLElement | null => {
       const search = (root: Document | ShadowRoot): HTMLElement | null => {
@@ -99,23 +109,46 @@ export async function syntheticNativeDrag(
     if (!source) throw new Error(`missing drag source: ${sourceSelector}`);
     if (!target) throw new Error(`missing drag target: ${targetSelector}`);
 
+    // NOT `new DataTransfer()`: one made by the constructor is stuck on
+    // effectAllowed "none" — it is not attached to a drag operation, so
+    // Chromium ignores writes to it — and a zone that honours the source's
+    // permitted effects would refuse every synthetic drop. Real drags never
+    // look like that. A plain stand-in carries the whole surface the
+    // protocol touches and lets the drag declare what it permits.
+    const store = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed,
+      dropEffect: "none",
+      files: [] as File[],
+      get types() {
+        return [...store.keys()];
+      },
+      setData: (type: string, value: string) => void store.set(type, value),
+      getData: (type: string) => store.get(type) ?? "",
+      setDragImage: () => {},
+    };
+
     const rect = target.getBoundingClientRect();
-    const dataTransfer = new DataTransfer();
     const opts = {
       bubbles: true,
       cancelable: true,
       composed: true,
-      dataTransfer,
       clientX: rect.left + rect.width / 2,
       clientY: rect.bottom - 2,
     };
+    const dragEvent = (type: string) => {
+      const event = new DragEvent(type, opts);
+      Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+      return event;
+    };
+
     (window as unknown as Record<string, unknown>).__mtrSyntheticDrag = {
       source,
       target,
-      opts,
+      dragEvent,
     };
-    source.dispatchEvent(new DragEvent("dragstart", opts));
-    target.dispatchEvent(new DragEvent("dragover", opts));
+    source.dispatchEvent(dragEvent("dragstart"));
+    target.dispatchEvent(dragEvent("dragover"));
   };
 
   const finish = () => {
@@ -123,20 +156,18 @@ export async function syntheticNativeDrag(
       .__mtrSyntheticDrag as {
       source: HTMLElement;
       target: HTMLElement;
-      opts: DragEventInit;
+      dragEvent: (type: string) => DragEvent;
     };
     delete (window as unknown as Record<string, unknown>).__mtrSyntheticDrag;
-    state.target.dispatchEvent(new DragEvent("drop", state.opts));
-    state.source.dispatchEvent(
-      new DragEvent("dragend", {
-        bubbles: true,
-        composed: true,
-        dataTransfer: state.opts.dataTransfer,
-      }),
-    );
+    state.target.dispatchEvent(state.dragEvent("drop"));
+    state.source.dispatchEvent(state.dragEvent("dragend"));
   };
 
-  await page.evaluate(begin, { sourceSelector, targetSelector });
+  await page.evaluate(begin, {
+    sourceSelector,
+    targetSelector,
+    effectAllowed: options.effectAllowed ?? "uninitialized",
+  });
   if (options.whileOverTarget) {
     await options.whileOverTarget();
   }
