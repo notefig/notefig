@@ -35,6 +35,17 @@ export async function ensureMarketingWorkspaceSeeded(
     );
   }
 
-  // Written last, so a seed interrupted mid-write re-runs next boot.
-  await fs.writeFiles([{ path: HASH_FILE, content: manifestHash }]);
+  // Written last, so a seed interrupted mid-write re-runs next boot. If only
+  // the marker fails the content is still there and the site works, so this
+  // does not throw — but the next load will re-seed and overwrite whatever
+  // the visitor edited, which is worth saying out loud rather than swallowing.
+  const marker = await fs.writeFiles([
+    { path: HASH_FILE, content: manifestHash },
+  ]);
+  if (marker.failed.length > 0) {
+    console.warn(
+      `Marketing seed marker could not be written (${marker.failed[0].message}); ` +
+        "the workspace will be re-seeded on the next load and in-browser edits lost.",
+    );
+  }
 }

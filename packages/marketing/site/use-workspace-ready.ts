@@ -1,11 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { platformAdapter } from "@/adapters";
-import {
-  LAYOUT_PARAM,
-  findLayoutSelectedTab,
-  parseLayout,
-} from "@/utils/layout-codec";
+import { LAYOUT_PARAM, parseLayout } from "@/utils/layout-codec";
+import type { LayoutNode } from "@/components/dockable";
 import { openFileInLayout } from "@/utils/dockable-layout";
 import { ensureMarketingWorkspaceSeeded } from "./seed";
 import { findPageByFilePath, type MarketingPage } from "./content-manifest";
@@ -42,21 +39,43 @@ function useMarketingSeed(): boolean {
   return seeded;
 }
 
+/**
+ * Every window's selected tab, in layout order (primary window first).
+ * The core's `findLayoutSelectedTab` stops at the first one, which cannot
+ * describe a split layout — and the page a link opens may well be selected
+ * in the second window rather than the first.
+ */
+export function selectedTabsInLayout(nodes: LayoutNode[]): string[] {
+  return nodes.flatMap((node) => {
+    if (node.type === "Window") return node.selected ? [node.selected] : [];
+    if (node.type === "Panel") return selectedTabsInLayout(node.children);
+    return [];
+  });
+}
+
 export interface PendingSync {
   /** Which side we wrote and are waiting to observe back. */
   type: "nav" | "layout";
   route: string;
 }
 
-/** Has the write recorded in `pending` landed in the router state yet? */
+/**
+ * Has the write recorded in `pending` landed in the router state yet?
+ *
+ * A layout write settles when the page is selected in ANY window, not just
+ * the primary one: `openFileInLayout` selects an already-open tab wherever it
+ * lives, so in a split layout the page can land in the second window. Waiting
+ * on the primary selection there would never settle, and the reconciler —
+ * which stays hands-off until it does — would be dead for the session.
+ */
 export function isPendingSettled(
   pending: PendingSync,
   pathRoute: string,
-  layoutRoute: string | null,
+  layoutRoutes: readonly string[],
 ): boolean {
   return pending.type === "nav"
     ? pathRoute === pending.route
-    : layoutRoute === pending.route;
+    : layoutRoutes.includes(pending.route);
 }
 
 export type SyncAction =
@@ -68,18 +87,26 @@ export type SyncAction =
 /**
  * Which side of the URL moved, and therefore which side follows. `lastRoute`
  * is the route both sides last agreed on; whichever side no longer matches it
- * is the one the user changed. A selected file that is not a page of the site
- * (layoutRoute null) yields "none" — the URL deliberately stays put.
+ * is the one the user changed.
+ *
+ * `layoutRoutes` is every window's selected page, primary window first. The
+ * URL is satisfied as long as its page is on screen somewhere; only when it
+ * is not does the primary window's selection pull the URL along. Selected
+ * files that are not pages of the site (a visitor's own scratch file) are
+ * absent from the list, and with nothing to follow the URL stays put.
  */
 export function decideSync(
   pathRoute: string,
-  layoutRoute: string | null,
+  layoutRoutes: readonly string[],
   lastRoute: string | null,
 ): SyncAction {
-  if (layoutRoute === pathRoute) return { kind: "settled", route: pathRoute };
+  if (layoutRoutes.includes(pathRoute)) {
+    return { kind: "settled", route: pathRoute };
+  }
   if (pathRoute !== lastRoute) return { kind: "follow-path", route: pathRoute };
-  if (layoutRoute !== null && layoutRoute !== lastRoute) {
-    return { kind: "follow-layout", route: layoutRoute };
+  const primary = layoutRoutes[0];
+  if (primary !== undefined && primary !== lastRoute) {
+    return { kind: "follow-layout", route: primary };
   }
   return { kind: "none" };
 }
@@ -110,26 +137,26 @@ function usePageUrlSync(page: MarketingPage): boolean {
   const pendingRef = useRef<PendingSync | null>(null);
 
   const layoutParam = searchParams.get(LAYOUT_PARAM);
-  const selectedTab = useMemo(
-    () => findLayoutSelectedTab(parseLayout(layoutParam)),
+  const layoutRoutes = useMemo(
+    () =>
+      selectedTabsInLayout(parseLayout(layoutParam))
+        .map((tabId) => findPageByFilePath(tabId)?.route)
+        .filter((route): route is string => route !== undefined),
     [layoutParam],
   );
 
   useEffect(() => {
     const pathRoute = page.route;
-    const layoutRoute = selectedTab
-      ? (findPageByFilePath(selectedTab)?.route ?? null)
-      : null;
 
     if (
       pendingRef.current &&
-      !isPendingSettled(pendingRef.current, pathRoute, layoutRoute)
+      !isPendingSettled(pendingRef.current, pathRoute, layoutRoutes)
     ) {
       return;
     }
     pendingRef.current = null;
 
-    const action = decideSync(pathRoute, layoutRoute, lastRouteRef.current);
+    const action = decideSync(pathRoute, layoutRoutes, lastRouteRef.current);
     switch (action.kind) {
       case "settled":
         lastRouteRef.current = action.route;
@@ -166,7 +193,7 @@ function usePageUrlSync(page: MarketingPage): boolean {
   }, [
     page.route,
     page.filePath,
-    selectedTab,
+    layoutRoutes,
     searchParams,
     setSearchParams,
     navigate,
