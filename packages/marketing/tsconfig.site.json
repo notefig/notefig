@@ -1,0 +1,38 @@
+{
+  // Typechecks the site/ sources (and, transitively, the desktop modules
+  // they import). Separate from tsconfig.json, which belongs to the Nextra
+  // docs site. Mirrors ../desktop/tsconfig.json.
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["../desktop/src/*"],
+      "@notefig/shared": ["../shared/src/index.ts"],
+      "@notefig/shared/*": ["../shared/src/*/index.ts"],
+      // This package nests @types/react 19 (for Next), but the desktop app
+      // typechecks against the workspace-root @types/react. Without pinning,
+      // site/ files resolve 19 while the imported desktop modules resolve
+      // the root copy, and the two RefObject/ReactNode shapes clash. Pin to
+      // the same copy the desktop's own tsc uses.
+      "react": ["../../node_modules/@types/react"],
+      "react/*": ["../../node_modules/@types/react/*"],
+      "react-dom": ["../../node_modules/@types/react-dom"],
+      "react-dom/*": ["../../node_modules/@types/react-dom/*"]
+    }
+  },
+  "include": ["site", "../desktop/src/vite-env.d.ts"]
+}

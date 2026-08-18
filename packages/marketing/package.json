@@ -6,7 +6,11 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "next lint",
-    "start": "next start"
+    "start": "next start",
+    "dev:site": "vite --config vite.site.config.mts",
+    "build:site": "tsc -p tsconfig.site.json && vite build --config vite.site.config.mts && node scripts/prerender.mjs",
+    "preview:site": "vite preview --config vite.site.config.mts",
+    "test:site": "vitest run --config vitest.site.config.mts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
@@ -37,6 +41,7 @@
     "@radix-ui/react-toggle": "1.1.1",
     "@radix-ui/react-toggle-group": "1.1.1",
     "@radix-ui/react-tooltip": "1.1.6",
+    "@tanstack/react-query": "^5.90.21",
     "autoprefixer": "^10.4.20",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -54,6 +59,7 @@
     "react-dom": "^19.1.0",
     "react-hook-form": "^7.54.1",
     "react-resizable-panels": "^2.1.7",
+    "react-router-dom": "^7.9.6",
     "recharts": "2.15.0",
     "sonner": "^1.7.1",
     "tailwind-merge": "^2.5.5",

@@ -13,12 +13,15 @@ import {
   uninstallDragProtocol,
   composeDropHandlers,
   createProtocolDropHandler,
+  resolveDropEffect,
 } from "@/utils/drag-protocol";
 
 /** Minimal DataTransfer stand-in (happy-dom has no real drag data store). */
 class FakeDataTransfer {
   private store = new Map<string, string>();
-  effectAllowed = "none";
+  // Real DataTransfers start "uninitialized" (every effect permitted), not
+  // "none" (drop forbidden) — the resolver's behaviour depends on it.
+  effectAllowed = "uninitialized";
   dropEffect = "none";
   files: File[] = [];
 
@@ -111,6 +114,26 @@ describe("payload wire format", () => {
   });
 });
 
+describe("resolveDropEffect", () => {
+  it("keeps the zone's preference when the source permits it", () => {
+    expect(resolveDropEffect("copyMove", "copy")).toBe("copy");
+    expect(resolveDropEffect("all", "move")).toBe("move");
+    expect(resolveDropEffect("uninitialized", "copy")).toBe("copy");
+    expect(resolveDropEffect(undefined, "copy")).toBe("copy");
+  });
+
+  it("falls back to an effect the source does permit", () => {
+    expect(resolveDropEffect("move", "copy")).toBe("move");
+    expect(resolveDropEffect("linkMove", "copy")).toBe("move");
+    expect(resolveDropEffect("copy", "move")).toBe("copy");
+  });
+
+  it("returns null when no usable effect is permitted", () => {
+    expect(resolveDropEffect("none", "copy")).toBeNull();
+    expect(resolveDropEffect("link", "copy")).toBeNull();
+  });
+});
+
 describe("drop zone registration", () => {
   it("registers on ref attach and unregisters on ref detach", () => {
     installDragProtocol();
@@ -198,6 +221,28 @@ describe("delegated dispatch", () => {
     expect(onDrop.mock.calls[0][0]).toEqual(filePayload);
     await Promise.resolve(); // registry clears in a microtask
     expect(getCurrentDragPayload()).toBeNull();
+  });
+
+  it("advertises an effect the source permits, so the drop can land", () => {
+    // Sources outside the protocol (file-tree rows) allow moves only; the
+    // zone's "copy" would make the browser cancel the drop silently.
+    const { source, inner } = mountSourceAndTarget();
+    dragEvent("dragstart", source, new FakeDataTransfer());
+    const dt = new FakeDataTransfer();
+    dt.effectAllowed = "move";
+    const over = dragEvent("dragover", inner, dt);
+    expect(over.defaultPrevented).toBe(true);
+    expect(dt.dropEffect).toBe("move");
+  });
+
+  it("declines the drop when the source permits nothing usable", () => {
+    const { source, inner, target } = mountSourceAndTarget();
+    dragEvent("dragstart", source, new FakeDataTransfer());
+    const dt = new FakeDataTransfer();
+    dt.effectAllowed = "link";
+    const over = dragEvent("dragover", inner, dt);
+    expect(over.defaultPrevented).toBe(false);
+    expect(target.hasAttribute("data-mtr-drop-over")).toBe(false);
   });
 
   it("dragend clears the registry and hover state", () => {

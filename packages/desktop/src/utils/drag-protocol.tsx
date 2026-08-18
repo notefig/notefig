@@ -240,16 +240,60 @@ function handleDragStart(event: DragEvent): void {
   if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
 }
 
+/** Which drop effects each `effectAllowed` value permits (HTML DnD spec). */
+const ALLOWED_EFFECTS: Record<string, readonly DropEffect[]> = {
+  none: [],
+  copy: ["copy"],
+  copyLink: ["copy", "link"],
+  copyMove: ["copy", "move"],
+  link: ["link"],
+  linkMove: ["link", "move"],
+  move: ["move"],
+  all: ["copy", "move", "link"],
+  uninitialized: ["copy", "move", "link"],
+};
+
+type DropEffect = "copy" | "move" | "link";
+
+/**
+ * The drop effect to advertise for a zone, given what the drag source allows.
+ *
+ * A `dropEffect` outside the source's `effectAllowed` makes the browser
+ * silently cancel the drop — dragover is honoured, the cursor looks right,
+ * then mouseup fires `dragend` with no `drop` at all. Drag sources we don't
+ * own set this: `@pierre/trees` rows declare `effectAllowed: "move"`, so the
+ * zones' default "copy" killed every file-tree → editor / tab-bar drop.
+ * Returns null when the source permits nothing this zone can use.
+ */
+export function resolveDropEffect(
+  effectAllowed: string | undefined,
+  preferred: DropEffect = "copy",
+): DropEffect | null {
+  const allowed = ALLOWED_EFFECTS[effectAllowed ?? "uninitialized"] ?? [
+    "copy",
+    "move",
+    "link",
+  ];
+  if (allowed.includes(preferred)) return preferred;
+  return allowed.find((effect) => effect !== "link") ?? null;
+}
+
 function handleDragOver(event: DragEvent): void {
   const hit = closestDropZone(event);
   if (!hit || !hasPayloadOfKind(event.dataTransfer, ...hit.config.accepts)) {
     setHoveredDropElement(null);
     return;
   }
-  event.preventDefault();
-  if (event.dataTransfer) {
-    event.dataTransfer.dropEffect = hit.config.dropEffect ?? "copy";
+  const effect = resolveDropEffect(
+    event.dataTransfer?.effectAllowed,
+    hit.config.dropEffect,
+  );
+  if (!effect) {
+    setHoveredDropElement(null);
+    return;
   }
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = effect;
   setHoveredDropElement(hit.element);
 }
 

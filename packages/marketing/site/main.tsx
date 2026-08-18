@@ -15,12 +15,25 @@ import { queryClient } from "@/entities/query-client";
 import { MarketingHeader } from "./marketing-header";
 import { Landing } from "./landing";
 import { DocsRoute } from "./docs-route";
+import { marketingDocs } from "./content-manifest";
 
-import "@/styles.css";
+// The site-local wrapper around @/styles.css — registers the desktop source
+// tree with Tailwind, whose auto-detection cannot see outside this package.
+import "./styles.css";
 
 if (typeof globalThis.Buffer === "undefined") {
   globalThis.Buffer = Buffer;
 }
+
+// The prerender script (scripts/prerender.mjs) reads the route list and
+// per-page metadata from the running app, so the manifest never needs a
+// second, node-side frontmatter parser.
+(window as unknown as { __MARKETING_ROUTES__: unknown }).__MARKETING_ROUTES__ =
+  marketingDocs.map(({ slug, title, description }) => ({
+    slug,
+    title,
+    description,
+  }));
 
 /**
  * The marketing composition root: the same app, assembled without the

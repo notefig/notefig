@@ -75,6 +75,12 @@ export function DockableRoot({
   const lastReportedJsonRef = useRef<string>(
     controledPanels ? JSON.stringify(controledPanels) : "",
   );
+  // State JSON at the moment a controlled sync was dispatched. Until that
+  // dispatch re-renders, the report effect still sees this pre-sync state —
+  // emitting it would report the OLD layout as a fresh user change (one
+  // stale onChange per external layout write, observable as a junk history
+  // entry that can revert the write).
+  const preSyncStateJsonRef = useRef<string | null>(null);
 
   // Sync controlled layout prop into internal reducer state.
   // Only dispatch when the incoming prop is structurally different from
@@ -85,18 +91,29 @@ export function DockableRoot({
     const incoming = JSON.stringify(controledPanels);
     if (incoming !== lastReportedJsonRef.current) {
       lastReportedJsonRef.current = incoming;
+      preSyncStateJsonRef.current = JSON.stringify(state.children);
       dispatch({ type: "setState", children: controledPanels });
     }
+    // `state` is deliberately not a dependency: this effect must run only on
+    // prop changes; it reads the state of that same commit for the echo guard.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controledPanels]);
 
   // Report internal state changes to the parent.
   useEffect(() => {
     if (!onChange) return;
     const current = JSON.stringify(state.children);
-    if (current !== lastReportedJsonRef.current) {
-      lastReportedJsonRef.current = current;
-      onChange(state.children);
+    if (current === lastReportedJsonRef.current) {
+      preSyncStateJsonRef.current = null;
+      return;
     }
+    if (current === preSyncStateJsonRef.current) {
+      // Pre-sync echo: a controlled sync is in flight and this is the state
+      // it is about to replace, not a user change. Never report it.
+      return;
+    }
+    lastReportedJsonRef.current = current;
+    onChange(state.children);
   }, [state, onChange]);
 
   const pointerSensor = useSensor(PointerSensor, {

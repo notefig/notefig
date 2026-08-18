@@ -1,0 +1,8 @@
+/*
+ * Site entry stylesheet. Tailwind v4's automatic source detection scans
+ * relative to the build's working directory (this package), so the desktop
+ * sources — where almost every utility class in the app lives — must be
+ * registered explicitly or the workspace UI ships unstyled.
+ */
+@import "../../desktop/src/styles.css";
+@source "../../desktop/src";
