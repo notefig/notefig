@@ -30,152 +30,18 @@ import { Editor } from "@tiptap/core";
 import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
 
 // In-memory platform adapter with async latency (hoisted for vi.mock)
-const fake = vi.hoisted(() => {
-  interface FakeFile {
-    content: string;
-    modifiedAt: Date;
-    createdAt: Date;
-  }
-
-  const store = new Map<string, FakeFile>();
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-  // Latencies roughly shaped like a real adapter (IndexedDB / OPFS / worker
-  // RPC): writes slower than reads, and *jittered* — variable completion
-  // times are what allow independent async operations to finish out of
-  // order, which is the raw material of every race in this pipeline.
-  // Deterministic PRNG so failures are reproducible.
-  let seed = 42;
-  const rand = () => {
-    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-    return seed / 0x7fffffff;
-  };
-  const writeLatency = () => 2 + Math.floor(rand() * 20);
-  const readLatency = () => 1 + Math.floor(rand() * 10);
-
-  const listeners = new Set<(event: unknown) => void>();
-
-  // Assigned after imports (vi.hoisted runs before them): lets the test
-  // model the desktop watcher around writeFiles. Mirrors src-tauri: the
-  // write registers its hash BEFORE writing (fs_ops.rs write_files), and
-  // the fs notification fires after the write lands (file_watcher.rs).
-  const hooks: {
-    beforeWrite?: (path: string, newContent: string) => void;
-    afterWrite?: (path: string) => void;
-  } = {};
-
-  const adapter = {
-    async readDirectory(path: string) {
-      await sleep(readLatency());
-      const prefix = path.endsWith("/") ? path : path + "/";
-      return {
-        ok: true as const,
-        value: [...store.keys()].filter((p) => p.startsWith(prefix)),
-      };
-    },
-
-    async getMetadata(paths: string[]) {
-      await sleep(readLatency());
-      const succeeded = paths
-        .filter((p) => store.has(p))
-        .map((p) => {
-          const f = store.get(p)!;
-          return {
-            path: p,
-            type: "file" as const,
-            size: f.content.length,
-            modifiedAt: f.modifiedAt,
-            createdAt: f.createdAt,
-          };
-        });
-      return { succeeded, failed: [] };
-    },
-
-    async readFiles(paths: string[]) {
-      await sleep(readLatency());
-      const succeeded = paths
-        .filter((p) => store.has(p))
-        .map((p) => ({ path: p, content: store.get(p)!.content }));
-      return { succeeded, failed: [] };
-    },
-
-    async writeFiles(files: { path: string; content: string }[]) {
-      // Mirror src-tauri/fs_ops.rs write_files: register the new content
-      // hash before the write, then write; the OS notification (afterWrite)
-      // follows once the data is on disk.
-      for (const f of files) {
-        hooks.beforeWrite?.(f.path, f.content);
-      }
-      await sleep(writeLatency());
-      for (const f of files) {
-        const existing = store.get(f.path);
-        store.set(f.path, {
-          content: f.content,
-          modifiedAt: new Date(),
-          createdAt: existing?.createdAt ?? new Date(),
-        });
-      }
-      for (const f of files) {
-        hooks.afterWrite?.(f.path);
-      }
-      return { succeeded: files.map((f) => f.path), failed: [] };
-    },
-
-    async createFiles(paths: string[]) {
-      return adapter.writeFiles(paths.map((path) => ({ path, content: "" })));
-    },
-
-    async createDirectories(paths: string[]) {
-      return { succeeded: paths, failed: [] };
-    },
-
-    async deleteFiles(paths: string[]) {
-      await sleep(writeLatency());
-      paths.forEach((p) => store.delete(p));
-      return { succeeded: paths, failed: [] };
-    },
-
-    async deleteDirectories(paths: string[]) {
-      return { succeeded: paths, failed: [] };
-    },
-
-    async moveFile() {
-      return { ok: true as const, value: undefined };
-    },
-
-    async moveDirectory() {
-      return { ok: true as const, value: undefined };
-    },
-
-    onFsEvent(cb: (event: unknown) => void) {
-      listeners.add(cb);
-      return () => listeners.delete(cb);
-    },
-
-    async startWatchingMetadata() {},
-    async startWatchingContent() {},
-    stopWatching() {},
-
-    async pickDirectory() {
-      return null;
-    },
-    async promptText() {
-      return null;
+vi.mock("@/adapters", async () => {
+  const { fake } = await import("@/testing/fake-fs-adapter");
+  return {
+    platformAdapter: {
+      fs: fake.adapter,
+      ui: fake.adapter,
+      db: (await import("@/testing/node-db")).createNodeTestDb(),
     },
   };
-
-  return { store, adapter, listeners, hooks };
 });
 
-// One flat fake serving both surfaces it touches — the extra keys on each
-// are harmless, and keeping a single object keeps the fs state in one place.
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    fs: fake.adapter,
-    ui: fake.adapter,
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
+import { fake, installWatcherSim } from "@/testing/fake-fs-adapter";
 
 // Real modules — imported after the adapter mock so they bind to the fake fs.
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
@@ -308,63 +174,15 @@ beforeEach(async () => {
     createdAt: new Date(Date.now() - 60_000),
   });
 
-  // Desktop (Tauri) watcher semantics, mirrored from src-tauri:
-  //
-  // - write_files (fs_ops.rs) registers the new content's hash once,
-  //   before writing.
-  // - Each write produces an OS notification. The handler
-  //   (file_watcher.rs) runs LATER and reads the file at THAT moment —
-  //   so the content/hash it sees may belong to a newer write than the
-  //   one that raised the event. It consumes one matching registration,
-  //   and anything unmatched is emitted to the frontend as an external
-  //   content change (fs-content-changed → handleContentFileSystemChange,
-  //   wired in workspace.tsx).
-  const appWrites: { path: string; hash: string }[] = [];
-  let eventSeed = 7;
-  const eventDelay = () => {
-    eventSeed = (eventSeed * 1103515245 + 12345) & 0x7fffffff;
-    return 5 + (eventSeed % 60);
-  };
-  fake.hooks.beforeWrite = (path, newContent) => {
-    appWrites.push({ path, hash: calculateContentHash(newContent) });
-  };
-  const scheduleFsEvent = (path: string) => {
-    pendingEvents.push(
-      (async () => {
-        // OS notification latency before the watcher thread handles it.
-        await new Promise((r) => setTimeout(r, eventDelay()));
-        // fs::read_to_string at handling time — current, not event-time,
-        // state: the hash may belong to a NEWER write than the one that
-        // raised this event.
-        const content = fake.store.get(path)?.content ?? "";
-        const hash = calculateContentHash(content);
-        const index = appWrites.findIndex(
-          (w) => w.path === path && w.hash === hash,
-        );
-        if (index !== -1) {
-          appWrites.splice(index, 1); // consumed: recognized as app write
-          return;
-        }
-        // Not recognized → emitted to the frontend as an EXTERNAL change.
-        // The payload carries the content captured above; IPC + main-thread
-        // scheduling delay its arrival, during which the editor may have
-        // moved further ahead.
-        await new Promise((r) => setTimeout(r, eventDelay()));
-        const event: ContentChangeEvent = {
-          changes: [{ path, content, contentHash: hash }],
-        };
-        await handleContentFileSystemChange(event, WS);
-      })(),
-    );
-  };
-  fake.hooks.afterWrite = (path) => {
-    // atomic_write (temp file + rename) makes notify deliver more than one
-    // event per write on macOS — a Modify(Data) and a Modify(Name(Any)) —
-    // and file_watcher.rs handles each independently: each reads the file
-    // and consumes at most one registration.
-    scheduleFsEvent(path);
-    scheduleFsEvent(path);
-  };
+  // Desktop (Tauri) watcher semantics (see @/testing/fake-fs-adapter for
+  // the src-tauri mapping). The xor cancels the sim's internal mixing so
+  // the historical event-delay sequence (eventSeed = 7) is preserved.
+  installWatcherSim({
+    fakeFs: fake,
+    seed: 7 ^ 0x5bd1e995,
+    pendingEvents,
+    onExternalChange: (event) => handleContentFileSystemChange(event, WS),
+  });
 
   editor = new Editor({
     extensions: editorExtensions,
@@ -484,9 +302,9 @@ describe("typing → save → adoption loop integrity", () => {
   it("a delayed echo of an earlier self-write never regresses the content row", async () => {
     // Model the residual echo window directly: the watcher read an older
     // flush of this app's own save, and IPC delivered it only after a
-    // newer flush had already landed. Without the self-write ledger in
-    // handleContentFileSystemChange, this stale event would overwrite the
-    // newer row (and the adoption path would then replace the editor).
+    // newer flush had already landed. The handler must not trust that
+    // stale payload — it re-reads the file at handling time, so the row
+    // stays on the newer content (and the adoption path never fires).
     const older = "start plus older flush";
     const newer = "start plus older flush plus newer flush";
 
@@ -510,9 +328,16 @@ describe("typing → save → adoption loop integrity", () => {
     const { content } = getOrCreateWorkspaceCollections(WS);
     expect(content.get(FILE)?.content).toBe(newer);
 
-    // A genuinely external change (content this app never wrote) must
-    // still come through — suppression must not eat real edits.
+    // A genuinely external change must still come through — suppression
+    // must not eat real edits. An external edit is on disk by definition
+    // (the handler re-reads at handling time rather than trusting the
+    // event payload), so put it there like a real external writer would.
     const external = "external edit from another program";
+    fake.store.set(FILE, {
+      content: external,
+      modifiedAt: new Date(),
+      createdAt: fake.store.get(FILE)?.createdAt ?? new Date(),
+    });
     await handleContentFileSystemChange(
       {
         changes: [
@@ -529,26 +354,22 @@ describe("typing → save → adoption loop integrity", () => {
     expect(content.get(FILE)?.content).toBe(external);
   });
 
-  it("a delayed echo evicted from the self-write ledger still must not regress the row", async () => {
-    // Root cause of the *intermittent* "older overwrites newer": the frontend
-    // self-write ledger is capped (MAX_SELF_WRITES_PER_PATH) and the Rust
-    // watcher evicts its own registration after 5s. A watcher echo delivered
-    // late (batched fs events, a slow read, IPC backlog) can therefore carry
-    // content this app wrote — yet find NO matching ledger entry because a
-    // burst of newer saves has since pushed that hash out. With no pending
-    // edit to guard it, handleContentFileSystemChange then writes the stale
-    // payload over the newer row.
-    //
-    // Reproduce deterministically by flooding the ledger past its cap so an
-    // early write's hash is evicted, then replaying that early write as an echo.
+  it("a delayed echo from far in the past still must not regress the row", async () => {
+    // Historic root cause of the *intermittent* "older overwrites newer":
+    // suppression once keyed on a capped ledger of recently-written hashes,
+    // and a late echo whose hash had aged out of it (batched fs events, a
+    // slow read, IPC backlog, a long save burst) wrote its stale payload
+    // over the newer row. The handler now ignores event payloads entirely
+    // and re-reads the file, so no amount of intervening saves can make a
+    // stale echo win — a short burst is as conclusive as the 110-write
+    // flood that once overflowed the ledger cap.
     const { content } = getOrCreateWorkspaceCollections(WS);
 
     const stale = "content from an early save";
-    await writeFileContent(WS, FILE, stale); // hash recorded...
+    await writeFileContent(WS, FILE, stale);
 
-    // ...then evicted: more than MAX_SELF_WRITES_PER_PATH (100) newer writes.
     let newest = "";
-    for (let i = 0; i < 110; i++) {
+    for (let i = 0; i < 3; i++) {
       newest = `newer save number ${i}`;
       await writeFileContent(WS, FILE, newest);
     }

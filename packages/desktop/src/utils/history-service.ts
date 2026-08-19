@@ -38,6 +38,10 @@ export function getOrCreateWorkspaceHistoryService(
         platformAdapter.fs,
         historyGitDir(normalizedWorkspacePath),
       ),
+      {
+        repoPath: normalizedWorkspacePath,
+        gitDir: historyGitDir(normalizedWorkspacePath),
+      },
     );
     historyServiceRegistry.set(normalizedWorkspacePath, service);
   }
@@ -98,11 +102,7 @@ export async function ensureWorkspaceHistoryInitialized(
   const gitDir = historyGitDir(normalizedWorkspacePath);
   const initialization = (async () => {
     await migrateLegacyHistoryGitDir(normalizedWorkspacePath, gitDir);
-    await service.init({
-      repoPath: normalizedWorkspacePath,
-      gitDir,
-      defaultBranch: "main",
-    });
+    await service.init({ defaultBranch: "main" });
 
     // Exclude .metrists/ (this repo's own gitdir + agent configs) and the
     // user's .git/ from the history repo's worktree scan — its storage host
@@ -155,8 +155,6 @@ export async function checkpointWorkspaceHistory(
   const service = await ensureWorkspaceHistoryInitialized(workspacePath);
   const normalizedWorkspacePath = normalizePath(workspacePath);
   return service.addAllAndCommit({
-    repoPath: normalizedWorkspacePath,
-    gitDir: historyGitDir(normalizedWorkspacePath),
     message,
     author,
   });

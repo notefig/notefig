@@ -3,7 +3,6 @@ import { resolveWorkspacePath } from "@/utils/fs";
 import type { AgentTool } from "@notefig/shared/agent";
 import {
   ensureWorkspaceHistoryInitialized,
-  historyGitDir,
 } from "@/utils/history-service";
 
 const InputSchema = z.object({
@@ -33,17 +32,12 @@ export const historyDiff: AgentTool<
     if (!resolved.ok) return { ok: false, error: resolved.error };
     try {
       const service = await ensureWorkspaceHistoryInitialized(ctx.workspacePath);
-      const gitDir = historyGitDir(ctx.workspacePath);
       const [fromContent, toContent] = await Promise.all([
         service.readTextFile({
-          repoPath: ctx.workspacePath,
-          gitDir,
           ref: input.from,
           filepath: resolved.relative,
         }),
         service.readTextFile({
-          repoPath: ctx.workspacePath,
-          gitDir,
           ref: input.to,
           filepath: resolved.relative,
         }),

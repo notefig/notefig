@@ -14,102 +14,24 @@
  * repo walk and were always invalidated together. Only workspace-access
  * errors escape the queryFn (to reach WorkspaceErrorBoundary, same as the
  * file metadata collection).
+ *
+ * Every row derives from the app's HISTORY repo (`<ws>/.metrists/.git`,
+ * via utils/history-service) — never from a `.git` the user may keep in
+ * the same workspace. Their repo is theirs alone: the app must not read
+ * its status, rewrite its index, or commit into it.
  */
 import { useMemo } from "react";
 import { createCollection, useLiveQuery, eq } from "@tanstack/react-db";
 import { queryCollectionOptions } from "@tanstack/query-db-collection";
 import { useIsFetching } from "@tanstack/react-query";
-import {
-  GitError,
-  IsomorphicGitService,
-  type GitErrorCode,
-  type RepoStatus,
-} from "@notefig/git";
-import { platformAdapter } from "@/adapters";
-import { createGitStorageHost } from "@/adapters/git-storage-host";
+import { GitError, type GitErrorCode, type RepoStatus } from "@notefig/git";
 import { isWorkspaceAccessError } from "@/adapters/platform-adapter.interface";
 import { normalizePath } from "@/utils/fs";
-import { ensureExcludeLines } from "@/utils/git-exclude";
+import {
+  ensureWorkspaceHistoryInitialized,
+  getOrCreateWorkspaceHistoryService,
+} from "@/utils/history-service";
 import { queryClient } from "./query-client";
-
-const gitServiceRegistry = new Map<string, IsomorphicGitService>();
-const gitInitRegistry = new Map<string, Promise<void>>();
-
-export function getOrCreateWorkspaceGitService(
-  workspacePath: string,
-): IsomorphicGitService {
-  const normalizedWorkspacePath = normalizePath(workspacePath);
-  let service = gitServiceRegistry.get(normalizedWorkspacePath);
-
-  if (!service) {
-    service = new IsomorphicGitService(
-      createGitStorageHost(
-        platformAdapter.fs,
-        `${normalizedWorkspacePath}/.git`,
-      ),
-    );
-    gitServiceRegistry.set(normalizedWorkspacePath, service);
-  }
-
-  return service;
-}
-
-export async function ensureWorkspaceGitInitialized(
-  workspacePath: string,
-): Promise<IsomorphicGitService> {
-  const normalizedWorkspacePath = normalizePath(workspacePath);
-  const service = getOrCreateWorkspaceGitService(normalizedWorkspacePath);
-
-  const inFlight = gitInitRegistry.get(normalizedWorkspacePath);
-  if (inFlight) {
-    await inFlight;
-    return service;
-  }
-
-  const initialization = (async () => {
-    await service.init({
-      repoPath: normalizedWorkspacePath,
-      defaultBranch: "main",
-    });
-    // Hide the app's ephemeral root from the repo via its gitdir-local
-    // exclude, so a repo initialized through the app never shows
-    // .metrists/ as untracked. Best-effort: history-service re-ensures
-    // this on every checkpoint.
-    try {
-      await ensureExcludeLines(`${normalizedWorkspacePath}/.git`, [
-        ".metrists/",
-      ]);
-    } catch (error) {
-      console.warn(
-        `Failed to update the repo's exclude for '${normalizedWorkspacePath}':`,
-        error,
-      );
-    }
-  })().finally(() => {
-    gitInitRegistry.delete(normalizedWorkspacePath);
-  });
-
-  gitInitRegistry.set(normalizedWorkspacePath, initialization);
-  await initialization;
-  return service;
-}
-
-export async function initializeWorkspaceGit(
-  workspacePath: string,
-): Promise<IsomorphicGitService> {
-  return ensureWorkspaceGitInitialized(workspacePath);
-}
-
-export function disposeWorkspaceGitService(workspacePath: string): void {
-  const normalizedWorkspacePath = normalizePath(workspacePath);
-  gitServiceRegistry.delete(normalizedWorkspacePath);
-  gitInitRegistry.delete(normalizedWorkspacePath);
-}
-
-export function clearWorkspaceGitServices(): void {
-  gitServiceRegistry.clear();
-  gitInitRegistry.clear();
-}
 
 /** A GitError flattened to data so it can live on a row. */
 export interface SerializedGitError {
@@ -221,13 +143,13 @@ function fileRowsFromStatus(
 
 /** Exported for unit tests; the collection's queryFn. */
 export async function fetchGitRows(workspacePath: string): Promise<GitRow[]> {
-  const service = getOrCreateWorkspaceGitService(workspacePath);
+  const service = getOrCreateWorkspaceHistoryService(workspacePath);
   const rows: GitRow[] = [];
 
   let status: RepoStatus | undefined;
   let statusError: SerializedGitError | undefined;
   try {
-    status = await service.status({ repoPath: workspacePath });
+    status = await service.status();
   } catch (error) {
     // Only workspace-access errors escape (WorkspaceErrorBoundary); every
     // git failure becomes data on the repo row — no component observes a
@@ -242,7 +164,6 @@ export async function fetchGitRows(workspacePath: string): Promise<GitRow[]> {
   if (!uninitialized) {
     try {
       const entries = await service.log({
-        repoPath: workspacePath,
         depth: CHECKPOINT_LOG_DEPTH,
       });
       for (const entry of entries) {
@@ -457,7 +378,7 @@ export async function saveCheckpoint(
   description?: string,
 ): Promise<string | null> {
   const normalized = normalizePath(workspacePath);
-  const service = getOrCreateWorkspaceGitService(normalized);
+  const service = getOrCreateWorkspaceHistoryService(normalized);
 
   // Cancel any in-flight fetch so a stale pre-commit response can't land
   // after the commit's own refetch (the old code's cancelQueries guard, at
@@ -466,7 +387,6 @@ export async function saveCheckpoint(
 
   try {
     return await service.addAllAndCommit({
-      repoPath: normalized,
       message: description?.trim() || "Commit",
       author: COMMIT_AUTHOR,
     });
@@ -484,8 +404,8 @@ export async function revertToCheckpoint(
   workspacePath: string,
   checkpoint: { oid: string; hash: string },
 ): Promise<void> {
-  const service = getOrCreateWorkspaceGitService(workspacePath);
-  const status = await service.status({ repoPath: workspacePath });
+  const service = getOrCreateWorkspaceHistoryService(workspacePath);
+    const status = await service.status();
   const hasLocalChanges =
     status.staged.length > 0 ||
     status.unstaged.length > 0 ||
@@ -493,7 +413,6 @@ export async function revertToCheckpoint(
 
   if (hasLocalChanges) {
     await service.addAllAndCommit({
-      repoPath: workspacePath,
       message: `WIP before revert ${checkpoint.hash}`,
       author: COMMIT_AUTHOR,
     });
@@ -501,7 +420,6 @@ export async function revertToCheckpoint(
 
   try {
     await service.revertCommit({
-      repoPath: workspacePath,
       oid: checkpoint.oid,
       message: `Revert ${checkpoint.hash}`,
       author: COMMIT_AUTHOR,
@@ -512,12 +430,12 @@ export async function revertToCheckpoint(
 }
 
 export async function abortRevert(workspacePath: string): Promise<void> {
-  const service = getOrCreateWorkspaceGitService(workspacePath);
-  await service.abortRevert({ repoPath: workspacePath });
+  const service = getOrCreateWorkspaceHistoryService(workspacePath);
+  await service.abortRevert();
   await refetchGit(workspacePath);
 }
 
 export async function initializeGit(workspacePath: string): Promise<void> {
-  await initializeWorkspaceGit(workspacePath);
+  await ensureWorkspaceHistoryInitialized(workspacePath);
   await refetchGit(workspacePath);
 }

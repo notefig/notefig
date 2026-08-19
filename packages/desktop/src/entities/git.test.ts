@@ -180,7 +180,6 @@ describe("saveCheckpoint (plain action + refetch)", () => {
 
     expect(oid).toBe("feedbeef00");
     expect(addAllAndCommitMock).toHaveBeenCalledWith({
-      repoPath: WS,
       message: "did things",
       author: { name: "Notefig", email: "git@notefig.com" },
     });

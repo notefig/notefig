@@ -3,7 +3,6 @@ import { resolveWorkspacePath } from "@/utils/fs";
 import type { AgentTool } from "@notefig/shared/agent";
 import {
   ensureWorkspaceHistoryInitialized,
-  historyGitDir,
 } from "@/utils/history-service";
 
 const InputSchema = z.object({
@@ -37,8 +36,6 @@ export const historyLog: AgentTool<
     try {
       const service = await ensureWorkspaceHistoryInitialized(ctx.workspacePath);
       const commits = await service.log({
-        repoPath: ctx.workspacePath,
-        gitDir: historyGitDir(ctx.workspacePath),
         filepath,
       });
       const value = commits.map((c) => ({

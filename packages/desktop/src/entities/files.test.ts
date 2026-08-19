@@ -23,10 +23,9 @@ vi.mock("@/adapters", async () => ({
   },
 }));
 
-// Watcher self-write ledger — harmless in a unit test, but stub it so we don't
+// Debounced invalidation — harmless in a unit test, but stub it so we don't
 // depend on its timers.
 vi.mock("@/utils/file-write-effects", () => ({
-  recordSelfWrite: vi.fn(),
   invalidateDerivedState: vi.fn(),
 }));
 

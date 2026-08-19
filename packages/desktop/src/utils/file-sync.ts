@@ -4,13 +4,12 @@ import type {
   ContentChangeEvent,
 } from "@/adapters/platform-adapter.interface";
 import { FsError } from "@/adapters/platform-adapter.interface";
-import { getOrCreateWorkspaceCollections } from "@/entities/files";
-import { queryClient } from "@/entities/query-client";
 import {
-  invalidateDerivedState,
-  isRecentSelfWrite,
-  recordSelfWrite,
-} from "./file-write-effects";
+  getOrCreateWorkspaceCollections,
+  updateLoadedContentRow,
+} from "@/entities/files";
+import { queryClient } from "@/entities/query-client";
+import { invalidateDerivedState } from "./file-write-effects";
 import {
   projectSettingsPath,
   projectSettingsQueryKey,
@@ -51,13 +50,13 @@ function assertAbsoluteWorkspacePath(path: string): void {
  * advertises fs:false so writes there are native and only adopted via the
  * watcher).
  *
- * This is the *adopting* write primitive. The watcher echo of this write is
- * self-write-suppressed (`recordSelfWrite` + `handleContentFileSystemChange`'s
- * skip), so the watcher → content-change → DocumentSync pipeline never fires
- * for it — correct for a normal editor autosave, where the editor already
- * holds what was written, but wrong for any agent-shaped write to a document
- * open in an editor. So after the disk write, this function pushes the
- * content into the live editor itself, driving the same
+ * This is the *adopting* write primitive. The platform watcher suppresses
+ * this write's echo (consume-one registration in the adapters/src-tauri),
+ * and even when one slips through, adoption is a no-op once the editor
+ * holds the content — correct for a normal editor autosave, but an
+ * agent-shaped write to a document open in an editor must not wait on a
+ * watcher round-trip that may never come. So after the disk write, this
+ * function pushes the content into the live editor itself, driving the same
  * `DocumentSync.prepareAdoption`/`commitAdoption` API `useEditorFileSync`
  * uses for external changes — directly and synchronously, not via a watcher
  * round-trip that was never going to arrive. `prepareAdoption` returning
@@ -75,12 +74,17 @@ export async function writeWorkspaceTextFile(
   content: string,
 ): Promise<void> {
   assertAbsoluteWorkspacePath(path);
-  recordSelfWrite(path, calculateContentHash(content));
   const result = await platformAdapter.fs.writeFiles([{ path, content }]);
   const failure = result.failed[0];
   if (failure) {
     throw new FsError(failure.type, failure.path, failure.message);
   }
+
+  // Rows lead disk for every app write (see updateLoadedContentRow) — the
+  // echo of this write is natively consumed, so nothing else would ever
+  // bring the row forward, and adoption would later roll the editor back
+  // to the stale row.
+  updateLoadedContentRow(path, content);
 
   const editor = getMarkdownEditor(path);
   if (editor && !editor.isDestroyed) {
@@ -258,41 +262,47 @@ export async function handleContentFileSystemChange(
 
   for (const change of event.changes) {
     try {
-      // An echo of this app's own save must never be treated as external:
-      // its payload can be stale relative to the editor by the time it
-      // arrives, and writing it into the collection would make the
-      // adoption path replace new content with old.
-      if (isRecentSelfWrite(change.path, change.contentHash)) {
-        continue;
-      }
-
+      // Skip files not loaded in memory (only open files have content rows).
       const existingContent = collections.content.get(change.path);
-
-      // Skip if file isn't loaded in memory, or content hasn't actually changed
-      if (
-        !existingContent ||
-        existingContent.contentHash === change.contentHash
-      ) {
+      if (!existingContent) {
         continue;
       }
 
-      collections.content.utils.writeUpdate({
-        path: change.path,
-        content: change.content,
-        contentHash: change.contentHash,
-      });
-
-      // Keep metadata contentHash in sync so the editor sees the change
-      const existingMetadata = collections.metadata.get(change.path);
-      if (
-        existingMetadata &&
-        existingMetadata.contentHash !== change.contentHash
-      ) {
-        collections.metadata.utils.writeUpdate({
-          ...existingMetadata,
-          contentHash: change.contentHash,
-        });
+      // Nothing new claimed: an event whose payload matches the row (the
+      // common echo of this app's own save) is a no-op, decided by hash
+      // compare alone — no I/O on the autosave hot path.
+      if (existingContent.contentHash === change.contentHash) {
+        continue;
       }
+
+      // A save in flight owns this path. A read here can capture the
+      // pre-rename bytes of that very save — and the save's own echo is
+      // natively consumed, so nothing would correct a row regressed from
+      // such a read. Defer: the save's completion updates the row itself,
+      // and last-writer-wins already governs external changes that land
+      // mid-edit (the editor guards drop them the same way).
+      if (getDocumentSync(change.path).isDirty()) {
+        continue;
+      }
+
+      // Beyond that, a change event is a TRIGGER, not a source. Its payload
+      // was read at emit time and can already be stale by delivery (the
+      // read can race the app's next write; delivery crosses IPC) — writing
+      // it into the row would regress the row to a disk state that no
+      // longer exists, and a remounting editor seeds from the row. So
+      // re-read and sync the row to what disk holds NOW: stale observations
+      // converge to a no-op, while genuine external changes — including a
+      // revert to bytes this app once wrote (`git checkout --`/`git
+      // revert`) — land as themselves and flow on to the editor's adoption
+      // path. Cost: one read of one open file, only when an event claims
+      // the file differs from the row.
+      let content: string;
+      try {
+        content = await readWorkspaceTextFile(change.path);
+      } catch {
+        continue; // deleted/unreadable — the metadata pipeline handles it
+      }
+      updateLoadedContentRow(change.path, content);
     } catch (error) {
       console.error(
         `[file-sync] Error processing content change for ${change.path}:`,

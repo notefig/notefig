@@ -11,8 +11,10 @@ import { useEffect, useRef } from "react";
 import type { Editor, JSONContent } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import type { FileEntry } from "@/utils/fs";
-import { writeFileContent } from "@/entities/files";
-import { isRecentSelfWrite } from "@/utils/file-write-effects";
+import {
+  getOrCreateWorkspaceCollections,
+  writeFileContent,
+} from "@/entities/files";
 import { getDocumentSync } from "@/utils/markdown-conversion";
 import { UI_ONLY_TRANSACTION_META } from "@/components/editor/editor-schema-kit";
 
@@ -69,25 +71,35 @@ export function useEditorFileSync(
   useEffect(() => {
     if (!editor || !file.contentHash || contentError) return;
 
-    // A file state this app wrote itself is never an external change — the
-    // editor already moved past it. Under back-to-back autosaves a render
-    // can deliver the PREVIOUS save's row after DocumentSync's baseline has
-    // advanced to the next one; without this guard that stale row passes
-    // needsAdoption (hashes differ) and, once the in-flight save settles,
-    // setContent rolls the editor back to it (MET-70: deletions/undo/paste
-    // "jumping back"). Same ledger the watcher path consults in
-    // handleContentFileSystemChange.
-    if (isRecentSelfWrite(file.path, file.contentHash)) return;
-
     const sync = getDocumentSync(file.path);
     const fileContent = file.content ?? "";
     if (!sync.needsAdoption(file.contentHash, fileContent)) return;
 
     let cancelled = false;
     const targetHash = file.contentHash;
+    const isCurrentRow = () =>
+      getOrCreateWorkspaceCollections(basePath).content.get(file.path)
+        ?.contentHash === targetHash;
+    // Cheap pre-check: don't parse content the currency check will reject
+    // (stale renders under save bursts are the common visitor here).
+    if (!isCurrentRow()) return;
     (async () => {
       const doc = await sync.prepareAdoption(fileContent);
       if (!doc || cancelled || editor.isDestroyed) return;
+      // Commit-time currency check, in memory — no disk I/O on this path.
+      // The row driving this effect is rendered state and can lag: under
+      // back-to-back autosaves a render can deliver the PREVIOUS save's
+      // row after DocumentSync's baseline advanced (MET-70 deletions/undo/
+      // paste "jumping back"). The content collection is the app's
+      // freshest belief of the file — our own writes update it before disk
+      // persists, and watcher events sync it from a fresh disk read
+      // (handleContentFileSystemChange, the one place that reads). So
+      // adopt only a row that still IS the collection's current state; a
+      // lagging render's newer truth arrives as its own render and re-runs
+      // this effect. This is also what lets a user's own `git checkout --`
+      // / `git revert` — bytes identical to an old save of ours — come
+      // through: the watcher verified it against disk and made it current.
+      if (!isCurrentRow()) return;
       // Edits waiting in the autosave debounce window win over external
       // content, same as an in-flight save (checked inside prepareAdoption).
       if (saveTimerRef.current) return;
