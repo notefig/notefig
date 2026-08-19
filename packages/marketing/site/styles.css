@@ -15,9 +15,31 @@
  */
 .site-stage {
   --takeover: 0;
+  /* How much of the viewport the app occupies before the visitor scrolls.
+     The header and hero measure themselves from it (.site-column), so the
+     page reads as one column and the app is not a stray inset rectangle. */
+  --app-rest-scale: 0.78;
   /* Eased progress: most of the growth happens early in the runway, so the
      app snaps to full screen instead of creeping the last few percent. */
   --takeover-ease: calc(1 - (1 - var(--takeover)) * (1 - var(--takeover)));
+}
+
+/*
+ * The column the app fills at rest. It is scaled about its centre, so its
+ * visible width is exactly this fraction of the page — deriving both from
+ * one variable is what keeps the hero's left edge on the app's left edge.
+ */
+.site-column {
+  width: calc(var(--app-rest-scale) * 100%);
+  margin-inline: auto;
+}
+
+/* On a phone the same fraction leaves too little room to read, so the app
+   sits back less. Both sides read the variable, so they stay aligned. */
+@media (max-width: 640px) {
+  .site-stage {
+    --app-rest-scale: 0.9;
+  }
 }
 
 .site-header {
@@ -33,7 +55,12 @@
   /* Scale, not width/height: the app relayouting on every scroll frame
      would be ruinous, and a transform stays on the compositor. The app
      starts small and far, and rushes forward — parallax, not a pan. */
-  transform: scale(calc(0.78 + 0.22 * var(--takeover-ease)))
+  transform: scale(
+      calc(
+        var(--app-rest-scale) + (1 - var(--app-rest-scale)) *
+          var(--takeover-ease)
+      )
+    )
     translateY(calc((1 - var(--takeover-ease)) * -7vh));
   border-radius: calc((1 - var(--takeover-ease)) * 20px);
   /* Depth, not dimming: the app reads as a lit object floating above the
