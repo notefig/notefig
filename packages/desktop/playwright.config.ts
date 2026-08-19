@@ -36,14 +36,25 @@ export default defineConfig({
       testMatch: /editor\/.*\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
     },
+    // Agent-chat suites against the in-memory mock harness (VITE_AGENT_MOCK
+    // on the shared dev server below; see src/agent/mock-harness.ts).
+    {
+      name: "agent",
+      testMatch: /agent\/.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
 
   webServer: {
-    // Keeps the first-run telemetry consent dialog from opening over the first
-    // workspace route. Note `reuseExistingServer`: a dev server you already had
-    // running does not carry this, so the guarantee holds for a server
-    // Playwright starts (as CI always does).
-    command: "VITE_TELEMETRY_DISABLED=1 npm run dev",
+    // VITE_TELEMETRY_DISABLED keeps the first-run consent dialog from opening
+    // over the first workspace route; VITE_AGENT_MOCK serves agent sessions
+    // from the in-memory mock harness (inert for every non-agent path). Note
+    // `reuseExistingServer`: a dev server you already had running carries
+    // neither env var, so the guarantee holds for a server Playwright starts
+    // (as CI always does) — the agent suite in particular needs the mock, so
+    // start your own dev server with VITE_AGENT_MOCK=1 when running it
+    // alongside one.
+    command: "VITE_TELEMETRY_DISABLED=1 VITE_AGENT_MOCK=1 npm run dev",
     url: "http://localhost:1420",
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,

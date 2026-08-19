@@ -7,13 +7,16 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import {
+  ArrowDown,
   ArrowUp,
   Check,
   ChevronRight,
@@ -34,12 +37,7 @@ import { useActiveHarnesses } from "@/hooks/use-harness-selection";
 import { useAutosizeTextarea } from "@/hooks/use-autosize-textarea";
 import { Button } from "@/components/ui/button";
 import {
-  MessageScroller,
-  MessageScrollerButton,
-  MessageScrollerContent,
-  MessageScrollerItem,
   MessageScrollerProvider,
-  MessageScrollerViewport,
   useMessageScroller,
 } from "@/components/ui/message-scroller";
 import { Markdown } from "@/components/ui/markdown";
@@ -50,6 +48,7 @@ import {
   useTaskTurns,
   type AgentEntry,
   type AgentTaskRow,
+  type AgentTurn,
 } from "@/entities/agents";
 import {
   authenticateAgentTask,
@@ -133,6 +132,16 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
   const [composerEl, setComposerEl] = useState<HTMLDivElement | null>(null);
   const composerHeight = useMeasuredHeight(composerEl);
 
+  // The transcript is virtualized (windowed) and owns its own scroll
+  // container, so it no longer registers with the MessageScrollerProvider
+  // above it (see Transcript's doc comment). The composer still needs to
+  // jump the view to the live edge on send — this ref is Transcript's own
+  // scrollToEnd, handed down as a mutable box rather than context so a
+  // send doesn't need to re-render the transcript to reach it.
+  const transcriptScrollRef = useRef<TranscriptScrollHandle>({
+    scrollToEnd: () => {},
+  });
+
   // The tab can outlive the task row for a frame (workspace teardown clears
   // rows before the layout prunes the tab).
   if (!taskRow) {
@@ -147,12 +156,17 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
     // The dock's content wrapper is a plain flex box, so this root brings
     // its own positioning context for the absolute composer overlay.
     <div className="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
-      <Transcript taskId={taskId} bottomInset={composerHeight} />
+      <Transcript
+        taskId={taskId}
+        bottomInset={composerHeight}
+        scrollHandleRef={transcriptScrollRef}
+      />
       <ComposerOverlay
         containerRef={setComposerEl}
         taskRow={taskRow}
         isRunning={isRunning}
         isLoadingSession={isLoadingSession}
+        transcriptScrollRef={transcriptScrollRef}
       />
     </div>
   );
@@ -191,14 +205,21 @@ function ComposerOverlay({
   taskRow,
   isRunning,
   isLoadingSession,
+  transcriptScrollRef,
 }: {
   containerRef: (el: HTMLDivElement | null) => void;
   taskRow: AgentTaskRow;
   isRunning: boolean;
   isLoadingSession: boolean;
+  /** Transcript's own scroll-to-end (it bypasses the provider below — see
+   *  Transcript's doc comment). */
+  transcriptScrollRef: TranscriptScrollHandleRef;
 }) {
   const { t } = useTranslation();
-  const { scrollToEnd } = useMessageScroller();
+  // The provider's scrollToEnd is a no-op now (nothing registers with it —
+  // Transcript owns its own scroll container), kept only so this hook call
+  // doesn't need the provider ripped out from around the tab.
+  useMessageScroller();
   const taskId = taskRow.taskId;
   const [draft, setDraftState] = useState(() => getComposerDraft(taskId));
   const setDraft = useCallback(
@@ -219,8 +240,8 @@ function ComposerOverlay({
     // Jump to the live edge so the sent message is in view even when the
     // reader had scrolled up into history; this also re-enters follow mode
     // for the streamed reply.
-    scrollToEnd({ behavior: "auto" });
-  }, [draft, taskId, scrollToEnd]);
+    transcriptScrollRef.current.scrollToEnd();
+  }, [draft, taskId, transcriptScrollRef]);
 
   const stopTask = useCallback(() => {
     void cancelAgentTask(taskId);
@@ -381,19 +402,83 @@ export function AuthCard({
   );
 }
 
-/** Memoized (MET-139): the body re-renders on task-row status flips that
- *  don't concern the transcript; its own collection hooks pull in entry
- *  changes regardless. Shallow compare suffices — both props are scalars. */
+/** One transcript row fed to the virtualizer — entries and turn-error
+ *  banners are peers in the same windowed list, so one bottom-anchor/follow
+ *  path covers both. */
+type TranscriptRow =
+  | { kind: "entry"; entry: AgentEntry; queued: boolean }
+  | { kind: "error"; turn: AgentTurn };
+
+function transcriptRowKey(row: TranscriptRow): string {
+  return row.kind === "entry" ? row.entry.id : `error-${row.turn.turnId}`;
+}
+
+/** Per-type height guess for a row that hasn't been measured yet; a close
+ *  estimate keeps the scrollbar honest and minimizes reveal jumps —
+ *  `measureElement` corrects these as rows mount. Values are measured
+ *  medians (incl. the row's own pb-3) over the mock harness's
+ *  representative transcript (MET-149); re-measure if entry styling
+ *  changes materially. */
+function estimateRowSize(row: TranscriptRow): number {
+  if (row.kind === "error") return 44;
+  switch (row.entry.type) {
+    case "tool_call":
+      return 42;
+    case "thought":
+      return 48;
+    case "user":
+      return 86;
+    case "plan":
+      return 164;
+    case "assistant":
+      return 617;
+    default:
+      return 1; // "unknown" entries render null (D4)
+  }
+}
+
+/** Transcript's own scroll-to-end, handed to the composer via a ref (see
+ *  AgentChatTabBody) since the transcript no longer registers with the
+ *  MessageScrollerProvider above it. Always initialized with a real object
+ *  (never null), so the ref type stays non-nullable — a plain mutable box,
+ *  not React's RefObject<T | null>. */
+type TranscriptScrollHandle = { scrollToEnd: () => void };
+type TranscriptScrollHandleRef = { current: TranscriptScrollHandle };
+
+/**
+ * Memoized (MET-139): the body re-renders on task-row status flips that
+ * don't concern the transcript; its own collection hooks pull in entry
+ * changes regardless. Shallow compare suffices — both props are scalars
+ * (the ref object itself is stable across the tab's lifetime).
+ *
+ * Virtualized (MET-149): with 2000+ entries, every streamed chunk
+ * reconciled the *whole* flat list, dropping the app to ~2fps. Only the
+ * on-screen rows (± overscan) exist in the DOM; @tanstack/react-virtual
+ * keeps the scrollbar spanning the full transcript. Bottom-anchoring over
+ * variable-height rows rides the library's chat mode (`anchorTo: "end"`),
+ * whose measurement compensation keeps both the pinned tail and scrolled-up
+ * history from jumping as estimates give way to real sizes.
+ *
+ * This bypasses the @shadcn message-scroller primitive for the transcript
+ * surface: its follow mode walks Content's real DOM children with an
+ * IntersectionObserver, which can't work against a windowed
+ * (absolutely-positioned, subset) child list. The MessageScrollerProvider
+ * above the tab stays mounted only so ComposerOverlay's
+ * useMessageScroller() keeps resolving (a no-op here); the composer reaches
+ * this transcript's real scrollToEnd via `scrollHandleRef`.
+ */
 const Transcript = memo(function Transcript({
   taskId,
   bottomInset,
+  scrollHandleRef,
 }: {
   taskId: string;
   /** Live height of the floating composer overlay (0 until measured). */
   bottomInset: number;
+  /** Filled in with this transcript's real scrollToEnd (see doc comment). */
+  scrollHandleRef: TranscriptScrollHandleRef;
 }) {
   const { t } = useTranslation();
-  const { scrollToEnd } = useMessageScroller();
   const entries = useTaskEntries(taskId);
   const turns = useTaskTurns(taskId);
   const turnErrors = useMemo(
@@ -413,74 +498,201 @@ const Transcript = memo(function Transcript({
     [entries],
   );
 
+  const rows = useMemo<TranscriptRow[]>(
+    () => [
+      ...sortedEntries.map(
+        (entry): TranscriptRow => ({
+          kind: "entry",
+          entry,
+          queued: entry.type === "user" && queuedTurnIds.has(entry.turnId),
+        }),
+      ),
+      ...turnErrors.map((turn): TranscriptRow => ({ kind: "error", turn })),
+    ],
+    [sortedEntries, queuedTurnIds, turnErrors],
+  );
+
+  const scrollElRef = useRef<HTMLDivElement | null>(null);
+  // Live edge tracking for the floating button; re-render-worthy (unlike
+  // the row virtualizer's own internal isAtEnd check) since it drives what
+  // paints. Starts true: a freshly opened/reopened tab lands at the end.
+  const [pinned, setPinned] = useState(true);
+
+  const rowVirtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollElRef.current,
+    estimateSize: (index) => estimateRowSize(rows[index]),
+    getItemKey: (index) => transcriptRowKey(rows[index]),
+    overscan: 8,
+    // Chat mode (see doc comment): follow the live edge on append while
+    // pinned, and compensate scrollTop as the tail's real height replaces
+    // its estimate so a pinned view never jumps while streaming.
+    anchorTo: "end",
+    followOnAppend: "auto",
+    scrollEndThreshold: 48,
+  });
+
+  // Detach is INTENT-based: the re-glue below and the virtualizer's
+  // measurement compensation both move scrollTop programmatically, and
+  // mid-adjustment scroll events routinely observe a large distance-from-
+  // end — deriving `pinned` from distance alone falsely detached during
+  // fast torrents (the old primitive detached on wheel for the same
+  // reason, MET-104). Only a user gesture may detach: a wheel tick
+  // (consumed by the scroll event it produces) or a held pointer
+  // (scrollbar drag / touch pan). Re-arming stays distance-based.
+  const wheelIntent = useRef(false);
+  const pointerHeld = useRef(false);
+  const handleScroll = useCallback(() => {
+    const el = scrollElRef.current;
+    if (!el) return;
+    const distanceFromEnd = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromEnd <= 48) {
+      setPinned(true);
+    } else if (wheelIntent.current || pointerHeld.current) {
+      setPinned(false);
+    }
+    wheelIntent.current = false;
+  }, []);
+
+  // While pinned, `pinned` is the follow-mode authority — re-glue on every
+  // append and on bottomInset changes. followOnAppend("auto") alone loses
+  // the live edge under fast torrents (session/load replay): bursty
+  // appends push the gap past scrollEndThreshold between anchor checks and
+  // it silently stops following without any user scroll. The clearance
+  // spacer (bottomInset) likewise grows without touching row count, so no
+  // append-side mechanism ever sees it.
+  useLayoutEffect(() => {
+    if (pinned) rowVirtualizer.scrollToEnd({ behavior: "auto" });
+  }, [bottomInset, pinned, rows.length, rowVirtualizer]);
+
+  useEffect(() => {
+    scrollHandleRef.current.scrollToEnd = () => {
+      rowVirtualizer.scrollToEnd({ behavior: "auto" });
+      setPinned(true);
+    };
+  }, [rowVirtualizer, scrollHandleRef]);
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
+
   return (
-    // The provider (owning scroll state) wraps the whole tab in AgentChatTab;
-    // this is just the scroll surface. Streamed replies are followed while
-    // the reader is at the live edge; scrolling up detaches until they
-    // return to the bottom (or send, which jumps there).
-    <MessageScroller className="flex-1 min-h-0">
-      {/* The primitive drops follow mode on ANY wheel event — even a
-          downward nudge while already pinned — and only re-arms from a
-          scroll event, which a nudge at max scrollTop never produces
-          (MET-104). Re-arm by hand: a non-upward wheel at the live edge
-          re-enters follow mode via scrollToEnd. */}
-      <MessageScrollerViewport
+    <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden">
+      {/* overflow-anchor:none — browser scroll anchoring's spontaneous
+          scrollTop adjustments during streaming reflow would otherwise read
+          as "user scrolled up" against our own distance-from-bottom check
+          and falsely detach follow mode (MET-104). */}
+      <div
+        ref={scrollElRef}
+        onScroll={handleScroll}
         onWheel={(event) => {
-          const viewport = event.currentTarget;
-          if (
-            event.deltaY >= 0 &&
-            viewport.scrollHeight -
-              viewport.scrollTop -
-              viewport.clientHeight <=
-              48
-          ) {
-            scrollToEnd({ behavior: "auto" });
-          }
+          if (event.deltaY !== 0) wheelIntent.current = true;
         }}
+        onPointerDown={() => {
+          pointerHeld.current = true;
+        }}
+        onPointerUp={() => {
+          pointerHeld.current = false;
+        }}
+        onPointerCancel={() => {
+          pointerHeld.current = false;
+        }}
+        data-transcript-viewport
+        className="size-full min-h-0 min-w-0 overflow-y-auto overscroll-contain px-3 pt-3 [overflow-anchor:none]"
       >
-        {/* The composer clearance is a real spacer child, NOT paddingBottom
-            on Content: padding changes don't alter the content box, so the
-            primitive's ResizeObserver would never see the overlay growing
-            (permission/auth cards) and the last entry would sit under it
-            with follow mode blind to the gap (MET-104). 144px matches the
-            pre-measurement fallback of the old pb-36. */}
-        <MessageScrollerContent className="gap-3 p-3">
-          {sortedEntries.map((entry) => (
-            <MessageScrollerItem key={entry.id} messageId={entry.id}>
-              <EntryView
-                entry={entry}
-                queued={
-                  entry.type === "user" && queuedTurnIds.has(entry.turnId)
-                }
-              />
-            </MessageScrollerItem>
+        <div
+          style={{
+            position: "relative",
+            height: rowVirtualizer.getTotalSize(),
+            width: "100%",
+          }}
+        >
+          {virtualItems.map((virtualRow) => (
+            <TranscriptRowView
+              key={virtualRow.key}
+              virtualRow={virtualRow}
+              row={rows[virtualRow.index]}
+              measureElement={rowVirtualizer.measureElement}
+              t={t}
+            />
           ))}
-          {turnErrors.map((turn) => (
-            <MessageScrollerItem
-              key={turn.turnId}
-              messageId={`error-${turn.turnId}`}
-            >
-              <div className="select-text rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
-                <span className="select-text font-medium">
-                  {t("agentTurnFailed")}
-                </span>{" "}
-                {turn.error}
-              </div>
-            </MessageScrollerItem>
-          ))}
-          <div aria-hidden style={{ height: Math.max(bottomInset, 144) }} />
-        </MessageScrollerContent>
-      </MessageScrollerViewport>
+        </div>
+        {/* The composer clearance is a real spacer, not paddingBottom on the
+            scroll container: a padding change wouldn't grow the scrollable
+            content box, so distance-from-bottom would stay wrong and the
+            last row would sit under the overlay with follow mode blind to
+            the gap (MET-104). 144px matches the pre-measurement fallback of
+            the old pb-36. */}
+        <div aria-hidden style={{ height: Math.max(bottomInset, 144) }} />
+      </div>
       {/* Tucked into the corner just above the composer cards: the overlay
           begins with ~40px of transparent gradient (pt-10), so backing off
           from its measured top keeps the button visually next to the
           prompt box rather than floating high above it. */}
-      <MessageScrollerButton
+      {/* Always mounted, shown/hidden via data-active so it keeps the
+          primitive button's slide-and-fade (MessageScrollerButton's
+          direction=end treatment) without importing its scroll logic. */}
+      <Button
+        variant="outline"
+        size="icon"
+        data-active={!pinned}
+        aria-label={t("agentScrollToEnd")}
+        title={t("agentScrollToEnd")}
+        className="absolute end-3 size-7 rounded-full border-border bg-background text-foreground shadow-sm transition-[translate,scale,opacity] duration-200 hover:bg-muted hover:text-foreground [&_svg]:size-3.5 data-[active=false]:pointer-events-none data-[active=false]:translate-y-full data-[active=false]:scale-95 data-[active=false]:opacity-0 data-[active=false]:duration-400 data-[active=false]:ease-[cubic-bezier(0.7,0,0.84,0)] data-[active=true]:translate-y-0 data-[active=true]:scale-100 data-[active=true]:opacity-100 data-[active=true]:ease-[cubic-bezier(0.23,1,0.32,1)]"
         style={{ bottom: Math.max(bottomInset, 144) - 32 }}
-      />
-    </MessageScroller>
+        onClick={() => {
+          rowVirtualizer.scrollToEnd({ behavior: "smooth" });
+          setPinned(true);
+        }}
+      >
+        <ArrowDown className="size-4" />
+      </Button>
+    </div>
   );
 });
+
+/** One absolutely-positioned virtual row. A separate component (not inlined
+ *  in the map) so its measureElement ref callback is stable per row identity
+ *  rather than a fresh closure every Transcript render. */
+function TranscriptRowView({
+  virtualRow,
+  row,
+  measureElement,
+  t,
+}: {
+  virtualRow: VirtualItem;
+  row: TranscriptRow;
+  measureElement: (node: HTMLDivElement | null) => void;
+  t: (key: string) => string;
+}) {
+  return (
+    <div
+      data-index={virtualRow.index}
+      ref={measureElement}
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        transform: `translateY(${virtualRow.start}px)`,
+      }}
+      // pb-3 (not a flex `gap`, since rows are absolutely positioned):
+      // baked into the measured element itself so estimateRowSize and the
+      // real ResizeObserver measurement agree on what "this row's height"
+      // includes — matches the old gap-3 spacing between transcript items.
+      className="pb-3"
+    >
+      {row.kind === "error" ? (
+        <div className="select-text rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+          <span className="select-text font-medium">
+            {t("agentTurnFailed")}
+          </span>{" "}
+          {row.turn.error}
+        </div>
+      ) : (
+        <EntryView entry={row.entry} queued={row.queued} />
+      )}
+    </div>
+  );
+}
 
 /** Render one transcript entry by type; tool calls are peers of text.
  *  Memoized: a stream chunk replaces only the mutating entry's row object,
@@ -728,9 +940,6 @@ function ToolCallCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
     (item): item is Extract<ToolCallContent, { type: "diff" }> =>
       item.type === "diff",
   );
-  if (diffs.length > 0) {
-    return <ChangedFilesCard diffs={diffs} status={status} />;
-  }
 
   const rawInput = call.rawInput;
   const failed = status === "failed";
@@ -745,6 +954,13 @@ function ToolCallCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
   // a boolean is an explicit user toggle that then sticks.
   const [override, setOverride] = useState<boolean | null>(null);
   const open = override ?? failed;
+
+  // The hook above must precede this branch: a streamed tool call GAINS diff
+  // content mid-flight (pending → completed), and an early return above any
+  // hook would shrink the hook count across renders and tear the tab down.
+  if (diffs.length > 0) {
+    return <ChangedFilesCard diffs={diffs} status={status} />;
+  }
 
   return (
     <div className="w-full text-xs">

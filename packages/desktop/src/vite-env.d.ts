@@ -15,6 +15,9 @@ interface ImportMetaEnv {
   /** Set to "shim" by the e2e shim config; also makes telemetry inert. */
   readonly VITE_TEST_BACKEND?: string;
   readonly VITE_TEST_BACKEND_PORT?: string;
+  /** Set to "1" by the agent e2e config: agent transports come from the
+   * in-memory mock harness (agent/mock-harness.ts) instead of spawning. */
+  readonly VITE_AGENT_MOCK?: string;
 }
 
 // File System Access API types

@@ -8,8 +8,14 @@ import { cn } from "@/lib/utils";
  * synchronously on remount (tab switches, transcript re-renders) with no
  * plain-text flash. Streaming fills it with prefixes of the growing message,
  * hence the LRU cap.
+ *
+ * 2000, not a few hundred: a single long streaming reply mints hundreds of
+ * prefix keys, and under the virtualized transcript (MET-149) scrolling
+ * through history REMOUNTS messages — every eviction there costs a worker
+ * round-trip mid-scroll plus a visible plain-text flash. Entries are strings
+ * of rendered HTML; even a full cache is a few MB.
  */
-const HTML_CACHE_MAX = 300;
+const HTML_CACHE_MAX = 2000;
 const htmlCache = new Map<string, string>();
 
 function cacheGet(text: string): string | undefined {
