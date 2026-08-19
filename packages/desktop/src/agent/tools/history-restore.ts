@@ -4,7 +4,6 @@ import { writeWorkspaceTextFile } from "@/utils/file-sync";
 import { resolveWorkspacePath } from "@/utils/fs";
 import {
   ensureWorkspaceHistoryInitialized,
-  historyGitDir,
 } from "@/utils/history-service";
 
 const InputSchema = z.object({
@@ -27,8 +26,6 @@ export const historyRestore: AgentTool<z.infer<typeof InputSchema>, void> = {
     try {
       const service = await ensureWorkspaceHistoryInitialized(ctx.workspacePath);
       const content = await service.readTextFile({
-        repoPath: ctx.workspacePath,
-        gitDir: historyGitDir(ctx.workspacePath),
         ref: input.checkpoint,
         filepath: resolved.relative,
       });

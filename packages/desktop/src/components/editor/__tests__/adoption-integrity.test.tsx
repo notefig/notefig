@@ -125,6 +125,8 @@ vi.mock("@/adapters", async () => ({
 // Real modules — imported after the adapter mock so they bind to the fake fs.
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
 import { useEditorFileSync } from "../use-editor-file-sync";
+import { getOrCreateWorkspaceCollections } from "@/entities/files";
+import { handleContentFileSystemChange } from "@/utils/file-sync";
 import {
   closeDocumentSync,
   resetConverterForTests,
@@ -182,6 +184,25 @@ async function tick(ms: number) {
   });
 }
 
+/** An external writer's change arriving the way the app sees one: on disk,
+ * verified + row-synced by the watcher handler, then rendered to the hook. */
+async function externalArrival(contentText: string) {
+  fake.store.set(FILE, { content: contentText, modifiedAt: new Date() });
+  await handleContentFileSystemChange(
+    {
+      changes: [
+        {
+          path: FILE,
+          content: contentText,
+          contentHash: calculateContentHash(contentText),
+        },
+      ],
+    },
+    WS,
+  );
+  deliverEntry(entryFor(contentText));
+}
+
 /** Type text into the editor character by character, like keyboard input. */
 async function type(text: string, msPerChar = 3) {
   await act(async () => {
@@ -207,6 +228,17 @@ beforeEach(async () => {
   fake.store.set(FILE, {
     content: INITIAL,
     modifiedAt: new Date(Date.now() - 60_000),
+  });
+
+  // Adoption commits only rows that still match the content collection's
+  // current state, so this harness runs the real collection: started and
+  // seeded like an open file in the app.
+  const { content } = getOrCreateWorkspaceCollections(WS);
+  await content.preload();
+  content.utils.writeUpsert({
+    path: FILE,
+    content: INITIAL,
+    contentHash: calculateContentHash(INITIAL),
   });
 
   editor = new Editor({
@@ -281,9 +313,10 @@ describe("adoption integrity: self-writes vs external writes vs typing", () => {
     await type("Mine");
     await flushSave();
 
-    // Content this app never wrote: not in the ledger, hash unknown.
     const external = "replaced by another program entirely";
-    deliverEntry(entryFor(external));
+    await act(async () => {
+      await externalArrival(external);
+    });
     await tick(300);
 
     expect(editor.state.doc.textContent).toBe(external);
@@ -301,9 +334,10 @@ describe("adoption integrity: self-writes vs external writes vs typing", () => {
     const base = editor.state.doc.textContent;
 
     // External change lands mid-burst: the debounce timer / in-flight save
-    // guards must hold it off, and the user's keystrokes must survive.
+    // guards must hold it off, and the user's keystrokes must survive
+    // (last-writer-wins).
     await type("Typing");
-    deliverEntry(entryFor("external mid-typing clobber attempt"));
+    await externalArrival("external mid-typing clobber attempt");
     await type("Continues");
     await flushSave();
     await tick(300);

@@ -39,8 +39,10 @@ vi.mock("@/utils/git-exclude", () => ({
   ensureExcludeLines: ensureExcludeLinesMock,
 }));
 
+import { IsomorphicGitService } from "@notefig/git";
 import {
   clearWorkspaceHistoryServices,
+  disposeWorkspaceHistoryService,
   ensureWorkspaceHistoryInitialized,
   getOrCreateWorkspaceHistoryService,
   historyGitDir,
@@ -75,21 +77,23 @@ describe("history-service", () => {
     expect(historyGitDir("/workspace/")).toBe(GIT_DIR);
   });
 
-  it("builds the storage host lock-scoped to the history gitdir, not the workspace", () => {
+  it("binds the service to the history repo: host lock scope AND repo ref", () => {
     getOrCreateWorkspaceHistoryService(WS);
 
     expect(createGitStorageHostMock).toHaveBeenCalledWith(fsMock, GIT_DIR);
+    // The repo identity is bound once, at construction — calls can no
+    // longer aim operations at another repo's gitdir.
+    expect(vi.mocked(IsomorphicGitService)).toHaveBeenCalledWith(
+      expect.anything(),
+      { repoPath: WS, gitDir: GIT_DIR },
+    );
   });
 
   it("fresh workspace: inits at the new gitdir without touching migration", async () => {
     await ensureWorkspaceHistoryInitialized(WS);
 
     expect(moveDirectoryMock).not.toHaveBeenCalled();
-    expect(initMock).toHaveBeenCalledWith({
-      repoPath: WS,
-      gitDir: GIT_DIR,
-      defaultBranch: "main",
-    });
+    expect(initMock).toHaveBeenCalledWith({ defaultBranch: "main" });
   });
 
   it("legacy gitdir present: renames it to .metrists/.git before init", async () => {
@@ -124,9 +128,7 @@ describe("history-service", () => {
 
     await expect(ensureWorkspaceHistoryInitialized(WS)).resolves.toBeTruthy();
 
-    expect(initMock).toHaveBeenCalledWith(
-      expect.objectContaining({ gitDir: GIT_DIR }),
-    );
+    expect(initMock).toHaveBeenCalled();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
@@ -171,5 +173,41 @@ describe("history-service", () => {
     await expect(ensureWorkspaceHistoryInitialized(WS)).resolves.toBeTruthy();
 
     warn.mockRestore();
+  });
+
+  // Registry semantics — this is the ONLY per-workspace git service registry
+  // (entities/git.ts delegates here rather than keeping a second one aimed
+  // at a different gitdir).
+  it("returns a singleton service per normalized workspace", () => {
+    const first = getOrCreateWorkspaceHistoryService("/workspace/");
+    const second = getOrCreateWorkspaceHistoryService("/workspace");
+
+    expect(first).toBe(second);
+    expect(createGitStorageHostMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("initializes once per in-flight workspace", async () => {
+    await Promise.all([
+      ensureWorkspaceHistoryInitialized(WS),
+      ensureWorkspaceHistoryInitialized(WS),
+    ]);
+
+    expect(initMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-runs init on later ensure calls", async () => {
+    await ensureWorkspaceHistoryInitialized(WS);
+    await ensureWorkspaceHistoryInitialized(WS);
+
+    expect(initMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("disposes a workspace's service entry", () => {
+    const first = getOrCreateWorkspaceHistoryService(WS);
+    disposeWorkspaceHistoryService(WS);
+    const second = getOrCreateWorkspaceHistoryService(WS);
+
+    expect(first).not.toBe(second);
+    expect(createGitStorageHostMock).toHaveBeenCalledTimes(2);
   });
 });

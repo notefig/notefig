@@ -36,147 +36,18 @@ import { createElement, Fragment } from "react";
 import { Editor } from "@tiptap/core";
 import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
 
-// In-memory platform adapter with jittered async latency (hoisted for vi.mock)
-const fake = vi.hoisted(() => {
-  interface FakeFile {
-    content: string;
-    modifiedAt: Date;
-    createdAt: Date;
-  }
-
-  const store = new Map<string, FakeFile>();
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-  // Deterministic PRNG, reseedable per run so each profile can be replayed
-  // under several interleavings without flaking.
-  let seed = 42;
-  const reseed = (n: number) => {
-    seed = n;
-  };
-  const rand = () => {
-    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-    return seed / 0x7fffffff;
-  };
-  const writeLatency = () => 2 + Math.floor(rand() * 20);
-  const readLatency = () => 1 + Math.floor(rand() * 10);
-
-  const listeners = new Set<(event: unknown) => void>();
-
-  const hooks: {
-    beforeWrite?: (path: string, newContent: string) => void;
-    afterWrite?: (path: string) => void;
-  } = {};
-
-  const adapter = {
-    async readDirectory(path: string) {
-      await sleep(readLatency());
-      const prefix = path.endsWith("/") ? path : path + "/";
-      return {
-        ok: true as const,
-        value: [...store.keys()].filter((p) => p.startsWith(prefix)),
-      };
-    },
-
-    async getMetadata(paths: string[]) {
-      await sleep(readLatency());
-      const succeeded = paths
-        .filter((p) => store.has(p))
-        .map((p) => {
-          const f = store.get(p)!;
-          return {
-            path: p,
-            type: "file" as const,
-            size: f.content.length,
-            modifiedAt: f.modifiedAt,
-            createdAt: f.createdAt,
-          };
-        });
-      return { succeeded, failed: [] };
-    },
-
-    async readFiles(paths: string[]) {
-      await sleep(readLatency());
-      const succeeded = paths
-        .filter((p) => store.has(p))
-        .map((p) => ({ path: p, content: store.get(p)!.content }));
-      return { succeeded, failed: [] };
-    },
-
-    async writeFiles(files: { path: string; content: string }[]) {
-      for (const f of files) {
-        hooks.beforeWrite?.(f.path, f.content);
-      }
-      await sleep(writeLatency());
-      for (const f of files) {
-        const existing = store.get(f.path);
-        store.set(f.path, {
-          content: f.content,
-          modifiedAt: new Date(),
-          createdAt: existing?.createdAt ?? new Date(),
-        });
-      }
-      for (const f of files) {
-        hooks.afterWrite?.(f.path);
-      }
-      return { succeeded: files.map((f) => f.path), failed: [] };
-    },
-
-    async createFiles(paths: string[]) {
-      return adapter.writeFiles(paths.map((path) => ({ path, content: "" })));
-    },
-
-    async createDirectories(paths: string[]) {
-      return { succeeded: paths, failed: [] };
-    },
-
-    async deleteFiles(paths: string[]) {
-      await sleep(writeLatency());
-      paths.forEach((p) => store.delete(p));
-      return { succeeded: paths, failed: [] };
-    },
-
-    async deleteDirectories(paths: string[]) {
-      return { succeeded: paths, failed: [] };
-    },
-
-    async moveFile() {
-      return { ok: true as const, value: undefined };
-    },
-
-    async moveDirectory() {
-      return { ok: true as const, value: undefined };
-    },
-
-    onFsEvent(cb: (event: unknown) => void) {
-      listeners.add(cb);
-      return () => listeners.delete(cb);
-    },
-
-    async startWatchingMetadata() {},
-    async startWatchingContent() {},
-    stopWatching() {},
-
-    async pickDirectory() {
-      return null;
-    },
-    async promptText() {
-      return null;
+vi.mock("@/adapters", async () => {
+  const { fake } = await import("@/testing/fake-fs-adapter");
+  return {
+    platformAdapter: {
+      fs: fake.adapter,
+      ui: fake.adapter,
+      db: (await import("@/testing/node-db")).createNodeTestDb(),
     },
   };
-
-  return { store, adapter, listeners, hooks, reseed };
 });
 
-// One flat fake serving both surfaces it touches — the extra keys on each
-// are harmless, and keeping a single object keeps the fs state in one place.
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    fs: fake.adapter,
-    ui: fake.adapter,
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
+import { fake, installWatcherSim } from "@/testing/fake-fs-adapter";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
 import { useEditorFileSync } from "../use-editor-file-sync";
 import {
@@ -329,44 +200,13 @@ async function setupWorkspace(seed: number) {
     createdAt: new Date(Date.now() - 60_000),
   });
 
-  // Desktop (Tauri) watcher semantics, mirrored from src-tauri (see the
-  // integrity test for the full rationale): register-hash-before-write,
-  // read-at-handling-time, consume-one-or-emit-external, two events per
-  // atomic write.
-  const appWrites: { path: string; hash: string }[] = [];
-  let eventSeed = seed ^ 0x5bd1e995;
-  const eventDelay = () => {
-    eventSeed = (eventSeed * 1103515245 + 12345) & 0x7fffffff;
-    return 5 + (eventSeed % 60);
-  };
-  fake.hooks.beforeWrite = (path, newContent) => {
-    appWrites.push({ path, hash: calculateContentHash(newContent) });
-  };
-  const scheduleFsEvent = (path: string) => {
-    pendingEvents.push(
-      (async () => {
-        await new Promise((r) => setTimeout(r, eventDelay()));
-        const content = fake.store.get(path)?.content ?? "";
-        const hash = calculateContentHash(content);
-        const index = appWrites.findIndex(
-          (w) => w.path === path && w.hash === hash,
-        );
-        if (index !== -1) {
-          appWrites.splice(index, 1);
-          return;
-        }
-        await new Promise((r) => setTimeout(r, eventDelay()));
-        const event: ContentChangeEvent = {
-          changes: [{ path, content, contentHash: hash }],
-        };
-        await handleContentFileSystemChange(event, WS);
-      })(),
-    );
-  };
-  fake.hooks.afterWrite = (path) => {
-    scheduleFsEvent(path);
-    scheduleFsEvent(path);
-  };
+  // Desktop (Tauri) watcher semantics (see @/testing/fake-fs-adapter).
+  installWatcherSim({
+    fakeFs: fake,
+    seed,
+    pendingEvents,
+    onExternalChange: (event) => handleContentFileSystemChange(event, WS),
+  });
 
   editor = new Editor({
     extensions: editorExtensions,

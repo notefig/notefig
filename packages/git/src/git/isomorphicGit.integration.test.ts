@@ -185,8 +185,11 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
   });
 
   it("maps host storage through isomorphic-git init", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, {
+      repoPath: repoDir,
+      gitDir: join(repoDir, ".git"),
+    });
+    await service.init({ defaultBranch: "main" });
 
     const headFile = await host.readFile(join(repoDir, ".git/HEAD"));
     const headText = Buffer.from(headFile).toString("utf8");
@@ -198,13 +201,13 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
   });
 
   it("repairs incomplete .git metadata on init", async () => {
-    const service = new IsomorphicGitService(host);
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
 
     await host.createDir(join(repoDir, ".git"));
     await host.createDir(join(repoDir, ".git/objects"));
     await host.createDir(join(repoDir, ".git/refs"));
 
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    await service.init({ defaultBranch: "main" });
 
     const headFile = await host.readFile(join(repoDir, ".git/HEAD"));
     const headText = Buffer.from(headFile).toString("utf8");
@@ -216,10 +219,10 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
   });
 
   it("writes control files on repeated init calls", async () => {
-    const service = new IsomorphicGitService(host);
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
 
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    await service.init({ defaultBranch: "main" });
+    await service.init({ defaultBranch: "main" });
 
     const headFile = await host.readFile(join(repoDir, ".git/HEAD"));
     const configFile = await host.readFile(join(repoDir, ".git/config"));
@@ -229,14 +232,14 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
   });
 
   it("returns success when kernel init fails but control files exist", async () => {
-    const service = new IsomorphicGitService(host);
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
     const initSpy = jest
       .spyOn(git, "init")
       .mockRejectedValue(new Error("forced init failure"));
 
     try {
       await expect(
-        service.init({ repoPath: repoDir, defaultBranch: "main" }),
+        service.init({ defaultBranch: "main" }),
       ).resolves.toBeUndefined();
 
       const headFile = await host.readFile(join(repoDir, ".git/HEAD"));
@@ -253,14 +256,17 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
 
   it("throws when kernel init fails and control files are missing", async () => {
     const missingStatHost = new MissingControlFilesStatHost(repoDir);
-    const service = new IsomorphicGitService(missingStatHost);
+    const service = new IsomorphicGitService(missingStatHost, {
+      repoPath: repoDir,
+      gitDir: join(repoDir, ".git"),
+    });
     const initSpy = jest
       .spyOn(git, "init")
       .mockRejectedValue(new Error("forced init failure"));
 
     try {
       await expect(
-        service.init({ repoPath: repoDir, defaultBranch: "main" }),
+        service.init({ defaultBranch: "main" }),
       ).rejects.toMatchObject({
         name: "GitError",
         code: "CorruptRepository",
@@ -271,29 +277,29 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
   });
 
   it("reports untracked files before first commit", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
     await host.writeFileAtomic(
       join(repoDir, "note.md"),
       new TextEncoder().encode("hello\n"),
     );
 
-    const before = await service.status({ repoPath: repoDir });
+    const before = await service.status();
     expect(before.untracked).toEqual(["note.md"]);
   });
 
   it("returns empty log for initialized repo without commits", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
 
-    await expect(service.log({ repoPath: repoDir })).resolves.toEqual([]);
+    await expect(service.log()).resolves.toEqual([]);
   });
 
   it("returns status for initialized repo without commits", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
 
-    const status = await service.status({ repoPath: repoDir });
+    const status = await service.status();
 
     expect(status.repoPath).toBe(repoDir);
     expect(status.currentBranch).toBe("main");
@@ -304,25 +310,24 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
   });
 
   it("throws RepoNotFound for status when repository is not initialized", async () => {
-    const service = new IsomorphicGitService(host);
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
 
-    await expect(service.status({ repoPath: repoDir })).rejects.toMatchObject({
+    await expect(service.status()).rejects.toMatchObject({
       name: "GitError",
       code: "RepoNotFound",
     });
   });
 
   it("stages and commits via mock storage host", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
     await host.writeFileAtomic(
       join(repoDir, "note.md"),
       new TextEncoder().encode("hello\n"),
     );
 
-    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    await service.add({ filepath: ["note.md"] });
     const commit = await service.commit({
-      repoPath: repoDir,
       message: "Add note",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
@@ -331,66 +336,62 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
   });
 
   it("lists branches and supports branch creation", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
     await host.writeFileAtomic(
       join(repoDir, "a.md"),
       new TextEncoder().encode("a\n"),
     );
-    await service.add({ repoPath: repoDir, filepath: ["a.md"] });
+    await service.add({ filepath: ["a.md"] });
     await service.commit({
-      repoPath: repoDir,
       message: "init",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
     });
 
-    await service.createBranch({ repoPath: repoDir, ref: "feature/test" });
+    await service.createBranch({ ref: "feature/test" });
 
-    const branches = await service.listBranches({ repoPath: repoDir });
+    const branches = await service.listBranches();
     expect(branches).toEqual(expect.arrayContaining(["main", "feature/test"]));
   });
 
   it("supports switch branch and log per ref", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
     await host.writeFileAtomic(
       join(repoDir, "base.md"),
       new TextEncoder().encode("base\n"),
     );
-    await service.add({ repoPath: repoDir, filepath: ["base.md"] });
+    await service.add({ filepath: ["base.md"] });
     const baseCommit = await service.commit({
-      repoPath: repoDir,
       message: "base",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
     });
 
-    await service.createBranch({ repoPath: repoDir, ref: "feature/test" });
-    await service.switchBranch({ repoPath: repoDir, ref: "feature/test" });
+    await service.createBranch({ ref: "feature/test" });
+    await service.switchBranch({ ref: "feature/test" });
 
     await host.writeFileAtomic(
       join(repoDir, "feature.md"),
       new TextEncoder().encode("feature\n"),
     );
-    await service.add({ repoPath: repoDir, filepath: ["feature.md"] });
+    await service.add({ filepath: ["feature.md"] });
     const featureCommit = await service.commit({
-      repoPath: repoDir,
       message: "feature",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
     });
 
-    const featureStatus = await service.status({ repoPath: repoDir });
+    const featureStatus = await service.status();
     expect(featureStatus.currentBranch).toBe("feature/test");
 
-    await service.switchBranch({ repoPath: repoDir, ref: "main" });
-    const mainStatus = await service.status({ repoPath: repoDir });
+    await service.switchBranch({ ref: "main" });
+    const mainStatus = await service.status();
     expect(mainStatus.currentBranch).toBe("main");
 
-    const mainLog = await service.log({ repoPath: repoDir, ref: "main" });
+    const mainLog = await service.log({ ref: "main" });
     const featureLog = await service.log({
-      repoPath: repoDir,
       ref: "feature/test",
     });
 
@@ -400,28 +401,27 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
   });
 
   it("reports status transitions and restores file with checkoutPaths", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
     await host.writeFileAtomic(
       join(repoDir, "note.md"),
       new TextEncoder().encode("hello\n"),
     );
 
-    const untracked = await service.status({ repoPath: repoDir });
+    const untracked = await service.status();
     expect(untracked.untracked).toEqual(["note.md"]);
 
-    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
-    const staged = await service.status({ repoPath: repoDir });
+    await service.add({ filepath: ["note.md"] });
+    const staged = await service.status();
     expect(staged.staged).toEqual([{ path: "note.md", type: "added" }]);
 
     await service.commit({
-      repoPath: repoDir,
       message: "Add note",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
     });
 
-    const clean = await service.status({ repoPath: repoDir });
+    const clean = await service.status();
     expect(clean.staged).toEqual([]);
     expect(clean.unstaged).toEqual([]);
     expect(clean.untracked).toEqual([]);
@@ -430,24 +430,23 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
       join(repoDir, "note.md"),
       new TextEncoder().encode("changed\n"),
     );
-    const dirty = await service.status({ repoPath: repoDir });
+    const dirty = await service.status();
     expect(dirty.unstaged).toEqual([{ path: "note.md", type: "modified" }]);
 
     await service.checkoutPaths({
-      repoPath: repoDir,
       filepaths: ["note.md"],
     });
 
     const restoredText = await readFile(join(repoDir, "note.md"), "utf8");
     expect(restoredText).toBe("hello\n");
 
-    const restored = await service.status({ repoPath: repoDir });
+    const restored = await service.status();
     expect(restored.unstaged).toEqual([]);
   });
 
   it("reports staged modifications and unstaged deletion accurately", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
 
     await host.writeFileAtomic(
       join(repoDir, "2026-05-05.md"),
@@ -463,11 +462,9 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     );
 
     await service.add({
-      repoPath: repoDir,
       filepath: ["2026-05-05.md", "2026-05-06.md", "h.md"],
     });
     await service.commit({
-      repoPath: repoDir,
       message: "baseline",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
@@ -484,11 +481,10 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     await host.deleteFile(join(repoDir, "h.md"));
 
     await service.add({
-      repoPath: repoDir,
       filepath: ["2026-05-05.md", "2026-05-06.md"],
     });
 
-    const status = await service.status({ repoPath: repoDir });
+    const status = await service.status();
 
     expect(status.staged).toEqual(
       expect.arrayContaining([
@@ -502,29 +498,28 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
   });
 
   it("removes deleted files from index before commit", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
 
     await host.writeFileAtomic(
       join(repoDir, "note.md"),
       new TextEncoder().encode("hello\n"),
     );
-    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    await service.add({ filepath: ["note.md"] });
     await service.commit({
-      repoPath: repoDir,
       message: "baseline",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
     });
 
     await host.deleteFile(join(repoDir, "note.md"));
-    const before = await service.status({ repoPath: repoDir });
+    const before = await service.status();
     expect(before.unstaged).toEqual(
       expect.arrayContaining([{ path: "note.md", type: "deleted" }]),
     );
 
-    await service.remove({ repoPath: repoDir, filepath: "note.md" });
-    const after = await service.status({ repoPath: repoDir });
+    await service.remove({ filepath: "note.md" });
+    const after = await service.status();
     expect(after.unstaged).toEqual([]);
     expect(after.staged).toEqual(
       expect.arrayContaining([{ path: "note.md", type: "deleted" }]),
@@ -532,8 +527,8 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
   });
 
   it("addAllAndCommit stages mixed changes and commits once", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
 
     await host.writeFileAtomic(
       join(repoDir, "keep.md"),
@@ -544,11 +539,9 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
       new TextEncoder().encode("delete\n"),
     );
     await service.add({
-      repoPath: repoDir,
       filepath: ["keep.md", "delete.md"],
     });
     await service.commit({
-      repoPath: repoDir,
       message: "baseline",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
@@ -565,22 +558,21 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     );
 
     const oid = await service.addAllAndCommit({
-      repoPath: repoDir,
       message: "checkpoint",
       author: { name: "Metrists", email: "dev@metrists.app" },
     });
 
     expect(oid).toBeTruthy();
 
-    const status = await service.status({ repoPath: repoDir });
+    const status = await service.status();
     expect(status.staged).toEqual([]);
     expect(status.unstaged).toEqual([]);
     expect(status.untracked).toEqual([]);
   });
 
   it("addAllAndCommit stages mixed changes including deletions", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
 
     await host.writeFileAtomic(
       join(repoDir, "keep.md"),
@@ -591,11 +583,9 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
       new TextEncoder().encode("delete me\n"),
     );
     await service.add({
-      repoPath: repoDir,
       filepath: ["keep.md", "delete-me.md"],
     });
     await service.commit({
-      repoPath: repoDir,
       message: "baseline",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
@@ -612,25 +602,23 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     );
 
     const oid = await service.addAllAndCommit({
-      repoPath: repoDir,
       message: "checkpoint",
       author: { name: "Metrists", email: "dev@metrists.app" },
     });
 
     expect(oid).toBeTruthy();
 
-    const status = await service.status({ repoPath: repoDir });
+    const status = await service.status();
     expect(status.staged).toEqual([]);
     expect(status.unstaged).toEqual([]);
     expect(status.untracked).toEqual([]);
   });
 
   it("addAllAndCommit returns null when there are no changes", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
 
     const oid = await service.addAllAndCommit({
-      repoPath: repoDir,
       message: "noop",
       author: { name: "Metrists", email: "dev@metrists.app" },
     });
@@ -639,8 +627,8 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
   });
 
   it("addAllAndCommit stages mixed changes and creates commit", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
 
     await host.writeFileAtomic(
       join(repoDir, "a.md"),
@@ -650,9 +638,8 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
       join(repoDir, "b.md"),
       new TextEncoder().encode("b\n"),
     );
-    await service.add({ repoPath: repoDir, filepath: ["a.md", "b.md"] });
+    await service.add({ filepath: ["a.md", "b.md"] });
     await service.commit({
-      repoPath: repoDir,
       message: "baseline",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
@@ -669,30 +656,28 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     await host.deleteFile(join(repoDir, "b.md"));
 
     const oid = await service.addAllAndCommit({
-      repoPath: repoDir,
       message: "mixed changes",
       author: { name: "Metrists", email: "dev@metrists.app" },
     });
 
     expect(oid).toHaveLength(40);
 
-    const clean = await service.status({ repoPath: repoDir });
+    const clean = await service.status();
     expect(clean.staged).toEqual([]);
     expect(clean.unstaged).toEqual([]);
     expect(clean.untracked).toEqual([]);
   });
 
   it("revertCommit creates a new commit restoring parent content", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
 
     await host.writeFileAtomic(
       join(repoDir, "note.md"),
       new TextEncoder().encode("one\n"),
     );
-    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    await service.add({ filepath: ["note.md"] });
     const baseCommit = await service.commit({
-      repoPath: repoDir,
       message: "base",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
@@ -702,16 +687,14 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
       join(repoDir, "note.md"),
       new TextEncoder().encode("two\n"),
     );
-    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    await service.add({ filepath: ["note.md"] });
     const changeCommit = await service.commit({
-      repoPath: repoDir,
       message: "change",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
     });
 
     const revertCommit = await service.revertCommit({
-      repoPath: repoDir,
       oid: changeCommit,
       author: { name: "Metrists", email: "dev@metrists.app" },
     });
@@ -721,23 +704,22 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     const restoredText = await readFile(join(repoDir, "note.md"), "utf8");
     expect(restoredText).toBe("one\n");
 
-    const log = await service.log({ repoPath: repoDir });
+    const log = await service.log();
     expect(log[0]?.oid).toBe(revertCommit);
     expect(log[1]?.oid).toBe(changeCommit);
     expect(log[2]?.oid).toBe(baseCommit);
   });
 
   it("revertCommit detects conflicts when HEAD has diverged", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
 
     await host.writeFileAtomic(
       join(repoDir, "note.md"),
       new TextEncoder().encode("one\n"),
     );
-    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    await service.add({ filepath: ["note.md"] });
     await service.commit({
-      repoPath: repoDir,
       message: "base",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
@@ -747,9 +729,8 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
       join(repoDir, "note.md"),
       new TextEncoder().encode("two\n"),
     );
-    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    await service.add({ filepath: ["note.md"] });
     const changeCommit = await service.commit({
-      repoPath: repoDir,
       message: "change",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
@@ -759,9 +740,8 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
       join(repoDir, "note.md"),
       new TextEncoder().encode("three\n"),
     );
-    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    await service.add({ filepath: ["note.md"] });
     await service.commit({
-      repoPath: repoDir,
       message: "change again",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
@@ -769,7 +749,6 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
 
     await expect(
       service.revertCommit({
-        repoPath: repoDir,
         oid: changeCommit,
         author: { name: "Metrists", email: "dev@metrists.app" },
       }),
@@ -783,16 +762,15 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
   });
 
   it("revertCommit is a no-op when HEAD is already reverted", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
 
     await host.writeFileAtomic(
       join(repoDir, "note.md"),
       new TextEncoder().encode("one\n"),
     );
-    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    await service.add({ filepath: ["note.md"] });
     await service.commit({
-      repoPath: repoDir,
       message: "base",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
@@ -802,9 +780,8 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
       join(repoDir, "note.md"),
       new TextEncoder().encode("two\n"),
     );
-    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    await service.add({ filepath: ["note.md"] });
     const changeCommit = await service.commit({
-      repoPath: repoDir,
       message: "change",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
@@ -812,7 +789,6 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
 
     // Revert the change once
     await service.revertCommit({
-      repoPath: repoDir,
       oid: changeCommit,
       author: { name: "Metrists", email: "dev@metrists.app" },
     });
@@ -822,28 +798,26 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
 
     // Revert the same commit again — HEAD already matches parent
     const secondRevert = await service.revertCommit({
-      repoPath: repoDir,
       oid: changeCommit,
       author: { name: "Metrists", email: "dev@metrists.app" },
     });
 
     expect(secondRevert).toBeNull();
 
-    const log = await service.log({ repoPath: repoDir });
+    const log = await service.log();
     expect(log).toHaveLength(3);
   });
 
   it("abortRevert restores working tree to HEAD", async () => {
-    const service = new IsomorphicGitService(host);
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
 
     await host.writeFileAtomic(
       join(repoDir, "note.md"),
       new TextEncoder().encode("one\n"),
     );
-    await service.add({ repoPath: repoDir, filepath: ["note.md"] });
+    await service.add({ filepath: ["note.md"] });
     await service.commit({
-      repoPath: repoDir,
       message: "base",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
@@ -854,12 +828,12 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
       new TextEncoder().encode("dirty\n"),
     );
 
-    await service.abortRevert({ repoPath: repoDir });
+    await service.abortRevert();
 
     const currentText = await readFile(join(repoDir, "note.md"), "utf8");
     expect(currentText).toBe("one\n");
 
-    const status = await service.status({ repoPath: repoDir });
+    const status = await service.status();
     expect(status.staged).toEqual([]);
     expect(status.unstaged).toEqual([]);
   });
@@ -931,7 +905,10 @@ describe("IsomorphicGitService with a detached gitDir (gitdir separate from work
     workspaceDir = await mkdtemp(join(tmpdir(), "detached-gitdir-it-"));
     gitDir = join(workspaceDir, ".meta", ".git");
     host = new MockPlatformStorageHost(workspaceDir);
-    service = new IsomorphicGitService(host);
+    service = new IsomorphicGitService(host, {
+      repoPath: workspaceDir,
+      gitDir,
+    });
   });
 
   afterEach(async () => {
@@ -939,11 +916,7 @@ describe("IsomorphicGitService with a detached gitDir (gitdir separate from work
   });
 
   it("never writes into <repoPath>/.git when gitDir is set", async () => {
-    await service.init({
-      repoPath: workspaceDir,
-      gitDir,
-      defaultBranch: "main",
-    });
+    await service.init({ defaultBranch: "main" });
 
     const defaultGitDir = await host.stat(join(workspaceDir, ".git"));
     expect(defaultGitDir.exists).toBe(false);
@@ -955,16 +928,10 @@ describe("IsomorphicGitService with a detached gitDir (gitdir separate from work
   });
 
   it("round-trips checkpoint -> log -> diff (readTextFile) -> restore on a single file", async () => {
-    await service.init({
-      repoPath: workspaceDir,
-      gitDir,
-      defaultBranch: "main",
-    });
+    await service.init({ defaultBranch: "main" });
 
     await writeFile(join(workspaceDir, "notes.md"), "# Notes\n\nfirst draft\n");
     const oid1 = await service.addAllAndCommit({
-      repoPath: workspaceDir,
-      gitDir,
       message: "checkpoint: first draft",
       author: { name: "claude-code", email: "agent@metrists.local" },
     });
@@ -975,16 +942,12 @@ describe("IsomorphicGitService with a detached gitDir (gitdir separate from work
       "# Notes\n\nfirst draft\n\nsecond paragraph\n",
     );
     const oid2 = await service.addAllAndCommit({
-      repoPath: workspaceDir,
-      gitDir,
       message: "checkpoint: add second paragraph",
       author: { name: "claude-code", email: "agent@metrists.local" },
     });
     expect(oid2).toBeTruthy();
 
     const commits = await service.log({
-      repoPath: workspaceDir,
-      gitDir,
       filepath: "notes.md",
     });
     expect(commits.map((c) => c.commit.message.trim())).toEqual([
@@ -993,14 +956,10 @@ describe("IsomorphicGitService with a detached gitDir (gitdir separate from work
     ]);
 
     const contentAtOid1 = await service.readTextFile({
-      repoPath: workspaceDir,
-      gitDir,
       ref: oid1 as string,
       filepath: "notes.md",
     });
     const contentAtOid2 = await service.readTextFile({
-      repoPath: workspaceDir,
-      gitDir,
       ref: oid2 as string,
       filepath: "notes.md",
     });
@@ -1014,11 +973,15 @@ describe("IsomorphicGitService with a detached gitDir (gitdir separate from work
   });
 
   it("two repos over one worktree stay independent when the primary excludes the secondary's dir", async () => {
-    // The worktree's OWN default-gitdir repo (no gitDir override).
-    await service.init({ repoPath: workspaceDir, defaultBranch: "main" });
-    await writeFile(join(workspaceDir, "README.md"), "# project readme\n");
-    await service.addAllAndCommit({
+    // The worktree's OWN repo, gitdir at the conventional <dir>/.git —
+    // its own service instance, exactly as two repos require two bindings.
+    const primaryService = new IsomorphicGitService(host, {
       repoPath: workspaceDir,
+      gitDir: join(workspaceDir, ".git"),
+    });
+    await primaryService.init({ defaultBranch: "main" });
+    await writeFile(join(workspaceDir, "README.md"), "# project readme\n");
+    await primaryService.addAllAndCommit({
       message: "init project repo",
       author: { name: "user", email: "user@example.com" },
     });
@@ -1031,20 +994,14 @@ describe("IsomorphicGitService with a detached gitDir (gitdir separate from work
     await writeFile(primaryExclude, `${stock}.meta/\n`);
 
     // The SECONDARY detached-gitdir repo, same worktree.
-    await service.init({
-      repoPath: workspaceDir,
-      gitDir,
-      defaultBranch: "main",
-    });
+    await service.init({ defaultBranch: "main" });
     await writeFile(join(workspaceDir, "notes.md"), "draft\n");
     await service.addAllAndCommit({
-      repoPath: workspaceDir,
-      gitDir,
       message: "checkpoint",
       author: { name: "second", email: "second@example.com" },
     });
 
-    const ownStatus = await service.status({ repoPath: workspaceDir });
+    const ownStatus = await primaryService.status();
     // notes.md was never added to the primary repo, README.md is committed,
     // and the exclude hides everything under .meta/ — so the primary's
     // status must contain exactly one untracked path. A tolerant

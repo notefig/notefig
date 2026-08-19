@@ -48,7 +48,7 @@ describeRealGit("[real-git] IsomorphicGitService concurrency & lock safety", () 
 
   beforeEach(async () => {
     repoDir = await mkdtemp(join(tmpdir(), "metrists-git-concurrency-"));
-    service = new IsomorphicGitService(new NodeGitStorageHost(repoDir));
+    service = new IsomorphicGitService(new NodeGitStorageHost(repoDir), { repoPath: repoDir, gitDir: join(repoDir, ".git") });
   });
 
   afterEach(async () => {
@@ -56,11 +56,10 @@ describeRealGit("[real-git] IsomorphicGitService concurrency & lock safety", () 
   });
 
   async function commitBaseline(): Promise<void> {
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    await service.init({ defaultBranch: "main" });
     await writeFile(join(repoDir, "seed.md"), "seed\n", "utf8");
-    await service.add({ repoPath: repoDir, filepath: "seed.md" });
+    await service.add({ filepath: "seed.md" });
     await service.commit({
-      repoPath: repoDir,
       message: "seed",
       author: GIT_AUTHOR,
       committer: GIT_AUTHOR,
@@ -82,7 +81,6 @@ describeRealGit("[real-git] IsomorphicGitService concurrency & lock safety", () 
       );
 
       const appCommit = service.addAllAndCommit({
-        repoPath: repoDir,
         message: `app checkpoint ${round}`,
         author: GIT_AUTHOR,
       });
@@ -102,7 +100,7 @@ describeRealGit("[real-git] IsomorphicGitService concurrency & lock safety", () 
       expect(await runGit(repoDir, ["rev-parse", "HEAD"])).toHaveLength(40);
       expect((await runGitAllowFail(repoDir, ["status"])).code).toBe(0);
       // The app can still read the repository it shares with system git.
-      expect((await service.log({ repoPath: repoDir })).length).toBeGreaterThan(0);
+      expect((await service.log()).length).toBeGreaterThan(0);
     }
   }, 30000);
 
@@ -115,7 +113,6 @@ describeRealGit("[real-git] IsomorphicGitService concurrency & lock safety", () 
     const appCommit = async (n: number): Promise<void> => {
       await writeFile(join(repoDir, `app-${n}.md`), `app ${n}\n`, "utf8");
       await service.addAllAndCommit({
-        repoPath: repoDir,
         message: `app ${n}`,
         author: GIT_AUTHOR,
       });
@@ -145,14 +142,14 @@ describeRealGit("[real-git] IsomorphicGitService concurrency & lock safety", () 
     ).split("\n");
     expect(gitSubjects).toEqual(expectedSubjects);
 
-    const serviceLog = await service.log({ repoPath: repoDir });
+    const serviceLog = await service.log();
     expect(serviceLog.map((entry) => entry.commit.message.trim())).toEqual(
       expectedSubjects,
     );
 
     // The shared index/working tree is clean per both the app and system git.
     expect(await runGit(repoDir, ["status", "--porcelain"])).toBe("");
-    const status = await service.status({ repoPath: repoDir });
+    const status = await service.status();
     expect(status.staged).toEqual([]);
     expect(status.unstaged).toEqual([]);
     expect(status.untracked).toEqual([]);
@@ -174,7 +171,6 @@ describeRealGit("[real-git] IsomorphicGitService concurrency & lock safety", () 
     // proceeds. This documents the interop boundary: the app is not blocked by a
     // stale system-git lock.
     const oid = await service.addAllAndCommit({
-      repoPath: repoDir,
       message: "app commit despite stale lock",
       author: GIT_AUTHOR,
     });

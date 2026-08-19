@@ -14,9 +14,26 @@ import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
 import type { FileEntry } from "@/utils/fs";
 import { calculateContentHash } from "@/utils/hash";
 
-vi.mock("@/entities/files", () => ({
-  writeFileContent: vi.fn(async () => {}),
-}));
+// Adoption commits only rows that still match the content collection's
+// current state; this suite has no collections, so back that check with a
+// tiny map standing in for the collection.
+const disk = vi.hoisted(() => new Map<string, string>());
+vi.mock("@/entities/files", async () => {
+  const { calculateContentHash } = await import("@/utils/hash");
+  return {
+    writeFileContent: vi.fn(async () => {}),
+    getOrCreateWorkspaceCollections: () => ({
+      content: {
+        get: (path: string) => {
+          const content = disk.get(path);
+          return content === undefined
+            ? undefined
+            : { path, content, contentHash: calculateContentHash(content) };
+        },
+      },
+    }),
+  };
+});
 
 import { writeFileContent } from "@/entities/files";
 import {
@@ -152,6 +169,9 @@ describe("save pipeline (inline fallback = worker-boot-failure path)", () => {
   it("adopts an external change without writing it back", async () => {
     await render(makeFile("start"));
 
+    // An external write is on disk by definition — adoption verifies the
+    // row against a fresh read before committing.
+    disk.set("/ws/note.md", "external content");
     await render(makeFile("external content"));
     // Adoption parses asynchronously.
     for (let i = 0; i < 20; i++) {

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { platformAdapter } from "@/adapters";
 import { FsError } from "@/adapters/platform-adapter.interface";
 import { readWorkspaceTextFile, writeWorkspaceTextFile } from "../file-sync";
-import { isRecentSelfWrite } from "../file-write-effects";
+import { getOrCreateWorkspaceCollections } from "@/entities/files";
 import { calculateContentHash } from "../hash";
 import { getDocumentSync } from "../markdown-conversion";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
@@ -31,14 +31,23 @@ beforeEach(() => {
 });
 
 describe("writeWorkspaceTextFile", () => {
-  it("records a self-write so the watcher echo is suppressed", async () => {
-    writeMock.mockResolvedValue({ succeeded: ["/ws/a.md"], failed: [] });
+  it("brings the loaded content row forward (rows lead disk for app writes)", async () => {
+    // The write's watcher echo is consumed natively, so this row update is
+    // the ONLY thing carrying the new content into the collection — a
+    // stale row would later be adopted over the write.
+    const { content } = getOrCreateWorkspaceCollections("/ws-row");
+    readMock.mockResolvedValue({ succeeded: [], failed: [] });
+    await content.preload();
+    content.utils.writeUpsert({
+      path: "/ws-row/a.md",
+      content: "old",
+      contentHash: calculateContentHash("old"),
+    });
+    writeMock.mockResolvedValue({ succeeded: ["/ws-row/a.md"], failed: [] });
 
-    await writeWorkspaceTextFile("/ws/a.md", "hello\n");
+    await writeWorkspaceTextFile("/ws-row/a.md", "hello\n");
 
-    expect(isRecentSelfWrite("/ws/a.md", calculateContentHash("hello\n"))).toBe(
-      true,
-    );
+    expect(content.get("/ws-row/a.md")?.content).toBe("hello\n");
   });
 
   it("throws FsError on adapter failure", async () => {

@@ -28,7 +28,7 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
 
   beforeEach(async () => {
     repoDir = await mkdtemp(join(tmpdir(), "metrists-git-real-"));
-    service = new IsomorphicGitService(new NodeGitStorageHost(repoDir));
+    service = new IsomorphicGitService(new NodeGitStorageHost(repoDir), { repoPath: repoDir, gitDir: join(repoDir, ".git") });
   });
 
   afterEach(async () => {
@@ -36,7 +36,7 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
   });
 
   it("init produces a repository readable by system git", async () => {
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    await service.init({ defaultBranch: "main" });
 
     const isWorkTree = await runGit(repoDir, [
       "rev-parse",
@@ -49,12 +49,11 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
   });
 
   it("add and commit through service is visible in system git", async () => {
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    await service.init({ defaultBranch: "main" });
     await writeFile(join(repoDir, "note.md"), "hello\n", "utf8");
 
-    await service.add({ repoPath: repoDir, filepath: "note.md" });
+    await service.add({ filepath: "note.md" });
     const oid = await service.commit({
-      repoPath: repoDir,
       message: "Add note",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
@@ -70,16 +69,14 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
   });
 
   it("addAllAndCommit handles modify/add/delete and leaves clean status", async () => {
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    await service.init({ defaultBranch: "main" });
     await writeFile(join(repoDir, "keep.md"), "keep\n", "utf8");
     await writeFile(join(repoDir, "delete.md"), "delete\n", "utf8");
 
     await service.add({
-      repoPath: repoDir,
       filepath: ["keep.md", "delete.md"],
     });
     await service.commit({
-      repoPath: repoDir,
       message: "baseline",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
@@ -90,7 +87,6 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
     await writeFile(join(repoDir, "new.md"), "new\n", "utf8");
 
     const oid = await service.addAllAndCommit({
-      repoPath: repoDir,
       message: "checkpoint",
       author: { name: "Metrists", email: "dev@metrists.app" },
     });
@@ -111,28 +107,25 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
   });
 
   it("revertCommit produces a new commit visible to system git", async () => {
-    await service.init({ repoPath: repoDir, defaultBranch: "main" });
+    await service.init({ defaultBranch: "main" });
     await writeFile(join(repoDir, "note.md"), "one\n", "utf8");
 
-    await service.add({ repoPath: repoDir, filepath: "note.md" });
+    await service.add({ filepath: "note.md" });
     await service.commit({
-      repoPath: repoDir,
       message: "base",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
     });
 
     await writeFile(join(repoDir, "note.md"), "two\n", "utf8");
-    await service.add({ repoPath: repoDir, filepath: "note.md" });
+    await service.add({ filepath: "note.md" });
     const changeCommit = await service.commit({
-      repoPath: repoDir,
       message: "change",
       author: { name: "Metrists", email: "dev@metrists.app" },
       committer: { name: "Metrists", email: "dev@metrists.app" },
     });
 
     const revertCommit = await service.revertCommit({
-      repoPath: repoDir,
       oid: changeCommit,
       author: { name: "Metrists", email: "dev@metrists.app" },
     });
@@ -152,25 +145,25 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
   // ---------------------------------------------------------------------------
   describe("system git → app-reported state", () => {
     it("reflects a commit made by system git in service.log and service.status", async () => {
-      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      await service.init({ defaultBranch: "main" });
       await writeFile(join(repoDir, "note.md"), "hello\n", "utf8");
 
       await runGit(repoDir, ["add", "note.md"]);
       await commitViaGit(repoDir, "system commit");
       const head = await runGit(repoDir, ["rev-parse", "HEAD"]);
 
-      const log = await service.log({ repoPath: repoDir });
+      const log = await service.log();
       expect(log[0]?.oid).toBe(head);
       expect(log[0]?.commit.message.trim()).toBe("system commit");
 
-      const status = await service.status({ repoPath: repoDir });
+      const status = await service.status();
       expect(status.staged).toEqual([]);
       expect(status.unstaged).toEqual([]);
       expect(status.untracked).toEqual([]);
     });
 
     it("reflects a branch created and checked out by system git", async () => {
-      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      await service.init({ defaultBranch: "main" });
       await writeFile(join(repoDir, "note.md"), "hello\n", "utf8");
       await runGit(repoDir, ["add", "note.md"]);
       await commitViaGit(repoDir, "base");
@@ -178,28 +171,28 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
       await runGit(repoDir, ["branch", "feature"]);
       await runGit(repoDir, ["checkout", "feature"]);
 
-      const branches = await service.listBranches({ repoPath: repoDir });
+      const branches = await service.listBranches();
       expect(branches).toEqual(expect.arrayContaining(["feature", "main"]));
 
-      const status = await service.status({ repoPath: repoDir });
+      const status = await service.status();
       expect(status.currentBranch).toBe("feature");
     });
 
     it("surfaces an external working-tree edit as unstaged", async () => {
-      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      await service.init({ defaultBranch: "main" });
       await writeFile(join(repoDir, "note.md"), "one\n", "utf8");
       await runGit(repoDir, ["add", "note.md"]);
       await commitViaGit(repoDir, "base");
 
       await writeFile(join(repoDir, "note.md"), "two\n", "utf8");
 
-      const status = await service.status({ repoPath: repoDir });
+      const status = await service.status();
       expect(status.unstaged.map((change) => change.path)).toContain("note.md");
       expect(status.staged).toEqual([]);
     });
 
     it("surfaces a change staged by system git as staged", async () => {
-      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      await service.init({ defaultBranch: "main" });
       await writeFile(join(repoDir, "note.md"), "one\n", "utf8");
       await runGit(repoDir, ["add", "note.md"]);
       await commitViaGit(repoDir, "base");
@@ -207,7 +200,7 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
       await writeFile(join(repoDir, "note.md"), "two\n", "utf8");
       await runGit(repoDir, ["add", "note.md"]);
 
-      const status = await service.status({ repoPath: repoDir });
+      const status = await service.status();
       expect(status.staged.map((change) => change.path)).toContain("note.md");
       expect(status.unstaged).toEqual([]);
     });
@@ -220,12 +213,12 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
   // ---------------------------------------------------------------------------
   describe("git compatibility scenarios", () => {
     it("excludes .gitignore-ignored files from untracked status (parity with system git)", async () => {
-      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      await service.init({ defaultBranch: "main" });
       await writeFile(join(repoDir, ".gitignore"), "ignored.txt\n", "utf8");
       await writeFile(join(repoDir, "ignored.txt"), "secret\n", "utf8");
       await writeFile(join(repoDir, "tracked.txt"), "visible\n", "utf8");
 
-      const status = await service.status({ repoPath: repoDir });
+      const status = await service.status();
       expect(status.untracked).toEqual(
         expect.arrayContaining([".gitignore", "tracked.txt"]),
       );
@@ -237,7 +230,7 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
     });
 
     it("status parity: service categories agree with git status --porcelain", async () => {
-      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      await service.init({ defaultBranch: "main" });
       await writeFile(join(repoDir, "keep.md"), "keep\n", "utf8");
       await runGit(repoDir, ["add", "keep.md"]);
       await commitViaGit(repoDir, "base");
@@ -245,7 +238,7 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
       await writeFile(join(repoDir, "keep.md"), "keep changed\n", "utf8");
       await writeFile(join(repoDir, "new.md"), "new\n", "utf8");
 
-      const status = await service.status({ repoPath: repoDir });
+      const status = await service.status();
       const porcelain = await runGit(repoDir, ["status", "--porcelain"]);
 
       expect(new Set(status.unstaged.map((change) => change.path))).toEqual(
@@ -257,7 +250,7 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
     });
 
     it("log parity: service.log matches system git log order and messages", async () => {
-      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      await service.init({ defaultBranch: "main" });
       const messages = ["first", "second", "third"];
       for (const message of messages) {
         await writeFile(join(repoDir, `${message}.md`), `${message}\n`, "utf8");
@@ -265,7 +258,7 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
         await commitViaGit(repoDir, message);
       }
 
-      const log = await service.log({ repoPath: repoDir });
+      const log = await service.log();
       const gitOids = (await runGit(repoDir, ["log", "--format=%H"])).split(
         "\n",
       );
@@ -280,39 +273,38 @@ describeRealGit("[real-git] IsomorphicGitService interoperability", () => {
     });
 
     it("branch/switch roundtrip works in both directions", async () => {
-      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      await service.init({ defaultBranch: "main" });
       await writeFile(join(repoDir, "note.md"), "hello\n", "utf8");
       await runGit(repoDir, ["add", "note.md"]);
       await commitViaGit(repoDir, "base");
 
       // App creates + switches → system git observes the current branch.
-      await service.createBranch({ repoPath: repoDir, ref: "feature" });
-      await service.switchBranch({ repoPath: repoDir, ref: "feature" });
+      await service.createBranch({ ref: "feature" });
+      await service.switchBranch({ ref: "feature" });
       expect(await runGit(repoDir, ["branch", "--show-current"])).toBe(
         "feature",
       );
 
       // System git creates + switches → the app observes the current branch.
-      await service.switchBranch({ repoPath: repoDir, ref: "main" });
+      await service.switchBranch({ ref: "main" });
       await runGit(repoDir, ["checkout", "-b", "hotfix"]);
-      const status = await service.status({ repoPath: repoDir });
+      const status = await service.status();
       expect(status.currentBranch).toBe("hotfix");
 
-      const branches = await service.listBranches({ repoPath: repoDir });
+      const branches = await service.listBranches();
       expect(branches).toEqual(
         expect.arrayContaining(["main", "feature", "hotfix"]),
       );
     });
 
     it("checkoutPaths restores a file to its committed content on disk and per system git", async () => {
-      await service.init({ repoPath: repoDir, defaultBranch: "main" });
+      await service.init({ defaultBranch: "main" });
       await writeFile(join(repoDir, "note.md"), "one\n", "utf8");
       await runGit(repoDir, ["add", "note.md"]);
       await commitViaGit(repoDir, "base");
 
       await writeFile(join(repoDir, "note.md"), "two\n", "utf8");
       await service.checkoutPaths({
-        repoPath: repoDir,
         ref: "HEAD",
         filepaths: ["note.md"],
         force: true,
@@ -344,7 +336,10 @@ describeRealGit(
     beforeEach(async () => {
       workspaceDir = await mkdtemp(join(tmpdir(), "detached-gitdir-real-"));
       detachedGitDir = join(workspaceDir, ".meta", ".git");
-      service = new IsomorphicGitService(new NodeGitStorageHost(workspaceDir));
+      service = new IsomorphicGitService(new NodeGitStorageHost(workspaceDir), {
+        repoPath: workspaceDir,
+        gitDir: detachedGitDir,
+      });
     });
 
     afterEach(async () => {
@@ -364,11 +359,7 @@ describeRealGit(
       await writeFile(primaryExclude, `${stock}.meta/\n`, "utf8");
 
       // The secondary repo via the service, detached gitdir under .meta/.
-      await service.init({
-        repoPath: workspaceDir,
-        gitDir: detachedGitDir,
-        defaultBranch: "main",
-      });
+      await service.init({ defaultBranch: "main" });
       await writeFile(
         join(detachedGitDir, "info", "exclude"),
         ".meta/\n.git/\n",
@@ -376,8 +367,6 @@ describeRealGit(
       );
       await writeFile(join(workspaceDir, "notes.md"), "draft\n", "utf8");
       const oid = await service.addAllAndCommit({
-        repoPath: workspaceDir,
-        gitDir: detachedGitDir,
         message: "checkpoint: draft",
         author: { name: "second", email: "second@example.com" },
       });
@@ -431,14 +420,8 @@ describeRealGit(
       await writeFile(join(workspaceDir, "debug.log"), "noise\n", "utf8");
       await writeFile(join(workspaceDir, "notes.md"), "draft\n", "utf8");
 
-      await service.init({
-        repoPath: workspaceDir,
-        gitDir: detachedGitDir,
-        defaultBranch: "main",
-      });
+      await service.init({ defaultBranch: "main" });
       const oid = await service.addAllAndCommit({
-        repoPath: workspaceDir,
-        gitDir: detachedGitDir,
         message: "checkpoint",
         author: { name: "second", email: "second@example.com" },
       });

@@ -34,10 +34,7 @@ import {
 import type { FileEntry } from "@/utils/fs";
 import { IGNORE_RULES } from "@/utils/ignore";
 import { calculateContentHash } from "@/utils/hash";
-import {
-  invalidateDerivedState,
-  recordSelfWrite,
-} from "@/utils/file-write-effects";
+import { invalidateDerivedState } from "@/utils/file-write-effects";
 import { queryClient } from "./query-client";
 
 // The shared QueryClient moved to the entities/query-client leaf; re-exported
@@ -521,6 +518,39 @@ export function getOrCreateWorkspaceCollections(
   return collections;
 }
 
+/**
+ * Sync the content row (and metadata contentHash) for `path` to `content`.
+ * The single implementation of "a loaded file's row reflects its bytes":
+ * called after app writes that bypass this entity's own write path
+ * (writeWorkspaceTextFile — the agent/blob primitive, whose watcher echo is
+ * consumed natively, so nothing else would bring the row forward and
+ * adoption would later roll the editor back to the stale row) and by the
+ * watcher handler after it verifies an external change against disk. Rows
+ * exist only for loaded files; unloaded paths are a no-op, and callers have
+ * no workspace handle, so the (tiny) registry is scanned for the owning
+ * row. The hash is computed lazily — most agent writes target files no
+ * workspace has loaded.
+ */
+export function updateLoadedContentRow(path: string, content: string): void {
+  let contentHash: string | undefined;
+  for (const collections of workspaceCollectionsRegistry.values()) {
+    const existing = collections.content.get(path);
+    if (!existing) continue;
+    contentHash ??= calculateContentHash(content);
+    if (existing.contentHash === contentHash) continue;
+
+    collections.content.utils.writeUpdate({ path, content, contentHash });
+
+    const existingMetadata = collections.metadata.get(path);
+    if (existingMetadata && existingMetadata.contentHash !== contentHash) {
+      collections.metadata.utils.writeUpdate({
+        ...existingMetadata,
+        contentHash,
+      });
+    }
+  }
+}
+
 /** Refetch the metadata collection; call when files are known to have changed on disk. */
 export async function refreshDirectoryMetadata(
   workspaceId: string,
@@ -536,10 +566,6 @@ export async function writeFileContent(
 ): Promise<void> {
   const collections = getOrCreateWorkspaceCollections(workspaceId);
   const contentHash = calculateContentHash(content);
-
-  // Ledger first, write second: a watcher echo of this write must find the
-  // hash already recorded so it is never mistaken for an external change.
-  recordSelfWrite(filePath, contentHash);
 
   const existingContent = collections.content.get(filePath);
   const tx = existingContent

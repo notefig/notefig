@@ -13,12 +13,21 @@ import type {
   resetIndex as igResetIndex,
 } from "isomorphic-git";
 
-type WithRepoPath<T> = Omit<T, "fs" | "dir" | "gitdir"> & {
+/**
+ * The repo a service instance operates on, bound once at construction — a
+ * worktree plus an explicit gitdir, never inferred from each other. A
+ * workspace can hold two repos over one worktree (the user's `<ws>/.git`
+ * and the app's `<ws>/.metrists/.git`); an inferred or per-call gitdir let
+ * callers silently operate on the wrong repo.
+ */
+export interface GitRepoRef {
+  /** Worktree root (isomorphic-git's `dir`). */
   repoPath: string;
-  /** Defaults to `<repoPath>/.git`. Set to point at a repo whose gitdir is
-   *  separate from its worktree (e.g. Metrists' document-history repo). */
-  gitDir?: string;
-};
+  /** Git directory (isomorphic-git's `gitdir`). */
+  gitDir: string;
+}
+
+type GitOpInput<T> = Omit<T, "fs" | "dir" | "gitdir">;
 
 type AddParams = Parameters<typeof igAdd>[0];
 type BranchParams = Parameters<typeof igBranch>[0];
@@ -136,67 +145,53 @@ export interface GitStorageHost {
   unlock(name: string): Promise<void>;
 }
 
-export type GitAddInput = WithRepoPath<AddParams>;
-export type GitInitInput = WithRepoPath<InitParams>;
-export type GitUnstageInput = WithRepoPath<ResetIndexParams>;
-export type GitRemoveInput = WithRepoPath<RemoveParams>;
-export type GitCommitInput = WithRepoPath<CommitParams>;
+export type GitAddInput = GitOpInput<AddParams>;
+export type GitInitInput = GitOpInput<InitParams>;
+export type GitUnstageInput = GitOpInput<ResetIndexParams>;
+export type GitRemoveInput = GitOpInput<RemoveParams>;
+export type GitCommitInput = GitOpInput<CommitParams>;
 export type GitAddAllAndCommitInput = {
-  repoPath: string;
-  gitDir?: string;
   message?: string;
   author: NonNullable<CommitParams["author"]>;
   committer?: CommitParams["committer"];
 };
 export type GitRevertCommitInput = {
-  repoPath: string;
-  gitDir?: string;
   oid: string;
   author: NonNullable<CommitParams["author"]>;
   committer?: CommitParams["committer"];
   message?: string;
 };
-export type GitAbortRevertInput = {
-  repoPath: string;
-  gitDir?: string;
-};
-export type GitStatusInput = {
-  repoPath: string;
-  gitDir?: string;
-};
-export type GitListBranchesInput = WithRepoPath<ListBranchesParams>;
-export type GitCreateBranchInput = WithRepoPath<BranchParams>;
-export type GitSwitchBranchInput = WithRepoPath<
+export type GitListBranchesInput = GitOpInput<ListBranchesParams>;
+export type GitCreateBranchInput = GitOpInput<BranchParams>;
+export type GitSwitchBranchInput = GitOpInput<
   Pick<CheckoutParams, "ref" | "force" | "track" | "remote">
 >;
-export type GitCheckoutPathsInput = WithRepoPath<
+export type GitCheckoutPathsInput = GitOpInput<
   Pick<
     CheckoutParams,
     "ref" | "filepaths" | "force" | "noCheckout" | "noUpdateHead"
   >
 >;
-export type GitLogInput = WithRepoPath<LogParams>;
-export type GitFetchInput = WithRepoPath<FetchParams>;
-export type GitPullInput = WithRepoPath<PullParams>;
-export type GitPushInput = WithRepoPath<PushParams>;
+export type GitLogInput = GitOpInput<LogParams>;
+export type GitFetchInput = GitOpInput<FetchParams>;
+export type GitPullInput = GitOpInput<PullParams>;
+export type GitPushInput = GitOpInput<PushParams>;
 export type GitReadTextFileInput = {
-  repoPath: string;
-  gitDir?: string;
   /** Commit oid or ref to read the file at. */
   ref: string;
   filepath: string;
 };
 
 export interface GitService {
-  init(input: GitInitInput): ReturnType<typeof igInit>;
-  status(input: GitStatusInput): Promise<RepoStatus>;
+  init(input?: GitInitInput): ReturnType<typeof igInit>;
+  status(): Promise<RepoStatus>;
   add(input: GitAddInput): ReturnType<typeof igAdd>;
   remove(input: GitRemoveInput): ReturnType<typeof igRemove>;
   unstage(input: GitUnstageInput): ReturnType<typeof igResetIndex>;
   commit(input: GitCommitInput): ReturnType<typeof igCommit>;
   addAllAndCommit(input: GitAddAllAndCommitInput): Promise<string | null>;
   revertCommit(input: GitRevertCommitInput): Promise<string | null>;
-  abortRevert(input: GitAbortRevertInput): Promise<void>;
+  abortRevert(): Promise<void>;
   listBranches(input: GitListBranchesInput): ReturnType<typeof igListBranches>;
   createBranch(input: GitCreateBranchInput): ReturnType<typeof igBranch>;
   switchBranch(input: GitSwitchBranchInput): ReturnType<typeof igCheckout>;
