@@ -13,15 +13,38 @@ function markReady(): void {
   document.getElementById("prerender")?.remove();
 }
 
+export interface HandoffOptions {
+  /**
+   * Accept an empty match as rendered. Text is normally the proof that the
+   * app has caught up with the snapshot, but a visitor can empty a page —
+   * their edits persist — and then an empty editor IS the loaded state.
+   * Without this the wait can only end on the timeout, leaving them staring
+   * at a stale snapshot they cannot scroll or click for 15 seconds.
+   */
+  allowEmpty?: boolean;
+  timeoutMs?: number;
+}
+
+/** Is the app's content on screen, so the snapshot can be dropped? */
+export function handoffSatisfied(
+  target: Element | null,
+  allowEmpty: boolean,
+): boolean {
+  if (!target) return false;
+  return allowEmpty || (target.textContent ?? "").trim().length > 0;
+}
+
 /**
- * Remove the overlay when `selector` matches an element with visible text
- * inside `#root`. Falls back to removing after `timeoutMs` so a selector
- * drift can never leave a visitor stuck behind a stale snapshot.
+ * Remove the overlay once `selector` matches rendered content inside `#root`.
+ * Falls back to removing after `timeoutMs` so a selector drift can never
+ * leave a visitor stuck behind a stale snapshot.
  */
 export function usePrerenderHandoff(
   selector: string | null,
-  timeoutMs = 15000,
+  options: HandoffOptions = {},
 ): void {
+  const { allowEmpty = false, timeoutMs = 15000 } = options;
+
   useEffect(() => {
     if (!document.getElementById("prerender")) {
       markReady();
@@ -38,9 +61,9 @@ export function usePrerenderHandoff(
     const poll = () => {
       if (cancelled) return;
       const root = document.getElementById("root");
-      const target = root?.querySelector(selector);
+      const target = root?.querySelector(selector) ?? null;
       if (
-        (target && (target.textContent ?? "").trim().length > 0) ||
+        handoffSatisfied(target, allowEmpty) ||
         performance.now() - startedAt > timeoutMs
       ) {
         markReady();
@@ -53,5 +76,5 @@ export function usePrerenderHandoff(
     return () => {
       cancelled = true;
     };
-  }, [selector, timeoutMs]);
+  }, [selector, allowEmpty, timeoutMs]);
 }

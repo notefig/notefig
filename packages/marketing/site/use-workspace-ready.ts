@@ -21,6 +21,30 @@ export function useWorkspaceReady(page: MarketingPage): boolean {
   return seeded && layoutReady;
 }
 
+/**
+ * True when the page's file has no text of its own — because the visitor
+ * emptied it, since their edits persist. The prerender handoff waits for
+ * rendered text as proof the app has caught up with the snapshot, which an
+ * emptied page can never produce; this tells it that empty is the truth.
+ */
+export function usePageIsEmpty(page: MarketingPage, enabled: boolean): boolean {
+  const [isEmpty, setIsEmpty] = useState(false);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    void platformAdapter.fs.readFiles([page.filePath]).then((result) => {
+      const content = result.succeeded[0]?.content ?? "";
+      if (!cancelled) setIsEmpty(content.trim().length === 0);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [page.filePath, enabled]);
+
+  return isEmpty;
+}
+
 /** True once the marketing workspace content is in IndexedDB. */
 function useMarketingSeed(): boolean {
   const [seeded, setSeeded] = useState(false);

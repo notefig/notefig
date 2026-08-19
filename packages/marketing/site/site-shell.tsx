@@ -7,7 +7,7 @@ import { MarketingHeader } from "./marketing-header";
 import { usePrerenderHandoff } from "./prerender";
 import { pageForPathname, titleForRoute } from "./route-page";
 import { RUNWAY_VH, useAppTakeover } from "./use-app-takeover";
-import { useWorkspaceReady } from "./use-workspace-ready";
+import { usePageIsEmpty, useWorkspaceReady } from "./use-workspace-ready";
 
 /**
  * The whole site: one page, always. A short hero on top and the real app
@@ -35,7 +35,10 @@ function SitePage({
   const { runwayRef, stageRef, frameRef, scrollToApp, jumpToApp } =
     useAppTakeover();
 
-  usePrerenderHandoff(workspaceReady ? ".ProseMirror" : ".never");
+  const pageIsEmpty = usePageIsEmpty(page, workspaceReady);
+  usePrerenderHandoff(workspaceReady ? ".ProseMirror" : ".never", {
+    allowEmpty: pageIsEmpty,
+  });
   useDocumentTitle(page, isDeepLink);
 
   // A visitor arriving on a page URL (search result, shared link) came for
