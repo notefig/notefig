@@ -46,6 +46,11 @@ import {
 } from "./agent-collections";
 import { getRegisteredTask, registerTask, unregisterTask } from "./task-registry";
 import {
+  MOCK_AGENT_MODE,
+  createMockAgentTransport,
+  createMockMcpEndpoint,
+} from "./mock-harness";
+import {
   HARNESS_SETTINGS_NAMESPACE,
   HARNESS_OVERRIDES_KEY,
   HARNESS_CUSTOM_KEY,
@@ -308,7 +313,9 @@ export class AgentTask {
       // construct-then-start pattern as the ACP transport below:
       // createMcpEndpoint is a dumb sync constructor, we call start()
       // ourselves, and mcpServer only exists on the instance afterward.
-      const mcpEndpoint = platformAdapter.proc.createMcpEndpoint({ taskId: this.taskId });
+      const mcpEndpoint = MOCK_AGENT_MODE
+        ? createMockMcpEndpoint()
+        : platformAdapter.proc.createMcpEndpoint({ taskId: this.taskId });
       this.mcpEndpoint = mcpEndpoint;
       await mcpEndpoint.start();
       this.unsubscribers.push(
@@ -1364,6 +1371,7 @@ export function startAgentTask(
 
 /** The one place a task's spawn spec meets the platform transport. */
 function transportFactory(task: AgentTask) {
+  if (MOCK_AGENT_MODE) return () => createMockAgentTransport();
   return ({ extraEnv }: { extraEnv: Record<string, string> }) =>
     platformAdapter.proc.createAgentTransport({
       taskId: task.taskId,

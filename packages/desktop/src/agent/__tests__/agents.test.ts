@@ -32,7 +32,7 @@ vi.mock("@/utils/history-service", () => ({
 }));
 
 import { createLoopbackPair } from "../loopback-transport";
-import { FakeAgent } from "./fake-agent";
+import { FakeAgent } from "../mock-harness";
 import { TaskManager } from "../agent-service";
 import { agents } from "../agents";
 import {

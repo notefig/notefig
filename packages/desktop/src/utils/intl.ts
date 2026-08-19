@@ -396,6 +396,7 @@ i18n
           agentThinking: "Thinking…",
           agentQueuedBadge: "queued",
           agentRemoveFromQueue: "Remove from queue",
+          agentScrollToEnd: "Scroll to end",
           agentPromptPlaceholder: "Ask anything, @models, /prompts …",
           agentLoadingSession: "Loading session…",
           agentSend: "Send (⏎)",

@@ -3,6 +3,7 @@ import i18n from "@/utils/intl";
 import { isWeb } from "@/utils/platform";
 import { tunnelConnection } from "./tunnel-connection";
 import { openPairDialog } from "./pair-dialog-store";
+import { MOCK_AGENT_MODE } from "../mock-harness";
 
 /**
  * Gate agent-start actions on the web having a paired worker. On desktop
@@ -13,6 +14,8 @@ import { openPairDialog } from "./pair-dialog-store";
  * prompts to an already-running one.
  */
 export function ensureAgentRuntime(): boolean {
+  // Mock harness sessions are in-memory — no worker to pair with.
+  if (MOCK_AGENT_MODE) return true;
   if (!isWeb()) return true;
   if (tunnelConnection.getState().status === "connected") return true;
   toast.error(i18n.t("tunnelNoConnection"), {

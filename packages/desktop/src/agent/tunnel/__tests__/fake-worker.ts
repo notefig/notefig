@@ -22,7 +22,7 @@ import {
 } from "@notefig/shared/tunnel";
 import { bytesToBase64 } from "@notefig/shared/tunnel";
 import { createLoopbackPair, type LoopbackTransport } from "../../loopback-transport";
-import { FakeAgent } from "../../__tests__/fake-agent";
+import { FakeAgent } from "../../mock-harness";
 import type { TunnelSocket, TunnelSocketFactory } from "../tunnel-connection";
 
 type FakeTask = {
