@@ -18,14 +18,16 @@ export function Hero({
 }) {
   return (
     // Sized in viewport heights so the app always peeks above the fold: the
-    // hero is the promise, the app underneath is the proof.
-    <section className="mx-auto flex min-h-[62vh] max-w-5xl flex-col justify-center gap-6 px-6 pb-8 pt-20">
-      <h1 className="max-w-3xl text-4xl font-semibold leading-[1.08] tracking-tight sm:text-6xl">
+    // hero is the promise, the app underneath is the proof. `site-column`
+    // puts its left edge on the app's, which is scaled down at this scroll
+    // position — see --app-rest-scale in styles.css.
+    <section className="site-column flex min-h-[62vh] flex-col justify-center gap-5 pb-8 pt-16">
+      <h1 className="max-w-3xl text-3xl font-semibold leading-[1.1] tracking-tight sm:text-5xl">
         Write markdown.
         <br />
         Continuously publish.
       </h1>
-      <p className="max-w-xl text-base text-muted-foreground sm:text-lg">
+      <p className="max-w-lg text-sm text-muted-foreground sm:text-base">
         Notefig turns plain markdown files into published books and sites. Your
         content stays in files you own — write, commit, and every change ships
         itself.
