@@ -6,6 +6,13 @@ import {
 } from "@pierre/trees/react";
 import type { ContextMenuItem, ContextMenuOpenContext } from "@pierre/trees";
 import {
+  ExternalLink,
+  FilePlus,
+  FolderPlus,
+  PenLine,
+  Trash2,
+} from "lucide-react";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -551,12 +558,15 @@ function FileTreeInner({
   const renderContextMenu = useCallback(
     (item: ContextMenuItem, context: ContextMenuOpenContext) => {
       const abs = toAbs(item.path);
+      // Mirrors ui/context-menu.tsx's ContextMenuItem styling (this menu is
+      // hand-rolled — @pierre/trees owns its rendering) so the file tree and
+      // the sessions panel read as the same menu.
       const menuButton =
-        "w-full rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50";
+        "flex w-full items-center gap-2 whitespace-nowrap rounded-sm px-1.5 py-1 text-left text-xs hover:bg-accent hover:text-accent-foreground disabled:opacity-50 [&_svg]:size-3.5 [&_svg]:shrink-0";
       return (
         <div
           role="menu"
-          className="min-w-36 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+          className="w-max min-w-[7rem] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
           data-file-tree-context-menu-root="true"
         >
           {item.kind === "file" && (
@@ -569,6 +579,7 @@ function FileTreeInner({
                 openFileAtPath(item.path, { intent: "new-tab" });
               }}
             >
+              <ExternalLink />
               {t("openInNewTab", "Open in New Tab")}
             </button>
           )}
@@ -587,6 +598,7 @@ function FileTreeInner({
                   });
                 }}
               >
+                <FilePlus />
                 {t("newFile", "New File")}
               </button>
               <button
@@ -602,6 +614,7 @@ function FileTreeInner({
                   });
                 }}
               >
+                <FolderPlus />
                 {t("newFolder", "New Folder")}
               </button>
             </>
@@ -616,8 +629,10 @@ function FileTreeInner({
               context.close({ restoreFocus: false });
             }}
           >
+            <PenLine />
             {t("rename", "Rename")}
           </button>
+          <div role="separator" className="-mx-1 my-1 h-px bg-border" />
           <button
             type="button"
             role="menuitem"
@@ -627,6 +642,7 @@ function FileTreeInner({
               setPendingDelete({ path: abs, type: item.kind });
             }}
           >
+            <Trash2 />
             {t("delete", "Delete")}
           </button>
         </div>

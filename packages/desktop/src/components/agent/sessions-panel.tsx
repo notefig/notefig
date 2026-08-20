@@ -238,39 +238,36 @@ function SessionRowMenu({ task }: { task: AgentTaskRow }) {
   return (
     <ContextMenuContent>
       <ContextMenuItem
-        className="gap-2 text-xs"
         disabled={!actions.canRefresh}
         onSelect={() => refreshAgentSession(task.taskId)}
       >
-        <RefreshCw className="size-3.5" />
+        <RefreshCw />
         {t("agentRefreshSession")}
       </ContextMenuItem>
       <ContextMenuItem
-        className="gap-2 text-xs"
         disabled={actions.sessionId === null}
         onSelect={() => void copyTextToClipboard(actions.sessionId ?? "")}
       >
-        <Copy className="size-3.5" />
+        <Copy />
         {t("agentCopySessionId")}
       </ContextMenuItem>
       {actions.resume.supported && (
         <ContextMenuItem
-          className="gap-2 text-xs"
           disabled={actions.resume.command === null}
           onSelect={() =>
             void copyTextToClipboard(actions.resume.command ?? "")
           }
         >
-          <Terminal className="size-3.5" />
+          <Terminal />
           {t("agentCopyResumeCommand")}
         </ContextMenuItem>
       )}
       <ContextMenuSeparator />
       <ContextMenuItem
-        className="gap-2 text-xs text-destructive focus:text-destructive"
+        className="text-destructive focus:text-destructive"
         onSelect={() => void deleteAgentSession(task.taskId)}
       >
-        <Trash2 className="size-3.5" />
+        <Trash2 />
         {t("agentDeleteSession")}
       </ContextMenuItem>
     </ContextMenuContent>
@@ -322,8 +319,7 @@ function NewSessionButton({
           {harnesses.map((harness) => (
             <DropdownMenuItem
               key={harness.id}
-              className="gap-2 text-xs"
-              onSelect={() => {
+                  onSelect={() => {
                 setDefaultHarness(harness.id);
                 onCreate(harness);
               }}
