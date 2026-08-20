@@ -1,10 +1,23 @@
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronDown, Plus, Square, Trash2 } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Plus,
+  RefreshCw,
+  Square,
+  Trash2,
+} from "lucide-react";
 import type { HarnessDefinition } from "@notefig/shared/agent";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,13 +41,11 @@ import type { AgentTaskRow } from "@/agent/agent-collections";
 import {
   cancelAgentTask,
   deleteAgentSession,
+  refreshAgentSession,
   startAgentTask,
 } from "@/agent/agent-service";
 import { ensureAgentRuntime } from "@/agent/tunnel/require-connection";
-import {
-  describeTaskMeta,
-  useAgentTaskList,
-} from "@/entities/agents";
+import { describeTaskMeta, useAgentTaskList } from "@/entities/agents";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
 import { agentTabId } from "@/entities/tabs";
 import {
@@ -166,80 +177,71 @@ export function SessionRow({
   onOpen: () => void;
 }) {
   const { t } = useTranslation();
+  // Refresh is a between-turns action only: mid-turn the session can't be
+  // reloaded (and the fork hazard says it must not be); "starting" is
+  // already a load in flight, and error/unavailable have no live session
+  // worth re-reading.
+  const canRefresh =
+    task.status === "idle" ||
+    task.status === "cancelled" ||
+    task.status === "restored";
   return (
     // Flat full-width rows, same affordances as the file tree / commit
     // list: pointer cursor (Tailwind's preflight defaults buttons to the
-    // arrow cursor), hover wash, solid accent when active.
-    <div
-      onClick={onOpen}
-      title={task.title}
-      className={cn(
-        "group flex w-full cursor-pointer items-center gap-2 px-2 py-1 text-xs transition-colors",
-        active ? "bg-accent" : "hover:bg-accent/50",
-      )}
-    >
-      <StatusDot status={task.status} />
-      <span className="min-w-0 flex-1 truncate">{task.title}</span>
-      <span className="shrink-0 text-[0.6875rem] text-muted-foreground">
-        {meta}
-      </span>
-      {isRunning && (
-        <button
-          type="button"
-          title={t("agentStopSession")}
-          aria-label={t("agentStopSession")}
-          className="hidden shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-foreground group-hover:block"
-          onClick={(event) => {
-            event.stopPropagation();
-            void cancelAgentTask(task.taskId);
-          }}
+    // arrow cursor), hover wash, solid accent when active. Session actions
+    // (refresh from the harness store, delete) live on the row's context
+    // menu — the right-click-then-click gesture is deliberate enough that
+    // delete needs no extra confirm step (it replaced the MET-91 two-step
+    // inline trash button).
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          onClick={onOpen}
+          title={task.title}
+          className={cn(
+            "group flex w-full cursor-pointer items-center gap-2 px-2 py-1 text-xs transition-colors",
+            active ? "bg-accent" : "hover:bg-accent/50",
+          )}
         >
-          <Square className="size-3 fill-current" />
-        </button>
-      )}
-      <DeleteSessionButton taskId={task.taskId} />
-    </div>
-  );
-}
-
-/**
- * Two-step inline delete confirm (MET-91): any session is deletable, no
- * dialog — the first click arms the trash into a labeled destructive
- * "Delete?" (a red icon alone reads as decoration), the second deletes.
- * Leaving the button or blurring disarms, so a stray armed button can't
- * fire on a later stray click.
- */
-function DeleteSessionButton({ taskId }: { taskId: string }) {
-  const { t } = useTranslation();
-  const [armed, setArmed] = useState(false);
-  const label = t(armed ? "agentDeleteSessionConfirm" : "agentDeleteSession");
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      className={cn(
-        "shrink-0 cursor-pointer rounded",
-        armed
-          ? // Armed: stays visible even if row hover is momentarily lost so
-            // the confirming click always lands on the same button.
-            "flex items-center gap-1 p-0.5 text-[0.625rem] font-medium text-destructive hover:text-destructive/80"
-          : "hidden p-0.5 text-muted-foreground hover:text-foreground group-hover:block",
-      )}
-      onMouseLeave={() => setArmed(false)}
-      onBlur={() => setArmed(false)}
-      onClick={(event) => {
-        event.stopPropagation();
-        if (armed) {
-          void deleteAgentSession(taskId);
-        } else {
-          setArmed(true);
-        }
-      }}
-    >
-      <Trash2 className="size-3" />
-      {armed && <span>{t("agentDeleteSessionArmed")}</span>}
-    </button>
+          <StatusDot status={task.status} />
+          <span className="min-w-0 flex-1 truncate">{task.title}</span>
+          <span className="shrink-0 text-[0.6875rem] text-muted-foreground">
+            {meta}
+          </span>
+          {isRunning && (
+            <button
+              type="button"
+              title={t("agentStopSession")}
+              aria-label={t("agentStopSession")}
+              className="hidden shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-foreground group-hover:block"
+              onClick={(event) => {
+                event.stopPropagation();
+                void cancelAgentTask(task.taskId);
+              }}
+            >
+              <Square className="size-3 fill-current" />
+            </button>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem
+          className="gap-2 text-xs"
+          disabled={!canRefresh}
+          onSelect={() => refreshAgentSession(task.taskId)}
+        >
+          <RefreshCw className="size-3.5" />
+          {t("agentRefreshSession")}
+        </ContextMenuItem>
+        <ContextMenuItem
+          className="gap-2 text-xs text-destructive focus:text-destructive"
+          onSelect={() => void deleteAgentSession(task.taskId)}
+        >
+          <Trash2 className="size-3.5" />
+          {t("agentDeleteSession")}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

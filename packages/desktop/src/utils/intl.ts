@@ -382,8 +382,6 @@ i18n
           agentSessionUnavailableNotice:
             "This session is no longer available — the harness has no record of it.",
           agentDeleteSession: "Delete session",
-          agentDeleteSessionConfirm: "Click again to delete",
-          agentDeleteSessionArmed: "Delete",
           agentBlobAnswerOrphaned:
             "Answer saved to the document, but the session that asked is no longer available.",
 
@@ -399,6 +397,7 @@ i18n
           agentScrollToEnd: "Scroll to end",
           agentPromptPlaceholder: "Ask anything, @models, /prompts …",
           agentLoadingSession: "Loading session…",
+          agentRefreshSession: "Refresh session",
           agentSend: "Send (⏎)",
           agentQueue: "Queue (⏎)",
           agentStop: "Stop",
