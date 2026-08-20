@@ -245,10 +245,19 @@ describe("buildHarnessResumeCommand", () => {
     workspacePath: "/Users/x/My Notes",
   };
 
-  it("substitutes sessionId and workspace into the template", () => {
-    const claude = BUILT_IN_HARNESSES.find((h) => h.id === CLAUDE_CODE_ID)!;
+  it("substitutes sessionId and workspace as shell-quoted arguments", () => {
     expect(buildHarnessResumeCommand(claude, params)).toBe(
-      'cd "/Users/x/My Notes" && claude --resume sess-123',
+      "cd '/Users/x/My Notes' && claude --resume sess-123",
+    );
+  });
+
+  it("neutralizes shell metacharacters in substituted values", () => {
+    const command = buildHarnessResumeCommand(claude, {
+      sessionId: "sess-123",
+      workspacePath: "/tmp/$(rm -rf ~)/it's",
+    });
+    expect(command).toBe(
+      "cd '/tmp/$(rm -rf ~)/it'\\''s' && claude --resume sess-123",
     );
   });
 

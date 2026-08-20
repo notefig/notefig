@@ -476,7 +476,7 @@ i18n
           harnessProbePlaceholder: "command -v <command>",
           harnessResumeField: "Resume command (optional)",
           harnessResumePlaceholder:
-            'cd "${workspace}" && <command> --resume ${sessionId}',
+            "cd ${workspace} && <command> --resume ${sessionId}",
           harnessMcpField: "App tools (MCP)",
           harnessMcpNone: "No app tools",
           harnessMcpSessionNew: "Register via ACP session",

@@ -512,16 +512,21 @@ export class AgentTask {
         });
       }
       await this.client.loadSession(sessionId, this.agentCwd, mcpServers);
-      this.sessionId = sessionId;
+      // The transport can die while the load is in flight —
+      // handleTransportClose drops the staged turn and marks the task
+      // errored. Committing the replay past that would hand the caller an
+      // "idle" session backed by a dead transport, so abort instead.
       const turn = this.currentTurn;
-      if (turn) {
-        this.closeRun(turn);
-        // Replayed tool calls carry whatever status they streamed with; one
-        // still pending/in_progress can't actually be running (this history
-        // already happened), and the replay turn never passes through
-        // finishTurn — resolve them here so nothing spins forever.
-        this.resolveLingeringToolCalls(stage, turnId, "completed");
+      if (turn?.turnId !== turnId) {
+        throw new Error("agent process ended during session/load");
       }
+      this.sessionId = sessionId;
+      this.closeRun(turn);
+      // Replayed tool calls carry whatever status they streamed with; one
+      // still pending/in_progress can't actually be running (this history
+      // already happened), and the replay turn never passes through
+      // finishTurn — resolve them here so nothing spins forever.
+      this.resolveLingeringToolCalls(stage, turnId, "completed");
       // Prompts queued against this revival keep their rows: they aren't
       // part of the replayed history.
       stage.commit(
@@ -1373,7 +1378,13 @@ export class AgentTask {
     // "agent process exited (code N)" / "terminated (signal)" from the
     // transport — the difference between a silent dead task and a real reason.
     this.warn("transport closed", error?.message ?? "transport closed");
-    if (this.currentTurn) {
+    if (this.currentTurn?.entries instanceof ReplayStage) {
+      // A replay turn is staged, not a real turn row — finishTurn would
+      // update a turn that was never inserted. Drop the stage (resumeSession
+      // sees the cleared turn and aborts its commit) and record the error.
+      this.currentTurn = null;
+      this.setStatus("error");
+    } else if (this.currentTurn) {
       this.finishTurn(
         undefined,
         "error",

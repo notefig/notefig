@@ -1618,6 +1618,60 @@ describe("session hydration: buffered replay + manual refresh", () => {
     expect(turnFor(task.taskId).at(-1)!.status).toBe("completed");
   });
 
+  it("a transport death during session/load never commits the replay", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    // The adapter process dies mid-load but its session/load response line
+    // was already written: the service observes the close while the load
+    // promise is still about to resolve. A wrapper transport fires the
+    // task's close handler (the FIRST onClose registration — the ACP lib
+    // subscribes later) without closing the loopback pipe, so the response
+    // still arrives afterward.
+    let fireClose: (() => void) | undefined;
+    const flaky = {
+      locus: "local" as const,
+      start: () => client.start(),
+      send: (line: string) => client.send(line),
+      onLine: (cb: (line: string) => void) => client.onLine(cb),
+      onClose: (cb: () => void) => {
+        fireClose ??= cb;
+        return client.onClose(cb);
+      },
+      close: () => client.close(),
+    };
+    let releaseLoad: (() => void) | undefined;
+    agent.onLoadSession = async (params, a) => {
+      a.update(params.sessionId, {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "partial replay" },
+      });
+      await new Promise<void>((resolve) => {
+        releaseLoad = resolve;
+      });
+      return {};
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    seedOldTranscript(task.taskId);
+    const started = task
+      .start(() => flaky, { resumeSessionId: "sess_old" })
+      .catch(() => {});
+
+    await vi.waitFor(() => expect(releaseLoad).toBeDefined());
+    fireClose!();
+    releaseLoad!();
+    await started;
+
+    // The staged replay is dropped whole: old transcript intact, no replay
+    // turn row, and the task must NOT read as a promptable idle session.
+    expect(task.currentStatus).not.toBe("idle");
+    expect(entriesFor(task.taskId).map((e) => e.id)).toEqual([
+      "evt_old_1",
+      "evt_old_2",
+    ]);
+    expect(turnFor(task.taskId).map((t) => t.turnId)).toEqual(["trn_old"]);
+  });
+
   it("a session/close rejection degrades to a transcript-only re-sync", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);

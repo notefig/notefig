@@ -31,8 +31,10 @@ export const HarnessDefinitionSchema = z.object({
   /**
    * Terminal command template that reopens an existing session in the
    * harness's own CLI — `${sessionId}` and `${workspace}` are substituted
-   * (see `buildHarnessResumeCommand`). Optional: absent means the harness
-   * has no known way to resume by id, and resume affordances are hidden.
+   * as ALREADY shell-quoted arguments (see `buildHarnessResumeCommand`), so
+   * templates must NOT wrap the placeholders in their own quotes. Optional:
+   * absent means the harness has no known way to resume by id, and resume
+   * affordances are hidden.
    */
   resumeCommand: z.string().optional(),
   /**
@@ -52,10 +54,26 @@ export const HarnessDefinitionSchema = z.object({
 
 export type HarnessDefinition = z.infer<typeof HarnessDefinitionSchema>;
 
+/** Safe as a bare (unquoted) POSIX shell word — no quoting needed. */
+const SHELL_SAFE_WORD = /^[A-Za-z0-9_.,:/@%^+=-]+$/;
+
+/**
+ * Render a value as one literal POSIX shell argument. Single quotes make
+ * everything literal ($, backticks, spaces); embedded single quotes close,
+ * escape, and reopen ('\''). Values that are plainly safe stay bare so the
+ * common command reads clean.
+ */
+function shellQuoteArg(value: string): string {
+  if (SHELL_SAFE_WORD.test(value)) return value;
+  return `'${value.split("'").join("'\\''")}'`;
+}
+
 /**
  * Fill a harness's `resumeCommand` template for one concrete session.
- * Returns null when the harness declares no template — callers hide the
- * affordance rather than guessing a CLI invocation.
+ * Substituted values are shell-quoted — a workspace path containing spaces,
+ * quotes, or `$(...)` pastes into a terminal as the literal argument, never
+ * as syntax. Returns null when the harness declares no template — callers
+ * hide the affordance rather than guessing a CLI invocation.
  */
 export function buildHarnessResumeCommand(
   harness: HarnessDefinition,
@@ -65,9 +83,9 @@ export function buildHarnessResumeCommand(
   // split/join = replaceAll (this package's TS lib predates ES2021).
   return harness.resumeCommand
     .split("${sessionId}")
-    .join(params.sessionId)
+    .join(shellQuoteArg(params.sessionId))
     .split("${workspace}")
-    .join(params.workspacePath);
+    .join(shellQuoteArg(params.workspacePath));
 }
 
 /**
@@ -88,8 +106,9 @@ export const BUILT_IN_HARNESSES: HarnessDefinition[] = [
     authHint: "Run `claude /login` in a terminal on this machine.",
     // Claude sessions are keyed by cwd, so the resume must run from the
     // workspace (verified in acp-two-way-spike.md — external `--resume`
-    // appends to the same session file).
-    resumeCommand: 'cd "${workspace}" && claude --resume ${sessionId}',
+    // appends to the same session file). No quotes around the placeholders:
+    // substitution shell-quotes the values itself.
+    resumeCommand: "cd ${workspace} && claude --resume ${sessionId}",
     mcpRegistration: "session-new",
   },
   {
