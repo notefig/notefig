@@ -120,6 +120,9 @@ export const BUILT_IN_HARNESSES: HarnessDefinition[] = [
     args: ["acp", "--cwd", "${workspace}"],
     env: {},
     authHint: "Run `opencode auth login` in a terminal on this machine.",
+    // OpenCode scopes sessions to the project directory (the spawn above
+    // pins it via --cwd), so the resume runs from the workspace too.
+    resumeCommand: "cd ${workspace} && opencode --session ${sessionId}",
     mcpRegistration: "opencode-config",
   },
   {
