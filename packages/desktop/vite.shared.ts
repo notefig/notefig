@@ -67,6 +67,16 @@ export function sharedResolveAliases(dirname: string) {
       find: /^@notefig\/shared\/(.*)$/,
       replacement: path.resolve(dirname, "../shared/src/$1/index.ts"),
     },
+    // Same source-resolution treatment for the agent protocol package.
+    {
+      find: /^@notefig\/agent$/,
+      replacement: path.resolve(dirname, "../agent/src/index.ts"),
+    },
+    // Same source-resolution treatment for the agent protocol package.
+    {
+      find: /^@notefig\/agent$/,
+      replacement: path.resolve(dirname, "../agent/src/index.ts"),
+    },
     { find: "@", replacement: path.resolve(dirname, "./src") },
     // isomorphic-git's packfile reader calls node's crypto.createHash
     // directly (everything else in it uses a browser-safe sha.js

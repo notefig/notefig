@@ -42,6 +42,13 @@ export class AgentTransportError extends Error {
 
 export type Unsubscribe = () => void;
 
+/** Set-backed subscription used by every transport's onLine/onClose/…:
+ *  add the callback, hand back its removal. */
+export function subscribe<T>(listeners: Set<T>, callback: T): Unsubscribe {
+  listeners.add(callback);
+  return () => listeners.delete(callback);
+}
+
 /** How the child was launched — diagnostics only (no env; may hold secrets). */
 export type SpawnAgentInfo = {
   pid?: number;

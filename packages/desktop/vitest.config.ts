@@ -49,6 +49,14 @@ export default defineConfig({
         find: /^@notefig\/shared\/(.*)$/,
         replacement: path.resolve(__dirname, "../shared/src/$1/index.ts"),
       },
+      {
+        find: /^@notefig\/agent$/,
+        replacement: path.resolve(__dirname, "../agent/src/index.ts"),
+      },
+      {
+        find: /^@notefig\/agent$/,
+        replacement: path.resolve(__dirname, "../agent/src/index.ts"),
+      },
       { find: "@", replacement: path.resolve(__dirname, "./src") },
     ],
     // Hoisted deps (e.g. @tanstack/react-db at the repo root) must not pull

@@ -21,7 +21,7 @@ import {
   type WorkerInfo,
 } from "@notefig/shared/tunnel";
 import { bytesToBase64 } from "@notefig/shared/tunnel";
-import { createLoopbackPair, type LoopbackTransport } from "../../loopback-transport";
+import { createLoopbackPair, type LoopbackTransport } from "@notefig/agent";
 import { FakeAgent } from "../../mock-harness";
 import type { TunnelSocket, TunnelSocketFactory } from "../tunnel-connection";
 

@@ -32,28 +32,31 @@ vi.mock("@/components/editor/blobs/blob-registry", () => ({
 // author_blob's execute reads/writes through the file-sync helpers; stub
 // them so the stringified-payload repair test below exercises the full
 // dispatch without touching a real workspace.
-const { writeWorkspaceTextFile } = vi.hoisted(() => ({
+const { readWorkspaceTextFile, writeWorkspaceTextFile } = vi.hoisted(() => ({
+  readWorkspaceTextFile: vi.fn(async () => "# Doc\n"),
   writeWorkspaceTextFile: vi.fn(async () => {}),
 }));
 vi.mock("@/utils/file-sync", () => ({
-  readWorkspaceTextFile: vi.fn(async () => "# Doc\n"),
+  readWorkspaceTextFile,
   writeWorkspaceTextFile,
 }));
 
-const { buildWidgetContextPayload } = vi.hoisted(() => ({
-  buildWidgetContextPayload: vi.fn(),
-}));
-vi.mock("../widget-context-resource", () => ({ buildWidgetContextPayload }));
+// The payload builder is an injected dep of the handler now (it reads live
+// editor state, so the real one stays out of this suite); URI decoding is
+// the package's own pure codec and runs for real.
+const buildWidgetContextPayload = vi.fn();
 
-const { decodeWidgetContextUri } = vi.hoisted(() => ({
-  decodeWidgetContextUri: vi.fn(),
-}));
-vi.mock("../widget-context-uri", () => ({ decodeWidgetContextUri }));
-
-import { createMcpRequestHandler } from "../mcp-server";
+import {
+  attachMcpEndpoint,
+  createMcpRequestHandler,
+  encodeWidgetContextUri,
+} from "@notefig/agent";
+import type { McpEndpoint, ToolContext } from "@notefig/agent";
 import { PermissionBroker } from "../permission-broker";
 import { agentPermissionRequestsCollection } from "../agent-collections";
-import type { ToolContext } from "@notefig/shared/agent";
+import { toolRegistry, getTool } from "../tools";
+import { serverInstructions } from "../mcp-instructions";
+import i18n from "@/utils/intl";
 
 // vi.hoisted can't reference `z` (hoisted above the "zod" import); assign
 // real schemas onto the mocked blob types now that imports have resolved.
@@ -77,7 +80,16 @@ const ctx: ToolContext = {
 };
 
 function handler(permissionBroker = new PermissionBroker(ctx.taskId)) {
-  return createMcpRequestHandler({ ctx, permissionBroker });
+  return createMcpRequestHandler({
+    ctx,
+    permissionBroker,
+    // The real desktop registry — this suite is deliberately an integration
+    // test of the protocol handler against the actual tool set.
+    tools: { list: () => toolRegistry, get: getTool },
+    translate: (key) => i18n.t(key),
+    instructions: serverInstructions,
+    buildWidgetContextPayload,
+  });
 }
 
 describe("createMcpRequestHandler", () => {
@@ -85,7 +97,6 @@ describe("createMcpRequestHandler", () => {
     for (const r of agentPermissionRequestsCollection.toArray) {
       agentPermissionRequestsCollection.delete(r.id);
     }
-    decodeWidgetContextUri.mockReset();
     buildWidgetContextPayload.mockReset();
   });
 
@@ -128,7 +139,6 @@ describe("createMcpRequestHandler", () => {
   });
 
   it("resources/read: an undecodable uri returns a JSON-RPC error, not a thrown exception", async () => {
-    decodeWidgetContextUri.mockReturnValue(undefined);
     const response = await handler()({
       jsonrpc: "2.0",
       id: 21,
@@ -150,17 +160,15 @@ describe("createMcpRequestHandler", () => {
       selectedText: null,
       otherOpenFiles: [],
     };
-    decodeWidgetContextUri.mockReturnValue(ref);
     buildWidgetContextPayload.mockResolvedValue(payload);
 
-    const uri = "notefig://widget-context?path=notes.md&pos=0";
+    const uri = encodeWidgetContextUri(ref);
     const response = await handler()({
       jsonrpc: "2.0",
       id: 22,
       method: "resources/read",
       params: { uri },
     });
-    expect(decodeWidgetContextUri).toHaveBeenCalledWith(uri);
     expect(buildWidgetContextPayload).toHaveBeenCalledWith(
       ctx.workspacePath,
       ref,
@@ -363,5 +371,145 @@ describe("createMcpRequestHandler", () => {
       method: "not/a/real/method",
     });
     expect(response?.error?.code).toBe(-32601);
+  });
+
+  it("tools/call: a tool that returns ok:false becomes an isError MCP result", async () => {
+    readWorkspaceTextFile.mockRejectedValueOnce(new Error("disk detached"));
+    const response = await handler()({
+      jsonrpc: "2.0",
+      id: 50,
+      method: "tools/call",
+      params: { name: "workspace_read_document", arguments: { path: "a.md" } },
+    });
+    const result = response?.result as {
+      isError: true;
+      content: Array<{ text: string }>;
+    };
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("disk detached");
+  });
+
+  it("tools/call: missing name and missing arguments are handled", async () => {
+    const noName = await handler()({
+      jsonrpc: "2.0",
+      id: 51,
+      method: "tools/call",
+    });
+    expect(noName?.error?.code).toBe(-32602);
+    expect(noName?.error?.message).toContain("(missing name)");
+
+    // Omitted arguments default to {} — fine for a no-input tool.
+    const noArgs = await handler()({
+      jsonrpc: "2.0",
+      id: 52,
+      method: "tools/call",
+      params: { name: "workspace_open_files" },
+    });
+    expect(noArgs?.error).toBeUndefined();
+  });
+
+  it("tools/call: the repair pass leaves non-object arguments and broken JSON strings alone", async () => {
+    // Arguments that aren't a plain object can't be repaired.
+    const arrayArgs = await handler()({
+      jsonrpc: "2.0",
+      id: 53,
+      method: "tools/call",
+      params: { name: "widget_respond", arguments: ["kind", "answer"] },
+    });
+    expect(arrayArgs?.error?.code).toBe(-32602);
+
+    // A value that looks like JSON but doesn't parse keeps the original
+    // string and still fails validation.
+    const brokenJson = await handler()({
+      jsonrpc: "2.0",
+      id: 54,
+      method: "tools/call",
+      params: {
+        name: "author_blob",
+        arguments: {
+          path: "notes.md",
+          type: "question",
+          id: "question_bad1",
+          payload: '{"prompt": broken',
+        },
+      },
+    });
+    expect(brokenJson?.error?.code).toBe(-32602);
+    expect(brokenJson?.error?.message).toMatch(/invalid input for author_blob/);
+  });
+
+  it("resources/list is empty (widget-context URIs are handed out inline, not enumerated)", async () => {
+    const response = await handler()({
+      jsonrpc: "2.0",
+      id: 55,
+      method: "resources/list",
+      params: {},
+    });
+    expect(response?.result).toEqual({ resources: [] });
+  });
+
+  it("resources/read: a missing uri returns a JSON-RPC error without decoding", async () => {
+    const response = await handler()({
+      jsonrpc: "2.0",
+      id: 56,
+      method: "resources/read",
+    });
+    expect(response?.error?.code).toBe(-32602);
+    expect(response?.error?.message).toContain("(missing)");
+    expect(buildWidgetContextPayload).not.toHaveBeenCalled();
+  });
+});
+
+describe("attachMcpEndpoint", () => {
+  function fakeEndpoint() {
+    let onRequest:
+      | ((line: string, respond: (response: string) => void) => void)
+      | undefined;
+    const endpoint: McpEndpoint = {
+      start: async () => {},
+      onRequest(cb) {
+        onRequest = cb;
+        return () => {
+          onRequest = undefined;
+        };
+      },
+      close: async () => {},
+    };
+    return {
+      endpoint,
+      send: (line: string) =>
+        new Promise<string | null>((resolve) => {
+          let responded = false;
+          onRequest!(line, (response) => {
+            responded = true;
+            resolve(response);
+          });
+          // Give the async handler a beat; notifications never respond.
+          setTimeout(() => {
+            if (!responded) resolve(null);
+          }, 10);
+        }),
+    };
+  }
+
+  it("answers unparseable lines with a JSON-RPC parse error", async () => {
+    const { endpoint, send } = fakeEndpoint();
+    attachMcpEndpoint(endpoint, handler());
+    const raw = await send("this is not json");
+    const parsed = JSON.parse(raw!) as {
+      id: null;
+      error: { code: number; message: string };
+    };
+    expect(parsed.id).toBeNull();
+    expect(parsed.error.code).toBe(-32700);
+  });
+
+  it("stays silent for notifications (handler returns null)", async () => {
+    const { endpoint, send } = fakeEndpoint();
+    attachMcpEndpoint(endpoint, handler());
+    const raw = await send(
+      JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+    );
+    expect(raw).toBeNull();
   });
 });

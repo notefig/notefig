@@ -16,12 +16,21 @@ export interface AgentTool<In, Out> {
    * prompts and tool-call UI, distinct from `name`. Resolved at the point of
    * use (e.g. `mcp-server.ts`'s `tools/list`), never baked into this object
    * at module-load time, so it reflects the active language even if it
-   * changes later. `shared` can't import `desktop`'s i18n instance, so this
-   * stays a plain string key here — desktop owns resolving it.
+   * changes later. This package can't import `desktop`'s i18n instance, so this
+   * stays a plain string key here — desktop owns resolving it (injected as
+   * `McpHandlerDeps.translate`).
    */
   title: string;
   description: string;
   input: z.ZodType<In>;
+  /**
+   * Optional hand-rendered JSON Schema for `tools/list`, regenerated per
+   * call; when absent, the generic zodToJsonSchema rendering of `input` is
+   * used. `author_blob` sets this: its payload shape depends on the
+   * registered blob types, which only the tool's own module can enumerate —
+   * the protocol layer stays tool-agnostic.
+   */
+  inputJsonSchema?: () => unknown;
   /** Mutating tools set this so the MCP dispatch gates behind the existing
    *  PermissionBroker before calling `execute` — no second consent surface. */
   requiresPermission?: boolean;
@@ -31,7 +40,7 @@ export interface AgentTool<In, Out> {
 /**
  * `agents` is desktop's Stage 1 entity-handle facade
  * (`packages/desktop/src/agent/agents.ts`). It's typed structurally here
- * (shared can't import from desktop) — just enough surface for tools to act
+ * (this package can't import from desktop) — just enough surface for tools to act
  * through it rather than reaching into service internals.
  */
 export interface ToolAgentsFacade {

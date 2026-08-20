@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      // Resolve @notefig/shared to its TS source, mirroring desktop's
+      // tsconfig (stale-dist drift + fresh-checkout rationale documented
+      // there).
+      "@notefig/shared": ["../shared/src/index.ts"],
+      "@notefig/shared/*": ["../shared/src/*/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

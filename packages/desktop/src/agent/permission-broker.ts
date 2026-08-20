@@ -2,6 +2,7 @@ import type {
   RequestPermissionRequest,
   RequestPermissionResponse,
 } from "@notefig/shared/agent";
+import type { PermissionRequester } from "@notefig/agent";
 import { agentPermissionRequestsCollection } from "./agent-collections";
 
 type Pending = {
@@ -17,7 +18,7 @@ type Pending = {
  * session/cancel must resolve every pending request as cancelled, per the ACP
  * spec.
  */
-export class PermissionBroker {
+export class PermissionBroker implements PermissionRequester {
   private readonly pending = new Map<string, Pending>();
   private nextId = 0;
 

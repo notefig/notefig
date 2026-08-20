@@ -22,7 +22,7 @@ import type { HarnessDefinition } from "@notefig/shared/agent";
 import type {
   AgentTransport,
   McpEndpoint,
-} from "@/agent/agent-transport.interface";
+} from "@notefig/agent";
 import { tunnelConnection } from "@/agent/tunnel/tunnel-connection";
 import { TunnelTransport } from "@/agent/tunnel/tunnel-transport";
 import { TunnelMcpEndpoint } from "@/agent/tunnel/tunnel-mcp-endpoint";

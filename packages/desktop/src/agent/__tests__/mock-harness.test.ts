@@ -9,7 +9,7 @@ vi.mock("@/adapters", async () => ({
   },
 }));
 
-import { NotefigAcpClient } from "../acp-client";
+import { NotefigAcpClient } from "@notefig/agent";
 import type { SessionNotification } from "@notefig/shared/agent";
 import { PermissionBroker } from "../permission-broker";
 import {
@@ -26,6 +26,10 @@ async function connectedClient(onUpdate: (n: SessionNotification) => void) {
     transport,
     permissionBroker: new PermissionBroker("task_test"),
     onSessionUpdate: onUpdate,
+    fs: {
+      readTextFile: vi.fn(async () => ""),
+      writeTextFile: vi.fn(async () => {}),
+    },
   });
   await transport.start();
   await client.connect();

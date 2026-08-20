@@ -37,6 +37,9 @@
       ],
       "@notefig/shared/*": [
         "../shared/src/*/index.ts"
+      ],
+      "@notefig/agent": [
+        "../agent/src/index.ts"
       ]
     }
   },

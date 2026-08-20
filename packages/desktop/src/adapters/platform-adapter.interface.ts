@@ -4,7 +4,7 @@ import type { HarnessDefinition } from "@notefig/shared/agent";
 import type {
   AgentTransport,
   McpEndpoint,
-} from "@/agent/agent-transport.interface";
+} from "@notefig/agent";
 
 export type FileSystemErrorType =
   | "not_found"

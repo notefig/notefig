@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AgentTool } from "@notefig/shared/agent";
+import type { AgentTool } from "@notefig/agent";
 
 /**
  * Shared between the tool and the widget-side reader

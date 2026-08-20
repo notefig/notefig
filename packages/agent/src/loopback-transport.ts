@@ -1,3 +1,4 @@
+import { subscribe } from "./agent-transport.interface";
 import type { AgentTransport, Unsubscribe } from "./agent-transport.interface";
 import type { AgentTransportError } from "./agent-transport.interface";
 
@@ -32,13 +33,11 @@ export class LoopbackTransport implements AgentTransport {
   }
 
   onLine(callback: (line: string) => void): Unsubscribe {
-    this.lineListeners.add(callback);
-    return () => this.lineListeners.delete(callback);
+    return subscribe(this.lineListeners, callback);
   }
 
   onClose(callback: (error?: AgentTransportError) => void): Unsubscribe {
-    this.closeListeners.add(callback);
-    return () => this.closeListeners.delete(callback);
+    return subscribe(this.closeListeners, callback);
   }
 
   async close(): Promise<void> {

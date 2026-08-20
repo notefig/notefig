@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { MCP_SERVER_NAME, type McpServer } from "@notefig/shared/agent";
-import type { McpEndpoint, Unsubscribe } from "./agent-transport.interface";
-import { AgentTransportError } from "./agent-transport.interface";
+import type { McpEndpoint, Unsubscribe } from "@notefig/agent";
+import { AgentTransportError } from "@notefig/agent";
 import { StreamPuller } from "./stream-puller";
 
 /** Errors-as-values shape returned by the mcp_bridge.rs commands. */
