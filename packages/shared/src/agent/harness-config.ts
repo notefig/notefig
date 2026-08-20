@@ -68,6 +68,14 @@ function shellQuoteArg(value: string): string {
   return `'${value.split("'").join("'\\''")}'`;
 }
 
+/** A placeholder the template author wrapped in their own quotes — e.g.
+ *  `"${workspace}"` (the pre-quoting built-in's shape, or a hand-written
+ *  custom template). Nesting our single-quoted value inside those quotes
+ *  would re-enable `$(...)` inside double quotes and inject literal quote
+ *  characters inside single ones, so the wrapper is stripped and our own
+ *  quoting becomes the only quoting. */
+const QUOTED_PLACEHOLDER = /(["'])(\$\{(?:sessionId|workspace)\})\1/g;
+
 /**
  * Fill a harness's `resumeCommand` template for one concrete session.
  * Substituted values are shell-quoted — a workspace path containing spaces,
@@ -82,6 +90,7 @@ export function buildHarnessResumeCommand(
   if (!harness.resumeCommand) return null;
   // split/join = replaceAll (this package's TS lib predates ES2021).
   return harness.resumeCommand
+    .replace(QUOTED_PLACEHOLDER, "$2")
     .split("${sessionId}")
     .join(shellQuoteArg(params.sessionId))
     .split("${workspace}")

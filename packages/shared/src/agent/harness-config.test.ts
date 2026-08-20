@@ -106,7 +106,13 @@ describe("resolveEffectiveHarnesses", () => {
 
   it("inherits the built-in probeCommand unless the override sets one", () => {
     const inherited = resolveEffectiveHarnesses(
-      { [CLAUDE_CODE_ID]: { id: CLAUDE_CODE_ID, enabled: true, command: "/opt/acp" } },
+      {
+        [CLAUDE_CODE_ID]: {
+          id: CLAUDE_CODE_ID,
+          enabled: true,
+          command: "/opt/acp",
+        },
+      },
       [],
     ).find((h) => h.id === CLAUDE_CODE_ID)!;
     expect(inherited.probeCommand).toBe("command -v claude");
@@ -259,6 +265,19 @@ describe("buildHarnessResumeCommand", () => {
     expect(command).toBe(
       "cd '/tmp/$(rm -rf ~)/it'\\''s' && claude --resume sess-123",
     );
+  });
+
+  it("strips author quoting around placeholders — our quoting is the only quoting", () => {
+    const quoted = {
+      ...claude,
+      resumeCommand: "cd \"${workspace}\" && claude --resume '${sessionId}'",
+    };
+    expect(
+      buildHarnessResumeCommand(quoted, {
+        sessionId: "sess-123",
+        workspacePath: "/tmp/$(whoami)",
+      }),
+    ).toBe("cd '/tmp/$(whoami)' && claude --resume sess-123");
   });
 
   it("returns null when the harness declares no resumeCommand", () => {

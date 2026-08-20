@@ -1267,6 +1267,7 @@ export class AgentTask {
     // "starting" + a sessionId is the UI's session-loading state (MET-54) —
     // the composer holds input exactly as it does during revival.
     this.setStatus("starting");
+    let resynced = false;
     try {
       // resumeSession installs its replay turn synchronously, so the whole
       // close+load window reads as "a turn is in flight" to prompt() — no
@@ -1278,6 +1279,7 @@ export class AgentTask {
         "session/load",
       );
       this.setStatus("idle");
+      resynced = true;
       return { ok: true };
     } catch (error) {
       const message = errorMessage(error);
@@ -1286,7 +1288,12 @@ export class AgentTask {
       return { ok: false, error: message };
     } finally {
       // Prompts sent during the refresh queued (see prompt()); run them now.
+      // Only after a successful re-sync: a failed refresh can mean a dead
+      // transport (handleTransportClose dropped the replay turn), and
+      // draining would shove the queue into it — the prompts stay queued
+      // (visible rows) instead.
       if (
+        resynced &&
         this.pendingPrompts.length > 0 &&
         !this.authBlocked &&
         !this.currentTurn &&

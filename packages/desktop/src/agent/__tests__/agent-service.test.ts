@@ -1672,6 +1672,54 @@ describe("session hydration: buffered replay + manual refresh", () => {
     expect(turnFor(task.taskId).map((t) => t.turnId)).toEqual(["trn_old"]);
   });
 
+  it("a failed refresh leaves queued prompts queued — never drained into the dead transport", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    let promptCount = 0;
+    agent.onPrompt = async () => {
+      promptCount += 1;
+      return { stopReason: "end_turn" };
+    };
+    // Same flaky-transport shape as the load-death test above: fire the
+    // task's close handler (first onClose registration) while the pipe
+    // stays open so the load response still arrives.
+    let fireClose: (() => void) | undefined;
+    const flaky = {
+      locus: "local" as const,
+      start: () => client.start(),
+      send: (line: string) => client.send(line),
+      onLine: (cb: (line: string) => void) => client.onLine(cb),
+      onClose: (cb: () => void) => {
+        fireClose ??= cb;
+        return client.onClose(cb);
+      },
+      close: () => client.close(),
+    };
+    let releaseLoad: (() => void) | undefined;
+    agent.onLoadSession = async () => {
+      await new Promise<void>((resolve) => {
+        releaseLoad = resolve;
+      });
+      return {};
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => flaky);
+    await runPrompt(task, "hi");
+    expect(promptCount).toBe(1);
+
+    const refresh = task.refreshFromHarness();
+    await vi.waitFor(() => expect(releaseLoad).toBeDefined());
+    // Queued behind the replay turn; must survive the transport death.
+    task.prompt("queued during refresh");
+    fireClose!();
+    releaseLoad!();
+
+    expect(await refresh).toMatchObject({ ok: false });
+    expect(promptCount).toBe(1);
+    expect(turnFor(task.taskId).at(-1)!.status).toBe("queued");
+  });
+
   it("a session/close rejection degrades to a transcript-only re-sync", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
