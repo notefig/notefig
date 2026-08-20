@@ -560,10 +560,16 @@ const Transcript = memo(function Transcript({
   // appends push the gap past scrollEndThreshold between anchor checks and
   // it silently stops following without any user scroll. The clearance
   // spacer (bottomInset) likewise grows without touching row count, so no
-  // append-side mechanism ever sees it.
+  // append-side mechanism ever sees it. The tail row's KEY matters too: a
+  // refresh (ReplayStage.commit) swaps the whole transcript for new row ids
+  // at possibly the same length — every cached measurement drops back to an
+  // estimate, so without a re-glue the view lands offset from the end.
+  const lastRowKey = rows.length
+    ? transcriptRowKey(rows[rows.length - 1])
+    : null;
   useLayoutEffect(() => {
     if (pinned) rowVirtualizer.scrollToEnd({ behavior: "auto" });
-  }, [bottomInset, pinned, rows.length, rowVirtualizer]);
+  }, [bottomInset, pinned, rows.length, lastRowKey, rowVirtualizer]);
 
   useEffect(() => {
     scrollHandleRef.current.scrollToEnd = () => {
