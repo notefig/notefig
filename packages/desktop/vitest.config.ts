@@ -2,6 +2,7 @@ import { defineConfig } from "vitest/config";
 import fs from "fs";
 import path from "path";
 import pkg from "./package.json";
+import { workspaceSourceAliases } from "./vite.shared";
 
 const latestReleaseNotesFile = path.resolve(
   __dirname,
@@ -37,26 +38,13 @@ export default defineConfig({
     },
   },
   resolve: {
-    // Mirror vite.config.ts: resolve @notefig/shared to its TS source so
-    // tests compile the same code the app bundles (no CJS star-re-export
-    // named-export gaps, no stale-dist drift).
+    // Workspace packages resolve to TS source so tests compile the same
+    // code the app bundles — the list itself lives in vite.shared.ts
+    // (workspaceSourceAliases), one authoritative place. Deliberately NOT
+    // sharedResolveAliases: tests keep their own `@` entry and skip the
+    // browser-only crypto polyfill alias.
     alias: [
-      {
-        find: /^@notefig\/shared$/,
-        replacement: path.resolve(__dirname, "../shared/src/index.ts"),
-      },
-      {
-        find: /^@notefig\/shared\/(.*)$/,
-        replacement: path.resolve(__dirname, "../shared/src/$1/index.ts"),
-      },
-      {
-        find: /^@notefig\/agent$/,
-        replacement: path.resolve(__dirname, "../agent/src/index.ts"),
-      },
-      {
-        find: /^@notefig\/agent$/,
-        replacement: path.resolve(__dirname, "../agent/src/index.ts"),
-      },
+      ...workspaceSourceAliases(__dirname),
       { find: "@", replacement: path.resolve(__dirname, "./src") },
     ],
     // Hoisted deps (e.g. @tanstack/react-db at the repo root) must not pull
