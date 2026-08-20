@@ -467,18 +467,10 @@ type TranscriptScrollHandleRef = { current: TranscriptScrollHandle };
  * useMessageScroller() keeps resolving (a no-op here); the composer reaches
  * this transcript's real scrollToEnd via `scrollHandleRef`.
  */
-const Transcript = memo(function Transcript({
-  taskId,
-  bottomInset,
-  scrollHandleRef,
-}: {
-  taskId: string;
-  /** Live height of the floating composer overlay (0 until measured). */
-  bottomInset: number;
-  /** Filled in with this transcript's real scrollToEnd (see doc comment). */
-  scrollHandleRef: TranscriptScrollHandleRef;
-}) {
-  const { t } = useTranslation();
+/** The transcript's flat row list: entries in id order (ids are ascending,
+ *  so document order = chronological — text and tool calls interleaved
+ *  exactly as they streamed), then turn-error banners. */
+function useTranscriptRows(taskId: string): TranscriptRow[] {
   const entries = useTaskEntries(taskId);
   const turns = useTaskTurns(taskId);
   const turnErrors = useMemo(
@@ -490,15 +482,11 @@ const Transcript = memo(function Transcript({
       new Set(turns.filter((t) => t.status === "queued").map((t) => t.turnId)),
     [turns],
   );
-
-  // Ids are ascending, so document order = chronological (text and tool calls
-  // interleaved exactly as they streamed).
   const sortedEntries = useMemo(
     () => [...entries].sort((a, b) => (a.id < b.id ? -1 : 1)),
     [entries],
   );
-
-  const rows = useMemo<TranscriptRow[]>(
+  return useMemo<TranscriptRow[]>(
     () => [
       ...sortedEntries.map(
         (entry): TranscriptRow => ({
@@ -511,37 +499,40 @@ const Transcript = memo(function Transcript({
     ],
     [sortedEntries, queuedTurnIds, turnErrors],
   );
+}
 
-  const scrollElRef = useRef<HTMLDivElement | null>(null);
+/**
+ * Follow-mode ("pinned to the live edge") state over the row virtualizer.
+ *
+ * Detach is INTENT-based: the re-glue below and the virtualizer's
+ * measurement compensation both move scrollTop programmatically, and
+ * mid-adjustment scroll events routinely observe a large distance-from-
+ * end — deriving `pinned` from distance alone falsely detached during
+ * fast torrents (the old primitive detached on wheel for the same
+ * reason, MET-104). Only a user gesture may detach: a wheel tick
+ * (consumed by the scroll event it produces) or a held pointer
+ * (scrollbar drag / touch pan). Re-arming stays distance-based.
+ */
+function useTranscriptFollow({
+  rows,
+  bottomInset,
+  scrollElRef,
+  rowVirtualizer,
+  scrollHandleRef,
+}: {
+  rows: TranscriptRow[];
+  bottomInset: number;
+  scrollElRef: React.RefObject<HTMLDivElement | null>;
+  rowVirtualizer: ReturnType<typeof useVirtualizer<HTMLDivElement, Element>>;
+  scrollHandleRef: TranscriptScrollHandleRef;
+}) {
   // Live edge tracking for the floating button; re-render-worthy (unlike
   // the row virtualizer's own internal isAtEnd check) since it drives what
   // paints. Starts true: a freshly opened/reopened tab lands at the end.
   const [pinned, setPinned] = useState(true);
-
-  const rowVirtualizer = useVirtualizer({
-    count: rows.length,
-    getScrollElement: () => scrollElRef.current,
-    estimateSize: (index) => estimateRowSize(rows[index]),
-    getItemKey: (index) => transcriptRowKey(rows[index]),
-    overscan: 8,
-    // Chat mode (see doc comment): follow the live edge on append while
-    // pinned, and compensate scrollTop as the tail's real height replaces
-    // its estimate so a pinned view never jumps while streaming.
-    anchorTo: "end",
-    followOnAppend: "auto",
-    scrollEndThreshold: 48,
-  });
-
-  // Detach is INTENT-based: the re-glue below and the virtualizer's
-  // measurement compensation both move scrollTop programmatically, and
-  // mid-adjustment scroll events routinely observe a large distance-from-
-  // end — deriving `pinned` from distance alone falsely detached during
-  // fast torrents (the old primitive detached on wheel for the same
-  // reason, MET-104). Only a user gesture may detach: a wheel tick
-  // (consumed by the scroll event it produces) or a held pointer
-  // (scrollbar drag / touch pan). Re-arming stays distance-based.
   const wheelIntent = useRef(false);
   const pointerHeld = useRef(false);
+
   const handleScroll = useCallback(() => {
     const el = scrollElRef.current;
     if (!el) return;
@@ -552,7 +543,7 @@ const Transcript = memo(function Transcript({
       setPinned(false);
     }
     wheelIntent.current = false;
-  }, []);
+  }, [scrollElRef]);
 
   // While pinned, `pinned` is the follow-mode authority — re-glue on every
   // append and on bottomInset changes. followOnAppend("auto") alone loses
@@ -578,7 +569,98 @@ const Transcript = memo(function Transcript({
     };
   }, [rowVirtualizer, scrollHandleRef]);
 
-  const virtualItems = rowVirtualizer.getVirtualItems();
+  // Spreadable onto the scroll element: detach-intent capture + re-arm.
+  const viewportHandlers = useMemo(
+    () => ({
+      onScroll: handleScroll,
+      onWheel: (event: React.WheelEvent) => {
+        if (event.deltaY !== 0) wheelIntent.current = true;
+      },
+      onPointerDown: () => {
+        pointerHeld.current = true;
+      },
+      onPointerUp: () => {
+        pointerHeld.current = false;
+      },
+      onPointerCancel: () => {
+        pointerHeld.current = false;
+      },
+    }),
+    [handleScroll],
+  );
+
+  return { pinned, setPinned, viewportHandlers };
+}
+
+/** The floating jump-to-live-edge button, tucked into the corner just above
+ *  the composer cards: the overlay begins with ~40px of transparent gradient
+ *  (pt-10), so backing off from its measured top keeps the button visually
+ *  next to the prompt box rather than floating high above it. Always
+ *  mounted, shown/hidden via data-active so it keeps the primitive button's
+ *  slide-and-fade (MessageScrollerButton's direction=end treatment) without
+ *  importing its scroll logic. */
+function ScrollToEndButton({
+  active,
+  bottomInset,
+  onJump,
+}: {
+  active: boolean;
+  bottomInset: number;
+  onJump: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Button
+      variant="outline"
+      size="icon"
+      data-active={active}
+      aria-label={t("agentScrollToEnd")}
+      title={t("agentScrollToEnd")}
+      className="absolute end-3 size-7 rounded-full border-border bg-background text-foreground shadow-sm transition-[translate,scale,opacity] duration-200 hover:bg-muted hover:text-foreground [&_svg]:size-3.5 data-[active=false]:pointer-events-none data-[active=false]:translate-y-full data-[active=false]:scale-95 data-[active=false]:opacity-0 data-[active=false]:duration-400 data-[active=false]:ease-[cubic-bezier(0.7,0,0.84,0)] data-[active=true]:translate-y-0 data-[active=true]:scale-100 data-[active=true]:opacity-100 data-[active=true]:ease-[cubic-bezier(0.23,1,0.32,1)]"
+      style={{ bottom: Math.max(bottomInset, 144) - 32 }}
+      onClick={onJump}
+    >
+      <ArrowDown className="size-4" />
+    </Button>
+  );
+}
+
+const Transcript = memo(function Transcript({
+  taskId,
+  bottomInset,
+  scrollHandleRef,
+}: {
+  taskId: string;
+  /** Live height of the floating composer overlay (0 until measured). */
+  bottomInset: number;
+  /** Filled in with this transcript's real scrollToEnd (see doc comment). */
+  scrollHandleRef: TranscriptScrollHandleRef;
+}) {
+  const { t } = useTranslation();
+  const rows = useTranscriptRows(taskId);
+  const scrollElRef = useRef<HTMLDivElement | null>(null);
+
+  const rowVirtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollElRef.current,
+    estimateSize: (index) => estimateRowSize(rows[index]),
+    getItemKey: (index) => transcriptRowKey(rows[index]),
+    overscan: 8,
+    // Chat mode (see doc comment): follow the live edge on append while
+    // pinned, and compensate scrollTop as the tail's real height replaces
+    // its estimate so a pinned view never jumps while streaming.
+    anchorTo: "end",
+    followOnAppend: "auto",
+    scrollEndThreshold: 48,
+  });
+
+  const { pinned, setPinned, viewportHandlers } = useTranscriptFollow({
+    rows,
+    bottomInset,
+    scrollElRef,
+    rowVirtualizer,
+    scrollHandleRef,
+  });
 
   return (
     <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden">
@@ -588,19 +670,7 @@ const Transcript = memo(function Transcript({
           and falsely detach follow mode (MET-104). */}
       <div
         ref={scrollElRef}
-        onScroll={handleScroll}
-        onWheel={(event) => {
-          if (event.deltaY !== 0) wheelIntent.current = true;
-        }}
-        onPointerDown={() => {
-          pointerHeld.current = true;
-        }}
-        onPointerUp={() => {
-          pointerHeld.current = false;
-        }}
-        onPointerCancel={() => {
-          pointerHeld.current = false;
-        }}
+        {...viewportHandlers}
         data-transcript-viewport
         className="size-full min-h-0 min-w-0 overflow-y-auto overscroll-contain px-3 pt-3 [overflow-anchor:none]"
       >
@@ -611,7 +681,7 @@ const Transcript = memo(function Transcript({
             width: "100%",
           }}
         >
-          {virtualItems.map((virtualRow) => (
+          {rowVirtualizer.getVirtualItems().map((virtualRow) => (
             <TranscriptRowView
               key={virtualRow.key}
               virtualRow={virtualRow}
@@ -629,28 +699,14 @@ const Transcript = memo(function Transcript({
             the old pb-36. */}
         <div aria-hidden style={{ height: Math.max(bottomInset, 144) }} />
       </div>
-      {/* Tucked into the corner just above the composer cards: the overlay
-          begins with ~40px of transparent gradient (pt-10), so backing off
-          from its measured top keeps the button visually next to the
-          prompt box rather than floating high above it. */}
-      {/* Always mounted, shown/hidden via data-active so it keeps the
-          primitive button's slide-and-fade (MessageScrollerButton's
-          direction=end treatment) without importing its scroll logic. */}
-      <Button
-        variant="outline"
-        size="icon"
-        data-active={!pinned}
-        aria-label={t("agentScrollToEnd")}
-        title={t("agentScrollToEnd")}
-        className="absolute end-3 size-7 rounded-full border-border bg-background text-foreground shadow-sm transition-[translate,scale,opacity] duration-200 hover:bg-muted hover:text-foreground [&_svg]:size-3.5 data-[active=false]:pointer-events-none data-[active=false]:translate-y-full data-[active=false]:scale-95 data-[active=false]:opacity-0 data-[active=false]:duration-400 data-[active=false]:ease-[cubic-bezier(0.7,0,0.84,0)] data-[active=true]:translate-y-0 data-[active=true]:scale-100 data-[active=true]:opacity-100 data-[active=true]:ease-[cubic-bezier(0.23,1,0.32,1)]"
-        style={{ bottom: Math.max(bottomInset, 144) - 32 }}
-        onClick={() => {
+      <ScrollToEndButton
+        active={!pinned}
+        bottomInset={bottomInset}
+        onJump={() => {
           rowVirtualizer.scrollToEnd({ behavior: "smooth" });
           setPinned(true);
         }}
-      >
-        <ArrowDown className="size-4" />
-      </Button>
+      />
     </div>
   );
 });
