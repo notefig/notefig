@@ -123,6 +123,46 @@ function parseStringifiedObjectValues(
   return repairedAny ? out : undefined;
 }
 
+/**
+ * Spec revisions this handler is verified against, newest first —
+ * negotiation falls back to [0]. Don't add a revision without checking its
+ * changelog against our surface (initialize, ping, tools/list, tools/call,
+ * resources/list, resources/read). Verified 2026-08-20:
+ * - 2025-11-25: additive only (auth discovery, icons, elicitation, sampling
+ *   tools, experimental tasks). The one item touching us is SEP-1303, a
+ *   SHOULD-level clarification that tool input-validation errors go back as
+ *   tool execution errors rather than protocol errors; we still answer
+ *   -32602 after the repair pass, which remains compliant.
+ * - 2025-06-18: removed JSON-RPC batching (we never batched), structured
+ *   tool output + elicitation are optional additions.
+ * - 2025-03-26: streamable HTTP + audio content — transport/content
+ *   features we don't emit.
+ * Real harnesses bundle the official MCP SDK, which requests the latest
+ * revision it knows and validates our counter-offer against its own
+ * supported list (opencode's binary carries all four of these strings).
+ */
+export const SUPPORTED_MCP_PROTOCOL_VERSIONS = [
+  "2025-11-25",
+  "2025-06-18",
+  "2025-03-26",
+  "2024-11-05",
+] as const;
+
+/**
+ * MCP version negotiation (spec: lifecycle § initialization): echo the
+ * requested revision if we support it, otherwise offer our latest and let
+ * the client decide whether to proceed or disconnect. Replaces the old
+ * verbatim echo, which claimed support for anything (MET-153).
+ */
+export function negotiateMcpProtocolVersion(
+  requested: string | undefined,
+): string {
+  return requested &&
+    (SUPPORTED_MCP_PROTOCOL_VERSIONS as readonly string[]).includes(requested)
+    ? requested
+    : SUPPORTED_MCP_PROTOCOL_VERSIONS[0];
+}
+
 export type McpHandlerDeps = {
   ctx: ToolContext;
   permissionBroker: PermissionRequester;
@@ -149,6 +189,11 @@ export type McpHandlerDeps = {
     workspacePath: string,
     ref: WidgetContextRef,
   ) => Promise<unknown>;
+  /** Fired when a client requests a revision outside our supported list
+   *  (undefined = it sent none) and gets counter-offered our latest —
+   *  observability hook (desktop wires telemetry); never affects the
+   *  response. */
+  onUnsupportedProtocolVersion?: (requested: string | undefined) => void;
 };
 
 function handleInitialize(
@@ -156,10 +201,14 @@ function handleInitialize(
   id: JsonRpcMessage["id"],
   params: unknown,
 ): JsonRpcMessage {
+  const requested = (params as { protocolVersion?: string } | undefined)
+    ?.protocolVersion;
+  const negotiated = negotiateMcpProtocolVersion(requested);
+  if (negotiated !== requested) {
+    deps.onUnsupportedProtocolVersion?.(requested);
+  }
   return jsonrpcResult(id, {
-    protocolVersion:
-      (params as { protocolVersion?: string } | undefined)?.protocolVersion ??
-      "2024-11-05",
+    protocolVersion: negotiated,
     capabilities: { tools: {}, resources: {} },
     serverInfo: { name: MCP_SERVER_NAME, version: "1.0.0" },
     instructions: deps.instructions(),
@@ -220,7 +269,11 @@ async function handleToolsCall(
   const name = callParams?.name;
   const tool = name ? deps.tools.get(name) : undefined;
   if (!tool) {
-    return jsonrpcError(id, -32602, `unknown tool: ${name ?? "(missing name)"}`);
+    return jsonrpcError(
+      id,
+      -32602,
+      `unknown tool: ${name ?? "(missing name)"}`,
+    );
   }
   const args = callParams?.arguments ?? {};
   let parsed = tool.input.safeParse(args);
@@ -292,6 +345,11 @@ export function createMcpRequestHandler(
  * command three times concurrently) can never receive each other's replies.
  * No request/response correlation needed beyond that — MCP's own JSON-RPC
  * `id` is what the *harness* uses to match a response to its request.
+ *
+ * Version seam: if a future spec revision ever forces divergent behavior,
+ * per-version handler variants would key HERE, at the connection level —
+ * each connection sees exactly one `initialize`, so this is where the
+ * negotiated version is knowable — not inside the shared stateless handler.
  */
 export function attachMcpEndpoint(
   endpoint: McpEndpoint,

@@ -50,6 +50,7 @@ import {
   attachMcpEndpoint,
   createMcpRequestHandler,
   encodeWidgetContextUri,
+  SUPPORTED_MCP_PROTOCOL_VERSIONS,
 } from "@notefig/agent";
 import type { McpEndpoint, ToolContext } from "@notefig/agent";
 import { PermissionBroker } from "../permission-broker";
@@ -111,7 +112,8 @@ describe("createMcpRequestHandler", () => {
       jsonrpc: "2.0",
       id: 1,
       result: {
-        protocolVersion: "2024-11-05",
+        // No requested version → negotiation offers our latest (MET-153).
+        protocolVersion: SUPPORTED_MCP_PROTOCOL_VERSIONS[0],
         capabilities: { tools: {}, resources: {} },
         serverInfo: { name: "notefig", version: "1.0.0" },
       },
