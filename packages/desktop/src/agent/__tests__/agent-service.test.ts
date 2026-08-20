@@ -1469,6 +1469,238 @@ describe("AgentTask startup timeout (MET-72)", () => {
   });
 });
 
+describe("session hydration: buffered replay + manual refresh", () => {
+  /** Rows a previous life of the task left behind (workspace close → reopen). */
+  function seedOldTranscript(taskId: string): void {
+    agentTurnsCollection.insert({
+      turnId: "trn_old",
+      taskId,
+      sessionId: "sess_old",
+      status: "completed",
+      stopReason: "end_turn",
+      startedAt: 1,
+    });
+    agentEntriesCollection.insert({
+      id: "evt_old_1",
+      taskId,
+      turnId: "trn_old",
+      type: "user",
+      text: "old prompt",
+      createdAt: 1,
+    });
+    agentEntriesCollection.insert({
+      id: "evt_old_2",
+      taskId,
+      turnId: "trn_old",
+      type: "assistant",
+      text: "old reply",
+      createdAt: 2,
+    });
+  }
+
+  it("keeps the previous transcript visible while the replay streams, then swaps once", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    let release: (() => void) | undefined;
+    agent.onLoadSession = async (params, a) => {
+      a.update(params.sessionId, {
+        sessionUpdate: "user_message_chunk",
+        content: { type: "text", text: "replayed prompt" },
+      });
+      a.update(params.sessionId, {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "replayed reply" },
+      });
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return {};
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    seedOldTranscript(task.taskId);
+    const started = task.start(() => client, { resumeSessionId: "sess_old" });
+
+    // The replay updates above have streamed in, but the load hasn't
+    // resolved: the OLD rows must still be the visible transcript — the old
+    // wipe-first order blanked it here (the render-remove-re-add flicker).
+    await vi.waitFor(() => expect(release).toBeDefined());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(entriesFor(task.taskId).map((e) => e.id)).toEqual([
+      "evt_old_1",
+      "evt_old_2",
+    ]);
+
+    release!();
+    await started;
+
+    // One synchronous swap: exactly the replayed transcript, old rows gone.
+    const entries = entriesFor(task.taskId);
+    expect(entries.map((e) => [e.type, e.text])).toEqual([
+      ["user", "replayed prompt"],
+      ["assistant", "replayed reply"],
+    ]);
+    // Replayed entries carry NO createdAt (MET-94).
+    expect(entries.map((e) => e.createdAt)).toEqual([undefined, undefined]);
+    expect(turnFor(task.taskId).map((t) => t.stopReason)).toEqual(["replay"]);
+  });
+
+  it("a failed session/load keeps the previous transcript readable", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onLoadSession = async (params, a) => {
+      // Even partial replay before the failure must not leak into the
+      // transcript — the buffer is discarded whole.
+      a.update(params.sessionId, {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "partial replay" },
+      });
+      throw new Error("session gone");
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    seedOldTranscript(task.taskId);
+    await task
+      .start(() => client, { resumeSessionId: "sess_old" })
+      .catch(() => {});
+
+    expect(task.currentStatus).toBe("unavailable");
+    expect(entriesFor(task.taskId).map((e) => e.id)).toEqual([
+      "evt_old_1",
+      "evt_old_2",
+    ]);
+  });
+
+  it("refreshFromHarness closes the session and swaps in the fresh load's transcript", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async (_params, a) => {
+      a.update("sess_test", {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "live reply" },
+      });
+      return { stopReason: "end_turn" };
+    };
+    // The harness's store now also holds a turn another process appended.
+    agent.onLoadSession = async (params, a) => {
+      for (const [type, text] of [
+        ["user_message_chunk", "hi"],
+        ["agent_message_chunk", "live reply"],
+        ["user_message_chunk", "external prompt"],
+        ["agent_message_chunk", "external reply"],
+      ]) {
+        a.update(params.sessionId, {
+          sessionUpdate: type,
+          content: { type: "text", text },
+        });
+      }
+      return {};
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "hi");
+
+    const result = await task.refreshFromHarness();
+
+    expect(result).toEqual({ ok: true });
+    expect(agent.closeSessionParams).toMatchObject({ sessionId: "sess_test" });
+    expect(agent.loadSessionParams).toMatchObject({ sessionId: "sess_test" });
+    expect(entriesFor(task.taskId).map((e) => [e.type, e.text])).toEqual([
+      ["user", "hi"],
+      ["assistant", "live reply"],
+      ["user", "external prompt"],
+      ["assistant", "external reply"],
+    ]);
+    expect(task.currentStatus).toBe("idle");
+    // Still promptable after the re-sync.
+    await runPrompt(task, "follow-up");
+    expect(turnFor(task.taskId).at(-1)!.status).toBe("completed");
+  });
+
+  it("a session/close rejection degrades to a transcript-only re-sync", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onCloseSession = async () => {
+      throw new Error("not implemented");
+    };
+    agent.onLoadSession = async (params, a) => {
+      a.update(params.sessionId, {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "reloaded" },
+      });
+      return {};
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+
+    const result = await task.refreshFromHarness();
+
+    expect(result).toEqual({ ok: true });
+    expect(entriesFor(task.taskId).map((e) => e.text)).toEqual(["reloaded"]);
+  });
+
+  it("refreshFromHarness refuses while a turn is running", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    let finishTurn: (() => void) | undefined;
+    agent.onPrompt = () =>
+      new Promise<{ stopReason: string }>((resolve) => {
+        finishTurn = () => resolve({ stopReason: "end_turn" });
+      });
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    task.prompt("long task");
+    await vi.waitFor(() => expect(finishTurn).toBeDefined());
+
+    const result = await task.refreshFromHarness();
+
+    expect(result).toEqual({ ok: false, error: "a turn is in progress" });
+    expect(agent.closeSessionParams).toBeNull();
+    finishTurn!();
+    await vi.waitFor(() =>
+      expect(turnFor(task.taskId)[0].status).toBe("completed"),
+    );
+  });
+
+  it("prompts sent during a refresh queue and run once it completes", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    let releaseLoad: (() => void) | undefined;
+    agent.onLoadSession = async () => {
+      await new Promise<void>((resolve) => {
+        releaseLoad = resolve;
+      });
+      return {};
+    };
+    const promptedTexts: string[] = [];
+    agent.onPrompt = async (params) => {
+      promptedTexts.push(lastPromptText(params));
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+
+    const refresh = task.refreshFromHarness();
+    await vi.waitFor(() => expect(releaseLoad).toBeDefined());
+    task.prompt("sent mid-refresh");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The prompt queued — the half-torn session must not receive it.
+    expect(promptedTexts).toEqual([]);
+
+    releaseLoad!();
+    await refresh;
+    await vi.waitFor(() => expect(promptedTexts).toEqual(["sent mid-refresh"]));
+    // Its queued transcript rows survived the replay commit.
+    expect(
+      entriesFor(task.taskId).some((e) => e.text === "sent mid-refresh"),
+    ).toBe(true);
+  });
+});
+
 describe("AgentTask dispose (MET-72)", () => {
   const opencodeHarness = BUILT_IN_HARNESSES.find((h) => h.id === "opencode")!;
 

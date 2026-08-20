@@ -58,15 +58,28 @@ export class FakeAgent {
   onNewSession: (params: Json, agent: FakeAgent) => Promise<Json> = async () =>
     this.newSessionResult;
   /** Scripted turn behavior; may emit updates / request permission via `this`. */
-  onPrompt: (params: Json, agent: FakeAgent) => Promise<{ stopReason: string }> =
-    async () => ({ stopReason: "end_turn" });
+  onPrompt: (
+    params: Json,
+    agent: FakeAgent,
+  ) => Promise<{ stopReason: string }> = async () => ({
+    stopReason: "end_turn",
+  });
   /** Scripted `authenticate` behavior; throwing rejects the call. */
-  onAuthenticate: (params: Json, agent: FakeAgent) => Promise<Json> = async () => ({});
+  onAuthenticate: (params: Json, agent: FakeAgent) => Promise<Json> =
+    async () => ({});
   /** Captured `session/load` params (revival assertions). */
   loadSessionParams: Json | null = null;
   /** Scripted `session/load`: emit replay updates via `this` before
    *  returning; throwing rejects the call (evicted session). */
-  onLoadSession: (params: Json, agent: FakeAgent) => Promise<Json> = async () => ({});
+  onLoadSession: (params: Json, agent: FakeAgent) => Promise<Json> =
+    async () => ({});
+  /** Captured `session/close` params (refresh re-sync assertions). */
+  closeSessionParams: Json | null = null;
+  /** Scripted `session/close` (the app sends it as a raw request — the
+   *  pinned client library predates the method); throwing rejects it,
+   *  which callers treat as "close unsupported". */
+  onCloseSession: (params: Json, agent: FakeAgent) => Promise<Json> =
+    async () => ({});
   /** `session/cancel` notification hook (the harness aborts its scenario). */
   onCancel: (params: Json, agent: FakeAgent) => void = () => {};
 
@@ -144,6 +157,9 @@ export class FakeAgent {
       case "session/load":
         this.loadSessionParams = params;
         return this.answer(id, -32603, () => this.onLoadSession(params, this));
+      case "session/close":
+        this.closeSessionParams = params;
+        return this.answer(id, -32601, () => this.onCloseSession(params, this));
       case "authenticate":
         return this.answer(id, -32000, () => this.onAuthenticate(params, this));
       case "session/prompt":
@@ -239,10 +255,15 @@ const MARKDOWN_BLOCKS: Array<(n: number, s: string) => string> = [
   () => `---\n`,
 ];
 
-function markdownMessage(section: number, blocks: number, seed: string): string {
+function markdownMessage(
+  section: number,
+  blocks: number,
+  seed: string,
+): string {
   const parts: string[] = [];
   for (let b = 0; b < blocks; b++) {
-    const template = MARKDOWN_BLOCKS[(section * 3 + b) % MARKDOWN_BLOCKS.length];
+    const template =
+      MARKDOWN_BLOCKS[(section * 3 + b) % MARKDOWN_BLOCKS.length];
     parts.push(template(section * 100 + b, seed));
   }
   return parts.join("\n");
@@ -260,7 +281,9 @@ const THOUGHT_TEXT = (n: number, s: string) =>
  * periodic plans and diff-bearing tools — the element mix a real long
  * session accumulates, at a configurable pace.
  */
-export function longTranscript(options: LongTranscriptOptions = {}): MockScenario {
+export function longTranscript(
+  options: LongTranscriptOptions = {},
+): MockScenario {
   const {
     sections = 40,
     chunkSize = 120,
@@ -353,8 +376,7 @@ export function longTranscript(options: LongTranscriptOptions = {}): MockScenari
           entries: Array.from({ length: 4 }, (_, i) => ({
             content: `Step ${i + 1} of pass ${section} (${seedLabel})`,
             priority: "medium",
-            status:
-              i < 2 ? "completed" : i === 2 ? "in_progress" : "pending",
+            status: i < 2 ? "completed" : i === 2 ? "in_progress" : "pending",
           })),
         });
       }
@@ -424,7 +446,10 @@ function configFromPrompt(promptText: string): MockAgentConfig | null {
   if (!promptText.startsWith("@@mock:")) return null;
   try {
     const parsed = JSON.parse(promptText.slice("@@mock:".length));
-    if (typeof parsed?.scenario === "string" && scenarioRegistry.has(parsed.scenario)) {
+    if (
+      typeof parsed?.scenario === "string" &&
+      scenarioRegistry.has(parsed.scenario)
+    ) {
       return parsed as MockAgentConfig;
     }
   } catch {
@@ -444,6 +469,26 @@ function promptText(params: Json): string {
 let mockSessionCounter = 0;
 
 /**
+ * Per-session update history for the scenario agent, keyed by sessionId and
+ * module-level so it survives the transport (mock revival spawns a fresh
+ * FakeAgent, exactly like respawning a real adapter). `session/load` replays
+ * it the way real adapters replay their persisted store: each historical
+ * user prompt as a single user_message_chunk, then the turn's updates —
+ * which is what makes revival and the manual session refresh real in mock
+ * mode instead of returning an empty transcript.
+ */
+const mockSessionHistories = new Map<string, Json[]>();
+
+function recordMockUpdate(sessionId: string, update: Json): void {
+  let history = mockSessionHistories.get(sessionId);
+  if (!history) {
+    history = [];
+    mockSessionHistories.set(sessionId, history);
+  }
+  history.push(update);
+}
+
+/**
  * The app side of a loopback pair whose far side is a scenario-driven
  * FakeAgent. One per task, same as a spawned process.
  */
@@ -461,6 +506,13 @@ function attachScenarioAgent(agentSide: LoopbackTransport): void {
     sessionId: `mock_session_${++mockSessionCounter}`,
   });
 
+  agent.onLoadSession = async (params) => {
+    for (const update of mockSessionHistories.get(params.sessionId) ?? []) {
+      agent.update(params.sessionId, update);
+    }
+    return {};
+  };
+
   agent.onCancel = () => currentAbort?.abort();
 
   agent.onPrompt = async (params) => {
@@ -468,6 +520,13 @@ function attachScenarioAgent(agentSide: LoopbackTransport): void {
     const config = configFromPrompt(text) ?? activeConfig;
     const factory = scenarioRegistry.get(config.scenario)!;
     const scenario: MockScenario = factory(config.options);
+
+    // History mirrors what a real harness persists: the prompt replays as a
+    // single user_message_chunk, then the turn's updates in order.
+    recordMockUpdate(params.sessionId, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text },
+    });
 
     const abort = new AbortController();
     currentAbort = abort;
@@ -489,13 +548,18 @@ function attachScenarioAgent(agentSide: LoopbackTransport): void {
       const result = await scenario({
         sessionId: params.sessionId,
         promptText: text,
-        emit: (update) => agent.update(params.sessionId, update),
+        emit: (update) => {
+          recordMockUpdate(params.sessionId, update);
+          agent.update(params.sessionId, update);
+        },
         sleep,
         signal: abort.signal,
       });
-      return result ?? {
-        stopReason: abort.signal.aborted ? "cancelled" : "end_turn",
-      };
+      return (
+        result ?? {
+          stopReason: abort.signal.aborted ? "cancelled" : "end_turn",
+        }
+      );
     } finally {
       if (currentAbort === abort) currentAbort = null;
     }
@@ -547,5 +611,7 @@ if (MOCK_AGENT_MODE && typeof window !== "undefined") {
     },
   };
   // eslint-disable-next-line no-console
-  console.info("[mock-harness] VITE_AGENT_MOCK on — agent transports are mocked");
+  console.info(
+    "[mock-harness] VITE_AGENT_MOCK on — agent transports are mocked",
+  );
 }
