@@ -40,6 +40,7 @@ import { toolRegistry, getTool } from "./tools";
 import { serverInstructions } from "./mcp-instructions";
 import { buildWidgetContextPayload } from "./widget-context-resource";
 import i18n from "@/utils/intl";
+import { captureEvent } from "@/telemetry/telemetry";
 import {
   readWorkspaceTextFile,
   writeWorkspaceTextFile,
@@ -362,6 +363,12 @@ export class AgentTask {
             translate: (key) => i18n.t(key),
             instructions: serverInstructions,
             buildWidgetContextPayload,
+            onUnsupportedProtocolVersion: (requested) =>
+              captureEvent("agent_protocol_version_unsupported", {
+                protocol: "mcp",
+                harness: this.harness.id,
+                version: requested ?? "(missing)",
+              }),
           }),
         ),
       );
@@ -393,6 +400,12 @@ export class AgentTask {
           readTextFile: readWorkspaceTextFile,
           writeTextFile: writeWorkspaceTextFile,
         },
+        onUnsupportedProtocolVersion: (negotiated) =>
+          captureEvent("agent_protocol_version_unsupported", {
+            protocol: "acp",
+            harness: this.harness.id,
+            version: String(negotiated),
+          }),
       });
 
       // Bring the transport live before any ACP traffic; spawn failure

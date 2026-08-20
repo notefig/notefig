@@ -11,6 +11,7 @@ vi.mock("@/adapters", async () => ({
 // The workspace fs surface is an injected dep of the client now.
 const readTextFile = vi.fn(async () => "content");
 const writeTextFile = vi.fn(async () => {});
+const onUnsupportedProtocolVersion = vi.fn();
 
 import { NotefigAcpClient, createLoopbackPair } from "@notefig/agent";
 import { PermissionBroker } from "../permission-broker";
@@ -29,6 +30,7 @@ function makeClient(initializeResult?: Json) {
     permissionBroker: new PermissionBroker("task_acp_test"),
     onSessionUpdate: (_n: SessionNotification) => {},
     fs: { readTextFile, writeTextFile },
+    onUnsupportedProtocolVersion,
   });
   return { client, agent, clientSide, agentSide };
 }
@@ -65,6 +67,18 @@ describe("NotefigAcpClient", () => {
     expect(client.embeddedContextCapability).toBe(false);
   });
 
+  it("rejects connect() when the agent negotiates an unsupported protocol version", async () => {
+    onUnsupportedProtocolVersion.mockClear();
+    const { client } = makeClient({ protocolVersion: 99 });
+    // Surfaces through agent-service's startup-failure path rather than
+    // proceeding on a connection whose frames we might misread.
+    await expect(client.connect()).rejects.toThrow(
+      "agent negotiated unsupported ACP protocol version 99 (supported: 1)",
+    );
+    // The observability hook (telemetry in desktop) hears about it too.
+    expect(onUnsupportedProtocolVersion).toHaveBeenCalledWith(99);
+  });
+
   describe("closeSession", () => {
     it("resolves when the agent acknowledges and carries the sessionId", async () => {
       const { client, agent } = makeClient();
@@ -92,8 +106,12 @@ describe("NotefigAcpClient", () => {
       // Noise the waiter must skip: a non-JSON frame (the ACP library also
       // sees and tolerates it) and a response addressed to someone else.
       agentSide.send("garbage, not json");
-      agentSide.send(JSON.stringify({ jsonrpc: "2.0", id: "other", result: {} }));
-      agentSide.send(JSON.stringify({ jsonrpc: "2.0", id: requestId, result: {} }));
+      agentSide.send(
+        JSON.stringify({ jsonrpc: "2.0", id: "other", result: {} }),
+      );
+      agentSide.send(
+        JSON.stringify({ jsonrpc: "2.0", id: requestId, result: {} }),
+      );
       await expect(pending).resolves.toBeUndefined();
     });
 
@@ -166,10 +184,7 @@ describe("NotefigAcpClient", () => {
         content: "# updated",
       });
       expect(response).toEqual({});
-      expect(writeTextFile).toHaveBeenCalledWith(
-        "/ws/doc.md",
-        "# updated",
-      );
+      expect(writeTextFile).toHaveBeenCalledWith("/ws/doc.md", "# updated");
     });
   });
 });

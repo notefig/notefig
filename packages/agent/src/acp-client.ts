@@ -24,8 +24,17 @@ import { transportToStreams } from "./agent-transport.interface";
 import type { AgentTransport } from "./agent-transport.interface";
 import type { PermissionRequester } from "./permission-requester";
 
-/** ACP protocol version we speak (pinned; a spec bump changes acp-types). */
-const PROTOCOL_VERSION = 1;
+/**
+ * ACP protocol versions we speak (a spec bump changes acp-types, so a new
+ * entry means new types were verified too). ACP negotiation is a downgrade
+ * handshake: we request our latest; an older agent answers with its own,
+ * and `connect()` rejects if the negotiated version isn't in this list.
+ * Version seam: an ACP v2 would select a client-implementation variant on
+ * the negotiated version right after `initialize` resolves.
+ */
+export const SUPPORTED_ACP_PROTOCOL_VERSIONS: readonly number[] = [1];
+
+const PROTOCOL_VERSION = Math.max(...SUPPORTED_ACP_PROTOCOL_VERSIONS);
 
 /** Ids for raw requests sent outside the library (closeSession) — string
  *  ids, so they can never collide with the library's numeric counter. */
@@ -69,6 +78,9 @@ export type AcpClientDeps = {
   /** AgentTask sink for session/update notifications */
   onSessionUpdate: (notification: SessionNotification) => void;
   fs: AcpFileSystem;
+  /** Fired just before connect() rejects on an unsupported negotiated
+   *  version — observability hook (desktop wires telemetry). */
+  onUnsupportedProtocolVersion?: (negotiated: number) => void;
 };
 
 /**
@@ -102,6 +114,15 @@ export class NotefigAcpClient implements Client {
       protocolVersion: PROTOCOL_VERSION,
       clientCapabilities: capabilitiesForLocus(this.deps.transport.locus),
     });
+    if (!SUPPORTED_ACP_PROTOCOL_VERSIONS.includes(response.protocolVersion)) {
+      this.deps.onUnsupportedProtocolVersion?.(response.protocolVersion);
+      // Propagates through agent-service's withStartupTimeout startup-failure
+      // path — the task surfaces this message instead of hanging on a
+      // connection whose frames we might misread.
+      throw new Error(
+        `agent negotiated unsupported ACP protocol version ${response.protocolVersion} (supported: ${SUPPORTED_ACP_PROTOCOL_VERSIONS.join(", ")})`,
+      );
+    }
     this.authMethods = response.authMethods ?? [];
     this.agentCapabilities = response.agentCapabilities;
     return response;

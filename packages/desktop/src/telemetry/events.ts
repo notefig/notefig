@@ -18,6 +18,14 @@ export type TelemetryEvent =
         outcome: "ok" | "error" | "cancelled";
       };
     }
+  | {
+      // A harness asked for (mcp) or answered with (acp) a protocol version
+      // outside our supported list — early warning that version pinning
+      // (MET-153) is biting a real harness in the field. `version` is the
+      // coarse protocol revision string, never anything user-derived.
+      name: "agent_protocol_version_unsupported";
+      properties: { protocol: "mcp" | "acp"; harness: string; version: string };
+    }
   | { name: "tunnel_paired"; properties?: undefined }
   | { name: "update_available"; properties: { to_version: string } }
   | {
