@@ -72,4 +72,29 @@ describe("PermissionBroker", () => {
       }),
     ).not.toThrow();
   });
+
+  it("falls back to a generic row title when the tool call has none", () => {
+    const broker = new PermissionBroker("task_5");
+    const request = req("ignored");
+    request.toolCall = { toolCallId: "c2" };
+    broker.request(request);
+    expect(rowsFor("task_5")[0].title).toBe(
+      "The agent is requesting permission",
+    );
+  });
+
+  it("responding after the row was already dropped still resolves the promise", async () => {
+    const broker = new PermissionBroker("task_6");
+    const pending = broker.request(req("gone"));
+    const row = rowsFor("task_6")[0];
+    // UI (or a workspace teardown) removed the row out from under the broker.
+    agentPermissionRequestsCollection.delete(row.id);
+    broker.respond(row.id, {
+      outcome: { outcome: "selected", optionId: "allow" },
+    });
+    await expect(pending).resolves.toEqual({
+      outcome: { outcome: "selected", optionId: "allow" },
+    });
+    expect(agentPermissionRequestsCollection.get(row.id)).toBeUndefined();
+  });
 });

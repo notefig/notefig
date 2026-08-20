@@ -52,13 +52,19 @@ export function flattenPierreTreesCss(): Plugin {
   };
 }
 
-export function sharedResolveAliases(dirname: string) {
+/**
+ * Resolve the workspace packages (@notefig/shared, @notefig/agent) to their
+ * TS source. The published shared dist is CommonJS with `export *` star
+ * re-exports, which Vite's browser optimizer (cjs-module-lexer) can't see
+ * named exports through — so a value import like `newEventId` fails at
+ * runtime; @notefig/agent ships no dist at all. Compiling the source
+ * directly gives real named exports and avoids stale-dist drift. The single
+ * authoritative list — vite.config.ts (via sharedResolveAliases) and
+ * vitest.config.ts both consume it; only tsconfig's `paths` must be kept in
+ * sync by hand.
+ */
+export function workspaceSourceAliases(dirname: string) {
   return [
-    // Resolve @notefig/shared to its TS source. The published dist is
-    // CommonJS with `export *` star re-exports, which Vite's browser
-    // optimizer (cjs-module-lexer) can't see named exports through — so a
-    // value import like `newEventId` fails at runtime. Compiling the source
-    // directly gives real named exports and avoids stale-dist drift.
     {
       find: /^@notefig\/shared$/,
       replacement: path.resolve(dirname, "../shared/src/index.ts"),
@@ -67,6 +73,16 @@ export function sharedResolveAliases(dirname: string) {
       find: /^@notefig\/shared\/(.*)$/,
       replacement: path.resolve(dirname, "../shared/src/$1/index.ts"),
     },
+    {
+      find: /^@notefig\/agent$/,
+      replacement: path.resolve(dirname, "../agent/src/index.ts"),
+    },
+  ];
+}
+
+export function sharedResolveAliases(dirname: string) {
+  return [
+    ...workspaceSourceAliases(dirname),
     { find: "@", replacement: path.resolve(dirname, "./src") },
     // isomorphic-git's packfile reader calls node's crypto.createHash
     // directly (everything else in it uses a browser-safe sha.js

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { withMockedTauri } from "@/testing/tauri-mock";
 import { TauriStdioTransport, type SpawnAgentOptions } from "../tauri-stdio-transport";
-import { AgentTransportError } from "../agent-transport.interface";
+import { AgentTransportError } from "@notefig/agent";
 import type { PullResult } from "../stream-puller";
 
 // Flush the microtask queue so the transport's promise-chained stdin writes and

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AgentTool } from "@notefig/shared/agent";
+import type { AgentTool } from "@notefig/agent";
 import { checkpointWorkspaceHistory } from "@/utils/history-service";
 
 const InputSchema = z.object({

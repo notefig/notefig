@@ -59,7 +59,7 @@ vi.mock("@/utils/history-service", () => ({
 }));
 
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
-import { AgentTransportError } from "../../agent-transport.interface";
+import { AgentTransportError } from "@notefig/agent";
 import {
   agentEntriesCollection,
   agentPermissionRequestsCollection,

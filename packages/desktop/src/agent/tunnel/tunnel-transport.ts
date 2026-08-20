@@ -11,7 +11,7 @@ import {
   AgentTransportError,
   type AgentTransport,
   type Unsubscribe,
-} from "../agent-transport.interface";
+} from "@notefig/agent";
 import { TunnelConnection, tunnelConnection } from "./tunnel-connection";
 
 const START_TIMEOUT_MS = 30_000;

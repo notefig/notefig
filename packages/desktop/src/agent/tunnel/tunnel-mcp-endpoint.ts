@@ -12,7 +12,7 @@ import {
   AgentTransportError,
   type McpEndpoint,
   type Unsubscribe,
-} from "../agent-transport.interface";
+} from "@notefig/agent";
 import { TunnelConnection, tunnelConnection } from "./tunnel-connection";
 
 const OPEN_TIMEOUT_MS = 15_000;

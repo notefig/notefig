@@ -28,10 +28,22 @@ import { normalizePath, resolveWorkspacePath } from "@/utils/fs";
 import { getOrCreateKvCollection } from "@/utils/kv-store";
 import { MarkdownJoiner } from "@/lib/markdown-joiner-transform";
 import { PermissionBroker } from "./permission-broker";
-import { NotefigAcpClient } from "./acp-client";
-import type { AgentTransport, McpEndpoint } from "./agent-transport.interface";
-import { AgentTransportError } from "./agent-transport.interface";
-import { attachMcpEndpoint, createMcpRequestHandler } from "./mcp-server";
+import {
+  AgentTransportError,
+  NotefigAcpClient,
+  attachMcpEndpoint,
+  createMcpRequestHandler,
+  type AgentTransport,
+  type McpEndpoint,
+} from "@notefig/agent";
+import { toolRegistry, getTool } from "./tools";
+import { serverInstructions } from "./mcp-instructions";
+import { buildWidgetContextPayload } from "./widget-context-resource";
+import i18n from "@/utils/intl";
+import {
+  readWorkspaceTextFile,
+  writeWorkspaceTextFile,
+} from "@/utils/file-sync";
 import { checkpointWorkspaceHistory } from "@/utils/history-service";
 import {
   agentEntriesCollection,
@@ -346,6 +358,10 @@ export class AgentTask {
               agents,
             },
             permissionBroker: this.permissionBroker,
+            tools: { list: () => toolRegistry, get: getTool },
+            translate: (key) => i18n.t(key),
+            instructions: serverInstructions,
+            buildWidgetContextPayload,
           }),
         ),
       );
@@ -373,6 +389,10 @@ export class AgentTask {
         permissionBroker: this.permissionBroker,
         onSessionUpdate: (notification) =>
           this.handleSessionUpdate(notification),
+        fs: {
+          readTextFile: readWorkspaceTextFile,
+          writeTextFile: writeWorkspaceTextFile,
+        },
       });
 
       // Bring the transport live before any ACP traffic; spawn failure

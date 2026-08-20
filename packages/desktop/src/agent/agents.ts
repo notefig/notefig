@@ -21,7 +21,7 @@ import { getRegisteredTask } from "./task-registry";
 // `workspaceHandle.createTask` and `taskHandle.prompt`'s revival path reach
 // back into the service, at call time.
 import { getOrReviveTask, startAgentTask } from "./agent-service";
-import { encodeWidgetContextUri } from "./widget-context-uri";
+import { encodeWidgetContextUri } from "@notefig/agent";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 

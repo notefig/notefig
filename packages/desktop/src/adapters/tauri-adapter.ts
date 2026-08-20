@@ -31,7 +31,7 @@ import type { HarnessDefinition } from "@notefig/shared/agent";
 import type {
   AgentTransport,
   McpEndpoint,
-} from "@/agent/agent-transport.interface";
+} from "@notefig/agent";
 import { TauriStdioTransport } from "@/agent/tauri-stdio-transport";
 import { TauriMcpTransport } from "@/agent/tauri-mcp-transport";
 

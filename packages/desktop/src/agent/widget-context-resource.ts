@@ -25,7 +25,7 @@ import {
 import { getWorkspaceEditorContext } from "@/entities/editors";
 import { readWorkspaceTextFile } from "@/utils/file-sync";
 import { resolveWorkspacePath } from "@/utils/fs";
-import type { WidgetContextRef } from "./widget-context-uri";
+import type { WidgetContextRef } from "@notefig/agent";
 
 // Same schema-construction pattern as markdown-codec.ts, for the fallback
 // path when the document isn't open in a live editor (the widget's host

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AgentTool } from "@notefig/shared/agent";
+import { toJsonSchema, type AgentTool } from "@notefig/agent";
 import { BlobEnvelopeSchema, findBlobs, serializeBlobBlock } from "@notefig/shared/blobs";
 import { getAllBlobTypes, getBlobType } from "@/components/editor/blobs/blob-registry";
 import { readWorkspaceTextFile, writeWorkspaceTextFile } from "@/utils/file-sync";
@@ -47,6 +47,47 @@ export const authorBlob: AgentTool<z.infer<typeof InputSchema>, { blobId: string
     );
   },
   input: InputSchema,
+  /**
+   * `author_blob`'s input is `{ path, type, id, payload }` where `payload`'s
+   * shape depends on `type` — the exact envelope/payload split that caused
+   * the seven-guess fence failure (docs/architecture/agent-harness-v2.md,
+   * "Findings"). The generic `zodToJsonSchema(input)` only sees
+   * `payload: z.record(z.unknown())`, which is no more informative than the
+   * old prose description. Render it explicitly instead, `anyOf` over every
+   * registered blob type's real payload schema, regenerated per call so blob
+   * registration timing is a non-issue (same cycle caveat as `description`).
+   */
+  inputJsonSchema(): unknown {
+    const blobTypes = getAllBlobTypes();
+    const payloadSchemas = blobTypes.map((blobType) =>
+      toJsonSchema(blobType.schema),
+    );
+    return {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Workspace-relative document path.",
+        },
+        type: {
+          type: "string",
+          enum: blobTypes.map((t) => t.type),
+          description: "Which registered blob type to author.",
+        },
+        id: {
+          type: "string",
+          pattern: "^[a-z]+_[a-z0-9]{4,}$",
+          description: 'Unique block id, e.g. "question_8f2a".',
+        },
+        payload: {
+          description:
+            "Shape depends on `type` — matches the corresponding entry below.",
+          anyOf: payloadSchemas,
+        },
+      },
+      required: ["path", "type", "id"],
+    };
+  },
   async execute(ctx, input) {
     // Agents send workspace-relative paths; an unresolved one would land
     // relative to the process CWD (src-tauri/ in dev — see resolveWorkspacePath).

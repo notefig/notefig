@@ -28,7 +28,7 @@ import { Cause, Deferred, Duration, Effect, Exit } from "effect";
 import {
   AgentTransportError,
   type Unsubscribe,
-} from "../agent-transport.interface";
+} from "@notefig/agent";
 
 const HANDSHAKE_TIMEOUT_MS = 15_000;
 

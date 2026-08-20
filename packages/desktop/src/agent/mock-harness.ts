@@ -19,9 +19,9 @@
  * which Vite statically evaluates to false in normal builds (same pattern
  * as testing/shim-transport.ts), so this dead-code-eliminates away.
  */
-import { createLoopbackPair } from "./loopback-transport";
-import type { LoopbackTransport } from "./loopback-transport";
-import type { AgentTransport, McpEndpoint } from "./agent-transport.interface";
+import { createLoopbackPair } from "@notefig/agent";
+import type { LoopbackTransport } from "@notefig/agent";
+import type { AgentTransport, McpEndpoint } from "@notefig/agent";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Json = any;

@@ -1,4 +1,4 @@
-import type { AgentTool } from "@notefig/shared/agent";
+import type { AgentTool } from "@notefig/agent";
 import { workspaceListDocuments } from "./workspace-list-documents";
 import { workspaceReadDocument } from "./workspace-read-document";
 import { workspaceOpenFiles } from "./workspace-open-files";

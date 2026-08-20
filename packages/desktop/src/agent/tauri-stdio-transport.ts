@@ -4,8 +4,8 @@ import type {
   AgentTransport,
   SpawnAgentInfo,
   Unsubscribe,
-} from "./agent-transport.interface";
-import { AgentTransportError } from "./agent-transport.interface";
+} from "@notefig/agent";
+import { AgentTransportError, subscribe } from "@notefig/agent";
 import { StreamPuller } from "./stream-puller";
 
 export type SpawnAgentOptions = {
@@ -189,18 +189,15 @@ export class TauriStdioTransport implements AgentTransport {
   }
 
   onLine(callback: (line: string) => void): Unsubscribe {
-    this.lineListeners.add(callback);
-    return () => this.lineListeners.delete(callback);
+    return subscribe(this.lineListeners, callback);
   }
 
   onClose(callback: (error?: AgentTransportError) => void): Unsubscribe {
-    this.closeListeners.add(callback);
-    return () => this.closeListeners.delete(callback);
+    return subscribe(this.closeListeners, callback);
   }
 
   onDiagnostic(callback: (line: string) => void): Unsubscribe {
-    this.diagnosticListeners.add(callback);
-    return () => this.diagnosticListeners.delete(callback);
+    return subscribe(this.diagnosticListeners, callback);
   }
 
   async close(): Promise<void> {

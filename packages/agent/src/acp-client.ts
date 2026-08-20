@@ -22,16 +22,7 @@ import type {
 } from "@notefig/shared/agent";
 import { transportToStreams } from "./agent-transport.interface";
 import type { AgentTransport } from "./agent-transport.interface";
-import type { PermissionBroker } from "./permission-broker";
-// Pre-existing tangle: file-sync reaches editor-store for write adoption,
-// and the editor/blob component graph reaches back to agent-service →
-// acp-client. Untangling means relocating the editor registry to a leaf
-// module (tracked in file-sync's editor-store import comment).
-// fallow-ignore-file circular-dependency
-import {
-  readWorkspaceTextFile,
-  writeWorkspaceTextFile,
-} from "@/utils/file-sync";
+import type { PermissionRequester } from "./permission-requester";
 
 /** ACP protocol version we speak (pinned; a spec bump changes acp-types). */
 const PROTOCOL_VERSION = 1;
@@ -57,13 +48,27 @@ export function capabilitiesForLocus(
     : { fs: { readTextFile: false, writeTextFile: false } };
 }
 
+/**
+ * Workspace fs surface the ACP client-side `fs/*` methods delegate to.
+ * Desktop injects its file-sync helpers (which adopt writes into live
+ * editors); the remote locus advertises fs:false and never calls these.
+ */
+export type AcpFileSystem = {
+  readTextFile(
+    path: string,
+    options?: { line?: number; limit?: number },
+  ): Promise<string>;
+  writeTextFile(path: string, content: string): Promise<void>;
+};
+
 export type AcpClientDeps = {
   /** The task this connection belongs to — one connection per task. */
   taskId: string;
   transport: AgentTransport;
-  permissionBroker: PermissionBroker;
+  permissionBroker: PermissionRequester;
   /** AgentTask sink for session/update notifications */
   onSessionUpdate: (notification: SessionNotification) => void;
+  fs: AcpFileSystem;
 };
 
 /**
@@ -276,7 +281,7 @@ export class NotefigAcpClient implements Client {
   async readTextFile(
     request: ReadTextFileRequest,
   ): Promise<ReadTextFileResponse> {
-    const content = await readWorkspaceTextFile(request.path, {
+    const content = await this.deps.fs.readTextFile(request.path, {
       line: request.line ?? undefined,
       limit: request.limit ?? undefined,
     });
@@ -286,7 +291,7 @@ export class NotefigAcpClient implements Client {
   async writeTextFile(
     request: WriteTextFileRequest,
   ): Promise<WriteTextFileResponse> {
-    await writeWorkspaceTextFile(request.path, request.content);
+    await this.deps.fs.writeTextFile(request.path, request.content);
     return {};
   }
 
