@@ -3,9 +3,11 @@ import { useTranslation } from "react-i18next";
 import {
   Check,
   ChevronDown,
+  Copy,
   Plus,
   RefreshCw,
   Square,
+  Terminal,
   Trash2,
 } from "lucide-react";
 import type { HarnessDefinition } from "@notefig/shared/agent";
@@ -16,6 +18,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
@@ -35,6 +38,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { copyTextToClipboard } from "@/utils/clipboard";
 import { useKv } from "@/utils/kv-store";
 import { normalizePath } from "@/utils/fs";
 import type { AgentTaskRow } from "@/agent/agent-collections";
@@ -51,6 +55,7 @@ import { agentTabId } from "@/entities/tabs";
 import {
   useActiveHarnesses,
   useDefaultHarness,
+  useSessionResumeCommand,
 } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "./harness-logo";
 
@@ -177,22 +182,11 @@ export function SessionRow({
   onOpen: () => void;
 }) {
   const { t } = useTranslation();
-  // Refresh is a between-turns action only: mid-turn the session can't be
-  // reloaded (and the fork hazard says it must not be); "starting" is
-  // already a load in flight, and error/unavailable have no live session
-  // worth re-reading.
-  const canRefresh =
-    task.status === "idle" ||
-    task.status === "cancelled" ||
-    task.status === "restored";
   return (
     // Flat full-width rows, same affordances as the file tree / commit
     // list: pointer cursor (Tailwind's preflight defaults buttons to the
     // arrow cursor), hover wash, solid accent when active. Session actions
-    // (refresh from the harness store, delete) live on the row's context
-    // menu — the right-click-then-click gesture is deliberate enough that
-    // delete needs no extra confirm step (it replaced the MET-91 two-step
-    // inline trash button).
+    // live on the row's context menu (SessionRowMenu).
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
@@ -224,24 +218,65 @@ export function SessionRow({
           )}
         </div>
       </ContextMenuTrigger>
-      <ContextMenuContent>
+      <SessionRowMenu task={task} />
+    </ContextMenu>
+  );
+}
+
+/**
+ * The session row's context menu: refresh from the harness store, copy the
+ * session id / terminal resume command, delete. The right-click-then-click
+ * gesture is deliberate enough that delete needs no extra confirm step (it
+ * replaced the MET-91 two-step inline trash button).
+ */
+function SessionRowMenu({ task }: { task: AgentTaskRow }) {
+  const { t } = useTranslation();
+  // Refresh is a between-turns action only: mid-turn the session can't be
+  // reloaded (and the fork hazard says it must not be); "starting" is
+  // already a load in flight, and error/unavailable have no live session
+  // worth re-reading.
+  const canRefresh =
+    task.status === "idle" ||
+    task.status === "cancelled" ||
+    task.status === "restored";
+  const resume = useSessionResumeCommand(task);
+  return (
+    <ContextMenuContent>
+      <ContextMenuItem
+        className="gap-2 text-xs"
+        disabled={!canRefresh}
+        onSelect={() => refreshAgentSession(task.taskId)}
+      >
+        <RefreshCw className="size-3.5" />
+        {t("agentRefreshSession")}
+      </ContextMenuItem>
+      <ContextMenuItem
+        className="gap-2 text-xs"
+        disabled={!task.sessionId}
+        onSelect={() => void copyTextToClipboard(task.sessionId ?? "")}
+      >
+        <Copy className="size-3.5" />
+        {t("agentCopySessionId")}
+      </ContextMenuItem>
+      {resume.supported && (
         <ContextMenuItem
           className="gap-2 text-xs"
-          disabled={!canRefresh}
-          onSelect={() => refreshAgentSession(task.taskId)}
+          disabled={resume.command === null}
+          onSelect={() => void copyTextToClipboard(resume.command ?? "")}
         >
-          <RefreshCw className="size-3.5" />
-          {t("agentRefreshSession")}
+          <Terminal className="size-3.5" />
+          {t("agentCopyResumeCommand")}
         </ContextMenuItem>
-        <ContextMenuItem
-          className="gap-2 text-xs text-destructive focus:text-destructive"
-          onSelect={() => void deleteAgentSession(task.taskId)}
-        >
-          <Trash2 className="size-3.5" />
-          {t("agentDeleteSession")}
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+      )}
+      <ContextMenuSeparator />
+      <ContextMenuItem
+        className="gap-2 text-xs text-destructive focus:text-destructive"
+        onSelect={() => void deleteAgentSession(task.taskId)}
+      >
+        <Trash2 className="size-3.5" />
+        {t("agentDeleteSession")}
+      </ContextMenuItem>
+    </ContextMenuContent>
   );
 }
 

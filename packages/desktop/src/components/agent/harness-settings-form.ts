@@ -25,6 +25,9 @@ export type HarnessFormState = {
   /** Textarea raw text, KEY=VALUE per line. */
   envText: string;
   probeCommand: string;
+  /** Terminal resume template (`${sessionId}`/`${workspace}`); empty = none
+   *  (or inherit, for built-in overrides). */
+  resumeCommand: string;
   /** Custom entries only: the warned MCP opt-in. */
   mcpOptIn: "none" | "session-new";
 };
@@ -46,6 +49,7 @@ export type ParsedHarnessForm = {
   args: string[];
   env: Record<string, string>;
   probeCommand: string;
+  resumeCommand: string;
 };
 
 /** One argv entry per non-blank line, verbatim (spaces stay in the arg). */
@@ -101,6 +105,7 @@ export function definitionToForm(
       .map(([key, value]) => `${key}=${value}`)
       .join("\n"),
     probeCommand: definition.probeCommand ?? "",
+    resumeCommand: definition.resumeCommand ?? "",
     mcpOptIn: "none",
   };
 }
@@ -128,6 +133,7 @@ export function validateHarnessForm(
       args: parseArgLines(form.argsText),
       env,
       probeCommand: form.probeCommand.trim(),
+      resumeCommand: form.resumeCommand.trim(),
     },
   };
 }
@@ -169,6 +175,10 @@ export function formToOverride(
   if (parsed.probeCommand !== builtinProbe && parsed.probeCommand !== "") {
     override.probeCommand = parsed.probeCommand;
   }
+  const builtinResume = builtin.resumeCommand ?? "";
+  if (parsed.resumeCommand !== builtinResume && parsed.resumeCommand !== "") {
+    override.resumeCommand = parsed.resumeCommand;
+  }
   if (!isMaterialOverride(override) && enabled === naturalEnabled) return null;
   return override;
 }
@@ -186,6 +196,7 @@ export function formToCustomEntry(
     args: parsed.args,
     env: parsed.env,
     ...(parsed.probeCommand ? { probeCommand: parsed.probeCommand } : {}),
+    ...(parsed.resumeCommand ? { resumeCommand: parsed.resumeCommand } : {}),
     mcpRegistrationOverride: form.mcpOptIn,
     enabled,
   };

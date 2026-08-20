@@ -1,6 +1,8 @@
 import {
   BUILT_IN_HARNESSES,
+  buildHarnessResumeCommand,
   filterDiscoveredHarnesses,
+  isMaterialOverride,
   resolveEffectiveHarnesses,
 } from "./harness-config";
 import type {
@@ -10,6 +12,7 @@ import type {
 } from "./harness-config";
 
 const CLAUDE_CODE_ID = "claude-code";
+const claude = BUILT_IN_HARNESSES.find((h) => h.id === CLAUDE_CODE_ID)!;
 
 function discovered(
   id: string,
@@ -121,6 +124,28 @@ describe("resolveEffectiveHarnesses", () => {
     expect(overridden.probeCommand).toBe("command -v my-claude");
   });
 
+  it("inherits the built-in resumeCommand unless the override sets one", () => {
+    const inherited = resolveEffectiveHarnesses(
+      { [CLAUDE_CODE_ID]: { id: CLAUDE_CODE_ID, enabled: true, command: "c" } },
+      [],
+    ).find((h) => h.id === CLAUDE_CODE_ID)!;
+    expect(inherited.resumeCommand).toBe(claude.resumeCommand);
+
+    const overrides: Record<string, HarnessOverride> = {
+      [CLAUDE_CODE_ID]: {
+        id: CLAUDE_CODE_ID,
+        enabled: true,
+        resumeCommand: "claude -r ${sessionId}",
+      },
+    };
+    const overridden = resolveEffectiveHarnesses(overrides, []).find(
+      (h) => h.id === CLAUDE_CODE_ID,
+    )!;
+    expect(overridden.resumeCommand).toBe("claude -r ${sessionId}");
+    // A resume-only override is material (settings badge + save keeps it).
+    expect(isMaterialOverride(overrides[CLAUDE_CODE_ID])).toBe(true);
+  });
+
   it("excludes a disabled custom entry", () => {
     const custom: CustomHarnessEntry[] = [
       {
@@ -211,5 +236,25 @@ describe("filterDiscoveredHarnesses", () => {
       discovered("custom:1", false),
     );
     expect(visible.find((h) => h.id === "custom:1")).toBeDefined();
+  });
+});
+
+describe("buildHarnessResumeCommand", () => {
+  const params = {
+    sessionId: "sess-123",
+    workspacePath: "/Users/x/My Notes",
+  };
+
+  it("substitutes sessionId and workspace into the template", () => {
+    const claude = BUILT_IN_HARNESSES.find((h) => h.id === CLAUDE_CODE_ID)!;
+    expect(buildHarnessResumeCommand(claude, params)).toBe(
+      'cd "/Users/x/My Notes" && claude --resume sess-123',
+    );
+  });
+
+  it("returns null when the harness declares no resumeCommand", () => {
+    const gemini = BUILT_IN_HARNESSES.find((h) => h.id === "gemini-cli")!;
+    expect(gemini.resumeCommand).toBeUndefined();
+    expect(buildHarnessResumeCommand(gemini, params)).toBeNull();
   });
 });

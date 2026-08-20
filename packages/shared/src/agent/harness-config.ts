@@ -29,6 +29,13 @@ export const HarnessDefinitionSchema = z.object({
    */
   authHint: z.string().optional(),
   /**
+   * Terminal command template that reopens an existing session in the
+   * harness's own CLI — `${sessionId}` and `${workspace}` are substituted
+   * (see `buildHarnessResumeCommand`). Optional: absent means the harness
+   * has no known way to resume by id, and resume affordances are hidden.
+   */
+  resumeCommand: z.string().optional(),
+  /**
    * How this harness learns about the app's MCP tool server — set from the
    * capability matrix (docs/architecture/acp-capability-matrix.md), NOT from
    * the adapter's self-reported `mcpCapabilities` (unreliable: OpenCode
@@ -46,6 +53,24 @@ export const HarnessDefinitionSchema = z.object({
 export type HarnessDefinition = z.infer<typeof HarnessDefinitionSchema>;
 
 /**
+ * Fill a harness's `resumeCommand` template for one concrete session.
+ * Returns null when the harness declares no template — callers hide the
+ * affordance rather than guessing a CLI invocation.
+ */
+export function buildHarnessResumeCommand(
+  harness: HarnessDefinition,
+  params: { sessionId: string; workspacePath: string },
+): string | null {
+  if (!harness.resumeCommand) return null;
+  // split/join = replaceAll (this package's TS lib predates ES2021).
+  return harness.resumeCommand
+    .split("${sessionId}")
+    .join(params.sessionId)
+    .split("${workspace}")
+    .join(params.workspacePath);
+}
+
+/**
  * Harnesses Metrists knows how to spawn out of the box. Each is an existing
  * ACP adapter; a future Metrists-owned harness is just another entry.
  */
@@ -61,6 +86,10 @@ export const BUILT_IN_HARNESSES: HarnessDefinition[] = [
     // the adapter's auth flow needs anyway — see authHint).
     probeCommand: "command -v claude",
     authHint: "Run `claude /login` in a terminal on this machine.",
+    // Claude sessions are keyed by cwd, so the resume must run from the
+    // workspace (verified in acp-two-way-spike.md — external `--resume`
+    // appends to the same session file).
+    resumeCommand: 'cd "${workspace}" && claude --resume ${sessionId}',
     mcpRegistration: "session-new",
   },
   {
@@ -107,22 +136,25 @@ export const HarnessOverrideSchema = z.object({
   env: z.record(z.string()).optional(),
   /** Absent = inherit the built-in's probe (or the `command -v` default). */
   probeCommand: z.string().optional(),
+  /** Absent = inherit the built-in's resume template (if any). */
+  resumeCommand: z.string().optional(),
 });
 
 export type HarnessOverride = z.infer<typeof HarnessOverrideSchema>;
 
 /**
- * A material override actually changes how the harness spawns or probes.
- * An enabled-only row is bookkeeping (the on/off switch), NOT a
- * customization — it must not mark the harness "customized" in settings,
- * and it must not exempt it from discovery filtering in pickers.
+ * A material override actually customizes the harness (spawn, probe, or
+ * resume template). An enabled-only row is bookkeeping (the on/off switch),
+ * NOT a customization — it must not mark the harness "customized" in
+ * settings, and it must not exempt it from discovery filtering in pickers.
  */
 export function isMaterialOverride(override: HarnessOverride): boolean {
   return (
     override.command !== undefined ||
     override.args !== undefined ||
     override.env !== undefined ||
-    override.probeCommand !== undefined
+    override.probeCommand !== undefined ||
+    override.resumeCommand !== undefined
   );
 }
 
@@ -253,6 +285,7 @@ export function resolveEffectiveHarnesses(
       args: override.args ?? builtin.args,
       env: override.env ? { ...builtin.env, ...override.env } : builtin.env,
       probeCommand: override.probeCommand ?? builtin.probeCommand,
+      resumeCommand: override.resumeCommand ?? builtin.resumeCommand,
     });
   }
 
