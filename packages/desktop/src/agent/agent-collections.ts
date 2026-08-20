@@ -331,3 +331,95 @@ export function agentTurnsForTask(taskId: string): AgentTurn[] {
   }
   return turns;
 }
+
+/**
+ * Where a turn's transcript-entry writes land. The streaming pipeline in
+ * agent-service is target-agnostic: every turn carries its writer — live
+ * turns write straight to the collections ({@link liveEntryWriter}), a
+ * session/load replay writes into a {@link ReplayStage} that swaps in
+ * atomically when the load completes. The target riding the turn (rather
+ * than a mode flag on the task) is what keeps the service free of "are we
+ * replaying right now?" state.
+ *
+ * Deliberately NOT the collections' own sync layer: TanStack DB's sync
+ * transactions stage invisibly and land atomically — the right shape — but
+ * staged rows aren't readable mid-transaction, and the replay pipeline must
+ * read-modify its own staged rows (tool-call coalescing, whitespace-run
+ * deletion, the lingering-tool sweep). A readable staging model is
+ * irreducible, so it lives here, next to the collections it commits into.
+ */
+export interface AgentEntryWriter {
+  /** Insert one entry. `createdAt` is the writer's call: live writes stamp
+   *  wall-clock time; replayed history gets none — ACP carries no
+   *  timestamps (MET-94), so a replayed entry's true time is unknowable and
+   *  a revival-time stamp would lie. Ordering never depends on the stamp
+   *  (entry ids are mint-ascending). */
+  insert(row: Omit<AgentEntry, "createdAt">): void;
+  update(id: string, mutate: (draft: AgentEntry) => void): void;
+  delete(id: string): void;
+  entriesForTask(taskId: string): AgentEntry[];
+}
+
+/** The live target: entries land in the collections as they stream. */
+export const liveEntryWriter: AgentEntryWriter = {
+  insert: (row) =>
+    agentEntriesCollection.insert({ ...row, createdAt: Date.now() }),
+  update: (id, mutate) => agentEntriesCollection.update(id, mutate),
+  delete: (id) => agentEntriesCollection.delete(id),
+  entriesForTask: agentEntriesForTask,
+};
+
+/**
+ * Staging target for one session/load replay: history streams in here, NOT
+ * the collections, so the rows kept from the task's previous life stay
+ * visible while it runs, and {@link commit} swaps them for the replayed
+ * transcript in one synchronous pass — a single render, no frame where the
+ * transcript is empty or doubled (a wipe-first order rendered, removed, and
+ * re-added the same messages). A failed load simply drops the stage,
+ * keeping the old transcript readable.
+ */
+export class ReplayStage implements AgentEntryWriter {
+  private readonly rows = new Map<string, AgentEntry>();
+
+  insert(row: Omit<AgentEntry, "createdAt">): void {
+    this.rows.set(row.id, row);
+  }
+
+  update(id: string, mutate: (draft: AgentEntry) => void): void {
+    const row = this.rows.get(id);
+    if (row) mutate(row);
+  }
+
+  delete(id: string): void {
+    this.rows.delete(id);
+  }
+
+  /** Staged rows all belong to the replaying task — no filtering needed. */
+  entriesForTask(): AgentEntry[] {
+    return [...this.rows.values()];
+  }
+
+  /**
+   * The atomic swap: drop the task's previous transcript rows and insert
+   * the synthetic replay turn plus the staged entries. Turns in
+   * `keepTurnIds` (prompts queued against the revival) keep their rows —
+   * they aren't part of the replayed history.
+   */
+  commit(replayTurn: AgentTurn, keepTurnIds: ReadonlySet<string>): void {
+    const taskId = replayTurn.taskId;
+    for (const entry of agentEntriesForTask(taskId)) {
+      if (!keepTurnIds.has(entry.turnId)) {
+        agentEntriesCollection.delete(entry.id);
+      }
+    }
+    for (const turn of agentTurnsForTask(taskId)) {
+      if (!keepTurnIds.has(turn.turnId)) {
+        agentTurnsCollection.delete(turn.turnId);
+      }
+    }
+    agentTurnsCollection.insert(replayTurn);
+    for (const row of this.rows.values()) {
+      agentEntriesCollection.insert(row);
+    }
+  }
+}

@@ -40,11 +40,18 @@ import {
   agentTasksCollection,
   agentTurnsCollection,
   agentTurnsForTask,
-  type AgentEntry,
+  liveEntryWriter,
+  ReplayStage,
+  type AgentEntryWriter,
   type AgentTaskStatus,
+  type AgentTurn,
   type AgentTurnStatus,
 } from "./agent-collections";
-import { getRegisteredTask, registerTask, unregisterTask } from "./task-registry";
+import {
+  getRegisteredTask,
+  registerTask,
+  unregisterTask,
+} from "./task-registry";
 import {
   MOCK_AGENT_MODE,
   createMockAgentTransport,
@@ -123,6 +130,12 @@ type TurnState = {
   run: StreamRun | null;
   /** The user prompt that started this turn (checkpoint commit message). */
   userText: string;
+  /**
+   * Where this turn's entries land: the collections for live turns
+   * (liveEntryWriter), a ReplayStage for a session/load replay. The target
+   * rides the turn so the streaming pipeline never branches on task mode.
+   */
+  entries: AgentEntryWriter;
 };
 
 export function contentBlockText(content: ContentBlock): string {
@@ -147,7 +160,8 @@ function deriveToolLocations(
   rawInput: unknown,
   workspacePath: string,
 ): Array<{ path: string }> | undefined {
-  if (!isPlainObject(rawInput) || typeof rawInput.path !== "string") return undefined;
+  if (!isPlainObject(rawInput) || typeof rawInput.path !== "string")
+    return undefined;
   const resolved = resolveWorkspacePath(workspacePath, rawInput.path);
   return [{ path: resolved.ok ? resolved.absolute : rawInput.path }];
 }
@@ -159,7 +173,9 @@ function deriveToolLocations(
  * whichever is present so transcript entries and `findBlobAuthorTask` see
  * the plain tool name, same as any other tool call.
  */
-function normalizeMcpToolName(title: string | null | undefined): string | undefined {
+function normalizeMcpToolName(
+  title: string | null | undefined,
+): string | undefined {
   if (!title) return undefined;
   for (const prefix of [`mcp__${MCP_SERVER_NAME}__`, `${MCP_SERVER_NAME}_`]) {
     if (title.startsWith(prefix)) return title.slice(prefix.length);
@@ -294,7 +310,9 @@ export class AgentTask {
    * via `OPENCODE_CONFIG`) rather than through `session/new.mcpServers`.
    */
   async start(
-    createTransport: (spec: { extraEnv: Record<string, string> }) => AgentTransport,
+    createTransport: (spec: {
+      extraEnv: Record<string, string>;
+    }) => AgentTransport,
     options?: {
       /**
        * Revival (MET-54): resume this harness-stored session via ACP
@@ -353,7 +371,8 @@ export class AgentTask {
         taskId: this.taskId,
         transport,
         permissionBroker: this.permissionBroker,
-        onSessionUpdate: (notification) => this.handleSessionUpdate(notification),
+        onSessionUpdate: (notification) =>
+          this.handleSessionUpdate(notification),
       });
 
       // Bring the transport live before any ACP traffic; spawn failure
@@ -363,13 +382,7 @@ export class AgentTask {
       // Note: we do NOT surface authHint here — the adapter always advertises
       // authMethods regardless of login (see the auth spike), so the hint only
       // becomes meaningful when a prompt actually fails with "auth required".
-      // Only harnesses with verified session/new pass-through get the
-      // entry here (capability matrix, not self-reported mcpCapabilities);
-      // "opencode-config" harnesses already got it via their spawn env.
-      const mcpServers =
-        this.harness.mcpRegistration === "session-new" && mcpEndpoint.mcpServer
-          ? [mcpEndpoint.mcpServer]
-          : [];
+      const mcpServers = this.currentMcpServers();
       if (options?.resumeSessionId) {
         await withStartupTimeout(
           this.resumeSession(options.resumeSessionId, mcpServers),
@@ -427,74 +440,102 @@ export class AgentTask {
   }
 
   /**
+   * The mcpServers list for session/new and session/load — derived, not
+   * stored: only harnesses with verified session/new pass-through get the
+   * entry (capability matrix, not self-reported mcpCapabilities);
+   * "opencode-config" harnesses already got theirs via their spawn env.
+   */
+  private currentMcpServers(): McpServer[] {
+    return this.harness.mcpRegistration === "session-new" &&
+      this.mcpEndpoint?.mcpServer
+      ? [this.mcpEndpoint.mcpServer]
+      : [];
+  }
+
+  /**
    * ACP `session/load` + replay capture. History replays as session/update
    * notifications BEFORE loadSession resolves (verified on both adapters,
    * MET-54 spike); a synthetic completed turn anchors them so the transcript
    * rebuilds through the normal handleSessionUpdate pipeline — including
-   * replayed user messages (the `user_message_chunk` case).
+   * replayed user messages (the `user_message_chunk` case). The turn writes
+   * into a ReplayStage, not the collections: rows kept from this task's
+   * previous life (workspace close → reopen) stay visible while history
+   * streams, and the stage commits the replayed transcript in one
+   * synchronous swap. A failed load drops the stage, so the old transcript
+   * stays readable next to the "unavailable" verdict instead of vanishing.
+   *
+   * `closeFirst` is the manual-refresh variant (refreshFromHarness): ACP
+   * `session/close` tears down the agent's in-memory session so the reload
+   * rebuilds BOTH the transcript and the model's context from the merged
+   * store (spike §4.5 — a repeat load alone re-syncs only the transcript).
+   * Best-effort: an adapter without the method still gets the transcript
+   * re-sync. The replay turn is set synchronously before the close, so the
+   * whole close+load window reads as "a turn is in flight" — prompts queue
+   * without kicking the drain into the half-torn session.
    */
   private async resumeSession(
     sessionId: string,
     mcpServers: McpServer[],
+    options?: { closeFirst?: boolean },
   ): Promise<void> {
     if (!this.client) throw new Error("ACP client not connected");
-    // The replay is the authoritative transcript — drop rows kept from this
-    // task's previous life (workspace close → reopen) so history isn't
-    // duplicated. Prompts already queued against this revival keep theirs.
-    const queued = new Set(this.pendingPrompts.map((p) => p.turnId));
-    for (const entry of agentEntriesForTask(this.taskId)) {
-      if (!queued.has(entry.turnId)) agentEntriesCollection.delete(entry.id);
-    }
-    for (const turn of agentTurnsForTask(this.taskId)) {
-      if (!queued.has(turn.turnId)) agentTurnsCollection.delete(turn.turnId);
-    }
+    const stage = new ReplayStage();
     const turnId = newTurnId();
-    agentTurnsCollection.insert({
+    const replayTurn: AgentTurn = {
       turnId,
       taskId: this.taskId,
       sessionId,
       status: "completed",
       stopReason: "replay",
       startedAt: Date.now(),
-    });
+    };
+    // The replay re-establishes tool-call coalescing from scratch — a stale
+    // mapping would land a replayed toolCallId on a row the commit deletes.
+    this.toolEventIds.clear();
     this.currentTurn = {
       turnId,
       joiner: new MarkdownJoiner(),
       run: null,
       userText: "",
+      entries: stage,
     };
     try {
-      await this.client.loadSession(sessionId, this.agentCwd, mcpServers);
-      this.sessionId = sessionId;
-    } finally {
-      const turn = this.currentTurn;
-      if (turn) {
-        this.closeRun(turn);
-        // Replayed tool calls carry whatever status they streamed with; one
-        // still pending/in_progress can't actually be running (this history
-        // already happened), and the replay turn never passes through
-        // finishTurn — resolve them here so nothing spins forever.
-        this.resolveLingeringToolCalls(turn.turnId, "completed");
+      if (options?.closeFirst) {
+        await withStartupTimeout(
+          this.client.closeSession(sessionId),
+          "session/close",
+        ).catch((error) => {
+          this.warn(
+            "session/close failed; transcript-only re-sync",
+            errorMessage(error),
+          );
+        });
       }
+      await this.client.loadSession(sessionId, this.agentCwd, mcpServers);
+      // The transport can die while the load is in flight —
+      // handleTransportClose drops the staged turn and marks the task
+      // errored. Committing the replay past that would hand the caller an
+      // "idle" session backed by a dead transport, so abort instead.
+      const turn = this.currentTurn;
+      if (turn?.turnId !== turnId) {
+        throw new Error("agent process ended during session/load");
+      }
+      this.sessionId = sessionId;
+      this.closeRun(turn);
+      // Replayed tool calls carry whatever status they streamed with; one
+      // still pending/in_progress can't actually be running (this history
+      // already happened), and the replay turn never passes through
+      // finishTurn — resolve them here so nothing spins forever.
+      this.resolveLingeringToolCalls(stage, turnId, "completed");
+      // Prompts queued against this revival keep their rows: they aren't
+      // part of the replayed history.
+      stage.commit(
+        replayTurn,
+        new Set(this.pendingPrompts.map((p) => p.turnId)),
+      );
+    } finally {
       this.currentTurn = null;
     }
-  }
-
-  /**
-   * The one insert path for entries mapped from ACP session updates. Live
-   * entries are stamped with wall-clock time; rows belonging to the
-   * synthetic session/load replay turn (stopReason "replay", inserted by
-   * resumeSession before history streams) get NO createdAt — ACP carries
-   * no timestamps (MET-94), so a replayed entry's true time is unknowable
-   * and a revival-time stamp would lie. Ordering never depends on the
-   * stamp (entry ids are mint-ascending).
-   */
-  private insertEntry(row: Omit<AgentEntry, "createdAt">): void {
-    const replayed =
-      agentTurnsCollection.get(row.turnId)?.stopReason === "replay";
-    agentEntriesCollection.insert(
-      replayed ? row : { ...row, createdAt: Date.now() },
-    );
   }
 
   /**
@@ -517,7 +558,8 @@ export class AgentTask {
     }
     const configPath = this.opencodeConfigPath();
     const environment: Record<string, string> = {};
-    for (const entry of mcpServer.env ?? []) environment[entry.name] = entry.value;
+    for (const entry of mcpServer.env ?? [])
+      environment[entry.name] = entry.value;
     const config = {
       $schema: "https://opencode.ai/config.json",
       mcp: {
@@ -533,7 +575,9 @@ export class AgentTask {
       { path: configPath, content: JSON.stringify(config, null, 2) },
     ]);
     if (result.failed.length > 0) {
-      this.warn("opencode mcp config write failed; task runs without app tools");
+      this.warn(
+        "opencode mcp config write failed; task runs without app tools",
+      );
       return {};
     }
     this.opencodeConfigWritten = true;
@@ -612,10 +656,17 @@ export class AgentTask {
     const entry = { turnId, text, contextParts: options?.contextParts };
     if (options?.front) this.pendingPrompts.unshift(entry);
     else this.pendingPrompts.push(entry);
-    // Kick the drain unless a running/draining loop will pick this up, a
-    // sign-in block holds the queue (authenticate()/retryHeldPrompt()
-    // restarts it), or the spawn in flight will (start()'s tail).
-    if (hasSession && !this.currentTurn && !this.draining && !this.authBlocked) {
+    // Kick the drain unless a turn is in flight (live or replay — a
+    // session/load replay holds currentTurn for its whole window, manual
+    // refresh included), a draining loop will pick this up, a sign-in block
+    // holds the queue (authenticate()/retryHeldPrompt() restarts it), or
+    // the spawn in flight will (start()'s tail).
+    if (
+      hasSession &&
+      !this.currentTurn &&
+      !this.draining &&
+      !this.authBlocked
+    ) {
       void this.drainQueue();
     }
     return { turnId, completed };
@@ -660,7 +711,10 @@ export class AgentTask {
   }
 
   /** Answer a pending permission request this task raised. */
-  respondPermission(requestId: string, response: RequestPermissionResponse): void {
+  respondPermission(
+    requestId: string,
+    response: RequestPermissionResponse,
+  ): void {
     this.permissionBroker.respond(requestId, response);
   }
 
@@ -715,6 +769,7 @@ export class AgentTask {
       joiner: new MarkdownJoiner(),
       run: null,
       userText: text,
+      entries: liveEntryWriter,
     };
     this.setStatus("running");
 
@@ -725,7 +780,9 @@ export class AgentTask {
       const blocks = composePrompt({
         text,
         contextParts,
-        capabilities: { embeddedContext: this.client.embeddedContextCapability },
+        capabilities: {
+          embeddedContext: this.client.embeddedContextCapability,
+        },
       });
       const response = await this.client.prompt(this.sessionId, blocks);
       // A turn that reached the model clears any auth block and marks this
@@ -768,7 +825,9 @@ export class AgentTask {
    * rejects, and the UI falls back to showing the method's description as
    * instructions plus the "I've signed in" retry affordance.
    */
-  async authenticate(methodId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  async authenticate(
+    methodId: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
     if (!this.client) return { ok: false, error: "agent task is not started" };
     try {
       await this.client.authenticate(methodId);
@@ -809,7 +868,11 @@ export class AgentTask {
       if (!this.currentTurn && !this.draining) {
         void this.drainQueue();
       }
-    } else if (this.pendingPrompts.length > 0 && !this.currentTurn && !this.draining) {
+    } else if (
+      this.pendingPrompts.length > 0 &&
+      !this.currentTurn &&
+      !this.draining
+    ) {
       // Nothing held, but prompts queued up behind the block — resume them.
       void this.drainQueue();
     }
@@ -857,7 +920,7 @@ export class AgentTask {
 
     // A finished turn means its tools are no longer running — resolve any that
     // never received a terminal update so nothing spins forever.
-    this.resolveLingeringToolCalls(turn.turnId, turnStatus);
+    this.resolveLingeringToolCalls(turn.entries, turn.turnId, turnStatus);
 
     agentTurnsCollection.update(turn.turnId, (draft) => {
       draft.status = turnStatus;
@@ -919,7 +982,9 @@ export class AgentTask {
         // A reply after a thought closes the thought run (order-preserving);
         // assistant text additionally rides the markdown joiner.
         if (turn.run?.kind === "thought") this.closeRun(turn);
-        const flushable = turn.joiner.processText(contentBlockText(update.content));
+        const flushable = turn.joiner.processText(
+          contentBlockText(update.content),
+        );
         if (flushable) this.appendToRun(turn, "assistant", flushable);
         break;
       }
@@ -936,7 +1001,7 @@ export class AgentTask {
         // Plans are peers of text/tools; close the open run so a following
         // reply opens a fresh entry after the plan.
         this.closeRun(turn);
-        this.insertEntry({
+        turn.entries.insert({
           id: newEventId(),
           taskId: this.taskId,
           turnId: turn.turnId,
@@ -953,7 +1018,7 @@ export class AgentTask {
         const chunk = contentBlockText(update.content);
         if (!chunk) break;
         this.closeRun(turn);
-        this.insertEntry({
+        turn.entries.insert({
           id: newEventId(),
           taskId: this.taskId,
           turnId: turn.turnId,
@@ -966,7 +1031,7 @@ export class AgentTask {
         // D4: available_commands_update / current_mode_update — not rendered
         // yet, but kept as transcript data rather than dropped. Run
         // boundaries are left alone.
-        this.insertEntry({
+        turn.entries.insert({
           id: newEventId(),
           taskId: this.taskId,
           turnId: turn.turnId,
@@ -1000,9 +1065,12 @@ export class AgentTask {
     const existingId = toolCallId
       ? this.toolEventIds.get(toolCallId)
       : undefined;
+    // No turn (a late tool_call_update at/after the turn boundary) means the
+    // row it targets is already committed — write to the collections.
+    const entries = this.currentTurn?.entries ?? liveEntryWriter;
 
     if (existingId) {
-      agentEntriesCollection.update(existingId, (draft) => {
+      entries.update(existingId, (draft) => {
         const previous = draft.toolCall as ToolCallUpdate | undefined;
         // ACP updates replace each field, so a shallow merge is correct —
         // except title/locations: a later update commonly omits `title`
@@ -1014,7 +1082,9 @@ export class AgentTask {
           ...update,
           title: normalizeMcpToolName(update.title) ?? previous?.title,
           locations:
-            update.locations ?? deriveToolLocations(update.rawInput, this.workspacePath) ?? previous?.locations,
+            update.locations ??
+            deriveToolLocations(update.rawInput, this.workspacePath) ??
+            previous?.locations,
         };
       });
       return;
@@ -1025,7 +1095,7 @@ export class AgentTask {
     if (this.currentTurn) this.closeRun(this.currentTurn);
     const id = newEventId();
     if (toolCallId) this.toolEventIds.set(toolCallId, id);
-    this.insertEntry({
+    entries.insert({
       id,
       taskId: this.taskId,
       turnId: this.currentTurn?.turnId ?? "",
@@ -1034,7 +1104,9 @@ export class AgentTask {
       toolCall: {
         ...update,
         title: normalizeMcpToolName(update.title),
-        locations: update.locations ?? deriveToolLocations(update.rawInput, this.workspacePath),
+        locations:
+          update.locations ??
+          deriveToolLocations(update.rawInput, this.workspacePath),
       },
     });
   }
@@ -1050,16 +1122,17 @@ export class AgentTask {
    * otherwise spin forever (MET-104).
    */
   private resolveLingeringToolCalls(
+    entries: AgentEntryWriter,
     turnId: string,
     turnStatus: AgentTurnStatus,
   ): void {
     const terminal = turnStatus === "completed" ? "completed" : "failed";
-    for (const entry of agentEntriesForTask(this.taskId)) {
+    for (const entry of entries.entriesForTask(this.taskId)) {
       if (entry.type !== "tool_call") continue;
       if (entry.turnId !== turnId && entry.turnId !== "") continue;
       const status = entry.toolCall?.status;
       if (status === "pending" || status === "in_progress" || status == null) {
-        agentEntriesCollection.update(entry.id, (draft) => {
+        entries.update(entry.id, (draft) => {
           if (draft.toolCall) draft.toolCall.status = terminal;
         });
       }
@@ -1071,10 +1144,14 @@ export class AgentTask {
    * transcript entry) if none of this kind is open. Callers close a
    * different-kind run first — this only extends or opens.
    */
-  private appendToRun(turn: TurnState, kind: StreamRun["kind"], text: string): void {
+  private appendToRun(
+    turn: TurnState,
+    kind: StreamRun["kind"],
+    text: string,
+  ): void {
     if (!turn.run || turn.run.kind !== kind) {
       turn.run = { kind, entryId: newEventId(), text };
-      this.insertEntry({
+      turn.entries.insert({
         id: turn.run.entryId,
         taskId: this.taskId,
         turnId: turn.turnId,
@@ -1085,7 +1162,7 @@ export class AgentTask {
     }
     turn.run.text += text;
     const { entryId, text: runText } = turn.run;
-    agentEntriesCollection.update(entryId, (draft) => {
+    turn.entries.update(entryId, (draft) => {
       draft.text = runText;
     });
   }
@@ -1105,7 +1182,7 @@ export class AgentTask {
     // tool_call opens a run that nothing else joins); a closed run that never
     // got visible text is transcript noise — drop its entry.
     if (turn.run && !turn.run.text.trim()) {
-      agentEntriesCollection.delete(turn.run.entryId);
+      turn.entries.delete(turn.run.entryId);
     }
     turn.run = null;
   }
@@ -1121,7 +1198,11 @@ export class AgentTask {
     for (const { turnId } of this.pendingPrompts.splice(0)) {
       this.settleQueuedTurn(turnId, { status: "cancelled" });
     }
-    if (this.client && this.sessionId && this.currentTurn) {
+    // A replay in flight isn't a cancellable turn: its synthetic turn row
+    // lives in the stage (finishTurn would update a row that isn't in the
+    // collection yet), and session/load runs to completion regardless.
+    const replaying = this.currentTurn?.entries instanceof ReplayStage;
+    if (this.client && this.sessionId && this.currentTurn && !replaying) {
       try {
         await this.client.cancel(this.sessionId);
       } catch {
@@ -1160,6 +1241,69 @@ export class AgentTask {
     return true;
   }
 
+  /**
+   * Re-sync this live task from the harness's own session store. ACP has no
+   * change feed — a turn appended by another process (`claude --resume` in a
+   * terminal) surfaces only through a fresh `session/load`. `session/close`
+   * first tears down the adapter's in-memory session so the reload rebuilds
+   * BOTH the transcript and the model's context from the merged store
+   * (verified against claude-agent-acp — a repeat load alone re-syncs only
+   * the transcript; docs/architecture/acp-two-way-spike.md §4.5). Close is
+   * best-effort: an adapter without the method still gets the transcript
+   * re-sync. Refusing to run mid-turn also keeps the fork hazard shut —
+   * prompting a session that went stale under an external append forks the
+   * harness's history tree and orphans the external branch.
+   */
+  async refreshFromHarness(): Promise<
+    { ok: true } | { ok: false; error: string }
+  > {
+    if (!this.client || !this.sessionId) {
+      return { ok: false, error: "agent task is not started" };
+    }
+    if (this.currentTurn || this.draining) {
+      return { ok: false, error: "a turn is in progress" };
+    }
+    const sessionId = this.sessionId;
+    // "starting" + a sessionId is the UI's session-loading state (MET-54) —
+    // the composer holds input exactly as it does during revival.
+    this.setStatus("starting");
+    let resynced = false;
+    try {
+      // resumeSession installs its replay turn synchronously, so the whole
+      // close+load window reads as "a turn is in flight" to prompt() — no
+      // extra mode flag needed to keep the drain off the half-torn session.
+      await withStartupTimeout(
+        this.resumeSession(sessionId, this.currentMcpServers(), {
+          closeFirst: true,
+        }),
+        "session/load",
+      );
+      this.setStatus("idle");
+      resynced = true;
+      return { ok: true };
+    } catch (error) {
+      const message = errorMessage(error);
+      this.warn("session refresh failed", message);
+      this.setStatus("error");
+      return { ok: false, error: message };
+    } finally {
+      // Prompts sent during the refresh queued (see prompt()); run them now.
+      // Only after a successful re-sync: a failed refresh can mean a dead
+      // transport (handleTransportClose dropped the replay turn), and
+      // draining would shove the queue into it — the prompts stay queued
+      // (visible rows) instead.
+      if (
+        resynced &&
+        this.pendingPrompts.length > 0 &&
+        !this.authBlocked &&
+        !this.currentTurn &&
+        !this.draining
+      ) {
+        void this.drainQueue();
+      }
+    }
+  }
+
   get authHint(): string | undefined {
     return this.authHintValue;
   }
@@ -1182,7 +1326,9 @@ export class AgentTask {
     await Promise.all([this.transport?.close(), this.mcpEndpoint?.close()]);
     if (this.opencodeConfigWritten) {
       // Best-effort: a stale per-task config is inert (nothing points at it).
-      void platformAdapter.fs.deleteFiles([this.opencodeConfigPath()]).catch(() => {});
+      void platformAdapter.fs
+        .deleteFiles([this.opencodeConfigPath()])
+        .catch(() => {});
     }
   }
 
@@ -1239,8 +1385,18 @@ export class AgentTask {
     // "agent process exited (code N)" / "terminated (signal)" from the
     // transport — the difference between a silent dead task and a real reason.
     this.warn("transport closed", error?.message ?? "transport closed");
-    if (this.currentTurn) {
-      this.finishTurn(undefined, "error", error?.message ?? "agent process ended");
+    if (this.currentTurn?.entries instanceof ReplayStage) {
+      // A replay turn is staged, not a real turn row — finishTurn would
+      // update a turn that was never inserted. Drop the stage (resumeSession
+      // sees the cleared turn and aborts its commit) and record the error.
+      this.currentTurn = null;
+      this.setStatus("error");
+    } else if (this.currentTurn) {
+      this.finishTurn(
+        undefined,
+        "error",
+        error?.message ?? "agent process ended",
+      );
     } else if (this.currentStatus !== "unavailable") {
       // "unavailable" (failed session/load) must survive the adapter process
       // exiting afterward — it's a distinct, deletable end state, not an error.
@@ -1274,7 +1430,12 @@ export class TaskManager {
     harness: HarnessDefinition,
     parentTaskId?: string,
   ): AgentTask {
-    const task = new AgentTask(taskId, this.workspacePath, harness, parentTaskId);
+    const task = new AgentTask(
+      taskId,
+      this.workspacePath,
+      harness,
+      parentTaskId,
+    );
     this.tasks.set(taskId, task);
     registerTask(task);
     return task;
@@ -1387,13 +1548,16 @@ function transportFactory(task: AgentTask) {
  * register the task in the same tick so a prompt can queue immediately.
  * Falls back to the built-in definition when settings aren't loaded yet.
  */
-function effectiveHarnessById(harnessId: string): HarnessDefinition | undefined {
+function effectiveHarnessById(
+  harnessId: string,
+): HarnessDefinition | undefined {
   const kv = getOrCreateKvCollection(HARNESS_SETTINGS_NAMESPACE);
   const overrides = parseHarnessOverrides(kv.get(HARNESS_OVERRIDES_KEY)?.value);
   const custom = parseCustomHarnessEntries(kv.get(HARNESS_CUSTOM_KEY)?.value);
   return (
-    resolveEffectiveHarnesses(overrides, custom).find((h) => h.id === harnessId) ??
-    BUILT_IN_HARNESSES.find((h) => h.id === harnessId)
+    resolveEffectiveHarnesses(overrides, custom).find(
+      (h) => h.id === harnessId,
+    ) ?? BUILT_IN_HARNESSES.find((h) => h.id === harnessId)
   );
 }
 
@@ -1476,6 +1640,23 @@ export function removeQueuedPrompt(taskId: string, turnId: string): void {
 /** Cancel a task's running turn and pending permissions. */
 export async function cancelAgentTask(taskId: string): Promise<void> {
   await getRegisteredTask(taskId)?.cancel();
+}
+
+/**
+ * The transcript's manual "refresh session" control: pull whatever the
+ * harness's session store holds now — including turns appended by other
+ * processes — back into the task. Live tasks re-sync in place
+ * (session/close + session/load, see AgentTask.refreshFromHarness);
+ * restored rows just revive, which IS a fresh load. Fire-and-forget like
+ * the other UI entry points; failures land on the task row as status.
+ */
+export function refreshAgentSession(taskId: string): void {
+  const task = getRegisteredTask(taskId);
+  if (task) {
+    void task.refreshFromHarness();
+    return;
+  }
+  reviveAgentTask(taskId);
 }
 
 /**

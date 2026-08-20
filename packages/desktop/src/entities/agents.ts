@@ -8,9 +8,14 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery, eq, and, inArray } from "@tanstack/react-db";
+import {
+  BUILT_IN_HARNESSES,
+  buildHarnessResumeCommand,
+} from "@notefig/shared/agent";
 import { normalizePath } from "@/utils/fs";
 import { formatTimeAgo } from "@/utils/format";
 import i18n from "@/utils/intl";
+import { useActiveHarnesses } from "@/hooks/use-harness-selection";
 import {
   agentTasksCollection,
   agentTurnsCollection,
@@ -142,9 +147,7 @@ export function useAgentTasksReady(): boolean {
   const [ready, setReady] = useState(false);
   useEffect(() => {
     let live = true;
-    void agentTasksCollection
-      .preload()
-      .finally(() => live && setReady(true));
+    void agentTasksCollection.preload().finally(() => live && setReady(true));
     return () => {
       live = false;
     };
@@ -195,6 +198,56 @@ export function useAgentTaskList(workspacePath: string): AgentTaskMeta[] {
         isUnavailable: task.status === "unavailable",
       }));
   }, [tasks, queuedTurns]);
+}
+
+/**
+ * The actions a session row can offer, derived from the task in one place —
+ * consumers never join task rows with harness config or interpret status
+ * enums themselves.
+ */
+export type AgentSessionActions = {
+  /** The raw ACP session id (harness-minted, NOT taskId); null until the
+   *  session handshake has completed. */
+  sessionId: string | null;
+  /** Refresh is a between-turns action only: mid-turn the session can't be
+   *  reloaded (and the fork hazard says it must not be); "starting" is
+   *  already a load in flight, and error/unavailable have no live session
+   *  worth re-reading. */
+  canRefresh: boolean;
+  /** Terminal resume command from the harness's `resumeCommand` template
+   *  (per-machine overrides included). `supported: false` — the harness
+   *  declares no template: hide the control. `command: null` while
+   *  supported — no session id yet: disable it. */
+  resume: { supported: boolean; command: string | null };
+};
+
+export function useSessionActions(task: AgentTaskRow): AgentSessionActions {
+  // The task's harness may be disabled or undiscovered by now — fall back
+  // to the built-in definition so its sessions keep their affordances.
+  const harnesses = useActiveHarnesses();
+  const harness =
+    harnesses.find((entry) => entry.id === task.harnessId) ??
+    BUILT_IN_HARNESSES.find((entry) => entry.id === task.harnessId);
+  const sessionId = task.sessionId ?? null;
+  return {
+    sessionId,
+    canRefresh:
+      task.status === "idle" ||
+      task.status === "cancelled" ||
+      task.status === "restored",
+    resume:
+      harness?.resumeCommand === undefined
+        ? { supported: false, command: null }
+        : {
+            supported: true,
+            command: sessionId
+              ? buildHarnessResumeCommand(harness, {
+                  sessionId,
+                  workspacePath: task.workspacePath,
+                })
+              : null,
+          },
+  };
 }
 
 /**

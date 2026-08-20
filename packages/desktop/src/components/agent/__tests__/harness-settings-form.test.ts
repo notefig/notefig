@@ -35,6 +35,7 @@ function form(partial: Partial<HarnessFormState> = {}): HarnessFormState {
     argsText: "",
     envText: "",
     probeCommand: "",
+    resumeCommand: "",
     mcpOptIn: "none",
     ...partial,
   };
@@ -114,6 +115,7 @@ describe("validateHarnessForm", () => {
       args: ["acp"],
       env: { K: "v" },
       probeCommand: "",
+      resumeCommand: "",
     });
   });
 
@@ -190,6 +192,29 @@ describe("definitionToForm / formToOverride round-trip (diff-on-save)", () => {
     );
     expect(formToOverride(parsed!, claude, true, true)).toBeNull();
   });
+
+  it("editing only the resume command produces a material override", () => {
+    const seeded = definitionToForm(claude);
+    expect(seeded.resumeCommand).toBe(claude.resumeCommand);
+    const { parsed } = validateHarnessForm(
+      { ...seeded, resumeCommand: "claude -r ${sessionId}" },
+      { requireLabel: false },
+    );
+    expect(formToOverride(parsed!, claude, true, true)).toEqual({
+      id: "claude-code",
+      enabled: true,
+      resumeCommand: "claude -r ${sessionId}",
+    });
+  });
+
+  it("an emptied resume field means inherit (omitted)", () => {
+    const seeded = definitionToForm(claude);
+    const { parsed } = validateHarnessForm(
+      { ...seeded, resumeCommand: "" },
+      { requireLabel: false },
+    );
+    expect(formToOverride(parsed!, claude, true, true)).toBeNull();
+  });
 });
 
 describe("formToCustomEntry", () => {
@@ -212,6 +237,25 @@ describe("formToCustomEntry", () => {
       mcpRegistrationOverride: "session-new",
       enabled: true,
     });
+  });
+
+  it("carries a resume command when set, omits it when blank", () => {
+    const f = form({
+      label: "Mine",
+      command: "my-bin",
+      resumeCommand: "my-bin --resume ${sessionId}",
+    });
+    const { parsed } = validateHarnessForm(f, { requireLabel: true });
+    expect(formToCustomEntry(parsed!, f, "custom:x", true).resumeCommand).toBe(
+      "my-bin --resume ${sessionId}",
+    );
+    const blank = form({ label: "Mine", command: "my-bin" });
+    const { parsed: blankParsed } = validateHarnessForm(blank, {
+      requireLabel: true,
+    });
+    expect(
+      "resumeCommand" in formToCustomEntry(blankParsed!, blank, "custom:x", true),
+    ).toBe(false);
   });
 });
 

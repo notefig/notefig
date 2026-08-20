@@ -79,6 +79,7 @@ const EMPTY_FORM: HarnessFormState = {
   argsText: "",
   envText: "",
   probeCommand: "",
+  resumeCommand: "",
   mcpOptIn: "none",
 };
 
@@ -610,6 +611,15 @@ function HarnessEditorView({
             value={form.probeCommand}
             placeholder={t("harnessProbePlaceholder")}
             onChange={(e) => patch({ probeCommand: e.target.value })}
+            className="font-mono text-xs"
+          />
+        </Field>
+
+        <Field label={t("harnessResumeField")}>
+          <Input
+            value={form.resumeCommand}
+            placeholder={t("harnessResumePlaceholder")}
+            onChange={(e) => patch({ resumeCommand: e.target.value })}
             className="font-mono text-xs"
           />
         </Field>

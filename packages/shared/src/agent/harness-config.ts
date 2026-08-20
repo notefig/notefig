@@ -29,6 +29,15 @@ export const HarnessDefinitionSchema = z.object({
    */
   authHint: z.string().optional(),
   /**
+   * Terminal command template that reopens an existing session in the
+   * harness's own CLI — `${sessionId}` and `${workspace}` are substituted
+   * as ALREADY shell-quoted arguments (see `buildHarnessResumeCommand`), so
+   * templates must NOT wrap the placeholders in their own quotes. Optional:
+   * absent means the harness has no known way to resume by id, and resume
+   * affordances are hidden.
+   */
+  resumeCommand: z.string().optional(),
+  /**
    * How this harness learns about the app's MCP tool server — set from the
    * capability matrix (docs/architecture/acp-capability-matrix.md), NOT from
    * the adapter's self-reported `mcpCapabilities` (unreliable: OpenCode
@@ -44,6 +53,49 @@ export const HarnessDefinitionSchema = z.object({
 });
 
 export type HarnessDefinition = z.infer<typeof HarnessDefinitionSchema>;
+
+/** Safe as a bare (unquoted) POSIX shell word — no quoting needed. */
+const SHELL_SAFE_WORD = /^[A-Za-z0-9_.,:/@%^+=-]+$/;
+
+/**
+ * Render a value as one literal POSIX shell argument. Single quotes make
+ * everything literal ($, backticks, spaces); embedded single quotes close,
+ * escape, and reopen ('\''). Values that are plainly safe stay bare so the
+ * common command reads clean.
+ */
+function shellQuoteArg(value: string): string {
+  if (SHELL_SAFE_WORD.test(value)) return value;
+  return `'${value.split("'").join("'\\''")}'`;
+}
+
+/** A placeholder the template author wrapped in their own quotes — e.g.
+ *  `"${workspace}"` (the pre-quoting built-in's shape, or a hand-written
+ *  custom template). Nesting our single-quoted value inside those quotes
+ *  would re-enable `$(...)` inside double quotes and inject literal quote
+ *  characters inside single ones, so the wrapper is stripped and our own
+ *  quoting becomes the only quoting. */
+const QUOTED_PLACEHOLDER = /(["'])(\$\{(?:sessionId|workspace)\})\1/g;
+
+/**
+ * Fill a harness's `resumeCommand` template for one concrete session.
+ * Substituted values are shell-quoted — a workspace path containing spaces,
+ * quotes, or `$(...)` pastes into a terminal as the literal argument, never
+ * as syntax. Returns null when the harness declares no template — callers
+ * hide the affordance rather than guessing a CLI invocation.
+ */
+export function buildHarnessResumeCommand(
+  harness: HarnessDefinition,
+  params: { sessionId: string; workspacePath: string },
+): string | null {
+  if (!harness.resumeCommand) return null;
+  // split/join = replaceAll (this package's TS lib predates ES2021).
+  return harness.resumeCommand
+    .replace(QUOTED_PLACEHOLDER, "$2")
+    .split("${sessionId}")
+    .join(shellQuoteArg(params.sessionId))
+    .split("${workspace}")
+    .join(shellQuoteArg(params.workspacePath));
+}
 
 /**
  * Harnesses Metrists knows how to spawn out of the box. Each is an existing
@@ -61,6 +113,11 @@ export const BUILT_IN_HARNESSES: HarnessDefinition[] = [
     // the adapter's auth flow needs anyway — see authHint).
     probeCommand: "command -v claude",
     authHint: "Run `claude /login` in a terminal on this machine.",
+    // Claude sessions are keyed by cwd, so the resume must run from the
+    // workspace (verified in acp-two-way-spike.md — external `--resume`
+    // appends to the same session file). No quotes around the placeholders:
+    // substitution shell-quotes the values itself.
+    resumeCommand: "cd ${workspace} && claude --resume ${sessionId}",
     mcpRegistration: "session-new",
   },
   {
@@ -72,6 +129,9 @@ export const BUILT_IN_HARNESSES: HarnessDefinition[] = [
     args: ["acp", "--cwd", "${workspace}"],
     env: {},
     authHint: "Run `opencode auth login` in a terminal on this machine.",
+    // OpenCode scopes sessions to the project directory (the spawn above
+    // pins it via --cwd), so the resume runs from the workspace too.
+    resumeCommand: "cd ${workspace} && opencode --session ${sessionId}",
     mcpRegistration: "opencode-config",
   },
   {
@@ -107,22 +167,25 @@ export const HarnessOverrideSchema = z.object({
   env: z.record(z.string()).optional(),
   /** Absent = inherit the built-in's probe (or the `command -v` default). */
   probeCommand: z.string().optional(),
+  /** Absent = inherit the built-in's resume template (if any). */
+  resumeCommand: z.string().optional(),
 });
 
 export type HarnessOverride = z.infer<typeof HarnessOverrideSchema>;
 
 /**
- * A material override actually changes how the harness spawns or probes.
- * An enabled-only row is bookkeeping (the on/off switch), NOT a
- * customization — it must not mark the harness "customized" in settings,
- * and it must not exempt it from discovery filtering in pickers.
+ * A material override actually customizes the harness (spawn, probe, or
+ * resume template). An enabled-only row is bookkeeping (the on/off switch),
+ * NOT a customization — it must not mark the harness "customized" in
+ * settings, and it must not exempt it from discovery filtering in pickers.
  */
 export function isMaterialOverride(override: HarnessOverride): boolean {
   return (
     override.command !== undefined ||
     override.args !== undefined ||
     override.env !== undefined ||
-    override.probeCommand !== undefined
+    override.probeCommand !== undefined ||
+    override.resumeCommand !== undefined
   );
 }
 
@@ -253,6 +316,7 @@ export function resolveEffectiveHarnesses(
       args: override.args ?? builtin.args,
       env: override.env ? { ...builtin.env, ...override.env } : builtin.env,
       probeCommand: override.probeCommand ?? builtin.probeCommand,
+      resumeCommand: override.resumeCommand ?? builtin.resumeCommand,
     });
   }
 
