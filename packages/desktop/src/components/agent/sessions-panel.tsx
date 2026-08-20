@@ -49,13 +49,16 @@ import {
   startAgentTask,
 } from "@/agent/agent-service";
 import { ensureAgentRuntime } from "@/agent/tunnel/require-connection";
-import { describeTaskMeta, useAgentTaskList } from "@/entities/agents";
+import {
+  describeTaskMeta,
+  useAgentTaskList,
+  useSessionActions,
+} from "@/entities/agents";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
 import { agentTabId } from "@/entities/tabs";
 import {
   useActiveHarnesses,
   useDefaultHarness,
-  useSessionResumeCommand,
 } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "./harness-logo";
 
@@ -231,20 +234,12 @@ export function SessionRow({
  */
 function SessionRowMenu({ task }: { task: AgentTaskRow }) {
   const { t } = useTranslation();
-  // Refresh is a between-turns action only: mid-turn the session can't be
-  // reloaded (and the fork hazard says it must not be); "starting" is
-  // already a load in flight, and error/unavailable have no live session
-  // worth re-reading.
-  const canRefresh =
-    task.status === "idle" ||
-    task.status === "cancelled" ||
-    task.status === "restored";
-  const resume = useSessionResumeCommand(task);
+  const actions = useSessionActions(task);
   return (
     <ContextMenuContent>
       <ContextMenuItem
         className="gap-2 text-xs"
-        disabled={!canRefresh}
+        disabled={!actions.canRefresh}
         onSelect={() => refreshAgentSession(task.taskId)}
       >
         <RefreshCw className="size-3.5" />
@@ -252,17 +247,19 @@ function SessionRowMenu({ task }: { task: AgentTaskRow }) {
       </ContextMenuItem>
       <ContextMenuItem
         className="gap-2 text-xs"
-        disabled={!task.sessionId}
-        onSelect={() => void copyTextToClipboard(task.sessionId ?? "")}
+        disabled={actions.sessionId === null}
+        onSelect={() => void copyTextToClipboard(actions.sessionId ?? "")}
       >
         <Copy className="size-3.5" />
         {t("agentCopySessionId")}
       </ContextMenuItem>
-      {resume.supported && (
+      {actions.resume.supported && (
         <ContextMenuItem
           className="gap-2 text-xs"
-          disabled={resume.command === null}
-          onSelect={() => void copyTextToClipboard(resume.command ?? "")}
+          disabled={actions.resume.command === null}
+          onSelect={() =>
+            void copyTextToClipboard(actions.resume.command ?? "")
+          }
         >
           <Terminal className="size-3.5" />
           {t("agentCopyResumeCommand")}

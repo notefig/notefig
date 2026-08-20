@@ -2,7 +2,6 @@ import { useMemo } from "react";
 import type { HarnessDefinition } from "@notefig/shared/agent";
 import {
   BUILT_IN_HARNESSES,
-  buildHarnessResumeCommand,
   filterDiscoveredHarnesses,
   parseCustomHarnessEntries,
   parseHarnessDiscovery,
@@ -99,37 +98,6 @@ export function useDefaultHarness(): {
  * showing all built-ins rather than an empty picker — each still names its
  * install/sign-in hint on failure.
  */
-/**
- * The terminal resume command for one session, from its harness's
- * `resumeCommand` template (per-machine overrides included). The harness is
- * looked up in the active list with a built-in fallback, so sessions on a
- * since-disabled or undiscovered harness keep the affordance.
- * - `supported: false` — the harness declares no template: hide the control.
- * - `command: null` while supported — no session id yet: disable it.
- */
-export function useSessionResumeCommand(session: {
-  harnessId: string;
-  sessionId?: string;
-  workspacePath: string;
-}): { supported: boolean; command: string | null } {
-  const harnesses = useActiveHarnesses();
-  const harness =
-    harnesses.find((entry) => entry.id === session.harnessId) ??
-    BUILT_IN_HARNESSES.find((entry) => entry.id === session.harnessId);
-  if (harness?.resumeCommand === undefined) {
-    return { supported: false, command: null };
-  }
-  return {
-    supported: true,
-    command: session.sessionId
-      ? buildHarnessResumeCommand(harness, {
-          sessionId: session.sessionId,
-          workspacePath: session.workspacePath,
-        })
-      : null,
-  };
-}
-
 export function useActiveHarnesses(): HarnessDefinition[] {
   const effective = useEffectiveHarnesses();
   const workerIds = useWorkerAvailableIds();
