@@ -50,6 +50,7 @@
 
   --color-brand: var(--brand);
   --color-highlight: var(--highlight);
+  --color-logo: var(--logo);
 
   --color-chart-1: hsl(var(--chart-1));
   --color-chart-2: hsl(var(--chart-2));
@@ -77,14 +78,17 @@
     from {
       height: 0;
     }
+
     to {
       height: var(--radix-accordion-content-height);
     }
   }
+
   @keyframes accordion-up {
     from {
       height: var(--radix-accordion-content-height);
     }
+
     to {
       height: 0;
     }
@@ -120,6 +124,8 @@
     --chart-5: 27 87% 67%;
     --brand: oklch(0.623 0.214 259.815);
     --highlight: oklch(0.852 0.199 91.936);
+    /* The app logo's fill (icon-sidebar); markdown file icons share it. */
+    --logo: #506600;
   }
 
   .dark {
@@ -149,6 +155,7 @@
     --chart-5: 340 75% 55%;
     --brand: oklch(0.707 0.165 254.624);
     --highlight: oklch(0.852 0.199 91.936);
+    --logo: #ceff1a;
   }
 }
 
@@ -229,6 +236,7 @@
 
 /* Prevent text selection throughout the app except in editors */
 @layer base {
+
   /* Disable selection by default */
   * {
     user-select: none;
@@ -369,12 +377,10 @@
        -webkit-text-fill-color to hide the glyphs instead. */
     -webkit-text-fill-color: transparent;
     background-color: currentColor;
-    background-image: linear-gradient(
-      var(--shimmer-angle),
-      transparent calc(50% - var(--shimmer-spread) / 2),
-      var(--shimmer-color),
-      transparent calc(50% + var(--shimmer-spread) / 2)
-    );
+    background-image: linear-gradient(var(--shimmer-angle),
+        transparent calc(50% - var(--shimmer-spread) / 2),
+        var(--shimmer-color),
+        transparent calc(50% + var(--shimmer-spread) / 2));
     background-repeat: no-repeat;
     background-size: 250% 100%;
     background-clip: text;
@@ -394,6 +400,7 @@
     from {
       background-position: 150% 0;
     }
+
     to {
       background-position: -50% 0;
     }
@@ -429,15 +436,18 @@
    Without this, cursor position drifts further right at higher zoom levels
    (e.g., 125%, 150%) because Safari miscalculates the marker offset. */
 @layer base {
+
   /* Unordered list styles */
   .list-style-disc {
     list-style-type: disc;
     list-style-position: inside;
   }
+
   .list-style-circle {
     list-style-type: circle;
     list-style-position: inside;
   }
+
   .list-style-square {
     list-style-type: square;
     list-style-position: inside;
@@ -448,18 +458,22 @@
     list-style-type: decimal;
     list-style-position: inside;
   }
+
   .list-style-lower-alpha {
     list-style-type: lower-alpha;
     list-style-position: inside;
   }
+
   .list-style-upper-alpha {
     list-style-type: upper-alpha;
     list-style-position: inside;
   }
+
   .list-style-lower-roman {
     list-style-type: lower-roman;
     list-style-position: inside;
   }
+
   .list-style-upper-roman {
     list-style-type: upper-roman;
     list-style-position: inside;
@@ -502,6 +516,13 @@ file-tree-container {
      12px indent per level (the built-in tree uses px here, not rem). */
   --trees-item-padding-x-override: 8px;
   --trees-level-gap-override: 12px;
+
+  /* File-type icons track the UI-scale baseline like the text does — the
+     library default is fixed 16px, which sits small beside 1.5x-scaled
+     text. The nudge is chevron-only (directory arrows), rem-scaled to
+     match its 1px default. */
+  --trees-icon-width-override: 0.9375rem;
+  --trees-icon-nudge-override: 0.0625rem;
 }
 
 .dark file-tree-container {
