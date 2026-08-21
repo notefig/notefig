@@ -128,8 +128,9 @@ export const IconSidebar = memo(function IconSidebar({
             onClick={handleLogoClick}
             className="mb-3 p-0.5 pt-0 rounded-md transition-colors hover:bg-sidebar-accent cursor-pointer"
           >
-            <PlainLogo size="1.25rem" className="block dark:hidden" />
-            <PlainLogo size="1.25rem" fill="#CEFF1A" className="hidden dark:block" />
+            {/* Fill rides the --logo token so everything sharing the
+                logo color (markdown file icons) stays in sync. */}
+            <PlainLogo size="1.25rem" fill="var(--logo)" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>

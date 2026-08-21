@@ -49,6 +49,10 @@ export interface AgentTaskHandle {
   promptFromWidget(
     text: string,
     widget: { path: string; pos: number; isDocEmpty: boolean },
+    /** Additional parts riding along with the widget context — file
+     *  @-mentions (MET-80). Kept even on the empty-doc branch, which
+     *  otherwise carries no contextParts. */
+    extraContextParts?: PromptContextPart[],
   ): PromptHandle;
   cancel(): Promise<ActionResult>;
   respondPermission(
@@ -99,23 +103,33 @@ function taskHandle(taskId: string): AgentTaskHandle {
   return {
     taskId,
     prompt: promptImpl,
-    promptFromWidget(text, widget) {
+    promptFromWidget(text, widget, extraContextParts = []) {
       if (widget.isDocEmpty) {
         // The one deliberately-embedded exception: the agent can't
         // discover "this doc is empty" by reading a resource it doesn't
         // know to ask for, so this stays inline in the prompt text. The
         // widget_respond directive rides along too — this branch carries
-        // no resource_link, so the resource_link-keyed steering in
-        // serverInstructions() (mcp-server.ts) never fires for it.
+        // no widget-context resource_link, so the widget-keyed steering in
+        // serverInstructions() (mcp-server.ts) never fires for it. Mention
+        // parts (file:// links) still ride along; the steering keys on the
+        // widget-context URI scheme, not resource_link presence.
         const framing = `${widget.path} is currently empty. Author directly into it — do not just describe what you would write. When finished, deliver a brief confirmation (or any issues) via the \`widget_respond\` tool, not as plain chat text.\n\n`;
-        return promptImpl(framing + text);
+        return promptImpl(
+          framing + text,
+          extraContextParts.length
+            ? { contextParts: extraContextParts }
+            : undefined,
+        );
       }
       const uri = encodeWidgetContextUri({
         path: widget.path,
         pos: widget.pos,
       });
       return promptImpl(text, {
-        contextParts: [{ kind: "resource_link", path: uri }],
+        contextParts: [
+          { kind: "resource_link", path: uri },
+          ...extraContextParts,
+        ],
       });
     },
     async cancel() {

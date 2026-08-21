@@ -28,7 +28,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Editor } from "@tiptap/core";
-import { useAutosizeTextarea } from "@/hooks/use-autosize-textarea";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/ui/markdown";
 import { OrbLoader } from "@/components/ui/orb-loader";
@@ -64,6 +63,11 @@ import {
 } from "@/components/editor/editor-store";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "./harness-logo";
+import {
+  mentionContextParts,
+  PromptEditor,
+  type PromptEditorHandle,
+} from "./prompt-editor";
 import { AuthCard } from "./agent-chat-tab";
 import { CopyTextButton } from "./copy-text-button";
 import { PermissionCard } from "./permission-card";
@@ -173,7 +177,7 @@ export const PromptBlob = memo(function PromptBlob({
     () => getPromptBlob(blobId),
   );
   const { boundTurnId, boundTaskId } = record;
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<PromptEditorHandle>(null);
 
   const { defaultHarness } = useDefaultHarness();
   const { openFile, openAgentTab } = useWorkspaceTabs();
@@ -198,7 +202,7 @@ export const PromptBlob = memo(function PromptBlob({
     getPos,
     summoned,
     removeNode,
-    textareaRef,
+    composerRef,
   });
 
   // Live rows for the bound turn (sentinel ids keep the hooks unconditional).
@@ -313,7 +317,7 @@ export const PromptBlob = memo(function PromptBlob({
     // new-file creation (and "/" leaves the editor holding focus) — it
     // would win the race otherwise.
     suppressEditorFocus();
-    requestAnimationFrame(() => textareaRef.current?.focus());
+    requestAnimationFrame(() => composerRef.current?.focus());
   }, []);
 
   // Focus requests from the "/" summon: a pending request may predate this
@@ -395,7 +399,7 @@ export const PromptBlob = memo(function PromptBlob({
               confirmTrust={confirmTrust}
               trustName={defaultHarness.label}
               workspacePath={workspacePath}
-              textareaRef={textareaRef}
+              composerRef={composerRef}
             />
           )}
 
@@ -472,6 +476,7 @@ export const PromptBlob = memo(function PromptBlob({
               onReply={() => void sendFollowUp()}
               onReplyEscape={escapeToEditor}
               replyDisabled={isSending}
+              workspacePath={workspacePath}
             />
           )}
 
@@ -486,6 +491,7 @@ export const PromptBlob = memo(function PromptBlob({
               onReply={() => void sendFollowUp()}
               onReplyEscape={escapeToEditor}
               replyDisabled={isSending}
+              workspacePath={workspacePath}
             />
           )}
         </div>
@@ -557,6 +563,7 @@ function usePromptSendActions({
           docContentSize: doc.content.size,
           isDocEmpty: !docHasRealContent(doc),
         }),
+        mentionContextParts(workspacePath, text),
       ).turnId;
     },
     [documentPath, workspacePath, editor, getPos],
@@ -654,7 +661,7 @@ function usePromptBlobActions({
   getPos,
   summoned,
   removeNode,
-  textareaRef,
+  composerRef,
 }: {
   blobId: string;
   workspacePath: string;
@@ -666,7 +673,7 @@ function usePromptBlobActions({
     insertSlash?: boolean;
     restoreParagraph?: boolean;
   }) => void;
-  textareaRef: React.RefObject<HTMLTextAreaElement>;
+  composerRef: React.RefObject<PromptEditorHandle>;
 }) {
   const { isSending, confirmTrust, send, sendFollowUp } = usePromptSendActions({
     blobId,
@@ -691,8 +698,8 @@ function usePromptBlobActions({
       boundTurnId: null,
       boundTaskId: null,
     });
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [blobId, textareaRef]);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }, [blobId, composerRef]);
 
   // Edit: pull the sent prompt back into the composer. A queued turn is
   // withdrawn; a running/finished one keeps going — re-send is a new turn.
@@ -848,7 +855,7 @@ function Composer({
   confirmTrust,
   trustName,
   workspacePath,
-  textareaRef,
+  composerRef,
 }: {
   draft: string;
   setDraft: (value: string) => void;
@@ -864,18 +871,18 @@ function Composer({
   confirmTrust: boolean;
   trustName: string;
   workspacePath: string;
-  textareaRef: React.RefObject<HTMLTextAreaElement>;
+  composerRef: React.RefObject<PromptEditorHandle>;
 }) {
   const { t } = useTranslation();
-  useAutosizeTextarea(textareaRef, draft);
   return (
     <div className="flex flex-col">
       <div className="flex items-start gap-1.5 px-1.5 py-1">
         <SessionControl workspacePath={workspacePath} />
-        <textarea
-          ref={textareaRef}
+        <PromptEditor
+          ref={composerRef}
+          workspacePath={workspacePath}
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={setDraft}
           onKeyDown={(event) => {
             const action = deriveComposerKeyAction({
               key: event.key,
@@ -884,16 +891,15 @@ function Composer({
               canRevert: onRevert !== undefined,
               inFlight: false,
             });
-            if (action.type === "none") return;
-            event.preventDefault();
+            if (action.type === "none") return false;
             if (action.type === "send") onSend();
             else if (action.type === "revert") onRevert?.();
             else if (action.type === "backspaceDismiss") onBackspaceDismiss?.();
             else onEscape();
+            return true;
           }}
           placeholder={t("promptBlobPlaceholder")}
-          rows={1}
-          className="min-h-[1.75rem] min-w-0 flex-1 resize-none overflow-hidden bg-transparent pt-1 pb-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
+          className="min-h-[1.75rem] min-w-0 flex-1 pt-1 pb-1.5 text-sm"
         />
       </div>
       {confirmTrust && (
@@ -1113,22 +1119,22 @@ function ReplyRow({
   onSend,
   onEscape,
   disabled,
+  workspacePath,
 }: {
   draft: string;
   setDraft: (value: string) => void;
   onSend: () => void;
   onEscape: () => void;
   disabled: boolean;
+  workspacePath: string;
 }) {
   const { t } = useTranslation();
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  useAutosizeTextarea(textareaRef, draft);
   return (
-    <textarea
-      ref={textareaRef}
+    <PromptEditor
+      workspacePath={workspacePath}
       value={draft}
+      onChange={setDraft}
       disabled={disabled}
-      onChange={(event) => setDraft(event.target.value)}
       onKeyDown={(event) => {
         const action = deriveComposerKeyAction({
           key: event.key,
@@ -1137,14 +1143,13 @@ function ReplyRow({
           canRevert: false,
           inFlight: false,
         });
-        if (action.type === "none") return;
-        event.preventDefault();
+        if (action.type === "none") return false;
         if (action.type === "send") onSend();
         else if (action.type === "escape") onEscape();
+        return true;
       }}
       placeholder={t("promptBlobReply")}
-      rows={1}
-      className="mt-1 min-h-[1.5rem] w-full resize-none overflow-hidden border-t border-border/60 bg-transparent px-0.5 pt-1.5 text-xs placeholder:text-muted-foreground focus-visible:outline-none"
+      className="mt-1 min-h-[1.5rem] w-full border-t border-border/60 px-0.5 pt-1.5 text-xs"
     />
   );
 }
@@ -1223,6 +1228,7 @@ export function DoneState({
   onReply,
   onReplyEscape,
   replyDisabled,
+  workspacePath,
 }: {
   cancelled: boolean;
   response: WidgetResponse | null;
@@ -1238,6 +1244,7 @@ export function DoneState({
   onReply: () => void;
   onReplyEscape: () => void;
   replyDisabled: boolean;
+  workspacePath: string;
 }) {
   const { t } = useTranslation();
   // Expanded by default (MET-133): the response body IS the outcome — the
@@ -1331,6 +1338,7 @@ export function DoneState({
         onSend={onReply}
         onEscape={onReplyEscape}
         disabled={replyDisabled}
+        workspacePath={workspacePath}
       />
     </div>
   );
@@ -1349,6 +1357,7 @@ function ErrorState({
   onReply,
   onReplyEscape,
   replyDisabled,
+  workspacePath,
 }: {
   message: string | undefined;
   onRetry: () => void;
@@ -1359,6 +1368,7 @@ function ErrorState({
   onReply: () => void;
   onReplyEscape: () => void;
   replyDisabled: boolean;
+  workspacePath: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -1403,6 +1413,7 @@ function ErrorState({
         onSend={onReply}
         onEscape={onReplyEscape}
         disabled={replyDisabled}
+        workspacePath={workspacePath}
       />
     </div>
   );

@@ -98,6 +98,65 @@ export interface ScoredPath {
   relativePath: string;
 }
 
+export interface FileSearchResult {
+  path: string;
+  relativePath: string;
+  title: string;
+  score: number;
+}
+
+export interface FileSearchOptions {
+  /** Cap on returned rows — the result lists are not virtualized. */
+  limit?: number;
+  /** Openability gate (e.g. canOpenFile); paths failing it never surface. */
+  filter?: (path: string) => boolean;
+  /**
+   * Empty-query behavior: [] by default; the mention picker passes true to
+   * list files immediately on a bare "@" (shallowest paths first).
+   */
+  matchAllWhenEmpty?: boolean;
+}
+
+export const DEFAULT_FILE_SEARCH_LIMIT = 10;
+
+/**
+ * Rank workspace file rows against a query — the pure core shared by
+ * useFileSearch (live rows) and the prompt editor's mention suggestion
+ * (one-shot collection reads). Rows without a relativePath are loose files
+ * (outside the workspace tree) and are hidden to match the file tree.
+ */
+export function rankFileRows(
+  rows: Iterable<{ path: string; relativePath?: string }>,
+  query: string,
+  {
+    limit = DEFAULT_FILE_SEARCH_LIMIT,
+    filter,
+    matchAllWhenEmpty = false,
+  }: FileSearchOptions = {},
+): FileSearchResult[] {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery && !matchAllWhenEmpty) return [];
+  const results: FileSearchResult[] = [];
+  for (const row of rows) {
+    if (!row.relativePath) continue;
+    if (filter && !filter(row.path)) continue;
+    // Empty query with matchAllWhenEmpty: every file at score 0 — the
+    // comparator then orders by shortest path, then alphabetically.
+    const score = trimmedQuery
+      ? scoreFilePath(trimmedQuery, row.relativePath)
+      : 0;
+    if (trimmedQuery && score <= 0) continue;
+    results.push({
+      path: row.path,
+      relativePath: row.relativePath,
+      title: row.relativePath.slice(row.relativePath.lastIndexOf("/") + 1),
+      score,
+    });
+  }
+  results.sort(compareScoredPaths);
+  return results.slice(0, limit);
+}
+
 /** Score desc, then shorter path, then lexicographic — a total order so
  * result lists are stable across re-renders. */
 export function compareScoredPaths(a: ScoredPath, b: ScoredPath): number {

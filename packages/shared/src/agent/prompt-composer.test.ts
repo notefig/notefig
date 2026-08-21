@@ -44,6 +44,29 @@ describe("composePrompt", () => {
       contextParts: [{ kind: "resource_link", path: "chapter-2.md" }],
       capabilities: { embeddedContext: false },
     });
-    expect(blocks[1]).toMatchObject({ type: "resource_link", uri: "chapter-2.md" });
+    expect(blocks[1]).toMatchObject({
+      type: "resource_link",
+      uri: "chapter-2.md",
+    });
+  });
+
+  it("resource_link name defaults to the path and honors an explicit name", () => {
+    const blocks = composePrompt({
+      text: "see",
+      contextParts: [
+        { kind: "resource_link", path: "file:///ws/a.md", name: "a.md" },
+        { kind: "resource_link", path: "chapter-2.md" },
+      ],
+      capabilities: { embeddedContext: true },
+    });
+    expect(blocks[1]).toMatchObject({
+      type: "resource_link",
+      uri: "file:///ws/a.md",
+      name: "a.md",
+    });
+    expect(blocks[2]).toMatchObject({
+      type: "resource_link",
+      name: "chapter-2.md",
+    });
   });
 });

@@ -1,4 +1,5 @@
 import { FileTree, type FileTreeSortEntry } from "@pierre/trees";
+import { FILE_ICON_CONFIG } from "./file-type-icon";
 import type { SortOrder } from "@/utils/fs";
 
 /**
@@ -139,12 +140,25 @@ export function acquireTreeModel(
     initialSelectedPaths: init.initialSelectedPaths,
     sort: makeComparator(sortState),
     itemHeight: init.itemHeightPx,
-    icons: { set: "none" },
-    // Parity with the previous tree: files have no icon, just the spacer
-    // width that keeps them aligned with directory chevrons. visibility
-    // (not display) preserves that width.
+    // The same monochrome icon set the prompt composer's mention picker and
+    // the palette's quick results render (file-type-icon.tsx) — one config,
+    // every surface agrees.
+    icons: FILE_ICON_CONFIG,
+    // The library hard-codes width/height ATTRIBUTES of 16 on the icon svg
+    // (Icon.tsx), so the --trees-icon-width variable only sizes the lane —
+    // rescaling the glyph itself to the 1.5x rem baseline needs CSS, which
+    // beats presentation attributes. Flat rule only (nested CSS in this
+    // shadow root segfaulted WebKit — bug 290102). File icons only; the
+    // chevron keeps the library's own sizing + nudge.
     unsafeCSS: `
-      svg[data-icon-name="file-tree-icon-file"] { visibility: hidden; }
+      [data-item-section="icon"] svg[data-icon-name="file-tree-icon-file"] {
+        width: 0.9375rem;
+        height: 0.9375rem;
+        transform: translateY(0.0625rem);
+      }
+      [data-item-section="icon"] svg[data-icon-token="markdown"] {
+        color: var(--logo);
+      }
     `,
     dragAndDrop: {
       // Open-in-tab files may still be DRAGGED (dropping one on another

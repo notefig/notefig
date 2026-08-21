@@ -147,6 +147,18 @@ describe("useFileSearch", () => {
     expect(results).toHaveLength(1);
   });
 
+  it("matchAllWhenEmpty lists files for an empty query, shallowest first", async () => {
+    const results = await renderSearch("", { matchAllWhenEmpty: true });
+    expect(results.map((r) => r.relativePath)).toEqual([
+      "notes.md",
+      "image.png",
+      "readme.md",
+      "archive/old-notes.md",
+    ]);
+    // Default behavior unchanged: empty query without the flag yields [].
+    expect(await renderSearch("")).toEqual([]);
+  });
+
   it("caps results at 10 by default", async () => {
     await act(async () => {
       const { metadata } = files.getOrCreateWorkspaceCollections(WS);
