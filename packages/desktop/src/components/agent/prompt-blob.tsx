@@ -49,6 +49,7 @@ import {
   agentTurnsCollection,
 } from "@/agent/agent-collections";
 import { agents } from "@/agent/agents";
+import { mentionContextParts } from "@/agent/prompt-mention-context";
 import {
   cancelAgentTask,
   cancelAgentTurnAndForget,
@@ -64,6 +65,7 @@ import {
 } from "@/components/editor/editor-store";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "./harness-logo";
+import { MentionPicker, useMentionPicker } from "./mention-picker";
 import { AuthCard } from "./agent-chat-tab";
 import { CopyTextButton } from "./copy-text-button";
 import { PermissionCard } from "./permission-card";
@@ -472,6 +474,7 @@ export const PromptBlob = memo(function PromptBlob({
               onReply={() => void sendFollowUp()}
               onReplyEscape={escapeToEditor}
               replyDisabled={isSending}
+              workspacePath={workspacePath}
             />
           )}
 
@@ -486,6 +489,7 @@ export const PromptBlob = memo(function PromptBlob({
               onReply={() => void sendFollowUp()}
               onReplyEscape={escapeToEditor}
               replyDisabled={isSending}
+              workspacePath={workspacePath}
             />
           )}
         </div>
@@ -557,6 +561,7 @@ function usePromptSendActions({
           docContentSize: doc.content.size,
           isDocEmpty: !docHasRealContent(doc),
         }),
+        mentionContextParts(workspacePath, text),
       ).turnId;
     },
     [documentPath, workspacePath, editor, getPos],
@@ -868,33 +873,41 @@ function Composer({
 }) {
   const { t } = useTranslation();
   useAutosizeTextarea(textareaRef, draft);
+  const mentions = useMentionPicker({
+    workspacePath,
+    value: draft,
+    onChange: setDraft,
+    textareaRef,
+  });
   return (
     <div className="flex flex-col">
       <div className="flex items-start gap-1.5 px-1.5 py-1">
         <SessionControl workspacePath={workspacePath} />
-        <textarea
-          ref={textareaRef}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            const action = deriveComposerKeyAction({
-              key: event.key,
-              shiftKey: event.shiftKey,
-              draftEmpty: draft.trim().length === 0,
-              canRevert: onRevert !== undefined,
-              inFlight: false,
-            });
-            if (action.type === "none") return;
-            event.preventDefault();
-            if (action.type === "send") onSend();
-            else if (action.type === "revert") onRevert?.();
-            else if (action.type === "backspaceDismiss") onBackspaceDismiss?.();
-            else onEscape();
-          }}
-          placeholder={t("promptBlobPlaceholder")}
-          rows={1}
-          className="min-h-[1.75rem] min-w-0 flex-1 resize-none overflow-hidden bg-transparent pt-1 pb-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
-        />
+        <MentionPicker picker={mentions} className="min-w-0 flex-1">
+          <textarea
+            {...mentions.textareaProps}
+            onKeyDown={(event) => {
+              if (mentions.handleKeyDown(event)) return;
+              const action = deriveComposerKeyAction({
+                key: event.key,
+                shiftKey: event.shiftKey,
+                draftEmpty: draft.trim().length === 0,
+                canRevert: onRevert !== undefined,
+                inFlight: false,
+              });
+              if (action.type === "none") return;
+              event.preventDefault();
+              if (action.type === "send") onSend();
+              else if (action.type === "revert") onRevert?.();
+              else if (action.type === "backspaceDismiss")
+                onBackspaceDismiss?.();
+              else onEscape();
+            }}
+            placeholder={t("promptBlobPlaceholder")}
+            rows={1}
+            className="min-h-[1.75rem] w-full resize-none overflow-hidden bg-transparent pt-1 pb-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
+          />
+        </MentionPicker>
       </div>
       {confirmTrust && (
         <span className="px-3 pb-1.5 text-[0.6875rem] text-amber-600 dark:text-amber-400">
@@ -1113,39 +1126,48 @@ function ReplyRow({
   onSend,
   onEscape,
   disabled,
+  workspacePath,
 }: {
   draft: string;
   setDraft: (value: string) => void;
   onSend: () => void;
   onEscape: () => void;
   disabled: boolean;
+  workspacePath: string;
 }) {
   const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useAutosizeTextarea(textareaRef, draft);
+  const mentions = useMentionPicker({
+    workspacePath,
+    value: draft,
+    onChange: setDraft,
+    textareaRef,
+  });
   return (
-    <textarea
-      ref={textareaRef}
-      value={draft}
-      disabled={disabled}
-      onChange={(event) => setDraft(event.target.value)}
-      onKeyDown={(event) => {
-        const action = deriveComposerKeyAction({
-          key: event.key,
-          shiftKey: event.shiftKey,
-          draftEmpty: draft.trim().length === 0,
-          canRevert: false,
-          inFlight: false,
-        });
-        if (action.type === "none") return;
-        event.preventDefault();
-        if (action.type === "send") onSend();
-        else if (action.type === "escape") onEscape();
-      }}
-      placeholder={t("promptBlobReply")}
-      rows={1}
-      className="mt-1 min-h-[1.5rem] w-full resize-none overflow-hidden border-t border-border/60 bg-transparent px-0.5 pt-1.5 text-xs placeholder:text-muted-foreground focus-visible:outline-none"
-    />
+    <MentionPicker picker={mentions}>
+      <textarea
+        {...mentions.textareaProps}
+        disabled={disabled}
+        onKeyDown={(event) => {
+          if (mentions.handleKeyDown(event)) return;
+          const action = deriveComposerKeyAction({
+            key: event.key,
+            shiftKey: event.shiftKey,
+            draftEmpty: draft.trim().length === 0,
+            canRevert: false,
+            inFlight: false,
+          });
+          if (action.type === "none") return;
+          event.preventDefault();
+          if (action.type === "send") onSend();
+          else if (action.type === "escape") onEscape();
+        }}
+        placeholder={t("promptBlobReply")}
+        rows={1}
+        className="mt-1 min-h-[1.5rem] w-full resize-none overflow-hidden border-t border-border/60 bg-transparent px-0.5 pt-1.5 text-xs placeholder:text-muted-foreground focus-visible:outline-none"
+      />
+    </MentionPicker>
   );
 }
 
@@ -1223,6 +1245,7 @@ export function DoneState({
   onReply,
   onReplyEscape,
   replyDisabled,
+  workspacePath,
 }: {
   cancelled: boolean;
   response: WidgetResponse | null;
@@ -1238,6 +1261,7 @@ export function DoneState({
   onReply: () => void;
   onReplyEscape: () => void;
   replyDisabled: boolean;
+  workspacePath: string;
 }) {
   const { t } = useTranslation();
   // Expanded by default (MET-133): the response body IS the outcome — the
@@ -1331,6 +1355,7 @@ export function DoneState({
         onSend={onReply}
         onEscape={onReplyEscape}
         disabled={replyDisabled}
+        workspacePath={workspacePath}
       />
     </div>
   );
@@ -1349,6 +1374,7 @@ function ErrorState({
   onReply,
   onReplyEscape,
   replyDisabled,
+  workspacePath,
 }: {
   message: string | undefined;
   onRetry: () => void;
@@ -1359,6 +1385,7 @@ function ErrorState({
   onReply: () => void;
   onReplyEscape: () => void;
   replyDisabled: boolean;
+  workspacePath: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -1403,6 +1430,7 @@ function ErrorState({
         onSend={onReply}
         onEscape={onReplyEscape}
         disabled={replyDisabled}
+        workspacePath={workspacePath}
       />
     </div>
   );

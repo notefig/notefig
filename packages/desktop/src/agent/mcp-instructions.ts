@@ -25,7 +25,8 @@ export function serverInstructions(): string {
     `or verify it. Four of these are your PRIMARY tools — keep them top of mind; ` +
     `everything else is secondary, for when the task specifically calls for it. ` +
     `(1) The widget-context resource: a prompt sent from an in-document widget ` +
-    `always carries a \`resource_link\` — call \`resources/read\` on its URI as ` +
+    `always carries a \`resource_link\` whose URI starts with ` +
+    `\`notefig://widget-context\` — call \`resources/read\` on that URI as ` +
     `your FIRST action, before \`workspace_read_document\` or any native ` +
     `file-read tool. Its payload (document title, the full heading outline, the ` +
     `text surrounding the prompt's position, the current selection, and the other ` +
@@ -41,8 +42,13 @@ export function serverInstructions(): string {
     `prompts, plain assistant text is progress notes, never the deliverable. ` +
     `Keep its markdown SHORT (it renders inline in the document): a few ` +
     `sentences, never a paste-back of content you wrote into the document. When ` +
-    `a prompt has no resource_link (it came from the chat panel), do NOT call ` +
-    `\`widget_respond\` — answer in chat as normal. ` +
+    `a prompt has no \`notefig://widget-context\` resource_link (it came from ` +
+    `the chat panel), do NOT call \`widget_respond\` — answer in chat as normal. ` +
+    `Separately, a prompt from either surface may carry \`file://\` ` +
+    `resource_links: files the user explicitly referenced with @ — do NOT call ` +
+    `\`resources/read\` on those; read each one before acting (prefer ` +
+    `\`workspace_read_document\` with its workspace-relative name so you see ` +
+    `live editor state). ` +
     `(3) \`author_blob\` with a multiple-choice question: whenever you need the ` +
     `user to decide or clarify something — or they ask you to add an interactive ` +
     `question, approval, or status block to a document — author a block instead ` +

@@ -45,6 +45,7 @@ function render(props: {
         onReply: noop,
         onReplyEscape: noop,
         replyDisabled: false,
+        workspacePath: "/test-workspace",
       }),
     ),
   );

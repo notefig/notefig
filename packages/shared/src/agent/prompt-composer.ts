@@ -11,6 +11,8 @@ export interface PromptContextPart {
   kind: "resource_link" | "embedded";
   path: string;
   content?: string;
+  /** Display name for resource_link blocks; defaults to the path/URI. */
+  name?: string;
 }
 
 export interface ComposePromptInput {
@@ -27,7 +29,7 @@ export function composePrompt(input: ComposePromptInput): ContentBlock[] {
       blocks.push({
         type: "resource_link",
         uri: part.path,
-        name: part.path,
+        name: part.name ?? part.path,
       });
       continue;
     }

@@ -16,6 +16,11 @@ export interface FileSearchOptions {
   limit?: number;
   /** Openability gate (e.g. canOpenFile); paths failing it never surface. */
   filter?: (path: string) => boolean;
+  /**
+   * Empty-query behavior: [] by default; the mention picker passes true to
+   * list files immediately on a bare "@" (shallowest paths first).
+   */
+  matchAllWhenEmpty?: boolean;
 }
 
 const DEFAULT_LIMIT = 10;
@@ -29,7 +34,11 @@ const DEFAULT_LIMIT = 10;
 export function useFileSearch(
   workspacePath: string,
   query: string,
-  { limit = DEFAULT_LIMIT, filter }: FileSearchOptions = {},
+  {
+    limit = DEFAULT_LIMIT,
+    filter,
+    matchAllWhenEmpty = false,
+  }: FileSearchOptions = {},
 ): FileSearchResult[] {
   const { metadata } = useFileCollections(workspacePath);
   const { data = [] } = useLiveQuery(
@@ -46,15 +55,19 @@ export function useFileSearch(
 
   const trimmedQuery = query.trim();
   return useMemo(() => {
-    if (!trimmedQuery) return [];
+    if (!trimmedQuery && !matchAllWhenEmpty) return [];
     const results: FileSearchResult[] = [];
     for (const row of data) {
       // Rows without a relativePath are loose files (outside the workspace
       // tree) — hidden to match what the file tree shows.
       if (!row.relativePath) continue;
       if (filter && !filter(row.path)) continue;
-      const score = scoreFilePath(trimmedQuery, row.relativePath);
-      if (score <= 0) continue;
+      // Empty query with matchAllWhenEmpty: every file at score 0 — the
+      // comparator then orders by shortest path, then alphabetically.
+      const score = trimmedQuery
+        ? scoreFilePath(trimmedQuery, row.relativePath)
+        : 0;
+      if (trimmedQuery && score <= 0) continue;
       results.push({
         path: row.path,
         relativePath: row.relativePath,
@@ -64,5 +77,5 @@ export function useFileSearch(
     }
     results.sort(compareScoredPaths);
     return results.slice(0, limit);
-  }, [data, trimmedQuery, limit, filter]);
+  }, [data, trimmedQuery, limit, filter, matchAllWhenEmpty]);
 }

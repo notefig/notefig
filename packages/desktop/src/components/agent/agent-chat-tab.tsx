@@ -60,6 +60,8 @@ import {
   retryAgentTaskAfterAuth,
   reviveAgentTask,
 } from "@/agent/agent-service";
+import { MentionPicker, useMentionPicker } from "./mention-picker";
+import { mentionContextParts } from "@/agent/prompt-mention-context";
 import { PermissionCard } from "./permission-card";
 import { HarnessLogo } from "./harness-logo";
 import {
@@ -233,7 +235,11 @@ function ComposerOverlay({
   const sendPrompt = useCallback(() => {
     const text = draft.trim();
     if (!text) return;
-    promptAgentTask(taskId, text);
+    promptAgentTask(
+      taskId,
+      text,
+      mentionContextParts(taskRow.workspacePath, text),
+    );
     setLastSentPrompt(taskId, text);
     setDraftState("");
     clearComposerDraft(taskId);
@@ -241,7 +247,7 @@ function ComposerOverlay({
     // reader had scrolled up into history; this also re-enters follow mode
     // for the streamed reply.
     transcriptScrollRef.current.scrollToEnd();
-  }, [draft, taskId, transcriptScrollRef]);
+  }, [draft, taskId, taskRow.workspacePath, transcriptScrollRef]);
 
   const stopTask = useCallback(() => {
     void cancelAgentTask(taskId);
@@ -294,6 +300,7 @@ function ComposerOverlay({
           isRunning={isRunning}
           disabled={isLoadingSession}
           harnessId={taskRow.harnessId}
+          workspacePath={taskRow.workspacePath}
         />
       )}
     </div>
@@ -1259,6 +1266,7 @@ function PromptBox({
   isRunning,
   disabled = false,
   harnessId,
+  workspacePath,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -1270,11 +1278,18 @@ function PromptBox({
   /** Session history is loading (session/load) — no inputs until it lands. */
   disabled?: boolean;
   harnessId: string;
+  workspacePath: string;
 }) {
   const { t } = useTranslation();
   const harnessLabel = useHarnessLabel(harnessId);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useAutosizeTextarea(textareaRef, value);
+  const mentions = useMentionPicker({
+    workspacePath,
+    value,
+    onChange,
+    textareaRef,
+  });
   // autoFocus can't fire on a disabled textarea — refocus once the session
   // load finishes and the composer opens up.
   useEffect(() => {
@@ -1282,37 +1297,39 @@ function PromptBox({
   }, [disabled]);
   return (
     <div className="pointer-events-auto rounded-2xl border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40">
-      <textarea
-        ref={textareaRef}
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-        // autoFocus: mount == tab selected (the dock unmounts unselected
-        // tabs), and pulling focus into the dock is also what keeps the
-        // tab hotkeys (Ctrl+Tab, ⌘W, ⌘1-9) alive — they listen on the
-        // dockable container, the way editors self-focus on tab-select.
-        autoFocus
-        onKeyDown={(event) => {
-          const action = deriveComposerKeyAction({
-            key: event.key,
-            shiftKey: event.shiftKey,
-            draftEmpty: value.trim().length === 0,
-            canRevert: false,
-            inFlight: isRunning,
-          });
-          // Idle "escape" stays a no-op here — the chat tab has no
-          // document editor to hand focus back to.
-          if (action.type !== "send" && action.type !== "cancelRestore") return;
-          event.preventDefault();
-          if (action.type === "send") onSend();
-          else onCancelRestore();
-        }}
-        placeholder={
-          disabled ? t("agentLoadingSession") : t("agentPromptPlaceholder")
-        }
-        rows={2}
-        className="min-h-[2.75rem] w-full resize-none overflow-hidden bg-transparent px-4 pt-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:opacity-60"
-      />
+      <MentionPicker picker={mentions}>
+        <textarea
+          {...mentions.textareaProps}
+          disabled={disabled}
+          // autoFocus: mount == tab selected (the dock unmounts unselected
+          // tabs), and pulling focus into the dock is also what keeps the
+          // tab hotkeys (Ctrl+Tab, ⌘W, ⌘1-9) alive — they listen on the
+          // dockable container, the way editors self-focus on tab-select.
+          autoFocus
+          onKeyDown={(event) => {
+            if (mentions.handleKeyDown(event)) return;
+            const action = deriveComposerKeyAction({
+              key: event.key,
+              shiftKey: event.shiftKey,
+              draftEmpty: value.trim().length === 0,
+              canRevert: false,
+              inFlight: isRunning,
+            });
+            // Idle "escape" stays a no-op here — the chat tab has no
+            // document editor to hand focus back to.
+            if (action.type !== "send" && action.type !== "cancelRestore")
+              return;
+            event.preventDefault();
+            if (action.type === "send") onSend();
+            else onCancelRestore();
+          }}
+          placeholder={
+            disabled ? t("agentLoadingSession") : t("agentPromptPlaceholder")
+          }
+          rows={2}
+          className="min-h-[2.75rem] w-full resize-none overflow-hidden bg-transparent px-4 pt-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:opacity-60"
+        />
+      </MentionPicker>
       <div className="flex items-center gap-1 px-2 pb-2">
         {/* The session is pinned to one harness — a passive indicator, not
             a picker (the sidebar's new-session split button chooses). */}
