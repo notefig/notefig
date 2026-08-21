@@ -338,6 +338,59 @@ function useMentionSuggestion() {
   return { popup, popupRef, selectedIndex, setSelectedIndex, pick, renderer };
 }
 
+/**
+ * Prop → editor synchronization. useEditor can hand out an instance that
+ * has since been destroyed (the dock unmounts tabs, and StrictMode
+ * double-mounts): Editor.destroy() nulls commandManager while the
+ * `commands` getter has no guard, so every imperative entry point checks
+ * isDestroyed first (crash report 2026-08-21, focus on a stale chat-tab
+ * handle) — re-checked inside each effect too, since a StrictMode cleanup
+ * can destroy the instance between render and effect.
+ */
+function usePromptEditorSync({
+  editor,
+  value,
+  workspacePath,
+  disabled,
+  lastEmitted,
+}: {
+  editor: Editor | null;
+  value: string;
+  workspacePath: string;
+  disabled: boolean;
+  lastEmitted: React.MutableRefObject<string>;
+}) {
+  const liveEditor = editor && !editor.isDestroyed ? editor : null;
+
+  // Controlled-value round trip: only re-set content when the change came
+  // from outside (draft cleared after send, Escape-restore) — re-setting on
+  // every keystroke would drop chips mid-composition and reset the caret.
+  useEffect(() => {
+    if (!liveEditor || liveEditor.isDestroyed) return;
+    if (value === lastEmitted.current) return;
+    lastEmitted.current = value;
+    liveEditor.commands.setContent(draftToDoc(workspacePath, value), {
+      emitUpdate: false,
+    });
+    liveEditor.commands.focus("end");
+  }, [liveEditor, value, workspacePath, lastEmitted]);
+
+  useEffect(() => {
+    if (!liveEditor || liveEditor.isDestroyed) return;
+    liveEditor.setEditable(!disabled);
+  }, [liveEditor, disabled]);
+
+  // Reachable from the DOM for integration tests and devtools — simulated
+  // typing has to go through real editor transactions (contenteditable
+  // ignores synthetic input events).
+  useEffect(() => {
+    if (!liveEditor || liveEditor.isDestroyed) return;
+    (
+      liveEditor.view.dom as HTMLElement & { promptEditor?: Editor }
+    ).promptEditor = liveEditor as Editor;
+  }, [liveEditor]);
+}
+
 export const PromptEditor = forwardRef<
   PromptEditorHandle,
   {
@@ -405,34 +458,16 @@ export const PromptEditor = forwardRef<
     [workspacePath, placeholder],
   );
 
-  // Controlled-value round trip: only re-set content when the change came
-  // from outside (draft cleared after send, Escape-restore) — re-setting on
-  // every keystroke would drop chips mid-composition and reset the caret.
-  useEffect(() => {
-    if (!editor || value === lastEmitted.current) return;
-    lastEmitted.current = value;
-    editor.commands.setContent(draftToDoc(workspacePath, value), {
-      emitUpdate: false,
-    });
-    editor.commands.focus("end");
-  }, [editor, value, workspacePath]);
-
-  useEffect(() => {
-    editor?.setEditable(!disabled);
-  }, [editor, disabled]);
-
-  // Reachable from the DOM for integration tests and devtools — simulated
-  // typing has to go through real editor transactions (contenteditable
-  // ignores synthetic input events).
-  useEffect(() => {
-    if (!editor) return;
-    (editor.view.dom as HTMLElement & { promptEditor?: Editor }).promptEditor =
-      editor as Editor;
-  }, [editor]);
+  usePromptEditorSync({ editor, value, workspacePath, disabled, lastEmitted });
 
   useImperativeHandle(
     ref,
-    () => ({ focus: () => editor?.commands.focus("end") }),
+    () => ({
+      focus: () => {
+        if (!editor || editor.isDestroyed) return;
+        editor.commands.focus("end");
+      },
+    }),
     [editor],
   );
 

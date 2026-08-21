@@ -46,11 +46,14 @@ const hostKeyDown = vi.fn((event: KeyboardEvent) => {
   return false;
 });
 
+let latestHandle: import("../prompt-editor").PromptEditorHandle | null = null;
+
 function Host({ workspacePath }: { workspacePath: string }) {
   const [value, setValue] = useState("");
   const editorRef = useRef<import("../prompt-editor").PromptEditorHandle>(null);
   latestValue = value;
   setHostValue = setValue;
+  latestHandle = editorRef.current;
   return createElement(promptEditor.PromptEditor, {
     ref: editorRef,
     workspacePath,
@@ -182,6 +185,20 @@ describe("PromptEditor mention suggestion", () => {
     expect(lastKeyDownConsumed).toBe(true);
     // Consumed Enter never split the paragraph.
     expect(latestValue).toBe("plain text");
+  });
+
+  it("a stale handle no-ops after the editor is destroyed (crash 2026-08-21)", async () => {
+    await setDraft("warm up");
+    // Re-render to observe the populated ref, then unmount — the dock does
+    // this to unselected tabs; a parent effect can still hold the handle.
+    await act(async () => {
+      setHostValue("warm up again");
+    });
+    const handle = latestHandle;
+    expect(handle).not.toBeNull();
+    act(() => root?.unmount());
+    root = null;
+    expect(() => handle!.focus()).not.toThrow();
   });
 
   it("revives chips from a persisted draft string", async () => {
