@@ -227,6 +227,7 @@ i18n
           commandPaletteDesc: "Search for a command to run...",
           typeCommand: "Type a command or search...",
           noResults: "No results found.",
+          quickResultsFor: 'Quick results for "{{query}}"',
 
           // Command Groups
           file: "File",
