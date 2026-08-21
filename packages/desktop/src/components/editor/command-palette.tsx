@@ -44,10 +44,15 @@ import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { pickDirectory } from "../../utils/fs";
 import { getLocalizedCommandKeywords } from "@/utils/command-keywords";
+import { useFileSearch, type FileSearchResult } from "@/hooks/use-file-search";
+import { canOpenFile } from "./polymorphic-editor";
+import { FileTypeIcon } from "./file-type-icon";
+import { useWorkspaceTabsOptional } from "@/components/workspace-tabs-provider";
 
 interface CommandPaletteProps {
   open: boolean;
   sidebarOpen: boolean;
+  workspacePath: string;
   onOpenChange: (open: boolean) => void;
   onNewFile?: () => void;
   onNewDirectory?: () => void;
@@ -73,9 +78,79 @@ interface CommandType {
   action?: () => void | Promise<void>;
 }
 
+/**
+ * The palette's Linear-style "quick results" tail: fuzzy file matches from
+ * the workspace, rendered after every command group. Hidden outside a
+ * workspace tab surface (the editor test harness) — there is nowhere to open
+ * a file there.
+ *
+ * useFileSearch only pre-selects the top matches out of the whole workspace;
+ * visible filtering/ranking stays with cmdk's default scorer, so file rows
+ * get the same interaction behavior as commands (within-group sorting,
+ * selection management). cmdk's group re-sorting is a no-op here because
+ * every group lives in its own wrapper div, so commands always stay above
+ * these results.
+ */
+function FileQuickResults({
+  workspacePath,
+  query,
+  showSeparator,
+  onClose,
+}: {
+  workspacePath: string;
+  query: string;
+  showSeparator: boolean;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const workspaceTabs = useWorkspaceTabsOptional();
+  const fileResults = useFileSearch(workspacePath, query, {
+    filter: canOpenFile,
+  });
+
+  if (!workspaceTabs || fileResults.length === 0) return null;
+
+  const handleSelect = (result: FileSearchResult) => {
+    workspaceTabs.openFile({ tabId: result.path, intent: "replace" });
+    onClose();
+  };
+
+  return (
+    <div>
+      {showSeparator && <CommandSeparator />}
+      <CommandGroup heading={t("quickResultsFor", { query })}>
+        {fileResults.map((result) => (
+          <CommandItem
+            key={result.path}
+            // Scored by cmdk's default filter — the relative path, not the
+            // absolute one, so the workspace prefix can't match the query.
+            value={result.relativePath}
+            keywords={[result.title]}
+            onSelect={() => handleSelect(result)}
+            className="flex items-center gap-2 cursor-pointer"
+          >
+            <FileTypeIcon
+              path={result.path}
+              className="w-4 h-4 text-muted-foreground shrink-0"
+            />
+            <span className="truncate">{result.title}</span>
+            <span
+              className="ms-auto min-w-0 truncate text-xs text-muted-foreground"
+              dir="ltr"
+            >
+              {result.relativePath}
+            </span>
+          </CommandItem>
+        ))}
+      </CommandGroup>
+    </div>
+  );
+}
+
 export function CommandPalette({
   open,
   sidebarOpen,
+  workspacePath,
   onOpenChange,
   onNewFile,
   onNewDirectory,
@@ -93,7 +168,10 @@ export function CommandPalette({
   const { setTheme, theme } = useTheme();
   const { setTheme: persistTheme } = useAppSettings();
   const { t } = useTranslation();
-  const [search, setSearch] = useState("");
+  // cmdk's Command value/onValueChange track the *highlighted item*, not the
+  // input — the query needs its own controlled state (it drives file search).
+  const [query, setQuery] = useState("");
+  const [highlighted, setHighlighted] = useState("");
 
   const navigate = useNavigate();
 
@@ -115,7 +193,8 @@ export function CommandPalette({
 
   useEffect(() => {
     if (!open) {
-      setSearch("");
+      setQuery("");
+      setHighlighted("");
     }
   }, [open]);
 
@@ -266,6 +345,8 @@ export function CommandPalette({
 
   const skipFocusRestoreRef = useRef(false);
 
+  const trimmedQuery = query.trim();
+
   const handleSelect = (command: CommandType) => {
     if (
       command.id === "new-file" ||
@@ -294,14 +375,17 @@ export function CommandPalette({
     {} as Record<string, CommandType[]>,
   );
 
+  // "navigation" (file results) renders LAST, Linear-style: actions always
+  // outrank quick results — searching "theme" surfaces Toggle Theme above
+  // theme-related files.
   const groupOrder = [
     "file",
     "edit",
     "view",
-    "navigation",
     "tools",
     "settings",
     "help",
+    "navigation",
   ];
 
   const handleCloseAutoFocus = (event: Event) => {
@@ -325,10 +409,10 @@ export function CommandPalette({
         showCloseButton={false}
       >
         <Command
-          value={search}
-          onValueChange={setSearch}
+          value={highlighted}
+          onValueChange={setHighlighted}
           className={`bg-transparent [&_[cmdk-group-heading]]:text-muted-foreground **:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5 ${
-            search.trim().length > 0
+            highlighted.trim().length > 0
               ? "[&_[cmdk-item]]:opacity-60 [&_[cmdk-item][data-selected=true]]:opacity-100"
               : ""
           }`}
@@ -341,6 +425,8 @@ export function CommandPalette({
               autoCorrect="off"
               autoCapitalize="off"
               spellCheck={false}
+              value={query}
+              onValueChange={setQuery}
             />
             <button
               onClick={() => onOpenChange(false)}
@@ -353,6 +439,18 @@ export function CommandPalette({
           <CommandList>
             <CommandEmpty>{t("noResults")}</CommandEmpty>
             {groupOrder.map((groupName, index) => {
+              if (groupName === "navigation") {
+                return (
+                  <FileQuickResults
+                    key={groupName}
+                    workspacePath={workspacePath}
+                    query={trimmedQuery}
+                    showSeparator={index > 0}
+                    onClose={() => onOpenChange(false)}
+                  />
+                );
+              }
+
               const groupCommands = groupedCommands[groupName];
               if (!groupCommands) return null;
 

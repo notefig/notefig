@@ -429,6 +429,7 @@ export const Workspace = () => {
         <CommandPalette
           open={isCommandPaletteOpen}
           sidebarOpen={isSidebarCollapsed}
+          workspacePath={workspacePath}
           onOpenChange={setIsCommandPaletteOpen}
           onNewFile={handleNewFile}
           onNewDirectory={handleNewDirectory}
