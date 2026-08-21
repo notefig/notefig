@@ -144,6 +144,8 @@ describe("PromptEditor mention suggestion", () => {
     await setDraft("see @");
     expect(options().join("\n")).toContain("notes.md");
     expect(options().join("\n")).toContain("readme.md");
+    // Directory rows never appear (the raw metadata collection holds them).
+    expect(options()).not.toContain("archive");
 
     await setDraft("see @no");
     const filtered = options().join("\n");

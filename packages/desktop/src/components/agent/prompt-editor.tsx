@@ -61,7 +61,10 @@ function searchWorkspaceFiles(
   query: string,
 ): FileSearchResult[] {
   const { metadata } = getOrCreateWorkspaceCollections(workspacePath);
-  return rankFileRows(metadata.toArray, query, {
+  // The raw collection holds directory rows too (useFileSearch's live query
+  // filters them; a one-shot read must do it itself).
+  const files = metadata.toArray.filter((row) => row.type === "file");
+  return rankFileRows(files, query, {
     limit: SUGGESTION_LIMIT,
     filter: canOpenFile,
     matchAllWhenEmpty: true,
@@ -166,6 +169,12 @@ function promptExtensions(
       suggestion: {
         char: "@",
         items: ({ query }) => searchWorkspaceFiles(workspacePath, query),
+        // Pinned directly under the "@" (the anchor is the suggestion
+        // decoration, whose left edge is the trigger char). Fixed strategy
+        // sidesteps offset-parent math inside the dock/editor stack.
+        placement: "bottom-start",
+        offset: { mainAxis: 2, crossAxis: 0 },
+        floatingUi: { strategy: "fixed" },
         render: renderer,
       },
     }),
@@ -188,6 +197,16 @@ function suggestionKeyAction(event: KeyboardEvent): SuggestionKeyAction {
   }
 }
 
+/** The directory prefix for a row's combined one-line label — the file name
+ *  stays whole and the path shrinks: nothing for root files, the full
+ *  prefix up to two levels, first/…/last beyond that. */
+function summarizeDirPrefix(item: FileSearchResult): string | null {
+  if (item.relativePath === item.title) return null;
+  const dirs = item.relativePath.slice(0, -(item.title.length + 1)).split("/");
+  if (dirs.length <= 2) return `${dirs.join("/")}/`;
+  return `${dirs[0]}/…/${dirs[dirs.length - 1]}/`;
+}
+
 function SuggestionList({
   items,
   selectedIndex,
@@ -204,7 +223,7 @@ function SuggestionList({
     <div
       role="listbox"
       aria-label={t("mentionFilesLabel")}
-      className="flex max-h-64 w-80 max-w-[90vw] flex-col overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md texture-surface"
+      className="flex max-h-64 w-max min-w-40 max-w-72 flex-col overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md texture-surface"
     >
       {items.map((item, index) => (
         <button
@@ -219,7 +238,7 @@ function SuggestionList({
           }}
           onMouseEnter={() => onHover(index)}
           className={cn(
-            "flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm",
+            "flex cursor-pointer items-center gap-1.5 rounded-sm px-2 py-1 text-start text-sm",
             index === selectedIndex && "bg-accent text-accent-foreground",
           )}
         >
@@ -227,15 +246,14 @@ function SuggestionList({
             path={item.path}
             className="h-4 w-4 shrink-0 text-muted-foreground"
           />
-          <span className="truncate">{item.title}</span>
-          {item.relativePath !== item.title && (
-            <span
-              className="ms-auto min-w-0 truncate text-xs text-muted-foreground"
-              dir="ltr"
-            >
-              {item.relativePath}
+          {/* One combined label: the name stays whole, the dir summary
+              truncates first. */}
+          <span className="flex min-w-0 items-baseline" dir="ltr">
+            <span className="min-w-0 truncate text-xs text-muted-foreground">
+              {summarizeDirPrefix(item)}
             </span>
-          )}
+            <span className="shrink-0">{item.title}</span>
+          </span>
         </button>
       ))}
     </div>
