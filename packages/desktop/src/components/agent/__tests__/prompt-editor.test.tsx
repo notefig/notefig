@@ -33,7 +33,6 @@ let WS = "";
 
 let files: typeof import("@/entities/files");
 let promptEditor: typeof import("../prompt-editor");
-let mentionContext: typeof import("@/agent/prompt-mention-context");
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -121,7 +120,6 @@ beforeEach(async () => {
 
   files = await import("@/entities/files");
   promptEditor = await import("../prompt-editor");
-  mentionContext = await import("@/agent/prompt-mention-context");
   await files.getOrCreateWorkspaceCollections(WS).metadata.preload();
 
   container = document.createElement("div");
@@ -211,9 +209,56 @@ describe("PromptEditor mention suggestion", () => {
   });
 });
 
+describe("extractMentionPaths", () => {
+  const workspace = (...paths: string[]) => {
+    const set = new Set(paths);
+    return (candidate: string) => set.has(candidate);
+  };
+  const extract = (text: string, isPath: (c: string) => boolean) =>
+    promptEditor.extractMentionPaths(text, isPath);
+
+  it("extracts mentions at start, mid-text, and after newlines; dedupes; ignores mid-word @", () => {
+    const isPath = workspace("a.md", "docs/b.md", "c.md");
+    expect(
+      extract("@a.md check with @docs/b.md\n@c.md a@a.md @a.md", isPath),
+    ).toEqual(["a.md", "docs/b.md", "c.md"]);
+  });
+
+  it("resolves paths containing spaces, and strips trailing punctuation", () => {
+    const isPath = workspace("my file.md", "my", "notes.md");
+    expect(extract("read @my file.md before lunch", isPath)).toEqual([
+      "my file.md",
+    ]);
+    expect(extract("(see @notes.md!)", isPath)).toEqual(["notes.md"]);
+  });
+
+  it("never extends a mention into following prose (greptile #3)", () => {
+    // Both names exist; the longer one would only win by swallowing prose.
+    const isPath = workspace("my file.md", "my file.md is");
+    expect(extract("read @my file.md is fine", isPath)).toEqual(["my file.md"]);
+  });
+
+  it("allows multi-word extensionless paths only at line end", () => {
+    const isPath = workspace("my notes");
+    expect(extract("summarize @my notes", isPath)).toEqual(["my notes"]);
+    expect(extract("summarize @my notes please", isPath)).toEqual([]);
+  });
+
+  it("resolves paths with many space-separated words (greptile #2)", () => {
+    const long = "a b c d e f g h i j.md";
+    expect(extract(`see @${long}`, workspace(long))).toEqual([long]);
+  });
+
+  it("stays within its line and returns [] with no matches", () => {
+    expect(extract("@my\nfile.md", workspace("my file.md"))).toEqual([]);
+    expect(extract("no mentions", () => true)).toEqual([]);
+    expect(extract("@ alone", () => true)).toEqual([]);
+  });
+});
+
 describe("mentionContextParts", () => {
   it("turns tokens naming real files into file:// resource_link parts", () => {
-    const parts = mentionContext.mentionContextParts(
+    const parts = promptEditor.mentionContextParts(
       WS,
       "read @notes.md and @missing.md, also @archive/old.md.",
     );
@@ -232,12 +277,12 @@ describe("mentionContextParts", () => {
   });
 
   it("skips directories and text without mentions", () => {
-    expect(mentionContext.mentionContextParts(WS, "see @archive")).toEqual([]);
-    expect(mentionContext.mentionContextParts(WS, "no refs")).toEqual([]);
+    expect(promptEditor.mentionContextParts(WS, "see @archive")).toEqual([]);
+    expect(promptEditor.mentionContextParts(WS, "no refs")).toEqual([]);
   });
 
   it("resolves picker-inserted mentions whose paths contain spaces", () => {
-    const parts = mentionContext.mentionContextParts(
+    const parts = promptEditor.mentionContextParts(
       WS,
       "summarize @my spaced file.md please",
     );

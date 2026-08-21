@@ -48,7 +48,6 @@ import {
   agentTurnsCollection,
 } from "@/agent/agent-collections";
 import { agents } from "@/agent/agents";
-import { mentionContextParts } from "@/agent/prompt-mention-context";
 import {
   cancelAgentTask,
   cancelAgentTurnAndForget,
@@ -64,7 +63,11 @@ import {
 } from "@/components/editor/editor-store";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "./harness-logo";
-import { PromptEditor, type PromptEditorHandle } from "./prompt-editor";
+import {
+  mentionContextParts,
+  PromptEditor,
+  type PromptEditorHandle,
+} from "./prompt-editor";
 import { AuthCard } from "./agent-chat-tab";
 import { CopyTextButton } from "./copy-text-button";
 import { PermissionCard } from "./permission-card";

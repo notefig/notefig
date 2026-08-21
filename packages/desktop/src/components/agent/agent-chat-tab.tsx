@@ -59,8 +59,11 @@ import {
   retryAgentTaskAfterAuth,
   reviveAgentTask,
 } from "@/agent/agent-service";
-import { PromptEditor, type PromptEditorHandle } from "./prompt-editor";
-import { mentionContextParts } from "@/agent/prompt-mention-context";
+import {
+  mentionContextParts,
+  PromptEditor,
+  type PromptEditorHandle,
+} from "./prompt-editor";
 import { PermissionCard } from "./permission-card";
 import { HarnessLogo } from "./harness-logo";
 import {

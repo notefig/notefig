@@ -17,11 +17,11 @@ import type {
   SuggestionKeyDownProps,
   SuggestionProps,
 } from "@tiptap/suggestion";
+import type { PromptContextPart } from "@notefig/shared/agent";
 import { getOrCreateWorkspaceCollections } from "@/entities/files";
 import { canOpenFile } from "@/components/editor/polymorphic-editor";
 import { FileTypeIcon } from "@/components/editor/file-type-icon";
 import { rankFileRows, type FileSearchResult } from "@/utils/file-score";
-import { segmentMentions } from "@/utils/prompt-mentions";
 import { cn } from "@/lib/utils";
 
 /**
@@ -54,6 +54,172 @@ interface SuggestionPopupState {
   command: (attrs: { id: string; label: string }) => void;
 }
 
+// ─── The mention text contract ──────────────────────────────────────────
+// Mentions are stateless text: picking a file inserts a literal
+// `@<relative/path>` (as an atomic chip that serializes to the same text),
+// and submit paths re-scan the final string for tokens that resolve to real
+// workspace files. Nothing persists alongside drafts, and hand-typed or
+// edited mentions behave identically to picked ones. Paths containing
+// spaces resolve too: extraction probes multi-word candidates, longest
+// first — gated to candidates whose last word has an extension dot or that
+// end the line, so following prose can never extend a mention into an
+// unintended longer filename.
+
+// A mention can't run past its line, and candidate probing is bounded so a
+// long prose line doesn't test dozens of prefixes per "@". Paths with more
+// space-separated words than this don't resolve — at 16, far past any real
+// filename.
+const MAX_MENTION_WORDS = 16;
+
+const TRAILING_PUNCTUATION = /[.,;:!?)\]}'"`]+$/;
+
+/** The line's word-boundary prefixes after an "@" — the strings a mention
+ *  could be, shortest first. */
+function mentionCandidates(rest: string): string[] {
+  const candidates: string[] = [];
+  const word = /\S+/g;
+  let match: RegExpExecArray | null;
+  while ((match = word.exec(rest)) && candidates.length < MAX_MENTION_WORDS) {
+    candidates.push(rest.slice(0, match.index + match[0].length));
+  }
+  return candidates;
+}
+
+/** Multi-word candidates must look like a filename (extension dot in the
+ *  last word) or consume the whole line — otherwise prose after a picked
+ *  mention could combine into some other real file's name. */
+function isPlausibleMention(candidate: string, rest: string): boolean {
+  if (!/\s/.test(candidate)) return true;
+  if (candidate.length === rest.length) return true;
+  const lastWord = candidate.slice(candidate.search(/\S+$/));
+  return lastWord.includes(".");
+}
+
+/** The candidate itself, or its punctuation-stripped variant, if accepted. */
+function resolveCandidate(
+  candidate: string,
+  isPath: (candidate: string) => boolean,
+): string | null {
+  if (isPath(candidate)) return candidate;
+  const stripped = candidate.replace(TRAILING_PUNCTUATION, "");
+  if (stripped && stripped !== candidate && isPath(stripped)) return stripped;
+  return null;
+}
+
+/** Longest accepted candidate, with the length the match consumed. */
+function longestMention(
+  rest: string,
+  isPath: (candidate: string) => boolean,
+): { hit: string; consumed: number } | null {
+  const candidates = mentionCandidates(rest);
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    if (!isPlausibleMention(candidates[i], rest)) continue;
+    const hit = resolveCandidate(candidates[i], isPath);
+    if (hit) return { hit, consumed: candidates[i].length };
+  }
+  return null;
+}
+
+export type MentionSegment =
+  { type: "text"; value: string } | { type: "mention"; value: string };
+
+/**
+ * Split a prompt into plain-text runs and resolved mentions, in order. For
+ * each "@" (at start of text or after whitespace) the candidates are the
+ * line's word-boundary prefixes, tested longest first, with a
+ * trailing-punctuation-stripped variant of each ("see @notes.md." still
+ * resolves). Tokens nothing accepts are just text. Used to rebuild chips
+ * from a persisted plain-string draft, and via extractMentionPaths at
+ * submit time.
+ */
+export function segmentMentions(
+  text: string,
+  isPath: (candidate: string) => boolean,
+): MentionSegment[] {
+  const segments: MentionSegment[] = [];
+  let plainFrom = 0;
+  const pushText = (to: number) => {
+    if (to > plainFrom) {
+      segments.push({ type: "text", value: text.slice(plainFrom, to) });
+    }
+  };
+
+  const mentionStart = /(?:^|\s)@/g;
+  let match: RegExpExecArray | null;
+  while ((match = mentionStart.exec(text))) {
+    const start = match.index + match[0].length;
+    const newline = text.indexOf("\n", start);
+    const rest = text.slice(start, newline === -1 ? text.length : newline);
+    if (!rest || /^\s/.test(rest)) continue;
+
+    const mention = longestMention(rest, isPath);
+    if (!mention) continue;
+    pushText(start - 1);
+    segments.push({ type: "mention", value: mention.hit });
+    // Trailing punctuation the resolution stripped stays in the next text
+    // segment; the scan resumes after the matched mention, not the "@".
+    plainFrom = start + mention.hit.length;
+    mentionStart.lastIndex = start + mention.consumed;
+  }
+  pushText(text.length);
+  return segments;
+}
+
+/** Every distinct resolved mention in a finished prompt, in order. */
+export function extractMentionPaths(
+  text: string,
+  isPath: (candidate: string) => boolean,
+): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const segment of segmentMentions(text, isPath)) {
+    if (segment.type !== "mention" || seen.has(segment.value)) continue;
+    seen.add(segment.value);
+    found.push(segment.value);
+  }
+  return found;
+}
+
+/** Does this token name a real file in the workspace? workspacePath must
+ *  stay byte-identical to the collection's workspaceId (rows are keyed
+ *  `<workspaceId>/<relativePath>`) — no normalization. */
+function workspaceFilePredicate(
+  workspacePath: string,
+): (token: string) => boolean {
+  const { metadata } = getOrCreateWorkspaceCollections(workspacePath);
+  const root = workspacePath.replace(/\/+$/, "");
+  return (token) => {
+    const row = metadata.get(`${root}/${token.replace(/^\/+/, "")}`);
+    return row !== undefined && row.type === "file";
+  };
+}
+
+/** file:// URI for an absolute path, per-segment percent-encoded. */
+export function pathToFileUri(absolutePath: string): string {
+  return "file://" + absolutePath.split("/").map(encodeURIComponent).join("/");
+}
+
+/**
+ * Turn a finished prompt's @-mentions into resource_link context parts for
+ * the submit paths. URIs are file:// (not notefig://widget-context): the
+ * MCP server's resources/read only decodes widget-context URIs, so mention
+ * links must be readable by the harness's own file tools.
+ */
+export function mentionContextParts(
+  workspacePath: string,
+  text: string,
+): PromptContextPart[] {
+  const root = workspacePath.replace(/\/+$/, "");
+  const isFile = workspaceFilePredicate(workspacePath);
+  return extractMentionPaths(text, isFile).map((token) => ({
+    kind: "resource_link" as const,
+    path: pathToFileUri(`${root}/${token.replace(/^\/+/, "")}`),
+    name: token,
+  }));
+}
+
+// ─── The suggestion popup ───────────────────────────────────────────────
+
 const SUGGESTION_LIMIT = 8;
 
 function searchWorkspaceFiles(
@@ -74,12 +240,7 @@ function searchWorkspaceFiles(
 /** Rebuild a persisted plain-string draft as a doc with mention chips for
  *  every token that resolves to a workspace file. */
 function draftToDoc(workspacePath: string, draft: string): JSONContent {
-  const { metadata } = getOrCreateWorkspaceCollections(workspacePath);
-  const root = workspacePath.replace(/\/+$/, "");
-  const isPath = (token: string) => {
-    const row = metadata.get(`${root}/${token.replace(/^\/+/, "")}`);
-    return row !== undefined && row.type === "file";
-  };
+  const isPath = workspaceFilePredicate(workspacePath);
   const paragraph: JSONContent[] = [];
   for (const line of draft.split("\n")) {
     if (paragraph.length > 0) paragraph.push({ type: "hardBreak" });
@@ -160,7 +321,6 @@ function promptExtensions(
         class:
           "rounded bg-accent/70 px-1 py-0.5 text-accent-foreground whitespace-nowrap",
       },
-      renderText: ({ node }) => `@${node.attrs.id}`,
       renderHTML: ({ node }) => [
         "span",
         { "data-type": "mention", "data-id": node.attrs.id },
