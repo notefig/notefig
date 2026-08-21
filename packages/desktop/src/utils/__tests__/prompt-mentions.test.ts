@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyMention,
-  extractMentionTokens,
+  extractMentionPaths,
   getActiveMention,
 } from "@/utils/prompt-mentions";
 
@@ -62,30 +62,52 @@ describe("applyMention", () => {
   });
 });
 
-describe("extractMentionTokens", () => {
-  it("extracts tokens at start, mid-text, and after newlines", () => {
-    expect(extractMentionTokens("@a.md check with @docs/b.md\n@c.md")).toEqual([
-      "a.md",
-      "docs/b.md",
-      "c.md",
+describe("extractMentionPaths", () => {
+  const workspace = (...paths: string[]) => {
+    const set = new Set(paths);
+    return (candidate: string) => set.has(candidate);
+  };
+
+  it("extracts mentions at start, mid-text, and after newlines", () => {
+    const isPath = workspace("a.md", "docs/b.md", "c.md");
+    expect(
+      extractMentionPaths("@a.md check with @docs/b.md\n@c.md", isPath),
+    ).toEqual(["a.md", "docs/b.md", "c.md"]);
+  });
+
+  it("ignores mid-word @, unresolvable tokens, and dedupes", () => {
+    const isPath = workspace("b.md", "x.md");
+    expect(
+      extractMentionPaths("a@b.md and @x.md plus @x.md or @nope.md", isPath),
+    ).toEqual(["x.md"]);
+  });
+
+  it("resolves paths containing spaces, longest match first", () => {
+    const isPath = workspace("my file.md", "my");
+    expect(
+      extractMentionPaths("read @my file.md before lunch", isPath),
+    ).toEqual(["my file.md"]);
+    // Falls back to the shorter file when the long candidate isn't one.
+    expect(extractMentionPaths("read @my notes", workspace("my"))).toEqual([
+      "my",
     ]);
   });
 
-  it("ignores mid-word @ and dedupes", () => {
-    expect(extractMentionTokens("a@b.md and @x.md plus @x.md")).toEqual([
-      "x.md",
-    ]);
+  it("does not run a mention past its line", () => {
+    const isPath = workspace("my file.md");
+    expect(extractMentionPaths("@my\nfile.md", isPath)).toEqual([]);
   });
 
-  it("adds punctuation-stripped variants", () => {
-    expect(extractMentionTokens("see @notes.md.")).toEqual([
-      "notes.md.",
-      "notes.md",
+  it("strips trailing punctuation per candidate", () => {
+    const isPath = workspace("notes.md", "my file.md");
+    expect(extractMentionPaths("see @notes.md.", isPath)).toEqual(["notes.md"]);
+    expect(extractMentionPaths("(read @my file.md!)", isPath)).toEqual([
+      "my file.md",
     ]);
   });
 
   it("returns [] when nothing matches", () => {
-    expect(extractMentionTokens("no mentions here")).toEqual([]);
-    expect(extractMentionTokens("@ alone")).toEqual([]);
+    expect(extractMentionPaths("no mentions here", () => true)).toEqual([]);
+    expect(extractMentionPaths("@ alone", () => true)).toEqual([]);
   });
 });

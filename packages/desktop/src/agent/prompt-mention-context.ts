@@ -1,6 +1,6 @@
 import type { PromptContextPart } from "@notefig/shared/agent";
 import { file } from "@/entities/files";
-import { extractMentionTokens } from "@/utils/prompt-mentions";
+import { extractMentionPaths } from "@/utils/prompt-mentions";
 
 /** file:// URI for an absolute path, per-segment percent-encoded. */
 export function pathToFileUri(absolutePath: string): string {
@@ -22,19 +22,14 @@ export function mentionContextParts(
   // workspacePath must stay byte-identical to the collection's workspaceId
   // (rows are keyed `<workspaceId>/<relativePath>`) — no normalization.
   const root = workspacePath.replace(/\/+$/, "");
-  const parts: PromptContextPart[] = [];
-  const seen = new Set<string>();
-  for (const token of extractMentionTokens(text)) {
-    const absolute = `${root}/${token.replace(/^\/+/, "")}`;
-    if (seen.has(absolute)) continue;
-    const handle = file(workspacePath, absolute);
-    if (!handle.exists() || handle.metadata()?.type !== "file") continue;
-    seen.add(absolute);
-    parts.push({
-      kind: "resource_link",
-      path: pathToFileUri(absolute),
-      name: token,
-    });
-  }
-  return parts;
+  const toAbsolute = (token: string) => `${root}/${token.replace(/^\/+/, "")}`;
+  const isFile = (token: string) => {
+    const handle = file(workspacePath, toAbsolute(token));
+    return handle.exists() && handle.metadata()?.type === "file";
+  };
+  return extractMentionPaths(text, isFile).map((token) => ({
+    kind: "resource_link" as const,
+    path: pathToFileUri(toAbsolute(token)),
+    name: token,
+  }));
 }

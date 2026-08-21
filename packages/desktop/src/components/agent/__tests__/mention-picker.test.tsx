@@ -107,7 +107,12 @@ beforeEach(async () => {
     async (_dir: string, opts: { includeFiles: boolean }) => ({
       ok: true,
       value: opts.includeFiles
-        ? [`${WS}/notes.md`, `${WS}/readme.md`, `${WS}/archive/old.md`]
+        ? [
+            `${WS}/notes.md`,
+            `${WS}/readme.md`,
+            `${WS}/archive/old.md`,
+            `${WS}/my spaced file.md`,
+          ]
         : [`${WS}/archive`],
     }),
   );
@@ -205,5 +210,19 @@ describe("mentionContextParts", () => {
   it("skips directories and text without mentions", () => {
     expect(mentionContext.mentionContextParts(WS, "see @archive")).toEqual([]);
     expect(mentionContext.mentionContextParts(WS, "no refs")).toEqual([]);
+  });
+
+  it("resolves picker-inserted mentions whose paths contain spaces", () => {
+    const parts = mentionContext.mentionContextParts(
+      WS,
+      "summarize @my spaced file.md please",
+    );
+    expect(parts).toEqual([
+      {
+        kind: "resource_link",
+        path: `file://${WS}/my%20spaced%20file.md`,
+        name: "my spaced file.md",
+      },
+    ]);
   });
 });

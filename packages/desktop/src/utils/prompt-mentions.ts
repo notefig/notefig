@@ -6,7 +6,8 @@
 // `@<relative/path>` into the draft, and the submitted text is re-scanned
 // for tokens that resolve to real workspace files. Nothing to persist
 // alongside drafts, and hand-typed or edited mentions behave identically to
-// picked ones. Paths containing whitespace can't be referenced this way.
+// picked ones. Paths containing spaces resolve too: extraction tries
+// multi-word candidates against the workspace, longest match first.
 
 export interface ActiveMention {
   /** Index of the "@" in the text. */
@@ -47,19 +48,77 @@ export function applyMention(
   };
 }
 
+// A mention can't run past its line, and candidate probing is bounded so a
+// long prose line doesn't test dozens of prefixes per "@".
+const MAX_MENTION_WORDS = 8;
+
+const TRAILING_PUNCTUATION = /[.,;:!?)\]}'"`]+$/;
+
 /**
- * Every candidate mention token in a finished prompt, in order, deduped.
- * Callers resolve tokens against the workspace; ones that aren't real files
- * are just text. For each token a variant with trailing punctuation
- * stripped is included too, so "see @notes.md." still resolves.
+ * Every mention in a finished prompt that `isPath` accepts, in order,
+ * deduped. For each "@" (at start of text or after whitespace) the
+ * candidates are the line's word-boundary prefixes after the "@", tested
+ * longest first — so `@my file.md is great` resolves "my file.md" when that
+ * file exists (paths with spaces survive), and falls back to "my" only if
+ * that is itself a file. A trailing-punctuation-stripped variant of each
+ * candidate is tried too, so "see @notes.md." still resolves. Tokens
+ * nothing accepts are just text.
  */
-export function extractMentionTokens(text: string): string[] {
-  const tokens = new Set<string>();
-  for (const match of text.matchAll(/(?:^|\s)@(\S+)/g)) {
-    const token = match[1];
-    tokens.add(token);
-    const stripped = token.replace(/[.,;:!?)\]}'"`]+$/, "");
-    if (stripped && stripped !== token) tokens.add(stripped);
+/** The line's word-boundary prefixes after an "@" — the strings a mention
+ *  could be, shortest first. */
+function mentionCandidates(rest: string): string[] {
+  const candidates: string[] = [];
+  const word = /\S+/g;
+  let match: RegExpExecArray | null;
+  while ((match = word.exec(rest)) && candidates.length < MAX_MENTION_WORDS) {
+    candidates.push(rest.slice(0, match.index + match[0].length));
   }
-  return [...tokens];
+  return candidates;
+}
+
+/** The candidate itself, or its punctuation-stripped variant, if accepted. */
+function resolveCandidate(
+  candidate: string,
+  isPath: (candidate: string) => boolean,
+): string | null {
+  if (isPath(candidate)) return candidate;
+  const stripped = candidate.replace(TRAILING_PUNCTUATION, "");
+  if (stripped && stripped !== candidate && isPath(stripped)) return stripped;
+  return null;
+}
+
+/** Longest accepted candidate, with the length the match consumed. */
+function longestMention(
+  candidates: string[],
+  isPath: (candidate: string) => boolean,
+): { hit: string; consumed: number } | null {
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const hit = resolveCandidate(candidates[i], isPath);
+    if (hit) return { hit, consumed: candidates[i].length };
+  }
+  return null;
+}
+
+export function extractMentionPaths(
+  text: string,
+  isPath: (candidate: string) => boolean,
+): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  const mentionStart = /(?:^|\s)@/g;
+  let match: RegExpExecArray | null;
+  while ((match = mentionStart.exec(text))) {
+    const start = match.index + match[0].length;
+    const newline = text.indexOf("\n", start);
+    const rest = text.slice(start, newline === -1 ? text.length : newline);
+    if (!rest || /^\s/.test(rest)) continue;
+
+    const mention = longestMention(mentionCandidates(rest), isPath);
+    if (!mention) continue;
+    if (!seen.has(mention.hit)) found.push(mention.hit);
+    seen.add(mention.hit);
+    // Scan resumes after the matched mention, not after the "@".
+    mentionStart.lastIndex = start + mention.consumed;
+  }
+  return found;
 }
