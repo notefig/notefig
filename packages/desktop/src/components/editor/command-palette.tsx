@@ -44,7 +44,6 @@ import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { pickDirectory } from "../../utils/fs";
 import { getLocalizedCommandKeywords } from "@/utils/command-keywords";
-import { fuzzyScore } from "@/utils/file-score";
 import { useFileSearch, type FileSearchResult } from "@/hooks/use-file-search";
 import { canOpenFile } from "./polymorphic-editor";
 import { FileTypeIcon } from "./file-type-icon";
@@ -84,6 +83,13 @@ interface CommandType {
  * the workspace, rendered after every command group. Hidden outside a
  * workspace tab surface (the editor test harness) — there is nowhere to open
  * a file there.
+ *
+ * useFileSearch only pre-selects the top matches out of the whole workspace;
+ * visible filtering/ranking stays with cmdk's default scorer, so file rows
+ * get the same interaction behavior as commands (within-group sorting,
+ * selection management). cmdk's group re-sorting is a no-op here because
+ * every group lives in its own wrapper div, so commands always stay above
+ * these results.
  */
 function FileQuickResults({
   workspacePath,
@@ -116,7 +122,10 @@ function FileQuickResults({
         {fileResults.map((result) => (
           <CommandItem
             key={result.path}
-            value={result.path}
+            // Scored by cmdk's default filter — the relative path, not the
+            // absolute one, so the workspace prefix can't match the query.
+            value={result.relativePath}
+            keywords={[result.title]}
             onSelect={() => handleSelect(result)}
             className="flex items-center gap-2 cursor-pointer"
           >
@@ -338,16 +347,6 @@ export function CommandPalette({
 
   const trimmedQuery = query.trim();
 
-  // Filtering is ours, not cmdk's (shouldFilter={false}): commands and file
-  // results go through the same scorer so ranking behaves consistently.
-  const matchesQuery = (command: CommandType) => {
-    if (!trimmedQuery) return true;
-    if (fuzzyScore(trimmedQuery, t(command.labelKey)) > 0) return true;
-    return getLocalizedCommandKeywords(t, command.keywordKey).some(
-      (keyword) => fuzzyScore(trimmedQuery, keyword) > 0,
-    );
-  };
-
   const handleSelect = (command: CommandType) => {
     if (
       command.id === "new-file" ||
@@ -365,7 +364,7 @@ export function CommandPalette({
     onOpenChange(false);
   };
 
-  const groupedCommands = commands.filter(matchesQuery).reduce(
+  const groupedCommands = commands.reduce(
     (acc, command) => {
       if (!acc[command.groupKey]) {
         acc[command.groupKey] = [];
@@ -410,7 +409,6 @@ export function CommandPalette({
         showCloseButton={false}
       >
         <Command
-          shouldFilter={false}
           value={highlighted}
           onValueChange={setHighlighted}
           className={`bg-transparent [&_[cmdk-group-heading]]:text-muted-foreground **:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5 ${

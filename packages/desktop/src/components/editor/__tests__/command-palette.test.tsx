@@ -154,7 +154,7 @@ describe("CommandPalette file search", () => {
     });
   });
 
-  it("still filters commands by label and keywords (manual filtering path)", async () => {
+  it("still filters commands by label and keywords (cmdk default filter)", async () => {
     renderPalette();
     await act(async () => {});
     // Empty query: all commands visible, e.g. the file group's "New file".
