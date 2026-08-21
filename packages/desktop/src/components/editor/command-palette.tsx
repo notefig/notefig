@@ -134,12 +134,14 @@ function FileQuickResults({
               className="w-4 h-4 text-muted-foreground shrink-0"
             />
             <span className="truncate">{result.title}</span>
-            <span
-              className="ms-auto min-w-0 truncate text-xs text-muted-foreground"
-              dir="ltr"
-            >
-              {result.relativePath}
-            </span>
+            {result.relativePath !== result.title && (
+              <span
+                className="ms-auto min-w-0 truncate text-xs text-muted-foreground"
+                dir="ltr"
+              >
+                {result.relativePath}
+              </span>
+            )}
           </CommandItem>
         ))}
       </CommandGroup>

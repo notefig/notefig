@@ -258,12 +258,14 @@ export function MentionPicker({
                   className="h-4 w-4 shrink-0 text-muted-foreground"
                 />
                 <span className="truncate">{result.title}</span>
-                <span
-                  className="ms-auto min-w-0 truncate text-xs text-muted-foreground"
-                  dir="ltr"
-                >
-                  {result.relativePath}
-                </span>
+                {result.relativePath !== result.title && (
+                  <span
+                    className="ms-auto min-w-0 truncate text-xs text-muted-foreground"
+                    dir="ltr"
+                  >
+                    {result.relativePath}
+                  </span>
+                )}
               </button>
             ))}
           </div>
