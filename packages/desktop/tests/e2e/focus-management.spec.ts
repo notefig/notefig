@@ -217,7 +217,9 @@ test.describe("Focus Management", () => {
       )
       .toBe(true);
 
-    const composer = widget.locator("textarea").first();
+    // The composer is its own Tiptap editor (MET-80) — a nested
+    // contenteditable, not a textarea.
+    const composer = widget.locator(".ProseMirror").first();
     await expect(composer).toBeFocused();
 
     // The editor's post-mount reclaim window is 600ms — focus must survive
@@ -227,7 +229,7 @@ test.describe("Focus Management", () => {
 
     // Typing goes to the composer, not the document.
     await page.keyboard.type("hello agent");
-    await expect(composer).toHaveValue("hello agent");
+    await expect(composer).toHaveText("hello agent");
   });
 
   test("multi-dock hotkeys switch tabs inside the active dock window", async ({

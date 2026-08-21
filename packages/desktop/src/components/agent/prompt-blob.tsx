@@ -28,7 +28,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Editor } from "@tiptap/core";
-import { useAutosizeTextarea } from "@/hooks/use-autosize-textarea";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/ui/markdown";
 import { OrbLoader } from "@/components/ui/orb-loader";
@@ -65,7 +64,7 @@ import {
 } from "@/components/editor/editor-store";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "./harness-logo";
-import { MentionPicker, useMentionPicker } from "./mention-picker";
+import { PromptEditor, type PromptEditorHandle } from "./prompt-editor";
 import { AuthCard } from "./agent-chat-tab";
 import { CopyTextButton } from "./copy-text-button";
 import { PermissionCard } from "./permission-card";
@@ -175,7 +174,7 @@ export const PromptBlob = memo(function PromptBlob({
     () => getPromptBlob(blobId),
   );
   const { boundTurnId, boundTaskId } = record;
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<PromptEditorHandle>(null);
 
   const { defaultHarness } = useDefaultHarness();
   const { openFile, openAgentTab } = useWorkspaceTabs();
@@ -200,7 +199,7 @@ export const PromptBlob = memo(function PromptBlob({
     getPos,
     summoned,
     removeNode,
-    textareaRef,
+    composerRef,
   });
 
   // Live rows for the bound turn (sentinel ids keep the hooks unconditional).
@@ -315,7 +314,7 @@ export const PromptBlob = memo(function PromptBlob({
     // new-file creation (and "/" leaves the editor holding focus) — it
     // would win the race otherwise.
     suppressEditorFocus();
-    requestAnimationFrame(() => textareaRef.current?.focus());
+    requestAnimationFrame(() => composerRef.current?.focus());
   }, []);
 
   // Focus requests from the "/" summon: a pending request may predate this
@@ -397,7 +396,7 @@ export const PromptBlob = memo(function PromptBlob({
               confirmTrust={confirmTrust}
               trustName={defaultHarness.label}
               workspacePath={workspacePath}
-              textareaRef={textareaRef}
+              composerRef={composerRef}
             />
           )}
 
@@ -659,7 +658,7 @@ function usePromptBlobActions({
   getPos,
   summoned,
   removeNode,
-  textareaRef,
+  composerRef,
 }: {
   blobId: string;
   workspacePath: string;
@@ -671,7 +670,7 @@ function usePromptBlobActions({
     insertSlash?: boolean;
     restoreParagraph?: boolean;
   }) => void;
-  textareaRef: React.RefObject<HTMLTextAreaElement>;
+  composerRef: React.RefObject<PromptEditorHandle>;
 }) {
   const { isSending, confirmTrust, send, sendFollowUp } = usePromptSendActions({
     blobId,
@@ -696,8 +695,8 @@ function usePromptBlobActions({
       boundTurnId: null,
       boundTaskId: null,
     });
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [blobId, textareaRef]);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }, [blobId, composerRef]);
 
   // Edit: pull the sent prompt back into the composer. A queued turn is
   // withdrawn; a running/finished one keeps going — re-send is a new turn.
@@ -853,7 +852,7 @@ function Composer({
   confirmTrust,
   trustName,
   workspacePath,
-  textareaRef,
+  composerRef,
 }: {
   draft: string;
   setDraft: (value: string) => void;
@@ -869,45 +868,36 @@ function Composer({
   confirmTrust: boolean;
   trustName: string;
   workspacePath: string;
-  textareaRef: React.RefObject<HTMLTextAreaElement>;
+  composerRef: React.RefObject<PromptEditorHandle>;
 }) {
   const { t } = useTranslation();
-  useAutosizeTextarea(textareaRef, draft);
-  const mentions = useMentionPicker({
-    workspacePath,
-    value: draft,
-    onChange: setDraft,
-    textareaRef,
-  });
   return (
     <div className="flex flex-col">
       <div className="flex items-start gap-1.5 px-1.5 py-1">
         <SessionControl workspacePath={workspacePath} />
-        <MentionPicker picker={mentions} className="min-w-0 flex-1">
-          <textarea
-            {...mentions.textareaProps}
-            onKeyDown={(event) => {
-              if (mentions.handleKeyDown(event)) return;
-              const action = deriveComposerKeyAction({
-                key: event.key,
-                shiftKey: event.shiftKey,
-                draftEmpty: draft.trim().length === 0,
-                canRevert: onRevert !== undefined,
-                inFlight: false,
-              });
-              if (action.type === "none") return;
-              event.preventDefault();
-              if (action.type === "send") onSend();
-              else if (action.type === "revert") onRevert?.();
-              else if (action.type === "backspaceDismiss")
-                onBackspaceDismiss?.();
-              else onEscape();
-            }}
-            placeholder={t("promptBlobPlaceholder")}
-            rows={1}
-            className="min-h-[1.75rem] w-full resize-none overflow-hidden bg-transparent pt-1 pb-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
-          />
-        </MentionPicker>
+        <PromptEditor
+          ref={composerRef}
+          workspacePath={workspacePath}
+          value={draft}
+          onChange={setDraft}
+          onKeyDown={(event) => {
+            const action = deriveComposerKeyAction({
+              key: event.key,
+              shiftKey: event.shiftKey,
+              draftEmpty: draft.trim().length === 0,
+              canRevert: onRevert !== undefined,
+              inFlight: false,
+            });
+            if (action.type === "none") return false;
+            if (action.type === "send") onSend();
+            else if (action.type === "revert") onRevert?.();
+            else if (action.type === "backspaceDismiss") onBackspaceDismiss?.();
+            else onEscape();
+            return true;
+          }}
+          placeholder={t("promptBlobPlaceholder")}
+          className="min-h-[1.75rem] min-w-0 flex-1 pt-1 pb-1.5 text-sm"
+        />
       </div>
       {confirmTrust && (
         <span className="px-3 pb-1.5 text-[0.6875rem] text-amber-600 dark:text-amber-400">
@@ -1136,38 +1126,28 @@ function ReplyRow({
   workspacePath: string;
 }) {
   const { t } = useTranslation();
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  useAutosizeTextarea(textareaRef, draft);
-  const mentions = useMentionPicker({
-    workspacePath,
-    value: draft,
-    onChange: setDraft,
-    textareaRef,
-  });
   return (
-    <MentionPicker picker={mentions}>
-      <textarea
-        {...mentions.textareaProps}
-        disabled={disabled}
-        onKeyDown={(event) => {
-          if (mentions.handleKeyDown(event)) return;
-          const action = deriveComposerKeyAction({
-            key: event.key,
-            shiftKey: event.shiftKey,
-            draftEmpty: draft.trim().length === 0,
-            canRevert: false,
-            inFlight: false,
-          });
-          if (action.type === "none") return;
-          event.preventDefault();
-          if (action.type === "send") onSend();
-          else if (action.type === "escape") onEscape();
-        }}
-        placeholder={t("promptBlobReply")}
-        rows={1}
-        className="mt-1 min-h-[1.5rem] w-full resize-none overflow-hidden border-t border-border/60 bg-transparent px-0.5 pt-1.5 text-xs placeholder:text-muted-foreground focus-visible:outline-none"
-      />
-    </MentionPicker>
+    <PromptEditor
+      workspacePath={workspacePath}
+      value={draft}
+      onChange={setDraft}
+      disabled={disabled}
+      onKeyDown={(event) => {
+        const action = deriveComposerKeyAction({
+          key: event.key,
+          shiftKey: event.shiftKey,
+          draftEmpty: draft.trim().length === 0,
+          canRevert: false,
+          inFlight: false,
+        });
+        if (action.type === "none") return false;
+        if (action.type === "send") onSend();
+        else if (action.type === "escape") onEscape();
+        return true;
+      }}
+      placeholder={t("promptBlobReply")}
+      className="mt-1 min-h-[1.5rem] w-full border-t border-border/60 px-0.5 pt-1.5 text-xs"
+    />
   );
 }
 

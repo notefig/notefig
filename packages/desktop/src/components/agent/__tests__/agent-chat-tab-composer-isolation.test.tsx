@@ -69,16 +69,18 @@ function seedTaskWithEntries(entryCount: number) {
   }
 }
 
-/** Type into the composer the way a user does: native value setter (React's
- *  value tracker ignores plain assignment) + a bubbling input event. */
-function typeIntoComposer(textarea: HTMLTextAreaElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(
-    Object.getPrototypeOf(textarea),
-    "value",
-  )?.set;
+/** Type into the composer the way a user does: a real editor transaction
+ *  per keystroke (the composer is a Tiptap editor — contenteditable ignores
+ *  synthetic input events; PromptEditor exposes its instance on the DOM
+ *  node for exactly this). */
+function typeIntoComposer(element: HTMLElement, char: string) {
+  const editor = (
+    element as HTMLElement & {
+      promptEditor?: { commands: { insertContent: (c: string) => void } };
+    }
+  ).promptEditor;
   act(() => {
-    setter?.call(textarea, value);
-    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    editor?.commands.insertContent(char);
   });
 }
 
@@ -95,20 +97,18 @@ describe("AgentChatTab composer isolation (MET-139)", () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
 
-    const textarea = container.querySelector("textarea");
-    expect(textarea).not.toBeNull();
+    const composer = container.querySelector<HTMLElement>(".ProseMirror");
+    expect(composer).not.toBeNull();
 
     const transcriptRenders = vi.mocked(useTaskEntries).mock.calls.length;
     expect(transcriptRenders).toBeGreaterThan(0);
 
-    let draft = "";
     for (const char of "rapid typing burst") {
-      draft += char;
-      typeIntoComposer(textarea!, draft);
+      typeIntoComposer(composer!, char);
     }
     await act(async () => {});
 
-    expect(textarea!.value).toBe("rapid typing burst");
+    expect(composer!.textContent).toBe("rapid typing burst");
     expect(vi.mocked(useTaskEntries).mock.calls.length).toBe(transcriptRenders);
   });
 });

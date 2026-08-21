@@ -99,12 +99,35 @@ function longestMention(
   return null;
 }
 
-export function extractMentionPaths(
+export type MentionSegment =
+  | { type: "text"; value: string }
+  | {
+      type: "mention";
+      /** The resolved path (punctuation-stripped when that's what matched). */
+      value: string;
+      /** The literal characters consumed, including the "@" (never trailing
+       *  punctuation the resolution stripped). */
+      raw: string;
+    };
+
+/**
+ * Split a prompt into plain-text runs and resolved mentions, in order. The
+ * mention-matching rules are extractMentionPaths' — this is the positional
+ * variant the prompt editor uses to rebuild mention chips from a persisted
+ * plain-string draft.
+ */
+export function segmentMentions(
   text: string,
   isPath: (candidate: string) => boolean,
-): string[] {
-  const found: string[] = [];
-  const seen = new Set<string>();
+): MentionSegment[] {
+  const segments: MentionSegment[] = [];
+  let plainFrom = 0;
+  const pushText = (to: number) => {
+    if (to > plainFrom) {
+      segments.push({ type: "text", value: text.slice(plainFrom, to) });
+    }
+  };
+
   const mentionStart = /(?:^|\s)@/g;
   let match: RegExpExecArray | null;
   while ((match = mentionStart.exec(text))) {
@@ -115,10 +138,32 @@ export function extractMentionPaths(
 
     const mention = longestMention(mentionCandidates(rest), isPath);
     if (!mention) continue;
-    if (!seen.has(mention.hit)) found.push(mention.hit);
-    seen.add(mention.hit);
+    // The raw run excludes trailing punctuation resolution stripped — it
+    // stays in the following text segment.
+    pushText(start - 1);
+    segments.push({
+      type: "mention",
+      value: mention.hit,
+      raw: `@${mention.hit}`,
+    });
+    plainFrom = start + mention.hit.length;
     // Scan resumes after the matched mention, not after the "@".
     mentionStart.lastIndex = start + mention.consumed;
+  }
+  pushText(text.length);
+  return segments;
+}
+
+export function extractMentionPaths(
+  text: string,
+  isPath: (candidate: string) => boolean,
+): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const segment of segmentMentions(text, isPath)) {
+    if (segment.type !== "mention" || seen.has(segment.value)) continue;
+    seen.add(segment.value);
+    found.push(segment.value);
   }
   return found;
 }
