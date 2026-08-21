@@ -262,6 +262,16 @@
     -ms-user-select: text;
   }
 
+  /* Tiptap Placeholder renders via CSS only — nothing app-wide draws
+     data-placeholder, so the prompt composer (MET-80) opts in here. */
+  .prompt-editor .ProseMirror p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    color: hsl(var(--muted-foreground));
+    float: left;
+    height: 0;
+    pointer-events: none;
+  }
+
   [data-slate-editor="true"] [data-slate-placeholder] {
     top: 0 !important;
     left: 0 !important;

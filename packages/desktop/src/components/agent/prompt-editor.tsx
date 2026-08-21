@@ -9,7 +9,7 @@ import {
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
-import type { JSONContent } from "@tiptap/core";
+import { mergeAttributes, type JSONContent } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import Mention from "@tiptap/extension-mention";
@@ -314,16 +314,22 @@ function promptExtensions(
       trailingNode: false,
       underline: false,
     }),
-    Placeholder.configure({ placeholder }),
+    // showOnlyWhenEditable: false — the chat composer disables the editor
+    // during session load, and the loading placeholder is the only signal.
+    Placeholder.configure({ placeholder, showOnlyWhenEditable: false }),
     Mention.configure({
       deleteTriggerWithBackspace: true,
+      // Muted chip background so mentions read as attachments — rendering
+      // only; the serialized draft stays the literal @path text.
       HTMLAttributes: {
-        class:
-          "rounded bg-accent/70 px-1 py-0.5 text-accent-foreground whitespace-nowrap",
+        class: "rounded-sm bg-muted px-1 whitespace-nowrap",
       },
-      renderHTML: ({ node }) => [
+      renderHTML: ({ options, node }) => [
         "span",
-        { "data-type": "mention", "data-id": node.attrs.id },
+        mergeAttributes(options.HTMLAttributes, {
+          "data-type": "mention",
+          "data-id": node.attrs.id,
+        }),
         `@${node.attrs.label ?? node.attrs.id}`,
       ],
       suggestion: {
@@ -383,7 +389,7 @@ function SuggestionList({
     <div
       role="listbox"
       aria-label={t("mentionFilesLabel")}
-      className="flex max-h-64 w-max min-w-40 max-w-72 flex-col overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md texture-surface"
+      className="flex max-h-56 w-max min-w-36 max-w-72 flex-col overflow-y-auto rounded-md border bg-popover p-0.5 text-popover-foreground shadow-md texture-surface"
     >
       {items.map((item, index) => (
         <button
@@ -398,18 +404,18 @@ function SuggestionList({
           }}
           onMouseEnter={() => onHover(index)}
           className={cn(
-            "flex cursor-pointer items-center gap-1.5 rounded-sm px-2 py-1 text-start text-sm",
+            "flex cursor-pointer items-center gap-1 rounded-sm px-1.5 py-0.5 text-start text-xs",
             index === selectedIndex && "bg-accent text-accent-foreground",
           )}
         >
           <FileTypeIcon
             path={item.path}
-            className="h-4 w-4 shrink-0 text-muted-foreground"
+            className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
           />
           {/* One combined label: the name stays whole, the dir summary
               truncates first. */}
           <span className="flex min-w-0 items-baseline" dir="ltr">
-            <span className="min-w-0 truncate text-xs text-muted-foreground">
+            <span className="min-w-0 truncate text-muted-foreground">
               {summarizeDirPrefix(item)}
             </span>
             <span className="shrink-0">{item.title}</span>
