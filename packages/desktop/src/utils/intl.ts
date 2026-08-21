@@ -228,6 +228,7 @@ i18n
           typeCommand: "Type a command or search...",
           noResults: "No results found.",
           quickResultsFor: 'Quick results for "{{query}}"',
+          mentionFilesLabel: "Reference a file",
 
           // Command Groups
           file: "File",

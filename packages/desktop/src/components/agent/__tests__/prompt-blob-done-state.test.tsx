@@ -45,6 +45,7 @@ function render(props: {
         onReply: noop,
         onReplyEscape: noop,
         replyDisabled: false,
+        workspacePath: "/test-workspace",
       }),
     ),
   );
@@ -95,12 +96,16 @@ describe("DoneState", () => {
     expect(container!.textContent).toContain("the whole answer");
     clickSummary();
     // Collapsed: the body is gone; the summary line echoes it truncated.
-    expect(container!.querySelector("strong, p")).toBeNull();
+    // (Scoped to .prose — the reply composer below is a Tiptap editor whose
+    // empty state renders a placeholder <p> of its own.)
+    expect(container!.querySelector(".prose strong, .prose p")).toBeNull();
     expect(container!.querySelector("button")?.textContent).toBe(
       "the whole answer",
     );
     clickSummary();
-    expect(container!.querySelector("p")?.textContent).toBe("the whole answer");
+    expect(container!.querySelector(".prose p")?.textContent).toBe(
+      "the whole answer",
+    );
   });
 
   it("caps the expanded body with an internal scroll", () => {
