@@ -1,13 +1,9 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
 import { Dockable } from "@/components/dockable";
 import { IconSidebar } from "@/components/editor/icon-sidebar";
 import { Sidebar } from "@/components/editor/sidebar";
 import type { SearchPanelHandle } from "@/components/editor/search-panel";
-import {
-  PolymorphicEditor,
-  canOpenFile as canOpenInEditor,
-} from "@/components/editor/polymorphic-editor";
+import { canOpenFile as canOpenInEditor } from "@/components/editor/polymorphic-editor";
 import { StatusBar } from "@/components/editor/status-bar";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
@@ -21,25 +17,16 @@ import { useNavigationPersistence } from "@/hooks/use-recent-projects";
 import { useProjectSettings } from "@/utils/project-settings";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
 import { useWorkspaceCommands } from "@/hooks/use-workspace-commands";
-import type { FileEntry } from "@/utils/fs";
-import { getFileName } from "@/utils/fs";
+import { useWorkspacePanels } from "@/hooks/use-workspace-panels";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { WorkspaceTabsProvider } from "@/components/workspace-tabs-provider";
 import { useThrowWorkspaceAccessError } from "@/components/workspace-error-boundary";
-import { retryOnAnimationFrame } from "@/utils/retry-on-animation-frame";
 import { disposeAllEditors } from "@/components/editor/editor-store";
-import { AgentChatTab } from "@/components/agent/agent-chat-tab";
-import { ReleaseNotesTab } from "@/components/release-notes-tab";
 import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
-import {
-  agentTabId,
-  isAgentTabId,
-  isReleaseNotesTabId,
-  RELEASE_NOTES_TAB_ID,
-} from "@/entities/tabs";
+import { agentTabId, tabKind } from "@/entities/tabs";
+import { useTabElements } from "@/tabs/tab-types";
 import { useReleaseNotesOnUpdate } from "@/hooks/use-release-notes-on-update";
-import { latestReleaseTitle } from "@/utils/release-notes";
 import {
   type FileTreeMode,
   FILE_TREE_IDLE,
@@ -67,11 +54,10 @@ export const Workspace = () => {
     closeTab,
     closeActiveTab,
     getFocusedTabId,
-    focusActiveEditor,
+    focusActiveTab,
     getSelectedText,
     openFile,
   } = useDockableTabs({
-    renderTabs: () => [],
     canOpenFile: (file) => file.type === "file" && canOpenInEditor(file.path),
     dockableRef,
   });
@@ -98,122 +84,42 @@ export const Workspace = () => {
     fileTabIds: fileOpenTabIds,
     fileRows: fileDataWithContent,
     agentTaskRows: openAgentTaskRows,
-    isReleaseNotesTabOpen,
     staleTabIds,
   } = useWorkspaceTabs(workspacePath, openTabs);
 
   useReleaseNotesOnUpdate(openFile);
 
-  const agentDockableTabs = useMemo(
-    () =>
-      openAgentTaskRows.map((task) => (
-        <Dockable.Tab
-          key={agentTabId(task.taskId)}
-          id={agentTabId(task.taskId)}
-          // Session titles are first-prompt text (up to 60 chars) — far
-          // wider than file names, so give tabs a much shorter ellipsis.
-          name={
-            task.title.length > 24
-              ? `${task.title.slice(0, 23).trimEnd()}…`
-              : task.title
-          }
-          // closeTab (functional layout update) rather than a closure over
-          // `layout`: keeps this memo stable across tab selects/drags. It
-          // never cancels the session — that stays reachable from the
-          // sessions sidebar.
-          onClose={() => closeTab(agentTabId(task.taskId))}
-        >
-          <AgentChatTab taskId={task.taskId} />
-        </Dockable.Tab>
-      )),
-    [openAgentTaskRows, closeTab],
-  );
-
-  const dockableTabs = useMemo(
-    () =>
-      fileDataWithContent.map((fileEntry) => (
-        <Dockable.Tab
-          key={fileEntry.path}
-          id={fileEntry.path}
-          name={getFileName(fileEntry.path)}
-          onClose={() => closeTab(fileEntry.path)}
-        >
-          <PolymorphicEditor
-            file={fileEntry as FileEntry}
-            basePath={workspacePath}
-            isContentLoaded={fileEntry.isContentLoaded}
-            contentError={fileEntry.contentError}
-          />
-        </Dockable.Tab>
-      )),
-    [fileDataWithContent, workspacePath, closeTab],
-  );
-
-  const releaseNotesDockableTabs = useMemo(
-    () =>
-      isReleaseNotesTabOpen
-        ? [
-            <Dockable.Tab
-              key={RELEASE_NOTES_TAB_ID}
-              id={RELEASE_NOTES_TAB_ID}
-              name={latestReleaseTitle ?? t("releaseNotesTitle")}
-              onClose={() => closeTab(RELEASE_NOTES_TAB_ID)}
-            >
-              <ReleaseNotesTab />
-            </Dockable.Tab>,
-          ]
-        : [],
-    [isReleaseNotesTabOpen, closeTab, t],
-  );
-
-  const allDockableTabs = useMemo(
-    () => [...dockableTabs, ...agentDockableTabs, ...releaseNotesDockableTabs],
-    [dockableTabs, agentDockableTabs, releaseNotesDockableTabs],
-  );
+  // One element per open tab, built from the tab-type registry (title +
+  // content per kind) and memoised per tab id.
+  const allDockableTabs = useTabElements(openTabs, {
+    workspacePath,
+    fileRows: fileDataWithContent,
+    agentTaskRows: openAgentTaskRows,
+    closeTab,
+  });
 
   const activeFileData = fileDataWithContent.find(
     (f) => f.path === activeTabId,
   );
   const currentContent = activeFileData?.content || "";
 
-  const [searchParams, setUrlSearchParams] = useSearchParams();
-  const isSidebarCollapsed = searchParams.get("sidebar") === "collapsed";
-  const toggleSidebarCollapsed = useCallback(() => {
-    const isClosing = !isSidebarCollapsed;
-
-    setUrlSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        if (next.get("sidebar") === "collapsed") {
-          next.delete("sidebar");
-        } else {
-          next.set("sidebar", "collapsed");
-          next.delete("sidebarView");
-        }
-        return next;
-      },
-      { replace: true },
-    );
-
-    if (isClosing) {
-      const active = document.activeElement;
-      if (active instanceof HTMLElement && active.closest("[data-sidebar]")) {
-        active.blur();
-      }
-
-      retryOnAnimationFrame(() => {
-        return focusActiveEditor();
-      });
-    }
-  }, [isSidebarCollapsed, setUrlSearchParams, focusActiveEditor]);
+  const {
+    isSidebarCollapsed,
+    toggleSidebarCollapsed,
+    openSidebarIfCollapsed,
+    openSettings,
+    openSearchPanel,
+    openSessionsSidebar,
+  } = useWorkspacePanels({ searchPanelRef, focusActiveTab });
 
   // Exposed via WorkspaceTabsContext so components nested in the layout
   // (link menu, search panel) can open files as tabs.
   const openFileInTabs = useCallback(
     (options: OpenFileInLayoutOptions) => {
+      // Only file tabs are gated on the editor's format support; the other
+      // tab kinds carry their own content.
       if (
-        !isAgentTabId(options.tabId) &&
-        !isReleaseNotesTabId(options.tabId) &&
+        tabKind(options.tabId) === "file" &&
         !canOpenInEditor(options.tabId)
       ) {
         return false;
@@ -278,71 +184,10 @@ export const Workspace = () => {
   const [fileTreeMode, setFileTreeMode] =
     useState<FileTreeMode>(FILE_TREE_IDLE);
 
-  const openSidebarIfCollapsed = useCallback(() => {
-    if (!isSidebarCollapsed) return;
-
-    setUrlSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete("sidebar");
-        return next;
-      },
-      { replace: true },
-    );
-  }, [isSidebarCollapsed, setUrlSearchParams]);
-
-  const handleOpenSettings = useCallback(() => {
-    setUrlSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.set("settings", "true");
-        return next;
-      },
-      { replace: true },
-    );
-  }, [setUrlSearchParams]);
-
-  const openSearchPanel = useCallback(
-    (options?: { filePattern?: string; initialQuery?: string }) => {
-      const filePattern = options?.filePattern;
-      const initialQuery = options?.initialQuery;
-
-      setUrlSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          next.set("sidebarView", "search");
-          next.delete("sidebar"); // ensure expanded
-          return next;
-        },
-        { replace: true },
-      );
-
-      retryOnAnimationFrame(() => {
-        if (!searchPanelRef.current) return false;
-        searchPanelRef.current.focusInput({ filePattern, initialQuery });
-        return true;
-      });
-    },
-    [setUrlSearchParams],
-  );
-
-  /** Mod+Shift+A — the agent sessions menu in the left sidebar. */
-  const openSessionsSidebar = useCallback(() => {
-    setUrlSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.set("sidebarView", "sessions");
-        next.delete("sidebar"); // ensure expanded
-        return next;
-      },
-      { replace: true },
-    );
-  }, [setUrlSearchParams]);
-
   const {
     handleNewFile,
     handleNewDirectory,
-    runEditorHistoryAction,
+    runHistoryAction,
     handleToggleFullscreen,
     handleSearchInFile,
     handleSearchInFiles,
@@ -423,7 +268,7 @@ export const Workspace = () => {
         <SettingsModal
           direction={direction}
           onDirectionChange={setDirection}
-          onFocusEditor={focusActiveEditor}
+          onFocusTab={focusActiveTab}
         />
 
         <CommandPalette
@@ -434,14 +279,14 @@ export const Workspace = () => {
           onNewFile={handleNewFile}
           onNewDirectory={handleNewDirectory}
           onCloseFile={closeActiveTab}
-          onUndo={() => runEditorHistoryAction("undo")}
-          onRedo={() => runEditorHistoryAction("redo")}
-          onOpenSettings={handleOpenSettings}
+          onUndo={() => runHistoryAction("undo")}
+          onRedo={() => runHistoryAction("redo")}
+          onOpenSettings={openSettings}
           onToggleSidebar={toggleSidebarCollapsed}
           onToggleFullscreen={handleToggleFullscreen}
           onSearchInFile={handleSearchInFile}
           onSearchInFiles={handleSearchInFiles}
-          onFocusEditor={focusActiveEditor}
+          onFocusTab={focusActiveTab}
           direction={direction}
         />
       </div>

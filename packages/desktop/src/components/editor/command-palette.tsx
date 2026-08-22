@@ -64,7 +64,7 @@ interface CommandPaletteProps {
   onToggleFullscreen?: () => void | Promise<void>;
   onSearchInFile?: () => void;
   onSearchInFiles?: () => void;
-  onFocusEditor?: () => void;
+  onFocusTab?: () => void;
   direction?: "ltr" | "rtl";
 }
 
@@ -164,7 +164,7 @@ export function CommandPalette({
   onToggleFullscreen,
   onSearchInFile,
   onSearchInFiles,
-  onFocusEditor,
+  onFocusTab,
   direction = "ltr",
 }: CommandPaletteProps) {
   const { setTheme, theme } = useTheme();
@@ -395,7 +395,7 @@ export function CommandPalette({
     const shouldRestore = !skipFocusRestoreRef.current;
     skipFocusRestoreRef.current = false;
     if (!shouldRestore) return;
-    onFocusEditor?.();
+    onFocusTab?.();
   };
 
   return (

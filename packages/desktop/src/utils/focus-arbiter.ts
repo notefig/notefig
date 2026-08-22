@@ -1,14 +1,14 @@
-export type FocusDomain = "modal" | "palette" | "sidebar" | "editor" | "misc";
+export type FocusDomain = "modal" | "palette" | "sidebar" | "tab" | "misc";
 
 export type FocusTiming = "immediate" | "next-frame" | "when-mounted";
 
 /**
- * Optional caret placement carried by editor-targeted intents. The arbiter
- * treats it as opaque data — the editor resolver (editor-store) interprets
- * it when the intent wins. Without one, the editor's current selection is
- * left as-is (mount restores its saved selection and must keep it).
+ * Optional caret placement carried by tab-targeted intents. The arbiter
+ * treats it as opaque data — the tab's controller interprets it when the
+ * intent wins. Without one, the tab's current selection is left as-is
+ * (an editor mount restores its saved selection and must keep it).
  */
-export type EditorCaretPlacement = {
+export type TabCaretPlacement = {
   /** Put the caret in the nearest textblock before the node at `pos` —
    *  Escape out of an inline widget returns the cursor to where the user
    *  was before summoning it, not past it. */
@@ -17,7 +17,7 @@ export type EditorCaretPlacement = {
 };
 
 export type FocusTarget =
-  | { type: "editor"; filePath: string; caret?: EditorCaretPlacement }
+  | { type: "tab"; tabId: string; caret?: TabCaretPlacement }
   | { type: "element"; key: string };
 
 export interface FocusIntentInput {
@@ -94,7 +94,7 @@ export class FocusArbiter {
   private suppressUntil = new Map<FocusDomain | "all", number>();
 
   private owner: FocusOwner | null = null;
-  private activeEditorId: string | null = null;
+  private activeTabId: string | null = null;
   private cooldownUntil = 0;
   private sequence = 0;
   private idCounter = 0;
@@ -163,8 +163,8 @@ export class FocusArbiter {
     this.suppressUntil.set(scope, this.now() + ms);
   }
 
-  setActiveEditor(filePath: string | null): void {
-    this.activeEditorId = filePath;
+  setActiveTab(tabId: string | null): void {
+    this.activeTabId = tabId;
   }
 
   flush(): void {
@@ -283,9 +283,9 @@ export class FocusArbiter {
       return false;
     }
 
-    if (intent.target.type === "editor") {
-      if (!this.activeEditorId) return false;
-      if (this.activeEditorId !== intent.target.filePath) return false;
+    if (intent.target.type === "tab") {
+      if (!this.activeTabId) return false;
+      if (this.activeTabId !== intent.target.tabId) return false;
     }
 
     return true;

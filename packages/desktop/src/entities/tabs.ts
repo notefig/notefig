@@ -1,17 +1,22 @@
 /**
- * Tabs entity — the dockable tab layout and its id conventions.
+ * Tabs entity — the dockable tab layout, its id conventions, and the handle
+ * over one open tab.
  *
  * The layout's single source of truth is the URL (`?layout=<json>`); there
  * is no registry to construct or dispose. This module owns:
- *   - the pure layout codec (parse/extract/find), shared by the reactive
- *     hook (`useLayoutSearchParam`) and non-React callers;
- *   - the `agent:<taskId>` tab-id convention (tab ids are workspace file
- *     paths by default; the prefix keeps agent chat tabs out of every
- *     file-path code path);
- *   - the blessed imperative reads (`readLayout`/`readOpenTabIds`/
- *     `readActiveTabId`) for one-shot, non-reactive callers — agent tools,
- *     prompt composers. These parse `window.location` fresh on every call;
- *     reactive UI must go through `useLayoutSearchParam`/`useDockableTabs`.
+ *   - the reactive layout hook (`useLayoutSearchParam`) and the open-tabs
+ *     cross-entity join (`useWorkspaceTabs`);
+ *   - `tab(tabId)` — the handle: the controls every tab type has, plus
+ *     `.editor` on a file tab and `.agent` on an agent tab for the ones only
+ *     that kind has;
+ *   - re-exports of the two leaves it is the public face of: the pure layout
+ *     codec (`utils/layout-codec`, shared with the crash-fallback debug
+ *     panel) and the tab-id scheme (`tabs/tab-id`).
+ *
+ * The imperative reads (`readLayout`/`readOpenTabIds`/`readActiveTabId`) are
+ * for one-shot, non-reactive callers — agent tools, prompt composers. They
+ * parse `window.location` fresh on every call; reactive UI must go through
+ * `useLayoutSearchParam`/`useDockableTabs`.
  */
 import { useMemo, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -21,68 +26,148 @@ import {
   parseLayout,
   extractTabIds,
   findLayoutSelectedTab,
+  readLayout,
+  readOpenTabIds,
+  readActiveTabId,
 } from "@/utils/layout-codec";
-// Sibling entities — only referenced inside hook bodies (cycle rule).
 import {
-  useOpenFileRows,
-  useMetadataFetching,
-  type OpenFileRow,
-} from "./files";
+  AGENT_TAB_PREFIX,
+  RELEASE_NOTES_TAB_ID,
+  agentTabId,
+  agentTaskIdFromTabId,
+  isAgentTabId,
+  isFileTabId,
+  isReleaseNotesTabId,
+  parseTabId,
+  tabKind,
+  type TabKind,
+  type TabRef,
+} from "@/tabs/tab-id";
 import {
+  focusTab,
+  getTabController,
+  getTabSelectedText,
+  isTabFocusable,
+  revealTabMatch,
+  searchTab,
+  type TabSearchMatch,
+  type TabSearchOptions,
+} from "@/tabs/tab-controllers";
+// Sibling entities — only referenced inside function bodies (cycle rule).
+import { editor, type EditorHandle } from "./editors";
+import {
+  agents,
   agentTasksCollection,
   useAgentTasksReady,
   useAgentTaskRowsById,
   type AgentTaskRow,
 } from "./agents";
+import type { AgentTaskHandle } from "@/agent/agents";
+import {
+  useOpenFileRows,
+  useMetadataFetching,
+  type OpenFileRow,
+} from "./files";
 
 // ---------------------------------------------------------------------------
-// Pure layout codec — lives in the layout-codec leaf (so the crash-fallback
-// debug panel can share it without importing entity modules); re-exported
-// here as the entity's public API.
+// Public re-exports: the layout codec and the tab-id scheme.
 // ---------------------------------------------------------------------------
 
-export { LAYOUT_PARAM, parseLayout, extractTabIds, findLayoutSelectedTab };
+export {
+  LAYOUT_PARAM,
+  parseLayout,
+  extractTabIds,
+  findLayoutSelectedTab,
+  readLayout,
+  readOpenTabIds,
+  readActiveTabId,
+  AGENT_TAB_PREFIX,
+  RELEASE_NOTES_TAB_ID,
+  agentTabId,
+  agentTaskIdFromTabId,
+  isAgentTabId,
+  isFileTabId,
+  isReleaseNotesTabId,
+  parseTabId,
+  tabKind,
+};
+export type { TabKind, TabRef, TabSearchMatch };
 
-export const AGENT_TAB_PREFIX = "agent:";
+// ---------------------------------------------------------------------------
+// The tab handle — general controls flat, type-specific ones behind `.editor`
+// / `.agent`. Handles are re-resolved on every call and never cache state.
+// ---------------------------------------------------------------------------
 
-/** Singleton release-notes tab. */
-export const RELEASE_NOTES_TAB_ID = "release:";
-
-export function agentTabId(taskId: string): string {
-  return `${AGENT_TAB_PREFIX}${taskId}`;
+/** What every tab can do, whatever it contains. */
+interface TabHandleBase {
+  readonly tabId: string;
+  /** Whether the tab's surface is live (mounted / instantiated). */
+  isMounted(): boolean;
+  isFocusable(): boolean;
+  /** Move keyboard focus into the tab. Returns whether focus landed. */
+  focus(): boolean;
+  /** Text the user has selected inside the tab, if any. */
+  selectedText(): string | undefined;
+  /** Find-in-tab: occurrences of `query` in this tab's own content. */
+  search(query: string, options?: TabSearchOptions): TabSearchMatch[];
+  /** Scroll a match from `search` into view and highlight it. */
+  revealMatch(match: TabSearchMatch): boolean;
 }
 
-export function isAgentTabId(tabId: string): boolean {
-  return tabId.startsWith(AGENT_TAB_PREFIX);
+export interface FileTabHandle extends TabHandleBase {
+  readonly kind: "file";
+  readonly path: string;
+  /** The document controls only a file tab has (dirty state, markdown). */
+  readonly editor: EditorHandle;
 }
 
-export function agentTaskIdFromTabId(tabId: string): string | null {
-  return isAgentTabId(tabId) ? tabId.slice(AGENT_TAB_PREFIX.length) : null;
+export interface AgentTabHandle extends TabHandleBase {
+  readonly kind: "agent";
+  readonly taskId: string;
+  /** The session controls only an agent tab has (prompt, cancel, auth). */
+  readonly agent: AgentTaskHandle;
 }
 
-export function isReleaseNotesTabId(tabId: string): boolean {
-  return tabId === RELEASE_NOTES_TAB_ID;
+export interface ReleaseNotesTabHandle extends TabHandleBase {
+  readonly kind: "release-notes";
 }
 
-export type TabRef =
-  | { type: "file"; path: string }
-  | { type: "agent"; taskId: string }
-  | { type: "release-notes" };
+export type TabHandle = FileTabHandle | AgentTabHandle | ReleaseNotesTabHandle;
 
 /**
- * The single place that knows the tab-id encoding. Ids with a known scheme
- * prefix are non-file tabs; everything else is a workspace file path (file
- * paths are absolute, so they can never collide with a scheme).
+ * The handle over one open tab, whether or not it is currently mounted (an
+ * unmounted tab reports `isMounted() === false` and its controls no-op).
  */
-export function parseTabId(tabId: string): TabRef {
-  if (isReleaseNotesTabId(tabId)) {
-    return { type: "release-notes" };
+export function tab(tabId: string): TabHandle {
+  const base: TabHandleBase = {
+    tabId,
+    isMounted: () => getTabController(tabId) !== undefined,
+    isFocusable: () => isTabFocusable(tabId),
+    focus: () => focusTab(tabId),
+    selectedText: () => getTabSelectedText(tabId),
+    search: (query, options) => searchTab(tabId, query, options),
+    revealMatch: (match) => revealTabMatch(tabId, match),
+  };
+
+  const ref = parseTabId(tabId);
+  switch (ref.kind) {
+    case "file":
+      return {
+        ...base,
+        kind: "file",
+        path: ref.path,
+        editor: editor(ref.path),
+      };
+    case "agent":
+      return {
+        ...base,
+        kind: "agent",
+        taskId: ref.taskId,
+        agent: agents.task(ref.taskId),
+      };
+    case "release-notes":
+      return { ...base, kind: "release-notes" };
   }
-  const taskId = agentTaskIdFromTabId(tabId);
-  if (taskId !== null) {
-    return { type: "agent", taskId };
-  }
-  return { type: "file", path: tabId };
 }
 
 export interface UseLayoutSearchParam {
@@ -175,10 +260,7 @@ export function useWorkspaceTabs(
   workspacePath: string,
   openTabs: string[],
 ): WorkspaceTabsState {
-  const fileTabIds = useMemo(
-    () => openTabs.filter((tabId) => parseTabId(tabId).type === "file"),
-    [openTabs],
-  );
+  const fileTabIds = useMemo(() => openTabs.filter(isFileTabId), [openTabs]);
   const agentTaskIds = useMemo(
     () =>
       openTabs
@@ -220,17 +302,4 @@ export function useWorkspaceTabs(
     isReleaseNotesTabOpen,
     staleTabIds,
   };
-}
-
-export function readLayout(): LayoutNode[] {
-  const params = new URLSearchParams(window.location.search);
-  return parseLayout(params.get(LAYOUT_PARAM));
-}
-
-export function readOpenTabIds(): string[] {
-  return extractTabIds(readLayout());
-}
-
-export function readActiveTabId(): string | null {
-  return findLayoutSelectedTab(readLayout());
 }

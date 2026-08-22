@@ -58,9 +58,9 @@ import type { WidgetResponse } from "@/agent/tools/widget-respond";
 import { ensureAgentRuntime } from "@/agent/tunnel/require-connection";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
 import {
-  requestEditorFocus,
-  suppressEditorFocus,
-} from "@/components/editor/editor-store";
+  requestTabFocus,
+  suppressTabFocus,
+} from "@/tabs/tab-controllers";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "./harness-logo";
 import {
@@ -303,7 +303,7 @@ export const PromptBlob = memo(function PromptBlob({
   // resolver's default collapse applies.
   const escapeToEditor = useCallback(() => {
     const pos = getPos?.();
-    requestEditorFocus(documentPath, {
+    requestTabFocus(documentPath, {
       reason: "blob-escape",
       // Focus IS in this widget's composer — an explicit hand-off, not an
       // ambient grab, so it may leave the text entry.
@@ -316,7 +316,7 @@ export const PromptBlob = memo(function PromptBlob({
     // suppressEditorFocus first: the arbiter routes focus to the editor on
     // new-file creation (and "/" leaves the editor holding focus) — it
     // would win the race otherwise.
-    suppressEditorFocus();
+    suppressTabFocus();
     requestAnimationFrame(() => composerRef.current?.focus());
   }, []);
 

@@ -2,10 +2,8 @@
 
 import { useEffect } from "react";
 import type { FileEntry } from "@/utils/fs";
-import {
-  getOrCreateEditor,
-  focusEditor,
-} from "@/components/editor/editor-store";
+import { getOrCreateEditor } from "@/components/editor/editor-store";
+import { focusTab } from "@/tabs/tab-controllers";
 import { useImageUrl } from "@/hooks/use-image-url";
 import { cn } from "@/lib/utils";
 
@@ -28,7 +26,7 @@ export function ImageViewer({ file, basePath }: ImageViewerProps) {
   // Auto-focus when this component mounts (handles panel 1+ timing issues)
   useEffect(() => {
     const rafId = requestAnimationFrame(() => {
-      focusEditor(file.path);
+      focusTab(file.path);
     });
     return () => cancelAnimationFrame(rafId);
   }, [file.path]);

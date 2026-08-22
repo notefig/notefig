@@ -6,14 +6,14 @@
  * of computing a position.
  */
 import { getProtocolContext } from "@/utils/drag-protocol";
-import { requestEditorFocus } from "../editor-store";
+import { requestTabFocus } from "@/tabs/tab-controllers";
 
 const POLL_INTERVAL_MS = 50;
 const MAX_POLL_ATTEMPTS = 40; // ~2s
 
 export function jumpToBlob(path: string, blobId: string): void {
   getProtocolContext().openFile?.({ tabId: path, intent: "new-tab", moveIfOpen: true });
-  requestEditorFocus(path, { when: "when-mounted", reason: "jump-to-blob" });
+  requestTabFocus(path, { when: "when-mounted", reason: "jump-to-blob" });
   pollForBlob(blobId, 0);
 }
 

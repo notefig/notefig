@@ -54,3 +54,23 @@ export function findLayoutSelectedTab(nodes: LayoutNode[]): string | null {
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// The blessed one-shot reads. The layout's single source of truth is the URL,
+// so these parse `window.location` fresh on every call — for non-reactive
+// callers (agent tools, prompt composers, entity handles). Reactive UI must
+// go through `useLayoutSearchParam`/`useDockableTabs` instead.
+// ---------------------------------------------------------------------------
+
+export function readLayout(): LayoutNode[] {
+  const params = new URLSearchParams(window.location.search);
+  return parseLayout(params.get(LAYOUT_PARAM));
+}
+
+export function readOpenTabIds(): string[] {
+  return extractTabIds(readLayout());
+}
+
+export function readActiveTabId(): string | null {
+  return findLayoutSelectedTab(readLayout());
+}
