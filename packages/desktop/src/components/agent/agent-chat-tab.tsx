@@ -76,6 +76,8 @@ import {
   useAgentTabController,
   type ComposerFocusHandle,
 } from "./agent-tab-controller";
+import { requestTabFocus } from "@/tabs/tab-controllers";
+import { agentTabId } from "@/tabs/tab-id";
 import { CopyTextButton } from "./copy-text-button";
 import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
 
@@ -229,6 +231,18 @@ function ComposerOverlay({
   composerFocusRef: { readonly current: ComposerFocusHandle };
 }) {
   const { t } = useTranslation();
+  // Focus goes through the arbiter, exactly like a document editor's mount
+  // intent (use-editor-focus-lifecycle): the controller resolves it into
+  // the composer's own focus call, and an ambient intent stands down for a
+  // modal, a menu or a sidebar text entry instead of yanking them. Re-fired
+  // when the session finishes loading, since a disabled composer declines.
+  useEffect(() => {
+    if (isLoadingSession) return;
+    requestTabFocus(agentTabId(taskRow.taskId), {
+      when: "when-mounted",
+      reason: "chat-composer-ready",
+    });
+  }, [isLoadingSession, taskRow.taskId]);
   // The provider's scrollToEnd is a no-op now (nothing registers with it —
   // Transcript owns its own scroll container), kept only so this hook call
   // doesn't need the provider ripped out from around the tab.
@@ -1295,14 +1309,9 @@ function PromptBox({
   const { t } = useTranslation();
   const harnessLabel = useHarnessLabel(harnessId);
   const editorRef = useRef<PromptEditorHandle>(null);
-  // autoFocus can't land in a disabled editor — refocus once the session
-  // load finishes and the composer opens up.
-  useEffect(() => {
-    if (!disabled) editorRef.current?.focus();
-  }, [disabled]);
-  // Hand the controller a live focus call. A disabled composer (session
-  // still loading) declines, which leaves a when-mounted intent retrying
-  // until the effect above takes over.
+  // Hand the controller a live focus call — the one way focus reaches this
+  // composer. A disabled composer (session still loading) declines, which
+  // leaves the arbiter's when-mounted intent retrying until it opens up.
   useLayoutEffect(() => {
     const box = focusRef.current;
     box.focus = () => {
@@ -1322,11 +1331,6 @@ function PromptBox({
         value={value}
         onChange={onChange}
         disabled={disabled}
-        // autoFocus: mount == tab selected (the dock unmounts unselected
-        // tabs), and pulling focus into the dock is also what keeps the
-        // tab hotkeys (Ctrl+Tab, ⌘W, ⌘1-9) alive — they listen on the
-        // dockable container, the way editors self-focus on tab-select.
-        autoFocus
         onKeyDown={(event) => {
           const action = deriveComposerKeyAction({
             key: event.key,

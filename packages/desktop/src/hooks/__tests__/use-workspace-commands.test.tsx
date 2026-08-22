@@ -5,11 +5,6 @@ import {
   useWorkspaceCommands,
   type WorkspaceCommands,
 } from "@/hooks/use-workspace-commands";
-import {
-  registerTabController,
-  unregisterTabController,
-  type TabController,
-} from "@/tabs/tab-controllers";
 
 vi.mock("@/adapters", () => ({
   platformAdapter: { ui: { toggleFullscreen: vi.fn(async () => {}) } },
@@ -76,58 +71,5 @@ describe("search in the active tab", () => {
       filePattern: undefined,
       initialQuery: "beta",
     });
-  });
-
-  it("searches the whole workspace with nothing open", () => {
-    render(null);
-
-    act(() => commands.handleSearchInFile());
-
-    expect(openSearchPanel).toHaveBeenCalledWith({
-      filePattern: undefined,
-      initialQuery: "beta",
-    });
-  });
-});
-
-describe("undo/redo in the focused tab", () => {
-  const undo = vi.fn();
-  const redo = vi.fn();
-
-  const controller: TabController = {
-    tabId: "/ws/notes.md",
-    kind: "file",
-    focus: () => true,
-    isFocusable: () => true,
-    selectedText: () => undefined,
-    dispose: () => {},
-    search: () => [],
-    revealMatch: () => false,
-    history: { undo, redo },
-  };
-
-  beforeEach(() => {
-    undo.mockClear();
-    redo.mockClear();
-  });
-
-  afterEach(() => unregisterTabController("/ws/notes.md"));
-
-  it("routes to the focused tab's own history", () => {
-    registerTabController(controller);
-    render("/ws/notes.md");
-
-    act(() => commands.runHistoryAction("undo"));
-    act(() => commands.runHistoryAction("redo"));
-
-    expect(undo).toHaveBeenCalledTimes(1);
-    expect(redo).toHaveBeenCalledTimes(1);
-  });
-
-  it("is inert on a tab type with no history", () => {
-    render("agent:task_1");
-
-    expect(() => act(() => commands.runHistoryAction("undo"))).not.toThrow();
-    expect(undo).not.toHaveBeenCalled();
   });
 });

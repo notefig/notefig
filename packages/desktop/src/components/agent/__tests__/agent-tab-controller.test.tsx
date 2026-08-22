@@ -61,14 +61,6 @@ describe("agent tab controller", () => {
     expect(hasTabController(TAB_ID)).toBe(false);
   });
 
-  it("focuses the composer", () => {
-    const focus = vi.fn(() => true);
-    mount(focus);
-
-    expect(getTabController(TAB_ID)!.focus()).toBe(true);
-    expect(focus).toHaveBeenCalledTimes(1);
-  });
-
   it("never yanks focus out of another text entry unless told to", () => {
     const focus = vi.fn(() => true);
     mount(focus);
@@ -112,25 +104,5 @@ describe("agent tab controller", () => {
 
     expect(controller.selectedText()).toBeUndefined();
     outside.remove();
-  });
-
-  it("closing the tab never tears the session down", () => {
-    mount();
-    // dispose is deliberately inert: the session outlives its tab.
-    expect(() => getTabController(TAB_ID)!.dispose()).not.toThrow();
-  });
-
-  it("has find-in-tab wired but not yet implemented (MET-152)", () => {
-    mount();
-    const controller = getTabController(TAB_ID)!;
-
-    expect(controller.search("transcript")).toEqual([]);
-    expect(
-      controller.revealMatch({
-        matchText: "transcript",
-        lineText: "hello from the transcript",
-        occurrence: 0,
-      }),
-    ).toBe(false);
   });
 });

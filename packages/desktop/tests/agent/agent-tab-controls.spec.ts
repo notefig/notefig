@@ -25,6 +25,8 @@ test.describe("agent tab controls", () => {
     await openWorkspace(page, WORKSPACE_PATH);
     await startMockSession(page, WORKSPACE_PATH);
     await expect(composer(page)).toBeVisible();
+    // The tab's own mount intent, resolved by the arbiter into the composer.
+    await expect.poll(() => focusInComposer(page)).toBe(true);
 
     // Take focus out of the tab: the sessions list in the sidebar.
     await page
