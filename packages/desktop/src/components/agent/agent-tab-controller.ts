@@ -21,16 +21,10 @@ import {
   type TabSearchOptions,
 } from "@/tabs/tab-controllers";
 import { agentTabId } from "@/tabs/tab-id";
+import type { PromptEditorHandle } from "./prompt-editor";
 
-/** A live element reference; `RefObject`-compatible in both React typings. */
-type ElementRef<T extends HTMLElement> = { readonly current: T | null };
-
-/** A mutable box the composer fills in with its own focus call. */
-export type ComposerFocusHandle = { focus: () => boolean };
-
-export function createComposerFocusHandle(): ComposerFocusHandle {
-  return { focus: () => false };
-}
+/** A live ref; `RefObject`-compatible across React typings. */
+type LiveRef<T> = { readonly current: T | null };
 
 /**
  * The chat tab's primary surface is its composer: focusing the tab puts the
@@ -39,8 +33,8 @@ export function createComposerFocusHandle(): ComposerFocusHandle {
  */
 function createAgentTabController(
   taskId: string,
-  root: ElementRef<HTMLElement>,
-  composer: ComposerFocusHandle,
+  root: LiveRef<HTMLElement>,
+  composer: LiveRef<PromptEditorHandle>,
 ): TabController {
   const tabId = agentTabId(taskId);
 
@@ -62,7 +56,10 @@ function createAgentTabController(
       // elsewhere; only an explicit hand-off may.
       if (!steal && isTextEntryActive(active)) return false;
 
-      return composer.focus();
+      // The composer declines while it is disabled (session still
+      // loading), which leaves a when-mounted intent retrying until it
+      // opens up — no other path focuses this tab.
+      return composer.current?.focus() ?? false;
     },
 
     isFocusable: () => root.current !== null,
@@ -108,21 +105,19 @@ function createAgentTabController(
 
 /**
  * Publish this chat tab's controls for as long as it is mounted. Returns the
- * root ref to spread on the tab's outermost element and the composer's focus
- * box to hand down to the prompt box.
+ * refs the tab must attach: `rootRef` on its outermost element (selection
+ * scoping) and `composerRef` on the prompt editor (focus).
  */
 export function useAgentTabController(taskId: string) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const composerFocusRef = useRef<ComposerFocusHandle>(
-    createComposerFocusHandle(),
-  );
+  const composerRef = useRef<PromptEditorHandle>(null);
 
   useEffect(() => {
     registerTabController(
-      createAgentTabController(taskId, rootRef, composerFocusRef.current),
+      createAgentTabController(taskId, rootRef, composerRef),
     );
     return () => unregisterTabController(agentTabId(taskId));
   }, [taskId]);
 
-  return { rootRef, composerFocusRef };
+  return { rootRef, composerRef };
 }

@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
@@ -72,10 +73,7 @@ import {
   deriveComposerButton,
   deriveComposerKeyAction,
 } from "./prompt-blob-state";
-import {
-  useAgentTabController,
-  type ComposerFocusHandle,
-} from "./agent-tab-controller";
+import { useAgentTabController } from "./agent-tab-controller";
 import { requestTabFocus } from "@/tabs/tab-controllers";
 import { agentTabId } from "@/tabs/tab-id";
 import { CopyTextButton } from "./copy-text-button";
@@ -115,7 +113,7 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
   const { t } = useTranslation();
   // Publish this tab's controls (focus, selection, find-in-tab) while it is
   // mounted, so the generic tab layer can drive it like any other tab.
-  const { rootRef, composerFocusRef } = useAgentTabController(taskId);
+  const { rootRef, composerRef } = useAgentTabController(taskId);
   const taskRow = useTaskRow(taskId);
   const isRunning = taskRow?.status === "running";
   // The session/load window (MET-54): a restored row waiting for its revive,
@@ -178,7 +176,7 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
         isRunning={isRunning}
         isLoadingSession={isLoadingSession}
         transcriptScrollRef={transcriptScrollRef}
-        composerFocusRef={composerFocusRef}
+        composerRef={composerRef}
       />
     </div>
   );
@@ -218,7 +216,7 @@ function ComposerOverlay({
   isRunning,
   isLoadingSession,
   transcriptScrollRef,
-  composerFocusRef,
+  composerRef,
 }: {
   containerRef: (el: HTMLDivElement | null) => void;
   taskRow: AgentTaskRow;
@@ -227,8 +225,8 @@ function ComposerOverlay({
   /** Transcript's own scroll-to-end (it bypasses the provider below — see
    *  Transcript's doc comment). */
   transcriptScrollRef: TranscriptScrollHandleRef;
-  /** The tab controller's focus box — the prompt box fills it in. */
-  composerFocusRef: { readonly current: ComposerFocusHandle };
+  /** The tab controller's handle on the composer — how focus reaches it. */
+  composerRef: RefObject<PromptEditorHandle>;
 }) {
   const { t } = useTranslation();
   // Focus goes through the arbiter, exactly like a document editor's mount
@@ -326,7 +324,7 @@ function ComposerOverlay({
           disabled={isLoadingSession}
           harnessId={taskRow.harnessId}
           workspacePath={taskRow.workspacePath}
-          focusRef={composerFocusRef}
+          composerRef={composerRef}
         />
       )}
     </div>
@@ -1290,7 +1288,7 @@ function PromptBox({
   disabled = false,
   harnessId,
   workspacePath,
-  focusRef,
+  composerRef,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -1303,30 +1301,15 @@ function PromptBox({
   disabled?: boolean;
   harnessId: string;
   workspacePath: string;
-  /** Filled in for the tab controller: focusing the tab focuses here. */
-  focusRef: { readonly current: ComposerFocusHandle };
+  /** The tab controller focuses the tab by focusing this. */
+  composerRef: RefObject<PromptEditorHandle>;
 }) {
   const { t } = useTranslation();
   const harnessLabel = useHarnessLabel(harnessId);
-  const editorRef = useRef<PromptEditorHandle>(null);
-  // Hand the controller a live focus call — the one way focus reaches this
-  // composer. A disabled composer (session still loading) declines, which
-  // leaves the arbiter's when-mounted intent retrying until it opens up.
-  useLayoutEffect(() => {
-    const box = focusRef.current;
-    box.focus = () => {
-      if (disabled || !editorRef.current) return false;
-      editorRef.current.focus();
-      return true;
-    };
-    return () => {
-      box.focus = () => false;
-    };
-  }, [focusRef, disabled]);
   return (
     <div className="pointer-events-auto rounded-2xl border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40">
       <PromptEditor
-        ref={editorRef}
+        ref={composerRef}
         workspacePath={workspacePath}
         value={value}
         onChange={onChange}

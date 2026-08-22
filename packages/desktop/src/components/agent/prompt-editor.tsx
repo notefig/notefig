@@ -45,7 +45,10 @@ import { cn } from "@/lib/utils";
  * wiring are already per-trigger.
  */
 export interface PromptEditorHandle {
-  focus: () => void;
+  /** Focus the composer, caret at the end. False when it can't take focus
+   *  (not mounted, destroyed, or disabled while a session loads) — callers
+   *  going through the focus arbiter retry until it can. */
+  focus: () => boolean;
 }
 
 interface SuggestionPopupState {
@@ -538,7 +541,11 @@ function usePromptEditorSync({
     liveEditor.commands.setContent(draftToDoc(workspacePath, value), {
       emitUpdate: false,
     });
-    liveEditor.commands.focus("end");
+    // Put the caret back at the end of the swapped-in draft, but only when
+    // this composer already holds focus: pulling focus in from somewhere
+    // else is the focus arbiter's decision, not a side effect of a content
+    // round trip (a send clearing the draft used to yank it back).
+    if (liveEditor.isFocused) liveEditor.commands.focus("end");
   }, [liveEditor, value, workspacePath, lastEmitted]);
 
   useEffect(() => {
@@ -630,8 +637,9 @@ export const PromptEditor = forwardRef<
     ref,
     () => ({
       focus: () => {
-        if (!editor || editor.isDestroyed) return;
+        if (!editor || editor.isDestroyed || !editor.isEditable) return false;
         editor.commands.focus("end");
+        return true;
       },
     }),
     [editor],
