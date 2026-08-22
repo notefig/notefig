@@ -12,9 +12,8 @@ import {
   getSelectedText,
   navigateToLocation,
   getMarkdownEditor,
-  requestEditorFocus,
-  setActiveEditorFocusTarget,
 } from "@/components/editor/editor-store";
+import { requestTabFocus, setActiveTab } from "@/tabs/tab-controllers";
 import { findPromptNodeId } from "@/components/editor/ai-prompt-utils";
 import { consumePendingPromptBlobFocus } from "@/components/agent/prompt-blob-store";
 
@@ -95,8 +94,8 @@ describe("focus arbiter keeper redirect", () => {
    *  only the arbiter's behavior. */
   async function emptyKeeperDoc(path: string): Promise<string> {
     getOrCreateEditor(path, EMPTY_CONFIG);
-    // Editor intents are only eligible for the arbiter's active editor.
-    setActiveEditorFocusTarget(path);
+    // Tab intents are only eligible for the arbiter's active tab.
+    setActiveTab(path);
     await new Promise((resolve) => setTimeout(resolve, 0));
     const blobId = findPromptNodeId(getMarkdownEditor(path)!.state.doc);
     expect(blobId).toBeTruthy();
@@ -105,7 +104,7 @@ describe("focus arbiter keeper redirect", () => {
   }
 
   afterEach(() => {
-    setActiveEditorFocusTarget(null);
+    setActiveTab(null);
   });
 
   it("forwards ambient intents to the keeper composer on empty docs", async () => {
@@ -113,7 +112,7 @@ describe("focus arbiter keeper redirect", () => {
 
     // A tab-activation-style intent: non-steal, while some other control
     // may hold focus. It must route to the composer, not vanish.
-    requestEditorFocus("/ws/empty.md", { reason: "tab-selected" });
+    requestTabFocus("/ws/empty.md", { reason: "tab-selected" });
     await new Promise((resolve) => setTimeout(resolve, 0)); // microtask flush
 
     expect(consumePendingPromptBlobFocus(blobId)).toBe(true);
@@ -122,7 +121,7 @@ describe("focus arbiter keeper redirect", () => {
   it("explicit steal hand-offs still reach the editor, not the composer", async () => {
     const blobId = await emptyKeeperDoc("/ws/empty-steal.md");
 
-    requestEditorFocus("/ws/empty-steal.md", {
+    requestTabFocus("/ws/empty-steal.md", {
       reason: "blob-escape",
       steal: true,
     });
@@ -133,10 +132,10 @@ describe("focus arbiter keeper redirect", () => {
 
   it("does not redirect on documents with content", async () => {
     getOrCreateEditor("/ws/full.md", MD_CONFIG);
-    setActiveEditorFocusTarget("/ws/full.md");
+    setActiveTab("/ws/full.md");
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    requestEditorFocus("/ws/full.md", { reason: "tab-selected" });
+    requestTabFocus("/ws/full.md", { reason: "tab-selected" });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     // No keeper exists on content docs — nothing pending anywhere.

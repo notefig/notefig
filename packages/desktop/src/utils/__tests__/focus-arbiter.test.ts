@@ -23,7 +23,7 @@ describe("FocusArbiter", () => {
       queueMicrotask: () => {},
     });
 
-    arbiter.registerResolver("editor", (intent) => {
+    arbiter.registerResolver("tab", (intent) => {
       focused.push(intent);
       return true;
     });
@@ -64,7 +64,7 @@ describe("FocusArbiter", () => {
     });
 
     const execute = options?.executeFocus ?? (() => true);
-    arbiter.registerResolver("editor", () => execute());
+    arbiter.registerResolver("tab", () => execute());
     arbiter.registerResolver("element", () => execute());
 
     return arbiter;
@@ -75,8 +75,8 @@ describe("FocusArbiter", () => {
 
     h.arbiter.request({
       id: "low",
-      domain: "editor",
-      target: { type: "editor", filePath: "/a.md" },
+      domain: "tab",
+      target: { type: "tab", tabId: "/a.md" },
       reason: "low",
       priority: 10,
     });
@@ -88,7 +88,7 @@ describe("FocusArbiter", () => {
       priority: 90,
     });
 
-    h.arbiter.setActiveEditor("/a.md");
+    h.arbiter.setActiveTab("/a.md");
     h.arbiter.flush();
 
     expect(h.focused[0]?.id).toBe("high");
@@ -99,21 +99,21 @@ describe("FocusArbiter", () => {
 
     h.arbiter.request({
       id: "editor-a",
-      domain: "editor",
-      target: { type: "editor", filePath: "/a.md" },
+      domain: "tab",
+      target: { type: "tab", tabId: "/a.md" },
       reason: "tab-focus",
       priority: 70,
     });
 
-    h.arbiter.setActiveEditor("/b.md");
+    h.arbiter.setActiveTab("/b.md");
     h.arbiter.flush();
 
     expect(h.focused).toHaveLength(0);
 
     h.arbiter.request({
       id: "editor-b",
-      domain: "editor",
-      target: { type: "editor", filePath: "/b.md" },
+      domain: "tab",
+      target: { type: "tab", tabId: "/b.md" },
       reason: "tab-focus",
       priority: 70,
     });
@@ -125,12 +125,12 @@ describe("FocusArbiter", () => {
   it("respects suppression windows", () => {
     const h = createHarness();
 
-    h.arbiter.suppress("editor", 200);
-    h.arbiter.setActiveEditor("/a.md");
+    h.arbiter.suppress("tab", 200);
+    h.arbiter.setActiveTab("/a.md");
     h.arbiter.request({
       id: "editor",
-      domain: "editor",
-      target: { type: "editor", filePath: "/a.md" },
+      domain: "tab",
+      target: { type: "tab", tabId: "/a.md" },
       reason: "tab-focus",
       priority: 70,
     });
@@ -165,11 +165,11 @@ describe("FocusArbiter", () => {
   it("blocks lower-priority focus during cooldown and allows higher-priority preemption", () => {
     const h = createHarness();
 
-    h.arbiter.setActiveEditor("/a.md");
+    h.arbiter.setActiveTab("/a.md");
     h.arbiter.request({
       id: "editor",
-      domain: "editor",
-      target: { type: "editor", filePath: "/a.md" },
+      domain: "tab",
+      target: { type: "tab", tabId: "/a.md" },
       reason: "editor",
       priority: 70,
     });
@@ -211,13 +211,13 @@ describe("FocusArbiter", () => {
 
     arbiter.request({
       id: "mount",
-      domain: "editor",
-      target: { type: "editor", filePath: "/a.md" },
+      domain: "tab",
+      target: { type: "tab", tabId: "/a.md" },
       reason: "mount",
       priority: 70,
       when: "when-mounted",
     });
-    arbiter.setActiveEditor("/a.md");
+    arbiter.setActiveTab("/a.md");
 
     arbiter.flush();
     now += 1;
@@ -248,8 +248,8 @@ describe("FocusArbiter", () => {
 
     arbiter.request({
       id: "pending",
-      domain: "editor",
-      target: { type: "editor", filePath: "/a.md" },
+      domain: "tab",
+      target: { type: "tab", tabId: "/a.md" },
       reason: "test",
       priority: 10,
       when: "next-frame",

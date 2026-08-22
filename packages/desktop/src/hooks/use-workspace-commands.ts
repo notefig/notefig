@@ -1,8 +1,9 @@
 import { useCallback } from "react";
 import { useHotkey } from "@tanstack/react-hotkeys";
-import { getEditor } from "@/components/editor/editor-store";
 import { platformAdapter } from "@/adapters";
 import { getFileName } from "@/utils/fs";
+import { runTabHistoryAction } from "@/tabs/tab-controllers";
+import { tabKind } from "@/tabs/tab-id";
 import type { FileTreeMode } from "@/components/editor/file-tree";
 
 export interface WorkspaceCommandsOptions {
@@ -23,7 +24,8 @@ export interface WorkspaceCommandsOptions {
 export interface WorkspaceCommands {
   handleNewFile: () => void;
   handleNewDirectory: () => void;
-  runEditorHistoryAction: (action: "undo" | "redo") => void;
+  /** Undo/redo inside the focused tab, if its type keeps a history. */
+  runHistoryAction: (action: "undo" | "redo") => void;
   handleToggleFullscreen: () => void;
   handleSearchInFile: () => void;
   handleSearchInFiles: () => void;
@@ -62,20 +64,11 @@ export function useWorkspaceCommands({
     });
   }, [workspacePath, openSidebarIfCollapsed, setFileTreeMode]);
 
-  const runEditorHistoryAction = useCallback(
+  const runHistoryAction = useCallback(
     (action: "undo" | "redo") => {
       const focusedTabId = getFocusedTabId();
       if (!focusedTabId) return;
-
-      const editor = getEditor(focusedTabId) as
-        | { undo?: () => void; redo?: () => void }
-        | undefined;
-
-      if (action === "undo") {
-        editor?.undo?.();
-      } else {
-        editor?.redo?.();
-      }
+      runTabHistoryAction(focusedTabId, action);
     },
     [getFocusedTabId],
   );
@@ -86,18 +79,21 @@ export function useWorkspaceCommands({
     });
   }, []);
 
-  /** Mod+F — search within the active file */
+  /**
+   * Mod+F — search within the active tab. The file filter only means
+   * something for a file tab; on any other kind (an agent session, the
+   * release notes) this falls back to an unfiltered search, seeded with
+   * whatever is selected in that tab.
+   */
   const handleSearchInFile = useCallback(() => {
     const selectedText = getSelectedText();
+    const searchableFile =
+      activeTabId && tabKind(activeTabId) === "file" ? activeTabId : null;
 
-    if (activeTabId) {
-      openSearchPanel({
-        filePattern: getFileName(activeTabId),
-        initialQuery: selectedText,
-      });
-    } else {
-      openSearchPanel({ initialQuery: selectedText });
-    }
+    openSearchPanel({
+      filePattern: searchableFile ? getFileName(searchableFile) : undefined,
+      initialQuery: selectedText,
+    });
   }, [activeTabId, getSelectedText, openSearchPanel]);
 
   /** Mod+Shift+F — global search across all files */
@@ -126,7 +122,7 @@ export function useWorkspaceCommands({
   return {
     handleNewFile,
     handleNewDirectory,
-    runEditorHistoryAction,
+    runHistoryAction,
     handleToggleFullscreen,
     handleSearchInFile,
     handleSearchInFiles,

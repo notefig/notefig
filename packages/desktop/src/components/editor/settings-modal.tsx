@@ -54,7 +54,7 @@ import {
 interface SettingsModalProps {
   direction: "ltr" | "rtl";
   onDirectionChange: (direction: "ltr" | "rtl") => void;
-  onFocusEditor: () => void;
+  onFocusTab: () => void;
 }
 
 interface SettingsSection {
@@ -97,14 +97,14 @@ interface SettingsState {
 export function SettingsModal({
   direction,
   onDirectionChange,
-  onFocusEditor,
+  onFocusTab,
 }: SettingsModalProps) {
   const { t } = useTranslation();
   const { isOn: isSettingsOpen, setFlag: handleSettingsToggle } =
     useSearchParamFlag("settings", { replace: true });
   const handleCloseAutoFocus = (event: Event) => {
     event.preventDefault();
-    onFocusEditor();
+    onFocusTab();
   };
   const [activeSection, setActiveSection] = useState("general");
   const [settings, setSettings] = useState<SettingsState>({

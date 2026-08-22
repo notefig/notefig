@@ -21,10 +21,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { getFileName } from "@/utils/fs";
 import type { SearchMatch } from "@/adapters/platform-adapter.interface";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
-import {
-  suppressEditorFocus,
-  requestNavigation,
-} from "@/components/editor/editor-store";
+import { requestNavigation } from "@/components/editor/editor-store";
+import { suppressTabFocus } from "@/tabs/tab-controllers";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
 
 interface SearchPanelProps {
@@ -85,7 +83,7 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
         const initialQuery = options?.initialQuery;
 
         // Suppress editor focus stealing for 500ms to prevent race conditions
-        suppressEditorFocus(500);
+        suppressTabFocus(500);
 
         if (initialQuery !== undefined) {
           setQuery(initialQuery);

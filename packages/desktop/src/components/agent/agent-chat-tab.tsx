@@ -1,8 +1,3 @@
-// Pre-existing tangle: the editor component graph (jump-to-blob →
-// editor-store → ai-prompt-node → prompt-blob) reaches back to this tab.
-// Untangling means relocating the editor registry to a leaf module (see
-// file-sync's editor-store import comment); new cycles elsewhere still gate.
-// fallow-ignore-file circular-dependency
 import {
   memo,
   useCallback,
@@ -77,6 +72,12 @@ import {
   deriveComposerButton,
   deriveComposerKeyAction,
 } from "./prompt-blob-state";
+import {
+  useAgentTabController,
+  type ComposerFocusHandle,
+} from "./agent-tab-controller";
+import { requestTabFocus } from "@/tabs/tab-controllers";
+import { agentTabId } from "@/tabs/tab-id";
 import { CopyTextButton } from "./copy-text-button";
 import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
 
@@ -112,6 +113,9 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
 
 function AgentChatTabBody({ taskId }: { taskId: string }) {
   const { t } = useTranslation();
+  // Publish this tab's controls (focus, selection, find-in-tab) while it is
+  // mounted, so the generic tab layer can drive it like any other tab.
+  const { rootRef, composerFocusRef } = useAgentTabController(taskId);
   const taskRow = useTaskRow(taskId);
   const isRunning = taskRow?.status === "running";
   // The session/load window (MET-54): a restored row waiting for its revive,
@@ -159,7 +163,10 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
   return (
     // The dock's content wrapper is a plain flex box, so this root brings
     // its own positioning context for the absolute composer overlay.
-    <div className="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
+    <div
+      ref={rootRef}
+      className="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
+    >
       <Transcript
         taskId={taskId}
         bottomInset={composerHeight}
@@ -171,6 +178,7 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
         isRunning={isRunning}
         isLoadingSession={isLoadingSession}
         transcriptScrollRef={transcriptScrollRef}
+        composerFocusRef={composerFocusRef}
       />
     </div>
   );
@@ -210,6 +218,7 @@ function ComposerOverlay({
   isRunning,
   isLoadingSession,
   transcriptScrollRef,
+  composerFocusRef,
 }: {
   containerRef: (el: HTMLDivElement | null) => void;
   taskRow: AgentTaskRow;
@@ -218,8 +227,22 @@ function ComposerOverlay({
   /** Transcript's own scroll-to-end (it bypasses the provider below — see
    *  Transcript's doc comment). */
   transcriptScrollRef: TranscriptScrollHandleRef;
+  /** The tab controller's focus box — the prompt box fills it in. */
+  composerFocusRef: { readonly current: ComposerFocusHandle };
 }) {
   const { t } = useTranslation();
+  // Focus goes through the arbiter, exactly like a document editor's mount
+  // intent (use-editor-focus-lifecycle): the controller resolves it into
+  // the composer's own focus call, and an ambient intent stands down for a
+  // modal, a menu or a sidebar text entry instead of yanking them. Re-fired
+  // when the session finishes loading, since a disabled composer declines.
+  useEffect(() => {
+    if (isLoadingSession) return;
+    requestTabFocus(agentTabId(taskRow.taskId), {
+      when: "when-mounted",
+      reason: "chat-composer-ready",
+    });
+  }, [isLoadingSession, taskRow.taskId]);
   // The provider's scrollToEnd is a no-op now (nothing registers with it —
   // Transcript owns its own scroll container), kept only so this hook call
   // doesn't need the provider ripped out from around the tab.
@@ -303,6 +326,7 @@ function ComposerOverlay({
           disabled={isLoadingSession}
           harnessId={taskRow.harnessId}
           workspacePath={taskRow.workspacePath}
+          focusRef={composerFocusRef}
         />
       )}
     </div>
@@ -1266,6 +1290,7 @@ function PromptBox({
   disabled = false,
   harnessId,
   workspacePath,
+  focusRef,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -1278,15 +1303,26 @@ function PromptBox({
   disabled?: boolean;
   harnessId: string;
   workspacePath: string;
+  /** Filled in for the tab controller: focusing the tab focuses here. */
+  focusRef: { readonly current: ComposerFocusHandle };
 }) {
   const { t } = useTranslation();
   const harnessLabel = useHarnessLabel(harnessId);
   const editorRef = useRef<PromptEditorHandle>(null);
-  // autoFocus can't land in a disabled editor — refocus once the session
-  // load finishes and the composer opens up.
-  useEffect(() => {
-    if (!disabled) editorRef.current?.focus();
-  }, [disabled]);
+  // Hand the controller a live focus call — the one way focus reaches this
+  // composer. A disabled composer (session still loading) declines, which
+  // leaves the arbiter's when-mounted intent retrying until it opens up.
+  useLayoutEffect(() => {
+    const box = focusRef.current;
+    box.focus = () => {
+      if (disabled || !editorRef.current) return false;
+      editorRef.current.focus();
+      return true;
+    };
+    return () => {
+      box.focus = () => false;
+    };
+  }, [focusRef, disabled]);
   return (
     <div className="pointer-events-auto rounded-2xl border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40">
       <PromptEditor
@@ -1295,11 +1331,6 @@ function PromptBox({
         value={value}
         onChange={onChange}
         disabled={disabled}
-        // autoFocus: mount == tab selected (the dock unmounts unselected
-        // tabs), and pulling focus into the dock is also what keeps the
-        // tab hotkeys (Ctrl+Tab, ⌘W, ⌘1-9) alive — they listen on the
-        // dockable container, the way editors self-focus on tab-select.
-        autoFocus
         onKeyDown={(event) => {
           const action = deriveComposerKeyAction({
             key: event.key,
