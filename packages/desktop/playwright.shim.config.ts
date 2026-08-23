@@ -58,6 +58,10 @@ export default defineConfig({
       env: {
         VITE_TEST_BACKEND: "shim",
         VITE_TEST_BACKEND_PORT: String(SHIM_PORT),
+        // The shim's real backend runs on THIS machine; the browser's UA is
+        // a device fiction (Desktop Chrome claims Windows everywhere), so
+        // the app's pathutil flavor is pinned to the actual host OS.
+        VITE_TEST_HOST_OS: process.platform,
       },
       url: `http://localhost:${UI_PORT}`,
       reuseExistingServer: !process.env.CI,

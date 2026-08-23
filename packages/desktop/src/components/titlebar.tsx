@@ -1,4 +1,4 @@
-import { isTauri } from "@/utils/platform";
+import { getDesktopOs } from "@/utils/platform";
 import { useAppSettings } from "@/hooks/use-app-settings";
 
 /**
@@ -11,7 +11,10 @@ const TRAFFIC_LIGHT_CLEARANCE_PX = 30;
 export function Titlebar() {
   const { settings } = useAppSettings();
 
-  if (!isTauri()) return null;
+  // The spacer only exists to clear the macOS overlay traffic lights; on
+  // Windows/Linux the window has native decorations (the macOS-only
+  // titleBarStyle/trafficLightPosition config keys are ignored there).
+  if (getDesktopOs() !== "macos") return null;
 
   // Native webview zoom scales CSS pixels but not the traffic lights, so
   // the clearance floor must be divided by the zoom factor.

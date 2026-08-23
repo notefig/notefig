@@ -1,3 +1,12 @@
+import { path as pathutil, relativeTreePath } from "./path";
+
+/**
+ * Workspace and file paths travel through the router as ONE opaque
+ * percent-encoded segment holding the NATIVE absolute path — the decoded
+ * value must round-trip byte-identical to the collection/registry keys built
+ * from it (`use-workspace-params.ts` hands it straight to them). Never
+ * normalize or re-spell here.
+ */
 export function encodePathForUrl(path: string): string {
   return encodeURIComponent(path);
 }
@@ -18,13 +27,17 @@ export function getAbsolutePathFromUrl(
   return decodePathFromUrl(encodedAbsolutePath);
 }
 
+/** Historical slash-prepend fixup for legacy relative inputs. Prepending to
+ *  a native absolute (`C:\…`) would corrupt it, so guard on isAbsolute. */
+function toRouteAbsolute(path: string): string {
+  return pathutil.isAbsolute(path) ? path : "/" + path;
+}
+
 export function buildEditFileUrl(
   basePath: string,
   absoluteFilePath: string,
 ): string {
-  const normalizedBasePath = basePath.startsWith("/")
-    ? basePath
-    : "/" + basePath;
+  const normalizedBasePath = toRouteAbsolute(basePath);
   return `/${encodePathForUrl(normalizedBasePath)}/edit/${encodePathForUrl(absoluteFilePath)}`;
 }
 
@@ -32,14 +45,12 @@ export function buildPreviewFileUrl(
   basePath: string,
   absoluteFilePath: string,
 ): string {
-  const normalizedBasePath = basePath.startsWith("/")
-    ? basePath
-    : "/" + basePath;
+  const normalizedBasePath = toRouteAbsolute(basePath);
   return `/${encodePathForUrl(normalizedBasePath)}/preview/${encodePathForUrl(absoluteFilePath)}`;
 }
 
 export function buildDirectoryUrl(basePath: string): string {
-  const normalizedPath = basePath.startsWith("/") ? basePath : "/" + basePath;
+  const normalizedPath = toRouteAbsolute(basePath);
   return `/${encodePathForUrl(normalizedPath)}`;
 }
 
@@ -52,10 +63,11 @@ export function getFilePathFromUrl(
   const decodedBasePath = decodePathFromUrl(basePath);
   const decodedRelativePath = decodePathFromUrl(relativePath);
 
-  const normalizedBasePath = decodedBasePath.startsWith("/")
-    ? decodedBasePath
-    : "/" + decodedBasePath;
-  return `${normalizedBasePath}/${decodedRelativePath}`;
+  const normalizedBasePath = toRouteAbsolute(decodedBasePath);
+  return pathutil.join(
+    normalizedBasePath,
+    pathutil.fromTreePath(decodedRelativePath),
+  );
 }
 
 /** @deprecated No longer needed with absolute paths */
@@ -63,19 +75,15 @@ export function getRelativePathForUrl(
   basePath: string,
   fullPath: string,
 ): string {
-  const normalizedBasePath = basePath.startsWith("/")
-    ? basePath
-    : "/" + basePath;
-  const normalizedFullPath = fullPath.startsWith("/")
-    ? fullPath
-    : "/" + fullPath;
+  const normalizedBasePath = toRouteAbsolute(basePath);
+  const normalizedFullPath = toRouteAbsolute(fullPath);
 
-  if (!normalizedFullPath.startsWith(normalizedBasePath)) {
+  const relativePath = relativeTreePath(normalizedBasePath, normalizedFullPath);
+  if (relativePath === undefined) {
     throw new Error(
       `Invalid paths: fullPath "${normalizedFullPath}" must start with basePath "${normalizedBasePath}"`,
     );
   }
 
-  const relativePath = normalizedFullPath.slice(normalizedBasePath.length);
-  return relativePath.startsWith("/") ? relativePath.slice(1) : relativePath;
+  return relativePath;
 }

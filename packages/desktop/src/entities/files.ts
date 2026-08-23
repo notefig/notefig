@@ -35,6 +35,7 @@ import type { FileEntry } from "@/utils/fs";
 import { IGNORE_RULES } from "@/utils/ignore";
 import { calculateContentHash } from "@/utils/hash";
 import { invalidateDerivedState } from "@/utils/file-write-effects";
+import { path as pathutil, relativeTreePath } from "@/utils/path";
 import { queryClient } from "./query-client";
 
 // The shared QueryClient moved to the entities/query-client leaf; re-exported
@@ -141,9 +142,7 @@ export function createFileMetadataCollection(workspaceId: string) {
           const previous = previousRows?.get(path);
           return {
             path,
-            relativePath: path.startsWith(workspaceId)
-              ? path.slice(workspaceId.length + 1)
-              : undefined,
+            relativePath: relativeTreePath(workspaceId, path),
             type,
             modified: stat?.modifiedAt ?? previous?.modified,
             size: stat?.size ?? previous?.size,
@@ -451,12 +450,10 @@ export function hydrateDirectoryStats(
     const collections = workspaceCollectionsRegistry.get(workspaceId);
     if (!collections) return;
 
-    const prefix = dirPath.endsWith("/") ? dirPath : dirPath + "/";
-    const children = collections.metadata.toArray.filter(
-      (row) =>
-        row.path.startsWith(prefix) &&
-        !row.path.slice(prefix.length).includes("/"),
-    );
+    const children = collections.metadata.toArray.filter((row) => {
+      const rel = relativeTreePath(dirPath, row.path);
+      return rel !== undefined && rel !== "" && !rel.includes("/");
+    });
 
     if (children.length > 0) {
       const result = await platformAdapter.fs.getMetadata(
@@ -611,9 +608,7 @@ export async function createFile(
 
   collections.metadata.insert({
     path: filePath,
-    relativePath: filePath.startsWith(workspaceId)
-      ? filePath.slice(workspaceId.length + 1)
-      : undefined,
+    relativePath: relativeTreePath(workspaceId, filePath),
     type: "file",
     contentHash: "",
     size: 0,
@@ -642,9 +637,7 @@ export async function createDirectory(
 
   collections.metadata.insert({
     path: dirPath,
-    relativePath: dirPath.startsWith(workspaceId)
-      ? dirPath.slice(workspaceId.length + 1)
-      : undefined,
+    relativePath: relativeTreePath(workspaceId, dirPath),
     type: "directory",
     contentHash: "",
   });
@@ -684,11 +677,11 @@ export async function deleteFileOrDirectory(
     // For directories, remove all children from collections first.
     // Use direct writes (utils.writeDelete) to bypass mutation handlers —
     // the platform adapter's recursive directory delete handles the FS cleanup.
-    const childPrefix = path.endsWith("/") ? path : path + "/";
     const allMetadata = collections.metadata.toArray;
 
     for (const child of allMetadata) {
-      if (child.path.startsWith(childPrefix)) {
+      const rel = relativeTreePath(path, child.path);
+      if (rel !== undefined && rel !== "") {
         const childContent = collections.content.get(child.path);
         if (childContent) {
           collections.content.utils.writeDelete(child.path);
@@ -812,9 +805,7 @@ export async function renameFileOrDirectory(
   }
 
   const computeRelativePath = (absolutePath: string): string | undefined =>
-    absolutePath.startsWith(workspaceId)
-      ? absolutePath.slice(workspaceId.length + 1)
-      : undefined;
+    relativeTreePath(workspaceId, absolutePath);
 
   if (entry.type === "file") {
     const moveResult = await platformAdapter.fs.moveFile(oldPath, newPath);
@@ -847,12 +838,12 @@ export async function renameFileOrDirectory(
       );
     }
 
-    const childPrefix = oldPath.endsWith("/") ? oldPath : oldPath + "/";
     const allMetadata = collections.metadata.toArray;
 
     for (const child of allMetadata) {
-      if (child.path.startsWith(childPrefix)) {
-        const newChildPath = newPath + child.path.slice(oldPath.length);
+      const rel = relativeTreePath(oldPath, child.path);
+      if (rel !== undefined && rel !== "") {
+        const newChildPath = pathutil.join(newPath, pathutil.fromTreePath(rel));
 
         collections.metadata.utils.writeDelete(child.path);
         collections.metadata.utils.writeInsert({

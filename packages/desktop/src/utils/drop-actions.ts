@@ -17,6 +17,7 @@ import {
 } from "@/components/editor/editor-store";
 import { platformAdapter } from "@/adapters";
 import { getFileName } from "@/utils/fs";
+import { path as pathutil } from "@/utils/path";
 
 /**
  * Move a dragged item into a folder:
@@ -43,7 +44,7 @@ async function moveIntoFolderAsync(
     return;
   }
 
-  const newPath = `${folderPath}/${getFileName(payload.path)}`;
+  const newPath = pathutil.join(folderPath, getFileName(payload.path));
   if (payload.path === newPath) return;
 
   if (payload.fileType === "directory") {
@@ -75,7 +76,7 @@ async function moveImageAsset(
   payload: PayloadOfKind<"image-asset">,
   folderPath: string,
 ): Promise<void> {
-  const newPath = `${folderPath}/${getFileName(payload.absolutePath)}`;
+  const newPath = pathutil.join(folderPath, getFileName(payload.absolutePath));
   if (newPath === payload.absolutePath) return;
 
   const newSrc = newPath.startsWith(payload.workspaceRoot + "/")

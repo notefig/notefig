@@ -12,7 +12,8 @@ import {
   BUILT_IN_HARNESSES,
   buildHarnessResumeCommand,
 } from "@notefig/shared/agent";
-import { normalizePath } from "@/utils/fs";
+import { path as pathutil } from "@/utils/path";
+import { getDesktopOs } from "@/utils/platform";
 import { formatTimeAgo } from "@/utils/format";
 import i18n from "@/utils/intl";
 import { useActiveHarnesses } from "@/hooks/use-harness-selection";
@@ -161,7 +162,7 @@ export function useAgentTasksReady(): boolean {
  * queued-turn count.
  */
 export function useAgentTaskList(workspacePath: string): AgentTaskMeta[] {
-  const normalized = normalizePath(workspacePath);
+  const normalized = pathutil.normalize(workspacePath);
 
   const { data: tasks = [] } = useLiveQuery(
     (q) =>
@@ -241,10 +242,16 @@ export function useSessionActions(task: AgentTaskRow): AgentSessionActions {
         : {
             supported: true,
             command: sessionId
-              ? buildHarnessResumeCommand(harness, {
-                  sessionId,
-                  workspacePath: task.workspacePath,
-                })
+              ? buildHarnessResumeCommand(
+                  harness,
+                  {
+                    sessionId,
+                    workspacePath: task.workspacePath,
+                  },
+                  // The copy target is the user's default terminal:
+                  // PowerShell on Windows, a POSIX shell elsewhere.
+                  getDesktopOs() === "windows" ? "powershell" : "posix",
+                )
               : null,
           },
   };

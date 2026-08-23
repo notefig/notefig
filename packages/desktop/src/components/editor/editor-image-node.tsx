@@ -3,6 +3,7 @@ import type { NodeViewProps } from "@tiptap/core";
 import { NodeViewWrapper } from "@tiptap/react";
 import { useImageUrl } from "@/hooks/use-image-url";
 import { dragSourceProps } from "@/utils/drag-protocol";
+import { path as pathutil } from "@/utils/path";
 
 export function EditorImage(props: NodeViewProps) {
   const src = props.node.attrs.src as string;
@@ -47,7 +48,7 @@ export function EditorImage(props: NodeViewProps) {
       {...dragSourceProps({
         kind: "image-asset",
         src,
-        absolutePath: `${workspaceRoot}/${src}`,
+        absolutePath: pathutil.join(workspaceRoot, pathutil.fromTreePath(src)),
         workspaceRoot,
         sourceFilePath: filePath,
       })}

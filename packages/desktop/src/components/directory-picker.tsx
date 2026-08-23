@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Icons } from "@/components/icons";
-import { pickDirectory } from "@/utils/fs";
+import { getFileName, pickDirectory } from "@/utils/fs";
 import { useTranslation } from "react-i18next";
 
 interface DirectoryPickerProps {
@@ -52,7 +52,7 @@ export function DirectoryPicker({
             className="text-xs text-muted-foreground truncate"
             title={currentDirectory}
           >
-            {currentDirectory.split("/").pop() || currentDirectory}
+            {getFileName(currentDirectory)}
           </p>
         </div>
       )}

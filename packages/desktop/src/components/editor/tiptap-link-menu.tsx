@@ -3,6 +3,7 @@ import { useEditorState } from "@tiptap/react";
 import { ExternalLink, FileText, Link, Unlink } from "lucide-react";
 import type { Editor } from "@tiptap/core";
 import { toast } from "sonner";
+import { getDirectoryPath } from "@/utils/fs";
 import { platformAdapter } from "@/adapters";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
 import { isExternalUrl, buildInternalCandidates } from "./tiptap-link-utils";
@@ -40,7 +41,7 @@ export function LinkBubbleMenu({
       return;
     }
 
-    const fileDir = filePath.substring(0, filePath.lastIndexOf("/")) || "/";
+    const fileDir = getDirectoryPath(filePath);
     const candidates = buildInternalCandidates(href, { fileDir, basePath });
 
     const results = await platformAdapter.fs.exists(candidates);

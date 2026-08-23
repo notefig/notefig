@@ -79,6 +79,11 @@ export async function discoverHarnesses(
   const probedAt = Date.now();
   if (entries.length === 0) return {};
 
+  // Windows note (MET-157): the probe script is POSIX and $SHELL is unset
+  // there, so runShellCommand fails and this returns null — "couldn't
+  // check", which persists nothing and keeps every harness visible. A
+  // native PATH×PATHEXT probe was deliberately skipped to avoid growing the
+  // adapter surface; install detection on Windows is a future nicety.
   let probed: { found: boolean; resolvedPath?: string }[];
   try {
     const { stdout } = await platformAdapter.proc.runShellCommand(

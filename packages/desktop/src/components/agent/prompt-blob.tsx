@@ -40,7 +40,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useKv } from "@/utils/kv-store";
-import { normalizePath, getFileName } from "@/utils/fs";
+import { getFileName } from "@/utils/fs";
+import { workspaceKey } from "@/utils/path";
 import {
   agentEntriesCollection,
   agentPermissionRequestsCollection,
@@ -543,7 +544,7 @@ function usePromptSendActions({
   const { t } = useTranslation();
   const { defaultHarness } = useDefaultHarness();
   const kv = useKv<boolean>("agent");
-  const trustKey = `trust:${normalizePath(workspacePath)}`;
+  const trustKey = `trust:${workspaceKey(workspacePath)}`;
   const [isSending, setIsSending] = useState(false);
   const [confirmTrust, setConfirmTrust] = useState(false);
 

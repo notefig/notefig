@@ -50,3 +50,27 @@ export function isTauri(): boolean {
 export function isWeb(): boolean {
   return getPlatform() === Platform.BROWSER;
 }
+
+export type DesktopOs = "macos" | "windows" | "linux";
+
+/**
+ * Which OS the Tauri shell is running on, or null on web. Synchronous by
+ * design (UA sniffing) so it can gate first-paint layout decisions — the
+ * plugin-os API is async and would flash the wrong chrome.
+ */
+export function getDesktopOs(): DesktopOs | null {
+  if (!isTauri()) return null;
+  // Test harnesses (the e2e shim) pin the real host OS here — browser UAs
+  // in test automation are device fictions (Playwright's "Desktop Chrome"
+  // claims Windows on every runner). Real webviews (WKWebView/WebView2)
+  // report their true OS in the UA.
+  const override = (window as unknown as Record<string, unknown>)
+    .__NOTEFIG_DESKTOP_OS__;
+  if (override === "macos" || override === "windows" || override === "linux") {
+    return override;
+  }
+  const ua = navigator.userAgent;
+  if (ua.includes("Windows")) return "windows";
+  if (ua.includes("Mac")) return "macos";
+  return "linux";
+}

@@ -5,6 +5,7 @@
  * without mounting Tiptap.
  */
 import type { ToolCallUpdate } from "@notefig/shared/agent";
+import { relativeTreePath } from "@/utils/path";
 import type {
   AgentEntry,
   AgentTaskRow,
@@ -177,9 +178,7 @@ export function widgetPromptTarget(params: {
 }): { path: string; pos: number; isDocEmpty: boolean } {
   const { documentPath, workspacePath, pos, docContentSize, isDocEmpty } =
     params;
-  const path = documentPath.startsWith(workspacePath + "/")
-    ? documentPath.slice(workspacePath.length + 1)
-    : documentPath;
+  const path = relativeTreePath(workspacePath, documentPath) || documentPath;
   return { path, pos: pos ?? docContentSize, isDocEmpty };
 }
 

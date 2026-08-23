@@ -156,6 +156,19 @@ function installShimTransport(baseUrl: string): void {
 if (import.meta.env.VITE_TEST_BACKEND === "shim") {
   const port = import.meta.env.VITE_TEST_BACKEND_PORT ?? "4599";
   installShimTransport(`http://127.0.0.1:${port}`);
+
+  // The pathutil flavor must follow the SHIM HOST's OS, not the browser's
+  // user agent — Playwright's "Desktop Chrome" presents a Windows UA even on
+  // a mac runner, which bound the win32 flavor and produced backslash paths
+  // against a posix backend. The Playwright config passes the host's
+  // process.platform through VITE_TEST_HOST_OS; getDesktopOs() reads this
+  // override before falling back to UA sniffing.
+  const hostOs = import.meta.env.VITE_TEST_HOST_OS as string | undefined;
+  if (hostOs) {
+    (window as unknown as Record<string, unknown>).__NOTEFIG_DESKTOP_OS__ =
+      hostOs === "win32" ? "windows" : hostOs === "darwin" ? "macos" : "linux";
+  }
+
   // eslint-disable-next-line no-console
   console.info(`[shim-transport] installed → http://127.0.0.1:${port}`);
 }

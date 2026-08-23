@@ -40,7 +40,7 @@ import {
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/utils/clipboard";
 import { useKv } from "@/utils/kv-store";
-import { normalizePath } from "@/utils/fs";
+import { workspaceKey } from "@/utils/path";
 import type { AgentTaskRow } from "@/agent/agent-collections";
 import {
   cancelAgentTask,
@@ -78,7 +78,7 @@ export function SessionsPanel({
   activeTabId: string | null;
 }) {
   const { t } = useTranslation();
-  const normalized = normalizePath(workspacePath);
+  const normalized = workspaceKey(workspacePath);
   const { openAgentTab } = useWorkspaceTabs();
   const taskMetas = useAgentTaskList(workspacePath);
 

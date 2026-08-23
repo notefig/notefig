@@ -102,24 +102,133 @@ struct AgentHandle {
     stdin: AsyncMutex<ChildStdin>,
     kill: Notify,
     pid: Option<u32>,
+    /// Windows: a Job Object with KILL_ON_JOB_CLOSE holding the child's whole
+    /// tree — the platform's replacement for the unix process group. Dropping
+    /// the handle (or app crash) kills every process in it.
+    #[cfg(windows)]
+    job: Option<job_object::JobObject>,
 }
 
-/// Kill the child's entire process group. The spawn puts each adapter in its
-/// own group (`process_group(0)`), so the group id is the child's pid. A
-/// plain `start_kill` only reaches the direct child — for the built-in
-/// harnesses that's an npx wrapper, and the real adapter + claude CLI
-/// grandchildren reparent to launchd and keep running (verified 2026-07-23:
-/// the orphaned adapter survives stdin EOF for minutes).
-fn kill_process_group(pid: Option<u32>) {
+/// Kill the handle's entire process tree. Unix: the spawn puts each adapter
+/// in its own group (`process_group(0)`), so the group id is the child's
+/// pid. A plain `start_kill` only reaches the direct child — for the
+/// built-in harnesses that's an npx wrapper, and the real adapter + claude
+/// CLI grandchildren reparent to launchd and keep running (verified
+/// 2026-07-23: the orphaned adapter survives stdin EOF for minutes).
+/// Windows: terminate the Job Object the child was assigned at spawn.
+fn kill_process_tree(handle: &AgentHandle) {
     #[cfg(unix)]
+    kill_unix_process_group(handle.pid);
+    #[cfg(windows)]
+    if let Some(job) = &handle.job {
+        job.terminate();
+    }
+    #[cfg(not(any(unix, windows)))]
+    let _ = handle;
+}
+
+#[cfg(unix)]
+fn kill_unix_process_group(pid: Option<u32>) {
     if let Some(pid) = pid {
         unsafe {
             libc::killpg(pid as i32, libc::SIGKILL);
         }
     }
-    // Non-unix: the monitor's `start_kill` / `kill_on_drop` fallback applies.
-    #[cfg(not(unix))]
-    let _ = pid;
+}
+
+#[cfg(windows)]
+mod job_object {
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    /// Owns one Job Object handle. Closing it (Drop) kills every process
+    /// assigned to it — grandchildren included, and even if the app crashes
+    /// (the OS closes our handles for us).
+    pub struct JobObject(HANDLE);
+
+    // HANDLE is a raw pointer; job handles are freely usable across threads.
+    unsafe impl Send for JobObject {}
+    unsafe impl Sync for JobObject {}
+
+    impl JobObject {
+        /// Create a kill-on-close job and assign the child to it. Must run
+        /// before the child spawns grandchildren to guarantee full coverage —
+        /// in practice immediately after spawn, which beats the npx wrapper's
+        /// own child creation. Returns None (child runs unjailed, teardown
+        /// falls back to start_kill) if any step fails.
+        pub fn assign(child_handle: HANDLE) -> Option<JobObject> {
+            unsafe {
+                let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+                if job.is_null() {
+                    return None;
+                }
+                let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                let ok = SetInformationJobObject(
+                    job,
+                    JobObjectExtendedLimitInformation,
+                    &info as *const _ as *const core::ffi::c_void,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                ) != 0
+                    && AssignProcessToJobObject(job, child_handle) != 0;
+                if !ok {
+                    CloseHandle(job);
+                    return None;
+                }
+                Some(JobObject(job))
+            }
+        }
+
+        pub fn terminate(&self) {
+            unsafe {
+                TerminateJobObject(self.0, 1);
+            }
+        }
+    }
+
+    impl Drop for JobObject {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+}
+
+/// Resolve a bare program name to a concrete on-PATH executable on Windows.
+/// `Command::new` maps to CreateProcess, which only tries `.exe` — the npm
+/// world ships `.cmd` shims (npx.cmd, opencode.cmd), so a bare "npx" is
+/// NotFound. Mirrors PATHEXT semantics. Returns the input unchanged when it
+/// already carries a path separator or an extension, or when nothing
+/// resolves (the spawn then reports the real NotFound). The resolved path
+/// ends in `.cmd`/`.bat` where applicable, which routes through std's
+/// CVE-2024-24576 strict-quoting cmd.exe spawn path.
+#[cfg(windows)]
+fn resolve_windows_program(program: &str, env: &HashMap<String, String>) -> String {
+    if program.contains(['\\', '/']) || std::path::Path::new(program).extension().is_some() {
+        return program.to_string();
+    }
+    let path_var = env
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("PATH"))
+        .map(|(_, v)| v.clone())
+        .or_else(|| std::env::var("PATH").ok())
+        .unwrap_or_default();
+    let pathext =
+        std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+    for dir in std::env::split_paths(&path_var) {
+        for ext in pathext.split(';').filter(|e| !e.is_empty()) {
+            let candidate = dir.join(format!("{program}{ext}"));
+            if candidate.is_file() {
+                return candidate.to_string_lossy().into_owned();
+            }
+        }
+    }
+    program.to_string()
 }
 
 lazy_static::lazy_static! {
@@ -253,6 +362,11 @@ pub async fn spawn_agent<R: tauri::Runtime>(
     env: HashMap<String, String>,
     app_handle: AppHandle<R>,
 ) -> AgentResult<SpawnInfo> {
+    // B3 (MET-157): bare names like "npx" only exist as .cmd shims on
+    // Windows; resolve against PATH × PATHEXT before CreateProcess sees it.
+    #[cfg(windows)]
+    let program = resolve_windows_program(&program, &env);
+
     let mut cmd = Command::new(&program);
     cmd.args(&args)
         .current_dir(&cwd)
@@ -293,6 +407,13 @@ pub async fn spawn_agent<R: tauri::Runtime>(
     };
 
     let pid = child.id();
+    // B5 (MET-157): jail the child (and every process it spawns) in a
+    // kill-on-close Job Object right after spawn — before the npx wrapper
+    // forks the adapter/CLI grandchildren.
+    #[cfg(windows)]
+    let job = child
+        .raw_handle()
+        .and_then(|h| job_object::JobObject::assign(h as _));
     let stdin = match child.stdin.take() {
         Some(stdin) => stdin,
         None => {
@@ -310,6 +431,8 @@ pub async fn spawn_agent<R: tauri::Runtime>(
         stdin: AsyncMutex::new(stdin),
         kill: Notify::new(),
         pid,
+        #[cfg(windows)]
+        job,
     });
 
     // Replace any stale entry with the same id (kill the old one first).
@@ -359,7 +482,7 @@ pub async fn spawn_agent<R: tauri::Runtime>(
         tauri::async_runtime::spawn(async move {
             let status = tokio::select! {
                 _ = handle.kill.notified() => {
-                    kill_process_group(handle.pid);
+                    kill_process_tree(&handle);
                     let _ = child.start_kill();
                     child.wait().await.ok()
                 }
@@ -448,10 +571,10 @@ pub fn kill_all_agents() {
         map.drain().map(|(_, handle)| handle).collect()
     };
     for handle in handles {
-        // Group-kill directly (sync): at app exit the runtime may tear the
+        // Tree-kill directly (sync): at app exit the runtime may tear the
         // monitor down before it reacts to the notify, and kill_on_drop only
         // reaches the direct child, orphaning the adapter tree.
-        kill_process_group(handle.pid);
+        kill_process_tree(&handle);
         handle.kill.notify_one();
     }
 }
@@ -464,6 +587,43 @@ mod tests {
     fn ok_result_serializes_with_ok_true() {
         let json = serde_json::to_value(AgentResult::ok(())).unwrap();
         assert_eq!(json["ok"], true);
+    }
+
+    /// MET-157 B3: a bare name resolves to its PATHEXT sibling ("cmd" →
+    /// C:\Windows\System32\cmd.exe); names with an extension or separator
+    /// pass through untouched. Only meaningful on the windows-latest leg.
+    #[cfg(windows)]
+    #[test]
+    fn windows_program_resolution_finds_pathext_shims() {
+        let env = HashMap::new();
+        let resolved = resolve_windows_program("cmd", &env);
+        assert!(
+            resolved.to_lowercase().ends_with("cmd.exe"),
+            "expected a concrete cmd.exe path, got {resolved}"
+        );
+        assert_eq!(resolve_windows_program("cmd.exe", &env), "cmd.exe");
+        assert_eq!(
+            resolve_windows_program("C:\\tools\\thing", &env),
+            "C:\\tools\\thing"
+        );
+    }
+
+    /// MET-157 B3: args must survive std's strict .cmd quoting
+    /// (CVE-2024-24576 path) — a .cmd shim receives a spaced argument intact.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn cmd_shim_spawn_preserves_args() {
+        let dir = tempfile::tempdir().unwrap();
+        let shim = dir.path().join("echoarg.cmd");
+        std::fs::write(&shim, "@echo off\r\necho %~1\r\n").unwrap();
+
+        let output = Command::new(&shim)
+            .arg("hello windows world")
+            .output()
+            .await
+            .expect(".cmd shim should spawn via the strict-quoting path");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(stdout.trim(), "hello windows world");
     }
 
     #[test]
@@ -509,7 +669,7 @@ mod tests {
             .parse()
             .unwrap();
 
-        kill_process_group(child.id());
+        kill_unix_process_group(child.id());
         let _ = child.wait().await;
         tokio::time::sleep(Duration::from_millis(200)).await;
 

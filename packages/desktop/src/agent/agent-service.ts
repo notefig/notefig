@@ -24,7 +24,8 @@ import {
   type TurnOutcome,
 } from "@notefig/shared/agent";
 import { platformAdapter } from "@/adapters";
-import { normalizePath, resolveWorkspacePath } from "@/utils/fs";
+import { resolveWorkspacePath } from "@/utils/fs";
+import { path as pathutil, workspaceKey } from "@/utils/path";
 import { getOrCreateKvCollection } from "@/utils/kv-store";
 import { MarkdownJoiner } from "@/lib/markdown-joiner-transform";
 import { PermissionBroker } from "./permission-broker";
@@ -619,7 +620,12 @@ export class AgentTask {
 
   /** Per-task OpenCode config, under the workspace's own `.metrists/`. */
   private opencodeConfigPath(): string {
-    return `${this.workspacePath}/.metrists/agent/opencode-${this.taskId}.json`;
+    return pathutil.join(
+      this.workspacePath,
+      ".metrists",
+      "agent",
+      `opencode-${this.taskId}.json`,
+    );
   }
 
   /**
@@ -1529,17 +1535,20 @@ export function findBlobAuthorTask(
 export function getWorkspaceTaskManager(
   workspacePath: string,
 ): TaskManager | undefined {
-  return taskManagerRegistry.get(normalizePath(workspacePath));
+  return taskManagerRegistry.get(workspaceKey(workspacePath));
 }
 
 export function getOrCreateWorkspaceTaskManager(
   workspacePath: string,
 ): TaskManager {
-  const normalized = normalizePath(workspacePath);
-  let manager = taskManagerRegistry.get(normalized);
+  // Registry key vs value: workspaceKey collapses Windows respellings onto
+  // one manager, while the manager itself holds the native spelling — it is
+  // the spawn cwd and the persisted task rows' workspacePath.
+  const key = workspaceKey(workspacePath);
+  let manager = taskManagerRegistry.get(key);
   if (!manager) {
-    manager = new TaskManager(normalized);
-    taskManagerRegistry.set(normalized, manager);
+    manager = new TaskManager(pathutil.normalize(workspacePath));
+    taskManagerRegistry.set(key, manager);
   }
   return manager;
 }
@@ -1748,9 +1757,9 @@ export async function disposeAllWorkspaceTaskManagers(): Promise<void> {
 export async function disposeWorkspaceTaskManager(
   workspacePath: string,
 ): Promise<void> {
-  const normalized = normalizePath(workspacePath);
-  const manager = taskManagerRegistry.get(normalized);
-  taskManagerRegistry.delete(normalized);
+  const key = workspaceKey(workspacePath);
+  const manager = taskManagerRegistry.get(key);
+  taskManagerRegistry.delete(key);
   await manager?.disposeAll();
   // Sessions outlive their runtimes: rows with a sessionId go back to
   // "restored" — the same live-but-unspawned state they'd have after a
@@ -1758,7 +1767,7 @@ export async function disposeWorkspaceTaskManager(
   // never deletes anything. Rows that never got a session can't revive;
   // drop them. Both write through the storage-backed collection.
   for (const task of agentTasksCollection.toArray) {
-    if (task.workspacePath !== normalized) continue;
+    if (workspaceKey(task.workspacePath) !== key) continue;
     if (task.sessionId) {
       agentTasksCollection.update(task.taskId, (draft) => {
         draft.status = "restored";

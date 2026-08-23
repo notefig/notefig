@@ -37,6 +37,7 @@ import {
 import { useLiveQuery } from "@tanstack/react-db";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { dropZoneProps, tagCurrentDrag } from "@/utils/drag-protocol";
+import { path as pathutil, relativeTreePath } from "@/utils/path";
 import { moveIntoFolder } from "@/utils/drop-actions";
 import { attachTreeStatHydration } from "./tree-stat-hydration";
 import {
@@ -126,12 +127,12 @@ function FileTreeInner({
   const { metadata } = useFileCollections(basePath);
 
   const toAbs = useCallback(
-    (rel: string) => `${basePath}/${rel.replace(/\/+$/, "")}`,
+    (rel: string) =>
+      pathutil.join(basePath, pathutil.fromTreePath(rel.replace(/\/+$/, ""))),
     [basePath],
   );
   const toRel = useCallback(
-    (abs: string) =>
-      abs.startsWith(basePath) ? abs.slice(basePath.length + 1) : abs,
+    (abs: string) => relativeTreePath(basePath, abs) || abs,
     [basePath],
   );
 
@@ -165,8 +166,7 @@ function FileTreeInner({
   openTabsRef.current = openTabs;
   const isPathOpenInTab = useCallback((absPath: string) => {
     const tabs = openTabsRef.current ?? [];
-    const prefix = absPath + "/";
-    return tabs.some((tab) => tab === absPath || tab.startsWith(prefix));
+    return tabs.some((tab) => pathutil.contains(absPath, tab));
   }, []);
 
   const [pendingDelete, setPendingDelete] = useState<{
@@ -190,9 +190,8 @@ function FileTreeInner({
         itemHeightPx,
         initialSelectedPaths: selectedFilePathRef.current
           ? [
-              selectedFilePathRef.current.startsWith(basePath)
-                ? selectedFilePathRef.current.slice(basePath.length + 1)
-                : selectedFilePathRef.current,
+              relativeTreePath(basePath, selectedFilePathRef.current) ||
+                selectedFilePathRef.current,
             ]
           : [],
         initialExpandedPaths: rememberedExpandedPaths(basePath),
