@@ -4,7 +4,7 @@ Metrists is a **markdown-first, local-first text editor** built with React, Taur
 
 ## Core Principles
 
-### 1. Performance First
+### 1. Performance First|
 
 - **Perceived**: UI feels instant
 - **Real**: File open, typing latency, sync speed
@@ -144,13 +144,12 @@ const dirPath = await platformAdapter.pickDirectory("Select workspace");
 
 ## Editor (Plate)
 
-**Multi-Tab Architecture:** All tabs render simultaneously (hidden via `display: none`). Preserves cursor, scroll, undo/redo. ~5-10MB per tab.
+**Multi-Tab Architecture:** All tabs render simultaneously (hidden via `display: none`). Preserves cursor, scroll, undo/redo. \~5-10MB per tab.
 
 ```typescript
 {fileDataWithContent.map((fileEntry) => (
   <div key={fileEntry.path} style={{ display: fileEntry.path === activeTabId ? 'block' : 'none' }}>
-    <TextEditor file={fileEntry} />
-  </div>
+    <TextEditor file={fileEntry} /></div>
 ))}
 ```
 
@@ -216,7 +215,9 @@ src/
 ## App Icons (macOS)
 
 ### The Problem
+
 macOS app icons have strict design requirements. The icon must follow Apple's Human Interface Guidelines to render correctly across:
+
 - Dock
 - Finder
 - Spotlight
@@ -224,33 +225,37 @@ macOS app icons have strict design requirements. The icon must follow Apple's Hu
 - System Settings
 
 ### macOS Tahoe (macOS 26) Changes
+
 Apple introduced new icon rendering with **Liquid Glass** effects in macOS 26. While `.icns` files still work, the system applies stricter masking and scaling. Icons that don't follow the proper grid appear too small or have ugly gray borders.
 
 ### Icon Specifications
 
-**Content Ratio:** The actual icon content (logo/artwork) should occupy **~83%** of the total canvas. This leaves transparent padding around the edges for macOS to apply its own rounded corners, shadows, and glass effects.
+**Content Ratio:** The actual icon content (logo/artwork) should occupy **\~83%** of the total canvas. This leaves transparent padding around the edges for macOS to apply its own rounded corners, shadows, and glass effects.
 
 **Corner Radius:** macOS app icons use a corner radius of approximately **22.37%** of the canvas width. For a 1024×1024 icon, this means:
-- Corner radius: ~229px
+
+- Corner radius: \~229px
 - The icon should have rounded corners built-in
 
 **Example for 1024×1024:**
+
 - Canvas: 1024×1024
-- Content size: ~849×849 (83%)
-- Corner radius: ~229px
-- Padding: ~87px on each side
+- Content size: \~849×849 (83%)
+- Corner radius: \~229px
+- Padding: \~87px on each side
 
 ### Common Mistakes
 
 1. **Solid background filling 100%** — macOS will not apply its glass effects properly
-2. **Logo too small** (< 80%) — icon appears tiny in the grid
-3. **Logo too large** (> 90%) — edges get clipped by the system mask
+2. **Logo too small** (&lt; 80%) — icon appears tiny in the grid
+3. **Logo too large** (&gt; 90%) — edges get clipped by the system mask
 4. **Sharp corners** — macOS expects pre-rounded icons
 5. **Runtime hacks** — Using `setApplicationIconImage` only fixes the Dock, not Finder/Spotlight
 
 ### Implementation
 
 **Tauri Configuration:**
+
 ```json
 "icon": [
   "icons/32x32.png",
@@ -264,6 +269,7 @@ Apple introduced new icon rendering with **Liquid Glass** effects in macOS 26. W
 ```
 
 **Files Required:**
+
 - `icon.icns` — macOS bundle icon (contains multiple sizes)
 - `icon.png` — 512×512 (Linux/default)
 - `icon.ico` — Windows icon
@@ -274,6 +280,7 @@ Apple introduced new icon rendering with **Liquid Glass** effects in macOS 26. W
 ### Our Fix
 
 We fixed the icon by:
+
 1. Removing the white background from the source SVG
 2. Scaling the logo to 83% of canvas
 3. Applying proper rounded corners (229px radius)
@@ -283,6 +290,7 @@ We fixed the icon by:
 ### Cache Clearing
 
 After changing icons, macOS caches aggressively. To see changes:
+
 ```bash
 rm -rf ~/Library/Caches/com.apple.finder/
 rm -rf ~/Library/Caches/com.apple.Spotlight/

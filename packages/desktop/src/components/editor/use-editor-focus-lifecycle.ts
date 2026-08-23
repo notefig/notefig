@@ -8,12 +8,12 @@
 import { useEffect } from "react";
 import type { Editor } from "@tiptap/core";
 import {
-  requestEditorFocus,
   saveSelection,
   getSavedSelection,
   consumePendingNavigation,
   navigateToLocation,
 } from "@/components/editor/editor-store";
+import { requestTabFocus } from "@/tabs/tab-controllers";
 import {
   docHasRealContent,
   findPromptNodeId,
@@ -47,7 +47,7 @@ export function useEditorFocusLifecycle(
       }
     }
 
-    requestEditorFocus(filePath, {
+    requestTabFocus(filePath, {
       when: "next-frame",
       reason: "text-editor-mount",
     });
@@ -77,7 +77,7 @@ export function useEditorFocusLifecycle(
         if (keeperId) {
           requestPromptBlobFocus(keeperId);
         } else {
-          requestEditorFocus(filePath, {
+          requestTabFocus(filePath, {
             when: "immediate",
             reason: "focus-lost-after-mount",
           });

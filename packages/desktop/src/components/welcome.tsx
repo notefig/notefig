@@ -263,7 +263,7 @@ export function Welcome() {
       <SettingsModal
         direction="ltr"
         onDirectionChange={() => {}}
-        onFocusEditor={() => {}}
+        onFocusTab={() => {}}
       />
     </div>
   );

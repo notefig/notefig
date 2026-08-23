@@ -19,13 +19,22 @@ import {
   flushDocumentSync,
   getDocumentSync,
 } from "@/utils/markdown-conversion";
-import { focusArbiter } from "@/utils/focus-arbiter";
 import {
   isSidebarTextEntryActive,
   isTextEntryActive,
-  type EditorCaretPlacement,
+  type TabCaretPlacement,
 } from "@/utils/focus-arbiter";
+import {
+  registerTabController,
+  unregisterTabController,
+  type TabController,
+  type TabFocusOptions,
+  type TabSearchOptions,
+} from "@/tabs/tab-controllers";
+import type { TabKind } from "@/tabs/tab-id";
 import { resolveSearchTarget, type SearchTarget } from "./editor-position";
+import { platformAdapter } from "@/adapters";
+import { getDirectoryPath } from "@/utils/fs";
 import { docHasRealContent, findPromptNodeId } from "./ai-prompt-utils";
 import { requestPromptBlobFocus } from "@/components/agent/prompt-blob-store";
 import { placeCaretBeforeNode } from "./refocus-editor";
@@ -50,10 +59,10 @@ export interface EditorInstance {
   /**
    * Focus this editor. Returns true if focus was attempted, false if not applicable.
    * For non-focusable editors (images), this is a no-op that returns false.
-   * `caret` is the intent's placement hint (see EditorCaretPlacement);
+   * `caret` is the intent's placement hint (see TabCaretPlacement);
    * without one, the current selection is left untouched.
    */
-  focus(caret?: EditorCaretPlacement): boolean;
+  focus(caret?: TabCaretPlacement): boolean;
   /**
    * Dispose of this editor instance. Cleans up any resources.
    */
@@ -161,19 +170,9 @@ if (import.meta.env.DEV) {
     });
 }
 
-const EDITOR_FOCUS_PRIORITY = 70;
-
-let observedFocusIntentId: string | null = null;
-let observedFocusResult = false;
-
-function focusEditorPath(
-  filePath: string,
-  caret?: EditorCaretPlacement,
-): boolean {
-  const instance = editorInstances.get(filePath);
-  if (!instance) return false;
-
-  return instance.focus(caret);
+/** Sidebar text entry (rename/create) outranks any editor focus intent. */
+function isEditorFocusSuppressed(): boolean {
+  return isSidebarTextEntryActive(document.activeElement);
 }
 
 /**
@@ -207,81 +206,95 @@ function emptyKeeperDocPromptId(filePath: string): string | null {
   return findPromptNodeId(doc);
 }
 
-focusArbiter.registerResolver("editor", (intent) => {
-  if (intent.target.type !== "editor") return false;
-
-  // Mirror the element resolver's rule: ambient intents (editor mount,
-  // layout reclaim, tab activation) must not yank focus out of an active
-  // text entry — toggling the sidebar re-parents the dock, remounts the
-  // editor, and its mount intent used to steal the widget composer's
-  // focus mid-typing (MET-93). Intents marked `steal` (an explicit
-  // hand-off like the blob's Escape) proceed; when-mounted intents keep
-  // retrying until the entry releases focus or their TTL expires.
-  if (!intent.steal && isForeignTextEntryFocused(intent.target.filePath)) {
-    return false;
-  }
-
-  // On an empty doc the keeper's composer owns focus by default — ambient
-  // intents (mount, tab activation, post-mount reclaim) must not race it,
-  // even while focus momentarily sits on <body> (rAF gap before the
-  // textarea focuses, tab-layout re-parenting). Forward the intent to the
-  // composer rather than just declining: on a tab re-activation nothing
-  // else routes focus there (the reclaim loop only watches <body>), and
-  // returning true retires the intent instead of leaving a when-mounted
-  // retry loop spinning. The pending-focus channel covers a widget that
-  // hasn't mounted yet. Explicit hand-offs like the blob's Escape carry
-  // `steal` and still land in the editor.
-  if (!intent.steal) {
-    const keeperId = emptyKeeperDocPromptId(intent.target.filePath);
-    if (keeperId) {
-      requestPromptBlobFocus(keeperId);
-      if (observedFocusIntentId === intent.id) {
-        observedFocusResult = true;
-      }
-      return true;
-    }
-  }
-
-  const result = focusEditorPath(intent.target.filePath, intent.target.caret);
-  if (observedFocusIntentId === intent.id) {
-    observedFocusResult = result;
-  }
-  return result;
-});
-
 /**
- * Suppress all editor focus for the given duration (ms).
- * Calling again resets the timer.
+ * The `TabController` an open document (or a container-only tab such as the
+ * image viewer / release notes) presents to the rest of the app. The
+ * instance map stays private: everything above this file addresses a
+ * document through its tab id like any other tab.
  */
-export function suppressEditorFocus(durationMs = 300): void {
-  focusArbiter.suppress("editor", durationMs);
-}
-
-function isEditorFocusSuppressed(): boolean {
-  return isSidebarTextEntryActive(document.activeElement);
-}
-
-export function setActiveEditorFocusTarget(filePath: string | null): void {
-  focusArbiter.setActiveEditor(filePath);
-}
-
-export function requestEditorFocus(
+function createEditorTabController(
   filePath: string,
-  options: {
-    when?: "immediate" | "next-frame" | "when-mounted";
-    reason?: string;
-    caret?: EditorCaretPlacement;
-    steal?: boolean;
-  } = {},
-): string {
-  return focusArbiter.request({
-    domain: "editor",
-    target: { type: "editor", filePath, caret: options.caret },
-    steal: options.steal,
-    priority: EDITOR_FOCUS_PRIORITY,
-    reason: options.reason ?? "editor-focus",
-    when: options.when ?? "immediate",
-  });
+  kind: TabKind,
+): TabController {
+  return {
+    tabId: filePath,
+    kind,
+
+    /**
+     * Ambient intents (editor mount, layout reclaim, tab activation) must
+     * not yank focus out of an active text entry — toggling the sidebar
+     * re-parents the dock, remounts the editor, and its mount intent used
+     * to steal the widget composer's focus mid-typing (MET-93). Intents
+     * marked `steal` (an explicit hand-off like the blob's Escape) proceed;
+     * `when-mounted` intents keep retrying until the entry releases focus
+     * or their TTL expires.
+     */
+    focus({ caret, steal }: TabFocusOptions = {}): boolean {
+      if (!steal && isForeignTextEntryFocused(filePath)) return false;
+
+      // On an empty doc the keeper's composer owns focus by default —
+      // ambient intents must not race it, even while focus momentarily sits
+      // on <body> (rAF gap before the textarea focuses, tab-layout
+      // re-parenting). Forward the intent to the composer rather than just
+      // declining: on a tab re-activation nothing else routes focus there
+      // (the reclaim loop only watches <body>), and reporting success
+      // retires the intent instead of leaving a when-mounted retry loop
+      // spinning. The pending-focus channel covers a widget that hasn't
+      // mounted yet. Explicit hand-offs like the blob's Escape carry
+      // `steal` and still land in the editor.
+      if (!steal) {
+        const keeperId = emptyKeeperDocPromptId(filePath);
+        if (keeperId) {
+          requestPromptBlobFocus(keeperId);
+          return true;
+        }
+      }
+
+      return editorInstances.get(filePath)?.focus(caret) ?? false;
+    },
+
+    isFocusable: () => isEditorFocusable(filePath),
+
+    selectedText: () => getSelectedText(filePath),
+
+    // Flushes the autosave window and closes the document sync — the tab is
+    // gone, so the instance must not outlive it.
+    dispose: () => disposeEditor(filePath),
+
+    /**
+     * Find-in-document, through the same file search the workspace search
+     * panel uses — scoped to this one file. `revealMatch` below re-locates
+     * whatever it returns in the rendered document, which is exactly what
+     * the {matchText, lineText, occurrence} shape exists for.
+     */
+    async search(
+      query: string,
+      options?: TabSearchOptions,
+    ): Promise<SearchTarget[]> {
+      // Only documents have searchable text; an image viewer has none.
+      if (!isMarkdownInstance(editorInstances.get(filePath))) return [];
+      if (!query.trim()) return [];
+
+      return platformAdapter.fs.searchContent(getDirectoryPath(filePath), {
+        query,
+        caseSensitive: options?.caseSensitive,
+        fileIncludes: [filePath],
+      });
+    },
+
+    revealMatch: (match: SearchTarget) => navigateToLocation(filePath, match),
+
+    get history() {
+      // Only documents have an edit history; image/release-notes tabs
+      // report none, so the palette's undo/redo stays inert on them.
+      const instance = editorInstances.get(filePath);
+      if (!isMarkdownInstance(instance)) return undefined;
+      return {
+        undo: () => instance.editor.commands.undo(),
+        redo: () => instance.editor.commands.redo(),
+      };
+    },
+  };
 }
 
 function createMarkdownInstance(
@@ -372,7 +385,7 @@ function createMarkdownInstance(
     type: "markdown",
     editor,
     filePath,
-    focus(caret?: EditorCaretPlacement): boolean {
+    focus(caret?: TabCaretPlacement): boolean {
       if (isEditorFocusSuppressed()) return false;
       if (caret?.type === "before-node") {
         placeCaretBeforeNode(this.editor, caret.pos);
@@ -508,6 +521,14 @@ export function getOrCreateEditor(
   }
 
   editorInstances.set(filePath, instance);
+  // The tab is live from here on: publish its controller so focus intents,
+  // find-in-tab and dispose reach it through the generic tab layer.
+  registerTabController(
+    createEditorTabController(
+      filePath,
+      config.type === "release-notes" ? "release-notes" : "file",
+    ),
+  );
   return instance;
 }
 
@@ -541,6 +562,7 @@ export function isEditorFocusable(filePath: string): boolean {
  */
 export function disposeEditor(filePath: string): void {
   const instance = editorInstances.get(filePath);
+  unregisterTabController(filePath);
   if (instance) {
     // Flush the autosave debounce window while the editor can still be
     // snapshotted — the file-sync hook's teardown runs after destroy on
@@ -561,30 +583,11 @@ export function disposeAllEditors(): void {
     instance.dispose();
     closeDocumentSync(filePath);
   });
+  editorInstances.forEach((_instance, filePath) =>
+    unregisterTabController(filePath),
+  );
   editorInstances.clear();
   pendingNavigations.clear();
-}
-
-/**
- * Focus an editor by file path.
- * Returns true if focus was attempted/applicable, false otherwise.
- * For non-focusable editors (images), returns false without doing anything.
- */
-export function focusEditor(filePath: string): boolean {
-  const instance = editorInstances.get(filePath);
-  if (!instance) return false;
-
-  const intentId = requestEditorFocus(filePath, {
-    when: "immediate",
-    reason: "focus-editor",
-  });
-
-  observedFocusIntentId = intentId;
-  observedFocusResult = false;
-  focusArbiter.flush();
-  observedFocusIntentId = null;
-
-  return observedFocusResult;
 }
 
 /**

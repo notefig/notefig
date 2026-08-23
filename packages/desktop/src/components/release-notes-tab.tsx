@@ -2,10 +2,8 @@ import { useEffect } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { useTranslation } from "react-i18next";
 import { createSchemaExtensions } from "@/components/editor/editor-schema-kit";
-import {
-  getOrCreateEditor,
-  focusEditor,
-} from "@/components/editor/editor-store";
+import { getOrCreateEditor } from "@/components/editor/editor-store";
+import { focusTab } from "@/tabs/tab-controllers";
 import { RELEASE_NOTES_TAB_ID } from "@/entities/tabs";
 import { latestReleaseMarkdown } from "@/utils/release-notes";
 import "@/components/editor/tiptap.css";
@@ -38,7 +36,7 @@ export function ReleaseNotesTab() {
 
   useEffect(() => {
     const rafId = requestAnimationFrame(() => {
-      focusEditor(RELEASE_NOTES_TAB_ID);
+      focusTab(RELEASE_NOTES_TAB_ID);
     });
     return () => cancelAnimationFrame(rafId);
   }, []);

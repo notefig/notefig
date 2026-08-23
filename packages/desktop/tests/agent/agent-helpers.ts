@@ -21,8 +21,9 @@ export async function startMockSession(
   await composer(page).waitFor({ timeout: 15000 });
 }
 
+/** The prompt composer's editable surface (a Tiptap editor since MET-80). */
 export function composer(page: Page) {
-  return page.locator('textarea[placeholder^="Ask anything"]');
+  return page.locator('.prompt-editor [role="textbox"]');
 }
 
 export async function configureScenario(

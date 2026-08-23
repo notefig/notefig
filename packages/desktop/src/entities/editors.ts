@@ -1,5 +1,6 @@
 /**
- * Editors entity — one-shot reads over the live Tiptap instances.
+ * Editors entity — one-shot reads over the live Tiptap instances: the
+ * file-tab-specific half of a tab's API, reached as `tab(id).editor`.
  *
  * Lifecycle and mutation stay on `components/editor/editor-store.ts`
  * (create/dispose, focus-priority arbitration, selection save/restore, raw
@@ -16,7 +17,11 @@ import {
 } from "@/components/editor/editor-store";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { getDocumentSync } from "@/utils/markdown-conversion";
-import { readLayout, extractTabIds, findLayoutSelectedTab } from "./tabs";
+import {
+  readLayout,
+  extractTabIds,
+  findLayoutSelectedTab,
+} from "@/utils/layout-codec";
 
 const markdownCodec = createMarkdownCodec();
 
