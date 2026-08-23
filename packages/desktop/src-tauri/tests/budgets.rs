@@ -382,15 +382,21 @@ fn oversized_agent_line_never_rides_the_eval_path() {
     // Register a JS listener for the topic — emit_js only builds the eval
     // script for webviews that have one, exactly like the real transport's
     // `listen()` call. Without this the test would measure a no-op.
-    // `tauri://localhost` (not invoke_raw's `http://tauri.localhost`) so the
-    // origin resolves as Local and matches the ACL entry above.
+    // The URL must be the platform's LOCAL webview origin so the ACL check
+    // resolves it as Local: `tauri://localhost` on macOS/Linux, but Windows
+    // serves the app from `http://tauri.localhost` and only that spelling
+    // matches (the mac spelling was denied on the windows CI leg).
+    #[cfg(windows)]
+    let local_origin = "http://tauri.localhost";
+    #[cfg(not(windows))]
+    let local_origin = "tauri://localhost";
     let listened = get_ipc_response(
         &webview,
         InvokeRequest {
             cmd: "plugin:event|listen".into(),
             callback: tauri::ipc::CallbackFn(0),
             error: tauri::ipc::CallbackFn(1),
-            url: "tauri://localhost".parse().unwrap(),
+            url: local_origin.parse().unwrap(),
             body: tauri::ipc::InvokeBody::Json(
                 json!({ "event": TOPIC, "target": { "kind": "Any" }, "handler": 1 }),
             ),
