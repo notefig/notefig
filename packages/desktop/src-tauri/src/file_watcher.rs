@@ -217,6 +217,50 @@ fn push_deleted(metadata_changes: &mut Vec<MetadataChange>, path: PathBuf, is_di
     });
 }
 
+/// Read `path` and, if the content changed and isn't a recent echo of our
+/// own write, emit a ContentChange. Shared by every "this path was modified"
+/// arm, including the same-path-replace fallback below.
+async fn push_content_change_if_new(content_changes: &mut Vec<ContentChange>, path: &Path) {
+    if let Ok(content) = fs::read_to_string(path).await {
+        let hash = compute_content_hash(&content);
+        if !is_recent_app_write(path, &hash) {
+            content_changes.push(ContentChange {
+                path: path.to_string_lossy().to_string(),
+                content,
+                content_hash: hash,
+            });
+        }
+    }
+}
+
+/// Handle a Remove-shaped event for `path` — but re-check the filesystem
+/// first (MET-158): Windows' `MoveFileExW(MOVEFILE_REPLACE_EXISTING)` — what
+/// `atomic_write`'s rename-over-an-existing-file does on EVERY save —  is
+/// reported by `ReadDirectoryChangesW` as a Remove notification for the
+/// destination followed by a Create, rather than a clean rename, because the
+/// underlying file identity changes even though the path doesn't (a
+/// well-documented Windows quirk hit by other file watchers, e.g. chokidar
+/// and VS Code, for this exact replace-in-place pattern). Trusting every
+/// Remove event closed the tab on virtually every save on Windows once B6
+/// stopped silently dropping generic Remove events. `process_events` runs
+/// after the fs operation that triggered the notification already
+/// completed, so if `path` still exists the "delete" was this artifact —
+/// treat it as a content update instead of a real delete.
+async fn push_removed_or_modified(
+    metadata_changes: &mut Vec<MetadataChange>,
+    content_changes: &mut Vec<ContentChange>,
+    path: PathBuf,
+    is_dir: bool,
+) {
+    if path.exists() {
+        if !is_dir {
+            push_content_change_if_new(content_changes, &path).await;
+        }
+        return;
+    }
+    push_deleted(metadata_changes, path, is_dir);
+}
+
 /// Process file system events and emit to frontend
 async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppHandle<R>) {
     let mut metadata_changes = Vec::new();
@@ -259,7 +303,8 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                     if should_filter_path(&path) {
                         continue;
                     }
-                    push_deleted(&mut metadata_changes, path, false);
+                    push_removed_or_modified(&mut metadata_changes, &mut content_changes, path, false)
+                        .await;
                 }
             }
             EventKind::Remove(RemoveKind::Folder) => {
@@ -267,18 +312,20 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                     if should_filter_path(&path) {
                         continue;
                     }
-                    push_deleted(&mut metadata_changes, path, true);
+                    push_removed_or_modified(&mut metadata_changes, &mut content_changes, path, true)
+                        .await;
                 }
             }
             // Windows counterpart of Create(Any) above: only RemoveKind::Any
-            // is ever emitted. The path is already gone, so is_dir can't be
-            // probed — emit false; no consumer reads it on deletes.
+            // is ever emitted. is_dir is irrelevant here since a still-alive
+            // path routes through the content-change branch (files only).
             EventKind::Remove(RemoveKind::Any | RemoveKind::Other) => {
                 for path in event.paths {
                     if should_filter_path(&path) {
                         continue;
                     }
-                    push_deleted(&mut metadata_changes, path, false);
+                    push_removed_or_modified(&mut metadata_changes, &mut content_changes, path, false)
+                        .await;
                 }
             }
 
@@ -293,17 +340,7 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                     }
 
                     if path.is_file() {
-                        if let Ok(content) = fs::read_to_string(&path).await {
-                            let hash = compute_content_hash(&content);
-
-                            if !is_recent_app_write(&path, &hash) {
-                                content_changes.push(ContentChange {
-                                    path: path.to_string_lossy().to_string(),
-                                    content,
-                                    content_hash: hash,
-                                });
-                            }
-                        }
+                        push_content_change_if_new(&mut content_changes, &path).await;
                     }
                 }
             }
@@ -317,17 +354,7 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                     }
 
                     if path.is_file() && !path.to_string_lossy().ends_with(".crswap") {
-                        if let Ok(content) = fs::read_to_string(&path).await {
-                            let hash = compute_content_hash(&content);
-
-                            if !is_recent_app_write(&path, &hash) {
-                                content_changes.push(ContentChange {
-                                    path: path.to_string_lossy().to_string(),
-                                    content,
-                                    content_hash: hash,
-                                });
-                            }
-                        }
+                        push_content_change_if_new(&mut content_changes, &path).await;
                     }
                 }
             }
@@ -393,7 +420,8 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                     if should_filter_path(&path) {
                         continue;
                     }
-                    push_deleted(&mut metadata_changes, path, false);
+                    push_removed_or_modified(&mut metadata_changes, &mut content_changes, path, false)
+                        .await;
                 }
             }
             EventKind::Modify(ModifyKind::Name(RenameMode::To)) => {
@@ -698,14 +726,73 @@ mod event_kind_tests {
         let dir = tempfile::Builder::new().prefix("notefig-b6").tempdir().unwrap();
         let file = dir.path().join("typed.md");
         std::fs::write(&file, "x").unwrap();
+        let gone_dir = dir.path().join("typed-subdir"); // never created
 
         let changes = metadata_changes_for(vec![
             event(EventKind::Create(CreateKind::File), vec![file.clone()]),
-            event(EventKind::Remove(RemoveKind::Folder), vec![file.clone()]),
+            event(EventKind::Remove(RemoveKind::Folder), vec![gone_dir.clone()]),
         ]);
 
-        let file_str = file.to_string_lossy().to_string();
-        assert!(changes.contains(&("created".into(), file_str.clone(), false)));
-        assert!(changes.contains(&("deleted".into(), file_str, true)));
+        assert!(changes.contains(&(
+            "created".into(),
+            file.to_string_lossy().to_string(),
+            false
+        )));
+        assert!(changes.contains(&(
+            "deleted".into(),
+            gone_dir.to_string_lossy().to_string(),
+            true
+        )));
+    }
+
+    /// MET-158: Windows' MoveFileExW(MOVEFILE_REPLACE_EXISTING) — every
+    /// atomic_write save — is reported by ReadDirectoryChangesW as a Remove
+    /// for the destination, not a clean rename. Before this fix, that
+    /// deleted the row and closed the tab on virtually every keystroke.
+    #[test]
+    fn remove_of_a_path_that_still_exists_is_not_a_delete() {
+        let dir = tempfile::Builder::new().prefix("notefig-b6").tempdir().unwrap();
+        let file = dir.path().join("still-here.md");
+        std::fs::write(&file, "new content after replace").unwrap();
+
+        let changes = metadata_changes_for(vec![event(
+            EventKind::Remove(RemoveKind::Any),
+            vec![file.clone()],
+        )]);
+
+        assert!(
+            !changes.iter().any(|(t, _, _)| t == "deleted"),
+            "a still-existing path must never be reported deleted: {changes:?}"
+        );
+    }
+
+    /// Same guard, but proves the surviving path is treated as a genuine
+    /// content update rather than silently dropped.
+    #[test]
+    fn remove_of_a_path_that_still_exists_emits_a_content_change() {
+        let dir = tempfile::Builder::new().prefix("notefig-b6").tempdir().unwrap();
+        let file = dir.path().join("replaced.md");
+        std::fs::write(&file, "the new content").unwrap();
+
+        let app = mock_builder()
+            .build(mock_context(noop_assets()))
+            .expect("failed to build mock app");
+        let captured: Arc<Mutex<Vec<ContentChange>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = captured.clone();
+        app.listen("fs-content-changed", move |event| {
+            let parsed: ContentChangeEvent =
+                serde_json::from_str(event.payload()).expect("payload should deserialize");
+            sink.lock().unwrap().extend(parsed.changes);
+        });
+
+        tauri::async_runtime::block_on(process_events(
+            vec![event(EventKind::Remove(RemoveKind::Any), vec![file.clone()])],
+            app.handle(),
+        ));
+
+        let rows = captured.lock().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].path, file.to_string_lossy().to_string());
+        assert_eq!(rows[0].content, "the new content");
     }
 }

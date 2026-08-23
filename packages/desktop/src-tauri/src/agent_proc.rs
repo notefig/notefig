@@ -199,6 +199,121 @@ mod job_object {
     }
 }
 
+/// Reads the PATH a fresh process would inherit right now, straight from the
+/// registry (MET-158) rather than trusting this long-lived GUI process's own
+/// (potentially years-stale) PATH. Composed the same way Windows itself
+/// builds a new process's environment: system PATH first, user PATH
+/// appended, with `%VARS%` expanded.
+#[cfg(windows)]
+mod win_env {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::System::Environment::ExpandEnvironmentStringsW;
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER,
+        HKEY_LOCAL_MACHINE, KEY_READ, REG_EXPAND_SZ, REG_SZ,
+    };
+
+    fn utf16(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    fn from_wide_nul_terminated(buf: &[u16]) -> String {
+        let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        OsString::from_wide(&buf[..len])
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// Expand `%SystemRoot%`-style references. Falls back to the raw input
+    /// on any API failure — a partially-expanded PATH entry is still usable.
+    fn expand(input: &str) -> String {
+        unsafe {
+            let input_w = utf16(input);
+            let needed = ExpandEnvironmentStringsW(input_w.as_ptr(), std::ptr::null_mut(), 0);
+            if needed <= 0 {
+                return input.to_string();
+            }
+            let mut buf = vec![0u16; needed as usize];
+            let written =
+                ExpandEnvironmentStringsW(input_w.as_ptr(), buf.as_mut_ptr(), needed as u32);
+            if written == 0 {
+                return input.to_string();
+            }
+            from_wide_nul_terminated(&buf)
+        }
+    }
+
+    /// Reads one REG_SZ/REG_EXPAND_SZ string value. None on any failure
+    /// (missing key/value, wrong type, API error) — callers degrade
+    /// gracefully rather than propagate a Windows API error into a spawn.
+    fn read_string_value(root: HKEY, subkey: &str, value_name: &str) -> Option<String> {
+        unsafe {
+            let subkey_w = utf16(subkey);
+            let mut hkey: HKEY = std::ptr::null_mut();
+            if RegOpenKeyExW(root, subkey_w.as_ptr(), 0, KEY_READ, &mut hkey) != 0 {
+                return None;
+            }
+            let value_w = utf16(value_name);
+            let mut value_type: u32 = 0;
+            let mut byte_len: u32 = 0;
+            // First pass: discover the required buffer size.
+            let sized = RegQueryValueExW(
+                hkey,
+                value_w.as_ptr(),
+                std::ptr::null_mut(),
+                &mut value_type,
+                std::ptr::null_mut(),
+                &mut byte_len,
+            );
+            if sized != 0 || (value_type != REG_SZ && value_type != REG_EXPAND_SZ) || byte_len == 0
+            {
+                RegCloseKey(hkey);
+                return None;
+            }
+            let mut buf: Vec<u16> = vec![0u16; byte_len as usize / 2 + 1];
+            let read = RegQueryValueExW(
+                hkey,
+                value_w.as_ptr(),
+                std::ptr::null_mut(),
+                &mut value_type,
+                buf.as_mut_ptr() as *mut u8,
+                &mut byte_len,
+            );
+            RegCloseKey(hkey);
+            if read != 0 {
+                return None;
+            }
+            let raw = from_wide_nul_terminated(&buf);
+            Some(if value_type == REG_EXPAND_SZ {
+                expand(&raw)
+            } else {
+                raw
+            })
+        }
+    }
+
+    /// System PATH (`HKLM\SYSTEM\...\Environment`) + user PATH
+    /// (`HKCU\Environment`) joined in the order Windows itself uses when
+    /// composing a fresh process's environment. None only if both reads
+    /// fail (registry access denied or genuinely empty) — callers then keep
+    /// the process's own inherited PATH.
+    pub fn fresh_path() -> Option<String> {
+        let system = read_string_value(
+            HKEY_LOCAL_MACHINE,
+            "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
+            "Path",
+        );
+        let user = read_string_value(HKEY_CURRENT_USER, "Environment", "Path");
+        match (system, user) {
+            (Some(sys), Some(usr)) if !usr.is_empty() => Some(format!("{sys};{usr}")),
+            (Some(sys), _) => Some(sys),
+            (None, Some(usr)) => Some(usr),
+            (None, None) => None,
+        }
+    }
+}
+
 /// Resolve a bare program name to a concrete on-PATH executable on Windows.
 /// `Command::new` maps to CreateProcess, which only tries `.exe` — the npm
 /// world ships `.cmd` shims (npx.cmd, opencode.cmd), so a bare "npx" is
@@ -208,14 +323,21 @@ mod job_object {
 /// ends in `.cmd`/`.bat` where applicable, which routes through std's
 /// CVE-2024-24576 strict-quoting cmd.exe spawn path.
 #[cfg(windows)]
-fn resolve_windows_program(program: &str, env: &HashMap<String, String>) -> String {
+fn resolve_windows_program(
+    program: &str,
+    env: &HashMap<String, String>,
+    fresh_path: Option<&str>,
+) -> String {
     if program.contains(['\\', '/']) || std::path::Path::new(program).extension().is_some() {
         return program.to_string();
     }
-    let path_var = env
-        .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case("PATH"))
-        .map(|(_, v)| v.clone())
+    let path_var = fresh_path
+        .map(|p| p.to_string())
+        .or_else(|| {
+            env.iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("PATH"))
+                .map(|(_, v)| v.clone())
+        })
         .or_else(|| std::env::var("PATH").ok())
         .unwrap_or_default();
     let pathext =
@@ -238,19 +360,34 @@ lazy_static::lazy_static! {
         Mutex::new(HashMap::new());
 }
 
-// ========== PATH resolution (macOS GUI-launch pitfall) ==========
+// ========== PATH resolution (GUI-launch pitfall) ==========
+//
+// Every long-lived GUI app on every desktop OS has the same problem: it
+// inherits PATH from whatever launched it (Explorer/launchd), snapshotted at
+// THAT process's startup, and never sees PATH changes an installer makes
+// afterward. macOS: re-derive PATH from a login+interactive shell. Windows:
+// re-read it from the registry, the same source `SendMessage(WM_SETTINGCHANGE)`-aware
+// tools (a fresh cmd.exe, VS Code's "reload window") pick up without a
+// reboot (MET-158 — installing Node/npm in PowerShell after launching the
+// app left spawn_agent stuck on the stale PATH from before the install).
 
 static LOGIN_PATH: OnceCell<Option<String>> = OnceCell::const_new();
 
-/// The user's real login+interactive shell PATH, resolved once and cached.
-/// macOS GUI apps inherit a bare PATH; without this, nvm-installed `npx`/`node`
-/// are unresolvable. On other platforms we keep the inherited PATH (None).
+/// The PATH a freshly-launched process would actually see right now.
+/// macOS: a login-shell probe, resolved once and cached (nvm/brew paths).
+/// Windows: a live registry read, NOT cached — re-resolved on every spawn so
+/// an install made mid-session is visible on the very next agent start, no
+/// app restart required. Other platforms keep the inherited PATH (None).
 async fn resolve_login_path() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
         LOGIN_PATH.get_or_init(probe_login_path).await.clone()
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        win_env::fresh_path()
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         None
     }
@@ -362,10 +499,15 @@ pub async fn spawn_agent<R: tauri::Runtime>(
     env: HashMap<String, String>,
     app_handle: AppHandle<R>,
 ) -> AgentResult<SpawnInfo> {
+    // Resolved BEFORE the PATHEXT lookup below so both use the same fresh
+    // value: on Windows this is a live registry read (MET-158), not the
+    // app's own stale inherited PATH.
+    let resolved_path = resolve_login_path().await;
+
     // B3 (MET-157): bare names like "npx" only exist as .cmd shims on
     // Windows; resolve against PATH × PATHEXT before CreateProcess sees it.
     #[cfg(windows)]
-    let program = resolve_windows_program(&program, &env);
+    let program = resolve_windows_program(&program, &env, resolved_path.as_deref());
 
     let mut cmd = Command::new(&program);
     cmd.args(&args)
@@ -381,8 +523,8 @@ pub async fn spawn_agent<R: tauri::Runtime>(
     #[cfg(unix)]
     cmd.process_group(0);
 
-    // Replace PATH with the login-shell probe (macOS) so npx/node resolve.
-    let resolved_path = resolve_login_path().await;
+    // Replace PATH with the freshly-resolved value (login-shell probe on
+    // macOS, registry read on Windows) so npx/node resolve.
     if let Some(path) = &resolved_path {
         cmd.env("PATH", path);
     }
@@ -596,16 +738,37 @@ mod tests {
     #[test]
     fn windows_program_resolution_finds_pathext_shims() {
         let env = HashMap::new();
-        let resolved = resolve_windows_program("cmd", &env);
+        let resolved = resolve_windows_program("cmd", &env, None);
         assert!(
             resolved.to_lowercase().ends_with("cmd.exe"),
             "expected a concrete cmd.exe path, got {resolved}"
         );
-        assert_eq!(resolve_windows_program("cmd.exe", &env), "cmd.exe");
+        assert_eq!(resolve_windows_program("cmd.exe", &env, None), "cmd.exe");
         assert_eq!(
-            resolve_windows_program("C:\\tools\\thing", &env),
+            resolve_windows_program("C:\\tools\\thing", &env, None),
             "C:\\tools\\thing"
         );
+    }
+
+    /// MET-158: a caller-supplied fresh_path wins over both harness env and
+    /// the process's own inherited PATH — the whole point of threading the
+    /// registry-read value through instead of trusting std::env::var.
+    #[cfg(windows)]
+    #[test]
+    fn windows_program_resolution_prefers_the_fresh_path_argument() {
+        let dir = tempfile::tempdir().unwrap();
+        let shim = dir.path().join("mytool.cmd");
+        std::fs::write(&shim, "@echo off\r\n").unwrap();
+
+        let mut env = HashMap::new();
+        env.insert("PATH".to_string(), "C:\\nowhere".to_string());
+
+        let resolved = resolve_windows_program(
+            "mytool",
+            &env,
+            Some(&dir.path().to_string_lossy()),
+        );
+        assert_eq!(resolved, shim.to_string_lossy());
     }
 
     /// MET-157 B3: args must survive std's strict .cmd quoting

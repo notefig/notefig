@@ -418,17 +418,46 @@ pub async fn write_files(files: Vec<FileToWrite>) -> BatchResult<String> {
     result
 }
 
+/// Renames that replace an existing destination transiently fail on Windows
+/// with ERROR_SHARING_VIOLATION when AV/indexer/our own watcher briefly
+/// holds a handle on it (flagged in the MET-157 spike, MET-158). Bounded
+/// retry with backoff rather than surfacing a spurious save failure.
+const ATOMIC_RENAME_MAX_ATTEMPTS: u32 = 5;
+
 async fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
-    let temp_path = path.with_extension("tmp");
+    // Append ".tmp" to the whole file name rather than replacing the
+    // extension (`with_extension`): "note.md" and "note.txt" both mapped to
+    // "note.tmp" there, so concurrent saves of sibling files sharing a stem
+    // could stomp each other's temp file.
+    let mut temp_name = path
+        .file_name()
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no file name")
+        })?
+        .to_os_string();
+    temp_name.push(".tmp");
+    let temp_path = path.with_file_name(temp_name);
 
     let mut file = fs::File::create(&temp_path).await?;
     file.write_all(content.as_bytes()).await?;
     file.sync_all().await?;
     drop(file);
 
-    fs::rename(&temp_path, path).await?;
+    for attempt in 1..=ATOMIC_RENAME_MAX_ATTEMPTS {
+        match fs::rename(&temp_path, path).await {
+            Ok(()) => return Ok(()),
+            Err(err) if attempt < ATOMIC_RENAME_MAX_ATTEMPTS => {
+                eprintln!(
+                    "atomic_write: rename attempt {attempt}/{ATOMIC_RENAME_MAX_ATTEMPTS} failed for {}: {err}",
+                    path.display()
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(30 * attempt as u64)).await;
+            }
+            Err(err) => return Err(err),
+        }
+    }
 
-    Ok(())
+    unreachable!("loop always returns by the last attempt")
 }
 
 #[tauri::command]
@@ -1058,6 +1087,41 @@ mod tests {
             .expect("Failed to read file2");
         assert_eq!(content1, "content1");
         assert_eq!(content2, "content2");
+    }
+
+    /// MET-158: atomic_write's old temp name (`path.with_extension("tmp")`)
+    /// mapped "note.md" and "note.txt" to the same "note.tmp", so writing
+    /// both concurrently could stomp one temp file with the other's
+    /// content. The temp name now appends to the whole file name instead.
+    #[tokio::test]
+    async fn test_write_files_does_not_collide_on_shared_stem() {
+        let temp_dir = setup_test_dir();
+        let md_path = temp_dir.path().join("note.md").to_string_lossy().to_string();
+        let txt_path = temp_dir.path().join("note.txt").to_string_lossy().to_string();
+
+        let files = vec![
+            FileToWrite {
+                path: md_path.clone(),
+                content: "markdown content".to_string(),
+            },
+            FileToWrite {
+                path: txt_path.clone(),
+                content: "plain text content".to_string(),
+            },
+        ];
+
+        let result = write_files(files).await;
+
+        assert_eq!(result.succeeded.len(), 2);
+        assert!(result.failed.is_empty());
+        assert_eq!(
+            tokio::fs::read_to_string(&md_path).await.unwrap(),
+            "markdown content"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(&txt_path).await.unwrap(),
+            "plain text content"
+        );
     }
 
     #[tokio::test]
