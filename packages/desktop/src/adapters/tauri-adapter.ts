@@ -22,6 +22,7 @@ import type {
 import { FsError } from "./platform-adapter.interface";
 import { createTauriDb } from "./tauri-db";
 import { requestTextPrompt } from "@/utils/text-prompt";
+import { path as pathutil } from "@/utils/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -389,9 +390,9 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     relativePath: string,
     workspacePath: string,
   ): Promise<string> {
-    const absolutePath = relativePath.startsWith("/")
+    const absolutePath = pathutil.isAbsolute(relativePath)
       ? relativePath
-      : `${workspacePath}/${relativePath}`.replace(/\/+/g, "/");
+      : pathutil.join(workspacePath, pathutil.fromTreePath(relativePath));
     return convertFileSrc(absolutePath);
   }
 

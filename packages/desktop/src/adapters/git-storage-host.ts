@@ -3,6 +3,7 @@ import type {
   BatchResult,
   FileSystemSurface,
 } from "./platform-adapter.interface";
+import { path as pathutil } from "@/utils/path";
 
 /**
  * Git's storage host, built purely on the fs surface.
@@ -57,19 +58,32 @@ export function createGitStorageHost(
   fs: FileSystemSurface,
   lockScope: string,
 ): GitStorageHost {
+  // isomorphic-git builds paths as `dir + "/" + filepath` — against a native
+  // Windows dir that yields mixed-separator forms (`C:\ws/notes.md`), so
+  // every incoming path is renormalized to native spelling at this seam.
+  // Identity on posix.
+  const native = (p: string) => pathutil.normalize(p);
+
   const host: GitStorageHost = {
-    readFile: async (path: string): Promise<Uint8Array> => {
+    readFile: async (rawPath: string): Promise<Uint8Array> => {
+      const path = native(rawPath);
       const result = await fs.readBinaryFiles([path]);
       const entry = requireSuccess(path, result, "read");
       return entry.data;
     },
 
-    writeFileAtomic: async (path: string, data: Uint8Array): Promise<void> => {
+    writeFileAtomic: async (
+      rawPath: string,
+      data: Uint8Array,
+    ): Promise<void> => {
+      const path = native(rawPath);
       const result = await fs.writeBinaryFiles([{ path, data }]);
       requireSuccess(path, result, "write");
     },
 
-    renameAtomic: async (from: string, to: string): Promise<void> => {
+    renameAtomic: async (rawFrom: string, rawTo: string): Promise<void> => {
+      const from = native(rawFrom);
+      const to = native(rawTo);
       const result = await fs.moveFile(from, to);
       if (!result.ok) {
         throw new Error(
@@ -78,12 +92,14 @@ export function createGitStorageHost(
       }
     },
 
-    deleteFile: async (path: string): Promise<void> => {
+    deleteFile: async (rawPath: string): Promise<void> => {
+      const path = native(rawPath);
       const result = await fs.deleteFiles([path]);
       requireSuccess(path, result, "write");
     },
 
-    stat: async (path: string) => {
+    stat: async (rawPath: string) => {
+      const path = native(rawPath);
       const exists = await fs.exists([path]);
       const entry = exists[0];
       if (!entry?.exists) {
@@ -125,7 +141,8 @@ export function createGitStorageHost(
       };
     },
 
-    readDir: async (path: string) => {
+    readDir: async (rawPath: string) => {
+      const path = native(rawPath);
       const result = await fs.readDirectory(path, {
         recursive: false,
         includeFiles: true,
@@ -143,19 +160,21 @@ export function createGitStorageHost(
       return childExists
         .filter((entry) => entry.exists)
         .map((entry) => ({
-          name: entry.path.split("/").filter(Boolean).pop() ?? entry.path,
+          name: pathutil.basename(entry.path) || entry.path,
           isFile: entry.type === "file",
           isDir: entry.type === "directory",
           isSymbolicLink: false,
         }));
     },
 
-    createDir: async (path: string): Promise<void> => {
+    createDir: async (rawPath: string): Promise<void> => {
+      const path = native(rawPath);
       const result = await fs.createDirectories([path]);
       requireSuccess(path, result, "write");
     },
 
-    removeDir: async (path: string): Promise<void> => {
+    removeDir: async (rawPath: string): Promise<void> => {
+      const path = native(rawPath);
       const result = await fs.deleteDirectories([path], {
         recursive: false,
       });

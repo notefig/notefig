@@ -25,6 +25,7 @@ import { getDocumentSync } from "./markdown-conversion";
 // a leaf module rather than adding a registration seam.
 import { getMarkdownEditor } from "@/components/editor/editor-store";
 import { platformAdapter } from "@/adapters";
+import { path as pathutil, relativeTreePath } from "./path";
 
 /**
  * The app-layer choke point for the "workspace paths are absolute"
@@ -36,7 +37,7 @@ import { platformAdapter } from "@/adapters";
  * the standard FsError boundary if anyone forgets.
  */
 function assertAbsoluteWorkspacePath(path: string): void {
-  if (!path.startsWith("/")) {
+  if (!pathutil.isAbsolute(path)) {
     throw new FsError(
       "invalid_path",
       path,
@@ -134,9 +135,7 @@ function relativeToWorkspace(
   path: string,
   workspaceId: string,
 ): string | undefined {
-  return path.startsWith(workspaceId)
-    ? path.slice(workspaceId.length + 1)
-    : undefined;
+  return relativeTreePath(workspaceId, path);
 }
 
 async function applyMetadataCreated(

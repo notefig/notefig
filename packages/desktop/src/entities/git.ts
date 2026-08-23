@@ -26,7 +26,7 @@ import { queryCollectionOptions } from "@tanstack/query-db-collection";
 import { useIsFetching } from "@tanstack/react-query";
 import { GitError, type GitErrorCode, type RepoStatus } from "@notefig/git";
 import { isWorkspaceAccessError } from "@/adapters/platform-adapter.interface";
-import { normalizePath } from "@/utils/fs";
+import { path as pathutil, workspaceKey } from "@/utils/path";
 import {
   ensureWorkspaceHistoryInitialized,
   getOrCreateWorkspaceHistoryService,
@@ -103,9 +103,11 @@ function fileRowId(absolutePath: string): string {
 }
 
 function toAbsolute(workspacePath: string, repoRelativePath: string): string {
-  return repoRelativePath.startsWith(workspacePath)
+  // Status results are repo-relative "/"-separated (isomorphic-git's
+  // filepath domain); absolutes must land in native spelling.
+  return pathutil.isAbsolute(repoRelativePath)
     ? repoRelativePath
-    : `${workspacePath}/${repoRelativePath}`;
+    : pathutil.join(workspacePath, pathutil.fromTreePath(repoRelativePath));
 }
 
 function fileRowsFromStatus(
@@ -229,19 +231,23 @@ export type GitCollection = ReturnType<typeof createGitCollection>;
 const gitCollectionsRegistry = new Map<string, GitCollection>();
 
 export function getOrCreateGitCollection(workspacePath: string): GitCollection {
-  const normalized = normalizePath(workspacePath);
-  let collection = gitCollectionsRegistry.get(normalized);
+  // Registry key vs value: workspaceKey dedupes Windows respellings; the
+  // collection itself (and its query key) carries the native spelling.
+  const key = workspaceKey(workspacePath);
+  const native = pathutil.normalize(workspacePath);
+  let collection = gitCollectionsRegistry.get(key);
   if (!collection) {
-    collection = createGitCollection(normalized);
-    gitCollectionsRegistry.set(normalized, collection);
+    collection = createGitCollection(native);
+    gitCollectionsRegistry.set(key, collection);
   }
   return collection;
 }
 
 export function clearGitCollection(workspacePath: string): void {
-  const normalized = normalizePath(workspacePath);
-  gitCollectionsRegistry.delete(normalized);
-  queryClient.removeQueries({ queryKey: gitQueryKey(normalized) });
+  gitCollectionsRegistry.delete(workspaceKey(workspacePath));
+  queryClient.removeQueries({
+    queryKey: gitQueryKey(pathutil.normalize(workspacePath)),
+  });
 }
 
 export interface GitSummary {
@@ -363,7 +369,7 @@ export async function refetchGit(workspacePath: string): Promise<void> {
 /** Debounce-friendly invalidation for file-sync's derived-state pass. */
 export function invalidateGit(workspacePath: string): void {
   void queryClient.invalidateQueries({
-    queryKey: gitQueryKey(normalizePath(workspacePath)),
+    queryKey: gitQueryKey(pathutil.normalize(workspacePath)),
   });
 }
 
@@ -377,7 +383,7 @@ export async function saveCheckpoint(
   workspacePath: string,
   description?: string,
 ): Promise<string | null> {
-  const normalized = normalizePath(workspacePath);
+  const normalized = pathutil.normalize(workspacePath);
   const service = getOrCreateWorkspaceHistoryService(normalized);
 
   // Cancel any in-flight fetch so a stale pre-commit response can't land

@@ -151,7 +151,13 @@ jobs:
 
   test-desktop-tauri:
     name: Test Desktop (Tauri)
-    runs-on: macos-latest
+    # The windows-latest leg is the only continuous Windows compile/test signal
+    # (MET-157) — without it every Windows breakage is invisible until release.
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -164,6 +170,11 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/desktop/src-tauri
 
       - name: Install dependencies
         run: npm ci
@@ -174,7 +185,18 @@ jobs:
 
   test-desktop-shim:
     name: Test Desktop (real-backend shim)
-    runs-on: macos-latest
+    # The windows-latest leg is the Phase-2 acceptance gate for MET-157: the
+    # real frontend against the real Rust backend on NTFS — fs ops, tree,
+    # external-change adoption, editor round-trips — with no bundle/signing.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            playwright-cache: ~/.cache/ms-playwright
+          - platform: windows-latest
+            playwright-cache: ~\AppData\Local\ms-playwright
+    runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -188,13 +210,26 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/desktop/src-tauri
+
       - name: Install dependencies
         run: npm ci
+
+      # Compile the shim OUTSIDE Playwright's webServer timeout — a cold
+      # workspace build takes well past the old 180s (both legs timed out on
+      # the first PR run); after this step `cargo run -p test-shim` is a
+      # no-op rebuild.
+      - name: Build test shim
+        working-directory: packages/desktop/src-tauri
+        run: cargo build -p test-shim
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
-          path: ~/.cache/ms-playwright
+          path: ${{ matrix.playwright-cache }}
           key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-playwright-

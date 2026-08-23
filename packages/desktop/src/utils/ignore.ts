@@ -13,6 +13,7 @@
  */
 
 import { getFileExtension } from "./fs";
+import { path as pathutil, relativeTreePath } from "./path";
 
 export const IGNORED_DIRECTORIES: string[] = [
   "node_modules",
@@ -134,11 +135,13 @@ export function isIgnoredFile(path: string): boolean {
 export function isIgnoredPath(path: string, base?: string): boolean {
   let relative = path;
   if (base) {
-    const prefix = base.endsWith("/") ? base : base + "/";
     if (path === base) return false;
-    if (path.startsWith(prefix)) relative = path.slice(prefix.length);
+    relative = relativeTreePath(base, path) ?? path;
   }
-  const components = relative.split("/").filter((c) => c.length > 0);
+  const components = pathutil
+    .toTreePath(relative)
+    .split("/")
+    .filter((c) => c.length > 0);
   if (components.length === 0) return false;
   if (components.some((c) => isIgnoredDirectory(c))) return true;
   return isIgnoredFile(components[components.length - 1]);

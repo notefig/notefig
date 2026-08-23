@@ -3,6 +3,8 @@
  * Creates a realistic workspace with markdown files and metrists.json
  */
 
+import { path as pathutil } from "./path";
+
 export interface FileRowData {
   path: string; // Absolute path
   relativePath?: string; // Relative path to basePath (optional - not all files are inside basePath)
@@ -45,7 +47,10 @@ export function generateDemoFiles(
     type: "file" | "directory",
     content: string,
   ): FileRowData => {
-    const absolutePath = `${normalizedBasePath}/${relativePath}`;
+    const absolutePath = pathutil.join(
+      normalizedBasePath,
+      pathutil.fromTreePath(relativePath),
+    );
     return {
       path: absolutePath,
       relativePath,

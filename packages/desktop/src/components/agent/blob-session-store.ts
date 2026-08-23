@@ -8,7 +8,7 @@
  * keeps watching it).
  */
 import type { HarnessDefinition } from "@notefig/shared/agent";
-import { normalizePath } from "@/utils/fs";
+import { workspaceKey } from "@/utils/path";
 import { agentTasksCollection } from "@/agent/agent-collections";
 import { startAgentTask } from "@/agent/agent-service";
 
@@ -37,7 +37,7 @@ export async function getOrStartSharedSession(
   workspacePath: string,
   harness: HarnessDefinition,
 ): Promise<{ taskId: string }> {
-  const key = normalizePath(workspacePath);
+  const key = workspaceKey(workspacePath);
   let session = sessions.get(key);
   if (!session || !isReusable(session)) {
     const { taskId, started } = startAgentTask(workspacePath, harness);
@@ -55,7 +55,7 @@ export async function getOrStartSharedSession(
  * cancelled; it stays in the sessions panel.
  */
 export function dropSharedSession(workspacePath: string): void {
-  sessions.delete(normalizePath(workspacePath));
+  sessions.delete(workspaceKey(workspacePath));
 }
 
 /** Point the shared session at an existing live task (the session-picker
@@ -70,7 +70,7 @@ export function adoptSharedSession(workspacePath: string, taskId: string): void 
   ) {
     return;
   }
-  sessions.set(normalizePath(workspacePath), {
+  sessions.set(workspaceKey(workspacePath), {
     taskId,
     started: Promise.resolve(),
   });
@@ -78,7 +78,7 @@ export function adoptSharedSession(workspacePath: string, taskId: string): void 
 
 /** Current shared session's taskId, if one is live — for rendering only. */
 export function peekSharedSession(workspacePath: string): string | null {
-  const session = sessions.get(normalizePath(workspacePath));
+  const session = sessions.get(workspaceKey(workspacePath));
   return session && isReusable(session) ? session.taskId : null;
 }
 

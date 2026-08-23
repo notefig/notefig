@@ -304,8 +304,7 @@ function createMarkdownInstance(
   content: JSONContent,
   basePath?: string,
 ): MarkdownInstance {
-  const workspaceRoot =
-    basePath || filePath.substring(0, filePath.lastIndexOf("/")) || "/";
+  const workspaceRoot = basePath || getDirectoryPath(filePath);
 
   const extensions = [
     ...editorExtensions.filter(

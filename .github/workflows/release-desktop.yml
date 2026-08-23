@@ -197,9 +197,13 @@ jobs:
           # - platform: ubuntu-22.04
           #   args: --bundles deb,appimage
           #   id: linux
-          # - platform: windows-latest
-          #   args: ""
-          #   id: windows
+          # NSIS only: the updater consumes a single installer per platform,
+          # and MSI (WiX) would add a second ambiguous asset to latest.json
+          # (and needs the VBSCRIPT optional feature on runners). Unsigned for
+          # now (MET-157) — Azure Trusted Signing lands before GA.
+          - platform: windows-latest
+            args: --bundles nsis
+            id: windows
 
     runs-on: ${{ matrix.platform }}
 
@@ -214,6 +218,8 @@ jobs:
       # this checkout only (BSD sed on macOS runners — hence perl).
       - name: Stamp debug version
         if: ${{ contains(inputs.version, '-debug') }}
+        # windows-latest defaults to PowerShell; Git-for-Windows bash has perl.
+        shell: bash
         run: |
           perl -pi -e 's/"version": "[^"]*"/"version": "${{ inputs.version }}"/' packages/desktop/package.json
           perl -pi -e '$done ||= s/^version = "[^"]*"/version = "${{ inputs.version }}"/' packages/desktop/src-tauri/Cargo.toml
@@ -246,6 +252,8 @@ jobs:
       - name: Read release notes
         id: notes
         if: ${{ !contains(inputs.version, '-debug') }}
+        # windows-latest defaults to PowerShell; the heredoc + uuidgen need bash.
+        shell: bash
         run: |
           # Random per-run delimiter: the notes file carries PR-authored text,
           # so a fixed delimiter could be embedded in a PR body to terminate

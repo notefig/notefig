@@ -673,6 +673,16 @@ mod tests {
         tempfile::tempdir().expect("Failed to create temp directory")
     }
 
+    /// A path no platform can create: a child of a regular FILE. The old
+    /// "/nonexistent/…" fixtures were creatable on Windows — a leading `/`
+    /// is drive-relative there, and the write paths create missing parents,
+    /// so the "failure" tests succeeded and failed their assertions.
+    fn file_blocked_path(temp_dir: &TempDir, name: &str) -> String {
+        let blocker = temp_dir.path().join("blocker-file");
+        std::fs::write(&blocker, "x").expect("Failed to write blocker file");
+        blocker.join(name).to_string_lossy().to_string()
+    }
+
     async fn create_test_file(dir: &TempDir, path: &str, content: &str) -> String {
         let file_path = dir.path().join(path);
         if let Some(parent) = file_path.parent() {
@@ -1076,7 +1086,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_write_files_returns_failed_array_for_errors() {
-        let invalid_file = "/nonexistent/invalid/path/file.txt".to_string();
+        let temp_dir = setup_test_dir();
+        let invalid_file = file_blocked_path(&temp_dir, "file.txt");
 
         let files = vec![FileToWrite {
             path: invalid_file.clone(),
@@ -1110,7 +1121,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_directories_handles_failures() {
-        let invalid_dir = "/nonexistent/invalid/path".to_string();
+        let temp_dir = setup_test_dir();
+        let invalid_dir = file_blocked_path(&temp_dir, "subdir");
 
         let result = create_directories(vec![invalid_dir.clone()]).await;
 
@@ -1504,7 +1516,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_write_binary_files_returns_failed_array_for_errors() {
-        let invalid_file = "/nonexistent/invalid/file.bin".to_string();
+        let temp_dir = setup_test_dir();
+        let invalid_file = file_blocked_path(&temp_dir, "file.bin");
 
         let files = vec![BinaryFileWriteRequest {
             path: invalid_file.clone(),

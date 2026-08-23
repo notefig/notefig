@@ -19,6 +19,7 @@ import type {
 } from "@tiptap/suggestion";
 import type { PromptContextPart } from "@notefig/shared/agent";
 import { getOrCreateWorkspaceCollections } from "@/entities/files";
+import { path as pathutil } from "@/utils/path";
 import { canOpenFile } from "@/components/editor/polymorphic-editor";
 import { FileTypeIcon } from "@/components/editor/file-type-icon";
 import { rankFileRows, type FileSearchResult } from "@/utils/file-score";
@@ -190,16 +191,22 @@ function workspaceFilePredicate(
   workspacePath: string,
 ): (token: string) => boolean {
   const { metadata } = getOrCreateWorkspaceCollections(workspacePath);
-  const root = workspacePath.replace(/\/+$/, "");
+  // Mention tokens are tree-domain ("/"-separated); rows are keyed by
+  // NATIVE absolute paths derived from the byte-identical workspaceId, so
+  // the join must reproduce that spelling exactly (join is an identity for
+  // the clean roots real routes carry — no other normalization here).
   return (token) => {
-    const row = metadata.get(`${root}/${token.replace(/^\/+/, "")}`);
+    const row = metadata.get(
+      pathutil.join(workspacePath, pathutil.fromTreePath(token)),
+    );
     return row !== undefined && row.type === "file";
   };
 }
 
-/** file:// URI for an absolute path, per-segment percent-encoded. */
+/** file:// URI for a native absolute path, per-segment percent-encoded
+ *  (posix `file:///Users/…`; Windows drive `file:///C:/…`). */
 export function pathToFileUri(absolutePath: string): string {
-  return "file://" + absolutePath.split("/").map(encodeURIComponent).join("/");
+  return pathutil.toFileUri(absolutePath);
 }
 
 /**
@@ -212,11 +219,12 @@ export function mentionContextParts(
   workspacePath: string,
   text: string,
 ): PromptContextPart[] {
-  const root = workspacePath.replace(/\/+$/, "");
   const isFile = workspaceFilePredicate(workspacePath);
   return extractMentionPaths(text, isFile).map((token) => ({
     kind: "resource_link" as const,
-    path: pathToFileUri(`${root}/${token.replace(/^\/+/, "")}`),
+    path: pathToFileUri(
+      pathutil.join(workspacePath, pathutil.fromTreePath(token)),
+    ),
     name: token,
   }));
 }

@@ -16,6 +16,7 @@ import { TableMenu } from "./tiptap-table-menu";
 import { cn } from "@/lib/utils";
 import { dropZoneProps, getProtocolContext } from "@/utils/drag-protocol";
 import { isImageFile } from "@/utils/fs";
+import { relativeTreePath } from "@/utils/path";
 import "./tiptap.css";
 
 interface TextEditorProps {
@@ -96,9 +97,8 @@ export function TextEditor({
             if (payload.fileType !== "file") return;
 
             if (isImageFile(payload.path)) {
-              const src = payload.path.startsWith(basePath + "/")
-                ? payload.path.slice(basePath.length + 1)
-                : payload.path;
+              const src =
+                relativeTreePath(basePath, payload.path) || payload.path;
               const pos =
                 editor.view.posAtCoords({
                   left: info.position.x,

@@ -10,8 +10,14 @@ use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilde
 use tauri::{AppHandle, Emitter, Manager};
 
 fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
-    let open_folder = MenuItem::with_id(app, "open_folder", "Open Folder...", true, Some("cmd+o"))?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, Some("cmd+q"))?;
+    let open_folder = MenuItem::with_id(
+        app,
+        "open_folder",
+        "Open Folder...",
+        true,
+        Some("CmdOrCtrl+O"),
+    )?;
+    let quit = MenuItem::with_id(app, "quit", "Quit", true, Some("CmdOrCtrl+Q"))?;
 
     // Edit menu items - using predefined items for native OS behavior
     let undo = PredefinedMenuItem::undo(app, None)?;
@@ -172,12 +178,14 @@ fn main() {
     // file at plugin init.
     migrate_app_data_from_old_identifier();
 
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+    let builder = builder
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_nspanel::init())
         .setup(|app| {
             let menu = create_menu(app.handle())?;
             app.set_menu(menu)?;

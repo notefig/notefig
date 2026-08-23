@@ -1,6 +1,7 @@
 import { FileTree, type FileTreeSortEntry } from "@pierre/trees";
 import { FILE_ICON_CONFIG } from "./file-type-icon";
 import type { SortOrder } from "@/utils/fs";
+import { path as pathutil } from "@/utils/path";
 
 /**
  * Module-level cache of @pierre/trees models, one per workspace.
@@ -131,7 +132,10 @@ export function acquireTreeModel(
     needsDefaultExpansion: init.initialExpandedPaths === null,
   };
 
-  const toAbs = (rel: string) => `${workspacePath}/${rel.replace(/\/+$/, "")}`;
+  // Model paths are tree-domain ("/"-separated); only this seam converts
+  // back to native absolute paths.
+  const toAbs = (rel: string) =>
+    pathutil.join(workspacePath, pathutil.fromTreePath(rel.replace(/\/+$/, "")));
 
   entry.model = new FileTree({
     paths: [],

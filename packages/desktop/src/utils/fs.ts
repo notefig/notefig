@@ -1,5 +1,6 @@
 import { platformAdapter } from "@/adapters";
 import type { TextPromptOptions } from "@/adapters/platform-adapter.interface";
+import { path as pathutil } from "./path";
 
 export interface FileEntry {
   path: string; // Absolute path
@@ -23,8 +24,7 @@ export interface FileTreeNode extends FileEntry {
 
 export function getFileName(filePath: string): string {
   if (!filePath) return "";
-  const parts = filePath.split("/").filter((p) => p.length > 0);
-  return parts.length > 0 ? parts[parts.length - 1] : filePath;
+  return pathutil.basename(filePath) || filePath;
 }
 
 export function getFileExtension(filePath: string): string {
@@ -119,14 +119,14 @@ export function isTextFile(filePath: string): boolean {
 }
 
 export function getFileNameWithoutExtension(filePath: string): string {
-  const fileName = filePath.split("/").pop() || filePath;
+  const fileName = pathutil.basename(filePath) || filePath;
   const parts = fileName.split(".");
   return parts.length > 1 ? parts.slice(0, -1).join(".") : fileName;
 }
 
 export function getDirectoryPath(filePath: string): string {
-  const parts = filePath.split("/");
-  return parts.slice(0, -1).join("/") || "/";
+  const dir = pathutil.dirname(filePath);
+  return dir === "." ? "/" : dir;
 }
 
 export function joinPaths(...paths: string[]): string {
@@ -137,27 +137,11 @@ export function joinPaths(...paths: string[]): string {
     .replace(/\/+/g, "/");
 }
 
-/**
- * Normalize a file path by ensuring it starts with a leading slash
- * and removing duplicate slashes and trailing slashes
- */
-export function normalizePath(filePath: string): string {
-  if (!filePath) return "/";
-
-  let normalized = filePath.replace(/\\/g, "/").replace(/\/+/g, "/");
-
-  // Ensure leading slash
-  if (!normalized.startsWith("/")) {
-    normalized = "/" + normalized;
-  }
-
-  // Remove trailing slash unless it's the root
-  if (normalized.length > 1 && normalized.endsWith("/")) {
-    normalized = normalized.slice(0, -1);
-  }
-
-  return normalized;
-}
+// normalizePath is gone (MET-157 B2): its "/"-prepend corrupted native
+// Windows paths, and every caller migrated to `path.normalize` (spelling),
+// `workspaceKey` (registry/persisted keys), or `relativeTreePath`
+// (derivations) in @/utils/path. For real mac inputs all of these produce
+// byte-identical output, so persisted keys never changed spelling.
 
 export type WorkspacePathResolution =
   | { ok: true; absolute: string; relative: string }
@@ -179,17 +163,24 @@ export function resolveWorkspacePath(
   workspacePath: string,
   inputPath: string,
 ): WorkspacePathResolution {
-  const root = normalizePath(workspacePath);
-  // normalizePath force-prepends "/", so absoluteness is decided on the raw
-  // input (after backslash conversion) — before normalization erases it.
-  const raw = inputPath.replace(/\\/g, "/");
-  const joined = raw.startsWith("/")
-    ? normalizePath(raw)
-    : normalizePath(`${root}/${raw}`);
+  const root = pathutil.normalize(workspacePath);
+  // Agent-supplied relative paths are "/"-separated (the tool schemas'
+  // contract) — tree-domain, converted to native before joining.
+  const joined = pathutil.isAbsolute(inputPath)
+    ? pathutil.normalize(inputPath)
+    : pathutil.join(root, pathutil.fromTreePath(inputPath));
 
-  // Collapse "." and ".." segments so escapes are caught structurally.
+  // Collapse "." and ".." segments so escapes are caught structurally, in
+  // forward-slash space so one loop serves both flavors. The filesystem-root
+  // segments can never be popped:
+  //   posix  /a/b        → [""]        win32  C:/a → ["C:"]
+  //   UNC    //srv/sh/a  → ["", "", "srv", "sh"]
+  const posixForm = pathutil.toPosixAbsolute(joined);
+  const parts = posixForm.split("/");
+  const rootCount = posixForm.startsWith("//") ? 4 : 1;
+  const kept = parts.slice(0, rootCount);
   const segments: string[] = [];
-  for (const segment of joined.split("/")) {
+  for (const segment of parts.slice(rootCount)) {
     if (segment === "" || segment === ".") continue;
     if (segment === "..") {
       if (segments.length === 0) {
@@ -200,16 +191,18 @@ export function resolveWorkspacePath(
     }
     segments.push(segment);
   }
-  const absolute = "/" + segments.join("/");
+  const absolute = pathutil.normalize([...kept, ...segments].join("/"));
 
-  if (absolute !== root && !absolute.startsWith(root === "/" ? "/" : `${root}/`)) {
+  const relativeNative = pathutil.relative(root, absolute);
+  if (relativeNative === undefined) {
     return {
       ok: false,
       error: `path is outside the workspace (${workspacePath}): ${inputPath}`,
     };
   }
-  const relative = absolute === root ? "" : absolute.slice(root.length + 1);
-  return { ok: true, absolute, relative };
+  // The relative half stays "/"-separated: every consumer (tool results,
+  // metadata rows, tree paths) lives in the tree-path domain.
+  return { ok: true, absolute, relative: pathutil.toTreePath(relativeNative) };
 }
 
 export function flatEntriesToTree(
@@ -220,7 +213,9 @@ export function flatEntriesToTree(
   const pathMap = new Map<string, FileTreeNode>();
   const rootNodes: FileTreeNode[] = [];
 
-  const normalizedBasePath = normalizePath(basePath);
+  // relativePath is tree-domain ("/"-separated on every platform); absolute
+  // node paths are native and must match the callers' row-key spelling.
+  const normalizedBasePath = pathutil.normalize(basePath);
 
   // First pass: Create all directory nodes that might not exist in flatFiles
   // This ensures parent directories exist even if they weren't explicitly added
@@ -239,7 +234,10 @@ export function flatEntriesToTree(
   });
 
   directoriesNeeded.forEach((relPath) => {
-    const absolutePath = `${normalizedBasePath}/${relPath}`;
+    const absolutePath = pathutil.join(
+      normalizedBasePath,
+      pathutil.fromTreePath(relPath),
+    );
     if (!flatFiles[absolutePath]) {
       const dirNode: FileTreeNode = {
         path: absolutePath,
@@ -285,7 +283,10 @@ export function flatEntriesToTree(
       rootNodes.push(node);
     } else {
       const parentRelativePath = parts.slice(0, -1).join("/");
-      const parentAbsolutePath = `${normalizedBasePath}/${parentRelativePath}`;
+      const parentAbsolutePath = pathutil.join(
+        normalizedBasePath,
+        pathutil.fromTreePath(parentRelativePath),
+      );
       const parent = pathMap.get(parentAbsolutePath);
 
       if (parent && parent.children) {

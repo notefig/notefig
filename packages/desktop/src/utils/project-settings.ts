@@ -12,6 +12,7 @@ import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { platformAdapter } from "@/adapters";
 import { queryClient } from "@/entities/query-client";
+import { path as pathutil } from "./path";
 
 export const PROJECT_SETTINGS_FILENAME = "metrists.json";
 
@@ -50,7 +51,7 @@ export function projectSettingsQueryKey(workspacePath: string) {
 }
 
 export function projectSettingsPath(workspacePath: string): string {
-  return `${workspacePath}/${PROJECT_SETTINGS_FILENAME}`;
+  return pathutil.join(workspacePath, PROJECT_SETTINGS_FILENAME);
 }
 
 /**

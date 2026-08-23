@@ -1,0 +1,64 @@
+name: Windows Installer (CI artifact)
+
+# Builds the NSIS installer on demand and uploads it as a workflow artifact —
+# no GitHub release, no tag, nothing the in-app updater can ever see. This is
+# the test vehicle for Windows work (MET-157): download the artifact onto a
+# Windows machine and install it, without burning a release number. The
+# updater .sig is included so a localhost latest.json can rehearse the full
+# update flow against this exact build.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag, or SHA to build (default: main)"
+        required: false
+        default: "main"
+        type: string
+      debug:
+        description: "Debug build (devtools enabled)"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  build-windows-installer:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        working-directory: packages/desktop
+        run: npm install
+
+      # createUpdaterArtifacts: true makes the build produce (and require the
+      # key for) the minisign .sig next to the installer.
+      - name: Build NSIS installer
+        working-directory: packages/desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build -- --bundles nsis ${{ inputs.debug && '--debug' || '' }}
+        shell: bash
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          # No ref in the name — branch names contain "/", which artifact
+          # names reject; the run page already shows the built ref.
+          name: notefig-windows-nsis${{ inputs.debug && '-debug' || '' }}
+          path: |
+            packages/desktop/src-tauri/target/${{ inputs.debug && 'debug' || 'release' }}/bundle/nsis/*.exe
+            packages/desktop/src-tauri/target/${{ inputs.debug && 'debug' || 'release' }}/bundle/nsis/*.sig
+          if-no-files-found: error
+          retention-days: 14

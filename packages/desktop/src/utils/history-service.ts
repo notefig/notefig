@@ -11,39 +11,47 @@
 import { IsomorphicGitService } from "@notefig/git";
 import { platformAdapter } from "@/adapters";
 import { createGitStorageHost } from "@/adapters/git-storage-host";
-import { normalizePath } from "@/utils/fs";
+import { path as pathutil, workspaceKey } from "@/utils/path";
 import { ensureExcludeLines } from "@/utils/git-exclude";
 
 const historyServiceRegistry = new Map<string, IsomorphicGitService>();
 const historyInitRegistry = new Map<string, Promise<void>>();
 
 export function historyGitDir(workspacePath: string): string {
-  return `${normalizePath(workspacePath)}/.metrists/.git`;
+  return pathutil.join(pathutil.normalize(workspacePath), ".metrists", ".git");
 }
 
 /** Pre-rename location of the history gitdir; only read for migration. */
 function legacyHistoryGitDir(workspacePath: string): string {
-  return `${normalizePath(workspacePath)}/.metrists/history`;
+  return pathutil.join(
+    pathutil.normalize(workspacePath),
+    ".metrists",
+    "history",
+  );
 }
 
 export function getOrCreateWorkspaceHistoryService(
   workspacePath: string,
 ): IsomorphicGitService {
-  const normalizedWorkspacePath = normalizePath(workspacePath);
-  let service = historyServiceRegistry.get(normalizedWorkspacePath);
+  // Registry key vs OS-facing value: the key is workspaceKey (lowercased on
+  // Windows so respelled routes share one service); repoPath/gitDir keep the
+  // caller's native spelling. Identical strings on posix.
+  const registryKey = workspaceKey(workspacePath);
+  const nativeWorkspacePath = pathutil.normalize(workspacePath);
+  let service = historyServiceRegistry.get(registryKey);
 
   if (!service) {
     service = new IsomorphicGitService(
       createGitStorageHost(
         platformAdapter.fs,
-        historyGitDir(normalizedWorkspacePath),
+        historyGitDir(nativeWorkspacePath),
       ),
       {
-        repoPath: normalizedWorkspacePath,
-        gitDir: historyGitDir(normalizedWorkspacePath),
+        repoPath: nativeWorkspacePath,
+        gitDir: historyGitDir(nativeWorkspacePath),
       },
     );
-    historyServiceRegistry.set(normalizedWorkspacePath, service);
+    historyServiceRegistry.set(registryKey, service);
   }
 
   return service;
@@ -90,18 +98,19 @@ async function migrateLegacyHistoryGitDir(
 export async function ensureWorkspaceHistoryInitialized(
   workspacePath: string,
 ): Promise<IsomorphicGitService> {
-  const normalizedWorkspacePath = normalizePath(workspacePath);
-  const service = getOrCreateWorkspaceHistoryService(normalizedWorkspacePath);
+  const registryKey = workspaceKey(workspacePath);
+  const nativeWorkspacePath = pathutil.normalize(workspacePath);
+  const service = getOrCreateWorkspaceHistoryService(nativeWorkspacePath);
 
-  const inFlight = historyInitRegistry.get(normalizedWorkspacePath);
+  const inFlight = historyInitRegistry.get(registryKey);
   if (inFlight) {
     await inFlight;
     return service;
   }
 
-  const gitDir = historyGitDir(normalizedWorkspacePath);
+  const gitDir = historyGitDir(nativeWorkspacePath);
   const initialization = (async () => {
-    await migrateLegacyHistoryGitDir(normalizedWorkspacePath, gitDir);
+    await migrateLegacyHistoryGitDir(nativeWorkspacePath, gitDir);
     await service.init({ defaultBranch: "main" });
 
     // Exclude .metrists/ (this repo's own gitdir + agent configs) and the
@@ -112,7 +121,7 @@ export async function ensureWorkspaceHistoryInitialized(
       await ensureExcludeLines(gitDir, [".metrists/", ".git/"]);
     } catch (error) {
       console.warn(
-        `Failed to update the history repo's exclude for '${normalizedWorkspacePath}':`,
+        `Failed to update the history repo's exclude for '${nativeWorkspacePath}':`,
         error,
       );
     }
@@ -122,22 +131,22 @@ export async function ensureWorkspaceHistoryInitialized(
     // this block re-executes per checkpoint, so a repo the user inits
     // *after* history exists gets the exclude on the next turn.
     try {
-      const userGitDir = `${normalizedWorkspacePath}/.git`;
+      const userGitDir = pathutil.join(nativeWorkspacePath, ".git");
       const [userGit] = await platformAdapter.fs.exists([userGitDir]);
       if (userGit?.exists && userGit.type === "directory") {
         await ensureExcludeLines(userGitDir, [".metrists/"]);
       }
     } catch (error) {
       console.warn(
-        `Failed to update the user repo's exclude for '${normalizedWorkspacePath}':`,
+        `Failed to update the user repo's exclude for '${nativeWorkspacePath}':`,
         error,
       );
     }
   })().finally(() => {
-    historyInitRegistry.delete(normalizedWorkspacePath);
+    historyInitRegistry.delete(registryKey);
   });
 
-  historyInitRegistry.set(normalizedWorkspacePath, initialization);
+  historyInitRegistry.set(registryKey, initialization);
   await initialization;
   return service;
 }
@@ -153,7 +162,6 @@ export async function checkpointWorkspaceHistory(
   author: { name: string; email: string },
 ): Promise<string | null> {
   const service = await ensureWorkspaceHistoryInitialized(workspacePath);
-  const normalizedWorkspacePath = normalizePath(workspacePath);
   return service.addAllAndCommit({
     message,
     author,
@@ -161,9 +169,9 @@ export async function checkpointWorkspaceHistory(
 }
 
 export function disposeWorkspaceHistoryService(workspacePath: string): void {
-  const normalizedWorkspacePath = normalizePath(workspacePath);
-  historyServiceRegistry.delete(normalizedWorkspacePath);
-  historyInitRegistry.delete(normalizedWorkspacePath);
+  const registryKey = workspaceKey(workspacePath);
+  historyServiceRegistry.delete(registryKey);
+  historyInitRegistry.delete(registryKey);
 }
 
 export function clearWorkspaceHistoryServices(): void {

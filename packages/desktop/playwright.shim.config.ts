@@ -50,7 +50,10 @@ export default defineConfig({
       cwd: "src-tauri",
       url: `http://127.0.0.1:${SHIM_PORT}/health`,
       reuseExistingServer: !process.env.CI,
-      timeout: 180 * 1000,
+      // A cold `cargo run` compiles the whole workspace first; CI prebuilds
+      // the shim in its own step, but an uncached runner still needs far
+      // more than the old 180s here (both shim legs timed out at 180s).
+      timeout: 600 * 1000,
     },
     {
       // The app in shim mode — installs the shim transport (see main.tsx).
@@ -58,6 +61,10 @@ export default defineConfig({
       env: {
         VITE_TEST_BACKEND: "shim",
         VITE_TEST_BACKEND_PORT: String(SHIM_PORT),
+        // The shim's real backend runs on THIS machine; the browser's UA is
+        // a device fiction (Desktop Chrome claims Windows everywhere), so
+        // the app's pathutil flavor is pinned to the actual host OS.
+        VITE_TEST_HOST_OS: process.platform,
       },
       url: `http://localhost:${UI_PORT}`,
       reuseExistingServer: !process.env.CI,

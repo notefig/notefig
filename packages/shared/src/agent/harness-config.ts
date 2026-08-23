@@ -76,25 +76,46 @@ function shellQuoteArg(value: string): string {
  *  quoting becomes the only quoting. */
 const QUOTED_PLACEHOLDER = /(["'])(\$\{(?:sessionId|workspace)\})\1/g;
 
+/** Which shell the rendered resume command targets. Templates are authored
+ *  in POSIX; "powershell" re-renders the same template for the Windows
+ *  default terminal (MET-157). */
+export type ResumeShellDialect = "posix" | "powershell";
+
+/** PowerShell literal argument: single quotes, embedded quotes doubled.
+ *  Set-Location handles cross-drive `cd` natively (no cmd.exe `/d`). */
+function powershellQuoteArg(value: string): string {
+  if (SHELL_SAFE_WORD.test(value)) return value;
+  return `'${value.split("'").join("''")}'`;
+}
+
 /**
  * Fill a harness's `resumeCommand` template for one concrete session.
  * Substituted values are shell-quoted — a workspace path containing spaces,
  * quotes, or `$(...)` pastes into a terminal as the literal argument, never
  * as syntax. Returns null when the harness declares no template — callers
  * hide the affordance rather than guessing a CLI invocation.
+ *
+ * "powershell" additionally rewrites ` && ` to `; ` — Windows PowerShell
+ * 5.1 (the OS default) has no pipeline-chain operators, and `;` preserves
+ * the sequencing the templates rely on.
  */
 export function buildHarnessResumeCommand(
   harness: HarnessDefinition,
   params: { sessionId: string; workspacePath: string },
+  dialect: ResumeShellDialect = "posix",
 ): string | null {
   if (!harness.resumeCommand) return null;
+  const quote = dialect === "powershell" ? powershellQuoteArg : shellQuoteArg;
+  let template = harness.resumeCommand.replace(QUOTED_PLACEHOLDER, "$2");
+  if (dialect === "powershell") {
+    template = template.split(" && ").join("; ");
+  }
   // split/join = replaceAll (this package's TS lib predates ES2021).
-  return harness.resumeCommand
-    .replace(QUOTED_PLACEHOLDER, "$2")
+  return template
     .split("${sessionId}")
-    .join(shellQuoteArg(params.sessionId))
+    .join(quote(params.sessionId))
     .split("${workspace}")
-    .join(shellQuoteArg(params.workspacePath));
+    .join(quote(params.workspacePath));
 }
 
 /**

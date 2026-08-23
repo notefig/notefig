@@ -257,6 +257,34 @@ describe("buildHarnessResumeCommand", () => {
     );
   });
 
+  it("renders the powershell dialect: PS quoting, `;` sequencing, native paths (MET-157)", () => {
+    const command = buildHarnessResumeCommand(
+      claude,
+      {
+        sessionId: "sess-123",
+        workspacePath: "C:\\Users\\x\\My Notes",
+      },
+      "powershell",
+    );
+    // Single quotes are literal in PowerShell; embedded quotes double; `&&`
+    // is not a Windows PowerShell 5.1 operator, `;` is.
+    expect(command).toBe(
+      "cd 'C:\\Users\\x\\My Notes'; claude --resume sess-123",
+    );
+  });
+
+  it("powershell quoting doubles embedded single quotes", () => {
+    const command = buildHarnessResumeCommand(
+      claude,
+      {
+        sessionId: "sess-123",
+        workspacePath: "C:\\it's",
+      },
+      "powershell",
+    );
+    expect(command).toBe("cd 'C:\\it''s'; claude --resume sess-123");
+  });
+
   it("neutralizes shell metacharacters in substituted values", () => {
     const command = buildHarnessResumeCommand(claude, {
       sessionId: "sess-123",

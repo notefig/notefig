@@ -184,6 +184,39 @@ fn collect_directory_paths(
     })
 }
 
+/// Emit "created" for a path — and, when it is a directory, for everything
+/// inside it (a moved-in tree only produces one event for its root).
+async fn push_created(metadata_changes: &mut Vec<MetadataChange>, path: PathBuf, is_dir: bool) {
+    metadata_changes.push(MetadataChange {
+        change_type: "created".to_string(),
+        path: path.to_string_lossy().to_string(),
+        old_path: None,
+        is_directory: is_dir,
+    });
+    if is_dir {
+        for (child_path, child_is_dir) in collect_directory_paths(path).await {
+            metadata_changes.push(MetadataChange {
+                change_type: "created".to_string(),
+                path: child_path.to_string_lossy().to_string(),
+                old_path: None,
+                is_directory: child_is_dir,
+            });
+        }
+    }
+}
+
+/// Emit "deleted" for a path. Children are not enumerated: for a directory
+/// the OS emits per-child remove events on recursive deletes, and no frontend
+/// consumer reads `is_directory` on deletes anyway.
+fn push_deleted(metadata_changes: &mut Vec<MetadataChange>, path: PathBuf, is_dir: bool) {
+    metadata_changes.push(MetadataChange {
+        change_type: "deleted".to_string(),
+        path: path.to_string_lossy().to_string(),
+        old_path: None,
+        is_directory: is_dir,
+    });
+}
+
 /// Process file system events and emit to frontend
 async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppHandle<R>) {
     let mut metadata_changes = Vec::new();
@@ -196,13 +229,7 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                     if should_filter_path(&path) {
                         continue;
                     }
-
-                    metadata_changes.push(MetadataChange {
-                        change_type: "created".to_string(),
-                        path: path.to_string_lossy().to_string(),
-                        old_path: None,
-                        is_directory: false,
-                    });
+                    push_created(&mut metadata_changes, path, false).await;
                 }
             }
             EventKind::Create(CreateKind::Folder) => {
@@ -210,24 +237,20 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                     if should_filter_path(&path) {
                         continue;
                     }
-
-                    let dir_contents = collect_directory_paths(path.clone()).await;
-
-                    metadata_changes.push(MetadataChange {
-                        change_type: "created".to_string(),
-                        path: path.to_string_lossy().to_string(),
-                        old_path: None,
-                        is_directory: true,
-                    });
-
-                    for (child_path, is_dir) in dir_contents {
-                        metadata_changes.push(MetadataChange {
-                            change_type: "created".to_string(),
-                            path: child_path.to_string_lossy().to_string(),
-                            old_path: None,
-                            is_directory: is_dir,
-                        });
+                    push_created(&mut metadata_changes, path, true).await;
+                }
+            }
+            // Windows: the ReadDirectoryChangesW backend only ever emits
+            // CreateKind::Any (notify 6.1.1 windows.rs) — without this arm
+            // external creates never reach the frontend and the tree goes
+            // stale (MET-157 B6). The kind is unknown, so probe the fs.
+            EventKind::Create(CreateKind::Any | CreateKind::Other) => {
+                for path in event.paths {
+                    if should_filter_path(&path) {
+                        continue;
                     }
+                    let is_dir = path.is_dir();
+                    push_created(&mut metadata_changes, path, is_dir).await;
                 }
             }
 
@@ -236,13 +259,7 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                     if should_filter_path(&path) {
                         continue;
                     }
-
-                    metadata_changes.push(MetadataChange {
-                        change_type: "deleted".to_string(),
-                        path: path.to_string_lossy().to_string(),
-                        old_path: None,
-                        is_directory: false,
-                    });
+                    push_deleted(&mut metadata_changes, path, false);
                 }
             }
             EventKind::Remove(RemoveKind::Folder) => {
@@ -250,15 +267,18 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                     if should_filter_path(&path) {
                         continue;
                     }
-
-                    // For directory deletion, we only emit the directory itself
-                    // The frontend should handle cascade deletion of children
-                    metadata_changes.push(MetadataChange {
-                        change_type: "deleted".to_string(),
-                        path: path.to_string_lossy().to_string(),
-                        old_path: None,
-                        is_directory: true,
-                    });
+                    push_deleted(&mut metadata_changes, path, true);
+                }
+            }
+            // Windows counterpart of Create(Any) above: only RemoveKind::Any
+            // is ever emitted. The path is already gone, so is_dir can't be
+            // probed — emit false; no consumer reads it on deletes.
+            EventKind::Remove(RemoveKind::Any | RemoveKind::Other) => {
+                for path in event.paths {
+                    if should_filter_path(&path) {
+                        continue;
+                    }
+                    push_deleted(&mut metadata_changes, path, false);
                 }
             }
 
@@ -359,6 +379,30 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
                             is_directory: false,
                         });
                     }
+                }
+            }
+
+            // Windows renames arrive as separate From/To events with no
+            // tracker cookie; the debouncer's file-ID fallback merges most
+            // pairs into Both within the 100ms window, but unpaired halves
+            // (rename out of / into the watched tree, or a missed pairing)
+            // fall through to here. Model them as delete + create — the
+            // frontend already treats an unknown-oldPath rename as a create.
+            EventKind::Modify(ModifyKind::Name(RenameMode::From)) => {
+                for path in event.paths {
+                    if should_filter_path(&path) {
+                        continue;
+                    }
+                    push_deleted(&mut metadata_changes, path, false);
+                }
+            }
+            EventKind::Modify(ModifyKind::Name(RenameMode::To)) => {
+                for path in event.paths {
+                    if should_filter_path(&path) {
+                        continue;
+                    }
+                    let is_dir = path.is_dir();
+                    push_created(&mut metadata_changes, path, is_dir).await;
                 }
             }
 
@@ -536,5 +580,132 @@ pub async fn stop_watching(watch_id: String) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("No watcher found with id: {}", watch_id))
+    }
+}
+
+/// Event-kind mapping tests for `process_events` (MET-157 B6). Synthetic
+/// `notify::Event`s stand in for the backends so the match arms are exercised
+/// deterministically on every platform — in particular the `Any`-kind and
+/// `From`/`To` shapes that are the ONLY thing the Windows
+/// `ReadDirectoryChangesW` backend emits (real-watcher end-to-end coverage
+/// lives in the shim e2e suite, which runs the actual backend per OS).
+#[cfg(test)]
+mod event_kind_tests {
+    use super::*;
+    use tauri::test::{mock_builder, mock_context, noop_assets};
+    use tauri::Listener;
+
+    /// Runs `process_events` on a mock app and returns the captured
+    /// fs-metadata-changed payloads' (type, path, is_directory) rows.
+    fn metadata_changes_for(events: Vec<Event>) -> Vec<(String, String, bool)> {
+        let app = mock_builder()
+            .build(mock_context(noop_assets()))
+            .expect("failed to build mock app");
+        let captured: Arc<Mutex<Vec<MetadataChange>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = captured.clone();
+        app.listen("fs-metadata-changed", move |event| {
+            let parsed: MetadataChangeEvent =
+                serde_json::from_str(event.payload()).expect("payload should deserialize");
+            sink.lock().unwrap().extend(parsed.changes);
+        });
+
+        tauri::async_runtime::block_on(process_events(events, app.handle()));
+
+        let rows = captured.lock().unwrap();
+        rows.iter()
+            .map(|c| (c.change_type.clone(), c.path.clone(), c.is_directory))
+            .collect()
+    }
+
+    fn event(kind: EventKind, paths: Vec<PathBuf>) -> Event {
+        let mut e = Event::new(kind);
+        e.paths = paths;
+        e
+    }
+
+    #[test]
+    fn create_any_probes_file_vs_directory() {
+        let dir = tempfile::Builder::new().prefix("notefig-b6").tempdir().unwrap();
+        let file = dir.path().join("note.md");
+        std::fs::write(&file, "x").unwrap();
+        let subdir = dir.path().join("sub");
+        std::fs::create_dir(&subdir).unwrap();
+        std::fs::write(subdir.join("child.md"), "y").unwrap();
+
+        let changes = metadata_changes_for(vec![
+            event(EventKind::Create(CreateKind::Any), vec![file.clone()]),
+            event(EventKind::Create(CreateKind::Any), vec![subdir.clone()]),
+        ]);
+
+        let file_str = file.to_string_lossy().to_string();
+        let subdir_str = subdir.to_string_lossy().to_string();
+        assert!(changes.contains(&("created".into(), file_str, false)));
+        assert!(changes.contains(&("created".into(), subdir_str, true)));
+        // A directory create enumerates its children.
+        assert!(changes
+            .iter()
+            .any(|(t, p, d)| t == "created" && p.ends_with("child.md") && !d));
+    }
+
+    #[test]
+    fn remove_any_emits_deleted() {
+        // Path deliberately nonexistent: on Windows a removed path can't be
+        // probed, and the arm must not require it to exist.
+        let gone = std::env::temp_dir().join("notefig-test-gone-b6.md");
+        let changes = metadata_changes_for(vec![event(
+            EventKind::Remove(RemoveKind::Any),
+            vec![gone.clone()],
+        )]);
+
+        assert_eq!(
+            changes,
+            vec![("deleted".into(), gone.to_string_lossy().to_string(), false)]
+        );
+    }
+
+    #[test]
+    fn unpaired_rename_from_and_to_become_delete_and_create() {
+        let dir = tempfile::Builder::new().prefix("notefig-b6").tempdir().unwrap();
+        let target = dir.path().join("renamed.md");
+        std::fs::write(&target, "x").unwrap();
+        let source = dir.path().join("original.md"); // already gone
+
+        let changes = metadata_changes_for(vec![
+            event(
+                EventKind::Modify(ModifyKind::Name(RenameMode::From)),
+                vec![source.clone()],
+            ),
+            event(
+                EventKind::Modify(ModifyKind::Name(RenameMode::To)),
+                vec![target.clone()],
+            ),
+        ]);
+
+        assert!(changes.contains(&(
+            "deleted".into(),
+            source.to_string_lossy().to_string(),
+            false
+        )));
+        assert!(changes.contains(&(
+            "created".into(),
+            target.to_string_lossy().to_string(),
+            false
+        )));
+    }
+
+    #[test]
+    fn typed_create_and_remove_kinds_still_map() {
+        let dir = tempfile::Builder::new().prefix("notefig-b6").tempdir().unwrap();
+        let file = dir.path().join("typed.md");
+        std::fs::write(&file, "x").unwrap();
+
+        let changes = metadata_changes_for(vec![
+            event(EventKind::Create(CreateKind::File), vec![file.clone()]),
+            event(EventKind::Remove(RemoveKind::Folder), vec![file.clone()]),
+        ]);
+
+        let file_str = file.to_string_lossy().to_string();
+        assert!(changes.contains(&("created".into(), file_str.clone(), false)));
+        assert!(changes.contains(&("deleted".into(), file_str, true)));
     }
 }
