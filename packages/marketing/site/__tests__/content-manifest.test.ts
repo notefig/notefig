@@ -34,6 +34,15 @@ describe("parseFrontmatter", () => {
     const raw = "# No frontmatter\n";
     expect(parseFrontmatter(raw).markdown).toBe(raw);
   });
+
+  it("strips frontmatter when the file uses Windows line endings", () => {
+    const { frontmatter, markdown } = parseFrontmatter(
+      "---\r\ntitle: Advanced\r\ndescription: Self-hosted\r\norder: 10\r\n---\r\n\r\n# Advanced\r\n",
+    );
+    expect(frontmatter.title).toBe("Advanced");
+    expect(frontmatter.description).toBe("Self-hosted");
+    expect(markdown.startsWith("# Advanced")).toBe(true);
+  });
 });
 
 describe("pageIdFromModulePath", () => {
