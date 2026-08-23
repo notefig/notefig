@@ -69,6 +69,9 @@ windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
   "Win32_System_JobObjects",
   "Win32_Security",
+  # JOBOBJECT_EXTENDED_LIMIT_INFORMATION embeds IO_COUNTERS, which lives in
+  # (and feature-gates on) the Threading module.
+  "Win32_System_Threading",
 ] }
 
 [dev-dependencies]

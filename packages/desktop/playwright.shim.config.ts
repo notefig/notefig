@@ -50,7 +50,10 @@ export default defineConfig({
       cwd: "src-tauri",
       url: `http://127.0.0.1:${SHIM_PORT}/health`,
       reuseExistingServer: !process.env.CI,
-      timeout: 180 * 1000,
+      // A cold `cargo run` compiles the whole workspace first; CI prebuilds
+      // the shim in its own step, but an uncached runner still needs far
+      // more than the old 180s here (both shim legs timed out at 180s).
+      timeout: 600 * 1000,
     },
     {
       // The app in shim mode — installs the shim transport (see main.tsx).

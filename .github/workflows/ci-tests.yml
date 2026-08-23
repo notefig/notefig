@@ -171,6 +171,11 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/desktop/src-tauri
+
       - name: Install dependencies
         run: npm ci
 
@@ -205,8 +210,21 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/desktop/src-tauri
+
       - name: Install dependencies
         run: npm ci
+
+      # Compile the shim OUTSIDE Playwright's webServer timeout — a cold
+      # workspace build takes well past the old 180s (both legs timed out on
+      # the first PR run); after this step `cargo run -p test-shim` is a
+      # no-op rebuild.
+      - name: Build test shim
+        working-directory: packages/desktop/src-tauri
+        run: cargo build -p test-shim
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4
