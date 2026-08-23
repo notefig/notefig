@@ -246,13 +246,22 @@ async fn push_content_change_if_new(content_changes: &mut Vec<ContentChange>, pa
 /// after the fs operation that triggered the notification already
 /// completed, so if `path` still exists the "delete" was this artifact —
 /// treat it as a content update instead of a real delete.
+///
+/// One further check: existence alone isn't enough — if the path was
+/// genuinely removed and something ELSE got created at the same path before
+/// this event was processed (e.g. a directory deleted and a file created in
+/// its place), the entity's TYPE flips even though the path doesn't. That's
+/// not the replace-artifact this function exists to suppress: the old
+/// entity's metadata (and, for a directory, its children) really is stale
+/// and needs clearing. Re-derive the current type and only treat same-type
+/// survivors as a benign replace; a type mismatch still emits "deleted".
 async fn push_removed_or_modified(
     metadata_changes: &mut Vec<MetadataChange>,
     content_changes: &mut Vec<ContentChange>,
     path: PathBuf,
     is_dir: bool,
 ) {
-    if path.exists() {
+    if path.exists() && path.is_dir() == is_dir {
         if !is_dir {
             push_content_change_if_new(content_changes, &path).await;
         }
@@ -794,5 +803,28 @@ mod event_kind_tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].path, file.to_string_lossy().to_string());
         assert_eq!(rows[0].content, "the new content");
+    }
+
+    /// A path surviving isn't enough on its own: if a directory was removed
+    /// and a FILE got created at that exact path before this event was
+    /// processed, the entity's type flipped — the old directory's metadata
+    /// (and children) really is stale and must still be cleaned up.
+    #[test]
+    fn remove_of_a_path_whose_type_changed_is_still_a_delete() {
+        let dir = tempfile::Builder::new().prefix("notefig-b6").tempdir().unwrap();
+        let path = dir.path().join("was-a-dir-now-a-file");
+        std::fs::write(&path, "now a file").unwrap();
+
+        // Claimed is_dir=true (as a real Remove(Folder) event would carry),
+        // but the path now resolves to a file.
+        let changes = metadata_changes_for(vec![event(
+            EventKind::Remove(RemoveKind::Folder),
+            vec![path.clone()],
+        )]);
+
+        assert_eq!(
+            changes,
+            vec![("deleted".into(), path.to_string_lossy().to_string(), true)]
+        );
     }
 }

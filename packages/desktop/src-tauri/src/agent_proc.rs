@@ -768,7 +768,13 @@ mod tests {
             &env,
             Some(&dir.path().to_string_lossy()),
         );
-        assert_eq!(resolved, shim.to_string_lossy());
+        // Case-insensitive: the candidate is built from PATHEXT's own
+        // casing (".CMD"), not the on-disk file's casing — irrelevant to
+        // Windows path resolution, same reasoning as the sibling test above.
+        assert_eq!(
+            resolved.to_lowercase(),
+            shim.to_string_lossy().to_lowercase()
+        );
     }
 
     /// MET-157 B3: args must survive std's strict .cmd quoting
