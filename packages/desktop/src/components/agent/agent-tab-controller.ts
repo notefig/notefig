@@ -93,7 +93,10 @@ function createAgentTabController(
     // (2) scrolling the matched row into view and highlighting the phrase
     // inside it (the transcript is virtualised, so revealing means asking
     // its virtualiser to scroll to the row's index first).
-    search(_query: string, _options?: TabSearchOptions): TabSearchMatch[] {
+    async search(
+      _query: string,
+      _options?: TabSearchOptions,
+    ): Promise<TabSearchMatch[]> {
       return [];
     },
 

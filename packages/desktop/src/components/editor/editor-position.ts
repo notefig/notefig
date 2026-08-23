@@ -104,10 +104,7 @@ function posAtRenderedOffset(lines: RenderedLine[], offset: number): number {
 }
 
 /** Rendered line index containing a character offset in the joined text. */
-export function lineIndexAtOffset(
-  lines: RenderedLine[],
-  offset: number,
-): number {
+function lineIndexAtOffset(lines: RenderedLine[], offset: number): number {
   let remaining = offset;
   for (let i = 0; i < lines.length; i++) {
     if (remaining <= lines[i].text.length) return i;
@@ -213,43 +210,4 @@ export function resolveSearchTarget(
     from: posAtRenderedOffset(lines, chosen),
     to: posAtRenderedOffset(lines, chosen + target.matchText.length - 1) + 1,
   };
-}
-
-/**
- * Find-in-document: every occurrence of `query` in the rendered text, in the
- * `SearchTarget` shape `resolveSearchTarget` reads back. Occurrence indices
- * are counted per distinct matched text (a case-insensitive search can match
- * several spellings), which is exactly how the workspace-wide file search
- * numbers its matches.
- */
-export function searchRenderedDoc(
-  doc: DocLike,
-  query: string,
-  options: { caseSensitive?: boolean } = {},
-): SearchTarget[] {
-  if (!query) return [];
-
-  const lines = buildRenderedLines(doc);
-  const rendered = lines.map((l) => l.text).join("\n");
-  const haystack = options.caseSensitive ? rendered : rendered.toLowerCase();
-  const needle = options.caseSensitive ? query : query.toLowerCase();
-  if (!needle) return [];
-
-  const seen = new Map<string, number>();
-  const matches: SearchTarget[] = [];
-
-  let idx = haystack.indexOf(needle);
-  while (idx !== -1) {
-    const matchText = rendered.slice(idx, idx + needle.length);
-    const occurrence = seen.get(matchText) ?? 0;
-    seen.set(matchText, occurrence + 1);
-    matches.push({
-      matchText,
-      lineText: lines[lineIndexAtOffset(lines, idx)].text,
-      occurrence,
-    });
-    idx = haystack.indexOf(needle, idx + 1);
-  }
-
-  return matches;
 }

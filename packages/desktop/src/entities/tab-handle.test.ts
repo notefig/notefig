@@ -12,12 +12,12 @@ describe("tab()", () => {
     expect(agent.agent.taskId).toBe("task_1");
   });
 
-  it("is inert on a tab whose surface isn't live", () => {
+  it("is inert on a tab whose surface isn't live", async () => {
     const handle = tab("/ws/notes.md");
 
     expect(handle.isMounted()).toBe(false);
     expect(handle.focus()).toBe(false);
     expect(handle.selectedText()).toBeUndefined();
-    expect(handle.search("anything")).toEqual([]);
+    await expect(handle.search("anything")).resolves.toEqual([]);
   });
 });

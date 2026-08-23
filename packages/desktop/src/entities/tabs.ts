@@ -109,7 +109,7 @@ interface TabHandleBase {
   /** Text the user has selected inside the tab, if any. */
   selectedText(): string | undefined;
   /** Find-in-tab: occurrences of `query` in this tab's own content. */
-  search(query: string, options?: TabSearchOptions): TabSearchMatch[];
+  search(query: string, options?: TabSearchOptions): Promise<TabSearchMatch[]>;
   /** Scroll a match from `search` into view and highlight it. */
   revealMatch(match: TabSearchMatch): boolean;
 }
@@ -198,8 +198,7 @@ export function useLayoutSearchParam(): UseLayoutSearchParam {
   const setLayout = useCallback(
     (
       nextLayout:
-        | LayoutNode[]
-        | ((currentLayout: LayoutNode[]) => LayoutNode[]),
+        LayoutNode[] | ((currentLayout: LayoutNode[]) => LayoutNode[]),
     ) => {
       setUrlSearchParams((prev) => {
         const next = new URLSearchParams(prev);

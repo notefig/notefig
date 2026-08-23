@@ -21,20 +21,21 @@ afterEach(() => {
 });
 
 describe("a document's tab controller", () => {
-  it("round-trips find-in-tab: what search finds, revealMatch selects", () => {
+  it("reveals a match by re-locating it in the rendered document", () => {
     getOrCreateEditor("/ws/a.md", {
       type: "markdown",
       content: doc("alpha beta", "beta gamma"),
     });
 
-    const tab = getTabController("/ws/a.md")!;
-    const matches = tab.search("beta");
-    expect(matches).toEqual([
-      { matchText: "beta", lineText: "alpha beta", occurrence: 0 },
-      { matchText: "beta", lineText: "beta gamma", occurrence: 1 },
-    ]);
+    // The shape the file search returns: text, its line, and which
+    // same-text occurrence in the file it was.
+    const revealed = getTabController("/ws/a.md")!.revealMatch({
+      matchText: "beta",
+      lineText: "beta gamma",
+      occurrence: 1,
+    });
+    expect(revealed).toBe(true);
 
-    expect(tab.revealMatch(matches[1])).toBe(true);
     const editor = getMarkdownEditor("/ws/a.md")!;
     const { from, to } = editor.state.selection;
     expect(editor.state.doc.textBetween(from, to)).toBe("beta");
@@ -52,11 +53,11 @@ describe("a document's tab controller", () => {
     expect(editor.state.doc.textContent).not.toContain("beta");
   });
 
-  it("has no history or searchable content on a non-document tab", () => {
+  it("has no history or searchable content on a non-document tab", async () => {
     getOrCreateEditor("/ws/pic.png", { type: "image" });
     const tab = getTabController("/ws/pic.png")!;
 
     expect(tab.history).toBeUndefined();
-    expect(tab.search("anything")).toEqual([]);
+    await expect(tab.search("anything")).resolves.toEqual([]);
   });
 });

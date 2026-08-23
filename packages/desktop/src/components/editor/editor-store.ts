@@ -32,11 +32,9 @@ import {
   type TabSearchOptions,
 } from "@/tabs/tab-controllers";
 import type { TabKind } from "@/tabs/tab-id";
-import {
-  resolveSearchTarget,
-  searchRenderedDoc,
-  type SearchTarget,
-} from "./editor-position";
+import { resolveSearchTarget, type SearchTarget } from "./editor-position";
+import { platformAdapter } from "@/adapters";
+import { getDirectoryPath } from "@/utils/fs";
 import { docHasRealContent, findPromptNodeId } from "./ai-prompt-utils";
 import { requestPromptBlobFocus } from "@/components/agent/prompt-blob-store";
 import { placeCaretBeforeNode } from "./refocus-editor";
@@ -263,10 +261,25 @@ function createEditorTabController(
     // gone, so the instance must not outlive it.
     dispose: () => disposeEditor(filePath),
 
-    search(query: string, options?: TabSearchOptions): SearchTarget[] {
-      const instance = editorInstances.get(filePath);
-      if (!isMarkdownInstance(instance)) return [];
-      return searchRenderedDoc(instance.editor.state.doc, query, options);
+    /**
+     * Find-in-document, through the same file search the workspace search
+     * panel uses — scoped to this one file. `revealMatch` below re-locates
+     * whatever it returns in the rendered document, which is exactly what
+     * the {matchText, lineText, occurrence} shape exists for.
+     */
+    async search(
+      query: string,
+      options?: TabSearchOptions,
+    ): Promise<SearchTarget[]> {
+      // Only documents have searchable text; an image viewer has none.
+      if (!isMarkdownInstance(editorInstances.get(filePath))) return [];
+      if (!query.trim()) return [];
+
+      return platformAdapter.fs.searchContent(getDirectoryPath(filePath), {
+        query,
+        caseSensitive: options?.caseSensitive,
+        fileIncludes: [filePath],
+      });
     },
 
     revealMatch: (match: SearchTarget) => navigateToLocation(filePath, match),

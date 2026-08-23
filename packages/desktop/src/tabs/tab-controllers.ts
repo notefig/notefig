@@ -71,8 +71,13 @@ export interface TabController {
   selectedText(): string | undefined;
   /** Release resources; called when the tab leaves the layout. */
   dispose(): void;
-  /** Occurrences of `query` in this tab's own content (find-in-tab). */
-  search(query: string, options?: TabSearchOptions): SearchTarget[];
+  /**
+   * Occurrences of `query` in this tab's own content (find-in-tab). Async
+   * because the content lives behind whatever machinery that tab type
+   * already uses — the platform adapter's file search for a document, the
+   * stored transcript for an agent session.
+   */
+  search(query: string, options?: TabSearchOptions): Promise<SearchTarget[]>;
   /** Scroll a match from `search` into view and highlight it. */
   revealMatch(match: SearchTarget): boolean;
   /** Undo/redo inside the tab; absent when the tab type has no history. */
@@ -206,12 +211,12 @@ export function disposeTab(tabId: string): void {
   controller.dispose();
 }
 
-export function searchTab(
+export async function searchTab(
   tabId: string,
   query: string,
   options?: TabSearchOptions,
-): SearchTarget[] {
-  return controllers.get(tabId)?.search(query, options) ?? [];
+): Promise<SearchTarget[]> {
+  return (await controllers.get(tabId)?.search(query, options)) ?? [];
 }
 
 export function revealTabMatch(tabId: string, match: SearchTarget): boolean {

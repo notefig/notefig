@@ -23,7 +23,7 @@ function stubController(
     isFocusable: () => true,
     selectedText: () => "selected",
     dispose: () => {},
-    search: () => [],
+    search: async () => [],
     revealMatch: () => true,
     ...overrides,
   };
@@ -48,9 +48,9 @@ describe("tab controller registry", () => {
     expect(runTabHistoryAction("agent:task_1", "undo")).toBeUndefined();
   });
 
-  it("no-ops on a tab with no live controller", () => {
+  it("no-ops on a tab with no live controller", async () => {
     expect(getTabSelectedText("/ws/closed.md")).toBeUndefined();
-    expect(searchTab("/ws/closed.md", "x")).toEqual([]);
+    await expect(searchTab("/ws/closed.md", "x")).resolves.toEqual([]);
     expect(focusTab("/ws/closed.md")).toBe(false);
     expect(() => disposeTab("/ws/closed.md")).not.toThrow();
   });
