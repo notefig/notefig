@@ -137,7 +137,7 @@ export function Welcome() {
   };
 
   return (
-    <div className="relative flex h-screen flex-col bg-background overflow-hidden texture-surface">
+    <div className="relative flex h-full flex-col bg-background overflow-hidden texture-surface">
       <DebugPanel />
       <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none">
         <PlainLogo size="25rem" className="block dark:hidden text-foreground" />
@@ -187,7 +187,7 @@ export function Welcome() {
               </h1>
             </div>
 
-            <ScrollArea className="h-[calc(100vh-25rem)] max-h-[25rem]">
+            <ScrollArea className="h-[calc(100vh-var(--titlebar-height,0px)-25rem)] max-h-[25rem]">
               <div className="space-y-2 pr-4">
                 <button
                   ref={newProjectRef}
@@ -230,7 +230,10 @@ export function Welcome() {
                     >
                       <div className="flex flex-1 items-center gap-3 min-w-0">
                         <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted">
-                          <PlainLogo size="1.25rem" className="block dark:hidden" />
+                          <PlainLogo
+                            size="1.25rem"
+                            className="block dark:hidden"
+                          />
                           <PlainLogo
                             size="1.25rem"
                             fill="white"
