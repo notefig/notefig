@@ -258,7 +258,9 @@ jobs:
           # Random per-run delimiter: the notes file carries PR-authored text,
           # so a fixed delimiter could be embedded in a PR body to terminate
           # this value early and inject arbitrary step outputs.
-          DELIMITER="RELEASE_NOTES_$(uuidgen)"
+          # uuidgen isn't available in Windows' Git Bash, so build the
+          # delimiter from bash builtins instead (portable across all runners).
+          DELIMITER="RELEASE_NOTES_${RANDOM}${RANDOM}${RANDOM}_$$"
           {
             echo "body<<${DELIMITER}"
             cat "packages/desktop/release-notes/v${{ inputs.version }}.md"
