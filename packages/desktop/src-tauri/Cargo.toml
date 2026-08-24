@@ -72,6 +72,10 @@ windows-sys = { version = "0.59", features = [
   # JOBOBJECT_EXTENDED_LIMIT_INFORMATION embeds IO_COUNTERS, which lives in
   # (and feature-gates on) the Threading module.
   "Win32_System_Threading",
+  # Live registry PATH read (agent_proc.rs win_env) — a GUI app's inherited
+  # PATH is a stale snapshot from Explorer startup (MET-158).
+  "Win32_System_Registry",
+  "Win32_System_Environment",
 ] }
 
 [dev-dependencies]
