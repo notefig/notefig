@@ -72,6 +72,32 @@
   src: url("./assets/fonts/libre-baskerville-latin-700-italic.woff2") format("woff2");
 }
 
+/* Rubik covers Arabic (incl. Farsi's extended letters) and Hebrew, which
+   Inter doesn't ship glyphs for. Listed as a --font-sans fallback below so
+   the browser's per-run font substitution picks it up automatically for
+   those scripts while Latin text keeps rendering in Inter. Only a regular
+   weight is published upstream for these scripts; bold falls back to
+   browser-synthesized bold. */
+@font-face {
+  font-family: "Rubik";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/rubik-arabic-400-normal.woff2") format("woff2");
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891,
+    U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41,
+    U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+}
+@font-face {
+  font-family: "Rubik";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/rubik-hebrew-400-normal.woff2") format("woff2");
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC,
+    U+FB1D-FB4F;
+}
+
 /* The typography plugin wraps inline code in `` ` `` pseudo-characters
    (code::before/::after). In the editor they read as real text but aren't:
    they can't be selected, and the caret at a code boundary renders on the
@@ -123,7 +149,7 @@
   --radius-sm: calc(var(--radius) - 4px);
 
   --font-sans:
-    "Inter", ui-sans-serif, -apple-system, BlinkMacSystemFont,
+    "Inter", "Rubik", ui-sans-serif, -apple-system, BlinkMacSystemFont,
     "Segoe UI Variable Display", "Segoe UI", Helvetica, "Apple Color Emoji",
     Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
   --font-heading: var(--font-sans);
