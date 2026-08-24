@@ -18,8 +18,8 @@ export interface RecentProject {
   lastUrl?: string;
 }
 
-function deriveProjectName(path: string, name?: string) {
-  return name || path.split("/").pop() || path.split("\\").pop() || "Untitled";
+export function deriveProjectName(path: string, name?: string) {
+  return name || path.split(/[/\\]/).filter(Boolean).pop() || "Untitled";
 }
 
 /**

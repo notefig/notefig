@@ -1,0 +1,11 @@
+{
+  "$schema": "https://v2.tauri.app/schemas/config.json",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "decorations": false
+      }
+    ]
+  }
+}
