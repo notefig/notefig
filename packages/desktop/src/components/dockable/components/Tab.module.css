@@ -10,7 +10,7 @@
   box-sizing: border-box;
   cursor: pointer;
   min-width: 0;
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .tabNameContainer {

@@ -230,7 +230,10 @@ export function Welcome() {
                     >
                       <div className="flex flex-1 items-center gap-3 min-w-0">
                         <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted">
-                          <PlainLogo size="1.25rem" className="block dark:hidden" />
+                          <PlainLogo
+                            size="1.25rem"
+                            className="block dark:hidden"
+                          />
                           <PlainLogo
                             size="1.25rem"
                             fill="white"
