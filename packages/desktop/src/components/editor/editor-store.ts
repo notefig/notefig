@@ -88,6 +88,9 @@ export interface MarkdownInstance extends EditorInstance {
   readonly editor: Editor;
   filePath: string;
   savedSelection?: { from: number; to: number };
+  /** Document position last seen at the top of the visible area — see
+   *  `use-editor-viewport-memory`. */
+  savedViewport?: number;
 }
 
 /**
@@ -389,7 +392,12 @@ function createMarkdownInstance(
       if (caret?.type === "before-node") {
         placeCaretBeforeNode(this.editor, caret.pos);
       }
-      this.editor.commands.focus();
+      // Never move the viewport: taking focus is ambient (tab select, mount,
+      // Escape out of a widget) and the caret is often nowhere near what the
+      // user is reading — a tab kept its scroll position precisely so that
+      // coming back to it doesn't jump. Navigation that IS meant to move the
+      // viewport goes through goToLocation.
+      this.editor.commands.focus(null, { scrollIntoView: false });
       return true;
     },
     dispose(): void {
@@ -620,6 +628,18 @@ export function getSavedSelection(
     return instance.savedSelection;
   }
   return undefined;
+}
+
+export function saveViewport(filePath: string, pos: number): void {
+  const instance = editorInstances.get(filePath);
+  if (isMarkdownInstance(instance)) {
+    instance.savedViewport = pos;
+  }
+}
+
+export function getSavedViewport(filePath: string): number | undefined {
+  const instance = editorInstances.get(filePath);
+  return isMarkdownInstance(instance) ? instance.savedViewport : undefined;
 }
 
 export function getAllEditorPaths(): string[] {

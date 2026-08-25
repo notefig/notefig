@@ -9,6 +9,7 @@ import {
 } from "@/components/editor/editor-store";
 import { useEditorFileSync } from "./use-editor-file-sync";
 import { useEditorFocusLifecycle } from "./use-editor-focus-lifecycle";
+import { useEditorViewportMemory } from "./use-editor-viewport-memory";
 import { useLinkPrompt } from "./use-link-prompt";
 import { TiptapToolbar } from "./tiptap-toolbar";
 import { LinkBubbleMenu } from "./tiptap-link-menu";
@@ -51,6 +52,7 @@ export function TextEditor({
 
   useEditorFileSync(editor, file, basePath, isContentLoaded, contentError);
   useEditorFocusLifecycle(editor, file.path);
+  const scrollRef = useEditorViewportMemory(editor, file.path);
   const handleLinkToggle = useLinkPrompt(editor);
 
   // The contenteditable fills the wrapper's height (tiptap.css), but the
@@ -79,51 +81,58 @@ export function TextEditor({
       .run();
   };
 
+  // Drop zone: files open as tabs in this editor's window; image files
+  // insert into the document at the drop point.
+  const dropZone = dropZoneProps({
+    accepts: ["file"],
+    onDrop: (payload, info) => {
+      if (payload.fileType !== "file") return;
+
+      if (isImageFile(payload.path)) {
+        const src = relativeTreePath(basePath, payload.path) || payload.path;
+        const pos =
+          editor.view.posAtCoords({
+            left: info.position.x,
+            top: info.position.y,
+          })?.pos ?? editor.state.selection.from;
+        editor.view.dispatch(
+          editor.state.tr.insert(
+            pos,
+            editor.state.schema.nodes.image.create({ src }),
+          ),
+        );
+        return;
+      }
+
+      getProtocolContext().openFile?.({
+        tabId: payload.path,
+        intent: "new-tab",
+        targetWindowId:
+          info.element
+            .closest("[data-dockable-window-id]")
+            ?.getAttribute("data-dockable-window-id") ?? undefined,
+        moveIfOpen: true,
+      });
+    },
+  });
+
   return (
     <div className="flex flex-col flex-1 min-h-0 w-full z-0">
       <TiptapToolbar editor={editor} onLinkToggle={handleLinkToggle} />
       <div
-        // Drop zone: files open as tabs in this editor's window; image
-        // files insert into the document at the drop point.
         className={cn(
           "flex-1 min-h-0 overflow-auto tiptap-editor-wrapper",
           "data-[mtr-drop-over=true]:shadow-[0_0_0_1px_hsl(var(--ring))_inset]",
           "data-[mtr-drop-over=true]:bg-[hsl(var(--ring)/0.06)]",
         )}
         onMouseDown={handleGutterMouseDown}
-        {...dropZoneProps({
-          accepts: ["file"],
-          onDrop: (payload, info) => {
-            if (payload.fileType !== "file") return;
-
-            if (isImageFile(payload.path)) {
-              const src =
-                relativeTreePath(basePath, payload.path) || payload.path;
-              const pos =
-                editor.view.posAtCoords({
-                  left: info.position.x,
-                  top: info.position.y,
-                })?.pos ?? editor.state.selection.from;
-              editor.view.dispatch(
-                editor.state.tr.insert(
-                  pos,
-                  editor.state.schema.nodes.image.create({ src }),
-                ),
-              );
-              return;
-            }
-
-            getProtocolContext().openFile?.({
-              tabId: payload.path,
-              intent: "new-tab",
-              targetWindowId:
-                info.element
-                  .closest("[data-dockable-window-id]")
-                  ?.getAttribute("data-dockable-window-id") ?? undefined,
-              moveIfOpen: true,
-            });
-          },
-        })}
+        {...dropZone}
+        // This element is both the drop zone and the document's scroller,
+        // and each wants a ref.
+        ref={(element: HTMLDivElement | null) => {
+          dropZone.ref(element);
+          scrollRef.current = element;
+        }}
       >
         <DragHandle editor={editor} nested>
           <GripVertical className="w-4 h-4 text-muted-foreground/40 hover:text-muted-foreground" />
