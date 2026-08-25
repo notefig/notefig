@@ -9,7 +9,9 @@
  * serialize output — is identical to the editor's.
  */
 
-import { Node } from "@tiptap/core";
+import { Extension, Node } from "@tiptap/core";
+import { Plugin } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import StarterKit from "@tiptap/starter-kit";
 import { ListItem } from "@tiptap/extension-list";
 import { Markdown } from "tiptap-markdown";
@@ -244,6 +246,95 @@ export const PromptHostListItem = ListItem.extend({
 });
 
 /**
+ * Wrapper node types whose own dir="auto" governs both text flow and
+ * layout that depends on `direction` — list markers (bullets/numbers) and
+ * indentation for list items, cell text alignment for table cells. These
+ * always own their own dir="auto" via the static attribute below.
+ */
+const DIRECTION_OWNING_WRAPPERS = new Set([
+  "bulletList",
+  "orderedList",
+  "listItem",
+  "taskList",
+  "taskItem",
+  "blockquote",
+  "tableCell",
+  "tableHeader",
+]);
+
+/**
+ * Per-block RTL: gives text-bearing block nodes a real dir="auto"
+ * attribute, so the browser resolves each block's own direction from its
+ * first strong character (Farsi/Arabic vs. Latin). This has to be an actual
+ * HTML attribute rather than the `unicode-bidi: plaintext` CSS trick — that
+ * CSS-only approximation reorders inline text but never touches the box's
+ * computed `direction`, so list markers (bullets/numbers), whose position
+ * follows `direction`, stay pinned to the LTR side and can render off
+ * (invisible) for RTL content. dir="auto" flips both correctly.
+ *
+ * Two mechanisms, split by a real HTML footgun:
+ *
+ * 1. DIRECTION_OWNING_WRAPPERS get a static dir="auto" attribute (always
+ *    present, unconditional — the value is always "auto": parseHTML ignores
+ *    whatever a pasted `dir` says and renderHTML always emits it, so this
+ *    never becomes divergent persisted state).
+ *
+ * 2. paragraph/heading get dir="auto" via a decoration plugin instead of a
+ *    static attribute, and only when their PARENT is not one of the wrappers
+ *    above. Per the HTML dir=auto algorithm, an element's auto-direction
+ *    scan skips the entire subtree of any descendant that itself carries a
+ *    dir attribute. A listItem's only text is its leading paragraph — if
+ *    that paragraph also carried its own dir="auto", the listItem's scan
+ *    would find nothing to look at, fall back to its parent's direction
+ *    (ltr), and the marker/indentation fix above would silently stop
+ *    working — reproduced by hand: with both tagged, "1." stayed pinned
+ *    left while the paragraph text inside correctly went rtl, i.e. exactly
+ *    the "bullets align, text doesn't" symptom. Skipping the paragraph
+ *    inside those wrappers lets it inherit the wrapper's own computed
+ *    direction via normal CSS inheritance instead of racing it.
+ */
+export const AutoDirection = Extension.create({
+  name: "autoDirection",
+  addGlobalAttributes() {
+    return [
+      {
+        types: [...DIRECTION_OWNING_WRAPPERS],
+        attributes: {
+          dir: {
+            default: "auto",
+            parseHTML: () => "auto",
+            renderHTML: () => ({ dir: "auto" }),
+          },
+        },
+      },
+    ];
+  },
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        props: {
+          decorations: (state) => {
+            const decorations: Decoration[] = [];
+            state.doc.descendants((node, pos, parent) => {
+              if (node.type.name !== "paragraph" && node.type.name !== "heading") {
+                return;
+              }
+              if (parent && DIRECTION_OWNING_WRAPPERS.has(parent.type.name)) {
+                return;
+              }
+              decorations.push(
+                Decoration.node(pos, pos + node.nodeSize, { dir: "auto" }),
+              );
+            });
+            return DecorationSet.create(state.doc, decorations);
+          },
+        },
+      }),
+    ];
+  },
+});
+
+/**
  * The schema-defining extension list, in the same order the editor has
  * always registered them (order can influence schema construction). The
  * image, codeBlock, and aiPrompt extensions are injectable so the renderer
@@ -267,6 +358,7 @@ export function createSchemaExtensions(
       listItem: false,
     }),
     PromptHostListItem,
+    AutoDirection,
     Markdown.configure(markdownOptions),
     Underline,
     Subscript,
