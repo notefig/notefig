@@ -6,8 +6,8 @@ import { useAppSettings } from "@/hooks/use-app-settings";
 
 /**
  * Physical pixels the titlebar must cover so content clears the native
- * traffic lights (trafficLightPosition y:14 + ~12px glyphs, plus the -m-1
- * pull-up — see tauri.conf.json).
+ * traffic lights (trafficLightPosition y:14 + ~12px glyphs, plus the 4px
+ * pull-up below — see tauri.conf.json).
  */
 const TRAFFIC_LIGHT_CLEARANCE_PX = 30;
 
@@ -78,7 +78,12 @@ function MacTitlebarSpacer() {
     <div
       ref={ref}
       data-tauri-drag-region
-      className="texture-surface -m-1 w-[calc(100%+1rem)] shrink-0 h-[5vh] md:h-[3vh] xl:h-[2.5vh] bg-background"
+      // -m-1/w-[calc(100%+1rem)] used to do this bleed, but both are
+      // rem-based and silently grew (4px -> 6px pull-up) when the root
+      // font-size moved to a 150% baseline, eating into
+      // TRAFFIC_LIGHT_CLEARANCE_PX's fixed-px budget. Pinned to px so this
+      // can't drift again the next time the root scale changes.
+      className="texture-surface -m-[4px] w-[calc(100%+8px)] shrink-0 h-[5vh] md:h-[3vh] xl:h-[2.5vh] bg-background"
       style={{ WebkitAppRegion: "drag", minHeight } as React.CSSProperties}
     />
   );
