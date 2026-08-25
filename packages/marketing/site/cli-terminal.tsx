@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type RefObject,
+  type SetStateAction,
+} from "react";
 
 const COMMANDS = [
   { command: "npx notefig watch", result: "watching ./" },
@@ -15,7 +22,10 @@ type Line =
   | { kind: "spin"; frame: number }
   | { kind: "result"; text: string };
 
-function sleep(ms: number, signal: { cancelled: boolean }): Promise<void> {
+type Cancel = { cancelled: boolean };
+type SetLines = Dispatch<SetStateAction<Line[] | null>>;
+
+function sleep(ms: number, signal: Cancel): Promise<void> {
   return new Promise((resolve) => {
     if (signal.cancelled) {
       resolve();
@@ -23,6 +33,74 @@ function sleep(ms: number, signal: { cancelled: boolean }): Promise<void> {
     }
     window.setTimeout(resolve, ms);
   });
+}
+
+function replaceLast(prev: Line[] | null, line: Line): Line[] {
+  const next = [...(prev ?? [])];
+  next[next.length - 1] = line;
+  return next;
+}
+
+async function typeCommand(
+  command: string,
+  signal: Cancel,
+  setLines: SetLines,
+): Promise<void> {
+  setLines((prev) => [...(prev ?? []), { kind: "input", command, chars: 0 }]);
+  for (let i = 1; i <= command.length; i++) {
+    if (signal.cancelled) return;
+    setLines((prev) =>
+      replaceLast(prev, { kind: "input", command, chars: i }),
+    );
+    await sleep(command[i - 1] === " " ? 70 : 38, signal);
+  }
+}
+
+async function playSpinner(signal: Cancel, setLines: SetLines): Promise<void> {
+  setLines((prev) => [...(prev ?? []), { kind: "spin", frame: 0 }]);
+  for (let frame = 1; frame <= 14; frame++) {
+    if (signal.cancelled) return;
+    setLines((prev) => replaceLast(prev, { kind: "spin", frame }));
+    await sleep(70, signal);
+  }
+}
+
+function finishStep(prev: Line[] | null, result: string): Line[] {
+  const next = [...(prev ?? [])];
+  if (next[next.length - 1]?.kind === "spin") next.pop();
+  next.push({ kind: "result", text: result });
+  return next;
+}
+
+async function playStep(
+  step: (typeof COMMANDS)[number],
+  signal: Cancel,
+  setLines: SetLines,
+): Promise<void> {
+  await typeCommand(step.command, signal, setLines);
+  await sleep(160, signal);
+  if (signal.cancelled) return;
+  await playSpinner(signal, setLines);
+  if (signal.cancelled) return;
+  setLines((prev) => finishStep(prev, step.result));
+  await sleep(400, signal);
+}
+
+async function playOnce(
+  signal: Cancel,
+  setLines: SetLines,
+  setFading: (value: boolean) => void,
+): Promise<void> {
+  setFading(true);
+  await sleep(180, signal);
+  if (signal.cancelled) return;
+  setLines(() => []);
+  setFading(false);
+  for (const step of COMMANDS) {
+    await playStep(step, signal, setLines);
+    if (signal.cancelled) return;
+  }
+  await sleep(2200, signal);
 }
 
 function usePrefersReducedMotion(): boolean {
@@ -96,69 +174,15 @@ export function CliTerminal() {
       return;
     }
 
-    const signal = { cancelled: false };
+    const signal: Cancel = { cancelled: false };
 
-    async function run(): Promise<void> {
+    async function runLoop(): Promise<void> {
       while (!signal.cancelled) {
-        setFading(true);
-        await sleep(180, signal);
-        if (signal.cancelled) return;
-        setLines([]);
-        setFading(false);
-
-        for (const step of COMMANDS) {
-          if (signal.cancelled) return;
-          setLines((prev) => [
-            ...(prev ?? []),
-            { kind: "input", command: step.command, chars: 0 },
-          ]);
-
-          for (let i = 1; i <= step.command.length; i++) {
-            if (signal.cancelled) return;
-            const chars = i;
-            setLines((prev) => {
-              const next = [...(prev ?? [])];
-              next[next.length - 1] = {
-                kind: "input",
-                command: step.command,
-                chars,
-              };
-              return next;
-            });
-            const typed = step.command[i - 1];
-            await sleep(typed === " " ? 70 : 38, signal);
-          }
-
-          await sleep(160, signal);
-          if (signal.cancelled) return;
-          setLines((prev) => [...(prev ?? []), { kind: "spin", frame: 0 }]);
-          for (let frame = 1; frame <= 14; frame++) {
-            if (signal.cancelled) return;
-            setLines((prev) => {
-              const next = [...(prev ?? [])];
-              if (next[next.length - 1]?.kind === "spin") {
-                next[next.length - 1] = { kind: "spin", frame };
-              }
-              return next;
-            });
-            await sleep(70, signal);
-          }
-
-          if (signal.cancelled) return;
-          setLines((prev) => {
-            const next = [...(prev ?? [])];
-            if (next[next.length - 1]?.kind === "spin") next.pop();
-            next.push({ kind: "result", text: step.result });
-            return next;
-          });
-          await sleep(400, signal);
-        }
-
-        await sleep(2200, signal);
+        await playOnce(signal, setLines, setFading);
       }
     }
 
-    void run();
+    void runLoop();
     return () => {
       signal.cancelled = true;
     };

@@ -31,7 +31,22 @@ export function handoffSatisfied(
   allowEmpty: boolean,
 ): boolean {
   if (!target) return false;
+  if (target instanceof HTMLImageElement) return target.complete;
   return allowEmpty || (target.textContent ?? "").trim().length > 0;
+}
+
+/**
+ * Mobile waits on the product-shot image (not allowEmpty — img has no text).
+ * Desktop waits on the editor, accepting empty when the visitor wiped the page.
+ */
+export function marketingHandoff(
+  isMobileShot: boolean,
+  workspaceReady: boolean,
+  pageIsEmpty: boolean,
+): { selector: string; allowEmpty: boolean } {
+  if (isMobileShot) return { selector: ".product-shot", allowEmpty: false };
+  if (!workspaceReady) return { selector: ".never", allowEmpty: false };
+  return { selector: ".ProseMirror", allowEmpty: pageIsEmpty };
 }
 
 /**

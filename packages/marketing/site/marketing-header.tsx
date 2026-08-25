@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
-import { APP_URL, GITHUB_URL, MACOS_DOWNLOAD_URL } from "./links";
+import { DownloadAppLink } from "./download-app-link";
+import { APP_URL, GITHUB_URL } from "./links";
 
 export function MarketingHeader({ onEnterApp }: { onEnterApp: () => void }) {
   return (
@@ -34,13 +35,7 @@ export function MarketingHeader({ onEnterApp }: { onEnterApp: () => void }) {
           >
             Open the app
           </a>
-          <a
-            href={MACOS_DOWNLOAD_URL}
-            download
-            className="whitespace-nowrap rounded-md border border-border px-3 py-1 text-xs font-medium hover:bg-accent"
-          >
-            Download for macOS
-          </a>
+          <DownloadAppLink className="whitespace-nowrap rounded-md border border-border px-3 py-1 text-xs font-medium hover:bg-accent" />
         </div>
       </div>
     </header>

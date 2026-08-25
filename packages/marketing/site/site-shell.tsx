@@ -6,7 +6,7 @@ import { Hero } from "./hero";
 import { MarketingFooter } from "./marketing-footer";
 import { MarketingHeader } from "./marketing-header";
 import { MarketingSections } from "./marketing-sections";
-import { usePrerenderHandoff } from "./prerender";
+import { marketingHandoff, usePrerenderHandoff } from "./prerender";
 import { pageForPathname, titleForRoute } from "./route-page";
 import {
   useMobileProductShot,
@@ -35,20 +35,41 @@ function SitePage({
 }) {
   const isMobileShot = useMobileProductShot();
   const workspaceReady = useWorkspaceReady(page);
-  const { frameRef, live, scrollToApp, jumpToApp } =
-    useProductWindow(isDeepLink);
-
+  const product = useProductWindow(isDeepLink);
   const pageIsEmpty = usePageIsEmpty(page, workspaceReady && !isMobileShot);
-  usePrerenderHandoff(
-    isMobileShot
-      ? ".product-shot"
-      : workspaceReady
-        ? ".ProseMirror"
-        : ".never",
-    { allowEmpty: isMobileShot || pageIsEmpty },
-  );
-  useDocumentTitle(page, isDeepLink);
+  const handoff = marketingHandoff(isMobileShot, workspaceReady, pageIsEmpty);
 
+  usePrerenderHandoff(handoff.selector, { allowEmpty: handoff.allowEmpty });
+  useDocumentTitle(page, isDeepLink);
+  useArriveAtApp(isMobileShot, workspaceReady, isDeepLink, product.jumpToApp);
+
+  return (
+    <div className="site-stage bg-background text-foreground">
+      <div className="select-text">
+        <MarketingHeader onEnterApp={product.scrollToApp} />
+        <Hero />
+      </div>
+      <ProductStage
+        frameRef={product.frameRef}
+        live={product.live}
+        isMobileShot={isMobileShot}
+        workspaceReady={workspaceReady}
+        onEnterApp={product.scrollToApp}
+      />
+      <div className="select-text">
+        <MarketingSections />
+        <MarketingFooter onEnterApp={product.scrollToApp} />
+      </div>
+    </div>
+  );
+}
+
+function useArriveAtApp(
+  isMobileShot: boolean,
+  workspaceReady: boolean,
+  isDeepLink: boolean,
+  jumpToApp: () => void,
+): void {
   const jumped = useRef(false);
   useEffect(() => {
     if (jumped.current) return;
@@ -57,54 +78,56 @@ function SitePage({
     if (isDeepLink) jumpToApp();
     else window.scrollTo({ top: 0 });
   }, [isMobileShot, workspaceReady, isDeepLink, jumpToApp]);
+}
 
+function ProductStage({
+  frameRef,
+  live,
+  isMobileShot,
+  workspaceReady,
+  onEnterApp,
+}: {
+  frameRef: React.RefObject<HTMLElement | null>;
+  live: boolean;
+  isMobileShot: boolean;
+  workspaceReady: boolean;
+  onEnterApp: () => void;
+}) {
   return (
-    <div className="site-stage bg-background text-foreground">
-      <div className="select-text">
-        <MarketingHeader onEnterApp={scrollToApp} />
-        <Hero />
-      </div>
-
-      <section
-        ref={frameRef as React.RefObject<HTMLElement>}
-        className="site-column product-window relative pb-8"
-      >
-        <img
-          src="/app-preview-desktop.png"
-          alt="The Notefig homepage: stone paper page around a framed dark editor"
-          className="product-shot"
-        />
-        <div className="product-live">
-          <div className="product-chrome" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
-          <div className="relative">
-            <div
-              className="product-frame dark"
-              {...(!live ? { inert: true } : {})}
-            >
-              {!isMobileShot && workspaceReady && <AppSurface />}
-            </div>
-            {!live && (
-              <button
-                type="button"
-                className="absolute inset-0 cursor-pointer"
-                onClick={scrollToApp}
-              >
-                <span className="sr-only">Open the app</span>
-              </button>
-            )}
-          </div>
+    <section
+      ref={frameRef as React.RefObject<HTMLElement>}
+      className="site-column product-window relative pb-8"
+    >
+      <img
+        src="/app-preview-desktop.png"
+        alt="The Notefig homepage: stone paper page around a framed dark editor"
+        className="product-shot"
+      />
+      <div className="product-live">
+        <div className="product-chrome" aria-hidden="true">
+          <span />
+          <span />
+          <span />
         </div>
-      </section>
-
-      <div className="select-text">
-        <MarketingSections />
-        <MarketingFooter onEnterApp={scrollToApp} />
+        <div className="relative">
+          <div
+            className="product-frame dark"
+            {...(!live ? { inert: true } : {})}
+          >
+            {!isMobileShot && workspaceReady && <AppSurface />}
+          </div>
+          {!live && (
+            <button
+              type="button"
+              className="absolute inset-0 cursor-pointer"
+              onClick={onEnterApp}
+            >
+              <span className="sr-only">Open the app</span>
+            </button>
+          )}
+        </div>
       </div>
-    </div>
+    </section>
   );
 }
 

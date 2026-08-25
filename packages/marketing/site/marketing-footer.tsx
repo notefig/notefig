@@ -1,4 +1,5 @@
-import { APP_URL, GITHUB_URL, MACOS_DOWNLOAD_URL } from "./links";
+import { DownloadAppLink } from "./download-app-link";
+import { APP_URL, GITHUB_URL } from "./links";
 import { PageLinkRow } from "./page-links";
 
 export function MarketingFooter({ onEnterApp }: { onEnterApp: () => void }) {
@@ -22,13 +23,7 @@ export function MarketingFooter({ onEnterApp }: { onEnterApp: () => void }) {
           >
             Open the app
           </a>
-          <a
-            href={MACOS_DOWNLOAD_URL}
-            download
-            className="ml-auto whitespace-nowrap rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90"
-          >
-            Download for macOS
-          </a>
+          <DownloadAppLink className="ml-auto whitespace-nowrap rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90" />
         </div>
         <PageLinkRow onNavigate={onEnterApp} />
       </div>
