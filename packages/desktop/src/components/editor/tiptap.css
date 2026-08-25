@@ -43,6 +43,14 @@
   vertical-align: top;
 }
 
+/* The widget owns its own focus/selection UI (PromptBlob) — a ProseMirror
+   NodeSelection can still land on it (e.g. the "/" summon sets one so ⌘Z
+   restores the right cursor position, ai-prompt-utils.ts), but it must never
+   show the generic node-selection outline. */
+.ProseMirror [data-type="ai-prompt"].ProseMirror-selectednode {
+  outline: none;
+}
+
 /* Task item — checkbox and text side by side */
 ul[data-type="taskList"] > li {
   display: flex;
