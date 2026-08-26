@@ -100,11 +100,17 @@ export function FrontmatterEditor({
   onChange: (yaml: string) => void;
 }) {
   const doc = parseDocument(yaml || "");
+  // String keys only: Object.entries stringifies scalar keys, so a numeric
+  // or boolean key (`1: x`) would make set/delete target a DIFFERENT key
+  // than the one displayed (duplicate rows, undeletable properties). Such
+  // maps take the raw-YAML fallback instead.
   const structured =
     doc.errors.length === 0 &&
     (doc.contents === null ||
       (isMap(doc.contents) &&
-        doc.contents.items.every((item) => isScalar(item.key))));
+        doc.contents.items.every(
+          (item) => isScalar(item.key) && typeof item.key.value === "string",
+        )));
 
   const rows: Row[] = structured
     ? Object.entries((doc.toJS() ?? {}) as Record<string, unknown>).map(
