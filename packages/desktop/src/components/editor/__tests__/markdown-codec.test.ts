@@ -75,6 +75,10 @@ export const fixtures: string[] = [
   "text before ![inline](pic.png) text after",
   "Before\n\n<div>raw html</div>\n\nAfter",
   "",
+  "---\ntitle: Hello\ntags:\n  - a\n  - b\n---\n\n# Heading",
+  "---\n---",
+  "---\ntitle: only frontmatter\n---",
+  "---\n\nBelow",
   [
     "# Title",
     "",

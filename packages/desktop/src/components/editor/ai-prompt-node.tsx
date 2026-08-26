@@ -54,11 +54,15 @@ function appendPromptTr(
   const type = state.schema.nodes[AiPromptNodeBase.name];
   if (!type) return null;
   const blobId = newPromptBlobInstanceId();
-  // Position 0: the widget sits above the empty paragraph, so a fresh doc
-  // shows no blank line before it. The paragraph below stays as the caret
-  // landing spot for Escape/click-into-editor.
+  // Top of the body: above the empty paragraph, so a fresh doc shows no
+  // blank line before it (the paragraph below stays as the caret landing
+  // spot for Escape/click-into-editor) — but after a leading frontmatter
+  // node, whose doc position the content expression pins to 0 (MET-137).
+  const first = state.doc.firstChild;
+  const insertPos =
+    first && first.type.name === "frontmatter" ? first.nodeSize : 0;
   const tr = state.tr
-    .insert(0, type.create({ blobId }))
+    .insert(insertPos, type.create({ blobId }))
     .setMeta("addToHistory", false)
     .setMeta(UI_ONLY_TRANSACTION_META, true);
   return { tr, blobId };

@@ -132,6 +132,50 @@ describe("identity round-trip (canonical markdown)", () => {
     expectIdentity("Before\n\n![alt text](assets/pic.png)\n\nAfter"));
 });
 
+describe("frontmatter (MET-137)", () => {
+  it("frontmatter round-trips byte-identical", () =>
+    expectIdentity("---\ntitle: Hello\ntags:\n  - a\n  - b\n---\n\n# Heading"));
+
+  it("comments and key order survive", () =>
+    expectIdentity(
+      "---\n# reviewed 2026-08\nzeta: 1\nalpha: 2\n---\n\nBody",
+    ));
+
+  it("frontmatter-only file", () =>
+    expectIdentity("---\ntitle: only frontmatter\n---"));
+
+  it("empty frontmatter is dropped on save (empty node = no fences)", () => {
+    // Deleting the last property leaves an empty node; it must serialize
+    // to nothing, which also normalizes bare "---\n---" fences away.
+    expect(roundTrip("---\n---")).toBe("");
+    expectStable("---\n---");
+  });
+
+  it("missing blank line after closing fence normalizes once", () =>
+    expectStable("---\ntitle: x\n---\n# Heading"));
+
+  it("unclosed opening fence stays a horizontal rule", () => {
+    expectIdentity("---\n\nBelow");
+    const editor = createEditor("---\n\nBelow");
+    expect(editor.getJSON().content?.[0]?.type).toBe("horizontalRule");
+  });
+
+  it("mid-document --- is not frontmatter", () => {
+    const editor = createEditor("Above\n\n---\n\nBelow");
+    expect(editor.getJSON().content?.[0]?.type).toBe("paragraph");
+    expectIdentity("Above\n\n---\n\nBelow");
+  });
+
+  it("parses into a frontmatter node carrying the raw yaml", () => {
+    const editor = createEditor("---\ntitle: Hello\n---\n\nBody");
+    const first = editor.getJSON().content?.[0];
+    expect(first?.type).toBe("frontmatter");
+    expect(first?.attrs?.yaml).toBe("title: Hello");
+    // The YAML must not leak into the rendered document text.
+    expect(editor.getText()).not.toContain("title");
+  });
+});
+
 describe("stability round-trip (may normalize once, then fixed)", () => {
   it("asterisk bullets normalize to dashes", () =>
     expectStable("* one\n* two"));

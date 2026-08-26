@@ -177,6 +177,189 @@ export const MarkdownImageBase = Image.extend({
 });
 
 /**
+ * YAML frontmatter support (MET-137). The `---` fenced block at byte 0 is
+ * document metadata, not markdown — without special handling markdown-it
+ * parses it as a horizontal rule plus a setext heading of the raw YAML,
+ * which the next save then destructively rewrites.
+ *
+ * Split of responsibilities:
+ *  - splitFrontmatter: the one definition of "this file has frontmatter"
+ *    (gray-matter convention: opening `---` at byte 0, closing `---` on its
+ *    own line).
+ *  - wrapParserWithFrontmatter: patches a tiptap-markdown parser so full-
+ *    document parses emit a frontmatter node ahead of the parsed body.
+ *    Inline parses (insertContentAt / the clipboard path) are left alone —
+ *    pasted text must never grow a frontmatter node mid-document, and the
+ *    doc's content expression (`frontmatter? block+`, DocWithFrontmatter
+ *    below) would reject it anyway.
+ *  - FrontmatterMarkdown applies the wrapper. It must be a subclass of the
+ *    Markdown extension itself: Markdown runs at priority 50 (after every
+ *    other hook) and parses the editor's initial content inside its own
+ *    onBeforeCreate, immediately after constructing the parser — no other
+ *    extension's hook can get between the two. The codec's fake editor
+ *    invokes the same config.onBeforeCreate, so worker parses are wrapped
+ *    identically by construction.
+ *  - FrontmatterNodeBase.markdown.serialize re-emits the fences, so every
+ *    serializer (worker codec and live getMarkdown()) round-trips it.
+ *
+ * The YAML text travels through the HTML hand-off URI-encoded in data-yaml:
+ * it can contain any character, and encoding sidesteps entity-escaping
+ * differences between the real DOM and the worker's linkedom shim.
+ */
+export function splitFrontmatter(markdown: string): {
+  yaml: string | null;
+  body: string;
+} {
+  const lines = markdown.split("\n");
+  if (lines[0]?.trimEnd() !== "---") return { yaml: null, body: markdown };
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trimEnd() !== "---") continue;
+    let bodyStart = i + 1;
+    // The conventional blank line after the closing fence belongs to the
+    // fence (the serializer's closeBlock re-emits it), not to the body.
+    if (lines[bodyStart] === "") bodyStart++;
+    return {
+      yaml: lines.slice(1, i).join("\n"),
+      body: lines.slice(bodyStart).join("\n"),
+    };
+  }
+  // Opening fence with no closing fence: a horizontal rule, not frontmatter.
+  return { yaml: null, body: markdown };
+}
+
+export function wrapParserWithFrontmatter(storage: {
+  parser: { parse(content: string, options?: { inline?: boolean }): unknown };
+}): void {
+  const inner = storage.parser.parse.bind(storage.parser);
+  storage.parser.parse = (content, options) => {
+    if (options?.inline || typeof content !== "string") {
+      return inner(content, options);
+    }
+    const { yaml, body } = splitFrontmatter(content);
+    if (yaml === null) return inner(content, options);
+    const html = inner(body, options);
+    return (
+      `<div data-type="frontmatter" data-yaml="${encodeURIComponent(yaml)}"></div>` +
+      (typeof html === "string" ? html : "")
+    );
+  };
+}
+
+interface FrontmatterMarkdownEditor {
+  options: { content: unknown; initialContent?: unknown };
+  storage: {
+    markdown?: {
+      parser: { parse(content: unknown, options?: { inline?: boolean }): unknown };
+    };
+  };
+}
+
+const baseMarkdownOnBeforeCreate = (
+  Markdown.config as unknown as {
+    onBeforeCreate: (this: { editor: unknown; options: unknown }) => void;
+  }
+).onBeforeCreate;
+
+export const FrontmatterMarkdown = Markdown.extend({
+  onBeforeCreate() {
+    const editor = this.editor as unknown as FrontmatterMarkdownEditor;
+    // The base hook builds parser+serializer and immediately parses the
+    // initial content — replay it against empty content, install the
+    // frontmatter wrapper, then parse the real initial content through the
+    // wrapped parser. (Explicit base call, not this.parent: the codec's
+    // fake editor invokes this hook outside tiptap's extension plumbing,
+    // where parent() doesn't exist.)
+    const initialContent = editor.options.content;
+    editor.options.content = "";
+    baseMarkdownOnBeforeCreate.call(this);
+    const storage = editor.storage.markdown!;
+    wrapParserWithFrontmatter(storage);
+    editor.options.initialContent = initialContent;
+    editor.options.content = storage.parser.parse(initialContent);
+  },
+});
+
+export const FrontmatterNodeBase = Node.create({
+  name: "frontmatter",
+  // Deliberately not in the "block" group: the only place the schema admits
+  // it is the doc's own content expression (DocWithFrontmatter), which pins
+  // it to position 0 — ProseMirror itself then forbids moving it, creating
+  // a second one, or typing above it.
+  atom: true,
+  // Not selectable: the document opens with its selection at doc start,
+  // which would otherwise resolve to a NodeSelection on this atom — the
+  // browser paints the whole panel as selected and the first keystroke
+  // would REPLACE the frontmatter with the typed text.
+  selectable: false,
+  draggable: false,
+
+  addAttributes() {
+    return {
+      // The raw YAML between the fences, without them and without a
+      // trailing newline. Byte-preserved: the panel UI edits it through the
+      // yaml library's document API so comments, key order, and unknown
+      // keys survive untouched.
+      yaml: { default: "" },
+    };
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: 'div[data-type="frontmatter"]',
+        getAttrs: (element) => ({
+          yaml: decodeURIComponent(element.getAttribute("data-yaml") ?? ""),
+        }),
+      },
+    ];
+  },
+
+  renderHTML({ node }) {
+    return [
+      "div",
+      {
+        "data-type": "frontmatter",
+        "data-yaml": encodeURIComponent(node.attrs.yaml as string),
+      },
+    ];
+  },
+
+  addStorage() {
+    return {
+      markdown: {
+        serialize(
+          state: {
+            write: (s: string) => void;
+            closeBlock: (node: unknown) => void;
+          },
+          node: { attrs: { yaml: string } },
+        ) {
+          // An empty node contributes nothing (like aiPrompt): deleting
+          // the last property must remove the fences from the file, not
+          // leave "---\n---" behind. Corollary: bare "---\n---" fences
+          // normalize away on the first save.
+          const yaml = node.attrs.yaml;
+          if (!yaml) return;
+          state.write(`---\n${yaml}\n---`);
+          state.closeBlock(node);
+        },
+      },
+    };
+  },
+});
+
+/**
+ * Top node admitting an optional frontmatter block at position 0 and
+ * nothing else frontmatter-shaped anywhere else. Replaces StarterKit's
+ * stock Document (content: "block+").
+ */
+export const DocWithFrontmatter = Node.create({
+  name: "doc",
+  topNode: true,
+  content: "frontmatter? block+",
+});
+
+/**
  * Transactions that only touch UI-only nodes (today: the aiPrompt widget)
  * carry this meta so the autosave path can ignore them — they never change
  * the serialized markdown, and a save would only churn the file watcher.
@@ -345,6 +528,7 @@ export function createSchemaExtensions(
   image: typeof MarkdownImageBase = MarkdownImageBase,
   codeBlock: typeof CodeBlockLowlight = CodeBlockLowlight,
   aiPrompt: typeof AiPromptNodeBase = AiPromptNodeBase,
+  frontmatter: typeof FrontmatterNodeBase = FrontmatterNodeBase,
 ) {
   return [
     StarterKit.configure({
@@ -356,10 +540,14 @@ export function createSchemaExtensions(
       // Replaced by PromptHostListItem below (same node name, widened
       // content expression).
       listItem: false,
+      // Replaced by DocWithFrontmatter (same node name, content expression
+      // admitting an optional leading frontmatter node).
+      document: false,
     }),
+    DocWithFrontmatter,
     PromptHostListItem,
     AutoDirection,
-    Markdown.configure(markdownOptions),
+    FrontmatterMarkdown.configure(markdownOptions),
     Underline,
     Subscript,
     Superscript,
@@ -378,5 +566,8 @@ export function createSchemaExtensions(
     TableHeader,
     codeBlock.configure({ lowlight }),
     aiPrompt,
+    // After Markdown: its onBeforeCreate patches the parser tiptap-markdown
+    // constructs in its own onBeforeCreate, and hooks run in list order.
+    frontmatter,
   ];
 }

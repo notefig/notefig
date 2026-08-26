@@ -6,6 +6,7 @@ import CharacterCount from "@tiptap/extension-character-count";
 import { EditorImage } from "./editor-image-node";
 import { BlobNodeView } from "./blobs/blob-node-view";
 import { AiPromptNode } from "./ai-prompt-node";
+import { FrontmatterNode } from "./frontmatter-node";
 import {
   createSchemaExtensions,
   MarkdownImageBase,
@@ -81,7 +82,12 @@ const NativeFormatIntercept = Extension.create({
 });
 
 export const editorExtensions = [
-  ...createSchemaExtensions(MarkdownImage, MarkdownCodeBlock, AiPromptNode),
+  ...createSchemaExtensions(
+    MarkdownImage,
+    MarkdownCodeBlock,
+    AiPromptNode,
+    FrontmatterNode,
+  ),
   Placeholder.configure({ placeholder: "Type something, or press / for AI…" }),
   CharacterCount,
   NativeFormatIntercept,
