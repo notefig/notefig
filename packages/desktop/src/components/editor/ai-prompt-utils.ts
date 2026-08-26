@@ -7,11 +7,13 @@
 import type { Node as PMNode } from "@tiptap/pm/model";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
-import { AiPromptNodeBase } from "./editor-schema-kit";
+import { AiPromptNodeBase, FrontmatterNodeBase } from "./editor-schema-kit";
 
-/** Real content = anything that would serialize to markdown: text, or a
- *  non-aiPrompt leaf (image, horizontal rule, …). Empty paragraphs and the
- *  widget itself don't count. */
+/** Real content = anything that would serialize to markdown BODY: text, or
+ *  a non-widget leaf (image, horizontal rule, …). Empty paragraphs, the
+ *  widget itself, and the frontmatter node don't count — a document whose
+ *  body is empty should get the prompt widget even when it carries
+ *  frontmatter (MET-137). */
 export function docHasRealContent(doc: PMNode): boolean {
   let found = false;
   doc.descendants((node) => {
@@ -20,7 +22,11 @@ export function docHasRealContent(doc: PMNode): boolean {
       if (node.text?.trim()) found = true;
       return false;
     }
-    if (node.isLeaf && node.type.name !== AiPromptNodeBase.name) {
+    if (
+      node.isLeaf &&
+      node.type.name !== AiPromptNodeBase.name &&
+      node.type.name !== FrontmatterNodeBase.name
+    ) {
       found = true;
     }
     return !found;

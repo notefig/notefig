@@ -24,6 +24,7 @@ import {
   TiptapLinkButton,
   TiptapTableInsertButton,
 } from "./tiptap-toolbar-buttons";
+import { FrontmatterToolbarButton } from "./frontmatter-popover";
 
 interface TiptapToolbarProps {
   editor: Editor;
@@ -117,6 +118,10 @@ export function TiptapToolbar({ editor, onLinkToggle }: TiptapToolbarProps) {
           <LinkIcon />
         </TiptapLinkButton>
       </ScrollArea>
+
+      {/* Outside the scroll area: FixedToolbar is justify-between, so the
+          properties popover trigger pins to the toolbar's far end. */}
+      <FrontmatterToolbarButton editor={editor} />
     </FixedToolbar>
   );
 }
