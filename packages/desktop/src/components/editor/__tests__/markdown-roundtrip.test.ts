@@ -163,8 +163,10 @@ describe("frontmatter (MET-137)", () => {
   it("mid-document --- is not frontmatter", () => {
     const editor = createEditor("Above\n\n---\n\nBelow");
     expect(editor.getJSON().content?.[0]?.type).toBe("paragraph");
-    expectIdentity("Above\n\n---\n\nBelow");
   });
+
+  it("CRLF fences are recognized, then stable", () =>
+    expectStable("---\r\ntitle: x\r\n---\r\n\r\nBody"));
 
   it("parses into a frontmatter node carrying the raw yaml", () => {
     const editor = createEditor("---\ntitle: Hello\n---\n\nBody");

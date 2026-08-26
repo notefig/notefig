@@ -107,6 +107,95 @@ test.describe("persistence", () => {
   });
 });
 
+test.describe("frontmatter properties", () => {
+  test("editing through the popover saves frontmatter without touching the body", async ({
+    page,
+  }) => {
+    await openHarness(page, {
+      content: "---\ntitle: Draft\n---\n\n# Doc\n\nBody text.\n",
+    });
+    // The yaml never renders in the document itself.
+    await expect(page.locator(".ProseMirror")).not.toContainText("Draft");
+
+    await page.getByRole("radio", { name: "Properties" }).click();
+    const popover = page.getByRole("dialog");
+    await expect(
+      popover.getByRole("textbox", { name: "Property name title" }),
+    ).toBeVisible();
+
+    // Edit the existing value.
+    const valueInput = popover.getByRole("textbox", { name: "Value of title" });
+    await valueInput.fill("Final");
+    await valueInput.press("Enter");
+
+    // Add a new property.
+    await popover.getByRole("textbox", { name: "New property name" }).fill("status");
+    await popover.getByRole("textbox", { name: "New property value" }).fill("done");
+    await popover.getByRole("textbox", { name: "New property value" }).press("Enter");
+
+    await expect
+      .poll(() => readFile(page, DOC), { timeout: 5_000 })
+      .toBe("---\ntitle: Final\nstatus: done\n---\n\n# Doc\n\nBody text.");
+
+    // Delete both properties: the fences must leave the file entirely.
+    await popover.getByRole("button", { name: "Delete title" }).click();
+    await popover.getByRole("button", { name: "Delete status" }).click();
+    await expect
+      .poll(() => readFile(page, DOC), { timeout: 5_000 })
+      .toBe("# Doc\n\nBody text.");
+  });
+
+  test("toolbar button toggles the popover closed instead of reopening", async ({
+    page,
+  }) => {
+    await openHarness(page, { content: "---\ntitle: Draft\n---\n\n# Doc\n" });
+    const button = page.getByRole("radio", { name: "Properties" });
+
+    await button.click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await button.click();
+    await expect(page.getByRole("dialog")).not.toBeVisible();
+    await button.click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+  });
+
+  test("undoing a hidden frontmatter change opens the popover", async ({
+    page,
+  }) => {
+    await openHarness(page, { content: "---\ntitle: Draft\n---\n\n# Doc\n" });
+    const button = page.getByRole("radio", { name: "Properties" });
+
+    await button.click();
+    const valueInput = page
+      .getByRole("dialog")
+      .getByRole("textbox", { name: "Value of title" });
+    await valueInput.fill("Final");
+    await valueInput.press("Enter");
+    await button.click();
+    await expect(page.getByRole("dialog")).not.toBeVisible();
+
+    // Let the autosave land, then undo through the editor command (the
+    // ⌘Z→undo binding is stock tiptap; synthetic modifier keystrokes are
+    // unreliable in the harness right after popover focus juggling).
+    await expect
+      .poll(() => readFile(page, DOC), { timeout: 5_000 })
+      .toContain("title: Final");
+    await page.locator(".ProseMirror").click();
+    await page.evaluate(() => {
+      const dom = document.querySelector(".ProseMirror") as unknown as {
+        editor: { commands: { undo: () => boolean } };
+      };
+      dom.editor.commands.undo();
+    });
+
+    // The change is invisible in the page, so the popover opens to show it.
+    await expect(
+      page.getByRole("dialog").getByRole("textbox", { name: "Value of title" }),
+    ).toHaveValue("Draft");
+    expect(await getMarkdown(page)).toContain("title: Draft");
+  });
+});
+
 test.describe("images", () => {
   const PNG_BYTES = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 

@@ -98,6 +98,19 @@ describe("aiPrompt empty-document keeper", () => {
     expect(hasPromptNode(editor)).toBe(false);
   });
 
+  it("treats a frontmatter-only document as empty and inserts below the frontmatter (MET-137)", async () => {
+    editor = await documentEditor("---\ntitle: x\n---");
+    expect(hasPromptNode(editor)).toBe(true);
+    expect(editor.state.doc.child(0).type.name).toBe("frontmatter");
+    expect(editor.state.doc.child(1).type.name).toBe("aiPrompt");
+    expect(getEditorMarkdown(editor)).toBe("---\ntitle: x\n---");
+  });
+
+  it("frontmatter plus body counts as real content — no widget", async () => {
+    editor = await documentEditor("---\ntitle: x\n---\n\nBody");
+    expect(hasPromptNode(editor)).toBe(false);
+  });
+
   it("survives typing and never leaks into the markdown", async () => {
     editor = await documentEditor("");
     editor.commands.insertContentAt(0, "Hello world");

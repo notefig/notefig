@@ -1,9 +1,9 @@
 /**
  * The document properties popover, MET-137 — the ONLY surface where
  * frontmatter is viewed and edited (the node renders nothing in the page,
- * see frontmatter-node.tsx). Anchored to a tag-icon button at the right end
- * of the editor toolbar; the button is hidden for editors whose document
- * carries no frontmatter node (schema-only contexts).
+ * see frontmatter-node.tsx). Anchored to a tag-icon button at the right
+ * end of the editor toolbar; the button always shows — a document without
+ * frontmatter just opens an empty properties list.
  *
  * Values render through the value-type registry
  * (frontmatter-value-types.tsx): each recognized type supplies the key
@@ -12,17 +12,16 @@
  *
  * Edits go through the yaml library's Document API (parseDocument → mutate
  * → toString) so comments, key order, and keys the popover can't render
- * survive byte-for-byte; renames mutate the pair's key scalar in place for
- * the same reason. Every commit is one setFrontmatterYaml call — a normal
- * history transaction the autosave path treats like typing.
+ * survive byte-for-byte. Every commit is one setFrontmatterYaml call — a
+ * normal history transaction the autosave path treats like typing.
  */
-import { useState, type FocusEvent } from "react";
+import { useEffect, useRef, useState, type FocusEvent } from "react";
 import type { Editor } from "@tiptap/core";
 import { useEditorState } from "@tiptap/react";
-import { parseDocument } from "yaml";
 import {
   isMap,
   isScalar,
+  parseDocument,
   type Document as YamlDocument,
   type Scalar,
 } from "yaml";
@@ -43,8 +42,87 @@ import {
   yamlTextareaClass,
 } from "./frontmatter-value-types";
 
+/* ------------------------------------------------------------------ */
+/* Pure yaml-text editing (each operation: current yaml → next yaml)  */
+/* ------------------------------------------------------------------ */
+
+export type FrontmatterRow = { key: string; value: unknown };
+
+/** String keys only count as structured: Object.entries stringifies scalar
+ * keys, so a numeric key (`1: x`) would make set/delete target a DIFFERENT
+ * key than the one displayed. Such maps take the raw-YAML fallback. */
+export function analyzeFrontmatter(yaml: string): {
+  structured: boolean;
+  parseError: boolean;
+  rows: FrontmatterRow[];
+} {
+  const doc = parseDocument(yaml || "");
+  const parseError = doc.errors.length > 0;
+  const structured =
+    !parseError &&
+    (doc.contents === null ||
+      (isMap(doc.contents) &&
+        doc.contents.items.every(
+          (item) => isScalar(item.key) && typeof item.key.value === "string",
+        )));
+  const rows: FrontmatterRow[] = structured
+    ? Object.entries((doc.toJS() ?? {}) as Record<string, unknown>).map(
+        ([key, value]) => ({ key, value }),
+      )
+    : [];
+  return { structured, parseError, rows };
+}
+
+function mutateYaml(
+  yaml: string,
+  mutate: (target: YamlDocument) => void,
+): string {
+  const target = parseDocument(yaml || "");
+  mutate(target);
+  const text = target.toString().replace(/\n$/, "");
+  // An emptied map stringifies as "{}" and a blank doc as "null" — both
+  // mean "no properties", which serializes as no frontmatter at all.
+  return text === "{}" || text === "null" ? "" : text;
+}
+
+export const setFrontmatterKey = (
+  yaml: string,
+  key: string,
+  value: unknown,
+): string => mutateYaml(yaml, (target) => target.set(key, value));
+
+export const deleteFrontmatterKey = (yaml: string, key: string): string =>
+  mutateYaml(yaml, (target) => target.delete(key));
+
+/** In-place rename (mutating the pair's key scalar keeps the entry's
+ * position and comments); renaming onto an existing key is a no-op. */
+export const renameFrontmatterKey = (
+  yaml: string,
+  oldKey: string,
+  newKey: string,
+): string =>
+  mutateYaml(yaml, (target) => {
+    if (!isMap(target.contents)) return;
+    const items = target.contents.items;
+    if (items.some((p) => isScalar(p.key) && String(p.key.value) === newKey)) {
+      return;
+    }
+    const pair = items.find(
+      (p) => isScalar(p.key) && String(p.key.value) === oldKey,
+    );
+    if (pair) (pair.key as Scalar).value = newKey;
+  });
+
+/* ------------------------------------------------------------------ */
+/* UI                                                                 */
+/* ------------------------------------------------------------------ */
+
 export function FrontmatterToolbarButton({ editor }: { editor: Editor }) {
   const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const openRef = useRef(open);
+  openRef.current = open;
+  const lastYaml = useRef<string | null>(null);
   // null = no frontmatter node yet (setFrontmatterYaml creates it on the
   // first property commit) — the popover just edits an empty document.
   const yaml =
@@ -53,10 +131,20 @@ export function FrontmatterToolbarButton({ editor }: { editor: Editor }) {
       selector: ({ editor }) => getFrontmatterYaml(editor),
     }) ?? "";
 
+  // Frontmatter is invisible in the page, so a document change that touches
+  // it while the popover is closed (undo/redo, external file change) needs
+  // an explicit signal: open the popover so the change is visible.
+  useEffect(() => {
+    const previous = lastYaml.current;
+    lastYaml.current = yaml;
+    if (previous === null || previous === yaml || openRef.current) return;
+    setOpen(true);
+  }, [yaml]);
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverAnchor asChild>
-        <div>
+        <div ref={anchorRef}>
           <ToolbarButton
             tooltip="Properties"
             pressed={open}
@@ -69,6 +157,14 @@ export function FrontmatterToolbarButton({ editor }: { editor: Editor }) {
       <PopoverContent
         align="end"
         sideOffset={6}
+        // Clicking the toggle button while open must only close: without
+        // this guard the outside-interaction dismiss closes the popover and
+        // the button's own click handler immediately reopens it.
+        onInteractOutside={(event) => {
+          if (anchorRef.current?.contains(event.target as Node)) {
+            event.preventDefault();
+          }
+        }}
         // Plain theme background (same tone as the page); the border and
         // shadow carry the elevation. background-image:none strips the
         // stock texture-surface noise tile so the color stays flat.
@@ -86,8 +182,6 @@ export function FrontmatterToolbarButton({ editor }: { editor: Editor }) {
   );
 }
 
-type Row = { key: string; value: unknown };
-
 const keyInputClass = `h-6 w-full min-w-0 truncate px-1 text-xs text-muted-foreground ${fieldFocusClass}`;
 const rowClass =
   "group/row flex min-h-6 items-start gap-2 rounded hover:bg-muted/30";
@@ -99,58 +193,21 @@ export function FrontmatterEditor({
   yaml: string;
   onChange: (yaml: string) => void;
 }) {
-  const doc = parseDocument(yaml || "");
-  // String keys only: Object.entries stringifies scalar keys, so a numeric
-  // or boolean key (`1: x`) would make set/delete target a DIFFERENT key
-  // than the one displayed (duplicate rows, undeletable properties). Such
-  // maps take the raw-YAML fallback instead.
-  const structured =
-    doc.errors.length === 0 &&
-    (doc.contents === null ||
-      (isMap(doc.contents) &&
-        doc.contents.items.every(
-          (item) => isScalar(item.key) && typeof item.key.value === "string",
-        )));
-
-  const rows: Row[] = structured
-    ? Object.entries((doc.toJS() ?? {}) as Record<string, unknown>).map(
-        ([key, value]) => ({ key, value }),
-      )
-    : [];
+  const { structured, parseError, rows } = analyzeFrontmatter(yaml);
   const keys = rows.map((r) => r.key);
 
-  /** Re-parse, mutate, write back — one history transaction per commit. */
-  const commit = (mutate: (target: YamlDocument) => void) => {
-    const next = parseDocument(yaml || "");
-    mutate(next);
-    let text = next.toString().replace(/\n$/, "");
-    // An emptied map stringifies as "{}" and a blank doc as "null" — both
-    // mean "no properties", which serializes as no frontmatter at all.
-    if (text === "{}" || text === "null") text = "";
-    if (text !== yaml) onChange(text);
+  /** One history transaction per commit; unchanged text commits nothing. */
+  const commit = (next: string) => {
+    if (next !== yaml) onChange(next);
   };
 
   const setKey = (key: string, value: unknown) =>
-    commit((target) => target.set(key, value));
+    commit(setFrontmatterKey(yaml, key, value));
 
-  const deleteKey = (key: string) => commit((target) => target.delete(key));
+  const deleteKey = (key: string) => commit(deleteFrontmatterKey(yaml, key));
 
-  /** In-place rename: mutate the pair's key scalar so the entry keeps its
-   * position and attached comments (delete+set would move it to the end). */
   const renameKey = (oldKey: string, newKey: string) =>
-    commit((target) => {
-      if (!isMap(target.contents)) return;
-      const items = target.contents.items;
-      if (
-        items.some((p) => isScalar(p.key) && String(p.key.value) === newKey)
-      ) {
-        return;
-      }
-      const pair = items.find(
-        (p) => isScalar(p.key) && String(p.key.value) === oldKey,
-      );
-      if (pair) (pair.key as Scalar).value = newKey;
-    });
+    commit(renameFrontmatterKey(yaml, oldKey, newKey));
 
   const commitRaw = (event: FocusEvent<HTMLTextAreaElement>) => {
     const text = event.target.value.replace(/\n+$/, "");
@@ -178,7 +235,7 @@ export function FrontmatterEditor({
           />
           <p className="pt-0.5 text-xs text-muted-foreground">
             Shown as raw text — this frontmatter isn’t a simple key/value map
-            {doc.errors.length > 0 ? " (parse error)" : ""}.
+            {parseError ? " (parse error)" : ""}.
           </p>
         </div>
       ) : (
