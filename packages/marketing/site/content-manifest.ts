@@ -50,7 +50,7 @@ export function parseFrontmatter(raw: string): {
   frontmatter: Frontmatter;
   markdown: string;
 } {
-  const match = raw.match(/^---\n([\s\S]*?)\n---\n/);
+  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
   if (!match) {
     return {
       frontmatter: { title: "", description: "", order: 0 },
@@ -59,7 +59,7 @@ export function parseFrontmatter(raw: string): {
   }
 
   const fields: Record<string, string> = {};
-  for (const line of match[1].split("\n")) {
+  for (const line of match[1].split(/\r?\n/)) {
     const separator = line.indexOf(":");
     if (separator === -1) continue;
     fields[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
@@ -71,7 +71,7 @@ export function parseFrontmatter(raw: string): {
       description: fields.description ?? "",
       order: Number(fields.order ?? 0),
     },
-    markdown: raw.slice(match[0].length).replace(/^\n+/, ""),
+    markdown: raw.slice(match[0].length).replace(/^[\r\n]+/, ""),
   };
 }
 

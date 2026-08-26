@@ -35,9 +35,8 @@ if (typeof globalThis.Buffer === "undefined") {
     isDefault: route === defaultPage.route,
   }));
 
-// The site scrolls, and it decides its own scroll position on arrival
-// (top for `/`, the app for a deep link) — a restored offset would land the
-// visitor mid-transition.
+// The site decides its own scroll position on arrival (top for `/`, the
+// product window for a deep link).
 if ("scrollRestoration" in history) history.scrollRestoration = "manual";
 
 /**
