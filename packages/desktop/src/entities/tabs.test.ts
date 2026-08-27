@@ -53,7 +53,7 @@ beforeEach(() => {
 });
 
 describe("renameOpenFileTab", () => {
-  it("runs flush → capture-clean → dispose → fs rename → layout swap, in order", async () => {
+  it("runs flush → drain → fs rename → dispose → layout swap, in order", async () => {
     const applyLayoutRename = vi.fn(() => calls.push("layout"));
 
     await renameOpenFileTab({
@@ -66,8 +66,8 @@ describe("renameOpenFileTab", () => {
     expect(calls).toEqual([
       "flush",
       "capture-clean",
-      "dispose",
       "rename-fs",
+      "dispose",
       "layout",
     ]);
     expect(renameFileOrDirectoryMock).toHaveBeenCalledWith(WS, OLD, NEW);
@@ -95,7 +95,7 @@ describe("renameOpenFileTab", () => {
     expect(renameFileOrDirectoryMock).toHaveBeenCalled();
   });
 
-  it("rethrows a failed move without touching the layout", async () => {
+  it("rethrows a failed move leaving the tab intact — no dispose, no layout write", async () => {
     renameFileOrDirectoryMock.mockRejectedValue(new Error("target exists"));
     const applyLayoutRename = vi.fn();
 
@@ -107,6 +107,7 @@ describe("renameOpenFileTab", () => {
         applyLayoutRename,
       }),
     ).rejects.toThrow(/target exists/);
+    expect(calls).not.toContain("dispose");
     expect(applyLayoutRename).not.toHaveBeenCalled();
   });
 });

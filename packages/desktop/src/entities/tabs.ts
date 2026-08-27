@@ -280,19 +280,20 @@ export async function renameOpenFileTab(options: {
   const { workspacePath, oldPath, newPath, applyLayoutRename } = options;
   beginTabRename(oldPath, newPath);
   try {
+    // Drain the save pipeline before the move so no in-flight write can
+    // recreate the old path afterwards. The editor stays alive until the
+    // move succeeds: a failed move then leaves the tab fully intact.
+    // (Renames are gesture-driven — a drag or a tree-input commit — so no
+    // edits land during the move itself.)
     flushDocumentSync(oldPath);
-    // Captured before dispose: closeDocumentSync drops the registry entry,
-    // but this promise still resolves when the final write lands — after
-    // which no in-flight save can recreate the old path.
-    const clean = whenDocumentSyncClean(oldPath);
-    disposeTab(oldPath);
-    await clean;
+    await whenDocumentSyncClean(oldPath);
     await renameFileOrDirectory(workspacePath, oldPath, newPath);
-    applyLayoutRename(oldPath, newPath);
   } catch (error) {
     endTabRename(oldPath, newPath);
     throw error;
   }
+  disposeTab(oldPath);
+  applyLayoutRename(oldPath, newPath);
   // Outlive the render that commits the layout write; after it, layout id
   // and row agree and pruning is inert again.
   setTimeout(() => endTabRename(oldPath, newPath), 0);
