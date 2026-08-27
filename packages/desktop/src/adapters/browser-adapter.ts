@@ -14,11 +14,7 @@ import {
   buildSearchPattern,
   searchFileContent,
 } from "./base-browser-adapter";
-import {
-  isHiddenPathAllowing,
-  matchesIgnoreRules,
-  resolveReadDirectoryOptions,
-} from "./browser-fs-utils";
+import { isHiddenPath, matchesIgnoreRules } from "./browser-fs-utils";
 import { processPool } from "@/utils/process-pool";
 
 export class BrowserPlatformAdapter extends BaseBrowserAdapter {
@@ -82,7 +78,6 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     db: IDBDatabase,
     basePath: string,
     recursive: boolean,
-    allowHiddenDirectories: readonly string[],
   ): Promise<string[]> {
     const transaction = db.transaction([this.STORE_NAME], "readonly");
     const store = transaction.objectStore(this.STORE_NAME);
@@ -110,20 +105,12 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
           currentPath += pathParts[i] + "/";
           const dirPath = currentPath.slice(0, -1);
           // Relative to the walk root, like the file filter above.
-          if (
-            !isHiddenPathAllowing(
-              dirPath.slice(normalizedPath.length),
-              allowHiddenDirectories,
-            )
-          ) {
+          if (!isHiddenPath(dirPath.slice(normalizedPath.length))) {
             directories.add(dirPath);
           }
         }
       } else {
-        if (
-          pathParts.length > 1 &&
-          !isHiddenPathAllowing(pathParts[0], allowHiddenDirectories)
-        ) {
+        if (pathParts.length > 1 && !isHiddenPath(pathParts[0])) {
           directories.add(normalizedPath + pathParts[0]);
         }
       }
@@ -215,7 +202,6 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
       includeDirectories?: boolean;
       includeHidden?: boolean;
       ignore?: IgnoreRulesOption;
-      allowHiddenDirectories?: string[];
     },
   ): Promise<Result<string[]>> {
     try {
@@ -247,13 +233,10 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
         request.onerror = () => reject(request.error);
       });
 
-      const {
-        recursive,
-        includeFiles,
-        includeDirectories,
-        includeHidden,
-        allowHiddenDirectories,
-      } = resolveReadDirectoryOptions(options);
+      const includeFiles = options?.includeFiles !== false;
+      const includeDirectories = options?.includeDirectories !== false;
+      const recursive = options?.recursive ?? false;
+      const includeHidden = options?.includeHidden ?? false;
 
       const normalizedPath = path.endsWith("/") ? path : path + "/";
 
@@ -265,14 +248,9 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
 
           const relativePath = key.slice(normalizedPath.length);
 
-          // Hidden filtering is relative to the walk root and honors the
-          // allowed dot names, matching the native walker.
-          if (
-            !includeHidden &&
-            isHiddenPathAllowing(relativePath, allowHiddenDirectories)
-          ) {
-            return false;
-          }
+          // Hidden filtering is relative to the walk root (the app dir is
+          // exempt inside isHiddenPath), matching the native walker.
+          if (!includeHidden && isHiddenPath(relativePath)) return false;
 
           if (!recursive && relativePath.includes("/")) return false;
 
@@ -284,12 +262,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
       }
 
       if (includeDirectories) {
-        const directoryPaths = await this.getDirectories(
-          db,
-          path,
-          recursive,
-          allowHiddenDirectories,
-        );
+        const directoryPaths = await this.getDirectories(db, path, recursive);
         results.push(
           ...directoryPaths.filter(
             (dirPath) =>
@@ -397,6 +370,57 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     }
 
     return { succeeded, failed };
+  }
+
+  /**
+   * Record-preserving move. The base implementation round-trips through
+   * readBinaryFiles → writeBinaryFiles, which stores TEXT files as
+   * `binaryData` with an empty `content` — every later readFiles then
+   * returns "" (surfaced by scratchpad auto-renames, MET-135). Moving the
+   * raw record keeps text, binary, and timestamps intact.
+   */
+  protected async moveFile(
+    oldPath: string,
+    newPath: string,
+  ): Promise<Result<void>> {
+    try {
+      const db = await this.ensureDB();
+      const record: Record<string, unknown> | null = await new Promise(
+        (resolve, reject) => {
+          const request = db
+            .transaction([this.STORE_NAME], "readonly")
+            .objectStore(this.STORE_NAME)
+            .get(oldPath);
+          request.onsuccess = () => resolve(request.result ?? null);
+          request.onerror = () => reject(request.error);
+        },
+      );
+      if (!record) {
+        return {
+          ok: false,
+          error: createError(oldPath, "not_found", "File not found"),
+        };
+      }
+
+      const transaction = db.transaction([this.STORE_NAME], "readwrite");
+      const store = transaction.objectStore(this.STORE_NAME);
+      store.put({ ...record, path: newPath });
+      store.delete(oldPath);
+      await new Promise<void>((resolve, reject) => {
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      });
+      return { ok: true, value: undefined };
+    } catch (error) {
+      return {
+        ok: false,
+        error: createError(
+          oldPath,
+          "io_error",
+          error instanceof Error ? error.message : "Unknown error",
+        ),
+      };
+    }
   }
 
   protected async moveDirectory(

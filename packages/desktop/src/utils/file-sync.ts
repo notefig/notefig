@@ -26,7 +26,6 @@ import { getDocumentSync } from "./markdown-conversion";
 import { getMarkdownEditor } from "@/components/editor/editor-store";
 import { platformAdapter } from "@/adapters";
 import { path as pathutil, relativeTreePath } from "./path";
-import { appDirPath } from "@/entities/scratchpads";
 import { activeRenameTarget } from "@/entities/tabs";
 import { trackWorkspaceWrite } from "./workspace-write-tracker";
 
@@ -364,10 +363,7 @@ export function useFileWatchers(
         await platformAdapter.fs.startWatchingMetadata(
           [workspacePath],
           metadataWatchId,
-          {
-            ignore: IGNORE_RULES,
-            allowHiddenSubtrees: [appDirPath(workspacePath)],
-          },
+          { ignore: IGNORE_RULES },
         );
 
         if (openFilePaths.length > 0) {

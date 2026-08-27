@@ -75,7 +75,6 @@ describe("ignore rules plumbing", () => {
     await adapter.fs.readDirectory("/ws", { recursive: true, ignore: IGNORE });
     await adapter.fs.startWatchingMetadata(["/ws"], "watch-1", {
       ignore: IGNORE,
-      allowHiddenSubtrees: ["/ws/.metrists/scratchpads"],
     });
 
     expect(tauri.calls("read_directory")).toEqual([
@@ -95,7 +94,6 @@ describe("ignore rules plumbing", () => {
         watchId: "watch-1",
         ignoreDirectories: ["node_modules"],
         ignoreExtensions: ["mp4"],
-        allowHiddenSubtrees: ["/ws/.metrists/scratchpads"],
       },
     ]);
   });

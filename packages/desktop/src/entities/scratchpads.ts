@@ -13,10 +13,6 @@
  * (create / entry resolution / sweep / close-time GC and auto-rename), and
  * the empty-entry hook.
  */
-// fallow-ignore-file circular-dependency -- files.ts imports this entity's
-// APP_DIR_NAME constant while this entity is built on files.ts
-// collections; both edges are function-body/const references (the entities
-// cycle rule, see tabs.ts).
 import { useEffect, useRef } from "react";
 import { platformAdapter } from "@/adapters";
 import { path as pathutil } from "@/utils/path";

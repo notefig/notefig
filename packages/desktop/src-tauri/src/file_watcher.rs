@@ -63,9 +63,6 @@ struct WatchIgnoreConfig {
     roots: Vec<PathBuf>,
     directories: Vec<String>,
     extensions: Vec<String>,
-    /// Subtrees whose events pass the hidden-path filter (MET-135: the
-    /// app-owned scratchpads dir lives under dot-hidden `.metrists/`).
-    allow_hidden_subtrees: Vec<PathBuf>,
 }
 
 lazy_static::lazy_static! {
@@ -136,30 +133,11 @@ fn is_recent_app_write(path: &Path, content_hash: &str) -> bool {
         .any(|w| w.path == path && w.content_hash == content_hash)
 }
 
-/// Hidden filtering with subtree allowances: a path under an allowed
-/// subtree is re-checked RELATIVE to it, so the subtree root (".metrists")
-/// passes while its own hidden children (".metrists/.git") stay filtered —
-/// the same semantics as the walker's per-entry filter. Registered per
-/// metadata watch but consulted globally, so the per-file content watcher
-/// (which registers no config) is covered too.
-fn is_hidden_for_watch(path: &Path) -> bool {
-    if !is_hidden_path(path) {
-        return false;
-    }
-    let configs = WATCH_IGNORES.lock().unwrap();
-    let allowed = configs.values().any(|config| {
-        config.allow_hidden_subtrees.iter().any(|subtree| {
-            path.strip_prefix(subtree)
-                .map(|relative| !is_hidden_path(relative))
-                .unwrap_or(false)
-        })
-    });
-    !allowed
-}
-
 /// Check if a path should be filtered (hidden files, temp files, etc.)
+/// `is_hidden_path` exempts the app dir (walkdir_utils::APP_DIR_NAME), so
+/// scratchpad events flow while `.metrists/.git` etc. stay filtered.
 fn should_filter_path(path: &Path) -> bool {
-    if is_hidden_for_watch(path) {
+    if is_hidden_path(path) {
         return true;
     }
 
@@ -494,7 +472,6 @@ pub async fn start_watching_metadata<R: tauri::Runtime>(
     watch_id: String,
     ignore_directories: Option<Vec<String>>,
     ignore_extensions: Option<Vec<String>>,
-    allow_hidden_subtrees: Option<Vec<String>>,
     app_handle: AppHandle<R>,
 ) -> Result<(), String> {
     let app_handle_clone = app_handle.clone();
@@ -538,11 +515,6 @@ pub async fn start_watching_metadata<R: tauri::Runtime>(
                 roots: path_bufs.clone(),
                 directories: ignore_directories.unwrap_or_default(),
                 extensions: ignore_extensions.unwrap_or_default(),
-                allow_hidden_subtrees: allow_hidden_subtrees
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(PathBuf::from)
-                    .collect(),
             },
         );
     }
@@ -784,32 +756,19 @@ mod event_kind_tests {
         )));
     }
 
-    /// MET-135: events under an allowed hidden subtree pass the hidden
-    /// filter, but the subtree's own hidden children, other hidden paths,
-    /// and atomic-write temp files stay filtered.
+    /// MET-135: the app dir is not hidden, so scratchpad events flow — but
+    /// its own dot children, other hidden paths, and atomic-write temp
+    /// files stay filtered. No per-watch configuration involved.
     #[test]
-    fn allowed_hidden_subtree_passes_filter_siblings_stay_filtered() {
-        let subtree = PathBuf::from("/ws/.metrists");
-        WATCH_IGNORES.lock().unwrap().insert(
-            "test-allow-hidden".into(),
-            WatchIgnoreConfig {
-                roots: vec![PathBuf::from("/ws")],
-                allow_hidden_subtrees: vec![subtree.clone()],
-                ..Default::default()
-            },
-        );
-
-        assert!(!should_filter_path(&subtree.join("scratchpads/untitled.md")));
-        // Hidden children of the allowed subtree are still hidden.
-        assert!(should_filter_path(&subtree.join(".git/HEAD")));
-        assert!(should_filter_path(&subtree.join(".agent/opencode-1.json")));
+    fn app_dir_events_pass_filter_hidden_children_stay_filtered() {
+        let app_dir = PathBuf::from("/ws/.metrists");
+        assert!(!should_filter_path(&app_dir.join("scratchpads/untitled.md")));
+        assert!(should_filter_path(&app_dir.join(".git/HEAD")));
+        assert!(should_filter_path(&app_dir.join(".agent/opencode-1.json")));
         assert!(should_filter_path(Path::new("/ws/.git/HEAD")));
         assert!(should_filter_path(
-            &subtree.join("scratchpads/untitled.md.tmp")
+            &app_dir.join("scratchpads/untitled.md.tmp")
         ));
-
-        WATCH_IGNORES.lock().unwrap().remove("test-allow-hidden");
-        assert!(should_filter_path(&subtree.join("scratchpads/untitled.md")));
     }
 
     /// MET-158: Windows' MoveFileExW(MOVEFILE_REPLACE_EXISTING) — every

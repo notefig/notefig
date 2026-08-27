@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { platformAdapter } from "@/adapters";
 import { IGNORE_RULES } from "@/utils/ignore";
-import { scratchpadsDirPath } from "@/entities/scratchpads";
 import type {
   SearchOptions,
   SearchMatch,
@@ -71,18 +70,7 @@ export function useSearch(
       filePattern,
       maxResults,
     ],
-    // Two roots: the workspace walk excludes hidden paths in Rust, so the
-    // dot-hidden scratchpads folder (MET-135) gets its own rooted search;
-    // a missing folder just contributes nothing.
-    queryFn: async () => {
-      const [workspaceMatches, scratchpadMatches] = await Promise.all([
-        platformAdapter.fs.searchContent(workspacePath, searchOptions),
-        platformAdapter.fs
-          .searchContent(scratchpadsDirPath(workspacePath), searchOptions)
-          .catch(() => []),
-      ]);
-      return [...workspaceMatches, ...scratchpadMatches];
-    },
+    queryFn: () => platformAdapter.fs.searchContent(workspacePath, searchOptions),
     enabled: trimmed !== "",
     retry: false,
     placeholderData: (previous) => previous,

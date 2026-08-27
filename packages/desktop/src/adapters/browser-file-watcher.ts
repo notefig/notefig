@@ -115,8 +115,7 @@ export class BrowserFileWatcher {
   async startWatchingMetadata(
     paths: string[],
     watchId: string,
-    // allowHiddenSubtrees is Tauri-only: the browser walkers never dot-filter.
-    options?: { ignore?: IgnoreRulesOption; allowHiddenSubtrees?: string[] },
+    options?: { ignore?: IgnoreRulesOption },
   ): Promise<void> {
     this.stopWatching(watchId);
 

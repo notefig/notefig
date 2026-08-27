@@ -244,7 +244,6 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
       includeDirectories?: boolean;
       includeHidden?: boolean;
       ignore?: IgnoreRulesOption;
-      allowHiddenDirectories?: string[];
     },
   ): Promise<Result<string[]>>;
   protected abstract createDirectories(
@@ -334,7 +333,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   protected async startWatchingMetadata(
     _paths: string[],
     _watchId: string,
-    _options?: { ignore?: IgnoreRulesOption; allowHiddenSubtrees?: string[] },
+    _options?: { ignore?: IgnoreRulesOption },
   ): Promise<void> {
     // TODO: Implement polling + BroadcastChannel; no-op for now
     console.log("[BrowserAdapter] Metadata watching not yet implemented");

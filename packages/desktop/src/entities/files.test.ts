@@ -56,17 +56,38 @@ beforeEach(async () => {
   vi.clearAllMocks();
   WS = `/ws-files-test-${testCounter++}`;
   FILE = `${WS}/notes.md`;
-  adapter.createFiles.mockResolvedValue(ok([FILE]));
-  adapter.writeFiles.mockResolvedValue(ok([FILE]));
-  adapter.deleteFiles.mockResolvedValue(ok([FILE]));
+  // A tiny faithful disk: createFile awaits its insert's persistence, which
+  // triggers the collection's post-mutation refetch — the walk must list
+  // the created file like a real filesystem would, or the fresh row gets
+  // full-replaced away.
+  const disk = new Set<string>();
+  adapter.createFiles.mockImplementation(async (paths: string[]) => {
+    paths.forEach((p) => disk.add(p));
+    return ok(paths);
+  });
+  adapter.writeFiles.mockImplementation(
+    async (writes: { path: string }[]) => {
+      writes.forEach((w) => disk.add(w.path));
+      return ok(writes.map((w) => w.path));
+    },
+  );
+  adapter.deleteFiles.mockImplementation(async (paths: string[]) => {
+    paths.forEach((p) => disk.delete(p));
+    return ok(paths);
+  });
   // Honor the requested paths — the metadata queryFn calls this with the
-  // directory listing (empty here), so a blanket return would seed the
-  // collection with FILE before createFile ever runs.
+  // directory listing, so a blanket return would seed the collection with
+  // FILE before createFile ever runs.
   adapter.getMetadata.mockImplementation(async (paths: string[]) =>
     ok(paths.includes(FILE) ? [metadata(FILE, 5)] : []),
   );
   adapter.readFiles.mockResolvedValue(ok([{ path: FILE, content: "hello" }]));
-  adapter.readDirectory.mockResolvedValue({ ok: true, value: [] });
+  adapter.readDirectory.mockImplementation(
+    async (_root: string, options?: { includeFiles?: boolean }) => ({
+      ok: true,
+      value: options?.includeFiles === false ? [] : [...disk],
+    }),
+  );
 
   files = await import("./files");
 

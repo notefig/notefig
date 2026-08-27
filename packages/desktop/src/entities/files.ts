@@ -36,9 +36,6 @@ import { IGNORE_RULES } from "@/utils/ignore";
 import { calculateContentHash } from "@/utils/hash";
 import { invalidateDerivedState } from "@/utils/file-write-effects";
 import { path as pathutil, relativeTreePath } from "@/utils/path";
-// Sibling entity built on this module — function-body references only
-// (the entities cycle rule; suppressed at scratchpads.ts).
-import { APP_DIR_NAME } from "./scratchpads";
 import { queryClient } from "./query-client";
 
 // The shared QueryClient moved to the entities/query-client leaf; re-exported
@@ -87,13 +84,7 @@ export function createFileMetadataCollection(workspaceId: string) {
       // dirs) because the listing API returns bare paths and rows need a
       // type; the walk is the cheap half of the old scan.
       queryFn: async (): Promise<FileMetadata[]> => {
-        // The app dir is walked like any folder; its own hidden children
-        // (.metrists/.git, .metrists/.agent) stay filtered per-entry.
-        const walkOptions = {
-          recursive: true,
-          ignore: IGNORE_RULES,
-          allowHiddenDirectories: [APP_DIR_NAME],
-        };
+        const walkOptions = { recursive: true, ignore: IGNORE_RULES };
         const [filesResult, dirsResult] = await Promise.all([
           platformAdapter.fs.readDirectory(workspaceId, {
             ...walkOptions,
@@ -616,13 +607,18 @@ export async function createFile(
 ): Promise<void> {
   const collections = getOrCreateWorkspaceCollections(workspaceId);
 
-  collections.metadata.insert({
+  const tx = collections.metadata.insert({
     path: filePath,
     relativePath: relativeTreePath(workspaceId, filePath),
     type: "file",
     contentHash: "",
     size: 0,
   });
+  // The mutation handler writes the file asynchronously; callers open the
+  // path as a tab immediately after, and the content load must not race
+  // the disk write (a lost race is a sticky not_found editor — the write's
+  // own watcher echo is suppressed, so nothing would heal it).
+  await tx.isPersisted.promise;
 
   if (content) {
     await writeFileContent(workspaceId, filePath, content);
@@ -630,7 +626,7 @@ export async function createFile(
 
   // Refresh metadata to get accurate timestamps
   const metadataResult = await platformAdapter.fs.getMetadata([filePath]);
-  if (metadataResult.succeeded.length > 0) {
+  if (metadataResult.succeeded.length > 0 && collections.metadata.get(filePath)) {
     const metadata = metadataResult.succeeded[0];
     collections.metadata.update(filePath, (draft) => {
       draft.modified = metadata.modifiedAt;

@@ -59,28 +59,6 @@ function classifyInvokeError(path: string, error: unknown): FileSystemError {
  * the shape every caller that must see the complete tree (git storage
  * host) gets by simply not passing `ignore`.
  */
-function readDirectoryArgs(
-  path: string,
-  options?: {
-    recursive?: boolean;
-    includeFiles?: boolean;
-    includeDirectories?: boolean;
-    includeHidden?: boolean;
-    ignore?: IgnoreRulesOption;
-    allowHiddenDirectories?: string[];
-  },
-): Record<string, unknown> {
-  return {
-    path,
-    recursive: options?.recursive ?? false,
-    includeFiles: options?.includeFiles ?? true,
-    includeDirectories: options?.includeDirectories ?? true,
-    includeHidden: options?.includeHidden ?? false,
-    ...ignoreArgs(options?.ignore),
-    allowHiddenDirectories: options?.allowHiddenDirectories,
-  };
-}
-
 function ignoreArgs(ignore?: IgnoreRulesOption): {
   ignoreDirectories: string[] | null;
   ignoreExtensions: string[] | null;
@@ -190,7 +168,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       includeDirectories?: boolean;
       includeHidden?: boolean;
       ignore?: IgnoreRulesOption;
-      allowHiddenDirectories?: string[];
     },
   ): Promise<Result<string[]>> {
     try {
@@ -198,7 +175,14 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
         ok: boolean;
         value?: string[];
         error?: FileSystemError;
-      }>("read_directory", readDirectoryArgs(path, options));
+      }>("read_directory", {
+        path,
+        recursive: options?.recursive ?? false,
+        includeFiles: options?.includeFiles ?? true,
+        includeDirectories: options?.includeDirectories ?? true,
+        includeHidden: options?.includeHidden ?? false,
+        ...ignoreArgs(options?.ignore),
+      });
 
       if (result.ok && result.value) {
         return { ok: true, value: result.value };
@@ -445,14 +429,13 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   private async startWatchingMetadata(
     paths: string[],
     watchId: string,
-    options?: { ignore?: IgnoreRulesOption; allowHiddenSubtrees?: string[] },
+    options?: { ignore?: IgnoreRulesOption },
   ): Promise<void> {
     try {
       await invoke("start_watching_metadata", {
         paths,
         watchId,
         ...ignoreArgs(options?.ignore),
-        allowHiddenSubtrees: options?.allowHiddenSubtrees,
       });
     } catch (error) {
       console.error("Failed to start watching metadata:", error);

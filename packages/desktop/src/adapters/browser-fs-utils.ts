@@ -70,59 +70,26 @@ export function getRelativePath(path: string, workspaceRoot: string): string {
   return "";
 }
 
+/** The app's own directory is deliberately NOT hidden (MET-135) — it
+ * appears in the tree; its dot-named children (.metrists/.git) stay
+ * hidden. Mirrors walkdir_utils::APP_DIR_NAME; MET-115 renames both. */
+const APP_DIR_NAME = ".metrists";
+
 /**
  * Check if a path contains hidden segments (starting with ., excluding . and ..)
  */
 export function isHiddenPath(path: string): boolean {
   const parts = path.split("/");
   return parts.some(
-    (part) => part.startsWith(".") && part.length > 1 && part !== "..",
+    (part) =>
+      part.startsWith(".") &&
+      part.length > 1 &&
+      part !== ".." &&
+      part !== APP_DIR_NAME,
   );
 }
 
-/** Read-directory options with the browser adapters' shared defaults. */
-export function resolveReadDirectoryOptions(options?: {
-  recursive?: boolean;
-  includeFiles?: boolean;
-  includeDirectories?: boolean;
-  includeHidden?: boolean;
-  allowHiddenDirectories?: string[];
-}): {
-  recursive: boolean;
-  includeFiles: boolean;
-  includeDirectories: boolean;
-  includeHidden: boolean;
-  allowHiddenDirectories: string[];
-} {
-  return {
-    recursive: options?.recursive ?? false,
-    includeFiles: options?.includeFiles !== false,
-    includeDirectories: options?.includeDirectories !== false,
-    includeHidden: options?.includeHidden ?? false,
-    allowHiddenDirectories: options?.allowHiddenDirectories ?? [],
-  };
-}
 
-/**
- * Hidden check with per-component allowances (MET-135): a dot component in
- * `allowNames` (e.g. ".metrists") passes, but other hidden components —
- * including hidden children of an allowed one — still hide the path.
- * Mirrors the native walker's allow_hidden_names semantics.
- */
-export function isHiddenPathAllowing(
-  path: string,
-  allowNames: readonly string[],
-): boolean {
-  return path
-    .split("/")
-    .some(
-      (part) =>
-        part.startsWith(".") &&
-        part.length > 1 &&
-        part !== ".." &&
-        !allowNames.includes(part),
-    );
-}
 
 /**
  * App-side ignore checks for browser adapters. Lists arrive lowercased

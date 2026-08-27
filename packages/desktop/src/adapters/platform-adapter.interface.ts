@@ -241,9 +241,6 @@ export interface FileSystemSurface {
       includeHidden?: boolean;
       /** Opt-in ignore filtering; omitted ⇒ complete listing (git host path). */
       ignore?: IgnoreRulesOption;
-      /** Dot-named entries allowed through the hidden filter (e.g.
-       * ".metrists", MET-135); their own hidden children stay filtered. */
-      allowHiddenDirectories?: string[];
     },
   ): Promise<Result<string[]>>;
 
@@ -359,15 +356,12 @@ export interface FileSystemSurface {
    * @param paths - Directory paths to watch
    * @param watchId - Unique identifier for this watch session
    * @param options.ignore - Drop events for ignored directories/extensions
-   * @param options.allowHiddenSubtrees - Subtrees whose events pass the
-   *   hidden-path filter (MET-135 scratchpads); adapters without a hidden
-   *   filter ignore it
    * @returns Promise that resolves when watching starts
    */
   startWatchingMetadata(
     paths: string[],
     watchId: string,
-    options?: { ignore?: IgnoreRulesOption; allowHiddenSubtrees?: string[] },
+    options?: { ignore?: IgnoreRulesOption },
   ): Promise<void>;
 
   /**
