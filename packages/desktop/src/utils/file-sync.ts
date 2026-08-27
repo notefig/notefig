@@ -26,6 +26,7 @@ import { getDocumentSync } from "./markdown-conversion";
 import { getMarkdownEditor } from "@/components/editor/editor-store";
 import { platformAdapter } from "@/adapters";
 import { path as pathutil, relativeTreePath } from "./path";
+import { scratchpadsDirPath } from "@/entities/scratchpads";
 
 /**
  * The app-layer choke point for the "workspace paths are absolute"
@@ -346,7 +347,10 @@ export function useFileWatchers(
         await platformAdapter.fs.startWatchingMetadata(
           [workspacePath],
           metadataWatchId,
-          { ignore: IGNORE_RULES },
+          {
+            ignore: IGNORE_RULES,
+            allowHiddenSubtrees: [scratchpadsDirPath(workspacePath)],
+          },
         );
 
         if (openFilePaths.length > 0) {

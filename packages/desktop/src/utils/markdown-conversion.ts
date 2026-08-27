@@ -141,6 +141,9 @@ export class DocumentSync {
   /** Persists a serialization; assigned by the editor-side hook. */
   writer: ((markdown: string) => Promise<void>) | null = null;
 
+  /** Resolvers waiting for the pipeline to drain (whenClean). */
+  private cleanWaiters: (() => void)[] = [];
+
   /** Pushes edits still sitting in the autosave debounce window into the
    * pipeline; assigned by the editor-side hook. Called by `disposeEditor`
    * BEFORE the editor is destroyed — the hook's own teardown flush runs
@@ -152,6 +155,26 @@ export class DocumentSync {
   /** Whether a save is pending/in-flight for this document. */
   isDirty(): boolean {
     return this.dirty || this.saving;
+  }
+
+  /**
+   * Resolves once no save is pending or in flight — i.e. when a disk write
+   * started after this point cannot be racing an autosave of this document.
+   * Capture the promise BEFORE disposing the editor: closeDocumentSync
+   * drops the sync from the registry, but a captured promise still resolves
+   * when the final write lands.
+   */
+  whenClean(): Promise<void> {
+    if (!this.isDirty()) return Promise.resolve();
+    return new Promise((resolve) => {
+      this.cleanWaiters.push(resolve);
+    });
+  }
+
+  private resolveCleanWaiters(): void {
+    const waiters = this.cleanWaiters;
+    this.cleanWaiters = [];
+    waiters.forEach((resolve) => resolve());
   }
 
   /** Establish the file-content baseline once; later saves keep it fresh. */
@@ -256,6 +279,9 @@ export class DocumentSync {
         // An edit that landed during the error path must not go unsaved.
         void this.runSaveLoop();
       }
+      if (!this.dirty) {
+        this.resolveCleanWaiters();
+      }
     }
   }
 }
@@ -275,6 +301,18 @@ export function getDocumentSync(path: string): DocumentSync {
  * Must run while the editor is still alive — the snapshot reads its state. */
 export function flushDocumentSync(path: string): void {
   documentSyncs.get(path)?.flushPendingEdits?.();
+}
+
+/** Whether the path's sync has unsaved or in-flight edits. Never creates a
+ * sync — a path that was never opened is simply not dirty. */
+export function isDocumentSyncDirty(path: string): boolean {
+  return documentSyncs.get(path)?.isDirty() ?? false;
+}
+
+/** Resolves once the path's save pipeline is drained (immediately when no
+ * sync exists). Capture BEFORE disposing the editor — see whenClean. */
+export function whenDocumentSyncClean(path: string): Promise<void> {
+  return documentSyncs.get(path)?.whenClean() ?? Promise.resolve();
 }
 
 /** Called when an editor is disposed (tab closed / workspace switch). */

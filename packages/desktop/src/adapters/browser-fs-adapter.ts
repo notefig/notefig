@@ -702,7 +702,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
   protected async startWatchingMetadata(
     paths: string[],
     watchId: string,
-    options?: { ignore?: IgnoreRulesOption },
+    options?: { ignore?: IgnoreRulesOption; allowHiddenSubtrees?: string[] },
   ): Promise<void> {
     await this.fileWatcher.startWatchingMetadata(paths, watchId, options);
   }

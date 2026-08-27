@@ -7,6 +7,7 @@ const {
   fsMock,
   createGitStorageHostMock,
   ensureExcludeLinesMock,
+  replaceExcludeLineMock,
 } = vi.hoisted(() => {
   const initMock = vi.fn();
   const existsMock = vi.fn();
@@ -18,6 +19,7 @@ const {
     fsMock: { exists: existsMock, moveDirectory: moveDirectoryMock },
     createGitStorageHostMock: vi.fn(() => ({})),
     ensureExcludeLinesMock: vi.fn(),
+    replaceExcludeLineMock: vi.fn(),
   };
 });
 
@@ -37,6 +39,7 @@ vi.mock("@/adapters/git-storage-host", () => ({
 
 vi.mock("@/utils/git-exclude", () => ({
   ensureExcludeLines: ensureExcludeLinesMock,
+  replaceExcludeLine: replaceExcludeLineMock,
 }));
 
 import { IsomorphicGitService } from "@notefig/git";
@@ -69,6 +72,7 @@ describe("history-service", () => {
     clearWorkspaceHistoryServices();
     initMock.mockResolvedValue(undefined);
     ensureExcludeLinesMock.mockResolvedValue(undefined);
+    replaceExcludeLineMock.mockResolvedValue(undefined);
     moveDirectoryMock.mockResolvedValue({ ok: true, value: undefined });
     setExisting({});
   });
@@ -133,11 +137,15 @@ describe("history-service", () => {
     warn.mockRestore();
   });
 
-  it("writes the history repo's own exclude (.metrists/ and .git/)", async () => {
+  it("narrows the history repo's exclude to app-internal subtrees (scratchpads stay tracked)", async () => {
     await ensureWorkspaceHistoryInitialized(WS);
 
-    expect(ensureExcludeLinesMock).toHaveBeenCalledWith(GIT_DIR, [
-      ".metrists/",
+    // Migrates a pre-MET-135 blanket `.metrists/` line in place; the
+    // scratchpads folder must NOT appear here — history checkpoints it.
+    expect(replaceExcludeLineMock).toHaveBeenCalledWith(GIT_DIR, ".metrists/", [
+      ".metrists/.git/",
+      ".metrists/agent/",
+      ".metrists/history/",
       ".git/",
     ]);
   });
@@ -168,6 +176,7 @@ describe("history-service", () => {
 
   it("exclude failures never block init", async () => {
     ensureExcludeLinesMock.mockRejectedValue(new Error("read-only fs"));
+    replaceExcludeLineMock.mockRejectedValue(new Error("read-only fs"));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     await expect(ensureWorkspaceHistoryInitialized(WS)).resolves.toBeTruthy();

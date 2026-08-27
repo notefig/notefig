@@ -2,6 +2,7 @@ import { FileTree, type FileTreeSortEntry } from "@pierre/trees";
 import { FILE_ICON_CONFIG } from "./file-type-icon";
 import type { SortOrder } from "@/utils/fs";
 import { path as pathutil } from "@/utils/path";
+import { isProtectedTreePath } from "@/entities/scratchpads";
 
 /**
  * Module-level cache of @pierre/trees models, one per workspace.
@@ -23,6 +24,9 @@ import { path as pathutil } from "@/utils/path";
  */
 export interface TreeDelegate {
   isPathOpenInTab(absPath: string): boolean;
+  /** Scratchpad files may be renamed/dragged even while open (MET-135
+   * promotion routes through the close-and-reopen rename). */
+  isPromotableScratchpad(absPath: string): boolean;
   moveFile(fromAbs: string, toAbs: string): void;
   renameFile(oldAbs: string, newName: string): void;
   createEntry(
@@ -163,16 +167,28 @@ export function acquireTreeModel(
       [data-item-section="icon"] svg[data-icon-token="markdown"] {
         color: var(--logo);
       }
+      [data-item-path=".metrists"] {
+        opacity: 0.65;
+        font-style: italic;
+      }
     `,
     dragAndDrop: {
       // Open-in-tab files may still be DRAGGED (dropping one on another
       // window's tab bar moves the tab there — the protocol handles that
       // outside the tree), but tree-internal MOVES of them are refused:
-      // tab ids are absolute paths, so a move would orphan the tab.
+      // tab ids are absolute paths, so a move would orphan the tab. Two
+      // scratchpad exceptions: protected app paths can't be dragged at all,
+      // and open scratchpad files CAN be (the close-and-reopen rename moves
+      // the tab with the file).
       canDrop: (context) =>
-        !context.draggedPaths.some((p) =>
-          entry.delegate.isPathOpenInTab(toAbs(p)),
-        ),
+        !context.draggedPaths.some((p) => {
+          const abs = toAbs(p);
+          if (isProtectedTreePath(p.replace(/\/+$/, ""))) return true;
+          return (
+            entry.delegate.isPathOpenInTab(abs) &&
+            !entry.delegate.isPromotableScratchpad(abs)
+          );
+        }),
       onDropComplete: (event) => {
         // directoryPath arrives with a trailing slash ("docs/"); without
         // stripping it the destination becomes "docs//name", which round
@@ -188,7 +204,16 @@ export function acquireTreeModel(
       onDropError: (error) => console.error("Drop failed:", error),
     },
     renaming: {
-      canRename: (item) => !entry.delegate.isPathOpenInTab(toAbs(item.path)),
+      canRename: (item) => {
+        const rel = item.path.replace(/\/+$/, "");
+        if (isProtectedTreePath(rel)) return false;
+        const abs = toAbs(item.path);
+        // Naming an open scratchpad is promotion — always allowed.
+        return (
+          entry.delegate.isPromotableScratchpad(abs) ||
+          !entry.delegate.isPathOpenInTab(abs)
+        );
+      },
       onRename: (event) => {
         const pending = entry.pendingCreate;
         const newName =

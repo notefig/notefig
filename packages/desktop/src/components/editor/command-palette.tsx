@@ -55,6 +55,7 @@ interface CommandPaletteProps {
   workspacePath: string;
   onOpenChange: (open: boolean) => void;
   onNewFile?: () => void;
+  onNewFileIn?: () => void;
   onNewDirectory?: () => void;
   onCloseFile?: () => void;
   onUndo?: () => void;
@@ -155,6 +156,7 @@ export function CommandPalette({
   workspacePath,
   onOpenChange,
   onNewFile,
+  onNewFileIn,
   onNewDirectory,
   onCloseFile,
   onUndo,
@@ -224,10 +226,20 @@ export function CommandPalette({
       icon: Plus,
       shortcut: formatForDisplay("Mod+N"),
       action: () => {
+        onNewFile?.();
+      },
+    },
+    {
+      id: "new-file-in",
+      labelKey: "newFileIn",
+      groupKey: "file",
+      keywordKey: "commandKeywords.newFileIn",
+      icon: Plus,
+      action: () => {
         if (sidebarOpen) {
           onToggleSidebar?.();
         }
-        onNewFile?.();
+        onNewFileIn?.();
       },
     },
     {

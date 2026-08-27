@@ -18,6 +18,7 @@ import { PolymorphicEditor } from "@/components/editor/polymorphic-editor";
 import type { OpenFileRow } from "@/entities/files";
 import type { AgentTaskRow } from "@/entities/agents";
 import type { FileEntry } from "@/utils/fs";
+import { scratchpadTabTitle } from "@/entities/scratchpads";
 import { getFileName } from "@/utils/fs";
 import { latestReleaseTitle } from "@/utils/release-notes";
 import { parseTabId, type TabKind, type TabRef } from "./tab-id";
@@ -64,7 +65,7 @@ const fileTab: TabTypeDefinition<"file"> = {
     if (!row) return null;
 
     return {
-      name: getFileName(row.path),
+      name: scratchpadTabTitle(workspacePath, row) ?? getFileName(row.path),
       deps: [row, workspacePath],
       content: (
         <PolymorphicEditor

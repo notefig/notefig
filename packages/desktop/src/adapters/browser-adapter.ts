@@ -104,16 +104,14 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
         for (let i = 0; i < pathParts.length - 1; i++) {
           currentPath += pathParts[i] + "/";
           const dirPath = currentPath.slice(0, -1);
-          if (!isHiddenPath(dirPath)) {
+          // Relative to the walk root, like the file filter above.
+          if (!isHiddenPath(dirPath.slice(normalizedPath.length))) {
             directories.add(dirPath);
           }
         }
       } else {
-        if (pathParts.length > 1) {
-          const dirPath = normalizedPath + pathParts[0];
-          if (!isHiddenPath(dirPath)) {
-            directories.add(dirPath);
-          }
+        if (pathParts.length > 1 && !isHiddenPath(pathParts[0])) {
+          directories.add(normalizedPath + pathParts[0]);
         }
       }
     }
@@ -248,9 +246,12 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
         const filePaths = allKeys.filter((key) => {
           if (!key.startsWith(normalizedPath)) return false;
 
-          if (!includeHidden && isHiddenPath(key)) return false;
-
           const relativePath = key.slice(normalizedPath.length);
+
+          // Hidden filtering is relative to the walk root (the root itself
+          // may be a dot path — e.g. the scratchpads dir rooted walk),
+          // matching the native walker.
+          if (!includeHidden && isHiddenPath(relativePath)) return false;
 
           if (!recursive && relativePath.includes("/")) return false;
 

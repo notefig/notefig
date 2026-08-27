@@ -63,6 +63,9 @@ struct WatchIgnoreConfig {
     roots: Vec<PathBuf>,
     directories: Vec<String>,
     extensions: Vec<String>,
+    /// Subtrees whose events pass the hidden-path filter (MET-135: the
+    /// app-owned scratchpads dir lives under dot-hidden `.metrists/`).
+    allow_hidden_subtrees: Vec<PathBuf>,
 }
 
 lazy_static::lazy_static! {
@@ -133,9 +136,22 @@ fn is_recent_app_write(path: &Path, content_hash: &str) -> bool {
         .any(|w| w.path == path && w.content_hash == content_hash)
 }
 
+/// Whether any registered watch allows hidden-path events for this path.
+/// Registered per metadata watch but consulted globally, so the per-file
+/// content watcher (which registers no config) is covered too.
+fn is_in_allowed_hidden_subtree(path: &Path) -> bool {
+    let configs = WATCH_IGNORES.lock().unwrap();
+    configs.values().any(|config| {
+        config
+            .allow_hidden_subtrees
+            .iter()
+            .any(|subtree| path.starts_with(subtree))
+    })
+}
+
 /// Check if a path should be filtered (hidden files, temp files, etc.)
 fn should_filter_path(path: &Path) -> bool {
-    if is_hidden_path(path) {
+    if is_hidden_path(path) && !is_in_allowed_hidden_subtree(path) {
         return true;
     }
 
@@ -470,6 +486,7 @@ pub async fn start_watching_metadata<R: tauri::Runtime>(
     watch_id: String,
     ignore_directories: Option<Vec<String>>,
     ignore_extensions: Option<Vec<String>>,
+    allow_hidden_subtrees: Option<Vec<String>>,
     app_handle: AppHandle<R>,
 ) -> Result<(), String> {
     let app_handle_clone = app_handle.clone();
@@ -513,6 +530,11 @@ pub async fn start_watching_metadata<R: tauri::Runtime>(
                 roots: path_bufs.clone(),
                 directories: ignore_directories.unwrap_or_default(),
                 extensions: ignore_extensions.unwrap_or_default(),
+                allow_hidden_subtrees: allow_hidden_subtrees
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(PathBuf::from)
+                    .collect(),
             },
         );
     }
@@ -752,6 +774,32 @@ mod event_kind_tests {
             gone_dir.to_string_lossy().to_string(),
             true
         )));
+    }
+
+    /// MET-135: events under an allowed hidden subtree pass the hidden
+    /// filter; sibling hidden paths and atomic-write temp files stay
+    /// filtered.
+    #[test]
+    fn allowed_hidden_subtree_passes_filter_siblings_stay_filtered() {
+        let subtree = PathBuf::from("/ws/.metrists/scratchpads");
+        WATCH_IGNORES.lock().unwrap().insert(
+            "test-allow-hidden".into(),
+            WatchIgnoreConfig {
+                roots: vec![PathBuf::from("/ws")],
+                allow_hidden_subtrees: vec![subtree.clone()],
+                ..Default::default()
+            },
+        );
+
+        assert!(!should_filter_path(&subtree.join("scratch.md")));
+        assert!(should_filter_path(Path::new(
+            "/ws/.metrists/agent/opencode-1.json"
+        )));
+        assert!(should_filter_path(Path::new("/ws/.git/HEAD")));
+        assert!(should_filter_path(&subtree.join("scratch.md.tmp")));
+
+        WATCH_IGNORES.lock().unwrap().remove("test-allow-hidden");
+        assert!(should_filter_path(&subtree.join("scratch.md")));
     }
 
     /// MET-158: Windows' MoveFileExW(MOVEFILE_REPLACE_EXISTING) — every

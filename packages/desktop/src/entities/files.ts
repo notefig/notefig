@@ -36,6 +36,9 @@ import { IGNORE_RULES } from "@/utils/ignore";
 import { calculateContentHash } from "@/utils/hash";
 import { invalidateDerivedState } from "@/utils/file-write-effects";
 import { path as pathutil, relativeTreePath } from "@/utils/path";
+// Sibling entity built on this module — function-body references only
+// (the entities cycle rule; suppressed at scratchpads.ts).
+import { readScratchpadEntries } from "./scratchpads";
 import { queryClient } from "./query-client";
 
 // The shared QueryClient moved to the entities/query-client leaf; re-exported
@@ -116,6 +119,14 @@ export function createFileMetadataCollection(workspaceId: string) {
           })),
           ...filesResult.value.map((p) => ({ path: p, type: "file" as const })),
         ];
+
+        // Scratchpads live under the dot-hidden app dir, which the main
+        // walks skip; their own rooted walk is merged here so the tree, tab
+        // staleness, and the feature share one readiness signal.
+        const seen = new Set(entries.map((e) => e.path));
+        for (const entry of await readScratchpadEntries(workspaceId)) {
+          if (!seen.has(entry.path)) entries.push(entry);
+        }
 
         // Re-stat children of hydrated directories so their stats stay
         // fresh across refetches instead of pinning to hydration time.
@@ -939,6 +950,19 @@ export function useMetadataFetching(workspacePath: string): boolean {
     useIsFetching({ queryKey: ["file-metadata", workspacePath] }, queryClient) >
     0
   );
+}
+
+/**
+ * True once the workspace's eager metadata load has completed at least once
+ * and is not currently in flight. `useMetadataFetching` alone is false
+ * BEFORE the first load starts, so it cannot distinguish "loaded" from
+ * "not started"; dataUpdatedAt does. The useIsFetching subscription drives
+ * the re-render when the first load completes.
+ */
+export function useMetadataReady(workspacePath: string): boolean {
+  const isFetching = useMetadataFetching(workspacePath);
+  const state = queryClient.getQueryState(["file-metadata", workspacePath]);
+  return !isFetching && (state?.dataUpdatedAt ?? 0) > 0;
 }
 
 /** Whether any on-demand content load for the workspace is in flight. */

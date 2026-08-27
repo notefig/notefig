@@ -356,12 +356,15 @@ export interface FileSystemSurface {
    * @param paths - Directory paths to watch
    * @param watchId - Unique identifier for this watch session
    * @param options.ignore - Drop events for ignored directories/extensions
+   * @param options.allowHiddenSubtrees - Subtrees whose events pass the
+   *   hidden-path filter (MET-135 scratchpads); adapters without a hidden
+   *   filter ignore it
    * @returns Promise that resolves when watching starts
    */
   startWatchingMetadata(
     paths: string[],
     watchId: string,
-    options?: { ignore?: IgnoreRulesOption },
+    options?: { ignore?: IgnoreRulesOption; allowHiddenSubtrees?: string[] },
   ): Promise<void>;
 
   /**

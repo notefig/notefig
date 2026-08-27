@@ -141,14 +141,10 @@ test.describe("Content Loading", () => {
     await page.reload();
     await waitForFileTree(page, "small-file.md");
 
+    // "New File" is instant (MET-135): an untitled scratchpad opens with
+    // no naming prompt; it must reach an editable editor rather than sit
+    // on the loading placeholder.
     await page.getByRole("button", { name: "New file" }).click();
-    const input = page.locator("file-tree-container input");
-    await input.waitFor({ state: "visible", timeout: 5000 });
-    await input.fill("brand-new.md");
-    await input.press("Enter");
-
-    // The new file auto-opens; it must reach an editable editor rather
-    // than sit on the loading placeholder.
     const editor = page
       .locator('[role="textbox"]')
       .locator("visible=true")
@@ -156,15 +152,24 @@ test.describe("Content Loading", () => {
     await editor.waitFor({ state: "visible", timeout: 10000 });
 
     await editor.click();
-    await editor.pressSequentially("# Brand New\n\nHello", { delay: 10 });
+    await editor.pressSequentially("Hello from a scratchpad", { delay: 10 });
     await waitForAutoSave(page);
 
-    const persisted = await getIndexedDBContent(
-      page,
-      ws,
-      `${ws}/brand-new.md`,
-    );
-    expect(persisted).toContain("Hello");
+    // The empty-entry auto-open may have claimed untitled.md first, so the
+    // clicked-into file is whichever untitled file holds the typed text.
+    await expect
+      .poll(async () => {
+        for (const name of ["untitled.md", "untitled-2.md"]) {
+          const content = await getIndexedDBContent(
+            page,
+            ws,
+            `${ws}/.metrists/scratchpads/${name}`,
+          ).catch(() => null);
+          if (content?.includes("Hello from a scratchpad")) return true;
+        }
+        return false;
+      })
+      .toBe(true);
   });
 
   test("A failed content read shows an error state and never mounts an editor", async ({

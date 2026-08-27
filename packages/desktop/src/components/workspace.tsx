@@ -10,7 +10,7 @@ import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
 import { useContentFetching } from "@/entities/files";
 import { useFileWatchers } from "@/utils/file-sync";
-import { useWorkspaceTabs } from "@/entities/tabs";
+import { useWorkspaceTabs, renameOpenFileTab } from "@/entities/tabs";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import { useNavigationPersistence } from "@/hooks/use-recent-projects";
@@ -28,6 +28,10 @@ import { agentTabId, tabKind } from "@/entities/tabs";
 import { useTabElements } from "@/tabs/tab-types";
 import { useReleaseNotesOnUpdate } from "@/hooks/use-release-notes-on-update";
 import {
+  maybeGcScratchpadOnClose,
+  useScratchpadOnEmptyOpen,
+} from "@/entities/scratchpads";
+import {
   type FileTreeMode,
   FILE_TREE_IDLE,
 } from "@/components/editor/file-tree";
@@ -40,10 +44,17 @@ export const Workspace = () => {
   }
 
   useThrowWorkspaceAccessError(workspacePath);
-  useNavigationPersistence();
+  const { isEntrySettled } = useNavigationPersistence();
   const { t } = useTranslation();
   const dockableRef = useRef<HTMLDivElement>(null);
   const searchPanelRef = useRef<SearchPanelHandle>(null);
+
+  // Whitespace-only scratchpads are deleted when their tab closes; runs
+  // before dispose so the document sync and content row are still alive.
+  const gcScratchpadOnClose = useCallback(
+    (tabId: string) => maybeGcScratchpadOnClose(workspacePath, tabId),
+    [workspacePath],
+  );
 
   const {
     layout,
@@ -52,6 +63,7 @@ export const Workspace = () => {
     handleFileSelect,
     handleLayoutChange,
     closeTab,
+    renameTab,
     closeActiveTab,
     getFocusedTabId,
     focusActiveTab,
@@ -60,6 +72,7 @@ export const Workspace = () => {
   } = useDockableTabs({
     canOpenFile: (file) => file.type === "file" && canOpenInEditor(file.path),
     dockableRef,
+    onBeforeClose: gcScratchpadOnClose,
   });
 
   useEffect(() => {
@@ -130,6 +143,16 @@ export const Workspace = () => {
     [openFile],
   );
 
+  // An empty workspace entry lands in a scratchpad (MET-135); non-empty
+  // entries still get the whitespace-leftover sweep.
+  useScratchpadOnEmptyOpen({
+    workspacePath,
+    openTabs,
+    staleTabIds,
+    isEntrySettled,
+    openFile: openFileInTabs,
+  });
+
   // Open (or focus — openFileInLayout dedupes by id) a session's chat tab.
   // `new-tab` intent: a session must never replace the file tab in view.
   const openAgentTab = useCallback(
@@ -186,6 +209,7 @@ export const Workspace = () => {
 
   const {
     handleNewFile,
+    handleNewFileIn,
     handleNewDirectory,
     runHistoryAction,
     handleToggleFullscreen,
@@ -198,9 +222,23 @@ export const Workspace = () => {
     getSelectedText,
     openSidebarIfCollapsed,
     setFileTreeMode,
+    openFile: openFileInTabs,
     openSearchPanel,
     openSessionsSidebar,
   });
+
+  // Promotion: rename/move a scratchpad while its tab is open — the
+  // close-and-reopen primitive keeps the tab in its window slot.
+  const renameOpenScratchpad = useCallback(
+    (oldPath: string, newPath: string) =>
+      renameOpenFileTab({
+        workspacePath,
+        oldPath,
+        newPath,
+        applyLayoutRename: renameTab,
+      }),
+    [workspacePath, renameTab],
+  );
 
   useFileWatchers(workspacePath, fileOpenTabIds);
 
@@ -226,6 +264,7 @@ export const Workspace = () => {
               openTabs={openTabs}
               onFileSelect={handleFileSelect}
               closeTab={closeTab}
+              onRenameOpenFile={renameOpenScratchpad}
               mode={fileTreeMode}
               onModeChange={setFileTreeMode}
               searchPanelRef={searchPanelRef}
@@ -277,6 +316,7 @@ export const Workspace = () => {
           workspacePath={workspacePath}
           onOpenChange={setIsCommandPaletteOpen}
           onNewFile={handleNewFile}
+          onNewFileIn={handleNewFileIn}
           onNewDirectory={handleNewDirectory}
           onCloseFile={closeActiveTab}
           onUndo={() => runHistoryAction("undo")}

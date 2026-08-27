@@ -66,6 +66,7 @@ i18n
 
           // File Controls
           newFile: "New file",
+          newFileIn: "New file in…",
           newFolder: "New folder",
           sort: "Sort",
           sortFiles: "Sort files",
@@ -315,7 +316,8 @@ i18n
 
           // Command Keywords
           commandKeywords: {
-            newFile: ["new", "file", "create", "add"],
+            newFile: ["new", "file", "create", "add", "scratchpad", "note"],
+            newFileIn: ["new", "file", "in", "folder", "create", "location"],
             closeFile: ["close", "file", "tab"],
             newFolder: ["new", "folder", "directory", "create"],
             openFolder: ["open", "folder", "workspace", "directory"],

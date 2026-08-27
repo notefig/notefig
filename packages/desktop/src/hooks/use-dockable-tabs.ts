@@ -15,6 +15,7 @@ import {
   openFileInLayout,
   type OpenFileInLayoutOptions,
   removeTabFromLayout,
+  renameTabInLayout,
   selectTabInLayout,
 } from "@/utils/dockable-layout";
 import {
@@ -30,6 +31,14 @@ export interface UseDockableTabsOptions {
   canOpenFile?: (file: FileTreeNode) => boolean;
 
   dockableRef?: RefObject<HTMLElement | null>;
+
+  /**
+   * Runs for every tab about to leave the layout — explicit close, Mod+W,
+   * drag-to-close, and programmatic layout prunes all funnel through here,
+   * BEFORE the tab is disposed (its controller and document sync are still
+   * alive). Used by scratchpad GC (MET-135).
+   */
+  onBeforeClose?: (tabId: string) => void;
 }
 
 export interface UseDockableTabsResult {
@@ -49,6 +58,13 @@ export interface UseDockableTabsResult {
   openFile: (options: OpenFileInLayoutOptions) => void;
 
   closeTab: (tabId: string) => void;
+
+  /**
+   * Swap a tab id in place (rename-open-tab flow). Raw layout write: no
+   * dispose, no onBeforeClose — the orchestrator in entities/tabs.ts owns
+   * the editor teardown ordering.
+   */
+  renameTab: (oldId: string, newId: string) => void;
 
   getFocusedTabId: () => string | null;
 
@@ -93,7 +109,7 @@ export interface UseDockableTabsResult {
 export function useDockableTabs(
   options: UseDockableTabsOptions,
 ): UseDockableTabsResult {
-  const { canOpenFile, dockableRef } = options;
+  const { canOpenFile, dockableRef, onBeforeClose } = options;
   const { layout, setLayout, openTabs, layoutSelectedTabId } =
     useLayoutSearchParam();
   const lastFocusedWindowIdRef = useRef<string | null>(null);
@@ -218,11 +234,12 @@ export function useDockableTabs(
       // Tear down any tabs Dockable removed (e.g. via drag to close)
       const newTabIds = extractTabIds(newLayout);
       const removed = openTabs.filter((id) => !newTabIds.includes(id));
+      removed.forEach((id) => onBeforeClose?.(id));
       removed.forEach((id) => disposeTab(id));
 
       setLayout(newLayout);
     },
-    [openTabs, setLayout],
+    [openTabs, setLayout, onBeforeClose],
   );
 
   const openFile = useCallback(
@@ -242,11 +259,21 @@ export function useDockableTabs(
     (tabId: string) => {
       if (!openTabs.includes(tabId)) return;
 
+      onBeforeClose?.(tabId);
       disposeTab(tabId);
 
       setLayout((currentLayout) => removeTabFromLayout(currentLayout, tabId));
     },
-    [openTabs, setLayout],
+    [openTabs, setLayout, onBeforeClose],
+  );
+
+  const renameTab = useCallback(
+    (oldId: string, newId: string) => {
+      setLayout((currentLayout) =>
+        renameTabInLayout(currentLayout, oldId, newId),
+      );
+    },
+    [setLayout],
   );
 
   const selectTab = useCallback(
@@ -428,6 +455,7 @@ export function useDockableTabs(
     handleLayoutChange,
     openFile,
     closeTab,
+    renameTab,
     getFocusedTabId,
     closeActiveTab,
     selectTab,

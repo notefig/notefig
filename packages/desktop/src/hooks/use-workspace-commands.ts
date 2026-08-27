@@ -4,6 +4,8 @@ import { platformAdapter } from "@/adapters";
 import { getFileName } from "@/utils/fs";
 import { runTabHistoryAction } from "@/tabs/tab-controllers";
 import { tabKind } from "@/tabs/tab-id";
+import { createAndOpenScratchpad } from "@/entities/scratchpads";
+import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import type { FileTreeMode } from "@/components/editor/file-tree";
 
 export interface WorkspaceCommandsOptions {
@@ -14,6 +16,7 @@ export interface WorkspaceCommandsOptions {
   /** Expand the sidebar if collapsed (file creation lands in the tree). */
   openSidebarIfCollapsed: () => void;
   setFileTreeMode: (mode: FileTreeMode) => void;
+  openFile: (options: OpenFileInLayoutOptions) => boolean;
   openSearchPanel: (options?: {
     filePattern?: string;
     initialQuery?: string;
@@ -23,6 +26,7 @@ export interface WorkspaceCommandsOptions {
 
 export interface WorkspaceCommands {
   handleNewFile: () => void;
+  handleNewFileIn: () => void;
   handleNewDirectory: () => void;
   /** Undo/redo inside the focused tab, if its type keeps a history. */
   runHistoryAction: (action: "undo" | "redo") => void;
@@ -43,10 +47,17 @@ export function useWorkspaceCommands({
   getSelectedText,
   openSidebarIfCollapsed,
   setFileTreeMode,
+  openFile,
   openSearchPanel,
   openSessionsSidebar,
 }: WorkspaceCommandsOptions): WorkspaceCommands {
+  // "New File" is instant and nameless (a scratchpad); "New File in…"
+  // keeps the explicit-location inline-naming flow.
   const handleNewFile = useCallback(() => {
+    createAndOpenScratchpad(workspacePath, openFile);
+  }, [workspacePath, openFile]);
+
+  const handleNewFileIn = useCallback(() => {
     openSidebarIfCollapsed();
     setFileTreeMode({
       type: "creating",
@@ -121,6 +132,7 @@ export function useWorkspaceCommands({
 
   return {
     handleNewFile,
+    handleNewFileIn,
     handleNewDirectory,
     runHistoryAction,
     handleToggleFullscreen,

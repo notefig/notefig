@@ -161,41 +161,17 @@ test.describe("Focus Management", () => {
     await expect(editor).not.toContainText("bravo content for tab b");
   });
 
-  test("creating a new file focuses the opened editor", async ({ page }) => {
-    await page.getByRole("button", { name: "New file" }).click();
-
-    // Creation is an inline rename of a placeholder row (shadow root input,
-    // pre-filled with "untitled.md").
-    const createInput = page.locator("file-tree-container input");
-    await expect(createInput).toBeVisible();
-    await expect(createInput).toBeFocused();
-
-    await createInput.fill("focus-created-file.md");
-    await createInput.press("Enter");
-
-    await expect(
-      page.getByRole("treeitem", { name: "focus-created-file.md" }),
-    ).toBeVisible();
-    const editor = page
-      .locator('[role="textbox"]')
-      .locator("visible=true")
-      .first();
-    await editor.click();
-    await expect.poll(async () => isEditorFocused(page)).toBe(true);
-
-    await editor.pressSequentially("focused");
-    await expect(editor).toContainText("focused");
-  });
-
-  test("new empty file shows the prompt widget first with its composer focused", async ({
+  test("new file opens an empty scratchpad showing the prompt widget first with its composer focused", async ({
     page,
   }) => {
+    // "New File" is instant (MET-135): no naming prompt, the untitled
+    // scratchpad opens straight into the empty-document prompt widget.
     await page.getByRole("button", { name: "New file" }).click();
-    const createInput = page.locator("file-tree-container input");
-    await createInput.fill("empty-widget-focus.md");
-    await createInput.press("Enter");
 
-    const widget = page.locator('[data-type="ai-prompt"]').first();
+    const widget = page
+      .locator('[data-type="ai-prompt"]')
+      .locator("visible=true")
+      .first();
     await expect(widget).toBeVisible();
 
     // No blank line above the widget: it is the document's first block.

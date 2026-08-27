@@ -44,6 +44,7 @@ import {
   type TabRef,
 } from "@/tabs/tab-id";
 import {
+  disposeTab,
   focusTab,
   getTabController,
   getTabSelectedText,
@@ -66,8 +67,13 @@ import type { AgentTaskHandle } from "@/agent/agents";
 import {
   useOpenFileRows,
   useMetadataFetching,
+  renameFileOrDirectory,
   type OpenFileRow,
 } from "./files";
+import {
+  flushDocumentSync,
+  whenDocumentSyncClean,
+} from "@/utils/markdown-conversion";
 
 // ---------------------------------------------------------------------------
 // Public re-exports: the layout codec and the tab-id scheme.
@@ -229,6 +235,69 @@ export function useLayoutSearchParam(): UseLayoutSearchParam {
   return { layout, setLayout, openTabs, layoutSelectedTabId };
 }
 
+// ---------------------------------------------------------------------------
+// Rename-open-tab: the close-and-reopen primitive (MET-135 promotion).
+// ---------------------------------------------------------------------------
+
+/**
+ * Tab ids currently mid-rename. Between the collection row re-key and the
+ * layout id-swap commit, the layout briefly holds an id with no backing row
+ * — without this guard the stale-tab pruning would close the tab. React
+ * batches renders across the orchestrator's await points, so ordering alone
+ * cannot prevent that.
+ */
+const pendingTabRenames = new Set<string>();
+
+function beginTabRename(oldId: string, newId: string): void {
+  pendingTabRenames.add(oldId);
+  pendingTabRenames.add(newId);
+}
+
+function endTabRename(oldId: string, newId: string): void {
+  pendingTabRenames.delete(oldId);
+  pendingTabRenames.delete(newId);
+}
+
+/**
+ * Rename/move an OPEN file tab by closing and reopening it in place: the
+ * editor is disposed, the file moved once the save pipeline drains, and the
+ * tab id swapped in the layout without leaving its window slot. The editor
+ * remounts at the new path (undo history and caret are not preserved —
+ * accepted for an explicit rename/promote gesture). Throws if the move
+ * fails; the tab is left intact at the old path in that case.
+ */
+export async function renameOpenFileTab(options: {
+  workspacePath: string;
+  oldPath: string;
+  newPath: string;
+  /**
+   * Must be the RAW layout write (`setLayout(l => renameTabInLayout(...))`)
+   * — handleLayoutChange's removed-id diff would dispose the old id again
+   * and treat the swap as a close+open.
+   */
+  applyLayoutRename: (oldId: string, newId: string) => void;
+}): Promise<void> {
+  const { workspacePath, oldPath, newPath, applyLayoutRename } = options;
+  beginTabRename(oldPath, newPath);
+  try {
+    flushDocumentSync(oldPath);
+    // Captured before dispose: closeDocumentSync drops the registry entry,
+    // but this promise still resolves when the final write lands — after
+    // which no in-flight save can recreate the old path.
+    const clean = whenDocumentSyncClean(oldPath);
+    disposeTab(oldPath);
+    await clean;
+    await renameFileOrDirectory(workspacePath, oldPath, newPath);
+    applyLayoutRename(oldPath, newPath);
+  } catch (error) {
+    endTabRename(oldPath, newPath);
+    throw error;
+  }
+  // Outlive the render that commits the layout write; after it, layout id
+  // and row agree and pruning is inert again.
+  setTimeout(() => endTabRename(oldPath, newPath), 0);
+}
+
 export interface WorkspaceTabsState {
   /** Open tab ids that are files (real workspace paths). */
   fileTabIds: string[];
@@ -284,7 +353,11 @@ export function useWorkspaceTabs(
     const existingFilePaths = new Set(fileRows.map((row) => row.path));
     const missingFileTabIds = isFetchingMetadata
       ? []
-      : fileTabIds.filter((tabId) => !existingFilePaths.has(tabId));
+      : fileTabIds.filter(
+          // Ids mid-rename are transiently rowless by design — never stale.
+          (tabId) =>
+            !existingFilePaths.has(tabId) && !pendingTabRenames.has(tabId),
+        );
     const missingAgentTabIds = agentTasksReady
       ? agentTaskIds
           .filter((taskId) => !agentTasksCollection.get(taskId))

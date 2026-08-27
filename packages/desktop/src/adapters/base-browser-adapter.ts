@@ -333,7 +333,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   protected async startWatchingMetadata(
     _paths: string[],
     _watchId: string,
-    _options?: { ignore?: IgnoreRulesOption },
+    _options?: { ignore?: IgnoreRulesOption; allowHiddenSubtrees?: string[] },
   ): Promise<void> {
     // TODO: Implement polling + BroadcastChannel; no-op for now
     console.log("[BrowserAdapter] Metadata watching not yet implemented");

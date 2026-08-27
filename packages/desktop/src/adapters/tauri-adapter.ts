@@ -429,13 +429,14 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   private async startWatchingMetadata(
     paths: string[],
     watchId: string,
-    options?: { ignore?: IgnoreRulesOption },
+    options?: { ignore?: IgnoreRulesOption; allowHiddenSubtrees?: string[] },
   ): Promise<void> {
     try {
       await invoke("start_watching_metadata", {
         paths,
         watchId,
         ...ignoreArgs(options?.ignore),
+        allowHiddenSubtrees: options?.allowHiddenSubtrees,
       });
     } catch (error) {
       console.error("Failed to start watching metadata:", error);

@@ -54,6 +54,29 @@ export function addTabToLayout(
 }
 
 /**
+ * Deep-clone a layout tree, swapping a tab id in place: same window, same
+ * child index, selection follows. Used by the rename-open-tab flow (a file
+ * tab's id IS its path) — must NOT go through handleLayoutChange, whose
+ * removed-id diff would dispose the old id.
+ */
+export function renameTabInLayout(
+  layout: LayoutNode[],
+  oldId: string,
+  newId: string,
+): LayoutNode[] {
+  return mapLayout(layout, (windowNode) => {
+    if (!windowNode.children.includes(oldId)) {
+      return windowNode;
+    }
+    return {
+      ...windowNode,
+      children: windowNode.children.map((id) => (id === oldId ? newId : id)),
+      selected: windowNode.selected === oldId ? newId : windowNode.selected,
+    };
+  });
+}
+
+/**
  * Deep-clone a layout tree, setting `selected` to `tabId` in the Window
  * that contains it. Other windows are left unchanged.
  */

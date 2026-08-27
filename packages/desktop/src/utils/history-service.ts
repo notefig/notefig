@@ -12,7 +12,10 @@ import { IsomorphicGitService } from "@notefig/git";
 import { platformAdapter } from "@/adapters";
 import { createGitStorageHost } from "@/adapters/git-storage-host";
 import { path as pathutil, workspaceKey } from "@/utils/path";
-import { ensureExcludeLines } from "@/utils/git-exclude";
+import {
+  ensureExcludeLines,
+  replaceExcludeLine,
+} from "@/utils/git-exclude";
 
 const historyServiceRegistry = new Map<string, IsomorphicGitService>();
 const historyInitRegistry = new Map<string, Promise<void>>();
@@ -113,12 +116,22 @@ export async function ensureWorkspaceHistoryInitialized(
     await migrateLegacyHistoryGitDir(nativeWorkspacePath, gitDir);
     await service.init({ defaultBranch: "main" });
 
-    // Exclude .metrists/ (this repo's own gitdir + agent configs) and the
-    // user's .git/ from the history repo's worktree scan — its storage host
-    // walks with includeHidden and no ignore rules, so without these the
-    // scan would descend into both.
+    // Exclude the app-internal .metrists subtrees (this repo's own gitdir,
+    // agent configs, the legacy history dir) and the user's .git/ from the
+    // history repo's worktree scan — its storage host walks with
+    // includeHidden and no ignore rules. Deliberately NOT the whole
+    // `.metrists/`: scratchpads (entities/scratchpads.ts) must be checkpointed,
+    // and git cannot re-include inside an excluded directory, so anything
+    // new placed directly under .metrists/ gets checkpointed unless listed
+    // here. replaceExcludeLine migrates pre-MET-135 excludes in place —
+    // this file is app-owned, so the rewrite is safe.
     try {
-      await ensureExcludeLines(gitDir, [".metrists/", ".git/"]);
+      await replaceExcludeLine(gitDir, ".metrists/", [
+        ".metrists/.git/",
+        ".metrists/agent/",
+        ".metrists/history/",
+        ".git/",
+      ]);
     } catch (error) {
       console.warn(
         `Failed to update the history repo's exclude for '${nativeWorkspacePath}':`,

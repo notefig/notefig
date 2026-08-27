@@ -7,6 +7,7 @@ import {
   openFileInLayout,
   openTabInWindow,
   removeTabFromLayout,
+  renameTabInLayout,
   replaceSelectedTabInWindow,
   resolveTargetWindowId,
 } from "../dockable-layout";
@@ -37,6 +38,41 @@ function makeTwoWindowLayout(): LayoutNode[] {
     },
   ];
 }
+
+describe("renameTabInLayout", () => {
+  it("swaps the id in place, preserving index and window membership", () => {
+    const layout = renameTabInLayout(makeTwoWindowLayout(), "a.md", "z.md");
+    const panel = layout[0];
+    if (panel.type !== "Panel") throw new Error("expected panel");
+    const left = panel.children[0];
+    if (left.type !== "Window") throw new Error("expected window");
+    expect(left.children).toEqual(["z.md", "b.md"]);
+    expect(left.selected).toBe("b.md");
+  });
+
+  it("moves selection with a selected tab", () => {
+    const layout = renameTabInLayout(makeTwoWindowLayout(), "b.md", "y.md");
+    const panel = layout[0];
+    if (panel.type !== "Panel") throw new Error("expected panel");
+    const left = panel.children[0];
+    if (left.type !== "Window") throw new Error("expected window");
+    expect(left.children).toEqual(["a.md", "y.md"]);
+    expect(left.selected).toBe("y.md");
+  });
+
+  it("leaves other windows untouched and is a no-op for absent ids", () => {
+    const original = makeTwoWindowLayout();
+    const renamed = renameTabInLayout(original, "c.md", "x.md");
+    const untouched = renameTabInLayout(original, "missing.md", "x.md");
+    const panel = renamed[0];
+    if (panel.type !== "Panel") throw new Error("expected panel");
+    const right = panel.children[1];
+    if (right.type !== "Window") throw new Error("expected window");
+    expect(right.children).toEqual(["x.md"]);
+    expect(right.selected).toBe("x.md");
+    expect(untouched).toEqual(original);
+  });
+});
 
 describe("dockable-layout", () => {
   it("creates initial layout for first tab", () => {

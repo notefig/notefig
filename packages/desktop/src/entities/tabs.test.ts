@@ -1,0 +1,112 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const calls: string[] = [];
+
+const renameFileOrDirectoryMock = vi.fn();
+vi.mock("@/entities/files", () => ({
+  useOpenFileRows: vi.fn(() => []),
+  useMetadataFetching: vi.fn(() => false),
+  renameFileOrDirectory: (ws: string, from: string, to: string) => {
+    calls.push("rename-fs");
+    return renameFileOrDirectoryMock(ws, from, to);
+  },
+}));
+
+let cleanPromise: Promise<void> = Promise.resolve();
+vi.mock("@/utils/markdown-conversion", () => ({
+  flushDocumentSync: () => calls.push("flush"),
+  whenDocumentSyncClean: () => {
+    calls.push("capture-clean");
+    return cleanPromise;
+  },
+}));
+
+vi.mock("@/tabs/tab-controllers", () => ({
+  disposeTab: () => calls.push("dispose"),
+  focusTab: vi.fn(),
+  getTabController: vi.fn(),
+  getTabSelectedText: vi.fn(),
+  isTabFocusable: vi.fn(),
+  revealTabMatch: vi.fn(),
+  searchTab: vi.fn(),
+}));
+
+vi.mock("./editors", () => ({ editor: vi.fn() }));
+vi.mock("./agents", () => ({
+  agents: { task: vi.fn() },
+  agentTasksCollection: { get: vi.fn() },
+  useAgentTasksReady: vi.fn(() => true),
+  useAgentTaskRowsById: vi.fn(() => []),
+}));
+
+import { renameOpenFileTab } from "./tabs";
+
+const WS = "/ws";
+const OLD = "/ws/.metrists/scratchpads/untitled.md";
+const NEW = "/ws/My Notes.md";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  calls.length = 0;
+  cleanPromise = Promise.resolve();
+  renameFileOrDirectoryMock.mockResolvedValue(undefined);
+});
+
+describe("renameOpenFileTab", () => {
+  it("runs flush → capture-clean → dispose → fs rename → layout swap, in order", async () => {
+    const applyLayoutRename = vi.fn(() => calls.push("layout"));
+
+    await renameOpenFileTab({
+      workspacePath: WS,
+      oldPath: OLD,
+      newPath: NEW,
+      applyLayoutRename,
+    });
+
+    expect(calls).toEqual([
+      "flush",
+      "capture-clean",
+      "dispose",
+      "rename-fs",
+      "layout",
+    ]);
+    expect(renameFileOrDirectoryMock).toHaveBeenCalledWith(WS, OLD, NEW);
+    expect(applyLayoutRename).toHaveBeenCalledWith(OLD, NEW);
+  });
+
+  it("waits for the save pipeline to drain before moving the file", async () => {
+    let resolveClean!: () => void;
+    cleanPromise = new Promise((resolve) => {
+      resolveClean = resolve;
+    });
+    const applyLayoutRename = vi.fn();
+
+    const run = renameOpenFileTab({
+      workspacePath: WS,
+      oldPath: OLD,
+      newPath: NEW,
+      applyLayoutRename,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(renameFileOrDirectoryMock).not.toHaveBeenCalled();
+
+    resolveClean();
+    await run;
+    expect(renameFileOrDirectoryMock).toHaveBeenCalled();
+  });
+
+  it("rethrows a failed move without touching the layout", async () => {
+    renameFileOrDirectoryMock.mockRejectedValue(new Error("target exists"));
+    const applyLayoutRename = vi.fn();
+
+    await expect(
+      renameOpenFileTab({
+        workspacePath: WS,
+        oldPath: OLD,
+        newPath: NEW,
+        applyLayoutRename,
+      }),
+    ).rejects.toThrow(/target exists/);
+    expect(applyLayoutRename).not.toHaveBeenCalled();
+  });
+});

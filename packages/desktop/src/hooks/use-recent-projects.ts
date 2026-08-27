@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { readKv, useKv, writeKv } from "@/utils/kv-store";
 import { formatTimeAgo } from "@/utils/format";
@@ -69,17 +69,22 @@ async function projectOpenUrl(path: string): Promise<string> {
  * saved URL. Once inside the project a bare URL is the user's own doing
  * (e.g. closing the last tab) and is recorded like any other.
  */
-export function useNavigationPersistence() {
+export function useNavigationPersistence(): { isEntrySettled: boolean } {
   const { workspacePath } = useWorkspaceParams();
   const location = useLocation();
   const navigate = useNavigate();
   const enteredProjectRef = useRef<string | null>(null);
+  // False until the entry decision resolved: entering at the bare root, the
+  // saved URL is looked up asynchronously and the layout is empty for that
+  // beat — consumers (scratchpad auto-open) must not judge it yet.
+  const [isEntrySettled, setIsEntrySettled] = useState(false);
 
   useEffect(() => {
     if (!workspacePath) return;
     const fullPath = location.pathname + location.search;
     const entering = enteredProjectRef.current !== workspacePath;
     enteredProjectRef.current = workspacePath;
+    if (entering) setIsEntrySettled(false);
 
     const atBareRoot =
       !location.search && !location.pathname.slice(1).includes("/");
@@ -90,12 +95,16 @@ export function useNavigationPersistence() {
         } else {
           void rememberProjectNavigation(workspacePath, fullPath);
         }
+        setIsEntrySettled(true);
       });
       return;
     }
 
+    setIsEntrySettled(true);
     void rememberProjectNavigation(workspacePath, fullPath);
   }, [workspacePath, location.pathname, location.search, navigate]);
+
+  return { isEntrySettled };
 }
 
 export interface RecentProjectDisplay extends RecentProject {
