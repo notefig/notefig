@@ -32,6 +32,16 @@ vi.mock("@/tabs/tab-controllers", () => ({
 }));
 
 vi.mock("./editors", () => ({ editor: vi.fn() }));
+
+const liveEditor = {
+  isDestroyed: false,
+  setEditable: vi.fn((editable: boolean) =>
+    calls.push(editable ? "editable" : "readonly"),
+  ),
+};
+vi.mock("@/components/editor/editor-store", () => ({
+  getMarkdownEditor: () => liveEditor,
+}));
 vi.mock("./agents", () => ({
   agents: { task: vi.fn() },
   agentTasksCollection: { get: vi.fn() },
@@ -64,6 +74,7 @@ describe("renameOpenFileTab", () => {
     });
 
     expect(calls).toEqual([
+      "readonly",
       "flush",
       "capture-clean",
       "rename-fs",
@@ -108,6 +119,14 @@ describe("renameOpenFileTab", () => {
       }),
     ).rejects.toThrow(/target exists/);
     expect(calls).not.toContain("dispose");
+    // The frozen editor is thawed again — the tab stays fully usable.
+    expect(calls).toEqual([
+      "readonly",
+      "flush",
+      "capture-clean",
+      "rename-fs",
+      "editable",
+    ]);
     expect(applyLayoutRename).not.toHaveBeenCalled();
   });
 });

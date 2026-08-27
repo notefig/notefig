@@ -74,6 +74,9 @@ import {
   flushDocumentSync,
   whenDocumentSyncClean,
 } from "@/utils/markdown-conversion";
+// Read-side editor-store accessor, same conscious entities → components
+// import as entities/editors.ts.
+import { getMarkdownEditor } from "@/components/editor/editor-store";
 
 // ---------------------------------------------------------------------------
 // Public re-exports: the layout codec and the tab-id scheme.
@@ -279,16 +282,18 @@ export async function renameOpenFileTab(options: {
 }): Promise<void> {
   const { workspacePath, oldPath, newPath, applyLayoutRename } = options;
   beginTabRename(oldPath, newPath);
+  // Freeze the editor for the duration: an edit landing after the drain
+  // would schedule a save against the old path and resurrect it post-move.
+  // The editor stays alive (read-only) until the move succeeds, so a
+  // failed move leaves the tab fully intact.
+  const liveEditor = getMarkdownEditor(oldPath);
+  liveEditor?.setEditable(false);
   try {
-    // Drain the save pipeline before the move so no in-flight write can
-    // recreate the old path afterwards. The editor stays alive until the
-    // move succeeds: a failed move then leaves the tab fully intact.
-    // (Renames are gesture-driven — a drag or a tree-input commit — so no
-    // edits land during the move itself.)
     flushDocumentSync(oldPath);
     await whenDocumentSyncClean(oldPath);
     await renameFileOrDirectory(workspacePath, oldPath, newPath);
   } catch (error) {
+    if (liveEditor && !liveEditor.isDestroyed) liveEditor.setEditable(true);
     endTabRename(oldPath, newPath);
     throw error;
   }
