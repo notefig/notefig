@@ -23,10 +23,10 @@ import { isProtectedTreePath } from "@/entities/scratchpads";
  *   remount never resets, so scroll survives.
  */
 export interface TreeDelegate {
-  isPathOpenInTab(absPath: string): boolean;
-  /** Scratchpad files may be renamed/dragged even while open (MET-135
-   * promotion routes through the close-and-reopen rename). */
-  isPromotableScratchpad(absPath: string): boolean;
+  /** True for a DIRECTORY with open tabs somewhere inside — moving it would
+   * orphan them. An open file itself is fine: the delegate's moveFile
+   * routes it through the close-and-reopen rename. */
+  containsOpenTab(absPath: string): boolean;
   moveFile(fromAbs: string, toAbs: string): void;
   renameFile(oldAbs: string, newName: string): void;
   createEntry(
@@ -173,21 +173,13 @@ export function acquireTreeModel(
       }
     `,
     dragAndDrop: {
-      // Open-in-tab files may still be DRAGGED (dropping one on another
-      // window's tab bar moves the tab there — the protocol handles that
-      // outside the tree), but tree-internal MOVES of them are refused:
-      // tab ids are absolute paths, so a move would orphan the tab. Two
-      // scratchpad exceptions: protected app paths can't be dragged at all,
-      // and open scratchpad files CAN be (the close-and-reopen rename moves
-      // the tab with the file).
+      // Open-in-tab files CAN be moved — the delegate routes them through
+      // the close-and-reopen rename so the tab follows the file. Blocked:
+      // protected app paths, and directories with open tabs inside.
       canDrop: (context) =>
         !context.draggedPaths.some((p) => {
-          const abs = toAbs(p);
           if (isProtectedTreePath(p.replace(/\/+$/, ""))) return true;
-          return (
-            entry.delegate.isPathOpenInTab(abs) &&
-            !entry.delegate.isPromotableScratchpad(abs)
-          );
+          return entry.delegate.containsOpenTab(toAbs(p));
         }),
       onDropComplete: (event) => {
         // directoryPath arrives with a trailing slash ("docs/"); without
@@ -204,16 +196,12 @@ export function acquireTreeModel(
       onDropError: (error) => console.error("Drop failed:", error),
     },
     renaming: {
-      canRename: (item) => {
-        const rel = item.path.replace(/\/+$/, "");
-        if (isProtectedTreePath(rel)) return false;
-        const abs = toAbs(item.path);
-        // Naming an open scratchpad is promotion — always allowed.
-        return (
-          entry.delegate.isPromotableScratchpad(abs) ||
-          !entry.delegate.isPathOpenInTab(abs)
-        );
-      },
+      // Open files rename like closed ones (the delegate routes them
+      // through the close-and-reopen rename); blocked: protected app
+      // paths, and directories with open tabs inside.
+      canRename: (item) =>
+        !isProtectedTreePath(item.path.replace(/\/+$/, "")) &&
+        !entry.delegate.containsOpenTab(toAbs(item.path)),
       onRename: (event) => {
         const pending = entry.pendingCreate;
         const newName =

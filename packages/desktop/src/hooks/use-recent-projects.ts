@@ -85,10 +85,10 @@ async function pruneDeadFileTabs(layout: LayoutNode[]): Promise<LayoutNode[]> {
  * navigating — the single writer of the entry layout, so nothing can race
  * or clobber it (MET-135). Start from the last visited URL (if it still
  * points inside this project), drop file tabs whose files no longer
- * exist, and if no tabs survive, land in a scratchpad: the folder is
- * swept (empty leftovers deleted, titled ones renamed) and the most
- * recent scratchpad — or a fresh untitled one — is baked into the
- * layout. All on plain adapter fs; collections are not consulted.
+ * exist, and if no tabs survive, land in a scratchpad: abandoned empty
+ * ones are swept away and the most recent survivor — or a fresh untitled
+ * one — is baked into the layout. All on plain adapter fs; collections
+ * are not consulted.
  */
 async function computeProjectEntryUrl(path: string): Promise<string> {
   const base = await savedEntryBase(path);
@@ -100,7 +100,8 @@ async function computeProjectEntryUrl(path: string): Promise<string> {
 
   const restoredTabs = extractTabIds(layout);
   if (restoredTabs.length > 0) {
-    // Non-empty entry: sweep leftovers in the background, restore as-is.
+    // Non-empty entry: sweep empty leftovers in the background, restore
+    // as-is.
     void sweepScratchpadsOnDisk(path, restoredTabs).then(() =>
       refetchWorkspaceMetadata(path),
     );

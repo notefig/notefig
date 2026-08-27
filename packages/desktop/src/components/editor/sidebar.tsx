@@ -205,8 +205,7 @@ export function Sidebar({
 
   const handleRenameFile = useCallback(
     (oldPath: string, newName: string) => {
-      // Rename is always in place — moving a scratchpad OUT of its folder
-      // (promotion) is the drag gesture, never a rename side effect.
+      // Rename is always in place; moving lives on the drag gesture.
       const newPath = getDirectoryPath(oldPath) + "/" + newName;
       if (oldPath === newPath) return;
 
@@ -216,8 +215,8 @@ export function Sidebar({
         return;
       }
 
-      // Scratchpads may be renamed while open — route through the
-      // close-and-reopen primitive so the tab follows the file.
+      // Open files route through the close-and-reopen primitive so the
+      // tab follows the file.
       const rename = openTabs.includes(oldPath)
         ? onRenameOpenFile(oldPath, newPath)
         : renameFileOrDirectory(workspacePath, oldPath, newPath);

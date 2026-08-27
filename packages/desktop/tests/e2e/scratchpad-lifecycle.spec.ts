@@ -40,8 +40,6 @@ test.describe("scratchpad close → reopen project", () => {
 
   async function closeScratchpadTab(page: Page) {
     await openFileInNewTab(page, "README.md");
-    // The scratchpad tab is whichever tab isn't README (its title derives
-    // from content and the composer can steal early keystrokes — MET-100).
     const tab = page
       .getByRole("button", { name: /Close tab/ })
       .filter({ hasNotText: "README.md" })
@@ -72,12 +70,10 @@ test.describe("scratchpad close → reopen project", () => {
     await visibleEditor(page).waitFor({ state: "visible", timeout: 15000 });
     await expectNoLoadError(page);
 
-    // The close-time rename produced a slug-named file; it must open
-    // cleanly from the tree (the reported bug: not-found on open).
+    // The contentful scratchpad kept its name and survived the entry
+    // sweep; it must open cleanly from the tree.
     await page.getByRole("treeitem", { name: /scratchpads/ }).click();
-    await page
-      .getByRole("treeitem", { name: /repro-notes-[a-z0-9]{4}\.md/ })
-      .click();
+    await page.getByRole("treeitem", { name: "untitled.md" }).click();
     await expect(visibleEditor(page)).toContainText("body text", {
       timeout: 10000,
     });
@@ -102,7 +98,7 @@ test.describe("scratchpad close → reopen project", () => {
     await expect(visibleEditor(page)).toContainText("still alive");
   });
 
-  test("renaming an open scratchpad via the tree keeps its tab", async ({
+  test("renaming an open file via the tree keeps its tab", async ({
     page,
   }) => {
     const editor = visibleEditor(page);

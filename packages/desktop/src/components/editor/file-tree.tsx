@@ -38,7 +38,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { dropZoneProps, tagCurrentDrag } from "@/utils/drag-protocol";
 import { path as pathutil, relativeTreePath } from "@/utils/path";
-import { isProtectedTreePath, isScratchpadPath } from "@/entities/scratchpads";
+import { isProtectedTreePath } from "@/entities/scratchpads";
 import { moveIntoFolder } from "@/utils/drop-actions";
 import { attachTreeStatHydration } from "./tree-stat-hydration";
 import {
@@ -168,9 +168,14 @@ function FileTreeInner({
 
   const openTabsRef = useRef(openTabs);
   openTabsRef.current = openTabs;
-  const isPathOpenInTab = useCallback((absPath: string) => {
+  // An open FILE renames/moves fine (the close-and-reopen rename walks the
+  // tab along), but moving a directory that contains open tabs would orphan
+  // them — tab ids are absolute paths — so those stay blocked.
+  const containsOpenTab = useCallback((absPath: string) => {
     const tabs = openTabsRef.current ?? [];
-    return tabs.some((tab) => pathutil.contains(absPath, tab));
+    return tabs.some(
+      (tab) => tab !== absPath && pathutil.contains(absPath, tab),
+    );
   }, []);
 
   const [pendingDelete, setPendingDelete] = useState<{
@@ -200,8 +205,7 @@ function FileTreeInner({
           : [],
         initialExpandedPaths: rememberedExpandedPaths(basePath),
         delegate: {
-          isPathOpenInTab: () => false,
-          isPromotableScratchpad: () => false,
+          containsOpenTab: () => false,
           moveFile: () => {},
           renameFile: () => {},
           createEntry: () => {},
@@ -216,15 +220,12 @@ function FileTreeInner({
   // The long-lived model calls into the app through this delegate — refresh
   // it every render so it never sees stale props.
   entry.delegate = {
-    isPathOpenInTab,
-    isPromotableScratchpad: (abs) => isScratchpadPath(basePath, abs),
+    containsOpenTab,
     moveFile: (fromAbs, destAbs) => {
-      // Dragging an OPEN scratchpad out of its folder is promotion — route
-      // through the close-and-reopen rename so the tab follows the file.
+      // Moving an OPEN file routes through the close-and-reopen rename so
+      // the tab follows the file instead of being orphaned.
       const move =
-        isScratchpadPath(basePath, fromAbs) &&
-        (openTabsRef.current ?? []).includes(fromAbs) &&
-        onRenameOpenFile
+        (openTabsRef.current ?? []).includes(fromAbs) && onRenameOpenFile
           ? onRenameOpenFile(fromAbs, destAbs)
           : renameFileOrDirectory(basePath, fromAbs, destAbs);
       move.catch((error: unknown) => {
@@ -639,11 +640,7 @@ function FileTreeInner({
                 type="button"
                 role="menuitem"
                 className={menuButton}
-                // Scratchpads may be renamed while open (naming = promotion,
-                // via the close-and-reopen primitive).
-                disabled={
-                  isPathOpenInTab(abs) && !isScratchpadPath(basePath, abs)
-                }
+                disabled={containsOpenTab(abs)}
                 onClick={() => {
                   model.startRenaming(item.path);
                   context.close({ restoreFocus: false });
@@ -670,7 +667,7 @@ function FileTreeInner({
         </div>
       );
     },
-    [toAbs, openFileAtPath, onModeChange, isPathOpenInTab, model, t],
+    [toAbs, openFileAtPath, onModeChange, containsOpenTab, model, t],
   );
 
   const handleHostKeyDown = useCallback<

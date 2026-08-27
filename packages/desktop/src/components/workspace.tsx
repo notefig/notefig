@@ -206,9 +206,9 @@ export const Workspace = () => {
     openSessionsSidebar,
   });
 
-  // Promotion: rename/move a scratchpad while its tab is open — the
-  // close-and-reopen primitive keeps the tab in its window slot.
-  const renameOpenScratchpad = useCallback(
+  // Rename/move a file while its tab is open — the close-and-reopen
+  // primitive keeps the tab in its window slot.
+  const handleRenameOpenFile = useCallback(
     (oldPath: string, newPath: string) =>
       renameOpenFileTab({
         workspacePath,
@@ -243,7 +243,7 @@ export const Workspace = () => {
               openTabs={openTabs}
               onFileSelect={handleFileSelect}
               closeTab={closeTab}
-              onRenameOpenFile={renameOpenScratchpad}
+              onRenameOpenFile={handleRenameOpenFile}
               mode={fileTreeMode}
               onModeChange={setFileTreeMode}
               searchPanelRef={searchPanelRef}

@@ -240,7 +240,8 @@ export function useLayoutSearchParam(): UseLayoutSearchParam {
 }
 
 // ---------------------------------------------------------------------------
-// Rename-open-tab: the close-and-reopen primitive (MET-135 promotion).
+// Rename-open-tab: the close-and-reopen primitive — any open file may be
+// renamed or moved from the tree; the tab follows the file.
 // ---------------------------------------------------------------------------
 
 /**

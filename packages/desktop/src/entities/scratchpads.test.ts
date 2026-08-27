@@ -77,16 +77,6 @@ async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-/** Pin Math.random so auto-rename tails are predictable per test. */
-function stubRandomTails(...values: number[]) {
-  const spy = vi.spyOn(Math, "random");
-  values.forEach((value) => spy.mockReturnValueOnce(value));
-  spy.mockReturnValue(values[values.length - 1]);
-  return values.map((value) =>
-    value.toString(36).slice(2, 6).padEnd(4, "0"),
-  );
-}
-
 beforeEach(async () => {
   vi.restoreAllMocks();
   vi.clearAllMocks();
@@ -139,8 +129,6 @@ describe("path scheme & naming", () => {
         type: "directory",
       }),
     ).toBe(false);
-    expect(scratchpads.isScratchpadPath(WS, `${DIR}/a.md`)).toBe(true);
-    expect(scratchpads.isScratchpadPath(WS, `${WS}/a.md`)).toBe(false);
   });
 
   it("counts untitled names up first-free", () => {
@@ -148,8 +136,6 @@ describe("path scheme & naming", () => {
     expect(
       scratchpads.nextUntitledBasename(["untitled.md", "untitled-3.md"]),
     ).toBe("untitled-2.md");
-    expect(scratchpads.isUntitledBasename("Untitled-7.md")).toBe(true);
-    expect(scratchpads.isUntitledBasename("notes.md")).toBe(false);
   });
 
   it("picks the most recent candidate, deterministic without stats", () => {
@@ -166,24 +152,6 @@ describe("path scheme & naming", () => {
         { path: `${DIR}/alpha.md`, modifiedAt: at(1) },
       ]),
     ).toBe(`${DIR}/alpha.md`);
-  });
-
-  it("derives titles from the first heading, tolerating missing content", () => {
-    expect(scratchpads.deriveScratchpadTitle("# My Notes\ntext")).toBe(
-      "My Notes",
-    );
-    expect(scratchpads.deriveScratchpadTitle("no heading")).toBeNull();
-    expect(scratchpads.deriveScratchpadTitle(undefined)).toBeNull();
-  });
-
-  it("slugifies titles to lowercase-dash with a length cap", () => {
-    expect(scratchpads.slugifyScratchpadTitle("Plans: Q3/Q4 <draft>")).toBe(
-      "plans-q3-q4-draft",
-    );
-    expect(
-      scratchpads.slugifyScratchpadTitle("word ".repeat(20))!.length,
-    ).toBeLessThanOrEqual(32);
-    expect(scratchpads.slugifyScratchpadTitle("!!!")).toBeNull();
   });
 
   it("protects only the app dir and the folder itself", () => {
@@ -276,65 +244,29 @@ describe("resolveScratchpadOnDisk", () => {
 });
 
 describe("sweepScratchpadsOnDisk", () => {
-  it("deletes whitespace-only leftovers, renames untitled ones with content, spares kept paths", async () => {
-    const [tail] = stubRandomTails(0.111);
+  it("deletes whitespace-only leftovers, spares kept paths and content", async () => {
     const kept = `${DIR}/untitled-2.md`;
     const empty = `${DIR}/untitled-3.md`;
-    const survivor = `${DIR}/untitled-4.md`;
-    const named = `${DIR}/already-named.md`;
+    const withContent = `${DIR}/untitled-4.md`;
     adapter.readDirectory.mockResolvedValue({
       ok: true,
-      value: [kept, empty, survivor, named],
+      value: [kept, empty, withContent],
     });
     adapter.readFiles.mockResolvedValue(
       ok([
         { path: empty, content: "  \n" },
-        { path: survivor, content: "# Crash Survivor" },
-        { path: named, content: "# Different Title" },
+        { path: withContent, content: "# Notes" },
       ]),
     );
 
     await scratchpads.sweepScratchpadsOnDisk(WS, [kept]);
 
     expect(new Set(adapter.readFiles.mock.calls[0][0] as string[])).toEqual(
-      new Set([empty, survivor, named]),
+      new Set([empty, withContent]),
     );
     expect(adapter.deleteFiles).toHaveBeenCalledWith([empty]);
     expect(adapter.deleteFiles).toHaveBeenCalledTimes(1);
-    expect(adapter.moveFile).toHaveBeenCalledWith(
-      survivor,
-      `${DIR}/crash-survivor-${tail}.md`,
-    );
-    expect(adapter.moveFile).toHaveBeenCalledTimes(1);
-  });
-
-  it("re-rolls the random tail on a name collision and tolerates failures", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const [first, second] = stubRandomTails(0.333, 0.444);
-    const path = `${DIR}/untitled.md`;
-    adapter.readDirectory.mockResolvedValue({
-      ok: true,
-      value: [path, `${DIR}/roadmap-${first}.md`],
-    });
-    adapter.readFiles.mockResolvedValue(
-      ok([
-        { path, content: "# Roadmap" },
-        { path: `${DIR}/roadmap-${first}.md`, content: "# Roadmap" },
-      ]),
-    );
-    adapter.moveFile.mockResolvedValueOnce({
-      ok: false,
-      error: { path, type: "io_error", message: "disk full" },
-    });
-
-    await scratchpads.sweepScratchpadsOnDisk(WS, []);
-
-    expect(adapter.moveFile).toHaveBeenCalledWith(
-      path,
-      `${DIR}/roadmap-${second}.md`,
-    );
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
+    expect(adapter.moveFile).not.toHaveBeenCalled();
   });
 
   it("does nothing when the folder is missing", async () => {

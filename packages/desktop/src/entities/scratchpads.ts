@@ -9,13 +9,15 @@
  * tracked project file. MET-115 renames `.metrists`; consumers derive every
  * path from the constants here.
  *
- * This file is the whole feature: path scheme + naming, the user-facing
- * "New File" action, and the disk-based entry lifecycle (sweep +
- * resolve) that useNavigationPersistence folds into the workspace entry
- * URL. Lifecycle runs on plain adapter fs — never on collections — so it
- * cannot race collection or query readiness; rows catch up via the
- * normal metadata walk. Nothing happens on tab close; leftovers are
- * cleaned and renamed at the next workspace entry.
+ * This file is the whole feature, and the feature is deliberately small.
+ * Scratchpads have exactly two special powers: "New File" auto-creates the
+ * next untitled file here, and an empty workspace entry auto-opens the most
+ * recent one (useNavigationPersistence folds it into the entry URL), after
+ * an entry-time sweep deletes abandoned empty ones. In every other respect
+ * — renaming, dragging, tab titles, deletion — they are ordinary files
+ * with no special treatment. Entry lifecycle runs on plain adapter fs —
+ * never on collections — so it cannot race collection or query readiness;
+ * rows catch up via the normal metadata walk.
  */
 import { platformAdapter } from "@/adapters";
 import { path as pathutil } from "@/utils/path";
@@ -61,17 +63,6 @@ export function isScratchpadFileRow(row: {
   );
 }
 
-export function isScratchpadPath(
-  workspacePath: string,
-  absolutePath: string,
-): boolean {
-  return pathutil.dirname(absolutePath) === scratchpadsDirPath(workspacePath);
-}
-
-export function isUntitledBasename(basename: string): boolean {
-  return new RegExp(`^${UNTITLED_BASENAME}(-\\d+)?\\.md$`, "i").test(basename);
-}
-
 export function nextUntitledBasename(existingBasenames: string[]): string {
   const taken = new Set(existingBasenames);
   let name = `${UNTITLED_BASENAME}.md`;
@@ -105,36 +96,6 @@ export function pickMostRecentScratchpad(
   return best.path;
 }
 
-/** Text of the document's first ATX heading; tolerates content that hasn't
- * loaded yet. */
-export function deriveScratchpadTitle(
-  markdown: string | null | undefined,
-): string | null {
-  if (typeof markdown !== "string" || markdown.length === 0) return null;
-  const match = markdown.match(/^#{1,6}\s+(.+?)\s*#*\s*$/m);
-  const title = match?.[1]?.trim();
-  return title ? title : null;
-}
-
-const MAX_SLUG_LENGTH = 32;
-
-/** `# Plans: Q3/Q4` → `plans-q3-q4`; null when nothing survives. */
-export function slugifyScratchpadTitle(title: string): string | null {
-  const slug = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, MAX_SLUG_LENGTH)
-    .replace(/-+$/, "");
-  return slug ? slug : null;
-}
-
-/** Random tail for auto-derived names (`plans-q3-q4-k3f9.md`) — unique
- * without counter churn. */
-export function randomScratchpadSuffix(): string {
-  return Math.random().toString(36).slice(2, 6).padEnd(4, "0");
-}
-
 /** Tree paths the user must not rename, delete, or drag — the app dir and
  * the scratchpads folder themselves. Files inside stay editable. */
 export function isProtectedTreePath(relativeTreePath: string): boolean {
@@ -142,22 +103,6 @@ export function isProtectedTreePath(relativeTreePath: string): boolean {
     relativeTreePath === APP_DIR_NAME ||
     relativeTreePath === SCRATCHPADS_REL_PATH
   );
-}
-
-/** Content-derived display title for a scratchpad tab; null falls back to
- * the filename. Display only — the file renames at close time. */
-export function scratchpadTabTitle(
-  workspacePath: string,
-  row: {
-    path: string;
-    isContentLoaded?: boolean;
-    contentError?: string;
-    content?: string;
-  },
-): string | null {
-  if (!isScratchpadPath(workspacePath, row.path)) return null;
-  if (!row.isContentLoaded || row.contentError) return null;
-  return deriveScratchpadTitle(row.content);
 }
 
 // ---------------------------------------------------------------------------
@@ -261,11 +206,10 @@ export async function resolveScratchpadOnDisk(
 }
 
 /**
- * Entry-time sweep, on plain disk truth, over scratchpads not in
- * `keepPaths` (the tabs the entry is about to restore): whitespace-only
- * leftovers are deleted, untitled ones with content are renamed to their
- * heading (`<slug>-<random>.md`). Best-effort; failures warn, never
- * throw. Rows catch up via the watcher and the metadata walk.
+ * Entry-time cleanup, on plain disk truth: whitespace-only scratchpads not
+ * in `keepPaths` (the tabs the entry is about to restore) are deleted.
+ * Best-effort; failures warn, never throw. Rows catch up via the watcher
+ * and the metadata walk.
  */
 export async function sweepScratchpadsOnDisk(
   workspacePath: string,
@@ -279,45 +223,14 @@ export async function sweepScratchpadsOnDisk(
   });
   if (!listing.ok) return;
   const keep = new Set(keepPaths);
-  const taken = new Set(listing.value.map((p) => pathutil.basename(p)));
   const candidates = listing.value.filter((path) => !keep.has(path));
-  scratchpadDebug("sweep(disk): candidates", candidates, "keep", keepPaths);
   if (candidates.length === 0) return;
 
   const reads = await platformAdapter.fs.readFiles(candidates);
-  for (const { path, content } of reads.succeeded) {
-    if (content.trim() === "") {
-      scratchpadDebug("sweep(disk): deleting empty", path);
-      await platformAdapter.fs.deleteFiles([path]);
-      taken.delete(pathutil.basename(path));
-    } else if (isUntitledBasename(pathutil.basename(path))) {
-      await renameScratchpadToHeading(dir, path, content, taken);
-    }
-  }
-}
-
-/** Rename one untitled scratchpad to its heading slug, de-duped against
- * `taken` (updated in place). No-op when no heading survives slugging. */
-async function renameScratchpadToHeading(
-  dir: string,
-  path: string,
-  content: string,
-  taken: Set<string>,
-): Promise<void> {
-  const title = deriveScratchpadTitle(content);
-  const slug = title ? slugifyScratchpadTitle(title) : null;
-  if (!slug) return;
-  let name = `${slug}-${randomScratchpadSuffix()}.md`;
-  for (let i = 0; i < 3 && taken.has(name); i++) {
-    name = `${slug}-${randomScratchpadSuffix()}.md`;
-  }
-  const target = pathutil.join(dir, name);
-  scratchpadDebug("sweep(disk): renaming", path, "->", target);
-  const moved = await platformAdapter.fs.moveFile(path, target);
-  if (moved.ok) {
-    taken.delete(pathutil.basename(path));
-    taken.add(name);
-  } else {
-    console.warn("[scratchpads] rename failed:", moved.error);
-  }
+  const empties = reads.succeeded
+    .filter(({ content }) => content.trim() === "")
+    .map(({ path }) => path);
+  if (empties.length === 0) return;
+  scratchpadDebug("sweep(disk): deleting empty", empties);
+  await platformAdapter.fs.deleteFiles(empties);
 }
