@@ -167,9 +167,21 @@ export function acquireTreeModel(
       [data-item-section="icon"] svg[data-icon-token="markdown"] {
         color: var(--logo);
       }
-      [data-item-path=".metrists"] {
+      [data-item-path=".metrists"], [data-item-path=".metrists/"] {
         opacity: 0.65;
         font-style: italic;
+      }
+      /* The scratchpads row displays as plain "scratchpads" — the tree
+         flattens the .metrists/scratchpads chain into one row (its
+         data-item-path is the deep one, trailing slash included) and the
+         ".metrists / " prefix is just noise. Display-only: model paths,
+         aria labels and search keep the real name, and no rename input
+         can render here (the row is protected). */
+      [data-item-path=".metrists/scratchpads/"] [data-item-section="content"] > * {
+        display: none;
+      }
+      [data-item-path=".metrists/scratchpads/"] [data-item-section="content"]::after {
+        content: "scratchpads";
       }
     `,
     dragAndDrop: {

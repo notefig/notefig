@@ -17,6 +17,12 @@ export interface AppSettings {
   crashReportingEnabled: boolean;
   analyticsEnabled: boolean;
   autoUpdateEnabled: boolean;
+  /**
+   * Entering a project with nothing open lands in a scratchpad (the most
+   * recent one, else a fresh untitled). Off = land on the empty state
+   * instead; scratchpads are then only ever opened deliberately.
+   */
+  scratchpadOnStartup: boolean;
   telemetryConsentVersion: number;
   telemetryInstallId: string | null;
   /**
@@ -33,6 +39,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   crashReportingEnabled: true,
   analyticsEnabled: true,
   autoUpdateEnabled: true,
+  scratchpadOnStartup: true,
   telemetryConsentVersion: 0,
   telemetryInstallId: null,
   lastSeenVersion: null,

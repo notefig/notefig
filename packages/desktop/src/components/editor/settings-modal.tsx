@@ -257,6 +257,8 @@ function GeneralSettings({
         </Select>
       </SettingRow>
 
+      <ScratchpadOnStartupToggle />
+
       <div className="pt-4">
         <h2 className="text-lg font-semibold mb-1">Advanced</h2>
         <DebugModeToggle />
@@ -505,6 +507,26 @@ function PrivacySettings() {
         />
       </SettingRow>
     </div>
+  );
+}
+
+function ScratchpadOnStartupToggle() {
+  const { t } = useTranslation();
+  const { settings, setSetting, isReady } = useAppSettings();
+
+  return (
+    <SettingRow
+      title={t("scratchpadOnStartup")}
+      description={t("scratchpadOnStartupDesc")}
+    >
+      <Switch
+        checked={settings.scratchpadOnStartup}
+        disabled={!isReady}
+        onCheckedChange={(checked) =>
+          setSetting("scratchpadOnStartup", checked)
+        }
+      />
+    </SettingRow>
   );
 }
 

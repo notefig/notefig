@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { readKv, useKv, writeKv } from "@/utils/kv-store";
+import { SETTINGS_NAMESPACE } from "@/hooks/use-app-settings";
 import { formatTimeAgo } from "@/utils/format";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import { platformAdapter } from "@/adapters";
@@ -107,7 +108,14 @@ async function computeProjectEntryUrl(path: string): Promise<string> {
     );
   } else {
     await sweepScratchpadsOnDisk(path, []);
-    const scratchpad = await resolveScratchpadOnDisk(path);
+    // Off means off: an empty entry lands on the empty state — neither
+    // creates a scratchpad nor auto-opens an existing one.
+    const scratchpadOnStartup =
+      (await readKv<boolean>(SETTINGS_NAMESPACE, "scratchpadOnStartup")) !==
+      false;
+    const scratchpad = scratchpadOnStartup
+      ? await resolveScratchpadOnDisk(path)
+      : null;
     if (scratchpad) layout = createInitialLayout(scratchpad);
     // The sweep/resolve mutated disk behind the collections' back; start
     // the re-walk NOW so the stale-tab pruner (gated on metadata fetching)

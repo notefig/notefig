@@ -158,6 +158,9 @@ i18n
           releaseNotesTitle: "Release Notes",
           releaseNotesEmpty: "No release notes yet.",
           relaunch: "Relaunch",
+          scratchpadOnStartup: "Scratchpad on startup",
+          scratchpadOnStartupDesc:
+            "Open a scratchpad when you enter a project with nothing open.",
           automaticUpdates: "Automatic updates",
           automaticUpdatesDesc:
             "Download updates in the background and notify you when they're ready to install.",

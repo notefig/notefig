@@ -13,7 +13,9 @@
  * Scratchpads have exactly two special powers: "New File" auto-creates the
  * next untitled file here, and an empty workspace entry auto-opens the most
  * recent one (useNavigationPersistence folds it into the entry URL), after
- * an entry-time sweep deletes abandoned empty ones. In every other respect
+ * an entry-time sweep deletes abandoned empty ones. The "scratchpad on
+ * startup" app setting turns the empty-entry half off entirely — no
+ * create, no auto-open; only the sweep still runs. In every other respect
  * — renaming, dragging, tab titles, deletion — they are ordinary files
  * with no special treatment. Entry lifecycle runs on plain adapter fs —
  * never on collections — so it cannot race collection or query readiness;
