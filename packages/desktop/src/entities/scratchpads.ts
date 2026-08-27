@@ -37,6 +37,11 @@ export const SCRATCHPADS_DIR_NAME = "scratchpads";
 export const SCRATCHPADS_REL_PATH = `${APP_DIR_NAME}/${SCRATCHPADS_DIR_NAME}`;
 export const UNTITLED_BASENAME = "untitled";
 
+/** Temporary MET-135 diagnostics — grep for [scratchpad-debug]. */
+export function scratchpadDebug(...parts: unknown[]): void {
+  console.info("[scratchpad-debug]", ...parts);
+}
+
 export function appDirPath(workspacePath: string): string {
   return pathutil.join(workspacePath, APP_DIR_NAME);
 }
@@ -230,6 +235,10 @@ export async function resolveScratchpadToOpen(
   }
 
   const candidates = scratchpadRows(workspacePath);
+  scratchpadDebug(
+    "resolve: candidates",
+    candidates.map((row) => row.path),
+  );
   if (candidates.length === 0) {
     return createUntitledScratchpad(workspacePath);
   }
@@ -258,12 +267,20 @@ export async function sweepEmptyScratchpads(
   const candidates = scratchpadRows(workspacePath)
     .map((row) => row.path)
     .filter((path) => !open.has(path));
+  scratchpadDebug("sweep: candidates", candidates, "open", openTabIds);
   if (candidates.length === 0) return;
 
   const reads = await platformAdapter.fs.readFiles(candidates);
+  scratchpadDebug(
+    "sweep: reads ok",
+    reads.succeeded.map((r) => `${r.path} (${r.content.length}b)`),
+    "failed",
+    reads.failed,
+  );
   for (const { path, content } of reads.succeeded) {
     try {
       if (content.trim() === "") {
+        scratchpadDebug("sweep: deleting empty", path);
         await deleteFileOrDirectory(workspacePath, path);
       } else {
         await maybeAutoRenameScratchpad(workspacePath, path, content);
@@ -293,6 +310,7 @@ async function maybeAutoRenameScratchpad(
   for (let i = 0; i < 3 && metadata.get(target) !== undefined; i++) {
     target = pathutil.join(dir, `${slug}-${randomScratchpadSuffix()}.md`);
   }
+  scratchpadDebug("sweep: renaming", path, "->", target);
   await renameFileOrDirectory(workspacePath, path, target);
 }
 
@@ -338,6 +356,11 @@ export function useScratchpadOnEmptyOpen(options: {
       return;
     }
 
+    scratchpadDebug("hook: empty entry decision", {
+      workspacePath,
+      openTabs,
+      staleTabIds,
+    });
     inFlightRef.current = true;
     void (async () => {
       // Sweep first: nothing is open, so leftovers delete/rename before we
@@ -345,6 +368,7 @@ export function useScratchpadOnEmptyOpen(options: {
       await sweepEmptyScratchpads(workspacePath, []);
       const path = await resolveScratchpadToOpen(workspacePath);
       decidedForRef.current = workspacePath;
+      scratchpadDebug("hook: opening", path);
       if (path) openFile({ tabId: path, intent: "new-tab" });
     })()
       .catch((error) => {

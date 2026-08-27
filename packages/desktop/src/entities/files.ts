@@ -44,6 +44,11 @@ export { queryClient };
 
 const METADATA_REFETCH_INTERVAL_MS = 30_000;
 
+/** Temporary MET-135 diagnostics — grep for [scratchpad-debug]. */
+function scratchpadDebug(...parts: unknown[]): void {
+  console.info("[scratchpad-debug]", ...parts);
+}
+
 /** Excludes content to keep metadata queries lightweight. */
 export interface FileMetadata {
   path: string; // Absolute path - serves as the key
@@ -116,6 +121,10 @@ export function createFileMetadataCollection(workspaceId: string) {
           })),
           ...filesResult.value.map((p) => ({ path: p, type: "file" as const })),
         ];
+        scratchpadDebug(
+          "metadata walk:",
+          entries.filter((e) => e.path.includes("/.metrists")).map((e) => e.path),
+        );
 
 
         // Re-stat children of hydrated directories so their stats stay
@@ -305,7 +314,13 @@ export function createFileContentCollection(workspaceId: string) {
 
         if (requestedPaths.length === 0) return [];
 
+        if (requestedPaths.some((p) => p.includes("/.metrists/"))) {
+          scratchpadDebug("content queryFn: reading", requestedPaths);
+        }
         const result = await platformAdapter.fs.readFiles(requestedPaths);
+        if (result.failed.length > 0) {
+          scratchpadDebug("content queryFn: FAILED reads", result.failed);
+        }
 
         const contentMap = new Map<string, FileContent>();
 

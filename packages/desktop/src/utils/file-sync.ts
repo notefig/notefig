@@ -155,6 +155,13 @@ function relativeToWorkspace(
   return relativeTreePath(workspaceId, path);
 }
 
+function debugWatcherChanges(kind: string, paths: string[]): void {
+  const app = paths.filter((p) => p.includes("/.metrists"));
+  if (app.length > 0) {
+    console.info("[scratchpad-debug] watcher", kind, app);
+  }
+}
+
 async function applyMetadataCreated(
   collections: WorkspaceCollections,
   workspaceId: string,
@@ -245,6 +252,10 @@ export async function handleMetadataFileSystemChange(
   workspaceId: string,
 ): Promise<void> {
   const collections = getOrCreateWorkspaceCollections(workspaceId);
+  debugWatcherChanges(
+    "metadata",
+    event.changes.map((c) => `${c.type}:${c.path}`),
+  );
 
   for (const change of event.changes) {
     try {
@@ -275,6 +286,10 @@ export async function handleContentFileSystemChange(
   workspaceId: string,
 ): Promise<void> {
   const collections = getOrCreateWorkspaceCollections(workspaceId);
+  debugWatcherChanges(
+    "content",
+    event.changes.map((c) => c.path),
+  );
 
   for (const change of event.changes) {
     try {
