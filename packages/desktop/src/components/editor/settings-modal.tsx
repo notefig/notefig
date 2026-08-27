@@ -24,7 +24,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
-  Bot,
+  Sparkles,
   Shield,
 } from "lucide-react";
 import {
@@ -68,7 +68,7 @@ interface SettingsSection {
 
 const settingsSections: SettingsSection[] = [
   {
-    label: "projectSettings",
+    label: "generalSettings",
     items: [
       { id: "general", label: "General", icon: Settings },
       { id: "appearance", label: "Appearance", icon: Palette },
@@ -78,7 +78,13 @@ const settingsSections: SettingsSection[] = [
   },
   {
     label: "agentSettings",
-    items: [{ id: "harnesses", label: "Harnesses", icon: Bot }],
+    items: [
+      {
+        id: "harnesses",
+        label: "Harnesses",
+        icon: Sparkles,
+      },
+    ],
   },
   {
     label: "corePlugins",

@@ -108,7 +108,7 @@ i18n
           settings: "Settings",
           close: "Close",
           options: "Options",
-          projectSettings: "Project Settings",
+          generalSettings: "General Settings",
           general: "General",
           editor: "Editor",
           filesAndLinks: "Files and links",
