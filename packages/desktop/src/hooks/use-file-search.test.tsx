@@ -81,18 +81,12 @@ beforeEach(async () => {
   WS = `/ws-file-search-${testCounter++}`;
   adapter.getMetadata.mockResolvedValue({ succeeded: [], failed: [] });
   adapter.readDirectory.mockImplementation(
-    async (dir: string, options: { includeFiles: boolean }) =>
-      dir.endsWith("/.metrists/scratchpads")
-        ? {
-            ok: false,
-            error: { path: dir, type: "not_found", message: "missing" },
-          }
-        : {
-            ok: true,
-            value: options.includeFiles
-              ? [...WORKSPACE_FILES.map((rel) => `${WS}/${rel}`), LOOSE_FILE]
-              : [`${WS}/archive`],
-          },
+    async (_dir: string, options: { includeFiles: boolean }) => ({
+      ok: true,
+      value: options.includeFiles
+        ? [...WORKSPACE_FILES.map((rel) => `${WS}/${rel}`), LOOSE_FILE]
+        : [`${WS}/archive`],
+    }),
   );
 
   files = await import("@/entities/files");

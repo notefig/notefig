@@ -26,7 +26,7 @@ import { getDocumentSync } from "./markdown-conversion";
 import { getMarkdownEditor } from "@/components/editor/editor-store";
 import { platformAdapter } from "@/adapters";
 import { path as pathutil, relativeTreePath } from "./path";
-import { scratchpadsDirPath } from "@/entities/scratchpads";
+import { appDirPath } from "@/entities/scratchpads";
 import { activeRenameTarget } from "@/entities/tabs";
 import { trackWorkspaceWrite } from "./workspace-write-tracker";
 
@@ -366,7 +366,7 @@ export function useFileWatchers(
           metadataWatchId,
           {
             ignore: IGNORE_RULES,
-            allowHiddenSubtrees: [scratchpadsDirPath(workspacePath)],
+            allowHiddenSubtrees: [appDirPath(workspacePath)],
           },
         );
 

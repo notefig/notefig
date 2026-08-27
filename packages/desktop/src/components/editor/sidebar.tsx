@@ -34,7 +34,7 @@ interface SidebarProps {
     file: FileTreeNode,
     options?: Omit<OpenFileInLayoutOptions, "tabId">,
   ) => void;
-  closeTab: (tabId: string) => void;
+  closeTab: (tabId: string, options?: { runBeforeClose?: boolean }) => void;
   /** Rename/move a file whose tab is open (close-and-reopen primitive). */
   onRenameOpenFile: (oldPath: string, newPath: string) => Promise<void>;
   mode: FileTreeMode;
@@ -192,7 +192,9 @@ export function Sidebar({
       const pathPrefix = path.endsWith("/") ? path : path + "/";
       for (const tabId of openTabs) {
         if (tabId === path || tabId.startsWith(pathPrefix)) {
-          closeTab(tabId);
+          // Part of a deletion: the close lifecycle (scratchpad GC
+          // rename/delete) must not race the delete below.
+          closeTab(tabId, { runBeforeClose: false });
         }
       }
 

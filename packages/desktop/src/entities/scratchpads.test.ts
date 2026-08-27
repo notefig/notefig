@@ -105,6 +105,9 @@ beforeEach(async () => {
     ok(writes),
   );
   adapter.deleteFiles.mockImplementation(async (paths: string[]) => ok(paths));
+  adapter.deleteDirectories.mockImplementation(async (paths: string[]) =>
+    ok(paths),
+  );
   adapter.moveFile.mockResolvedValue({ ok: true, value: undefined });
   adapter.getMetadata.mockResolvedValue(ok([]));
   adapter.readFiles.mockResolvedValue(ok([]));
@@ -394,47 +397,6 @@ describe("maybeGcScratchpadOnClose", () => {
 
     expect(adapter.readFiles).toHaveBeenCalledWith([path]);
     expect(adapter.deleteFiles).toHaveBeenCalledWith([path]);
-  });
-});
-
-describe("metadata queryFn scratchpads sub-walk", () => {
-  it("merges scratchpad entries with directory rows for the chain", async () => {
-    adapter.readDirectory.mockImplementation(
-      async (root: string, options: { includeFiles?: boolean }) =>
-        root === DIR
-          ? {
-              ok: true,
-              value: options.includeFiles ? [`${DIR}/untitled.md`] : [],
-            }
-          : { ok: true, value: [] },
-    );
-
-    const collections = files.getOrCreateWorkspaceCollections(WS);
-    await collections.metadata.utils.refetch();
-
-    expect(
-      collections.metadata.toArray.map((r) => r.relativePath).sort(),
-    ).toEqual([
-      ".metrists",
-      ".metrists/scratchpads",
-      ".metrists/scratchpads/untitled.md",
-    ]);
-  });
-
-  it("contributes nothing when the scratchpads dir is missing", async () => {
-    adapter.readDirectory.mockImplementation(async (root: string) =>
-      root === DIR
-        ? {
-            ok: false,
-            error: { path: root, type: "not_found", message: "missing" },
-          }
-        : { ok: true, value: [] },
-    );
-
-    const collections = files.getOrCreateWorkspaceCollections(WS);
-    await collections.metadata.utils.refetch();
-
-    expect(collections.metadata.toArray).toEqual([]);
   });
 });
 

@@ -197,6 +197,7 @@ pub async fn search_content(
         follow_links: true,
         exclude_hidden: true,
         exclude_patterns: ignore_directories.unwrap_or_default(),
+        allow_hidden_names: vec![],
         base_path: dir_path.clone(),
     };
 

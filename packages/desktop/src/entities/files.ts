@@ -38,7 +38,7 @@ import { invalidateDerivedState } from "@/utils/file-write-effects";
 import { path as pathutil, relativeTreePath } from "@/utils/path";
 // Sibling entity built on this module — function-body references only
 // (the entities cycle rule; suppressed at scratchpads.ts).
-import { readScratchpadEntries } from "./scratchpads";
+import { APP_DIR_NAME } from "./scratchpads";
 import { queryClient } from "./query-client";
 
 // The shared QueryClient moved to the entities/query-client leaf; re-exported
@@ -87,7 +87,13 @@ export function createFileMetadataCollection(workspaceId: string) {
       // dirs) because the listing API returns bare paths and rows need a
       // type; the walk is the cheap half of the old scan.
       queryFn: async (): Promise<FileMetadata[]> => {
-        const walkOptions = { recursive: true, ignore: IGNORE_RULES };
+        // The app dir is walked like any folder; its own hidden children
+        // (.metrists/.git, .metrists/.agent) stay filtered per-entry.
+        const walkOptions = {
+          recursive: true,
+          ignore: IGNORE_RULES,
+          allowHiddenDirectories: [APP_DIR_NAME],
+        };
         const [filesResult, dirsResult] = await Promise.all([
           platformAdapter.fs.readDirectory(workspaceId, {
             ...walkOptions,
@@ -120,13 +126,6 @@ export function createFileMetadataCollection(workspaceId: string) {
           ...filesResult.value.map((p) => ({ path: p, type: "file" as const })),
         ];
 
-        // Scratchpads live under the dot-hidden app dir, which the main
-        // walks skip; their own rooted walk is merged here so the tree, tab
-        // staleness, and the feature share one readiness signal.
-        const seen = new Set(entries.map((e) => e.path));
-        for (const entry of await readScratchpadEntries(workspaceId)) {
-          if (!seen.has(entry.path)) entries.push(entry);
-        }
 
         // Re-stat children of hydrated directories so their stats stay
         // fresh across refetches instead of pinning to hydration time.

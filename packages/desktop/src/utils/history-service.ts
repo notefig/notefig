@@ -128,6 +128,7 @@ export async function ensureWorkspaceHistoryInitialized(
     try {
       await replaceExcludeLine(gitDir, ".metrists/", [
         ".metrists/.git/",
+        ".metrists/.agent/",
         ".metrists/agent/",
         ".metrists/history/",
         ".git/",

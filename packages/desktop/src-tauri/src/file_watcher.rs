@@ -136,22 +136,30 @@ fn is_recent_app_write(path: &Path, content_hash: &str) -> bool {
         .any(|w| w.path == path && w.content_hash == content_hash)
 }
 
-/// Whether any registered watch allows hidden-path events for this path.
-/// Registered per metadata watch but consulted globally, so the per-file
-/// content watcher (which registers no config) is covered too.
-fn is_in_allowed_hidden_subtree(path: &Path) -> bool {
+/// Hidden filtering with subtree allowances: a path under an allowed
+/// subtree is re-checked RELATIVE to it, so the subtree root (".metrists")
+/// passes while its own hidden children (".metrists/.git") stay filtered —
+/// the same semantics as the walker's per-entry filter. Registered per
+/// metadata watch but consulted globally, so the per-file content watcher
+/// (which registers no config) is covered too.
+fn is_hidden_for_watch(path: &Path) -> bool {
+    if !is_hidden_path(path) {
+        return false;
+    }
     let configs = WATCH_IGNORES.lock().unwrap();
-    configs.values().any(|config| {
-        config
-            .allow_hidden_subtrees
-            .iter()
-            .any(|subtree| path.starts_with(subtree))
-    })
+    let allowed = configs.values().any(|config| {
+        config.allow_hidden_subtrees.iter().any(|subtree| {
+            path.strip_prefix(subtree)
+                .map(|relative| !is_hidden_path(relative))
+                .unwrap_or(false)
+        })
+    });
+    !allowed
 }
 
 /// Check if a path should be filtered (hidden files, temp files, etc.)
 fn should_filter_path(path: &Path) -> bool {
-    if is_hidden_path(path) && !is_in_allowed_hidden_subtree(path) {
+    if is_hidden_for_watch(path) {
         return true;
     }
 
@@ -777,11 +785,11 @@ mod event_kind_tests {
     }
 
     /// MET-135: events under an allowed hidden subtree pass the hidden
-    /// filter; sibling hidden paths and atomic-write temp files stay
-    /// filtered.
+    /// filter, but the subtree's own hidden children, other hidden paths,
+    /// and atomic-write temp files stay filtered.
     #[test]
     fn allowed_hidden_subtree_passes_filter_siblings_stay_filtered() {
-        let subtree = PathBuf::from("/ws/.metrists/scratchpads");
+        let subtree = PathBuf::from("/ws/.metrists");
         WATCH_IGNORES.lock().unwrap().insert(
             "test-allow-hidden".into(),
             WatchIgnoreConfig {
@@ -791,15 +799,17 @@ mod event_kind_tests {
             },
         );
 
-        assert!(!should_filter_path(&subtree.join("scratch.md")));
-        assert!(should_filter_path(Path::new(
-            "/ws/.metrists/agent/opencode-1.json"
-        )));
+        assert!(!should_filter_path(&subtree.join("scratchpads/untitled.md")));
+        // Hidden children of the allowed subtree are still hidden.
+        assert!(should_filter_path(&subtree.join(".git/HEAD")));
+        assert!(should_filter_path(&subtree.join(".agent/opencode-1.json")));
         assert!(should_filter_path(Path::new("/ws/.git/HEAD")));
-        assert!(should_filter_path(&subtree.join("scratch.md.tmp")));
+        assert!(should_filter_path(
+            &subtree.join("scratchpads/untitled.md.tmp")
+        ));
 
         WATCH_IGNORES.lock().unwrap().remove("test-allow-hidden");
-        assert!(should_filter_path(&subtree.join("scratch.md")));
+        assert!(should_filter_path(&subtree.join("scratchpads/untitled.md")));
     }
 
     /// MET-158: Windows' MoveFileExW(MOVEFILE_REPLACE_EXISTING) — every

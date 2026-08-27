@@ -209,7 +209,7 @@ describe("tunnel transport symmetry", () => {
     )!;
     const configPath = startTask.extraEnv.OPENCODE_CONFIG;
     expect(configPath).toBe(
-      `${WORKSPACE}/.metrists/agent/opencode-${task.taskId}.json`,
+      `${WORKSPACE}/.metrists/.agent/opencode-${task.taskId}.json`,
     );
     // The config was written by the browser's OWN fs adapter (not over the
     // tunnel); the worker rewrites this browser path to its --dir at spawn.

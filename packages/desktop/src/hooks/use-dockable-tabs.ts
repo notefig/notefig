@@ -57,7 +57,12 @@ export interface UseDockableTabsResult {
 
   openFile: (options: OpenFileInLayoutOptions) => void;
 
-  closeTab: (tabId: string) => void;
+  /**
+   * Close a tab. `runBeforeClose: false` skips the onBeforeClose lifecycle
+   * — for closes that are part of a deletion, where the scratchpad GC
+   * renaming/deleting the file would race the delete itself.
+   */
+  closeTab: (tabId: string, options?: { runBeforeClose?: boolean }) => void;
 
   /**
    * Swap a tab id in place (rename-open-tab flow). Raw layout write: no
@@ -256,10 +261,10 @@ export function useDockableTabs(
   );
 
   const closeTab = useCallback(
-    (tabId: string) => {
+    (tabId: string, options?: { runBeforeClose?: boolean }) => {
       if (!openTabs.includes(tabId)) return;
 
-      onBeforeClose?.(tabId);
+      if (options?.runBeforeClose !== false) onBeforeClose?.(tabId);
       disposeTab(tabId);
 
       setLayout((currentLayout) => removeTabFromLayout(currentLayout, tabId));

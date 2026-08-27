@@ -144,6 +144,7 @@ describe("history-service", () => {
     // scratchpads folder must NOT appear here — history checkpoints it.
     expect(replaceExcludeLineMock).toHaveBeenCalledWith(GIT_DIR, ".metrists/", [
       ".metrists/.git/",
+      ".metrists/.agent/",
       ".metrists/agent/",
       ".metrists/history/",
       ".git/",

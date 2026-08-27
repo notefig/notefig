@@ -59,6 +59,28 @@ function classifyInvokeError(path: string, error: unknown): FileSystemError {
  * the shape every caller that must see the complete tree (git storage
  * host) gets by simply not passing `ignore`.
  */
+function readDirectoryArgs(
+  path: string,
+  options?: {
+    recursive?: boolean;
+    includeFiles?: boolean;
+    includeDirectories?: boolean;
+    includeHidden?: boolean;
+    ignore?: IgnoreRulesOption;
+    allowHiddenDirectories?: string[];
+  },
+): Record<string, unknown> {
+  return {
+    path,
+    recursive: options?.recursive ?? false,
+    includeFiles: options?.includeFiles ?? true,
+    includeDirectories: options?.includeDirectories ?? true,
+    includeHidden: options?.includeHidden ?? false,
+    ...ignoreArgs(options?.ignore),
+    allowHiddenDirectories: options?.allowHiddenDirectories,
+  };
+}
+
 function ignoreArgs(ignore?: IgnoreRulesOption): {
   ignoreDirectories: string[] | null;
   ignoreExtensions: string[] | null;
@@ -168,6 +190,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       includeDirectories?: boolean;
       includeHidden?: boolean;
       ignore?: IgnoreRulesOption;
+      allowHiddenDirectories?: string[];
     },
   ): Promise<Result<string[]>> {
     try {
@@ -175,14 +198,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
         ok: boolean;
         value?: string[];
         error?: FileSystemError;
-      }>("read_directory", {
-        path,
-        recursive: options?.recursive ?? false,
-        includeFiles: options?.includeFiles ?? true,
-        includeDirectories: options?.includeDirectories ?? true,
-        includeHidden: options?.includeHidden ?? false,
-        ...ignoreArgs(options?.ignore),
-      });
+      }>("read_directory", readDirectoryArgs(path, options));
 
       if (result.ok && result.value) {
         return { ok: true, value: result.value };

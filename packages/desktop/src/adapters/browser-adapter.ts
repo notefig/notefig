@@ -14,7 +14,11 @@ import {
   buildSearchPattern,
   searchFileContent,
 } from "./base-browser-adapter";
-import { isHiddenPath, matchesIgnoreRules } from "./browser-fs-utils";
+import {
+  isHiddenPathAllowing,
+  matchesIgnoreRules,
+  resolveReadDirectoryOptions,
+} from "./browser-fs-utils";
 import { processPool } from "@/utils/process-pool";
 
 export class BrowserPlatformAdapter extends BaseBrowserAdapter {
@@ -78,6 +82,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     db: IDBDatabase,
     basePath: string,
     recursive: boolean,
+    allowHiddenDirectories: readonly string[],
   ): Promise<string[]> {
     const transaction = db.transaction([this.STORE_NAME], "readonly");
     const store = transaction.objectStore(this.STORE_NAME);
@@ -105,12 +110,20 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
           currentPath += pathParts[i] + "/";
           const dirPath = currentPath.slice(0, -1);
           // Relative to the walk root, like the file filter above.
-          if (!isHiddenPath(dirPath.slice(normalizedPath.length))) {
+          if (
+            !isHiddenPathAllowing(
+              dirPath.slice(normalizedPath.length),
+              allowHiddenDirectories,
+            )
+          ) {
             directories.add(dirPath);
           }
         }
       } else {
-        if (pathParts.length > 1 && !isHiddenPath(pathParts[0])) {
+        if (
+          pathParts.length > 1 &&
+          !isHiddenPathAllowing(pathParts[0], allowHiddenDirectories)
+        ) {
           directories.add(normalizedPath + pathParts[0]);
         }
       }
@@ -202,6 +215,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
       includeDirectories?: boolean;
       includeHidden?: boolean;
       ignore?: IgnoreRulesOption;
+      allowHiddenDirectories?: string[];
     },
   ): Promise<Result<string[]>> {
     try {
@@ -233,10 +247,13 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
         request.onerror = () => reject(request.error);
       });
 
-      const includeFiles = options?.includeFiles !== false;
-      const includeDirectories = options?.includeDirectories !== false;
-      const recursive = options?.recursive ?? false;
-      const includeHidden = options?.includeHidden ?? false;
+      const {
+        recursive,
+        includeFiles,
+        includeDirectories,
+        includeHidden,
+        allowHiddenDirectories,
+      } = resolveReadDirectoryOptions(options);
 
       const normalizedPath = path.endsWith("/") ? path : path + "/";
 
@@ -248,10 +265,14 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
 
           const relativePath = key.slice(normalizedPath.length);
 
-          // Hidden filtering is relative to the walk root (the root itself
-          // may be a dot path — e.g. the scratchpads dir rooted walk),
-          // matching the native walker.
-          if (!includeHidden && isHiddenPath(relativePath)) return false;
+          // Hidden filtering is relative to the walk root and honors the
+          // allowed dot names, matching the native walker.
+          if (
+            !includeHidden &&
+            isHiddenPathAllowing(relativePath, allowHiddenDirectories)
+          ) {
+            return false;
+          }
 
           if (!recursive && relativePath.includes("/")) return false;
 
@@ -263,7 +284,12 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
       }
 
       if (includeDirectories) {
-        const directoryPaths = await this.getDirectories(db, path, recursive);
+        const directoryPaths = await this.getDirectories(
+          db,
+          path,
+          recursive,
+          allowHiddenDirectories,
+        );
         results.push(
           ...directoryPaths.filter(
             (dirPath) =>

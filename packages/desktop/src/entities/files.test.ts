@@ -66,17 +66,7 @@ beforeEach(async () => {
     ok(paths.includes(FILE) ? [metadata(FILE, 5)] : []),
   );
   adapter.readFiles.mockResolvedValue(ok([{ path: FILE, content: "hello" }]));
-  // The scratchpads sub-walk (MET-135) probes `<ws>/.metrists/scratchpads`;
-  // like the real adapters, a missing directory is a not_found error, not an
-  // empty listing — otherwise every test would grow phantom .metrists rows.
-  adapter.readDirectory.mockImplementation(async (root: string) =>
-    root.endsWith("/.metrists/scratchpads")
-      ? {
-          ok: false,
-          error: { path: root, type: "not_found", message: "missing" },
-        }
-      : { ok: true, value: [] },
-  );
+  adapter.readDirectory.mockResolvedValue({ ok: true, value: [] });
 
   files = await import("./files");
 
@@ -146,21 +136,15 @@ describe("lazy stat hydration", () => {
     // The listing queryFn walks files and directories separately.
     adapter.readDirectory.mockImplementation(
       async (
-        root: string,
+        _root: string,
         options?: { includeFiles?: boolean; includeDirectories?: boolean },
-      ) =>
-        root.endsWith("/.metrists/scratchpads")
-          ? {
-              ok: false,
-              error: { path: root, type: "not_found", message: "missing" },
-            }
-          : {
-              ok: true,
-              value:
-                options?.includeDirectories && !options?.includeFiles
-                  ? [SUB]
-                  : [A, B],
-            },
+      ) => ({
+        ok: true,
+        value:
+          options?.includeDirectories && !options?.includeFiles
+            ? [SUB]
+            : [A, B],
+      }),
     );
     adapter.getMetadata.mockImplementation(async (paths: string[]) =>
       ok(

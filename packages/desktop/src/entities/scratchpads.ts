@@ -13,10 +13,10 @@
  * (create / entry resolution / sweep / close-time GC and auto-rename), and
  * the empty-entry hook.
  */
-// fallow-ignore-file circular-dependency -- files.ts pulls this entity's
-// readScratchpadEntries into its metadata queryFn while this entity is
-// built on files.ts collections; both edges are function-body references
-// (the entities cycle rule, see tabs.ts).
+// fallow-ignore-file circular-dependency -- files.ts imports this entity's
+// APP_DIR_NAME constant while this entity is built on files.ts
+// collections; both edges are function-body/const references (the entities
+// cycle rule, see tabs.ts).
 import { useEffect, useRef } from "react";
 import { platformAdapter } from "@/adapters";
 import { path as pathutil } from "@/utils/path";
@@ -44,8 +44,12 @@ export const SCRATCHPADS_DIR_NAME = "scratchpads";
 export const SCRATCHPADS_REL_PATH = `${APP_DIR_NAME}/${SCRATCHPADS_DIR_NAME}`;
 export const UNTITLED_BASENAME = "untitled";
 
+export function appDirPath(workspacePath: string): string {
+  return pathutil.join(workspacePath, APP_DIR_NAME);
+}
+
 export function scratchpadsDirPath(workspacePath: string): string {
-  return pathutil.join(workspacePath, APP_DIR_NAME, SCRATCHPADS_DIR_NAME);
+  return pathutil.join(appDirPath(workspacePath), SCRATCHPADS_DIR_NAME);
 }
 
 /** Scratchpad = a file DIRECTLY in the folder, whatever its name. */
@@ -164,46 +168,15 @@ export function scratchpadTabTitle(
 // Lifecycle I/O
 // ---------------------------------------------------------------------------
 
-/**
- * Walk entries for the scratchpads folder, with directory rows for the app
- * dir chain so the tree renders it. The folder is dot-hidden, so the main
- * workspace walk skips it — but a walk ROOTED here passes the hidden
- * filter (only entries are filtered). A missing folder contributes nothing.
- */
-export async function readScratchpadEntries(
-  workspaceId: string,
-): Promise<{ path: string; type: "file" | "directory" }[]> {
-  const dir = scratchpadsDirPath(workspaceId);
-  const [filesResult, dirsResult] = await Promise.all([
-    platformAdapter.fs.readDirectory(dir, {
+/** Best-effort removal of the pre-MET-135 `.metrists/agent/` config dir —
+ * it predates the app dir becoming visible in the tree; new configs live
+ * in dot-named `.metrists/.agent/`. */
+export function cleanupLegacyAgentConfigDir(workspacePath: string): void {
+  void platformAdapter.fs
+    .deleteDirectories([pathutil.join(appDirPath(workspacePath), "agent")], {
       recursive: true,
-      includeFiles: true,
-      includeDirectories: false,
-    }),
-    platformAdapter.fs.readDirectory(dir, {
-      recursive: true,
-      includeFiles: false,
-      includeDirectories: true,
-    }),
-  ]);
-  if (!filesResult.ok || !dirsResult.ok) {
-    const error = !filesResult.ok ? filesResult.error : undefined;
-    if (error && error.type !== "not_found" && error.type !== "is_file") {
-      console.warn("[scratchpads] walk failed:", error);
-    }
-    return [];
-  }
-  // An empty (or missing — browser adapters report it the same way) folder
-  // contributes nothing: no phantom .metrists node before the first file.
-  if (filesResult.value.length === 0 && dirsResult.value.length === 0) {
-    return [];
-  }
-  return [
-    { path: pathutil.join(workspaceId, APP_DIR_NAME), type: "directory" },
-    { path: dir, type: "directory" },
-    ...dirsResult.value.map((p) => ({ path: p, type: "directory" as const })),
-    ...filesResult.value.map((p) => ({ path: p, type: "file" as const })),
-  ];
+    })
+    .catch(() => {});
 }
 
 function scratchpadRows(workspacePath: string): FileMetadata[] {
@@ -402,6 +375,8 @@ export function useScratchpadOnEmptyOpen(options: {
     if (decidedForRef.current === workspacePath || inFlightRef.current) return;
     if (!isEntrySettled || !isMetadataReady || !areAgentTasksReady) return;
     if (staleTabIds.length > 0) return;
+
+    cleanupLegacyAgentConfigDir(workspacePath);
 
     if (openTabs.length > 0) {
       decidedForRef.current = workspacePath;

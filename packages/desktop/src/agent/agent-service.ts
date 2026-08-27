@@ -618,12 +618,14 @@ export class AgentTask {
     return { OPENCODE_CONFIG: configPath };
   }
 
-  /** Per-task OpenCode config, under the workspace's own `.metrists/`. */
+  /** Per-task OpenCode config, under the workspace's own `.metrists/`.
+   * Dot-named `.agent` so it stays hidden now that the app dir itself is
+   * walked (MET-135); the legacy `agent/` dir is cleaned up at startup. */
   private opencodeConfigPath(): string {
     return pathutil.join(
       this.workspacePath,
       ".metrists",
-      "agent",
+      ".agent",
       `opencode-${this.taskId}.json`,
     );
   }

@@ -244,6 +244,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
       includeDirectories?: boolean;
       includeHidden?: boolean;
       ignore?: IgnoreRulesOption;
+      allowHiddenDirectories?: string[];
     },
   ): Promise<Result<string[]>>;
   protected abstract createDirectories(
