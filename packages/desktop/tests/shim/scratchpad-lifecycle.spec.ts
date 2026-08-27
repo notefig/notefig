@@ -66,16 +66,19 @@ test.describe("shim: scratchpad close → reopen project", () => {
     await openProject(page);
     const editor = visibleEditor(page);
     await editor.waitFor({ state: "visible", timeout: 15000 });
-    await editor.click();
-    await editor.pressSequentially("# Warm Session", { delay: 10 });
-    await page.keyboard.press("Enter");
-    await editor.pressSequentially("warm body", { delay: 10 });
-    await expect(
-      page.getByRole("heading", { name: "Warm Session" }),
-    ).toBeVisible();
-    await waitForAutoSave(page);
+    await expect.poll(listScratchpads, { timeout: 10000 }).toContain(
+      "untitled.md",
+    );
 
     await closeScratchpadTab(page);
+    // Author into the closed scratchpad from outside — deterministic, and
+    // exactly the warm-session shape the reported bug needs (typing races
+    // the prompt composer's autofocus, MET-100).
+    await fs.writeFile(
+      path.join(workspace, ".metrists", "scratchpads", "untitled.md"),
+      "# Warm Session\n\nwarm body\n",
+      "utf8",
+    );
 
     // Empty the layout mid-session: delete README through the tree.
     await page
@@ -104,6 +107,37 @@ test.describe("shim: scratchpad close → reopen project", () => {
     await expect
       .poll(async () => (await listScratchpads()).join(","), { timeout: 10000 })
       .toMatch(/^warm-session-[a-z0-9]{4}\.md$/);
+  });
+
+  test("re-entry with a saved layout never summons a scratchpad over it", async ({
+    page,
+  }) => {
+    test.setTimeout(90000);
+
+    // First entry auto-opens a scratchpad; replace it with README so the
+    // saved layout holds a real file.
+    await openProject(page);
+    await visibleEditor(page).waitFor({ state: "visible", timeout: 15000 });
+    await page.getByRole("treeitem", { name: "README.md" }).first().click();
+    await expect(visibleEditor(page)).toContainText("Seeded", {
+      timeout: 10000,
+    });
+    // The saved-URL record is written fire-and-forget; give it a beat to
+    // land before the full navigation discards in-flight KV writes.
+    await page.waitForTimeout(750);
+
+    // Re-enter at the bare root: the saved layout must restore intact —
+    // the auto-open must not race the restore and clobber it.
+    await page.goto("/welcome");
+    await openProject(page);
+
+    await expect(visibleEditor(page)).toContainText("Seeded", {
+      timeout: 15000,
+    });
+    await expectNoLoadError(page);
+    await expect(
+      page.getByRole("button", { name: /untitled.*Close tab/ }),
+    ).toHaveCount(0);
   });
 
   test("empty entry auto-opens an existing scratchpad", async ({ page }) => {

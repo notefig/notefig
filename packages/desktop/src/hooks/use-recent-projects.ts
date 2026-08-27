@@ -91,11 +91,15 @@ export function useNavigationPersistence(): { isEntrySettled: boolean } {
     if (entering && atBareRoot) {
       void projectOpenUrl(workspacePath).then((savedUrl) => {
         if (savedUrl !== fullPath) {
+          // Not settled yet: consumers must not judge the layout until the
+          // effect re-runs AT the saved URL — settling here lets a render
+          // observe "settled + empty tabs" before the restore lands, and
+          // the scratchpad auto-open would clobber the restored layout.
           navigate(savedUrl, { replace: true });
         } else {
           void rememberProjectNavigation(workspacePath, fullPath);
+          setIsEntrySettled(true);
         }
-        setIsEntrySettled(true);
       });
       return;
     }

@@ -172,7 +172,7 @@ test.describe("Content Loading", () => {
       .toBe(true);
   });
 
-  test("A failed content read shows an error state and never mounts an editor", async ({
+  test("A failed content read never mounts an editor", async ({
     page,
   }) => {
     await setupTestDatabase(page, "content-loading-read-failure");
@@ -187,8 +187,11 @@ test.describe("Content Loading", () => {
 
     await openFileInTree(page, "doomed-file.md", { waitForEditor: false });
 
-    // The error placeholder appears instead of an editor.
-    await expect(page.getByText("Failed to load file:")).toBeVisible({
+    // A missing file contributes NO content row (fabricating one poisoned
+    // recreated paths — MET-135), so the tab sits on the loading
+    // placeholder until metadata catches up and prunes it. The guard that
+    // matters: no editor may mount over the failed read.
+    await expect(page.getByText("doomed-file.md")).toBeVisible({
       timeout: 10000,
     });
 
