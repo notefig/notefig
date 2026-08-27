@@ -27,7 +27,6 @@ import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
 import { agentTabId, tabKind } from "@/entities/tabs";
 import { useTabElements } from "@/tabs/tab-types";
 import { useReleaseNotesOnUpdate } from "@/hooks/use-release-notes-on-update";
-import { useScratchpadOnEmptyOpen } from "@/entities/scratchpads";
 import {
   type FileTreeMode,
   FILE_TREE_IDLE,
@@ -41,7 +40,7 @@ export const Workspace = () => {
   }
 
   useThrowWorkspaceAccessError(workspacePath);
-  const { isEntrySettled } = useNavigationPersistence();
+  useNavigationPersistence();
   const { t } = useTranslation();
   const dockableRef = useRef<HTMLDivElement>(null);
   const searchPanelRef = useRef<SearchPanelHandle>(null);
@@ -131,16 +130,6 @@ export const Workspace = () => {
     },
     [openFile],
   );
-
-  // An empty workspace entry lands in a scratchpad (MET-135); non-empty
-  // entries still get the whitespace-leftover sweep.
-  useScratchpadOnEmptyOpen({
-    workspacePath,
-    openTabs,
-    staleTabIds,
-    isEntrySettled,
-    openFile: openFileInTabs,
-  });
 
   // Open (or focus — openFileInLayout dedupes by id) a session's chat tab.
   // `new-tab` intent: a session must never replace the file tab in view.

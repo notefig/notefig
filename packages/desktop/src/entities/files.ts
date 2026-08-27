@@ -973,18 +973,6 @@ export function useMetadataFetching(workspacePath: string): boolean {
   );
 }
 
-/**
- * True once the workspace's eager metadata load has completed at least once
- * and is not currently in flight. `useMetadataFetching` alone is false
- * BEFORE the first load starts, so it cannot distinguish "loaded" from
- * "not started"; dataUpdatedAt does. The useIsFetching subscription drives
- * the re-render when the first load completes.
- */
-export function useMetadataReady(workspacePath: string): boolean {
-  const isFetching = useMetadataFetching(workspacePath);
-  const state = queryClient.getQueryState(["file-metadata", workspacePath]);
-  return !isFetching && (state?.dataUpdatedAt ?? 0) > 0;
-}
 
 /** Whether any on-demand content load for the workspace is in flight. */
 export function useContentFetching(workspacePath: string): boolean {

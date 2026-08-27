@@ -225,10 +225,31 @@ describe("createUntitledScratchpad", () => {
   });
 });
 
-describe("resolveScratchpadToOpen", () => {
+describe("resolveScratchpadOnDisk", () => {
+  function listDir(files: string[]) {
+    adapter.readDirectory.mockResolvedValue({ ok: true, value: files });
+  }
+
+  it("creates untitled.md when the folder is missing or empty", async () => {
+    adapter.readDirectory.mockResolvedValue({
+      ok: false,
+      error: { path: DIR, type: "not_found", message: "missing" },
+    });
+    await expect(scratchpads.resolveScratchpadOnDisk(WS)).resolves.toBe(
+      `${DIR}/untitled.md`,
+    );
+    expect(adapter.createFiles).toHaveBeenCalledWith([`${DIR}/untitled.md`]);
+
+    adapter.createFiles.mockClear();
+    listDir([]);
+    await expect(scratchpads.resolveScratchpadOnDisk(WS)).resolves.toBe(
+      `${DIR}/untitled.md`,
+    );
+    expect(adapter.createFiles).toHaveBeenCalledWith([`${DIR}/untitled.md`]);
+  });
+
   it("reuses the most recently modified existing scratchpad — no writes", async () => {
-    seedFileRow(`${DIR}/untitled.md`);
-    seedFileRow(`${DIR}/my-notes-a1b2.md`);
+    listDir([`${DIR}/untitled.md`, `${DIR}/my-notes-a1b2.md`]);
     adapter.getMetadata.mockResolvedValue(
       ok([
         stat(`${DIR}/untitled.md`, 100),
@@ -236,27 +257,35 @@ describe("resolveScratchpadToOpen", () => {
       ]),
     );
 
-    await expect(scratchpads.resolveScratchpadToOpen(WS)).resolves.toBe(
+    await expect(scratchpads.resolveScratchpadOnDisk(WS)).resolves.toBe(
       `${DIR}/my-notes-a1b2.md`,
     );
     expect(adapter.createFiles).not.toHaveBeenCalled();
+    expect(adapter.writeFiles).not.toHaveBeenCalled();
   });
 
-  it("creates a fresh untitled file when none exist", async () => {
-    await expect(scratchpads.resolveScratchpadToOpen(WS)).resolves.toBe(
-      `${DIR}/untitled.md`,
-    );
+  it("bails to null when the folder path is unusable", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    adapter.readDirectory.mockResolvedValue({
+      ok: false,
+      error: { path: DIR, type: "is_file", message: "a file" },
+    });
+    await expect(scratchpads.resolveScratchpadOnDisk(WS)).resolves.toBeNull();
+    warn.mockRestore();
   });
 });
 
-describe("sweepEmptyScratchpads", () => {
-  it("deletes whitespace-only leftovers, renames untitled ones with content, spares open tabs", async () => {
+describe("sweepScratchpadsOnDisk", () => {
+  it("deletes whitespace-only leftovers, renames untitled ones with content, spares kept paths", async () => {
     const [tail] = stubRandomTails(0.111);
-    const open = `${DIR}/untitled-2.md`;
+    const kept = `${DIR}/untitled-2.md`;
     const empty = `${DIR}/untitled-3.md`;
     const survivor = `${DIR}/untitled-4.md`;
     const named = `${DIR}/already-named.md`;
-    [open, empty, survivor, named].forEach(seedFileRow);
+    adapter.readDirectory.mockResolvedValue({
+      ok: true,
+      value: [kept, empty, survivor, named],
+    });
     adapter.readFiles.mockResolvedValue(
       ok([
         { path: empty, content: "  \n" },
@@ -265,7 +294,7 @@ describe("sweepEmptyScratchpads", () => {
       ]),
     );
 
-    await scratchpads.sweepEmptyScratchpads(WS, [open]);
+    await scratchpads.sweepScratchpadsOnDisk(WS, [kept]);
 
     expect(new Set(adapter.readFiles.mock.calls[0][0] as string[])).toEqual(
       new Set([empty, survivor, named]),
@@ -279,38 +308,41 @@ describe("sweepEmptyScratchpads", () => {
     expect(adapter.moveFile).toHaveBeenCalledTimes(1);
   });
 
-  it("re-rolls the random tail on the (rare) collision", async () => {
+  it("re-rolls the random tail on a name collision and tolerates failures", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const [first, second] = stubRandomTails(0.333, 0.444);
     const path = `${DIR}/untitled.md`;
-    seedFileRow(path);
-    seedFileRow(`${DIR}/roadmap-${first}.md`);
-    adapter.readFiles.mockResolvedValue(ok([{ path, content: "# Roadmap" }]));
+    adapter.readDirectory.mockResolvedValue({
+      ok: true,
+      value: [path, `${DIR}/roadmap-${first}.md`],
+    });
+    adapter.readFiles.mockResolvedValue(
+      ok([
+        { path, content: "# Roadmap" },
+        { path: `${DIR}/roadmap-${first}.md`, content: "# Roadmap" },
+      ]),
+    );
+    adapter.moveFile.mockResolvedValueOnce({
+      ok: false,
+      error: { path, type: "io_error", message: "disk full" },
+    });
 
-    await scratchpads.sweepEmptyScratchpads(WS, []);
+    await scratchpads.sweepScratchpadsOnDisk(WS, []);
 
     expect(adapter.moveFile).toHaveBeenCalledWith(
       path,
       `${DIR}/roadmap-${second}.md`,
     );
-  });
-
-  it("tolerates rename failure without throwing", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const path = `${DIR}/untitled.md`;
-    seedFileRow(path);
-    adapter.readFiles.mockResolvedValue(ok([{ path, content: "# Doomed" }]));
-    adapter.moveFile.mockResolvedValue({
-      ok: false,
-      error: { path, type: "io_error", message: "disk full" },
-    });
-
-    await scratchpads.sweepEmptyScratchpads(WS, []);
-
     expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 
-  it("does nothing when there are no candidates", async () => {
-    await scratchpads.sweepEmptyScratchpads(WS, []);
+  it("does nothing when the folder is missing", async () => {
+    adapter.readDirectory.mockResolvedValue({
+      ok: false,
+      error: { path: DIR, type: "not_found", message: "missing" },
+    });
+    await scratchpads.sweepScratchpadsOnDisk(WS, []);
     expect(adapter.readFiles).not.toHaveBeenCalled();
   });
 });
@@ -349,78 +381,5 @@ describe("content loads for missing files", () => {
     await act(async () => root.unmount());
     container.remove();
     warn.mockRestore();
-  });
-});
-
-describe("useScratchpadOnEmptyOpen", () => {
-  const openFileMock = vi.fn(() => true);
-  let container: HTMLDivElement;
-  let root: Root;
-
-  function Probe(props: { openTabs?: string[]; staleTabIds?: string[] }) {
-    scratchpads.useScratchpadOnEmptyOpen({
-      workspacePath: WS,
-      openTabs: props.openTabs ?? [],
-      staleTabIds: props.staleTabIds ?? [],
-      isEntrySettled: true,
-      openFile: openFileMock,
-    });
-    return null;
-  }
-
-  async function render(props: { openTabs?: string[]; staleTabIds?: string[] }) {
-    await act(async () => {
-      root.render(createElement(Probe, props));
-    });
-  }
-
-  beforeEach(async () => {
-    openFileMock.mockClear();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
-    // useMetadataReady needs a completed first load.
-    await files.getOrCreateWorkspaceCollections(WS).metadata.utils.refetch();
-  });
-
-  afterEach(async () => {
-    await act(async () => root.unmount());
-    container.remove();
-  });
-
-  it("opens a scratchpad once on an empty entry and never re-fires", async () => {
-    await render({});
-
-    expect(adapter.createFiles).toHaveBeenCalledWith([`${DIR}/untitled.md`]);
-    expect(openFileMock).toHaveBeenCalledWith({
-      tabId: `${DIR}/untitled.md`,
-      intent: "new-tab",
-    });
-
-    // Closing the last tab mid-session must not summon another.
-    await render({ openTabs: [`${DIR}/untitled.md`] });
-    await render({ openTabs: [] });
-    expect(adapter.createFiles).toHaveBeenCalledTimes(1);
-  });
-
-  it("waits for stale tabs to prune, then treats the layout as empty", async () => {
-    await render({ openTabs: [`${WS}/gone.md`], staleTabIds: [`${WS}/gone.md`] });
-    expect(openFileMock).not.toHaveBeenCalled();
-
-    await render({});
-    expect(openFileMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("only sweeps when tabs are open", async () => {
-    seedFileRow(`${DIR}/untitled.md`);
-    adapter.readFiles.mockResolvedValue(
-      ok([{ path: `${DIR}/untitled.md`, content: " " }]),
-    );
-
-    await render({ openTabs: [`${WS}/notes.md`] });
-    await settle();
-
-    expect(openFileMock).not.toHaveBeenCalled();
-    expect(adapter.deleteFiles).toHaveBeenCalledWith([`${DIR}/untitled.md`]);
   });
 });

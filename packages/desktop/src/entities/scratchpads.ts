@@ -9,24 +9,22 @@
  * tracked project file. MET-115 renames `.metrists`; consumers derive every
  * path from the constants here.
  *
- * This file is the whole feature: path scheme + naming, lifecycle I/O
- * (create / entry resolution / sweep + auto-rename), and the empty-entry
- * hook — the ONE place scratchpad lifecycle runs. Nothing happens on tab
- * close; leftovers are cleaned and renamed at the next workspace entry.
+ * This file is the whole feature: path scheme + naming, the user-facing
+ * "New File" action, and the disk-based entry lifecycle (sweep +
+ * resolve) that useNavigationPersistence folds into the workspace entry
+ * URL. Lifecycle runs on plain adapter fs — never on collections — so it
+ * cannot race collection or query readiness; rows catch up via the
+ * normal metadata walk. Nothing happens on tab close; leftovers are
+ * cleaned and renamed at the next workspace entry.
  */
-import { useEffect, useRef } from "react";
 import { platformAdapter } from "@/adapters";
 import { path as pathutil } from "@/utils/path";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import {
   createFile,
-  deleteFileOrDirectory,
   getOrCreateWorkspaceCollections,
-  renameFileOrDirectory,
-  useMetadataReady,
   type FileMetadata,
 } from "./files";
-import { useAgentTasksReady } from "./agents";
 
 // ---------------------------------------------------------------------------
 // Path scheme & naming (pure)
@@ -222,169 +220,104 @@ export function createAndOpenScratchpad(
     .catch((error) => console.error("Failed to create a new file:", error));
 }
 
-/** What an empty workspace entry should open: the most recently modified
- * scratchpad, else a fresh untitled one. Null bails to the empty state. */
-export async function resolveScratchpadToOpen(
+/**
+ * Entry-time resolution, on plain disk truth: the most recently modified
+ * scratchpad, else a freshly created untitled one. Null bails to the
+ * empty state (e.g. a file squatting on the folder path).
+ */
+export async function resolveScratchpadOnDisk(
   workspacePath: string,
 ): Promise<string | null> {
-  if (scratchpadDirIsBlocked(workspacePath)) {
-    console.warn(
-      "[scratchpads] a file occupies the scratchpads directory path; skipping",
-    );
+  const dir = scratchpadsDirPath(workspacePath);
+  const listing = await platformAdapter.fs.readDirectory(dir, {
+    recursive: false,
+    includeFiles: true,
+    includeDirectories: false,
+  });
+  if (!listing.ok && listing.error.type !== "not_found") {
+    console.warn("[scratchpads] cannot use the folder:", listing.error);
     return null;
   }
+  const files = listing.ok ? listing.value : [];
+  scratchpadDebug("resolve(disk): candidates", files);
 
-  const candidates = scratchpadRows(workspacePath);
-  scratchpadDebug(
-    "resolve: candidates",
-    candidates.map((row) => row.path),
-  );
-  if (candidates.length === 0) {
-    return createUntitledScratchpad(workspacePath);
+  if (files.length === 0) {
+    const fresh = pathutil.join(dir, nextUntitledBasename([]));
+    const created = await platformAdapter.fs.createFiles([fresh]);
+    if (created.failed.length > 0) {
+      console.warn("[scratchpads] create failed:", created.failed[0]);
+      return null;
+    }
+    return fresh;
   }
-  const stats = await platformAdapter.fs.getMetadata(
-    candidates.map((row) => row.path),
-  );
+
+  const stats = await platformAdapter.fs.getMetadata(files);
   const modifiedByPath = new Map(
     stats.succeeded.map((m) => [m.path, m.modifiedAt]),
   );
   return pickMostRecentScratchpad(
-    candidates.map((row) => ({
-      path: row.path,
-      modifiedAt: modifiedByPath.get(row.path) ?? row.modified,
-    })),
+    files.map((path) => ({ path, modifiedAt: modifiedByPath.get(path) })),
   );
 }
 
-/** Entry-time sweep over scratchpads not open in a tab: whitespace-only
- * leftovers are deleted, untitled ones with content pick up their derived
- * name. Best-effort; failures warn, never throw. */
-export async function sweepEmptyScratchpads(
+/**
+ * Entry-time sweep, on plain disk truth, over scratchpads not in
+ * `keepPaths` (the tabs the entry is about to restore): whitespace-only
+ * leftovers are deleted, untitled ones with content are renamed to their
+ * heading (`<slug>-<random>.md`). Best-effort; failures warn, never
+ * throw. Rows catch up via the watcher and the metadata walk.
+ */
+export async function sweepScratchpadsOnDisk(
   workspacePath: string,
-  openTabIds: string[],
+  keepPaths: readonly string[],
 ): Promise<void> {
-  const open = new Set(openTabIds);
-  const candidates = scratchpadRows(workspacePath)
-    .map((row) => row.path)
-    .filter((path) => !open.has(path));
-  scratchpadDebug("sweep: candidates", candidates, "open", openTabIds);
+  const dir = scratchpadsDirPath(workspacePath);
+  const listing = await platformAdapter.fs.readDirectory(dir, {
+    recursive: false,
+    includeFiles: true,
+    includeDirectories: false,
+  });
+  if (!listing.ok) return;
+  const keep = new Set(keepPaths);
+  const taken = new Set(listing.value.map((p) => pathutil.basename(p)));
+  const candidates = listing.value.filter((path) => !keep.has(path));
+  scratchpadDebug("sweep(disk): candidates", candidates, "keep", keepPaths);
   if (candidates.length === 0) return;
 
   const reads = await platformAdapter.fs.readFiles(candidates);
-  scratchpadDebug(
-    "sweep: reads ok",
-    reads.succeeded.map((r) => `${r.path} (${r.content.length}b)`),
-    "failed",
-    reads.failed,
-  );
   for (const { path, content } of reads.succeeded) {
-    try {
-      if (content.trim() === "") {
-        scratchpadDebug("sweep: deleting empty", path);
-        await deleteFileOrDirectory(workspacePath, path);
-      } else {
-        await maybeAutoRenameScratchpad(workspacePath, path, content);
-      }
-    } catch (error) {
-      console.warn(`[scratchpads] failed to sweep '${path}':`, error);
+    if (content.trim() === "") {
+      scratchpadDebug("sweep(disk): deleting empty", path);
+      await platformAdapter.fs.deleteFiles([path]);
+      taken.delete(pathutil.basename(path));
+    } else if (isUntitledBasename(pathutil.basename(path))) {
+      await renameScratchpadToHeading(dir, path, content, taken);
     }
   }
 }
 
-/** Rename an untitled scratchpad to `<slug>-<random>.md`. No-op for named
- * files or headingless content. Runs only from the entry sweep, where the
- * file has no open tab. */
-async function maybeAutoRenameScratchpad(
-  workspacePath: string,
+/** Rename one untitled scratchpad to its heading slug, de-duped against
+ * `taken` (updated in place). No-op when no heading survives slugging. */
+async function renameScratchpadToHeading(
+  dir: string,
   path: string,
   content: string,
+  taken: Set<string>,
 ): Promise<void> {
-  if (!isUntitledBasename(pathutil.basename(path))) return;
   const title = deriveScratchpadTitle(content);
   const slug = title ? slugifyScratchpadTitle(title) : null;
   if (!slug) return;
-
-  const metadata = getOrCreateWorkspaceCollections(workspacePath).metadata;
-  const dir = scratchpadsDirPath(workspacePath);
-  let target = pathutil.join(dir, `${slug}-${randomScratchpadSuffix()}.md`);
-  for (let i = 0; i < 3 && metadata.get(target) !== undefined; i++) {
-    target = pathutil.join(dir, `${slug}-${randomScratchpadSuffix()}.md`);
+  let name = `${slug}-${randomScratchpadSuffix()}.md`;
+  for (let i = 0; i < 3 && taken.has(name); i++) {
+    name = `${slug}-${randomScratchpadSuffix()}.md`;
   }
-  scratchpadDebug("sweep: renaming", path, "->", target);
-  await renameFileOrDirectory(workspacePath, path, target);
-}
-
-// ---------------------------------------------------------------------------
-// Empty-entry hook
-// ---------------------------------------------------------------------------
-
-/**
- * The scratchpad lifecycle hook: lands an empty workspace entry in a
- * scratchpad instead of the "No file selected" screen, after sweeping
- * leftovers (whitespace-only files deleted, untitled ones renamed to their
- * heading). Decides exactly once per entry, after the saved-URL restore
- * settled, metadata + agent tasks loaded, and stale tabs pruned — so an
- * only-stale layout counts as empty, while closing the last tab
- * mid-session never re-summons anything. Non-empty entries just sweep.
- */
-export function useScratchpadOnEmptyOpen(options: {
-  workspacePath: string;
-  openTabs: string[];
-  staleTabIds: string[];
-  isEntrySettled: boolean;
-  openFile: (options: OpenFileInLayoutOptions) => boolean;
-}): void {
-  const { workspacePath, openTabs, staleTabIds, isEntrySettled, openFile } =
-    options;
-  const isMetadataReady = useMetadataReady(workspacePath);
-  const areAgentTasksReady = useAgentTasksReady();
-  const decidedForRef = useRef<string | null>(null);
-  const inFlightRef = useRef(false);
-
-  useEffect(() => {
-    if (decidedForRef.current === workspacePath || inFlightRef.current) return;
-    if (!isEntrySettled || !isMetadataReady || !areAgentTasksReady) return;
-    if (staleTabIds.length > 0) return;
-
-    cleanupLegacyAgentConfigDir(workspacePath);
-
-    if (openTabs.length > 0) {
-      decidedForRef.current = workspacePath;
-      void sweepEmptyScratchpads(workspacePath, openTabs).catch((error) =>
-        console.warn("[scratchpads] entry sweep failed:", error),
-      );
-      return;
-    }
-
-    scratchpadDebug("hook: empty entry decision", {
-      workspacePath,
-      openTabs,
-      staleTabIds,
-    });
-    inFlightRef.current = true;
-    void (async () => {
-      // Sweep first: nothing is open, so leftovers delete/rename before we
-      // choose what to land in — the opened file carries its final name.
-      await sweepEmptyScratchpads(workspacePath, []);
-      const path = await resolveScratchpadToOpen(workspacePath);
-      decidedForRef.current = workspacePath;
-      scratchpadDebug("hook: opening", path);
-      if (path) openFile({ tabId: path, intent: "new-tab" });
-    })()
-      .catch((error) => {
-        decidedForRef.current = workspacePath;
-        console.warn("[scratchpads] failed to open a scratchpad:", error);
-      })
-      .finally(() => {
-        inFlightRef.current = false;
-      });
-  }, [
-    workspacePath,
-    openTabs,
-    staleTabIds,
-    isEntrySettled,
-    isMetadataReady,
-    areAgentTasksReady,
-    openFile,
-  ]);
+  const target = pathutil.join(dir, name);
+  scratchpadDebug("sweep(disk): renaming", path, "->", target);
+  const moved = await platformAdapter.fs.moveFile(path, target);
+  if (moved.ok) {
+    taken.delete(pathutil.basename(path));
+    taken.add(name);
+  } else {
+    console.warn("[scratchpads] rename failed:", moved.error);
+  }
 }

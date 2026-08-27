@@ -1,8 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { readKv, useKv, writeKv } from "@/utils/kv-store";
 import { formatTimeAgo } from "@/utils/format";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
+import { platformAdapter } from "@/adapters";
+import {
+  LAYOUT_PARAM,
+  extractTabIds,
+  parseLayout,
+} from "@/utils/layout-codec";
+import { isFileTabId } from "@/tabs/tab-id";
+import type { LayoutNode } from "@/components/dockable";
+import {
+  createInitialLayout,
+  removeTabFromLayout,
+} from "@/utils/dockable-layout";
+import {
+  cleanupLegacyAgentConfigDir,
+  resolveScratchpadOnDisk,
+  sweepScratchpadsOnDisk,
+} from "@/entities/scratchpads";
 
 const RECENT_PROJECTS_NAMESPACE = "recentProjects";
 const MAX_RECENT_PROJECTS = 20;
@@ -39,13 +56,9 @@ async function rememberProjectNavigation(path: string, url: string) {
   });
 }
 
-/**
- * URL to land on when entering a project: the last visited URL if one is on
- * record (and still points inside this project), else the bare workspace
- * root. Open paths navigate to the bare root; useNavigationPersistence calls
- * this on entry and replace-navigates to the saved URL.
- */
-async function projectOpenUrl(path: string): Promise<string> {
+/** The last visited URL when it still points inside this project, else
+ * the project's bare root. */
+async function savedEntryBase(path: string): Promise<string> {
   const bare = `/${encodeURIComponent(path)}`;
   const saved = (await readKv<RecentProject>(RECENT_PROJECTS_NAMESPACE, path))
     ?.lastUrl;
@@ -54,6 +67,53 @@ async function projectOpenUrl(path: string): Promise<string> {
     saved?.startsWith(`${bare}?`) ||
     saved?.startsWith(`${bare}/`);
   return savedIsInsideProject && saved ? saved : bare;
+}
+
+/** Drop file tabs whose files no longer exist on disk. */
+async function pruneDeadFileTabs(layout: LayoutNode[]): Promise<LayoutNode[]> {
+  const fileTabs = extractTabIds(layout).filter(isFileTabId);
+  if (fileTabs.length === 0) return layout;
+  const checks = await platformAdapter.fs.exists(fileTabs);
+  return checks
+    .filter((check) => !check.exists)
+    .reduce((pruned, check) => removeTabFromLayout(pruned, check.path), layout);
+}
+
+/**
+ * The URL a project entry lands on, computed ONCE from disk truth before
+ * navigating — the single writer of the entry layout, so nothing can race
+ * or clobber it (MET-135). Start from the last visited URL (if it still
+ * points inside this project), drop file tabs whose files no longer
+ * exist, and if no tabs survive, land in a scratchpad: the folder is
+ * swept (empty leftovers deleted, titled ones renamed) and the most
+ * recent scratchpad — or a fresh untitled one — is baked into the
+ * layout. All on plain adapter fs; collections are not consulted.
+ */
+async function computeProjectEntryUrl(path: string): Promise<string> {
+  const base = await savedEntryBase(path);
+  const [pathname, search = ""] = base.split("?");
+  const params = new URLSearchParams(search);
+  let layout = await pruneDeadFileTabs(parseLayout(params.get(LAYOUT_PARAM)));
+
+  cleanupLegacyAgentConfigDir(path);
+
+  const restoredTabs = extractTabIds(layout);
+  if (restoredTabs.length > 0) {
+    // Non-empty entry: sweep leftovers in the background, restore as-is.
+    void sweepScratchpadsOnDisk(path, restoredTabs);
+  } else {
+    await sweepScratchpadsOnDisk(path, []);
+    const scratchpad = await resolveScratchpadOnDisk(path);
+    if (scratchpad) layout = createInitialLayout(scratchpad);
+  }
+
+  if (layout.length === 0) {
+    params.delete(LAYOUT_PARAM);
+  } else {
+    params.set(LAYOUT_PARAM, JSON.stringify(layout));
+  }
+  const query = params.toString();
+  return query ? `${pathname}?${query}` : pathname;
 }
 
 /**
@@ -69,46 +129,33 @@ async function projectOpenUrl(path: string): Promise<string> {
  * saved URL. Once inside the project a bare URL is the user's own doing
  * (e.g. closing the last tab) and is recorded like any other.
  */
-export function useNavigationPersistence(): { isEntrySettled: boolean } {
+export function useNavigationPersistence(): void {
   const { workspacePath } = useWorkspaceParams();
   const location = useLocation();
   const navigate = useNavigate();
   const enteredProjectRef = useRef<string | null>(null);
-  // False until the entry decision resolved: entering at the bare root, the
-  // saved URL is looked up asynchronously and the layout is empty for that
-  // beat — consumers (scratchpad auto-open) must not judge it yet.
-  const [isEntrySettled, setIsEntrySettled] = useState(false);
 
   useEffect(() => {
     if (!workspacePath) return;
     const fullPath = location.pathname + location.search;
     const entering = enteredProjectRef.current !== workspacePath;
     enteredProjectRef.current = workspacePath;
-    if (entering) setIsEntrySettled(false);
 
     const atBareRoot =
       !location.search && !location.pathname.slice(1).includes("/");
     if (entering && atBareRoot) {
-      void projectOpenUrl(workspacePath).then((savedUrl) => {
-        if (savedUrl !== fullPath) {
-          // Not settled yet: consumers must not judge the layout until the
-          // effect re-runs AT the saved URL — settling here lets a render
-          // observe "settled + empty tabs" before the restore lands, and
-          // the scratchpad auto-open would clobber the restored layout.
-          navigate(savedUrl, { replace: true });
+      void computeProjectEntryUrl(workspacePath).then((entryUrl) => {
+        if (entryUrl !== fullPath) {
+          navigate(entryUrl, { replace: true });
         } else {
           void rememberProjectNavigation(workspacePath, fullPath);
-          setIsEntrySettled(true);
         }
       });
       return;
     }
 
-    setIsEntrySettled(true);
     void rememberProjectNavigation(workspacePath, fullPath);
   }, [workspacePath, location.pathname, location.search, navigate]);
-
-  return { isEntrySettled };
 }
 
 export interface RecentProjectDisplay extends RecentProject {
