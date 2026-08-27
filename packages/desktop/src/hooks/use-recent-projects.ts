@@ -134,6 +134,8 @@ export function useNavigationPersistence(): void {
   const location = useLocation();
   const navigate = useNavigate();
   const enteredProjectRef = useRef<string | null>(null);
+  const currentUrlRef = useRef("");
+  currentUrlRef.current = location.pathname + location.search;
 
   useEffect(() => {
     if (!workspacePath) return;
@@ -145,6 +147,9 @@ export function useNavigationPersistence(): void {
       !location.search && !location.pathname.slice(1).includes("/");
     if (entering && atBareRoot) {
       void computeProjectEntryUrl(workspacePath).then((entryUrl) => {
+        // The user navigated (e.g. opened a file) while the entry URL was
+        // being computed — their navigation wins, never clobber it.
+        if (currentUrlRef.current !== fullPath) return;
         if (entryUrl !== fullPath) {
           navigate(entryUrl, { replace: true });
         } else {
