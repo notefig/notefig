@@ -27,10 +27,7 @@ import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
 import { agentTabId, tabKind } from "@/entities/tabs";
 import { useTabElements } from "@/tabs/tab-types";
 import { useReleaseNotesOnUpdate } from "@/hooks/use-release-notes-on-update";
-import {
-  maybeGcScratchpadOnClose,
-  useScratchpadOnEmptyOpen,
-} from "@/entities/scratchpads";
+import { useScratchpadOnEmptyOpen } from "@/entities/scratchpads";
 import {
   type FileTreeMode,
   FILE_TREE_IDLE,
@@ -49,13 +46,6 @@ export const Workspace = () => {
   const dockableRef = useRef<HTMLDivElement>(null);
   const searchPanelRef = useRef<SearchPanelHandle>(null);
 
-  // Whitespace-only scratchpads are deleted when their tab closes; runs
-  // before dispose so the document sync and content row are still alive.
-  const gcScratchpadOnClose = useCallback(
-    (tabId: string) => maybeGcScratchpadOnClose(workspacePath, tabId),
-    [workspacePath],
-  );
-
   const {
     layout,
     openTabs,
@@ -72,7 +62,6 @@ export const Workspace = () => {
   } = useDockableTabs({
     canOpenFile: (file) => file.type === "file" && canOpenInEditor(file.path),
     dockableRef,
-    onBeforeClose: gcScratchpadOnClose,
   });
 
   useEffect(() => {

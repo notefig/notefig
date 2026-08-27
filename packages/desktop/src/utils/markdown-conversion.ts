@@ -303,11 +303,6 @@ export function flushDocumentSync(path: string): void {
   documentSyncs.get(path)?.flushPendingEdits?.();
 }
 
-/** Whether the path's sync has unsaved or in-flight edits. Never creates a
- * sync — a path that was never opened is simply not dirty. */
-export function isDocumentSyncDirty(path: string): boolean {
-  return documentSyncs.get(path)?.isDirty() ?? false;
-}
 
 /** Resolves once the path's save pipeline is drained (immediately when no
  * sync exists). Capture BEFORE disposing the editor — see whenClean. */

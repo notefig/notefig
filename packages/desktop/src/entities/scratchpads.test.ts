@@ -31,13 +31,6 @@ vi.mock("@/utils/file-write-effects", () => ({
   invalidateDerivedState: vi.fn(),
 }));
 
-const flushDocumentSyncMock = vi.fn();
-let cleanPromise: Promise<void> = Promise.resolve();
-vi.mock("@/utils/markdown-conversion", () => ({
-  flushDocumentSync: (path: string) => flushDocumentSyncMock(path),
-  whenDocumentSyncClean: () => cleanPromise,
-}));
-
 vi.mock("./agents", () => ({ useAgentTasksReady: () => true }));
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -97,7 +90,6 @@ function stubRandomTails(...values: number[]) {
 beforeEach(async () => {
   vi.restoreAllMocks();
   vi.clearAllMocks();
-  cleanPromise = Promise.resolve();
   WS = `/ws-scratchpads-test-${testCounter++}`;
   DIR = `${WS}/.metrists/scratchpads`;
   adapter.createFiles.mockImplementation(async (paths: string[]) => ok(paths));
@@ -258,24 +250,25 @@ describe("resolveScratchpadToOpen", () => {
 });
 
 describe("sweepEmptyScratchpads", () => {
-  it("deletes whitespace-only leftovers, renames untitled ones with content, spares keepPath and open tabs", async () => {
+  it("deletes whitespace-only leftovers, renames untitled ones with content, spares open tabs", async () => {
     const [tail] = stubRandomTails(0.111);
-    const keep = `${DIR}/untitled.md`;
     const open = `${DIR}/untitled-2.md`;
     const empty = `${DIR}/untitled-3.md`;
     const survivor = `${DIR}/untitled-4.md`;
-    [keep, open, empty, survivor].forEach(seedFileRow);
+    const named = `${DIR}/already-named.md`;
+    [open, empty, survivor, named].forEach(seedFileRow);
     adapter.readFiles.mockResolvedValue(
       ok([
         { path: empty, content: "  \n" },
         { path: survivor, content: "# Crash Survivor" },
+        { path: named, content: "# Different Title" },
       ]),
     );
 
-    await scratchpads.sweepEmptyScratchpads(WS, keep, [open]);
+    await scratchpads.sweepEmptyScratchpads(WS, [open]);
 
     expect(new Set(adapter.readFiles.mock.calls[0][0] as string[])).toEqual(
-      new Set([empty, survivor]),
+      new Set([empty, survivor, named]),
     );
     expect(adapter.deleteFiles).toHaveBeenCalledWith([empty]);
     expect(adapter.deleteFiles).toHaveBeenCalledTimes(1);
@@ -283,36 +276,7 @@ describe("sweepEmptyScratchpads", () => {
       survivor,
       `${DIR}/crash-survivor-${tail}.md`,
     );
-  });
-});
-
-describe("maybeGcScratchpadOnClose", () => {
-  it("deletes a whitespace-only scratchpad on close", async () => {
-    const path = `${DIR}/untitled.md`;
-    seedFileRow(path);
-    seedContentRow(path, "  \n");
-
-    scratchpads.maybeGcScratchpadOnClose(WS, path);
-    await settle();
-
-    expect(flushDocumentSyncMock).toHaveBeenCalledWith(path);
-    expect(adapter.deleteFiles).toHaveBeenCalledWith([path]);
-  });
-
-  it("renames an untitled scratchpad to a slug-with-random-tail name", async () => {
-    const [tail] = stubRandomTails(0.222);
-    const path = `${DIR}/untitled.md`;
-    seedFileRow(path);
-    seedContentRow(path, "# Roadmap Ideas: Q3/Q4\n\nnotes");
-
-    scratchpads.maybeGcScratchpadOnClose(WS, path);
-    await settle();
-
-    expect(adapter.moveFile).toHaveBeenCalledWith(
-      path,
-      `${DIR}/roadmap-ideas-q3-q4-${tail}.md`,
-    );
-    expect(adapter.deleteFiles).not.toHaveBeenCalled();
+    expect(adapter.moveFile).toHaveBeenCalledTimes(1);
   });
 
   it("re-rolls the random tail on the (rare) collision", async () => {
@@ -320,10 +284,9 @@ describe("maybeGcScratchpadOnClose", () => {
     const path = `${DIR}/untitled.md`;
     seedFileRow(path);
     seedFileRow(`${DIR}/roadmap-${first}.md`);
-    seedContentRow(path, "# Roadmap");
+    adapter.readFiles.mockResolvedValue(ok([{ path, content: "# Roadmap" }]));
 
-    scratchpads.maybeGcScratchpadOnClose(WS, path);
-    await settle();
+    await scratchpads.sweepEmptyScratchpads(WS, []);
 
     expect(adapter.moveFile).toHaveBeenCalledWith(
       path,
@@ -331,72 +294,24 @@ describe("maybeGcScratchpadOnClose", () => {
     );
   });
 
-  it("keeps headingless content, never renames non-untitled files, ignores non-scratchpads", async () => {
-    const untitled = `${DIR}/untitled.md`;
-    seedFileRow(untitled);
-    seedContentRow(untitled, "no heading here");
-    scratchpads.maybeGcScratchpadOnClose(WS, untitled);
-
-    const named = `${DIR}/my-notes.md`;
-    seedFileRow(named);
-    seedContentRow(named, "# Different Title");
-    scratchpads.maybeGcScratchpadOnClose(WS, named);
-
-    scratchpads.maybeGcScratchpadOnClose(WS, `${WS}/notes.md`);
-    await settle();
-
-    expect(adapter.moveFile).not.toHaveBeenCalled();
-    expect(adapter.deleteFiles).not.toHaveBeenCalled();
-  });
-
-  it("waits for the save pipeline before judging content", async () => {
-    const [tail] = stubRandomTails(0.555);
-    const path = `${DIR}/untitled.md`;
-    seedFileRow(path);
-    let resolveClean!: () => void;
-    cleanPromise = new Promise((resolve) => {
-      resolveClean = resolve;
-    });
-
-    scratchpads.maybeGcScratchpadOnClose(WS, path);
-    seedContentRow(path, "# Late Save");
-    await settle();
-    expect(adapter.moveFile).not.toHaveBeenCalled();
-
-    resolveClean();
-    await settle();
-    expect(adapter.moveFile).toHaveBeenCalledWith(
-      path,
-      `${DIR}/late-save-${tail}.md`,
-    );
-  });
-
-  it("tolerates rename failure without blocking the close", async () => {
+  it("tolerates rename failure without throwing", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const path = `${DIR}/untitled.md`;
     seedFileRow(path);
-    seedContentRow(path, "# Doomed");
+    adapter.readFiles.mockResolvedValue(ok([{ path, content: "# Doomed" }]));
     adapter.moveFile.mockResolvedValue({
       ok: false,
       error: { path, type: "io_error", message: "disk full" },
     });
 
-    scratchpads.maybeGcScratchpadOnClose(WS, path);
-    await settle();
+    await scratchpads.sweepEmptyScratchpads(WS, []);
 
     expect(warn).toHaveBeenCalled();
   });
 
-  it("falls back to a disk read when no content row is loaded", async () => {
-    const path = `${DIR}/untitled.md`;
-    seedFileRow(path);
-    adapter.readFiles.mockResolvedValue(ok([{ path, content: "" }]));
-
-    scratchpads.maybeGcScratchpadOnClose(WS, path);
-    await settle();
-
-    expect(adapter.readFiles).toHaveBeenCalledWith([path]);
-    expect(adapter.deleteFiles).toHaveBeenCalledWith([path]);
+  it("does nothing when there are no candidates", async () => {
+    await scratchpads.sweepEmptyScratchpads(WS, []);
+    expect(adapter.readFiles).not.toHaveBeenCalled();
   });
 });
 

@@ -31,14 +31,6 @@ export interface UseDockableTabsOptions {
   canOpenFile?: (file: FileTreeNode) => boolean;
 
   dockableRef?: RefObject<HTMLElement | null>;
-
-  /**
-   * Runs for every tab about to leave the layout — explicit close, Mod+W,
-   * drag-to-close, and programmatic layout prunes all funnel through here,
-   * BEFORE the tab is disposed (its controller and document sync are still
-   * alive). Used by scratchpad GC (MET-135).
-   */
-  onBeforeClose?: (tabId: string) => void;
 }
 
 export interface UseDockableTabsResult {
@@ -57,12 +49,7 @@ export interface UseDockableTabsResult {
 
   openFile: (options: OpenFileInLayoutOptions) => void;
 
-  /**
-   * Close a tab. `runBeforeClose: false` skips the onBeforeClose lifecycle
-   * — for closes that are part of a deletion, where the scratchpad GC
-   * renaming/deleting the file would race the delete itself.
-   */
-  closeTab: (tabId: string, options?: { runBeforeClose?: boolean }) => void;
+  closeTab: (tabId: string) => void;
 
   /**
    * Swap a tab id in place (rename-open-tab flow). Raw layout write: no
@@ -114,7 +101,7 @@ export interface UseDockableTabsResult {
 export function useDockableTabs(
   options: UseDockableTabsOptions,
 ): UseDockableTabsResult {
-  const { canOpenFile, dockableRef, onBeforeClose } = options;
+  const { canOpenFile, dockableRef } = options;
   const { layout, setLayout, openTabs, layoutSelectedTabId } =
     useLayoutSearchParam();
   const lastFocusedWindowIdRef = useRef<string | null>(null);
@@ -239,12 +226,11 @@ export function useDockableTabs(
       // Tear down any tabs Dockable removed (e.g. via drag to close)
       const newTabIds = extractTabIds(newLayout);
       const removed = openTabs.filter((id) => !newTabIds.includes(id));
-      removed.forEach((id) => onBeforeClose?.(id));
       removed.forEach((id) => disposeTab(id));
 
       setLayout(newLayout);
     },
-    [openTabs, setLayout, onBeforeClose],
+    [openTabs, setLayout],
   );
 
   const openFile = useCallback(
@@ -261,15 +247,14 @@ export function useDockableTabs(
   );
 
   const closeTab = useCallback(
-    (tabId: string, options?: { runBeforeClose?: boolean }) => {
+    (tabId: string) => {
       if (!openTabs.includes(tabId)) return;
 
-      if (options?.runBeforeClose !== false) onBeforeClose?.(tabId);
       disposeTab(tabId);
 
       setLayout((currentLayout) => removeTabFromLayout(currentLayout, tabId));
     },
-    [openTabs, setLayout, onBeforeClose],
+    [openTabs, setLayout],
   );
 
   const renameTab = useCallback(

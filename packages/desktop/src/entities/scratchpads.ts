@@ -10,16 +10,13 @@
  * path from the constants here.
  *
  * This file is the whole feature: path scheme + naming, lifecycle I/O
- * (create / entry resolution / sweep / close-time GC and auto-rename), and
- * the empty-entry hook.
+ * (create / entry resolution / sweep + auto-rename), and the empty-entry
+ * hook — the ONE place scratchpad lifecycle runs. Nothing happens on tab
+ * close; leftovers are cleaned and renamed at the next workspace entry.
  */
 import { useEffect, useRef } from "react";
 import { platformAdapter } from "@/adapters";
 import { path as pathutil } from "@/utils/path";
-import {
-  flushDocumentSync,
-  whenDocumentSyncClean,
-} from "@/utils/markdown-conversion";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import {
   createFile,
@@ -250,18 +247,17 @@ export async function resolveScratchpadToOpen(
   );
 }
 
-/** Entry-time sweep over scratchpads not open in a tab (and not `keepPath`):
- * whitespace-only leftovers are deleted, untitled ones with content pick up
- * their derived name. Best-effort; failures warn, never throw. */
+/** Entry-time sweep over scratchpads not open in a tab: whitespace-only
+ * leftovers are deleted, untitled ones with content pick up their derived
+ * name. Best-effort; failures warn, never throw. */
 export async function sweepEmptyScratchpads(
   workspacePath: string,
-  keepPath: string | null,
   openTabIds: string[],
 ): Promise<void> {
   const open = new Set(openTabIds);
   const candidates = scratchpadRows(workspacePath)
     .map((row) => row.path)
-    .filter((path) => path !== keepPath && !open.has(path));
+    .filter((path) => !open.has(path));
   if (candidates.length === 0) return;
 
   const reads = await platformAdapter.fs.readFiles(candidates);
@@ -279,7 +275,8 @@ export async function sweepEmptyScratchpads(
 }
 
 /** Rename an untitled scratchpad to `<slug>-<random>.md`. No-op for named
- * files or headingless content. Callers guarantee the tab is not open. */
+ * files or headingless content. Runs only from the entry sweep, where the
+ * file has no open tab. */
 async function maybeAutoRenameScratchpad(
   workspacePath: string,
   path: string,
@@ -299,59 +296,18 @@ async function maybeAutoRenameScratchpad(
   await renameFileOrDirectory(workspacePath, path, target);
 }
 
-/**
- * Close-time lifecycle for a scratchpad tab. MUST run before the tab's
- * dispose so the document sync is still alive for the flush; the clean
- * promise is captured before dispose and still resolves when the final
- * write lands. Whitespace-only → delete; untitled + heading → auto-rename.
- * Failures warn and never block the close.
- */
-export function maybeGcScratchpadOnClose(
-  workspacePath: string,
-  tabId: string,
-): void {
-  if (!isScratchpadPath(workspacePath, tabId)) return;
-
-  flushDocumentSync(tabId);
-  const clean = whenDocumentSyncClean(tabId);
-
-  void clean.then(async () => {
-    try {
-      // Rows lead disk, so a loaded content row is authoritative; an
-      // unloaded one means the file was never opened — read the disk.
-      const row = getOrCreateWorkspaceCollections(workspacePath).content.get(
-        tabId,
-      );
-      const content =
-        row && row.error === undefined
-          ? row.content
-          : ((await platformAdapter.fs.readFiles([tabId])).succeeded[0]
-              ?.content ?? null);
-      if (content === null) return;
-
-      if (content.trim() === "") {
-        await deleteFileOrDirectory(workspacePath, tabId);
-        return;
-      }
-
-      await maybeAutoRenameScratchpad(workspacePath, tabId, content);
-    } catch (error) {
-      console.warn(`[scratchpads] close-time gc failed for '${tabId}':`, error);
-    }
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Empty-entry hook
 // ---------------------------------------------------------------------------
 
 /**
- * Lands an empty workspace entry in a scratchpad instead of the "No file
- * selected" screen. Decides exactly once per entry, after the saved-URL
- * restore settled, metadata + agent tasks loaded, and stale tabs pruned —
- * so an only-stale layout counts as empty, while closing the last tab
- * mid-session never re-summons anything. Non-empty entries still get the
- * leftover sweep.
+ * The scratchpad lifecycle hook: lands an empty workspace entry in a
+ * scratchpad instead of the "No file selected" screen, after sweeping
+ * leftovers (whitespace-only files deleted, untitled ones renamed to their
+ * heading). Decides exactly once per entry, after the saved-URL restore
+ * settled, metadata + agent tasks loaded, and stale tabs pruned — so an
+ * only-stale layout counts as empty, while closing the last tab
+ * mid-session never re-summons anything. Non-empty entries just sweep.
  */
 export function useScratchpadOnEmptyOpen(options: {
   workspacePath: string;
@@ -376,20 +332,21 @@ export function useScratchpadOnEmptyOpen(options: {
 
     if (openTabs.length > 0) {
       decidedForRef.current = workspacePath;
-      void sweepEmptyScratchpads(workspacePath, null, openTabs).catch(
-        (error) => console.warn("[scratchpads] entry sweep failed:", error),
+      void sweepEmptyScratchpads(workspacePath, openTabs).catch((error) =>
+        console.warn("[scratchpads] entry sweep failed:", error),
       );
       return;
     }
 
     inFlightRef.current = true;
-    void resolveScratchpadToOpen(workspacePath)
-      .then((path) => {
-        decidedForRef.current = workspacePath;
-        if (!path) return;
-        openFile({ tabId: path, intent: "new-tab" });
-        return sweepEmptyScratchpads(workspacePath, path, [path]);
-      })
+    void (async () => {
+      // Sweep first: nothing is open, so leftovers delete/rename before we
+      // choose what to land in — the opened file carries its final name.
+      await sweepEmptyScratchpads(workspacePath, []);
+      const path = await resolveScratchpadToOpen(workspacePath);
+      decidedForRef.current = workspacePath;
+      if (path) openFile({ tabId: path, intent: "new-tab" });
+    })()
       .catch((error) => {
         decidedForRef.current = workspacePath;
         console.warn("[scratchpads] failed to open a scratchpad:", error);

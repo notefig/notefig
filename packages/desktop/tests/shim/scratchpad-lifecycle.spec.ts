@@ -58,6 +58,76 @@ test.describe("shim: scratchpad close → reopen project", () => {
     await expect(tab).toHaveCount(0);
   }
 
+  test("empty re-entry sweeps, renames, and auto-opens the leftover scratchpad", async ({
+    page,
+  }) => {
+    test.setTimeout(90000);
+
+    await openProject(page);
+    const editor = visibleEditor(page);
+    await editor.waitFor({ state: "visible", timeout: 15000 });
+    await editor.click();
+    await editor.pressSequentially("# Warm Session", { delay: 10 });
+    await page.keyboard.press("Enter");
+    await editor.pressSequentially("warm body", { delay: 10 });
+    await expect(
+      page.getByRole("heading", { name: "Warm Session" }),
+    ).toBeVisible();
+    await waitForAutoSave(page);
+
+    await closeScratchpadTab(page);
+
+    // Empty the layout mid-session: delete README through the tree.
+    await page
+      .getByRole("treeitem", { name: "README.md", exact: true })
+      .first()
+      .click({ button: "right" });
+    await page.locator('[role="menuitem"]:has-text("Delete")').click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Delete" })
+      .click();
+    await expect(page.getByText("No file selected")).toBeVisible({
+      timeout: 10000,
+    });
+
+    // Re-enter with a bare saved URL and warm collections: the auto-open
+    // must land in the RENAMED scratchpad, error-free.
+    await page.goto("/welcome");
+    await openProject(page);
+
+    const reopened = visibleEditor(page);
+    await reopened.waitFor({ state: "visible", timeout: 15000 });
+    await expectNoLoadError(page);
+    await expect(reopened).toContainText("warm body", { timeout: 10000 });
+    // The entry sweep renamed the untitled file before opening it.
+    await expect
+      .poll(async () => (await listScratchpads()).join(","), { timeout: 10000 })
+      .toMatch(/^warm-session-[a-z0-9]{4}\.md$/);
+  });
+
+  test("empty entry auto-opens an existing scratchpad", async ({ page }) => {
+    test.setTimeout(90000);
+
+    await fs.mkdir(path.join(workspace, ".metrists", "scratchpads"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(workspace, ".metrists", "scratchpads", "my-notes-ab12.md"),
+      "# My Notes\n\nexisting body\n",
+      "utf8",
+    );
+
+    await openProject(page);
+
+    const editor = visibleEditor(page);
+    await editor.waitFor({ state: "visible", timeout: 15000 });
+    await expectNoLoadError(page);
+    await expect(editor).toContainText("existing body", { timeout: 10000 });
+    // Reused, not duplicated: no fresh untitled file appears.
+    expect(await listScratchpads()).toEqual(["my-notes-ab12.md"]);
+  });
+
   test("content scratchpad survives close and reopens cleanly", async ({
     page,
   }) => {
@@ -81,19 +151,18 @@ test.describe("shim: scratchpad close → reopen project", () => {
     // Close the scratchpad tab (its title shows the derived heading).
     await closeScratchpadTab(page);
 
-    // Close-time GC renames the untitled file to its slug name on disk.
-    await expect
-      .poll(async () => (await listScratchpads()).join(","), { timeout: 10000 })
-      .toMatch(/repro-notes-[a-z0-9]{4}\.md/);
-
     // Reopen the project (bare-root entry, like picking it from recents).
-    // README is still in the saved layout, so it restores; the renamed
-    // scratchpad must then open cleanly from the tree — the reported bug
-    // was that it errors with "No such file or directory (os error 2)".
+    // README is still in the saved layout, so it restores; the entry sweep
+    // renames the closed scratchpad, which must then open cleanly from the
+    // tree — the reported bug was a "No such file or directory (os error
+    // 2)" here.
     await page.goto("/welcome");
     await openProject(page);
     await visibleEditor(page).waitFor({ state: "visible", timeout: 15000 });
     await expectNoLoadError(page);
+    await expect
+      .poll(async () => (await listScratchpads()).join(","), { timeout: 10000 })
+      .toMatch(/repro-notes-[a-z0-9]{4}\.md/);
 
     const [renamed] = await listScratchpads();
     await page.getByRole("treeitem", { name: /scratchpads/ }).click();
@@ -116,11 +185,8 @@ test.describe("shim: scratchpad close → reopen project", () => {
       "untitled.md",
     );
 
-    // Close it untouched — GC deletes the whitespace-only file.
+    // Close it untouched; the leftover is swept at the next entry.
     await closeScratchpadTab(page);
-    await expect
-      .poll(listScratchpads, { timeout: 10000 })
-      .not.toContain("untitled.md");
 
     // Reopen: a fresh scratchpad must open with a working editor.
     await page.goto("/welcome");
@@ -147,17 +213,24 @@ test.describe("shim: scratchpad close → reopen project", () => {
     await waitForAutoSave(page);
 
     await closeScratchpadTab(page);
-    await expect
-      .poll(async () => (await listScratchpads()).join(","), { timeout: 10000 })
-      .toMatch(/reload-case-[a-z0-9]{4}\.md/);
 
     // App-relaunch equivalent: reload, then enter the project at bare root.
     await page.reload();
     await openProject(page);
 
-    const reopened = visibleEditor(page);
-    await reopened.waitFor({ state: "visible", timeout: 15000 });
+    await visibleEditor(page).waitFor({ state: "visible", timeout: 15000 });
     await expectNoLoadError(page);
-    await expect(reopened).toContainText("Reload Case", { timeout: 10000 });
+    // The entry sweep renamed the leftover; it opens cleanly from the tree.
+    await expect
+      .poll(async () => (await listScratchpads()).join(","), { timeout: 10000 })
+      .toMatch(/reload-case-[a-z0-9]{4}\.md/);
+    await page.getByRole("treeitem", { name: /scratchpads/ }).click();
+    await page
+      .getByRole("treeitem", { name: /reload-case-[a-z0-9]{4}\.md/ })
+      .click();
+    await expect(visibleEditor(page)).toContainText("Reload Case", {
+      timeout: 10000,
+    });
+    await expectNoLoadError(page);
   });
 });
