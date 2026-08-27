@@ -332,13 +332,18 @@ export function createFileContentCollection(workspaceId: string) {
           });
         }
 
-        // Add empty entries for failed reads (binary files like images).
-        // The error field marks that content is not the file's real content,
-        // so the editor must never mount from (or save over) this entry.
+        // Add empty entries for UNREADABLE files (binary, permissions).
+        // The error field marks that content is not the file's real
+        // content, so the editor must never mount from (or save over) the
+        // entry. A not_found is different: the file does not exist, so no
+        // row may be fabricated — a delete racing a recreate of the same
+        // path (scratchpad sweep, MET-135) would otherwise persist a
+        // poisoned error row that the recreated file's editor then trusts.
         for (const failure of result.failed) {
           console.warn(
             `Failed to read file ${failure.path}: ${failure.message}`,
           );
+          if (failure.type === "not_found") continue;
           contentMap.set(failure.path, {
             path: failure.path,
             content: "",
@@ -634,6 +639,12 @@ export async function createFile(
   // the disk write (a lost race is a sticky not_found editor — the write's
   // own watcher echo is suppressed, so nothing would heal it).
   await tx.isPersisted.promise;
+
+  // A fresh file must not inherit a content row from a previous life of
+  // this path (e.g. an error row left by a read that raced its deletion).
+  if (collections.content.get(filePath)) {
+    collections.content.utils.writeDelete(filePath);
+  }
 
   if (content) {
     await writeFileContent(workspaceId, filePath, content);

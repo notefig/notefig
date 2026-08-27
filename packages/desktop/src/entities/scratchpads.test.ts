@@ -315,6 +315,43 @@ describe("sweepEmptyScratchpads", () => {
   });
 });
 
+describe("content loads for missing files", () => {
+  it("a not_found read never fabricates a poisoned content row", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const missing = `${DIR}/untitled.md`;
+    seedFileRow(missing);
+    adapter.readFiles.mockResolvedValue({
+      succeeded: [],
+      failed: [
+        { path: missing, type: "not_found", message: "os error 2" },
+      ],
+    });
+
+    // Drive the on-demand content load the way an opening tab does.
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    function Probe() {
+      files.useOpenFileRows(WS, [missing]);
+      return null;
+    }
+    await act(async () => {
+      root.render(createElement(Probe));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(adapter.readFiles).toHaveBeenCalled();
+    const row = files.getOrCreateWorkspaceCollections(WS).content.get(missing);
+    expect(row).toBeUndefined();
+
+    await act(async () => root.unmount());
+    container.remove();
+    warn.mockRestore();
+  });
+});
+
 describe("useScratchpadOnEmptyOpen", () => {
   const openFileMock = vi.fn(() => true);
   let container: HTMLDivElement;

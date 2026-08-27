@@ -225,6 +225,24 @@ describe("lazy stat hydration", () => {
   });
 });
 
+describe("recreated files", () => {
+  it("createFile clears a poisoned content row left by a prior life of the path", async () => {
+    const collections = files.getOrCreateWorkspaceCollections(WS);
+    collections.content.utils.writeUpsert([
+      {
+        path: FILE,
+        content: "",
+        contentHash: "x",
+        error: "No such file or directory (os error 2)",
+      },
+    ]);
+
+    await files.createFile(WS, FILE);
+
+    expect(collections.content.get(FILE)).toBeUndefined();
+  });
+});
+
 describe("file delete", () => {
   it("deleteFileOrDirectory removes the row and calls the fs seam", async () => {
     await files.createFile(WS, FILE, "hello");
