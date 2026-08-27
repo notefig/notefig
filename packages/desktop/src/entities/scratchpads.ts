@@ -37,11 +37,6 @@ export const SCRATCHPADS_DIR_NAME = "scratchpads";
 export const SCRATCHPADS_REL_PATH = `${APP_DIR_NAME}/${SCRATCHPADS_DIR_NAME}`;
 export const UNTITLED_BASENAME = "untitled";
 
-/** Temporary MET-135 diagnostics — grep for [scratchpad-debug]. */
-export function scratchpadDebug(...parts: unknown[]): void {
-  console.info("[scratchpad-debug]", ...parts);
-}
-
 export function appDirPath(workspacePath: string): string {
   return pathutil.join(workspacePath, APP_DIR_NAME);
 }
@@ -184,7 +179,6 @@ export async function resolveScratchpadOnDisk(
     return null;
   }
   const files = listing.ok ? listing.value : [];
-  scratchpadDebug("resolve(disk): candidates", files);
 
   if (files.length === 0) {
     const fresh = pathutil.join(dir, nextUntitledBasename([]));
@@ -231,6 +225,5 @@ export async function sweepScratchpadsOnDisk(
     .filter(({ content }) => content.trim() === "")
     .map(({ path }) => path);
   if (empties.length === 0) return;
-  scratchpadDebug("sweep(disk): deleting empty", empties);
   await platformAdapter.fs.deleteFiles(empties);
 }

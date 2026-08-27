@@ -161,7 +161,6 @@ export const Workspace = () => {
     // One pass so concurrent prunes can't race each other's layout writes;
     // the fetch/boot-load gating already happened inside useWorkspaceTabs.
     if (staleTabIds.length === 0) return;
-    console.info("[scratchpad-debug] pruning stale tabs", staleTabIds);
 
     const sanitizedLayout = staleTabIds.reduce(
       (nextLayout, tabId) => removeTabFromLayout(nextLayout, tabId),

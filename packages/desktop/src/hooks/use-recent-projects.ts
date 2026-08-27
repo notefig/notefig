@@ -159,12 +159,6 @@ export function useNavigationPersistence(): void {
         // was being computed — their navigation wins, never clobber it.
         const [nowPathname, nowSearch = ""] = currentUrlRef.current.split("?");
         const nowHasTabs = new URLSearchParams(nowSearch).get(LAYOUT_PARAM);
-        console.info("[scratchpad-debug] entry redirect", {
-          entryUrl,
-          fullPath,
-          now: currentUrlRef.current,
-          pathname: location.pathname,
-        });
         if (nowPathname !== location.pathname || nowHasTabs) return;
         if (entryUrl !== fullPath) {
           navigate(entryUrl, { replace: true });

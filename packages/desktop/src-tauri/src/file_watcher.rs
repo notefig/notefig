@@ -450,15 +450,6 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
     }
 
     if !metadata_changes.is_empty() {
-        for change in metadata_changes
-            .iter()
-            .filter(|c| c.path.contains("/.metrists"))
-        {
-            crate::fs_ops::scratchpad_debug(&format!(
-                "watcher metadata: {} {}",
-                change.change_type, change.path
-            ));
-        }
         let event = MetadataChangeEvent {
             changes: metadata_changes,
         };
@@ -466,15 +457,6 @@ async fn process_events<R: tauri::Runtime>(events: Vec<Event>, app_handle: &AppH
     }
 
     if !content_changes.is_empty() {
-        for change in content_changes
-            .iter()
-            .filter(|c| c.path.contains("/.metrists"))
-        {
-            crate::fs_ops::scratchpad_debug(&format!(
-                "watcher content: {}",
-                change.path
-            ));
-        }
         let event = ContentChangeEvent {
             changes: content_changes,
         };

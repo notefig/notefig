@@ -105,14 +105,6 @@ fn map_io_error(path: &str, err: std::io::Error) -> FileSystemError {
     }
 }
 
-/// Temporary MET-135 diagnostics — grep for [scratchpad-debug].
-pub fn scratchpad_debug(msg: &str) {
-    eprintln!("[scratchpad-debug] {}", msg);
-}
-
-fn is_app_dir_path(path: &str) -> bool {
-    path.contains("/.metrists")
-}
 
 async fn ensure_parent_dir(path: &Path) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
@@ -215,16 +207,6 @@ pub async fn read_directory(
         }
     }
 
-    {
-        let app_entries: Vec<&String> =
-            results.iter().filter(|p| is_app_dir_path(p)).collect();
-        if is_app_dir_path(&path) || !app_entries.is_empty() {
-            scratchpad_debug(&format!(
-                "read_directory {} (recursive={}) app entries: {:?}",
-                path, recursive, app_entries
-            ));
-        }
-    }
     Result::ok(results)
 }
 
@@ -333,10 +315,6 @@ pub async fn move_directory(old_path: String, new_path: String) -> Result<()> {
 
 #[tauri::command]
 pub async fn read_files(paths: Vec<String>) -> BatchResult<FileContent> {
-    let app_paths: Vec<&String> = paths.iter().filter(|p| is_app_dir_path(p)).collect();
-    if !app_paths.is_empty() {
-        scratchpad_debug(&format!("read_files: {:?}", app_paths));
-    }
     let mut result = BatchResult::new();
 
     let tasks: Vec<_> = paths
@@ -354,13 +332,7 @@ pub async fn read_files(paths: Vec<String>) -> BatchResult<FileContent> {
     for res in results {
         match res {
             Ok(file_content) => result.succeeded.push(file_content),
-            Err(err) => {
-                scratchpad_debug(&format!(
-                    "read_files FAILED: {} ({})",
-                    err.path, err.message
-                ));
-                result.failed.push(err);
-            }
+            Err(err) => result.failed.push(err),
         }
     }
 
@@ -413,13 +385,6 @@ pub struct FileToWrite {
 
 #[tauri::command]
 pub async fn write_files(files: Vec<FileToWrite>) -> BatchResult<String> {
-    for fw in files.iter().filter(|f| is_app_dir_path(&f.path)) {
-        scratchpad_debug(&format!(
-            "write_files: {} ({} bytes)",
-            fw.path,
-            fw.content.len()
-        ));
-    }
     let mut result = BatchResult::new();
 
     let tasks: Vec<_> = files
@@ -498,9 +463,6 @@ async fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
 
 #[tauri::command]
 pub async fn create_files(paths: Vec<String>) -> BatchResult<String> {
-    for p in paths.iter().filter(|p| is_app_dir_path(p)) {
-        scratchpad_debug(&format!("create_files: {}", p));
-    }
     let files = paths
         .into_iter()
         .map(|path| FileToWrite {
@@ -513,9 +475,6 @@ pub async fn create_files(paths: Vec<String>) -> BatchResult<String> {
 
 #[tauri::command]
 pub async fn delete_files(paths: Vec<String>) -> BatchResult<String> {
-    for p in paths.iter().filter(|p| is_app_dir_path(p)) {
-        scratchpad_debug(&format!("delete_files: {}", p));
-    }
     let mut result = BatchResult::new();
 
     let tasks: Vec<_> = paths
@@ -548,9 +507,6 @@ pub async fn delete_files(paths: Vec<String>) -> BatchResult<String> {
 
 #[tauri::command]
 pub async fn move_file(old_path: String, new_path: String) -> Result<()> {
-    if is_app_dir_path(&old_path) || is_app_dir_path(&new_path) {
-        scratchpad_debug(&format!("move_file: {} -> {}", old_path, new_path));
-    }
     let old_path_buf = PathBuf::from(&old_path);
     let new_path_buf = PathBuf::from(&new_path);
 
