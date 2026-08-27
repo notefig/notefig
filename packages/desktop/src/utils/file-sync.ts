@@ -28,6 +28,7 @@ import { platformAdapter } from "@/adapters";
 import { path as pathutil, relativeTreePath } from "./path";
 import { scratchpadsDirPath } from "@/entities/scratchpads";
 import { activeRenameTarget } from "@/entities/tabs";
+import { trackWorkspaceWrite } from "./workspace-write-tracker";
 
 /**
  * The app-layer choke point for the "workspace paths are absolute"
@@ -79,32 +80,40 @@ export async function writeWorkspaceTextFile(
   assertAbsoluteWorkspacePath(path);
   // A rename-open-tab (scratchpad promotion) may be moving this exact file
   // right now — wait it out and write to wherever the file settled, so an
-  // overlapping agent write can't resurrect the old path.
+  // overlapping agent write can't resurrect the old path. The redirect
+  // check and the in-flight registration below are one synchronous block:
+  // a rename beginning after it sees this write via
+  // whenWorkspaceWritesSettled; one beginning before is seen here.
   const renameTarget = activeRenameTarget(path);
   if (renameTarget) {
     path = await renameTarget;
   }
-  const result = await platformAdapter.fs.writeFiles([{ path, content }]);
-  const failure = result.failed[0];
-  if (failure) {
-    throw new FsError(failure.type, failure.path, failure.message);
-  }
-
-  // Rows lead disk for every app write (see updateLoadedContentRow) — the
-  // echo of this write is natively consumed, so nothing else would ever
-  // bring the row forward, and adoption would later roll the editor back
-  // to the stale row.
-  updateLoadedContentRow(path, content);
-
-  const editor = getMarkdownEditor(path);
-  if (editor && !editor.isDestroyed) {
-    const sync = getDocumentSync(path);
-    const doc = await sync.prepareAdoption(content);
-    if (doc && !editor.isDestroyed) {
-      editor.commands.setContent(doc, { emitUpdate: false });
-      sync.commitAdoption(content, calculateContentHash(content));
+  const target = path;
+  return trackWorkspaceWrite(target, async () => {
+    const result = await platformAdapter.fs.writeFiles([
+      { path: target, content },
+    ]);
+    const failure = result.failed[0];
+    if (failure) {
+      throw new FsError(failure.type, failure.path, failure.message);
     }
-  }
+
+    // Rows lead disk for every app write (see updateLoadedContentRow) — the
+    // echo of this write is natively consumed, so nothing else would ever
+    // bring the row forward, and adoption would later roll the editor back
+    // to the stale row.
+    updateLoadedContentRow(target, content);
+
+    const editor = getMarkdownEditor(target);
+    if (editor && !editor.isDestroyed) {
+      const sync = getDocumentSync(target);
+      const doc = await sync.prepareAdoption(content);
+      if (doc && !editor.isDestroyed) {
+        editor.commands.setContent(doc, { emitUpdate: false });
+        sync.commitAdoption(content, calculateContentHash(content));
+      }
+    }
+  });
 }
 
 export async function readWorkspaceTextFile(

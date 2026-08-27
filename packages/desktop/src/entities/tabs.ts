@@ -74,6 +74,7 @@ import {
   flushDocumentSync,
   whenDocumentSyncClean,
 } from "@/utils/markdown-conversion";
+import { whenWorkspaceWritesSettled } from "@/utils/workspace-write-tracker";
 // Read-side editor-store accessor, same conscious entities → components
 // import as entities/editors.ts.
 import { getMarkdownEditor } from "@/components/editor/editor-store";
@@ -310,6 +311,9 @@ export async function renameOpenFileTab(options: {
   try {
     flushDocumentSync(oldPath);
     await whenDocumentSyncClean(oldPath);
+    // Writes that passed the redirect check before this rename began are
+    // tracked in flight — drain them too before moving the file.
+    await whenWorkspaceWritesSettled(oldPath);
     await renameFileOrDirectory(workspacePath, oldPath, newPath);
   } catch (error) {
     if (liveEditor && !liveEditor.isDestroyed) liveEditor.setEditable(true);

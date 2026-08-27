@@ -166,3 +166,38 @@ describe("readWorkspaceTextFile", () => {
     );
   });
 });
+
+describe("in-flight write tracking", () => {
+  it("serializes same-path writes and settles whenWorkspaceWritesSettled after them", async () => {
+    const { whenWorkspaceWritesSettled } = await import(
+      "../workspace-write-tracker"
+    );
+    const order: string[] = [];
+    let releaseFirst!: () => void;
+    writeMock
+      .mockImplementationOnce(async () => {
+        order.push("first-start");
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+        order.push("first-done");
+        return { succeeded: ["/ws/a.md"], failed: [] };
+      })
+      .mockImplementationOnce(async () => {
+        order.push("second");
+        return { succeeded: ["/ws/a.md"], failed: [] };
+      });
+
+    const first = writeWorkspaceTextFile("/ws/a.md", "one");
+    const second = writeWorkspaceTextFile("/ws/a.md", "two");
+    const settled = whenWorkspaceWritesSettled("/ws/a.md").then(() =>
+      order.push("settled"),
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseFirst();
+    await Promise.all([first, second, settled]);
+
+    expect(order).toEqual(["first-start", "first-done", "second", "settled"]);
+  });
+});

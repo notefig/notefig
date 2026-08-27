@@ -42,6 +42,13 @@ const liveEditor = {
 vi.mock("@/components/editor/editor-store", () => ({
   getMarkdownEditor: () => liveEditor,
 }));
+
+vi.mock("@/utils/workspace-write-tracker", () => ({
+  whenWorkspaceWritesSettled: () => {
+    calls.push("writes-settled");
+    return Promise.resolve();
+  },
+}));
 vi.mock("./agents", () => ({
   agents: { task: vi.fn() },
   agentTasksCollection: { get: vi.fn() },
@@ -77,6 +84,7 @@ describe("renameOpenFileTab", () => {
       "readonly",
       "flush",
       "capture-clean",
+      "writes-settled",
       "rename-fs",
       "dispose",
       "layout",
@@ -147,6 +155,7 @@ describe("renameOpenFileTab", () => {
       "readonly",
       "flush",
       "capture-clean",
+      "writes-settled",
       "rename-fs",
       "editable",
     ]);
