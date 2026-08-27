@@ -18,7 +18,7 @@
  * parse `window.location` fresh on every call; reactive UI must go through
  * `useLayoutSearchParam`/`useDockableTabs`.
  */
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { LayoutNode } from "@/components/dockable";
 import {
@@ -250,7 +250,7 @@ export function useLayoutSearchParam(): UseLayoutSearchParam {
  * batches renders across the orchestrator's await points, so ordering alone
  * cannot prevent that.
  */
-const pendingTabRenames = new Set<string>();
+const pendingTabRenames = new Map<string, string>();
 
 /** oldPath → promise of the path's final location (newPath on success,
  * oldPath on failure). Programmatic writers (agent authoring) consult this
@@ -259,13 +259,11 @@ const pendingTabRenames = new Set<string>();
 const pendingRenameTargets = new Map<string, Promise<string>>();
 
 function beginTabRename(oldId: string, newId: string): void {
-  pendingTabRenames.add(oldId);
-  pendingTabRenames.add(newId);
+  pendingTabRenames.set(oldId, newId);
 }
 
-function endTabRename(oldId: string, newId: string): void {
+function endTabRename(oldId: string): void {
   pendingTabRenames.delete(oldId);
-  pendingTabRenames.delete(newId);
 }
 
 /** The path a write should target once any in-flight rename of `path`
@@ -319,16 +317,17 @@ export async function renameOpenFileTab(options: {
     if (liveEditor && !liveEditor.isDestroyed) liveEditor.setEditable(true);
     settleTarget(oldPath);
     pendingRenameTargets.delete(oldPath);
-    endTabRename(oldPath, newPath);
+    endTabRename(oldPath);
     throw error;
   }
   settleTarget(newPath);
   pendingRenameTargets.delete(oldPath);
   disposeTab(oldPath);
   applyLayoutRename(oldPath, newPath);
-  // Outlive the render that commits the layout write; after it, layout id
-  // and row agree and pruning is inert again.
-  setTimeout(() => endTabRename(oldPath, newPath), 0);
+  // The guard clears from state truth, not a timer: useWorkspaceTabs ends
+  // the rename once the layout no longer holds the old id (swap committed
+  // or tab closed). A timer raced the URL-driven layout commit — a prune
+  // render holding the pre-swap layout could clobber the swap.
 }
 
 export interface WorkspaceTabsState {
@@ -380,16 +379,27 @@ export function useWorkspaceTabs(
 
   const agentTaskRows = useAgentTaskRowsById(agentTaskIds);
 
+  // End pending renames from state truth: once the layout stops holding
+  // the old id (the swap committed, or the tab was closed), every render
+  // from here on sees a row-backed layout and pruning is inert again.
+  useEffect(() => {
+    for (const oldId of pendingTabRenames.keys()) {
+      if (!fileTabIds.includes(oldId)) endTabRename(oldId);
+    }
+  }, [fileTabIds]);
+
   const staleTabIds = useMemo(() => {
     // File tabs wait out the metadata fetch; agent tabs wait out the tasks
     // collection's boot load (restored sessions come back as rows).
     const existingFilePaths = new Set(fileRows.map((row) => row.path));
+    const midRenameIds = new Set(
+      [...pendingTabRenames].flat(),
+    );
     const missingFileTabIds = isFetchingMetadata
       ? []
       : fileTabIds.filter(
           // Ids mid-rename are transiently rowless by design — never stale.
-          (tabId) =>
-            !existingFilePaths.has(tabId) && !pendingTabRenames.has(tabId),
+          (tabId) => !existingFilePaths.has(tabId) && !midRenameIds.has(tabId),
         );
     const missingAgentTabIds = agentTasksReady
       ? agentTaskIds

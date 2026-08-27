@@ -101,4 +101,33 @@ test.describe("scratchpad close → reopen project", () => {
     await visibleEditor(page).pressSequentially("still alive", { delay: 10 });
     await expect(visibleEditor(page)).toContainText("still alive");
   });
+
+  test("renaming an open scratchpad via the tree keeps its tab", async ({
+    page,
+  }) => {
+    const editor = visibleEditor(page);
+    await editor.waitFor({ state: "visible", timeout: 15000 });
+    await editor.click();
+    await editor.pressSequentially("# Repro Notes", { delay: 10 });
+    await waitForAutoSave(page);
+
+    await page.getByRole("treeitem", { name: /scratchpads/ }).click();
+    const row = page.locator('[data-item-path$="untitled.md"]');
+    await row.click({ button: "right" });
+    await page.getByText("Rename", { exact: true }).click();
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type("mynotes.md");
+    await page.keyboard.press("Enter");
+
+    // The tab follows the file: the layout swaps to the new id instead of
+    // the stale-tab pruner closing it (the guard must outlast the
+    // URL-driven layout commit, not a timer).
+    await expect
+      .poll(() => decodeURIComponent(page.url()), { timeout: 10000 })
+      .toContain("mynotes.md");
+    await expect(visibleEditor(page)).toContainText("Repro Notes", {
+      timeout: 10000,
+    });
+    await expectNoLoadError(page);
+  });
 });
