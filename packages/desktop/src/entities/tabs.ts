@@ -293,6 +293,13 @@ export async function renameOpenFileTab(options: {
   applyLayoutRename: (oldId: string, newId: string) => void;
 }): Promise<void> {
   const { workspacePath, oldPath, newPath, applyLayoutRename } = options;
+  // One rename per source path at a time: the coordination entries are
+  // keyed by oldPath, so a second overlapping call would overwrite the
+  // first's, and whichever fails would clear the other's write redirect
+  // and stale-prune guard mid-swap.
+  if (pendingTabRenames.has(oldPath)) {
+    throw new Error(`A rename of "${oldPath}" is already in progress`);
+  }
   beginTabRename(oldPath, newPath);
   let settleTarget!: (path: string) => void;
   pendingRenameTargets.set(

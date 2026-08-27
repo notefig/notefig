@@ -59,14 +59,21 @@ vi.mock("./agents", () => ({
 import { activeRenameTarget, renameOpenFileTab } from "./tabs";
 
 const WS = "/ws";
-const OLD = "/ws/.metrists/scratchpads/untitled.md";
-const NEW = "/ws/My Notes.md";
+// Successful renames leave their stale-prune guard up until the layout
+// commit clears it (a hook effect these tests never run), so each test
+// uses its own source path.
+let pathCounter = 0;
+let OLD = "";
+let NEW = "";
 
 beforeEach(() => {
   vi.clearAllMocks();
   calls.length = 0;
   cleanPromise = Promise.resolve();
   renameFileOrDirectoryMock.mockResolvedValue(undefined);
+  pathCounter += 1;
+  OLD = `/ws/.metrists/scratchpads/untitled-${pathCounter}.md`;
+  NEW = `/ws/My Notes ${pathCounter}.md`;
 });
 
 describe("renameOpenFileTab", () => {
@@ -135,6 +142,37 @@ describe("renameOpenFileTab", () => {
     resolveClean();
     await run;
     expect(renameFileOrDirectoryMock).toHaveBeenCalled();
+  });
+
+  it("refuses a second rename of the same path while one is pending", async () => {
+    let resolveMove!: () => void;
+    renameFileOrDirectoryMock.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveMove = resolve;
+      }),
+    );
+
+    const run = renameOpenFileTab({
+      workspacePath: WS,
+      oldPath: OLD,
+      newPath: NEW,
+      applyLayoutRename: vi.fn(),
+    });
+    await expect(
+      renameOpenFileTab({
+        workspacePath: WS,
+        oldPath: OLD,
+        newPath: "/ws/other.md",
+        applyLayoutRename: vi.fn(),
+      }),
+    ).rejects.toThrow(/already in progress/);
+    // The refused call touched nothing: the first rename's write redirect
+    // is intact and it completes normally.
+    expect(activeRenameTarget(OLD)).not.toBeNull();
+
+    resolveMove();
+    await run;
+    expect(renameFileOrDirectoryMock).toHaveBeenCalledTimes(1);
   });
 
   it("rethrows a failed move leaving the tab intact — no dispose, no layout write", async () => {
