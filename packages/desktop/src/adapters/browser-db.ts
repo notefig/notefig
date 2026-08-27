@@ -16,8 +16,20 @@ import {
   openBrowserWASQLiteOPFSDatabase,
   type BrowserWASQLiteDatabase,
 } from "@tanstack/browser-db-sqlite-persistence";
-import type { PersistedCollectionPersistence } from "@tanstack/db-sqlite-persistence-core";
+import type {
+  ApplyLocalMutationsResponse,
+  PersistedCollectionPersistence,
+  PersistedIndexSpec,
+  PersistedMutationEnvelope,
+  PullSinceResponse,
+} from "@tanstack/db-sqlite-persistence-core";
 import type { DbSurface } from "./platform-adapter.interface";
+
+// Declared by `@tanstack/db`, which is not a direct dependency — derived
+// from the base class instead of importing the transitive package.
+type LoadSubsetOptions = Parameters<
+  BrowserCollectionCoordinator["requestEnsureRemoteSubset"]
+>[1];
 import { captureEvent } from "@/telemetry/telemetry";
 
 const DATABASE_NAME = "notefig.db";
@@ -62,6 +74,88 @@ async function removeOpfsDatabase(): Promise<void> {
         throw error;
       }
     }
+  }
+}
+
+/**
+ * Upstream's coordinator strands a collection's first sync for ~30s when it
+ * starts during boot: the RPC-issuing methods branch on `isLeader` at call
+ * time, so a call that lands in the gap between requesting the Web Lock and
+ * being granted it goes out as a follower RPC over BroadcastChannel — which
+ * never delivers to its own sender. Milliseconds later this tab IS the
+ * leader, but the in-flight RPC can no longer be answered by anyone, and it
+ * burns the full retry budget (3 × 10s) before upstream falls back. A boot
+ * directly into a workspace creates collections mid-render-storm, so the
+ * settings read that gates the entry URL hit this every time (MET-135).
+ *
+ * Fix at our seam, public interface only: hold each RPC-capable call until
+ * leadership is SETTLED — this tab won the lock, or a live leader's
+ * heartbeat proves the RPC will be answered. The ceiling keeps upstream's
+ * own timeout path as the worst case (liveness fallback, never an
+ * arbitration of truth), for the day a lock is wedged by a zombie holder.
+ */
+const LEADERSHIP_SETTLE_CEILING_MS = 10_000;
+const LEADERSHIP_POLL_MS = 25;
+
+class SettledLeadershipCoordinator extends BrowserCollectionCoordinator {
+  private readonly leaderKnown = new Map<string, Promise<void>>();
+
+  private whenLeaderKnown(collectionId: string): Promise<void> {
+    let known = this.leaderKnown.get(collectionId);
+    if (!known) {
+      known = new Promise<void>((resolve) => {
+        // `subscribe` also kicks this tab's own leadership acquisition;
+        // any non-RPC envelope (heartbeats included) proves a live leader.
+        const unsubscribe = this.subscribe(collectionId, () => done());
+        const done = () => {
+          clearInterval(poll);
+          clearTimeout(ceiling);
+          unsubscribe();
+          resolve();
+        };
+        // Self-leadership has no event to listen for — poll for liveness.
+        const poll = setInterval(() => {
+          if (this.isLeader(collectionId)) done();
+        }, LEADERSHIP_POLL_MS);
+        const ceiling = setTimeout(done, LEADERSHIP_SETTLE_CEILING_MS);
+        if (this.isLeader(collectionId)) done();
+      });
+      this.leaderKnown.set(collectionId, known);
+    }
+    return known;
+  }
+
+  override async pullSince(
+    collectionId: string,
+    fromRowVersion: number,
+  ): Promise<PullSinceResponse> {
+    await this.whenLeaderKnown(collectionId);
+    return super.pullSince(collectionId, fromRowVersion);
+  }
+
+  override async requestEnsureRemoteSubset(
+    collectionId: string,
+    options: LoadSubsetOptions,
+  ): Promise<void> {
+    await this.whenLeaderKnown(collectionId);
+    return super.requestEnsureRemoteSubset(collectionId, options);
+  }
+
+  override async requestEnsurePersistedIndex(
+    collectionId: string,
+    signature: string,
+    spec: PersistedIndexSpec,
+  ): Promise<void> {
+    await this.whenLeaderKnown(collectionId);
+    return super.requestEnsurePersistedIndex(collectionId, signature, spec);
+  }
+
+  override async requestApplyLocalMutations(
+    collectionId: string,
+    mutations: Array<PersistedMutationEnvelope>,
+  ): Promise<ApplyLocalMutationsResponse> {
+    await this.whenLeaderKnown(collectionId);
+    return super.requestApplyLocalMutations(collectionId, mutations);
   }
 }
 
@@ -146,7 +240,7 @@ export function createBrowserDb(): DbSurface {
         // the guard above responds to corruption by deleting the file. Leader
         // election runs over Web Locks + BroadcastChannel, both of which die
         // with the page, so there is nothing to dispose.
-        coordinator: new BrowserCollectionCoordinator({ dbName: "notefig" }),
+        coordinator: new SettledLeadershipCoordinator({ dbName: "notefig" }),
         schemaMismatchPolicy: "reset",
       });
       return persistence;
