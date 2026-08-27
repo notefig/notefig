@@ -189,20 +189,26 @@ test.describe("Content Loading", () => {
 
     // A missing file contributes NO content row (fabricating one poisoned
     // recreated paths — MET-135), so the tab sits on the loading
-    // placeholder until metadata catches up and prunes it. The guard that
-    // matters: no editor may mount over the failed read.
-    await expect(page.getByText("doomed-file.md")).toBeVisible({
+    // placeholder until metadata catches up and prunes it. The guards that
+    // matter: no editor may mount over the failed read, and nothing may
+    // write the file back.
+    const visibleEditors = () =>
+      page.evaluate(() => {
+        const editors = Array.from(
+          document.querySelectorAll('[role="textbox"]'),
+        );
+        return editors.filter(
+          (el) => window.getComputedStyle(el).display !== "none",
+        ).length;
+      });
+    expect(await visibleEditors()).toBe(0);
+
+    // Metadata catches up, pruning the dead file's tab and tree row —
+    // still with no editor mounted.
+    await expect(page.getByText("doomed-file.md")).toHaveCount(0, {
       timeout: 10000,
     });
-
-    // No editable document is shown for the failed file.
-    const visibleEditors = await page.evaluate(() => {
-      const editors = Array.from(document.querySelectorAll('[role="textbox"]'));
-      return editors.filter(
-        (el) => window.getComputedStyle(el).display !== "none",
-      ).length;
-    });
-    expect(visibleEditors).toBe(0);
+    expect(await visibleEditors()).toBe(0);
 
     // Nothing wrote the file back into storage (an empty-write would
     // recreate the row with empty content).

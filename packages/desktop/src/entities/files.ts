@@ -965,6 +965,16 @@ export function useOpenFileRows(
   return data as OpenFileRow[];
 }
 
+/** Re-walk the workspace's metadata after out-of-band disk mutations
+ * (e.g. the entry-time scratchpad sweep, which runs on plain adapter fs).
+ * No-op when the workspace's collection hasn't mounted yet — the initial
+ * walk will see the files. */
+export function refetchWorkspaceMetadata(workspacePath: string): Promise<void> {
+  return queryClient.refetchQueries({
+    queryKey: ["file-metadata", workspacePath],
+  });
+}
+
 /** Whether the workspace's eager metadata load is still in flight. */
 export function useMetadataFetching(workspacePath: string): boolean {
   return (

@@ -20,6 +20,7 @@ import {
   resolveScratchpadOnDisk,
   sweepScratchpadsOnDisk,
 } from "@/entities/scratchpads";
+import { refetchWorkspaceMetadata } from "@/entities/files";
 
 const RECENT_PROJECTS_NAMESPACE = "recentProjects";
 const MAX_RECENT_PROJECTS = 20;
@@ -100,11 +101,17 @@ async function computeProjectEntryUrl(path: string): Promise<string> {
   const restoredTabs = extractTabIds(layout);
   if (restoredTabs.length > 0) {
     // Non-empty entry: sweep leftovers in the background, restore as-is.
-    void sweepScratchpadsOnDisk(path, restoredTabs);
+    void sweepScratchpadsOnDisk(path, restoredTabs).then(() =>
+      refetchWorkspaceMetadata(path),
+    );
   } else {
     await sweepScratchpadsOnDisk(path, []);
     const scratchpad = await resolveScratchpadOnDisk(path);
     if (scratchpad) layout = createInitialLayout(scratchpad);
+    // The sweep/resolve mutated disk behind the collections' back; start
+    // the re-walk NOW so the stale-tab pruner (gated on metadata fetching)
+    // waits for rows that include the scratchpad we just baked in.
+    void refetchWorkspaceMetadata(path);
   }
 
   if (layout.length === 0) {
@@ -147,9 +154,17 @@ export function useNavigationPersistence(): void {
       !location.search && !location.pathname.slice(1).includes("/");
     if (entering && atBareRoot) {
       void computeProjectEntryUrl(workspacePath).then((entryUrl) => {
-        // The user navigated (e.g. opened a file) while the entry URL was
-        // being computed — their navigation wins, never clobber it.
-        if (currentUrlRef.current !== fullPath) return;
+        // The user opened tabs (or left the project) while the entry URL
+        // was being computed — their navigation wins, never clobber it.
+        const [nowPathname, nowSearch = ""] = currentUrlRef.current.split("?");
+        const nowHasTabs = new URLSearchParams(nowSearch).get(LAYOUT_PARAM);
+        console.info("[scratchpad-debug] entry redirect", {
+          entryUrl,
+          fullPath,
+          now: currentUrlRef.current,
+          pathname: location.pathname,
+        });
+        if (nowPathname !== location.pathname || nowHasTabs) return;
         if (entryUrl !== fullPath) {
           navigate(entryUrl, { replace: true });
         } else {
