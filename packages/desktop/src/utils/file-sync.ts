@@ -27,6 +27,7 @@ import { getMarkdownEditor } from "@/components/editor/editor-store";
 import { platformAdapter } from "@/adapters";
 import { path as pathutil, relativeTreePath } from "./path";
 import { scratchpadsDirPath } from "@/entities/scratchpads";
+import { activeRenameTarget } from "@/entities/tabs";
 
 /**
  * The app-layer choke point for the "workspace paths are absolute"
@@ -76,6 +77,13 @@ export async function writeWorkspaceTextFile(
   content: string,
 ): Promise<void> {
   assertAbsoluteWorkspacePath(path);
+  // A rename-open-tab (scratchpad promotion) may be moving this exact file
+  // right now — wait it out and write to wherever the file settled, so an
+  // overlapping agent write can't resurrect the old path.
+  const renameTarget = activeRenameTarget(path);
+  if (renameTarget) {
+    path = await renameTarget;
+  }
   const result = await platformAdapter.fs.writeFiles([{ path, content }]);
   const failure = result.failed[0];
   if (failure) {

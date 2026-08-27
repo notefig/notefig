@@ -251,6 +251,12 @@ export function useLayoutSearchParam(): UseLayoutSearchParam {
  */
 const pendingTabRenames = new Set<string>();
 
+/** oldPath → promise of the path's final location (newPath on success,
+ * oldPath on failure). Programmatic writers (agent authoring) consult this
+ * via `activeRenameTarget` so a write overlapping the move lands on the
+ * moved file instead of resurrecting the old path. */
+const pendingRenameTargets = new Map<string, Promise<string>>();
+
 function beginTabRename(oldId: string, newId: string): void {
   pendingTabRenames.add(oldId);
   pendingTabRenames.add(newId);
@@ -259,6 +265,12 @@ function beginTabRename(oldId: string, newId: string): void {
 function endTabRename(oldId: string, newId: string): void {
   pendingTabRenames.delete(oldId);
   pendingTabRenames.delete(newId);
+}
+
+/** The path a write should target once any in-flight rename of `path`
+ * settles; null when no rename is in flight. */
+export function activeRenameTarget(path: string): Promise<string> | null {
+  return pendingRenameTargets.get(path) ?? null;
 }
 
 /**
@@ -282,6 +294,13 @@ export async function renameOpenFileTab(options: {
 }): Promise<void> {
   const { workspacePath, oldPath, newPath, applyLayoutRename } = options;
   beginTabRename(oldPath, newPath);
+  let settleTarget!: (path: string) => void;
+  pendingRenameTargets.set(
+    oldPath,
+    new Promise<string>((resolve) => {
+      settleTarget = resolve;
+    }),
+  );
   // Freeze the editor for the duration: an edit landing after the drain
   // would schedule a save against the old path and resurrect it post-move.
   // The editor stays alive (read-only) until the move succeeds, so a
@@ -294,9 +313,13 @@ export async function renameOpenFileTab(options: {
     await renameFileOrDirectory(workspacePath, oldPath, newPath);
   } catch (error) {
     if (liveEditor && !liveEditor.isDestroyed) liveEditor.setEditable(true);
+    settleTarget(oldPath);
+    pendingRenameTargets.delete(oldPath);
     endTabRename(oldPath, newPath);
     throw error;
   }
+  settleTarget(newPath);
+  pendingRenameTargets.delete(oldPath);
   disposeTab(oldPath);
   applyLayoutRename(oldPath, newPath);
   // Outlive the render that commits the layout write; after it, layout id

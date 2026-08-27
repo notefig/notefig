@@ -49,7 +49,7 @@ vi.mock("./agents", () => ({
   useAgentTaskRowsById: vi.fn(() => []),
 }));
 
-import { renameOpenFileTab } from "./tabs";
+import { activeRenameTarget, renameOpenFileTab } from "./tabs";
 
 const WS = "/ws";
 const OLD = "/ws/.metrists/scratchpads/untitled.md";
@@ -83,6 +83,29 @@ describe("renameOpenFileTab", () => {
     ]);
     expect(renameFileOrDirectoryMock).toHaveBeenCalledWith(WS, OLD, NEW);
     expect(applyLayoutRename).toHaveBeenCalledWith(OLD, NEW);
+  });
+
+  it("redirects overlapping programmatic writes to the settled path", async () => {
+    let resolveMove!: () => void;
+    renameFileOrDirectoryMock.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveMove = resolve;
+      }),
+    );
+
+    const run = renameOpenFileTab({
+      workspacePath: WS,
+      oldPath: OLD,
+      newPath: NEW,
+      applyLayoutRename: vi.fn(),
+    });
+    const target = activeRenameTarget(OLD);
+    expect(target).not.toBeNull();
+
+    resolveMove();
+    await run;
+    await expect(target).resolves.toBe(NEW);
+    expect(activeRenameTarget(OLD)).toBeNull();
   });
 
   it("waits for the save pipeline to drain before moving the file", async () => {
