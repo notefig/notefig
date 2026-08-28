@@ -44,6 +44,11 @@ export { queryClient };
 
 const METADATA_REFETCH_INTERVAL_MS = 30_000;
 
+/** Temporary MET-135 diagnostics — grep for [scratchpad-debug]. */
+function scratchpadDebug(...parts: unknown[]): void {
+  console.info("[scratchpad-debug]", ...parts);
+}
+
 /** Excludes content to keep metadata queries lightweight. */
 export interface FileMetadata {
   path: string; // Absolute path - serves as the key
@@ -116,6 +121,11 @@ export function createFileMetadataCollection(workspaceId: string) {
           })),
           ...filesResult.value.map((p) => ({ path: p, type: "file" as const })),
         ];
+        scratchpadDebug(
+          "metadata walk:",
+          entries.filter((e) => e.path.includes("/.metrists")).map((e) => e.path),
+        );
+
 
         // Re-stat children of hydrated directories so their stats stay
         // fresh across refetches instead of pinning to hydration time.
@@ -304,7 +314,13 @@ export function createFileContentCollection(workspaceId: string) {
 
         if (requestedPaths.length === 0) return [];
 
+        if (requestedPaths.some((p) => p.includes("/.metrists/"))) {
+          scratchpadDebug("content queryFn: reading", requestedPaths);
+        }
         const result = await platformAdapter.fs.readFiles(requestedPaths);
+        if (result.failed.length > 0) {
+          scratchpadDebug("content queryFn: FAILED reads", result.failed);
+        }
 
         const contentMap = new Map<string, FileContent>();
 
@@ -316,13 +332,18 @@ export function createFileContentCollection(workspaceId: string) {
           });
         }
 
-        // Add empty entries for failed reads (binary files like images).
-        // The error field marks that content is not the file's real content,
-        // so the editor must never mount from (or save over) this entry.
+        // Add empty entries for UNREADABLE files (binary, permissions).
+        // The error field marks that content is not the file's real
+        // content, so the editor must never mount from (or save over) the
+        // entry. A not_found is different: the file does not exist, so no
+        // row may be fabricated — a delete racing a recreate of the same
+        // path (scratchpad sweep, MET-135) would otherwise persist a
+        // poisoned error row that the recreated file's editor then trusts.
         for (const failure of result.failed) {
           console.warn(
             `Failed to read file ${failure.path}: ${failure.message}`,
           );
+          if (failure.type === "not_found") continue;
           contentMap.set(failure.path, {
             path: failure.path,
             content: "",
@@ -606,13 +627,24 @@ export async function createFile(
 ): Promise<void> {
   const collections = getOrCreateWorkspaceCollections(workspaceId);
 
-  collections.metadata.insert({
+  const tx = collections.metadata.insert({
     path: filePath,
     relativePath: relativeTreePath(workspaceId, filePath),
     type: "file",
     contentHash: "",
     size: 0,
   });
+  // The mutation handler writes the file asynchronously; callers open the
+  // path as a tab immediately after, and the content load must not race
+  // the disk write (a lost race is a sticky not_found editor — the write's
+  // own watcher echo is suppressed, so nothing would heal it).
+  await tx.isPersisted.promise;
+
+  // A fresh file must not inherit a content row from a previous life of
+  // this path (e.g. an error row left by a read that raced its deletion).
+  if (collections.content.get(filePath)) {
+    collections.content.utils.writeDelete(filePath);
+  }
 
   if (content) {
     await writeFileContent(workspaceId, filePath, content);
@@ -620,7 +652,7 @@ export async function createFile(
 
   // Refresh metadata to get accurate timestamps
   const metadataResult = await platformAdapter.fs.getMetadata([filePath]);
-  if (metadataResult.succeeded.length > 0) {
+  if (metadataResult.succeeded.length > 0 && collections.metadata.get(filePath)) {
     const metadata = metadataResult.succeeded[0];
     collections.metadata.update(filePath, (draft) => {
       draft.modified = metadata.modifiedAt;
@@ -933,6 +965,16 @@ export function useOpenFileRows(
   return data as OpenFileRow[];
 }
 
+/** Re-walk the workspace's metadata after out-of-band disk mutations
+ * (e.g. the entry-time scratchpad sweep, which runs on plain adapter fs).
+ * No-op when the workspace's collection hasn't mounted yet — the initial
+ * walk will see the files. */
+export function refetchWorkspaceMetadata(workspacePath: string): Promise<void> {
+  return queryClient.refetchQueries({
+    queryKey: ["file-metadata", workspacePath],
+  });
+}
+
 /** Whether the workspace's eager metadata load is still in flight. */
 export function useMetadataFetching(workspacePath: string): boolean {
   return (
@@ -940,6 +982,7 @@ export function useMetadataFetching(workspacePath: string): boolean {
     0
   );
 }
+
 
 /** Whether any on-demand content load for the workspace is in flight. */
 export function useContentFetching(workspacePath: string): boolean {

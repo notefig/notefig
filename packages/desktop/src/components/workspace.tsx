@@ -10,7 +10,7 @@ import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
 import { useContentFetching } from "@/entities/files";
 import { useFileWatchers } from "@/utils/file-sync";
-import { useWorkspaceTabs } from "@/entities/tabs";
+import { useWorkspaceTabs, renameOpenFileTab } from "@/entities/tabs";
 import { DebugPanel } from "./debug-panel";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import { useNavigationPersistence } from "@/hooks/use-recent-projects";
@@ -52,6 +52,7 @@ export const Workspace = () => {
     handleFileSelect,
     handleLayoutChange,
     closeTab,
+    renameTab,
     closeActiveTab,
     getFocusedTabId,
     focusActiveTab,
@@ -186,6 +187,7 @@ export const Workspace = () => {
 
   const {
     handleNewFile,
+    handleNewFileIn,
     handleNewDirectory,
     runHistoryAction,
     handleToggleFullscreen,
@@ -198,9 +200,23 @@ export const Workspace = () => {
     getSelectedText,
     openSidebarIfCollapsed,
     setFileTreeMode,
+    openFile: openFileInTabs,
     openSearchPanel,
     openSessionsSidebar,
   });
+
+  // Rename/move a file while its tab is open — the close-and-reopen
+  // primitive keeps the tab in its window slot.
+  const handleRenameOpenFile = useCallback(
+    (oldPath: string, newPath: string) =>
+      renameOpenFileTab({
+        workspacePath,
+        oldPath,
+        newPath,
+        applyLayoutRename: renameTab,
+      }),
+    [workspacePath, renameTab],
+  );
 
   useFileWatchers(workspacePath, fileOpenTabIds);
 
@@ -226,6 +242,7 @@ export const Workspace = () => {
               openTabs={openTabs}
               onFileSelect={handleFileSelect}
               closeTab={closeTab}
+              onRenameOpenFile={handleRenameOpenFile}
               mode={fileTreeMode}
               onModeChange={setFileTreeMode}
               searchPanelRef={searchPanelRef}
@@ -277,6 +294,7 @@ export const Workspace = () => {
           workspacePath={workspacePath}
           onOpenChange={setIsCommandPaletteOpen}
           onNewFile={handleNewFile}
+          onNewFileIn={handleNewFileIn}
           onNewDirectory={handleNewDirectory}
           onCloseFile={closeActiveTab}
           onUndo={() => runHistoryAction("undo")}

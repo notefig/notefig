@@ -6,12 +6,8 @@ import {
   FileText,
   Search,
   Sparkles,
-  Bookmark,
-  LayoutGrid,
-  Clock,
   GitBranch,
   Settings,
-  HelpCircle,
   PanelLeftClose,
   PanelLeft,
 } from "lucide-react";

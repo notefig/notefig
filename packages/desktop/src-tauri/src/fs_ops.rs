@@ -105,6 +105,7 @@ fn map_io_error(path: &str, err: std::io::Error) -> FileSystemError {
     }
 }
 
+
 async fn ensure_parent_dir(path: &Path) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).await?;
@@ -742,6 +743,29 @@ mod tests {
             assert!(value.iter().any(|p| p.contains("file1.txt")));
             assert!(value.iter().any(|p| p.contains("file2.txt")));
             assert!(value.iter().any(|p| p.contains("file3.txt")));
+        }
+    }
+
+    /// MET-135: the app dir (".metrists") is not hidden — it is walked by
+    /// default — while its own dot children (".metrists/.git") stay hidden.
+    #[tokio::test]
+    async fn test_read_directory_walks_app_dir_but_not_its_hidden_children() {
+        let temp_dir = setup_test_dir();
+        let root_path = temp_dir.path().to_string_lossy().to_string();
+
+        create_test_file(&temp_dir, "notes.md", "x").await;
+        create_test_file(&temp_dir, ".metrists/scratchpads/untitled.md", "x").await;
+        create_test_file(&temp_dir, ".metrists/.git/HEAD", "x").await;
+        create_test_file(&temp_dir, ".git/HEAD", "x").await;
+
+        let result =
+            read_directory(root_path.clone(), true, true, false, false, None, None).await;
+
+        assert!(matches!(result, Result::Ok { .. }));
+        if let Result::Ok { value, .. } = result {
+            assert!(value.iter().any(|p| p.contains("untitled.md")));
+            assert!(value.iter().any(|p| p.contains("notes.md")));
+            assert!(!value.iter().any(|p| p.contains("HEAD")));
         }
     }
 

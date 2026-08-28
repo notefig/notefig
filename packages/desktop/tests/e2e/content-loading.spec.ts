@@ -141,14 +141,10 @@ test.describe("Content Loading", () => {
     await page.reload();
     await waitForFileTree(page, "small-file.md");
 
+    // "New File" is instant (MET-135): an untitled scratchpad opens with
+    // no naming prompt; it must reach an editable editor rather than sit
+    // on the loading placeholder.
     await page.getByRole("button", { name: "New file" }).click();
-    const input = page.locator("file-tree-container input");
-    await input.waitFor({ state: "visible", timeout: 5000 });
-    await input.fill("brand-new.md");
-    await input.press("Enter");
-
-    // The new file auto-opens; it must reach an editable editor rather
-    // than sit on the loading placeholder.
     const editor = page
       .locator('[role="textbox"]')
       .locator("visible=true")
@@ -156,18 +152,27 @@ test.describe("Content Loading", () => {
     await editor.waitFor({ state: "visible", timeout: 10000 });
 
     await editor.click();
-    await editor.pressSequentially("# Brand New\n\nHello", { delay: 10 });
+    await editor.pressSequentially("Hello from a scratchpad", { delay: 10 });
     await waitForAutoSave(page);
 
-    const persisted = await getIndexedDBContent(
-      page,
-      ws,
-      `${ws}/brand-new.md`,
-    );
-    expect(persisted).toContain("Hello");
+    // The empty-entry auto-open may have claimed untitled.md first, so the
+    // clicked-into file is whichever untitled file holds the typed text.
+    await expect
+      .poll(async () => {
+        for (const name of ["untitled.md", "untitled-2.md"]) {
+          const content = await getIndexedDBContent(
+            page,
+            ws,
+            `${ws}/.metrists/scratchpads/${name}`,
+          ).catch(() => null);
+          if (content?.includes("Hello from a scratchpad")) return true;
+        }
+        return false;
+      })
+      .toBe(true);
   });
 
-  test("A failed content read shows an error state and never mounts an editor", async ({
+  test("A failed content read never mounts an editor", async ({
     page,
   }) => {
     await setupTestDatabase(page, "content-loading-read-failure");
@@ -182,19 +187,28 @@ test.describe("Content Loading", () => {
 
     await openFileInTree(page, "doomed-file.md", { waitForEditor: false });
 
-    // The error placeholder appears instead of an editor.
-    await expect(page.getByText("Failed to load file:")).toBeVisible({
+    // A missing file contributes NO content row (fabricating one poisoned
+    // recreated paths — MET-135), so the tab sits on the loading
+    // placeholder until metadata catches up and prunes it. The guards that
+    // matter: no editor may mount over the failed read, and nothing may
+    // write the file back.
+    const visibleEditors = () =>
+      page.evaluate(() => {
+        const editors = Array.from(
+          document.querySelectorAll('[role="textbox"]'),
+        );
+        return editors.filter(
+          (el) => window.getComputedStyle(el).display !== "none",
+        ).length;
+      });
+    expect(await visibleEditors()).toBe(0);
+
+    // Metadata catches up, pruning the dead file's tab and tree row —
+    // still with no editor mounted.
+    await expect(page.getByText("doomed-file.md")).toHaveCount(0, {
       timeout: 10000,
     });
-
-    // No editable document is shown for the failed file.
-    const visibleEditors = await page.evaluate(() => {
-      const editors = Array.from(document.querySelectorAll('[role="textbox"]'));
-      return editors.filter(
-        (el) => window.getComputedStyle(el).display !== "none",
-      ).length;
-    });
-    expect(visibleEditors).toBe(0);
+    expect(await visibleEditors()).toBe(0);
 
     // Nothing wrote the file back into storage (an empty-write would
     // recreate the row with empty content).

@@ -40,6 +40,7 @@ import {
   resetConverterForTests,
   closeDocumentSync,
   flushDocumentSync,
+  whenDocumentSyncClean,
 } from "@/utils/markdown-conversion";
 import { useEditorFileSync } from "../use-editor-file-sync";
 
@@ -213,6 +214,38 @@ describe("save pipeline (inline fallback = worker-boot-failure path)", () => {
     expect(writeFileContentMock.mock.calls.at(-1)![2]).toBe(
       "start last-second",
     );
+  });
+
+  it("whenDocumentSyncClean resolves immediately for unknown/clean paths and only after in-flight saves land", async () => {
+    // No sync at all: immediate.
+    await expect(whenDocumentSyncClean("/ws/never-opened.md")).resolves
+      .toBeUndefined();
+
+    await render(makeFile("start"));
+    // Clean sync: immediate.
+    await expect(whenDocumentSyncClean("/ws/note.md")).resolves.toBeUndefined();
+
+    // Dirty: the promise must not resolve before the write lands — even
+    // when captured BEFORE close (the rename-open-tab ordering).
+    await act(async () => {
+      editor.commands.insertContentAt(
+        editor.state.doc.content.size - 1,
+        " racing",
+      );
+    });
+    let clean: Promise<void>;
+    await act(async () => {
+      flushDocumentSync("/ws/note.md");
+      clean = whenDocumentSyncClean("/ws/note.md");
+      editor.destroy();
+      closeDocumentSync("/ws/note.md");
+    });
+    await act(async () => {
+      await clean;
+    });
+
+    expect(writeFileContentMock).toHaveBeenCalled();
+    expect(writeFileContentMock.mock.calls.at(-1)![2]).toBe("start racing");
   });
 
   it("does not save while updates are suppressed as not-loaded", async () => {

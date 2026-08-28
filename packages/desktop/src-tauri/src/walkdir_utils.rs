@@ -24,6 +24,18 @@ impl Default for WalkOptions {
     }
 }
 
+/// The app's own directory is deliberately NOT hidden (MET-135): it holds
+/// user-visible scratchpads and appears in the tree. Its dot-named children
+/// (.metrists/.git, .metrists/.agent) stay hidden like any other dot path.
+/// MET-115 renames this alongside the TS constant (entities/scratchpads.ts).
+pub const APP_DIR_NAME: &str = ".metrists";
+
+/// Whether a single path component counts as hidden (dot-named, longer than
+/// ".", and not the app's own directory).
+pub fn is_hidden_name(name: &str) -> bool {
+    name.starts_with('.') && name.len() > 1 && name != APP_DIR_NAME
+}
+
 /// Check if a path contains any component that starts with a dot (hidden file/directory)
 /// Examples: .git, .vscode, .DS_Store, etc.
 /// Note: Single dot "." is not considered hidden
@@ -31,7 +43,7 @@ pub fn is_hidden_path(path: &Path) -> bool {
     path.components().any(|component| {
         if let std::path::Component::Normal(os_str) = component {
             if let Some(name) = os_str.to_str() {
-                return name.starts_with('.') && name.len() > 1;
+                return is_hidden_name(name);
             }
         }
         false
@@ -90,8 +102,7 @@ where
 fn should_traverse_entry(entry: &walkdir::DirEntry, options: &WalkOptions) -> bool {
     let file_name = entry.file_name().to_string_lossy();
 
-    // Check if hidden (starts with '.' and longer than 1 char to exclude ".")
-    if options.exclude_hidden && file_name.starts_with('.') && file_name.len() > 1 {
+    if options.exclude_hidden && is_hidden_name(&file_name) {
         return false;
     }
 
@@ -148,7 +159,7 @@ pub fn is_hidden_relative_to(path: &Path, base: &Path) -> bool {
         relative.components().any(|component| {
             if let std::path::Component::Normal(os_str) = component {
                 if let Some(name) = os_str.to_str() {
-                    return name.starts_with('.') && name.len() > 1;
+                    return is_hidden_name(name);
                 }
             }
             false

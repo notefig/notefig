@@ -38,6 +38,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { dropZoneProps, tagCurrentDrag } from "@/utils/drag-protocol";
 import { path as pathutil, relativeTreePath } from "@/utils/path";
+import { isProtectedTreePath } from "@/entities/scratchpads";
 import { moveIntoFolder } from "@/utils/drop-actions";
 import { attachTreeStatHydration } from "./tree-stat-hydration";
 import {
@@ -88,6 +89,8 @@ interface FileTreeComponentProps {
   ) => void;
   onDelete?: (path: string) => void;
   onRename?: (oldPath: string, newName: string) => void;
+  /** Rename/move a file whose tab is open (close-and-reopen primitive). */
+  onRenameOpenFile?: (oldPath: string, newPath: string) => Promise<void>;
   onCreate?: (
     parentPath: string,
     name: string,
@@ -116,6 +119,7 @@ function FileTreeInner({
   onFileSelect,
   onDelete,
   onRename,
+  onRenameOpenFile,
   onCreate,
   openTabs,
   basePath,
@@ -164,9 +168,14 @@ function FileTreeInner({
 
   const openTabsRef = useRef(openTabs);
   openTabsRef.current = openTabs;
-  const isPathOpenInTab = useCallback((absPath: string) => {
+  // An open FILE renames/moves fine (the close-and-reopen rename walks the
+  // tab along), but moving a directory that contains open tabs would orphan
+  // them — tab ids are absolute paths — so those stay blocked.
+  const containsOpenTab = useCallback((absPath: string) => {
     const tabs = openTabsRef.current ?? [];
-    return tabs.some((tab) => pathutil.contains(absPath, tab));
+    return tabs.some(
+      (tab) => tab !== absPath && pathutil.contains(absPath, tab),
+    );
   }, []);
 
   const [pendingDelete, setPendingDelete] = useState<{
@@ -196,7 +205,7 @@ function FileTreeInner({
           : [],
         initialExpandedPaths: rememberedExpandedPaths(basePath),
         delegate: {
-          isPathOpenInTab: () => false,
+          containsOpenTab: () => false,
           moveFile: () => {},
           renameFile: () => {},
           createEntry: () => {},
@@ -211,13 +220,17 @@ function FileTreeInner({
   // The long-lived model calls into the app through this delegate — refresh
   // it every render so it never sees stale props.
   entry.delegate = {
-    isPathOpenInTab,
+    containsOpenTab,
     moveFile: (fromAbs, destAbs) => {
-      renameFileOrDirectory(basePath, fromAbs, destAbs).catch(
-        (error: unknown) => {
-          console.error(`Failed to move ${fromAbs}:`, error);
-        },
-      );
+      // Moving an OPEN file routes through the close-and-reopen rename so
+      // the tab follows the file instead of being orphaned.
+      const move =
+        (openTabsRef.current ?? []).includes(fromAbs) && onRenameOpenFile
+          ? onRenameOpenFile(fromAbs, destAbs)
+          : renameFileOrDirectory(basePath, fromAbs, destAbs);
+      move.catch((error: unknown) => {
+        console.error(`Failed to move ${fromAbs}:`, error);
+      });
     },
     renameFile: (oldAbs, newName) => onRename?.(oldAbs, newName),
     createEntry: (parentAbs, name, type) => onCreate?.(parentAbs, name, type),
@@ -557,6 +570,9 @@ function FileTreeInner({
   const renderContextMenu = useCallback(
     (item: ContextMenuItem, context: ContextMenuOpenContext) => {
       const abs = toAbs(item.path);
+      // App-owned paths (.metrists and its scratchpads folder) can't be
+      // renamed or deleted; creating files inside them stays allowed.
+      const isProtected = isProtectedTreePath(item.path.replace(/\/+$/, ""));
       // Mirrors ui/context-menu.tsx's ContextMenuItem styling (this menu is
       // hand-rolled — @pierre/trees owns its rendering) so the file tree and
       // the sessions panel read as the same menu.
@@ -618,36 +634,40 @@ function FileTreeInner({
               </button>
             </>
           )}
-          <button
-            type="button"
-            role="menuitem"
-            className={menuButton}
-            disabled={isPathOpenInTab(abs)}
-            onClick={() => {
-              model.startRenaming(item.path);
-              context.close({ restoreFocus: false });
-            }}
-          >
-            <PenLine />
-            {t("rename", "Rename")}
-          </button>
-          <div role="separator" className="-mx-1 my-1 h-px bg-border" />
-          <button
-            type="button"
-            role="menuitem"
-            className={`${menuButton} text-destructive`}
-            onClick={() => {
-              context.close();
-              setPendingDelete({ path: abs, type: item.kind });
-            }}
-          >
-            <Trash2 />
-            {t("delete", "Delete")}
-          </button>
+          {!isProtected && (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                className={menuButton}
+                disabled={containsOpenTab(abs)}
+                onClick={() => {
+                  model.startRenaming(item.path);
+                  context.close({ restoreFocus: false });
+                }}
+              >
+                <PenLine />
+                {t("rename", "Rename")}
+              </button>
+              <div role="separator" className="-mx-1 my-1 h-px bg-border" />
+              <button
+                type="button"
+                role="menuitem"
+                className={`${menuButton} text-destructive`}
+                onClick={() => {
+                  context.close();
+                  setPendingDelete({ path: abs, type: item.kind });
+                }}
+              >
+                <Trash2 />
+                {t("delete", "Delete")}
+              </button>
+            </>
+          )}
         </div>
       );
     },
-    [toAbs, openFileAtPath, onModeChange, isPathOpenInTab, model, t],
+    [toAbs, openFileAtPath, onModeChange, containsOpenTab, model, t],
   );
 
   const handleHostKeyDown = useCallback<
@@ -673,7 +693,10 @@ function FileTreeInner({
         (event.metaKey || event.ctrlKey)
       ) {
         const focused = model.getFocusedItem();
-        if (focused) {
+        if (
+          focused &&
+          !isProtectedTreePath(focused.getPath().replace(/\/+$/, ""))
+        ) {
           event.preventDefault();
           setPendingDelete({
             path: toAbs(focused.getPath()),

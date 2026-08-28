@@ -134,6 +134,8 @@ fn is_recent_app_write(path: &Path, content_hash: &str) -> bool {
 }
 
 /// Check if a path should be filtered (hidden files, temp files, etc.)
+/// `is_hidden_path` exempts the app dir (walkdir_utils::APP_DIR_NAME), so
+/// scratchpad events flow while `.metrists/.git` etc. stay filtered.
 fn should_filter_path(path: &Path) -> bool {
     if is_hidden_path(path) {
         return true;
@@ -752,6 +754,21 @@ mod event_kind_tests {
             gone_dir.to_string_lossy().to_string(),
             true
         )));
+    }
+
+    /// MET-135: the app dir is not hidden, so scratchpad events flow — but
+    /// its own dot children, other hidden paths, and atomic-write temp
+    /// files stay filtered. No per-watch configuration involved.
+    #[test]
+    fn app_dir_events_pass_filter_hidden_children_stay_filtered() {
+        let app_dir = PathBuf::from("/ws/.metrists");
+        assert!(!should_filter_path(&app_dir.join("scratchpads/untitled.md")));
+        assert!(should_filter_path(&app_dir.join(".git/HEAD")));
+        assert!(should_filter_path(&app_dir.join(".agent/opencode-1.json")));
+        assert!(should_filter_path(Path::new("/ws/.git/HEAD")));
+        assert!(should_filter_path(
+            &app_dir.join("scratchpads/untitled.md.tmp")
+        ));
     }
 
     /// MET-158: Windows' MoveFileExW(MOVEFILE_REPLACE_EXISTING) — every

@@ -454,20 +454,25 @@ test.describe("tree-internal moves (@pierre/trees native drag)", () => {
     ).toHaveCount(1);
   });
 
-  test("a file that is open in a tab is not moved", async ({ page }) => {
+  test("a file that is open in a tab moves and its tab follows", async ({
+    page,
+  }) => {
     await openNotes(page); // notes.md is open
 
     await page
       .locator(treeRowExact(NOTES_NAME))
       .dragTo(page.locator(treeDirRow(FOLDER_NAME)));
 
-    await page.waitForTimeout(500);
-    // stays at the root; nothing appeared inside the folder
-    await expect(page.locator(treeRowExact(NOTES_NAME))).toHaveCount(1);
+    // The move routes through the close-and-reopen rename: the file lands
+    // in the folder and the open tab swaps to the new path.
     await expect(
       page.locator(treeRowExact(`${FOLDER_NAME}/${NOTES_NAME}`)),
-    ).toHaveCount(0);
-    // and the editor keeps working
+    ).toHaveCount(1, { timeout: 10_000 });
+    await expect(page.locator(treeRowExact(NOTES_NAME))).toHaveCount(0);
+    await expect
+      .poll(() => decodeURIComponent(page.url()), { timeout: 10_000 })
+      .toContain(`${FOLDER_NAME}/${NOTES_NAME}`);
+    // and the editor keeps working on the moved file
     await expect(
       page.locator(".ProseMirror h1", { hasText: "DnD Fixture" }),
     ).toBeVisible();

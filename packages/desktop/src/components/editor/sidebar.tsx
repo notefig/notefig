@@ -23,6 +23,8 @@ import {
 import type { FileTreeNode, SortOrder } from "@/utils/fs";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { requestElementFocus } from "@/utils/focus-arbiter";
+import { createAndOpenScratchpad } from "@/entities/scratchpads";
+import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
 
 interface SidebarProps {
   workspacePath: string;
@@ -33,6 +35,8 @@ interface SidebarProps {
     options?: Omit<OpenFileInLayoutOptions, "tabId">,
   ) => void;
   closeTab: (tabId: string) => void;
+  /** Rename/move a file whose tab is open (close-and-reopen primitive). */
+  onRenameOpenFile: (oldPath: string, newPath: string) => Promise<void>;
   mode: FileTreeMode;
   onModeChange: (mode: FileTreeMode) => void;
   searchPanelRef?: Ref<SearchPanelHandle>;
@@ -44,6 +48,7 @@ export function Sidebar({
   openTabs,
   onFileSelect,
   closeTab,
+  onRenameOpenFile,
   mode,
   onModeChange,
   searchPanelRef,
@@ -128,13 +133,13 @@ export function Sidebar({
     });
   }, [mode.type]);
 
+  const { openFile } = useWorkspaceTabs();
+
+  // "New File" is instant and nameless (a scratchpad); location-specific
+  // creation stays on the tree's per-folder context menu (handleCreate).
   const handleNewFile = useCallback(() => {
-    onModeChange({
-      type: "creating",
-      parentPath: workspacePath,
-      itemType: "file",
-    });
-  }, [workspacePath, onModeChange]);
+    createAndOpenScratchpad(workspacePath, openFile);
+  }, [workspacePath, openFile]);
 
   const handleNewFolder = useCallback(() => {
     onModeChange({
@@ -200,6 +205,7 @@ export function Sidebar({
 
   const handleRenameFile = useCallback(
     (oldPath: string, newName: string) => {
+      // Rename is always in place; moving lives on the drag gesture.
       const newPath = getDirectoryPath(oldPath) + "/" + newName;
       if (oldPath === newPath) return;
 
@@ -209,13 +215,16 @@ export function Sidebar({
         return;
       }
 
-      renameFileOrDirectory(workspacePath, oldPath, newPath).catch(
-        (error: unknown) => {
-          console.error(`Failed to rename ${oldPath} to ${newPath}:`, error);
-        },
-      );
+      // Open files route through the close-and-reopen primitive so the
+      // tab follows the file.
+      const rename = openTabs.includes(oldPath)
+        ? onRenameOpenFile(oldPath, newPath)
+        : renameFileOrDirectory(workspacePath, oldPath, newPath);
+      rename.catch((error: unknown) => {
+        console.error(`Failed to rename ${oldPath} to ${newPath}:`, error);
+      });
     },
-    [workspacePath, metadata],
+    [workspacePath, metadata, openTabs, onRenameOpenFile],
   );
 
   const sidebarView = searchParams.get("sidebarView") || "files";
@@ -244,6 +253,7 @@ export function Sidebar({
               onFileSelect={onFileSelect}
               onDelete={handleDeleteFile}
               onRename={handleRenameFile}
+              onRenameOpenFile={onRenameOpenFile}
               onCreate={handleCreate}
               openTabs={openTabs}
               basePath={workspacePath}

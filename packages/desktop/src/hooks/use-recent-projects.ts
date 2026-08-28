@@ -1,8 +1,27 @@
 import { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { readKv, useKv, writeKv } from "@/utils/kv-store";
+import { SETTINGS_NAMESPACE } from "@/hooks/use-app-settings";
 import { formatTimeAgo } from "@/utils/format";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
+import { platformAdapter } from "@/adapters";
+import {
+  LAYOUT_PARAM,
+  extractTabIds,
+  parseLayout,
+} from "@/utils/layout-codec";
+import { isFileTabId } from "@/tabs/tab-id";
+import type { LayoutNode } from "@/components/dockable";
+import {
+  createInitialLayout,
+  removeTabFromLayout,
+} from "@/utils/dockable-layout";
+import {
+  cleanupLegacyAgentConfigDir,
+  resolveScratchpadOnDisk,
+  sweepScratchpadsOnDisk,
+} from "@/entities/scratchpads";
+import { refetchWorkspaceMetadata } from "@/entities/files";
 
 const RECENT_PROJECTS_NAMESPACE = "recentProjects";
 const MAX_RECENT_PROJECTS = 20;
@@ -39,13 +58,9 @@ async function rememberProjectNavigation(path: string, url: string) {
   });
 }
 
-/**
- * URL to land on when entering a project: the last visited URL if one is on
- * record (and still points inside this project), else the bare workspace
- * root. Open paths navigate to the bare root; useNavigationPersistence calls
- * this on entry and replace-navigates to the saved URL.
- */
-async function projectOpenUrl(path: string): Promise<string> {
+/** The last visited URL when it still points inside this project, else
+ * the project's bare root. */
+async function savedEntryBase(path: string): Promise<string> {
   const bare = `/${encodeURIComponent(path)}`;
   const saved = (await readKv<RecentProject>(RECENT_PROJECTS_NAMESPACE, path))
     ?.lastUrl;
@@ -54,6 +69,67 @@ async function projectOpenUrl(path: string): Promise<string> {
     saved?.startsWith(`${bare}?`) ||
     saved?.startsWith(`${bare}/`);
   return savedIsInsideProject && saved ? saved : bare;
+}
+
+/** Drop file tabs whose files no longer exist on disk. */
+async function pruneDeadFileTabs(layout: LayoutNode[]): Promise<LayoutNode[]> {
+  const fileTabs = extractTabIds(layout).filter(isFileTabId);
+  if (fileTabs.length === 0) return layout;
+  const checks = await platformAdapter.fs.exists(fileTabs);
+  return checks
+    .filter((check) => !check.exists)
+    .reduce((pruned, check) => removeTabFromLayout(pruned, check.path), layout);
+}
+
+/**
+ * The URL a project entry lands on, computed ONCE from disk truth before
+ * navigating — the single writer of the entry layout, so nothing can race
+ * or clobber it (MET-135). Start from the last visited URL (if it still
+ * points inside this project), drop file tabs whose files no longer
+ * exist, and if no tabs survive, land in a scratchpad: abandoned empty
+ * ones are swept away and the most recent survivor — or a fresh untitled
+ * one — is baked into the layout. All on plain adapter fs; collections
+ * are not consulted.
+ */
+async function computeProjectEntryUrl(path: string): Promise<string> {
+  const base = await savedEntryBase(path);
+  const [pathname, search = ""] = base.split("?");
+  const params = new URLSearchParams(search);
+  let layout = await pruneDeadFileTabs(parseLayout(params.get(LAYOUT_PARAM)));
+
+  cleanupLegacyAgentConfigDir(path);
+
+  const restoredTabs = extractTabIds(layout);
+  if (restoredTabs.length > 0) {
+    // Non-empty entry: sweep empty leftovers in the background, restore
+    // as-is.
+    void sweepScratchpadsOnDisk(path, restoredTabs).then(() =>
+      refetchWorkspaceMetadata(path),
+    );
+  } else {
+    await sweepScratchpadsOnDisk(path, []);
+    // Off means off: an empty entry lands on the empty state — neither
+    // creates a scratchpad nor auto-opens an existing one.
+    const scratchpadOnStartup =
+      (await readKv<boolean>(SETTINGS_NAMESPACE, "scratchpadOnStartup")) !==
+      false;
+    const scratchpad = scratchpadOnStartup
+      ? await resolveScratchpadOnDisk(path)
+      : null;
+    if (scratchpad) layout = createInitialLayout(scratchpad);
+    // The sweep/resolve mutated disk behind the collections' back; start
+    // the re-walk NOW so the stale-tab pruner (gated on metadata fetching)
+    // waits for rows that include the scratchpad we just baked in.
+    void refetchWorkspaceMetadata(path);
+  }
+
+  if (layout.length === 0) {
+    params.delete(LAYOUT_PARAM);
+  } else {
+    params.set(LAYOUT_PARAM, JSON.stringify(layout));
+  }
+  const query = params.toString();
+  return query ? `${pathname}?${query}` : pathname;
 }
 
 /**
@@ -69,11 +145,13 @@ async function projectOpenUrl(path: string): Promise<string> {
  * saved URL. Once inside the project a bare URL is the user's own doing
  * (e.g. closing the last tab) and is recorded like any other.
  */
-export function useNavigationPersistence() {
+export function useNavigationPersistence(): void {
   const { workspacePath } = useWorkspaceParams();
   const location = useLocation();
   const navigate = useNavigate();
   const enteredProjectRef = useRef<string | null>(null);
+  const currentUrlRef = useRef("");
+  currentUrlRef.current = location.pathname + location.search;
 
   useEffect(() => {
     if (!workspacePath) return;
@@ -84,9 +162,14 @@ export function useNavigationPersistence() {
     const atBareRoot =
       !location.search && !location.pathname.slice(1).includes("/");
     if (entering && atBareRoot) {
-      void projectOpenUrl(workspacePath).then((savedUrl) => {
-        if (savedUrl !== fullPath) {
-          navigate(savedUrl, { replace: true });
+      void computeProjectEntryUrl(workspacePath).then((entryUrl) => {
+        // The user opened tabs (or left the project) while the entry URL
+        // was being computed — their navigation wins, never clobber it.
+        const [nowPathname, nowSearch = ""] = currentUrlRef.current.split("?");
+        const nowHasTabs = new URLSearchParams(nowSearch).get(LAYOUT_PARAM);
+        if (nowPathname !== location.pathname || nowHasTabs) return;
+        if (entryUrl !== fullPath) {
+          navigate(entryUrl, { replace: true });
         } else {
           void rememberProjectNavigation(workspacePath, fullPath);
         }

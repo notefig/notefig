@@ -104,16 +104,14 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
         for (let i = 0; i < pathParts.length - 1; i++) {
           currentPath += pathParts[i] + "/";
           const dirPath = currentPath.slice(0, -1);
-          if (!isHiddenPath(dirPath)) {
+          // Relative to the walk root, like the file filter above.
+          if (!isHiddenPath(dirPath.slice(normalizedPath.length))) {
             directories.add(dirPath);
           }
         }
       } else {
-        if (pathParts.length > 1) {
-          const dirPath = normalizedPath + pathParts[0];
-          if (!isHiddenPath(dirPath)) {
-            directories.add(dirPath);
-          }
+        if (pathParts.length > 1 && !isHiddenPath(pathParts[0])) {
+          directories.add(normalizedPath + pathParts[0]);
         }
       }
     }
@@ -248,9 +246,11 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
         const filePaths = allKeys.filter((key) => {
           if (!key.startsWith(normalizedPath)) return false;
 
-          if (!includeHidden && isHiddenPath(key)) return false;
-
           const relativePath = key.slice(normalizedPath.length);
+
+          // Hidden filtering is relative to the walk root (the app dir is
+          // exempt inside isHiddenPath), matching the native walker.
+          if (!includeHidden && isHiddenPath(relativePath)) return false;
 
           if (!recursive && relativePath.includes("/")) return false;
 
@@ -370,6 +370,57 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
     }
 
     return { succeeded, failed };
+  }
+
+  /**
+   * Record-preserving move. The base implementation round-trips through
+   * readBinaryFiles → writeBinaryFiles, which stores TEXT files as
+   * `binaryData` with an empty `content` — every later readFiles then
+   * returns "" (surfaced by scratchpad auto-renames, MET-135). Moving the
+   * raw record keeps text, binary, and timestamps intact.
+   */
+  protected async moveFile(
+    oldPath: string,
+    newPath: string,
+  ): Promise<Result<void>> {
+    try {
+      const db = await this.ensureDB();
+      const record: Record<string, unknown> | null = await new Promise(
+        (resolve, reject) => {
+          const request = db
+            .transaction([this.STORE_NAME], "readonly")
+            .objectStore(this.STORE_NAME)
+            .get(oldPath);
+          request.onsuccess = () => resolve(request.result ?? null);
+          request.onerror = () => reject(request.error);
+        },
+      );
+      if (!record) {
+        return {
+          ok: false,
+          error: createError(oldPath, "not_found", "File not found"),
+        };
+      }
+
+      const transaction = db.transaction([this.STORE_NAME], "readwrite");
+      const store = transaction.objectStore(this.STORE_NAME);
+      store.put({ ...record, path: newPath });
+      store.delete(oldPath);
+      await new Promise<void>((resolve, reject) => {
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      });
+      return { ok: true, value: undefined };
+    } catch (error) {
+      return {
+        ok: false,
+        error: createError(
+          oldPath,
+          "io_error",
+          error instanceof Error ? error.message : "Unknown error",
+        ),
+      };
+    }
   }
 
   protected async moveDirectory(

@@ -66,6 +66,7 @@ i18n
 
           // File Controls
           newFile: "New file",
+          newFileIn: "New file in…",
           newFolder: "New folder",
           sort: "Sort",
           sortFiles: "Sort files",
@@ -108,7 +109,7 @@ i18n
           settings: "Settings",
           close: "Close",
           options: "Options",
-          projectSettings: "Project Settings",
+          generalSettings: "General Settings",
           general: "General",
           editor: "Editor",
           filesAndLinks: "Files and links",
@@ -157,6 +158,9 @@ i18n
           releaseNotesTitle: "Release Notes",
           releaseNotesEmpty: "No release notes yet.",
           relaunch: "Relaunch",
+          scratchpadOnStartup: "Scratchpad on startup",
+          scratchpadOnStartupDesc:
+            "Open a scratchpad when you enter a project with nothing open.",
           automaticUpdates: "Automatic updates",
           automaticUpdatesDesc:
             "Download updates in the background and notify you when they're ready to install.",
@@ -315,7 +319,8 @@ i18n
 
           // Command Keywords
           commandKeywords: {
-            newFile: ["new", "file", "create", "add"],
+            newFile: ["new", "file", "create", "add", "scratchpad", "note"],
+            newFileIn: ["new", "file", "in", "folder", "create", "location"],
             closeFile: ["close", "file", "tab"],
             newFolder: ["new", "folder", "directory", "create"],
             openFolder: ["open", "folder", "workspace", "directory"],

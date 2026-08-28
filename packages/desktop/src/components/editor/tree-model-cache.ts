@@ -2,6 +2,7 @@ import { FileTree, type FileTreeSortEntry } from "@pierre/trees";
 import { FILE_ICON_CONFIG } from "./file-type-icon";
 import type { SortOrder } from "@/utils/fs";
 import { path as pathutil } from "@/utils/path";
+import { isProtectedTreePath } from "@/entities/scratchpads";
 
 /**
  * Module-level cache of @pierre/trees models, one per workspace.
@@ -22,7 +23,10 @@ import { path as pathutil } from "@/utils/path";
  *   remount never resets, so scroll survives.
  */
 export interface TreeDelegate {
-  isPathOpenInTab(absPath: string): boolean;
+  /** True for a DIRECTORY with open tabs somewhere inside — moving it would
+   * orphan them. An open file itself is fine: the delegate's moveFile
+   * routes it through the close-and-reopen rename. */
+  containsOpenTab(absPath: string): boolean;
   moveFile(fromAbs: string, toAbs: string): void;
   renameFile(oldAbs: string, newName: string): void;
   createEntry(
@@ -163,16 +167,32 @@ export function acquireTreeModel(
       [data-item-section="icon"] svg[data-icon-token="markdown"] {
         color: var(--logo);
       }
+      [data-item-path=".metrists"], [data-item-path=".metrists/"] {
+        opacity: 0.65;
+        font-style: italic;
+      }
+      /* The scratchpads row displays as plain "scratchpads" — the tree
+         flattens the .metrists/scratchpads chain into one row (its
+         data-item-path is the deep one, trailing slash included) and the
+         ".metrists / " prefix is just noise. Display-only: model paths,
+         aria labels and search keep the real name, and no rename input
+         can render here (the row is protected). */
+      [data-item-path=".metrists/scratchpads/"] [data-item-section="content"] > * {
+        display: none;
+      }
+      [data-item-path=".metrists/scratchpads/"] [data-item-section="content"]::after {
+        content: "scratchpads";
+      }
     `,
     dragAndDrop: {
-      // Open-in-tab files may still be DRAGGED (dropping one on another
-      // window's tab bar moves the tab there — the protocol handles that
-      // outside the tree), but tree-internal MOVES of them are refused:
-      // tab ids are absolute paths, so a move would orphan the tab.
+      // Open-in-tab files CAN be moved — the delegate routes them through
+      // the close-and-reopen rename so the tab follows the file. Blocked:
+      // protected app paths, and directories with open tabs inside.
       canDrop: (context) =>
-        !context.draggedPaths.some((p) =>
-          entry.delegate.isPathOpenInTab(toAbs(p)),
-        ),
+        !context.draggedPaths.some((p) => {
+          if (isProtectedTreePath(p.replace(/\/+$/, ""))) return true;
+          return entry.delegate.containsOpenTab(toAbs(p));
+        }),
       onDropComplete: (event) => {
         // directoryPath arrives with a trailing slash ("docs/"); without
         // stripping it the destination becomes "docs//name", which round
@@ -188,7 +208,12 @@ export function acquireTreeModel(
       onDropError: (error) => console.error("Drop failed:", error),
     },
     renaming: {
-      canRename: (item) => !entry.delegate.isPathOpenInTab(toAbs(item.path)),
+      // Open files rename like closed ones (the delegate routes them
+      // through the close-and-reopen rename); blocked: protected app
+      // paths, and directories with open tabs inside.
+      canRename: (item) =>
+        !isProtectedTreePath(item.path.replace(/\/+$/, "")) &&
+        !entry.delegate.containsOpenTab(toAbs(item.path)),
       onRename: (event) => {
         const pending = entry.pendingCreate;
         const newName =

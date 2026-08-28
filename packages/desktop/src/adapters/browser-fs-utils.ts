@@ -70,15 +70,26 @@ export function getRelativePath(path: string, workspaceRoot: string): string {
   return "";
 }
 
+/** The app's own directory is deliberately NOT hidden (MET-135) — it
+ * appears in the tree; its dot-named children (.metrists/.git) stay
+ * hidden. Mirrors walkdir_utils::APP_DIR_NAME; MET-115 renames both. */
+const APP_DIR_NAME = ".metrists";
+
 /**
  * Check if a path contains hidden segments (starting with ., excluding . and ..)
  */
 export function isHiddenPath(path: string): boolean {
   const parts = path.split("/");
   return parts.some(
-    (part) => part.startsWith(".") && part.length > 1 && part !== "..",
+    (part) =>
+      part.startsWith(".") &&
+      part.length > 1 &&
+      part !== ".." &&
+      part !== APP_DIR_NAME,
   );
 }
+
+
 
 /**
  * App-side ignore checks for browser adapters. Lists arrive lowercased

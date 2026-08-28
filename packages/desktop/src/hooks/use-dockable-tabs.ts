@@ -15,6 +15,7 @@ import {
   openFileInLayout,
   type OpenFileInLayoutOptions,
   removeTabFromLayout,
+  renameTabInLayout,
   selectTabInLayout,
 } from "@/utils/dockable-layout";
 import {
@@ -49,6 +50,13 @@ export interface UseDockableTabsResult {
   openFile: (options: OpenFileInLayoutOptions) => void;
 
   closeTab: (tabId: string) => void;
+
+  /**
+   * Swap a tab id in place (rename-open-tab flow). Raw layout write: no
+   * dispose, no onBeforeClose — the orchestrator in entities/tabs.ts owns
+   * the editor teardown ordering.
+   */
+  renameTab: (oldId: string, newId: string) => void;
 
   getFocusedTabId: () => string | null;
 
@@ -249,6 +257,15 @@ export function useDockableTabs(
     [openTabs, setLayout],
   );
 
+  const renameTab = useCallback(
+    (oldId: string, newId: string) => {
+      setLayout((currentLayout) =>
+        renameTabInLayout(currentLayout, oldId, newId),
+      );
+    },
+    [setLayout],
+  );
+
   const selectTab = useCallback(
     (tabId: string) => {
       if (!openTabs.includes(tabId)) return;
@@ -428,6 +445,7 @@ export function useDockableTabs(
     handleLayoutChange,
     openFile,
     closeTab,
+    renameTab,
     getFocusedTabId,
     closeActiveTab,
     selectTab,

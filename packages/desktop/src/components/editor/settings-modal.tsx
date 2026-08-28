@@ -24,7 +24,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
-  Bot,
+  Sparkles,
   Shield,
 } from "lucide-react";
 import {
@@ -68,7 +68,7 @@ interface SettingsSection {
 
 const settingsSections: SettingsSection[] = [
   {
-    label: "projectSettings",
+    label: "generalSettings",
     items: [
       { id: "general", label: "General", icon: Settings },
       { id: "appearance", label: "Appearance", icon: Palette },
@@ -78,7 +78,13 @@ const settingsSections: SettingsSection[] = [
   },
   {
     label: "agentSettings",
-    items: [{ id: "harnesses", label: "Harnesses", icon: Bot }],
+    items: [
+      {
+        id: "harnesses",
+        label: "Harnesses",
+        icon: Sparkles,
+      },
+    ],
   },
   {
     label: "corePlugins",
@@ -250,6 +256,8 @@ function GeneralSettings({
           </SelectContent>
         </Select>
       </SettingRow>
+
+      <ScratchpadOnStartupToggle />
 
       <div className="pt-4">
         <h2 className="text-lg font-semibold mb-1">Advanced</h2>
@@ -499,6 +507,26 @@ function PrivacySettings() {
         />
       </SettingRow>
     </div>
+  );
+}
+
+function ScratchpadOnStartupToggle() {
+  const { t } = useTranslation();
+  const { settings, setSetting, isReady } = useAppSettings();
+
+  return (
+    <SettingRow
+      title={t("scratchpadOnStartup")}
+      description={t("scratchpadOnStartupDesc")}
+    >
+      <Switch
+        checked={settings.scratchpadOnStartup}
+        disabled={!isReady}
+        onCheckedChange={(checked) =>
+          setSetting("scratchpadOnStartup", checked)
+        }
+      />
+    </SettingRow>
   );
 }
 
