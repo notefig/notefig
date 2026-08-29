@@ -225,7 +225,7 @@ describe("non-canonical disk files (file bytes ≠ rendered document)", () => {
     "",
     "## The setup",
     "",
-    "The hidden `.metrists/` directory holds the app itself (a Next.js",
+    "The hidden `.notefig/` directory holds the app itself (a Next.js",
     "project), and `.gitignore` contains exactly one line.",
     "",
     "There's also a `.gittt/` directory that looks like a typo'd stray",
@@ -273,7 +273,7 @@ describe("non-canonical disk files (file bytes ≠ rendered document)", () => {
           type: "paragraph",
           content: [
             { type: "text", text: "The hidden " },
-            { type: "text", marks: [{ type: "code" }], text: ".metrists/" },
+            { type: "text", marks: [{ type: "code" }], text: ".notefig/" },
             {
               type: "text",
               text: " directory holds the app itself (a Next.js project), and ",
@@ -300,7 +300,7 @@ describe("non-canonical disk files (file bytes ≠ rendered document)", () => {
   }
 
   // "directory" occurrences in DISK: 0 = frontmatter title (raw-only!),
-  // 1 = heading, 2 = .metrists paragraph, 3 = .gittt paragraph.
+  // 1 = heading, 2 = .notefig paragraph, 3 = .gittt paragraph.
 
   it("heading occurrence resolves despite the frontmatter echo above it", () => {
     const editor = createAstEditor();

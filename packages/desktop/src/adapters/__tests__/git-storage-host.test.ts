@@ -8,7 +8,7 @@ import type { FileSystemSurface } from "../platform-adapter.interface";
  * adapter instance exists per app. Extracting it (MET-122) makes that
  * assumption explicit as a module-level map, now keyed by the repo's gitdir
  * (MET-51): two repos share one worktree (the user's `.git` and the history
- * repo's `.metrists/.git`), so keying by workspace made them contend on
+ * repo's `.notefig/.git`), so keying by workspace made them contend on
  * each other's locks.
  */
 
@@ -66,7 +66,7 @@ describe("createGitStorageHost lock registry", () => {
     const userRepo = createGitStorageHost(fsStub(), `${workspace}/.git`);
     const historyRepo = createGitStorageHost(
       fsStub(),
-      `${workspace}/.metrists/.git`,
+      `${workspace}/.notefig/.git`,
     );
 
     await userRepo.lock("index");

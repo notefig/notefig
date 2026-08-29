@@ -1,13 +1,15 @@
 /**
  * Scratchpads entity (MET-135): where nameless new files live. "New File"
  * instantly creates the next untitled markdown file in the app-owned
- * `.metrists/scratchpads/` folder; membership in that folder — not the
+ * `.notefig/scratchpads/` folder; membership in that folder — not the
  * filename — is what makes a file a scratchpad. Scratchpads never reach the
- * user's git (the existing `.metrists/` exclude covers them) but ARE
- * checkpointed by the app's history repo, whose own exclude history-service
- * narrows accordingly. Moving a file out of the folder is how it becomes a
- * tracked project file. MET-115 renames `.metrists`; consumers derive every
- * path from the constants here.
+ * user's git (the `.notefig/` exclude covers them) but ARE checkpointed by
+ * the app's history repo, whose own exclude history-service narrows to this
+ * one folder. Moving a file out of the folder is how it becomes a tracked
+ * project file. Scratchpads are also the ONLY child of the app dir the fs
+ * walkers and the watcher surface — everything else under `.notefig/` is
+ * hidden by position, so app-internal files need no dot prefix. Consumers
+ * derive every path from the constants here.
  *
  * This file is the whole feature, and the feature is deliberately small.
  * Scratchpads have exactly two special powers: "New File" auto-creates the
@@ -26,6 +28,11 @@ import { platformAdapter } from "@/adapters";
 import { path as pathutil } from "@/utils/path";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import {
+  APP_DIR_NAME,
+  SCRATCHPADS_DIR_NAME,
+  SCRATCHPADS_REL_PATH,
+} from "@/utils/app-dir";
+import {
   createFile,
   getOrCreateWorkspaceCollections,
   type FileMetadata,
@@ -35,9 +42,10 @@ import {
 // Path scheme & naming (pure)
 // ---------------------------------------------------------------------------
 
-export const APP_DIR_NAME = ".metrists";
-export const SCRATCHPADS_DIR_NAME = "scratchpads";
-export const SCRATCHPADS_REL_PATH = `${APP_DIR_NAME}/${SCRATCHPADS_DIR_NAME}`;
+// The names live in the leaf utils/app-dir so utils/history-service can
+// reach them without importing this entity (and closing a cycle through
+// ./files); re-exported here because this module is the access path.
+export { APP_DIR_NAME, SCRATCHPADS_DIR_NAME, SCRATCHPADS_REL_PATH };
 export const UNTITLED_BASENAME = "untitled";
 
 export function appDirPath(workspacePath: string): string {
@@ -112,17 +120,6 @@ export function isProtectedTreePath(relativeTreePath: string): boolean {
 // ---------------------------------------------------------------------------
 // Lifecycle I/O
 // ---------------------------------------------------------------------------
-
-/** Best-effort removal of the pre-MET-135 `.metrists/agent/` config dir —
- * it predates the app dir becoming visible in the tree; new configs live
- * in dot-named `.metrists/.agent/`. */
-export function cleanupLegacyAgentConfigDir(workspacePath: string): void {
-  void platformAdapter.fs
-    .deleteDirectories([pathutil.join(appDirPath(workspacePath), "agent")], {
-      recursive: true,
-    })
-    .catch(() => {});
-}
 
 function scratchpadRows(workspacePath: string): FileMetadata[] {
   return getOrCreateWorkspaceCollections(workspacePath).metadata.toArray.filter(

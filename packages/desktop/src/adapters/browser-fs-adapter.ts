@@ -285,9 +285,11 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
         const iterator = (handle as any).entries?.() ?? [];
         for await (const entry of iterator as AsyncIterable<[string, any]>) {
           const [name, sub] = entry;
-          if (!includeHidden && isHiddenPath(name)) continue;
-          if (isIgnoredEntry(name, sub.kind === "file")) continue;
           const nextRel = currentRel ? `${currentRel}/${name}` : name;
+          // Hidden filtering needs the path, not the bare name: inside the
+          // app dir only the scratchpads folder is visible.
+          if (!includeHidden && isHiddenPath(nextRel)) continue;
+          if (isIgnoredEntry(name, sub.kind === "file")) continue;
           if (sub.kind === "file") {
             if (includeFiles) {
               results.push(buildAbsolutePath(workspaceRoot, nextRel));

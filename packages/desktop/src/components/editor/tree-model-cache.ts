@@ -2,7 +2,11 @@ import { FileTree, type FileTreeSortEntry } from "@pierre/trees";
 import { FILE_ICON_CONFIG } from "./file-type-icon";
 import type { SortOrder } from "@/utils/fs";
 import { path as pathutil } from "@/utils/path";
-import { isProtectedTreePath } from "@/entities/scratchpads";
+import {
+  APP_DIR_NAME,
+  SCRATCHPADS_REL_PATH,
+  isProtectedTreePath,
+} from "@/entities/scratchpads";
 
 /**
  * Module-level cache of @pierre/trees models, one per workspace.
@@ -170,20 +174,20 @@ export function acquireTreeModel(
       [data-item-section="icon"] svg[data-icon-token="markdown"] {
         color: var(--logo);
       }
-      [data-item-path=".metrists"], [data-item-path=".metrists/"] {
+      [data-item-path="${APP_DIR_NAME}"], [data-item-path="${APP_DIR_NAME}/"] {
         opacity: 0.65;
         font-style: italic;
       }
       /* The scratchpads row displays as plain "scratchpads" — the tree
-         flattens the .metrists/scratchpads chain into one row (its
+         flattens the .notefig/scratchpads chain into one row (its
          data-item-path is the deep one, trailing slash included) and the
-         ".metrists / " prefix is just noise. Display-only: model paths,
+         ".notefig / " prefix is just noise. Display-only: model paths,
          aria labels and search keep the real name, and no rename input
          can render here (the row is protected). */
-      [data-item-path=".metrists/scratchpads/"] [data-item-section="content"] > * {
+      [data-item-path="${SCRATCHPADS_REL_PATH}/"] [data-item-section="content"] > * {
         display: none;
       }
-      [data-item-path=".metrists/scratchpads/"] [data-item-section="content"]::after {
+      [data-item-path="${SCRATCHPADS_REL_PATH}/"] [data-item-section="content"]::after {
         content: "scratchpads";
       }
       /* The scratchpads row swaps its directory icon for the library's html
@@ -192,10 +196,10 @@ export function acquireTreeModel(
          so the swap happens here: hide the real icon and paint the glyph
          as an alpha mask (the .2-opacity square survives as a 20% tint).
          Expand/collapse stays on the row click. */
-      [data-item-path=".metrists/scratchpads/"] [data-item-section="icon"] svg {
+      [data-item-path="${SCRATCHPADS_REL_PATH}/"] [data-item-section="icon"] svg {
         display: none;
       }
-      [data-item-path=".metrists/scratchpads/"] [data-item-section="icon"]::after {
+      [data-item-path="${SCRATCHPADS_REL_PATH}/"] [data-item-section="icon"]::after {
         content: "";
         display: block;
         width: 0.9375rem;

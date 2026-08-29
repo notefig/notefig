@@ -25,29 +25,50 @@ impl Default for WalkOptions {
 }
 
 /// The app's own directory is deliberately NOT hidden (MET-135): it holds
-/// user-visible scratchpads and appears in the tree. Its dot-named children
-/// (.metrists/.git, .metrists/.agent) stay hidden like any other dot path.
-/// MET-115 renames this alongside the TS constant (entities/scratchpads.ts).
-pub const APP_DIR_NAME: &str = ".metrists";
+/// user-visible scratchpads and appears in the tree. Everything else it
+/// contains — the history gitdir, agent state, whatever comes next — is
+/// hidden by position rather than by name, so app-internal files never need
+/// a dot prefix to stay out of the tree, the walkers and the watcher.
+/// Mirrors the TS constants in entities/scratchpads.ts.
+pub const APP_DIR_NAME: &str = ".notefig";
 
-/// Whether a single path component counts as hidden (dot-named, longer than
-/// ".", and not the app's own directory).
-pub fn is_hidden_name(name: &str) -> bool {
+/// The one child of the app dir that is visible; see `APP_DIR_NAME`.
+pub const APP_VISIBLE_CHILD_NAME: &str = "scratchpads";
+
+/// Whether the component `name`, sitting directly inside the component
+/// `parent`, counts as hidden: dot-named (longer than "."), or any child of
+/// the app dir other than the scratchpads folder.
+pub fn is_hidden_child(parent: Option<&str>, name: &str) -> bool {
+    if parent == Some(APP_DIR_NAME) {
+        return name != APP_VISIBLE_CHILD_NAME;
+    }
     name.starts_with('.') && name.len() > 1 && name != APP_DIR_NAME
 }
 
-/// Check if a path contains any component that starts with a dot (hidden file/directory)
-/// Examples: .git, .vscode, .DS_Store, etc.
+/// Whether any component of `components` is hidden in the sense of
+/// `is_hidden_child`, tracking each component's parent as it goes.
+fn has_hidden_component<'a>(components: impl Iterator<Item = std::path::Component<'a>>) -> bool {
+    let mut parent: Option<String> = None;
+    for component in components {
+        let std::path::Component::Normal(os_str) = component else {
+            continue;
+        };
+        let Some(name) = os_str.to_str() else {
+            continue;
+        };
+        if is_hidden_child(parent.as_deref(), name) {
+            return true;
+        }
+        parent = Some(name.to_string());
+    }
+    false
+}
+
+/// Check if a path contains any hidden component (`.git`, `.vscode`,
+/// `.DS_Store`, or an app-internal path like `.notefig/.git`).
 /// Note: Single dot "." is not considered hidden
 pub fn is_hidden_path(path: &Path) -> bool {
-    path.components().any(|component| {
-        if let std::path::Component::Normal(os_str) = component {
-            if let Some(name) = os_str.to_str() {
-                return is_hidden_name(name);
-            }
-        }
-        false
-    })
+    has_hidden_component(path.components())
 }
 
 /// Shared directory traversal with consistent filtering
@@ -102,8 +123,15 @@ where
 fn should_traverse_entry(entry: &walkdir::DirEntry, options: &WalkOptions) -> bool {
     let file_name = entry.file_name().to_string_lossy();
 
-    if options.exclude_hidden && is_hidden_name(&file_name) {
-        return false;
+    if options.exclude_hidden {
+        let parent = entry
+            .path()
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str());
+        if is_hidden_child(parent, &file_name) {
+            return false;
+        }
     }
 
     // Case-insensitive: patterns arrive lowercased from the frontend ignore
@@ -156,14 +184,7 @@ pub fn matches_exclude_pattern(file_name: &str, pattern: &str) -> bool {
 /// but we only want to filter based on hidden components within the workspace
 pub fn is_hidden_relative_to(path: &Path, base: &Path) -> bool {
     if let Ok(relative) = path.strip_prefix(base) {
-        relative.components().any(|component| {
-            if let std::path::Component::Normal(os_str) = component {
-                if let Some(name) = os_str.to_str() {
-                    return is_hidden_name(name);
-                }
-            }
-            false
-        })
+        has_hidden_component(relative.components())
     } else {
         // Can't get relative path, fall back to full path check
         is_hidden_path(path)
@@ -211,6 +232,21 @@ mod tests {
         assert!(!is_hidden_path(Path::new("/workspace/src/main.rs")));
         // Single dot should not be considered hidden
         assert!(!is_hidden_path(Path::new("/workspace/./src")));
+    }
+
+    #[test]
+    fn test_app_dir_exposes_only_scratchpads() {
+        let app = format!("/workspace/{}", APP_DIR_NAME);
+        assert!(!is_hidden_path(Path::new(&app)));
+        assert!(!is_hidden_path(Path::new(&format!("{}/scratchpads", app))));
+        assert!(!is_hidden_path(Path::new(&format!(
+            "{}/scratchpads/sub/untitled.md",
+            app
+        ))));
+        // Every other child is hidden, dot-named or not.
+        assert!(is_hidden_path(Path::new(&format!("{}/.git/HEAD", app))));
+        assert!(is_hidden_path(Path::new(&format!("{}/tasks.json", app))));
+        assert!(is_hidden_path(Path::new(&format!("{}/agent", app))));
     }
 
     #[test]

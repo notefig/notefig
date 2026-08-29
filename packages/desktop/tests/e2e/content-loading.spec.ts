@@ -163,7 +163,7 @@ test.describe("Content Loading", () => {
           const content = await getIndexedDBContent(
             page,
             ws,
-            `${ws}/.metrists/scratchpads/${name}`,
+            `${ws}/.notefig/scratchpads/${name}`,
           ).catch(() => null);
           if (content?.includes("Hello from a scratchpad")) return true;
         }

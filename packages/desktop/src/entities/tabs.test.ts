@@ -72,7 +72,7 @@ beforeEach(() => {
   cleanPromise = Promise.resolve();
   renameFileOrDirectoryMock.mockResolvedValue(undefined);
   pathCounter += 1;
-  OLD = `/ws/.metrists/scratchpads/untitled-${pathCounter}.md`;
+  OLD = `/ws/.notefig/scratchpads/untitled-${pathCounter}.md`;
   NEW = `/ws/My Notes ${pathCounter}.md`;
 });
 

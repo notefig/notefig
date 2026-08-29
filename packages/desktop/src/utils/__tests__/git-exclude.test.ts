@@ -13,7 +13,7 @@ vi.mock("@/adapters", () => ({
   },
 }));
 
-import { ensureExcludeLines, replaceExcludeLine } from "../git-exclude";
+import { ensureExcludeLines } from "../git-exclude";
 
 function fileExists(content: string) {
   readFilesMock.mockResolvedValue({
@@ -44,30 +44,30 @@ describe("ensureExcludeLines", () => {
   it("creates the file with the lines when it doesn't exist", async () => {
     fileMissing();
 
-    await ensureExcludeLines("/ws/.git", [".metrists/"]);
+    await ensureExcludeLines("/ws/.git", [".notefig/"]);
 
     expect(writeFilesMock).toHaveBeenCalledWith([
-      { path: "/ws/.git/info/exclude", content: ".metrists/\n" },
+      { path: "/ws/.git/info/exclude", content: ".notefig/\n" },
     ]);
   });
 
   it("appends only the missing lines, preserving existing content and order", async () => {
-    fileExists("# stock comment\nuser-pattern.log\n.metrists/\n");
+    fileExists("# stock comment\nuser-pattern.log\n.notefig/\n");
 
-    await ensureExcludeLines("/ws/.git", [".metrists/", ".git/"]);
+    await ensureExcludeLines("/ws/.git", [".notefig/", ".git/"]);
 
     expect(writeFilesMock).toHaveBeenCalledWith([
       {
         path: "/ws/.git/info/exclude",
-        content: "# stock comment\nuser-pattern.log\n.metrists/\n.git/\n",
+        content: "# stock comment\nuser-pattern.log\n.notefig/\n.git/\n",
       },
     ]);
   });
 
   it("is idempotent — no write when every line is already present", async () => {
-    fileExists("# stock comment\n.metrists/\n.git/\n");
+    fileExists("# stock comment\n.notefig/\n.git/\n");
 
-    await ensureExcludeLines("/ws/.git", [".metrists/", ".git/"]);
+    await ensureExcludeLines("/ws/.git", [".notefig/", ".git/"]);
 
     expect(writeFilesMock).not.toHaveBeenCalled();
   });
@@ -75,12 +75,12 @@ describe("ensureExcludeLines", () => {
   it("adds a newline before appending to a file without a trailing one", async () => {
     fileExists("user-pattern.log");
 
-    await ensureExcludeLines("/ws/.git", [".metrists/"]);
+    await ensureExcludeLines("/ws/.git", [".notefig/"]);
 
     expect(writeFilesMock).toHaveBeenCalledWith([
       {
         path: "/ws/.git/info/exclude",
-        content: "user-pattern.log\n.metrists/\n",
+        content: "user-pattern.log\n.notefig/\n",
       },
     ]);
   });
@@ -98,7 +98,7 @@ describe("ensureExcludeLines", () => {
     });
 
     await expect(
-      ensureExcludeLines("/ws/.git", [".metrists/"]),
+      ensureExcludeLines("/ws/.git", [".notefig/"]),
     ).rejects.toThrow(/EACCES/);
     // The file was NOT replaced with only the app's entries.
     expect(writeFilesMock).not.toHaveBeenCalled();
@@ -112,90 +112,8 @@ describe("ensureExcludeLines", () => {
     });
 
     await expect(
-      ensureExcludeLines("/ws/.git", [".metrists/"]),
+      ensureExcludeLines("/ws/.git", [".notefig/"]),
     ).rejects.toThrow(/disk full/);
   });
 });
 
-describe("replaceExcludeLine", () => {
-  const NEW_LINES = [
-    ".metrists/.git/",
-    ".metrists/agent/",
-    ".metrists/history/",
-    ".git/",
-  ];
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    writeFilesMock.mockResolvedValue({ succeeded: [{}], failed: [] });
-  });
-
-  it("replaces the old line in place, preserving every other line", async () => {
-    fileExists("# stock comment\n.metrists/\n.git/\nuser-pattern.log\n");
-
-    await replaceExcludeLine("/ws/.git", ".metrists/", NEW_LINES);
-
-    expect(writeFilesMock).toHaveBeenCalledWith([
-      {
-        path: "/ws/.git/info/exclude",
-        content:
-          "# stock comment\n.metrists/.git/\n.metrists/agent/\n.metrists/history/\n.git/\nuser-pattern.log\n",
-      },
-    ]);
-  });
-
-  it("is idempotent — a migrated file gets no second write", async () => {
-    fileExists(
-      "# stock comment\n.metrists/.git/\n.metrists/agent/\n.metrists/history/\n.git/\n",
-    );
-
-    await replaceExcludeLine("/ws/.git", ".metrists/", NEW_LINES);
-
-    expect(writeFilesMock).not.toHaveBeenCalled();
-  });
-
-  it("falls back to appending when the old line is absent", async () => {
-    fileExists("# stock comment\n.git/\n");
-
-    await replaceExcludeLine("/ws/.git", ".metrists/", NEW_LINES);
-
-    expect(writeFilesMock).toHaveBeenCalledWith([
-      {
-        path: "/ws/.git/info/exclude",
-        content:
-          "# stock comment\n.git/\n.metrists/.git/\n.metrists/agent/\n.metrists/history/\n",
-      },
-    ]);
-  });
-
-  it("creates the file with the new lines when it doesn't exist", async () => {
-    fileMissing();
-
-    await replaceExcludeLine("/ws/.git", ".metrists/", NEW_LINES);
-
-    expect(writeFilesMock).toHaveBeenCalledWith([
-      {
-        path: "/ws/.git/info/exclude",
-        content: NEW_LINES.join("\n") + "\n",
-      },
-    ]);
-  });
-
-  it("aborts on a non-not_found read failure", async () => {
-    readFilesMock.mockResolvedValue({
-      succeeded: [],
-      failed: [
-        {
-          path: "/ws/.git/info/exclude",
-          type: "permission_denied",
-          message: "EACCES",
-        },
-      ],
-    });
-
-    await expect(
-      replaceExcludeLine("/ws/.git", ".metrists/", NEW_LINES),
-    ).rejects.toThrow(/EACCES/);
-    expect(writeFilesMock).not.toHaveBeenCalled();
-  });
-});

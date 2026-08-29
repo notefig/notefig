@@ -17,7 +17,7 @@ import type {
  * The repo a service instance operates on, bound once at construction — a
  * worktree plus an explicit gitdir, never inferred from each other. A
  * workspace can hold two repos over one worktree (the user's `<ws>/.git`
- * and the app's `<ws>/.metrists/.git`); an inferred or per-call gitdir let
+ * and the app's `<ws>/.notefig/.git`); an inferred or per-call gitdir let
  * callers silently operate on the wrong repo.
  */
 export interface GitRepoRef {

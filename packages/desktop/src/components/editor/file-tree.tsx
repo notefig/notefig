@@ -570,7 +570,7 @@ function FileTreeInner({
   const renderContextMenu = useCallback(
     (item: ContextMenuItem, context: ContextMenuOpenContext) => {
       const abs = toAbs(item.path);
-      // App-owned paths (.metrists and its scratchpads folder) can't be
+      // App-owned paths (.notefig and its scratchpads folder) can't be
       // renamed or deleted; creating files inside them stays allowed.
       const isProtected = isProtectedTreePath(item.path.replace(/\/+$/, ""));
       // Mirrors ui/context-menu.tsx's ContextMenuItem styling (this menu is

@@ -71,22 +71,33 @@ export function getRelativePath(path: string, workspaceRoot: string): string {
 }
 
 /** The app's own directory is deliberately NOT hidden (MET-135) — it
- * appears in the tree; its dot-named children (.metrists/.git) stay
- * hidden. Mirrors walkdir_utils::APP_DIR_NAME; MET-115 renames both. */
-const APP_DIR_NAME = ".metrists";
+ * appears in the tree — but the only child of it that is visible is the
+ * scratchpads folder; everything else it holds (`.notefig/.git`, agent
+ * state, …) is hidden by position rather than by name. Mirrors
+ * walkdir_utils::{APP_DIR_NAME, APP_VISIBLE_CHILD_NAME} and
+ * entities/scratchpads.ts. */
+const APP_DIR_NAME = ".notefig";
+const APP_VISIBLE_CHILD_NAME = "scratchpads";
+
+/** Whether `name`, sitting directly inside `parent`, is hidden: dot-named,
+ * or any child of the app dir other than the scratchpads folder. */
+function isHiddenSegment(parent: string | undefined, name: string): boolean {
+  if (parent === APP_DIR_NAME) return name !== APP_VISIBLE_CHILD_NAME;
+  return (
+    name.startsWith(".") &&
+    name.length > 1 &&
+    name !== ".." &&
+    name !== APP_DIR_NAME
+  );
+}
 
 /**
- * Check if a path contains hidden segments (starting with ., excluding . and ..)
+ * Check if a path contains any hidden segment. Paths arrive relative to the
+ * walk root, so app-internal segments are recognized by their parent.
  */
 export function isHiddenPath(path: string): boolean {
-  const parts = path.split("/");
-  return parts.some(
-    (part) =>
-      part.startsWith(".") &&
-      part.length > 1 &&
-      part !== ".." &&
-      part !== APP_DIR_NAME,
-  );
+  const parts = path.split("/").filter(Boolean);
+  return parts.some((part, index) => isHiddenSegment(parts[index - 1], part));
 }
 
 

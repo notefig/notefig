@@ -3,23 +3,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   initMock,
   existsMock,
-  moveDirectoryMock,
   fsMock,
   createGitStorageHostMock,
   ensureExcludeLinesMock,
-  replaceExcludeLineMock,
 } = vi.hoisted(() => {
   const initMock = vi.fn();
   const existsMock = vi.fn();
-  const moveDirectoryMock = vi.fn();
   return {
     initMock,
     existsMock,
-    moveDirectoryMock,
-    fsMock: { exists: existsMock, moveDirectory: moveDirectoryMock },
+    fsMock: { exists: existsMock },
     createGitStorageHostMock: vi.fn(() => ({})),
     ensureExcludeLinesMock: vi.fn(),
-    replaceExcludeLineMock: vi.fn(),
   };
 });
 
@@ -39,7 +34,6 @@ vi.mock("@/adapters/git-storage-host", () => ({
 
 vi.mock("@/utils/git-exclude", () => ({
   ensureExcludeLines: ensureExcludeLinesMock,
-  replaceExcludeLine: replaceExcludeLineMock,
 }));
 
 import { IsomorphicGitService } from "@notefig/git";
@@ -52,8 +46,8 @@ import {
 } from "../history-service";
 
 const WS = "/workspace";
-const GIT_DIR = "/workspace/.metrists/.git";
-const LEGACY_DIR = "/workspace/.metrists/history";
+const GIT_DIR = "/workspace/.notefig/.git";
+const HISTORY_EXCLUDE = [".notefig/*", "!.notefig/scratchpads", ".git/"];
 
 /** Configure fs.exists to answer per path from a lookup. */
 function setExisting(paths: Record<string, boolean>) {
@@ -72,12 +66,10 @@ describe("history-service", () => {
     clearWorkspaceHistoryServices();
     initMock.mockResolvedValue(undefined);
     ensureExcludeLinesMock.mockResolvedValue(undefined);
-    replaceExcludeLineMock.mockResolvedValue(undefined);
-    moveDirectoryMock.mockResolvedValue({ ok: true, value: undefined });
     setExisting({});
   });
 
-  it("resolves the gitdir to .metrists/.git", () => {
+  it("resolves the gitdir to .notefig/.git", () => {
     expect(historyGitDir("/workspace/")).toBe(GIT_DIR);
   });
 
@@ -93,91 +85,50 @@ describe("history-service", () => {
     );
   });
 
-  it("fresh workspace: inits at the new gitdir without touching migration", async () => {
+  it("inits at the gitdir", async () => {
     await ensureWorkspaceHistoryInitialized(WS);
 
-    expect(moveDirectoryMock).not.toHaveBeenCalled();
     expect(initMock).toHaveBeenCalledWith({ defaultBranch: "main" });
   });
 
-  it("legacy gitdir present: renames it to .metrists/.git before init", async () => {
-    setExisting({ [`${LEGACY_DIR}/HEAD`]: true });
-
+  it("excludes everything under the app dir but the scratchpads folder", async () => {
     await ensureWorkspaceHistoryInitialized(WS);
 
-    expect(moveDirectoryMock).toHaveBeenCalledWith(LEGACY_DIR, GIT_DIR);
-    expect(moveDirectoryMock.mock.invocationCallOrder[0]).toBeLessThan(
-      initMock.mock.invocationCallOrder[0],
+    // `dir/*` + `!dir/child` is the one git shape that re-includes inside
+    // an excluded directory — history must keep checkpointing scratchpads
+    // while never seeing the app's own gitdir or agent state.
+    expect(ensureExcludeLinesMock).toHaveBeenCalledWith(
+      GIT_DIR,
+      HISTORY_EXCLUDE,
     );
   });
 
-  it("already migrated: never moves again even with a legacy dir left behind", async () => {
-    setExisting({
-      [`${GIT_DIR}/HEAD`]: true,
-      [`${LEGACY_DIR}/HEAD`]: true,
-    });
-
-    await ensureWorkspaceHistoryInitialized(WS);
-
-    expect(moveDirectoryMock).not.toHaveBeenCalled();
-  });
-
-  it("migration failure falls back to a fresh init without throwing", async () => {
-    setExisting({ [`${LEGACY_DIR}/HEAD`]: true });
-    moveDirectoryMock.mockResolvedValue({
-      ok: false,
-      error: { message: "cross-device link" },
-    });
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    await expect(ensureWorkspaceHistoryInitialized(WS)).resolves.toBeTruthy();
-
-    expect(initMock).toHaveBeenCalled();
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
-  });
-
-  it("narrows the history repo's exclude to app-internal subtrees (scratchpads stay tracked)", async () => {
-    await ensureWorkspaceHistoryInitialized(WS);
-
-    // Migrates a pre-MET-135 blanket `.metrists/` line in place; the
-    // scratchpads folder must NOT appear here — history checkpoints it.
-    expect(replaceExcludeLineMock).toHaveBeenCalledWith(GIT_DIR, ".metrists/", [
-      ".metrists/.git/",
-      ".metrists/.agent/",
-      ".metrists/agent/",
-      ".metrists/history/",
-      ".git/",
-    ]);
-  });
-
-  it("hides .metrists/ from the user's repo when the workspace has one", async () => {
+  it("hides .notefig/ from the user's repo when the workspace has one", async () => {
     setExisting({ [`${WS}/.git`]: true });
 
     await ensureWorkspaceHistoryInitialized(WS);
 
     expect(ensureExcludeLinesMock).toHaveBeenCalledWith(`${WS}/.git`, [
-      ".metrists/",
+      ".notefig/",
     ]);
   });
 
   it("self-heals: a repo the user inits later gets the exclude on the next ensure", async () => {
     await ensureWorkspaceHistoryInitialized(WS);
     expect(ensureExcludeLinesMock).not.toHaveBeenCalledWith(`${WS}/.git`, [
-      ".metrists/",
+      ".notefig/",
     ]);
 
-    setExisting({ [`${GIT_DIR}/HEAD`]: true, [`${WS}/.git`]: true });
+    setExisting({ [`${WS}/.git`]: true });
     await ensureWorkspaceHistoryInitialized(WS);
 
     expect(ensureExcludeLinesMock).toHaveBeenCalledWith(`${WS}/.git`, [
-      ".metrists/",
+      ".notefig/",
     ]);
   });
 
   it("exclude failures never block init", async () => {
     ensureExcludeLinesMock.mockRejectedValue(new Error("read-only fs"));
-    replaceExcludeLineMock.mockRejectedValue(new Error("read-only fs"));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     await expect(ensureWorkspaceHistoryInitialized(WS)).resolves.toBeTruthy();

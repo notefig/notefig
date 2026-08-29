@@ -1392,7 +1392,7 @@ describe("Stage 4: per-harness MCP registration", () => {
       return client;
     });
 
-    const expectedPath = `/ws/.metrists/.agent/opencode-${task.taskId}.json`;
+    const expectedPath = `/ws/.notefig/agent/opencode-${task.taskId}.json`;
     expect(capturedEnv?.OPENCODE_CONFIG).toBe(expectedPath);
     const write = writeFiles.mock.calls
       .flat(1)

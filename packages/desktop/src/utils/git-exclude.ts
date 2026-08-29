@@ -1,9 +1,10 @@
 /**
  * Managed writes to a git repo's `<gitDir>/info/exclude` — the gitdir-local,
- * never-committed cousin of `.gitignore`. Used to hide `.metrists/` (the
+ * never-committed cousin of `.gitignore`. Used to hide `.notefig/` (the
  * app's ephemeral-files root) from the user's own repo, and to keep the
- * history repo's worktree walk out of `.git/` and `.metrists/`. Both real
- * git and isomorphic-git honor this file.
+ * history repo's worktree walk out of `.git/` and out of everything under
+ * `.notefig/` bar the scratchpads. Both real git and isomorphic-git honor
+ * this file.
  */
 import { platformAdapter } from "@/adapters";
 
@@ -44,37 +45,6 @@ export async function ensureExcludeLines(
   const prefix =
     current.length === 0 || current.endsWith("\n") ? current : `${current}\n`;
   await writeExclude(excludePath, `${prefix}${missing.join("\n")}\n`);
-}
-
-/**
- * Replace one exact line in `<gitDir>/info/exclude` with `newLines` (only
- * the ones not already present), preserving every other line. Falls back to
- * `ensureExcludeLines(gitDir, newLines)` when `oldLine` is absent, so the
- * call is idempotent. ONLY for exclude files the app itself owns (the
- * history repo's) — rewriting a user repo's exclude is never safe.
- */
-export async function replaceExcludeLine(
-  gitDir: string,
-  oldLine: string,
-  newLines: string[],
-): Promise<void> {
-  const excludePath = `${gitDir}/info/exclude`;
-  const current = await readExclude(excludePath);
-  const lines = current.length === 0 ? [] : current.split("\n");
-
-  const oldIndex = lines.findIndex((line) => line.trim() === oldLine);
-  if (oldIndex === -1) {
-    return ensureExcludeLines(gitDir, newLines);
-  }
-
-  const present = new Set(lines.map((line) => line.trim()));
-  const missing = newLines.filter((line) => !present.has(line));
-  lines.splice(oldIndex, 1, ...missing);
-  const content = lines.join("\n");
-  await writeExclude(
-    excludePath,
-    content.length === 0 || content.endsWith("\n") ? content : `${content}\n`,
-  );
 }
 
 async function writeExclude(

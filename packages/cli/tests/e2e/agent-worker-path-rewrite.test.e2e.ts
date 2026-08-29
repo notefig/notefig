@@ -8,11 +8,11 @@ describe('rewriteToWorkspaceRoot', () => {
   it('swaps the browser root prefix for the worker root', () => {
     expect(
       rewriteToWorkspaceRoot(
-        `${browserRoot}/.metrists/agent/opencode-t1.json`,
+        `${browserRoot}/.notefig/agent/opencode-t1.json`,
         browserRoot,
         workerRoot,
       ),
-    ).toBe(`${workerRoot}/.metrists/agent/opencode-t1.json`);
+    ).toBe(`${workerRoot}/.notefig/agent/opencode-t1.json`);
   });
 
   it('maps the root itself', () => {

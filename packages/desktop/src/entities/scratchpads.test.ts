@@ -81,7 +81,7 @@ beforeEach(async () => {
   vi.restoreAllMocks();
   vi.clearAllMocks();
   WS = `/ws-scratchpads-test-${testCounter++}`;
-  DIR = `${WS}/.metrists/scratchpads`;
+  DIR = `${WS}/.notefig/scratchpads`;
   adapter.createFiles.mockImplementation(async (paths: string[]) => ok(paths));
   adapter.writeFiles.mockImplementation(async (writes: { path: string }[]) =>
     ok(writes),
@@ -113,19 +113,19 @@ describe("path scheme & naming", () => {
   it("recognizes scratchpads by folder membership, not filename", () => {
     expect(
       scratchpads.isScratchpadFileRow({
-        relativePath: ".metrists/scratchpads/anything.md",
+        relativePath: ".notefig/scratchpads/anything.md",
         type: "file",
       }),
     ).toBe(true);
     expect(
       scratchpads.isScratchpadFileRow({
-        relativePath: ".metrists/scratchpads/sub/a.md",
+        relativePath: ".notefig/scratchpads/sub/a.md",
         type: "file",
       }),
     ).toBe(false);
     expect(
       scratchpads.isScratchpadFileRow({
-        relativePath: ".metrists/scratchpads",
+        relativePath: ".notefig/scratchpads",
         type: "directory",
       }),
     ).toBe(false);
@@ -164,9 +164,9 @@ describe("path scheme & naming", () => {
   });
 
   it("protects only the app dir and the folder itself", () => {
-    expect(scratchpads.isProtectedTreePath(".metrists")).toBe(true);
-    expect(scratchpads.isProtectedTreePath(".metrists/scratchpads")).toBe(true);
-    expect(scratchpads.isProtectedTreePath(".metrists/scratchpads/a.md")).toBe(
+    expect(scratchpads.isProtectedTreePath(".notefig")).toBe(true);
+    expect(scratchpads.isProtectedTreePath(".notefig/scratchpads")).toBe(true);
+    expect(scratchpads.isProtectedTreePath(".notefig/scratchpads/a.md")).toBe(
       false,
     );
   });
@@ -189,7 +189,7 @@ describe("createUntitledScratchpad", () => {
     files.getOrCreateWorkspaceCollections(WS).metadata.utils.writeUpsert([
       {
         path: DIR,
-        relativePath: ".metrists/scratchpads",
+        relativePath: ".notefig/scratchpads",
         type: "file" as const,
         contentHash: "",
       },
