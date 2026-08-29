@@ -29,10 +29,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import type { HarnessDefinition } from "@notefig/shared/agent";
-import type {
-  AgentTransport,
-  McpEndpoint,
-} from "@notefig/agent";
+import type { AgentTransport, McpEndpoint } from "@notefig/agent";
 import { TauriStdioTransport } from "@/agent/tauri-stdio-transport";
 import { TauriMcpTransport } from "@/agent/tauri-mcp-transport";
 
@@ -413,11 +410,26 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     paths: string[],
   ): Promise<BatchResult<FileSystemMetadata>> {
     try {
-      const result = await invoke<BatchResult<FileSystemMetadata>>(
-        "get_metadata",
-        { paths },
-      );
-      return result;
+      // The wire carries epoch millis (fs_ops.rs serializes i64); the
+      // adapter owns reviving them into the Dates the interface declares —
+      // the browser adapters construct real Dates, and consumers (e.g.
+      // pickMostRecentScratchpad) call Date methods on them.
+      const result = await invoke<
+        BatchResult<
+          Omit<FileSystemMetadata, "modifiedAt" | "createdAt"> & {
+            modifiedAt: number;
+            createdAt: number;
+          }
+        >
+      >("get_metadata", { paths });
+      return {
+        ...result,
+        succeeded: result.succeeded.map((entry) => ({
+          ...entry,
+          modifiedAt: new Date(entry.modifiedAt),
+          createdAt: new Date(entry.createdAt),
+        })),
+      };
     } catch (error) {
       return {
         succeeded: [],

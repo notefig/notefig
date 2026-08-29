@@ -13,7 +13,8 @@
  * Scratchpads have exactly two special powers: "New File" auto-creates the
  * next untitled file here, and an empty workspace entry auto-opens the most
  * recent one (useNavigationPersistence folds it into the entry URL), after
- * an entry-time sweep deletes abandoned empty ones. The "scratchpad on
+ * an entry-time sweep deletes abandoned empty untitled ones (renamed files
+ * are the user's, even while empty). The "scratchpad on
  * startup" app setting turns the empty-entry half off entirely — no
  * create, no auto-open; only the sweep still runs. In every other respect
  * — renaming, dragging, tab titles, deletion — they are ordinary files
@@ -58,6 +59,12 @@ export function isScratchpadFileRow(row: {
     row.relativePath.startsWith(prefix) &&
     !row.relativePath.slice(prefix.length).includes("/")
   );
+}
+
+/** A basename this module itself would generate ("untitled.md",
+ * "untitled-2.md", …). Anything else carries a user-chosen name. */
+export function isUntitledBasename(basename: string): boolean {
+  return new RegExp(`^${UNTITLED_BASENAME}(-\\d+)?\\.md$`).test(basename);
 }
 
 export function nextUntitledBasename(existingBasenames: string[]): string {
@@ -202,10 +209,13 @@ export async function resolveScratchpadOnDisk(
 }
 
 /**
- * Entry-time cleanup, on plain disk truth: whitespace-only scratchpads not
- * in `keepPaths` (the tabs the entry is about to restore) are deleted.
- * Best-effort; failures warn, never throw. Rows catch up via the watcher
- * and the metadata walk.
+ * Entry-time cleanup, on plain disk truth: whitespace-only UNTITLED
+ * scratchpads not in `keepPaths` (the tabs the entry is about to restore)
+ * are deleted. Only auto-generated names qualify — a renamed scratchpad
+ * expresses user intent even while still empty, and sweeping it would
+ * silently destroy it (and with it the empty-entry auto-open). Best-effort;
+ * failures warn, never throw. Rows catch up via the watcher and the
+ * metadata walk.
  */
 export async function sweepScratchpadsOnDisk(
   workspacePath: string,
@@ -219,7 +229,9 @@ export async function sweepScratchpadsOnDisk(
   });
   if (!listing.ok) return;
   const keep = new Set(keepPaths);
-  const candidates = listing.value.filter((path) => !keep.has(path));
+  const candidates = listing.value.filter(
+    (path) => !keep.has(path) && isUntitledBasename(pathutil.basename(path)),
+  );
   if (candidates.length === 0) return;
 
   const reads = await platformAdapter.fs.readFiles(candidates);

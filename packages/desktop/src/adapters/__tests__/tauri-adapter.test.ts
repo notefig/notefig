@@ -133,3 +133,36 @@ describe("ignore rules plumbing", () => {
     expect(entries.map((e) => e.name)).toEqual([".git", "node_modules"]);
   });
 });
+
+describe("metadata date revival", () => {
+  it("revives the wire's epoch-millis into Date instances", async () => {
+    // fs_ops.rs serializes modifiedAt/createdAt as i64 epoch millis; the
+    // adapter interface declares Dates. Regression: raw numbers leaking
+    // through crashed pickMostRecentScratchpad (`modifiedAt?.getTime`),
+    // silently killing empty-entry scratchpad auto-open for any workspace
+    // with two or more scratchpads.
+    withMockedTauri({
+      get_metadata: () => ({
+        succeeded: [
+          {
+            path: "/ws/a.md",
+            type: "file",
+            size: 3,
+            modifiedAt: 1_700_000_000_000,
+            createdAt: 1_600_000_000_000,
+          },
+        ],
+        failed: [],
+      }),
+    });
+    const adapter = new TauriPlatformAdapter();
+
+    const result = await adapter.fs.getMetadata(["/ws/a.md"]);
+
+    const entry = result.succeeded[0];
+    expect(entry.modifiedAt).toBeInstanceOf(Date);
+    expect(entry.modifiedAt.getTime()).toBe(1_700_000_000_000);
+    expect(entry.createdAt).toBeInstanceOf(Date);
+    expect(entry.createdAt.getTime()).toBe(1_600_000_000_000);
+  });
+});

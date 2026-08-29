@@ -5,11 +5,7 @@ import { SETTINGS_NAMESPACE } from "@/hooks/use-app-settings";
 import { formatTimeAgo } from "@/utils/format";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import { platformAdapter } from "@/adapters";
-import {
-  LAYOUT_PARAM,
-  extractTabIds,
-  parseLayout,
-} from "@/utils/layout-codec";
+import { LAYOUT_PARAM, extractTabIds, parseLayout } from "@/utils/layout-codec";
 import { isFileTabId } from "@/tabs/tab-id";
 import type { LayoutNode } from "@/components/dockable";
 import {
@@ -107,16 +103,24 @@ async function computeProjectEntryUrl(path: string): Promise<string> {
       refetchWorkspaceMetadata(path),
     );
   } else {
-    await sweepScratchpadsOnDisk(path, []);
-    // Off means off: an empty entry lands on the empty state — neither
-    // creates a scratchpad nor auto-opens an existing one.
-    const scratchpadOnStartup =
-      (await readKv<boolean>(SETTINGS_NAMESPACE, "scratchpadOnStartup")) !==
-      false;
-    const scratchpad = scratchpadOnStartup
-      ? await resolveScratchpadOnDisk(path)
-      : null;
-    if (scratchpad) layout = createInitialLayout(scratchpad);
+    // A scratchpad-resolution failure must degrade to a plain empty entry,
+    // never reject computeProjectEntryUrl — an unhandled rejection here
+    // strands the app at the bare root with no recorded URL (this is how
+    // the metadata-Date wire bug presented: entry silently never resolved).
+    try {
+      await sweepScratchpadsOnDisk(path, []);
+      // Off means off: an empty entry lands on the empty state — neither
+      // creates a scratchpad nor auto-opens an existing one.
+      const scratchpadOnStartup =
+        (await readKv<boolean>(SETTINGS_NAMESPACE, "scratchpadOnStartup")) !==
+        false;
+      const scratchpad = scratchpadOnStartup
+        ? await resolveScratchpadOnDisk(path)
+        : null;
+      if (scratchpad) layout = createInitialLayout(scratchpad);
+    } catch (error) {
+      console.error("[scratchpads] entry resolution failed:", error);
+    }
     // The sweep/resolve mutated disk behind the collections' back; start
     // the re-walk NOW so the stale-tab pruner (gated on metadata fetching)
     // waits for rows that include the scratchpad we just baked in.
