@@ -131,6 +131,15 @@ describe("path scheme & naming", () => {
     ).toBe(false);
   });
 
+  it("recognizes only its own generated basenames as untitled", () => {
+    expect(scratchpads.isUntitledBasename("untitled.md")).toBe(true);
+    expect(scratchpads.isUntitledBasename("untitled-2.md")).toBe(true);
+    expect(scratchpads.isUntitledBasename("untitled-10.md")).toBe(true);
+    expect(scratchpads.isUntitledBasename("meeting-notes.md")).toBe(false);
+    expect(scratchpads.isUntitledBasename("untitled-notes.md")).toBe(false);
+    expect(scratchpads.isUntitledBasename("untitled.txt")).toBe(false);
+  });
+
   it("counts untitled names up first-free", () => {
     expect(scratchpads.nextUntitledBasename([])).toBe("untitled.md");
     expect(
@@ -157,9 +166,9 @@ describe("path scheme & naming", () => {
   it("protects only the app dir and the folder itself", () => {
     expect(scratchpads.isProtectedTreePath(".metrists")).toBe(true);
     expect(scratchpads.isProtectedTreePath(".metrists/scratchpads")).toBe(true);
-    expect(
-      scratchpads.isProtectedTreePath(".metrists/scratchpads/a.md"),
-    ).toBe(false);
+    expect(scratchpads.isProtectedTreePath(".metrists/scratchpads/a.md")).toBe(
+      false,
+    );
   });
 });
 
@@ -269,6 +278,25 @@ describe("sweepScratchpadsOnDisk", () => {
     expect(adapter.moveFile).not.toHaveBeenCalled();
   });
 
+  it("never touches renamed scratchpads, even empty ones", async () => {
+    const renamedEmpty = `${DIR}/meeting-notes.md`;
+    const untitledEmpty = `${DIR}/untitled.md`;
+    adapter.readDirectory.mockResolvedValue({
+      ok: true,
+      value: [renamedEmpty, untitledEmpty],
+    });
+    adapter.readFiles.mockResolvedValue(
+      ok([{ path: untitledEmpty, content: "" }]),
+    );
+
+    await scratchpads.sweepScratchpadsOnDisk(WS, []);
+
+    // The renamed file is never even read — it can't qualify.
+    expect(adapter.readFiles).toHaveBeenCalledWith([untitledEmpty]);
+    expect(adapter.deleteFiles).toHaveBeenCalledWith([untitledEmpty]);
+    expect(adapter.deleteFiles).toHaveBeenCalledTimes(1);
+  });
+
   it("does nothing when the folder is missing", async () => {
     adapter.readDirectory.mockResolvedValue({
       ok: false,
@@ -286,9 +314,7 @@ describe("content loads for missing files", () => {
     seedFileRow(missing);
     adapter.readFiles.mockResolvedValue({
       succeeded: [],
-      failed: [
-        { path: missing, type: "not_found", message: "os error 2" },
-      ],
+      failed: [{ path: missing, type: "not_found", message: "os error 2" }],
     });
 
     // Drive the on-demand content load the way an opening tab does.

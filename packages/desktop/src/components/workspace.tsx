@@ -186,8 +186,8 @@ export const Workspace = () => {
     useState<FileTreeMode>(FILE_TREE_IDLE);
 
   const {
+    handleNewScratchpad,
     handleNewFile,
-    handleNewFileIn,
     handleNewDirectory,
     runHistoryAction,
     handleToggleFullscreen,
@@ -293,8 +293,8 @@ export const Workspace = () => {
           sidebarOpen={isSidebarCollapsed}
           workspacePath={workspacePath}
           onOpenChange={setIsCommandPaletteOpen}
+          onNewScratchpad={handleNewScratchpad}
           onNewFile={handleNewFile}
-          onNewFileIn={handleNewFileIn}
           onNewDirectory={handleNewDirectory}
           onCloseFile={closeActiveTab}
           onUndo={() => runHistoryAction("undo")}

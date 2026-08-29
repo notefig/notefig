@@ -135,11 +135,20 @@ export function Sidebar({
 
   const { openFile } = useWorkspaceTabs();
 
-  // "New File" is instant and nameless (a scratchpad); location-specific
-  // creation stays on the tree's per-folder context menu (handleCreate).
-  const handleNewFile = useCallback(() => {
+  // "New Scratchpad" is instant and nameless; "New File" starts the tree's
+  // inline-naming flow at the workspace root (per-folder creation stays on
+  // the context menu — both land in handleCreate).
+  const handleNewScratchpad = useCallback(() => {
     createAndOpenScratchpad(workspacePath, openFile);
   }, [workspacePath, openFile]);
+
+  const handleNewFile = useCallback(() => {
+    onModeChange({
+      type: "creating",
+      parentPath: workspacePath,
+      itemType: "file",
+    });
+  }, [workspacePath, onModeChange]);
 
   const handleNewFolder = useCallback(() => {
     onModeChange({
@@ -262,6 +271,7 @@ export function Sidebar({
               onModeChange={onModeChange}
             />
             <FileControls
+              onNewScratchpad={handleNewScratchpad}
               onNewFile={handleNewFile}
               onNewFolder={handleNewFolder}
               sortOrder={sortOrder}

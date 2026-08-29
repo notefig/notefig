@@ -25,8 +25,8 @@ export interface WorkspaceCommandsOptions {
 }
 
 export interface WorkspaceCommands {
+  handleNewScratchpad: () => void;
   handleNewFile: () => void;
-  handleNewFileIn: () => void;
   handleNewDirectory: () => void;
   /** Undo/redo inside the focused tab, if its type keeps a history. */
   runHistoryAction: (action: "undo" | "redo") => void;
@@ -37,8 +37,8 @@ export interface WorkspaceCommands {
 
 /**
  * The workspace's command handlers (fed to CommandPalette) and their
- * keyboard shortcuts: Mod+N new file, Mod+F search in file, Mod+Shift+F
- * global search, Mod+Shift+A agent sessions sidebar.
+ * keyboard shortcuts: Mod+N new scratchpad, Mod+F search in file,
+ * Mod+Shift+F global search, Mod+Shift+A agent sessions sidebar.
  */
 export function useWorkspaceCommands({
   workspacePath,
@@ -51,13 +51,13 @@ export function useWorkspaceCommands({
   openSearchPanel,
   openSessionsSidebar,
 }: WorkspaceCommandsOptions): WorkspaceCommands {
-  // "New File" is instant and nameless (a scratchpad); "New File in…"
-  // keeps the explicit-location inline-naming flow.
-  const handleNewFile = useCallback(() => {
+  // "New Scratchpad" is instant and nameless; "New File" keeps the
+  // explicit inline-naming flow in the tree.
+  const handleNewScratchpad = useCallback(() => {
     createAndOpenScratchpad(workspacePath, openFile);
   }, [workspacePath, openFile]);
 
-  const handleNewFileIn = useCallback(() => {
+  const handleNewFile = useCallback(() => {
     openSidebarIfCollapsed();
     setFileTreeMode({
       type: "creating",
@@ -115,7 +115,7 @@ export function useWorkspaceCommands({
   }, [getSelectedText, openSearchPanel]);
 
   useHotkey("Mod+N", () => {
-    handleNewFile();
+    handleNewScratchpad();
   });
 
   useHotkey("Mod+F", () => {
@@ -131,8 +131,8 @@ export function useWorkspaceCommands({
   });
 
   return {
+    handleNewScratchpad,
     handleNewFile,
-    handleNewFileIn,
     handleNewDirectory,
     runHistoryAction,
     handleToggleFullscreen,

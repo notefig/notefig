@@ -63,9 +63,9 @@ test.describe("shim: scratchpad entry lifecycle", () => {
     const editor = visibleEditor(page);
     await editor.waitFor({ state: "visible", timeout: 15000 });
     await expectNoLoadError(page);
-    await expect.poll(listScratchpads, { timeout: 10000 }).toContain(
-      "untitled.md",
-    );
+    await expect
+      .poll(listScratchpads, { timeout: 10000 })
+      .toContain("untitled.md");
 
     await editor.click();
     await editor.pressSequentially("still alive", { delay: 10 });
@@ -130,6 +130,83 @@ test.describe("shim: scratchpad entry lifecycle", () => {
     ).toHaveCount(0);
   });
 
+  test("empty entry auto-opens the most recent of SEVERAL scratchpads", async ({
+    page,
+  }) => {
+    test.setTimeout(90000);
+
+    // Two contentful renamed scratchpads — the compare loop in
+    // pickMostRecentScratchpad only runs with 2+ candidates, which is where
+    // the epoch-millis-vs-Date wire bug crashed entry resolution and left
+    // the app stranded at the bare root.
+    const dir = path.join(workspace, ".metrists", "scratchpads");
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "older-notes.md"), "# Old\n\nold body\n");
+    await fs.writeFile(path.join(dir, "newer-notes.md"), "# New\n\nnew body\n");
+    const now = Date.now() / 1000;
+    await fs.utimes(path.join(dir, "older-notes.md"), now - 3600, now - 3600);
+    await fs.utimes(path.join(dir, "newer-notes.md"), now - 60, now - 60);
+
+    await openProject(page);
+
+    const editor = visibleEditor(page);
+    await editor.waitFor({ state: "visible", timeout: 15000 });
+    await expectNoLoadError(page);
+    await expect(editor).toContainText("new body", { timeout: 10000 });
+    expect((await listScratchpads()).sort()).toEqual([
+      "newer-notes.md",
+      "older-notes.md",
+    ]);
+  });
+
+  test("re-entry after closing the last tab re-opens the renamed scratchpad", async ({
+    page,
+  }) => {
+    test.setTimeout(90000);
+
+    await fs.mkdir(path.join(workspace, ".metrists", "scratchpads"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(workspace, ".metrists", "scratchpads", "canto-notes.md"),
+      "# Canto\n\nnotes body\n",
+      "utf8",
+    );
+
+    await openProject(page);
+    const editor = visibleEditor(page);
+    await editor.waitFor({ state: "visible", timeout: 15000 });
+    await expect(editor).toContainText("notes body", { timeout: 10000 });
+
+    // Close the ONLY tab via the palette's Close File (a single-tab window
+    // has no ✕): the project sits at its bare root with the empty state,
+    // and that bare URL is recorded as the saved session.
+    await editor.click();
+    // Mod+P, not Mod+K (the focused Tiptap editor claims Mod+K for links);
+    // Control, not Meta — the Desktop Chrome device UA claims Windows, so
+    // the app's Mod resolves to Control here.
+    await page.keyboard.press("Control+p");
+    const palette = page.getByPlaceholder(/command/i);
+    await palette.waitFor({ state: "visible", timeout: 5000 });
+    await palette.fill("close file");
+    await page.keyboard.press("Enter");
+    await expect(page.getByText(/No file selected/)).toBeVisible({
+      timeout: 10000,
+    });
+    await page.waitForTimeout(750);
+
+    // Re-enter: the empty saved session must auto-open the scratchpad
+    // again — this is the "come back to my scratchpad" loop.
+    await page.goto("/welcome");
+    await openProject(page);
+    await expect(visibleEditor(page)).toContainText("notes body", {
+      timeout: 15000,
+    });
+    await expectNoLoadError(page);
+    // Reused, not duplicated.
+    expect(await listScratchpads()).toEqual(["canto-notes.md"]);
+  });
+
   test("entry sweep deletes abandoned empty scratchpads, keeps content", async ({
     page,
   }) => {
@@ -138,20 +215,27 @@ test.describe("shim: scratchpad entry lifecycle", () => {
     await openProject(page);
     const editor = visibleEditor(page);
     await editor.waitFor({ state: "visible", timeout: 15000 });
-    await expect.poll(listScratchpads, { timeout: 10000 }).toContain(
-      "untitled.md",
-    );
+    await expect
+      .poll(listScratchpads, { timeout: 10000 })
+      .toContain("untitled.md");
 
-    // Close it untouched; a second, contentful scratchpad stays on disk.
+    // Close it untouched; a second, contentful scratchpad stays on disk,
+    // and so does an EMPTY but renamed one — a user-chosen name is intent,
+    // never an abandoned leftover.
     await closeScratchpadTab(page);
     await fs.writeFile(
       path.join(workspace, ".metrists", "scratchpads", "untitled-2.md"),
       "# Keeper\n\nkept body\n",
       "utf8",
     );
+    await fs.writeFile(
+      path.join(workspace, ".metrists", "scratchpads", "renamed-empty.md"),
+      "",
+      "utf8",
+    );
 
-    // Re-enter at the bare root: README restores, the empty leftover is
-    // swept, the contentful one survives untouched.
+    // Re-enter at the bare root: README restores, the empty untitled
+    // leftover is swept, the contentful and the renamed-empty ones survive.
     await page.goto("/welcome");
     await openProject(page);
     await expect(visibleEditor(page)).toContainText("Seeded", {
@@ -159,7 +243,9 @@ test.describe("shim: scratchpad entry lifecycle", () => {
     });
     await expectNoLoadError(page);
     await expect
-      .poll(async () => (await listScratchpads()).join(","), { timeout: 10000 })
-      .toBe("untitled-2.md");
+      .poll(async () => (await listScratchpads()).sort().join(","), {
+        timeout: 10000,
+      })
+      .toBe("renamed-empty.md,untitled-2.md");
   });
 });

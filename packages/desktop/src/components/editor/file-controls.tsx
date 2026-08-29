@@ -22,9 +22,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { ScratchpadIcon } from "./scratchpad-icon";
 import type { SortOrder } from "@/utils/fs";
 
 interface FileControlsProps {
+  onNewScratchpad: () => void;
   onNewFile: () => void;
   onNewFolder: () => void;
   sortOrder: SortOrder;
@@ -38,6 +40,7 @@ const sortIcons: Record<SortOrder, typeof ArrowDownAZ> = {
 };
 
 export function FileControls({
+  onNewScratchpad,
   onNewFile,
   onNewFolder,
   sortOrder,
@@ -50,6 +53,20 @@ export function FileControls({
   return (
     <div className="flex h-9 items-center justify-between border-b border-sidebar-border bg-sidebar px-2">
       <ButtonGroup>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground"
+              onClick={onNewScratchpad}
+            >
+              <ScratchpadIcon className="h-4 w-4" />
+              <span className="sr-only">{t("newScratchpad")}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t("newScratchpad")}</TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
