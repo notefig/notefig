@@ -25,7 +25,7 @@ import {
   AiPromptNodeBase,
   UI_ONLY_TRANSACTION_META,
 } from "./editor-schema-kit";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import {
   docHasPromptNode,
   docHasRealContent,
@@ -90,29 +90,27 @@ function AiPromptNodeView(props: NodeViewProps) {
   }, [needsId]);
 
   // A widget restored from the file (MET-163) carries its session in the
-  // node. Seed the store so it renders as that session's widget, then drop
-  // it silently when the session turns out to be gone for good — a widget
-  // whose conversation no longer exists is a dead shell, and the ticket
-  // chooses discarding over surfacing an error the user can't act on. The
-  // node deletion re-serializes the document without the marker, so the
-  // file heals itself on the next save.
-  // Through refs, not deps: deleteNode's identity changes per render, and
-  // re-running the check on every one of them could fire a second delete
-  // against a node that is already gone.
-  const deleteNodeRef = useRef(props.deleteNode);
-  deleteNodeRef.current = props.deleteNode;
-  const discarded = useRef(false);
+  // node; adopting it is what makes the widget prompt that session instead
+  // of opening a new one. A session that is gone for good is discarded
+  // silently — the widget simply stays unbound and behaves as a fresh
+  // composer, and the next prompt rebinds it, rewriting the marker.
+  //
+  // Nothing here touches the document. An unreachable answer is not
+  // trustworthy enough to edit the user's file on: the local task database
+  // is recreated from scratch on corruption AND on any schemaVersion bump
+  // (adapters/tauri-db.ts), and a wiped database is indistinguishable from
+  // "these sessions never existed". Acting on that by deleting nodes would
+  // strip every widget from every open document as a side effect of an
+  // infrastructure event. Leaving the id in the file costs nothing.
   useEffect(() => {
     if (!filePath || !blobId || !persistedTaskId) return;
-    adoptPersistedPromptBinding(blobId, persistedTaskId);
     let cancelled = false;
     void agents
       .task(persistedTaskId)
       .isReachable()
       .then((reachable) => {
-        if (cancelled || reachable || discarded.current) return;
-        discarded.current = true;
-        deleteNodeRef.current();
+        if (cancelled || !reachable) return;
+        adoptPersistedPromptBinding(blobId, persistedTaskId);
       });
     return () => {
       cancelled = true;

@@ -86,7 +86,11 @@ export type AgentTaskRow = {
 };
 
 export type AgentTurnStatus =
-  "queued" | "running" | "completed" | "cancelled" | "error";
+  | "queued"
+  | "running"
+  | "completed"
+  | "cancelled"
+  | "error";
 
 export type AgentTurn = {
   /** trn_ (ascending) — one per session/prompt round-trip */
@@ -255,7 +259,7 @@ export async function reconcileAgentTasksAtBoot(): Promise<void> {
 }
 
 let reconcileStarted = false;
-let reconcileSettled: Promise<boolean> | null = null;
+let reconcileSettled: Promise<void> | null = null;
 
 /**
  * Fire-and-forget boot trigger, once per app session — StrictMode's
@@ -265,31 +269,27 @@ let reconcileSettled: Promise<boolean> | null = null;
 export function ensureAgentTasksReconciled(): void {
   if (reconcileStarted) return;
   reconcileStarted = true;
-  reconcileSettled = reconcileAgentTasksAtBoot().then(
-    () => true,
-    (error: unknown) => {
-      console.warn("Agent task reconciliation failed:", error);
-      return false;
-    },
-  );
+  reconcileSettled = reconcileAgentTasksAtBoot().catch((error: unknown) => {
+    console.warn("Agent task reconciliation failed:", error);
+  });
 }
 
 /**
- * Resolves TRUE once the hydrated rows are trustworthy — i.e. after boot
- * reconciliation has deleted the rows that can never be revived — and FALSE
- * when reconciliation failed and they never became trustworthy.
+ * Resolves once boot reconciliation has settled — i.e. the hydrated rows have
+ * loaded and the ones that can never be revived have been deleted.
  *
- * Anything that treats a missing row as "this session is gone for good" must
- * wait for this first: before it settles, the collection is either still
- * loading or still holding rows that are about to be deleted. The false case
- * matters just as much: a failed preload (corrupt or unreadable storage)
- * leaves an empty collection that is indistinguishable from "no sessions
- * exist", and callers that DESTROY user data on that answer must not act on
- * it. Starts reconciliation if nothing has yet (tests, harness routes).
+ * Anything that reads "is there a row for this task?" as an answer about the
+ * session must wait for this first; before it settles the collection is
+ * either still loading or still holding rows that are about to go. Settling
+ * is not a promise that the answer is COMPLETE — storage that failed to load
+ * (or was recreated after corruption) leaves an empty collection that looks
+ * exactly like a user with no sessions — so a missing row may only be used
+ * for decisions that are cheap to get wrong, never to destroy anything.
+ * Starts reconciliation if nothing has yet (tests, harness routes).
  */
-export function whenAgentTasksReconciled(): Promise<boolean> {
+export function whenAgentTasksReconciled(): Promise<void> {
   ensureAgentTasksReconciled();
-  return reconcileSettled ?? Promise.resolve(true);
+  return reconcileSettled ?? Promise.resolve();
 }
 
 /** Test-only: allow the once-per-session guard to re-arm. */

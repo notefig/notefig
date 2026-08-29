@@ -65,9 +65,10 @@ export interface AgentTaskHandle {
    * widget persisted in a document outlives the runtime that served it, and
    * must tell "your session is gone" apart from "your session is asleep").
    *
-   * Async because a missing row only means "gone for good" once boot
-   * reconciliation has settled — before that the collection may still be
-   * loading.
+   * Async because a missing row only means "gone" once boot reconciliation
+   * has settled — before that the collection may still be loading. Even
+   * then a false answer means "route this prompt at a new session", never
+   * "delete the user's widget": wiped storage answers false for everything.
    */
   isReachable(): Promise<boolean>;
   cancel(): Promise<ActionResult>;
@@ -150,18 +151,14 @@ function taskHandle(taskId: string): AgentTaskHandle {
     },
     async isReachable() {
       if (getRegisteredTask(taskId)) return true;
-      const reconciled = await whenAgentTasksReconciled();
+      await whenAgentTasksReconciled();
       if (getRegisteredTask(taskId)) return true;
       const row = agentTasksCollection.get(taskId);
-      // Exactly reviveAgentTask's precondition — a row that is anything else
-      // (already demoted to "unavailable", or session-less) can never come
-      // back, and says so on its own authority.
-      if (row) return row.status === "restored" && Boolean(row.sessionId);
-      // No row AND no trustworthy reconciliation is "don't know", not
-      // "gone": storage that failed to load looks exactly like a user with
-      // no sessions. Callers destroy persisted widgets on a false answer,
-      // so an infrastructure failure must never produce one.
-      return !reconciled;
+      // Exactly reviveAgentTask's precondition: anything else — no row at
+      // all, a row already demoted to "unavailable", or one with no session
+      // to resume — is a task no prompt can reach.
+      if (!row) return false;
+      return row.status === "restored" && Boolean(row.sessionId);
     },
     async cancel() {
       const task = getRegisteredTask(taskId);
