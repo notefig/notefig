@@ -150,12 +150,18 @@ function taskHandle(taskId: string): AgentTaskHandle {
     },
     async isReachable() {
       if (getRegisteredTask(taskId)) return true;
-      await whenAgentTasksReconciled();
+      const reconciled = await whenAgentTasksReconciled();
       if (getRegisteredTask(taskId)) return true;
       const row = agentTasksCollection.get(taskId);
-      // Exactly reviveAgentTask's precondition — anything else (no row, or
-      // one already demoted to "unavailable") can never come back.
-      return Boolean(row && row.status === "restored" && row.sessionId);
+      // Exactly reviveAgentTask's precondition — a row that is anything else
+      // (already demoted to "unavailable", or session-less) can never come
+      // back, and says so on its own authority.
+      if (row) return row.status === "restored" && Boolean(row.sessionId);
+      // No row AND no trustworthy reconciliation is "don't know", not
+      // "gone": storage that failed to load looks exactly like a user with
+      // no sessions. Callers destroy persisted widgets on a false answer,
+      // so an infrastructure failure must never produce one.
+      return !reconciled;
     },
     async cancel() {
       const task = getRegisteredTask(taskId);

@@ -255,7 +255,7 @@ export async function reconcileAgentTasksAtBoot(): Promise<void> {
 }
 
 let reconcileStarted = false;
-let reconcileSettled: Promise<void> | null = null;
+let reconcileSettled: Promise<boolean> | null = null;
 
 /**
  * Fire-and-forget boot trigger, once per app session — StrictMode's
@@ -265,23 +265,31 @@ let reconcileSettled: Promise<void> | null = null;
 export function ensureAgentTasksReconciled(): void {
   if (reconcileStarted) return;
   reconcileStarted = true;
-  reconcileSettled = reconcileAgentTasksAtBoot().catch((error: unknown) => {
-    console.warn("Agent task reconciliation failed:", error);
-  });
+  reconcileSettled = reconcileAgentTasksAtBoot().then(
+    () => true,
+    (error: unknown) => {
+      console.warn("Agent task reconciliation failed:", error);
+      return false;
+    },
+  );
 }
 
 /**
- * Resolves once the hydrated rows are trustworthy — i.e. after boot
- * reconciliation has deleted the rows that can never be revived.
+ * Resolves TRUE once the hydrated rows are trustworthy — i.e. after boot
+ * reconciliation has deleted the rows that can never be revived — and FALSE
+ * when reconciliation failed and they never became trustworthy.
  *
  * Anything that treats a missing row as "this session is gone for good" must
  * wait for this first: before it settles, the collection is either still
- * loading or still holding rows that are about to be deleted. Starts
- * reconciliation if nothing has yet (tests, harness routes).
+ * loading or still holding rows that are about to be deleted. The false case
+ * matters just as much: a failed preload (corrupt or unreadable storage)
+ * leaves an empty collection that is indistinguishable from "no sessions
+ * exist", and callers that DESTROY user data on that answer must not act on
+ * it. Starts reconciliation if nothing has yet (tests, harness routes).
  */
-export function whenAgentTasksReconciled(): Promise<void> {
+export function whenAgentTasksReconciled(): Promise<boolean> {
   ensureAgentTasksReconciled();
-  return reconcileSettled ?? Promise.resolve();
+  return reconcileSettled ?? Promise.resolve(true);
 }
 
 /** Test-only: allow the once-per-session guard to re-arm. */
