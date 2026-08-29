@@ -56,6 +56,7 @@ const actions = {
   revertToSlash: noop,
   backspaceDismiss: noop,
   escapeToEditor: noop,
+  rebindSession: noop,
   openBoundChat: noop,
   openFile: noop,
   openAgentTab: noop,

@@ -58,6 +58,7 @@ import {
   removeQueuedPrompt,
 } from "@/agent/agent-service";
 import type { WidgetResponse } from "@/agent/tools/widget-respond";
+import type { HarnessDefinition } from "@notefig/shared/agent";
 import { ensureAgentRuntime } from "@/agent/tunnel/require-connection";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
 import { requestTabFocus, suppressTabFocus } from "@/tabs/tab-controllers";
@@ -158,6 +159,29 @@ interface PromptBlobHost {
    *  document node, so it survives a re-parse and app restarts (MET-163).
    *  Provided by the node view, which owns the node's attributes. */
   onSessionBound?: (taskId: string) => void;
+}
+
+/**
+ * Where this widget's next prompt goes.
+ *
+ * A widget restored from the document (MET-163) already belongs to a
+ * session, and prompting it must continue that conversation — persisting the
+ * binding is pointless if the next prompt opens a new session instead. The
+ * workspace's shared session is the entry point only for a widget that has
+ * never been sent, or whose session is gone for good.
+ *
+ * Safe against the phases that look similar: Edit and Escape-cancel unbind
+ * the task outright, so a prompt the user pulled back and re-sent is not
+ * silently re-targeted at the old session.
+ */
+export async function resolvePromptTarget(
+  blobId: string,
+  workspacePath: string,
+  harness: HarnessDefinition,
+): Promise<string> {
+  const bound = getPromptBlob(blobId).boundTaskId;
+  if (bound && (await agents.task(bound).isReachable())) return bound;
+  return (await getOrStartSharedSession(workspacePath, harness)).taskId;
 }
 
 /**
@@ -442,6 +466,8 @@ interface PromptBlobFaceActions {
   revertToSlash?: () => void;
   backspaceDismiss?: () => void;
   escapeToEditor: () => void;
+  /** Point this widget at a different session (the composer's picker). */
+  rebindSession: (taskId: string) => void;
   openBoundChat?: () => void;
   openFile: (options: { tabId: string; intent: "new-tab" }) => void;
   openAgentTab: (taskId: string) => void;
@@ -598,6 +624,8 @@ export function PromptBlobFace({
               confirmTrust={confirmTrust}
               trustName={trustName}
               workspacePath={workspacePath}
+              boundTaskId={boundTaskId}
+              onSelectSession={actions.rebindSession}
               composerRef={composerRef}
             />
           )}
@@ -838,7 +866,8 @@ function usePromptSendActions({
     }
     setIsSending(true);
     try {
-      const { taskId } = await getOrStartSharedSession(
+      const taskId = await resolvePromptTarget(
+        blobId,
         workspacePath,
         defaultHarness,
       );
@@ -1031,6 +1060,19 @@ function usePromptBlobActions({
     [summoned, removeNode],
   );
 
+  // Picking a session on a widget that already belongs to one re-targets
+  // THIS widget (and its document marker), rather than only moving the
+  // workspace's shared session — otherwise the icon would name one session
+  // and the prompt would go to another.
+  const rebindSession = useCallback(
+    (taskId: string) => {
+      adoptSharedSession(workspacePath, taskId);
+      updatePromptBlob(blobId, { boundTaskId: taskId, boundTurnId: null });
+      onSessionBound?.(taskId);
+    },
+    [blobId, workspacePath, onSessionBound],
+  );
+
   return {
     isSending,
     confirmTrust,
@@ -1044,6 +1086,7 @@ function usePromptBlobActions({
     dismiss,
     revertToSlash,
     backspaceDismiss,
+    rebindSession,
   };
 }
 
@@ -1111,6 +1154,8 @@ function Composer({
   confirmTrust,
   trustName,
   workspacePath,
+  boundTaskId,
+  onSelectSession,
   composerRef,
 }: {
   draft: string;
@@ -1127,13 +1172,19 @@ function Composer({
   confirmTrust: boolean;
   trustName: string;
   workspacePath: string;
+  boundTaskId?: string | null;
+  onSelectSession?: (taskId: string) => void;
   composerRef: React.RefObject<PromptEditorHandle>;
 }) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col">
       <div className="flex items-start gap-1.5 px-1.5 py-1">
-        <SessionControl workspacePath={workspacePath} />
+        <SessionControl
+          workspacePath={workspacePath}
+          boundTaskId={boundTaskId}
+          onSelectSession={onSelectSession}
+        />
         <PromptEditor
           ref={composerRef}
           workspacePath={workspacePath}
@@ -1174,13 +1225,26 @@ function Composer({
  * recent live sessions to re-target, or an explicit new session (started on
  * the default harness).
  */
-function SessionControl({ workspacePath }: { workspacePath: string }) {
+function SessionControl({
+  workspacePath,
+  boundTaskId,
+  onSelectSession,
+}: {
+  workspacePath: string;
+  /** The session this widget is already bound to (a restored widget, MET-163)
+   *  — the icon must name where the prompt will actually go, which is this
+   *  task rather than the workspace's shared session. */
+  boundTaskId?: string | null;
+  /** Re-target a bound widget. Absent for an unbound one, whose selection
+   *  just moves the shared session as it always did. */
+  onSelectSession?: (taskId: string) => void;
+}) {
   const { t } = useTranslation();
   const { defaultHarness } = useDefaultHarness();
   const taskMetas = useAgentTaskList(workspacePath);
   const [open, setOpen] = useState(false);
 
-  const peekedTaskId = peekSharedSession(workspacePath);
+  const peekedTaskId = boundTaskId ?? peekSharedSession(workspacePath);
   const peekedKey = peekedTaskId ?? " none";
   const { data: peekedRows = [] } = useLiveQuery(
     (q) =>
@@ -1221,7 +1285,9 @@ function SessionControl({ workspacePath }: { workspacePath: string }) {
                 key={meta.task.taskId}
                 className="cursor-pointer gap-2 text-xs"
                 onSelect={() =>
-                  adoptSharedSession(workspacePath, meta.task.taskId)
+                  onSelectSession
+                    ? onSelectSession(meta.task.taskId)
+                    : adoptSharedSession(workspacePath, meta.task.taskId)
                 }
               >
                 {meta.task.taskId === peekedTaskId ? (
