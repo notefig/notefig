@@ -16,7 +16,7 @@ export default defineConfig({
   reporter: "list",
 
   use: {
-    baseURL: "http://localhost:1420",
+    baseURL: "http://localhost:1422",
     trace: "off",
     screenshot: "off",
     video: "off",
@@ -48,14 +48,19 @@ export default defineConfig({
   webServer: {
     // VITE_TELEMETRY_DISABLED keeps the first-run consent dialog from opening
     // over the first workspace route; VITE_AGENT_MOCK serves agent sessions
-    // from the in-memory mock harness (inert for every non-agent path). Note
-    // `reuseExistingServer`: a dev server you already had running carries
-    // neither env var, so the guarantee holds for a server Playwright starts
-    // (as CI always does) — the agent suite in particular needs the mock, so
-    // start your own dev server with VITE_AGENT_MOCK=1 when running it
-    // alongside one.
-    command: "VITE_TELEMETRY_DISABLED=1 VITE_AGENT_MOCK=1 npm run dev",
-    url: "http://localhost:1420",
+    // from the in-memory mock harness (inert for every non-agent path).
+    //
+    // Port 1422 is e2e's own (1420 = your dev server, 1421 = the shim suite).
+    // It has to be: with `reuseExistingServer`, sharing 1420 meant a plain
+    // `npm run dev` you happened to have open got adopted as the test server
+    // — and it carries NEITHER env var, so the consent dialog opened over
+    // every workspace route and intercepted the clicks. The suite then
+    // passed or failed depending on whether the app was running, which also
+    // made the pre-push hook unpushable. A dedicated port means the only
+    // server ever reused is one started with these flags.
+    command:
+      "VITE_TELEMETRY_DISABLED=1 VITE_AGENT_MOCK=1 npm run dev -- --port 1422",
+    url: "http://localhost:1422",
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
   },

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  adoptPersistedPromptBinding,
   getPromptBlob,
   updatePromptBlob,
   clearPromptBlobTurn,
@@ -81,6 +82,34 @@ describe("prompt-blob-store", () => {
     expect(getPromptBlob("blob_one")).toMatchObject({
       draft: "",
       boundTurnId: "trn_9",
+    });
+  });
+});
+
+describe("persisted binding adoption (MET-163)", () => {
+  it("binds a widget restored from the document to its session", () => {
+    adoptPersistedPromptBinding("blob_restored", "task_7");
+    expect(getPromptBlob("blob_restored")).toMatchObject({
+      boundTaskId: "task_7",
+      // No turn: turns don't outlive the app, so a restored widget composes
+      // against its old session rather than replaying a dead round.
+      boundTurnId: null,
+    });
+  });
+
+  it("never clobbers a live round (adoption mid-turn)", () => {
+    updatePromptBlob("blob_live", {
+      boundTurnId: "trn_live",
+      boundTaskId: "task_live",
+      draft: "typing",
+    });
+    // An agent write re-parses the document; the node comes back with the
+    // same ids it was serialized with and must not reset the round.
+    adoptPersistedPromptBinding("blob_live", "task_live");
+    expect(getPromptBlob("blob_live")).toMatchObject({
+      boundTurnId: "trn_live",
+      boundTaskId: "task_live",
+      draft: "typing",
     });
   });
 });

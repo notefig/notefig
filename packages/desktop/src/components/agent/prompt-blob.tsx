@@ -47,6 +47,9 @@ import {
   agentPermissionRequestsCollection,
   agentTasksCollection,
   agentTurnsCollection,
+  type AgentEntry,
+  type AgentTaskRow,
+  type AgentTurn,
 } from "@/agent/agent-collections";
 import { agents } from "@/agent/agents";
 import {
@@ -54,14 +57,11 @@ import {
   cancelAgentTurnAndForget,
   removeQueuedPrompt,
 } from "@/agent/agent-service";
-import { getRegisteredTask } from "@/agent/task-registry";
 import type { WidgetResponse } from "@/agent/tools/widget-respond";
+import type { HarnessDefinition } from "@notefig/shared/agent";
 import { ensureAgentRuntime } from "@/agent/tunnel/require-connection";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
-import {
-  requestTabFocus,
-  suppressTabFocus,
-} from "@/tabs/tab-controllers";
+import { requestTabFocus, suppressTabFocus } from "@/tabs/tab-controllers";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "./harness-logo";
 import {
@@ -84,6 +84,7 @@ import {
   getPromptBlob,
   updatePromptBlob,
   clearPromptBlobTurn,
+  type PromptBlobRecord,
   subscribePromptBlob,
   subscribePromptBlobFocus,
   consumePendingPromptBlobFocus,
@@ -128,28 +129,11 @@ function holdsLatestInFlightEscape(blobId: string): boolean {
 }
 
 /**
- * The inline prompt blob: the primary prompting surface, hosted by the
- * aiPrompt document node (ai-prompt-node.tsx) — part of the markdown AST in
- * the editor, present by default in empty documents, but serialized to
- * nothing so it never touches the file on disk. All interaction for the
- * turn it sends stays here — progress, transient tool activity, stop/edit,
- * auth and permission prompts, and the touched-documents summary — so the
- * chat tab is optional, opened only from the done-state affordance.
- *
- * State lives in prompt-blob-store (module-level, per document path): the
- * dock unmounts unselected tabs, and a running turn must survive that.
- * Turns queue into the shared per-workspace session (blob-session-store);
- * each widget watches only its own bound turnId.
+ * What the hosting document node hands the widget: its identity, where it
+ * sits, and the three ways it may write back to the node. Shared by the
+ * component and its action hooks, which all need the same facts.
  */
-export const PromptBlob = memo(function PromptBlob({
-  blobId,
-  workspacePath,
-  documentPath,
-  editor,
-  getPos,
-  summoned = false,
-  removeNode,
-}: {
+interface PromptBlobHost {
   /** This widget instance's identity (the node's blobId attr) — the store
    *  key. Documents can hold several widgets; the path is not identity. */
   blobId: string;
@@ -171,42 +155,49 @@ export const PromptBlob = memo(function PromptBlob({
     insertSlash?: boolean;
     restoreParagraph?: boolean;
   }) => void;
+  /** Record which agent session this widget's round belongs to on the
+   *  document node, so it survives a re-parse and app restarts (MET-163).
+   *  Provided by the node view, which owns the node's attributes. */
+  onSessionBound?: (taskId: string) => void;
+}
+
+/**
+ * Where this widget's next prompt goes.
+ *
+ * A widget restored from the document (MET-163) already belongs to a
+ * session, and prompting it must continue that conversation — persisting the
+ * binding is pointless if the next prompt opens a new session instead. The
+ * workspace's shared session is the entry point only for a widget that has
+ * never been sent, or whose session is gone for good.
+ *
+ * Safe against the phases that look similar: Edit and Escape-cancel unbind
+ * the task outright, so a prompt the user pulled back and re-sent is not
+ * silently re-targeted at the old session.
+ */
+export async function resolvePromptTarget(
+  blobId: string,
+  workspacePath: string,
+  harness: HarnessDefinition,
+): Promise<string> {
+  const bound = getPromptBlob(blobId).boundTaskId;
+  if (bound && (await agents.task(bound).isReachable())) return bound;
+  return (await getOrStartSharedSession(workspacePath, harness)).taskId;
+}
+
+/**
+ * The live rows behind one widget's bound round, and the phase they add up
+ * to. Sentinel ids keep the queries unconditional: an unbound widget still
+ * runs them, matching nothing.
+ */
+function usePromptBlobRound({
+  boundTurnId,
+  boundTaskId,
+  isSending,
+}: {
+  boundTurnId: string | null;
+  boundTaskId: string | null;
+  isSending: boolean;
 }) {
-  const { t } = useTranslation();
-  const record = useSyncExternalStore(
-    useCallback((cb) => subscribePromptBlob(blobId, cb), [blobId]),
-    () => getPromptBlob(blobId),
-  );
-  const { boundTurnId, boundTaskId } = record;
-  const composerRef = useRef<PromptEditorHandle>(null);
-
-  const { defaultHarness } = useDefaultHarness();
-  const { openFile, openAgentTab } = useWorkspaceTabs();
-  const {
-    isSending,
-    confirmTrust,
-    setDraft,
-    send,
-    sendFollowUp,
-    editPrompt,
-    retry,
-    stop,
-    cancelAndRestore,
-    dismiss,
-    revertToSlash,
-    backspaceDismiss,
-  } = usePromptBlobActions({
-    blobId,
-    workspacePath,
-    documentPath,
-    editor,
-    getPos,
-    summoned,
-    removeNode,
-    composerRef,
-  });
-
-  // Live rows for the bound turn (sentinel ids keep the hooks unconditional).
   const turnKey = boundTurnId ?? " none";
   const taskKey = boundTaskId ?? " none";
   const { data: turnRows = [] } = useLiveQuery(
@@ -254,97 +245,40 @@ export const PromptBlob = memo(function PromptBlob({
     [turnEntries],
   );
 
-  const phase: BlobPhase = derivePhase({
+  return {
     turn,
     task,
-    hasPendingPermission: pendingPermissions.length > 0,
-    isSending,
-  });
+    sortedEntries,
+    taskTurns,
+    phase: derivePhase({
+      turn,
+      task,
+      hasPendingPermission: pendingPermissions.length > 0,
+      isSending,
+    }) as BlobPhase,
+  };
+}
 
-  // Escape anywhere cancels this widget's in-flight turn and restores the
-  // prompt into the composer (MET-94). A global hotkey, not a card-level
-  // keydown: after send the composer unmounts and focus returns to the
-  // document, so no element inside the widget could hear the key. The dock
-  // unmounting unselected tabs scopes it to the visible document for free;
-  // "sending" is excluded (nothing to cancel yet — the dispatch is still
-  // racing the session spawn, a sub-second window).
-  const inFlight =
-    phase === "queued" ||
-    phase === "running" ||
-    phase === "needs-permission" ||
-    phase === "needs-auth";
-  useEffect(() => {
-    if (!inFlight || !boundTurnId) return;
-    return claimInFlightEscape(blobId, boundTurnId);
-  }, [inFlight, boundTurnId, blobId]);
-  useHotkey(
-    "Escape",
-    (event) => {
-      // A layer that consumed the key (dialog/menu dismissal) wins.
-      if (event.defaultPrevented) return;
-      if (!holdsLatestInFlightEscape(blobId)) return;
-      cancelAndRestore();
-    },
-    // 'allow': several widgets can legitimately hold this registration;
-    // the latest-sent claim decides which one acts.
-    { enabled: inFlight, conflictBehavior: "allow" },
-  );
-
-  // Stale bound turn (app restart / task disposed): rows are gone — unbind
-  // and fall back to composing instead of rendering a dead shell.
-  const isStale = boundTurnId !== null && !isSending && turn === undefined;
-  useEffect(() => {
-    if (isStale) clearPromptBlobTurn(blobId);
-  }, [isStale, blobId]);
-
-  // Escape back to the document, through the arbiter like every other
-  // focus hand-off: an editor intent carrying a before-node caret placement
-  // so the cursor returns to where the user was before summoning this
-  // widget. Without a position (shouldn't happen while mounted) the
-  // resolver's default collapse applies.
-  const escapeToEditor = useCallback(() => {
-    const pos = getPos?.();
-    requestTabFocus(documentPath, {
-      reason: "blob-escape",
-      // Focus IS in this widget's composer — an explicit hand-off, not an
-      // ambient grab, so it may leave the text entry.
-      steal: true,
-      caret: typeof pos === "number" ? { type: "before-node", pos } : undefined,
-    });
-  }, [documentPath, getPos]);
-
-  const focusComposer = useCallback(() => {
-    // suppressEditorFocus first: the arbiter routes focus to the editor on
-    // new-file creation (and "/" leaves the editor holding focus) — it
-    // would win the race otherwise.
-    suppressTabFocus();
-    requestAnimationFrame(() => composerRef.current?.focus());
-  }, []);
-
-  // Focus requests from the "/" summon: a pending request may predate this
-  // mount (the node view renders one React pass after the insert), then
-  // stay subscribed for requests while mounted (empty-doc "/" focuses the
-  // existing keeper widget).
-  useEffect(() => {
-    if (consumePendingPromptBlobFocus(blobId)) focusComposer();
-    return subscribePromptBlobFocus(blobId, focusComposer);
-  }, [blobId, focusComposer]);
-
-  // Auto-active on empty documents, on mount only. Beyond this and the
-  // summon channel above, only explicit user actions (Edit) call focus().
-  const autoFocused = useRef(false);
-  useEffect(() => {
-    if (autoFocused.current) return;
-    autoFocused.current = true;
-    const { draft, boundTurnId: bound } = getPromptBlob(blobId);
-    if (editor.state.doc.textContent.trim() !== "" || draft || bound) return;
-    // Only for newly opened empty docs. When a doc becomes empty mid-edit
-    // (select-all + delete), the keeper reinsert remounts this widget — the
-    // user's cursor is in the editor and must stay there.
-    if (editor.view.hasFocus()) return;
-    focusComposer();
-  }, [blobId, editor, focusComposer]);
-
+/**
+ * Everything the card shows that is derived from the transcript rather than
+ * stored: which files the turn touched, the agent's widget_respond answer,
+ * the live tool line, the assistant teaser, and the queue position. Each is
+ * scoped to the phases that display it, so a running turn does no done-state
+ * work and vice versa.
+ */
+function usePromptBlobDisplay({
+  phase,
+  sortedEntries,
+  taskTurns,
+  boundTurnId,
+  workspacePath,
+}: {
+  phase: BlobPhase;
+  sortedEntries: AgentEntry[];
+  taskTurns: AgentTurn[];
+  boundTurnId: string | null;
+  workspacePath: string;
+}) {
   const touchedFiles = useMemo(
     () =>
       phase === "done" ? deriveTouchedFiles(sortedEntries, workspacePath) : [],
@@ -368,12 +302,302 @@ export const PromptBlob = memo(function PromptBlob({
       ? deriveQueuePosition(taskTurns, boundTurnId)
       : 0;
 
-  // One click from any bound phase to the session's full transcript
-  // (MET-104) — the done face has its own copy of this in DoneState.
-  const openBoundChat = boundTaskId
-    ? () => openAgentTab(boundTaskId)
-    : undefined;
+  return {
+    touchedFiles,
+    widgetResponse,
+    activeToolLine,
+    assistantTeaser,
+    queueAhead,
+  };
+}
 
+/**
+ * Escape anywhere cancels this widget's in-flight turn and restores the
+ * prompt into the composer (MET-94). A global hotkey, not a card-level
+ * keydown: after send the composer unmounts and focus returns to the
+ * document, so no element inside the widget could hear the key. The dock
+ * unmounting unselected tabs scopes it to the visible document for free;
+ * "sending" is excluded (nothing to cancel yet — the dispatch is still
+ * racing the session spawn, a sub-second window).
+ */
+function useInFlightEscape({
+  blobId,
+  phase,
+  boundTurnId,
+  cancelAndRestore,
+}: {
+  blobId: string;
+  phase: BlobPhase;
+  boundTurnId: string | null;
+  cancelAndRestore: () => void;
+}) {
+  const inFlight =
+    phase === "queued" ||
+    phase === "running" ||
+    phase === "needs-permission" ||
+    phase === "needs-auth";
+  useEffect(() => {
+    if (!inFlight || !boundTurnId) return;
+    return claimInFlightEscape(blobId, boundTurnId);
+  }, [inFlight, boundTurnId, blobId]);
+  useHotkey(
+    "Escape",
+    (event) => {
+      // A layer that consumed the key (dialog/menu dismissal) wins.
+      if (event.defaultPrevented) return;
+      if (!holdsLatestInFlightEscape(blobId)) return;
+      cancelAndRestore();
+    },
+    // 'allow': several widgets can legitimately hold this registration;
+    // the latest-sent claim decides which one acts.
+    { enabled: inFlight, conflictBehavior: "allow" },
+  );
+}
+
+/**
+ * Stale bound turn (app restart / task disposed): rows are gone — unbind and
+ * fall back to composing instead of rendering a dead shell.
+ */
+function useStaleTurnReset({
+  blobId,
+  boundTurnId,
+  isSending,
+  hasTurn,
+}: {
+  blobId: string;
+  boundTurnId: string | null;
+  isSending: boolean;
+  hasTurn: boolean;
+}) {
+  const isStale = boundTurnId !== null && !isSending && !hasTurn;
+  useEffect(() => {
+    if (isStale) clearPromptBlobTurn(blobId);
+  }, [isStale, blobId]);
+}
+
+/**
+ * Who holds the caret: the composer's focus channels in, and the hand-off
+ * back out to the document.
+ */
+function usePromptBlobFocus({
+  blobId,
+  editor,
+  documentPath,
+  getPos,
+  composerRef,
+}: {
+  blobId: string;
+  editor: Editor;
+  documentPath: string;
+  getPos?: () => number | undefined;
+  composerRef: React.RefObject<PromptEditorHandle>;
+}) {
+  // Escape back to the document, through the arbiter like every other focus
+  // hand-off: an editor intent carrying a before-node caret placement so the
+  // cursor returns to where the user was before summoning this widget.
+  // Without a position (shouldn't happen while mounted) the resolver's
+  // default collapse applies.
+  const escapeToEditor = useCallback(() => {
+    const pos = getPos?.();
+    requestTabFocus(documentPath, {
+      reason: "blob-escape",
+      // Focus IS in this widget's composer — an explicit hand-off, not an
+      // ambient grab, so it may leave the text entry.
+      steal: true,
+      caret: typeof pos === "number" ? { type: "before-node", pos } : undefined,
+    });
+  }, [documentPath, getPos]);
+
+  const focusComposer = useCallback(() => {
+    // suppressEditorFocus first: the arbiter routes focus to the editor on
+    // new-file creation (and "/" leaves the editor holding focus) — it would
+    // win the race otherwise.
+    suppressTabFocus();
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }, [composerRef]);
+
+  // Focus requests from the "/" summon: a pending request may predate this
+  // mount (the node view renders one React pass after the insert), then stay
+  // subscribed for requests while mounted (empty-doc "/" focuses the
+  // existing keeper widget).
+  useEffect(() => {
+    if (consumePendingPromptBlobFocus(blobId)) focusComposer();
+    return subscribePromptBlobFocus(blobId, focusComposer);
+  }, [blobId, focusComposer]);
+
+  // Auto-active on empty documents, on mount only. Beyond this and the
+  // summon channel above, only explicit user actions (Edit) call focus().
+  const autoFocused = useRef(false);
+  useEffect(() => {
+    if (autoFocused.current) return;
+    autoFocused.current = true;
+    const { draft, boundTurnId: bound } = getPromptBlob(blobId);
+    if (editor.state.doc.textContent.trim() !== "" || draft || bound) return;
+    // Only for newly opened empty docs. When a doc becomes empty mid-edit
+    // (select-all + delete), the keeper reinsert remounts this widget — the
+    // user's cursor is in the editor and must stay there.
+    if (editor.view.hasFocus()) return;
+    focusComposer();
+  }, [blobId, editor, focusComposer]);
+
+  return { escapeToEditor };
+}
+
+/** What the face renders from the transcript, per phase. */
+interface PromptBlobDisplay {
+  touchedFiles: string[];
+  widgetResponse: ReturnType<typeof deriveWidgetResponse>;
+  activeToolLine: string | null;
+  assistantTeaser: string | null;
+  queueAhead: number;
+}
+
+/** Everything the face can do. Grouped so the container hands over one
+ *  object instead of a dozen callbacks. */
+interface PromptBlobFaceActions {
+  setDraft: (draft: string) => void;
+  send: () => Promise<void> | void;
+  sendFollowUp: () => Promise<void> | void;
+  editPrompt: () => void;
+  retry: () => void;
+  stop: () => void;
+  dismiss: () => void;
+  // Only armed when the node view supplied removeNode (the "/" contract).
+  revertToSlash?: () => void;
+  backspaceDismiss?: () => void;
+  escapeToEditor: () => void;
+  /** Point this widget at a different session (the composer's picker). */
+  rebindSession: (taskId: string) => void;
+  openBoundChat?: () => void;
+  openFile: (options: { tabId: string; intent: "new-tab" }) => void;
+  openAgentTab: (taskId: string) => void;
+}
+
+/**
+ * The four faces of a prompt that has been sent and hasn't finished: the
+ * same status row, differing in what it says and what it hangs underneath.
+ * Rendering nothing for every other phase keeps the branch in one place
+ * rather than spread across the parent's JSX.
+ */
+function SentFace({
+  phase,
+  record,
+  task,
+  boundTaskId,
+  display,
+  actions,
+}: {
+  phase: BlobPhase;
+  record: PromptBlobRecord;
+  task: AgentTaskRow | undefined;
+  boundTaskId: string | null;
+  display: PromptBlobDisplay;
+  actions: PromptBlobFaceActions;
+}) {
+  const { t } = useTranslation();
+
+  if (phase === "sending") return <StatusRow shimmer prompt={record.draft} />;
+
+  if (phase === "queued") {
+    return (
+      <StatusRow
+        label={
+          display.queueAhead > 0
+            ? t("promptBlobQueuedAhead", { count: display.queueAhead })
+            : t("promptBlobQueued")
+        }
+        prompt={record.lastSentPrompt}
+        onEdit={actions.editPrompt}
+        onStop={actions.stop}
+        stopLabel={t("agentRemoveFromQueue")}
+        onOpenChat={actions.openBoundChat}
+      />
+    );
+  }
+
+  if (phase === "running" || phase === "needs-permission") {
+    return (
+      <div className="flex flex-col">
+        <StatusRow
+          // No filler label: the tool-activity line exists only while a tool
+          // is actually in flight — the spinner alone carries "working", and
+          // a permanent "Working…" line just pads the row (Parsa's spacing
+          // complaint).
+          label={display.activeToolLine ?? undefined}
+          shimmer
+          prompt={record.lastSentPrompt}
+          teaser={display.assistantTeaser ?? undefined}
+          onEdit={actions.editPrompt}
+          onStop={actions.stop}
+          stopLabel={t("agentStop")}
+          onOpenChat={actions.openBoundChat}
+        />
+        {phase === "needs-permission" && boundTaskId && (
+          <div className="px-2.5 pb-2">
+            <PermissionCard taskId={boundTaskId} bare />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // The task row is what AuthCard reads; without it there is nothing to
+  // sign in to.
+  if (phase === "needs-auth" && task) {
+    return (
+      <div className="flex flex-col">
+        <StatusRow
+          label={t("agentSignInRequired")}
+          prompt={record.lastSentPrompt}
+          onEdit={actions.editPrompt}
+          onStop={actions.stop}
+          stopLabel={t("agentStop")}
+          onOpenChat={actions.openBoundChat}
+        />
+        <div className="px-2.5 pb-2">
+          <AuthCard task={task} bare />
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+/**
+ * The widget's face: given a phase and the state behind it, which card to
+ * show. Purely presentational — every hook, subscription and side effect
+ * lives in PromptBlob, so this is the part that can be rendered in a test
+ * with plain objects.
+ */
+export function PromptBlobFace({
+  phase,
+  record,
+  turn,
+  task,
+  boundTaskId,
+  workspacePath,
+  trustName,
+  confirmTrust,
+  isSending,
+  display,
+  actions,
+  composerRef,
+}: {
+  phase: BlobPhase;
+  record: PromptBlobRecord;
+  turn: AgentTurn | undefined;
+  task: AgentTaskRow | undefined;
+  boundTaskId: string | null;
+  workspacePath: string;
+  trustName: string;
+  confirmTrust: boolean;
+  isSending: boolean;
+  display: PromptBlobDisplay;
+  actions: PromptBlobFaceActions;
+  composerRef: React.RefObject<PromptEditorHandle>;
+}) {
+  const { t } = useTranslation();
   return (
     <div
       // The widget claims its pointer events wholesale: ProseMirror must
@@ -386,96 +610,52 @@ export const PromptBlob = memo(function PromptBlob({
         <div
           className={cn(
             "rounded-lg border",
-            blobCardClass(phase, widgetResponse?.kind === "issue"),
+            blobCardClass(phase, display.widgetResponse?.kind === "issue"),
           )}
         >
           {phase === "composing" && (
             <Composer
               draft={record.draft}
-              setDraft={setDraft}
-              onSend={() => void send()}
-              onEscape={escapeToEditor}
-              onRevert={revertToSlash}
-              onBackspaceDismiss={backspaceDismiss}
+              setDraft={actions.setDraft}
+              onSend={() => void actions.send()}
+              onEscape={actions.escapeToEditor}
+              onRevert={actions.revertToSlash}
+              onBackspaceDismiss={actions.backspaceDismiss}
               confirmTrust={confirmTrust}
-              trustName={defaultHarness.label}
+              trustName={trustName}
               workspacePath={workspacePath}
+              boundTaskId={boundTaskId}
+              onSelectSession={actions.rebindSession}
               composerRef={composerRef}
             />
           )}
 
-          {phase === "sending" && <StatusRow shimmer prompt={record.draft} />}
-
-          {phase === "queued" && (
-            <StatusRow
-              label={
-                queueAhead > 0
-                  ? t("promptBlobQueuedAhead", { count: queueAhead })
-                  : t("promptBlobQueued")
-              }
-              prompt={record.lastSentPrompt}
-              onEdit={editPrompt}
-              onStop={stop}
-              stopLabel={t("agentRemoveFromQueue")}
-              onOpenChat={openBoundChat}
-            />
-          )}
-
-          {(phase === "running" || phase === "needs-permission") && (
-            <div className="flex flex-col">
-              <StatusRow
-                // No filler label: the tool-activity line exists only while
-                // a tool is actually in flight — the spinner alone carries
-                // "working", and a permanent "Working…" line just pads the
-                // row (Parsa's spacing complaint).
-                label={activeToolLine ?? undefined}
-                shimmer
-                prompt={record.lastSentPrompt}
-                teaser={assistantTeaser ?? undefined}
-                onEdit={editPrompt}
-                onStop={stop}
-                stopLabel={t("agentStop")}
-                onOpenChat={openBoundChat}
-              />
-              {phase === "needs-permission" && boundTaskId && (
-                <div className="px-2.5 pb-2">
-                  <PermissionCard taskId={boundTaskId} bare />
-                </div>
-              )}
-            </div>
-          )}
-
-          {phase === "needs-auth" && task && (
-            <div className="flex flex-col">
-              <StatusRow
-                label={t("agentSignInRequired")}
-                prompt={record.lastSentPrompt}
-                onEdit={editPrompt}
-                onStop={stop}
-                stopLabel={t("agentStop")}
-                onOpenChat={openBoundChat}
-              />
-              <div className="px-2.5 pb-2">
-                <AuthCard task={task} bare />
-              </div>
-            </div>
-          )}
+          <SentFace
+            phase={phase}
+            record={record}
+            task={task}
+            boundTaskId={boundTaskId}
+            display={display}
+            actions={actions}
+          />
 
           {phase === "done" && (
             <DoneState
               cancelled={turn?.status === "cancelled"}
-              response={widgetResponse}
-              fallbackText={assistantTeaser}
-              touchedFiles={touchedFiles}
+              response={display.widgetResponse}
+              fallbackText={display.assistantTeaser}
+              touchedFiles={display.touchedFiles}
               onOpenFile={(path) =>
-                openFile({ tabId: path, intent: "new-tab" })
+                actions.openFile({ tabId: path, intent: "new-tab" })
               }
-              onOpenChat={() => boundTaskId && openAgentTab(boundTaskId)}
-              onDismiss={dismiss}
+              onOpenChat={() =>
+                boundTaskId && actions.openAgentTab(boundTaskId)
+              }
+              onDismiss={actions.dismiss}
               replyDraft={record.draft}
-              setReplyDraft={setDraft}
-              onReply={() => void sendFollowUp()}
-              onReplyEscape={escapeToEditor}
+              setReplyDraft={actions.setDraft}
+              onReply={() => void actions.sendFollowUp()}
+              onReplyEscape={actions.escapeToEditor}
               replyDisabled={isSending}
               workspacePath={workspacePath}
             />
@@ -484,13 +664,13 @@ export const PromptBlob = memo(function PromptBlob({
           {phase === "error" && (
             <ErrorState
               message={turn?.error}
-              onRetry={retry}
-              onEdit={editPrompt}
-              onDismiss={dismiss}
+              onRetry={actions.retry}
+              onEdit={actions.editPrompt}
+              onDismiss={actions.dismiss}
               replyDraft={record.draft}
-              setReplyDraft={setDraft}
-              onReply={() => void sendFollowUp()}
-              onReplyEscape={escapeToEditor}
+              setReplyDraft={actions.setDraft}
+              onReply={() => void actions.sendFollowUp()}
+              onReplyEscape={actions.escapeToEditor}
               replyDisabled={isSending}
               workspacePath={workspacePath}
             />
@@ -499,6 +679,106 @@ export const PromptBlob = memo(function PromptBlob({
       </AnimatedHeight>
     </div>
   );
+}
+
+/**
+ * The inline prompt blob: the primary prompting surface, hosted by the
+ * aiPrompt document node (ai-prompt-node.tsx) — part of the markdown AST in
+ * the editor, present by default in empty documents, but serialized to
+ * nothing so it never touches the file on disk. All interaction for the
+ * turn it sends stays here — progress, transient tool activity, stop/edit,
+ * auth and permission prompts, and the touched-documents summary — so the
+ * chat tab is optional, opened only from the done-state affordance.
+ *
+ * State lives in prompt-blob-store (module-level, per document path): the
+ * dock unmounts unselected tabs, and a running turn must survive that.
+ * Turns queue into the shared per-workspace session (blob-session-store);
+ * each widget watches only its own bound turnId.
+ */
+/**
+ * Everything the face needs, assembled from the store, the collections and
+ * the action hooks. Splitting it out keeps the component itself a container
+ * in the literal sense — one hook call and one element — and gives the
+ * widget's wiring a name of its own.
+ */
+function usePromptBlobModel(host: PromptBlobHost) {
+  const { blobId, workspacePath, documentPath, editor, getPos } = host;
+  const record = useSyncExternalStore(
+    useCallback((cb) => subscribePromptBlob(blobId, cb), [blobId]),
+    () => getPromptBlob(blobId),
+  );
+  const { boundTurnId, boundTaskId } = record;
+  const composerRef = useRef<PromptEditorHandle>(null);
+
+  const { defaultHarness } = useDefaultHarness();
+  const { openFile, openAgentTab } = useWorkspaceTabs();
+  const { isSending, confirmTrust, cancelAndRestore, ...actions } =
+    usePromptBlobActions({
+      blobId,
+      workspacePath,
+      documentPath,
+      editor,
+      getPos,
+      summoned: host.summoned ?? false,
+      removeNode: host.removeNode,
+      onSessionBound: host.onSessionBound,
+      composerRef,
+    });
+
+  const { turn, task, sortedEntries, taskTurns, phase } = usePromptBlobRound({
+    boundTurnId,
+    boundTaskId,
+    isSending,
+  });
+
+  useInFlightEscape({ blobId, phase, boundTurnId, cancelAndRestore });
+  useStaleTurnReset({ blobId, boundTurnId, isSending, hasTurn: Boolean(turn) });
+  const { escapeToEditor } = usePromptBlobFocus({
+    blobId,
+    editor,
+    documentPath,
+    getPos,
+    composerRef,
+  });
+
+  const display = usePromptBlobDisplay({
+    phase,
+    sortedEntries,
+    taskTurns,
+    boundTurnId,
+    workspacePath,
+  });
+
+  // One click from any bound phase to the session's full transcript
+  // (MET-104) — the done face has its own copy of this in DoneState.
+  const openBoundChat = boundTaskId
+    ? () => openAgentTab(boundTaskId)
+    : undefined;
+
+  return {
+    phase,
+    record,
+    turn,
+    task,
+    boundTaskId,
+    workspacePath,
+    trustName: defaultHarness.label,
+    confirmTrust,
+    isSending,
+    display,
+    composerRef,
+    actions: {
+      ...actions,
+      escapeToEditor,
+      openBoundChat,
+      openFile,
+      openAgentTab,
+    },
+  };
+}
+
+export const PromptBlob = memo(function PromptBlob(host: PromptBlobHost) {
+  return <PromptBlobFace {...usePromptBlobModel(host)} />;
 });
 
 /**
@@ -534,12 +814,14 @@ function usePromptSendActions({
   documentPath,
   editor,
   getPos,
+  onSessionBound,
 }: {
   blobId: string;
   workspacePath: string;
   documentPath: string;
   editor: Editor;
   getPos?: () => number | undefined;
+  onSessionBound?: (taskId: string) => void;
 }) {
   const { t } = useTranslation();
   const { defaultHarness } = useDefaultHarness();
@@ -584,7 +866,8 @@ function usePromptSendActions({
     }
     setIsSending(true);
     try {
-      const { taskId } = await getOrStartSharedSession(
+      const taskId = await resolvePromptTarget(
+        blobId,
         workspacePath,
         defaultHarness,
       );
@@ -595,6 +878,10 @@ function usePromptSendActions({
         lastSentPrompt: text,
         draft: "",
       });
+      // The widget is now part of the document's meaning, not just its UI:
+      // record the session on the node so the next save writes its marker
+      // (MET-163) and an agent write mid-round can't take it away.
+      onSessionBound?.(taskId);
     } catch (error) {
       console.error("Prompt blob send failed:", error);
     } finally {
@@ -609,6 +896,7 @@ function usePromptSendActions({
     workspacePath,
     defaultHarness,
     dispatchPrompt,
+    onSessionBound,
   ]);
 
   // Reply (MET-92): continue the conversation on the BOUND task — never the
@@ -626,7 +914,10 @@ function usePromptSendActions({
     // with no row, and binding to it would trip the stale-turn reset —
     // silently wiping this reply. Check first; on a dead task keep the
     // draft and fall back to composing (re-send starts a fresh session).
-    if (!getRegisteredTask(taskId)) {
+    // Reachable covers a session that is merely asleep: a widget restored
+    // from the document (MET-163) has no runtime until this prompt revives
+    // it via session/load, which is exactly the point of persisting it.
+    if (!(await agents.task(taskId).isReachable())) {
       toast(t("promptBlobSessionGone"));
       clearPromptBlobTurn(blobId);
       return;
@@ -662,18 +953,10 @@ function usePromptBlobActions({
   getPos,
   summoned,
   removeNode,
+  onSessionBound,
   composerRef,
-}: {
-  blobId: string;
-  workspacePath: string;
-  documentPath: string;
-  editor: Editor;
-  getPos?: () => number | undefined;
+}: PromptBlobHost & {
   summoned: boolean;
-  removeNode?: (options?: {
-    insertSlash?: boolean;
-    restoreParagraph?: boolean;
-  }) => void;
   composerRef: React.RefObject<PromptEditorHandle>;
 }) {
   const { isSending, confirmTrust, send, sendFollowUp } = usePromptSendActions({
@@ -682,6 +965,7 @@ function usePromptBlobActions({
     documentPath,
     editor,
     getPos,
+    onSessionBound,
   });
 
   const setDraft = useCallback(
@@ -776,6 +1060,19 @@ function usePromptBlobActions({
     [summoned, removeNode],
   );
 
+  // Picking a session on a widget that already belongs to one re-targets
+  // THIS widget (and its document marker), rather than only moving the
+  // workspace's shared session — otherwise the icon would name one session
+  // and the prompt would go to another.
+  const rebindSession = useCallback(
+    (taskId: string) => {
+      adoptSharedSession(workspacePath, taskId);
+      updatePromptBlob(blobId, { boundTaskId: taskId, boundTurnId: null });
+      onSessionBound?.(taskId);
+    },
+    [blobId, workspacePath, onSessionBound],
+  );
+
   return {
     isSending,
     confirmTrust,
@@ -789,6 +1086,7 @@ function usePromptBlobActions({
     dismiss,
     revertToSlash,
     backspaceDismiss,
+    rebindSession,
   };
 }
 
@@ -856,6 +1154,8 @@ function Composer({
   confirmTrust,
   trustName,
   workspacePath,
+  boundTaskId,
+  onSelectSession,
   composerRef,
 }: {
   draft: string;
@@ -872,13 +1172,19 @@ function Composer({
   confirmTrust: boolean;
   trustName: string;
   workspacePath: string;
+  boundTaskId?: string | null;
+  onSelectSession?: (taskId: string) => void;
   composerRef: React.RefObject<PromptEditorHandle>;
 }) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col">
       <div className="flex items-start gap-1.5 px-1.5 py-1">
-        <SessionControl workspacePath={workspacePath} />
+        <SessionControl
+          workspacePath={workspacePath}
+          boundTaskId={boundTaskId}
+          onSelectSession={onSelectSession}
+        />
         <PromptEditor
           ref={composerRef}
           workspacePath={workspacePath}
@@ -919,13 +1225,26 @@ function Composer({
  * recent live sessions to re-target, or an explicit new session (started on
  * the default harness).
  */
-function SessionControl({ workspacePath }: { workspacePath: string }) {
+function SessionControl({
+  workspacePath,
+  boundTaskId,
+  onSelectSession,
+}: {
+  workspacePath: string;
+  /** The session this widget is already bound to (a restored widget, MET-163)
+   *  — the icon must name where the prompt will actually go, which is this
+   *  task rather than the workspace's shared session. */
+  boundTaskId?: string | null;
+  /** Re-target a bound widget. Absent for an unbound one, whose selection
+   *  just moves the shared session as it always did. */
+  onSelectSession?: (taskId: string) => void;
+}) {
   const { t } = useTranslation();
   const { defaultHarness } = useDefaultHarness();
   const taskMetas = useAgentTaskList(workspacePath);
   const [open, setOpen] = useState(false);
 
-  const peekedTaskId = peekSharedSession(workspacePath);
+  const peekedTaskId = boundTaskId ?? peekSharedSession(workspacePath);
   const peekedKey = peekedTaskId ?? " none";
   const { data: peekedRows = [] } = useLiveQuery(
     (q) =>
@@ -966,7 +1285,9 @@ function SessionControl({ workspacePath }: { workspacePath: string }) {
                 key={meta.task.taskId}
                 className="cursor-pointer gap-2 text-xs"
                 onSelect={() =>
-                  adoptSharedSession(workspacePath, meta.task.taskId)
+                  onSelectSession
+                    ? onSelectSession(meta.task.taskId)
+                    : adoptSharedSession(workspacePath, meta.task.taskId)
                 }
               >
                 {meta.task.taskId === peekedTaskId ? (

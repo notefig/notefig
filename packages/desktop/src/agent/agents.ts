@@ -15,7 +15,12 @@ import {
   type RequestPermissionResponse,
   type TurnOutcome,
 } from "@notefig/shared/agent";
-import { agentTurnsCollection, type AgentTurn } from "./agent-collections";
+import {
+  agentTasksCollection,
+  agentTurnsCollection,
+  whenAgentTasksReconciled,
+  type AgentTurn,
+} from "./agent-collections";
 import { getRegisteredTask } from "./task-registry";
 // Deferred-use import (see agent-service.ts's matching note): only
 // `workspaceHandle.createTask` and `taskHandle.prompt`'s revival path reach
@@ -54,6 +59,18 @@ export interface AgentTaskHandle {
      *  otherwise carries no contextParts. */
     extraContextParts?: PromptContextPart[],
   ): PromptHandle;
+  /**
+   * Can this task still be prompted? True for a live runtime and for a
+   * restored row that `prompt` would revive via session/load (MET-163: a
+   * widget persisted in a document outlives the runtime that served it, and
+   * must tell "your session is gone" apart from "your session is asleep").
+   *
+   * Async because a missing row only means "gone" once boot reconciliation
+   * has settled — before that the collection may still be loading. Even
+   * then a false answer means "route this prompt at a new session", never
+   * "delete the user's widget": wiped storage answers false for everything.
+   */
+  isReachable(): Promise<boolean>;
   cancel(): Promise<ActionResult>;
   respondPermission(
     requestId: string,
@@ -131,6 +148,17 @@ function taskHandle(taskId: string): AgentTaskHandle {
           ...extraContextParts,
         ],
       });
+    },
+    async isReachable() {
+      if (getRegisteredTask(taskId)) return true;
+      await whenAgentTasksReconciled();
+      if (getRegisteredTask(taskId)) return true;
+      const row = agentTasksCollection.get(taskId);
+      // Exactly reviveAgentTask's precondition: anything else — no row at
+      // all, a row already demoted to "unavailable", or one with no session
+      // to resume — is a task no prompt can reach.
+      if (!row) return false;
+      return row.status === "restored" && Boolean(row.sessionId);
     },
     async cancel() {
       const task = getRegisteredTask(taskId);

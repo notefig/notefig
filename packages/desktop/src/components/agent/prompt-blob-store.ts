@@ -51,6 +51,23 @@ export function updatePromptBlob(
   emit(blobId);
 }
 
+/**
+ * Seed the binding a widget carried in the document (MET-163), so a widget
+ * restored from the file renders as belonging to its session rather than as
+ * a fresh composer.
+ *
+ * Never clobbers live state: during adoption (an agent writing this file
+ * mid-round) the record still holds the running turn, and the re-parsed node
+ * brings back the same ids it was serialized with.
+ */
+export function adoptPersistedPromptBinding(
+  blobId: string,
+  taskId: string,
+): void {
+  if (getPromptBlob(blobId).boundTaskId) return;
+  updatePromptBlob(blobId, { boundTaskId: taskId });
+}
+
 /** Unbind the watched turn (dismiss / stale-row reset), keeping the draft. */
 export function clearPromptBlobTurn(blobId: string): void {
   updatePromptBlob(blobId, {

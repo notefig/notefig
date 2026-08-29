@@ -199,3 +199,50 @@ describe("agents facade (Stage 1)", () => {
     expect(row?.status).toBe("completed");
   });
 });
+
+describe("task reachability (MET-163)", () => {
+  it("is false for a task that never existed", async () => {
+    expect(await agents.task("task_nope").isReachable()).toBe(false);
+  });
+
+  it("is true for a restored row a prompt would revive", async () => {
+    agentTasksCollection.insert({
+      taskId: "task_restored",
+      workspacePath: "/ws",
+      title: "restored",
+      status: "restored",
+      harnessId: harness.id,
+      sessionId: "sess_1",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    expect(await agents.task("task_restored").isReachable()).toBe(true);
+  });
+
+  it("is false once a row has been demoted to unavailable", async () => {
+    agentTasksCollection.insert({
+      taskId: "task_dead",
+      workspacePath: "/ws",
+      title: "dead",
+      status: "unavailable",
+      harnessId: harness.id,
+      sessionId: "sess_2",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    expect(await agents.task("task_dead").isReachable()).toBe(false);
+  });
+
+  it("is false for a row with no session to resume", async () => {
+    agentTasksCollection.insert({
+      taskId: "task_sessionless",
+      workspacePath: "/ws",
+      title: "no session",
+      status: "restored",
+      harnessId: harness.id,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    expect(await agents.task("task_sessionless").isReachable()).toBe(false);
+  });
+});
