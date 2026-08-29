@@ -9,9 +9,9 @@ import {
   FileText,
   Settings,
   Search,
+  FilePlus,
   FolderOpen,
   FolderPlus,
-  Plus,
   Undo,
   Redo,
   Moon,
@@ -47,6 +47,7 @@ import { getLocalizedCommandKeywords } from "@/utils/command-keywords";
 import { useFileSearch, type FileSearchResult } from "@/hooks/use-file-search";
 import { canOpenFile } from "./polymorphic-editor";
 import { FileTypeIcon } from "./file-type-icon";
+import { ScratchpadIcon } from "./scratchpad-icon";
 import { useWorkspaceTabsOptional } from "@/components/workspace-tabs-provider";
 
 interface CommandPaletteProps {
@@ -54,8 +55,8 @@ interface CommandPaletteProps {
   sidebarOpen: boolean;
   workspacePath: string;
   onOpenChange: (open: boolean) => void;
+  onNewScratchpad?: () => void;
   onNewFile?: () => void;
-  onNewFileIn?: () => void;
   onNewDirectory?: () => void;
   onCloseFile?: () => void;
   onUndo?: () => void;
@@ -155,8 +156,8 @@ export function CommandPalette({
   sidebarOpen,
   workspacePath,
   onOpenChange,
+  onNewScratchpad,
   onNewFile,
-  onNewFileIn,
   onNewDirectory,
   onCloseFile,
   onUndo,
@@ -219,27 +220,27 @@ export function CommandPalette({
 
   const commands: CommandType[] = [
     {
+      id: "new-scratchpad",
+      labelKey: "newScratchpad",
+      groupKey: "file",
+      keywordKey: "commandKeywords.newScratchpad",
+      icon: ScratchpadIcon,
+      shortcut: formatForDisplay("Mod+N"),
+      action: () => {
+        onNewScratchpad?.();
+      },
+    },
+    {
       id: "new-file",
       labelKey: "newFile",
       groupKey: "file",
       keywordKey: "commandKeywords.newFile",
-      icon: Plus,
-      shortcut: formatForDisplay("Mod+N"),
-      action: () => {
-        onNewFile?.();
-      },
-    },
-    {
-      id: "new-file-in",
-      labelKey: "newFileIn",
-      groupKey: "file",
-      keywordKey: "commandKeywords.newFileIn",
-      icon: Plus,
+      icon: FilePlus,
       action: () => {
         if (sidebarOpen) {
           onToggleSidebar?.();
         }
-        onNewFileIn?.();
+        onNewFile?.();
       },
     },
     {
@@ -363,6 +364,7 @@ export function CommandPalette({
 
   const handleSelect = (command: CommandType) => {
     if (
+      command.id === "new-scratchpad" ||
       command.id === "new-file" ||
       command.id === "new-directory" ||
       command.id === "search-in-file" ||
