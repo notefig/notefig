@@ -120,8 +120,11 @@ export function FileCreateActions({
 }: FileCreateActionsProps) {
   const { t } = useTranslation();
 
+  // No z-index on the pill: later-in-DOM keeps it over plain tree rows,
+  // while the tree's context menu (z-index 3-4 inside its host) paints —
+  // and clicks — above it instead of having menu items intercepted.
   return (
-    <ButtonGroup className="absolute bottom-2 end-2 z-10 rounded-md border border-sidebar-border bg-sidebar shadow-md">
+    <ButtonGroup className="absolute bottom-2 end-2 rounded-md border border-sidebar-border bg-sidebar shadow-md">
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
