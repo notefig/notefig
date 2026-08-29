@@ -158,3 +158,22 @@ export function removeToParagraphTr(
   const tr = state.tr.replaceWith(pos, pos + nodeSize, paragraph);
   return tr.setSelection(TextSelection.create(tr.doc, pos + 1));
 }
+
+/**
+ * A document whose last block is the widget has nowhere to put the caret:
+ * the atom is the only thing there, so there is no text position to click
+ * into. That is the shape a file holding just a persisted widget marker
+ * parses to (MET-163), and the shape the keeper has always relied on the
+ * empty document's own paragraph to avoid.
+ *
+ * Returns the repair transaction, or null when a landing spot already
+ * exists. An empty trailing paragraph serializes to nothing, so this never
+ * changes the file — callers mark it UI-only for that reason.
+ */
+export function trailingParagraphTr(state: EditorState): Transaction | null {
+  const last = state.doc.lastChild;
+  if (!last || last.type.name !== AiPromptNodeBase.name) return null;
+  const paragraph = state.schema.nodes.paragraph?.create();
+  if (!paragraph) return null;
+  return state.tr.insert(state.doc.content.size, paragraph);
+}

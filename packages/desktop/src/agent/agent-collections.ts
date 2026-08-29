@@ -86,11 +86,7 @@ export type AgentTaskRow = {
 };
 
 export type AgentTurnStatus =
-  | "queued"
-  | "running"
-  | "completed"
-  | "cancelled"
-  | "error";
+  "queued" | "running" | "completed" | "cancelled" | "error";
 
 export type AgentTurn = {
   /** trn_ (ascending) — one per session/prompt round-trip */
@@ -259,6 +255,7 @@ export async function reconcileAgentTasksAtBoot(): Promise<void> {
 }
 
 let reconcileStarted = false;
+let reconcileSettled: Promise<void> | null = null;
 
 /**
  * Fire-and-forget boot trigger, once per app session — StrictMode's
@@ -268,14 +265,29 @@ let reconcileStarted = false;
 export function ensureAgentTasksReconciled(): void {
   if (reconcileStarted) return;
   reconcileStarted = true;
-  void reconcileAgentTasksAtBoot().catch((error: unknown) => {
+  reconcileSettled = reconcileAgentTasksAtBoot().catch((error: unknown) => {
     console.warn("Agent task reconciliation failed:", error);
   });
+}
+
+/**
+ * Resolves once the hydrated rows are trustworthy — i.e. after boot
+ * reconciliation has deleted the rows that can never be revived.
+ *
+ * Anything that treats a missing row as "this session is gone for good" must
+ * wait for this first: before it settles, the collection is either still
+ * loading or still holding rows that are about to be deleted. Starts
+ * reconciliation if nothing has yet (tests, harness routes).
+ */
+export function whenAgentTasksReconciled(): Promise<void> {
+  ensureAgentTasksReconciled();
+  return reconcileSettled ?? Promise.resolve();
 }
 
 /** Test-only: allow the once-per-session guard to re-arm. */
 export function resetAgentTasksReconciledForTest(): void {
   reconcileStarted = false;
+  reconcileSettled = null;
 }
 
 export const agentTurnsCollection = createCollection(

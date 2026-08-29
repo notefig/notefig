@@ -25,6 +25,7 @@
 import { platformAdapter } from "@/adapters";
 import { path as pathutil } from "@/utils/path";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
+import { stripPromptMarkers } from "@/components/editor/prompt-marker";
 import {
   createFile,
   getOrCreateWorkspaceCollections,
@@ -236,7 +237,10 @@ export async function sweepScratchpadsOnDisk(
 
   const reads = await platformAdapter.fs.readFiles(candidates);
   const empties = reads.succeeded
-    .filter(({ content }) => content.trim() === "")
+    // A persisted prompt widget (MET-163) is the only thing an abandoned
+    // scratchpad may hold and still count as empty: the user typed a prompt
+    // that produced nothing, so the file is as disposable as a blank one.
+    .filter(({ content }) => stripPromptMarkers(content).trim() === "")
     .map(({ path }) => path);
   if (empties.length === 0) return;
   await platformAdapter.fs.deleteFiles(empties);

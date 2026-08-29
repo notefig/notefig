@@ -29,6 +29,7 @@ import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { common, createLowlight } from "lowlight";
+import { parsePromptMarkerData, serializePromptMarker } from "./prompt-marker";
 
 export { CodeBlockLowlight };
 
@@ -110,7 +111,9 @@ export const MarkdownTaskItem = TaskItem.extend({
                 // shim in the conversion worker only implements the attribute.
                 item.setAttribute(
                   "data-checked",
-                  String(input.hasAttribute("checked") || input.checked === true),
+                  String(
+                    input.hasAttribute("checked") || input.checked === true,
+                  ),
                 );
                 input.remove();
               }
@@ -119,9 +122,7 @@ export const MarkdownTaskItem = TaskItem.extend({
             element
               .querySelectorAll("ul > li:not([data-type])")
               .forEach((item) => {
-                const match = item.textContent
-                  ?.trim()
-                  .match(/^\[( |x|X)\]$/);
+                const match = item.textContent?.trim().match(/^\[( |x|X)\]$/);
                 if (!match) return;
                 item.setAttribute("data-type", "taskItem");
                 item.setAttribute(
@@ -249,7 +250,9 @@ interface FrontmatterMarkdownEditor {
   options: { content: unknown; initialContent?: unknown };
   storage: {
     markdown?: {
-      parser: { parse(content: unknown, options?: { inline?: boolean }): unknown };
+      parser: {
+        parse(content: unknown, options?: { inline?: boolean }): unknown;
+      };
     };
   };
 }
@@ -367,13 +370,20 @@ export const DocWithFrontmatter = Node.create({
 export const UI_ONLY_TRANSACTION_META = "uiOnlyNodeChange";
 
 /**
- * The inline AI prompt widget's schema node — a block atom that is pure UI:
- * it serializes to NOTHING (the markdown storage below), so it can live in
- * the document flow without ever touching the file on disk. This base is
- * worker-safe (schema + serializer only); the renderer extends it with the
- * React node view and the empty-doc keeper in ai-prompt-node.tsx. Without
- * the explicit no-op serializer, tiptap-markdown's html fallback would
- * write the node's placeholder <div> into the file.
+ * The inline AI prompt widget's schema node — a block atom whose presence in
+ * the file depends on whether it is bound to an agent session (MET-163).
+ *
+ * Unbound (the empty-doc keeper, a widget summoned with "/" but never sent)
+ * it is pure UI and serializes to NOTHING, exactly as it always did: an
+ * untouched document must stay byte-identical on disk. Once it is bound to a
+ * task it becomes real content and serializes to its marker comment — see
+ * prompt-marker.ts for why a comment and why only two ids. Without either
+ * branch tiptap-markdown's html fallback would write the node's placeholder
+ * <div> into the file.
+ *
+ * This base is worker-safe (schema + markdown spec only); the renderer
+ * extends it with the React node view, the empty-doc keeper and the binding
+ * write in ai-prompt-node.tsx.
  */
 export const AiPromptNodeBase = Node.create({
   name: "aiPrompt",
@@ -391,30 +401,109 @@ export const AiPromptNodeBase = Node.create({
       // bound turn) in prompt-blob-store by this id — a document can hold
       // several widgets, so the document path is not identity enough.
       // Minted at every creation site; null only for schema-default nodes,
-      // which the node view repairs on mount. Never serialized.
+      // which the node view repairs on mount. Serialized only alongside a
+      // taskId: it is what makes an adopted re-parse (an agent writing this
+      // file mid-round) land back on this widget's live state rather than a
+      // fresh empty one.
       blobId: { default: null },
+      // The agent task whose session this widget's round belongs to. Set at
+      // send time by the node view, null while composing. Its presence is
+      // what turns the widget from UI into file content.
+      taskId: { default: null },
     };
   },
 
   parseHTML() {
-    // Internal HTML round-trips only (clipboard); markdown never produces it.
-    return [{ tag: 'div[data-type="ai-prompt"]' }];
+    // Two sources: markdown (the marker comment, rewritten into this shape
+    // by the parse hook below, carrying both ids) and internal HTML
+    // round-trips (clipboard), whose renderHTML output has no attrs — those
+    // land id-less and the node view mints a fresh identity on mount.
+    return [
+      {
+        tag: 'div[data-type="ai-prompt"]',
+        getAttrs: (element) => {
+          const blobId = element.getAttribute("data-blob-id");
+          const taskId = element.getAttribute("data-task-id");
+          return {
+            ...(blobId ? { blobId } : {}),
+            ...(taskId ? { taskId } : {}),
+          };
+        },
+      },
+    ];
   },
 
   renderHTML() {
+    // Deliberately attr-less: copying a widget must not clone its identity
+    // into a second widget sharing one round's state.
     return ["div", { "data-type": "ai-prompt" }];
   },
 
   addStorage() {
     return {
       markdown: {
-        serialize() {
-          // UI-only: contributes nothing to the file.
+        serialize(
+          state: {
+            write: (s: string) => void;
+            closeBlock: (node: unknown) => void;
+          },
+          node: { attrs: { blobId: string | null; taskId: string | null } },
+        ) {
+          const marker = serializePromptMarker(node.attrs);
+          // Unbound: contributes nothing to the file.
+          if (!marker) return;
+          state.write(marker);
+          state.closeBlock(node);
+        },
+        parse: {
+          updateDOM(element: HTMLElement) {
+            replacePromptMarkerComments(element);
+          },
         },
       },
     };
   },
 });
+
+/**
+ * Rewrite our marker comments into the element `parseHTML` above matches.
+ *
+ * This hook is the last moment the comments exist: markdown-it emits them
+ * verbatim (html: true) and DOMParser keeps them, but ProseMirror's own
+ * DOMParser handles only element and text nodes, so anything still a comment
+ * by then is dropped without a trace.
+ *
+ * A manual childNodes recursion rather than querySelectorAll (which cannot
+ * select comments) or a TreeWalker (which the conversion worker's linkedom
+ * shim does not expose) — plain childNodes works in both DOMs.
+ */
+function replacePromptMarkerComments(element: HTMLElement): void {
+  const COMMENT_NODE = 8;
+  const ELEMENT_NODE = 1;
+  // `Node` in this module is Tiptap's; the DOM one needs its global name.
+  const walk = (parent: globalThis.Node): void => {
+    // Snapshot: replaceChild mutates the live childNodes list.
+    for (const child of Array.from(parent.childNodes)) {
+      if (child.nodeType === ELEMENT_NODE) {
+        walk(child);
+        continue;
+      }
+      if (child.nodeType !== COMMENT_NODE) continue;
+      const marker = parsePromptMarkerData(
+        (child as unknown as { data: string }).data ?? "",
+      );
+      if (!marker) continue;
+      const doc = element.ownerDocument;
+      if (!doc) continue;
+      const replacement = doc.createElement("div");
+      replacement.setAttribute("data-type", "ai-prompt");
+      replacement.setAttribute("data-blob-id", marker.blobId);
+      replacement.setAttribute("data-task-id", marker.taskId);
+      parent.replaceChild(replacement, child);
+    }
+  };
+  walk(element);
+}
 
 /**
  * ListItem whose content admits the aiPrompt widget in place of the leading
@@ -499,7 +588,10 @@ export const AutoDirection = Extension.create({
           decorations: (state) => {
             const decorations: Decoration[] = [];
             state.doc.descendants((node, pos, parent) => {
-              if (node.type.name !== "paragraph" && node.type.name !== "heading") {
+              if (
+                node.type.name !== "paragraph" &&
+                node.type.name !== "heading"
+              ) {
                 return;
               }
               if (parent && DIRECTION_OWNING_WRAPPERS.has(parent.type.name)) {

@@ -25,7 +25,7 @@ import {
   AiPromptNodeBase,
   UI_ONLY_TRANSACTION_META,
 } from "./editor-schema-kit";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import {
   docHasPromptNode,
   docHasRealContent,
@@ -34,9 +34,14 @@ import {
   removeToParagraphTr,
   revertToSlashTr,
   slashSummonTr,
+  trailingParagraphTr,
 } from "./ai-prompt-utils";
 import { PromptBlob } from "@/components/agent/prompt-blob";
-import { requestPromptBlobFocus } from "@/components/agent/prompt-blob-store";
+import {
+  adoptPersistedPromptBinding,
+  requestPromptBlobFocus,
+} from "@/components/agent/prompt-blob-store";
+import { agents } from "@/agent/agents";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
 
 export interface AiPromptNodeOptions {
@@ -71,6 +76,7 @@ function appendPromptTr(
 function AiPromptNodeView(props: NodeViewProps) {
   const { filePath, basePath } = props.extension.options as AiPromptNodeOptions;
   const blobId = (props.node.attrs.blobId as string | null) ?? null;
+  const persistedTaskId = (props.node.attrs.taskId as string | null) ?? null;
 
   // Repair id-less instances (schema defaults survive clipboard round-trips
   // — renderHTML doesn't carry attrs). One UI-only-ish attr write; the node
@@ -82,6 +88,36 @@ function AiPromptNodeView(props: NodeViewProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [needsId]);
+
+  // A widget restored from the file (MET-163) carries its session in the
+  // node. Seed the store so it renders as that session's widget, then drop
+  // it silently when the session turns out to be gone for good — a widget
+  // whose conversation no longer exists is a dead shell, and the ticket
+  // chooses discarding over surfacing an error the user can't act on. The
+  // node deletion re-serializes the document without the marker, so the
+  // file heals itself on the next save.
+  // Through refs, not deps: deleteNode's identity changes per render, and
+  // re-running the check on every one of them could fire a second delete
+  // against a node that is already gone.
+  const deleteNodeRef = useRef(props.deleteNode);
+  deleteNodeRef.current = props.deleteNode;
+  const discarded = useRef(false);
+  useEffect(() => {
+    if (!filePath || !blobId || !persistedTaskId) return;
+    adoptPersistedPromptBinding(blobId, persistedTaskId);
+    let cancelled = false;
+    void agents
+      .task(persistedTaskId)
+      .isReachable()
+      .then((reachable) => {
+        if (cancelled || reachable || discarded.current) return;
+        discarded.current = true;
+        deleteNodeRef.current();
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [filePath, blobId, persistedTaskId]);
 
   if (!filePath || !basePath || blobId === null) return <NodeViewWrapper />;
 
@@ -124,6 +160,7 @@ function AiPromptNodeView(props: NodeViewProps) {
         getPos={props.getPos}
         summoned={Boolean(props.node.attrs.summoned)}
         removeNode={removeNode}
+        onSessionBound={(taskId) => props.updateAttributes({ taskId })}
       />
     </NodeViewWrapper>
   );
@@ -144,6 +181,14 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
     // before the node view mounts, and its consumer doesn't bail on the
     // editor already holding focus (unlike the mount auto-focus effect).
     if (!this.options.filePath) return;
+    const caret = trailingParagraphTr(this.editor.state);
+    if (caret) {
+      this.editor.view.dispatch(
+        caret
+          .setMeta("addToHistory", false)
+          .setMeta(UI_ONLY_TRANSACTION_META, true),
+      );
+    }
     const res = appendPromptTr(this.editor.state);
     if (!res) return;
     this.editor.view.dispatch(res.tr);
@@ -182,7 +227,16 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
           if (!transactions.some((tr) => tr.docChanged)) return null;
           // Became-empty reinsert: no focus request — the user's cursor is
           // in the editor and must stay there.
-          return appendPromptTr(newState)?.tr ?? null;
+          const keeper = appendPromptTr(newState)?.tr;
+          if (keeper) return keeper;
+          // A widget left as the document's last block (adopting a file that
+          // holds only a persisted marker) needs a caret landing spot.
+          const caret = trailingParagraphTr(newState);
+          return caret
+            ? caret
+                .setMeta("addToHistory", false)
+                .setMeta(UI_ONLY_TRANSACTION_META, true)
+            : null;
         },
       }),
     ];

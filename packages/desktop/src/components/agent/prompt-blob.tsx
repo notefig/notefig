@@ -54,14 +54,10 @@ import {
   cancelAgentTurnAndForget,
   removeQueuedPrompt,
 } from "@/agent/agent-service";
-import { getRegisteredTask } from "@/agent/task-registry";
 import type { WidgetResponse } from "@/agent/tools/widget-respond";
 import { ensureAgentRuntime } from "@/agent/tunnel/require-connection";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
-import {
-  requestTabFocus,
-  suppressTabFocus,
-} from "@/tabs/tab-controllers";
+import { requestTabFocus, suppressTabFocus } from "@/tabs/tab-controllers";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "./harness-logo";
 import {
@@ -128,28 +124,11 @@ function holdsLatestInFlightEscape(blobId: string): boolean {
 }
 
 /**
- * The inline prompt blob: the primary prompting surface, hosted by the
- * aiPrompt document node (ai-prompt-node.tsx) — part of the markdown AST in
- * the editor, present by default in empty documents, but serialized to
- * nothing so it never touches the file on disk. All interaction for the
- * turn it sends stays here — progress, transient tool activity, stop/edit,
- * auth and permission prompts, and the touched-documents summary — so the
- * chat tab is optional, opened only from the done-state affordance.
- *
- * State lives in prompt-blob-store (module-level, per document path): the
- * dock unmounts unselected tabs, and a running turn must survive that.
- * Turns queue into the shared per-workspace session (blob-session-store);
- * each widget watches only its own bound turnId.
+ * What the hosting document node hands the widget: its identity, where it
+ * sits, and the three ways it may write back to the node. Shared by the
+ * component and its action hooks, which all need the same facts.
  */
-export const PromptBlob = memo(function PromptBlob({
-  blobId,
-  workspacePath,
-  documentPath,
-  editor,
-  getPos,
-  summoned = false,
-  removeNode,
-}: {
+interface PromptBlobHost {
   /** This widget instance's identity (the node's blobId attr) — the store
    *  key. Documents can hold several widgets; the path is not identity. */
   blobId: string;
@@ -171,7 +150,36 @@ export const PromptBlob = memo(function PromptBlob({
     insertSlash?: boolean;
     restoreParagraph?: boolean;
   }) => void;
-}) {
+  /** Record which agent session this widget's round belongs to on the
+   *  document node, so it survives a re-parse and app restarts (MET-163).
+   *  Provided by the node view, which owns the node's attributes. */
+  onSessionBound?: (taskId: string) => void;
+}
+
+/**
+ * The inline prompt blob: the primary prompting surface, hosted by the
+ * aiPrompt document node (ai-prompt-node.tsx) — part of the markdown AST in
+ * the editor, present by default in empty documents, but serialized to
+ * nothing so it never touches the file on disk. All interaction for the
+ * turn it sends stays here — progress, transient tool activity, stop/edit,
+ * auth and permission prompts, and the touched-documents summary — so the
+ * chat tab is optional, opened only from the done-state affordance.
+ *
+ * State lives in prompt-blob-store (module-level, per document path): the
+ * dock unmounts unselected tabs, and a running turn must survive that.
+ * Turns queue into the shared per-workspace session (blob-session-store);
+ * each widget watches only its own bound turnId.
+ */
+export const PromptBlob = memo(function PromptBlob({
+  blobId,
+  workspacePath,
+  documentPath,
+  editor,
+  getPos,
+  summoned = false,
+  removeNode,
+  onSessionBound,
+}: PromptBlobHost) {
   const { t } = useTranslation();
   const record = useSyncExternalStore(
     useCallback((cb) => subscribePromptBlob(blobId, cb), [blobId]),
@@ -203,6 +211,7 @@ export const PromptBlob = memo(function PromptBlob({
     getPos,
     summoned,
     removeNode,
+    onSessionBound,
     composerRef,
   });
 
@@ -534,12 +543,14 @@ function usePromptSendActions({
   documentPath,
   editor,
   getPos,
+  onSessionBound,
 }: {
   blobId: string;
   workspacePath: string;
   documentPath: string;
   editor: Editor;
   getPos?: () => number | undefined;
+  onSessionBound?: (taskId: string) => void;
 }) {
   const { t } = useTranslation();
   const { defaultHarness } = useDefaultHarness();
@@ -595,6 +606,10 @@ function usePromptSendActions({
         lastSentPrompt: text,
         draft: "",
       });
+      // The widget is now part of the document's meaning, not just its UI:
+      // record the session on the node so the next save writes its marker
+      // (MET-163) and an agent write mid-round can't take it away.
+      onSessionBound?.(taskId);
     } catch (error) {
       console.error("Prompt blob send failed:", error);
     } finally {
@@ -609,6 +624,7 @@ function usePromptSendActions({
     workspacePath,
     defaultHarness,
     dispatchPrompt,
+    onSessionBound,
   ]);
 
   // Reply (MET-92): continue the conversation on the BOUND task — never the
@@ -626,7 +642,10 @@ function usePromptSendActions({
     // with no row, and binding to it would trip the stale-turn reset —
     // silently wiping this reply. Check first; on a dead task keep the
     // draft and fall back to composing (re-send starts a fresh session).
-    if (!getRegisteredTask(taskId)) {
+    // Reachable covers a session that is merely asleep: a widget restored
+    // from the document (MET-163) has no runtime until this prompt revives
+    // it via session/load, which is exactly the point of persisting it.
+    if (!(await agents.task(taskId).isReachable())) {
       toast(t("promptBlobSessionGone"));
       clearPromptBlobTurn(blobId);
       return;
@@ -662,18 +681,10 @@ function usePromptBlobActions({
   getPos,
   summoned,
   removeNode,
+  onSessionBound,
   composerRef,
-}: {
-  blobId: string;
-  workspacePath: string;
-  documentPath: string;
-  editor: Editor;
-  getPos?: () => number | undefined;
+}: PromptBlobHost & {
   summoned: boolean;
-  removeNode?: (options?: {
-    insertSlash?: boolean;
-    restoreParagraph?: boolean;
-  }) => void;
   composerRef: React.RefObject<PromptEditorHandle>;
 }) {
   const { isSending, confirmTrust, send, sendFollowUp } = usePromptSendActions({
@@ -682,6 +693,7 @@ function usePromptBlobActions({
     documentPath,
     editor,
     getPos,
+    onSessionBound,
   });
 
   const setDraft = useCallback(
