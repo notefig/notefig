@@ -194,8 +194,8 @@ describe("routing builders", () => {
 
 describe("key producers", () => {
   it("historyGitDir spelling (persisted via git config/locks — must never drift on mac)", () => {
-    expect(historyGitDir(WS)).toBe(`${WS}/.metrists/.git`);
-    expect(historyGitDir(`${WS}/`)).toBe(`${WS}/.metrists/.git`);
+    expect(historyGitDir(WS)).toBe(`${WS}/.notefig/.git`);
+    expect(historyGitDir(`${WS}/`)).toBe(`${WS}/.notefig/.git`);
   });
 
   it("trust/TaskManager keys via workspaceKey are the identity on mac — persisted keys never change spelling", () => {

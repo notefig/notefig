@@ -746,16 +746,18 @@ mod tests {
         }
     }
 
-    /// MET-135: the app dir (".metrists") is not hidden — it is walked by
-    /// default — while its own dot children (".metrists/.git") stay hidden.
+    /// MET-135: the app dir (".notefig") is not hidden — it is walked by
+    /// default — but only its scratchpads folder is: every other child is
+    /// hidden by position, dot-named (".notefig/.git") or not.
     #[tokio::test]
     async fn test_read_directory_walks_app_dir_but_not_its_hidden_children() {
         let temp_dir = setup_test_dir();
         let root_path = temp_dir.path().to_string_lossy().to_string();
 
         create_test_file(&temp_dir, "notes.md", "x").await;
-        create_test_file(&temp_dir, ".metrists/scratchpads/untitled.md", "x").await;
-        create_test_file(&temp_dir, ".metrists/.git/HEAD", "x").await;
+        create_test_file(&temp_dir, ".notefig/scratchpads/untitled.md", "x").await;
+        create_test_file(&temp_dir, ".notefig/.git/HEAD", "x").await;
+        create_test_file(&temp_dir, ".notefig/tasks.json", "x").await;
         create_test_file(&temp_dir, ".git/HEAD", "x").await;
 
         let result =
@@ -766,6 +768,7 @@ mod tests {
             assert!(value.iter().any(|p| p.contains("untitled.md")));
             assert!(value.iter().any(|p| p.contains("notes.md")));
             assert!(!value.iter().any(|p| p.contains("HEAD")));
+            assert!(!value.iter().any(|p| p.contains("tasks.json")));
         }
     }
 

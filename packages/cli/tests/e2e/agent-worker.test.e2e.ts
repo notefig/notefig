@@ -296,7 +296,7 @@ describe('AgentWorker', () => {
         // Browser addresses files under its own synthetic root:
         cwd: '/browser-root',
         extraEnv: {
-          OPENCODE_CONFIG: '/browser-root/.metrists/agent/opencode-t1.json',
+          OPENCODE_CONFIG: '/browser-root/.notefig/agent/opencode-t1.json',
           UNCHANGED: '/somewhere/else',
         },
       },
@@ -320,7 +320,7 @@ describe('AgentWorker', () => {
     );
     // Browser prefix rewritten to the worker's real --dir.
     expect(String(cfgLine.data)).toBe(
-      `env:${workspace}/.metrists/agent/opencode-t1.json`,
+      `env:${workspace}/.notefig/agent/opencode-t1.json`,
     );
     browser.close();
   });

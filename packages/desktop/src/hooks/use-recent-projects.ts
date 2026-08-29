@@ -13,7 +13,6 @@ import {
   removeTabFromLayout,
 } from "@/utils/dockable-layout";
 import {
-  cleanupLegacyAgentConfigDir,
   resolveScratchpadOnDisk,
   sweepScratchpadsOnDisk,
 } from "@/entities/scratchpads";
@@ -92,8 +91,6 @@ async function computeProjectEntryUrl(path: string): Promise<string> {
   const [pathname, search = ""] = base.split("?");
   const params = new URLSearchParams(search);
   let layout = await pruneDeadFileTabs(parseLayout(params.get(LAYOUT_PARAM)));
-
-  cleanupLegacyAgentConfigDir(path);
 
   const restoredTabs = extractTabIds(layout);
   if (restoredTabs.length > 0) {

@@ -47,6 +47,7 @@ import {
   writeWorkspaceTextFile,
 } from "@/utils/file-sync";
 import { checkpointWorkspaceHistory } from "@/utils/history-service";
+import { APP_DIR_NAME } from "@/utils/app-dir";
 import {
   agentEntriesCollection,
   agentEntriesForTask,
@@ -618,14 +619,14 @@ export class AgentTask {
     return { OPENCODE_CONFIG: configPath };
   }
 
-  /** Per-task OpenCode config, under the workspace's own `.metrists/`.
-   * Dot-named `.agent` so it stays hidden now that the app dir itself is
-   * walked (MET-135); the legacy `agent/` dir is cleaned up at startup. */
+  /** Per-task OpenCode config, under the workspace's own app dir. Every
+   * child of that dir bar `scratchpads` is hidden from the walkers, the
+   * watcher and both git repos, so no dot prefix is needed here. */
   private opencodeConfigPath(): string {
     return pathutil.join(
       this.workspacePath,
-      ".metrists",
-      ".agent",
+      APP_DIR_NAME,
+      "agent",
       `opencode-${this.taskId}.json`,
     );
   }

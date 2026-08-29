@@ -15,7 +15,7 @@
  * errors escape the queryFn (to reach WorkspaceErrorBoundary, same as the
  * file metadata collection).
  *
- * Every row derives from the app's HISTORY repo (`<ws>/.metrists/.git`,
+ * Every row derives from the app's HISTORY repo (`<ws>/.notefig/.git`,
  * via utils/history-service) — never from a `.git` the user may keep in
  * the same workspace. Their repo is theirs alone: the app must not read
  * its status, rewrite its index, or commit into it.

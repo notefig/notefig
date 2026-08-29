@@ -24,7 +24,7 @@ vi.mock("@/utils/history-service", () => ({
     async (_ws: string, message: string, author: { name: string; email: string }) =>
       addAllAndCommit({ message, author }),
   ),
-  historyGitDir: vi.fn((ws: string) => `${ws}/.metrists/history`),
+  historyGitDir: vi.fn((ws: string) => `${ws}/.notefig/history`),
 }));
 
 const { writeWorkspaceTextFile } = vi.hoisted(() => ({

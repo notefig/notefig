@@ -37,7 +37,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
 
   async function listScratchpads(): Promise<string[]> {
     return fs
-      .readdir(path.join(workspace, ".metrists", "scratchpads"))
+      .readdir(path.join(workspace, ".notefig", "scratchpads"))
       .catch(() => [] as string[]);
   }
 
@@ -71,7 +71,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
     await editor.pressSequentially("still alive", { delay: 10 });
     await waitForAutoSave(page);
     const content = await fs.readFile(
-      path.join(workspace, ".metrists", "scratchpads", "untitled.md"),
+      path.join(workspace, ".notefig", "scratchpads", "untitled.md"),
       "utf8",
     );
     expect(content).toContain("still alive");
@@ -80,11 +80,11 @@ test.describe("shim: scratchpad entry lifecycle", () => {
   test("empty entry auto-opens an existing scratchpad", async ({ page }) => {
     test.setTimeout(90000);
 
-    await fs.mkdir(path.join(workspace, ".metrists", "scratchpads"), {
+    await fs.mkdir(path.join(workspace, ".notefig", "scratchpads"), {
       recursive: true,
     });
     await fs.writeFile(
-      path.join(workspace, ".metrists", "scratchpads", "my-notes.md"),
+      path.join(workspace, ".notefig", "scratchpads", "my-notes.md"),
       "# My Notes\n\nexisting body\n",
       "utf8",
     );
@@ -139,7 +139,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
     // pickMostRecentScratchpad only runs with 2+ candidates, which is where
     // the epoch-millis-vs-Date wire bug crashed entry resolution and left
     // the app stranded at the bare root.
-    const dir = path.join(workspace, ".metrists", "scratchpads");
+    const dir = path.join(workspace, ".notefig", "scratchpads");
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "older-notes.md"), "# Old\n\nold body\n");
     await fs.writeFile(path.join(dir, "newer-notes.md"), "# New\n\nnew body\n");
@@ -164,11 +164,11 @@ test.describe("shim: scratchpad entry lifecycle", () => {
   }) => {
     test.setTimeout(90000);
 
-    await fs.mkdir(path.join(workspace, ".metrists", "scratchpads"), {
+    await fs.mkdir(path.join(workspace, ".notefig", "scratchpads"), {
       recursive: true,
     });
     await fs.writeFile(
-      path.join(workspace, ".metrists", "scratchpads", "canto-notes.md"),
+      path.join(workspace, ".notefig", "scratchpads", "canto-notes.md"),
       "# Canto\n\nnotes body\n",
       "utf8",
     );
@@ -224,12 +224,12 @@ test.describe("shim: scratchpad entry lifecycle", () => {
     // never an abandoned leftover.
     await closeScratchpadTab(page);
     await fs.writeFile(
-      path.join(workspace, ".metrists", "scratchpads", "untitled-2.md"),
+      path.join(workspace, ".notefig", "scratchpads", "untitled-2.md"),
       "# Keeper\n\nkept body\n",
       "utf8",
     );
     await fs.writeFile(
-      path.join(workspace, ".metrists", "scratchpads", "renamed-empty.md"),
+      path.join(workspace, ".notefig", "scratchpads", "renamed-empty.md"),
       "",
       "utf8",
     );

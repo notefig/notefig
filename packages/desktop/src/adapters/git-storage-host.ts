@@ -23,7 +23,7 @@ import { path as pathutil } from "@/utils/path";
  * achieved that only because exactly one adapter instance exists per app.
  * Keying by gitdir (not workspace) matters because two repos share one
  * worktree — the user's repo at `<ws>/.git` and the history repo at
- * `<ws>/.metrists/.git` — and must never contend on each other's locks.
+ * `<ws>/.notefig/.git` — and must never contend on each other's locks.
  */
 const gitLocks = new Set<string>();
 
@@ -51,7 +51,7 @@ function requireSuccess<T>(
 /**
  * Create a GitStorageHost on demand — callers build one per repo when git
  * work starts, never eagerly at open. `lockScope` is the repo's gitdir
- * (e.g. `<ws>/.git` or `<ws>/.metrists/.git`): it namespaces the lock
+ * (e.g. `<ws>/.git` or `<ws>/.notefig/.git`): it namespaces the lock
  * registry so repos sharing a worktree never contend.
  */
 export function createGitStorageHost(

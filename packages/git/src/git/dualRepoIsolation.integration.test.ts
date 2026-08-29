@@ -3,7 +3,7 @@
  *
  * A workspace can contain both the user's own repository (`<ws>/.git`, created
  * and driven by the system `git` binary here) and the app's hidden history
- * repository (`<ws>/.metrists/.git`, same worktree). The invariant under test:
+ * repository (`<ws>/.notefig/.git`, same worktree). The invariant under test:
  * the app's git operations target the history repo and NEVER read from or
  * write to the user's `.git` — not its refs, not its index (statusMatrix
  * rewrites the index of whatever gitdir it runs against), not its worktree
@@ -16,7 +16,7 @@
  * isolation tests like these can catch.
  */
 import { createHash } from "node:crypto";
-import { appendFile, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -30,7 +30,11 @@ import {
 
 const describeRealGit = hasSystemGit ? describe : describe.skip;
 
-const HISTORY_GITDIR = (ws: string) => join(ws, ".metrists", ".git");
+const HISTORY_GITDIR = (ws: string) => join(ws, ".notefig", ".git");
+/** The history repo's exclude, verbatim from utils/history-service.ts:
+ * everything under the app dir except the scratchpads folder, plus the
+ * user's own gitdir. */
+const HISTORY_EXCLUDE = ".notefig/*\n!.notefig/scratchpads\n.git/\n";
 const AUTHOR = { name: "Notefig", email: "git@notefig.com" };
 
 /** Run system `git` against the history repo (worktree = the workspace). */
@@ -82,10 +86,10 @@ async function initUserRepo(ws: string): Promise<void> {
   await runGit(ws, ["add", "."]);
   await commitViaGit(ws, "user: initial");
   // Mirror history-service's stealth exclude of the app root.
-  await appendFile(join(ws, ".git", "info", "exclude"), ".metrists/\n");
+  await appendFile(join(ws, ".git", "info", "exclude"), ".notefig/\n");
 }
 
-/** History repo at .metrists/.git with one checkpoint, via explicit gitDir. */
+/** History repo at .notefig/.git with one checkpoint, via explicit gitDir. */
 async function initHistoryRepo(
   service: IsomorphicGitService,
   ws: string,
@@ -93,7 +97,7 @@ async function initHistoryRepo(
   const gitDir = HISTORY_GITDIR(ws);
   await service.init({ defaultBranch: "main" });
   // Mirror history-service.ts's own-exclude write.
-  await appendFile(join(gitDir, "info", "exclude"), ".metrists/\n.git/\n");
+  await appendFile(join(gitDir, "info", "exclude"), HISTORY_EXCLUDE);
   const oid = await service.addAllAndCommit({
     message: "checkpoint: initial",
     author: AUTHOR,
@@ -348,15 +352,43 @@ describeRealGit("[real-git] dual-repo isolation (history repo vs user repo)", ()
       // No user .git at all — the history repo's exclude is the only one.
       const gitDir = HISTORY_GITDIR(ws);
       await service.init({ defaultBranch: "main" });
-      await appendFile(join(gitDir, "info", "exclude"), ".metrists/\n.git/\n");
+      await appendFile(join(gitDir, "info", "exclude"), HISTORY_EXCLUDE);
       await writeFile(join(ws, "note.md"), "v1\n", "utf8");
-      await writeFile(join(ws, ".metrists", "tasks.json"), "{}\n", "utf8");
+      await writeFile(join(ws, ".notefig", "tasks.json"), "{}\n", "utf8");
 
       const status = await service.status();
 
-      // .metrists/ is excluded by the history repo's own exclude file —
-      // nothing under it may surface as untracked.
+      // Everything under .notefig/ is excluded by the history repo's own
+      // exclude file — nothing app-internal may surface as untracked.
       expect(status.untracked).toEqual(["note.md"]);
+    });
+
+    it("scratchpads are the one app-dir subtree history still sees", async () => {
+      const gitDir = HISTORY_GITDIR(ws);
+      await service.init({ defaultBranch: "main" });
+      await appendFile(join(gitDir, "info", "exclude"), HISTORY_EXCLUDE);
+      await mkdir(join(ws, ".notefig", "scratchpads"), { recursive: true });
+      await writeFile(
+        join(ws, ".notefig", "scratchpads", "untitled.md"),
+        "draft\n",
+        "utf8",
+      );
+      await writeFile(join(ws, ".notefig", "tasks.json"), "{}\n", "utf8");
+      await writeFile(join(gitDir, "app-internal"), "x\n", "utf8");
+
+      expect((await service.status()).untracked).toEqual([
+        ".notefig/scratchpads/untitled.md",
+      ]);
+
+      // ...and a checkpoint captures it, still without the rest.
+      await service.addAllAndCommit({
+        message: "checkpoint: scratchpad",
+        author: AUTHOR,
+      });
+      const tracked = await runHistoryGit(ws, ["ls-files"]);
+      expect(tracked.split("\n").filter(Boolean)).toEqual([
+        ".notefig/scratchpads/untitled.md",
+      ]);
     });
   });
 });
