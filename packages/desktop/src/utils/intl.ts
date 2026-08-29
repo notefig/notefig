@@ -70,6 +70,7 @@ i18n
           newFolder: "New folder",
           sort: "Sort",
           sortFiles: "Sort files",
+          switchWorkspace: "Switch workspace",
           sortNameAsc: "Name (A \u2192 Z)",
           sortNameDesc: "Name (Z \u2192 A)",
           sortDateModified: "Date modified",

@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef, useCallback, type Ref } from "react";
 import { useSearchParams } from "react-router-dom";
 import { FileTree, type FileTreeMode } from "@/components/editor/file-tree";
-import { FileControls } from "@/components/editor/file-controls";
+import {
+  FileControls,
+  FileCreateActions,
+} from "@/components/editor/file-controls";
 import {
   SearchPanel,
   type SearchPanelHandle,
@@ -257,23 +260,28 @@ export function Sidebar({
           />
         ) : (
           <>
-            <FileTree
-              selectedFilePath={activeTabId}
-              onFileSelect={onFileSelect}
-              onDelete={handleDeleteFile}
-              onRename={handleRenameFile}
-              onRenameOpenFile={onRenameOpenFile}
-              onCreate={handleCreate}
-              openTabs={openTabs}
-              basePath={workspacePath}
-              sortOrder={sortOrder}
-              mode={mode}
-              onModeChange={onModeChange}
-            />
+            <div className="relative flex min-h-0 grow flex-col">
+              <FileTree
+                selectedFilePath={activeTabId}
+                onFileSelect={onFileSelect}
+                onDelete={handleDeleteFile}
+                onRename={handleRenameFile}
+                onRenameOpenFile={onRenameOpenFile}
+                onCreate={handleCreate}
+                openTabs={openTabs}
+                basePath={workspacePath}
+                sortOrder={sortOrder}
+                mode={mode}
+                onModeChange={onModeChange}
+              />
+              <FileCreateActions
+                onNewScratchpad={handleNewScratchpad}
+                onNewFile={handleNewFile}
+                onNewFolder={handleNewFolder}
+              />
+            </div>
             <FileControls
-              onNewScratchpad={handleNewScratchpad}
-              onNewFile={handleNewFile}
-              onNewFolder={handleNewFolder}
+              workspacePath={workspacePath}
               sortOrder={sortOrder}
               onSortChange={setSortOrder}
             />

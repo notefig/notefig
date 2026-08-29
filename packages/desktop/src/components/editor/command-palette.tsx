@@ -6,6 +6,7 @@ import {
   type ElementType,
 } from "react";
 import {
+  Hash,
   FileText,
   Settings,
   Search,
@@ -47,7 +48,6 @@ import { getLocalizedCommandKeywords } from "@/utils/command-keywords";
 import { useFileSearch, type FileSearchResult } from "@/hooks/use-file-search";
 import { canOpenFile } from "./polymorphic-editor";
 import { FileTypeIcon } from "./file-type-icon";
-import { ScratchpadIcon } from "./scratchpad-icon";
 import { useWorkspaceTabsOptional } from "@/components/workspace-tabs-provider";
 
 interface CommandPaletteProps {
@@ -224,7 +224,7 @@ export function CommandPalette({
       labelKey: "newScratchpad",
       groupKey: "file",
       keywordKey: "commandKeywords.newScratchpad",
-      icon: ScratchpadIcon,
+      icon: Hash,
       shortcut: formatForDisplay("Mod+N"),
       action: () => {
         onNewScratchpad?.();
