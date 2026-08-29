@@ -139,7 +139,10 @@ export function acquireTreeModel(
   // Model paths are tree-domain ("/"-separated); only this seam converts
   // back to native absolute paths.
   const toAbs = (rel: string) =>
-    pathutil.join(workspacePath, pathutil.fromTreePath(rel.replace(/\/+$/, "")));
+    pathutil.join(
+      workspacePath,
+      pathutil.fromTreePath(rel.replace(/\/+$/, "")),
+    );
 
   entry.model = new FileTree({
     paths: [],
@@ -182,6 +185,25 @@ export function acquireTreeModel(
       }
       [data-item-path=".metrists/scratchpads/"] [data-item-section="content"]::after {
         content: "scratchpads";
+      }
+      /* The scratchpads row swaps its directory icon for the library's html
+         symbol (the "#"), in the same orange the colored built-in set gives
+         html (--trees-icon-orange). The icon config has no per-path hook,
+         so the swap happens here: hide the real icon and paint the glyph
+         as an alpha mask (the .2-opacity square survives as a 20% tint).
+         Expand/collapse stays on the row click. */
+      [data-item-path=".metrists/scratchpads/"] [data-item-section="icon"] svg {
+        display: none;
+      }
+      [data-item-path=".metrists/scratchpads/"] [data-item-section="icon"]::after {
+        content: "";
+        display: block;
+        width: 0.9375rem;
+        height: 0.9375rem;
+        transform: translateY(0.0625rem);
+        background-color: light-dark(#d47628, #ffa359);
+        -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M8 1C2.24 1 1 2.24 1 8s1.24 7 7 7 7-1.24 7-7-1.24-7-7-7" opacity=".2"/><path d="M10.48 3.76a.5.5 0 0 1 .4.58L10.6 5.8h1.14a.5.5 0 0 1 0 1h-1.32L10 9.2h1.08a.5.5 0 0 1 0 1H9.8l-.3 1.64a.5.5 0 1 1-.98-.18l.27-1.46H6.4l-.3 1.64a.5.5 0 1 1-.98-.18l.27-1.46H4.25a.5.5 0 0 1 0-1h1.32L6 6.8H4.93a.5.5 0 0 1 0-1H6.2l.3-1.64a.5.5 0 1 1 .98.18L7.2 5.8h2.4l.3-1.64a.5.5 0 0 1 .58-.4M6.58 9.2h2.4l.44-2.4h-2.4z"/></svg>') center / contain no-repeat;
+        mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M8 1C2.24 1 1 2.24 1 8s1.24 7 7 7 7-1.24 7-7-1.24-7-7-7" opacity=".2"/><path d="M10.48 3.76a.5.5 0 0 1 .4.58L10.6 5.8h1.14a.5.5 0 0 1 0 1h-1.32L10 9.2h1.08a.5.5 0 0 1 0 1H9.8l-.3 1.64a.5.5 0 1 1-.98-.18l.27-1.46H6.4l-.3 1.64a.5.5 0 1 1-.98-.18l.27-1.46H4.25a.5.5 0 0 1 0-1h1.32L6 6.8H4.93a.5.5 0 0 1 0-1H6.2l.3-1.64a.5.5 0 1 1 .98.18L7.2 5.8h2.4l.3-1.64a.5.5 0 0 1 .58-.4M6.58 9.2h2.4l.44-2.4h-2.4z"/></svg>') center / contain no-repeat;
       }
     `,
     dragAndDrop: {

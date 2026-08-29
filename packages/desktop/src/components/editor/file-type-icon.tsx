@@ -8,9 +8,8 @@ import {
 
 /**
  * Per-file-type icons rendered from @pierre/trees' built-in sprite set — the
- * same resolver the sidebar file tree would use, so the palette and the tree
- * can never disagree. The tree currently runs with icons off; when they come
- * back, feed it this config so both stay in lockstep.
+ * same resolver and config the sidebar file tree uses, so the palette and
+ * the tree can never disagree.
  *
  * "standard" is the monochrome tier (markdown/image/json/code/… plus a
  * "default" file glyph); icons inherit currentColor. Project-specific
