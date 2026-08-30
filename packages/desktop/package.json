@@ -30,6 +30,7 @@
     "@notefig/shared": "*",
     "@notefig/ui": "*",
     "@notefig/widgets": "*",
+    "@pierre/icons": "^0.7.1",
     "@pierre/trees": "^1.0.0-beta.6",
     "@tailwindcss/vite": "^4.3.2",
     "@tanstack/browser-db-sqlite-persistence": "0.2.9",

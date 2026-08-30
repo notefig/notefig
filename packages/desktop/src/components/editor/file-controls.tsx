@@ -1,18 +1,13 @@
 "use client";
 
-import {
-  Hash,
-  FilePlus,
-  FolderPlus,
-  ArrowDownAZ,
-  ArrowUpZA,
-  CalendarArrowDown,
-} from "lucide-react";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@notefig/ui/tooltip";
+import { ArrowDownAZ, ArrowUpZA, CalendarArrowDown } from "lucide-react";
+// The three creation actions use Pierre's set, matching the file tree they
+// sit on (@pierre/trees renders the rows and their file-type glyphs). Sizing
+// comes from the Button's own `[&_svg]:size-4`, and the icons default to
+// `currentcolor`, so they inherit the button's text color like the lucide
+// ones did.
+import { IconFilePlus, IconFolderPlus, IconHash } from "@pierre/icons";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@notefig/ui/tooltip";
 import { Button } from "@notefig/ui/button";
 import { ButtonGroup } from "@notefig/ui/button-group";
 import {
@@ -133,7 +128,7 @@ export function FileCreateActions({
             className="h-7 w-7 text-muted-foreground"
             onClick={onNewScratchpad}
           >
-            <Hash className="h-4 w-4" />
+            <IconHash />
             <span className="sr-only">{t("newScratchpad")}</span>
           </Button>
         </TooltipTrigger>
@@ -147,7 +142,7 @@ export function FileCreateActions({
             className="h-7 w-7 text-muted-foreground"
             onClick={onNewFile}
           >
-            <FilePlus className="h-4 w-4" />
+            <IconFilePlus />
             <span className="sr-only">{t("newFile")}</span>
           </Button>
         </TooltipTrigger>
@@ -161,7 +156,7 @@ export function FileCreateActions({
             className="h-7 w-7 text-muted-foreground"
             onClick={onNewFolder}
           >
-            <FolderPlus className="h-4 w-4" />
+            <IconFolderPlus />
             <span className="sr-only">{t("newFolder")}</span>
           </Button>
         </TooltipTrigger>
