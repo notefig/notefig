@@ -219,8 +219,11 @@ test.describe("shim: persisted collections over the real transport", () => {
     (async () => {
       const [adapters, reactDb, persist] = await Promise.all([
         import('/src/adapters/index.ts'),
-        import('/node_modules/.vite/deps/@tanstack_react-db.js'),
-        import('/node_modules/.vite/deps/@tanstack_tauri-db-sqlite-persistence.js'),
+        // /@id/ lets the dev server resolve the bare specifiers (a
+        // page-evaluated import can't) without hardcoding the dep-cache
+        // location, which moved to .vite-shim for shim-mode servers.
+        import('/@id/@tanstack/react-db'),
+        import('/@id/@tanstack/tauri-db-sqlite-persistence'),
       ]);
       const c = reactDb.createCollection(persist.persistedCollectionOptions({
         id: 'shim-probe-notes',
