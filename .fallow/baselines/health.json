@@ -130,7 +130,7 @@
       }
     },
     "packages/widgets/src/prompt/ui/prompt-blob.tsx": {
-      "complexity_critical": {
+      "complexity_moderate": {
         "count": 1
       }
     },
