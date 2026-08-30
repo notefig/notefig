@@ -105,6 +105,26 @@ export interface ImageInstance extends EditorInstance {
 const editorInstances = new Map<string, EditorInstance>();
 
 /**
+ * Navigation delegates for read-only code viewers. The viewer is a plain
+ * React component (no instance object of its own lives here), so it
+ * registers a match-reveal function on mount; the code instance's
+ * `goToLocation` dispatches through this map. Keyed by file path like the
+ * instance map.
+ */
+const codeNavigators = new Map<string, (target: SearchTarget) => boolean>();
+
+export function registerCodeNavigator(
+  filePath: string,
+  navigate: (target: SearchTarget) => boolean,
+): void {
+  codeNavigators.set(filePath, navigate);
+}
+
+export function unregisterCodeNavigator(filePath: string): void {
+  codeNavigators.delete(filePath);
+}
+
+/**
  * Navigation intents waiting for their editor to be ready. Navigation
  * can't just act on the live instance: re-opening a file whose tab was
  * replaced away disposes and recreates its editor (the layout-diff
@@ -136,6 +156,12 @@ export function requestNavigation(
   });
 
   const instance = editorInstances.get(filePath);
+  if (instance?.type === "code") {
+    // A code viewer's navigator is only registered while its view is
+    // mounted, so a successful dispatch is inherently attached.
+    if (instance.goToLocation(target)) pendingNavigations.delete(filePath);
+    return;
+  }
   if (!isMarkdownInstance(instance)) return;
   let attached = false;
   try {
@@ -274,8 +300,12 @@ function createEditorTabController(
       query: string,
       options?: TabSearchOptions,
     ): Promise<SearchTarget[]> {
-      // Only documents have searchable text; an image viewer has none.
-      if (!isMarkdownInstance(editorInstances.get(filePath))) return [];
+      // Documents and code viewers have searchable text; an image viewer
+      // has none.
+      const instance = editorInstances.get(filePath);
+      if (!isMarkdownInstance(instance) && instance?.type !== "code") {
+        return [];
+      }
       if (!query.trim()) return [];
 
       return platformAdapter.fs.searchContent(getDirectoryPath(filePath), {
@@ -438,7 +468,7 @@ function createMarkdownInstance(
  * tab-selected intents resolve like any editor's.
  */
 function createContainerInstance(
-  type: "image" | "release-notes",
+  type: "image" | "release-notes" | "code",
   filePath: string,
 ): EditorInstance {
   const instance: EditorInstance & { filePath: string } = {
@@ -459,8 +489,11 @@ function createContainerInstance(
     isFocusable(): boolean {
       return true;
     },
-    goToLocation(_target: SearchTarget): boolean {
-      return false;
+    goToLocation(target: SearchTarget): boolean {
+      // Read-only code viewers can reveal matches; the other container
+      // tabs (image, release notes) have no searchable surface.
+      if (type !== "code") return false;
+      return codeNavigators.get(filePath)?.(target) ?? false;
     },
   };
   return instance;
@@ -481,7 +514,12 @@ interface ReleaseNotesConfig {
   type: "release-notes";
 }
 
-type EditorConfig = MarkdownConfig | ImageConfig | ReleaseNotesConfig;
+interface CodeConfig {
+  type: "code";
+}
+
+type EditorConfig =
+  MarkdownConfig | ImageConfig | ReleaseNotesConfig | CodeConfig;
 
 /**
  * Get an existing editor for a file path, or create one with the given configuration.
@@ -527,6 +565,7 @@ export function getOrCreateEditor(
       break;
     case "image":
     case "release-notes":
+    case "code":
       instance = createContainerInstance(config.type, filePath);
       break;
     default:
