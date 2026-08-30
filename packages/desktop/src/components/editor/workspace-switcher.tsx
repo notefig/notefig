@@ -2,14 +2,14 @@
 
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { Button } from "@notefig/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@notefig/ui/dropdown-menu";
 import {
   useRecentProjects,
   deriveProjectName,

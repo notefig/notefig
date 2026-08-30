@@ -77,6 +77,22 @@ export function workspaceSourceAliases(dirname: string) {
       find: /^@notefig\/agent$/,
       replacement: path.resolve(dirname, "../agent/src/index.ts"),
     },
+    // @notefig/ui and @notefig/widgets are source-only (no dist at all):
+    // they ship .tsx, which only a bundler can consume. Subpath imports
+    // (@notefig/ui/button) map straight onto the file tree; extensions are
+    // left off so the resolver picks .ts or .tsx.
+    {
+      find: /^@notefig\/ui\/(.*)$/,
+      replacement: path.resolve(dirname, "../ui/src/$1"),
+    },
+    {
+      find: /^@notefig\/widgets$/,
+      replacement: path.resolve(dirname, "../widgets/src/index.ts"),
+    },
+    {
+      find: /^@notefig\/widgets\/(.*)$/,
+      replacement: path.resolve(dirname, "../widgets/src/$1"),
+    },
   ];
 }
 

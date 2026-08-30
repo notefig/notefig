@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { renderMarkdown } from "@/utils/markdown-conversion";
 import { platformAdapter } from "@/adapters";
-import { cn } from "@/lib/utils";
+import { cn } from "@notefig/ui/utils";
 
 /**
  * Rendered-HTML cache keyed by source text: completed messages render

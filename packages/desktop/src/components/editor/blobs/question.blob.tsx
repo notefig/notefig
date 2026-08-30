@@ -3,8 +3,8 @@ import { Loader2 } from "lucide-react";
 import { z } from "zod";
 import { defineBlobType } from "./blob-type";
 import { useBlobAnswer } from "./use-blob-answer";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button } from "@notefig/ui/button";
+import { Input } from "@notefig/ui/input";
 
 /**
  * The agent asks the user a contextual question inside the document.

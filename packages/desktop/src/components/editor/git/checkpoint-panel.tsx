@@ -13,23 +13,23 @@ import {
 import { useTranslation } from "react-i18next";
 import { useMutation, type UseMutateFunction } from "@tanstack/react-query";
 
-import { Button } from "@/components/ui/button";
-import { ButtonGroup } from "@/components/ui/button-group";
-import { copyTextToClipboard } from "@/utils/clipboard";
+import { Button } from "@notefig/ui/button";
+import { ButtonGroup } from "@notefig/ui/button-group";
+import { copyTextToClipboard } from "@notefig/ui/clipboard";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
+} from "@notefig/ui/popover";
+import { ScrollArea } from "@notefig/ui/scroll-area";
+import { Separator } from "@notefig/ui/separator";
+import { Switch } from "@notefig/ui/switch";
+import { Textarea } from "@notefig/ui/textarea";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@notefig/ui/tooltip";
 import {
   abortRevert as abortRevertAction,
   deriveSyncState,

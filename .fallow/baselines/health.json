@@ -124,13 +124,13 @@
         "count": 2
       }
     },
-    "packages/desktop/src/components/agent/prompt-blob-state.ts": {
+    "packages/widgets/src/prompt/state.ts": {
       "complexity_moderate": {
         "count": 2
       }
     },
-    "packages/desktop/src/components/agent/prompt-blob.tsx": {
-      "complexity_critical": {
+    "packages/widgets/src/prompt/ui/prompt-blob.tsx": {
+      "complexity_moderate": {
         "count": 1
       }
     },

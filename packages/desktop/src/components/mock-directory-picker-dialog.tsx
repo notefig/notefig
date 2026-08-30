@@ -6,9 +6,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+} from "@notefig/ui/dialog";
+import { Button } from "@notefig/ui/button";
+import { cn } from "@notefig/ui/utils";
 
 interface MockPickDirectoryEvent extends CustomEvent {
   detail: {

@@ -12,7 +12,7 @@ import {
   MarkdownImage,
   MarkdownCodeBlock,
 } from "@/components/editor/tiptap-editor-kit";
-import { AiPromptNode } from "@/components/editor/ai-prompt-node";
+import { editorWidgets, widgetRendererNodes } from "@notefig/widgets";
 import { lowlight } from "@/components/editor/editor-schema-kit";
 import {
   closeDocumentSync,
@@ -35,8 +35,8 @@ import type { TabKind } from "@/tabs/tab-id";
 import { resolveSearchTarget, type SearchTarget } from "./editor-position";
 import { platformAdapter } from "@/adapters";
 import { getDirectoryPath } from "@/utils/fs";
-import { docHasRealContent, findPromptNodeId } from "./ai-prompt-utils";
-import { requestPromptBlobFocus } from "@/components/agent/prompt-blob-store";
+import { docHasRealContent, findPromptNodeId } from "@notefig/widgets";
+import { requestPromptBlobFocus } from "@notefig/widgets";
 import { placeCaretBeforeNode } from "./refocus-editor";
 import {
   createImageDropHandler,
@@ -300,6 +300,10 @@ function createEditorTabController(
   };
 }
 
+/** Widget node names, so the per-document rebuild below can drop the
+ *  unconfigured instances the shared kit carries without naming them. */
+const widgetNames = new Set(editorWidgets.map((widget) => widget.name));
+
 function createMarkdownInstance(
   filePath: string,
   // Doc JSON only — all markdown parsing goes through the conversion worker
@@ -312,7 +316,9 @@ function createMarkdownInstance(
   const extensions = [
     ...editorExtensions.filter(
       (e) =>
-        e.name !== "image" && e.name !== "codeBlock" && e.name !== "aiPrompt",
+        e.name !== "image" &&
+        e.name !== "codeBlock" &&
+        !widgetNames.has(e.name),
     ),
     // filePath lets the image node view declare its drag-protocol payload
     // (which document to rewrite when the asset is moved elsewhere).
@@ -324,10 +330,10 @@ function createMarkdownInstance(
     // filePath lets BlobNodeView address answerBlob at the right document;
     // lowlight must be re-specified since configure() replaces options wholesale.
     MarkdownCodeBlock.configure({ lowlight, filePath } as any),
-    // filePath/basePath scope the inline prompt widget to this document and
-    // its workspace; they also arm the empty-doc keeper (unconfigured
-    // schema-only instances never self-insert).
-    AiPromptNode.configure({ filePath, basePath: workspaceRoot }),
+    // filePath/basePath scope the widgets to this document and its
+    // workspace; they also arm the prompt widget's empty-doc keeper
+    // (unconfigured schema-only instances never self-insert).
+    ...widgetRendererNodes({ filePath, basePath: workspaceRoot }),
   ];
 
   const editor = new Editor({

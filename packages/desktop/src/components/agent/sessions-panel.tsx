@@ -12,21 +12,21 @@ import {
 } from "lucide-react";
 import type { HarnessDefinition } from "@notefig/shared/agent";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
-import { Button } from "@/components/ui/button";
-import { ButtonGroup } from "@/components/ui/button-group";
+import { Button } from "@notefig/ui/button";
+import { ButtonGroup } from "@notefig/ui/button-group";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+} from "@notefig/ui/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@notefig/ui/dropdown-menu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,9 +36,9 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { cn } from "@/lib/utils";
-import { copyTextToClipboard } from "@/utils/clipboard";
+} from "@notefig/ui/alert-dialog";
+import { cn } from "@notefig/ui/utils";
+import { copyTextToClipboard } from "@notefig/ui/clipboard";
 import { useKv } from "@/utils/kv-store";
 import { workspaceKey } from "@/utils/path";
 import type { AgentTaskRow } from "@/agent/agent-collections";
@@ -60,7 +60,7 @@ import {
   useActiveHarnesses,
   useDefaultHarness,
 } from "@/hooks/use-harness-selection";
-import { HarnessLogo } from "./harness-logo";
+import { HarnessLogo } from "@notefig/ui/harness-logo";
 
 /**
  * The left-sidebar sessions menu (sidebarView === "sessions"): every agent

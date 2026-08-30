@@ -7,8 +7,8 @@ import {
 } from "@dnd-kit/sortable";
 import { useDndContext } from "@dnd-kit/core";
 import { useDockable } from "../store";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
+import { ScrollArea } from "@notefig/ui/scroll-area";
+import { cn } from "@notefig/ui/utils";
 import { dropZoneProps, getProtocolContext } from "@/utils/drag-protocol";
 export type tabObject = {
   id: string;

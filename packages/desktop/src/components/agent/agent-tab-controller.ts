@@ -21,7 +21,7 @@ import {
   type TabSearchOptions,
 } from "@/tabs/tab-controllers";
 import { agentTabId } from "@/tabs/tab-id";
-import type { PromptEditorHandle } from "./prompt-editor";
+import type { PromptEditorHandle } from "@notefig/widgets";
 
 /** A live ref; `RefObject`-compatible across React typings. */
 type LiveRef<T> = { readonly current: T | null };

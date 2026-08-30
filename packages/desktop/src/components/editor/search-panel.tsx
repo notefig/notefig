@@ -15,9 +15,9 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@notefig/ui/utils";
 import { useSearch } from "@/hooks/use-search";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { ScrollArea } from "@notefig/ui/scroll-area";
 import { getFileName } from "@/utils/fs";
 import type { SearchMatch } from "@/adapters/platform-adapter.interface";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";

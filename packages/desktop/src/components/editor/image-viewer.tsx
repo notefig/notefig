@@ -5,7 +5,7 @@ import type { FileEntry } from "@/utils/fs";
 import { getOrCreateEditor } from "@/components/editor/editor-store";
 import { focusTab } from "@/tabs/tab-controllers";
 import { useImageUrl } from "@/hooks/use-image-url";
-import { cn } from "@/lib/utils";
+import { cn } from "@notefig/ui/utils";
 
 interface ImageViewerProps {
   file: FileEntry;

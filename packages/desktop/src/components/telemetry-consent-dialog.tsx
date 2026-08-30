@@ -7,9 +7,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
+} from "@notefig/ui/dialog";
+import { Button } from "@notefig/ui/button";
+import { Switch } from "@notefig/ui/switch";
 
 export interface TelemetryConsentAnswer {
   crashEnabled: boolean;

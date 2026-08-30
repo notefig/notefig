@@ -15,8 +15,8 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
+} from "@notefig/ui/tooltip";
+import { cn } from "@notefig/ui/utils";
 import { useNavigate } from "react-router";
 import { useSearchParams } from "react-router-dom";
 import { useHotkey } from "@tanstack/react-hotkeys";

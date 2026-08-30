@@ -1,5 +1,5 @@
 import SortableItem from "../dndkit/SortableItem";
-import { cn } from "@/lib/utils";
+import { cn } from "@notefig/ui/utils";
 
 function Tab({
   name,

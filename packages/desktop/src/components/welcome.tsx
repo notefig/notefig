@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { Plus, Github, Settings, Book, Moon, Sun, Monitor } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@notefig/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@notefig/ui/dropdown-menu";
 import { pickDirectory } from "@/utils/fs";
 import { FsError } from "@/adapters/platform-adapter.interface";
 import { toast } from "sonner";
@@ -17,7 +17,7 @@ import { useSearchParams } from "react-router-dom";
 import { useTheme } from "@/components/theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { SettingsModal } from "@/components/editor/settings-modal";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { ScrollArea } from "@notefig/ui/scroll-area";
 import { useRecentProjects } from "@/hooks/use-recent-projects";
 import { DebugPanel } from "./debug-panel";
 

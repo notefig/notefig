@@ -1,0 +1,47 @@
+{
+  "name": "@notefig/widgets",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "types": "./src/*",
+      "default": "./src/*"
+    }
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@notefig/shared": "*",
+    "@notefig/ui": "*",
+    "@tanstack/react-hotkeys": "^0.4.1",
+    "lucide-react": "^0.454.0",
+    "sonner": "^1.7.4"
+  },
+  "peerDependencies": {
+    "@tiptap/core": "3.30.2",
+    "@tiptap/extension-mention": "3.30.2",
+    "@tiptap/extension-placeholder": "3.30.2",
+    "@tiptap/pm": "3.30.2",
+    "@tiptap/react": "3.30.2",
+    "@tiptap/starter-kit": "3.30.2",
+    "@tiptap/suggestion": "3.30.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-i18next": "^16.5.3"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.15",
+    "@types/react-dom": "^18.2.7",
+    "@vitejs/plugin-react": "^4.2.1",
+    "happy-dom": "^20.8.4",
+    "typescript": "^5.0.2",
+    "vitest": "^3.2.4"
+  }
+}

@@ -6,7 +6,7 @@ import {
   GitCommitHorizontal,
   GitPullRequest,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@notefig/ui/utils";
 import { useTranslation } from "react-i18next";
 import { TunnelStatus } from "@/components/tunnel/tunnel-status";
 import { useGitSummary } from "@/entities/git";

@@ -7,6 +7,15 @@
 @source not "../tests";
 @source not "../src-tauri";
 
+/* Tailwind's auto scanner only walks this package and skips node_modules, so
+   the workspace packages that render app UI are invisible to it — every class
+   used ONLY there (the dialog's positioning, for one) would be missing from
+   the shipped CSS while the markup still asks for it. These two lines are
+   what keep @notefig/ui and @notefig/widgets styled; add a line here for any
+   future workspace package that ships components. */
+@source "../../ui/src";
+@source "../../widgets/src";
+
 @plugin "@tailwindcss/typography";
 @plugin "tailwind-scrollbar-hide";
 

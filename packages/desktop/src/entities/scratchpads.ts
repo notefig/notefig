@@ -27,7 +27,7 @@
 import { platformAdapter } from "@/adapters";
 import { path as pathutil } from "@/utils/path";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
-import { stripPromptMarkers } from "@/components/editor/prompt-marker";
+import { stripPromptMarkers } from "@notefig/widgets";
 import {
   APP_DIR_NAME,
   SCRATCHPADS_DIR_NAME,

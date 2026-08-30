@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn } from "@notefig/ui/utils";
 
 /**
  * Lucide's `pencil-sparkles` (ISC), inlined because the installed

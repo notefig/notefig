@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { FolderLock } from "lucide-react";
 import { toast } from "sonner";
 import { DebugPanel } from "./debug-panel";
-import { Button } from "@/components/ui/button";
+import { Button } from "@notefig/ui/button";
 import { platformAdapter } from "@/adapters";
 import {
   FsError,

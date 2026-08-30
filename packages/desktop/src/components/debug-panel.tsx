@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useParams } from "react-router";
 import { useSearchParams } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
+import { Button } from "@notefig/ui/button";
+import { Input } from "@notefig/ui/input";
+import { ScrollArea } from "@notefig/ui/scroll-area";
+import { cn } from "@notefig/ui/utils";
 import {
   RotateCw,
   ArrowRight,

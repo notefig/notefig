@@ -1,5 +1,5 @@
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { Button } from "@notefig/ui/button";
+import { cn } from "@notefig/ui/utils";
 import { respondToAgentPermission } from "@/agent/agent-service";
 import { usePendingPermissions } from "@/entities/agents";
 import type { PermissionOption } from "@notefig/shared/agent";

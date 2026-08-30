@@ -18,23 +18,23 @@ import {
   type CustomHarnessEntry,
   type HarnessOverride,
 } from "@notefig/shared/agent";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@notefig/ui/button";
+import { Input } from "@notefig/ui/input";
+import { Textarea } from "@notefig/ui/textarea";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@notefig/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@notefig/ui/dropdown-menu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,8 +44,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { cn } from "@/lib/utils";
+} from "@notefig/ui/alert-dialog";
+import { cn } from "@notefig/ui/utils";
 import { useKv } from "@/utils/kv-store";
 import {
   HARNESS_CUSTOM_KEY,
@@ -55,7 +55,7 @@ import {
   refreshHarnessDiscovery,
 } from "@/agent/harness-discovery";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
-import { HarnessLogo } from "./harness-logo";
+import { HarnessLogo } from "@notefig/ui/harness-logo";
 import {
   builtInHarness,
   definitionToForm,
