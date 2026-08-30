@@ -368,6 +368,37 @@
     -ms-user-select: text;
   }
 
+  /* The prompt widget is chrome, not prose.
+     The two opt-ins above are descendant selectors, so they reach every node
+     view inside the editor — including this one. A document-wide drag or ⌘A
+     then painted the entire card (status row, response, Reply box and its
+     background) in selection blue, as if the widget were text the user had
+     selected. Deny the whole subtree here; the two things inside it that ARE
+     text opt back in below. */
+  [data-type="ai-prompt"],
+  [data-type="ai-prompt"] * {
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+  }
+
+  /* The composer is a real contenteditable and must still take a caret —
+     Chromium refuses to place one in user-select:none text, so a regression
+     here reads as a prompt box that silently swallows keystrokes. It wins on
+     specificity (0,2,0 over 0,1,0), not on source order, so it survives
+     wherever this block is moved to.
+     The agent's response opts in separately with `.select-text` on the
+     markdown body, which stays copyable: that rule is later in this layer at
+     equal specificity, so it beats the deny above on its own. */
+  [data-type="ai-prompt"] [contenteditable="true"],
+  [data-type="ai-prompt"] [contenteditable="true"] * {
+    user-select: text;
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+  }
+
   /* Tiptap Placeholder renders via CSS only — nothing app-wide draws
      data-placeholder, so the prompt composer (MET-80) opts in here. */
   .prompt-editor .ProseMirror p.is-editor-empty:first-child::before {
