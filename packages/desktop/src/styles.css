@@ -387,16 +387,30 @@
      Chromium refuses to place one in user-select:none text, so a regression
      here reads as a prompt box that silently swallows keystrokes. It wins on
      specificity (0,2,0 over 0,1,0), not on source order, so it survives
-     wherever this block is moved to.
-     The agent's response opts in separately with `.select-text` on the
-     markdown body, which stays copyable: that rule is later in this layer at
-     equal specificity, so it beats the deny above on its own. */
+     wherever this block is moved to. */
   [data-type="ai-prompt"] [contenteditable="true"],
   [data-type="ai-prompt"] [contenteditable="true"] * {
     user-select: text;
     -webkit-user-select: text;
     -moz-user-select: text;
     -ms-user-select: text;
+  }
+
+  /* …and that opt-in is exactly what a document-wide drag or ⌘A would paint:
+     the range spans the widget's DOM, so the composer lit up as a solid bar
+     even though the user was selecting the prose around it. `user-select`
+     can't express "editable, but not part of THAT selection", so suppress
+     the paint instead and give it back only while the widget itself holds
+     focus — which is the only time a selection in here is the user's own.
+     System colors rather than a hardcoded blue: this is restoring the
+     platform default, not inventing a highlight. */
+  [data-type="ai-prompt"] ::selection {
+    background-color: transparent;
+  }
+
+  [data-type="ai-prompt"]:focus-within ::selection {
+    background-color: Highlight;
+    color: HighlightText;
   }
 
   /* Tiptap Placeholder renders via CSS only — nothing app-wide draws

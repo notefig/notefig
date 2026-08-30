@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import {
+  openFileInTree,
   openWorkspace,
   seedTestFiles,
   setupTestDatabase,
@@ -43,8 +44,18 @@ test.describe("prompt widget selection", () => {
     await openWorkspace(page, WORKSPACE_PATH);
     await seedTestFiles(page, [
       {
+        // A persisted widget marker (MET-163) between paragraphs — the shape
+        // the bug was reported against, and the only way to get a widget
+        // into a document that also has prose to select.
         path: `${WORKSPACE_PATH}/doc.md`,
-        content: "Notefig is a monorepo that publishes text artifacts.\n",
+        content: [
+          "Notefig is a monorepo that publishes text artifacts.",
+          "",
+          '<!-- notefig:prompt id="blob_1a2b" task="task_9f8e" -->',
+          "",
+          "More prose below the widget so the selection spans it.",
+          "",
+        ].join("\n"),
         type: "file" as const,
       },
     ]);
@@ -94,40 +105,45 @@ test.describe("prompt widget selection", () => {
     }
   });
 
-  test("a .select-text region inside the widget stays selectable", async ({
+  test("a document-wide selection leaves the widget pixel-identical", async ({
     page,
   }) => {
-    await summonWidget(page);
+    // The composer keeps `user-select: text` so it can take a caret, so it
+    // would still be painted by a selection spanning the widget — the
+    // remaining gap after the user-select deny. `::selection` suppresses the
+    // paint instead.
+    //
+    // Asserted on pixels because that is literally the property: the widget
+    // must not CHANGE when the document around it is selected. Chromium's
+    // getComputedStyle does not resolve author ::selection rules, so reading
+    // the cascade here is not an option (an earlier version of this test
+    // tried, and reported the browser default no matter what was applied).
+    await openFileInTree(page, "doc.md");
     const widget = page
       .locator('[data-type="ai-prompt"]')
       .locator("visible=true")
       .first();
     await expect(widget).toBeVisible();
 
-    // The done face marks the agent's response `.select-text` so it can be
-    // copied out. That opt-in and the deny above have EQUAL specificity, so
-    // it only wins on source order — a fragile thing to rely on silently,
-    // and it cannot be observed here without a finished turn. Probing the
-    // cascade with a stand-in element is the cheap way to pin it.
-    const selectable = await page.evaluate(() => {
-      const widgetEl = document.querySelector<HTMLElement>(
-        '.ProseMirror [data-type="ai-prompt"]',
-      );
-      if (!widgetEl) return null;
-      const probe = document.createElement("div");
-      probe.className = "select-text";
-      const child = document.createElement("p");
-      probe.appendChild(child);
-      widgetEl.appendChild(probe);
-      const result = {
-        container: getComputedStyle(probe).userSelect,
-        child: getComputedStyle(child).userSelect,
-      };
-      probe.remove();
-      return result;
-    });
+    const editor = page.locator(".ProseMirror").locator("visible=true").first();
+    await editor.click();
+    // Settle before the baseline: the widget mounts its own chrome, and a
+    // shot taken mid-mount would differ for reasons that have nothing to do
+    // with selection.
+    await page.waitForTimeout(500);
+    const unselected = await widget.screenshot();
 
-    expect(selectable).toEqual({ container: "text", child: "text" });
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.waitForTimeout(500);
+    const selected = await widget.screenshot();
+
+    // The prose around it must actually be selected, or this proves nothing.
+    const selectedText = await page.evaluate(
+      () => window.getSelection()?.toString() ?? "",
+    );
+    expect(selectedText).toContain("monorepo");
+
+    expect(selected.equals(unselected)).toBe(true);
   });
 
   test("the composer still accepts typing", async ({ page }) => {
