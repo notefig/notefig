@@ -477,7 +477,10 @@ function createContainerInstance(
     focus(): boolean {
       if (isEditorFocusSuppressed()) return false;
 
-      const selector = `[data-editor-container="${filePath}"]`;
+      // The path lands inside an attribute selector, so its metacharacters
+      // (quotes, and every backslash in a Windows path) must be escaped or
+      // querySelector throws and the tab never takes focus.
+      const selector = `[data-editor-container="${CSS.escape(filePath)}"]`;
       const el = document.querySelector(selector);
       if (el instanceof HTMLElement) {
         el.focus();
