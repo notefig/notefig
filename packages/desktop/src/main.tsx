@@ -13,7 +13,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { AppUpdaterBootstrap } from "@/components/app-updater";
 import { TelemetryBootstrap } from "@/components/telemetry-bootstrap";
 import { Toaster } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@notefig/ui/tooltip";
 import { queryClient } from "@/entities/query-client";
 import { App } from "./App";
 

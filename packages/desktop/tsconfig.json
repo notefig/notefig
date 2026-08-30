@@ -40,6 +40,15 @@
       ],
       "@notefig/agent": [
         "../agent/src/index.ts"
+      ],
+      "@notefig/ui/*": [
+        "../ui/src/*"
+      ],
+      "@notefig/widgets": [
+        "../widgets/src/index.ts"
+      ],
+      "@notefig/widgets/*": [
+        "../widgets/src/*"
       ]
     }
   },

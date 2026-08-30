@@ -1,8 +1,10 @@
 // Pre-existing tangle: this module reaches the editor/blob component graph
-// via mcp-server → widget-context-resource → editor-store, and prompt-blob
-// reaches back through the agents facade. Untangling means relocating the
-// editor registry to a leaf module (see file-sync's editor-store import
-// comment); new cycles elsewhere still gate.
+// via mcp-server → widget-context-resource → editor-store, which reaches
+// back here. (The prompt widget's own half of this loop is gone — it lives
+// in @notefig/widgets now and can only reach the app through its host.)
+// Untangling the rest means relocating the editor registry to a leaf module
+// (see file-sync's editor-store import comment); new cycles elsewhere still
+// gate.
 // fallow-ignore-file circular-dependency
 import {
   newTaskId,

@@ -28,15 +28,18 @@ import type {
   ToolCallUpdate,
   PlanEntry,
 } from "@notefig/shared/agent";
-import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
+import {
+  BUILT_IN_HARNESSES,
+  sortEntriesChronologically,
+} from "@notefig/shared/agent";
 import { useActiveHarnesses } from "@/hooks/use-harness-selection";
-import { Button } from "@/components/ui/button";
+import { Button } from "@notefig/ui/button";
 import {
   MessageScrollerProvider,
   useMessageScroller,
-} from "@/components/ui/message-scroller";
+} from "@notefig/ui/message-scroller";
 import { Markdown } from "@/components/ui/markdown";
-import { cn } from "@/lib/utils";
+import { cn } from "@notefig/ui/utils";
 import {
   useTaskRow,
   useTaskEntries,
@@ -55,13 +58,11 @@ import {
   retryAgentTaskAfterAuth,
   reviveAgentTask,
 } from "@/agent/agent-service";
-import {
-  mentionContextParts,
-  PromptEditor,
-  type PromptEditorHandle,
-} from "./prompt-editor";
+import { PromptEditor, type PromptEditorHandle } from "@notefig/widgets";
+import { mentionContextParts } from "./prompt-widget-host";
 import { PermissionCard } from "./permission-card";
-import { HarnessLogo } from "./harness-logo";
+import { AuthCard } from "./auth-card";
+import { HarnessLogo } from "@notefig/ui/harness-logo";
 import {
   clearComposerDraft,
   getComposerDraft,
@@ -72,11 +73,11 @@ import {
 import {
   deriveComposerButton,
   deriveComposerKeyAction,
-} from "./prompt-blob-state";
+} from "@notefig/widgets";
 import { useAgentTabController } from "./agent-tab-controller";
 import { requestTabFocus } from "@/tabs/tab-controllers";
 import { agentTabId } from "@/tabs/tab-id";
-import { CopyTextButton } from "./copy-text-button";
+import { CopyTextButton } from "@notefig/widgets";
 import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
 
 /**
@@ -355,84 +356,6 @@ function UnavailableCard({ taskId }: { taskId: string }) {
   );
 }
 
-/**
- * Auth-blocked task: sign-in methods off the task row (Stage 4 — auth is
- * task-row state). Each method button tries in-band ACP `authenticate`; the
- * out-of-band terminal logins both current adapters use reject it, and the
- * card then shows the method's description as instructions. "I've signed in"
- * retries the held prompt optimistically — a failed retry re-raises the
- * block.
- */
-export function AuthCard({
-  task,
-  bare = false,
-}: {
-  task: AgentTaskRow;
-  /** Skip the card's own border/bg/padding — for hosts (the prompt-blob
-   *  widget) that already wrap it in an equivalently-tinted container. */
-  bare?: boolean;
-}) {
-  const { t } = useTranslation();
-  const [instructions, setInstructions] = useState<string | null>(null);
-  const [busyMethodId, setBusyMethodId] = useState<string | null>(null);
-  const methods = task.authMethods ?? [];
-
-  const tryMethod = useCallback(
-    async (method: AuthMethod) => {
-      setBusyMethodId(method.id);
-      setInstructions(null);
-      const result = await authenticateAgentTask(task.taskId, method.id);
-      setBusyMethodId(null);
-      if (!result.ok) {
-        // Out-of-band method: show how to sign in instead.
-        setInstructions(method.description ?? task.authHint ?? null);
-      }
-    },
-    [task.taskId, task.authHint],
-  );
-
-  return (
-    <div
-      className={cn(
-        "pointer-events-auto flex flex-col gap-2 text-xs",
-        // The amber tint rides a gradient *image* over an opaque
-        // bg-background: this card floats in the composer overlay above the
-        // transcript, so a plain translucent bg would let entries underneath
-        // show through it. `bare` hosts (the prompt-blob widget) already
-        // wrap this in their own equivalently-tinted card, so they skip it.
-        !bare &&
-          "rounded-md border border-amber-500/40 bg-background bg-gradient-to-b from-amber-500/10 to-amber-500/10 p-3",
-      )}
-    >
-      <span className="font-medium">{t("agentSignInRequired")}</span>
-      {instructions ? (
-        <p className="whitespace-pre-wrap">{instructions}</p>
-      ) : (
-        task.authHint && <p className="whitespace-pre-wrap">{task.authHint}</p>
-      )}
-      <div className="flex flex-wrap items-center gap-2">
-        {methods.map((method) => (
-          <Button
-            key={method.id}
-            size="sm"
-            variant="outline"
-            disabled={busyMethodId !== null}
-            onClick={() => void tryMethod(method)}
-          >
-            {busyMethodId === method.id && (
-              <Loader2 className="size-3.5 animate-spin" />
-            )}
-            {method.name ?? method.id}
-          </Button>
-        ))}
-        <Button size="sm" onClick={() => retryAgentTaskAfterAuth(task.taskId)}>
-          {t("agentSignedInRetry")}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 /** One transcript row fed to the virtualizer — entries and turn-error
  *  banners are peers in the same windowed list, so one bottom-anchor/follow
  *  path covers both. */
@@ -514,7 +437,7 @@ function useTranscriptRows(taskId: string): TranscriptRow[] {
     [turns],
   );
   const sortedEntries = useMemo(
-    () => [...entries].sort((a, b) => (a.id < b.id ? -1 : 1)),
+    () => sortEntriesChronologically(entries),
     [entries],
   );
   return useMemo<TranscriptRow[]>(

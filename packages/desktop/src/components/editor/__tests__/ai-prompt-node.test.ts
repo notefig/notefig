@@ -1,19 +1,19 @@
 /**
  * The aiPrompt document node: UI-only (serializes to nothing), kept present
  * in empty documents by the keeper, and summonable with "/" in empty
- * top-level paragraphs (ai-prompt-node.tsx).
+ * top-level paragraphs.
+ *
+ * The widget itself lives in @notefig/widgets; this exercises it inside the
+ * app's real editor kit and markdown codec, which is why it stays here.
  */
 import { describe, it, expect, afterEach } from "vitest";
 import { Editor } from "@tiptap/core";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
-import { AiPromptNode } from "@/components/editor/ai-prompt-node";
-import {
-  removeToParagraphTr,
-  revertToSlashTr,
-} from "@/components/editor/ai-prompt-utils";
+import { widgetRendererNodes } from "@notefig/widgets";
+import { removeToParagraphTr, revertToSlashTr } from "@notefig/widgets";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
-import { consumePendingPromptBlobFocus } from "@/components/agent/prompt-blob-store";
+import { consumePendingPromptBlobFocus } from "@notefig/widgets";
 
 /** The editor's create hook (where the keeper's initial insert runs) fires
  *  asynchronously — construction alone isn't enough for assertions. */
@@ -21,7 +21,7 @@ async function documentEditor(content: string): Promise<Editor> {
   const created = new Editor({
     extensions: [
       ...editorExtensions.filter((e) => e.name !== "aiPrompt"),
-      AiPromptNode.configure({ filePath: "/ws/doc.md", basePath: "/ws" }),
+      ...widgetRendererNodes({ filePath: "/ws/doc.md", basePath: "/ws" }),
     ],
     content,
   });

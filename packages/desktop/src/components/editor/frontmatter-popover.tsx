@@ -30,8 +30,8 @@ import {
   Popover,
   PopoverAnchor,
   PopoverContent,
-} from "@/components/ui/popover";
-import { ToolbarButton } from "@/components/ui/toolbar";
+} from "@notefig/ui/popover";
+import { ToolbarButton } from "@notefig/ui/toolbar";
 import { getFrontmatterYaml, setFrontmatterYaml } from "./frontmatter-node";
 import {
   commitOnEnter,

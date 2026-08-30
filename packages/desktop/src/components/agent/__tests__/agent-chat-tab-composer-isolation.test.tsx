@@ -18,6 +18,10 @@ vi.mock("@/entities/agents", async (importOriginal) => {
   return { ...mod, useTaskEntries: vi.fn(mod.useTaskEntries) };
 });
 
+import {
+  fakePromptWidgetHost,
+  withHost,
+} from "@notefig/widgets/testing";
 import { AgentChatTab } from "@/components/agent/agent-chat-tab";
 import {
   agentTasksCollection,
@@ -91,7 +95,17 @@ describe("AgentChatTab composer isolation (MET-139)", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    act(() => root!.render(createElement(AgentChatTab, { taskId: TASK_ID })));
+    // The tab's composer is the widget package's, so it needs a host — in
+    // the app that comes from PromptWidgetBoundary. Nothing here exercises
+    // the host itself, so the stub double is enough.
+    act(() =>
+      root!.render(
+        withHost(
+          fakePromptWidgetHost(),
+          createElement(AgentChatTab, { taskId: TASK_ID }),
+        ),
+      ),
+    );
     // Let live queries and the markdown pipeline settle before baselining.
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));

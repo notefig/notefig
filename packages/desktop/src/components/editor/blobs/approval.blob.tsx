@@ -3,7 +3,7 @@ import { Loader2 } from "lucide-react";
 import { z } from "zod";
 import { defineBlobType } from "./blob-type";
 import { useBlobAnswer } from "./use-blob-answer";
-import { Button } from "@/components/ui/button";
+import { Button } from "@notefig/ui/button";
 
 /**
  * The agent asks the user to approve or reject a described action before

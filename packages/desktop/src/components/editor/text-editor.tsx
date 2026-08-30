@@ -14,7 +14,7 @@ import { useLinkPrompt } from "./use-link-prompt";
 import { TiptapToolbar } from "./tiptap-toolbar";
 import { LinkBubbleMenu } from "./tiptap-link-menu";
 import { TableMenu } from "./tiptap-table-menu";
-import { cn } from "@/lib/utils";
+import { cn } from "@notefig/ui/utils";
 import { dropZoneProps, getProtocolContext } from "@/utils/drag-protocol";
 import { isImageFile } from "@/utils/fs";
 import { relativeTreePath } from "@/utils/path";

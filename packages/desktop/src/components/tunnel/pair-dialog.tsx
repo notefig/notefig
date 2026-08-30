@@ -7,9 +7,9 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { copyTextToClipboard } from "@/utils/clipboard";
+} from "@notefig/ui/dialog";
+import { Button } from "@notefig/ui/button";
+import { copyTextToClipboard } from "@notefig/ui/clipboard";
 import { useTunnelConnection } from "@/hooks/use-tunnel-connection";
 import {
   connectWithCode,

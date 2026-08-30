@@ -1,18 +1,18 @@
 import React from "react";
 import { useState } from "react";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { Switch } from "@/components/ui/switch";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogTitle } from "@notefig/ui/dialog";
+import { Switch } from "@notefig/ui/switch";
+import { Checkbox } from "@notefig/ui/checkbox";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
+} from "@notefig/ui/select";
+import { Button } from "@notefig/ui/button";
+import { ScrollArea } from "@notefig/ui/scroll-area";
+import { cn } from "@notefig/ui/utils";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import {
   Settings,

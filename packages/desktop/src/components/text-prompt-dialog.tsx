@@ -6,9 +6,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+} from "@notefig/ui/dialog";
+import { Button } from "@notefig/ui/button";
+import { Input } from "@notefig/ui/input";
 import {
   TEXT_PROMPT_EVENT,
   type TextPromptRequestDetail,

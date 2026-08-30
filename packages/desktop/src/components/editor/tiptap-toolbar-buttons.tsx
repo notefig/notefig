@@ -1,6 +1,6 @@
 import { useEditorState } from "@tiptap/react";
 import type { Editor } from "@tiptap/core";
-import { ToolbarButton } from "@/components/ui/toolbar";
+import { ToolbarButton } from "@notefig/ui/toolbar";
 
 const preventFocusLoss = (e: React.MouseEvent) => e.preventDefault();
 

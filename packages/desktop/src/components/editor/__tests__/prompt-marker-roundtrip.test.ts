@@ -6,7 +6,7 @@
 import { describe, it, expect } from "vitest";
 import { Editor } from "@tiptap/core";
 import { editorExtensions } from "../tiptap-editor-kit";
-import { AiPromptNode } from "../ai-prompt-node";
+import { widgetRendererNodes } from "@notefig/widgets";
 import { createMarkdownCodec } from "../markdown-codec";
 
 const MARKER = '<!-- notefig:prompt id="blob_1a2b" task="task_9f8e" -->';
@@ -16,7 +16,7 @@ function documentEditor(content: string) {
   return new Editor({
     extensions: [
       ...editorExtensions.filter((e) => e.name !== "aiPrompt"),
-      AiPromptNode.configure({ filePath: "/ws/doc.md", basePath: "/ws" }),
+      ...widgetRendererNodes({ filePath: "/ws/doc.md", basePath: "/ws" }),
     ],
     content,
   });

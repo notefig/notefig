@@ -18,7 +18,6 @@ import {
 } from "../routing";
 import { isIgnoredPath } from "../ignore";
 import { historyGitDir } from "../history-service";
-import { pathToFileUri } from "@/components/agent/prompt-editor";
 
 /**
  * Characterization baseline for the Windows path migration (MET-157 B2).
@@ -204,9 +203,9 @@ describe("key producers", () => {
   });
 });
 
-describe("pathToFileUri", () => {
+describe("path.toFileUri", () => {
   it("percent-encodes per segment after file://", () => {
-    expect(pathToFileUri(`${WS}/a b.md`)).toBe(
+    expect(pathutil.toFileUri(`${WS}/a b.md`)).toBe(
       `file://${WS.split("/").map(encodeURIComponent).join("/")}/a%20b.md`,
     );
   });

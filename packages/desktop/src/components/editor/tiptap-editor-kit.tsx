@@ -5,8 +5,8 @@ import Placeholder from "@tiptap/extension-placeholder";
 import CharacterCount from "@tiptap/extension-character-count";
 import { EditorImage } from "./editor-image-node";
 import { BlobNodeView } from "./blobs/blob-node-view";
-import { AiPromptNode } from "./ai-prompt-node";
 import { FrontmatterNode } from "./frontmatter-node";
+import { widgetRendererNodes } from "@notefig/widgets";
 import {
   createSchemaExtensions,
   MarkdownImageBase,
@@ -85,7 +85,9 @@ export const editorExtensions = [
   ...createSchemaExtensions(
     MarkdownImage,
     MarkdownCodeBlock,
-    AiPromptNode,
+    // Unconfigured: schema-only instances never self-insert the empty-doc
+    // keeper. editor-store.ts swaps these for per-document configured ones.
+    widgetRendererNodes({ filePath: "", basePath: "" }),
     FrontmatterNode,
   ),
   Placeholder.configure({ placeholder: "Type something, or press / for AI…" }),

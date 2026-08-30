@@ -31,6 +31,7 @@
   ],
   "ignoreExports": [
     { "file": "packages/desktop/src/components/ui/**", "exports": ["*"] },
+    { "file": "packages/ui/src/**", "exports": ["*"] },
     { "file": "packages/marketing/components/ui/**", "exports": ["*"] },
     { "file": "packages/themes/**/components/ui/**", "exports": ["*"] }
   ],
@@ -72,7 +73,7 @@
     "ignore": [
       "**/*.generated.ts",
       "packages/desktop/src/testing/shim-transport.ts",
-      "packages/desktop/src/components/ui/orb-loader.tsx"
+      "packages/ui/src/orb-loader.tsx"
     ]
   },
   "duplicates": {
@@ -82,6 +83,7 @@
     "threshold": 10,
     "ignore": [
       "**/components/ui/**",
+      "packages/ui/src/**",
       "packages/desktop/src/testing/shim-transport.ts"
     ],
     "skipLocal": false

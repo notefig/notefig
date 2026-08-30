@@ -14,9 +14,9 @@ import {
   TableIcon,
   UnderlineIcon,
 } from "lucide-react";
-import { FixedToolbar } from "@/components/ui/fixed-toolbar";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
+import { FixedToolbar } from "@notefig/ui/fixed-toolbar";
+import { ScrollArea } from "@notefig/ui/scroll-area";
+import { Separator } from "@notefig/ui/separator";
 import {
   TiptapHeadingButton,
   TiptapMarkButton,

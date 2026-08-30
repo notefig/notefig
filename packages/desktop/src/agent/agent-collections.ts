@@ -11,7 +11,13 @@ import {
   localOnlyCollectionOptions,
 } from "@tanstack/react-db";
 import { persistedCollectionOptions } from "@tanstack/db-sqlite-persistence-core";
-import type { AuthMethod, ToolCallUpdate } from "@notefig/shared/agent";
+import type {
+  AgentEntry,
+  AgentPermissionRequestRow,
+  AgentTaskRow,
+  AgentTaskStatus,
+  AgentTurn,
+} from "@notefig/shared/agent";
 import { platformAdapter } from "@/adapters";
 import { getRegisteredTask } from "./task-registry";
 import {
@@ -20,17 +26,19 @@ import {
   parsePersistedAgentTask,
 } from "./agent-persistence";
 
-export type AgentTaskStatus =
-  | "starting"
-  | "idle"
-  | "running"
-  | "cancelled"
-  | "error"
-  /** Persisted session restored after a restart — live but unspawned; first
-   *  interaction revives it via ACP session/load (agent-persistence.ts). */
-  | "restored"
-  /** Revival failed (harness-side session gone) — read-only, deletable. */
-  | "unavailable";
+// The row shapes live in @notefig/shared/agent — @notefig/widgets derives the
+// prompt widget's state machine from turns and entries, and neither package
+// owns the other. Writing them is still this module's job alone. Re-exported
+// so the app's existing "rows come from agent-collections" imports stand.
+export type {
+  AgentEntry,
+  AgentEntryType,
+  AgentPermissionRequestRow,
+  AgentTaskRow,
+  AgentTaskStatus,
+  AgentTurn,
+  AgentTurnStatus,
+} from "@notefig/shared/agent";
 
 const AGENT_TASK_STATUSES = new Set<string>([
   "starting",
@@ -46,118 +54,6 @@ function isAgentTaskStatus(value: string): value is AgentTaskStatus {
   return AGENT_TASK_STATUSES.has(value);
 }
 
-export type AgentTaskRow = {
-  /** task_ (descending id: newest-first lexicographic sort) */
-  taskId: string;
-  /** Set when this task was spawned by another task (subagent pattern) */
-  parentTaskId?: string;
-  workspacePath: string;
-  /** Short user-facing label, e.g. first prompt truncated */
-  title: string;
-  status: AgentTaskStatus;
-  harnessId: string;
-  /**
-   * ACP session id, set once session/new (or session/load) succeeds. Rides
-   * the row (not a KV side-key) so persistence and revival read one record.
-   */
-  sessionId?: string;
-  createdAt: number;
-  /**
-   * Last-activity timestamp: bumped on insert, every status transition, and
-   * prompt enqueue (queueing onto a busy task doesn't change status). Drives
-   * session-list ordering; deliberately NOT bumped per streamed chunk.
-   */
-  updatedAt: number;
-  /**
-   * "How to sign in" hint from the adapter/harness, surfaced on auth errors.
-   * On the row (not just the AgentTask instance) so the banner flows through
-   * useLiveQuery and can't lag behind an unrelated collection write.
-   */
-  authHint?: string;
-  /**
-   * Auth-blocked state is task-row state, not a collection of its own
-   * (Stage 4 design). True from a prompt failing with "authentication
-   * required" until a turn reaches the model again; `authMethods` carries
-   * what `initialize` advertised so the panel can render sign-in affordances
-   * straight off the row.
-   */
-  authRequired?: boolean;
-  authMethods?: AuthMethod[];
-};
-
-export type AgentTurnStatus =
-  | "queued"
-  | "running"
-  | "completed"
-  | "cancelled"
-  | "error";
-
-export type AgentTurn = {
-  /** trn_ (ascending) — one per session/prompt round-trip */
-  turnId: string;
-  taskId: string;
-  /** Empty while the turn is queued on a task whose session isn't up yet. */
-  sessionId: string;
-  status: AgentTurnStatus;
-  /** ACP stop reason once the turn ends */
-  stopReason?: string;
-  /** Failure reason when status is "error" — the "why did it fail?" answer. */
-  error?: string;
-  startedAt: number;
-};
-
-export type AgentEntryType =
-  | "user"
-  | "assistant"
-  /** Coalesced agent_thought_chunk run (OpenCode streams these per token). */
-  | "thought"
-  | "tool_call"
-  | "plan"
-  | "unknown";
-
-/**
- * One item in a task's transcript — a flat, ordered stream. Text and tool
- * calls are peers (tools are NOT nested under a message), so a
- * text → tool → text sequence renders in the order it happened. Assistant
- * text is coalesced into a contiguous run; a new run starts after each tool
- * call. Ids are minted ascending (newEventId) so lexicographic sort =
- * chronological render order.
- */
-export type AgentEntry = {
-  /** evt_ (ascending: lexicographic sort = chronological) */
-  id: string;
-  taskId: string;
-  turnId: string;
-  type: AgentEntryType;
-  /** user / assistant / thought text runs; unknown: the update's sessionUpdate kind */
-  text?: string;
-  /** tool_call: the ACP toolCallId this row coalesces */
-  toolCallId?: string;
-  /** tool_call: the coalesced tool call (title, kind, status, content, …) */
-  toolCall?: ToolCallUpdate;
-  /** plan: raw plan update payload */
-  plan?: unknown;
-  /** unknown: the full unrecognized session-update payload, kept verbatim
-   * (D4) so a later stage can render it (e.g. agent_thought_chunk) for free */
-  raw?: unknown;
-  /**
-   * Wall-clock insert time — absent on session/load replay (MET-94): ACP
-   * carries no timestamps, so a replayed entry's true time is unknowable
-   * and a revival-time stamp would lie. NEVER use this for ordering — ids
-   * are the chronological order, present or not.
-   */
-  createdAt?: number;
-};
-
-export type AgentPermissionRequestRow = {
-  id: string;
-  taskId: string;
-  sessionId: string;
-  title: string;
-  /** ACP PermissionOption[] rendered verbatim */
-  options: unknown[];
-  status: "pending" | "granted" | "denied" | "cancelled";
-};
 
 /**
  * Persisted (MET-54, on SQLite since MET-124): a local-only collection whose

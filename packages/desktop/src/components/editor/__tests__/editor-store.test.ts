@@ -14,8 +14,8 @@ import {
   getMarkdownEditor,
 } from "@/components/editor/editor-store";
 import { requestTabFocus, setActiveTab } from "@/tabs/tab-controllers";
-import { findPromptNodeId } from "@/components/editor/ai-prompt-utils";
-import { consumePendingPromptBlobFocus } from "@/components/agent/prompt-blob-store";
+import { findPromptNodeId } from "@notefig/widgets";
+import { consumePendingPromptBlobFocus } from "@notefig/widgets";
 
 /** Editors accept only parsed doc JSON (conversion happens in the worker). */
 function docWithText(text: string) {

@@ -21,6 +21,7 @@ import { useWorkspacePanels } from "@/hooks/use-workspace-panels";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { WorkspaceTabsProvider } from "@/components/workspace-tabs-provider";
+import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary";
 import { useThrowWorkspaceAccessError } from "@/components/workspace-error-boundary";
 import { disposeAllEditors } from "@/components/editor/editor-store";
 import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
@@ -225,89 +226,91 @@ export const Workspace = () => {
       openFile={openFileInTabs}
       openAgentTab={openAgentTab}
     >
-      <div
-        dir={direction}
-        className="relative flex h-full w-full overflow-hidden p-2"
-      >
-        <div className="flex h-full shrink-0 overflow-hidden rounded-xl border border-border">
-          <IconSidebar
-            isCollapsed={isSidebarCollapsed}
-            onToggleCollapse={toggleSidebarCollapsed}
-          />
-
-          {!isSidebarCollapsed && (
-            <Sidebar
-              workspacePath={workspacePath}
-              activeTabId={activeTabId}
-              openTabs={openTabs}
-              onFileSelect={handleFileSelect}
-              closeTab={closeTab}
-              onRenameOpenFile={handleRenameOpenFile}
-              mode={fileTreeMode}
-              onModeChange={setFileTreeMode}
-              searchPanelRef={searchPanelRef}
+      <PromptWidgetBoundary>
+        <div
+          dir={direction}
+          className="relative flex h-full w-full overflow-hidden p-2"
+        >
+          <div className="flex h-full shrink-0 overflow-hidden rounded-xl border border-border">
+            <IconSidebar
+              isCollapsed={isSidebarCollapsed}
+              onToggleCollapse={toggleSidebarCollapsed}
             />
-          )}
-        </div>
 
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          <DebugPanel />
+            {!isSidebarCollapsed && (
+              <Sidebar
+                workspacePath={workspacePath}
+                activeTabId={activeTabId}
+                openTabs={openTabs}
+                onFileSelect={handleFileSelect}
+                closeTab={closeTab}
+                onRenameOpenFile={handleRenameOpenFile}
+                mode={fileTreeMode}
+                onModeChange={setFileTreeMode}
+                searchPanelRef={searchPanelRef}
+              />
+            )}
+          </div>
 
-          <div className="flex-1 flex min-h-0 overflow-hidden">
-            <div
-              ref={dockableRef}
-              className="flex-1 min-w-0 h-full overflow-hidden"
-              tabIndex={-1}
-            >
-              {openTabs.length === 0 ? (
-                <div className="flex items-center justify-center h-full text-muted-foreground p-4 ps-0">
-                  <p className="text-center">{t("noFileSelected")}</p>
-                </div>
-              ) : (
-                <Dockable.Root
-                  orientation="row"
-                  layout={layout}
-                  onChange={handleLayoutChange}
-                >
-                  {allDockableTabs}
-                </Dockable.Root>
-              )}
+          <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+            <DebugPanel />
+
+            <div className="flex-1 flex min-h-0 overflow-hidden">
+              <div
+                ref={dockableRef}
+                className="flex-1 min-w-0 h-full overflow-hidden"
+                tabIndex={-1}
+              >
+                {openTabs.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-muted-foreground p-4 ps-0">
+                    <p className="text-center">{t("noFileSelected")}</p>
+                  </div>
+                ) : (
+                  <Dockable.Root
+                    orientation="row"
+                    layout={layout}
+                    onChange={handleLayoutChange}
+                  >
+                    {allDockableTabs}
+                  </Dockable.Root>
+                )}
+              </div>
             </div>
           </div>
+
+          <StatusBar
+            wordCount={wordCount}
+            isSynced={isSynced}
+            workspacePath={workspacePath}
+          />
+
+          <SettingsModal
+            direction={direction}
+            onDirectionChange={setDirection}
+            onFocusTab={focusActiveTab}
+          />
+
+          <CommandPalette
+            open={isCommandPaletteOpen}
+            sidebarOpen={isSidebarCollapsed}
+            workspacePath={workspacePath}
+            onOpenChange={setIsCommandPaletteOpen}
+            onNewScratchpad={handleNewScratchpad}
+            onNewFile={handleNewFile}
+            onNewDirectory={handleNewDirectory}
+            onCloseFile={closeActiveTab}
+            onUndo={() => runHistoryAction("undo")}
+            onRedo={() => runHistoryAction("redo")}
+            onOpenSettings={openSettings}
+            onToggleSidebar={toggleSidebarCollapsed}
+            onToggleFullscreen={handleToggleFullscreen}
+            onSearchInFile={handleSearchInFile}
+            onSearchInFiles={handleSearchInFiles}
+            onFocusTab={focusActiveTab}
+            direction={direction}
+          />
         </div>
-
-        <StatusBar
-          wordCount={wordCount}
-          isSynced={isSynced}
-          workspacePath={workspacePath}
-        />
-
-        <SettingsModal
-          direction={direction}
-          onDirectionChange={setDirection}
-          onFocusTab={focusActiveTab}
-        />
-
-        <CommandPalette
-          open={isCommandPaletteOpen}
-          sidebarOpen={isSidebarCollapsed}
-          workspacePath={workspacePath}
-          onOpenChange={setIsCommandPaletteOpen}
-          onNewScratchpad={handleNewScratchpad}
-          onNewFile={handleNewFile}
-          onNewDirectory={handleNewDirectory}
-          onCloseFile={closeActiveTab}
-          onUndo={() => runHistoryAction("undo")}
-          onRedo={() => runHistoryAction("redo")}
-          onOpenSettings={openSettings}
-          onToggleSidebar={toggleSidebarCollapsed}
-          onToggleFullscreen={handleToggleFullscreen}
-          onSearchInFile={handleSearchInFile}
-          onSearchInFiles={handleSearchInFiles}
-          onFocusTab={focusActiveTab}
-          direction={direction}
-        />
-      </div>
+      </PromptWidgetBoundary>
     </WorkspaceTabsProvider>
   );
 };

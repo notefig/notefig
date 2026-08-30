@@ -1,21 +1,15 @@
-import { z } from "zod";
 import type { AgentTool } from "@notefig/agent";
+import {
+  WIDGET_RESPOND_TOOL_NAME,
+  WidgetRespondInputSchema,
+  type WidgetResponse,
+} from "@notefig/shared/agent";
 
-/**
- * Shared between the tool and the widget-side reader
- * (`deriveWidgetResponse` in prompt-blob-state.ts), so the two can never
- * drift: the widget parses the transcript entry's `rawInput` with this
- * exact schema. Flat strings only — deliberately no nested objects, so
- * harness-side argument mangling (the OpenCode stringified-payload quirk
- * mcp-server.ts repairs) can't corrupt what the widget reads.
- */
-export const WidgetRespondInputSchema = z.object({
-  kind: z.enum(["answer", "issue"]),
-  markdown: z.string().min(1),
-  title: z.string().optional(),
-});
-
-export type WidgetResponse = z.infer<typeof WidgetRespondInputSchema>;
+// The schema and the tool name live in @notefig/shared/agent: @notefig/widgets
+// reads them to derive the widget's done face from the transcript, and neither
+// package owns the other. Re-exported here so the tool's own call sites keep
+// their existing import.
+export { WidgetRespondInputSchema, type WidgetResponse };
 
 /**
  * Deliver the agent's final response to the in-document prompt widget the
@@ -27,12 +21,12 @@ export type WidgetResponse = z.infer<typeof WidgetRespondInputSchema>;
  * documents for blob-answer routing (findBlobAuthorTask): the transcript
  * is the record; readers derive.
  *
- * Unlike author_blob this module stays a leaf (zod + shared types only) —
- * prompt-blob-state.ts imports the schema above, so pulling anything from
- * the editor/component layer here would open a cycle.
+ * Unlike author_blob this module stays a leaf (shared types only): the
+ * widget reads the same schema from @notefig/shared/agent, and pulling
+ * anything from the editor/component layer in here would open a cycle.
  */
 export const widgetRespond: AgentTool<WidgetResponse, { recorded: true }> = {
-  name: "widget_respond",
+  name: WIDGET_RESPOND_TOOL_NAME,
   title: "agentToolWidgetRespond",
   description:
     `Deliver your final answer (kind: "answer") or flag a problem/blocker ` +

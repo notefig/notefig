@@ -1,6 +1,10 @@
 {
-  "extends": ["../../.fallowrc.json"],
-  "publicPackages": ["@notefig/desktop"],
+  "extends": [
+    "../../.fallowrc.json"
+  ],
+  "publicPackages": [
+    "@notefig/desktop"
+  ],
   "ignoreDependencies": [
     "@radix-ui/react-accordion",
     "@radix-ui/react-aspect-ratio",
@@ -12,21 +16,12 @@
     "@radix-ui/react-progress",
     "@radix-ui/react-radio-group",
     "@radix-ui/react-scroll-area",
-    "@radix-ui/react-separator",
     "@radix-ui/react-slider",
-    "@radix-ui/react-slot",
     "@radix-ui/react-switch",
     "@radix-ui/react-tabs",
     "@radix-ui/react-toast",
     "@radix-ui/react-toggle",
     "@radix-ui/react-toggle-group",
-    "@radix-ui/react-toolbar",
-    "@radix-ui/react-tooltip",
-    "@radix-ui/react-checkbox",
-    "@radix-ui/react-dialog",
-    "@radix-ui/react-dropdown-menu",
-    "@radix-ui/react-popover",
-    "@radix-ui/react-select",
     "@notefig/git",
     "@notefig/shared",
     "@tauri-apps/plugin-fs",
@@ -41,7 +36,12 @@
   },
   "overrides": [
     {
-      "files": ["**/*.test.ts", "**/*.spec.ts", "**/__tests__/**", "**/tests/**"],
+      "files": [
+        "**/*.test.ts",
+        "**/*.spec.ts",
+        "**/__tests__/**",
+        "**/tests/**"
+      ],
       "rules": {
         "unused-dependencies": "off"
       }

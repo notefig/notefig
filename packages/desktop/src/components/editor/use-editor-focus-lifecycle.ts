@@ -17,8 +17,8 @@ import { requestTabFocus } from "@/tabs/tab-controllers";
 import {
   docHasRealContent,
   findPromptNodeId,
-} from "@/components/editor/ai-prompt-utils";
-import { requestPromptBlobFocus } from "@/components/agent/prompt-blob-store";
+} from "@notefig/widgets";
+import { requestPromptBlobFocus } from "@notefig/widgets";
 
 /** How long after mount the tab layout may still re-parent the editor DOM. */
 const FOCUS_RECLAIM_WINDOW_MS = 600;

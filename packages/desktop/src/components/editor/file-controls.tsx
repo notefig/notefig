@@ -12,17 +12,17 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { Button } from "@/components/ui/button";
-import { ButtonGroup } from "@/components/ui/button-group";
+} from "@notefig/ui/tooltip";
+import { Button } from "@notefig/ui/button";
+import { ButtonGroup } from "@notefig/ui/button-group";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@notefig/ui/dropdown-menu";
 import { WorkspaceSwitcher } from "@/components/editor/workspace-switcher";
-import { cn } from "@/lib/utils";
+import { cn } from "@notefig/ui/utils";
 import { useTranslation } from "react-i18next";
 import type { SortOrder } from "@/utils/fs";
 
