@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { cn } from "@/lib/utils";
+import { cn } from "@notefig/ui/utils";
 import { marketingPages, type MarketingPage } from "./content-manifest";
 
 /**

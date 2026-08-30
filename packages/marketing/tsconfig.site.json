@@ -23,6 +23,14 @@
       "@/*": ["../desktop/src/*"],
       "@notefig/shared": ["../shared/src/index.ts"],
       "@notefig/shared/*": ["../shared/src/*/index.ts"],
+      // Kept in step with ../desktop/tsconfig.json by hand, like the entries
+      // above: the Vite side of both builds shares one alias list
+      // (sharedResolveAliases), but tsc has no such thing, so a workspace
+      // package added there has to be added in BOTH tsconfigs or the site
+      // build is the one that finds out.
+      "@notefig/ui/*": ["../ui/src/*"],
+      "@notefig/widgets": ["../widgets/src/index.ts"],
+      "@notefig/widgets/*": ["../widgets/src/*"],
       // This package nests @types/react 19 (for Next), but the desktop app
       // typechecks against the workspace-root @types/react. Without pinning,
       // site/ files resolve 19 while the imported desktop modules resolve
