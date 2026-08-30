@@ -10,7 +10,7 @@ import "@/utils/intl";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TextPromptDialog } from "@/components/text-prompt-dialog";
 import { Toaster } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@notefig/ui/tooltip";
 import { queryClient } from "@/entities/query-client";
 import { SiteShell } from "./site-shell";
 import { defaultPage, marketingPages } from "./content-manifest";

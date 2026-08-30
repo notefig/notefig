@@ -1,18 +1,14 @@
 "use client";
 
-import {
-  Hash,
-  FilePlus,
-  FolderPlus,
-  ArrowDownAZ,
-  ArrowUpZA,
-  CalendarArrowDown,
-} from "lucide-react";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@notefig/ui/tooltip";
+import { ArrowDownAZ, ArrowUpZA, CalendarArrowDown } from "lucide-react";
+// The three creation actions use Pierre's set, matching the file tree they
+// sit on (@pierre/trees renders the rows and their file-type glyphs) and the
+// tree's own context menu. Sized to 3.5 to match that menu — passed as a
+// className so tailwind-merge drops the Button's own `[&_svg]:size-4` rather
+// than the two fighting on specificity. The icons default to `currentcolor`,
+// so they inherit the button's text color like the lucide ones did.
+import { IconFilePlus, IconFolderPlus, IconHash } from "@pierre/icons";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@notefig/ui/tooltip";
 import { Button } from "@notefig/ui/button";
 import { ButtonGroup } from "@notefig/ui/button-group";
 import {
@@ -124,16 +120,22 @@ export function FileCreateActions({
   // while the tree's context menu (z-index 3-4 inside its host) paints —
   // and clicks — above it instead of having menu items intercepted.
   return (
-    <ButtonGroup className="absolute bottom-2 end-2 rounded-md border border-sidebar-border bg-sidebar shadow-md">
+    // bg-popover/border-border, not bg-sidebar/border-sidebar-border: there
+    // are no --sidebar tokens in this theme, so those two utilities compiled
+    // to nothing and the pill floated over the tree with no background at
+    // all — just a default-coloured border and a shadow. These are the same
+    // tokens the tree's own context menu uses, which is the app's existing
+    // "floating surface" treatment.
+    <ButtonGroup className="absolute bottom-2 end-2 rounded-md border border-border bg-popover shadow-md">
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 text-muted-foreground"
+            className="h-7 w-7 text-muted-foreground [&_svg]:size-3.5"
             onClick={onNewScratchpad}
           >
-            <Hash className="h-4 w-4" />
+            <IconHash />
             <span className="sr-only">{t("newScratchpad")}</span>
           </Button>
         </TooltipTrigger>
@@ -144,10 +146,10 @@ export function FileCreateActions({
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 text-muted-foreground"
+            className="h-7 w-7 text-muted-foreground [&_svg]:size-3.5"
             onClick={onNewFile}
           >
-            <FilePlus className="h-4 w-4" />
+            <IconFilePlus />
             <span className="sr-only">{t("newFile")}</span>
           </Button>
         </TooltipTrigger>
@@ -158,10 +160,10 @@ export function FileCreateActions({
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 text-muted-foreground"
+            className="h-7 w-7 text-muted-foreground [&_svg]:size-3.5"
             onClick={onNewFolder}
           >
-            <FolderPlus className="h-4 w-4" />
+            <IconFolderPlus />
             <span className="sr-only">{t("newFolder")}</span>
           </Button>
         </TooltipTrigger>

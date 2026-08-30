@@ -5,13 +5,16 @@ import {
   type FileTreeProps as TreesFileTreeProps,
 } from "@pierre/trees/react";
 import type { ContextMenuItem, ContextMenuOpenContext } from "@pierre/trees";
+// Pierre's set, matching the rows @pierre/trees draws underneath this menu.
+// `menuButton` sizes them via [&_svg]:size-3.5 and they default to
+// `currentcolor`, so nothing is passed at the call sites.
 import {
-  ExternalLink,
-  FilePlus,
-  FolderPlus,
-  PenLine,
-  Trash2,
-} from "lucide-react";
+  IconArrowUpRight,
+  IconBin,
+  IconFilePlus,
+  IconFolderPlus,
+  IconPencil,
+} from "@pierre/icons";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -594,7 +597,7 @@ function FileTreeInner({
                 openFileAtPath(item.path, { intent: "new-tab" });
               }}
             >
-              <ExternalLink />
+              <IconArrowUpRight />
               {t("openInNewTab", "Open in New Tab")}
             </button>
           )}
@@ -613,7 +616,7 @@ function FileTreeInner({
                   });
                 }}
               >
-                <FilePlus />
+                <IconFilePlus />
                 {t("newFile", "New File")}
               </button>
               <button
@@ -629,7 +632,7 @@ function FileTreeInner({
                   });
                 }}
               >
-                <FolderPlus />
+                <IconFolderPlus />
                 {t("newFolder", "New Folder")}
               </button>
             </>
@@ -646,7 +649,7 @@ function FileTreeInner({
                   context.close({ restoreFocus: false });
                 }}
               >
-                <PenLine />
+                <IconPencil />
                 {t("rename", "Rename")}
               </button>
               <div role="separator" className="-mx-1 my-1 h-px bg-border" />
@@ -659,7 +662,7 @@ function FileTreeInner({
                   setPendingDelete({ path: abs, type: item.kind });
                 }}
               >
-                <Trash2 />
+                <IconBin />
                 {t("delete", "Delete")}
               </button>
             </>
