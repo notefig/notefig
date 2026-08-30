@@ -9,11 +9,12 @@
  * the app owns. If you are looking for "how does the widget do X", X is
  * either a method below or it never leaves the package.
  *
- * Constructed once per workspace and memoized: the object identity feeds
- * hook dependency arrays inside the widget, so a fresh one per render would
- * re-run its effects.
+ * Constructed once and never rebuilt: the object identity feeds hook
+ * dependency arrays inside the widget, so a fresh one per render re-runs its
+ * effects — see the stability note on usePromptWidgetHost for the loop that
+ * caused.
  */
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { useLiveQuery, eq, and } from "@tanstack/react-db";
 import type {
   MentionCandidate,
@@ -195,6 +196,25 @@ const slots: PromptWidgetHost["slots"] = {
   FileIcon: FileTypeIcon,
 };
 
+/** The workspace's "yes, agents may act here" gate. A real hook, called by
+ *  the widget in its own component — NOT a closure over a `useKv` result,
+ *  which would tie the host's identity to a value that changes every render
+ *  (see the stability note on usePromptWidgetHost). */
+function useTrust(workspacePath: string) {
+  const kv = useKv<boolean>("agent");
+  const key = `trust:${workspaceKey(workspacePath)}`;
+  return {
+    isTrusted: Boolean(kv.get(key)),
+    grant: () => kv.set(key, true),
+  };
+}
+
+/** The harness a new session would use, named for the widget's chrome. */
+function useHarnessIdentity() {
+  const { defaultHarness } = useDefaultHarness();
+  return { id: defaultHarness.id, label: defaultHarness.label };
+}
+
 /**
  * Build the host. Workspace-agnostic: every method takes the workspace path
  * it applies to, so one instance serves every editor and chat tab in the app.
@@ -202,16 +222,33 @@ const slots: PromptWidgetHost["slots"] = {
  * The `use*` members are hooks the WIDGET calls from its own components —
  * they are passed here unbound on purpose, and must never be invoked inside
  * this function.
+ *
+ * IDENTITY IS PART OF THE CONTRACT. This object is a context value that the
+ * widget lists in effect and callback dependency arrays, so it must be the
+ * same object for the lifetime of the provider. It previously memoized on
+ * `useKv(...)`, which returns a fresh object every render: the host changed
+ * on every render, every consumer re-rendered, the node view's reachability
+ * effect re-fired and hit the database, and the resulting collection updates
+ * re-rendered this component — an unbounded loop.
+ *
+ * The rule that keeps it stable: nothing reactive may be captured in the
+ * closure. Values that change are read from `latest` at call time, and
+ * anything that needs to be reactive is exposed as a hook the widget calls
+ * itself (useTrust, useDefaultHarness, useRound, useSessionList) — which is
+ * also why the memo below has an empty dependency array.
  */
 export function usePromptWidgetHost(): PromptWidgetHost {
   const { openFile, openAgentTab } = useWorkspaceTabs();
   const { defaultHarness } = useDefaultHarness();
-  const kv = useKv<boolean>("agent");
+
+  const latest = useRef({ defaultHarness, openFile, openAgentTab });
+  latest.current = { defaultHarness, openFile, openAgentTab };
 
   return useMemo<PromptWidgetHost>(
     () => ({
       startOrGetSharedSession: async (path) =>
-        (await getOrStartSharedSession(path, defaultHarness)).taskId,
+        (await getOrStartSharedSession(path, latest.current.defaultHarness))
+          .taskId,
       adoptSession: adoptSharedSession,
       dropSession: dropSharedSession,
       peekSession: peekSharedSession,
@@ -231,25 +268,19 @@ export function usePromptWidgetHost(): PromptWidgetHost {
 
       useRound,
       useSessionList,
-      useDefaultHarness: () => ({
-        id: defaultHarness.id,
-        label: defaultHarness.label,
-      }),
-      useTrust: (path) => {
-        const key = `trust:${workspaceKey(path)}`;
-        return {
-          isTrusted: Boolean(kv.get(key)),
-          grant: () => kv.set(key, true),
-        };
-      },
+      useDefaultHarness: useHarnessIdentity,
+      useTrust,
 
       isWorkspaceFile,
       searchWorkspaceFiles,
       toRelativePath: relativeTreePath,
 
       openFile: (path) =>
-        void openFile({ tabId: path, intent: "new-tab" as const }),
-      openAgentTab,
+        void latest.current.openFile({
+          tabId: path,
+          intent: "new-tab" as const,
+        }),
+      openAgentTab: (taskId) => latest.current.openAgentTab(taskId),
       focusDocument: (documentPath, options) =>
         void requestTabFocus(documentPath, {
           reason: options.reason,
@@ -263,6 +294,8 @@ export function usePromptWidgetHost(): PromptWidgetHost {
 
       slots,
     }),
-    [defaultHarness, kv, openFile, openAgentTab],
+    // Empty on purpose — see the identity note above. Everything that
+    // changes is read from `latest` at call time.
+    [],
   );
 }

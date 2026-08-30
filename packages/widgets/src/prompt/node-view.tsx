@@ -21,7 +21,7 @@
 import { ReactNodeViewRenderer, NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { Plugin } from "@tiptap/pm/state";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
 import { AiPromptNodeBase, PROMPT_NODE_NAME } from "./node";
 import { UI_ONLY_TRANSACTION_META } from "../define-widget";
@@ -98,17 +98,27 @@ function AiPromptNodeView(props: NodeViewProps) {
   // "these sessions never existed". Acting on that by deleting nodes would
   // strip every widget from every open document as a side effect of an
   // infrastructure event. Leaving the id in the file costs nothing.
+  //
+  // The host is read through a ref and deliberately NOT a dependency: this
+  // effect queries the task database, so re-running it is expensive, and its
+  // real inputs are the three ids below. A host whose identity changed per
+  // render once turned this into an unbounded read loop (each read updated a
+  // collection, which re-rendered the provider, which re-ran the effect). The
+  // host is stable again, but nothing about correctness here depends on that
+  // — so it shouldn't depend on it.
+  const hostRef = useRef(host);
+  hostRef.current = host;
   useEffect(() => {
     if (!filePath || !blobId || !persistedTaskId) return;
     let cancelled = false;
-    void host.isTaskReachable(persistedTaskId).then((reachable) => {
+    void hostRef.current.isTaskReachable(persistedTaskId).then((reachable) => {
       if (cancelled || !reachable) return;
       adoptPersistedPromptBinding(blobId, persistedTaskId);
     });
     return () => {
       cancelled = true;
     };
-  }, [filePath, blobId, persistedTaskId, host]);
+  }, [filePath, blobId, persistedTaskId]);
 
   if (!filePath || !basePath || blobId === null) return <NodeViewWrapper />;
 
