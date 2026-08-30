@@ -1448,6 +1448,34 @@ function DoneSummaryLine({
   );
 }
 
+/** The documents a finished turn wrote to, each a shortcut back into the
+ *  file. Its own component so the done face stays readable — that face is
+ *  already the branchiest part of the widget. */
+function TouchedFileChips({
+  paths,
+  onOpenFile,
+}: {
+  paths: string[];
+  onOpenFile: (path: string) => void;
+}) {
+  if (paths.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {paths.map((path) => (
+        <button
+          key={path}
+          type="button"
+          className="flex cursor-pointer items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[0.6875rem] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          onClick={() => onOpenFile(path)}
+        >
+          <FileText className="size-3" />
+          {basename(path)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Done: the widget's single resting face — the full response body,
  *  rendered as markdown and visible immediately (MET-133); the heading line
  *  above it doubles as the collapse toggle back to a one-line summary. The
@@ -1561,21 +1589,7 @@ export function DoneState({
           )}
         />
       )}
-      {touchedFiles.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1">
-          {touchedFiles.map((path) => (
-            <button
-              key={path}
-              type="button"
-              className="flex cursor-pointer items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[0.6875rem] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              onClick={() => onOpenFile(path)}
-            >
-              <FileText className="size-3" />
-              {basename(path)}
-            </button>
-          ))}
-        </div>
-      )}
+      <TouchedFileChips paths={touchedFiles} onOpenFile={onOpenFile} />
       <ReplyRow
         draft={replyDraft}
         setDraft={setReplyDraft}
