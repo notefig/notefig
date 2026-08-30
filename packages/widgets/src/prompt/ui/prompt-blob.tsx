@@ -1575,7 +1575,11 @@ export function DoneState({
         <Markdown
           text={body}
           className={cn(
-            "select-text text-xs leading-relaxed",
+            // Deliberately not `select-text`: the response is part of the widget's
+            // chrome as far as the document is concerned, and opting it into
+            // selection is what let a ⌘A over the prose paint it. The copy
+            // button in the status row is how this text leaves the widget.
+            "text-xs leading-relaxed",
             // Scroll cap: brevity is steered on the agent side (the
             // widget_respond directive), but a runaway response must scroll
             // inside the widget, not swallow the document.
