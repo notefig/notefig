@@ -30,7 +30,11 @@ interface CodeViewerProps {
  * moves that belong together:
  *
  * - The painted surfaces go transparent so the app's own background (and
- *   its texture) shows through the viewer.
+ *   its texture) shows through the viewer. That includes the [data-content]
+ *   and [data-gutter] grid columns spanning the whole code area, and each
+ *   line row's base fill — whose --diffs-line-bg fallback flips to
+ *   transparent while the variable itself stays, so hover and selected-line
+ *   fills (which set it) still paint.
  * - `--diffs-bg` is re-pointed at the app's background token — custom
  *   properties inherit across the shadow boundary, and `--background`
  *   flips with the `.dark` class like everywhere else. Pierre derives its
@@ -46,8 +50,13 @@ const TRANSPARENT_BACKGROUND_CSS = `
   --diffs-dark-bg: hsl(var(--background));
 }
 :host, pre, code,
+[data-content], [data-gutter],
 [data-content-buffer], [data-gutter-buffer] {
   background-color: transparent;
+}
+[data-line], [data-gutter-buffer], [data-column-number],
+[data-line-annotation], [data-no-newline] {
+  --diffs-computed-decoration-bg: transparent;
 }
 `;
 
@@ -200,7 +209,11 @@ export function CodeViewer({ file }: CodeViewerProps) {
           ref={handleRef}
           items={items}
           options={options}
-          className="flex-1 min-h-0"
+          // overflow-y-auto: CodeView's container is its scroll surface —
+          // the virtualizer tracks this element's scrollTop — but it ships
+          // no overflow style of its own, so without this the content just
+          // overflows invisibly and nothing scrolls.
+          className="flex-1 min-h-0 overflow-y-auto"
         />
       </WorkerPoolContextProvider>
     </div>

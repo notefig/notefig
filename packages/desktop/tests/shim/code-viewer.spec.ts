@@ -31,6 +31,12 @@ test.describe("shim: read-only code viewer", () => {
     workspace = await fs.mkdtemp(path.join(os.tmpdir(), "metrists-shim-"));
     await fs.writeFile(path.join(workspace, "script.ts"), SCRIPT_TS);
     await fs.writeFile(path.join(workspace, "notes.md"), "# Notes\n");
+    await fs.writeFile(
+      path.join(workspace, "long.ts"),
+      Array.from({ length: 400 }, (_, i) => `// filler line ${i + 1}`).join(
+        "\n",
+      ) + "\nexport const bottomMarker = 400;\n",
+    );
   });
 
   test.afterEach(async () => {
@@ -69,6 +75,33 @@ test.describe("shim: read-only code viewer", () => {
 
     const onDisk = await fs.readFile(path.join(workspace, "script.ts"), "utf8");
     expect(onDisk).toBe(SCRIPT_TS);
+  });
+
+  /**
+   * CodeView's container is its scroll surface but ships no overflow style
+   * of its own — without the viewer's overflow-y-auto the content just
+   * overflowed invisibly and wheel scrolling did nothing.
+   */
+  test("a long code file scrolls to the bottom", async ({ page }) => {
+    test.setTimeout(60000);
+
+    await openWorkspace(page, workspace);
+    await waitForFileTree(page, "long.ts");
+    await openFileInTree(page, "long.ts", { waitForEditor: false });
+    await expect(
+      page.getByText("filler line 1", { exact: false }).first(),
+    ).toBeVisible({ timeout: 10000 });
+
+    const container = page.locator(
+      `[data-editor-container="${path.join(workspace, "long.ts")}"]`,
+    );
+    const box = await container.boundingBox();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + 100);
+    await page.mouse.wheel(0, 20000);
+
+    await expect(page.getByText("bottomMarker").first()).toBeVisible({
+      timeout: 10000,
+    });
   });
 
   test("markdown files still open in the editable editor", async ({ page }) => {
