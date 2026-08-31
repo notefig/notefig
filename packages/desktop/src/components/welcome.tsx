@@ -52,6 +52,23 @@ function openExternalLink(url: string) {
   platformAdapter.ui.openExternal(url);
 }
 
+/**
+ * Route anchor clicks inside injected markdown to the platform opener.
+ * `renderMarkdownHtml` runs markdown-it with `linkify: true`, so a bundled
+ * release note can contain anchors even when its author wrote a bare URL —
+ * and a plain anchor click in the desktop webview navigates the APP out of
+ * existence rather than opening a browser. Delegated on the container
+ * because the markup is set via dangerouslySetInnerHTML and has no
+ * elements of ours to bind to.
+ */
+function handleMarkdownLinkClick(event: React.MouseEvent<HTMLElement>) {
+  const anchor = (event.target as HTMLElement).closest("a");
+  if (!anchor) return;
+  event.preventDefault();
+  const href = anchor.getAttribute("href");
+  if (href) openExternalLink(href);
+}
+
 /** Icon-button footprint for the rail's utility row — one size for the
  *  links, the theme menu and settings, so they read as a single strip. */
 const RAIL_ICON_BUTTON =
@@ -255,6 +272,7 @@ function ReleaseNotesPanel() {
           "[&_code]:font-mono",
           "[&_a]:underline [&_a]:underline-offset-2",
         )}
+        onClick={handleMarkdownLinkClick}
         dangerouslySetInnerHTML={{
           __html: renderMarkdownHtml(latestReleaseBody),
         }}
