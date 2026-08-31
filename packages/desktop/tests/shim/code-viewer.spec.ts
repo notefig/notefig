@@ -8,6 +8,17 @@ import {
   openFileInTree,
 } from "../setup/test-helpers";
 
+/**
+ * The viewer container is keyed by the native file path; on Windows that
+ * means backslashes, which are escape characters inside a CSS attribute
+ * selector and silently break an exact-match locator (same class of bug
+ * as the CSS.escape fix in editor-store's container focus). A suffix
+ * match on the file name needs no separators at all, whatever path
+ * flavor the attribute carries.
+ */
+const containerSelector = (fileName: string) =>
+  `[data-editor-container$="${fileName}"]`;
+
 const SCRIPT_TS = [
   "export function greetFromTypescript(name: string): string {",
   "  return `Hello, ${name}!`;",
@@ -56,9 +67,7 @@ test.describe("shim: read-only code viewer", () => {
     // The viewer container mounts keyed by the file path, and the file's
     // code is rendered inside it (Playwright text queries pierce the
     // CodeView's shadow root).
-    const container = page.locator(
-      `[data-editor-container="${path.join(workspace, "script.ts")}"]`,
-    );
+    const container = page.locator(containerSelector("script.ts"));
     await expect(container).toBeVisible();
     await expect(page.getByText("greetFromTypescript").first()).toBeVisible({
       timeout: 10000,
@@ -92,9 +101,7 @@ test.describe("shim: read-only code viewer", () => {
       page.getByText("filler line 1", { exact: false }).first(),
     ).toBeVisible({ timeout: 10000 });
 
-    const container = page.locator(
-      `[data-editor-container="${path.join(workspace, "long.ts")}"]`,
-    );
+    const container = page.locator(containerSelector("long.ts"));
     const box = await container.boundingBox();
     await page.mouse.move(box!.x + box!.width / 2, box!.y + 100);
     await page.mouse.wheel(0, 20000);
