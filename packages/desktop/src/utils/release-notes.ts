@@ -26,3 +26,12 @@ export const latestReleaseMarkdown: string = raw
     ? raw
     : `# Release Notes v${__APP_VERSION__}\n\n${raw}`
   : "";
+
+/**
+ * The notes without their own title line, for surfaces that render the
+ * title themselves (the welcome rail). "" when there are no bundled notes,
+ * or when the document is nothing but its heading.
+ */
+export const latestReleaseBody: string = latestReleaseMarkdown
+  .replace(/^#\s+.+$/m, "")
+  .trim();

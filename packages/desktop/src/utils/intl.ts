@@ -16,7 +16,7 @@ i18n
         translation: {
           // Welcome
           welcomeDescription:
-            "Open a folder to start browsing and editing your files.",
+            "A better place to write notes, plans and workflows with AI.",
           welcomeTitle: "Welcome to",
           welcomeTitleHighlight: "Notefig.",
           newDocument: "Open Workspace",
@@ -24,6 +24,10 @@ i18n
           modified: "Modified",
           noRecentProjects: "No recent projects",
           startByCreatingNew: "Start by creating a new document",
+          recentWorkspaces: "Recent",
+          openWorkspaceHint: "Choose a folder to work in",
+          harnessNoneConfigured: "No harnesses configured",
+          releaseNotesLink: "Release notes",
           openFolder: "Open Folder",
           opening: "Opening...",
           loading: "Loading...",

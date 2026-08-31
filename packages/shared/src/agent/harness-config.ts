@@ -270,6 +270,58 @@ export function filterDiscoveredHarnesses(
 }
 
 /**
+ * What the last discovery scan concluded about one harness. Distinct from
+ * `filterDiscoveredHarnesses`, which DROPS undiscovered built-ins because a
+ * picker must not offer a dead end: a status list has the opposite duty and
+ * must keep every row, so "we couldn't check" stays visibly different from
+ * "it isn't installed". `unknown` is the honest answer whenever no result
+ * exists for the id — the scan never ran (fresh install, first frames), the
+ * probe itself failed (browser adapter, Windows, shell timeout — see
+ * `discoverHarnesses`'s null return), or the harness is newer than the
+ * stored results.
+ */
+export type HarnessAvailability = "found" | "missing" | "unknown";
+
+/** One harness paired with what discovery found out about it. */
+export interface ProbedHarness {
+  harness: HarnessDefinition;
+  availability: HarnessAvailability;
+  /** Absolute path from the probe, when found. */
+  resolvedPath?: string;
+  /** Epoch ms of the scan that produced this row. */
+  probedAt?: number;
+}
+
+/**
+ * Every effective harness with its probe verdict attached, for surfaces that
+ * report readiness rather than offer a choice (the welcome screen's harness
+ * list). Order follows `resolveEffectiveHarnesses` — built-ins first, then
+ * custom entries.
+ *
+ * A materially customized entry gets no special treatment here, unlike in
+ * `filterDiscoveredHarnesses`: `candidateProbeEntries` probes the OVERRIDE's
+ * command, so a `found: false` on a customized row is a real answer about
+ * the binary the user actually pointed at, and reporting it as anything else
+ * would hide the one thing this list exists to show.
+ */
+export function describeProbedHarnesses(
+  overrides: Record<string, HarnessOverride>,
+  custom: CustomHarnessEntry[],
+  discovery: Record<string, HarnessDiscoveryResult>,
+): ProbedHarness[] {
+  return resolveEffectiveHarnesses(overrides, custom).map((harness) => {
+    const result = discovery[harness.id];
+    if (!result) return { harness, availability: "unknown" as const };
+    return {
+      harness,
+      availability: result.found ? ("found" as const) : ("missing" as const),
+      resolvedPath: result.resolvedPath,
+      probedAt: result.probedAt,
+    };
+  });
+}
+
+/**
  * Validate a raw `overrides` KV value (kv.json is a plain on-disk file —
  * corrupt or hand-edited rows are dropped, never spawned).
  */
