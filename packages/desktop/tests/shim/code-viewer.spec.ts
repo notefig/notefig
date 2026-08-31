@@ -111,6 +111,50 @@ test.describe("shim: read-only code viewer", () => {
     });
   });
 
+  /**
+   * Selecting code and hitting the search hotkey must seed the search box
+   * with the selection, the way it does from the markdown editor. The
+   * selection lives in the CodeView's shadow root, which the container
+   * instance couldn't read at all — `selectedText()` only knew about
+   * markdown instances, so the query arrived empty.
+   */
+  test("the search hotkey carries the selected code over to the search box", async ({
+    page,
+  }) => {
+    test.setTimeout(60000);
+
+    await openWorkspace(page, workspace);
+    await waitForFileTree(page, "script.ts");
+    await openFileInTree(page, "script.ts", { waitForEditor: false });
+
+    const token = page.getByText("greetFromTypescript").first();
+    await expect(token).toBeVisible({ timeout: 10000 });
+
+    // Drag across the token to make a real selection inside the shadow root.
+    const box = (await token.boundingBox())!;
+    await page.mouse.move(box.x + 1, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, {
+      steps: 10,
+    });
+    await page.mouse.up();
+
+    const selected = await page.evaluate(() =>
+      (document.getSelection()?.toString() ?? "").trim(),
+    );
+    expect(selected).toContain("greetFromTypescript");
+
+    // Control, not Meta: the shim suite runs Playwright's Desktop Chrome,
+    // whose UA claims Windows on every host (see playwright.shim.config.ts),
+    // so the app resolves "Mod" to Control — same as the Control+p palette
+    // press in scratchpad-lifecycle.
+    await page.keyboard.press("Control+Shift+F");
+
+    await expect(page.getByPlaceholder("Search")).toHaveValue(selected, {
+      timeout: 10000,
+    });
+  });
+
   test("markdown files still open in the editable editor", async ({ page }) => {
     test.setTimeout(60000);
 

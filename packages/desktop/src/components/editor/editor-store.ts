@@ -105,23 +105,30 @@ export interface ImageInstance extends EditorInstance {
 const editorInstances = new Map<string, EditorInstance>();
 
 /**
- * Navigation delegates for read-only code viewers. The viewer is a plain
- * React component (no instance object of its own lives here), so it
- * registers a match-reveal function on mount; the code instance's
- * `goToLocation` dispatches through this map. Keyed by file path like the
- * instance map.
+ * Delegates for read-only code viewers. The viewer is a plain React
+ * component (no instance object of its own lives here), so it registers
+ * the operations that need its DOM on mount: match reveal (dispatched by
+ * the code instance's `goToLocation`) and reading the user's text
+ * selection out of the CodeView shadow root (dispatched by
+ * `getSelectedText`, which seeds Mod+F / Mod+Shift+F). Keyed by file path
+ * like the instance map.
  */
-const codeNavigators = new Map<string, (target: SearchTarget) => boolean>();
-
-export function registerCodeNavigator(
-  filePath: string,
-  navigate: (target: SearchTarget) => boolean,
-): void {
-  codeNavigators.set(filePath, navigate);
+export interface CodeViewerDelegate {
+  revealMatch(target: SearchTarget): boolean;
+  selectedText(): string | undefined;
 }
 
-export function unregisterCodeNavigator(filePath: string): void {
-  codeNavigators.delete(filePath);
+const codeViewerDelegates = new Map<string, CodeViewerDelegate>();
+
+export function registerCodeViewerDelegate(
+  filePath: string,
+  delegate: CodeViewerDelegate,
+): void {
+  codeViewerDelegates.set(filePath, delegate);
+}
+
+export function unregisterCodeViewerDelegate(filePath: string): void {
+  codeViewerDelegates.delete(filePath);
 }
 
 /**
@@ -496,7 +503,7 @@ function createContainerInstance(
       // Read-only code viewers can reveal matches; the other container
       // tabs (image, release notes) have no searchable surface.
       if (type !== "code") return false;
-      return codeNavigators.get(filePath)?.(target) ?? false;
+      return codeViewerDelegates.get(filePath)?.revealMatch(target) ?? false;
     },
   };
   return instance;
@@ -703,6 +710,10 @@ export function getSelectedText(filePath: string): string | undefined {
 
     const text = instance.editor.state.doc.textBetween(from, to, "\n");
     return text.trim() ? text : undefined;
+  }
+
+  if (instance?.type === "code") {
+    return codeViewerDelegates.get(filePath)?.selectedText();
   }
 
   return undefined;
