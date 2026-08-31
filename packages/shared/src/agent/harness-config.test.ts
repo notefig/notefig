@@ -1,6 +1,7 @@
 import {
   BUILT_IN_HARNESSES,
   buildHarnessResumeCommand,
+  describeProbedHarnesses,
   filterDiscoveredHarnesses,
   isMaterialOverride,
   resolveEffectiveHarnesses,
@@ -242,6 +243,107 @@ describe("filterDiscoveredHarnesses", () => {
       discovered("custom:1", false),
     );
     expect(visible.find((h) => h.id === "custom:1")).toBeDefined();
+  });
+});
+
+describe("describeProbedHarnesses", () => {
+  it("keeps every harness, unlike the picker's filter", () => {
+    const rows = describeProbedHarnesses(
+      {},
+      [],
+      discovered(CLAUDE_CODE_ID, false),
+    );
+    expect(rows).toHaveLength(BUILT_IN_HARNESSES.length);
+  });
+
+  it("labels found, missing and unchecked distinctly", () => {
+    const rows = describeProbedHarnesses(
+      {},
+      [],
+      discovered(CLAUDE_CODE_ID, true),
+    );
+    const claudeRow = rows.find((r) => r.harness.id === CLAUDE_CODE_ID)!;
+    expect(claudeRow.availability).toBe("found");
+    // Every other built-in has no row in the discovery map at all: that is
+    // "we never checked", which must not be reported as "not installed".
+    for (const row of rows.filter((r) => r.harness.id !== CLAUDE_CODE_ID)) {
+      expect(row.availability).toBe("unknown");
+    }
+    expect(
+      describeProbedHarnesses({}, [], discovered(CLAUDE_CODE_ID, false)).find(
+        (r) => r.harness.id === CLAUDE_CODE_ID,
+      )!.availability,
+    ).toBe("missing");
+  });
+
+  it("reports no verdict when discovery has never run", () => {
+    for (const row of describeProbedHarnesses({}, [], {})) {
+      expect(row.availability).toBe("unknown");
+      expect(row.probedAt).toBeUndefined();
+    }
+  });
+
+  it("carries the probe's resolved path and timestamp through", () => {
+    const rows = describeProbedHarnesses({}, [], {
+      [CLAUDE_CODE_ID]: {
+        harnessId: CLAUDE_CODE_ID,
+        found: true,
+        resolvedPath: "/usr/local/bin/claude",
+        probedAt: 1234,
+      },
+    });
+    const row = rows.find((r) => r.harness.id === CLAUDE_CODE_ID)!;
+    expect(row.resolvedPath).toBe("/usr/local/bin/claude");
+    expect(row.probedAt).toBe(1234);
+  });
+
+  it("reports the probe verdict for a customized harness rather than exempting it", () => {
+    // filterDiscoveredHarnesses deliberately keeps customized entries
+    // visible whatever the probe said. A readiness list has the opposite
+    // duty: candidateProbeEntries probes the OVERRIDE's command, so the
+    // verdict is about the binary the user actually pointed at.
+    const overrides: Record<string, HarnessOverride> = {
+      [CLAUDE_CODE_ID]: {
+        id: CLAUDE_CODE_ID,
+        enabled: true,
+        command: "/opt/custom/claude",
+      },
+    };
+    const row = describeProbedHarnesses(
+      overrides,
+      [],
+      discovered(CLAUDE_CODE_ID, false),
+    ).find((r) => r.harness.id === CLAUDE_CODE_ID)!;
+    expect(row.harness.command).toBe("/opt/custom/claude");
+    expect(row.availability).toBe("missing");
+  });
+
+  it("includes enabled custom entries and drops disabled ones", () => {
+    const custom: CustomHarnessEntry[] = [
+      {
+        id: "mine",
+        label: "Mine",
+        command: "mine",
+        args: [],
+        env: {},
+        mcpRegistrationOverride: "none",
+        enabled: true,
+      },
+      {
+        id: "off",
+        label: "Off",
+        command: "off",
+        args: [],
+        env: {},
+        mcpRegistrationOverride: "none",
+        enabled: false,
+      },
+    ];
+    const ids = describeProbedHarnesses({}, custom, {}).map(
+      (r) => r.harness.id,
+    );
+    expect(ids).toContain("mine");
+    expect(ids).not.toContain("off");
   });
 });
 

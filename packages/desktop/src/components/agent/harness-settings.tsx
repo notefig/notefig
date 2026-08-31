@@ -147,9 +147,7 @@ export function HarnessSettings() {
 
   const toggleEnabled = (row: HarnessSettingsRow) => {
     if (row.origin === "custom") {
-      writeCustom(
-        toggleCustomEnabled(custom, row.definition.id, !row.enabled),
-      );
+      writeCustom(toggleCustomEnabled(custom, row.definition.id, !row.enabled));
     } else {
       writeOverrides(
         toggleOverrideEnabled(
@@ -210,11 +208,16 @@ export function HarnessSettings() {
         const entry = formToCustomEntry(parsed, form, definition.id, enabled);
         const checked = CustomHarnessEntrySchema.safeParse(entry);
         if (!checked.success) return errors;
-        writeCustom(
-          custom.map((existing) =>
-            existing.id === definition.id ? checked.data : existing,
-          ),
+        const nextCustom = custom.map((existing) =>
+          existing.id === definition.id ? checked.data : existing,
         );
+        writeCustom(nextCustom);
+        // Re-probe with the edited definition, exactly as the new-entry
+        // path does. Discovery results are keyed by harness id alone, so
+        // without this the stored verdict keeps describing the executable
+        // the harness pointed at BEFORE the edit — the pickers and the
+        // welcome screen would then report on the wrong binary.
+        void refreshHarnessDiscovery(overrides, nextCustom);
       } else {
         const override = formToOverride(
           parsed,
@@ -222,13 +225,21 @@ export function HarnessSettings() {
           enabled,
           naturalEnabled(editingRow),
         );
+        let nextOverrides: Record<string, HarnessOverride>;
         if (override === null) {
           deleteOverride(definition.id);
+          // Reverting to the built-in re-probes too: the stored result may
+          // describe the override's command, not the built-in's.
+          nextOverrides = Object.fromEntries(
+            Object.entries(overrides).filter(([id]) => id !== definition.id),
+          );
         } else {
           const checked = HarnessOverrideSchema.safeParse(override);
           if (!checked.success) return errors;
-          writeOverrides({ ...overrides, [definition.id]: checked.data });
+          nextOverrides = { ...overrides, [definition.id]: checked.data };
+          writeOverrides(nextOverrides);
         }
+        void refreshHarnessDiscovery(nextOverrides, custom);
       }
       setEditingId(null);
       return null;
@@ -381,9 +392,7 @@ function HarnessRow({
       <span
         className={cn(
           "size-2 shrink-0 rounded-full",
-          discovery?.found
-            ? "bg-green-500"
-            : "bg-muted-foreground/30",
+          discovery?.found ? "bg-green-500" : "bg-muted-foreground/30",
         )}
       />
       <HarnessLogo

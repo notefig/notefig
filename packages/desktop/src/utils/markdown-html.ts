@@ -14,3 +14,12 @@ const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
 export function renderMarkdownHtml(text: string): string {
   return md.render(text);
 }
+
+/**
+ * Inline-only rendering: no wrapping <p>, so a fragment (one bullet's text,
+ * a heading) can be dropped straight into an existing element. Same `html:
+ * false` renderer, so raw HTML stays escaped here too.
+ */
+export function renderMarkdownInline(text: string): string {
+  return md.renderInline(text);
+}
