@@ -15,26 +15,33 @@ import tailwindcss from "@tailwindcss/vite";
  * the Nextra site's tailwind v3).
  */
 export function sharedBuildPlugins(): PluginOption[] {
-  return [react(), tailwindcss(), flattenPierreTreesCss()];
+  return [react(), tailwindcss(), flattenPierreShadowCss()];
 }
 
-// @pierre/trees ships its shadow-root stylesheet with native CSS nesting,
-// which hits WebKit bug 290102 on macOS ≤15.3 (fixed upstream May 2025):
-// attribute-change style invalidation segfaults WebContent — blank window.
-// Compiling the nesting away removes the StyleRuleNestedDeclarations rules
-// WebKit chokes on. (Applied to every build so the two targets can't drift.)
-export function flattenPierreTreesCss(): Plugin {
+// @pierre/trees and @pierre/diffs ship their shadow-root stylesheets with
+// native CSS nesting, which hits WebKit bug 290102 on macOS ≤15.3 (fixed
+// upstream May 2025): attribute-change style invalidation segfaults
+// WebContent — blank window. Compiling the nesting away removes the
+// StyleRuleNestedDeclarations rules WebKit chokes on. Both packages inline
+// their CSS the same way — a `style_default` string literal in dist/style.js.
+// (Applied to every build so the two targets can't drift. @pierre/diffs also
+// embeds nested CSS in its edit-mode editor module; nothing imports
+// `@pierre/diffs/edit`, so only style.js needs flattening.)
+export function flattenPierreShadowCss(): Plugin {
   return {
-    name: "flatten-pierre-trees-css",
+    name: "flatten-pierre-shadow-css",
     async transform(code, id) {
       const file = id.split("?")[0].replace(/\\/g, "/");
-      if (!file.includes("@pierre/trees/") || !file.endsWith("/style.js")) {
+      const isPierreStyle =
+        (file.includes("@pierre/trees/") || file.includes("@pierre/diffs/")) &&
+        file.endsWith("/style.js");
+      if (!isPierreStyle) {
         return null;
       }
       const literal = code.match(/var style_default = ("(?:[^"\\]|\\.)*");/);
       if (!literal) {
         throw new Error(
-          "flatten-pierre-trees-css: style_default literal not found in @pierre/trees style.js — package shape changed, re-verify the WebKit 290102 mitigation",
+          `flatten-pierre-shadow-css: style_default literal not found in ${file} — package shape changed, re-verify the WebKit 290102 mitigation`,
         );
       }
       const css = JSON.parse(literal[1]) as string;
@@ -44,7 +51,7 @@ export function flattenPierreTreesCss(): Plugin {
       });
       if (flat.includes("&")) {
         throw new Error(
-          "flatten-pierre-trees-css: nesting survived the transform — WebKit 290102 mitigation is not effective",
+          "flatten-pierre-shadow-css: nesting survived the transform — WebKit 290102 mitigation is not effective",
         );
       }
       return code.replace(literal[1], JSON.stringify(flat));
@@ -127,7 +134,15 @@ export const sharedOptimizeDeps = {
   // "OPFS worker terminated unexpectedly". Excluding it serves the package
   // from its own directory, where the asset actually sits. Dev-only: the
   // production build emits the asset correctly either way.
-  // @pierre/trees: pre-bundling bypasses transform hooks, which would skip
-  // flattenPierreTreesCss in dev.
-  exclude: ["@tanstack/browser-db-sqlite-persistence", "@pierre/trees"],
+  // @pierre/trees, @pierre/diffs: pre-bundling bypasses transform hooks,
+  // which would skip flattenPierreShadowCss in dev.
+  exclude: [
+    "@tanstack/browser-db-sqlite-persistence",
+    "@pierre/trees",
+    "@pierre/diffs",
+  ],
+  // An excluded package's imports are served raw, so its CommonJS-only
+  // dependency needs pre-bundling explicitly or its default import breaks
+  // in dev ("does not provide an export named 'default'").
+  include: ["@pierre/diffs > lru_map"],
 };

@@ -105,6 +105,33 @@ export interface ImageInstance extends EditorInstance {
 const editorInstances = new Map<string, EditorInstance>();
 
 /**
+ * Delegates for read-only code viewers. The viewer is a plain React
+ * component (no instance object of its own lives here), so it registers
+ * the operations that need its DOM on mount: match reveal (dispatched by
+ * the code instance's `goToLocation`) and reading the user's text
+ * selection out of the CodeView shadow root (dispatched by
+ * `getSelectedText`, which seeds Mod+F / Mod+Shift+F). Keyed by file path
+ * like the instance map.
+ */
+export interface CodeViewerDelegate {
+  revealMatch(target: SearchTarget): boolean;
+  selectedText(): string | undefined;
+}
+
+const codeViewerDelegates = new Map<string, CodeViewerDelegate>();
+
+export function registerCodeViewerDelegate(
+  filePath: string,
+  delegate: CodeViewerDelegate,
+): void {
+  codeViewerDelegates.set(filePath, delegate);
+}
+
+export function unregisterCodeViewerDelegate(filePath: string): void {
+  codeViewerDelegates.delete(filePath);
+}
+
+/**
  * Navigation intents waiting for their editor to be ready. Navigation
  * can't just act on the live instance: re-opening a file whose tab was
  * replaced away disposes and recreates its editor (the layout-diff
@@ -136,6 +163,12 @@ export function requestNavigation(
   });
 
   const instance = editorInstances.get(filePath);
+  if (instance?.type === "code") {
+    // A code viewer's navigator is only registered while its view is
+    // mounted, so a successful dispatch is inherently attached.
+    if (instance.goToLocation(target)) pendingNavigations.delete(filePath);
+    return;
+  }
   if (!isMarkdownInstance(instance)) return;
   let attached = false;
   try {
@@ -274,8 +307,12 @@ function createEditorTabController(
       query: string,
       options?: TabSearchOptions,
     ): Promise<SearchTarget[]> {
-      // Only documents have searchable text; an image viewer has none.
-      if (!isMarkdownInstance(editorInstances.get(filePath))) return [];
+      // Documents and code viewers have searchable text; an image viewer
+      // has none.
+      const instance = editorInstances.get(filePath);
+      if (!isMarkdownInstance(instance) && instance?.type !== "code") {
+        return [];
+      }
       if (!query.trim()) return [];
 
       return platformAdapter.fs.searchContent(getDirectoryPath(filePath), {
@@ -438,7 +475,7 @@ function createMarkdownInstance(
  * tab-selected intents resolve like any editor's.
  */
 function createContainerInstance(
-  type: "image" | "release-notes",
+  type: "image" | "release-notes" | "code",
   filePath: string,
 ): EditorInstance {
   const instance: EditorInstance & { filePath: string } = {
@@ -447,7 +484,10 @@ function createContainerInstance(
     focus(): boolean {
       if (isEditorFocusSuppressed()) return false;
 
-      const selector = `[data-editor-container="${filePath}"]`;
+      // The path lands inside an attribute selector, so its metacharacters
+      // (quotes, and every backslash in a Windows path) must be escaped or
+      // querySelector throws and the tab never takes focus.
+      const selector = `[data-editor-container="${CSS.escape(filePath)}"]`;
       const el = document.querySelector(selector);
       if (el instanceof HTMLElement) {
         el.focus();
@@ -459,8 +499,11 @@ function createContainerInstance(
     isFocusable(): boolean {
       return true;
     },
-    goToLocation(_target: SearchTarget): boolean {
-      return false;
+    goToLocation(target: SearchTarget): boolean {
+      // Read-only code viewers can reveal matches; the other container
+      // tabs (image, release notes) have no searchable surface.
+      if (type !== "code") return false;
+      return codeViewerDelegates.get(filePath)?.revealMatch(target) ?? false;
     },
   };
   return instance;
@@ -481,7 +524,12 @@ interface ReleaseNotesConfig {
   type: "release-notes";
 }
 
-type EditorConfig = MarkdownConfig | ImageConfig | ReleaseNotesConfig;
+interface CodeConfig {
+  type: "code";
+}
+
+type EditorConfig =
+  MarkdownConfig | ImageConfig | ReleaseNotesConfig | CodeConfig;
 
 /**
  * Get an existing editor for a file path, or create one with the given configuration.
@@ -527,6 +575,7 @@ export function getOrCreateEditor(
       break;
     case "image":
     case "release-notes":
+    case "code":
       instance = createContainerInstance(config.type, filePath);
       break;
     default:
@@ -661,6 +710,10 @@ export function getSelectedText(filePath: string): string | undefined {
 
     const text = instance.editor.state.doc.textBetween(from, to, "\n");
     return text.trim() ? text : undefined;
+  }
+
+  if (instance?.type === "code") {
+    return codeViewerDelegates.get(filePath)?.selectedText();
   }
 
   return undefined;

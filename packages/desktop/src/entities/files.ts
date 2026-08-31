@@ -20,7 +20,15 @@
  */
 
 import { useMemo } from "react";
-import { createCollection, useLiveQuery, eq, inArray } from "@tanstack/react-db";
+import {
+  createCollection,
+  useLiveQuery,
+  eq,
+  inArray,
+  coalesce,
+  isUndefined,
+  not,
+} from "@tanstack/react-db";
 import { useIsFetching } from "@tanstack/react-query";
 import {
   queryCollectionOptions,
@@ -123,9 +131,10 @@ export function createFileMetadataCollection(workspaceId: string) {
         ];
         scratchpadDebug(
           "metadata walk:",
-          entries.filter((e) => e.path.includes("/.metrists")).map((e) => e.path),
+          entries
+            .filter((e) => e.path.includes("/.metrists"))
+            .map((e) => e.path),
         );
-
 
         // Re-stat children of hydrated directories so their stats stay
         // fresh across refetches instead of pinning to hydration time.
@@ -143,9 +152,8 @@ export function createFileMetadataCollection(workspaceId: string) {
 
         // Merge, don't wipe: full-replace sync would erase hydrated stats
         // and self-write bookkeeping for rows the walk still sees.
-        const previousRows = workspaceCollectionsRegistry.get(
-          workspaceId,
-        )?.metadata;
+        const previousRows =
+          workspaceCollectionsRegistry.get(workspaceId)?.metadata;
 
         return entries.map(({ path, type }) => {
           const stat = statMap.get(path);
@@ -182,7 +190,8 @@ export function createFileMetadataCollection(workspaceId: string) {
         }
 
         if (directories.length > 0) {
-          const result = await platformAdapter.fs.createDirectories(directories);
+          const result =
+            await platformAdapter.fs.createDirectories(directories);
           if (result.failed.length > 0) {
             throw new Error(
               `Failed to create directories: ${result.failed.map((f) => f.message).join(", ")}`,
@@ -257,9 +266,12 @@ export function createFileMetadataCollection(workspaceId: string) {
         }
 
         if (directories.length > 0) {
-          const result = await platformAdapter.fs.deleteDirectories(directories, {
-            recursive: true,
-          });
+          const result = await platformAdapter.fs.deleteDirectories(
+            directories,
+            {
+              recursive: true,
+            },
+          );
           if (result.failed.length > 0) {
             throw new Error(
               `Failed to delete directories: ${result.failed.map((f) => f.message).join(", ")}`,
@@ -652,7 +664,10 @@ export async function createFile(
 
   // Refresh metadata to get accurate timestamps
   const metadataResult = await platformAdapter.fs.getMetadata([filePath]);
-  if (metadataResult.succeeded.length > 0 && collections.metadata.get(filePath)) {
+  if (
+    metadataResult.succeeded.length > 0 &&
+    collections.metadata.get(filePath)
+  ) {
     const metadata = metadataResult.succeeded[0];
     collections.metadata.update(filePath, (draft) => {
       draft.modified = metadata.modifiedAt;
@@ -790,10 +805,7 @@ export async function prefetchFileContent(
       // The content collection uses on-demand sync — its write context is
       // only initialized when a live query subscribes (a file tab opens).
       // Hover-prefetch before any tab opens hits this; silently skip.
-      if (
-        error instanceof Error &&
-        error.name === "SyncNotInitializedError"
-      ) {
+      if (error instanceof Error && error.name === "SyncNotInitializedError") {
         return;
       }
       throw error;
@@ -917,7 +929,9 @@ export function clearWorkspaceCollections(workspaceId: string): void {
 }
 
 /** The workspace's collections as a render-stable pair. */
-export function useFileCollections(workspacePath: string): WorkspaceCollections {
+export function useFileCollections(
+  workspacePath: string,
+): WorkspaceCollections {
   return useMemo(
     () => getOrCreateWorkspaceCollections(workspacePath),
     [workspacePath],
@@ -953,11 +967,17 @@ export function useOpenFileRows(
             .leftJoin({ content }, ({ file, content }) =>
               eq(file.path, content.path),
             )
+            // The callback runs once at build time with ref PROXIES, not
+            // per row — plain JS operators on them constant-fold. The old
+            // `content !== undefined` compiled to a hardcoded `true` and
+            // `?? ""` to a no-op, so rows claimed loaded content while the
+            // join was still empty (undefined). Everything data-dependent
+            // must go through query operators.
             .select(({ file, content }) => ({
               ...file,
-              content: content?.content ?? "",
-              contentHash: content?.contentHash ?? "",
-              isContentLoaded: content !== undefined,
+              content: coalesce(content?.content, ""),
+              contentHash: coalesce(content?.contentHash, ""),
+              isContentLoaded: not(isUndefined(content?.content)),
               contentError: content?.error,
             })),
     [workspacePath, ...paths],
@@ -982,7 +1002,6 @@ export function useMetadataFetching(workspacePath: string): boolean {
     0
   );
 }
-
 
 /** Whether any on-demand content load for the workspace is in flight. */
 export function useContentFetching(workspacePath: string): boolean {

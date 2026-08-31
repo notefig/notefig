@@ -30,6 +30,7 @@
     "@notefig/shared": "*",
     "@notefig/ui": "*",
     "@notefig/widgets": "*",
+    "@pierre/diffs": "^1.3.6",
     "@pierre/icons": "^0.7.1",
     "@pierre/trees": "^1.0.0-beta.6",
     "@tailwindcss/vite": "^4.3.2",
