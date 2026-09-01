@@ -227,9 +227,9 @@ export const Workspace = () => {
       <PromptWidgetBoundary>
         <div
           dir={direction}
-          className="relative flex h-full w-full overflow-hidden p-2"
+          className="relative flex h-full w-full overflow-clip p-2"
         >
-          <div className="flex h-full shrink-0 overflow-hidden rounded-xl border border-border">
+          <div className="flex h-full shrink-0 overflow-clip rounded-xl border border-border">
             <IconSidebar
               isCollapsed={isSidebarCollapsed}
               onToggleCollapse={toggleSidebarCollapsed}
@@ -250,13 +250,13 @@ export const Workspace = () => {
             )}
           </div>
 
-          <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          <div className="flex-1 flex flex-col min-w-0 overflow-clip">
             <DebugPanel />
 
-            <div className="flex-1 flex min-h-0 overflow-hidden">
+            <div className="flex-1 flex min-h-0 overflow-clip">
               <div
                 ref={dockableRef}
-                className="flex-1 min-w-0 h-full overflow-hidden"
+                className="flex-1 min-w-0 h-full overflow-clip"
                 tabIndex={-1}
               >
                 {openTabs.length === 0 ? (

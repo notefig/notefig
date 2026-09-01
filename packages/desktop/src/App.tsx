@@ -110,7 +110,7 @@ export const App = () => {
   }, [setTheme, persistTheme, navigate, setZoomLevel]);
 
   return (
-    <div className="flex h-screen flex-col text-foreground overflow-hidden">
+    <div className="flex h-screen flex-col text-foreground overflow-clip">
       <Titlebar />
       {isWeb() && <MockDirectoryPickerDialog />}
       <TextPromptDialog />
