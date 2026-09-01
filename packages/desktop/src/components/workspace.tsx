@@ -172,15 +172,13 @@ export const Workspace = () => {
   }, [staleTabIds, layout, handleLayoutChange]);
 
   const isSynced = !isFetchingContent;
-  const { wordCount, characterCount } = useMemo(() => {
+  const wordCount = useMemo(() => {
+    if (!currentContent) return null;
     const words = currentContent
       .trim()
       .split(/\s+/)
       .filter((word: string) => word.length > 0);
-    return {
-      wordCount: words.length,
-      characterCount: currentContent.length,
-    };
+    return words.length;
   }, [currentContent]);
 
   const [fileTreeMode, setFileTreeMode] =

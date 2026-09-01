@@ -12,7 +12,8 @@ import { TunnelStatus } from "@/components/tunnel/tunnel-status";
 import { useGitSummary } from "@/entities/git";
 
 interface StatusBarProps {
-  wordCount: number;
+  /** Omitted (null) when the focused tab has no text content of its own. */
+  wordCount: number | null;
   isSynced: boolean;
   direction?: "ltr" | "rtl";
   workspacePath?: string;
@@ -79,12 +80,15 @@ export function StatusBar({
           <span>{hasGitChanges ? t("unchecked") : t("checked")}</span>
         </div>
       )}
-      <div className="flex items-center justify-center gap-2 w-[6.5rem]">
-        <Type className="w-3.5 h-3.5" />
-        <span>
-          {wordCount} {wordCount === 1 ? t("word") : t("words")}
-        </span>
-      </div>
+      {wordCount !== null && (
+        <div className="flex items-center justify-center gap-2 w-[6.5rem]">
+          <Type className="w-3.5 h-3.5" />
+          <span>
+            {JSON.stringify(wordCount)}{" "}
+            {wordCount === 1 ? t("word") : t("words")}
+          </span>
+        </div>
+      )}
       <TunnelStatus />
     </div>
   );
