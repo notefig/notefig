@@ -45,51 +45,78 @@ export function StatusBar({
   direction = "ltr",
   workspacePath,
 }: StatusBarProps) {
-  const isRtl = direction === "rtl";
-  const { t } = useTranslation();
   const debouncedSynced = useDebouncedSyncState(isSynced);
   const gitSummary = useGitSummary(workspacePath);
-
-  const hasGitChanges = gitSummary?.hasChanges;
-  const showGit = !!workspacePath && !gitSummary?.statusError;
+  const showGit = shouldShowGit(workspacePath, gitSummary);
 
   return (
     <div
       className={cn(
         "fixed bottom-0 flex items-center gap-4 px-4 py-1.5 bg-secondary/80 backdrop-blur-sm border-t border-border text-xs text-muted-foreground",
-        isRtl
-          ? "left-0 right-auto border-r rounded-tr-lg"
-          : "right-0 left-auto border-l rounded-tl-lg",
+        cornerClasses(direction === "rtl"),
       )}
     >
-      <div className="flex items-center justify-center gap-2 min-w-[4.5rem]">
-        {debouncedSynced ? (
-          <Cloud className="w-3.5 h-3.5 text-green-500" />
-        ) : (
-          <CloudUpload className="w-3.5 h-3.5 text-amber-500" />
-        )}
-        <span>{debouncedSynced ? t("saved") : t("saving")}</span>
-      </div>
-      {showGit && (
-        <div className="flex items-center justify-center gap-2 min-w-[5.5rem]">
-          {hasGitChanges ? (
-            <GitPullRequest className="w-3.5 h-3.5 text-amber-500" />
-          ) : (
-            <GitCommitHorizontal className="w-3.5 h-3.5 text-green-500" />
-          )}
-          <span>{hasGitChanges ? t("unchecked") : t("checked")}</span>
-        </div>
-      )}
-      {wordCount !== null && (
-        <div className="flex items-center justify-center gap-2 w-[6.5rem]">
-          <Type className="w-3.5 h-3.5" />
-          <span>
-            {JSON.stringify(wordCount)}{" "}
-            {wordCount === 1 ? t("word") : t("words")}
-          </span>
-        </div>
-      )}
+      <SaveCell synced={debouncedSynced} />
+      {showGit && <GitCell hasChanges={Boolean(gitSummary?.hasChanges)} />}
+      {wordCount !== null && <WordCountCell count={wordCount} />}
       <TunnelStatus />
     </div>
   );
+}
+
+
+function SaveCell({ synced }: { synced: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center justify-center gap-2 min-w-[4.5rem]">
+      {synced ? (
+        <Cloud className="w-3.5 h-3.5 text-green-500" />
+      ) : (
+        <CloudUpload className="w-3.5 h-3.5 text-amber-500" />
+      )}
+      <span>{synced ? t("saved") : t("saving")}</span>
+    </div>
+  );
+}
+
+function GitCell({ hasChanges }: { hasChanges: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center justify-center gap-2 min-w-[5.5rem]">
+      {hasChanges ? (
+        <GitPullRequest className="w-3.5 h-3.5 text-amber-500" />
+      ) : (
+        <GitCommitHorizontal className="w-3.5 h-3.5 text-green-500" />
+      )}
+      <span>{hasChanges ? t("unchecked") : t("checked")}</span>
+    </div>
+  );
+}
+
+function WordCountCell({ count }: { count: number }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center justify-center gap-2 w-[6.5rem]">
+      <Type className="w-3.5 h-3.5" />
+      <span>
+        {JSON.stringify(count)} {count === 1 ? t("word") : t("words")}
+      </span>
+    </div>
+  );
+}
+
+
+/** Pinned to the reading-direction end of the window. */
+function cornerClasses(isRtl: boolean): string {
+  return isRtl
+    ? "left-0 right-auto border-r rounded-tr-lg"
+    : "right-0 left-auto border-l rounded-tl-lg";
+}
+
+/** Git status renders only inside a workspace whose status read succeeded. */
+function shouldShowGit(
+  workspacePath: string | undefined,
+  gitSummary: ReturnType<typeof useGitSummary>,
+): boolean {
+  return Boolean(workspacePath) && !gitSummary?.statusError;
 }
