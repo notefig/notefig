@@ -572,27 +572,13 @@ function SentFace({
 
   if (phase === "running" || phase === "needs-permission") {
     return (
-      <div className="flex flex-col">
-        <StatusRow
-          // No filler label: the tool-activity line exists only while a tool
-          // is actually in flight — the spinner alone carries "working", and
-          // a permanent "Working…" line just pads the row (Parsa's spacing
-          // complaint).
-          label={display.activeToolLine ?? undefined}
-          shimmer
-          prompt={record.lastSentPrompt}
-          teaser={display.assistantTeaser ?? undefined}
-          onEdit={actions.editPrompt}
-          onStop={actions.stop}
-          stopLabel={t("agentStop")}
-          onOpenChat={actions.openBoundChat}
-        />
-        {phase === "needs-permission" && boundTaskId && (
-          <div className="px-2.5 pb-2">
-            <slots.PermissionCard taskId={boundTaskId} />
-          </div>
-        )}
-      </div>
+      <RunningFace
+        phase={phase}
+        record={record}
+        boundTaskId={boundTaskId}
+        display={display}
+        actions={actions}
+      />
     );
   }
 
@@ -617,6 +603,49 @@ function SentFace({
   }
 
   return null;
+}
+
+
+/** The in-flight card: the shimmer status row, and — while the agent waits
+ *  on a permission — the permission card under it. */
+function RunningFace({
+  phase,
+  record,
+  boundTaskId,
+  display,
+  actions,
+}: {
+  phase: BlobPhase;
+  record: PromptBlobRecord;
+  boundTaskId: string | null;
+  display: PromptBlobDisplay;
+  actions: PromptBlobFaceActions;
+}) {
+  const { t } = useTranslation();
+  const { slots } = usePromptWidgetHost();
+  return (
+    <div className="flex flex-col">
+      <StatusRow
+        // No filler label: the tool-activity line exists only while a tool
+        // is actually in flight — the spinner alone carries "working", and
+        // a permanent "Working…" line just pads the row (Parsa's spacing
+        // complaint).
+        label={display.activeToolLine ?? undefined}
+        shimmer
+        prompt={record.lastSentPrompt}
+        teaser={display.assistantTeaser ?? undefined}
+        onEdit={actions.editPrompt}
+        onStop={actions.stop}
+        stopLabel={t("agentStop")}
+        onOpenChat={actions.openBoundChat}
+      />
+      {phase === "needs-permission" && boundTaskId && (
+        <div className="px-2.5 pb-2">
+          <slots.PermissionCard taskId={boundTaskId} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
