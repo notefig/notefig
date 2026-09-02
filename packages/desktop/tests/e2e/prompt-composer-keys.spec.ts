@@ -12,13 +12,12 @@
  * widget's DOM badly enough that the re-parse drops the node.
  *
  * Mod-Backspace note: Playwright's Desktop Chrome device reports a Windows
- * platform, so ProseMirror maps Mod to Ctrl there; the real app (WKWebView,
- * MacIntel) maps it to Meta. PW_WEBKIT=1 runs assert the Meta path.
+ * platform, so ProseMirror maps Mod to Ctrl here rather than Meta.
  */
 import { test, expect, type Page } from "@playwright/test";
 import { openWorkspace, seedTestFiles, setupTestDatabase, waitForFileTree, openFileInTree } from "../setup/test-helpers";
 
-const MOD_BACKSPACE = process.env.PW_WEBKIT ? "Meta+Backspace" : "Control+Backspace";
+const MOD_BACKSPACE = "Control+Backspace";
 
 async function openDoc(page: Page, db: string, ws: string) {
   await setupTestDatabase(page, db);
