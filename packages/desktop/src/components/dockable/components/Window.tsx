@@ -134,6 +134,13 @@ function TabView({
           overflow: "clip",
           display: "flex",
           flex: 1,
+          // Without this the content minimum wins over the flex sizing in
+          // the column container and this box grows to its content's full
+          // height — the editor's own overflow-auto wrapper then never
+          // constrains, and nothing below the fold is scrollable. The old
+          // overflow: hidden masked it by being a scroll port that
+          // scrollIntoView could move; clip is not.
+          minHeight: 0,
         }}
       >
         {tabs.find((tab) => tab.id === selected)?.content}
