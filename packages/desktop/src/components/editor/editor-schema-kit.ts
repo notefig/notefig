@@ -33,6 +33,7 @@ import {
   editorWidgets,
   registerContentlessNodeName,
   widgetSchemaNodes,
+  PROMPT_DRAFT_NODE_NAME,
 } from "@notefig/widgets";
 
 // A document carrying only frontmatter is still an empty document, so the
@@ -473,7 +474,11 @@ export const AutoDirection = Extension.create({
             state.doc.descendants((node, pos, parent) => {
               if (
                 node.type.name !== "paragraph" &&
-                node.type.name !== "heading"
+                node.type.name !== "heading" &&
+                // A prompt widget's draft is a textblock like any other and
+                // needs the same RTL resolution — it is just not in the
+                // group above, being admissible only inside its widget.
+                node.type.name !== PROMPT_DRAFT_NODE_NAME
               ) {
                 return;
               }

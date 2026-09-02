@@ -22,7 +22,6 @@ import {
 import {
   isSidebarTextEntryActive,
   isTextEntryActive,
-  type TabCaretPlacement,
 } from "@/utils/focus-arbiter";
 import {
   registerTabController,
@@ -35,9 +34,6 @@ import type { TabKind } from "@/tabs/tab-id";
 import { resolveSearchTarget, type SearchTarget } from "./editor-position";
 import { platformAdapter } from "@/adapters";
 import { getDirectoryPath } from "@/utils/fs";
-import { docHasRealContent, findPromptNodeId } from "@notefig/widgets";
-import { requestPromptBlobFocus } from "@notefig/widgets";
-import { placeCaretBeforeNode } from "./refocus-editor";
 import {
   createImageDropHandler,
   createImagePasteHandler,
@@ -59,10 +55,12 @@ export interface EditorInstance {
   /**
    * Focus this editor. Returns true if focus was attempted, false if not applicable.
    * For non-focusable editors (images), this is a no-op that returns false.
-   * `caret` is the intent's placement hint (see TabCaretPlacement);
-   * without one, the current selection is left untouched.
+   * The current selection is left untouched (an editor mount restores its
+   * saved selection and must keep it). `steal` marks an explicit hand-off,
+   * which may take focus from a text entry that an ambient intent would
+   * stand down for.
    */
-  focus(caret?: TabCaretPlacement): boolean;
+  focus(steal?: boolean): boolean;
   /**
    * Dispose of this editor instance. Cleans up any resources.
    */
@@ -212,9 +210,10 @@ function isEditorFocusSuppressed(): boolean {
 }
 
 /**
- * A text entry other than `filePath`'s own ProseMirror surface holds focus.
- * The widget composer is a textarea INSIDE that surface but still a
- * distinct entry — only the contenteditable root itself counts as "own".
+ * A text entry other than `filePath`'s own ProseMirror surface holds focus —
+ * a sidebar rename field, the chat tab's composer. The widget's draft is
+ * part of this surface, not a foreign entry, so it is covered by the
+ * `active === view.dom` check like any other text in the document.
  */
 function isForeignTextEntryFocused(filePath: string): boolean {
   const active = document.activeElement;
@@ -227,19 +226,6 @@ function isForeignTextEntryFocused(filePath: string): boolean {
     }
   }
   return isTextEntryActive(active);
-}
-
-/**
- * An empty document carrying the keeper widget: the composer is the
- * document's entry point there, so ambient editor focus must stand down.
- * Returns the keeper's blobId so the caller can forward focus to it.
- */
-function emptyKeeperDocPromptId(filePath: string): string | null {
-  const instance = editorInstances.get(filePath);
-  if (!instance || !isMarkdownInstance(instance)) return null;
-  const doc = instance.editor.state.doc;
-  if (docHasRealContent(doc)) return null;
-  return findPromptNodeId(doc);
 }
 
 /**
@@ -260,33 +246,17 @@ function createEditorTabController(
      * Ambient intents (editor mount, layout reclaim, tab activation) must
      * not yank focus out of an active text entry — toggling the sidebar
      * re-parents the dock, remounts the editor, and its mount intent used
-     * to steal the widget composer's focus mid-typing (MET-93). Intents
-     * marked `steal` (an explicit hand-off like the blob's Escape) proceed;
-     * `when-mounted` intents keep retrying until the entry releases focus
-     * or their TTL expires.
+     * to steal a rename field's focus mid-typing (MET-93). Intents marked
+     * `steal` proceed; `when-mounted` intents keep retrying until the entry
+     * releases focus or their TTL expires.
+     *
+     * The prompt widget needs no carve-out here any more: its draft is
+     * document content, so focusing the editor and restoring its selection
+     * IS focusing the composer.
      */
-    focus({ caret, steal }: TabFocusOptions = {}): boolean {
+    focus({ steal }: TabFocusOptions = {}): boolean {
       if (!steal && isForeignTextEntryFocused(filePath)) return false;
-
-      // On an empty doc the keeper's composer owns focus by default —
-      // ambient intents must not race it, even while focus momentarily sits
-      // on <body> (rAF gap before the textarea focuses, tab-layout
-      // re-parenting). Forward the intent to the composer rather than just
-      // declining: on a tab re-activation nothing else routes focus there
-      // (the reclaim loop only watches <body>), and reporting success
-      // retires the intent instead of leaving a when-mounted retry loop
-      // spinning. The pending-focus channel covers a widget that hasn't
-      // mounted yet. Explicit hand-offs like the blob's Escape carry
-      // `steal` and still land in the editor.
-      if (!steal) {
-        const keeperId = emptyKeeperDocPromptId(filePath);
-        if (keeperId) {
-          requestPromptBlobFocus(keeperId);
-          return true;
-        }
-      }
-
-      return editorInstances.get(filePath)?.focus(caret) ?? false;
+      return editorInstances.get(filePath)?.focus(steal) ?? false;
     },
 
     isFocusable: () => isEditorFocusable(filePath),
@@ -337,9 +307,17 @@ function createEditorTabController(
   };
 }
 
-/** Widget node names, so the per-document rebuild below can drop the
- *  unconfigured instances the shared kit carries without naming them. */
-const widgetNames = new Set(editorWidgets.map((widget) => widget.name));
+/** Every node name the widget registry contributes — the widgets themselves
+ *  and the support nodes their content expressions need (the prompt's draft,
+ *  the mention chip). The per-document rebuild below drops all of them from
+ *  the shared kit's unconfigured copy and re-adds the configured set, so a
+ *  support node must be named here too or it would be registered twice. */
+const widgetNames = new Set(
+  editorWidgets.flatMap((widget) => [
+    widget.name,
+    ...(widget.support?.bases ?? []).map((node) => node.name),
+  ]),
+);
 
 function createMarkdownInstance(
   filePath: string,
@@ -430,11 +408,13 @@ function createMarkdownInstance(
     type: "markdown",
     editor,
     filePath,
-    focus(caret?: TabCaretPlacement): boolean {
-      if (isEditorFocusSuppressed()) return false;
-      if (caret?.type === "before-node") {
-        placeCaretBeforeNode(this.editor, caret.pos);
-      }
+    focus(steal?: boolean): boolean {
+      // A sidebar rename/create field outranks an AMBIENT editor intent —
+      // but not an explicit hand-off. Creating a file opens that field and
+      // opens the new document's prompt at the same time; the prompt is the
+      // document's entry point (focus-management.spec.ts), so its claim is
+      // deliberate and says so with `steal`.
+      if (!steal && isEditorFocusSuppressed()) return false;
       // Never move the viewport: taking focus is ambient (tab select, mount,
       // Escape out of a widget) and the caret is often nowhere near what the
       // user is reading — a tab kept its scroll position precisely so that

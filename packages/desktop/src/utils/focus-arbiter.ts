@@ -2,22 +2,8 @@ export type FocusDomain = "modal" | "palette" | "sidebar" | "tab" | "misc";
 
 export type FocusTiming = "immediate" | "next-frame" | "when-mounted";
 
-/**
- * Optional caret placement carried by tab-targeted intents. The arbiter
- * treats it as opaque data — the tab's controller interprets it when the
- * intent wins. Without one, the tab's current selection is left as-is
- * (an editor mount restores its saved selection and must keep it).
- */
-export type TabCaretPlacement = {
-  /** Put the caret in the nearest textblock before the node at `pos` —
-   *  Escape out of an inline widget returns the cursor to where the user
-   *  was before summoning it, not past it. */
-  type: "before-node";
-  pos: number;
-};
-
 export type FocusTarget =
-  | { type: "tab"; tabId: string; caret?: TabCaretPlacement }
+  | { type: "tab"; tabId: string }
   | { type: "element"; key: string };
 
 export interface FocusIntentInput {

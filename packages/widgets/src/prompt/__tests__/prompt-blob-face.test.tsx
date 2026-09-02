@@ -15,14 +15,6 @@ vi.mock("react-i18next", () => ({
   initReactI18next: { type: "3rdParty" as const, init: () => {} },
 }));
 
-// The composer is a full Tiptap editor; the face's contract with it is
-// "rendered in the composing phase", not its internals. The only module mock
-// left in this file — everything the face needs from the application now
-// arrives through the host object below.
-vi.mock("../composer/prompt-editor", () => ({
-  PromptEditor: () => createElement("div", { "data-testid": "composer" }),
-}));
-
 import { PromptBlobFace } from "../ui/prompt-blob";
 import type { BlobPhase } from "../state";
 import type { AgentTaskRow, AgentTurn } from "@notefig/shared/agent";
@@ -42,7 +34,6 @@ const record = {
 };
 
 const actions = {
-  setDraft: noop,
   send: noop,
   sendFollowUp: noop,
   editPrompt: noop,
@@ -70,6 +61,7 @@ function render(
     }>;
     turn?: Partial<AgentTurn>;
     task?: Partial<AgentTaskRow>;
+    draft?: string;
   } = {},
 ): string {
   container = document.createElement("div");
@@ -98,7 +90,16 @@ function render(
             ...overrides.display,
           },
           actions,
-          composerRef: { current: null },
+          documentPath: "/ws/doc.md",
+          draft: overrides.draft ?? "",
+          draftIO: {
+            read: () => overrides.draft ?? "",
+            write: noop,
+            holdsCaret: () => false,
+          },
+          // The draft is document content, so the face is handed a content
+          // hole rather than rendering a composer of its own.
+          draftSlot: createElement("div", { "data-testid": "composer" }),
         }),
       ),
     ),

@@ -16,7 +16,10 @@ export const editorWidgets: EditorWidgetDefinition[] = [promptWidget];
  * constructible without React, a live DOM, or a host.
  */
 export function widgetSchemaNodes() {
-  return editorWidgets.map((widget) => widget.base);
+  return editorWidgets.flatMap((widget) => [
+    ...(widget.support?.bases ?? []),
+    widget.base,
+  ]);
 }
 
 /**
@@ -29,5 +32,8 @@ export function widgetRendererNodes(options: {
   filePath: string;
   basePath: string;
 }) {
-  return editorWidgets.map((widget) => widget.view.configure(options));
+  return editorWidgets.flatMap((widget) => [
+    ...(widget.support?.views(options) ?? []),
+    widget.view.configure(options),
+  ]);
 }

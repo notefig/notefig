@@ -17,6 +17,10 @@ import {
 } from "@/entities/files";
 import { getDocumentSync } from "@/utils/markdown-conversion";
 import { UI_ONLY_TRANSACTION_META } from "@/components/editor/editor-schema-kit";
+import {
+  carryDraftsForward,
+  isDraftOnlyEdit,
+} from "@/components/editor/draft-only-edit";
 
 const AUTOSAVE_DEBOUNCE_MS = 500;
 
@@ -109,7 +113,10 @@ export function useEditorFileSync(
       );
 
       suppressSaveRef.current = true;
-      editor.commands.setContent(doc, { emitUpdate: false });
+      // A half-typed prompt is not on disk and must survive the replace.
+      editor.commands.setContent(carryDraftsForward(doc, editor.state.doc), {
+        emitUpdate: false,
+      });
       suppressSaveRef.current = false;
       sync.commitAdoption(fileContent, targetHash);
     })().catch((error) => {
@@ -150,6 +157,11 @@ export function useEditorFileSync(
       // UI-only node changes (the aiPrompt keeper) never alter the
       // serialized markdown — saving would only churn the file watcher.
       if (transaction.getMeta(UI_ONLY_TRANSACTION_META)) return;
+      // Neither does typing in a prompt widget's draft: it is document
+      // content, but the widget serializes to its marker and never renders
+      // children. Not a meta, because these transactions come out of
+      // ProseMirror's own input handling — see draft-only-edit.ts.
+      if (isDraftOnlyEdit(transaction)) return;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         saveTimerRef.current = null;

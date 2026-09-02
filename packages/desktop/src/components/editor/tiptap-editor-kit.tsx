@@ -6,7 +6,7 @@ import CharacterCount from "@tiptap/extension-character-count";
 import { EditorImage } from "./editor-image-node";
 import { BlobNodeView } from "./blobs/blob-node-view";
 import { FrontmatterNode } from "./frontmatter-node";
-import { widgetRendererNodes } from "@notefig/widgets";
+import { widgetRendererNodes, PROMPT_DRAFT_NODE_NAME } from "@notefig/widgets";
 import {
   createSchemaExtensions,
   MarkdownImageBase,
@@ -90,7 +90,17 @@ export const editorExtensions = [
     widgetRendererNodes({ filePath: "", basePath: "" }),
     FrontmatterNode,
   ),
-  Placeholder.configure({ placeholder: "Type something, or press / for AI…" }),
+  Placeholder.configure({
+    // A prompt widget's draft is a textblock of this document, so it would
+    // otherwise inherit the document's own prompt. The widget paints its
+    // own placeholder instead — it knows whether it is asking for the first
+    // prompt or a follow-up reply, and this extension has one string for
+    // the whole file.
+    placeholder: ({ node }) =>
+      node.type.name === PROMPT_DRAFT_NODE_NAME
+        ? ""
+        : "Type something, or press / for AI…",
+  }),
   CharacterCount,
   NativeFormatIntercept,
 ];

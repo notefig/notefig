@@ -35,6 +35,48 @@ type TabViewProps = {
   orientation: "row" | "column";
   address: number[];
 };
+
+/** Either end of a drag (`active` or `over`) — only the shared shape. */
+type DragEntry = Pick<
+  NonNullable<ReturnType<typeof useDndContext>["active"]>,
+  "id" | "data"
+> | null;
+
+/** The window id a drag entry belongs to: a tab's parent window, else the
+ *  entry's own id (a window being dragged). */
+function dragWindowId(entry: DragEntry) {
+  const data = entry?.data?.current;
+  return (data?.type === "tab" && data?.parentId) || entry?.id;
+}
+
+/** Derived drag state for the tab bar: same-window check, the edge zone
+ *  being hovered, and whether a FOREIGN drag is over this bar (its own
+ *  tabs don't count). */
+function deriveDragState(active: DragEntry, over: DragEntry, id: string) {
+  const isSameWindow = isSame(
+    active?.data?.current?.address,
+    over?.data?.current?.address,
+  );
+  const currentEdgeZoneSide =
+    over?.data?.current?.parentId == id && over?.data?.current?.side;
+  const isOverAny = dragWindowId(over) == id && dragWindowId(active) !== id;
+  return { isSameWindow, currentEdgeZoneSide, isOverAny };
+}
+
+/** A file dropped on the tab bar opens (or moves) as a tab of this window. */
+function openDroppedFile(
+  payload: { fileType: string; path: string },
+  windowId: string,
+): void {
+  if (payload.fileType !== "file") return;
+  getProtocolContext().openFile?.({
+    tabId: payload.path,
+    intent: "new-tab",
+    targetWindowId: windowId,
+    moveIfOpen: true,
+  });
+}
+
 function TabView({
   tabs,
   hideTabs = false,
@@ -45,26 +87,11 @@ function TabView({
 }: TabViewProps) {
   const { active, over } = useDndContext();
   const { dispatch } = useDockable();
-
-  const isSameWindow = isSame(
-    active?.data?.current?.address,
-    over?.data?.current?.address,
+  const { isSameWindow, currentEdgeZoneSide, isOverAny } = deriveDragState(
+    active,
+    over,
+    id,
   );
-
-  const overId =
-    (over?.data?.current?.type === "tab" && over?.data?.current?.parentId) ||
-    over?.id;
-
-  const activeId =
-    (active?.data?.current?.type === "tab" &&
-      active?.data?.current?.parentId) ||
-    active?.id;
-
-  const currentEdgeZoneSide =
-    over?.data?.current?.parentId == id && over?.data?.current?.side;
-
-  // flag for styling when dragging over the tab bar (but not it's own tabBar)
-  const isOverAny = overId == id && activeId !== id;
 
   return (
     <div
@@ -81,18 +108,10 @@ function TabView({
           data-testid="tab-bar"
           {...dropZoneProps({
             accepts: ["file"],
-            onDrop: (payload) => {
-              if (payload.fileType !== "file") return;
-              getProtocolContext().openFile?.({
-                tabId: payload.path,
-                intent: "new-tab",
-                targetWindowId: id,
-                moveIfOpen: true,
-              });
-            },
+            onDrop: (payload) => openDroppedFile(payload, id),
           })}
           className={cn(
-            "relative mx-2 flex min-w-0 w-[calc(100%-1rem)] rounded-lg border border-sidebar-border overflow-hidden",
+            "relative mx-2 flex min-w-0 w-[calc(100%-1rem)] rounded-lg border border-sidebar-border overflow-clip",
             "data-[mtr-drop-over=true]:border-ring",
             "data-[mtr-drop-over=true]:shadow-[0_0_0_1px_hsl(var(--ring))_inset]",
           )}
@@ -131,9 +150,16 @@ function TabView({
       <div
         className="px-2"
         style={{
-          overflow: "hidden",
+          overflow: "clip",
           display: "flex",
           flex: 1,
+          // Without this the content minimum wins over the flex sizing in
+          // the column container and this box grows to its content's full
+          // height — the editor's own overflow-auto wrapper then never
+          // constrains, and nothing below the fold is scrollable. The old
+          // overflow: hidden masked it by being a scroll port that
+          // scrollIntoView could move; clip is not.
+          minHeight: 0,
         }}
       >
         {tabs.find((tab) => tab.id === selected)?.content}

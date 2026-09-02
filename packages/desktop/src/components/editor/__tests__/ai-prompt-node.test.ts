@@ -13,7 +13,7 @@ import { widgetRendererNodes } from "@notefig/widgets";
 import { removeToParagraphTr, revertToSlashTr } from "@notefig/widgets";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
-import { consumePendingPromptBlobFocus } from "@notefig/widgets";
+import { selectionDraft } from "@notefig/widgets";
 
 /** The editor's create hook (where the keeper's initial insert runs) fires
  *  asynchronously — construction alone isn't enough for assertions. */
@@ -86,11 +86,11 @@ describe("aiPrompt empty-document keeper", () => {
     expect(editor.state.doc.lastChild?.type.name).toBe("paragraph");
   });
 
-  it("requests composer focus for the fresh keeper on create", async () => {
+  it("puts the caret in the fresh keeper's draft on create", async () => {
     editor = await documentEditor("");
     const keeper = findPromptNode(editor);
     expect(keeper?.blobId).toBeTruthy();
-    expect(consumePendingPromptBlobFocus(keeper!.blobId!)).toBe(true);
+    expect(selectionDraft(editor.state)?.blobId).toBe(keeper!.blobId);
   });
 
   it("does not touch documents that open with content", async () => {
@@ -129,10 +129,10 @@ describe("aiPrompt empty-document keeper", () => {
     editor = await documentEditor("<p>Some text</p>");
     editor.commands.clearContent(true);
     expect(editor.state.doc.firstChild?.type.name).toBe("aiPrompt");
-    // The user's cursor stays in the editor: the reinsert must not queue a
-    // composer focus request (contrast with the on-create keeper).
+    // The user's cursor stays where it was: the reinsert must not move it
+    // into the draft (contrast with the on-create keeper).
     const keeper = findPromptNode(editor);
-    expect(consumePendingPromptBlobFocus(keeper!.blobId!)).toBe(false);
+    expect(selectionDraft(editor.state)).toBeNull();
     // Selection remains in the paragraph below the widget.
     const { from } = editor.state.selection;
     expect(from).toBeGreaterThan(keeper!.pos);
@@ -192,8 +192,8 @@ describe('"/" summon', () => {
     expect(node?.summoned).toBe(true);
     expect(node?.blobId).toBeTruthy();
     expect(getEditorMarkdown(editor)).toBe("Hi there");
-    // The focus request is keyed to this instance's id.
-    expect(consumePendingPromptBlobFocus(node!.blobId!)).toBe(true);
+    // The caret moved into the new widget's draft, in the same transaction.
+    expect(selectionDraft(editor.state)?.blobId).toBe(node!.blobId);
   });
 
   it("types normally mid-text", async () => {
@@ -215,7 +215,7 @@ describe('"/" summon', () => {
     // The widget replaced the item's paragraph in place — list intact,
     // serialized file identical.
     expect(getEditorMarkdown(editor)).toBe(markdownBefore);
-    expect(consumePendingPromptBlobFocus(node!.blobId!)).toBe(true);
+    expect(selectionDraft(editor.state)?.blobId).toBe(node!.blobId);
   });
 
   it("summons inside an indented (nested) list item", async () => {
@@ -282,18 +282,17 @@ describe('"/" summon', () => {
     expect(findPromptNode(editor)).toBeNull();
   });
 
-  it("focuses the keeper widget in an empty doc instead of inserting twice", async () => {
+  it("moves the caret to the keeper in an empty doc instead of inserting twice", async () => {
     editor = await documentEditor("");
     const keeper = findPromptNode(editor);
     expect(keeper?.blobId).toBeTruthy();
-    // Drain the on-create focus request so the assertion below proves the
-    // "/" itself re-requests focus on the existing keeper.
-    consumePendingPromptBlobFocus(keeper!.blobId!);
-    // Inside the empty paragraph below the widget (widget occupies 0..1).
-    editor.commands.setTextSelection(2);
+    // Out of the draft first, so the assertion below proves the "/" itself
+    // put the caret back rather than the on-create keeper having left it.
+    editor.commands.setTextSelection(editor.state.doc.content.size - 1);
+    expect(selectionDraft(editor.state)).toBeNull();
     expect(typeText(editor, "/")).toBe(true);
     expect(findPromptNodes(editor)).toHaveLength(1);
-    expect(consumePendingPromptBlobFocus(keeper!.blobId!)).toBe(true);
+    expect(selectionDraft(editor.state)?.blobId).toBe(keeper!.blobId);
   });
 
   it("gives each summoned widget its own instance id", async () => {

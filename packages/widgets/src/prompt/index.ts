@@ -9,13 +9,27 @@ import {
   stripPromptMarkers,
   type PromptMarker,
 } from "./marker-codec";
-import { AiPromptNodeBase, PROMPT_NODE_NAME } from "./node";
+import {
+  AiPromptNodeBase,
+  PromptDraftNodeBase,
+  PROMPT_NODE_NAME,
+} from "./node";
+import { promptMentionNode } from "./composer/mention-node";
 import { AiPromptNode, type AiPromptNodeOptions } from "./node-view";
 
 export const promptWidget = defineEditorWidget<AiPromptNodeOptions>({
   name: PROMPT_NODE_NAME,
   base: AiPromptNodeBase,
   view: AiPromptNode,
+  // The draft the user types is document content, so its node and the
+  // mention chip that can sit in it are part of the document schema. The
+  // mention's suggestion half stays with the renderer (the widget's own
+  // plugins register it, scoped to drafts); the worker only needs the node
+  // so its parse/serialize agrees with the editor's.
+  support: {
+    bases: [PromptDraftNodeBase, promptMentionNode()],
+    views: () => [PromptDraftNodeBase, promptMentionNode()],
+  },
   codec: {
     serialize: (marker) =>
       serializePromptMarker(marker as Partial<PromptMarker>),

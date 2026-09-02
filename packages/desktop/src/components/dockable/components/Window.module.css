@@ -3,8 +3,15 @@
   flex-direction: column;
   background: transparent;
   border-radius: 0;
-  overflow: hidden;
+  overflow: clip;
   flex: 1;
+  /* Without these the content minimum beats the flex sizing and the window
+     grows past its pane — the box was clipped, so it LOOKED right, but its
+     true bounds overlapped the neighbouring pane (clicks near the divider
+     hit the resize handle instead of the editor) and, vertically, left the
+     editor's scroll wrapper unconstrained. */
+  min-width: 0;
+  min-height: 0;
   transition: margin 0.1s ease-in-out;
 }
 

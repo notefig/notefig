@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Editor } from "@tiptap/core";
+import { TextSelection } from "@tiptap/pm/state";
 import { Button } from "@notefig/ui/button";
 import { OrbLoader } from "@notefig/ui/orb-loader";
 import {
@@ -40,14 +41,18 @@ import {
   type AgentTurn,
   type WidgetResponse,
 } from "@notefig/shared/agent";
-import {
-  PromptEditor,
-  type PromptEditorHandle,
-} from "../composer/prompt-editor";
+import { draftToNode, readDraftNode } from "../composer/draft-text";
+import { mentionPopupHasResults } from "../composer/mention-bridge";
+import { registerComposerKeyHandler } from "../composer/key-bridge";
 import { CopyTextButton } from "./copy-text-button";
 import { usePromptWidgetHost } from "../host-context";
 import type { PromptWidgetHost } from "../host";
-import { docHasRealContent } from "../doc-helpers";
+import {
+  docHasRealContent,
+  findPromptNodePos,
+  promptDraftRange,
+  selectionDraft,
+} from "../doc-helpers";
 import { basename } from "../basename";
 import {
   getPromptBlob,
@@ -55,8 +60,6 @@ import {
   clearPromptBlobTurn,
   type PromptBlobRecord,
   subscribePromptBlob,
-  subscribePromptBlobFocus,
-  consumePendingPromptBlobFocus,
 } from "../store";
 import {
   derivePhase,
@@ -127,7 +130,59 @@ interface PromptBlobPlacement {
    *  document node, so it survives a re-parse and app restarts (MET-163).
    *  Provided by the node view, which owns the node's attributes. */
   onSessionBound?: (taskId: string) => void;
+  /** The draft's current text, read off the node by the view. */
+  draft?: string;
+  /** The widget's content hole — the draft the user types, as document
+   *  content. ProseMirror requires a node's contentDOM to stay mounted, so
+   *  this element is rendered exactly once and never moves between parents;
+   *  the phase decides how the row around it is dressed, not whether it is
+   *  there. */
+  draftSlot?: React.ReactNode;
 }
+
+/**
+ * Reading and writing a widget's draft, which lives in the document rather
+ * than in a store: the draft is `aiPrompt > promptDraft`, so "set the
+ * composer text" is a ranged replace and "focus the composer" is a
+ * selection.
+ *
+ * Every read goes through the live document at call time, the same
+ * discipline the rest of these actions already follow — a widget can be
+ * moved, adopted, or re-parsed between a render and a callback firing.
+ */
+function useDraftIO(editor: Editor, blobId: string, workspacePath: string) {
+  const host = usePromptWidgetHost();
+  return useMemo(() => {
+    const range = () => promptDraftRange(editor.state.doc, blobId);
+    const read = () => {
+      const found = range();
+      return found ? readDraftNode(found.node) : "";
+    };
+    /** Replace the draft's text, caret at the end. Not autosave-exempt and
+     *  not history-exempt: it is an ordinary document edit, which is the
+     *  whole point of the draft living here. */
+    const write = (text: string) => {
+      const found = range();
+      if (!found) return;
+      const isPath = (token: string) =>
+        host.isWorkspaceFile(workspacePath, token);
+      const tr = editor.state.tr.replaceWith(
+        found.from,
+        found.to,
+        editor.state.schema.nodeFromJSON(draftToNode(isPath, text)).content,
+      );
+      const after = promptDraftRange(tr.doc, blobId);
+      if (after) tr.setSelection(TextSelection.create(tr.doc, after.to));
+      editor.view.dispatch(tr);
+    };
+    /** True while the caret is in THIS widget's draft — the guard the key
+     *  map and the chrome's active styling share. */
+    const holdsCaret = () => selectionDraft(editor.state)?.blobId === blobId;
+    return { read, write, holdsCaret };
+  }, [editor, blobId, host, workspacePath]);
+}
+
+export type DraftIO = ReturnType<typeof useDraftIO>;
 
 /**
  * Where this widget's next prompt goes.
@@ -315,64 +370,128 @@ function usePromptBlobFocus({
   editor,
   documentPath,
   getPos,
-  composerRef,
+  draftIO,
 }: {
   blobId: string;
   editor: Editor;
   documentPath: string;
   getPos?: () => number | undefined;
-  composerRef: React.RefObject<PromptEditorHandle>;
+  draftIO: DraftIO;
 }) {
   const host = usePromptWidgetHost();
-  // Escape back to the document, through the arbiter like every other focus
-  // hand-off: an editor intent carrying a before-node caret placement so the
-  // cursor returns to where the user was before summoning this widget.
-  // Without a position (shouldn't happen while mounted) the resolver's
-  // default collapse applies.
-  const escapeToEditor = useCallback(() => {
-    const pos = getPos?.();
+
+  // The keeper's "active by default on new documents" rule. `onCreate` put
+  // the caret in this widget's draft before the node view mounted, which is
+  // why the claim is made from here rather than from the tab layout's own
+  // mount intent — by then there was no widget to notice. What is left is
+  // the focus half, and it is an explicit hand-off: creating a file opens
+  // the tree's inline rename at the same moment, which an ambient intent
+  // rightly stands down for. The composer used to make the same claim by
+  // focusing its own editor directly, out of the arbiter's sight; now it
+  // goes through the arbiter and says `steal`.
+  const claimed = useRef(false);
+  useEffect(() => {
+    if (claimed.current) return;
+    claimed.current = true;
+    if (docHasRealContent(editor.state.doc)) return;
+    // Not when the doc merely BECAME empty (select-all + delete): the
+    // keeper reinsert remounts this widget while the user's caret is in the
+    // editor, and it must stay there.
+    if (!draftIO.holdsCaret() || editor.view.hasFocus()) return;
     host.focusDocument(documentPath, {
-      reason: "blob-escape",
-      // Focus IS in this widget's composer — an explicit hand-off, not an
-      // ambient grab, so it may leave the text entry.
+      reason: "empty-doc-prompt",
       steal: true,
-      caretBeforeNode: typeof pos === "number" ? pos : undefined,
     });
-  }, [host, documentPath, getPos]);
+  }, [host, documentPath, editor, draftIO]);
 
-  const focusComposer = useCallback(() => {
-    // Suppress first: the arbiter routes focus to the editor on new-file
-    // creation (and "/" leaves the editor holding focus) — it would win the
-    // race otherwise.
-    host.suppressAmbientFocus();
-    requestAnimationFrame(() => composerRef.current?.focus());
-  }, [host, composerRef]);
+  // Escape back to the document: the caret is already in this editor, so
+  // "hand focus back" is just a selection move to the position after the
+  // widget — no arbiter intent, no caret-placement hint, nothing to race.
+  // That collapse is the point of the draft being document content.
+  return useCallback(() => {
+    const pos = getPos?.() ?? findPromptNodePos(editor.state.doc, blobId);
+    if (pos === null || pos === undefined) return;
+    const node = editor.state.doc.nodeAt(pos);
+    if (!node) return;
+    // TextSelection.near, not the raw boundary position: pos + nodeSize is a
+    // doc-level gap between nodes, and a TextSelection created there cannot
+    // be represented by a DOM caret — the browser keeps typing into the
+    // draft. `near` snaps forward into the next textblock.
+    const $after = editor.state.doc.resolve(pos + node.nodeSize);
+    editor
+      .chain()
+      .focus(undefined, { scrollIntoView: false })
+      .setTextSelection(TextSelection.near($after, 1).from)
+      .run();
+  }, [editor, blobId, getPos]);
+}
 
-  // Focus requests from the "/" summon: a pending request may predate this
-  // mount (the node view renders one React pass after the insert), then stay
-  // subscribed for requests while mounted (empty-doc "/" focuses the
-  // existing keeper widget).
-  useEffect(() => {
-    if (consumePendingPromptBlobFocus(blobId)) focusComposer();
-    return subscribePromptBlobFocus(blobId, focusComposer);
-  }, [blobId, focusComposer]);
+/**
+ * The composer key map, registered with the extension's key bridge.
+ *
+ * `deriveComposerKeyAction` is unchanged — only its delivery moved. It
+ * cannot be a DOM listener on the widget's own element: key events in a
+ * contenteditable target the editing host — the document's `.ProseMirror`
+ * root, an ANCESTOR of the card — so a bubbling listener here never fires.
+ * The extension's `addKeyboardShortcuts` (node-view.tsx) is where
+ * ProseMirror actually routes keys for a caret inside the draft; it resolves
+ * the draft under the selection and forwards through key-bridge.ts to this
+ * handler.
+ *
+ * One guard: an open mention popup owns Enter/Escape — but only while it
+ * has rows to offer. "Caret in THIS draft" is the extension's dispatch
+ * condition, so it needs no re-check here.
+ */
+function useComposerKeys({
+  blobId,
+  documentPath,
+  draft,
+  canRevert,
+  actions,
+}: {
+  blobId: string;
+  documentPath: string;
+  draft: string;
+  canRevert: boolean;
+  actions: Pick<
+    PromptBlobFaceActions,
+    "send" | "sendFollowUp" | "escapeToEditor" | "revertToSlash" | "backspaceDismiss"
+  > & { replying: boolean };
+}) {
+  const latest = useRef({ draft, canRevert, actions });
+  latest.current = { draft, canRevert, actions };
 
-  // Auto-active on empty documents, on mount only. Beyond this and the
-  // summon channel above, only explicit user actions (Edit) call focus().
-  const autoFocused = useRef(false);
-  useEffect(() => {
-    if (autoFocused.current) return;
-    autoFocused.current = true;
-    const { draft, boundTurnId: bound } = getPromptBlob(blobId);
-    if (editor.state.doc.textContent.trim() !== "" || draft || bound) return;
-    // Only for newly opened empty docs. When a doc becomes empty mid-edit
-    // (select-all + delete), the keeper reinsert remounts this widget — the
-    // user's cursor is in the editor and must stay there.
-    if (editor.view.hasFocus()) return;
-    focusComposer();
-  }, [blobId, editor, focusComposer]);
-
-  return { escapeToEditor };
+  useEffect(
+    () =>
+      registerComposerKeyHandler(blobId, (input) => {
+        if (mentionPopupHasResults(documentPath)) return false;
+        const { draft: text, canRevert: revertable, actions: live } =
+          latest.current;
+        const action = deriveComposerKeyAction({
+          key: input.key,
+          shiftKey: input.shiftKey,
+          draftEmpty: text.trim().length === 0,
+          // Reverting to "/" belongs to a summoned widget that has never
+          // been sent; dismissal to any removable one. A reply row (a
+          // widget showing its round) gets neither.
+          canRevert: revertable && !live.replying,
+          canDismiss:
+            live.backspaceDismiss !== undefined && !live.replying,
+          // Escape mid-turn is a global hotkey with its own claim map
+          // (useInFlightEscape) — it must not be resolved twice.
+          inFlight: false,
+        });
+        if (action.type === "none") return false;
+        if (action.type === "send") {
+          if (live.replying) void live.sendFollowUp();
+          else void live.send();
+        } else if (action.type === "revert") live.revertToSlash?.();
+        else if (action.type === "backspaceDismiss") live.backspaceDismiss?.();
+        else live.escapeToEditor();
+        return true;
+      }),
+    [blobId, documentPath],
+  );
 }
 
 /** What the face renders from the transcript, per phase. */
@@ -387,7 +506,6 @@ interface PromptBlobDisplay {
 /** Everything the face can do. Grouped so the container hands over one
  *  object instead of a dozen callbacks. */
 interface PromptBlobFaceActions {
-  setDraft: (draft: string) => void;
   send: () => Promise<void> | void;
   sendFollowUp: () => Promise<void> | void;
   editPrompt: () => void;
@@ -415,6 +533,7 @@ interface PromptBlobFaceActions {
 function SentFace({
   phase,
   record,
+  draft,
   task,
   boundTaskId,
   display,
@@ -422,6 +541,8 @@ function SentFace({
 }: {
   phase: BlobPhase;
   record: PromptBlobRecord;
+  /** The live draft, still in the document while the send is in flight. */
+  draft: string;
   task: AgentTaskRow | undefined;
   boundTaskId: string | null;
   display: PromptBlobDisplay;
@@ -430,7 +551,7 @@ function SentFace({
   const { t } = useTranslation();
   const { slots } = usePromptWidgetHost();
 
-  if (phase === "sending") return <StatusRow shimmer prompt={record.draft} />;
+  if (phase === "sending") return <StatusRow shimmer prompt={draft} />;
 
   if (phase === "queued") {
     return (
@@ -451,27 +572,13 @@ function SentFace({
 
   if (phase === "running" || phase === "needs-permission") {
     return (
-      <div className="flex flex-col">
-        <StatusRow
-          // No filler label: the tool-activity line exists only while a tool
-          // is actually in flight — the spinner alone carries "working", and
-          // a permanent "Working…" line just pads the row (Parsa's spacing
-          // complaint).
-          label={display.activeToolLine ?? undefined}
-          shimmer
-          prompt={record.lastSentPrompt}
-          teaser={display.assistantTeaser ?? undefined}
-          onEdit={actions.editPrompt}
-          onStop={actions.stop}
-          stopLabel={t("agentStop")}
-          onOpenChat={actions.openBoundChat}
-        />
-        {phase === "needs-permission" && boundTaskId && (
-          <div className="px-2.5 pb-2">
-            <slots.PermissionCard taskId={boundTaskId} />
-          </div>
-        )}
-      </div>
+      <RunningFace
+        phase={phase}
+        record={record}
+        boundTaskId={boundTaskId}
+        display={display}
+        actions={actions}
+      />
     );
   }
 
@@ -498,6 +605,49 @@ function SentFace({
   return null;
 }
 
+
+/** The in-flight card: the shimmer status row, and — while the agent waits
+ *  on a permission — the permission card under it. */
+function RunningFace({
+  phase,
+  record,
+  boundTaskId,
+  display,
+  actions,
+}: {
+  phase: BlobPhase;
+  record: PromptBlobRecord;
+  boundTaskId: string | null;
+  display: PromptBlobDisplay;
+  actions: PromptBlobFaceActions;
+}) {
+  const { t } = useTranslation();
+  const { slots } = usePromptWidgetHost();
+  return (
+    <div className="flex flex-col">
+      <StatusRow
+        // No filler label: the tool-activity line exists only while a tool
+        // is actually in flight — the spinner alone carries "working", and
+        // a permanent "Working…" line just pads the row (Parsa's spacing
+        // complaint).
+        label={display.activeToolLine ?? undefined}
+        shimmer
+        prompt={record.lastSentPrompt}
+        teaser={display.assistantTeaser ?? undefined}
+        onEdit={actions.editPrompt}
+        onStop={actions.stop}
+        stopLabel={t("agentStop")}
+        onOpenChat={actions.openBoundChat}
+      />
+      {phase === "needs-permission" && boundTaskId && (
+        <div className="px-2.5 pb-2">
+          <slots.PermissionCard taskId={boundTaskId} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * The widget's face: given a phase and the state behind it, which card to
  * show. Purely presentational — every hook, subscription and side effect
@@ -511,12 +661,15 @@ export function PromptBlobFace({
   task,
   boundTaskId,
   workspacePath,
+  documentPath,
   trustName,
   confirmTrust,
   isSending,
   display,
+  draft,
+  draftIO,
+  draftSlot,
   actions,
-  composerRef,
 }: {
   phase: BlobPhase;
   record: PromptBlobRecord;
@@ -524,20 +677,32 @@ export function PromptBlobFace({
   task: AgentTaskRow | undefined;
   boundTaskId: string | null;
   workspacePath: string;
+  documentPath: string;
   trustName: string;
   confirmTrust: boolean;
   isSending: boolean;
   display: PromptBlobDisplay;
+  draft: string;
+  draftIO: DraftIO;
+  draftSlot?: React.ReactNode;
   actions: PromptBlobFaceActions;
-  composerRef: React.RefObject<PromptEditorHandle>;
 }) {
-  const { t } = useTranslation();
   return (
     <div
       // The widget claims its pointer events wholesale: ProseMirror must
       // not turn clicks on its controls into node selections, and the
-      // editor's gutter-click focus handler must not grab them either.
-      onMouseDown={(event) => event.stopPropagation()}
+      // editor's gutter-click focus handler must not grab them either. The
+      // draft is the exception — it is document text, and a click there has
+      // to place a caret like any other.
+      onMouseDown={(event) => {
+        if (
+          event.target instanceof Element &&
+          event.target.closest("[data-prompt-draft]")
+        ) {
+          return;
+        }
+        event.stopPropagation();
+      }}
       className="w-full"
     >
       <AnimatedHeight>
@@ -547,66 +712,58 @@ export function PromptBlobFace({
             blobCardClass(phase, display.widgetResponse?.kind === "issue"),
           )}
         >
-          {phase === "composing" && (
-            <Composer
-              draft={record.draft}
-              setDraft={actions.setDraft}
-              onSend={() => void actions.send()}
-              onEscape={actions.escapeToEditor}
-              onRevert={actions.revertToSlash}
-              onBackspaceDismiss={actions.backspaceDismiss}
-              confirmTrust={confirmTrust}
-              trustName={trustName}
-              workspacePath={workspacePath}
+          {/* Everything above the draft row is chrome, and chrome inside a
+              node view must be contentEditable={false} — the same rule
+              BlobNodeView follows. It is not cosmetic: without it the whole
+              card is part of the document's editing host, so the browser
+              spellchecks the agent's transcript, computes visible positions
+              through every button, and will happily park a caret in a
+              status line. The draft below is the one editable island. */}
+          <div contentEditable={false}>
+            <SentFace
+              phase={phase}
+              record={record}
+              draft={draft}
+              task={task}
               boundTaskId={boundTaskId}
-              onSelectSession={actions.rebindSession}
-              composerRef={composerRef}
+              display={display}
+              actions={actions}
             />
-          )}
 
-          <SentFace
+            {phase === "done" && (
+              <DoneState
+                cancelled={turn?.status === "cancelled"}
+                response={display.widgetResponse}
+                fallbackText={display.assistantTeaser}
+                touchedFiles={display.touchedFiles}
+                onOpenFile={(path) => actions.openFile(path)}
+                onOpenChat={() =>
+                  boundTaskId && actions.openAgentTab(boundTaskId)
+                }
+                onDismiss={actions.dismiss}
+              />
+            )}
+
+            {phase === "error" && (
+              <ErrorState
+                message={turn?.error}
+                onRetry={actions.retry}
+                onEdit={actions.editPrompt}
+                onDismiss={actions.dismiss}
+              />
+            )}
+          </div>
+
+          <DraftRow
             phase={phase}
-            record={record}
-            task={task}
+            draftSlot={draftSlot}
+            empty={draft.trim().length === 0}
+            confirmTrust={confirmTrust}
+            trustName={trustName}
+            workspacePath={workspacePath}
             boundTaskId={boundTaskId}
-            display={display}
-            actions={actions}
+            onSelectSession={actions.rebindSession}
           />
-
-          {phase === "done" && (
-            <DoneState
-              cancelled={turn?.status === "cancelled"}
-              response={display.widgetResponse}
-              fallbackText={display.assistantTeaser}
-              touchedFiles={display.touchedFiles}
-              onOpenFile={(path) => actions.openFile(path)}
-              onOpenChat={() =>
-                boundTaskId && actions.openAgentTab(boundTaskId)
-              }
-              onDismiss={actions.dismiss}
-              replyDraft={record.draft}
-              setReplyDraft={actions.setDraft}
-              onReply={() => void actions.sendFollowUp()}
-              onReplyEscape={actions.escapeToEditor}
-              replyDisabled={isSending}
-              workspacePath={workspacePath}
-            />
-          )}
-
-          {phase === "error" && (
-            <ErrorState
-              message={turn?.error}
-              onRetry={actions.retry}
-              onEdit={actions.editPrompt}
-              onDismiss={actions.dismiss}
-              replyDraft={record.draft}
-              setReplyDraft={actions.setDraft}
-              onReply={() => void actions.sendFollowUp()}
-              onReplyEscape={actions.escapeToEditor}
-              replyDisabled={isSending}
-              workspacePath={workspacePath}
-            />
-          )}
         </div>
       </AnimatedHeight>
     </div>
@@ -641,7 +798,11 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     () => getPromptBlob(blobId),
   );
   const { boundTurnId, boundTaskId } = record;
-  const composerRef = useRef<PromptEditorHandle>(null);
+  // The draft is document content now, so it arrives as a prop from the
+  // node view (which re-renders on every document change) rather than from
+  // the store. `draftIO` is how the actions write it back.
+  const draft = placement.draft ?? "";
+  const draftIO = useDraftIO(editor, blobId, workspacePath);
 
   const { label: harnessLabel } = host.useDefaultHarness();
   const { isSending, confirmTrust, cancelAndRestore, ...actions } =
@@ -654,7 +815,7 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
       summoned: placement.summoned ?? false,
       removeNode: placement.removeNode,
       onSessionBound: placement.onSessionBound,
-      composerRef,
+      draftIO,
     });
 
   const { turn, task, sortedEntries, taskTurns, phase } = usePromptBlobRound({
@@ -665,12 +826,12 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
 
   useInFlightEscape({ blobId, phase, boundTurnId, cancelAndRestore });
   useStaleTurnReset({ blobId, boundTurnId, isSending, hasTurn: Boolean(turn) });
-  const { escapeToEditor } = usePromptBlobFocus({
+  const escapeToEditor = usePromptBlobFocus({
     blobId,
     editor,
     documentPath,
     getPos,
-    composerRef,
+    draftIO,
   });
 
   const display = usePromptBlobDisplay({
@@ -679,6 +840,18 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     taskTurns,
     boundTurnId,
     workspacePath,
+  });
+
+  useComposerKeys({
+    blobId,
+    documentPath,
+    draft,
+    canRevert: actions.revertToSlash !== undefined,
+    actions: {
+      ...actions,
+      escapeToEditor,
+      replying: phase === "done" || phase === "error",
+    },
   });
 
   // One click from any bound phase to the session's full transcript
@@ -698,7 +871,10 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     confirmTrust,
     isSending,
     display,
-    composerRef,
+    draft,
+    draftIO,
+    draftSlot: placement.draftSlot,
+    documentPath,
     actions: {
       ...actions,
       escapeToEditor,
@@ -750,6 +926,7 @@ function usePromptSendActions({
   editor,
   getPos,
   onSessionBound,
+  draftIO,
 }: {
   blobId: string;
   workspacePath: string;
@@ -757,6 +934,7 @@ function usePromptSendActions({
   editor: Editor;
   getPos?: () => number | undefined;
   onSessionBound?: (taskId: string) => void;
+  draftIO: DraftIO;
 }) {
   const { t } = useTranslation();
   const host = usePromptWidgetHost();
@@ -789,7 +967,7 @@ function usePromptSendActions({
   );
 
   const send = useCallback(async () => {
-    const text = getPromptBlob(blobId).draft.trim();
+    const text = draftIO.read().trim();
     if (!text || isSending) return;
     if (!host.ensureRuntime()) return;
     if (!trust.isTrusted && !confirmTrust) {
@@ -808,8 +986,8 @@ function usePromptSendActions({
         boundTurnId: turnId,
         boundTaskId: taskId,
         lastSentPrompt: text,
-        draft: "",
       });
+      draftIO.write("");
       // The widget is now part of the document's meaning, not just its UI:
       // record the session on the node so the next save writes its marker
       // (MET-163) and an agent write mid-round can't take it away.
@@ -828,6 +1006,7 @@ function usePromptSendActions({
     workspacePath,
     dispatchPrompt,
     onSessionBound,
+    draftIO,
   ]);
 
   // Reply (MET-92): continue the conversation on the BOUND task — never the
@@ -836,9 +1015,8 @@ function usePromptSendActions({
   // rebind below is the whole "replace the round behind the scenes". No
   // trust gate: round one already required it for this workspace.
   const sendFollowUp = useCallback(async () => {
-    const current = getPromptBlob(blobId);
-    const text = current.draft.trim();
-    const taskId = current.boundTaskId;
+    const text = draftIO.read().trim();
+    const taskId = getPromptBlob(blobId).boundTaskId;
     if (!text || isSending || !taskId) return;
     if (!host.ensureRuntime()) return;
     // dispatchPrompt is infallible by contract: a missing task mints a
@@ -856,15 +1034,12 @@ function usePromptSendActions({
     setIsSending(true);
     try {
       const turnId = dispatchPrompt(taskId, text);
-      updatePromptBlob(blobId, {
-        boundTurnId: turnId,
-        lastSentPrompt: text,
-        draft: "",
-      });
+      updatePromptBlob(blobId, { boundTurnId: turnId, lastSentPrompt: text });
+      draftIO.write("");
     } finally {
       setIsSending(false);
     }
-  }, [host, blobId, isSending, dispatchPrompt, t]);
+  }, [host, blobId, isSending, dispatchPrompt, t, draftIO]);
 
   return { isSending, confirmTrust, send, sendFollowUp };
 }
@@ -885,10 +1060,10 @@ function usePromptBlobActions({
   summoned,
   removeNode,
   onSessionBound,
-  composerRef,
+  draftIO,
 }: PromptBlobPlacement & {
   summoned: boolean;
-  composerRef: React.RefObject<PromptEditorHandle>;
+  draftIO: DraftIO;
 }) {
   const host = usePromptWidgetHost();
   const { isSending, confirmTrust, send, sendFollowUp } = usePromptSendActions({
@@ -898,25 +1073,19 @@ function usePromptBlobActions({
     editor,
     getPos,
     onSessionBound,
+    draftIO,
   });
-
-  const setDraft = useCallback(
-    (draft: string) => updatePromptBlob(blobId, { draft }),
-    [blobId],
-  );
 
   // Unbind and pull the sent prompt back into the composer, then focus it.
   // A draft already being typed (a half-written reply) always wins over the
   // restored prompt. Shared by Edit, Escape-cancel, and queued-Stop.
   const restorePromptToDraft = useCallback(() => {
     const current = getPromptBlob(blobId);
-    updatePromptBlob(blobId, {
-      draft: current.draft || current.lastSentPrompt,
-      boundTurnId: null,
-      boundTaskId: null,
-    });
-    requestAnimationFrame(() => composerRef.current?.focus());
-  }, [blobId, composerRef]);
+    updatePromptBlob(blobId, { boundTurnId: null, boundTaskId: null });
+    // The write puts the caret at the end of the restored prompt, so the
+    // old rAF-and-focus-the-composer dance is gone with it.
+    draftIO.write(draftIO.read() || current.lastSentPrompt);
+  }, [blobId, draftIO]);
 
   // Edit: pull the sent prompt back into the composer. A queued turn is
   // withdrawn; a running/finished one keeps going — re-send is a new turn.
@@ -981,16 +1150,25 @@ function usePromptBlobActions({
     [summoned, removeNode],
   );
 
-  // Backspace on an empty, summoned composer: unlike revertToSlash, no
-  // literal "/" is left behind — the widget just disappears, as if "/" was
-  // never typed. Same "summoned instances only" guard as revertToSlash.
-  const backspaceDismiss = useMemo(
-    () =>
-      summoned && removeNode
-        ? () => removeNode({ restoreParagraph: true })
-        : undefined,
-    [summoned, removeNode],
-  );
+  // Backspace on an empty composer: the widget just disappears. A summoned
+  // instance restores the paragraph the summon consumed (as if "/" was
+  // never typed); one restored from a saved marker is removed outright —
+  // that edit drops the marker from the file, and ⌘Z brings it back. In a
+  // doc with no real content removal is pointless (the keeper would
+  // reinsert with the caret kicked out of the draft), so the key is
+  // swallowed doing nothing — deliberately consumed either way, because an
+  // unhandled Backspace at the draft's start falls through to the browser's
+  // native editing, whose cross-boundary delete mangles the widget's DOM.
+  const backspaceDismiss = useMemo(() => {
+    if (!removeNode) return undefined;
+    return () => {
+      if (summoned) {
+        removeNode({ restoreParagraph: true });
+        return;
+      }
+      if (docHasRealContent(editor.state.doc)) removeNode();
+    };
+  }, [summoned, removeNode, editor]);
 
   // Picking a session on a widget that already belongs to one re-targets
   // THIS widget (and its document marker), rather than only moving the
@@ -1008,7 +1186,6 @@ function usePromptBlobActions({
   return {
     isSending,
     confirmTrust,
-    setDraft,
     send,
     sendFollowUp,
     editPrompt,
@@ -1072,77 +1249,80 @@ function AnimatedHeight({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * The composing face: session control + textarea, one row, no send button —
- * Enter (no Shift) is the only submit. The textarea never remounts across
- * the composing/confirm-trust flip — the trust warning renders alongside it.
+ * The draft row: the one place the widget's content hole lives.
+ *
+ * ProseMirror requires a node's contentDOM to stay mounted, so the hole is
+ * rendered here unconditionally and never moves between parents — the phase
+ * dresses the row around it (session picker and trust warning while
+ * composing, a divider while replying) and hides it outright in the phases
+ * that have no composer at all. That single hole is also why the initial
+ * composer and the follow-up reply can share one draft: they are the same
+ * text in the document, at different points in the round.
  */
-function Composer({
-  draft,
-  setDraft,
-  onSend,
-  onEscape,
-  onRevert,
-  onBackspaceDismiss,
+function DraftRow({
+  phase,
+  draftSlot,
+  empty,
   confirmTrust,
   trustName,
   workspacePath,
   boundTaskId,
   onSelectSession,
-  composerRef,
 }: {
-  draft: string;
-  setDraft: (value: string) => void;
-  onSend: () => void;
-  onEscape: () => void;
-  /** Slash-summoned instances only: turn back into a literal "/". Fires on
-   *  Esc or "/" while the composer is empty; with a draft, Esc falls back
-   *  to onEscape (return to the doc, draft kept). */
-  onRevert?: () => void;
-  /** Slash-summoned instances only: Backspace on an empty composer removes
-   *  the widget entirely (no literal "/" left behind, unlike onRevert). */
-  onBackspaceDismiss?: () => void;
+  phase: BlobPhase;
+  draftSlot: React.ReactNode;
+  empty: boolean;
   confirmTrust: boolean;
   trustName: string;
   workspacePath: string;
   boundTaskId?: string | null;
   onSelectSession?: (taskId: string) => void;
-  composerRef: React.RefObject<PromptEditorHandle>;
 }) {
   const { t } = useTranslation();
+  const composing = phase === "composing";
+  const replying = phase === "done" || phase === "error";
   return (
-    <div className="flex flex-col">
-      <div className="flex items-start gap-1.5 px-1.5 py-1">
-        <SessionControl
-          workspacePath={workspacePath}
-          boundTaskId={boundTaskId}
-          onSelectSession={onSelectSession}
-        />
-        <PromptEditor
-          ref={composerRef}
-          workspacePath={workspacePath}
-          value={draft}
-          onChange={setDraft}
-          onKeyDown={(event) => {
-            const action = deriveComposerKeyAction({
-              key: event.key,
-              shiftKey: event.shiftKey,
-              draftEmpty: draft.trim().length === 0,
-              canRevert: onRevert !== undefined,
-              inFlight: false,
-            });
-            if (action.type === "none") return false;
-            if (action.type === "send") onSend();
-            else if (action.type === "revert") onRevert?.();
-            else if (action.type === "backspaceDismiss") onBackspaceDismiss?.();
-            else onEscape();
-            return true;
-          }}
-          placeholder={t("promptBlobPlaceholder")}
-          className="min-h-[1.75rem] min-w-0 flex-1 pt-1 pb-1.5 text-sm"
-        />
+    <div className="flex flex-col" hidden={!composing && !replying}>
+      <div
+        className={cn(
+          "flex items-start",
+          composing
+            ? "gap-1.5 px-1.5 py-1"
+            : "mt-1 gap-1.5 border-t border-border/60 px-2.5 pt-1.5",
+        )}
+      >
+        {composing ? (
+          <div contentEditable={false}>
+            <SessionControl
+              workspacePath={workspacePath}
+              boundTaskId={boundTaskId}
+              onSelectSession={onSelectSession}
+            />
+          </div>
+        ) : null}
+        {/* The placeholder is painted from here rather than by the editor's
+            Placeholder extension: that extension has one string for the
+            whole document, and this row knows which prompt it is asking
+            for. */}
+        <div
+          data-prompt-draft=""
+          data-empty={empty ? "true" : "false"}
+          data-placeholder={
+            composing ? t("promptBlobPlaceholder") : t("promptBlobReply")
+          }
+          className={cn(
+            "prompt-editor relative min-w-0 flex-1 whitespace-pre-wrap break-words",
+            composing ? "pt-1 pb-1.5 text-sm" : "text-xs",
+          )}
+        >
+          {draftSlot}
+        </div>
       </div>
-      {confirmTrust && (
-        <span className="px-3 pb-1.5 text-[0.6875rem] text-amber-600 dark:text-amber-400">
+      {composing && confirmTrust && (
+        <span
+          contentEditable={false}
+          className="px-3 pb-1.5 text-[0.6875rem] text-amber-600 dark:text-amber-400"
+        >
           {t("promptBlobTrustWarning", { name: trustName })}
         </span>
       )}
@@ -1348,55 +1528,6 @@ function StatusRow({
   );
 }
 
-/**
- * The follow-up composer shared by DoneState and ErrorState (MET-92): same
- * store draft as the initial Composer (a half-typed reply survives tab
- * unmount, and Edit's `draft || lastSentPrompt` fallback never destroys it).
- * No SessionControl — the whole point of the row is that the destination is
- * fixed to the bound session. canRevert:false collapses the key map to:
- * Enter sends, Shift+Enter newlines, Escape returns focus to the editor.
- */
-function ReplyRow({
-  draft,
-  setDraft,
-  onSend,
-  onEscape,
-  disabled,
-  workspacePath,
-}: {
-  draft: string;
-  setDraft: (value: string) => void;
-  onSend: () => void;
-  onEscape: () => void;
-  disabled: boolean;
-  workspacePath: string;
-}) {
-  const { t } = useTranslation();
-  return (
-    <PromptEditor
-      workspacePath={workspacePath}
-      value={draft}
-      onChange={setDraft}
-      disabled={disabled}
-      onKeyDown={(event) => {
-        const action = deriveComposerKeyAction({
-          key: event.key,
-          shiftKey: event.shiftKey,
-          draftEmpty: draft.trim().length === 0,
-          canRevert: false,
-          inFlight: false,
-        });
-        if (action.type === "none") return false;
-        if (action.type === "send") onSend();
-        else if (action.type === "escape") onEscape();
-        return true;
-      }}
-      placeholder={t("promptBlobReply")}
-      className="mt-1 min-h-[1.5rem] w-full border-t border-border/60 px-0.5 pt-1.5 text-xs"
-    />
-  );
-}
-
 /** The done face's first row: status icon + the one-line outcome summary.
  *  The line doubles as the expand/collapse toggle when there's a body to
  *  show (disabled otherwise — a bare Done/Stopped label has nothing to
@@ -1494,12 +1625,6 @@ export function DoneState({
   onOpenFile,
   onOpenChat,
   onDismiss,
-  replyDraft,
-  setReplyDraft,
-  onReply,
-  onReplyEscape,
-  replyDisabled,
-  workspacePath,
 }: {
   cancelled: boolean;
   response: WidgetResponse | null;
@@ -1510,12 +1635,6 @@ export function DoneState({
   onOpenFile: (path: string) => void;
   onOpenChat: () => void;
   onDismiss: () => void;
-  replyDraft: string;
-  setReplyDraft: (value: string) => void;
-  onReply: () => void;
-  onReplyEscape: () => void;
-  replyDisabled: boolean;
-  workspacePath: string;
 }) {
   const { t } = useTranslation();
   const { Markdown } = usePromptWidgetHost().slots;
@@ -1594,14 +1713,6 @@ export function DoneState({
         />
       )}
       <TouchedFileChips paths={touchedFiles} onOpenFile={onOpenFile} />
-      <ReplyRow
-        draft={replyDraft}
-        setDraft={setReplyDraft}
-        onSend={onReply}
-        onEscape={onReplyEscape}
-        disabled={replyDisabled}
-        workspacePath={workspacePath}
-      />
     </div>
   );
 }
@@ -1614,23 +1725,11 @@ function ErrorState({
   onRetry,
   onEdit,
   onDismiss,
-  replyDraft,
-  setReplyDraft,
-  onReply,
-  onReplyEscape,
-  replyDisabled,
-  workspacePath,
 }: {
   message: string | undefined;
   onRetry: () => void;
   onEdit: () => void;
   onDismiss: () => void;
-  replyDraft: string;
-  setReplyDraft: (value: string) => void;
-  onReply: () => void;
-  onReplyEscape: () => void;
-  replyDisabled: boolean;
-  workspacePath: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -1669,14 +1768,6 @@ function ErrorState({
           <X className="size-3.5" />
         </button>
       </div>
-      <ReplyRow
-        draft={replyDraft}
-        setDraft={setReplyDraft}
-        onSend={onReply}
-        onEscape={onReplyEscape}
-        disabled={replyDisabled}
-        workspacePath={workspacePath}
-      />
     </div>
   );
 }

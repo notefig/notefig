@@ -34,7 +34,7 @@ function Panel(
     >
       <div
         style={{
-          overflow: "hidden",
+          overflow: "clip",
           maxWidth: "100%",
           maxHeight: "100%",
           width: "100%",

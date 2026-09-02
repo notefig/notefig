@@ -383,13 +383,15 @@
     -ms-user-select: none;
   }
 
-  /* The composer is a real contenteditable and must still take a caret —
-     Chromium refuses to place one in user-select:none text, so a regression
-     here reads as a prompt box that silently swallows keystrokes. It wins on
-     specificity (0,2,0 over 0,1,0), not on source order, so it survives
-     wherever this block is moved to. */
-  [data-type="ai-prompt"] [contenteditable="true"],
-  [data-type="ai-prompt"] [contenteditable="true"] * {
+  /* The draft must still take a caret — Chromium refuses to place one in
+     user-select:none text, so a regression here reads as a prompt box that
+     silently swallows keystrokes. It is content of the document's own
+     contenteditable now rather than a nested editor of its own, so the
+     opt-in is keyed to the row that holds it. Wins on specificity (0,2,0
+     over 0,1,0), not on source order, so it survives wherever this block is
+     moved to. */
+  [data-type="ai-prompt"] [data-prompt-draft],
+  [data-type="ai-prompt"] [data-prompt-draft] * {
     user-select: text;
     -webkit-user-select: text;
     -moz-user-select: text;
@@ -414,12 +416,26 @@
   }
 
   /* Tiptap Placeholder renders via CSS only — nothing app-wide draws
-     data-placeholder, so the prompt composer (MET-80) opts in here. */
+     data-placeholder, so the chat tab's standalone composer (MET-80) opts
+     in here. */
   .prompt-editor .ProseMirror p.is-editor-empty:first-child::before {
     content: attr(data-placeholder);
     color: hsl(var(--muted-foreground));
     float: left;
     height: 0;
+    pointer-events: none;
+  }
+
+  /* The in-document draft's placeholder is painted from its row rather than
+     by the editor's Placeholder extension: that extension carries one
+     string for the whole document, and the row knows whether it is asking
+     for the first prompt or a follow-up reply. Absolutely positioned so it
+     doesn't disturb the draft's own line box. */
+  [data-prompt-draft][data-empty="true"]::before {
+    content: attr(data-placeholder);
+    position: absolute;
+    inset-inline-start: 0;
+    color: hsl(var(--muted-foreground));
     pointer-events: none;
   }
 

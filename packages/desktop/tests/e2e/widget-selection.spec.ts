@@ -27,13 +27,18 @@ const WORKSPACE_PATH = "/workspace/widget-selection";
  * Two halves, and the second is why this can't just be `select-none` on the
  * wrapper:
  *  - the card chrome must be unselectable, but
- *  - the composer inside it is a real contenteditable that must still take a
- *    caret, and the agent's response opts back in via `.select-text` so it
- *    stays copyable.
+ *  - the draft inside it is real document text that must still take a caret,
+ *    and the agent's response opts back in via `.select-text` so it stays
+ *    copyable.
+ *
+ * The draft is no longer a contenteditable of its own — it is content of the
+ * document's own editor — so the opt-in is keyed to `[data-prompt-draft]`,
+ * the row that holds it.
  */
 /** A document with a mounted prompt widget. "New file" opens an empty
- *  scratchpad, and the empty-document keeper puts a widget in it — the same
- *  node view, and the same cascade, as one summoned with "/" mid-prose. */
+ *  scratchpad, and the empty-document keeper puts a widget in it with the
+ *  caret already in its draft — the same node view, and the same cascade, as
+ *  one summoned with "/" mid-prose. */
 async function summonWidget(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "New file" }).click();
 }
@@ -82,8 +87,8 @@ test.describe("prompt widget selection", () => {
       const read = (el: Element | null) =>
         el ? getComputedStyle(el).userSelect : null;
 
-      // The composer is a nested ProseMirror; the caret has to land in it.
-      const composer = widgetEl.querySelector('[contenteditable="true"]');
+      // The draft is document content; the caret has to land in it.
+      const composer = widgetEl.querySelector("[data-prompt-draft]");
 
       return {
         chrome: read(widgetEl),
@@ -98,7 +103,7 @@ test.describe("prompt widget selection", () => {
     // The card and its chrome: never selectable.
     expect(selection!.chrome).toBe("none");
     expect(selection!.chromeChild).toBe("none");
-    // The composer and its contents: still fully editable/selectable.
+    // The draft and its contents: still fully editable/selectable.
     expect(selection!.composer).toBe("text");
     if (selection!.composerChild) {
       expect(selection!.composerChild).toBe("text");
@@ -108,7 +113,7 @@ test.describe("prompt widget selection", () => {
   test("a document-wide selection leaves the widget pixel-identical", async ({
     page,
   }) => {
-    // The composer keeps `user-select: text` so it can take a caret, so it
+    // The draft keeps `user-select: text` so it can take a caret, so it
     // would still be painted by a selection spanning the widget — the
     // remaining gap after the user-select deny. `::selection` suppresses the
     // paint instead.
@@ -146,7 +151,7 @@ test.describe("prompt widget selection", () => {
     expect(selected.equals(unselected)).toBe(true);
   });
 
-  test("the composer still accepts typing", async ({ page }) => {
+  test("the draft still accepts typing", async ({ page }) => {
     await summonWidget(page);
 
     const widget = page
@@ -156,10 +161,10 @@ test.describe("prompt widget selection", () => {
     await expect(widget).toBeVisible();
 
     // Guards the fix's real risk: making the card unselectable must not
-    // reach the contenteditable inside it. Chromium refuses to place a caret
-    // in user-select:none text, so a regression here shows up as a composer
+    // reach the draft inside it. Chromium refuses to place a caret in
+    // user-select:none text, so a regression here shows up as a composer
     // that silently swallows keystrokes.
-    const composer = widget.locator('[contenteditable="true"]').first();
+    const composer = widget.locator("[data-prompt-draft]").first();
     await composer.click();
     await page.keyboard.type("still typable");
     await expect(composer).toContainText("still typable");

@@ -5,15 +5,11 @@ import {
   updatePromptBlob,
   clearPromptBlobTurn,
   subscribePromptBlob,
-  requestPromptBlobFocus,
-  subscribePromptBlobFocus,
-  consumePendingPromptBlobFocus,
 } from "../store";
 
 describe("prompt-blob-store", () => {
-  it("returns an empty record for unknown paths", () => {
-    expect(getPromptBlob("/ws/unknown.md")).toEqual({
-      draft: "",
+  it("returns an empty record for unknown ids", () => {
+    expect(getPromptBlob("blob_unknown")).toEqual({
       boundTurnId: null,
       boundTaskId: null,
       lastSentPrompt: "",
@@ -21,66 +17,67 @@ describe("prompt-blob-store", () => {
   });
 
   it("patches persist across reads (remount restoration)", () => {
-    updatePromptBlob("/ws/a.md", { draft: "hello" });
-    updatePromptBlob("/ws/a.md", {
+    updatePromptBlob("blob_a", { lastSentPrompt: "hello" });
+    updatePromptBlob("blob_a", {
       boundTurnId: "trn_1",
       boundTaskId: "task_1",
     });
-    expect(getPromptBlob("/ws/a.md")).toMatchObject({
-      draft: "hello",
+    expect(getPromptBlob("blob_a")).toMatchObject({
+      lastSentPrompt: "hello",
       boundTurnId: "trn_1",
       boundTaskId: "task_1",
     });
   });
 
-  it("clearPromptBlobTurn unbinds the turn but keeps the draft", () => {
-    updatePromptBlob("/ws/b.md", {
-      draft: "keep me",
+  it("clearPromptBlobTurn unbinds the turn, keeping the sent prompt", () => {
+    updatePromptBlob("blob_b", {
       boundTurnId: "trn_2",
       boundTaskId: "task_2",
       lastSentPrompt: "sent",
     });
-    clearPromptBlobTurn("/ws/b.md");
-    expect(getPromptBlob("/ws/b.md")).toMatchObject({
-      draft: "keep me",
+    clearPromptBlobTurn("blob_b");
+    expect(getPromptBlob("blob_b")).toMatchObject({
       boundTurnId: null,
       boundTaskId: null,
       lastSentPrompt: "sent",
     });
   });
 
-  it("notifies subscribers on its path only, until unsubscribed", () => {
+  it("notifies subscribers on its id only, until unsubscribed", () => {
     const onC = vi.fn();
     const onD = vi.fn();
-    const unsubscribe = subscribePromptBlob("/ws/c.md", onC);
-    subscribePromptBlob("/ws/d.md", onD);
+    const unsubscribe = subscribePromptBlob("blob_c", onC);
+    subscribePromptBlob("blob_d", onD);
 
-    updatePromptBlob("/ws/c.md", { draft: "x" });
+    updatePromptBlob("blob_c", { lastSentPrompt: "x" });
     expect(onC).toHaveBeenCalledTimes(1);
     expect(onD).not.toHaveBeenCalled();
 
     unsubscribe();
-    updatePromptBlob("/ws/c.md", { draft: "y" });
+    updatePromptBlob("blob_c", { lastSentPrompt: "y" });
     expect(onC).toHaveBeenCalledTimes(1);
   });
 
   it("snapshot identity is stable between writes (useSyncExternalStore)", () => {
-    updatePromptBlob("/ws/e.md", { draft: "z" });
-    expect(getPromptBlob("/ws/e.md")).toBe(getPromptBlob("/ws/e.md"));
+    updatePromptBlob("blob_e", { lastSentPrompt: "z" });
+    expect(getPromptBlob("blob_e")).toBe(getPromptBlob("blob_e"));
   });
 
   // The multi-widget regression: two widgets (distinct blobIds) in the same
-  // document must never share drafts or turn bindings.
+  // document must never share turn bindings.
   it("keeps records under different ids fully independent", () => {
-    updatePromptBlob("blob_one", { draft: "first", boundTurnId: "trn_1" });
-    updatePromptBlob("blob_two", { draft: "second" });
-    updatePromptBlob("blob_one", { boundTurnId: "trn_9", draft: "" });
+    updatePromptBlob("blob_one", {
+      lastSentPrompt: "first",
+      boundTurnId: "trn_1",
+    });
+    updatePromptBlob("blob_two", { lastSentPrompt: "second" });
+    updatePromptBlob("blob_one", { boundTurnId: "trn_9" });
     expect(getPromptBlob("blob_two")).toMatchObject({
-      draft: "second",
+      lastSentPrompt: "second",
       boundTurnId: null,
     });
     expect(getPromptBlob("blob_one")).toMatchObject({
-      draft: "",
+      lastSentPrompt: "first",
       boundTurnId: "trn_9",
     });
   });
@@ -101,7 +98,6 @@ describe("persisted binding adoption (MET-163)", () => {
     updatePromptBlob("blob_live", {
       boundTurnId: "trn_live",
       boundTaskId: "task_live",
-      draft: "typing",
     });
     // An agent write re-parses the document; the node comes back with the
     // same ids it was serialized with and must not reset the round.
@@ -109,26 +105,6 @@ describe("persisted binding adoption (MET-163)", () => {
     expect(getPromptBlob("blob_live")).toMatchObject({
       boundTurnId: "trn_live",
       boundTaskId: "task_live",
-      draft: "typing",
     });
-  });
-});
-
-describe("prompt-blob focus channel", () => {
-  it("notifies a mounted subscriber and stays pending for a late mount", () => {
-    const onFocus = vi.fn();
-    const unsubscribe = subscribePromptBlobFocus("/ws/f.md", onFocus);
-    requestPromptBlobFocus("/ws/f.md");
-    expect(onFocus).toHaveBeenCalledTimes(1);
-    // The request also remains pending until consumed (late-mount case).
-    expect(consumePendingPromptBlobFocus("/ws/f.md")).toBe(true);
-    unsubscribe();
-  });
-
-  it("consume is one-shot and per-path", () => {
-    requestPromptBlobFocus("/ws/g.md");
-    expect(consumePendingPromptBlobFocus("/ws/other.md")).toBe(false);
-    expect(consumePendingPromptBlobFocus("/ws/g.md")).toBe(true);
-    expect(consumePendingPromptBlobFocus("/ws/g.md")).toBe(false);
   });
 });
