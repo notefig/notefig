@@ -446,27 +446,34 @@ function useComposerKeys({
   blobId,
   documentPath,
   draft,
+  draftIO,
   canRevert,
   actions,
 }: {
   blobId: string;
   documentPath: string;
   draft: string;
+  draftIO: DraftIO;
   canRevert: boolean;
   actions: Pick<
     PromptBlobFaceActions,
     "send" | "sendFollowUp" | "escapeToEditor" | "revertToSlash" | "backspaceDismiss"
   > & { replying: boolean };
 }) {
-  const latest = useRef({ draft, canRevert, actions });
-  latest.current = { draft, canRevert, actions };
+  const latest = useRef({ draftIO, canRevert, actions });
+  latest.current = { draftIO, canRevert, actions };
 
   useEffect(
     () =>
       registerComposerKeyHandler(blobId, (input) => {
         if (mentionPopupHasResults(documentPath)) return false;
-        const { draft: text, canRevert: revertable, actions: live } =
+        const { draftIO: io, canRevert: revertable, actions: live } =
           latest.current;
+        // Read the draft off the live document, per useDraftIO's own
+        // discipline — the render snapshot can trail the document, and a
+        // stale "empty" here would dismiss the widget on the very keypress
+        // meant to delete the last character.
+        const text = io.read();
         const action = deriveComposerKeyAction({
           key: input.key,
           shiftKey: input.shiftKey,
@@ -846,6 +853,7 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     blobId,
     documentPath,
     draft,
+    draftIO,
     canRevert: actions.revertToSlash !== undefined,
     actions: {
       ...actions,
@@ -1155,10 +1163,9 @@ function usePromptBlobActions({
   // never typed); one restored from a saved marker is removed outright —
   // that edit drops the marker from the file, and ⌘Z brings it back. In a
   // doc with no real content removal is pointless (the keeper would
-  // reinsert with the caret kicked out of the draft), so the key is
-  // swallowed doing nothing — deliberately consumed either way, because an
-  // unhandled Backspace at the draft's start falls through to the browser's
-  // native editing, whose cross-boundary delete mangles the widget's DOM.
+  // reinsert with the caret kicked out of the draft), so nothing happens —
+  // the extension's Backspace clamp swallows the key either way (repro:
+  // prompt-widget-backspace.test.tsx).
   const backspaceDismiss = useMemo(() => {
     if (!removeNode) return undefined;
     return () => {

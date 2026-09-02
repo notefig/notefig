@@ -6,14 +6,15 @@
  * The widget itself lives in @notefig/widgets; this exercises it inside the
  * app's real editor kit and markdown codec, which is why it stays here.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
 import { widgetRendererNodes } from "@notefig/widgets";
 import { removeToParagraphTr, revertToSlashTr } from "@notefig/widgets";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
-import { selectionDraft } from "@notefig/widgets";
+import { selectionDraft, registerMentionService } from "@notefig/widgets";
+import type { MentionService } from "@notefig/widgets";
 
 /** The editor's create hook (where the keeper's initial insert runs) fires
  *  asynchronously — construction alone isn't enough for assertions. */
@@ -367,5 +368,77 @@ describe('"/" summon', () => {
     expect(findPromptNode(editor)).toBeNull();
     editor.commands.undo();
     expect(findPromptNode(editor)?.blobId).toBe(node.blobId);
+  });
+});
+
+/** Feed one keydown through the view's handleKeyDown props, the way
+ *  ProseMirror would during real typing. */
+function pressKey(target: Editor, key: string): boolean {
+  const event = new KeyboardEvent("keydown", { key });
+  return Boolean(
+    target.view.someProp("handleKeyDown", (handler) =>
+      handler(target.view, event),
+    ),
+  );
+}
+
+describe("arrow traversal vs the mention popup", () => {
+  /** A live menu registration for the harness's document path. Only
+   *  hasResults matters here — the rest never runs. */
+  function mentionServiceStub(hasResults: boolean): MentionService {
+    return {
+      hasResults: () => hasResults,
+      search: () => [],
+      onStart: () => {},
+      onUpdate: () => {},
+      onKeyDown: () => false,
+      onExit: () => {},
+    };
+  }
+
+  /** A summoned widget below a paragraph, caret in its draft. jsdom has no
+   *  layout, so endOfTextblock (arrowAcrossWidget's "caret at the visual
+   *  edge" gate) is pinned to true — the arrows are always at the boundary. */
+  async function editorWithCaretInDraft(): Promise<Editor> {
+    const created = await documentEditor("<p>Hi there</p><p></p>");
+    created.commands.setTextSelection(11);
+    typeText(created, "/");
+    expect(selectionDraft(created.state)).toBeTruthy();
+    vi.spyOn(created.view, "endOfTextblock").mockReturnValue(true);
+    return created;
+  }
+
+  it("ArrowUp leaves the draft when no popup is open", async () => {
+    editor = await editorWithCaretInDraft();
+    expect(pressKey(editor, "ArrowUp")).toBe(true);
+    expect(selectionDraft(editor.state)).toBeNull();
+  });
+
+  it("an open mention popup keeps the caret in the draft (MET-80 regression)", async () => {
+    editor = await editorWithCaretInDraft();
+    const unregister = registerMentionService(
+      "/ws/doc.md",
+      mentionServiceStub(true),
+    );
+    try {
+      pressKey(editor, "ArrowUp");
+      expect(selectionDraft(editor.state)).toBeTruthy();
+    } finally {
+      unregister();
+    }
+  });
+
+  it("a popup with no rows does not trap the caret", async () => {
+    editor = await editorWithCaretInDraft();
+    const unregister = registerMentionService(
+      "/ws/doc.md",
+      mentionServiceStub(false),
+    );
+    try {
+      expect(pressKey(editor, "ArrowUp")).toBe(true);
+      expect(selectionDraft(editor.state)).toBeNull();
+    } finally {
+      unregister();
+    }
   });
 });

@@ -47,8 +47,12 @@ import {
 } from "./doc-helpers";
 import { PromptBlob } from "./ui/prompt-blob";
 import { adoptPersistedPromptBinding } from "./store";
-import { getMentionService } from "./composer/mention-bridge";
+import {
+  getMentionService,
+  mentionPopupHasResults,
+} from "./composer/mention-bridge";
 import { dispatchComposerKey } from "./composer/key-bridge";
+import { PROMPT_MENTION_NAME } from "./composer/mention-node";
 import { readDraftNode } from "./composer/draft-text";
 import { usePromptWidgetHost } from "./host-context";
 
@@ -319,10 +323,49 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       if (!draft) return false;
       return dispatchComposerKey(draft.blobId, { key, shiftKey });
     };
+    const suggestionOwnsArrows = () =>
+      Boolean(selectionDraft(this.editor.state)) &&
+      mentionPopupHasResults(this.options.filePath);
     return {
       Enter: forward("Enter"),
       Escape: forward("Escape"),
-      Backspace: forward("Backspace"),
+      // Plain Backspace, clamped like its Mod/Alt variants below: the
+      // composer map gets its dismiss chance first (empty draft), then
+      // the character/selection delete happens as a
+      // ProseMirror transaction and the key is consumed. Left unhandled,
+      // the browser edits the draft's DOM natively — and WebKit deleting
+      // the draft's LAST character can mangle the editable island badly
+      // enough that the re-parse drops the whole widget: the same failure
+      // the Mod-Backspace comment describes, reachable from a plain
+      // keypress. A mention chip stays with the Mention extension's own
+      // Backspace (deleteTriggerWithBackspace turns it back into text).
+      // The composer map first (an empty draft DISMISSES, dispatching its
+      // own transaction — which is why it must run outside
+      // commands.command: the command's tr is captured before the callback
+      // runs, and dispatching that stale tr afterwards reverts the
+      // removal).
+      Backspace: () => {
+        if (forward("Backspace")()) return true;
+        return this.editor.commands.command(({ state, tr }) => {
+          const draft = selectionDraft(state);
+          if (!draft) return false;
+          const { selection } = state;
+          if (!selection.empty) {
+            tr.delete(selection.from, Math.min(selection.to, draft.to));
+            return true;
+          }
+          const caret = selection.from;
+          // Draft start: nothing to delete, but still consumed — an
+          // unhandled press here reaches the browser's cross-boundary
+          // native delete.
+          if (caret <= draft.from) return true;
+          if (selection.$from.nodeBefore?.type.name === PROMPT_MENTION_NAME) {
+            return false;
+          }
+          tr.delete(caret - 1, caret);
+          return true;
+        });
+      },
       // The "//" revert: a second "/" in an empty summoned draft turns the
       // widget back into a literal slash. Not consumed (draft has text, or
       // an unsummoned widget): falls through and types normally.
@@ -335,8 +378,16 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // engine: one press in, one press out. The doc-start/doc-end cases
       // fall through (return false) so the gap cursor can still offer a
       // place above/below a widget at the document's edge.
-      ArrowUp: () => arrowAcrossWidget(this.editor, -1),
-      ArrowDown: () => arrowAcrossWidget(this.editor, 1),
+      //
+      // An open mention popup owns vertical navigation — the same deferral
+      // Enter/Escape get through the composer handler: while the popup has
+      // rows, returning false hands the arrows to the suggestion plugin's
+      // own onKeyDown (it runs after this keymap) so they step through the
+      // list instead of carrying the caret out of the widget.
+      ArrowUp: () =>
+        !suggestionOwnsArrows() && arrowAcrossWidget(this.editor, -1),
+      ArrowDown: () =>
+        !suggestionOwnsArrows() && arrowAcrossWidget(this.editor, 1),
       // Delete-to-line-start. Inside a draft the composer map gets its
       // dismiss chance first (empty summoned draft), then the delete is
       // clamped to the draft's own start — and the key is ALWAYS consumed
@@ -346,14 +397,10 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // mangles the widget's DOM badly enough that the re-parse drops the
       // whole node.
       "Mod-Backspace": () => {
+        if (forward("Backspace")()) return true;
         return this.editor.commands.command(({ state, tr }) => {
           const draft = selectionDraft(state);
           if (!draft) return false;
-          if (
-            dispatchComposerKey(draft.blobId, { key: "Backspace", shiftKey: false })
-          ) {
-            return true;
-          }
           const { selection } = state;
           // Caret: delete back to the draft's start. Range: delete it.
           const from = selection.empty ? draft.from : selection.from;
@@ -365,14 +412,10 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // the boundary just like the soft-line variant). Empty summoned draft:
       // same dismiss as plain Backspace.
       "Alt-Backspace": () => {
+        if (forward("Backspace")()) return true;
         return this.editor.commands.command(({ state, tr }) => {
           const draft = selectionDraft(state);
           if (!draft) return false;
-          if (
-            dispatchComposerKey(draft.blobId, { key: "Backspace", shiftKey: false })
-          ) {
-            return true;
-          }
           const { selection } = state;
           if (!selection.empty) {
             tr.delete(selection.from, selection.to);

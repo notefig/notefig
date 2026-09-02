@@ -69,8 +69,15 @@ export { extractMentionPaths } from "./prompt/composer/draft-text";
 export { CopyTextButton } from "./prompt/ui/copy-text-button";
 
 /** The document's mention popup: mounted beside the editor, like the link
- *  and table menus, because the suggestion lives on the document. */
+ *  and table menus, because the suggestion lives on the document. The
+ *  service registration is the popup's seam with the widget's key handling
+ *  (an open popup claims Enter/Escape and the vertical arrows), exported so
+ *  the app's tests can stand in for a mounted menu. */
 export { PromptMentionMenu } from "./prompt/composer/mention-menu";
+export {
+  registerMentionService,
+  type MentionService,
+} from "./prompt/composer/mention-bridge";
 
 /** Widget state the app reaches into. */
 export {
