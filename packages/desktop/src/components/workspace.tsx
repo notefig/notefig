@@ -114,72 +114,16 @@ export const Workspace = () => {
     openSessionsSidebar,
   } = useWorkspacePanels({ searchPanelRef, focusActiveTab });
 
-  // Exposed via WorkspaceTabsContext so components nested in the layout
-  // (link menu, search panel) can open files as tabs.
-  const openFileInTabs = useCallback(
-    (options: OpenFileInLayoutOptions) => {
-      // Only file tabs are gated on the editor's format support; the other
-      // tab kinds carry their own content.
-      if (
-        tabKind(options.tabId) === "file" &&
-        !canOpenInEditor(options.tabId)
-      ) {
-        return false;
-      }
-      openFile(options);
-      return true;
-    },
-    [openFile],
-  );
-
-  // Open (or focus — openFileInLayout dedupes by id) a session's chat tab.
-  // `new-tab` intent: a session must never replace the file tab in view.
-  const openAgentTab = useCallback(
-    (taskId: string) => {
-      openFile({ tabId: agentTabId(taskId), intent: "new-tab" });
-    },
-    [openFile],
-  );
+  const { openFileInTabs, openAgentTab } = useWorkspaceFileOpeners(openFile);
 
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
-  const { settings: projectSettings, update: updateProjectSettings } =
-    useProjectSettings(workspacePath);
-  const direction = projectSettings.direction;
-  const setDirection = useCallback(
-    (next: "ltr" | "rtl") => {
-      updateProjectSettings({ settings: { direction: next } }).catch(
-        (error) => {
-          console.error("Failed to persist direction setting:", error);
-        },
-      );
-    },
-    [updateProjectSettings],
-  );
+  const { direction, setDirection } = useDirectionSetting(workspacePath);
 
   const isFetchingContent = useContentFetching(workspacePath);
-
-  useEffect(() => {
-    // One pass so concurrent prunes can't race each other's layout writes;
-    // the fetch/boot-load gating already happened inside useWorkspaceTabs.
-    if (staleTabIds.length === 0) return;
-
-    const sanitizedLayout = staleTabIds.reduce(
-      (nextLayout, tabId) => removeTabFromLayout(nextLayout, tabId),
-      layout,
-    );
-
-    handleLayoutChange(sanitizedLayout);
-  }, [staleTabIds, layout, handleLayoutChange]);
+  useStaleTabPruning(staleTabIds, layout, handleLayoutChange);
 
   const isSynced = !isFetchingContent;
-  const wordCount = useMemo(() => {
-    if (!currentContent) return null;
-    const words = currentContent
-      .trim()
-      .split(/\s+/)
-      .filter((word: string) => word.length > 0);
-    return words.length;
-  }, [currentContent]);
+  const wordCount = useWordCount(currentContent);
 
   const [fileTreeMode, setFileTreeMode] =
     useState<FileTreeMode>(FILE_TREE_IDLE);
@@ -312,3 +256,87 @@ export const Workspace = () => {
     </WorkspaceTabsProvider>
   );
 };
+
+/** Open-as-tab entry points, exposed via WorkspaceTabsContext so components
+ *  nested in the layout (link menu, search panel) can open files as tabs. */
+function useWorkspaceFileOpeners(
+  openFile: (options: OpenFileInLayoutOptions) => void,
+) {
+  const openFileInTabs = useCallback(
+    (options: OpenFileInLayoutOptions) => {
+      // Only file tabs are gated on the editor's format support; the other
+      // tab kinds carry their own content.
+      if (
+        tabKind(options.tabId) === "file" &&
+        !canOpenInEditor(options.tabId)
+      ) {
+        return false;
+      }
+      openFile(options);
+      return true;
+    },
+    [openFile],
+  );
+
+  // Open (or focus — openFileInLayout dedupes by id) a session's chat tab.
+  // `new-tab` intent: a session must never replace the file tab in view.
+  const openAgentTab = useCallback(
+    (taskId: string) => {
+      openFile({ tabId: agentTabId(taskId), intent: "new-tab" });
+    },
+    [openFile],
+  );
+
+  return { openFileInTabs, openAgentTab };
+}
+
+/** The workspace's text direction, persisted in project settings. */
+function useDirectionSetting(workspacePath: string) {
+  const { settings: projectSettings, update: updateProjectSettings } =
+    useProjectSettings(workspacePath);
+  const direction = projectSettings.direction;
+  const setDirection = useCallback(
+    (next: "ltr" | "rtl") => {
+      updateProjectSettings({ settings: { direction: next } }).catch(
+        (error) => {
+          console.error("Failed to persist direction setting:", error);
+        },
+      );
+    },
+    [updateProjectSettings],
+  );
+  return { direction, setDirection };
+}
+
+/** Drop tabs whose backing rows are gone. One pass so concurrent prunes
+ *  can't race each other's layout writes; the fetch/boot-load gating
+ *  already happened inside useWorkspaceTabs. */
+function useStaleTabPruning(
+  staleTabIds: string[],
+  layout: Parameters<typeof removeTabFromLayout>[0],
+  handleLayoutChange: (layout: Parameters<typeof removeTabFromLayout>[0]) => void,
+) {
+  useEffect(() => {
+    if (staleTabIds.length === 0) return;
+
+    const sanitizedLayout = staleTabIds.reduce(
+      (nextLayout, tabId) => removeTabFromLayout(nextLayout, tabId),
+      layout,
+    );
+
+    handleLayoutChange(sanitizedLayout);
+  }, [staleTabIds, layout, handleLayoutChange]);
+}
+
+/** Status-bar word count of the active document, null with nothing open. */
+function useWordCount(content: string): number | null {
+  return useMemo(() => {
+    if (!content) return null;
+    const words = content
+      .trim()
+      .split(/\s+/)
+      .filter((word: string) => word.length > 0);
+    return words.length;
+  }, [content]);
+}
+
