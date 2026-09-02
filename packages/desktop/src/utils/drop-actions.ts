@@ -79,9 +79,12 @@ async function moveImageAsset(
   const newPath = pathutil.join(folderPath, getFileName(payload.absolutePath));
   if (newPath === payload.absolutePath) return;
 
-  const newSrc = newPath.startsWith(payload.workspaceRoot + "/")
-    ? newPath.slice(payload.workspaceRoot.length + 1)
-    : newPath;
+  // Image srcs are file-relative (how the editor resolves them), so the
+  // rewritten reference must be relative to the source document's directory.
+  const newSrc = relativeSrcFrom(
+    pathutil.dirname(payload.sourceFilePath),
+    newPath,
+  );
 
   const editor = getMarkdownEditor(payload.sourceFilePath);
   if (!editor) {
@@ -121,4 +124,23 @@ async function moveImageAsset(
     }
   });
   if (tr.docChanged) editor.view.dispatch(tr);
+}
+
+/**
+ * Tree-domain path of `toPath` relative to `fromDir`, climbing with `../`
+ * segments when the target isn't a descendant (pathutil.relative is
+ * descendant-only by design). Falls back to the raw path when the two share
+ * no common root.
+ */
+function relativeSrcFrom(fromDir: string, toPath: string): string {
+  let base = fromDir;
+  let ups = "";
+  for (;;) {
+    const rel = pathutil.relative(base, toPath);
+    if (rel !== undefined && rel !== "") return ups + pathutil.toTreePath(rel);
+    const parent = pathutil.dirname(base);
+    if (parent === base) return toPath;
+    base = parent;
+    ups += "../";
+  }
 }

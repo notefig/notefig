@@ -1,8 +1,9 @@
 /**
  * Image drop/paste handling for the markdown editor: intercepts OS file
- * drops and clipboard images, copies them into `<workspaceRoot>/assets/`
- * via the platform adapter, and inserts image nodes with workspace-relative
- * srcs (which is what serializes into the markdown).
+ * drops and clipboard images, copies them into an `assets/` folder next to
+ * the document (`<baseDir>/assets/`) via the platform adapter, and inserts
+ * image nodes with file-relative srcs (which is what serializes into the
+ * markdown, and how the srcs are resolved on render).
  */
 
 import type { EditorView } from "@tiptap/pm/view";
@@ -16,12 +17,12 @@ export function normalizeImageName(name: string): string {
 }
 
 /**
- * Find a name under `<workspaceRoot>/assets/` that doesn't collide with an
+ * Find a name under `<baseDir>/assets/` that doesn't collide with an
  * existing file, suffixing `-1`, `-2`, … before the extension. Overwriting
  * would silently swap the image in every document referencing the old path.
  */
 export async function dedupeAssetName(
-  workspaceRoot: string,
+  baseDir: string,
   name: string,
 ): Promise<string> {
   const dot = name.lastIndexOf(".");
@@ -31,7 +32,7 @@ export async function dedupeAssetName(
   let candidate = name;
   for (let i = 1; ; i++) {
     const result = await platformAdapter.fs.exists([
-      `${workspaceRoot}/assets/${candidate}`,
+      `${baseDir}/assets/${candidate}`,
     ]);
     if (!result[0]?.exists) return candidate;
     candidate = `${stem}-${i}${ext}`;
@@ -40,12 +41,12 @@ export async function dedupeAssetName(
 
 async function writeAssetAndInsert(
   view: EditorView,
-  workspaceRoot: string,
+  baseDir: string,
   name: string,
   file: File,
   insertPos: number,
 ): Promise<void> {
-  const destPath = `${workspaceRoot}/assets/${name}`;
+  const destPath = `${baseDir}/assets/${name}`;
   const data = new Uint8Array(await file.arrayBuffer());
 
   await platformAdapter.fs.writeBinaryFiles([{ path: destPath, data }]);
@@ -62,7 +63,7 @@ async function writeAssetAndInsert(
  * editorProps.handleDrop for OS image-file drops. Internal node moves
  * (`moved`) and non-file drops fall through to ProseMirror.
  */
-export function createImageDropHandler(workspaceRoot: string) {
+export function createImageDropHandler(baseDir: string) {
   return function handleDrop(
     view: EditorView,
     event: DragEvent,
@@ -91,12 +92,12 @@ export function createImageDropHandler(workspaceRoot: string) {
       for (const file of imageFiles) {
         try {
           const normalized = await dedupeAssetName(
-            workspaceRoot,
+            baseDir,
             normalizeImageName(file.name),
           );
           await writeAssetAndInsert(
             view,
-            workspaceRoot,
+            baseDir,
             normalized,
             file,
             insertPos,
@@ -112,7 +113,7 @@ export function createImageDropHandler(workspaceRoot: string) {
 }
 
 /** editorProps.handlePaste for clipboard images (e.g. screenshots). */
-export function createImagePasteHandler(workspaceRoot: string) {
+export function createImagePasteHandler(baseDir: string) {
   return function handlePaste(
     view: EditorView,
     event: ClipboardEvent,
@@ -131,12 +132,12 @@ export function createImagePasteHandler(workspaceRoot: string) {
           try {
             const extension = item.type.split("/")[1] || "png";
             const name = await dedupeAssetName(
-              workspaceRoot,
+              baseDir,
               `pasted-${Date.now()}.${extension}`,
             );
             await writeAssetAndInsert(
               view,
-              workspaceRoot,
+              baseDir,
               name,
               file,
               view.state.selection.from,
