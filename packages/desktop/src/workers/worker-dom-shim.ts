@@ -25,6 +25,28 @@ import {
   Text,
 } from "linkedom/worker";
 
+// Module scope, not inside installWorkerDomShim(): in dev, Vite's
+// react-refresh preamble (injected into every .tsx in the worker's graph —
+// the widget nodes reach here through editor-schema-kit) dereferences
+// `window` while the import graph is still evaluating, before the entry's
+// body can call the installer. This module is the entry's first import, so
+// its top level is the earliest hook there is. Aliasing to globalThis also
+// serves `window.document` / `new window.DOMParser()` once the installer
+// below fills in the globals.
+if (typeof window === "undefined") {
+  const g = globalThis as Record<string, unknown>;
+  g.window = globalThis;
+  // The same preamble's per-component footer calls these registration
+  // hooks; in a page they are installed by the index.html bootstrap, which
+  // a worker never runs. No-ops match what plugin-react itself installs
+  // when refresh is inactive.
+  g.$RefreshReg$ = () => {};
+  g.$RefreshSig$ =
+    () =>
+    (type: unknown) =>
+      type;
+}
+
 /**
  * Browsers imply the missing <html> element around fragments like
  * `<body>…</body>` (the wrapper tiptap-markdown and @tiptap/core both use);
@@ -74,7 +96,7 @@ export function installWorkerDomShim(): void {
   g.Text = Text;
 
   // elementFromString does `new window.DOMParser()`; DOMSerializer falls back
-  // to `window.document`. A plain object keeps the wrapped DOMParser in
-  // control instead of linkedom's defaultView proxy.
-  g.window = { document: shimDocument, DOMParser: ShimDOMParser, Node };
+  // to `window.document`. window is globalThis (aliased at module scope
+  // above), so the globals assigned here serve those lookups — keeping the
+  // wrapped DOMParser in control instead of linkedom's defaultView proxy.
 }
