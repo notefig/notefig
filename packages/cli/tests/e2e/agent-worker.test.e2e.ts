@@ -297,6 +297,7 @@ describe('AgentWorker', () => {
         cwd: '/browser-root',
         extraEnv: {
           OPENCODE_CONFIG: '/browser-root/.notefig/agent/opencode-t1.json',
+          OPENCODE_CONFIG_CONTENT: '{"mcp":{"notefig":{"command":["/worker/bin"]}}}',
           UNCHANGED: '/somewhere/else',
         },
       },
@@ -321,6 +322,18 @@ describe('AgentWorker', () => {
     // Browser prefix rewritten to the worker's real --dir.
     expect(String(cfgLine.data)).toBe(
       `env:${workspace}/.notefig/agent/opencode-t1.json`,
+    );
+
+    browser.frames.length = 0;
+    browser.send({ ch: 'acp', taskId: 't1', data: 'env:OPENCODE_CONFIG_CONTENT' });
+    const contentLine = await browser.waitFor(() =>
+      browser.frames.find(
+        (f) => f.ch === 'acp' && String(f.data).startsWith('env:'),
+      ),
+    );
+    // JSON-valued env is not a path: passes through byte-for-byte.
+    expect(String(contentLine.data)).toBe(
+      'env:{"mcp":{"notefig":{"command":["/worker/bin"]}}}',
     );
     browser.close();
   });

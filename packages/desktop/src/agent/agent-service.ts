@@ -49,7 +49,6 @@ import {
   writeWorkspaceTextFile,
 } from "@/utils/file-sync";
 import { checkpointWorkspaceHistory } from "@/utils/history-service";
-import { APP_DIR_NAME } from "@/utils/app-dir";
 import {
   agentEntriesCollection,
   agentEntriesForTask,
@@ -161,6 +160,31 @@ export function contentBlockText(content: ContentBlock): string {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Layer `overlay` onto `base` with OpenCode's own config-merge semantics
+ * (`mergeConfigConcatArrays`): objects merge recursively, arrays
+ * concatenate, scalars from the overlay win. Used to combine a harness
+ * env override's `OPENCODE_CONFIG_CONTENT` with our app-tools entry so
+ * neither side's nested keys (e.g. the `mcp` map) clobber the other's.
+ */
+function deepMergeConfigs(
+  base: Record<string, unknown>,
+  overlay: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(overlay)) {
+    const existing = merged[key];
+    if (isPlainObject(existing) && isPlainObject(value)) {
+      merged[key] = deepMergeConfigs(existing, value);
+    } else if (Array.isArray(existing) && Array.isArray(value)) {
+      merged[key] = [...existing, ...value];
+    } else {
+      merged[key] = value;
+    }
+  }
+  return merged;
 }
 
 /**
@@ -296,8 +320,6 @@ export class AgentTask {
    * by authenticate()/retryHeldPrompt(), which restart the drain.
    */
   private authBlocked = false;
-  /** Whether this task wrote a per-task OpenCode config (cleaned up in dispose). */
-  private opencodeConfigWritten = false;
   /** True once start() has been called — distinguishes "spawn in flight"
    *  (prompts queue) from "never started" (prompts error immediately). */
   private startCalled = false;
@@ -323,8 +345,8 @@ export class AgentTask {
    * *factory* rather than a transport: the app-tools MCP channel must be
    * live before the harness process spawns, because some harnesses learn
    * about the MCP server through their spawn environment
-   * (`mcpRegistration: "opencode-config"` → a per-task config file passed
-   * via `OPENCODE_CONFIG`) rather than through `session/new.mcpServers`.
+   * (`mcpRegistration: "opencode-config"` → inline config passed via
+   * `OPENCODE_CONFIG_CONTENT`) rather than through `session/new.mcpServers`.
    */
   async start(
     createTransport: (spec: {
@@ -377,7 +399,7 @@ export class AgentTask {
         ),
       );
 
-      const extraEnv = await this.prepareHarnessMcpRegistration(
+      const extraEnv = this.prepareHarnessMcpRegistration(
         mcpEndpoint.mcpServer,
       );
 
@@ -577,15 +599,17 @@ export class AgentTask {
 
   /**
    * Pre-spawn MCP registration for harnesses that don't take
-   * `session/new.mcpServers`. For "opencode-config": write a per-task
-   * OpenCode config registering our stdio server and return
-   * `OPENCODE_CONFIG` pointing at it (verified to reach the model —
-   * v2-opencode-config-mcp-spike.md). Best-effort: a failed write degrades
-   * to "no app tools" rather than failing the task.
+   * `session/new.mcpServers`. For "opencode-config": inject the app-tools
+   * server as `OPENCODE_CONFIG_CONTENT` — inline JSON that OpenCode merges
+   * last, on top of the user's own global / `OPENCODE_CONFIG` / project
+   * configs (merge order verified against opencode 1.18.15, MET-65). A
+   * value instead of a file: nothing lands in the workspace, nothing to
+   * clean up in dispose, and browser transports carry it as plain env (the
+   * embedded relay command is already worker-local, so no path rewriting).
    */
-  private async prepareHarnessMcpRegistration(
+  private prepareHarnessMcpRegistration(
     mcpServer: McpServer | undefined,
-  ): Promise<Record<string, string>> {
+  ): Record<string, string> {
     if (
       this.harness.mcpRegistration !== "opencode-config" ||
       !mcpServer ||
@@ -593,11 +617,10 @@ export class AgentTask {
     ) {
       return {};
     }
-    const configPath = this.opencodeConfigPath();
     const environment: Record<string, string> = {};
     for (const entry of mcpServer.env ?? [])
       environment[entry.name] = entry.value;
-    const config = {
+    const config = deepMergeConfigs(this.harnessConfigContent(), {
       $schema: "https://opencode.ai/config.json",
       mcp: {
         [mcpServer.name]: {
@@ -607,30 +630,23 @@ export class AgentTask {
           environment,
         },
       },
-    };
-    const result = await platformAdapter.fs.writeFiles([
-      { path: configPath, content: JSON.stringify(config, null, 2) },
-    ]);
-    if (result.failed.length > 0) {
-      this.warn(
-        "opencode mcp config write failed; task runs without app tools",
-      );
-      return {};
-    }
-    this.opencodeConfigWritten = true;
-    return { OPENCODE_CONFIG: configPath };
+    });
+    return { OPENCODE_CONFIG_CONTENT: JSON.stringify(config) };
   }
 
-  /** Per-task OpenCode config, under the workspace's own app dir. Every
-   * child of that dir bar `scratchpads` is hidden from the walkers, the
-   * watcher and both git repos, so no dot prefix is needed here. */
-  private opencodeConfigPath(): string {
-    return pathutil.join(
-      this.workspacePath,
-      APP_DIR_NAME,
-      "agent",
-      `opencode-${this.taskId}.json`,
-    );
+  /** A harness env override may carry its own `OPENCODE_CONFIG_CONTENT`;
+   * ours must layer on top of it rather than clobber it (extraEnv wins the
+   * spawn-env merge on every platform). Unparseable content degrades to
+   * `{}` — OpenCode itself would reject it too. */
+  private harnessConfigContent(): Record<string, unknown> {
+    const raw = this.harness.env.OPENCODE_CONFIG_CONTENT;
+    if (!raw) return {};
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return isPlainObject(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
   }
 
   /**
@@ -1368,12 +1384,6 @@ export class AgentTask {
     this.unsubscribers.length = 0;
     await this.cancel();
     await Promise.all([this.transport?.close(), this.mcpEndpoint?.close()]);
-    if (this.opencodeConfigWritten) {
-      // Best-effort: a stale per-task config is inert (nothing points at it).
-      void platformAdapter.fs
-        .deleteFiles([this.opencodeConfigPath()])
-        .catch(() => {});
-    }
   }
 
   /** Residual observability: signals that used to land in the diagnostics stream. */

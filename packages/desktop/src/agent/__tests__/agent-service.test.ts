@@ -1382,7 +1382,7 @@ describe("Stage 4: per-harness MCP registration", () => {
     expect(agent.newSessionParams?.mcpServers?.[0]?.name).toBe("notefig");
   });
 
-  it('"opencode-config" harnesses get a per-task config file + OPENCODE_CONFIG, and empty mcpServers', async () => {
+  it('"opencode-config" harnesses get OPENCODE_CONFIG_CONTENT in spawn env (no file), and empty mcpServers', async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
     let capturedEnv: Record<string, string> | undefined;
@@ -1392,19 +1392,43 @@ describe("Stage 4: per-harness MCP registration", () => {
       return client;
     });
 
-    const expectedPath = `/ws/.notefig/agent/opencode-${task.taskId}.json`;
-    expect(capturedEnv?.OPENCODE_CONFIG).toBe(expectedPath);
-    const write = writeFiles.mock.calls
-      .flat(1)
-      .flat(1)
-      .find((f: { path?: string }) => f?.path === expectedPath) as
-      | { path: string; content: string }
-      | undefined;
-    expect(write).toBeDefined();
-    const config = JSON.parse(write!.content);
+    expect(capturedEnv?.OPENCODE_CONFIG).toBeUndefined();
+    const config = JSON.parse(capturedEnv!.OPENCODE_CONFIG_CONTENT);
     expect(config.mcp.notefig.type).toBe("local");
     expect(config.mcp.notefig.command).toEqual(["notefig"]);
+    expect(writeFiles).not.toHaveBeenCalled();
     expect(agent.newSessionParams?.mcpServers).toEqual([]);
+  });
+
+  it("deep-merges a harness-env OPENCODE_CONFIG_CONTENT under our mcp entry instead of clobbering it", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    new FakeAgent(agentSide);
+    let capturedEnv: Record<string, string> | undefined;
+    const task = new TaskManager("/ws").createTask({
+      ...opencodeHarness,
+      env: {
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          theme: "user-theme",
+          mcp: {
+            userServer: { type: "remote", url: "https://x.example" },
+            // Collides with the entry we inject: nested keys merge, our
+            // scalars win, foreign keys survive.
+            notefig: { enabled: false, timeout: 99 },
+          },
+        }),
+      },
+    });
+    await task.start(({ extraEnv }) => {
+      capturedEnv = extraEnv;
+      return client;
+    });
+
+    const config = JSON.parse(capturedEnv!.OPENCODE_CONFIG_CONTENT);
+    expect(config.theme).toBe("user-theme");
+    expect(config.mcp.userServer.url).toBe("https://x.example");
+    expect(config.mcp.notefig.command).toEqual(["notefig"]);
+    expect(config.mcp.notefig.enabled).toBe(true); // ours wins the collision
+    expect(config.mcp.notefig.timeout).toBe(99); // theirs survives the merge
   });
 
   it('"none" harnesses get neither', async () => {
@@ -1819,17 +1843,15 @@ describe("AgentTask dispose (MET-72)", () => {
     expect(mcpEndpoints.at(-1)!.close).toHaveBeenCalled();
   });
 
-  it("deletes the per-task opencode config it wrote", async () => {
+  it("leaves no per-task opencode config behind (none written, none deleted)", async () => {
     const [client, agentSide] = createLoopbackPair();
     new FakeAgent(agentSide);
     const task = new TaskManager("/ws").createTask(opencodeHarness);
     await task.start(() => client);
-    expect(writeFiles).toHaveBeenCalled(); // config written on start
 
     await task.dispose();
 
-    expect(deleteFiles).toHaveBeenCalledWith([
-      expect.stringContaining(`opencode-${task.taskId}.json`),
-    ]);
+    expect(writeFiles).not.toHaveBeenCalled();
+    expect(deleteFiles).not.toHaveBeenCalled();
   });
 });
