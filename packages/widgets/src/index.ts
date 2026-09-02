@@ -21,7 +21,7 @@ export {
 
 // ─── the prompt widget ────────────────────────────────────────────────────
 export { promptWidget } from "./prompt";
-export { PROMPT_NODE_NAME } from "./prompt/node";
+export { PROMPT_DRAFT_NODE_NAME, PROMPT_NODE_NAME } from "./prompt/node";
 export {
   PromptWidgetHostProvider,
   usePromptWidgetHost,
@@ -51,26 +51,31 @@ export {
   docHasPromptNode,
   docHasRealContent,
   findPromptNodeId,
+  findPromptNodePos,
+  promptDraftRange,
   registerContentlessNodeName,
   removeToParagraphTr,
   revertToSlashTr,
+  selectionDraft,
 } from "./prompt/doc-helpers";
 
-/** The composer and its copy affordance, reused by the app's chat tab. */
+/** The standalone composer and its copy affordance, for the chat tab —
+ *  which has no host document to put a draft in. */
 export {
   PromptEditor,
-  extractMentionPaths,
   type PromptEditorHandle,
 } from "./prompt/composer/prompt-editor";
+export { extractMentionPaths } from "./prompt/composer/draft-text";
 export { CopyTextButton } from "./prompt/ui/copy-text-button";
 
-/** Widget state the app's focus lifecycle reaches into. */
+/** The document's mention popup: mounted beside the editor, like the link
+ *  and table menus, because the suggestion lives on the document. */
+export { PromptMentionMenu } from "./prompt/composer/mention-menu";
+
+/** Widget state the app reaches into. */
 export {
-  consumePendingPromptBlobFocus,
   getPromptBlob,
-  requestPromptBlobFocus,
   subscribePromptBlob,
-  subscribePromptBlobFocus,
   updatePromptBlob,
   type PromptBlobRecord,
 } from "./prompt/store";

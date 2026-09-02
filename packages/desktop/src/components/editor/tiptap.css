@@ -61,11 +61,19 @@
 }
 
 /* The widget owns its own focus/selection UI (PromptBlob) — a ProseMirror
-   NodeSelection can still land on it (e.g. the "/" summon sets one so ⌘Z
-   restores the right cursor position, ai-prompt-utils.ts), but it must never
-   show the generic node-selection outline. */
+   NodeSelection can still land on it (clicking its chrome), but it must
+   never show the generic node-selection outline. */
 .ProseMirror [data-type="ai-prompt"].ProseMirror-selectednode {
   outline: none;
+}
+
+/* The draft is document content, so the editor's own outline rules would
+   otherwise reach it. `not-prose` on the widget already keeps document
+   typography off the card; the draft opts back into a readable line box
+   without opting back into prose margins. */
+.ProseMirror [data-prompt-draft] > [data-node-view-content] {
+  outline: none;
+  min-height: 1.5em;
 }
 
 /* Task item — checkbox and text side by side */

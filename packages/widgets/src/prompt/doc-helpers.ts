@@ -4,10 +4,10 @@
  * its dismiss semantics, and importing the node view from the chrome would
  * close an import cycle (the view renders the chrome).
  */
-import type { Node as PMNode } from "@tiptap/pm/model";
+import type { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
-import { PROMPT_NODE_NAME } from "./node";
+import { PROMPT_DRAFT_NODE_NAME, PROMPT_NODE_NAME } from "./node";
 
 /**
  * Node types that a document can hold and still count as empty. The widget
@@ -34,6 +34,13 @@ export function docHasRealContent(doc: PMNode): boolean {
   let found = false;
   doc.descendants((node) => {
     if (found) return false;
+    // A widget's draft is the user's half-written prompt, not the
+    // document's content: it never serializes, so a document holding only
+    // a draft is still empty on disk. Skipping the subtree is what keeps
+    // the empty-doc keeper, the "/" summon and the dismiss semantics
+    // working once the composer became document content — without it the
+    // first typed character would flip this to true.
+    if (node.type.name === PROMPT_NODE_NAME) return false;
     if (node.isText) {
       if (node.text?.trim()) found = true;
       return false;
@@ -65,6 +72,61 @@ export function findPromptNodeId(doc: PMNode): string | null {
     return found === null;
   });
   return found;
+}
+
+/** The document position of the widget carrying `blobId`, or null. */
+export function findPromptNodePos(doc: PMNode, blobId: string): number | null {
+  let found: number | null = null;
+  doc.descendants((node, pos) => {
+    if (found !== null) return false;
+    if (node.type.name === PROMPT_NODE_NAME && node.attrs.blobId === blobId) {
+      found = pos;
+    }
+    return found === null;
+  });
+  return found;
+}
+
+/**
+ * A widget's draft child: the node, and the range its CONTENT occupies —
+ * what a ranged replace addresses (Edit restoring a sent prompt, send
+ * clearing the composer) and where the "/" summon puts the caret.
+ */
+export function promptDraftRange(
+  doc: PMNode,
+  blobId: string,
+): { node: PMNode; from: number; to: number } | null {
+  const pos = findPromptNodePos(doc, blobId);
+  if (pos === null) return null;
+  const widget = doc.nodeAt(pos);
+  const draft = widget?.firstChild;
+  if (!widget || !draft || draft.type.name !== PROMPT_DRAFT_NODE_NAME) {
+    return null;
+  }
+  // +1 into the widget, +1 into the draft = the start of its inline content.
+  const from = pos + 2;
+  return { node: draft, from, to: from + draft.content.size };
+}
+
+/**
+ * The draft the selection sits in, if any — the guard every composer key
+ * binding shares, and how the widget's chrome learns that the caret is in
+ * its own text.
+ */
+export function selectionDraft(state: {
+  selection: { $from: ResolvedPos };
+}): { blobId: string; node: PMNode; from: number; to: number } | null {
+  const { $from } = state.selection;
+  for (let depth = $from.depth; depth > 0; depth--) {
+    if ($from.node(depth).type.name !== PROMPT_DRAFT_NODE_NAME) continue;
+    const draft = $from.node(depth);
+    const widget = $from.node(depth - 1);
+    const blobId = widget.attrs.blobId as string | null;
+    if (!blobId) return null;
+    const from = $from.start(depth);
+    return { blobId, node: draft, from, to: from + draft.content.size };
+  }
+  return null;
 }
 
 /**
@@ -123,11 +185,12 @@ export function slashSummonTr(
     return null;
   }
   const from = $from.before(depth);
-  const tr = state.tr.replaceWith(
-    from,
-    $from.after(depth),
-    type.create({ summoned: true, blobId }),
-  );
+  // createAndFill, not create: the widget's content expression requires a
+  // draft child, and a node built without one is invalid — it renders with
+  // no contentDOM, so there is nowhere to type.
+  const node = type.createAndFill({ summoned: true, blobId });
+  if (!node) return null;
+  const tr = state.tr.replaceWith(from, $from.after(depth), node);
   // Explicit, like revertToSlashTr/removeToParagraphTr below — leaving this
   // to ProseMirror's default post-replace mapping (an implicit NodeSelection
   // on the atom, since the old cursor position no longer resolves) left the

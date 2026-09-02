@@ -12,6 +12,7 @@ import { useEditorFocusLifecycle } from "./use-editor-focus-lifecycle";
 import { useEditorViewportMemory } from "./use-editor-viewport-memory";
 import { useLinkPrompt } from "./use-link-prompt";
 import { TiptapToolbar } from "./tiptap-toolbar";
+import { PromptMentionMenu } from "@notefig/widgets";
 import { LinkBubbleMenu } from "./tiptap-link-menu";
 import { TableMenu } from "./tiptap-table-menu";
 import { cn } from "@notefig/ui/utils";
@@ -134,6 +135,11 @@ export function TextEditor({
           scrollRef.current = element;
         }}
       >
+        {/* The grip can also appear against a prompt widget's draft. It is
+            inert there by construction — the schema admits `promptDraft`
+            only inside its own widget, so a drag out of one has nowhere
+            valid to land — and suppressing it would mean a React state
+            update on every hovered node. Left as is. */}
         <DragHandle editor={editor} nested>
           <GripVertical className="w-4 h-4 text-muted-foreground/40 hover:text-muted-foreground" />
         </DragHandle>
@@ -144,6 +150,10 @@ export function TextEditor({
           filePath={file.path}
         />
         <TableMenu editor={editor} />
+        {/* The "@" mention popup for this document's prompt drafts —
+            mounted here, like the link and table menus, because the
+            suggestion plugin lives on the document. */}
+        <PromptMentionMenu documentPath={file.path} workspacePath={basePath} />
         <EditorContent
           editor={editor}
           className="prose prose-sm dark:prose-invert max-w-2xl mx-auto p-4 outline-none"

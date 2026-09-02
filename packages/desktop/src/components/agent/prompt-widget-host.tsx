@@ -44,7 +44,7 @@ import { canOpenFile } from "@/components/editor/polymorphic-editor";
 import { FileTypeIcon } from "@/components/editor/file-type-icon";
 import { Markdown } from "@/components/ui/markdown";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
-import { requestTabFocus, suppressTabFocus } from "@/tabs/tab-controllers";
+import { requestTabFocus } from "@/tabs/tab-controllers";
 import { rankFileRows } from "@/utils/file-score";
 import { useKv } from "@/utils/kv-store";
 import { path as pathutil, relativeTreePath, workspaceKey } from "@/utils/path";
@@ -285,12 +285,7 @@ export function usePromptWidgetHost(): PromptWidgetHost {
         void requestTabFocus(documentPath, {
           reason: options.reason,
           steal: options.steal,
-          caret:
-            options.caretBeforeNode === undefined
-              ? undefined
-              : { type: "before-node", pos: options.caretBeforeNode },
         }),
-      suppressAmbientFocus: () => suppressTabFocus(),
 
       slots,
     }),

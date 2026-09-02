@@ -159,22 +159,15 @@ export interface PromptWidgetHost {
   openFile(path: string): void;
   openAgentTab(taskId: string): void;
   /**
-   * Hand focus back to the document, through the app's focus arbiter — an
-   * explicit hand-off out of the composer, so `steal` is the widget's to
-   * ask for. `caretBeforeNode` is the widget's own document position, which
-   * is where the caret should land (the app resolves what "before this node"
-   * means in its editor).
+   * Claim focus for the document, through the app's focus arbiter — an
+   * explicit hand-off, so `steal` is the widget's to ask for. The caret is
+   * already the document's own selection (the draft is document content),
+   * so there is nothing else to say.
    */
   focusDocument(
     documentPath: string,
-    options: { reason: string; steal?: boolean; caretBeforeNode?: number },
+    options: { reason: string; steal?: boolean },
   ): void;
-  /**
-   * Hold off the app's ambient focus grabs briefly, so a focus the widget is
-   * about to take for itself isn't stolen back (new-file creation and the
-   * "/" summon both leave the editor competing for it).
-   */
-  suppressAmbientFocus(): void;
 
   slots: {
     Markdown: ComponentType<{ text: string; className?: string }>;

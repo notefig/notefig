@@ -266,10 +266,12 @@ export function deriveTouchedFiles(
  * Escape and "/" only special-case to "revert" (turn back into a literal
  * "/") when the draft is empty and the widget is summoned; a non-empty
  * draft on Escape falls back to "escape" (return focus to the doc, draft
- * kept). Backspace on an empty, summoned composer dismisses the widget
- * entirely (no literal "/" left behind) — `canRevert` doubles as the
- * "summoned instances only" guard for both, since it's already exactly
- * that condition (see revertToSlash in prompt-blob.tsx).
+ * kept). Backspace on an empty composer dismisses the widget entirely (no
+ * literal "/" left behind) — gated by `canDismiss`, which is broader than
+ * `canRevert`: reverting to a literal "/" only makes sense for a summoned
+ * instance, but backspacing an empty widget away applies just as well to
+ * one restored from a saved marker (`canDismiss` defaults to `canRevert`
+ * for callers that predate the split).
  */
 export type ComposerKeyAction =
   | { type: "send" }
@@ -284,9 +286,11 @@ export function deriveComposerKeyAction(params: {
   shiftKey: boolean;
   draftEmpty: boolean;
   canRevert: boolean;
+  canDismiss?: boolean;
   inFlight: boolean;
 }): ComposerKeyAction {
   const { key, shiftKey, draftEmpty, canRevert, inFlight } = params;
+  const canDismiss = params.canDismiss ?? canRevert;
   if (key === "Enter" && !shiftKey) return { type: "send" };
   if (key === "Escape") {
     if (inFlight) return { type: "cancelRestore" };
@@ -295,7 +299,7 @@ export function deriveComposerKeyAction(params: {
   // The "//" path: a second "/" right after summoning means the user
   // wanted a literal slash.
   if (key === "/" && draftEmpty && canRevert) return { type: "revert" };
-  if (key === "Backspace" && draftEmpty && canRevert) {
+  if (key === "Backspace" && draftEmpty && canDismiss) {
     return { type: "backspaceDismiss" };
   }
   return { type: "none" };

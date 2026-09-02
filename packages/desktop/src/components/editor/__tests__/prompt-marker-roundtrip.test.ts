@@ -67,6 +67,12 @@ describe("prompt marker round trip", () => {
     editor.commands.insertContentAt(editor.state.doc.content.size, {
       type: "aiPrompt",
       attrs: { blobId: "blob_1a2b", taskId: "task_9f8e" },
+      // The widget's content is the user's draft; it is required by the
+      // schema and never serialized, so a bound widget with a half-typed
+      // prompt in it still writes nothing but its marker.
+      content: [
+        { type: "promptDraft", content: [{ type: "text", text: "unsent" }] },
+      ],
     });
     expect(markdownOf(editor)).toContain(MARKER);
     editor.destroy();

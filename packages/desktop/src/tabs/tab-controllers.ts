@@ -27,19 +27,13 @@
  * `tab(id).agent` for the type-specific ones.
  */
 import type { SearchTarget } from "@/adapters/platform-adapter.interface";
-import {
-  focusArbiter,
-  type FocusTiming,
-  type TabCaretPlacement,
-} from "@/utils/focus-arbiter";
+import { focusArbiter, type FocusTiming } from "@/utils/focus-arbiter";
 import type { TabKind } from "./tab-id";
 
 export type { SearchTarget as TabSearchMatch };
 
 /** Everything an intent can ask of a tab's focus. */
 export interface TabFocusOptions {
-  /** Placement hint for tab types with a caret; opaque to this layer. */
-  caret?: TabCaretPlacement;
   /**
    * An explicit user hand-off (Escape out of a composer, a menu action).
    * Ambient intents — mount, layout reclaim, tab activation — leave this
@@ -125,10 +119,7 @@ focusArbiter.registerResolver("tab", (intent) => {
   const controller = controllers.get(intent.target.tabId);
   if (!controller) return false;
 
-  const result = controller.focus({
-    caret: intent.target.caret,
-    steal: intent.steal,
-  });
+  const result = controller.focus({ steal: intent.steal });
   if (observedIntentId === intent.id) {
     observedResult = result;
   }
@@ -150,13 +141,12 @@ export function requestTabFocus(
   options: {
     when?: FocusTiming;
     reason?: string;
-    caret?: TabCaretPlacement;
     steal?: boolean;
   } = {},
 ): string {
   return focusArbiter.request({
     domain: "tab",
-    target: { type: "tab", tabId, caret: options.caret },
+    target: { type: "tab", tabId },
     steal: options.steal,
     priority: TAB_FOCUS_PRIORITY,
     reason: options.reason ?? "tab-focus",

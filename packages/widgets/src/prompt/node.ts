@@ -12,9 +12,65 @@ import { parsePromptMarkerData, serializePromptMarker } from "./marker-codec";
  *  from it instead of repeating the string literal. */
 export const PROMPT_NODE_NAME = "aiPrompt";
 
+/** The draft child's node name — the composer's text, as document content. */
+export const PROMPT_DRAFT_NODE_NAME = "promptDraft";
+
 /**
- * The inline AI prompt widget's schema node — a block atom whose presence in
- * the file depends on whether it is bound to an agent session (MET-163).
+ * The composer's text, as a node of the host document.
+ *
+ * This is what puts the widget inside the editor's own lifecycle: the caret
+ * in a prompt is an ordinary ProseMirror selection, so selection memory,
+ * viewport memory and the focus arbiter reach it with no widget-shaped
+ * special cases. The node view renders it through NodeViewContent.
+ *
+ * The schema is the isolation mechanism, not a pile of guards:
+ *  - `marks: ""` — every mark the document defines (bold, italic, code,
+ *    link, highlight, sub/sup, underline) is inadmissible here, so their
+ *    input rules, keymaps and toolbar commands no-op inside a draft.
+ *  - the parent's content expression admits only this node, so heading /
+ *    list / blockquote / code-block conversions and `splitBlock` all fail
+ *    `canReplaceWith` and no-op too.
+ *  - `isolating` keeps Backspace, joins and drags from crossing the edge.
+ * `image` is absent from the content expression, which is what stops the
+ * editor's image drop/paste handlers from inserting into a draft.
+ *
+ * It never reaches the file: the widget's serializer below writes its
+ * marker from attrs alone and never renders children. The no-op serializer
+ * here is the belt for that — without one, tiptap-markdown's HTML fallback
+ * would write the draft into the user's document.
+ */
+export const PromptDraftNodeBase = Node.create({
+  name: PROMPT_DRAFT_NODE_NAME,
+  content: "(text | mention | hardBreak)*",
+  marks: "",
+  isolating: true,
+  selectable: false,
+  // Deliberately not in the "block" group: the only place the schema admits
+  // it is the widget's own content expression, so ProseMirror itself
+  // forbids one appearing anywhere else in the document.
+
+  parseHTML() {
+    return [{ tag: 'div[data-type="prompt-draft"]' }];
+  },
+
+  renderHTML() {
+    return ["div", { "data-type": "prompt-draft" }, 0];
+  },
+
+  addStorage() {
+    return {
+      markdown: {
+        // Unreachable through the widget (its serializer never renders
+        // children) — this is the belt, not the mechanism.
+        serialize() {},
+      },
+    };
+  },
+});
+
+/**
+ * The inline AI prompt widget's schema node — a block whose presence in the
+ * file depends on whether it is bound to an agent session (MET-163).
  *
  * Unbound (the empty-doc keeper, a widget summoned with "/" but never sent)
  * it is pure UI and serializes to NOTHING: an untouched document must stay
@@ -22,12 +78,23 @@ export const PROMPT_NODE_NAME = "aiPrompt";
  * and serializes to its marker comment — see marker-codec.ts for why a
  * comment and why only two ids. Without either branch tiptap-markdown's html
  * fallback would write the node's placeholder <div> into the file.
+ *
+ * Its content is the draft the user types (PromptDraftNodeBase above) —
+ * never serialized, which is what keeps a half-written prompt out of the
+ * file while still letting the document own the caret.
  */
 export const AiPromptNodeBase = Node.create({
   name: PROMPT_NODE_NAME,
   group: "block",
-  atom: true,
+  content: PROMPT_DRAFT_NODE_NAME,
+  isolating: true,
   selectable: true,
+  // No gap cursor between the widget's edges and its draft child: those two
+  // gaps are phantom caret stops (arrowing through the widget took two
+  // presses and drew a blinking line over the chrome). Honoured by
+  // prosemirror-gapcursor via the schema spec, so it belongs to the
+  // worker-safe half even though only the live editor loads Gapcursor.
+  allowGapCursor: false,
 
   addAttributes() {
     return {

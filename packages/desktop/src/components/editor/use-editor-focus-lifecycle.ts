@@ -14,11 +14,6 @@ import {
   navigateToLocation,
 } from "@/components/editor/editor-store";
 import { requestTabFocus } from "@/tabs/tab-controllers";
-import {
-  docHasRealContent,
-  findPromptNodeId,
-} from "@notefig/widgets";
-import { requestPromptBlobFocus } from "@notefig/widgets";
 
 /** How long after mount the tab layout may still re-parent the editor DOM. */
 const FOCUS_RECLAIM_WINDOW_MS = 600;
@@ -66,22 +61,13 @@ export function useEditorFocusLifecycle(
         return;
       }
       if (document.activeElement === document.body && !editor.view.hasFocus()) {
-        // On an empty keeper doc the composer textarea is the rightful
-        // owner (the arbiter declines ambient editor intents there), so
-        // reclaim to it — re-parenting drops its focus just like the
-        // editor's, and nothing else restores it.
-        const doc = editor.state.doc;
-        const keeperId = docHasRealContent(doc)
-          ? null
-          : findPromptNodeId(doc);
-        if (keeperId) {
-          requestPromptBlobFocus(keeperId);
-        } else {
-          requestTabFocus(filePath, {
-            when: "immediate",
-            reason: "focus-lost-after-mount",
-          });
-        }
+        // One reclaim for every caret in the document, the widget's prompt
+        // draft included: it is content of this editor, so focusing the
+        // editor puts the caret back where the state selection already is.
+        requestTabFocus(filePath, {
+          when: "immediate",
+          reason: "focus-lost-after-mount",
+        });
       }
       reclaimRaf = requestAnimationFrame(reclaim);
     };

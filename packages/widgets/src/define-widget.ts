@@ -56,6 +56,18 @@ export interface EditorWidgetDefinition<Options = unknown> {
    * the node view is React, so it reads the host from context.
    */
   view: Node;
+  /**
+   * Extra schema nodes the widget's own content expression refers to — the
+   * prompt's draft child and the mention chip that can sit in it. Two
+   * halves for the same reason the widget has them (rule 1): `bases` is
+   * what the conversion worker builds its schema from, `views` is what the
+   * live editor registers. A node that needs nothing from the renderer
+   * appears, identically, in both.
+   */
+  support?: {
+    bases: Node[];
+    views(options: { filePath: string; basePath: string }): Node[];
+  };
   /** Phantom, for `view.configure()`'s option type at the call site. */
   readonly options?: Options;
   /** Present iff the widget persists to markdown. */

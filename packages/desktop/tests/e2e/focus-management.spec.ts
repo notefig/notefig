@@ -193,19 +193,31 @@ test.describe("Focus Management", () => {
       )
       .toBe(true);
 
-    // The composer is its own Tiptap editor (MET-80) — a nested
-    // contenteditable, not a textarea.
-    const composer = widget.locator(".ProseMirror").first();
-    await expect(composer).toBeFocused();
+    // The composer is the widget's draft, which is content of the
+    // document's own editor — so "focused" means the document holds focus
+    // with its caret in the draft, not that a second editor took it.
+    const draft = widget.locator("[data-prompt-draft]").first();
+    const caretIsInDraft = () =>
+      page.evaluate(() => {
+        const pm = document.querySelector(".ProseMirror");
+        const node = window.getSelection()?.anchorNode ?? null;
+        const element =
+          node instanceof Element ? node : (node?.parentElement ?? null);
+        return (
+          document.activeElement === pm &&
+          Boolean(element?.closest("[data-prompt-draft]"))
+        );
+      });
+    await expect.poll(caretIsInDraft).toBe(true);
 
     // The editor's post-mount reclaim window is 600ms — focus must survive
     // it, not just land briefly.
     await page.waitForTimeout(800);
-    await expect(composer).toBeFocused();
+    expect(await caretIsInDraft()).toBe(true);
 
-    // Typing goes to the composer, not the document.
+    // Typing goes to the draft, not the prose around it.
     await page.keyboard.type("hello agent");
-    await expect(composer).toHaveText("hello agent");
+    await expect(draft).toHaveText("hello agent");
   });
 
   test("multi-dock hotkeys switch tabs inside the active dock window", async ({

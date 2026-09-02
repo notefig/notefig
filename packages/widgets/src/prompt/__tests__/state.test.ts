@@ -398,7 +398,7 @@ describe("deriveComposerKeyAction", () => {
     }
   });
 
-  it("Backspace dismisses only on an empty, revertible (summoned) composer", () => {
+  it("Backspace dismisses on an empty, dismissable composer", () => {
     expect(
       deriveComposerKeyAction({
         key: "Backspace",
@@ -418,13 +418,36 @@ describe("deriveComposerKeyAction", () => {
         inFlight: false,
       }),
     ).toEqual({ type: "none" });
-    // Keeper widgets (summoned=false) never dismiss via Backspace.
+    // canDismiss is broader than canRevert: a widget restored from a saved
+    // marker is not summoned (no "/" to revert to) but still dismisses.
     expect(
       deriveComposerKeyAction({
         key: "Backspace",
         shiftKey: false,
         draftEmpty: true,
         canRevert: false,
+        canDismiss: true,
+        inFlight: false,
+      }),
+    ).toEqual({ type: "backspaceDismiss" });
+    // ...and defaults to canRevert for callers that predate the split.
+    expect(
+      deriveComposerKeyAction({
+        key: "Backspace",
+        shiftKey: false,
+        draftEmpty: true,
+        canRevert: false,
+        inFlight: false,
+      }),
+    ).toEqual({ type: "none" });
+    // A widget whose host withheld dismissal (reply row) stays put.
+    expect(
+      deriveComposerKeyAction({
+        key: "Backspace",
+        shiftKey: false,
+        draftEmpty: true,
+        canRevert: true,
+        canDismiss: false,
         inFlight: false,
       }),
     ).toEqual({ type: "none" });

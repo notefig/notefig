@@ -68,7 +68,6 @@ export function fakePromptWidgetHost(
     openFile: vi.fn(),
     openAgentTab: vi.fn(),
     focusDocument: vi.fn(),
-    suppressAmbientFocus: vi.fn(),
 
     slots: {
       Markdown: ({ text, className }) => (
