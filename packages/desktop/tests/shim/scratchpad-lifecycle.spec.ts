@@ -45,6 +45,35 @@ test.describe("shim: scratchpad entry lifecycle", () => {
    * A single-tab window renders no tab strip, so open README in a second
    * tab and close the scratchpad tab via its ✕.
    */
+  /**
+   * Resolve once `quietMs` has passed with no `/invoke/*` traffic to the
+   * shim backend — a real signal for "the concurrent collection-boot
+   * activity that collides with a write has drained," not a guess at how
+   * long that takes. The backend serializes each STATEMENT but not a
+   * write's surrounding transaction against another collection's own
+   * transaction (see db_ops.rs), so triggering a write while boot-time
+   * hydration (workspace metadata, the startup harness, KV settings) is
+   * still in flight can throw "cannot start a transaction within a
+   * transaction" — silently, since every caller here is fire-and-forget.
+   */
+  async function waitForBackendQuiet(
+    page: Page,
+    quietMs = 300,
+  ): Promise<void> {
+    let lastRequestAt = Date.now();
+    const onRequest = (req: import("@playwright/test").Request) => {
+      if (req.url().includes("/invoke/")) lastRequestAt = Date.now();
+    };
+    page.on("request", onRequest);
+    try {
+      await expect
+        .poll(() => Date.now() - lastRequestAt, { timeout: 15000 })
+        .toBeGreaterThanOrEqual(quietMs);
+    } finally {
+      page.off("request", onRequest);
+    }
+  }
+
   async function closeScratchpadTab(page: Page) {
     await openFileInNewTab(page, "README.md");
     const tab = page
@@ -54,6 +83,56 @@ test.describe("shim: scratchpad entry lifecycle", () => {
     await tab.hover();
     await tab.getByLabel("Close tab").click();
     await expect(tab).toHaveCount(0);
+    await waitForNavigationPersisted(page);
+  }
+
+  /**
+   * `useNavigationPersistence` writes the layout's saved URL to KV
+   * fire-and-forget (use-recent-projects.ts): the DOM updates the moment a
+   * tab closes, but the durable write can still be in flight. A re-entry
+   * that lands before it completes reads the STALE row — still listing the
+   * closed tab as "restored" — so a sweep keyed off that layout wrongly
+   * keeps what should have been an abandoned leftover.
+   *
+   * Poll the actual KV row instead of a fixed delay: the app's own
+   * `kv-store` module, imported page-side exactly as kv-persistence.spec.ts
+   * does, is the only thing that can say "this write has landed" — a
+   * timeout can only guess how long that takes.
+   */
+  async function waitForNavigationPersisted(page: Page) {
+    const currentUrl = await page.evaluate(
+      () => location.pathname + location.search,
+    );
+    await expect
+      .poll(
+        () =>
+          page.evaluate(async (workspacePath) => {
+            // A Vite dev-server-served path, not a bundler-resolvable
+            // specifier from this file's location — fallow's static
+            // analyzer can't know that (kv-persistence.spec.ts dodges the
+            // same false positive by hiding the identical import inside a
+            // plain string instead of real code).
+            // fallow-ignore-next-line unresolved-import
+            const kv = await import("/src/utils/kv-store.ts");
+            const row = await kv.readKv<{ lastUrl?: string }>(
+              "recentProjects",
+              workspacePath,
+            );
+            return row?.lastUrl ?? null;
+          }, workspace),
+        { timeout: 10000 },
+      )
+      .toBe(currentUrl);
+    // The optimistic local read above can be ahead of the durable write —
+    // this backend throws "cannot start a transaction within a
+    // transaction" when a write collides with concurrent collection
+    // activity (db_ops.rs serializes individual statements, not a write's
+    // surrounding transaction against another collection's own
+    // transaction), and every caller here is fire-and-forget, so a
+    // collision is swallowed silently and the row is left at its previous
+    // value. Waiting for backend traffic to quiet down closes the window
+    // that write was racing, instead of trusting the optimistic read alone.
+    await waitForBackendQuiet(page);
   }
 
   test("empty entry auto-creates and opens untitled.md", async ({ page }) => {
@@ -108,13 +187,17 @@ test.describe("shim: scratchpad entry lifecycle", () => {
     // saved layout holds a real file.
     await openProject(page);
     await visibleEditor(page).waitFor({ state: "visible", timeout: 15000 });
+    // The auto-create entry's own navigation write must settle before the
+    // README click fires a second one, or the two race each other.
+    await waitForNavigationPersisted(page);
     await page.getByRole("treeitem", { name: "README.md" }).first().click();
     await expect(visibleEditor(page)).toContainText("Seeded", {
       timeout: 10000,
     });
-    // The saved-URL record is written fire-and-forget; give it a beat to
-    // land before the full navigation discards in-flight KV writes.
-    await page.waitForTimeout(750);
+    // The saved-URL record is written fire-and-forget (see
+    // waitForNavigationPersisted above) — wait for it to actually land
+    // before the full navigation discards an in-flight write.
+    await waitForNavigationPersisted(page);
 
     // Re-enter at the bare root: the saved layout must restore intact —
     // the auto-open must not race the restore and clobber it.
@@ -193,7 +276,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
     await expect(page.getByText(/No file selected/)).toBeVisible({
       timeout: 10000,
     });
-    await page.waitForTimeout(750);
+    await waitForNavigationPersisted(page);
 
     // Re-enter: the empty saved session must auto-open the scratchpad
     // again — this is the "come back to my scratchpad" loop.

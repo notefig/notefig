@@ -146,6 +146,49 @@ async function computeProjectEntryUrl(path: string): Promise<string> {
  * saved URL. Once inside the project a bare URL is the user's own doing
  * (e.g. closing the last tab) and is recorded like any other.
  */
+/**
+ * The token of the most recently issued entry computation, per workspace —
+ * module-level, not a per-component ref, because the race this guards
+ * against isn't confined to one component instance: React can invoke this
+ * effect twice for what is logically one entry (StrictMode's dev-mode
+ * double-invoke, or a route transition that mounts Workspace before
+ * workspacePath settles and again once it has). Both invocations see
+ * `entering`, both kick off their own `computeProjectEntryUrl` — reading
+ * the SAME under-hydrated KV collection at slightly different moments — and
+ * both `navigate`/`rememberProjectNavigation` independently on resolution,
+ * with no guarantee the correct (later-reading) one finishes last. Losing
+ * that race silently overwrites a correct restore with a bogus "empty
+ * entry" one, autocreating and persisting a fresh scratchpad no one asked
+ * for. Only the LAST call issued for a path may act; every earlier one that
+ * resolves after being superseded is a no-op — closing the window instead
+ * of trying to out-wait it.
+ */
+const latestEntryToken = new Map<string, symbol>();
+
+async function resolveProjectEntry(
+  workspacePath: string,
+  fullPath: string,
+  currentPathname: string,
+  navigate: ReturnType<typeof useNavigate>,
+  currentUrlRef: { current: string },
+): Promise<void> {
+  const token = Symbol(workspacePath);
+  latestEntryToken.set(workspacePath, token);
+  const entryUrl = await computeProjectEntryUrl(workspacePath);
+  if (latestEntryToken.get(workspacePath) !== token) return;
+
+  // The user opened tabs (or left the project) while the entry URL was
+  // being computed — their navigation wins, never clobber it.
+  const [nowPathname, nowSearch = ""] = currentUrlRef.current.split("?");
+  const nowHasTabs = new URLSearchParams(nowSearch).get(LAYOUT_PARAM);
+  if (nowPathname !== currentPathname || nowHasTabs) return;
+  if (entryUrl !== fullPath) {
+    navigate(entryUrl, { replace: true });
+  } else {
+    void rememberProjectNavigation(workspacePath, fullPath);
+  }
+}
+
 export function useNavigationPersistence(): void {
   const { workspacePath } = useWorkspaceParams();
   const location = useLocation();
@@ -158,26 +201,34 @@ export function useNavigationPersistence(): void {
     if (!workspacePath) return;
     const fullPath = location.pathname + location.search;
     const entering = enteredProjectRef.current !== workspacePath;
-    enteredProjectRef.current = workspacePath;
 
     const atBareRoot =
       !location.search && !location.pathname.slice(1).includes("/");
     if (entering && atBareRoot) {
-      void computeProjectEntryUrl(workspacePath).then((entryUrl) => {
-        // The user opened tabs (or left the project) while the entry URL
-        // was being computed — their navigation wins, never clobber it.
-        const [nowPathname, nowSearch = ""] = currentUrlRef.current.split("?");
-        const nowHasTabs = new URLSearchParams(nowSearch).get(LAYOUT_PARAM);
-        if (nowPathname !== location.pathname || nowHasTabs) return;
-        if (entryUrl !== fullPath) {
-          navigate(entryUrl, { replace: true });
-        } else {
-          void rememberProjectNavigation(workspacePath, fullPath);
-        }
+      // Deferred, not synchronous: StrictMode invokes an effect body twice,
+      // back to back with no yield in between, for the very same render.
+      // Flipping the ref immediately would make the second invocation see
+      // entering=false and fall through to the plain "record current
+      // location" branch below — writing the pre-navigation bare-root URL
+      // over whatever resolveProjectEntry is about to (correctly) resolve
+      // to, as if closing the last tab had just happened. A microtask is
+      // enough to land after both synchronous invocations settle, so both
+      // agree this is an entering render; resolveProjectEntry's own token
+      // guard already makes the resulting duplicate call harmless.
+      void Promise.resolve().then(() => {
+        enteredProjectRef.current = workspacePath;
       });
+      void resolveProjectEntry(
+        workspacePath,
+        fullPath,
+        location.pathname,
+        navigate,
+        currentUrlRef,
+      );
       return;
     }
 
+    enteredProjectRef.current = workspacePath;
     void rememberProjectNavigation(workspacePath, fullPath);
   }, [workspacePath, location.pathname, location.search, navigate]);
 }
