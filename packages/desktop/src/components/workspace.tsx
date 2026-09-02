@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import type React from "react";
 import { Dockable } from "@/components/dockable";
 import { IconSidebar } from "@/components/editor/icon-sidebar";
 import { Sidebar } from "@/components/editor/sidebar";
@@ -40,9 +41,7 @@ export const Workspace = () => {
     return null;
   }
 
-  useThrowWorkspaceAccessError(workspacePath);
-  useNavigationPersistence();
-  const { t } = useTranslation();
+  useWorkspaceLifecycle(workspacePath);
   const dockableRef = useRef<HTMLDivElement>(null);
   const searchPanelRef = useRef<SearchPanelHandle>(null);
 
@@ -60,50 +59,19 @@ export const Workspace = () => {
     getSelectedText,
     openFile,
   } = useDockableTabs({
-    canOpenFile: (file) => file.type === "file" && canOpenInEditor(file.path),
+    canOpenFile: canOpenFileInTab,
     dockableRef,
   });
 
-  useEffect(() => {
-    return () => {
-      disposeAllEditors();
-    };
-  }, []);
-
-  // Tear down agent runtimes when leaving the workspace (their rows persist
-  // and demote to "restored" — the tasks collection is storage-backed,
-  // MET-54). On mount, kick the collection's boot load so restored sessions
-  // are in place before tab pruning runs.
-  useEffect(() => {
-    return () => {
-      void disposeWorkspaceTaskManager(workspacePath);
-    };
-  }, [workspacePath]);
-
-  // The open-tabs cross-entity join (agent/file split, metadata ⋈ content
-  // rows, agent task rows, stale-tab detection) lives on the tabs entity.
-  const {
-    fileTabIds: fileOpenTabIds,
-    fileRows: fileDataWithContent,
-    agentTaskRows: openAgentTaskRows,
-    staleTabIds,
-  } = useWorkspaceTabs(workspacePath, openTabs);
-
-  useReleaseNotesOnUpdate(openFile);
-
-  // One element per open tab, built from the tab-type registry (title +
-  // content per kind) and memoised per tab id.
-  const allDockableTabs = useTabElements(openTabs, {
+  const { allDockableTabs, wordCount, isSynced } = useWorkspaceDocuments({
     workspacePath,
-    fileRows: fileDataWithContent,
-    agentTaskRows: openAgentTaskRows,
+    openTabs,
+    activeTabId,
+    layout,
+    handleLayoutChange,
     closeTab,
+    openFile,
   });
-
-  const activeFileData = fileDataWithContent.find(
-    (f) => f.path === activeTabId,
-  );
-  const currentContent = activeFileData?.content || "";
 
   const {
     isSidebarCollapsed,
@@ -112,23 +80,18 @@ export const Workspace = () => {
     openSettings,
     openSearchPanel,
     openSessionsSidebar,
-  } = useWorkspacePanels({ searchPanelRef, focusActiveTab });
-
-  const { openFileInTabs, openAgentTab } = useWorkspaceFileOpeners(openFile);
-
-  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
-  const { direction, setDirection } = useDirectionSetting(workspacePath);
-
-  const isFetchingContent = useContentFetching(workspacePath);
-  useStaleTabPruning(staleTabIds, layout, handleLayoutChange);
-
-  const isSynced = !isFetchingContent;
-  const wordCount = useWordCount(currentContent);
-
-  const [fileTreeMode, setFileTreeMode] =
-    useState<FileTreeMode>(FILE_TREE_IDLE);
+    isCommandPaletteOpen,
+    setIsCommandPaletteOpen,
+    direction,
+    setDirection,
+  } = useWorkspaceChrome(workspacePath, searchPanelRef, focusActiveTab);
 
   const {
+    openFileInTabs,
+    openAgentTab,
+    handleRenameOpenFile,
+    fileTreeMode,
+    setFileTreeMode,
     handleNewScratchpad,
     handleNewFile,
     handleNewDirectory,
@@ -136,32 +99,17 @@ export const Workspace = () => {
     handleToggleFullscreen,
     handleSearchInFile,
     handleSearchInFiles,
-  } = useWorkspaceCommands({
+  } = useWorkspaceActions({
     workspacePath,
     activeTabId,
     getFocusedTabId,
     getSelectedText,
     openSidebarIfCollapsed,
-    setFileTreeMode,
-    openFile: openFileInTabs,
     openSearchPanel,
     openSessionsSidebar,
+    openFile,
+    renameTab,
   });
-
-  // Rename/move a file while its tab is open — the close-and-reopen
-  // primitive keeps the tab in its window slot.
-  const handleRenameOpenFile = useCallback(
-    (oldPath: string, newPath: string) =>
-      renameOpenFileTab({
-        workspacePath,
-        oldPath,
-        newPath,
-        applyLayoutRename: renameTab,
-      }),
-    [workspacePath, renameTab],
-  );
-
-  useFileWatchers(workspacePath, fileOpenTabIds);
 
   return (
     <WorkspaceTabsProvider
@@ -203,19 +151,13 @@ export const Workspace = () => {
                 className="flex-1 min-w-0 h-full overflow-clip"
                 tabIndex={-1}
               >
-                {openTabs.length === 0 ? (
-                  <div className="flex items-center justify-center h-full text-muted-foreground p-4 ps-0">
-                    <p className="text-center">{t("noFileSelected")}</p>
-                  </div>
-                ) : (
-                  <Dockable.Root
-                    orientation="row"
-                    layout={layout}
-                    onChange={handleLayoutChange}
-                  >
-                    {allDockableTabs}
-                  </Dockable.Root>
-                )}
+                <DockArea
+                  hasTabs={openTabs.length > 0}
+                  layout={layout}
+                  onLayoutChange={handleLayoutChange}
+                >
+                  {allDockableTabs}
+                </DockArea>
               </div>
             </div>
           </div>
@@ -340,3 +282,194 @@ function useWordCount(content: string): number | null {
   }, [content]);
 }
 
+
+/** Only file tabs are gated on the editor's format support; the other tab
+ *  kinds carry their own content. */
+function canOpenFileInTab(file: { type: string; path: string }): boolean {
+  return file.type === "file" && canOpenInEditor(file.path);
+}
+
+/** Workspace-scoped lifecycle: access guard, navigation persistence, and
+ *  teardown on leaving (editors disposed; agent runtimes torn down — their
+ *  rows persist and demote to "restored", the tasks collection is
+ *  storage-backed, MET-54). */
+function useWorkspaceLifecycle(workspacePath: string): void {
+  useThrowWorkspaceAccessError(workspacePath);
+  useNavigationPersistence();
+  useEffect(() => {
+    return () => {
+      disposeAllEditors();
+    };
+  }, []);
+  useEffect(() => {
+    return () => {
+      void disposeWorkspaceTaskManager(workspacePath);
+    };
+  }, [workspacePath]);
+}
+
+/** Everything derived from the open tabs' backing rows: the cross-entity
+ *  join (agent/file split, metadata ⋈ content rows, stale-tab detection),
+ *  the rendered tab elements, watchers, and the status bar's inputs. */
+function useWorkspaceDocuments({
+  workspacePath,
+  openTabs,
+  activeTabId,
+  layout,
+  handleLayoutChange,
+  closeTab,
+  openFile,
+}: {
+  workspacePath: string;
+  openTabs: string[];
+  activeTabId: string | null;
+  layout: Parameters<typeof removeTabFromLayout>[0];
+  handleLayoutChange: (layout: Parameters<typeof removeTabFromLayout>[0]) => void;
+  closeTab: (tabId: string) => void;
+  openFile: (options: OpenFileInLayoutOptions) => void;
+}) {
+  const {
+    fileTabIds: fileOpenTabIds,
+    fileRows: fileDataWithContent,
+    agentTaskRows: openAgentTaskRows,
+    staleTabIds,
+  } = useWorkspaceTabs(workspacePath, openTabs);
+
+  useReleaseNotesOnUpdate(openFile);
+
+  // One element per open tab, built from the tab-type registry (title +
+  // content per kind) and memoised per tab id.
+  const allDockableTabs = useTabElements(openTabs, {
+    workspacePath,
+    fileRows: fileDataWithContent,
+    agentTaskRows: openAgentTaskRows,
+    closeTab,
+  });
+
+  const activeFileData = fileDataWithContent.find(
+    (f) => f.path === activeTabId,
+  );
+  const wordCount = useWordCount(activeFileData?.content || "");
+
+  const isFetchingContent = useContentFetching(workspacePath);
+  useStaleTabPruning(staleTabIds, layout, handleLayoutChange);
+  useFileWatchers(workspacePath, fileOpenTabIds);
+
+  return { allDockableTabs, wordCount, isSynced: !isFetchingContent };
+}
+
+/** The workspace's chrome state: sidebar/panel controls, the command
+ *  palette's open flag, and the persisted text direction. */
+function useWorkspaceChrome(
+  workspacePath: string,
+  searchPanelRef: React.RefObject<SearchPanelHandle | null>,
+  focusActiveTab: () => boolean,
+) {
+  const panels = useWorkspacePanels({ searchPanelRef, focusActiveTab });
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const { direction, setDirection } = useDirectionSetting(workspacePath);
+  return {
+    ...panels,
+    isCommandPaletteOpen,
+    setIsCommandPaletteOpen,
+    direction,
+    setDirection,
+  };
+}
+
+/** The workspace's command surface: open-as-tab entry points, the command
+ *  bundle behind the palette and hotkeys, the open-file rename, and the
+ *  file tree's transient mode. */
+function useWorkspaceActions({
+  workspacePath,
+  activeTabId,
+  getFocusedTabId,
+  getSelectedText,
+  openSidebarIfCollapsed,
+  openSearchPanel,
+  openSessionsSidebar,
+  openFile,
+  renameTab,
+}: {
+  workspacePath: string;
+  activeTabId: string | null;
+  getFocusedTabId: () => string | null;
+  getSelectedText: () => string | undefined;
+  openSidebarIfCollapsed: () => void;
+  openSearchPanel: () => void;
+  openSessionsSidebar: () => void;
+  openFile: (options: OpenFileInLayoutOptions) => void;
+  renameTab: (oldId: string, newId: string) => void;
+}) {
+  const { openFileInTabs, openAgentTab } = useWorkspaceFileOpeners(openFile);
+  const [fileTreeMode, setFileTreeMode] =
+    useState<FileTreeMode>(FILE_TREE_IDLE);
+
+  const commands = useWorkspaceCommands({
+    workspacePath,
+    activeTabId,
+    getFocusedTabId,
+    getSelectedText,
+    openSidebarIfCollapsed,
+    setFileTreeMode,
+    openFile: openFileInTabs,
+    openSearchPanel,
+    openSessionsSidebar,
+  });
+
+  const handleRenameOpenFile = useRenameOpenFile(workspacePath, renameTab);
+
+  return {
+    openFileInTabs,
+    openAgentTab,
+    handleRenameOpenFile,
+    fileTreeMode,
+    setFileTreeMode,
+    ...commands,
+  };
+}
+
+/** Rename/move a file while its tab is open — the close-and-reopen
+ *  primitive keeps the tab in its window slot. */
+function useRenameOpenFile(
+  workspacePath: string,
+  renameTab: (oldId: string, newId: string) => void,
+) {
+  return useCallback(
+    (oldPath: string, newPath: string) =>
+      renameOpenFileTab({
+        workspacePath,
+        oldPath,
+        newPath,
+        applyLayoutRename: renameTab,
+      }),
+    [workspacePath, renameTab],
+  );
+}
+
+/** The dock's tab surface, or the empty-state message with no tabs open. */
+function DockArea({
+  hasTabs,
+  layout,
+  onLayoutChange,
+  children,
+}: {
+  hasTabs: boolean;
+  layout: Parameters<typeof removeTabFromLayout>[0];
+  onLayoutChange: (layout: Parameters<typeof removeTabFromLayout>[0]) => void;
+  children: React.ComponentProps<typeof Dockable.Root>["children"];
+}) {
+  const { t } = useTranslation();
+  if (!hasTabs) {
+    return (
+      <div className="flex items-center justify-center h-full text-muted-foreground p-4 ps-0">
+        <p className="text-center">{t("noFileSelected")}</p>
+      </div>
+    );
+  }
+  return (
+    <Dockable.Root orientation="row" layout={layout} onChange={onLayoutChange}>
+      {children}
+    </Dockable.Root>
+  );
+}
