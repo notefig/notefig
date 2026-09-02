@@ -60,17 +60,38 @@ test.describe("shim: scratchpad entry lifecycle", () => {
     page: Page,
     quietMs = 300,
   ): Promise<void> {
-    let lastRequestAt = Date.now();
+    // Tracked on COMPLETION (finished or failed), not on request start: a
+    // request that is still in flight when the quiet window would
+    // otherwise close must keep it open — that in-flight request could be
+    // the very write this is guarding, and declaring "quiet" while it's
+    // still unresolved defeats the whole point.
+    const outstanding = new Set<import("@playwright/test").Request>();
+    let lastSettledAt = Date.now();
+    const isTracked = (req: import("@playwright/test").Request) =>
+      req.url().includes("/invoke/");
     const onRequest = (req: import("@playwright/test").Request) => {
-      if (req.url().includes("/invoke/")) lastRequestAt = Date.now();
+      if (isTracked(req)) outstanding.add(req);
+    };
+    const onSettled = (req: import("@playwright/test").Request) => {
+      if (!isTracked(req)) return;
+      outstanding.delete(req);
+      lastSettledAt = Date.now();
     };
     page.on("request", onRequest);
+    page.on("requestfinished", onSettled);
+    page.on("requestfailed", onSettled);
     try {
       await expect
-        .poll(() => Date.now() - lastRequestAt, { timeout: 15000 })
+        .poll(
+          () =>
+            outstanding.size === 0 ? Date.now() - lastSettledAt : -1,
+          { timeout: 15000 },
+        )
         .toBeGreaterThanOrEqual(quietMs);
     } finally {
       page.off("request", onRequest);
+      page.off("requestfinished", onSettled);
+      page.off("requestfailed", onSettled);
     }
   }
 
