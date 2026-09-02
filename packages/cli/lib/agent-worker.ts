@@ -117,8 +117,9 @@ export async function probeHarnesses(): Promise<HarnessAdvert[]> {
  * The browser names files by its own workspace-root prefix (its fs adapter's
  * path); the worker spawns the agent in its real --dir. When those name the
  * same physical folder (the same-machine model), swap the leading browser
- * root in a path — the agent's cwd, or a path-bearing env like
- * OPENCODE_CONFIG — for the worker's root. Non-matching values pass through.
+ * root in a path — the agent's cwd, or a path-valued env var (e.g. a
+ * user-set OPENCODE_CONFIG) — for the worker's root. Non-matching values
+ * pass through, including JSON-valued env like OPENCODE_CONFIG_CONTENT.
  */
 export function rewriteToWorkspaceRoot(
   value: string,

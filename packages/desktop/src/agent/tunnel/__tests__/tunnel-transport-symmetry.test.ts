@@ -5,8 +5,9 @@
  * runs over the loopback transport on desktop — same FakeAgent scripting,
  * zero new protocol assertions in the task layer. Also covers the pieces
  * only the tunnel has: spawn errors over ctl, task-exit close semantics,
- * the OPENCODE_CONFIG write landing on the worker, session/load revival,
- * and the disconnect pipeline ordering (dispose before transport onClose).
+ * the OPENCODE_CONFIG_CONTENT env landing on the worker, session/load
+ * revival, and the disconnect pipeline ordering (dispose before transport
+ * onClose).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -197,7 +198,7 @@ describe("tunnel transport symmetry", () => {
     expect(captured?.cwd).toBe("/worker/real-dir");
   });
 
-  it("carries OPENCODE_CONFIG onto the worker: config file + spawn env", async () => {
+  it("carries OPENCODE_CONFIG_CONTENT onto the worker: inline config in spawn env, no file", async () => {
     const { worker, connection } = await connectedPair();
 
     const task = new TaskManager(WORKSPACE).createTask(opencodeHarness);
@@ -207,13 +208,10 @@ describe("tunnel transport symmetry", () => {
       (m): m is Extract<typeof m, { op: "start-task" }> =>
         m.op === "start-task",
     )!;
-    const configPath = startTask.extraEnv.OPENCODE_CONFIG;
-    expect(configPath).toBe(
-      `${WORKSPACE}/.notefig/agent/opencode-${task.taskId}.json`,
-    );
-    // The config was written by the browser's OWN fs adapter (not over the
-    // tunnel); the worker rewrites this browser path to its --dir at spawn.
-    const config = JSON.parse(mocks.fsFiles.get(configPath)!);
+    // Inline JSON, not a path: the worker applies its generic env rewrite,
+    // which passes it through untouched — the embedded relay command already
+    // arrived worker-local via the mcp-opened spec.
+    const config = JSON.parse(startTask.extraEnv.OPENCODE_CONFIG_CONTENT);
     expect(config.mcp.notefig.command).toEqual([
       "/usr/bin/node",
       "/worker/cli.js",
@@ -222,6 +220,8 @@ describe("tunnel transport symmetry", () => {
       "12345",
     ]);
     expect(config.mcp.notefig.environment.NOTEFIG_MCP_TOKEN).toBe("fake-token");
+    expect(startTask.extraEnv.OPENCODE_CONFIG).toBeUndefined();
+    expect(mocks.fsFiles.size).toBe(0);
   });
 
   it("answers MCP request lines from a harness relay connection (connId routing)", async () => {
