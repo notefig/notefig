@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { cn } from "@notefig/ui/utils";
 import {
   createFileTreeIconResolver,
   getBuiltInSpriteSheet,
@@ -54,11 +53,7 @@ export function FileTypeIcon({
   return (
     <svg
       viewBox={icon.viewBox ?? "0 0 16 16"}
-      // Markdown is the app's home format — its icon carries the logo
-      // color per theme (the tree mirrors this in tree-model-cache's
-      // unsafeCSS). Last-wins via cn's tailwind-merge over the caller's
-      // muted color.
-      className={cn(className, icon.token === "markdown" && "text-logo")}
+      className={className}
       aria-hidden="true"
       focusable="false"
     >

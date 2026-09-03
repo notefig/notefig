@@ -222,8 +222,8 @@
     --chart-5: 27 87% 67%;
     --brand: oklch(0.623 0.214 259.815);
     --highlight: oklch(0.852 0.199 91.936);
-    /* The app logo's fill (icon-sidebar); markdown file icons share it. */
-    --logo: #506600;
+    /* Forest green from /icon.svg; markdown file icons share it. */
+    --logo: #1d4528;
   }
 
   .dark {
@@ -253,7 +253,7 @@
     --chart-5: 340 75% 55%;
     --brand: oklch(0.707 0.165 254.624);
     --highlight: oklch(0.852 0.199 91.936);
-    --logo: #ceff1a;
+    --logo: #1d4528;
   }
 }
 

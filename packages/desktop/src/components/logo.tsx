@@ -51,12 +51,12 @@ export default function Logo({
 
       {showBackground && (
         <rect
-          x="2"
-          y="41"
+          x="4"
+          y="4"
           width="124"
-          height="82"
-          rx="39"
-          ry="39"
+          height="124"
+          rx="40"
+          ry="40"
           fill="white"
           stroke="#E5E5E5"
           strokeWidth="1"
