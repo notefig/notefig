@@ -203,7 +203,9 @@ pub async fn search_content(
     let walk_result = walk_directory(&dir_path, &walk_options, |entry| {
         let path = entry.path();
 
-        if !path.is_file() {
+        // walkdir caches the readdir file type (the followed target's type
+        // under follow_links) — no extra stat.
+        if !entry.file_type().is_file() {
             return Ok(());
         }
 
@@ -211,7 +213,11 @@ pub async fn search_content(
             return Ok(());
         }
 
-        {
+        // Only a symlink can alias an already-visited file; walkdir itself
+        // errors on true directory cycles under follow_links. A file reachable
+        // via two distinct symlinked *directories* may now appear twice —
+        // accepted trade-off for skipping a canonicalize() per file.
+        if entry.path_is_symlink() {
             let mut visited_guard = visited.lock().unwrap();
             if check_circular_symlink(path, &mut visited_guard) {
                 return Ok(());

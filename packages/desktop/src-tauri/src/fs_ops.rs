@@ -226,7 +226,15 @@ pub async fn read_directory(
                         continue;
                     }
 
-                    let is_dir = entry_path.is_dir();
+                    // readdir already knows the entry type; stat only symlinks
+                    // (is_dir() classifies by the followed target's type).
+                    let is_dir = match entry.file_type().await {
+                        Ok(ft) if !ft.is_symlink() => ft.is_dir(),
+                        _ => fs::metadata(&entry_path)
+                            .await
+                            .map(|m| m.is_dir())
+                            .unwrap_or(false),
+                    };
                     if !is_dir && has_ignored_extension(&entry_path, &ignore_extensions) {
                         continue;
                     }
