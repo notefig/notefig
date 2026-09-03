@@ -49,6 +49,7 @@ import {
   writeWorkspaceTextFile,
 } from "@/utils/file-sync";
 import { checkpointWorkspaceHistory } from "@/utils/history-service";
+import { invalidateGit } from "@/entities/git";
 import {
   agentEntriesCollection,
   agentEntriesForTask,
@@ -1014,6 +1015,10 @@ export class AgentTask {
         name: this.harness.id,
         email: "agent@notefig.local",
       });
+      // The commit lands in the hidden gitdir (no watcher event), and the
+      // turn's file writes may have flushed their debounced invalidation
+      // before it — mark stale explicitly. Free while no git panel is open.
+      invalidateGit(this.workspacePath);
     } catch (error) {
       // Best-effort: history is a convenience, never block/fail the turn on it.
       this.warn("checkpoint failed", errorMessage(error));

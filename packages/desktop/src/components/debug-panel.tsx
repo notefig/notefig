@@ -52,10 +52,25 @@ function useQueryCacheTick(): number {
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
+    // Cache events fire synchronously — including from inside another
+    // component's render when its mount starts a query (the git collection
+    // is lazy since the status bar stopped subscribing to it, so opening
+    // the checkpoint panel does exactly that). Defer the tick out of that
+    // render stack; the flag coalesces event bursts into one re-render.
+    let scheduled = false;
+    let disposed = false;
     const unsubscribe = queryClient.getQueryCache().subscribe(() => {
-      setTick((prev) => prev + 1);
+      if (scheduled) return;
+      scheduled = true;
+      queueMicrotask(() => {
+        scheduled = false;
+        if (!disposed) setTick((prev) => prev + 1);
+      });
     });
-    return unsubscribe;
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
   }, [queryClient]);
 
   return tick;

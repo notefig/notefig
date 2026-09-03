@@ -6,6 +6,24 @@ import type {
 import { path as pathutil } from "@/utils/path";
 
 /**
+ * The exact fs slice git's storage host consumes. A narrowed seam rather
+ * than the whole surface so the git worker can serve it over a host-RPC
+ * proxy (worker → main) without pretending to implement everything else.
+ */
+export type GitHostFs = Pick<
+  FileSystemSurface,
+  | "readBinaryFiles"
+  | "writeBinaryFiles"
+  | "moveFile"
+  | "deleteFiles"
+  | "exists"
+  | "getMetadata"
+  | "readDirectory"
+  | "createDirectories"
+  | "deleteDirectories"
+>;
+
+/**
  * Git's storage host, built purely on the fs surface.
  *
  * This used to be duplicated verbatim in `tauri-adapter.ts` and
@@ -55,7 +73,7 @@ function requireSuccess<T>(
  * registry so repos sharing a worktree never contend.
  */
 export function createGitStorageHost(
-  fs: FileSystemSurface,
+  fs: GitHostFs,
   lockScope: string,
 ): GitStorageHost {
   // isomorphic-git builds paths as `dir + "/" + filepath` — against a native

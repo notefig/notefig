@@ -59,16 +59,19 @@ export type DesktopOs = "macos" | "windows" | "linux";
  * plugin-os API is async and would flash the wrong chrome.
  */
 export function getDesktopOs(): DesktopOs | null {
-  if (!isTauri()) return null;
-  // Test harnesses (the e2e shim) pin the real host OS here — browser UAs
-  // in test automation are device fictions (Playwright's "Desktop Chrome"
-  // claims Windows on every runner). Real webviews (WKWebView/WebView2)
-  // report their true OS in the UA.
-  const override = (window as unknown as Record<string, unknown>)
+  // The override is checked before the Tauri gate: test harnesses (the e2e
+  // shim) pin the real host OS here — browser UAs in test automation are
+  // device fictions (Playwright's "Desktop Chrome" claims Windows on every
+  // runner) — and workers (no `window`, no Tauri internals) receive it from
+  // the main thread at boot, since nothing else in a worker can know the
+  // shell OS. Real webviews (WKWebView/WebView2) report their true OS in
+  // the UA.
+  const override = (globalThis as unknown as Record<string, unknown>)
     .__NOTEFIG_DESKTOP_OS__;
   if (override === "macos" || override === "windows" || override === "linux") {
     return override;
   }
+  if (!isTauri()) return null;
   const ua = navigator.userAgent;
   if (ua.includes("Windows")) return "windows";
   if (ua.includes("Mac")) return "macos";

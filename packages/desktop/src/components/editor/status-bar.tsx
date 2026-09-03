@@ -1,22 +1,14 @@
 import { useState, useEffect } from "react";
-import {
-  Cloud,
-  CloudUpload,
-  Type,
-  GitCommitHorizontal,
-  GitPullRequest,
-} from "lucide-react";
+import { Cloud, CloudUpload, Type } from "lucide-react";
 import { cn } from "@notefig/ui/utils";
 import { useTranslation } from "react-i18next";
 import { TunnelStatus } from "@/components/tunnel/tunnel-status";
-import { useGitSummary } from "@/entities/git";
 
 interface StatusBarProps {
   /** Omitted (null) when the focused tab has no text content of its own. */
   wordCount: number | null;
   isSynced: boolean;
   direction?: "ltr" | "rtl";
-  workspacePath?: string;
 }
 
 function useDebouncedSyncState(
@@ -39,15 +31,17 @@ function useDebouncedSyncState(
   return debouncedSynced;
 }
 
+// Deliberately no git subscription here: the status bar is always mounted,
+// and a live git query from it kept the workspace's whole status/log fetch
+// hot on every save. Git state now renders only inside the git panels, so
+// the collection has zero subscribers (and invalidations cost nothing)
+// while no git UI is open.
 export function StatusBar({
   wordCount,
   isSynced,
   direction = "ltr",
-  workspacePath,
 }: StatusBarProps) {
   const debouncedSynced = useDebouncedSyncState(isSynced);
-  const gitSummary = useGitSummary(workspacePath);
-  const showGit = shouldShowGit(workspacePath, gitSummary);
 
   return (
     <div
@@ -57,7 +51,6 @@ export function StatusBar({
       )}
     >
       <SaveCell synced={debouncedSynced} />
-      {showGit && <GitCell hasChanges={Boolean(gitSummary?.hasChanges)} />}
       {wordCount !== null && <WordCountCell count={wordCount} />}
       <TunnelStatus />
     </div>
@@ -79,19 +72,6 @@ function SaveCell({ synced }: { synced: boolean }) {
   );
 }
 
-function GitCell({ hasChanges }: { hasChanges: boolean }) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex items-center justify-center gap-2 min-w-[5.5rem]">
-      {hasChanges ? (
-        <GitPullRequest className="w-3.5 h-3.5 text-amber-500" />
-      ) : (
-        <GitCommitHorizontal className="w-3.5 h-3.5 text-green-500" />
-      )}
-      <span>{hasChanges ? t("unchecked") : t("checked")}</span>
-    </div>
-  );
-}
 
 function WordCountCell({ count }: { count: number }) {
   const { t } = useTranslation();
@@ -113,10 +93,3 @@ function cornerClasses(isRtl: boolean): string {
     : "right-0 left-auto border-l rounded-tl-lg";
 }
 
-/** Git status renders only inside a workspace whose status read succeeded. */
-function shouldShowGit(
-  workspacePath: string | undefined,
-  gitSummary: ReturnType<typeof useGitSummary>,
-): boolean {
-  return Boolean(workspacePath) && !gitSummary?.statusError;
-}

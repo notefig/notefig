@@ -4,7 +4,8 @@ const {
   initMock,
   existsMock,
   fsMock,
-  createGitStorageHostMock,
+  createWorkerGitServiceMock,
+  disposeWorkerGitRepoMock,
   ensureExcludeLinesMock,
 } = vi.hoisted(() => {
   const initMock = vi.fn();
@@ -13,30 +14,26 @@ const {
     initMock,
     existsMock,
     fsMock: { exists: existsMock },
-    createGitStorageHostMock: vi.fn(() => ({})),
+    createWorkerGitServiceMock: vi.fn(() => ({ init: initMock })),
+    disposeWorkerGitRepoMock: vi.fn(),
     ensureExcludeLinesMock: vi.fn(),
   };
 });
-
-vi.mock("@notefig/git", () => ({
-  IsomorphicGitService: vi.fn().mockImplementation(() => ({
-    init: initMock,
-  })),
-}));
 
 vi.mock("@/adapters", () => ({
   platformAdapter: { fs: fsMock },
 }));
 
-vi.mock("@/adapters/git-storage-host", () => ({
-  createGitStorageHost: createGitStorageHostMock,
+vi.mock("@/utils/git-worker-client", () => ({
+  createWorkerGitService: createWorkerGitServiceMock,
+  disposeWorkerGitRepo: disposeWorkerGitRepoMock,
+  clearWorkerGitRepos: vi.fn(),
 }));
 
 vi.mock("@/utils/git-exclude", () => ({
   ensureExcludeLines: ensureExcludeLinesMock,
 }));
 
-import { IsomorphicGitService } from "@notefig/git";
 import {
   clearWorkspaceHistoryServices,
   disposeWorkspaceHistoryService,
@@ -73,16 +70,15 @@ describe("history-service", () => {
     expect(historyGitDir("/workspace/")).toBe(GIT_DIR);
   });
 
-  it("binds the service to the history repo: host lock scope AND repo ref", () => {
+  it("binds the service to the history repo: repo ref fixed at creation", () => {
     getOrCreateWorkspaceHistoryService(WS);
 
-    expect(createGitStorageHostMock).toHaveBeenCalledWith(fsMock, GIT_DIR);
     // The repo identity is bound once, at construction — calls can no
     // longer aim operations at another repo's gitdir.
-    expect(vi.mocked(IsomorphicGitService)).toHaveBeenCalledWith(
-      expect.anything(),
-      { repoPath: WS, gitDir: GIT_DIR },
-    );
+    expect(createWorkerGitServiceMock).toHaveBeenCalledWith({
+      repoPath: WS,
+      gitDir: GIT_DIR,
+    });
   });
 
   it("inits at the gitdir", async () => {
@@ -144,7 +140,7 @@ describe("history-service", () => {
     const second = getOrCreateWorkspaceHistoryService("/workspace");
 
     expect(first).toBe(second);
-    expect(createGitStorageHostMock).toHaveBeenCalledTimes(1);
+    expect(createWorkerGitServiceMock).toHaveBeenCalledTimes(1);
   });
 
   it("initializes once per in-flight workspace", async () => {
@@ -169,6 +165,8 @@ describe("history-service", () => {
     const second = getOrCreateWorkspaceHistoryService(WS);
 
     expect(first).not.toBe(second);
-    expect(createGitStorageHostMock).toHaveBeenCalledTimes(2);
+    expect(createWorkerGitServiceMock).toHaveBeenCalledTimes(2);
+    // The worker's per-repo service (and object cache) is dropped too.
+    expect(disposeWorkerGitRepoMock).toHaveBeenCalledWith(GIT_DIR);
   });
 });
