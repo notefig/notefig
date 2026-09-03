@@ -56,7 +56,10 @@ export class BrowserFileWatcher {
         includeDirectories?: boolean;
         ignore?: IgnoreRulesOption;
       },
-    ) => Promise<{ ok: true; value: string[] } | { ok: false; error: unknown }>,
+    ) => Promise<
+      | { ok: true; value: { path: string; type: "file" | "directory" }[] }
+      | { ok: false; error: unknown }
+    >,
     private readFiles: (paths: string[]) => Promise<{
       succeeded: { path: string; content: string }[];
       failed: unknown[];
@@ -159,7 +162,7 @@ export class BrowserFileWatcher {
         continue;
       }
 
-      const paths = result.value;
+      const paths = result.value.map((entry) => entry.path);
 
       const metadataResult = await this.getMetadata(paths);
 

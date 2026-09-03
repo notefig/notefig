@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { BaseBrowserAdapter } from "../base-browser-adapter";
 import type {
   BatchResult,
+  DirectoryEntry,
   FileSystemError,
   FileSystemMetadata,
   Result,
@@ -14,7 +15,7 @@ class TestBrowserAdapter extends BaseBrowserAdapter {
   async pickDirectory(): Promise<string | null> {
     return null;
   }
-  async readDirectory(): Promise<Result<string[]>> {
+  async readDirectory(): Promise<Result<DirectoryEntry[]>> {
     return { ok: true, value: [] };
   }
   async createDirectories(): Promise<BatchResult<string>> {

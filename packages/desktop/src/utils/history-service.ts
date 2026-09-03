@@ -7,14 +7,18 @@
  * `git-service-store.ts`'s registry convention exactly (lazy per-workspace
  * singleton + in-flight-init dedup map + dispose/clear).
  */
-import { IsomorphicGitService } from "@notefig/git";
+import type { GitService } from "@notefig/git";
 import { platformAdapter } from "@/adapters";
-import { createGitStorageHost } from "@/adapters/git-storage-host";
+import {
+  clearWorkerGitRepos,
+  createWorkerGitService,
+  disposeWorkerGitRepo,
+} from "@/utils/git-worker-client";
 import { path as pathutil, workspaceKey } from "@/utils/path";
 import { ensureExcludeLines } from "@/utils/git-exclude";
 import { APP_DIR_NAME, SCRATCHPADS_REL_PATH } from "@/utils/app-dir";
 
-const historyServiceRegistry = new Map<string, IsomorphicGitService>();
+const historyServiceRegistry = new Map<string, GitService>();
 const historyInitRegistry = new Map<string, Promise<void>>();
 
 export function historyGitDir(workspacePath: string): string {
@@ -27,7 +31,7 @@ export function historyGitDir(workspacePath: string): string {
 
 export function getOrCreateWorkspaceHistoryService(
   workspacePath: string,
-): IsomorphicGitService {
+): GitService {
   // Registry key vs OS-facing value: the key is workspaceKey (lowercased on
   // Windows so respelled routes share one service); repoPath/gitDir keep the
   // caller's native spelling. Identical strings on posix.
@@ -36,16 +40,12 @@ export function getOrCreateWorkspaceHistoryService(
   let service = historyServiceRegistry.get(registryKey);
 
   if (!service) {
-    service = new IsomorphicGitService(
-      createGitStorageHost(
-        platformAdapter.fs,
-        historyGitDir(nativeWorkspacePath),
-      ),
-      {
-        repoPath: nativeWorkspacePath,
-        gitDir: historyGitDir(nativeWorkspacePath),
-      },
-    );
+    // Worker-backed (with an inline fallback): statusMatrix's worktree
+    // hashing and packfile parsing run off the main thread.
+    service = createWorkerGitService({
+      repoPath: nativeWorkspacePath,
+      gitDir: historyGitDir(nativeWorkspacePath),
+    });
     historyServiceRegistry.set(registryKey, service);
   }
 
@@ -70,7 +70,7 @@ const HISTORY_EXCLUDE_LINES = [
 
 export async function ensureWorkspaceHistoryInitialized(
   workspacePath: string,
-): Promise<IsomorphicGitService> {
+): Promise<GitService> {
   const registryKey = workspaceKey(workspacePath);
   const nativeWorkspacePath = pathutil.normalize(workspacePath);
   const service = getOrCreateWorkspaceHistoryService(nativeWorkspacePath);
@@ -141,9 +141,11 @@ export function disposeWorkspaceHistoryService(workspacePath: string): void {
   const registryKey = workspaceKey(workspacePath);
   historyServiceRegistry.delete(registryKey);
   historyInitRegistry.delete(registryKey);
+  disposeWorkerGitRepo(historyGitDir(pathutil.normalize(workspacePath)));
 }
 
 export function clearWorkspaceHistoryServices(): void {
   historyServiceRegistry.clear();
   historyInitRegistry.clear();
+  clearWorkerGitRepos();
 }

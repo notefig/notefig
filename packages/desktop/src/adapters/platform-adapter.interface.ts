@@ -51,6 +51,12 @@ export function isWorkspaceAccessError(error: unknown): error is FsError {
   );
 }
 
+/** One listing row from `readDirectory`. */
+export interface DirectoryEntry {
+  path: string;
+  type: "file" | "directory";
+}
+
 export type Result<T, E = FileSystemError> =
   | { ok: true; value: T }
   | { ok: false; error: E };
@@ -229,8 +235,10 @@ export interface FileSystemSurface {
   requestWorkspaceAccess(workspacePath: string): Promise<boolean>;
 
   /**
-   * Read directory contents
-   * @returns Result with array of absolute paths
+   * Read directory contents. Entries carry the type the walk already knows
+   * — callers must never re-derive file-vs-directory with a second stat
+   * pass (or a second whole walk).
+   * @returns Result with typed entries (absolute paths)
    */
   readDirectory(
     path: string,
@@ -242,7 +250,7 @@ export interface FileSystemSurface {
       /** Opt-in ignore filtering; omitted ⇒ complete listing (git host path). */
       ignore?: IgnoreRulesOption;
     },
-  ): Promise<Result<string[]>>;
+  ): Promise<Result<DirectoryEntry[]>>;
 
   /**
    * Create directories (creates parent directories if needed)

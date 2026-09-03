@@ -10,6 +10,7 @@ import type {
   ProcessSurface,
   Result,
   BatchResult,
+  DirectoryEntry,
   FileSystemError,
   FileSystemMetadata,
   MetadataChangeEvent,
@@ -166,11 +167,11 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       includeHidden?: boolean;
       ignore?: IgnoreRulesOption;
     },
-  ): Promise<Result<string[]>> {
+  ): Promise<Result<DirectoryEntry[]>> {
     try {
       const result = await invoke<{
         ok: boolean;
-        value?: string[];
+        value?: DirectoryEntry[];
         error?: FileSystemError;
       }>("read_directory", {
         path,
@@ -245,58 +246,95 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     }
   }
 
+  // Document content rides the raw IPC channel too: UTF-8 bytes both ways
+  // (decoded/encoded at this seam), so autosaves and file opens skip the
+  // JSON string escape + main-thread parse of whole documents. The Rust
+  // side still validates UTF-8 on read, so decoding here cannot replace.
   private async readFiles(
     paths: string[],
   ): Promise<BatchResult<{ path: string; content: string }>> {
-    try {
-      const result = await invoke<
-        BatchResult<{ path: string; content: string }>
-      >("read_files", { paths });
-      return result;
-    } catch (error) {
-      return {
-        succeeded: [],
-        failed: paths.map((path) => classifyInvokeError(path, error)),
-      };
-    }
+    const decoder = new TextDecoder();
+    const result: BatchResult<{ path: string; content: string }> = {
+      succeeded: [],
+      failed: [],
+    };
+    await Promise.all(
+      paths.map(async (path) => {
+        try {
+          const buffer = await invoke<ArrayBuffer>("read_file", { path });
+          result.succeeded.push({ path, content: decoder.decode(buffer) });
+        } catch (error) {
+          result.failed.push(TauriPlatformAdapter.toFileSystemError(path, error));
+        }
+      }),
+    );
+    return result;
   }
 
+  /** A raw-body command's rejection is the serialized FileSystemError. */
+  private static toFileSystemError(
+    path: string,
+    error: unknown,
+  ): FileSystemError {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      typeof (error as FileSystemError).type === "string" &&
+      typeof (error as FileSystemError).message === "string"
+    ) {
+      const typed = error as FileSystemError;
+      return new FsError(typed.type, typed.path || path, typed.message);
+    }
+    return classifyInvokeError(path, error);
+  }
+
+  // Binary payloads ride Tauri's raw IPC channel (ArrayBuffer both ways) —
+  // the old batch commands serialized every byte as a JSON number, which
+  // made the webview parse a 10MB packfile as ~35MB of JSON text on its
+  // main thread. The batch signature stays (browser adapters and callers
+  // are batch-shaped); each entry is one raw invoke.
   private async readBinaryFiles(
     paths: string[],
   ): Promise<BatchResult<{ path: string; data: Uint8Array }>> {
-    try {
-      const result = await invoke<
-        BatchResult<{ path: string; data: number[] }>
-      >("read_binary_files", { paths });
-      return {
-        succeeded: result.succeeded.map((entry) => ({
-          path: entry.path,
-          data: Uint8Array.from(entry.data),
-        })),
-        failed: result.failed,
-      };
-    } catch (error) {
-      return {
-        succeeded: [],
-        failed: paths.map((path) => classifyInvokeError(path, error)),
-      };
-    }
+    const result: BatchResult<{ path: string; data: Uint8Array }> = {
+      succeeded: [],
+      failed: [],
+    };
+    await Promise.all(
+      paths.map(async (path) => {
+        try {
+          const buffer = await invoke<ArrayBuffer>("read_binary_file", {
+            path,
+          });
+          result.succeeded.push({ path, data: new Uint8Array(buffer) });
+        } catch (error) {
+          result.failed.push(TauriPlatformAdapter.toFileSystemError(path, error));
+        }
+      }),
+    );
+    return result;
   }
 
   private async writeFiles(
     files: { path: string; content: string }[],
   ): Promise<BatchResult<string>> {
-    try {
-      const result = await invoke<BatchResult<string>>("write_files", {
-        files,
-      });
-      return result;
-    } catch (error) {
-      return {
-        succeeded: [],
-        failed: files.map((file) => classifyInvokeError(file.path, error)),
-      };
-    }
+    const encoder = new TextEncoder();
+    const result: BatchResult<string> = { succeeded: [], failed: [] };
+    await Promise.all(
+      files.map(async (file) => {
+        try {
+          await invoke<string>("write_file", encoder.encode(file.content), {
+            headers: { "x-notefig-path": encodeURIComponent(file.path) },
+          });
+          result.succeeded.push(file.path);
+        } catch (error) {
+          result.failed.push(
+            TauriPlatformAdapter.toFileSystemError(file.path, error),
+          );
+        }
+      }),
+    );
+    return result;
   }
 
   private async createFiles(paths: string[]): Promise<BatchResult<string>> {
@@ -367,20 +405,24 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   private async writeBinaryFiles(
     files: { path: string; data: Uint8Array }[],
   ): Promise<BatchResult<string>> {
-    try {
-      const result = await invoke<BatchResult<string>>("write_binary_files", {
-        files: files.map((f) => ({
-          path: f.path,
-          data: Array.from(f.data),
-        })),
-      });
-      return result;
-    } catch (error) {
-      return {
-        succeeded: [],
-        failed: files.map((f) => classifyInvokeError(f.path, error)),
-      };
-    }
+    const result: BatchResult<string> = { succeeded: [], failed: [] };
+    await Promise.all(
+      files.map(async (f) => {
+        try {
+          // Raw body; the destination path travels percent-encoded in a
+          // header (header values must be ASCII, paths need not be).
+          await invoke<string>("write_binary_file", f.data, {
+            headers: { "x-notefig-path": encodeURIComponent(f.path) },
+          });
+          result.succeeded.push(f.path);
+        } catch (error) {
+          result.failed.push(
+            TauriPlatformAdapter.toFileSystemError(f.path, error),
+          );
+        }
+      }),
+    );
+    return result;
   }
 
   private async resolveAssetUrl(

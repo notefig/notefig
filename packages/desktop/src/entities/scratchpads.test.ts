@@ -204,7 +204,10 @@ describe("createUntitledScratchpad", () => {
 
 describe("resolveScratchpadOnDisk", () => {
   function listDir(files: string[]) {
-    adapter.readDirectory.mockResolvedValue({ ok: true, value: files });
+    adapter.readDirectory.mockResolvedValue({
+      ok: true,
+      value: files.map((path) => ({ path, type: "file" as const })),
+    });
   }
 
   it("creates untitled.md when the folder is missing or empty", async () => {
@@ -259,7 +262,10 @@ describe("sweepScratchpadsOnDisk", () => {
     const withContent = `${DIR}/untitled-4.md`;
     adapter.readDirectory.mockResolvedValue({
       ok: true,
-      value: [kept, empty, withContent],
+      value: [kept, empty, withContent].map((path) => ({
+        path,
+        type: "file" as const,
+      })),
     });
     adapter.readFiles.mockResolvedValue(
       ok([
@@ -283,7 +289,10 @@ describe("sweepScratchpadsOnDisk", () => {
     const untitledEmpty = `${DIR}/untitled.md`;
     adapter.readDirectory.mockResolvedValue({
       ok: true,
-      value: [renamedEmpty, untitledEmpty],
+      value: [renamedEmpty, untitledEmpty].map((path) => ({
+        path,
+        type: "file" as const,
+      })),
     });
     adapter.readFiles.mockResolvedValue(
       ok([{ path: untitledEmpty, content: "" }]),

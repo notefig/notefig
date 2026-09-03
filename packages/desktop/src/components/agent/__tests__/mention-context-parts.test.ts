@@ -39,16 +39,15 @@ beforeEach(async () => {
   WS = `/ws-mention-context-${testCounter++}`;
   adapter.getMetadata.mockResolvedValue({ succeeded: [], failed: [] });
   adapter.readDirectory.mockImplementation(
-    async (_dir: string, opts: { includeFiles: boolean }) => ({
+    async () => ({
       ok: true,
-      value: opts.includeFiles
-        ? [
-            `${WS}/notes.md`,
-            `${WS}/readme.md`,
-            `${WS}/archive/old.md`,
-            `${WS}/my spaced file.md`,
-          ]
-        : [`${WS}/archive`],
+      value: [
+        { path: `${WS}/archive`, type: "directory" as const },
+        { path: `${WS}/notes.md`, type: "file" as const },
+        { path: `${WS}/readme.md`, type: "file" as const },
+        { path: `${WS}/archive/old.md`, type: "file" as const },
+        { path: `${WS}/my spaced file.md`, type: "file" as const },
+      ],
     }),
   );
 

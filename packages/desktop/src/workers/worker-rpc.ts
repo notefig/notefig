@@ -191,3 +191,103 @@ export function createWorkerClient<T extends WorkerApi>(
     },
   };
 }
+
+/**
+ * Host channel: the reverse direction. A worker whose work needs main-thread
+ * capabilities (e.g. filesystem access — Tauri's `invoke` does not exist in
+ * workers) calls back to an API the main thread serves. Distinct message
+ * marker (`hostRpc`) so both protocols share one Worker: the forward
+ * handlers above already ignore unmarked messages, and these use
+ * `addEventListener` so they never displace the forward channel's handlers.
+ */
+
+interface HostRpcRequest {
+  hostRpc: true;
+  id: number;
+  method: string;
+  args: unknown[];
+}
+
+interface HostRpcResponse {
+  hostRpc: true;
+  id: number;
+  ok: boolean;
+  result?: unknown;
+  error?: unknown;
+}
+
+/**
+ * Main side: serve `api` to the worker. `serializeError` turns a thrown
+ * error into structured-cloneable data (default: its message string);
+ * pair it with the worker side's `reviveError`.
+ */
+export function serveWorkerHost(
+  worker: Worker,
+  api: WorkerApi,
+  serializeError: (error: unknown) => unknown = (error) =>
+    error instanceof Error ? error.message : String(error),
+): () => void {
+  const handler = async (event: MessageEvent) => {
+    const request = event.data as HostRpcRequest;
+    if (!request || request.hostRpc !== true) return;
+
+    const response: HostRpcResponse = { hostRpc: true, id: request.id, ok: true };
+    try {
+      const method = api[request.method];
+      if (typeof method !== "function") {
+        throw new Error(`Unknown host RPC method: ${request.method}`);
+      }
+      response.result = await method(...request.args);
+    } catch (error) {
+      response.ok = false;
+      response.error = serializeError(error);
+    }
+    worker.postMessage(response);
+  };
+
+  worker.addEventListener("message", handler);
+  return () => worker.removeEventListener("message", handler);
+}
+
+/**
+ * Worker side: a typed promise proxy over the host channel. If the main
+ * thread goes away the worker dies with it, so there is no dead-host
+ * bookkeeping here — only per-call settle-once tracking.
+ */
+export function createHostClient<T extends WorkerApi>(
+  reviveError: (error: unknown) => Error = (error) =>
+    new Error(typeof error === "string" ? error : "Host RPC failed"),
+): WorkerClient<T> {
+  const scope = self as unknown as {
+    addEventListener: (type: string, handler: (event: MessageEvent) => void) => void;
+    postMessage: (message: unknown) => void;
+  };
+
+  let nextId = 1;
+  const pending = new Map<
+    number,
+    { resolve: (value: unknown) => void; reject: (error: Error) => void }
+  >();
+
+  scope.addEventListener("message", (event: MessageEvent) => {
+    const response = event.data as HostRpcResponse;
+    if (!response || response.hostRpc !== true) return;
+    const entry = pending.get(response.id);
+    if (!entry) return;
+    pending.delete(response.id);
+    if (response.ok) entry.resolve(response.result);
+    else entry.reject(reviveError(response.error));
+  });
+
+  return new Proxy({} as WorkerClient<T>, {
+    get(_target, method) {
+      if (typeof method !== "string" || method === "then") return undefined;
+      return (...args: unknown[]) =>
+        new Promise((resolve, reject) => {
+          const id = nextId++;
+          pending.set(id, { resolve, reject });
+          scope.postMessage({ hostRpc: true, id, method, args } as HostRpcRequest);
+        });
+    },
+  });
+}

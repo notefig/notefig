@@ -1,6 +1,7 @@
 import type {
   Result,
   BatchResult,
+  DirectoryEntry,
   FileSystemError,
   FileSystemMetadata,
   SearchMatch,
@@ -203,7 +204,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
       includeHidden?: boolean;
       ignore?: IgnoreRulesOption;
     },
-  ): Promise<Result<string[]>> {
+  ): Promise<Result<DirectoryEntry[]>> {
     try {
       const db = await this.ensureDB();
 
@@ -240,7 +241,7 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
 
       const normalizedPath = path.endsWith("/") ? path : path + "/";
 
-      const results: string[] = [];
+      const results: DirectoryEntry[] = [];
 
       if (includeFiles) {
         const filePaths = allKeys.filter((key) => {
@@ -258,19 +259,23 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
 
           return true;
         });
-        results.push(...filePaths);
+        results.push(
+          ...filePaths.map((p): DirectoryEntry => ({ path: p, type: "file" })),
+        );
       }
 
       if (includeDirectories) {
         const directoryPaths = await this.getDirectories(db, path, recursive);
         results.push(
-          ...directoryPaths.filter(
-            (dirPath) =>
-              !matchesIgnoreRules(
-                dirPath.slice(normalizedPath.length),
-                options?.ignore,
-              ),
-          ),
+          ...directoryPaths
+            .filter(
+              (dirPath) =>
+                !matchesIgnoreRules(
+                  dirPath.slice(normalizedPath.length),
+                  options?.ignore,
+                ),
+            )
+            .map((p): DirectoryEntry => ({ path: p, type: "directory" })),
         );
       }
 
@@ -1033,7 +1038,10 @@ export class BrowserPlatformAdapter extends BaseBrowserAdapter {
         return [];
       }
 
-      filePaths = filterFilePaths(dirResult.value, options);
+      filePaths = filterFilePaths(
+        dirResult.value.map((entry) => entry.path),
+        options,
+      );
     }
 
     const pattern = buildSearchPattern(options);

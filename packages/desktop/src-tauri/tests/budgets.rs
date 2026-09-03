@@ -190,25 +190,23 @@ fn write_binary_file(dir: &Path, name: &str, bytes: usize) -> (String, usize) {
 /// serialization of them. A third concurrent copy — or an uncapped fan-out
 /// that buffers every file before serializing — blows this.
 #[test]
-fn read_files_stays_within_content_plus_one_serialization() {
+fn read_file_stays_within_raw_wire_budget() {
     let _exclusive = exclusive();
     let tmp = tempfile::tempdir().expect("tempdir");
     let app = mock_app();
     let webview = main_webview(&app);
 
-    let mut paths = Vec::new();
-    let mut source = 0usize;
-    for i in 0..20 {
-        let (path, len) = write_text_file(tmp.path(), &format!("doc{i}.md"), 2 * 1024 * 1024);
-        paths.push(path);
-        source += len;
-    }
+    let (path, source) = write_text_file(tmp.path(), "doc.md", 8 * 1024 * 1024);
 
-    println!("\n=== read_files ===");
-    let (res, peak) = measure(|| invoke_raw(&webview, "read_files", json!({ "paths": paths })));
-    assert!(res.is_ok(), "read_files should dispatch");
+    println!("\n=== read_file ===");
+    let (res, peak) = measure(|| invoke_raw(&webview, "read_file", json!({ "path": path })));
+    let body = res.expect("read_file should dispatch");
+    assert!(
+        matches!(body, tauri::ipc::InvokeResponseBody::Raw(ref data) if data.len() == source),
+        "expected a raw response of the source bytes"
+    );
 
-    assert_budget("read_files (20 x 2MB)", source, peak, READ_FILES_BUDGET);
+    assert_budget("read_file (8MB)", source, peak, READ_FILES_BUDGET);
 }
 
 /// A request spread across many small files must stay within the same budget
@@ -225,44 +223,46 @@ fn read_files_stays_within_content_plus_one_serialization() {
 /// that variance into the assertion; comparing each to a ceiling does not,
 /// while still catching the overhead this test exists to catch.
 #[test]
-fn read_files_budget_holds_regardless_of_file_count() {
+fn read_file_peak_does_not_accumulate_across_invokes() {
     let _exclusive = exclusive();
     let tmp = tempfile::tempdir().expect("tempdir");
     let app = mock_app();
     let webview = main_webview(&app);
 
-    const TOTAL: usize = 40 * 1024 * 1024;
+    // 16 x 2.5MB read one-by-one (how the batch surface fans out now): the
+    // peak must track ONE file's budget, not the total — a response or
+    // buffer held across invokes would show up here as accumulation.
+    const COUNT: usize = 16;
+    const EACH: usize = (40 * 1024 * 1024) / COUNT;
 
-    println!("\n=== read_files: same total bytes, different file counts ===");
-    for count in [8usize, 64] {
-        let mut paths = Vec::new();
-        let mut source = 0usize;
-        for i in 0..count {
-            let (path, len) =
-                write_text_file(tmp.path(), &format!("n{count}_{i}.md"), TOTAL / count);
-            paths.push(path);
-            source += len;
+    let paths: Vec<String> = (0..COUNT)
+        .map(|i| write_text_file(tmp.path(), &format!("n{i}.md"), EACH).0)
+        .collect();
+
+    println!("\n=== read_file: sequential invokes at constant per-file size ===");
+    let (res, peak) = measure(|| {
+        let mut last = None;
+        for path in &paths {
+            last = Some(invoke_raw(&webview, "read_file", json!({ "path": path })));
         }
+        last.expect("at least one invoke")
+    });
+    assert!(res.is_ok(), "read_file should dispatch");
 
-        let (res, peak) =
-            measure(|| invoke_raw(&webview, "read_files", json!({ "paths": paths })));
-        assert!(res.is_ok(), "read_files should dispatch");
-
-        assert_budget(
-            &format!("read_files ({count} files)"),
-            source,
-            peak,
-            READ_FILES_BUDGET,
-        );
-    }
+    assert_budget(
+        &format!("read_file ({COUNT} sequential invokes)"),
+        EACH,
+        peak,
+        READ_FILES_BUDGET,
+    );
 }
 
-/// `read_binary_files` returns `Vec<u8>`, which serde renders as a JSON array
-/// of decimal integers — 3-4 bytes of JSON per source byte, live at the same
-/// time as the source. This budget encodes the *intended* wire format; see the
-/// note on the constant.
+/// `read_binary_file` returns the bytes on Tauri's raw IPC channel — no JSON
+/// rendering of the payload at all. The budget guards that raw wire format:
+/// a regression back to a serde-serialized `Vec<u8>` (3-4 JSON bytes per
+/// source byte) blows straight through it.
 #[test]
-fn read_binary_files_stays_within_wire_format_budget() {
+fn read_binary_file_stays_within_raw_wire_budget() {
     let _exclusive = exclusive();
     let tmp = tempfile::tempdir().expect("tempdir");
     let app = mock_app();
@@ -270,13 +270,17 @@ fn read_binary_files_stays_within_wire_format_budget() {
 
     let (path, source) = write_binary_file(tmp.path(), "blob.bin", 8 * 1024 * 1024);
 
-    println!("\n=== read_binary_files ===");
+    println!("\n=== read_binary_file ===");
     let (res, peak) = measure(|| {
-        invoke_raw(&webview, "read_binary_files", json!({ "paths": [path] }))
+        invoke_raw(&webview, "read_binary_file", json!({ "path": path }))
     });
-    assert!(res.is_ok(), "read_binary_files should dispatch");
+    let body = res.expect("read_binary_file should dispatch");
+    assert!(
+        matches!(body, tauri::ipc::InvokeResponseBody::Raw(ref data) if data.len() == source),
+        "expected a raw response of the source bytes"
+    );
 
-    assert_budget("read_binary_files (8MB)", source, peak, READ_BINARY_BUDGET);
+    assert_budget("read_binary_file (8MB)", source, peak, READ_BINARY_BUDGET);
 }
 
 /// A search whose matches all land on one enormous line must not scale with
@@ -472,18 +476,16 @@ fn oversized_agent_line_never_rides_the_eval_path() {
 // Budget constants — see the module docs on why these are ratios, not bytes.
 // ===========================================================================
 
-/// Measured at 3.34x. The floor is ~2x (contents + their serialization); the
-/// rest is `serde_json`'s output buffer doubling as it grows — during the final
-/// reallocation the old and new buffers are briefly live together. 4.0x leaves
-/// room for that without room for a whole extra copy of the data.
-const READ_FILES_BUDGET: f64 = 4.0;
+/// Raw wire format: the source string (its buffer moves into the response
+/// via `into_bytes`, no copy) plus the raw response copy. (The old JSON
+/// string wire format measured 3.34x; raw measures ~2x.)
+const READ_FILES_BUDGET: f64 = 3.0;
 
-/// Measured at 7.01x, which is the cost of today's wire format: `Vec<u8>`
-/// serializes to a JSON array of decimal integers (~4 bytes of JSON per source
-/// byte), live alongside the source. Deliberately generous — this budget exists
-/// to stop the ratio getting *worse*, not to bless it. Switching the wire
-/// format to base64 would bring the real ratio under 3x; tighten this then.
-const READ_BINARY_BUDGET: f64 = 8.0;
+/// The raw IPC channel: source bytes + the raw response copy, no JSON of the
+/// payload. (The old `Vec<u8>`-as-JSON wire format measured 7.01x; raw
+/// measures ~2x — source + one response copy — with headroom for allocator
+/// noise.)
+const READ_BINARY_BUDGET: f64 = 3.0;
 
 /// What search *should* cost: the matched lines plus the serialized result set.
 /// Today's code is at 2536x — see the test.

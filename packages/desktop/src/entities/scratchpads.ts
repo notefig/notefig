@@ -185,7 +185,7 @@ export async function resolveScratchpadOnDisk(
     console.warn("[scratchpads] cannot use the folder:", listing.error);
     return null;
   }
-  const files = listing.ok ? listing.value : [];
+  const files = listing.ok ? listing.value.map((entry) => entry.path) : [];
 
   if (files.length === 0) {
     const fresh = pathutil.join(dir, nextUntitledBasename([]));
@@ -227,9 +227,11 @@ export async function sweepScratchpadsOnDisk(
   });
   if (!listing.ok) return;
   const keep = new Set(keepPaths);
-  const candidates = listing.value.filter(
-    (path) => !keep.has(path) && isUntitledBasename(pathutil.basename(path)),
-  );
+  const candidates = listing.value
+    .map((entry) => entry.path)
+    .filter(
+      (path) => !keep.has(path) && isUntitledBasename(pathutil.basename(path)),
+    );
   if (candidates.length === 0) return;
 
   const reads = await platformAdapter.fs.readFiles(candidates);

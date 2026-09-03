@@ -64,7 +64,9 @@ export function createFakeFsAdapter() {
       const prefix = path.endsWith("/") ? path : path + "/";
       return {
         ok: true as const,
-        value: [...store.keys()].filter((p) => p.startsWith(prefix)),
+        value: [...store.keys()]
+          .filter((p) => p.startsWith(prefix))
+          .map((p) => ({ path: p, type: "file" as const })),
       };
     },
 

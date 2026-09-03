@@ -6,25 +6,18 @@ const { statusMock, logMock, addAllAndCommitMock } = vi.hoisted(() => ({
   addAllAndCommitMock: vi.fn(),
 }));
 
-vi.mock("@notefig/git", () => {
-  class MockGitError extends Error {
-    constructor(
-      readonly code: string,
-      message: string,
-    ) {
-      super(message);
-      this.name = "GitError";
-    }
-  }
-  return {
-    IsomorphicGitService: vi.fn(() => ({
-      status: statusMock,
-      log: logMock,
-      addAllAndCommit: addAllAndCommitMock,
-    })),
-    GitError: MockGitError,
-  };
-});
+// history-service reaches its per-repo GitService through the git worker
+// client; stub that seam (the real @notefig/git module — GitError included —
+// stays live).
+vi.mock("@/utils/git-worker-client", () => ({
+  createWorkerGitService: vi.fn(() => ({
+    status: statusMock,
+    log: logMock,
+    addAllAndCommit: addAllAndCommitMock,
+  })),
+  disposeWorkerGitRepo: vi.fn(),
+  clearWorkerGitRepos: vi.fn(),
+}));
 
 vi.mock("@/adapters", async () => ({
   platformAdapter: {
@@ -32,10 +25,6 @@ vi.mock("@/adapters", async () => ({
     db: (await import("@/testing/node-db")).createNodeTestDb(),
   },
 }));
-vi.mock("@/adapters/git-storage-host", () => ({
-  createGitStorageHost: vi.fn(() => ({})),
-}));
-
 import { createLiveQueryCollection, eq } from "@tanstack/react-db";
 import { getOrCreateGitCollection, invalidateGit, saveCheckpoint } from "./git";
 

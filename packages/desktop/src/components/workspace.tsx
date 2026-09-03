@@ -162,11 +162,7 @@ export const Workspace = () => {
             </div>
           </div>
 
-          <StatusBar
-            wordCount={wordCount}
-            isSynced={isSynced}
-            workspacePath={workspacePath}
-          />
+          <StatusBar wordCount={wordCount} isSynced={isSynced} />
 
           <SettingsModal
             direction={direction}

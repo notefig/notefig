@@ -80,14 +80,17 @@ beforeEach(async () => {
   vi.clearAllMocks();
   WS = `/ws-file-search-${testCounter++}`;
   adapter.getMetadata.mockResolvedValue({ succeeded: [], failed: [] });
-  adapter.readDirectory.mockImplementation(
-    async (_dir: string, options: { includeFiles: boolean }) => ({
-      ok: true,
-      value: options.includeFiles
-        ? [...WORKSPACE_FILES.map((rel) => `${WS}/${rel}`), LOOSE_FILE]
-        : [`${WS}/archive`],
-    }),
-  );
+  adapter.readDirectory.mockImplementation(async () => ({
+    ok: true,
+    value: [
+      { path: `${WS}/archive`, type: "directory" as const },
+      ...WORKSPACE_FILES.map((rel) => ({
+        path: `${WS}/${rel}`,
+        type: "file" as const,
+      })),
+      { path: LOOSE_FILE, type: "file" as const },
+    ],
+  }));
 
   files = await import("@/entities/files");
   ({ useFileSearch } = await import("@/hooks/use-file-search"));

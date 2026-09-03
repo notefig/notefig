@@ -76,34 +76,18 @@ pub fn walk_directory<F>(path: &Path, options: &WalkOptions, mut callback: F) ->
 where
     F: FnMut(&walkdir::DirEntry) -> Result<(), String>,
 {
-    let root_canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-
     let walker = WalkDir::new(path)
         .follow_links(options.follow_links)
         .into_iter()
-        .filter_entry(|e| {
-            // Always allow the root entry to pass through
-            if let Ok(canonical) = e.path().canonicalize() {
-                if canonical == root_canonical {
-                    return true;
-                }
-            } else if e.path() == path {
-                return true;
-            }
-            should_traverse_entry(e, options)
-        });
+        // The root is always yielded at depth 0 (even a symlinked root), so
+        // it can be recognized without canonicalizing every entry.
+        .filter_entry(|e| e.depth() == 0 || should_traverse_entry(e, options));
 
     for entry in walker {
         match entry {
             Ok(entry) => {
-                if entry.path() == path {
+                if entry.depth() == 0 {
                     continue;
-                }
-                // Also check canonical path for symlinked roots
-                if let Ok(canonical) = entry.path().canonicalize() {
-                    if canonical == root_canonical {
-                        continue;
-                    }
                 }
 
                 callback(&entry)?;
@@ -356,6 +340,30 @@ mod tests {
         .unwrap();
 
         assert_eq!(files.len(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_walk_directory_symlinked_root() {
+        use std::os::unix::fs::symlink;
+
+        // The root is recognized by depth, not canonical path — a symlinked
+        // root must still yield its children (and not itself).
+        let temp = TempDir::new().unwrap();
+        let real = temp.path().join("real");
+        fs::create_dir(&real).unwrap();
+        fs::write(real.join("file.txt"), "content").unwrap();
+        let link = temp.path().join("link");
+        symlink(&real, &link).unwrap();
+
+        let mut entries = Vec::new();
+        walk_directory(&link, &WalkOptions::default(), |entry| {
+            entries.push(entry.path().to_path_buf());
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(entries, vec![link.join("file.txt")]);
     }
 
     #[test]

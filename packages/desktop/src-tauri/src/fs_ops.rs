@@ -113,6 +113,36 @@ async fn ensure_parent_dir(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// A listing entry with the type the walk already knows — callers used to
+/// re-derive file-vs-directory with a second stat pass (or a second whole
+/// walk) because this returned bare paths.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DirectoryEntry {
+    pub path: String,
+    #[serde(rename = "type")]
+    pub entry_type: DirectoryEntryType,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DirectoryEntryType {
+    File,
+    Directory,
+}
+
+impl DirectoryEntry {
+    fn new(path: String, is_dir: bool) -> Self {
+        Self {
+            path,
+            entry_type: if is_dir {
+                DirectoryEntryType::Directory
+            } else {
+                DirectoryEntryType::File
+            },
+        }
+    }
+}
+
 /// Ignore filtering is opt-in per call: the frontend passes its ignore
 /// config (utils/ignore.ts) only for workspace listings. Callers that must
 /// see the complete tree — notably the git storage host — pass nothing and
@@ -126,7 +156,7 @@ pub async fn read_directory(
     include_hidden: bool,
     ignore_directories: Option<Vec<String>>,
     ignore_extensions: Option<Vec<String>>,
-) -> Result<Vec<String>> {
+) -> Result<Vec<DirectoryEntry>> {
     let path_buf = PathBuf::from(&path);
 
     if !path_buf.exists() {
@@ -159,14 +189,19 @@ pub async fn read_directory(
 
         if let Err(e) = walk_directory(&path_buf, &options, |entry| {
             let entry_path = entry.path();
-            let is_dir = entry_path.is_dir();
+            // walkdir caches the readdir file type (the followed target's
+            // type under follow_links) — no extra stat.
+            let is_dir = entry.file_type().is_dir();
 
             if !is_dir && has_ignored_extension(entry_path, &ignore_extensions) {
                 return Ok(());
             }
 
             if (is_dir && include_directories) || (!is_dir && include_files) {
-                results.push(entry_path.to_string_lossy().to_string());
+                results.push(DirectoryEntry::new(
+                    entry_path.to_string_lossy().to_string(),
+                    is_dir,
+                ));
             }
 
             Ok(())
@@ -191,13 +226,24 @@ pub async fn read_directory(
                         continue;
                     }
 
-                    let is_dir = entry_path.is_dir();
+                    // readdir already knows the entry type; stat only symlinks
+                    // (is_dir() classifies by the followed target's type).
+                    let is_dir = match entry.file_type().await {
+                        Ok(ft) if !ft.is_symlink() => ft.is_dir(),
+                        _ => fs::metadata(&entry_path)
+                            .await
+                            .map(|m| m.is_dir())
+                            .unwrap_or(false),
+                    };
                     if !is_dir && has_ignored_extension(&entry_path, &ignore_extensions) {
                         continue;
                     }
 
                     if (is_dir && include_directories) || (!is_dir && include_files) {
-                        results.push(entry_path.to_string_lossy().to_string());
+                        results.push(DirectoryEntry::new(
+                            entry_path.to_string_lossy().to_string(),
+                            is_dir,
+                        ));
                     }
                 }
             }
@@ -313,68 +359,33 @@ pub async fn move_directory(old_path: String, new_path: String) -> Result<()> {
     }
 }
 
+/// Raw-body text read: the file's UTF-8 bytes ride Tauri's raw IPC channel
+/// (the frontend decodes with TextDecoder) — no JSON string escape/parse of
+/// document content. `read_to_string` keeps the old command's UTF-8
+/// validation: invalid UTF-8 is an io error, never silently replaced.
 #[tauri::command]
-pub async fn read_files(paths: Vec<String>) -> BatchResult<FileContent> {
-    let mut result = BatchResult::new();
-
-    let tasks: Vec<_> = paths
-        .into_iter()
-        .map(|path| async move {
-            match fs::read_to_string(&path).await {
-                Ok(content) => Ok(FileContent { path, content }),
-                Err(err) => Err(map_io_error(&path, err)),
-            }
-        })
-        .collect();
-
-    let results = futures::future::join_all(tasks).await;
-
-    for res in results {
-        match res {
-            Ok(file_content) => result.succeeded.push(file_content),
-            Err(err) => result.failed.push(err),
-        }
+pub async fn read_file(
+    path: String,
+) -> std::result::Result<tauri::ipc::Response, FileSystemError> {
+    match fs::read_to_string(&path).await {
+        Ok(content) => Ok(tauri::ipc::Response::new(content.into_bytes())),
+        Err(err) => Err(map_io_error(&path, err)),
     }
-
-    result
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct FileContent {
-    pub path: String,
-    pub content: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct BinaryFileContent {
-    pub path: String,
-    pub data: Vec<u8>,
-}
-
+/// Raw-body binary read: the file's bytes ride Tauri's raw IPC channel as an
+/// `ArrayBuffer` — no JSON `number[]` encode/parse of the payload (the old
+/// batch command serialized a 10MB packfile as ~35MB of JSON text the webview
+/// then parsed on its main thread). Errors reject the invoke with the
+/// serialized `FileSystemError`.
 #[tauri::command]
-pub async fn read_binary_files(paths: Vec<String>) -> BatchResult<BinaryFileContent> {
-    let mut result = BatchResult::new();
-
-    let tasks: Vec<_> = paths
-        .into_iter()
-        .map(|path| async move {
-            match fs::read(&path).await {
-                Ok(data) => Ok(BinaryFileContent { path, data }),
-                Err(err) => Err(map_io_error(&path, err)),
-            }
-        })
-        .collect();
-
-    let results = futures::future::join_all(tasks).await;
-
-    for res in results {
-        match res {
-            Ok(file_content) => result.succeeded.push(file_content),
-            Err(err) => result.failed.push(err),
-        }
+pub async fn read_binary_file(
+    path: String,
+) -> std::result::Result<tauri::ipc::Response, FileSystemError> {
+    match fs::read(&path).await {
+        Ok(data) => Ok(tauri::ipc::Response::new(data)),
+        Err(err) => Err(map_io_error(&path, err)),
     }
-
-    result
 }
 
 #[derive(Deserialize)]
@@ -383,28 +394,53 @@ pub struct FileToWrite {
     pub content: String,
 }
 
+/// One text-file write — the engine `write_file` and `create_files` share:
+/// parents ensured, watcher-echo registered BEFORE the write (the race
+/// guard), then the atomic temp+rename.
+async fn write_text_file(
+    path: String,
+    content: String,
+) -> std::result::Result<String, FileSystemError> {
+    let path_buf = PathBuf::from(&path);
+
+    if let Err(err) = ensure_parent_dir(&path_buf).await {
+        return Err(map_io_error(&path, err));
+    }
+
+    // Register write before writing to prevent race condition with watcher
+    let hash = compute_content_hash(&content);
+    register_app_write(path.clone(), hash);
+
+    match atomic_write(&path_buf, &content).await {
+        Ok(_) => Ok(path),
+        Err(err) => Err(map_io_error(&path, err)),
+    }
+}
+
+/// Raw-body text write: the document's UTF-8 bytes ride Tauri's raw IPC
+/// channel (no JSON string escape of content per autosave), destination
+/// path in the percent-encoded header.
 #[tauri::command]
-pub async fn write_files(files: Vec<FileToWrite>) -> BatchResult<String> {
+pub async fn write_file(
+    request: RawRequest,
+) -> std::result::Result<String, FileSystemError> {
+    let path = raw_request_path(&request)?;
+    let content = String::from_utf8(request.body).map_err(|_| FileSystemError {
+        path: path.clone(),
+        error_type: FileSystemErrorType::IoError,
+        message: "write_file body is not valid UTF-8".to_string(),
+    })?;
+    write_text_file(path, content).await
+}
+
+/// Batch engine for `create_files`; not a command (the frontend writes
+/// documents through `write_file`'s raw body).
+async fn write_files(files: Vec<FileToWrite>) -> BatchResult<String> {
     let mut result = BatchResult::new();
 
     let tasks: Vec<_> = files
         .into_iter()
-        .map(|file| async move {
-            let path_buf = PathBuf::from(&file.path);
-
-            if let Err(err) = ensure_parent_dir(&path_buf).await {
-                return Err(map_io_error(&file.path, err));
-            }
-
-            // Register write before writing to prevent race condition with watcher
-            let hash = compute_content_hash(&file.content);
-            register_app_write(file.path.clone(), hash);
-
-            match atomic_write(&path_buf, &file.content).await {
-                Ok(_) => Ok(file.path),
-                Err(err) => Err(map_io_error(&file.path, err)),
-            }
-        })
+        .map(|file| write_text_file(file.path, file.content))
         .collect();
 
     let results = futures::future::join_all(tasks).await;
@@ -659,39 +695,102 @@ pub async fn get_metadata(paths: Vec<String>) -> BatchResult<FileSystemMetadata>
     result
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct BinaryFileWriteRequest {
-    pub path: String,
-    pub data: Vec<u8>,
+/// Header carrying the destination path for raw-body writes,
+/// percent-encoded (HTTP header values must be ASCII; paths need not be).
+pub const WRITE_BINARY_PATH_HEADER: &str = "x-notefig-path";
+
+/// Owned raw invoke body + headers. Tauri's own `ipc::Request` borrows the
+/// invoke message, which forces raw-body commands to be sync — and sync
+/// commands run their file IO on the IPC thread. This extractor pays one
+/// memcpy of the payload to keep raw-body commands async like every other
+/// fs command (`CommandItem.message` and its accessors are public API).
+pub struct RawRequest {
+    pub body: Vec<u8>,
+    pub headers: tauri::http::HeaderMap,
 }
 
-#[tauri::command]
-pub async fn write_binary_files(files: Vec<BinaryFileWriteRequest>) -> BatchResult<String> {
-    let mut result = BatchResult::new();
-
-    for file in files {
-        let path = PathBuf::from(&file.path);
-
-        if let Some(parent) = path.parent() {
-            if !parent.exists() {
-                if let Err(err) = fs::create_dir_all(parent).await {
-                    result.failed.push(map_io_error(&file.path, err));
-                    continue;
-                }
-            }
-        }
-
-        match fs::write(&path, file.data).await {
-            Ok(_) => {
-                result.succeeded.push(file.path);
-            }
-            Err(err) => {
-                result.failed.push(map_io_error(&file.path, err));
-            }
+impl<'a, R: tauri::Runtime> tauri::ipc::CommandArg<'a, R> for RawRequest {
+    fn from_command(
+        command: tauri::ipc::CommandItem<'a, R>,
+    ) -> std::result::Result<Self, tauri::ipc::InvokeError> {
+        match command.message.payload() {
+            tauri::ipc::InvokeBody::Raw(data) => Ok(Self {
+                body: data.clone(),
+                headers: command.message.headers().clone(),
+            }),
+            tauri::ipc::InvokeBody::Json(_) => Err(tauri::ipc::InvokeError(
+                serde_json::Value::String(format!(
+                    "command {} requires a raw request body",
+                    command.name
+                )),
+            )),
         }
     }
+}
 
-    result
+/// The percent-decoded destination path of a raw-body write request.
+fn raw_request_path(request: &RawRequest) -> std::result::Result<String, FileSystemError> {
+    let invalid = |message: &str| FileSystemError {
+        path: String::new(),
+        error_type: FileSystemErrorType::InvalidPath,
+        message: message.to_string(),
+    };
+    let encoded = request
+        .headers
+        .get(WRITE_BINARY_PATH_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| invalid("raw write requires the path header"))?;
+    percent_decode(encoded)
+        .ok_or_else(|| invalid("raw write path header is not valid percent-encoded UTF-8"))
+}
+
+/// Core of `write_binary_file`, separated so tests can exercise it without
+/// constructing a `tauri::ipc::Request`. Same semantics as the old batch
+/// write: parents created, plain write (no watcher-echo registration —
+/// binary writes never carried one), disk IO on the blocking pool.
+pub async fn write_binary_file_impl(
+    path: &str,
+    data: &[u8],
+) -> std::result::Result<String, FileSystemError> {
+    let path_buf = PathBuf::from(path);
+    if let Err(err) = ensure_parent_dir(&path_buf).await {
+        return Err(map_io_error(path, err));
+    }
+    match fs::write(&path_buf, data).await {
+        Ok(()) => Ok(path.to_string()),
+        Err(err) => Err(map_io_error(path, err)),
+    }
+}
+
+/// Raw-body binary write: bytes arrive on Tauri's raw IPC channel (no JSON
+/// `number[]`), destination path in a percent-encoded header.
+#[tauri::command]
+pub async fn write_binary_file(
+    request: RawRequest,
+) -> std::result::Result<String, FileSystemError> {
+    let path = raw_request_path(&request)?;
+    write_binary_file_impl(&path, &request.body).await
+}
+
+/// Minimal percent-decoder for the path header (the frontend encodes with
+/// `encodeURIComponent`); returns None on malformed input.
+fn percent_decode(input: &str) -> Option<String> {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = bytes.get(i + 1..i + 3)?;
+            let hi = char::from(hex[0]).to_digit(16)?;
+            let lo = char::from(hex[1]).to_digit(16)?;
+            out.push((hi * 16 + lo) as u8);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
 }
 
 #[cfg(test)]
@@ -740,9 +839,9 @@ mod tests {
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
             assert_eq!(value.len(), 3);
-            assert!(value.iter().any(|p| p.contains("file1.txt")));
-            assert!(value.iter().any(|p| p.contains("file2.txt")));
-            assert!(value.iter().any(|p| p.contains("file3.txt")));
+            assert!(value.iter().any(|e| e.path.contains("file1.txt")));
+            assert!(value.iter().any(|e| e.path.contains("file2.txt")));
+            assert!(value.iter().any(|e| e.path.contains("file3.txt")));
         }
     }
 
@@ -765,10 +864,10 @@ mod tests {
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
-            assert!(value.iter().any(|p| p.contains("untitled.md")));
-            assert!(value.iter().any(|p| p.contains("notes.md")));
-            assert!(!value.iter().any(|p| p.contains("HEAD")));
-            assert!(!value.iter().any(|p| p.contains("tasks.json")));
+            assert!(value.iter().any(|e| e.path.contains("untitled.md")));
+            assert!(value.iter().any(|e| e.path.contains("notes.md")));
+            assert!(!value.iter().any(|e| e.path.contains("HEAD")));
+            assert!(!value.iter().any(|e| e.path.contains("tasks.json")));
         }
     }
 
@@ -785,7 +884,7 @@ mod tests {
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
             assert_eq!(value.len(), 1);
-            assert!(value[0].contains("file1.txt"));
+            assert!(value[0].path.contains("file1.txt"));
         }
     }
 
@@ -815,13 +914,13 @@ mod tests {
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
-            assert!(value.iter().any(|p| p.contains("chapter.md")));
+            assert!(value.iter().any(|e| e.path.contains("chapter.md")));
             // Extensionless files stay tracked (denylist, not allowlist).
-            assert!(value.iter().any(|p| p.contains("LICENSE")));
-            assert!(value.iter().any(|p| p.ends_with("docs")));
-            assert!(!value.iter().any(|p| p.contains("clip.mp4")));
-            assert!(!value.iter().any(|p| p.contains("node_modules")));
-            assert!(!value.iter().any(|p| p.contains("dist")));
+            assert!(value.iter().any(|e| e.path.contains("LICENSE")));
+            assert!(value.iter().any(|e| e.path.ends_with("docs")));
+            assert!(!value.iter().any(|e| e.path.contains("clip.mp4")));
+            assert!(!value.iter().any(|e| e.path.contains("node_modules")));
+            assert!(!value.iter().any(|e| e.path.contains("dist")));
         }
     }
 
@@ -850,7 +949,7 @@ mod tests {
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
             assert_eq!(value.len(), 1);
-            assert!(value[0].contains("chapter.md"));
+            assert!(value[0].path.contains("chapter.md"));
         }
     }
 
@@ -867,8 +966,8 @@ mod tests {
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
-            assert!(value.iter().any(|p| p.contains("index.js")));
-            assert!(value.iter().any(|p| p.contains("clip.mp4")));
+            assert!(value.iter().any(|e| e.path.contains("index.js")));
+            assert!(value.iter().any(|e| e.path.contains("clip.mp4")));
         }
     }
 
@@ -885,9 +984,9 @@ mod tests {
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
-            assert!(value.iter().any(|p| p.contains("file1.txt")));
-            assert!(!value.iter().any(|p| p.contains(".hidden.txt")));
-            assert!(!value.iter().any(|p| p.contains(".git")));
+            assert!(value.iter().any(|e| e.path.contains("file1.txt")));
+            assert!(!value.iter().any(|e| e.path.contains(".hidden.txt")));
+            assert!(!value.iter().any(|e| e.path.contains(".git")));
         }
     }
 
@@ -904,9 +1003,9 @@ mod tests {
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
-            assert!(value.iter().any(|p| p.contains("file1.txt")));
-            assert!(value.iter().any(|p| p.contains(".hidden.txt")));
-            assert!(value.iter().any(|p| p.contains(".git")));
+            assert!(value.iter().any(|e| e.path.contains("file1.txt")));
+            assert!(value.iter().any(|e| e.path.contains(".hidden.txt")));
+            assert!(value.iter().any(|e| e.path.contains(".git")));
         }
     }
 
@@ -947,8 +1046,8 @@ mod tests {
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
-            assert!(value.iter().all(|p| !p.contains("subdir")));
-            assert!(value.iter().any(|p| p.contains("file1.txt")));
+            assert!(value.iter().all(|e| !e.path.contains("subdir")));
+            assert!(value.iter().any(|e| e.path.contains("file1.txt")));
         }
     }
 
@@ -966,114 +1065,107 @@ mod tests {
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
-            assert!(value.iter().all(|p| !p.contains("file1.txt")));
-            assert!(value.iter().any(|p| p.contains("subdir")));
+            assert!(value.iter().all(|e| !e.path.contains("file1.txt")));
+            assert!(value.iter().any(|e| e.path.contains("subdir")));
         }
     }
 
     // ========== read_files Tests ==========
 
     #[tokio::test]
-    async fn test_read_files_reads_multiple_files_in_batch() {
+    async fn test_read_file_returns_raw_utf8_bytes() {
+        use tauri::ipc::{InvokeResponseBody, IpcResponse};
+
         let temp_dir = setup_test_dir();
         let file1 = create_test_file(&temp_dir, "file1.txt", "content1").await;
-        let file2 = create_test_file(&temp_dir, "file2.txt", "content2").await;
 
-        let result = read_files(vec![file1.clone(), file2.clone()]).await;
-
-        assert_eq!(result.succeeded.len(), 2);
-        assert!(result
-            .succeeded
-            .iter()
-            .any(|f| f.path == file1 && f.content == "content1"));
-        assert!(result
-            .succeeded
-            .iter()
-            .any(|f| f.path == file2 && f.content == "content2"));
-        assert!(result.failed.is_empty());
+        let response = read_file(file1).await.expect("read should succeed");
+        match response.body().expect("response body") {
+            InvokeResponseBody::Raw(data) => assert_eq!(data, b"content1".to_vec()),
+            InvokeResponseBody::Json(_) => panic!("expected a raw body"),
+        }
     }
 
     #[tokio::test]
-    async fn test_read_files_returns_partial_success() {
+    async fn test_read_file_rejects_missing_path_with_typed_error() {
         let temp_dir = setup_test_dir();
-        let file1 = create_test_file(&temp_dir, "file1.txt", "content1").await;
         let missing_file = temp_dir
             .path()
             .join("missing.txt")
             .to_string_lossy()
             .to_string();
 
-        let result = read_files(vec![file1.clone(), missing_file.clone()]).await;
+        let err = match read_file(missing_file.clone()).await {
+            Ok(_) => panic!("read should fail"),
+            Err(err) => err,
+        };
 
-        assert_eq!(result.succeeded.len(), 1);
-        assert_eq!(result.failed.len(), 1);
-        assert_eq!(result.failed[0].path, missing_file);
-        assert!(matches!(
-            result.failed[0].error_type,
-            FileSystemErrorType::NotFound
-        ));
+        assert_eq!(err.path, missing_file);
+        assert!(matches!(err.error_type, FileSystemErrorType::NotFound));
     }
 
     #[tokio::test]
-    async fn test_read_files_returns_empty_content_for_empty_files() {
+    async fn test_read_file_rejects_invalid_utf8() {
+        let temp_dir = setup_test_dir();
+        let path = temp_dir.path().join("bad.bin");
+        tokio::fs::write(&path, [0xffu8, 0xfe, 0xfd])
+            .await
+            .expect("write");
+
+        let result = read_file(path.to_string_lossy().to_string()).await;
+        assert!(result.is_err(), "invalid UTF-8 must stay an error");
+    }
+
+    #[tokio::test]
+    async fn test_read_file_returns_empty_body_for_empty_files() {
+        use tauri::ipc::{InvokeResponseBody, IpcResponse};
+
         let temp_dir = setup_test_dir();
         let file1 = create_test_file(&temp_dir, "empty.txt", "").await;
 
-        let result = read_files(vec![file1.clone()]).await;
-
-        assert_eq!(result.succeeded.len(), 1);
-        assert_eq!(result.succeeded[0].content, "");
+        let response = read_file(file1).await.expect("read should succeed");
+        match response.body().expect("response body") {
+            InvokeResponseBody::Raw(data) => assert!(data.is_empty()),
+            InvokeResponseBody::Json(_) => panic!("expected a raw body"),
+        }
     }
 
     #[tokio::test]
-    async fn test_read_binary_files_reads_multiple_files_in_batch() {
+    async fn test_read_binary_file_returns_raw_bytes() {
+        use tauri::ipc::{InvokeResponseBody, IpcResponse};
+
         let temp_dir = setup_test_dir();
-        let file1_path = temp_dir.path().join("file1.bin");
-        let file2_path = temp_dir.path().join("file2.bin");
-        tokio::fs::write(&file1_path, vec![1u8, 2, 3])
-            .await
-            .expect("Failed to write binary file1");
-        tokio::fs::write(&file2_path, vec![4u8, 5, 6])
-            .await
-            .expect("Failed to write binary file2");
-
-        let file1 = file1_path.to_string_lossy().to_string();
-        let file2 = file2_path.to_string_lossy().to_string();
-
-        let result = read_binary_files(vec![file1.clone(), file2.clone()]).await;
-
-        assert_eq!(result.succeeded.len(), 2);
-        assert!(result
-            .succeeded
-            .iter()
-            .any(|f| f.path == file1 && f.data == vec![1u8, 2, 3]));
-        assert!(result
-            .succeeded
-            .iter()
-            .any(|f| f.path == file2 && f.data == vec![4u8, 5, 6]));
-        assert!(result.failed.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_read_binary_files_returns_partial_success() {
-        let temp_dir = setup_test_dir();
-        let file = temp_dir.path().join("file.bin");
-        tokio::fs::write(&file, vec![1u8, 2, 3])
+        let file_path = temp_dir.path().join("file1.bin");
+        tokio::fs::write(&file_path, vec![1u8, 2, 3])
             .await
             .expect("Failed to write binary file");
-        let existing = file.to_string_lossy().to_string();
+
+        let response = read_binary_file(file_path.to_string_lossy().to_string())
+            .await
+            .expect("read should succeed");
+
+        match response.body().expect("response body") {
+            InvokeResponseBody::Raw(data) => assert_eq!(data, vec![1u8, 2, 3]),
+            InvokeResponseBody::Json(_) => panic!("expected a raw body"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_binary_file_rejects_missing_path_with_typed_error() {
+        let temp_dir = setup_test_dir();
         let missing = temp_dir
             .path()
             .join("missing.bin")
             .to_string_lossy()
             .to_string();
 
-        let result = read_binary_files(vec![existing.clone(), missing.clone()]).await;
+        let err = match read_binary_file(missing.clone()).await {
+            Ok(_) => panic!("read should fail"),
+            Err(err) => err,
+        };
 
-        assert_eq!(result.succeeded.len(), 1);
-        assert_eq!(result.failed.len(), 1);
-        assert_eq!(result.succeeded[0].path, existing);
-        assert_eq!(result.failed[0].path, missing);
+        assert_eq!(err.path, missing);
+        assert!(matches!(err.error_type, FileSystemErrorType::NotFound));
     }
 
     #[tokio::test]
@@ -1561,30 +1653,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_write_binary_files_writes_binary_data() {
+    async fn test_write_binary_file_writes_binary_data_creating_parents() {
         let temp_dir = setup_test_dir();
         let file = temp_dir
             .path()
-            .join("image.png")
+            .join("nested/dir/image.png")
             .to_string_lossy()
             .to_string();
 
         let data = vec![0u8, 1, 2, 3, 255];
-        let files = vec![BinaryFileWriteRequest {
-            path: file.clone(),
-            data: data.clone(),
-        }];
-
-        let result = write_binary_files(files).await;
-
-        assert_eq!(result.succeeded.len(), 1);
+        write_binary_file_impl(&file, &data).await.expect("write should succeed");
 
         let read_data = tokio::fs::read(&file).await.expect("Failed to read file");
         assert_eq!(read_data, data);
     }
 
     #[tokio::test]
-    async fn test_write_binary_files_handles_empty_binary_files() {
+    async fn test_write_binary_file_handles_empty_body() {
         let temp_dir = setup_test_dir();
         let file = temp_dir
             .path()
@@ -1592,32 +1677,76 @@ mod tests {
             .to_string_lossy()
             .to_string();
 
-        let files = vec![BinaryFileWriteRequest {
-            path: file.clone(),
-            data: vec![],
-        }];
-
-        let result = write_binary_files(files).await;
-
-        assert_eq!(result.succeeded.len(), 1);
+        write_binary_file_impl(&file, &[]).await.expect("write should succeed");
 
         let read_data = tokio::fs::read(&file).await.expect("Failed to read file");
         assert!(read_data.is_empty());
     }
 
+    /// Guards the async contract, not the happy path: the write's disk IO
+    /// must ride the blocking pool, never the runtime worker (regressed once
+    /// when the command was briefly sync and kept `std::fs` after going back
+    /// to async). A FIFO with no reader makes the open block indefinitely —
+    /// the "slow disk" — on a single-threaded runtime a blocking impl then
+    /// starves the timer and the test fails by timeout.
+    #[cfg(unix)]
+    #[test]
+    fn test_write_binary_file_io_does_not_block_the_runtime_worker() {
+        use std::time::Duration;
+
+        let temp_dir = setup_test_dir();
+        let fifo = temp_dir.path().join("never-read.fifo");
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo should run")
+            .success());
+        let fifo = fifo.to_string_lossy().to_string();
+
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime should build");
+            rt.block_on(async move {
+                let write =
+                    tokio::spawn(async move { write_binary_file_impl(&fifo, &[1]).await });
+                // Only reachable while the sole worker thread is free.
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                write.abort();
+                done_tx.send(()).expect("test thread should be waiting");
+            });
+            // The aborted write's open may block a pool thread forever;
+            // don't wait for it on drop.
+            rt.shutdown_background();
+        });
+
+        assert!(
+            done_rx.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "write_binary_file_impl blocked the async runtime worker during IO"
+        );
+    }
+
     #[tokio::test]
-    async fn test_write_binary_files_returns_failed_array_for_errors() {
+    async fn test_write_binary_file_returns_typed_error() {
         let temp_dir = setup_test_dir();
         let invalid_file = file_blocked_path(&temp_dir, "file.bin");
 
-        let files = vec![BinaryFileWriteRequest {
-            path: invalid_file.clone(),
-            data: vec![1],
-        }];
+        let err = write_binary_file_impl(&invalid_file, &[1]).await.expect_err("write should fail");
 
-        let result = write_binary_files(files).await;
+        assert_eq!(err.path, invalid_file);
+    }
 
-        assert!(result.succeeded.is_empty());
-        assert_eq!(result.failed.len(), 1);
+    #[test]
+    fn test_percent_decode_round_trips_unicode_paths() {
+        // Mirror of the frontend's encodeURIComponent for a non-ASCII path.
+        assert_eq!(
+            percent_decode("%2Fws%2Fd%C3%A9j%C3%A0%20vu.bin").as_deref(),
+            Some("/ws/déjà vu.bin")
+        );
+        assert_eq!(percent_decode("plain-ascii"), Some("plain-ascii".to_string()));
+        assert_eq!(percent_decode("%zz"), None);
+        assert_eq!(percent_decode("%2"), None);
     }
 }

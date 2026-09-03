@@ -104,14 +104,11 @@ describe("ignore rules plumbing", () => {
     const tauri = withMockedTauri({
       read_directory: () => ({
         ok: true,
-        value: ["/ws/.git", "/ws/node_modules"],
+        value: [
+          { path: "/ws/.git", type: "directory" as const },
+          { path: "/ws/node_modules", type: "directory" as const },
+        ],
       }),
-      check_exists: (args) =>
-        (args.paths as string[]).map((path) => ({
-          path,
-          exists: true,
-          type: "directory" as const,
-        })),
     });
     const adapter = new TauriPlatformAdapter();
 
