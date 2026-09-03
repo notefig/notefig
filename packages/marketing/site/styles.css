@@ -124,25 +124,25 @@ body {
  * takeover.
  */
 .product-frame {
-  --background: 20 14.3% 4.1%;
-  --foreground: 60 9.1% 97.8%;
-  --card: 20 14.3% 4.1%;
-  --card-foreground: 60 9.1% 97.8%;
-  --popover: 20 14.3% 4.1%;
-  --popover-foreground: 60 9.1% 97.8%;
-  --primary: 60 9.1% 97.8%;
-  --primary-foreground: 24 9.8% 10%;
-  --secondary: 12 6.5% 15.1%;
-  --secondary-foreground: 60 9.1% 97.8%;
-  --muted: 12 6.5% 15.1%;
-  --muted-foreground: 24 5.4% 63.9%;
-  --accent: 12 6.5% 15.1%;
-  --accent-foreground: 60 9.1% 97.8%;
+  --background: 217 29% 8.5%;
+  --foreground: 210 20% 98%;
+  --card: 216 26% 11.5%;
+  --card-foreground: 210 20% 98%;
+  --popover: 216 26% 11.5%;
+  --popover-foreground: 210 20% 98%;
+  --primary: 210 20% 98%;
+  --primary-foreground: 217 29% 8.5%;
+  --secondary: 215 20% 18%;
+  --secondary-foreground: 210 20% 98%;
+  --muted: 215 20% 18%;
+  --muted-foreground: 215 15% 55%;
+  --accent: 215 20% 18%;
+  --accent-foreground: 210 20% 98%;
   --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 60 9.1% 97.8%;
-  --border: 12 6.5% 15.1%;
-  --input: 12 6.5% 15.1%;
-  --ring: 24 5.7% 82.9%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 215 18% 16%;
+  --input: 215 18% 16%;
+  --ring: 215 20% 75%;
   --chart-1: 220 70% 50%;
   --chart-2: 160 60% 45%;
   --chart-3: 30 80% 55%;
@@ -150,7 +150,7 @@ body {
   --chart-5: 340 75% 55%;
   --brand: oklch(0.707 0.165 254.624);
   --highlight: oklch(0.852 0.199 91.936);
-  --logo: #1d4528;
+  --logo: #ceff1a;
   color-scheme: dark;
   color: hsl(var(--foreground));
   height: min(62vh, 40rem);
