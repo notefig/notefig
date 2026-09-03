@@ -8,6 +8,7 @@ import {
 import type {
   Result,
   BatchResult,
+  DirectoryEntry,
   FileSystemMetadata,
   SearchMatch,
   SearchOptions,
@@ -32,10 +33,13 @@ class TestAdapter extends BaseBrowserAdapter {
       includeFiles?: boolean;
       includeDirectories?: boolean;
     },
-  ): Promise<Result<string[]>> {
+  ): Promise<Result<DirectoryEntry[]>> {
     const prefix = path.endsWith("/") ? path : path + "/";
     const paths = Object.keys(this.files).filter((p) => p.startsWith(prefix));
-    return { ok: true, value: paths };
+    return {
+      ok: true,
+      value: paths.map((p) => ({ path: p, type: "file" as const })),
+    };
   }
 
   async createDirectories(): Promise<BatchResult<string>> {
@@ -108,7 +112,10 @@ class TestAdapter extends BaseBrowserAdapter {
 
     if (!dirResult.ok) return [];
 
-    const filePaths = filterFilePaths(dirResult.value, options);
+    const filePaths = filterFilePaths(
+      dirResult.value.map((entry) => entry.path),
+      options,
+    );
     const pattern = buildSearchPattern(options);
     if (!pattern) return [];
 

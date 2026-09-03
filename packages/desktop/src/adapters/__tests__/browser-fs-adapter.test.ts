@@ -267,9 +267,9 @@ describe("BrowserFsPlatformAdapter", () => {
 
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.value).toContain("/test-workspace/file1.txt");
-        expect(result.value).toContain("/test-workspace/subdir");
-        expect(result.value).toContain("/test-workspace/subdir/file2.txt");
+        expect(result.value.map((e) => e.path)).toContain("/test-workspace/file1.txt");
+        expect(result.value.map((e) => e.path)).toContain("/test-workspace/subdir");
+        expect(result.value.map((e) => e.path)).toContain("/test-workspace/subdir/file2.txt");
       }
     });
 
@@ -292,8 +292,8 @@ describe("BrowserFsPlatformAdapter", () => {
 
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.value).not.toContain("/test-workspace/.git");
-        expect(result.value).not.toContain("/test-workspace/.env");
+        expect(result.value.map((e) => e.path)).not.toContain("/test-workspace/.git");
+        expect(result.value.map((e) => e.path)).not.toContain("/test-workspace/.env");
       }
     });
 
@@ -321,9 +321,9 @@ describe("BrowserFsPlatformAdapter", () => {
 
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.value).toContain("/test-workspace/visible.txt");
-        expect(result.value).not.toContain("/test-workspace/.hidden");
-        expect(result.value).not.toContain("/test-workspace/.hidden-file.txt");
+        expect(result.value.map((e) => e.path)).toContain("/test-workspace/visible.txt");
+        expect(result.value.map((e) => e.path)).not.toContain("/test-workspace/.hidden");
+        expect(result.value.map((e) => e.path)).not.toContain("/test-workspace/.hidden-file.txt");
       }
     });
 
@@ -342,9 +342,9 @@ describe("BrowserFsPlatformAdapter", () => {
 
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.value).toContain("/test-workspace/visible.txt");
-        expect(result.value).toContain("/test-workspace/.hidden");
-        expect(result.value).toContain("/test-workspace/.hidden-file.txt");
+        expect(result.value.map((e) => e.path)).toContain("/test-workspace/visible.txt");
+        expect(result.value.map((e) => e.path)).toContain("/test-workspace/.hidden");
+        expect(result.value.map((e) => e.path)).toContain("/test-workspace/.hidden-file.txt");
       }
     });
   });
@@ -566,7 +566,10 @@ describe("BrowserFsPlatformAdapter", () => {
     it("never deletes the source when a file fails to read during the copy", async () => {
       vi.spyOn(adapter.fs, "readDirectory").mockResolvedValue({
         ok: true,
-        value: ["/src/a.md", "/src/b.md"],
+        value: [
+          { path: "/src/a.md", type: "file" },
+          { path: "/src/b.md", type: "file" },
+        ],
       });
       vi.spyOn(adapter.fs, "readBinaryFiles").mockResolvedValue({
         succeeded: [{ path: "/src/a.md", data: new Uint8Array([1]) }],
@@ -584,7 +587,10 @@ describe("BrowserFsPlatformAdapter", () => {
     it("never deletes the source when a destination write fails, and rolls back the partial copy", async () => {
       vi.spyOn(adapter.fs, "readDirectory").mockResolvedValue({
         ok: true,
-        value: ["/src/HEAD", "/src/a.md"],
+        value: [
+          { path: "/src/HEAD", type: "file" },
+          { path: "/src/a.md", type: "file" },
+        ],
       });
       vi.spyOn(adapter.fs, "readBinaryFiles").mockResolvedValue({
         succeeded: [
@@ -618,7 +624,7 @@ describe("BrowserFsPlatformAdapter", () => {
     it("deletes the source only after a fully successful copy", async () => {
       vi.spyOn(adapter.fs, "readDirectory").mockResolvedValue({
         ok: true,
-        value: ["/src/a.md"],
+        value: [{ path: "/src/a.md", type: "file" }],
       });
       vi.spyOn(adapter.fs, "readBinaryFiles").mockResolvedValue({
         succeeded: [{ path: "/src/a.md", data: new Uint8Array([1]) }],

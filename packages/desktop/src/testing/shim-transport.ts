@@ -72,7 +72,17 @@ function installShimTransport(baseUrl: string): void {
     for (const id of [...ids]) runCallback(id, { event, id, payload });
   }
 
-  async function invoke(cmd: string, payload?: unknown): Promise<unknown> {
+  function copyView(view: ArrayBufferView): ArrayBuffer {
+    const copy = new Uint8Array(view.byteLength);
+    copy.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+    return copy.buffer as ArrayBuffer;
+  }
+
+  async function invoke(
+    cmd: string,
+    payload?: unknown,
+    options?: unknown,
+  ): Promise<unknown> {
     const args = (payload ?? {}) as Record<string, unknown>;
 
     // Event plugin: handled locally, never sent to the shim.
@@ -94,12 +104,38 @@ function installShimTransport(baseUrl: string): void {
     if (cmd.startsWith("plugin:")) return null;
 
     // Real command → shim HTTP. text/plain keeps it a CORS "simple request"
-    // (no preflight); the shim parses the body as JSON.
-    const res = await fetch(`${baseUrl}/invoke/${cmd}`, {
+    // (no preflight); the shim parses the body as JSON. Raw-body invokes
+    // (an ArrayBuffer/TypedArray payload, e.g. write_binary_file) send the
+    // bytes with `?raw=1`, and Tauri invoke headers travel percent-encoded
+    // in the query — custom request headers would force a CORS preflight
+    // the shim doesn't serve.
+    const rawBody =
+      payload instanceof ArrayBuffer
+        ? payload
+        : ArrayBuffer.isView(payload)
+          ? // Copy into a fresh plain-ArrayBuffer view (fetch's BodyInit
+            // rejects possibly-SharedArrayBuffer-backed views at the type
+            // level). Test-only path; the copy is fine.
+            copyView(payload)
+          : null;
+    const invokeHeaders = (options as { headers?: Record<string, string> })
+      ?.headers;
+    const query = rawBody
+      ? `?raw=1${
+          invokeHeaders
+            ? `&headers=${encodeURIComponent(JSON.stringify(invokeHeaders))}`
+            : ""
+        }`
+      : "";
+    const res = await fetch(`${baseUrl}/invoke/${cmd}${query}`, {
       method: "POST",
       headers: { "content-type": "text/plain" },
-      body: JSON.stringify(args),
+      body: rawBody ?? JSON.stringify(args),
     });
+    // Raw responses (e.g. read_binary_file) mirror real Tauri: an ArrayBuffer.
+    if (res.ok && res.headers.get("content-type") === "application/octet-stream") {
+      return await res.arrayBuffer();
+    }
     const text = await res.text();
     if (!res.ok) {
       // Non-2xx mirrors a command that returned Result::Err. Real Tauri rejects

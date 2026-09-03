@@ -31,9 +31,12 @@
 
 use std::net::SocketAddr;
 
+use std::collections::HashMap;
+
 use axum::{
+    body::Bytes,
     extract::ws::{WebSocket, WebSocketUpgrade},
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -46,13 +49,20 @@ use tauri::webview::InvokeRequest;
 use tauri::WebviewWindowBuilder;
 use tokio::sync::{mpsc, oneshot};
 
+/// A raw-body command's response bytes, or a JSON command's value.
+enum ShimBody {
+    Json(Value),
+    Raw(Vec<u8>),
+}
+
 /// A dispatch request handed from an axum handler to the main-thread Tauri loop.
 struct InvokeMsg {
     cmd: String,
-    args: Value,
-    /// `Ok(json)` resolves the frontend's invoke; `Err(json)` rejects it
+    body: tauri::ipc::InvokeBody,
+    headers: tauri::http::HeaderMap,
+    /// `Ok` resolves the frontend's invoke; `Err(json)` rejects it
     /// (a command that returned a real `Result::Err`).
-    reply: oneshot::Sender<Result<Value, Value>>,
+    reply: oneshot::Sender<Result<ShimBody, Value>>,
 }
 
 type Dispatch = mpsc::UnboundedSender<InvokeMsg>;
@@ -67,7 +77,13 @@ fn run_dispatch_loop(mut rx: mpsc::UnboundedReceiver<InvokeMsg>) {
         .build()
         .expect("failed to build shim webview");
 
-    while let Some(InvokeMsg { cmd, args, reply }) = rx.blocking_recv() {
+    while let Some(InvokeMsg {
+        cmd,
+        body,
+        headers,
+        reply,
+    }) = rx.blocking_recv()
+    {
         let response = get_ipc_response(
             &webview,
             InvokeRequest {
@@ -75,42 +91,94 @@ fn run_dispatch_loop(mut rx: mpsc::UnboundedReceiver<InvokeMsg>) {
                 callback: tauri::ipc::CallbackFn(0),
                 error: tauri::ipc::CallbackFn(1),
                 url: "http://tauri.localhost".parse().unwrap(),
-                body: tauri::ipc::InvokeBody::Json(args),
-                headers: Default::default(),
+                body,
+                headers,
                 invoke_key: INVOKE_KEY.to_string(),
             },
         )
-        .map(|body| body.deserialize::<Value>().unwrap_or(Value::Null));
+        .map(|body| match body {
+            // Raw responses (e.g. read_binary_file) cross back as bytes.
+            tauri::ipc::InvokeResponseBody::Raw(data) => ShimBody::Raw(data),
+            json => ShimBody::Json(json.deserialize::<Value>().unwrap_or(Value::Null)),
+        });
         // Receiver may have dropped if the client hung up — ignore.
         let _ = reply.send(response);
     }
 }
 
-/// `POST /invoke/{cmd}` — parse the JSON arg body (text/plain, so no CORS
-/// preflight), hand it to the dispatch loop, and translate the result.
+/// `POST /invoke/{cmd}` — hand the body to the dispatch loop and translate
+/// the result. JSON commands send a JSON text body (text/plain, so no CORS
+/// preflight). Raw-body commands (`?raw=1`) send bytes, with any Tauri
+/// invoke headers percent-encoded JSON in `?headers=` — query, not request
+/// headers, because custom request headers would force a CORS preflight the
+/// shim doesn't serve. Raw responses come back as octet-stream (Content-Type
+/// is a CORS-safelisted response header, so the transport can discriminate).
 async fn invoke(
     State(tx): State<Dispatch>,
     Path(cmd): Path<String>,
-    body: String,
+    Query(query): Query<HashMap<String, String>>,
+    body: Bytes,
 ) -> Response {
-    let args: Value = if body.trim().is_empty() {
-        json!({})
-    } else {
-        match serde_json::from_str(&body) {
-            Ok(v) => v,
-            Err(e) => {
-                return (StatusCode::BAD_REQUEST, format!("invalid args for {cmd}: {e}"))
-                    .into_response()
-            }
+    let raw = query.get("raw").map(String::as_str) == Some("1");
+
+    let mut headers = tauri::http::HeaderMap::new();
+    if let Some(encoded) = query.get("headers") {
+        let Ok(map) = serde_json::from_str::<HashMap<String, String>>(encoded) else {
+            return (StatusCode::BAD_REQUEST, format!("invalid headers for {cmd}")).into_response();
+        };
+        for (name, value) in map {
+            let (Ok(name), Ok(value)) = (
+                name.parse::<tauri::http::HeaderName>(),
+                HeaderValue::from_str(&value),
+            ) else {
+                return (StatusCode::BAD_REQUEST, format!("invalid header for {cmd}"))
+                    .into_response();
+            };
+            headers.insert(name, value);
         }
+    }
+
+    let invoke_body = if raw {
+        tauri::ipc::InvokeBody::Raw(body.to_vec())
+    } else {
+        let text = String::from_utf8_lossy(&body);
+        let args: Value = if text.trim().is_empty() {
+            json!({})
+        } else {
+            match serde_json::from_str(&text) {
+                Ok(v) => v,
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        format!("invalid args for {cmd}: {e}"),
+                    )
+                        .into_response()
+                }
+            }
+        };
+        tauri::ipc::InvokeBody::Json(args)
     };
 
     let (reply, wait) = oneshot::channel();
-    if tx.send(InvokeMsg { cmd, args, reply }).is_err() {
+    let msg = InvokeMsg {
+        cmd,
+        body: invoke_body,
+        headers,
+        reply,
+    };
+    if tx.send(msg).is_err() {
         return (StatusCode::INTERNAL_SERVER_ERROR, "shim dispatch loop is gone").into_response();
     }
     match wait.await {
-        Ok(Ok(value)) => Json(value).into_response(),
+        Ok(Ok(ShimBody::Json(value))) => Json(value).into_response(),
+        Ok(Ok(ShimBody::Raw(data))) => (
+            [(
+                axum::http::header::CONTENT_TYPE,
+                HeaderValue::from_static("application/octet-stream"),
+            )],
+            data,
+        )
+            .into_response(),
         // A command's Result::Err — reject the frontend's invoke with the value.
         Ok(Err(value)) => (StatusCode::UNPROCESSABLE_ENTITY, Json(value)).into_response(),
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "dispatch dropped").into_response(),

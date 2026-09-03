@@ -43,6 +43,31 @@ type BatchResult = {
 
 type EnumResult = { ok: boolean; value?: unknown; error?: unknown };
 
+/** Raw-body invoke, mirroring the frontend transport's `?raw=1` path. */
+async function invokeRaw(
+  cmd: string,
+  data: Uint8Array,
+  headers?: Record<string, string>,
+): Promise<{ status: number; bytes: Uint8Array | null; body: unknown }> {
+  const query = `?raw=1${
+    headers ? `&headers=${encodeURIComponent(JSON.stringify(headers))}` : ""
+  }`;
+  const res = await fetch(`${SHIM_URL}/invoke/${cmd}${query}`, {
+    method: "POST",
+    headers: { "content-type": "text/plain" },
+    body: new Uint8Array(data),
+  });
+  if (res.headers.get("content-type") === "application/octet-stream") {
+    return {
+      status: res.status,
+      bytes: new Uint8Array(await res.arrayBuffer()),
+      body: null,
+    };
+  }
+  const text = await res.text();
+  return { status: res.status, bytes: null, body: text ? JSON.parse(text) : null };
+}
+
 test.describe("shim: fs_ops guardrails on a real filesystem", () => {
   let workspace = "";
 
@@ -65,35 +90,40 @@ test.describe("shim: fs_ops guardrails on a real filesystem", () => {
     await expect(fs.readFile(target, "utf8")).resolves.toBe("");
   });
 
-  test("write_files persists content and read_files reads it back (both directions)", async () => {
+  test("write_file persists content and read_file reads it back (both directions)", async () => {
     const target = abs("note.md");
-    const content = "# Hello guardrails\n";
+    const content = "# Hello guardrails — déjà\n";
 
-    const write = await invoke("write_files", {
-      files: [{ path: target, content }],
-    });
+    const write = await invokeRaw(
+      "write_file",
+      new TextEncoder().encode(content),
+      { "x-notefig-path": encodeURIComponent(target) },
+    );
     expect(write.status).toBe(200);
-    expect((write.body as BatchResult).failed).toEqual([]);
 
     // Ground truth: the bytes are on disk.
     await expect(fs.readFile(target, "utf8")).resolves.toBe(content);
 
-    // App-reported: read_files returns the same content the disk holds.
-    const read = await invoke("read_files", { paths: [target] });
-    const succeeded = (read.body as BatchResult).succeeded as {
-      path: string;
-      content: string;
-    }[];
-    expect(succeeded[0]?.content).toBe(content);
+    // App-reported: read_file answers with the raw UTF-8 bytes.
+    const read = await fetch(`${SHIM_URL}/invoke/read_file`, {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: JSON.stringify({ path: target }),
+    });
+    expect(read.status).toBe(200);
+    expect(read.headers.get("content-type")).toBe("application/octet-stream");
+    expect(new TextDecoder().decode(await read.arrayBuffer())).toBe(content);
   });
 
-  test("write_files creates missing parent directories", async () => {
+  test("write_file creates missing parent directories", async () => {
     const target = abs("deeply/nested/dir/file.md");
-    const { body } = await invoke("write_files", {
-      files: [{ path: target, content: "nested\n" }],
-    });
+    const { status } = await invokeRaw(
+      "write_file",
+      new TextEncoder().encode("nested\n"),
+      { "x-notefig-path": encodeURIComponent(target) },
+    );
 
-    expect((body as BatchResult).failed).toEqual([]);
+    expect(status).toBe(200);
     await expect(fs.readFile(target, "utf8")).resolves.toBe("nested\n");
   });
 
@@ -200,5 +230,43 @@ test.describe("shim: fs_ops guardrails on a real filesystem", () => {
     expect(included.find((e) => e.path.endsWith(".git"))?.type).toBe(
       "directory",
     );
+  });
+
+  test("write_binary_file + read_binary_file round-trip raw bytes", async () => {
+    // Unicode path exercises the percent-encoded header; a 0x00 byte and a
+    // high byte prove nothing JSON-ish mangles the payload.
+    const target = abs("déjà vu.bin");
+    const payload = new Uint8Array([0, 1, 2, 127, 128, 255]);
+
+    const write = await invokeRaw("write_binary_file", payload, {
+      "x-notefig-path": encodeURIComponent(target),
+    });
+    expect(write.status).toBe(200);
+    // Ground truth: the exact bytes landed on disk.
+    expect(new Uint8Array(await fs.readFile(target))).toEqual(payload);
+
+    // read_binary_file answers with a raw octet-stream body.
+    const rawRead = await fetch(
+      `${SHIM_URL}/invoke/read_binary_file`,
+      {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: JSON.stringify({ path: target }),
+      },
+    );
+    expect(rawRead.status).toBe(200);
+    expect(rawRead.headers.get("content-type")).toBe(
+      "application/octet-stream",
+    );
+    expect(new Uint8Array(await rawRead.arrayBuffer())).toEqual(payload);
+  });
+
+  test("read_binary_file rejects a missing path with the typed error", async () => {
+    const missing = abs("missing.bin");
+    const res = await invoke("read_binary_file", { path: missing });
+    expect(res.status).toBe(422);
+    const error = res.body as { path: string; type: string };
+    expect(error.type).toBe("not_found");
+    expect(error.path).toBe(missing);
   });
 });
