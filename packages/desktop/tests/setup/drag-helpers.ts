@@ -125,6 +125,11 @@ export async function syntheticNativeDrag(
       },
       setData: (type: string, value: string) => void store.set(type, value),
       getData: (type: string) => store.get(type) ?? "",
+      // tiptap's drag-handle dragstart calls clearData() before setting the
+      // drag image; a missing method would abort it mid-handler and leave
+      // view.dragging unset (the drop then silently no-ops).
+      clearData: (type?: string) =>
+        void (type === undefined ? store.clear() : store.delete(type)),
       setDragImage: () => {},
     };
 

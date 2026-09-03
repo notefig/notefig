@@ -30,6 +30,7 @@ import type { JSONContent } from "@tiptap/core";
 import { TextEditor } from "@/components/editor/text-editor";
 import { SearchPanel } from "@/components/editor/search-panel";
 import { WorkspaceTabsProvider } from "@/components/workspace-tabs-provider";
+import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary";
 import {
   getMarkdownEditor,
   disposeAllEditors,
@@ -126,6 +127,7 @@ export function EditorHarness() {
         return true;
       }}
     >
+      <PromptWidgetBoundary>
       <div
         className="flex h-screen w-screen text-foreground"
         data-testid="editor-harness"
@@ -142,6 +144,7 @@ export function EditorHarness() {
           />
         </div>
       </div>
+      </PromptWidgetBoundary>
     </WorkspaceTabsProvider>
   );
 }

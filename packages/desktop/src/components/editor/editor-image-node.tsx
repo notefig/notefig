@@ -1,7 +1,13 @@
-import { Component, Suspense, useState, type ReactNode } from "react";
+import {
+  Component,
+  Suspense,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import type { NodeViewProps } from "@tiptap/core";
 import { NodeViewWrapper } from "@tiptap/react";
-import { useImageUrl } from "@/hooks/use-image-url";
+import { useResolvedImage } from "@/hooks/use-image-url";
 import { dragSourceProps } from "@/utils/drag-protocol";
 import { path as pathutil } from "@/utils/path";
 
@@ -10,6 +16,17 @@ export function EditorImage(props: NodeViewProps) {
   const options = props.extension.options as Record<string, string>;
   const workspaceRoot = options.workspaceRoot || "/";
   const filePath = options.filePath || "";
+  // A relative src is anchored at the containing file's directory (standard
+  // markdown semantics) or at the workspace root (this app's historical
+  // behavior) — Obsidian accepts both, so resolution probes the file's
+  // directory first and falls back to the root. Identical for root-level docs.
+  const fileDir = filePath ? pathutil.dirname(filePath) : workspaceRoot;
+  const baseDirs =
+    fileDir === workspaceRoot ? [fileDir] : [fileDir, workspaceRoot];
+
+  // Resolution decides which base the asset actually lives under; until it
+  // lands, the drag payload assumes the file-relative anchor.
+  const [resolvedPath, setResolvedPath] = useState<string | null>(null);
 
   // Focus containment. The node view is a non-editable island, so the
   // browser's default reaction to pressing it is to move DOM focus to the
@@ -48,14 +65,19 @@ export function EditorImage(props: NodeViewProps) {
       {...dragSourceProps({
         kind: "image-asset",
         src,
-        absolutePath: pathutil.join(workspaceRoot, pathutil.fromTreePath(src)),
+        absolutePath:
+          resolvedPath ?? pathutil.join(fileDir, pathutil.fromTreePath(src)),
         workspaceRoot,
         sourceFilePath: filePath,
       })}
     >
       <ImageErrorBoundary fallback={<BrokenImage src={src} />}>
         <Suspense fallback={<div className="h-8 w-full animate-pulse rounded bg-muted" />}>
-          <EditorImageInner src={src} workspaceRoot={workspaceRoot} />
+          <EditorImageInner
+            src={src}
+            baseDirs={baseDirs}
+            onResolvedPath={setResolvedPath}
+          />
         </Suspense>
       </ImageErrorBoundary>
     </NodeViewWrapper>
@@ -64,16 +86,22 @@ export function EditorImage(props: NodeViewProps) {
 
 function EditorImageInner({
   src,
-  workspaceRoot,
+  baseDirs,
+  onResolvedPath,
 }: {
   src: string;
-  workspaceRoot: string;
+  baseDirs: string[];
+  onResolvedPath: (absolutePath: string) => void;
 }) {
   // Throws its promise while loading (Suspense) and the resolution error on
   // failure (caught by ImageErrorBoundary). Rejections are cached until
   // reload, so a repaired file stays broken for the session.
-  const url = useImageUrl(src, workspaceRoot);
+  const { url, absolutePath } = useResolvedImage(src, baseDirs);
   const [broken, setBroken] = useState(false);
+
+  useEffect(() => {
+    onResolvedPath(absolutePath);
+  }, [absolutePath, onResolvedPath]);
 
   if (broken) {
     return <BrokenImage src={src} />;

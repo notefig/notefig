@@ -359,11 +359,13 @@ function createMarkdownInstance(
     editorProps: {
       // Protocol handler first — consumes tagged drags, falls through for
       // internal moves and payload-less drags (OS image drops).
+      // Assets are written and referenced relative to the document itself
+      // (`<fileDir>/assets/`), matching how image srcs are resolved.
       handleDrop: composeDropHandlers(
         createProtocolDropHandler(),
-        createImageDropHandler(workspaceRoot),
+        createImageDropHandler(getDirectoryPath(filePath)),
       ),
-      handlePaste: createImagePasteHandler(workspaceRoot),
+      handlePaste: createImagePasteHandler(getDirectoryPath(filePath)),
 
       handleDOMEvents: {
         // Layout re-parenting can silently drop DOM focus to <body> while

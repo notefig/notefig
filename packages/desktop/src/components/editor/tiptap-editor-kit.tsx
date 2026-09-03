@@ -17,8 +17,9 @@ import {
  * Rendering uses a React node view that resolves local paths through
  * useImageUrl / platformAdapter.fs.resolveAssetUrl (the same async mechanism
  * behind ImageViewer). The node attrs always store the canonical markdown
- * path — serialization is unaffected. workspaceRoot is passed per-editor
- * from editor-store.ts so resolution works regardless of the doc's directory.
+ * path — serialization is unaffected. filePath/workspaceRoot are passed
+ * per-editor from editor-store.ts; relative srcs resolve against the doc's
+ * own directory first, then the workspace root (Obsidian accepts both).
  */
 export const MarkdownImage = MarkdownImageBase.extend({
   addNodeView() {
