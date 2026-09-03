@@ -31,6 +31,7 @@
   font-display: swap;
   src: url("./assets/fonts/inter-latin-400-normal.woff2") format("woff2");
 }
+
 @font-face {
   font-family: "Inter";
   font-style: italic;
@@ -38,6 +39,7 @@
   font-display: swap;
   src: url("./assets/fonts/inter-latin-400-italic.woff2") format("woff2");
 }
+
 @font-face {
   font-family: "Inter";
   font-style: normal;
@@ -45,6 +47,7 @@
   font-display: swap;
   src: url("./assets/fonts/inter-latin-500-normal.woff2") format("woff2");
 }
+
 @font-face {
   font-family: "Inter";
   font-style: normal;
@@ -52,6 +55,7 @@
   font-display: swap;
   src: url("./assets/fonts/inter-latin-600-normal.woff2") format("woff2");
 }
+
 @font-face {
   font-family: "Inter";
   font-style: normal;
@@ -59,6 +63,7 @@
   font-display: swap;
   src: url("./assets/fonts/inter-latin-700-normal.woff2") format("woff2");
 }
+
 @font-face {
   font-family: "Libre Baskerville";
   font-style: normal;
@@ -66,6 +71,7 @@
   font-display: swap;
   src: url("./assets/fonts/libre-baskerville-latin-400-normal.woff2") format("woff2");
 }
+
 @font-face {
   font-family: "Libre Baskerville";
   font-style: normal;
@@ -73,6 +79,7 @@
   font-display: swap;
   src: url("./assets/fonts/libre-baskerville-latin-700-normal.woff2") format("woff2");
 }
+
 @font-face {
   font-family: "Libre Baskerville";
   font-style: italic;
@@ -97,6 +104,7 @@
     U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41,
     U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
 }
+
 @font-face {
   font-family: "Rubik";
   font-style: normal;
@@ -222,8 +230,8 @@
     --chart-5: 27 87% 67%;
     --brand: oklch(0.623 0.214 259.815);
     --highlight: oklch(0.852 0.199 91.936);
-    /* Forest green from /icon.svg; markdown file icons share it. */
-    --logo: #1d4528;
+    /* The app logo's fill (icon-sidebar); markdown file icons share it. */
+    --logo: #506600;
   }
 
   .dark {
@@ -253,7 +261,7 @@
     --chart-5: 340 75% 55%;
     --brand: oklch(0.707 0.165 254.624);
     --highlight: oklch(0.852 0.199 91.936);
-    --logo: #1d4528;
+    --logo: #90B800;
   }
 }
 
@@ -291,8 +299,11 @@
     z-index: 0;
   }
 
+  /* The webp's speckle alpha is baked in; layering the half-alpha copy on
+     top lands the grain at ~1.5x (2x read as too much, 1x too subtle). */
   .dark body::before {
-    background-image: url("/textures/noise-dark.webp");
+    background-image: url("/textures/noise-dark-half.webp"), url("/textures/noise-dark.webp");
+    background-size: 100px 100px, 100px 100px;
   }
 
   .texture-surface {
@@ -302,7 +313,8 @@
   }
 
   .dark .texture-surface {
-    background-image: url("/textures/noise-dark.webp");
+    background-image: url("/textures/noise-dark-half.webp"), url("/textures/noise-dark.webp");
+    background-size: 100px 100px, 100px 100px;
   }
 
   #root {
