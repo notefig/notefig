@@ -1,4 +1,5 @@
 import type {
+  DirectoryEntry,
   BatchResult,
   DbSurface,
   FileSystemError,
@@ -245,7 +246,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
       includeHidden?: boolean;
       ignore?: IgnoreRulesOption;
     },
-  ): Promise<Result<string[]>>;
+  ): Promise<Result<DirectoryEntry[]>>;
   protected abstract createDirectories(
     paths: string[],
   ): Promise<BatchResult<string>>;

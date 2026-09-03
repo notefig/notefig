@@ -113,6 +113,36 @@ async fn ensure_parent_dir(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// A listing entry with the type the walk already knows — callers used to
+/// re-derive file-vs-directory with a second stat pass (or a second whole
+/// walk) because this returned bare paths.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DirectoryEntry {
+    pub path: String,
+    #[serde(rename = "type")]
+    pub entry_type: DirectoryEntryType,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DirectoryEntryType {
+    File,
+    Directory,
+}
+
+impl DirectoryEntry {
+    fn new(path: String, is_dir: bool) -> Self {
+        Self {
+            path,
+            entry_type: if is_dir {
+                DirectoryEntryType::Directory
+            } else {
+                DirectoryEntryType::File
+            },
+        }
+    }
+}
+
 /// Ignore filtering is opt-in per call: the frontend passes its ignore
 /// config (utils/ignore.ts) only for workspace listings. Callers that must
 /// see the complete tree — notably the git storage host — pass nothing and
@@ -126,7 +156,7 @@ pub async fn read_directory(
     include_hidden: bool,
     ignore_directories: Option<Vec<String>>,
     ignore_extensions: Option<Vec<String>>,
-) -> Result<Vec<String>> {
+) -> Result<Vec<DirectoryEntry>> {
     let path_buf = PathBuf::from(&path);
 
     if !path_buf.exists() {
@@ -159,14 +189,19 @@ pub async fn read_directory(
 
         if let Err(e) = walk_directory(&path_buf, &options, |entry| {
             let entry_path = entry.path();
-            let is_dir = entry_path.is_dir();
+            // walkdir caches the readdir file type (the followed target's
+            // type under follow_links) — no extra stat.
+            let is_dir = entry.file_type().is_dir();
 
             if !is_dir && has_ignored_extension(entry_path, &ignore_extensions) {
                 return Ok(());
             }
 
             if (is_dir && include_directories) || (!is_dir && include_files) {
-                results.push(entry_path.to_string_lossy().to_string());
+                results.push(DirectoryEntry::new(
+                    entry_path.to_string_lossy().to_string(),
+                    is_dir,
+                ));
             }
 
             Ok(())
@@ -197,7 +232,10 @@ pub async fn read_directory(
                     }
 
                     if (is_dir && include_directories) || (!is_dir && include_files) {
-                        results.push(entry_path.to_string_lossy().to_string());
+                        results.push(DirectoryEntry::new(
+                            entry_path.to_string_lossy().to_string(),
+                            is_dir,
+                        ));
                     }
                 }
             }
@@ -740,9 +778,9 @@ mod tests {
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
             assert_eq!(value.len(), 3);
-            assert!(value.iter().any(|p| p.contains("file1.txt")));
-            assert!(value.iter().any(|p| p.contains("file2.txt")));
-            assert!(value.iter().any(|p| p.contains("file3.txt")));
+            assert!(value.iter().any(|e| e.path.contains("file1.txt")));
+            assert!(value.iter().any(|e| e.path.contains("file2.txt")));
+            assert!(value.iter().any(|e| e.path.contains("file3.txt")));
         }
     }
 
@@ -765,10 +803,10 @@ mod tests {
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
-            assert!(value.iter().any(|p| p.contains("untitled.md")));
-            assert!(value.iter().any(|p| p.contains("notes.md")));
-            assert!(!value.iter().any(|p| p.contains("HEAD")));
-            assert!(!value.iter().any(|p| p.contains("tasks.json")));
+            assert!(value.iter().any(|e| e.path.contains("untitled.md")));
+            assert!(value.iter().any(|e| e.path.contains("notes.md")));
+            assert!(!value.iter().any(|e| e.path.contains("HEAD")));
+            assert!(!value.iter().any(|e| e.path.contains("tasks.json")));
         }
     }
 
@@ -785,7 +823,7 @@ mod tests {
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
             assert_eq!(value.len(), 1);
-            assert!(value[0].contains("file1.txt"));
+            assert!(value[0].path.contains("file1.txt"));
         }
     }
 
@@ -815,13 +853,13 @@ mod tests {
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
-            assert!(value.iter().any(|p| p.contains("chapter.md")));
+            assert!(value.iter().any(|e| e.path.contains("chapter.md")));
             // Extensionless files stay tracked (denylist, not allowlist).
-            assert!(value.iter().any(|p| p.contains("LICENSE")));
-            assert!(value.iter().any(|p| p.ends_with("docs")));
-            assert!(!value.iter().any(|p| p.contains("clip.mp4")));
-            assert!(!value.iter().any(|p| p.contains("node_modules")));
-            assert!(!value.iter().any(|p| p.contains("dist")));
+            assert!(value.iter().any(|e| e.path.contains("LICENSE")));
+            assert!(value.iter().any(|e| e.path.ends_with("docs")));
+            assert!(!value.iter().any(|e| e.path.contains("clip.mp4")));
+            assert!(!value.iter().any(|e| e.path.contains("node_modules")));
+            assert!(!value.iter().any(|e| e.path.contains("dist")));
         }
     }
 
@@ -850,7 +888,7 @@ mod tests {
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
             assert_eq!(value.len(), 1);
-            assert!(value[0].contains("chapter.md"));
+            assert!(value[0].path.contains("chapter.md"));
         }
     }
 
@@ -867,8 +905,8 @@ mod tests {
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
-            assert!(value.iter().any(|p| p.contains("index.js")));
-            assert!(value.iter().any(|p| p.contains("clip.mp4")));
+            assert!(value.iter().any(|e| e.path.contains("index.js")));
+            assert!(value.iter().any(|e| e.path.contains("clip.mp4")));
         }
     }
 
@@ -885,9 +923,9 @@ mod tests {
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
-            assert!(value.iter().any(|p| p.contains("file1.txt")));
-            assert!(!value.iter().any(|p| p.contains(".hidden.txt")));
-            assert!(!value.iter().any(|p| p.contains(".git")));
+            assert!(value.iter().any(|e| e.path.contains("file1.txt")));
+            assert!(!value.iter().any(|e| e.path.contains(".hidden.txt")));
+            assert!(!value.iter().any(|e| e.path.contains(".git")));
         }
     }
 
@@ -904,9 +942,9 @@ mod tests {
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
-            assert!(value.iter().any(|p| p.contains("file1.txt")));
-            assert!(value.iter().any(|p| p.contains(".hidden.txt")));
-            assert!(value.iter().any(|p| p.contains(".git")));
+            assert!(value.iter().any(|e| e.path.contains("file1.txt")));
+            assert!(value.iter().any(|e| e.path.contains(".hidden.txt")));
+            assert!(value.iter().any(|e| e.path.contains(".git")));
         }
     }
 
@@ -947,8 +985,8 @@ mod tests {
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
-            assert!(value.iter().all(|p| !p.contains("subdir")));
-            assert!(value.iter().any(|p| p.contains("file1.txt")));
+            assert!(value.iter().all(|e| !e.path.contains("subdir")));
+            assert!(value.iter().any(|e| e.path.contains("file1.txt")));
         }
     }
 
@@ -966,8 +1004,8 @@ mod tests {
 
         assert!(matches!(result, Result::Ok { .. }));
         if let Result::Ok { value, .. } = result {
-            assert!(value.iter().all(|p| !p.contains("file1.txt")));
-            assert!(value.iter().any(|p| p.contains("subdir")));
+            assert!(value.iter().all(|e| !e.path.contains("file1.txt")));
+            assert!(value.iter().any(|e| e.path.contains("subdir")));
         }
     }
 

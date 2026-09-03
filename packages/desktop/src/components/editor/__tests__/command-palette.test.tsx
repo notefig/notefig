@@ -93,16 +93,15 @@ beforeEach(async () => {
   WS = `/ws-palette-${testCounter++}`;
   adapter.getMetadata.mockResolvedValue({ succeeded: [], failed: [] });
   adapter.readDirectory.mockImplementation(
-    async (_dir: string, options: { includeFiles: boolean }) => ({
+    async () => ({
       ok: true,
-      value: options.includeFiles
-        ? [
-            `${WS}/notes.md`,
-            `${WS}/archive/old-notes.md`,
-            `${WS}/theme.md`,
-            `${WS}/binary.bin`,
-          ]
-        : [`${WS}/archive`],
+      value: [
+        { path: `${WS}/archive`, type: "directory" as const },
+        { path: `${WS}/notes.md`, type: "file" as const },
+        { path: `${WS}/archive/old-notes.md`, type: "file" as const },
+        { path: `${WS}/theme.md`, type: "file" as const },
+        { path: `${WS}/binary.bin`, type: "file" as const },
+      ],
     }),
   );
 

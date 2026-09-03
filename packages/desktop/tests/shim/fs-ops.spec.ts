@@ -174,10 +174,16 @@ test.describe("shim: fs_ops guardrails on a real filesystem", () => {
       includeDirectories: true,
       includeHidden: false,
     });
-    const excludedPaths = (hiddenExcluded.body as EnumResult).value as string[];
-    expect(excludedPaths.some((p) => p.endsWith("visible.md"))).toBe(true);
-    expect(excludedPaths.some((p) => p.endsWith(".hidden"))).toBe(false);
-    expect(excludedPaths.some((p) => p.endsWith(".git"))).toBe(false);
+    const excluded = (hiddenExcluded.body as EnumResult).value as {
+      path: string;
+      type: "file" | "directory";
+    }[];
+    expect(excluded.some((e) => e.path.endsWith("visible.md"))).toBe(true);
+    expect(
+      excluded.find((e) => e.path.endsWith("visible.md"))?.type,
+    ).toBe("file");
+    expect(excluded.some((e) => e.path.endsWith(".hidden"))).toBe(false);
+    expect(excluded.some((e) => e.path.endsWith(".git"))).toBe(false);
 
     const hiddenIncluded = await invoke("read_directory", {
       path: workspace,
@@ -186,7 +192,13 @@ test.describe("shim: fs_ops guardrails on a real filesystem", () => {
       includeDirectories: true,
       includeHidden: true,
     });
-    const includedPaths = (hiddenIncluded.body as EnumResult).value as string[];
-    expect(includedPaths.some((p) => p.endsWith(".hidden"))).toBe(true);
+    const included = (hiddenIncluded.body as EnumResult).value as {
+      path: string;
+      type: "file" | "directory";
+    }[];
+    expect(included.some((e) => e.path.endsWith(".hidden"))).toBe(true);
+    expect(included.find((e) => e.path.endsWith(".git"))?.type).toBe(
+      "directory",
+    );
   });
 });

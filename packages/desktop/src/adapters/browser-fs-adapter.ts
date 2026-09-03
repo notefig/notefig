@@ -1,4 +1,5 @@
 import type {
+  DirectoryEntry,
   BatchResult,
   FileSystemError,
   FileSystemMetadata,
@@ -262,7 +263,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
       includeHidden?: boolean;
       ignore?: IgnoreRulesOption;
     },
-  ): Promise<Result<string[]>> {
+  ): Promise<Result<DirectoryEntry[]>> {
     try {
       const workspaceRoot = getWorkspaceRoot(path);
       if (!workspaceRoot) {
@@ -276,7 +277,7 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
       const includeHidden = options?.includeHidden ?? false;
       const isIgnoredEntry = createEntryIgnoreFilter(options?.ignore);
 
-      const results: string[] = [];
+      const results: DirectoryEntry[] = [];
 
       const walk = async (
         handle: DirectoryHandle,
@@ -292,11 +293,17 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
           if (isIgnoredEntry(name, sub.kind === "file")) continue;
           if (sub.kind === "file") {
             if (includeFiles) {
-              results.push(buildAbsolutePath(workspaceRoot, nextRel));
+              results.push({
+                path: buildAbsolutePath(workspaceRoot, nextRel),
+                type: "file",
+              });
             }
           } else {
             if (includeDirectories) {
-              results.push(buildAbsolutePath(workspaceRoot, nextRel));
+              results.push({
+                path: buildAbsolutePath(workspaceRoot, nextRel),
+                type: "directory",
+              });
             }
             if (recursive) {
               await walk(sub, nextRel);
@@ -382,7 +389,9 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
       if (!filesResult.ok) {
         return { ok: false, error: filesResult.error };
       }
-      const fileData = await this.fs.readBinaryFiles(filesResult.value);
+      const fileData = await this.fs.readBinaryFiles(
+        filesResult.value.map((entry) => entry.path),
+      );
       if (fileData.failed.length > 0) {
         return { ok: false, error: fileData.failed[0] };
       }
@@ -752,7 +761,10 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
         return [];
       }
 
-      filePaths = filterFilePaths(dirResult.value, options);
+      filePaths = filterFilePaths(
+        dirResult.value.map((entry) => entry.path),
+        options,
+      );
     }
 
     const pattern = buildSearchPattern(options);

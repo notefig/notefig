@@ -16,7 +16,6 @@ export type GitHostFs = Pick<
   | "writeBinaryFiles"
   | "moveFile"
   | "deleteFiles"
-  | "exists"
   | "getMetadata"
   | "readDirectory"
   | "createDirectories"
@@ -118,9 +117,12 @@ export function createGitStorageHost(
 
     stat: async (rawPath: string) => {
       const path = native(rawPath);
-      const exists = await fs.exists([path]);
-      const entry = exists[0];
-      if (!entry?.exists) {
+      // One getMetadata, no exists() pre-flight: getMetadata already
+      // reports a missing path as a not_found failure, and stat is git's
+      // hottest host op — the pre-flight doubled its IPC cost.
+      const metadataResult = await fs.getMetadata([path]);
+      const failure = metadataResult.failed[0];
+      if (failure?.type === "not_found") {
         return {
           exists: false as const,
           isFile: false as const,
@@ -128,7 +130,6 @@ export function createGitStorageHost(
         };
       }
 
-      const metadataResult = await fs.getMetadata([path]);
       const metadata = requireSuccess(path, metadataResult, "read");
       const isDir = metadata.type === "directory";
 
@@ -174,15 +175,15 @@ export function createGitStorageHost(
         );
       }
 
-      const childExists = await fs.exists(result.value);
-      return childExists
-        .filter((entry) => entry.exists)
-        .map((entry) => ({
-          name: pathutil.basename(entry.path) || entry.path,
-          isFile: entry.type === "file",
-          isDir: entry.type === "directory",
-          isSymbolicLink: false,
-        }));
+      // The listing already carries each child's type — no per-listing
+      // second pass to re-derive it (this used to double the IPC volume of
+      // every worktree walk).
+      return result.value.map((entry) => ({
+        name: pathutil.basename(entry.path) || entry.path,
+        isFile: entry.type === "file",
+        isDir: entry.type === "directory",
+        isSymbolicLink: false,
+      }));
     },
 
     createDir: async (rawPath: string): Promise<void> => {

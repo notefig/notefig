@@ -93,41 +93,29 @@ export function createFileMetadataCollection(workspaceId: string) {
       // Listing only — no per-path stat batch. Stats (modified/size)
       // hydrate per directory via hydrateDirectoryStats when the tree
       // shows it; the refetch re-stats already-hydrated directories so the
-      // 30s cycle stays cheap on large workspaces. Two walks (files, then
-      // dirs) because the listing API returns bare paths and rows need a
-      // type; the walk is the cheap half of the old scan.
+      // 30s cycle stays cheap on large workspaces. One walk: the listing
+      // carries entry types, so the historical files-then-dirs double walk
+      // is gone.
       queryFn: async (): Promise<FileMetadata[]> => {
-        const walkOptions = { recursive: true, ignore: IGNORE_RULES };
-        const [filesResult, dirsResult] = await Promise.all([
-          platformAdapter.fs.readDirectory(workspaceId, {
-            ...walkOptions,
-            includeFiles: true,
-            includeDirectories: false,
-          }),
-          platformAdapter.fs.readDirectory(workspaceId, {
-            ...walkOptions,
-            includeFiles: false,
-            includeDirectories: true,
-          }),
-        ]);
+        const listing = await platformAdapter.fs.readDirectory(workspaceId, {
+          recursive: true,
+          ignore: IGNORE_RULES,
+          includeFiles: true,
+          includeDirectories: true,
+        });
 
-        for (const result of [filesResult, dirsResult]) {
-          if (!result.ok) {
-            // Rethrow typed so WorkspaceErrorBoundary can recognize
-            // permission failures and render the recovery fallback instead
-            // of DebugPanel.
-            const { type, path, message } = result.error;
-            throw new FsError(type, path, message);
-          }
+        if (!listing.ok) {
+          // Rethrow typed so WorkspaceErrorBoundary can recognize
+          // permission failures and render the recovery fallback instead
+          // of DebugPanel.
+          const { type, path, message } = listing.error;
+          throw new FsError(type, path, message);
         }
-        if (!filesResult.ok || !dirsResult.ok) return []; // narrowing only
 
-        const entries: { path: string; type: "file" | "directory" }[] = [
-          ...dirsResult.value.map((p) => ({
-            path: p,
-            type: "directory" as const,
-          })),
-          ...filesResult.value.map((p) => ({ path: p, type: "file" as const })),
+        // Directories first, matching the old dirs-then-files ordering.
+        const entries = [
+          ...listing.value.filter((e) => e.type === "directory"),
+          ...listing.value.filter((e) => e.type === "file"),
         ];
         scratchpadDebug(
           "metadata walk:",

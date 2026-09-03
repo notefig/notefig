@@ -49,7 +49,6 @@ function hostFsApi(): GitHostFs {
     writeBinaryFiles: (files) => fs.writeBinaryFiles(files),
     moveFile: (oldPath, newPath) => fs.moveFile(oldPath, newPath),
     deleteFiles: (paths) => fs.deleteFiles(paths),
-    exists: (paths) => fs.exists(paths),
     getMetadata: (paths) => fs.getMetadata(paths),
     readDirectory: (path, options) => fs.readDirectory(path, options),
     createDirectories: (paths) => fs.createDirectories(paths),

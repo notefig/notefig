@@ -82,12 +82,10 @@ beforeEach(async () => {
     ok(paths.includes(FILE) ? [metadata(FILE, 5)] : []),
   );
   adapter.readFiles.mockResolvedValue(ok([{ path: FILE, content: "hello" }]));
-  adapter.readDirectory.mockImplementation(
-    async (_root: string, options?: { includeFiles?: boolean }) => ({
-      ok: true,
-      value: options?.includeFiles === false ? [] : [...disk],
-    }),
-  );
+  adapter.readDirectory.mockImplementation(async () => ({
+    ok: true,
+    value: [...disk].map((p) => ({ path: p, type: "file" as const })),
+  }));
 
   files = await import("./files");
 
@@ -154,19 +152,15 @@ describe("lazy stat hydration", () => {
     SUB = `${WS}/sub`;
     A = `${WS}/a.md`;
     B = `${WS}/sub/b.md`;
-    // The listing queryFn walks files and directories separately.
-    adapter.readDirectory.mockImplementation(
-      async (
-        _root: string,
-        options?: { includeFiles?: boolean; includeDirectories?: boolean },
-      ) => ({
-        ok: true,
-        value:
-          options?.includeDirectories && !options?.includeFiles
-            ? [SUB]
-            : [A, B],
-      }),
-    );
+    // One typed listing: files and directories together.
+    adapter.readDirectory.mockImplementation(async () => ({
+      ok: true,
+      value: [
+        { path: SUB, type: "directory" as const },
+        { path: A, type: "file" as const },
+        { path: B, type: "file" as const },
+      ],
+    }));
     adapter.getMetadata.mockImplementation(async (paths: string[]) =>
       ok(
         paths.map((path) => ({

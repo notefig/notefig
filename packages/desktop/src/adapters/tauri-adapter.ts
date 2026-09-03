@@ -10,6 +10,7 @@ import type {
   ProcessSurface,
   Result,
   BatchResult,
+  DirectoryEntry,
   FileSystemError,
   FileSystemMetadata,
   MetadataChangeEvent,
@@ -166,11 +167,11 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       includeHidden?: boolean;
       ignore?: IgnoreRulesOption;
     },
-  ): Promise<Result<string[]>> {
+  ): Promise<Result<DirectoryEntry[]>> {
     try {
       const result = await invoke<{
         ok: boolean;
-        value?: string[];
+        value?: DirectoryEntry[];
         error?: FileSystemError;
       }>("read_directory", {
         path,
