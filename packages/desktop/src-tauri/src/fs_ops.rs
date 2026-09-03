@@ -747,20 +747,16 @@ fn raw_request_path(request: &RawRequest) -> std::result::Result<String, FileSys
 /// Core of `write_binary_file`, separated so tests can exercise it without
 /// constructing a `tauri::ipc::Request`. Same semantics as the old batch
 /// write: parents created, plain write (no watcher-echo registration —
-/// binary writes never carried one).
-pub fn write_binary_file_impl(
+/// binary writes never carried one), disk IO on the blocking pool.
+pub async fn write_binary_file_impl(
     path: &str,
     data: &[u8],
 ) -> std::result::Result<String, FileSystemError> {
     let path_buf = PathBuf::from(path);
-    if let Some(parent) = path_buf.parent() {
-        if !parent.exists() {
-            if let Err(err) = std::fs::create_dir_all(parent) {
-                return Err(map_io_error(path, err));
-            }
-        }
+    if let Err(err) = ensure_parent_dir(&path_buf).await {
+        return Err(map_io_error(path, err));
     }
-    match std::fs::write(&path_buf, data) {
+    match fs::write(&path_buf, data).await {
         Ok(()) => Ok(path.to_string()),
         Err(err) => Err(map_io_error(path, err)),
     }
@@ -773,7 +769,7 @@ pub async fn write_binary_file(
     request: RawRequest,
 ) -> std::result::Result<String, FileSystemError> {
     let path = raw_request_path(&request)?;
-    write_binary_file_impl(&path, &request.body)
+    write_binary_file_impl(&path, &request.body).await
 }
 
 /// Minimal percent-decoder for the path header (the frontend encodes with
@@ -1666,7 +1662,7 @@ mod tests {
             .to_string();
 
         let data = vec![0u8, 1, 2, 3, 255];
-        write_binary_file_impl(&file, &data).expect("write should succeed");
+        write_binary_file_impl(&file, &data).await.expect("write should succeed");
 
         let read_data = tokio::fs::read(&file).await.expect("Failed to read file");
         assert_eq!(read_data, data);
@@ -1681,10 +1677,55 @@ mod tests {
             .to_string_lossy()
             .to_string();
 
-        write_binary_file_impl(&file, &[]).expect("write should succeed");
+        write_binary_file_impl(&file, &[]).await.expect("write should succeed");
 
         let read_data = tokio::fs::read(&file).await.expect("Failed to read file");
         assert!(read_data.is_empty());
+    }
+
+    /// Guards the async contract, not the happy path: the write's disk IO
+    /// must ride the blocking pool, never the runtime worker (regressed once
+    /// when the command was briefly sync and kept `std::fs` after going back
+    /// to async). A FIFO with no reader makes the open block indefinitely —
+    /// the "slow disk" — on a single-threaded runtime a blocking impl then
+    /// starves the timer and the test fails by timeout.
+    #[cfg(unix)]
+    #[test]
+    fn test_write_binary_file_io_does_not_block_the_runtime_worker() {
+        use std::time::Duration;
+
+        let temp_dir = setup_test_dir();
+        let fifo = temp_dir.path().join("never-read.fifo");
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo should run")
+            .success());
+        let fifo = fifo.to_string_lossy().to_string();
+
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime should build");
+            rt.block_on(async move {
+                let write =
+                    tokio::spawn(async move { write_binary_file_impl(&fifo, &[1]).await });
+                // Only reachable while the sole worker thread is free.
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                write.abort();
+                done_tx.send(()).expect("test thread should be waiting");
+            });
+            // The aborted write's open may block a pool thread forever;
+            // don't wait for it on drop.
+            rt.shutdown_background();
+        });
+
+        assert!(
+            done_rx.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "write_binary_file_impl blocked the async runtime worker during IO"
+        );
     }
 
     #[tokio::test]
@@ -1692,7 +1733,7 @@ mod tests {
         let temp_dir = setup_test_dir();
         let invalid_file = file_blocked_path(&temp_dir, "file.bin");
 
-        let err = write_binary_file_impl(&invalid_file, &[1]).expect_err("write should fail");
+        let err = write_binary_file_impl(&invalid_file, &[1]).await.expect_err("write should fail");
 
         assert_eq!(err.path, invalid_file);
     }
