@@ -39,7 +39,10 @@ import {
 import { ensureAgentRuntime } from "@/agent/tunnel/require-connection";
 import { describeTaskMeta, useAgentTaskList } from "@/entities/agents";
 import { getOrCreateWorkspaceCollections } from "@/entities/files";
-import { useDefaultHarness } from "@/hooks/use-harness-selection";
+import {
+  useActiveHarnesses,
+  useDefaultHarness,
+} from "@/hooks/use-harness-selection";
 import { canOpenFile } from "@/components/editor/polymorphic-editor";
 import { FileTypeIcon } from "@/components/editor/file-type-icon";
 import { Markdown } from "@/components/ui/markdown";
@@ -215,6 +218,22 @@ function useHarnessIdentity() {
   return { id: defaultHarness.id, label: defaultHarness.label };
 }
 
+/** The harnesses a new conversation may start on, default first — the
+ *  widget's explicit new-conversation entries come off the top of this
+ *  list. Never empty: useActiveHarnesses falls back to the built-ins. */
+function useHarnessList() {
+  const { defaultHarness } = useDefaultHarness();
+  const harnesses = useActiveHarnesses();
+  return useMemo(
+    () =>
+      [
+        defaultHarness,
+        ...harnesses.filter((harness) => harness.id !== defaultHarness.id),
+      ].map((harness) => ({ id: harness.id, label: harness.label })),
+    [defaultHarness, harnesses],
+  );
+}
+
 /**
  * Build the host. Workspace-agnostic: every method takes the workspace path
  * it applies to, so one instance serves every editor and chat tab in the app.
@@ -239,10 +258,15 @@ function useHarnessIdentity() {
  */
 export function usePromptWidgetHost(): PromptWidgetHost {
   const { openFile, openAgentTab } = useWorkspaceTabs();
-  const { defaultHarness } = useDefaultHarness();
+  const { defaultHarness, setDefaultHarness } = useDefaultHarness();
 
-  const latest = useRef({ defaultHarness, openFile, openAgentTab });
-  latest.current = { defaultHarness, openFile, openAgentTab };
+  const latest = useRef({
+    defaultHarness,
+    setDefaultHarness,
+    openFile,
+    openAgentTab,
+  });
+  latest.current = { defaultHarness, setDefaultHarness, openFile, openAgentTab };
 
   return useMemo<PromptWidgetHost>(
     () => ({
@@ -250,7 +274,12 @@ export function usePromptWidgetHost(): PromptWidgetHost {
         (await getOrStartSharedSession(path, latest.current.defaultHarness))
           .taskId,
       adoptSession: adoptSharedSession,
-      dropSession: dropSharedSession,
+      // Choosing a harness both starts the fresh session on it and remembers
+      // it as the default — the sessions panel's split-button rule.
+      dropSession: (path, harnessId) => {
+        latest.current.setDefaultHarness(harnessId);
+        dropSharedSession(path);
+      },
       peekSession: peekSharedSession,
       isTaskReachable: (taskId) => agents.task(taskId).isReachable(),
 
@@ -269,6 +298,7 @@ export function usePromptWidgetHost(): PromptWidgetHost {
       useRound,
       useSessionList,
       useDefaultHarness: useHarnessIdentity,
+      useHarnessList,
       useTrust,
 
       isWorkspaceFile,
