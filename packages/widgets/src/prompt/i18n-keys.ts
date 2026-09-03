@@ -29,7 +29,7 @@ export const PROMPT_WIDGET_I18N_KEYS = [
   "promptBlobEdit",
   "promptBlobFailed",
   "promptBlobIssue",
-  "promptBlobNewSession",
+  "promptBlobNewSessionWith",
   "promptBlobOpenChat",
   "promptBlobPlaceholder",
   "promptBlobQueued",

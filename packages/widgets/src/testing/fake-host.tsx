@@ -53,6 +53,10 @@ export function fakePromptWidgetHost(
     useRound: vi.fn(() => EMPTY_ROUND),
     useSessionList: vi.fn(() => []),
     useDefaultHarness: vi.fn(() => ({ id: "claude", label: "Claude Code" })),
+    useHarnessList: vi.fn(() => [
+      { id: "claude", label: "Claude Code" },
+      { id: "opencode", label: "opencode" },
+    ]),
     useTrust: vi.fn(() => ({ isTrusted: true, grant: vi.fn() })),
 
     isWorkspaceFile: vi.fn(() => false),

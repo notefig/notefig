@@ -1341,8 +1341,9 @@ function DraftRow({
  * The session picker, logo-only trigger in the composer row: shows where
  * the next prompt actually goes (the adopted session's harness logo, or the
  * default harness if nothing is adopted). The menu offers the workspace's
- * recent live sessions to re-target, or an explicit new session (started on
- * the default harness).
+ * recent live sessions to re-target, or a new conversation on one of the top
+ * harnesses — each its own entry with its logo; picking one also becomes the
+ * remembered default (the sessions panel's split-button rule).
  */
 function SessionControl({
   workspacePath,
@@ -1360,7 +1361,9 @@ function SessionControl({
 }) {
   const { t } = useTranslation();
   const host = usePromptWidgetHost();
-  const defaultHarness = host.useDefaultHarness();
+  // Default first, never empty — the top two become the explicit
+  // new-conversation entries below.
+  const harnesses = host.useHarnessList();
   // Already filtered to live sessions and ordered newest-first by the host.
   const sessions = host.useSessionList(workspacePath);
   const [open, setOpen] = useState(false);
@@ -1370,7 +1373,7 @@ function SessionControl({
   // at is in the list whenever it is live, so no second lookup is needed.
   const triggerHarnessId =
     sessions.find((session) => session.taskId === peekedTaskId)?.harnessId ??
-    defaultHarness.id;
+    harnesses[0].id;
 
   const recentSessions = sessions.slice(0, 5);
 
@@ -1417,13 +1420,19 @@ function SessionControl({
             <DropdownMenuSeparator />
           </>
         )}
-        <DropdownMenuItem
-          className="cursor-pointer gap-2 text-xs"
-          onSelect={() => host.dropSession(workspacePath)}
-        >
-          <MessageSquare className="size-3 text-muted-foreground" />
-          {t("promptBlobNewSession")}
-        </DropdownMenuItem>
+        {harnesses.slice(0, 2).map((harness) => (
+          <DropdownMenuItem
+            key={harness.id}
+            className="cursor-pointer gap-2 text-xs"
+            onSelect={() => host.dropSession(workspacePath, harness.id)}
+          >
+            <HarnessLogo
+              harnessId={harness.id}
+              className="size-3 text-muted-foreground"
+            />
+            {t("promptBlobNewSessionWith", { harness: harness.label })}
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   );

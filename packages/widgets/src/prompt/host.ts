@@ -83,9 +83,11 @@ export interface PromptWidgetHost {
   startOrGetSharedSession(workspacePath: string): Promise<string>;
   /** Point the shared session at an existing live task (session picker). */
   adoptSession(workspacePath: string, taskId: string): void;
-  /** Forget the shared session, so the next send starts a fresh one. The old
-   *  task is not cancelled — it stays in the app's session list. */
-  dropSession(workspacePath: string): void;
+  /** Forget the shared session, so the next send starts a fresh one on
+   *  `harnessId` — which also becomes the remembered default, mirroring the
+   *  sessions panel's split button. The old task is not cancelled — it stays
+   *  in the app's session list. */
+  dropSession(workspacePath: string, harnessId: string): void;
   /** The current shared session, for rendering only. */
   peekSession(workspacePath: string): string | null;
   /**
@@ -128,6 +130,10 @@ export interface PromptWidgetHost {
   /** The harness a new session would use. The host picks it; the widget only
    *  names it (trust prompt) and draws its logo. */
   useDefaultHarness(): { id: string; label: string };
+  /** The harnesses a new conversation may start on, default first. Never
+   *  empty; the widget offers the top of this list as explicit
+   *  new-conversation entries. */
+  useHarnessList(): { id: string; label: string }[];
   /**
    * The workspace's "yes, agents may act here" gate, asked once per
    * workspace before the first send.

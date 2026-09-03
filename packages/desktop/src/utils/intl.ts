@@ -455,7 +455,7 @@ i18n
           promptBlobIssue: "Issue",
           promptBlobSessionGone:
             "That session is no longer available — your reply was kept. Sending again starts a new session.",
-          promptBlobNewSession: "Start a new session",
+          promptBlobNewSessionWith: "New {{harness}} conversation",
           promptBlobTrustWarning:
             "Spawns {{name}} with access to this folder. Press Enter again to continue.",
 
