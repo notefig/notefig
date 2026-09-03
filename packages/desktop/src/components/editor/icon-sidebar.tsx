@@ -11,11 +11,7 @@ import {
   PanelLeftClose,
   PanelLeft,
 } from "lucide-react";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@notefig/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@notefig/ui/tooltip";
 import { cn } from "@notefig/ui/utils";
 import { useNavigate } from "react-router";
 import { useSearchParams } from "react-router-dom";
@@ -124,8 +120,8 @@ export const IconSidebar = memo(function IconSidebar({
             onClick={handleLogoClick}
             className="mb-3 p-0.5 pt-0 rounded-md transition-colors hover:bg-sidebar-accent cursor-pointer"
           >
-            {/* Fill rides the --logo token so everything sharing the
-                logo color (markdown file icons) stays in sync. */}
+            {/* Light mode keeps the pre-theming mark: fill rides the --logo
+                token so everything sharing the logo color stays in sync. */}
             <PlainLogo size="1.25rem" fill="var(--logo)" />
           </button>
         </TooltipTrigger>

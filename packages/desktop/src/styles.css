@@ -31,6 +31,7 @@
   font-display: swap;
   src: url("./assets/fonts/inter-latin-400-normal.woff2") format("woff2");
 }
+
 @font-face {
   font-family: "Inter";
   font-style: italic;
@@ -38,6 +39,7 @@
   font-display: swap;
   src: url("./assets/fonts/inter-latin-400-italic.woff2") format("woff2");
 }
+
 @font-face {
   font-family: "Inter";
   font-style: normal;
@@ -45,6 +47,7 @@
   font-display: swap;
   src: url("./assets/fonts/inter-latin-500-normal.woff2") format("woff2");
 }
+
 @font-face {
   font-family: "Inter";
   font-style: normal;
@@ -52,6 +55,7 @@
   font-display: swap;
   src: url("./assets/fonts/inter-latin-600-normal.woff2") format("woff2");
 }
+
 @font-face {
   font-family: "Inter";
   font-style: normal;
@@ -59,6 +63,7 @@
   font-display: swap;
   src: url("./assets/fonts/inter-latin-700-normal.woff2") format("woff2");
 }
+
 @font-face {
   font-family: "Libre Baskerville";
   font-style: normal;
@@ -66,6 +71,7 @@
   font-display: swap;
   src: url("./assets/fonts/libre-baskerville-latin-400-normal.woff2") format("woff2");
 }
+
 @font-face {
   font-family: "Libre Baskerville";
   font-style: normal;
@@ -73,6 +79,7 @@
   font-display: swap;
   src: url("./assets/fonts/libre-baskerville-latin-700-normal.woff2") format("woff2");
 }
+
 @font-face {
   font-family: "Libre Baskerville";
   font-style: italic;
@@ -97,6 +104,7 @@
     U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41,
     U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
 }
+
 @font-face {
   font-family: "Rubik";
   font-style: normal;
@@ -196,24 +204,24 @@
 @layer base {
   :root {
     --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
+    --foreground: 20 14.3% 4.1%;
     --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
+    --card-foreground: 20 14.3% 4.1%;
     --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
+    --popover-foreground: 20 14.3% 4.1%;
+    --primary: 24 9.8% 10%;
+    --primary-foreground: 60 9.1% 97.8%;
+    --secondary: 60 4.8% 95.9%;
+    --secondary-foreground: 24 9.8% 10%;
+    --muted: 60 4.8% 95.9%;
+    --muted-foreground: 25 5.3% 44.7%;
+    --accent: 60 4.8% 95.9%;
+    --accent-foreground: 24 9.8% 10%;
     --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 5.9% 10%;
+    --destructive-foreground: 60 9.1% 97.8%;
+    --border: 20 5.9% 90%;
+    --input: 20 5.9% 90%;
+    --ring: 20 14.3% 4.1%;
     --radius: 0.5rem;
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
@@ -227,25 +235,25 @@
   }
 
   .dark {
-    --background: 217 29% 8.5%;
-    --foreground: 210 20% 98%;
-    --card: 216 26% 11.5%;
-    --card-foreground: 210 20% 98%;
-    --popover: 216 26% 11.5%;
-    --popover-foreground: 210 20% 98%;
-    --primary: 210 20% 98%;
-    --primary-foreground: 217 29% 8.5%;
-    --secondary: 215 20% 18%;
-    --secondary-foreground: 210 20% 98%;
-    --muted: 215 20% 18%;
-    --muted-foreground: 215 15% 55%;
-    --accent: 215 20% 18%;
-    --accent-foreground: 210 20% 98%;
+    --background: 20 14.3% 4.1%;
+    --foreground: 60 9.1% 97.8%;
+    --card: 20 14.3% 4.1%;
+    --card-foreground: 60 9.1% 97.8%;
+    --popover: 20 14.3% 4.1%;
+    --popover-foreground: 60 9.1% 97.8%;
+    --primary: 60 9.1% 97.8%;
+    --primary-foreground: 24 9.8% 10%;
+    --secondary: 12 6.5% 15.1%;
+    --secondary-foreground: 60 9.1% 97.8%;
+    --muted: 12 6.5% 15.1%;
+    --muted-foreground: 24 5.4% 63.9%;
+    --accent: 12 6.5% 15.1%;
+    --accent-foreground: 60 9.1% 97.8%;
     --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 215 18% 16%;
-    --input: 215 18% 16%;
-    --ring: 215 20% 75%;
+    --destructive-foreground: 60 9.1% 97.8%;
+    --border: 12 6.5% 15.1%;
+    --input: 12 6.5% 15.1%;
+    --ring: 24 5.7% 82.9%;
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
@@ -253,7 +261,7 @@
     --chart-5: 340 75% 55%;
     --brand: oklch(0.707 0.165 254.624);
     --highlight: oklch(0.852 0.199 91.936);
-    --logo: #ceff1a;
+    --logo: #90B800;
   }
 }
 
@@ -291,8 +299,11 @@
     z-index: 0;
   }
 
+  /* The webp's speckle alpha is baked in; layering the half-alpha copy on
+     top lands the grain at ~1.5x (2x read as too much, 1x too subtle). */
   .dark body::before {
-    background-image: url("/textures/noise-dark.webp");
+    background-image: url("/textures/noise-dark-half.webp"), url("/textures/noise-dark.webp");
+    background-size: 100px 100px, 100px 100px;
   }
 
   .texture-surface {
@@ -302,7 +313,8 @@
   }
 
   .dark .texture-surface {
-    background-image: url("/textures/noise-dark.webp");
+    background-image: url("/textures/noise-dark-half.webp"), url("/textures/noise-dark.webp");
+    background-size: 100px 100px, 100px 100px;
   }
 
   #root {

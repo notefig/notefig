@@ -32,7 +32,7 @@ import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { platformAdapter } from "@/adapters";
 import { FsError } from "@/adapters/platform-adapter.interface";
-import { PlainLogo } from "@/components/logo";
+import Logo, { PlainLogo } from "@/components/logo";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { useTheme } from "@/components/theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
@@ -320,9 +320,9 @@ function RecentProjectRow({
       // is what made focused cards look sheared off.
       className="group flex w-full items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:border-primary hover:bg-accent focus-visible:border-primary focus-visible:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
     >
-      <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted">
-        <PlainLogo size="0.875rem" className="block dark:hidden" />
-        <PlainLogo size="0.875rem" fill="white" className="hidden dark:block" />
+      <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted dark:rounded-none dark:bg-transparent">
+        <PlainLogo size="0.875rem" fill="var(--logo)" className="block dark:hidden" />
+        <Logo size="1.75rem" className="hidden dark:block" />
       </div>
       <div className="min-w-0 flex-1">
         <h3 className="truncate text-xs font-medium text-foreground">
