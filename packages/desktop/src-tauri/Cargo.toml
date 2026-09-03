@@ -9,7 +9,7 @@ members = ["test-shim"]
 
 [package]
 name = "notefig"
-version = "0.0.122"
+version = "0.0.123"
 description = "Notefig desktop app backend"
 authors = ["Parsa"]
 edition = "2021"
