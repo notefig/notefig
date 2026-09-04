@@ -41,7 +41,10 @@ import { useLiveQuery } from "@tanstack/react-db";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { dropZoneProps, tagCurrentDrag } from "@/utils/drag-protocol";
 import { path as pathutil, relativeTreePath } from "@/utils/path";
-import { isProtectedTreePath } from "@/entities/scratchpads";
+import {
+  isProtectedTreePath,
+  SCRATCHPADS_REL_PATH,
+} from "@/entities/scratchpads";
 import { moveIntoFolder } from "@/utils/drop-actions";
 import { attachTreeStatHydration } from "./tree-stat-hydration";
 import {
@@ -482,14 +485,28 @@ function FileTreeInner({
       // the null-signal.
       const applyDefault = entry.needsDefaultExpansion;
       if (treePaths.length > 0) entry.needsDefaultExpansion = false;
-      resetModelPaths(
-        treePaths,
-        applyDefault
+      // The scratchpads row is a flattened .notefig/scratchpads chain (see
+      // tree-model-cache.ts) — nested, not a root-level dir, so the root
+      // default below misses it. Open it by default anyway (it's a
+      // first-class surface, not a buried folder) — but keyed on the row's
+      // FIRST APPEARANCE, not folded into the one-shot root default: on a
+      // fresh workspace the folder is created at entry time and can arrive
+      // ticks after the first paths list, when that default is already
+      // spent.
+      const hasScratchpadsRow = treePaths.some(
+        (p) => p.replace(/\/+$/, "") === SCRATCHPADS_REL_PATH,
+      );
+      const openScratchpads =
+        hasScratchpadsRow && entry.needsScratchpadsExpansion;
+      if (hasScratchpadsRow) entry.needsScratchpadsExpansion = false;
+      resetModelPaths(treePaths, [
+        ...(applyDefault
           ? treePaths
               .filter((p) => p.endsWith("/") && !p.slice(0, -1).includes("/"))
               .map((p) => p.replace(/\/+$/, ""))
-          : [],
-      );
+          : []),
+        ...(openScratchpads ? [SCRATCHPADS_REL_PATH] : []),
+      ]);
     }
 
     // Complete a deferred focus hand-off, but only if the host still holds

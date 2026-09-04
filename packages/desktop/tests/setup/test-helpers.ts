@@ -146,9 +146,9 @@ export async function openFileInTree(
   // actions under parallel-suite load.
   await expect(async () => {
     await fileButton.click();
-    await expect(
-      page.locator('[role="textbox"]:visible').first(),
-    ).toBeVisible({ timeout: 2000 });
+    await expect(page.locator('[role="textbox"]:visible').first()).toBeVisible({
+      timeout: 2000,
+    });
   }).toPass({ timeout: 15_000 });
 
   // Let the navigation/URL update settle
@@ -164,9 +164,7 @@ export async function openFileInNewTab(page: Page, fileName: string) {
 
   await fileButton.waitFor({ timeout: 5000 });
   await fileButton.click({ button: "right" });
-  await page
-    .locator('[role="menuitem"]:has-text("Open in New Tab")')
-    .click();
+  await page.locator('[role="menuitem"]:has-text("Open in New Tab")').click();
 
   // Wait a bit for the navigation/URL update to complete
   await page.waitForTimeout(300);
@@ -246,36 +244,44 @@ export async function waitForContentSaved(
 /**
  * Gets file content directly from IndexedDB
  */
+/** Every row of the test DB's files store, read in the page. The one
+ * IndexedDB-open in this half of the helpers — content lookups and
+ * listings both derive from it (test DBs are tiny). */
+async function readAllFileRows(
+  page: Page,
+): Promise<{ path?: string; content?: string; type?: string }[]> {
+  return page.evaluate(async () => {
+    const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "notefig-fs";
+    return new Promise<{ path?: string; content?: string; type?: string }[]>(
+      (resolve, reject) => {
+        const request = indexedDB.open(dbName, 1);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const db = request.result;
+          const store = db
+            .transaction(["files"], "readonly")
+            .objectStore("files");
+          const getAll = store.getAll();
+          getAll.onsuccess = () => {
+            db.close();
+            resolve(getAll.result ?? []);
+          };
+          getAll.onerror = () => {
+            db.close();
+            reject(getAll.error);
+          };
+        };
+      },
+    );
+  });
+}
+
 export async function getFileContentFromDB(
   page: Page,
   filePath: string,
 ): Promise<string | null> {
-  return page.evaluate(async (path) => {
-    const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "notefig-fs";
-    return new Promise<string | null>((resolve, reject) => {
-      const request = indexedDB.open(dbName, 1);
-
-      request.onerror = () => reject(request.error);
-
-      request.onsuccess = () => {
-        const db = request.result;
-        const transaction = db.transaction(["files"], "readonly");
-        const store = transaction.objectStore("files");
-        const getRequest = store.get(path);
-
-        getRequest.onsuccess = () => {
-          const result = getRequest.result;
-          db.close();
-          resolve(result?.content || null);
-        };
-
-        getRequest.onerror = () => {
-          db.close();
-          reject(getRequest.error);
-        };
-      };
-    });
-  }, filePath);
+  const rows = await readAllFileRows(page);
+  return rows.find((row) => row.path === filePath)?.content || null;
 }
 
 /**
@@ -403,6 +409,28 @@ export async function getIndexedDBContent(
       path: filePath,
     },
   );
+}
+
+/**
+ * Files directly in the workspace's scratchpads folder (path + content).
+ * Scratchpad names are generated (random friendly names), so tests discover
+ * them by folder membership and content instead of hardcoding basenames.
+ */
+export async function listScratchpadFiles(
+  page: Page,
+  workspacePath: string,
+): Promise<{ path: string; content: string }[]> {
+  const prefix = `${workspacePath}/.notefig/scratchpads/`;
+  const rows = await readAllFileRows(page);
+  return rows
+    .filter(
+      (row): row is { path: string; content?: string; type?: string } =>
+        row.type !== "directory" &&
+        typeof row.path === "string" &&
+        row.path.startsWith(prefix) &&
+        !row.path.slice(prefix.length).includes("/"),
+    )
+    .map((row) => ({ path: row.path, content: row.content ?? "" }));
 }
 
 /**
@@ -587,9 +615,7 @@ export async function dragFileToFolder(
   folderName: string,
 ) {
   const fileButton = page.getByRole("treeitem", { name: fileName }).first();
-  const folderButton = page
-    .getByRole("treeitem", { name: folderName })
-    .first();
+  const folderButton = page.getByRole("treeitem", { name: folderName }).first();
 
   // Perform drag and drop (the tree's native HTML5 drag engine)
   await fileButton.dragTo(folderButton);

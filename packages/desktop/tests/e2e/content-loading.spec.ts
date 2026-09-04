@@ -10,6 +10,7 @@ import {
   getFileContentFromDB,
   waitForFileTree,
   simulateExternalFileDeletion,
+  listScratchpadFiles,
 } from "../setup/test-helpers";
 import { contentLoadingFixture } from "./content-loading.fixture";
 
@@ -130,7 +131,11 @@ test.describe("Content Loading", () => {
     await editor.pressSequentially("Typed into empty file", { delay: 10 });
     await waitForAutoSave(page);
 
-    const persisted = await getIndexedDBContent(page, ws, `${ws}/empty-file.md`);
+    const persisted = await getIndexedDBContent(
+      page,
+      ws,
+      `${ws}/empty-file.md`,
+    );
     expect(persisted).toContain("Typed into empty file");
   });
 
@@ -141,7 +146,7 @@ test.describe("Content Loading", () => {
     await page.reload();
     await waitForFileTree(page, "small-file.md");
 
-    // "New File" is instant (MET-135): an untitled scratchpad opens with
+    // "New File" is instant (MET-135): a generated-name scratchpad opens with
     // no naming prompt; it must reach an editable editor rather than sit
     // on the loading placeholder.
     await page.getByRole("button", { name: "New file" }).click();
@@ -155,26 +160,19 @@ test.describe("Content Loading", () => {
     await editor.pressSequentially("Hello from a scratchpad", { delay: 10 });
     await waitForAutoSave(page);
 
-    // The empty-entry auto-open may have claimed untitled.md first, so the
-    // clicked-into file is whichever untitled file holds the typed text.
+    // Scratchpad names are generated, and the empty-entry auto-open may
+    // have claimed one first — find the typed text by folder membership.
     await expect
       .poll(async () => {
-        for (const name of ["untitled.md", "untitled-2.md"]) {
-          const content = await getIndexedDBContent(
-            page,
-            ws,
-            `${ws}/.notefig/scratchpads/${name}`,
-          ).catch(() => null);
-          if (content?.includes("Hello from a scratchpad")) return true;
-        }
-        return false;
+        const scratchpads = await listScratchpadFiles(page, ws);
+        return scratchpads.some(({ content }) =>
+          content.includes("Hello from a scratchpad"),
+        );
       })
       .toBe(true);
   });
 
-  test("A failed content read never mounts an editor", async ({
-    page,
-  }) => {
+  test("A failed content read never mounts an editor", async ({ page }) => {
     await setupTestDatabase(page, "content-loading-read-failure");
     await openWorkspace(page, ws);
     await seedTestFiles(page, contentLoadingFixture.files);

@@ -200,6 +200,25 @@ export function useDockableTabs(
     return getActiveWindow()?.id ?? null;
   }, [getActiveWindow]);
 
+  // Open with teardown: "replace" intent drops the target window's selected
+  // tab from the layout, and a tab that leaves the layout must be disposed —
+  // the same contract handleLayoutChange and closeTab honor. Diffing the tab
+  // ids across the transition catches it without duplicating the layout
+  // logic. disposeTab is idempotent, so a re-run of the updater is harmless.
+  const openFileDisposing = useCallback(
+    (options: OpenFileInLayoutOptions) => {
+      setLayout((currentLayout) => {
+        const nextLayout = openFileInLayout(currentLayout, options);
+        const nextTabIds = extractTabIds(nextLayout);
+        extractTabIds(currentLayout)
+          .filter((id) => !nextTabIds.includes(id))
+          .forEach((id) => disposeTab(id));
+        return nextLayout;
+      });
+    },
+    [setLayout],
+  );
+
   const handleFileSelect = useCallback(
     (file: FileTreeNode, options?: Omit<OpenFileInLayoutOptions, "tabId">) => {
       if (file.type !== "file") return;
@@ -209,16 +228,14 @@ export function useDockableTabs(
         return;
       }
 
-      setLayout((currentLayout) => {
-        return openFileInLayout(currentLayout, {
-          tabId: file.path,
-          intent: options?.intent ?? "replace",
-          targetWindowId:
-            options?.targetWindowId ?? getActiveWindowId() ?? undefined,
-        });
+      openFileDisposing({
+        tabId: file.path,
+        intent: options?.intent ?? "replace",
+        targetWindowId:
+          options?.targetWindowId ?? getActiveWindowId() ?? undefined,
       });
     },
-    [setLayout, canOpenFile, getActiveWindowId],
+    [openFileDisposing, canOpenFile, getActiveWindowId],
   );
 
   const handleLayoutChange = useCallback(
@@ -235,15 +252,13 @@ export function useDockableTabs(
 
   const openFile = useCallback(
     (options: OpenFileInLayoutOptions) => {
-      setLayout((currentLayout) =>
-        openFileInLayout(currentLayout, {
-          ...options,
-          targetWindowId:
-            options.targetWindowId ?? getActiveWindowId() ?? undefined,
-        }),
-      );
+      openFileDisposing({
+        ...options,
+        targetWindowId:
+          options.targetWindowId ?? getActiveWindowId() ?? undefined,
+      });
     },
-    [setLayout, getActiveWindowId],
+    [openFileDisposing, getActiveWindowId],
   );
 
   const closeTab = useCallback(

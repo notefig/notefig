@@ -1,6 +1,7 @@
 /**
  * Scratchpads entity (MET-135): where nameless new files live. "New File"
- * instantly creates the next untitled markdown file in the app-owned
+ * instantly creates a markdown file with a generated cute name
+ * (Docker/Heroku-style "sunny-otter.md") in the app-owned
  * `.notefig/scratchpads/` folder; membership in that folder — not the
  * filename — is what makes a file a scratchpad. Scratchpads never reach the
  * user's git (the `.notefig/` exclude covers them) but ARE checkpointed by
@@ -12,11 +13,12 @@
  * derive every path from the constants here.
  *
  * This file is the whole feature, and the feature is deliberately small.
- * Scratchpads have exactly two special powers: "New File" auto-creates the
- * next untitled file here, and an empty workspace entry auto-opens the most
- * recent one (useNavigationPersistence folds it into the entry URL), after
- * an entry-time sweep deletes abandoned empty untitled ones (renamed files
- * are the user's, even while empty). The "scratchpad on
+ * Scratchpads have exactly two special powers: "New File" auto-creates a
+ * generated-name file here, and an empty workspace entry auto-opens the
+ * most recent one (useNavigationPersistence folds it into the entry URL),
+ * after an entry-time sweep deletes abandoned empty ones — any name: the
+ * folder is app territory, and an empty file holds nothing worth keeping,
+ * however it got its name. The "scratchpad on
  * startup" app setting turns the empty-entry half off entirely — no
  * create, no auto-open; only the sweep still runs. In every other respect
  * — renaming, dragging, tab titles, deletion — they are ordinary files
@@ -25,7 +27,7 @@
  * rows catch up via the normal metadata walk.
  */
 import { platformAdapter } from "@/adapters";
-import { path as pathutil } from "@/utils/path";
+import { path as pathutil, workspaceKey } from "@/utils/path";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { stripPromptMarkers } from "@notefig/widgets";
 import {
@@ -47,7 +49,111 @@ import {
 // reach them without importing this entity (and closing a cycle through
 // ./files); re-exported here because this module is the access path.
 export { APP_DIR_NAME, SCRATCHPADS_DIR_NAME, SCRATCHPADS_REL_PATH };
-export const UNTITLED_BASENAME = "untitled";
+
+// Docker/Heroku-style generated names ("sunny-otter.md"): random, cute,
+// and assigned at creation — no rename step, no "untitled-4.md" pile.
+const NAME_ADJECTIVES = [
+  "amber",
+  "breezy",
+  "bright",
+  "bubbly",
+  "brave",
+  "cheery",
+  "chipper",
+  "coral",
+  "cozy",
+  "dandy",
+  "dapper",
+  "dreamy",
+  "fuzzy",
+  "gentle",
+  "glossy",
+  "golden",
+  "groovy",
+  "humble",
+  "indigo",
+  "jolly",
+  "lilac",
+  "lively",
+  "lucky",
+  "mellow",
+  "merry",
+  "minty",
+  "nimble",
+  "olive",
+  "peppy",
+  "perky",
+  "plucky",
+  "quirky",
+  "rosy",
+  "silky",
+  "snug",
+  "sprightly",
+  "sunny",
+  "tidy",
+  "velvet",
+  "witty",
+  "zesty",
+];
+const NAME_NOUNS = [
+  "acorn",
+  "badger",
+  "beaver",
+  "brook",
+  "bunny",
+  "chipmunk",
+  "clover",
+  "dolphin",
+  "falcon",
+  "fox",
+  "gecko",
+  "hedgehog",
+  "heron",
+  "kitten",
+  "koala",
+  "lemur",
+  "magpie",
+  "maple",
+  "marmot",
+  "meadow",
+  "newt",
+  "ocelot",
+  "otter",
+  "owl",
+  "panda",
+  "pebble",
+  "penguin",
+  "puffin",
+  "quokka",
+  "raccoon",
+  "robin",
+  "seal",
+  "sparrow",
+  "squirrel",
+  "tanuki",
+  "toucan",
+  "walrus",
+  "willow",
+  "wombat",
+  "yak",
+];
+
+/** A fresh random name avoiding `existingBasenames` (case-insensitive —
+ * mac and Windows filesystems are); after a bounded retry the last pick
+ * gets a counter suffix so the function always returns. */
+export function randomScratchpadBasename(existingBasenames: string[]): string {
+  const taken = new Set(existingBasenames.map((b) => b.toLowerCase()));
+  const pick = (list: string[]) =>
+    list[Math.floor(Math.random() * list.length)];
+  let name = "";
+  for (let attempt = 0; attempt < 20; attempt++) {
+    name = `${pick(NAME_ADJECTIVES)}-${pick(NAME_NOUNS)}`;
+    if (!taken.has(`${name}.md`)) return `${name}.md`;
+  }
+  let counter = 2;
+  while (taken.has(`${name}-${counter}.md`)) counter += 1;
+  return `${name}-${counter}.md`;
+}
 
 export function appDirPath(workspacePath: string): string {
   return pathutil.join(workspacePath, APP_DIR_NAME);
@@ -68,23 +174,6 @@ export function isScratchpadFileRow(row: {
     row.relativePath.startsWith(prefix) &&
     !row.relativePath.slice(prefix.length).includes("/")
   );
-}
-
-/** A basename this module itself would generate ("untitled.md",
- * "untitled-2.md", …). Anything else carries a user-chosen name. */
-export function isUntitledBasename(basename: string): boolean {
-  return new RegExp(`^${UNTITLED_BASENAME}(-\\d+)?\\.md$`).test(basename);
-}
-
-export function nextUntitledBasename(existingBasenames: string[]): string {
-  const taken = new Set(existingBasenames);
-  let name = `${UNTITLED_BASENAME}.md`;
-  let counter = 2;
-  while (taken.has(name)) {
-    name = `${UNTITLED_BASENAME}-${counter}.md`;
-    counter += 1;
-  }
-  return name;
 }
 
 /** Most recent by mtime; ties/missing stats fall back to basename compare
@@ -137,9 +226,9 @@ function scratchpadDirIsBlocked(workspacePath: string): boolean {
   );
 }
 
-/** "New File": create the next untitled scratchpad, return its path. Never
- * targets an existing path — the create path truncates. */
-export async function createUntitledScratchpad(
+/** "New File": create a fresh generated-name scratchpad, return its path.
+ * Never targets an existing path — the create path truncates. */
+export async function createGeneratedScratchpad(
   workspacePath: string,
 ): Promise<string> {
   if (scratchpadDirIsBlocked(workspacePath)) {
@@ -150,29 +239,53 @@ export async function createUntitledScratchpad(
   );
   const filePath = pathutil.join(
     scratchpadsDirPath(workspacePath),
-    nextUntitledBasename(basenames),
+    randomScratchpadBasename(basenames),
   );
   await createFile(workspacePath, filePath);
   return filePath;
 }
 
-/** The "New File" action: create the next untitled scratchpad and open it
- * as a tab. Shared by the Mod+N command, the palette, and the sidebar. */
+/** The "New File" action: create a fresh generated-name scratchpad and open
+ * it as a tab. Shared by the Mod+N command, the palette, and the sidebar. */
 export function createAndOpenScratchpad(
   workspacePath: string,
   openFile: (options: OpenFileInLayoutOptions) => boolean,
 ): void {
-  void createUntitledScratchpad(workspacePath)
-    .then((path) => openFile({ tabId: path, intent: "new-tab" }))
+  void createGeneratedScratchpad(workspacePath)
+    .then((path) => openFile({ tabId: path, intent: "replace" }))
     .catch((error) => console.error("Failed to create a new file:", error));
 }
 
 /**
- * Entry-time resolution, on plain disk truth: the most recently modified
- * scratchpad, else a freshly created untitled one. Null bails to the
- * empty state (e.g. a file squatting on the folder path).
+ * In-flight entry resolutions, coalesced per workspace. StrictMode invokes
+ * the entry effect twice back to back (see use-recent-projects.ts), and two
+ * concurrent resolves of an empty folder would each create a file — under
+ * the untitled scheme both computed the same basename and collided
+ * harmlessly, but generated names would make the duplicate real.
  */
-export async function resolveScratchpadOnDisk(
+const entryResolutionInFlight = new Map<string, Promise<string | null>>();
+
+/**
+ * Entry-time resolution, on plain disk truth: the most recently modified
+ * scratchpad, else a freshly created generated-name one. Null bails to the
+ * empty state (e.g. a file squatting on the folder path). Concurrent calls
+ * for one workspace share a single resolution — this is the create path,
+ * and it must be idempotent under the double-entry the caller documents.
+ */
+export function resolveScratchpadOnDisk(
+  workspacePath: string,
+): Promise<string | null> {
+  const key = workspaceKey(workspacePath);
+  const existing = entryResolutionInFlight.get(key);
+  if (existing) return existing;
+  const resolution = resolveScratchpadUncoalesced(workspacePath).finally(() =>
+    entryResolutionInFlight.delete(key),
+  );
+  entryResolutionInFlight.set(key, resolution);
+  return resolution;
+}
+
+async function resolveScratchpadUncoalesced(
   workspacePath: string,
 ): Promise<string | null> {
   const dir = scratchpadsDirPath(workspacePath);
@@ -188,7 +301,7 @@ export async function resolveScratchpadOnDisk(
   const files = listing.ok ? listing.value.map((entry) => entry.path) : [];
 
   if (files.length === 0) {
-    const fresh = pathutil.join(dir, nextUntitledBasename([]));
+    const fresh = pathutil.join(dir, randomScratchpadBasename([]));
     const created = await platformAdapter.fs.createFiles([fresh]);
     if (created.failed.length > 0) {
       console.warn("[scratchpads] create failed:", created.failed[0]);
@@ -207,13 +320,13 @@ export async function resolveScratchpadOnDisk(
 }
 
 /**
- * Entry-time cleanup, on plain disk truth: whitespace-only UNTITLED
- * scratchpads not in `keepPaths` (the tabs the entry is about to restore)
- * are deleted. Only auto-generated names qualify — a renamed scratchpad
- * expresses user intent even while still empty, and sweeping it would
- * silently destroy it (and with it the empty-entry auto-open). Best-effort;
- * failures warn, never throw. Rows catch up via the watcher and the
- * metadata walk.
+ * Entry-time cleanup, on plain disk truth: whitespace-only scratchpads not
+ * in `keepPaths` (the tabs the entry is about to restore) are deleted —
+ * regardless of name. The folder is app territory; an empty file holds no
+ * user work whether its name was generated or chosen, and a name-based
+ * carve-out would just make the sweep's behavior depend on whether a name
+ * happens to look like one of ours. Best-effort; failures warn, never
+ * throw. Rows catch up via the watcher and the metadata walk.
  */
 export async function sweepScratchpadsOnDisk(
   workspacePath: string,
@@ -229,9 +342,7 @@ export async function sweepScratchpadsOnDisk(
   const keep = new Set(keepPaths);
   const candidates = listing.value
     .map((entry) => entry.path)
-    .filter(
-      (path) => !keep.has(path) && isUntitledBasename(pathutil.basename(path)),
-    );
+    .filter((path) => !keep.has(path));
   if (candidates.length === 0) return;
 
   const reads = await platformAdapter.fs.readFiles(candidates);

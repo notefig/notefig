@@ -24,7 +24,11 @@
  * moves the caret there. Docs with content are never force-populated, and
  * deleting the widget there is final.
  */
-import { ReactNodeViewRenderer, NodeViewWrapper, NodeViewContent } from "@tiptap/react";
+import {
+  ReactNodeViewRenderer,
+  NodeViewWrapper,
+  NodeViewContent,
+} from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { Plugin } from "@tiptap/pm/state";
 import { Selection, TextSelection } from "@tiptap/pm/state";
@@ -63,7 +67,6 @@ export interface AiPromptNodeOptions {
   basePath: string;
 }
 
-
 /**
  * Move the caret across a widget boundary for ArrowUp (dir -1) / ArrowDown
  * (dir 1): out of a draft into the neighbouring textblock, or from a
@@ -71,7 +74,10 @@ export interface AiPromptNodeOptions {
  * at the textblock's edge in that direction, so ordinary line movement stays
  * native.
  */
-function arrowAcrossWidget(editor: NodeViewProps["editor"], dir: -1 | 1): boolean {
+function arrowAcrossWidget(
+  editor: NodeViewProps["editor"],
+  dir: -1 | 1,
+): boolean {
   const { state, view } = editor;
   const { selection } = state;
   if (!(selection instanceof TextSelection) || !selection.empty) return false;
@@ -81,6 +87,30 @@ function arrowAcrossWidget(editor: NodeViewProps["editor"], dir: -1 | 1): boolea
     : draftEntryTarget(state, dir);
   if (!target) return false;
   view.dispatch(state.tr.setSelection(target).scrollIntoView());
+  return true;
+}
+
+/**
+ * Newline inside a draft. HardBreak's own default keymap (Shift-Enter /
+ * Mod-Enter) calls its `setHardBreak` command, which bails out whenever the
+ * selection's immediate parent is an isolating node
+ * (`selection.$from.parent.type.spec.isolating`) — exactly what the draft is
+ * (node.ts), by design, to fence Backspace/joins/drags from crossing its
+ * edge. That guard silently swallows the built-in shortcut inside a draft,
+ * so it needs its own insertion that doesn't route through that command.
+ */
+function insertDraftHardBreak(editor: NodeViewProps["editor"]): boolean {
+  const { state, view } = editor;
+  // $from-only guard is not enough here: a drag selection can start in the
+  // draft and end in the document beyond it, and replacing that range would
+  // delete content outside the widget.
+  const draft = selectionDraft(state);
+  if (!draft || state.selection.to > draft.to) return false;
+  const hardBreak = state.schema.nodes.hardBreak;
+  if (!hardBreak) return false;
+  view.dispatch(
+    state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView(),
+  );
   return true;
 }
 
@@ -260,7 +290,9 @@ function AiPromptNodeView(props: NodeViewProps) {
         summoned={Boolean(props.node.attrs.summoned)}
         removeNode={removeNode}
         onSessionBound={(taskId) => props.updateAttributes({ taskId })}
-        draft={props.node.firstChild ? readDraftNode(props.node.firstChild) : ""}
+        draft={
+          props.node.firstChild ? readDraftNode(props.node.firstChild) : ""
+        }
         draftSlot={<NodeViewContent />}
       />
     </NodeViewWrapper>
@@ -318,16 +350,24 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
    * reached through mention-bridge.ts.
    */
   addKeyboardShortcuts() {
-    const forward = (key: string, shiftKey = false) => () => {
-      const draft = selectionDraft(this.editor.state);
-      if (!draft) return false;
-      return dispatchComposerKey(draft.blobId, { key, shiftKey });
-    };
+    const forward =
+      (key: string, shiftKey = false) =>
+      () => {
+        const draft = selectionDraft(this.editor.state);
+        if (!draft) return false;
+        return dispatchComposerKey(draft.blobId, { key, shiftKey });
+      };
     const suggestionOwnsArrows = () =>
       Boolean(selectionDraft(this.editor.state)) &&
       mentionPopupHasResults(this.options.filePath);
     return {
       Enter: forward("Enter"),
+      // Multi-line input: StarterKit's HardBreak binds these two combos
+      // itself, but its command bails inside the draft's isolating node (see
+      // insertDraftHardBreak) — so the draft handles them directly instead
+      // of falling through to that dead default.
+      "Shift-Enter": () => insertDraftHardBreak(this.editor),
+      "Mod-Enter": () => insertDraftHardBreak(this.editor),
       Escape: forward("Escape"),
       // Plain Backspace, clamped like its Mod/Alt variants below: the
       // composer map gets its dismiss chance first (empty draft), then
@@ -402,9 +442,11 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
           const draft = selectionDraft(state);
           if (!draft) return false;
           const { selection } = state;
-          // Caret: delete back to the draft's start. Range: delete it.
+          // Caret: delete back to the draft's start. Range: delete it,
+          // clamped like plain Backspace (a drag can end past the draft).
           const from = selection.empty ? draft.from : selection.from;
-          if (selection.to > from) tr.delete(from, selection.to);
+          const to = Math.min(selection.to, draft.to);
+          if (to > from) tr.delete(from, to);
           return true;
         });
       },
@@ -418,14 +460,19 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
           if (!draft) return false;
           const { selection } = state;
           if (!selection.empty) {
-            tr.delete(selection.from, selection.to);
+            tr.delete(selection.from, Math.min(selection.to, draft.to));
             return true;
           }
           const caret = selection.from;
           if (caret <= draft.from) return true;
           // 1:1 position math: draft content is flat (text | mention |
           // hardBreak), and every leaf serializes to one placeholder char.
-          const text = state.doc.textBetween(draft.from, caret, "\ufffc", "\ufffc");
+          const text = state.doc.textBetween(
+            draft.from,
+            caret,
+            "\ufffc",
+            "\ufffc",
+          );
           const kept = text.replace(/\s+$/u, "").replace(/\S+$/u, "");
           tr.delete(draft.from + kept.length, caret);
           return true;
@@ -445,11 +492,15 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
           }
           const caret = selection.from;
           if (caret >= draft.to) return true;
-          const text = state.doc.textBetween(caret, draft.to, "\ufffc", (node) =>
-            node.type.name === "hardBreak" ? "\n" : "\ufffc",
+          const text = state.doc.textBetween(
+            caret,
+            draft.to,
+            "\ufffc",
+            (node) => (node.type.name === "hardBreak" ? "\n" : "\ufffc"),
           );
           const brk = text.indexOf("\n");
-          const end = brk === -1 ? draft.to : brk === 0 ? caret + 1 : caret + brk;
+          const end =
+            brk === -1 ? draft.to : brk === 0 ? caret + 1 : caret + brk;
           if (end > caret) tr.delete(caret, end);
           return true;
         });

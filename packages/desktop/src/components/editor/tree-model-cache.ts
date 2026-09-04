@@ -59,6 +59,13 @@ export interface TreeModelEntry {
    * re-assert it on every resetPaths (sort switches).
    */
   needsDefaultExpansion: boolean;
+  /**
+   * The scratchpads row's own default-open (file-tree.tsx). Separate from
+   * needsDefaultExpansion because the folder is created at entry time and
+   * can arrive ticks after the first paths list — the root default is
+   * already spent by then. Keyed on the row's first appearance instead.
+   */
+  needsScratchpadsExpansion: boolean;
 }
 
 const entriesByWorkspace = new Map<string, TreeModelEntry>();
@@ -138,6 +145,7 @@ export function acquireTreeModel(
     pendingCreate: null,
     pathsSignature: null,
     needsDefaultExpansion: init.initialExpandedPaths === null,
+    needsScratchpadsExpansion: init.initialExpandedPaths === null,
   };
 
   // Model paths are tree-domain ("/"-separated); only this seam converts
