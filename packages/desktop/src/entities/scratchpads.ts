@@ -163,7 +163,7 @@ export function createAndOpenScratchpad(
   openFile: (options: OpenFileInLayoutOptions) => boolean,
 ): void {
   void createUntitledScratchpad(workspacePath)
-    .then((path) => openFile({ tabId: path, intent: "new-tab" }))
+    .then((path) => openFile({ tabId: path, intent: "replace" }))
     .catch((error) => console.error("Failed to create a new file:", error));
 }
 
