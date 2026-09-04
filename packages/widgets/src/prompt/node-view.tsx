@@ -84,6 +84,24 @@ function arrowAcrossWidget(editor: NodeViewProps["editor"], dir: -1 | 1): boolea
   return true;
 }
 
+/**
+ * Newline inside a draft. HardBreak's own default keymap (Shift-Enter /
+ * Mod-Enter) calls its `setHardBreak` command, which bails out whenever the
+ * selection's immediate parent is an isolating node
+ * (`selection.$from.parent.type.spec.isolating`) — exactly what the draft is
+ * (node.ts), by design, to fence Backspace/joins/drags from crossing its
+ * edge. That guard silently swallows the built-in shortcut inside a draft,
+ * so it needs its own insertion that doesn't route through that command.
+ */
+function insertDraftHardBreak(editor: NodeViewProps["editor"]): boolean {
+  const { state, view } = editor;
+  if (!selectionDraft(state)) return false;
+  const hardBreak = state.schema.nodes.hardBreak;
+  if (!hardBreak) return false;
+  view.dispatch(state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView());
+  return true;
+}
+
 /** Leaving the draft: the selection in the block next to the widget, or
  *  null at the doc's edge — the gap cursor plugin offers its position
  *  there instead. */
@@ -328,6 +346,12 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       mentionPopupHasResults(this.options.filePath);
     return {
       Enter: forward("Enter"),
+      // Multi-line input: StarterKit's HardBreak binds these two combos
+      // itself, but its command bails inside the draft's isolating node (see
+      // insertDraftHardBreak) — so the draft handles them directly instead
+      // of falling through to that dead default.
+      "Shift-Enter": () => insertDraftHardBreak(this.editor),
+      "Mod-Enter": () => insertDraftHardBreak(this.editor),
       Escape: forward("Escape"),
       // Plain Backspace, clamped like its Mod/Alt variants below: the
       // composer map gets its dismiss chance first (empty draft), then

@@ -414,15 +414,19 @@
      the range spans the widget's DOM, so the composer lit up as a solid bar
      even though the user was selecting the prose around it. `user-select`
      can't express "editable, but not part of THAT selection", so suppress
-     the paint instead and give it back only while the widget itself holds
-     focus — which is the only time a selection in here is the user's own.
-     System colors rather than a hardcoded blue: this is restoring the
-     platform default, not inventing a highlight. */
+     the paint on the widget's chrome and give it back only inside the draft
+     — the one subtree above that opted back into user-select:text, so it's
+     the only place a real browser Selection can land here regardless of
+     focus. (:focus-within can't gate this any more: the draft is content of
+     the document's own shared contenteditable rather than a nested editor
+     with its own focus scope, so the ancestor never matches it.) System
+     colors rather than a hardcoded blue: this is restoring the platform
+     default, not inventing a highlight. */
   [data-type="ai-prompt"] ::selection {
     background-color: transparent;
   }
 
-  [data-type="ai-prompt"]:focus-within ::selection {
+  [data-type="ai-prompt"] [data-prompt-draft] ::selection {
     background-color: Highlight;
     color: HighlightText;
   }
