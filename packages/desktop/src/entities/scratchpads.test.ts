@@ -131,20 +131,26 @@ describe("path scheme & naming", () => {
     ).toBe(false);
   });
 
-  it("recognizes only its own generated basenames as untitled", () => {
-    expect(scratchpads.isUntitledBasename("untitled.md")).toBe(true);
-    expect(scratchpads.isUntitledBasename("untitled-2.md")).toBe(true);
-    expect(scratchpads.isUntitledBasename("untitled-10.md")).toBe(true);
-    expect(scratchpads.isUntitledBasename("meeting-notes.md")).toBe(false);
-    expect(scratchpads.isUntitledBasename("untitled-notes.md")).toBe(false);
-    expect(scratchpads.isUntitledBasename("untitled.txt")).toBe(false);
+  it("recognizes its own generated basenames, legacy untitled included", () => {
+    const gen = scratchpads.isGeneratedScratchpadBasename;
+    expect(gen(scratchpads.randomScratchpadBasename([]))).toBe(true);
+    expect(gen("sunny-otter.md")).toBe(true);
+    expect(gen("sunny-otter-2.md")).toBe(true);
+    expect(gen("untitled.md")).toBe(true);
+    expect(gen("untitled-2.md")).toBe(true);
+    expect(gen("meeting-notes.md")).toBe(false);
+    expect(gen("sunny-meeting.md")).toBe(false);
+    expect(gen("sunny-otter.txt")).toBe(false);
   });
 
-  it("counts untitled names up first-free", () => {
-    expect(scratchpads.nextUntitledBasename([])).toBe("untitled.md");
+  it("generates collision-free names, counter-suffixed as a last resort", () => {
+    const first = scratchpads.randomScratchpadBasename([]);
+    expect(first).toMatch(/^[a-z]+-[a-z]+\.md$/);
+    expect(scratchpads.randomScratchpadBasename([first])).not.toBe(first);
+    // Case-insensitive take: mac/Windows filesystems are.
     expect(
-      scratchpads.nextUntitledBasename(["untitled.md", "untitled-3.md"]),
-    ).toBe("untitled-2.md");
+      scratchpads.randomScratchpadBasename([first.toUpperCase()]),
+    ).not.toBe(first);
   });
 
   it("picks the most recent candidate, deterministic without stats", () => {
@@ -172,16 +178,19 @@ describe("path scheme & naming", () => {
   });
 });
 
-describe("createUntitledScratchpad", () => {
-  it("creates untitled.md first, then counts up", async () => {
-    await expect(scratchpads.createUntitledScratchpad(WS)).resolves.toBe(
-      `${DIR}/untitled.md`,
-    );
-    expect(adapter.createFiles).toHaveBeenCalledWith([`${DIR}/untitled.md`]);
+describe("createGeneratedScratchpad", () => {
+  it("creates a generated-name file in the folder", async () => {
+    const created = await scratchpads.createGeneratedScratchpad(WS);
+    expect(created.startsWith(`${DIR}/`)).toBe(true);
+    expect(
+      scratchpads.isGeneratedScratchpadBasename(created.slice(DIR.length + 1)),
+    ).toBe(true);
+    expect(adapter.createFiles).toHaveBeenCalledWith([created]);
 
-    seedFileRow(`${DIR}/untitled.md`);
-    await expect(scratchpads.createUntitledScratchpad(WS)).resolves.toBe(
-      `${DIR}/untitled-2.md`,
+    // A seeded sibling never collides — names dodge existing rows.
+    seedFileRow(created);
+    await expect(scratchpads.createGeneratedScratchpad(WS)).resolves.not.toBe(
+      created,
     );
   });
 
@@ -195,7 +204,7 @@ describe("createUntitledScratchpad", () => {
       },
     ]);
 
-    await expect(scratchpads.createUntitledScratchpad(WS)).rejects.toThrow(
+    await expect(scratchpads.createGeneratedScratchpad(WS)).rejects.toThrow(
       /occupies/,
     );
     expect(adapter.createFiles).not.toHaveBeenCalled();
@@ -210,22 +219,28 @@ describe("resolveScratchpadOnDisk", () => {
     });
   }
 
-  it("creates untitled.md when the folder is missing or empty", async () => {
+  it("creates a generated-name file when the folder is missing or empty", async () => {
+    const expectFreshCreate = async () => {
+      const resolved = await scratchpads.resolveScratchpadOnDisk(WS);
+      expect(resolved).not.toBeNull();
+      expect(resolved!.startsWith(`${DIR}/`)).toBe(true);
+      expect(
+        scratchpads.isGeneratedScratchpadBasename(
+          resolved!.slice(DIR.length + 1),
+        ),
+      ).toBe(true);
+      expect(adapter.createFiles).toHaveBeenCalledWith([resolved]);
+    };
+
     adapter.readDirectory.mockResolvedValue({
       ok: false,
       error: { path: DIR, type: "not_found", message: "missing" },
     });
-    await expect(scratchpads.resolveScratchpadOnDisk(WS)).resolves.toBe(
-      `${DIR}/untitled.md`,
-    );
-    expect(adapter.createFiles).toHaveBeenCalledWith([`${DIR}/untitled.md`]);
+    await expectFreshCreate();
 
     adapter.createFiles.mockClear();
     listDir([]);
-    await expect(scratchpads.resolveScratchpadOnDisk(WS)).resolves.toBe(
-      `${DIR}/untitled.md`,
-    );
-    expect(adapter.createFiles).toHaveBeenCalledWith([`${DIR}/untitled.md`]);
+    await expectFreshCreate();
   });
 
   it("reuses the most recently modified existing scratchpad — no writes", async () => {
