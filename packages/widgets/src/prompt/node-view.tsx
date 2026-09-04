@@ -102,7 +102,11 @@ function arrowAcrossWidget(
  */
 function insertDraftHardBreak(editor: NodeViewProps["editor"]): boolean {
   const { state, view } = editor;
-  if (!selectionDraft(state)) return false;
+  // $from-only guard is not enough here: a drag selection can start in the
+  // draft and end in the document beyond it, and replacing that range would
+  // delete content outside the widget.
+  const draft = selectionDraft(state);
+  if (!draft || state.selection.to > draft.to) return false;
   const hardBreak = state.schema.nodes.hardBreak;
   if (!hardBreak) return false;
   view.dispatch(
@@ -439,9 +443,11 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
           const draft = selectionDraft(state);
           if (!draft) return false;
           const { selection } = state;
-          // Caret: delete back to the draft's start. Range: delete it.
+          // Caret: delete back to the draft's start. Range: delete it,
+          // clamped like plain Backspace (a drag can end past the draft).
           const from = selection.empty ? draft.from : selection.from;
-          if (selection.to > from) tr.delete(from, selection.to);
+          const to = Math.min(selection.to, draft.to);
+          if (to > from) tr.delete(from, to);
           return true;
         });
       },
@@ -455,7 +461,7 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
           if (!draft) return false;
           const { selection } = state;
           if (!selection.empty) {
-            tr.delete(selection.from, selection.to);
+            tr.delete(selection.from, Math.min(selection.to, draft.to));
             return true;
           }
           const caret = selection.from;

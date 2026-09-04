@@ -131,18 +131,6 @@ describe("path scheme & naming", () => {
     ).toBe(false);
   });
 
-  it("recognizes its own generated basenames, legacy untitled included", () => {
-    const gen = scratchpads.isGeneratedScratchpadBasename;
-    expect(gen(scratchpads.randomScratchpadBasename([]))).toBe(true);
-    expect(gen("sunny-otter.md")).toBe(true);
-    expect(gen("sunny-otter-2.md")).toBe(true);
-    expect(gen("untitled.md")).toBe(true);
-    expect(gen("untitled-2.md")).toBe(true);
-    expect(gen("meeting-notes.md")).toBe(false);
-    expect(gen("sunny-meeting.md")).toBe(false);
-    expect(gen("sunny-otter.txt")).toBe(false);
-  });
-
   it("generates collision-free names, counter-suffixed as a last resort", () => {
     const first = scratchpads.randomScratchpadBasename([]);
     expect(first).toMatch(/^[a-z]+-[a-z]+\.md$/);
@@ -182,9 +170,7 @@ describe("createGeneratedScratchpad", () => {
   it("creates a generated-name file in the folder", async () => {
     const created = await scratchpads.createGeneratedScratchpad(WS);
     expect(created.startsWith(`${DIR}/`)).toBe(true);
-    expect(
-      scratchpads.isGeneratedScratchpadBasename(created.slice(DIR.length + 1)),
-    ).toBe(true);
+    expect(created.slice(DIR.length + 1)).toMatch(/^[a-z]+-[a-z]+\.md$/);
     expect(adapter.createFiles).toHaveBeenCalledWith([created]);
 
     // A seeded sibling never collides — names dodge existing rows.
@@ -224,11 +210,7 @@ describe("resolveScratchpadOnDisk", () => {
       const resolved = await scratchpads.resolveScratchpadOnDisk(WS);
       expect(resolved).not.toBeNull();
       expect(resolved!.startsWith(`${DIR}/`)).toBe(true);
-      expect(
-        scratchpads.isGeneratedScratchpadBasename(
-          resolved!.slice(DIR.length + 1),
-        ),
-      ).toBe(true);
+      expect(resolved!.slice(DIR.length + 1)).toMatch(/^[a-z]+-[a-z]+\.md$/);
       expect(adapter.createFiles).toHaveBeenCalledWith([resolved]);
     };
 
@@ -299,7 +281,7 @@ describe("sweepScratchpadsOnDisk", () => {
     expect(adapter.moveFile).not.toHaveBeenCalled();
   });
 
-  it("never touches renamed scratchpads, even empty ones", async () => {
+  it("sweeps empty scratchpads regardless of name — the folder is app territory", async () => {
     const renamedEmpty = `${DIR}/meeting-notes.md`;
     const untitledEmpty = `${DIR}/untitled.md`;
     adapter.readDirectory.mockResolvedValue({
@@ -310,14 +292,17 @@ describe("sweepScratchpadsOnDisk", () => {
       })),
     });
     adapter.readFiles.mockResolvedValue(
-      ok([{ path: untitledEmpty, content: "" }]),
+      ok([
+        { path: renamedEmpty, content: "" },
+        { path: untitledEmpty, content: "" },
+      ]),
     );
 
     await scratchpads.sweepScratchpadsOnDisk(WS, []);
 
-    // The renamed file is never even read — it can't qualify.
-    expect(adapter.readFiles).toHaveBeenCalledWith([untitledEmpty]);
-    expect(adapter.deleteFiles).toHaveBeenCalledWith([untitledEmpty]);
+    expect(new Set(adapter.deleteFiles.mock.calls[0][0] as string[])).toEqual(
+      new Set([renamedEmpty, untitledEmpty]),
+    );
     expect(adapter.deleteFiles).toHaveBeenCalledTimes(1);
   });
 

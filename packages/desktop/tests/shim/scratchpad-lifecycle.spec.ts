@@ -330,9 +330,9 @@ test.describe("shim: scratchpad entry lifecycle", () => {
       .toBe(1);
 
     // Close it untouched; a second, contentful scratchpad stays on disk
-    // (the legacy untitled scheme still counts as generated), and so does
-    // an EMPTY but renamed one — a user-chosen name is intent, never an
-    // abandoned leftover.
+    // (legacy untitled names are ordinary scratchpads too), while an
+    // EMPTY renamed one is swept like any other — the folder is app
+    // territory, and an empty file holds nothing, whatever its name.
     await closeScratchpadTab(page);
     await fs.writeFile(
       path.join(workspace, ".notefig", "scratchpads", "untitled-2.md"),
@@ -345,8 +345,8 @@ test.describe("shim: scratchpad entry lifecycle", () => {
       "utf8",
     );
 
-    // Re-enter at the bare root: README restores, the empty generated-name
-    // leftover is swept, the contentful and the renamed-empty ones survive.
+    // Re-enter at the bare root: README restores, both empty leftovers
+    // (generated-name and renamed) are swept, only content survives.
     await page.goto("/welcome");
     await openProject(page);
     await expect(visibleEditor(page)).toContainText("Seeded", {
@@ -357,6 +357,6 @@ test.describe("shim: scratchpad entry lifecycle", () => {
       .poll(async () => (await listScratchpads()).sort().join(","), {
         timeout: 10000,
       })
-      .toBe("renamed-empty.md,untitled-2.md");
+      .toBe("untitled-2.md");
   });
 });

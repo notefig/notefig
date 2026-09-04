@@ -16,8 +16,9 @@
  * Scratchpads have exactly two special powers: "New File" auto-creates a
  * generated-name file here, and an empty workspace entry auto-opens the
  * most recent one (useNavigationPersistence folds it into the entry URL),
- * after an entry-time sweep deletes abandoned empty generated-name ones
- * (renamed files are the user's, even while empty). The "scratchpad on
+ * after an entry-time sweep deletes abandoned empty ones — any name: the
+ * folder is app territory, and an empty file holds nothing worth keeping,
+ * however it got its name. The "scratchpad on
  * startup" app setting turns the empty-entry half off entirely — no
  * create, no auto-open; only the sweep still runs. In every other respect
  * — renaming, dragging, tab titles, deletion — they are ordinary files
@@ -51,8 +52,6 @@ export { APP_DIR_NAME, SCRATCHPADS_DIR_NAME, SCRATCHPADS_REL_PATH };
 
 // Docker/Heroku-style generated names ("sunny-otter.md"): random, cute,
 // and assigned at creation — no rename step, no "untitled-4.md" pile.
-// The lists double as the recognizer for our own output (the sweep may
-// only delete names WE generated), so words must never contain "-".
 const NAME_ADJECTIVES = [
   "amber",
   "breezy",
@@ -138,17 +137,6 @@ const NAME_NOUNS = [
   "wombat",
   "yak",
 ];
-
-/** A basename this module generates now ("sunny-otter.md", counter-suffixed
- * on collision) or ever generated (the legacy "untitled-x.md" scheme, still
- * on disk in real workspaces). Anything else carries a user-chosen name. */
-export function isGeneratedScratchpadBasename(basename: string): boolean {
-  const match = /^([a-z]+)-([a-z]+)(?:-\d+)?\.md$/.exec(basename);
-  if (match) {
-    return NAME_ADJECTIVES.includes(match[1]) && NAME_NOUNS.includes(match[2]);
-  }
-  return /^untitled(?:-\d+)?\.md$/.test(basename);
-}
 
 /** A fresh random name avoiding `existingBasenames` (case-insensitive —
  * mac and Windows filesystems are); after a bounded retry the last pick
@@ -332,13 +320,13 @@ async function resolveScratchpadUncoalesced(
 }
 
 /**
- * Entry-time cleanup, on plain disk truth: whitespace-only GENERATED-NAME
- * scratchpads not in `keepPaths` (the tabs the entry is about to restore)
- * are deleted. Only auto-generated names qualify — a renamed scratchpad
- * expresses user intent even while still empty, and sweeping it would
- * silently destroy it (and with it the empty-entry auto-open). Best-effort;
- * failures warn, never throw. Rows catch up via the watcher and the
- * metadata walk.
+ * Entry-time cleanup, on plain disk truth: whitespace-only scratchpads not
+ * in `keepPaths` (the tabs the entry is about to restore) are deleted —
+ * regardless of name. The folder is app territory; an empty file holds no
+ * user work whether its name was generated or chosen, and a name-based
+ * carve-out would just make the sweep's behavior depend on whether a name
+ * happens to look like one of ours. Best-effort; failures warn, never
+ * throw. Rows catch up via the watcher and the metadata walk.
  */
 export async function sweepScratchpadsOnDisk(
   workspacePath: string,
@@ -354,11 +342,7 @@ export async function sweepScratchpadsOnDisk(
   const keep = new Set(keepPaths);
   const candidates = listing.value
     .map((entry) => entry.path)
-    .filter(
-      (path) =>
-        !keep.has(path) &&
-        isGeneratedScratchpadBasename(pathutil.basename(path)),
-    );
+    .filter((path) => !keep.has(path));
   if (candidates.length === 0) return;
 
   const reads = await platformAdapter.fs.readFiles(candidates);
