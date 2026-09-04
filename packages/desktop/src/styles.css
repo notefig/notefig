@@ -69,7 +69,8 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("./assets/fonts/libre-baskerville-latin-400-normal.woff2") format("woff2");
+  src: url("./assets/fonts/libre-baskerville-latin-400-normal.woff2")
+    format("woff2");
 }
 
 @font-face {
@@ -77,7 +78,8 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url("./assets/fonts/libre-baskerville-latin-700-normal.woff2") format("woff2");
+  src: url("./assets/fonts/libre-baskerville-latin-700-normal.woff2")
+    format("woff2");
 }
 
 @font-face {
@@ -85,7 +87,8 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url("./assets/fonts/libre-baskerville-latin-700-italic.woff2") format("woff2");
+  src: url("./assets/fonts/libre-baskerville-latin-700-italic.woff2")
+    format("woff2");
 }
 
 /* Rubik covers Arabic (incl. Farsi's extended letters) and Hebrew, which
@@ -100,9 +103,10 @@
   font-weight: 400;
   font-display: swap;
   src: url("./assets/fonts/rubik-arabic-400-normal.woff2") format("woff2");
-  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891,
-    U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41,
-    U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1,
+    U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF,
+    U+FE70-FE74, U+FE76-FEFC;
 }
 
 @font-face {
@@ -111,8 +115,8 @@
   font-weight: 400;
   font-display: swap;
   src: url("./assets/fonts/rubik-hebrew-400-normal.woff2") format("woff2");
-  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC,
-    U+FB1D-FB4F;
+  unicode-range:
+    U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
 }
 
 /* The typography plugin wraps inline code in `` ` `` pseudo-characters
@@ -261,7 +265,7 @@
     --chart-5: 340 75% 55%;
     --brand: oklch(0.707 0.165 254.624);
     --highlight: oklch(0.852 0.199 91.936);
-    --logo: #90B800;
+    --logo: #90b800;
   }
 }
 
@@ -302,8 +306,11 @@
   /* The webp's speckle alpha is baked in; layering the half-alpha copy on
      top lands the grain at ~1.5x (2x read as too much, 1x too subtle). */
   .dark body::before {
-    background-image: url("/textures/noise-dark-half.webp"), url("/textures/noise-dark.webp");
-    background-size: 100px 100px, 100px 100px;
+    background-image:
+      url("/textures/noise-dark-half.webp"), url("/textures/noise-dark.webp");
+    background-size:
+      100px 100px,
+      100px 100px;
   }
 
   .texture-surface {
@@ -313,8 +320,11 @@
   }
 
   .dark .texture-surface {
-    background-image: url("/textures/noise-dark-half.webp"), url("/textures/noise-dark.webp");
-    background-size: 100px 100px, 100px 100px;
+    background-image:
+      url("/textures/noise-dark-half.webp"), url("/textures/noise-dark.webp");
+    background-size:
+      100px 100px,
+      100px 100px;
   }
 
   #root {
@@ -346,7 +356,6 @@
 
 /* Prevent text selection throughout the app except in editors */
 @layer base {
-
   /* Disable selection by default */
   * {
     user-select: none;
@@ -414,19 +423,20 @@
      the range spans the widget's DOM, so the composer lit up as a solid bar
      even though the user was selecting the prose around it. `user-select`
      can't express "editable, but not part of THAT selection", so suppress
-     the paint on the widget's chrome and give it back only inside the draft
-     — the one subtree above that opted back into user-select:text, so it's
-     the only place a real browser Selection can land here regardless of
-     focus. (:focus-within can't gate this any more: the draft is content of
-     the document's own shared contenteditable rather than a nested editor
-     with its own focus scope, so the ancestor never matches it.) System
-     colors rather than a hardcoded blue: this is restoring the platform
-     default, not inventing a highlight. */
+     the paint on the widget's chrome and give it back only while the
+     selection actually lives inside the draft. (:focus-within can't gate
+     this any more: the draft is content of the document's own shared
+     contenteditable rather than a nested editor with its own focus scope —
+     so the widget's ProseMirror plugin decorates the draft node with
+     `prompt-draft-selection-live` exactly while the editor selection sits
+     inside it, and the paint keys on that.) System colors rather than a
+     hardcoded blue: this is restoring the platform default, not inventing
+     a highlight. */
   [data-type="ai-prompt"] ::selection {
     background-color: transparent;
   }
 
-  [data-type="ai-prompt"] [data-prompt-draft] ::selection {
+  [data-type="ai-prompt"] .prompt-draft-selection-live ::selection {
     background-color: Highlight;
     color: HighlightText;
   }
@@ -552,10 +562,12 @@
        -webkit-text-fill-color to hide the glyphs instead. */
     -webkit-text-fill-color: transparent;
     background-color: currentColor;
-    background-image: linear-gradient(var(--shimmer-angle),
-        transparent calc(50% - var(--shimmer-spread) / 2),
-        var(--shimmer-color),
-        transparent calc(50% + var(--shimmer-spread) / 2));
+    background-image: linear-gradient(
+      var(--shimmer-angle),
+      transparent calc(50% - var(--shimmer-spread) / 2),
+      var(--shimmer-color),
+      transparent calc(50% + var(--shimmer-spread) / 2)
+    );
     background-repeat: no-repeat;
     background-size: 250% 100%;
     background-clip: text;
@@ -611,7 +623,6 @@
    Without this, cursor position drifts further right at higher zoom levels
    (e.g., 125%, 150%) because Safari miscalculates the marker offset. */
 @layer base {
-
   /* Unordered list styles */
   .list-style-disc {
     list-style-type: disc;

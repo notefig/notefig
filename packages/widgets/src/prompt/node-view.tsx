@@ -24,9 +24,14 @@
  * moves the caret there. Docs with content are never force-populated, and
  * deleting the widget there is final.
  */
-import { ReactNodeViewRenderer, NodeViewWrapper, NodeViewContent } from "@tiptap/react";
+import {
+  ReactNodeViewRenderer,
+  NodeViewWrapper,
+  NodeViewContent,
+} from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { Plugin } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { Selection, TextSelection } from "@tiptap/pm/state";
 import Suggestion from "@tiptap/suggestion";
 import { useEffect, useRef } from "react";
@@ -63,7 +68,6 @@ export interface AiPromptNodeOptions {
   basePath: string;
 }
 
-
 /**
  * Move the caret across a widget boundary for ArrowUp (dir -1) / ArrowDown
  * (dir 1): out of a draft into the neighbouring textblock, or from a
@@ -71,7 +75,10 @@ export interface AiPromptNodeOptions {
  * at the textblock's edge in that direction, so ordinary line movement stays
  * native.
  */
-function arrowAcrossWidget(editor: NodeViewProps["editor"], dir: -1 | 1): boolean {
+function arrowAcrossWidget(
+  editor: NodeViewProps["editor"],
+  dir: -1 | 1,
+): boolean {
   const { state, view } = editor;
   const { selection } = state;
   if (!(selection instanceof TextSelection) || !selection.empty) return false;
@@ -98,7 +105,9 @@ function insertDraftHardBreak(editor: NodeViewProps["editor"]): boolean {
   if (!selectionDraft(state)) return false;
   const hardBreak = state.schema.nodes.hardBreak;
   if (!hardBreak) return false;
-  view.dispatch(state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView());
+  view.dispatch(
+    state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView(),
+  );
   return true;
 }
 
@@ -278,7 +287,9 @@ function AiPromptNodeView(props: NodeViewProps) {
         summoned={Boolean(props.node.attrs.summoned)}
         removeNode={removeNode}
         onSessionBound={(taskId) => props.updateAttributes({ taskId })}
-        draft={props.node.firstChild ? readDraftNode(props.node.firstChild) : ""}
+        draft={
+          props.node.firstChild ? readDraftNode(props.node.firstChild) : ""
+        }
         draftSlot={<NodeViewContent />}
       />
     </NodeViewWrapper>
@@ -336,11 +347,13 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
    * reached through mention-bridge.ts.
    */
   addKeyboardShortcuts() {
-    const forward = (key: string, shiftKey = false) => () => {
-      const draft = selectionDraft(this.editor.state);
-      if (!draft) return false;
-      return dispatchComposerKey(draft.blobId, { key, shiftKey });
-    };
+    const forward =
+      (key: string, shiftKey = false) =>
+      () => {
+        const draft = selectionDraft(this.editor.state);
+        if (!draft) return false;
+        return dispatchComposerKey(draft.blobId, { key, shiftKey });
+      };
     const suggestionOwnsArrows = () =>
       Boolean(selectionDraft(this.editor.state)) &&
       mentionPopupHasResults(this.options.filePath);
@@ -449,7 +462,12 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
           if (caret <= draft.from) return true;
           // 1:1 position math: draft content is flat (text | mention |
           // hardBreak), and every leaf serializes to one placeholder char.
-          const text = state.doc.textBetween(draft.from, caret, "\ufffc", "\ufffc");
+          const text = state.doc.textBetween(
+            draft.from,
+            caret,
+            "\ufffc",
+            "\ufffc",
+          );
           const kept = text.replace(/\s+$/u, "").replace(/\S+$/u, "");
           tr.delete(draft.from + kept.length, caret);
           return true;
@@ -469,11 +487,15 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
           }
           const caret = selection.from;
           if (caret >= draft.to) return true;
-          const text = state.doc.textBetween(caret, draft.to, "\ufffc", (node) =>
-            node.type.name === "hardBreak" ? "\n" : "\ufffc",
+          const text = state.doc.textBetween(
+            caret,
+            draft.to,
+            "\ufffc",
+            (node) => (node.type.name === "hardBreak" ? "\n" : "\ufffc"),
           );
           const brk = text.indexOf("\n");
-          const end = brk === -1 ? draft.to : brk === 0 ? caret + 1 : caret + brk;
+          const end =
+            brk === -1 ? draft.to : brk === 0 ? caret + 1 : caret + brk;
           if (end > caret) tr.delete(caret, end);
           return true;
         });
@@ -484,6 +506,28 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
   addProseMirrorPlugins() {
     const { options } = this;
     return [
+      // The draft's ::selection paint gate. The draft opts back into
+      // user-select:text, so a document-wide drag or select-all would
+      // light it up even though the user is selecting the prose AROUND
+      // the widget. CSS alone can't tell "the user is selecting my text"
+      // from "a range that merely spans me" (and :focus-within can't
+      // either — the draft shares the document's contenteditable), but
+      // the editor state can: decorate the draft only while the selection
+      // actually lives inside it, and let styles.css key the Highlight
+      // paint on the class.
+      new Plugin({
+        props: {
+          decorations(state) {
+            const draft = selectionDraft(state);
+            if (!draft || state.selection.to > draft.to) return null;
+            return DecorationSet.create(state.doc, [
+              Decoration.node(draft.from - 1, draft.to + 1, {
+                class: "prompt-draft-selection-live",
+              }),
+            ]);
+          },
+        },
+      }),
       new Plugin({
         props: {
           // The "/" summon. Returning true consumes the keystroke.

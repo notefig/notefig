@@ -6,6 +6,7 @@ import {
   setupTestDatabase,
   waitForAutoSave,
   waitForFileTree,
+  listScratchpadFiles,
 } from "../setup/test-helpers";
 
 const WORKSPACE_PATH = "/workspace/prompt-draft";
@@ -68,12 +69,18 @@ test.describe("prompt draft persistence", () => {
       )
       .toBe(true);
 
-    // The scratchpad is created on disk before any of this; snapshot it once
-    // it is actually there, or "unchanged" would compare two nulls.
-    const scratchpad = `${WORKSPACE_PATH}/.notefig/scratchpads/untitled.md`;
+    // The scratchpad is created on disk before any of this (with a
+    // generated name — discover it, don't hardcode); snapshot it once it
+    // is actually there, or "unchanged" would compare two nulls.
     await expect
-      .poll(async () => getFileContentFromDB(page, scratchpad) !== null)
-      .toBe(true);
+      .poll(
+        async () => (await listScratchpadFiles(page, WORKSPACE_PATH)).length,
+      )
+      .toBeGreaterThan(0);
+    const [{ path: scratchpad }] = await listScratchpadFiles(
+      page,
+      WORKSPACE_PATH,
+    );
     const original = await getFileContentFromDB(page, scratchpad);
 
     await page.keyboard.type("a long unsent prompt that must stay off disk");

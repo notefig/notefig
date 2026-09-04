@@ -26,7 +26,7 @@
  * rows catch up via the normal metadata walk.
  */
 import { platformAdapter } from "@/adapters";
-import { path as pathutil } from "@/utils/path";
+import { path as pathutil, workspaceKey } from "@/utils/path";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { stripPromptMarkers } from "@notefig/widgets";
 import {
@@ -269,11 +269,35 @@ export function createAndOpenScratchpad(
 }
 
 /**
- * Entry-time resolution, on plain disk truth: the most recently modified
- * scratchpad, else a freshly created untitled one. Null bails to the
- * empty state (e.g. a file squatting on the folder path).
+ * In-flight entry resolutions, coalesced per workspace. StrictMode invokes
+ * the entry effect twice back to back (see use-recent-projects.ts), and two
+ * concurrent resolves of an empty folder would each create a file — under
+ * the untitled scheme both computed the same basename and collided
+ * harmlessly, but generated names would make the duplicate real.
  */
-export async function resolveScratchpadOnDisk(
+const entryResolutionInFlight = new Map<string, Promise<string | null>>();
+
+/**
+ * Entry-time resolution, on plain disk truth: the most recently modified
+ * scratchpad, else a freshly created generated-name one. Null bails to the
+ * empty state (e.g. a file squatting on the folder path). Concurrent calls
+ * for one workspace share a single resolution — this is the create path,
+ * and it must be idempotent under the double-entry the caller documents.
+ */
+export function resolveScratchpadOnDisk(
+  workspacePath: string,
+): Promise<string | null> {
+  const key = workspaceKey(workspacePath);
+  const existing = entryResolutionInFlight.get(key);
+  if (existing) return existing;
+  const resolution = resolveScratchpadUncoalesced(workspacePath).finally(() =>
+    entryResolutionInFlight.delete(key),
+  );
+  entryResolutionInFlight.set(key, resolution);
+  return resolution;
+}
+
+async function resolveScratchpadUncoalesced(
   workspacePath: string,
 ): Promise<string | null> {
   const dir = scratchpadsDirPath(workspacePath);

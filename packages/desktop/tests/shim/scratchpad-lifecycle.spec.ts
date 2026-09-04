@@ -6,7 +6,7 @@ import { openFileInNewTab, waitForAutoSave } from "../setup/test-helpers";
 
 /**
  * Real-backend coverage of the scratchpads' only special powers: "New
- * File"/empty entry auto-creates an untitled file in the folder, an empty
+ * File"/empty entry auto-creates a generated-name file in the folder, an empty
  * entry auto-opens the most recent one, and the entry sweep deletes
  * abandoned empty ones. Runs against the real Rust fs via the test-shim,
  * on a real temp workspace.
@@ -56,10 +56,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
    * still in flight can throw "cannot start a transaction within a
    * transaction" — silently, since every caller here is fire-and-forget.
    */
-  async function waitForBackendQuiet(
-    page: Page,
-    quietMs = 300,
-  ): Promise<void> {
+  async function waitForBackendQuiet(page: Page, quietMs = 300): Promise<void> {
     // Tracked on COMPLETION (finished or failed), not on request start: a
     // request that is still in flight when the quiet window would
     // otherwise close must keep it open — that in-flight request could be
@@ -83,8 +80,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
     try {
       await expect
         .poll(
-          () =>
-            outstanding.size === 0 ? Date.now() - lastSettledAt : -1,
+          () => (outstanding.size === 0 ? Date.now() - lastSettledAt : -1),
           { timeout: 15000 },
         )
         .toBeGreaterThanOrEqual(quietMs);
@@ -156,22 +152,27 @@ test.describe("shim: scratchpad entry lifecycle", () => {
     await waitForBackendQuiet(page);
   }
 
-  test("empty entry auto-creates and opens untitled.md", async ({ page }) => {
+  test("empty entry auto-creates and opens a generated-name scratchpad", async ({
+    page,
+  }) => {
     test.setTimeout(90000);
 
     await openProject(page);
     const editor = visibleEditor(page);
     await editor.waitFor({ state: "visible", timeout: 15000 });
     await expectNoLoadError(page);
+    // Names are generated (random friendly names) — assert one exists,
+    // not what it's called.
     await expect
-      .poll(listScratchpads, { timeout: 10000 })
-      .toContain("untitled.md");
+      .poll(async () => (await listScratchpads()).length, { timeout: 10000 })
+      .toBe(1);
+    const [basename] = await listScratchpads();
 
     await editor.click();
     await editor.pressSequentially("still alive", { delay: 10 });
     await waitForAutoSave(page);
     const content = await fs.readFile(
-      path.join(workspace, ".notefig", "scratchpads", "untitled.md"),
+      path.join(workspace, ".notefig", "scratchpads", basename),
       "utf8",
     );
     expect(content).toContain("still alive");
@@ -229,8 +230,13 @@ test.describe("shim: scratchpad entry lifecycle", () => {
       timeout: 15000,
     });
     await expectNoLoadError(page);
+    // No scratchpad tab was summoned over the restored layout: README's
+    // tab is the only one (scratchpad names are generated, so match by
+    // exclusion rather than a fixed basename).
     await expect(
-      page.getByRole("button", { name: /untitled.*Close tab/ }),
+      page
+        .getByRole("button", { name: /Close tab/ })
+        .filter({ hasNotText: "README.md" }),
     ).toHaveCount(0);
   });
 
@@ -320,12 +326,13 @@ test.describe("shim: scratchpad entry lifecycle", () => {
     const editor = visibleEditor(page);
     await editor.waitFor({ state: "visible", timeout: 15000 });
     await expect
-      .poll(listScratchpads, { timeout: 10000 })
-      .toContain("untitled.md");
+      .poll(async () => (await listScratchpads()).length, { timeout: 10000 })
+      .toBe(1);
 
-    // Close it untouched; a second, contentful scratchpad stays on disk,
-    // and so does an EMPTY but renamed one — a user-chosen name is intent,
-    // never an abandoned leftover.
+    // Close it untouched; a second, contentful scratchpad stays on disk
+    // (the legacy untitled scheme still counts as generated), and so does
+    // an EMPTY but renamed one — a user-chosen name is intent, never an
+    // abandoned leftover.
     await closeScratchpadTab(page);
     await fs.writeFile(
       path.join(workspace, ".notefig", "scratchpads", "untitled-2.md"),
@@ -338,7 +345,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
       "utf8",
     );
 
-    // Re-enter at the bare root: README restores, the empty untitled
+    // Re-enter at the bare root: README restores, the empty generated-name
     // leftover is swept, the contentful and the renamed-empty ones survive.
     await page.goto("/welcome");
     await openProject(page);
