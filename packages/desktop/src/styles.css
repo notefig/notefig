@@ -419,24 +419,17 @@
     -ms-user-select: text;
   }
 
-  /* …and that opt-in is exactly what a document-wide drag or ⌘A would paint:
-     the range spans the widget's DOM, so the composer lit up as a solid bar
-     even though the user was selecting the prose around it. `user-select`
-     can't express "editable, but not part of THAT selection", so suppress
-     the paint on the widget's chrome and give it back only while the
-     selection actually lives inside the draft. (:focus-within can't gate
-     this any more: the draft is content of the document's own shared
-     contenteditable rather than a nested editor with its own focus scope —
-     so the widget's ProseMirror plugin decorates the draft node with
-     `prompt-draft-selection-live` exactly while the editor selection sits
-     inside it, and the paint keys on that.) System colors rather than a
-     hardcoded blue: this is restoring the platform default, not inventing
-     a highlight. */
+  /* The widget's chrome never paints a selection (it's user-select:none
+     anyway), but the draft is ordinary document text and paints like the
+     prose around it — a document-wide drag or ⌘A includes it, deliberately:
+     the composer's text IS part of the document. System colors rather than
+     a hardcoded blue: this is restoring the platform default, not
+     inventing a highlight. */
   [data-type="ai-prompt"] ::selection {
     background-color: transparent;
   }
 
-  [data-type="ai-prompt"] .prompt-draft-selection-live ::selection {
+  [data-type="ai-prompt"] [data-prompt-draft] ::selection {
     background-color: Highlight;
     color: HighlightText;
   }

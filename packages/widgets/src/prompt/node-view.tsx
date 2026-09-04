@@ -31,7 +31,6 @@ import {
 } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { Plugin } from "@tiptap/pm/state";
-import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { Selection, TextSelection } from "@tiptap/pm/state";
 import Suggestion from "@tiptap/suggestion";
 import { useEffect, useRef } from "react";
@@ -512,28 +511,6 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
   addProseMirrorPlugins() {
     const { options } = this;
     return [
-      // The draft's ::selection paint gate. The draft opts back into
-      // user-select:text, so a document-wide drag or select-all would
-      // light it up even though the user is selecting the prose AROUND
-      // the widget. CSS alone can't tell "the user is selecting my text"
-      // from "a range that merely spans me" (and :focus-within can't
-      // either — the draft shares the document's contenteditable), but
-      // the editor state can: decorate the draft only while the selection
-      // actually lives inside it, and let styles.css key the Highlight
-      // paint on the class.
-      new Plugin({
-        props: {
-          decorations(state) {
-            const draft = selectionDraft(state);
-            if (!draft || state.selection.to > draft.to) return null;
-            return DecorationSet.create(state.doc, [
-              Decoration.node(draft.from - 1, draft.to + 1, {
-                class: "prompt-draft-selection-live",
-              }),
-            ]);
-          },
-        },
-      }),
       new Plugin({
         props: {
           // The "/" summon. Returning true consumes the keystroke.

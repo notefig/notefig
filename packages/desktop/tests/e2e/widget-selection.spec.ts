@@ -10,8 +10,9 @@ import {
 const WORKSPACE_PATH = "/workspace/widget-selection";
 
 /**
- * The prompt widget is chrome, not prose — a document-wide selection must not
- * paint it.
+ * The prompt widget's CHROME is not prose — a document-wide selection must
+ * not paint the card. The draft inside it IS prose, and paints with the rest
+ * of the document.
  *
  * The bug: styles.css disables selection globally (`* { user-select: none }`)
  * and then re-enables it for the editor with `[contenteditable="true"] *`.
@@ -110,16 +111,16 @@ test.describe("prompt widget selection", () => {
     }
   });
 
-  test("a document-wide selection leaves the widget pixel-identical", async ({
+  test("a document-wide selection paints the draft like the prose around it", async ({
     page,
   }) => {
-    // The draft keeps `user-select: text` so it can take a caret, so it
-    // would still be painted by a selection spanning the widget — the
-    // remaining gap after the user-select deny. `::selection` suppresses the
-    // paint instead.
+    // The draft is document text, so ⌘A includes it — visibly. (An earlier
+    // iteration suppressed the paint unless the selection stayed inside the
+    // draft, which read as "select all skipped my prompt". Undifferentiated
+    // is the contract now.)
     //
-    // Asserted on pixels because that is literally the property: the widget
-    // must not CHANGE when the document around it is selected. Chromium's
+    // Asserted on pixels because that is literally the property: the draft
+    // must light up with the rest of the document. Chromium's
     // getComputedStyle does not resolve author ::selection rules, so reading
     // the cascade here is not an option (an earlier version of this test
     // tried, and reported the browser default no matter what was applied).
@@ -130,8 +131,16 @@ test.describe("prompt widget selection", () => {
       .first();
     await expect(widget).toBeVisible();
 
-    const editor = page.locator(".ProseMirror").locator("visible=true").first();
-    await editor.click();
+    // The paint needs text to land on, and the select-all starts from
+    // inside the composer — the reported scenario.
+    const composer = widget.locator("[data-prompt-draft]").first();
+    await composer.click();
+    await page.keyboard.type("words in the draft");
+    await expect(composer).toContainText("words in the draft");
+
+    // A blinking caret would make any two shots differ; take it out of the
+    // comparison so the only possible delta is the selection paint.
+    await page.addStyleTag({ content: "* { caret-color: transparent; }" });
     // Settle before the baseline: the widget mounts its own chrome, and a
     // shot taken mid-mount would differ for reasons that have nothing to do
     // with selection.
@@ -142,13 +151,15 @@ test.describe("prompt widget selection", () => {
     await page.waitForTimeout(500);
     const selected = await widget.screenshot();
 
-    // The prose around it must actually be selected, or this proves nothing.
+    // The whole document must actually be selected — prose and draft both —
+    // or the shot comparison proves nothing.
     const selectedText = await page.evaluate(
       () => window.getSelection()?.toString() ?? "",
     );
     expect(selectedText).toContain("monorepo");
+    expect(selectedText).toContain("words in the draft");
 
-    expect(selected.equals(unselected)).toBe(true);
+    expect(selected.equals(unselected)).toBe(false);
   });
 
   test("the draft still accepts typing", async ({ page }) => {
