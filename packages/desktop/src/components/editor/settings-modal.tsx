@@ -1,5 +1,5 @@
 import React from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@notefig/ui/dialog";
 import { Switch } from "@notefig/ui/switch";
 import { Checkbox } from "@notefig/ui/checkbox";
@@ -13,13 +13,11 @@ import {
 import { Button } from "@notefig/ui/button";
 import { ScrollArea } from "@notefig/ui/scroll-area";
 import { cn } from "@notefig/ui/utils";
-import { useHotkey } from "@tanstack/react-hotkeys";
+import { useHotkey, formatForDisplay } from "@tanstack/react-hotkeys";
 import {
   Settings,
   Palette,
   Keyboard,
-  RefreshCw,
-  GitBranch,
   Download,
   CheckCircle2,
   AlertCircle,
@@ -35,7 +33,16 @@ import { HarnessSettings } from "@/components/agent/harness-settings";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
-import { useSearchParamFlag } from "@/hooks/use-search-param-flag";
+import {
+  useSearchParamFlag,
+  useSearchParamValue,
+} from "@/hooks/use-search-param-flag";
+import { useScrollSpy } from "./use-scroll-spy";
+import {
+  HOTKEY_CATALOG,
+  HOTKEY_GROUPS,
+  type HotkeyEntry,
+} from "./hotkey-catalog";
 import { useWorkspaceTabsOptional } from "@/components/workspace-tabs-provider";
 import {
   RELEASE_NOTES_TAB_ID,
@@ -57,47 +64,38 @@ interface SettingsModalProps {
   onFocusTab: () => void;
 }
 
-interface SettingsSection {
+interface SettingsSectionDefinition {
+  id: string;
   label: string;
-  items: {
-    id: string;
-    label: string;
-    icon: React.ElementType;
-  }[];
+  icon: React.ElementType;
 }
 
-const settingsSections: SettingsSection[] = [
-  {
-    label: "generalSettings",
-    items: [
-      { id: "general", label: "General", icon: Settings },
-      { id: "appearance", label: "Appearance", icon: Palette },
-      { id: "hotkeys", label: "Hotkeys", icon: Keyboard },
-      { id: "privacy", label: "Privacy", icon: Shield },
-    ],
-  },
-  {
-    label: "agentSettings",
-    items: [
-      {
-        id: "harnesses",
-        label: "Harnesses",
-        icon: Sparkles,
-      },
-    ],
-  },
-  {
-    label: "corePlugins",
-    items: [
-      { id: "Git", label: "Git", icon: GitBranch },
-      { id: "sync", label: "Sync", icon: RefreshCw },
-    ],
-  },
+/**
+ * Every section, in the order they stack inside the one scroll container. The
+ * left rail is an index into this list, not a router.
+ */
+const SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
+  { id: "general", label: "General", icon: Settings },
+  { id: "appearance", label: "Appearance", icon: Palette },
+  { id: "hotkeys", label: "Hotkeys", icon: Keyboard },
+  { id: "harnesses", label: "Harnesses", icon: Sparkles },
+  { id: "privacy", label: "Privacy", icon: Shield },
 ];
+
+export const DEFAULT_SETTINGS_SECTION = SETTINGS_SECTIONS[0].id;
+
+/**
+ * `?settings=<section>` carries both facts: absent means the modal is closed,
+ * present names the open section. An unknown value still opens, on General.
+ */
+function resolveSection(param: string | null) {
+  return SETTINGS_SECTIONS.some((section) => section.id === param)
+    ? (param as string)
+    : DEFAULT_SETTINGS_SECTION;
+}
 
 interface SettingsState {
   language: string;
-  notifySlowStartup: boolean;
 }
 
 export function SettingsModal({
@@ -105,52 +103,62 @@ export function SettingsModal({
   onDirectionChange,
   onFocusTab,
 }: SettingsModalProps) {
-  const { t } = useTranslation();
-  const { isOn: isSettingsOpen, setFlag: handleSettingsToggle } =
-    useSearchParamFlag("settings", { replace: true });
+  const { value: sectionParam, setValue: setSectionParam } =
+    useSearchParamValue("settings", { replace: true });
+  const isSettingsOpen = sectionParam !== null;
+  const targetSection = resolveSection(sectionParam);
+
   const handleCloseAutoFocus = (event: Event) => {
     event.preventDefault();
     onFocusTab();
   };
-  const [activeSection, setActiveSection] = useState("general");
   const [settings, setSettings] = useState<SettingsState>({
     language: "english",
-    notifySlowStartup: false,
   });
+
+  const { setContainer, activeId, scrollToSection } = useScrollSpy();
 
   useHotkey({ key: ",", mod: true, shift: true }, () => {
-    handleSettingsToggle(!isSettingsOpen);
+    setSectionParam(isSettingsOpen ? null : DEFAULT_SETTINGS_SECTION);
   });
 
-  const renderSettingsContent = () => {
-    switch (activeSection) {
-      case "general":
-        return (
-          <GeneralSettings
-            settings={settings}
-            setSettings={setSettings}
-            direction={direction}
-            onDirectionChange={onDirectionChange}
-          />
-        );
-      case "appearance":
-        return <AppearanceSettings />;
-      case "privacy":
-        return <PrivacySettings />;
-      case "harnesses":
-        return <HarnessSettings />;
-      default:
-        return <PlaceholderSettings section={activeSection} />;
+  // URL -> scroll, on entry only: opening the modal, or a section arriving in
+  // the URL from outside, jumps there. Deliberately not re-run on `activeId`:
+  // a smooth scroll reports every section it passes, and re-scrolling to the
+  // target on each of those would restart the animation forever.
+  const appliedSection = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isSettingsOpen) {
+      appliedSection.current = null;
+      return;
     }
-  };
+    if (appliedSection.current === targetSection) return;
+    // The first scroll of a freshly opened dialog is a jump, not a glide.
+    const behavior = appliedSection.current === null ? "auto" : "smooth";
+    if (scrollToSection(targetSection, behavior)) {
+      appliedSection.current = targetSection;
+    }
+  }, [isSettingsOpen, targetSection, scrollToSection]);
+
+  // Scroll -> URL: the section you are reading is the section in the URL.
+  // `replace` so a scroll through the page leaves no history to walk back.
+  // Claiming `appliedSection` here is what keeps this from feeding back into
+  // the effect above as if the URL had changed from outside.
+  useEffect(() => {
+    if (!isSettingsOpen || !activeId || activeId === sectionParam) return;
+    appliedSection.current = activeId;
+    setSectionParam(activeId);
+  }, [isSettingsOpen, activeId, sectionParam, setSectionParam]);
 
   return (
     <Dialog
       open={isSettingsOpen}
-      onOpenChange={(open) => handleSettingsToggle(open)}
+      onOpenChange={(open) =>
+        setSectionParam(open ? DEFAULT_SETTINGS_SECTION : null)
+      }
     >
       <DialogContent
-        className="max-w-6xl w-[95vw] h-[85vh] p-0 gap-0 overflow-hidden bg-card border-border texture-surface"
+        className="max-w-6xl w-[95vw] h-[85vh] p-0 gap-0 overflow-hidden bg-card border-border texture-surface focus:outline-none focus-visible:outline-none"
         onCloseAutoFocus={handleCloseAutoFocus}
       >
         <DialogTitle className="sr-only">Settings</DialogTitle>
@@ -158,43 +166,114 @@ export function SettingsModal({
         <div dir={direction} className="flex h-full overflow-hidden">
           <div className="w-56 shrink-0 border-e border-border bg-sidebar">
             <ScrollArea className="h-full p-0">
-              <div className="py-1">
-                {settingsSections.map((section) => (
-                  <div key={section.label} className="mb-4">
-                    <div className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      {t(section.label)}
-                    </div>
-                    <div className="space-y-0.5 px-2">
-                      {section.items.map((item) => (
-                        <button
-                          key={item.id}
-                          onClick={() => setActiveSection(item.id)}
-                          className={cn(
-                            "w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md transition-colors",
-                            activeSection === item.id
-                              ? "bg-accent text-accent-foreground"
-                              : "text-foreground/80 hover:bg-accent/50",
-                          )}
-                        >
-                          <item.icon className="h-4 w-4 shrink-0" />
-                          <span className="truncate">{item.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+              <div className="space-y-0.5 px-2 py-4">
+                {SETTINGS_SECTIONS.map((section) => (
+                  <SettingsIndexItem
+                    key={section.id}
+                    section={section}
+                    active={activeId === section.id}
+                    onSelect={() => scrollToSection(section.id)}
+                  />
                 ))}
               </div>
             </ScrollArea>
           </div>
 
-          <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
-            <ScrollArea className="flex-1">
-              <div className="p-6">{renderSettingsContent()}</div>
-            </ScrollArea>
-          </div>
+          <ScrollArea ref={setContainer} className="flex-1 min-w-0 px-6">
+            <SettingsSection id="general" title="General">
+              <GeneralSettings
+                settings={settings}
+                setSettings={setSettings}
+                direction={direction}
+                onDirectionChange={onDirectionChange}
+              />
+            </SettingsSection>
+
+            <SettingsSection id="appearance" title="Appearance">
+              <AppearanceSettings />
+            </SettingsSection>
+
+            <SettingsSection id="hotkeys">
+              <HotkeysSettings />
+            </SettingsSection>
+
+            <SettingsSection id="harnesses">
+              <HarnessSettings />
+            </SettingsSection>
+
+            <SettingsSection id="privacy" last>
+              <PrivacySettings />
+            </SettingsSection>
+          </ScrollArea>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function SettingsIndexItem({
+  section,
+  active,
+  onSelect,
+}: {
+  section: SettingsSectionDefinition;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  const ref = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (active) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+
+  return (
+    <button
+      ref={ref}
+      onClick={onSelect}
+      aria-current={active ? "true" : undefined}
+      className={cn(
+        "w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md transition-colors",
+        "focus:outline-none focus-visible:outline-none",
+        active
+          ? "bg-accent text-accent-foreground"
+          : "text-foreground/80 hover:bg-accent/50",
+      )}
+    >
+      <section.icon className="h-4 w-4 shrink-0" />
+      <span className="truncate">{section.label}</span>
+    </button>
+  );
+}
+
+/**
+ * One anchor in the settings document. `title` is optional: sections whose
+ * heading carries its own controls (harnesses, with its rescan button) render
+ * their own.
+ */
+function SettingsSection({
+  id,
+  title,
+  last,
+  children,
+}: {
+  id: string;
+  title?: string;
+  last?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      data-settings-section={id}
+      className={cn(
+        "space-y-2 py-6",
+        // The final section stretches to a full viewport height so that it,
+        // too, can scroll up to the activation line and light up in the index.
+        last ? "min-h-full" : "border-b border-border",
+      )}
+    >
+      {title && <h2 className="text-lg font-semibold">{title}</h2>}
+      {children}
+    </section>
   );
 }
 
@@ -210,14 +289,10 @@ function GeneralSettings({
   onDirectionChange: (direction: "ltr" | "rtl") => void;
 }) {
   return (
-    <div className="space-y-2 max-w-3xl">
+    <div className="space-y-2">
       <UpdateSection />
 
-      <SettingRow
-        title="Language"
-        description="Change the display language."
-        link={{ text: "Learn how to add a new language.", href: "#" }}
-      >
+      <SettingRow title="Language" description="Change the display language.">
         <Select
           value={settings.language}
           onValueChange={(value) =>
@@ -278,9 +353,7 @@ function AppearanceSettings() {
   };
 
   return (
-    <div className="space-y-2 max-w-3xl">
-      <h2 className="text-lg font-semibold">Appearance</h2>
-
+    <div className="space-y-2">
       <SettingRow
         title="Theme"
         description="Choose a color theme for the interface."
@@ -445,6 +518,64 @@ function UpdaterButton() {
   }
 }
 
+/**
+ * Read-only reference for the shortcuts this version ships with. Rebinding
+ * lands in a later release, when `HOTKEY_CATALOG` becomes the registry the
+ * `useHotkey()` call sites read from.
+ */
+function HotkeysSettings() {
+  const { t } = useTranslation();
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold">{t("keyboardShortcuts")}</h2>
+        <p className="text-sm text-muted-foreground">
+          {t("hotkeysDescription")}
+        </p>
+      </div>
+
+      {HOTKEY_GROUPS.map((group) => {
+        const entries = HOTKEY_CATALOG.filter(
+          (entry) => entry.group === group.id,
+        );
+        if (entries.length === 0) return null;
+
+        return (
+          <div key={group.id} className="space-y-1.5">
+            <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              {t(group.labelKey)}
+            </h3>
+            <div className="divide-y divide-border rounded-lg border border-border">
+              {entries.map((entry) => (
+                <HotkeyRow key={entry.id} entry={entry} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function HotkeyRow({ entry }: { entry: HotkeyEntry }) {
+  const { t } = useTranslation();
+  const chord = entry.bindingEnd
+    ? `${formatForDisplay(entry.binding)} – ${formatForDisplay(entry.bindingEnd)}`
+    : formatForDisplay(entry.binding);
+
+  return (
+    <div className="flex items-center justify-between gap-4 px-3 py-2">
+      <span className="min-w-0 truncate text-sm">
+        {t(`hotkeyLabels.${entry.labelKey}`)}
+      </span>
+      <kbd className="shrink-0 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+        {chord}
+      </kbd>
+    </div>
+  );
+}
+
 function PrivacySettings() {
   const { t } = useTranslation();
   const { settings, setSetting } = useAppSettings();
@@ -472,7 +603,7 @@ function PrivacySettings() {
   };
 
   return (
-    <div className="space-y-2 max-w-3xl">
+    <div className="space-y-2">
       <h2 className="text-lg font-semibold">{t("privacySettings")}</h2>
 
       {!available && (
@@ -543,21 +674,6 @@ function DebugModeToggle() {
     >
       <Switch checked={isDebugActive} onCheckedChange={handleToggle} />
     </SettingRow>
-  );
-}
-
-function PlaceholderSettings({ section }: { section: string }) {
-  const title =
-    settingsSections.flatMap((s) => s.items).find((i) => i.id === section)
-      ?.label || section;
-
-  return (
-    <div className="space-y-4 max-w-3xl">
-      <h2 className="text-lg font-semibold">{title}</h2>
-      <p className="text-muted-foreground">
-        Settings for {title.toLowerCase()} will appear here.
-      </p>
-    </div>
   );
 }
 

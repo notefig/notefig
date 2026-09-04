@@ -279,7 +279,7 @@ export function HarnessSettings() {
   );
 
   return (
-    <div className="space-y-4 max-w-3xl">
+    <div className="space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h2 className="text-lg font-semibold">{t("harnessSettingsTitle")}</h2>
@@ -545,7 +545,7 @@ function HarnessEditorView({
   };
 
   return (
-    <div className="space-y-4 max-w-3xl">
+    <div className="space-y-4">
       <div className="flex items-center gap-2">
         <Button
           variant="ghost"

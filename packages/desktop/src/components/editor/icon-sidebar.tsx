@@ -17,7 +17,8 @@ import { useNavigate } from "react-router";
 import { useSearchParams } from "react-router-dom";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { PlainLogo } from "@/components/logo";
-import { useSearchParamFlag } from "@/hooks/use-search-param-flag";
+import { useSearchParamValue } from "@/hooks/use-search-param-flag";
+import { DEFAULT_SETTINGS_SECTION } from "./settings-modal";
 
 interface IconSidebarProps {
   isCollapsed: boolean;
@@ -91,7 +92,7 @@ export const IconSidebar = memo(function IconSidebar({
     [sidebarView, handleSidebarViewChange],
   );
 
-  const { setFlag: handleSettingsToggle } = useSearchParamFlag("settings");
+  const { setValue: setSettingsSection } = useSearchParamValue("settings");
 
   const bottomIcons = useMemo(
     () => [
@@ -99,10 +100,10 @@ export const IconSidebar = memo(function IconSidebar({
         id: "settings",
         icon: Settings,
         label: "Settings",
-        onClick: () => handleSettingsToggle(true),
+        onClick: () => setSettingsSection(DEFAULT_SETTINGS_SECTION),
       },
     ],
-    [handleSettingsToggle],
+    [setSettingsSection],
   );
 
   return (

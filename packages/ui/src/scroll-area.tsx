@@ -1,7 +1,7 @@
 import * as React from "react";
 import { cn } from "./utils";
 
-interface ScrollAreaProps extends React.HTMLAttributes<HTMLDivElement> {
+interface ScrollAreaProps extends React.ComponentProps<"div"> {
   className?: string;
   children: React.ReactNode;
 }
