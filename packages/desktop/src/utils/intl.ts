@@ -336,7 +336,6 @@ i18n
             openSettings: "Open settings",
             toggleSidebar: "Toggle sidebar",
             sessionsSidebar: "Open agent sessions",
-            toggleFullscreen: "Toggle fullscreen",
             closeTab: "Close tab",
             nextTab: "Next tab",
             prevTab: "Previous tab",

@@ -64,12 +64,6 @@ export const HOTKEY_CATALOG: HotkeyEntry[] = [
     labelKey: "sessionsSidebar",
     group: "general",
   },
-  {
-    id: "toggleFullscreen",
-    binding: "F11",
-    labelKey: "toggleFullscreen",
-    group: "general",
-  },
 
   // src/hooks/use-dockable-tabs.ts
   { id: "closeTab", binding: "Mod+W", labelKey: "closeTab", group: "tabs" },
