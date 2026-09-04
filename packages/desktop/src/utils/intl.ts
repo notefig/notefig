@@ -322,6 +322,31 @@ i18n
           keyboardShortcuts: "Keyboard Shortcuts",
           toggleTheme: "Toggle Theme",
 
+          // Hotkeys Settings
+          hotkeysDescription:
+            "The keyboard shortcuts this version ships with. Customizing them is coming in a future release.",
+          hotkeyGroups: {
+            general: "General",
+            tabs: "Tabs",
+            editing: "Editing",
+          },
+          hotkeyLabels: {
+            commandPalette: "Open command palette",
+            quickSwitcher: "Quick switcher",
+            openSettings: "Open settings",
+            toggleSidebar: "Toggle sidebar",
+            sessionsSidebar: "Open agent sessions",
+            closeTab: "Close tab",
+            nextTab: "Next tab",
+            prevTab: "Previous tab",
+            selectTabByNumber: "Select tab by number",
+            newScratchpad: "New scratchpad",
+            searchInFile: "Find in file",
+            searchInAllFiles: "Find in all files",
+            undo: "Undo",
+            redo: "Redo",
+          },
+
           // Command Keywords
           commandKeywords: {
             newScratchpad: [

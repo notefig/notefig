@@ -9,6 +9,7 @@ import { useCallback, type RefObject } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { SearchPanelHandle } from "@/components/editor/search-panel";
 import { retryOnAnimationFrame } from "@/utils/retry-on-animation-frame";
+import { DEFAULT_SETTINGS_SECTION } from "@/components/editor/settings-modal";
 
 export interface WorkspacePanelsOptions {
   searchPanelRef: RefObject<SearchPanelHandle | null>;
@@ -98,7 +99,7 @@ export function useWorkspacePanels({
     setUrlSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
-        next.set("settings", "true");
+        next.set("settings", DEFAULT_SETTINGS_SECTION);
         return next;
       },
       { replace: true },

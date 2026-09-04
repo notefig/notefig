@@ -33,7 +33,10 @@ import { toast } from "sonner";
 import { platformAdapter } from "@/adapters";
 import { FsError } from "@/adapters/platform-adapter.interface";
 import Logo, { PlainLogo } from "@/components/logo";
-import { SettingsModal } from "@/components/editor/settings-modal";
+import {
+  SettingsModal,
+  DEFAULT_SETTINGS_SECTION,
+} from "@/components/editor/settings-modal";
 import { useTheme } from "@/components/theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useProbedHarnesses } from "@/hooks/use-harness-selection";
@@ -385,7 +388,7 @@ export function Welcome() {
     setUrlSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
-        next.set("settings", "true");
+        next.set("settings", DEFAULT_SETTINGS_SECTION);
         return next;
       },
       { replace: true },
