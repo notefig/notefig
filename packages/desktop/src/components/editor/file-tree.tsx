@@ -41,7 +41,10 @@ import { useLiveQuery } from "@tanstack/react-db";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { dropZoneProps, tagCurrentDrag } from "@/utils/drag-protocol";
 import { path as pathutil, relativeTreePath } from "@/utils/path";
-import { isProtectedTreePath } from "@/entities/scratchpads";
+import {
+  isProtectedTreePath,
+  SCRATCHPADS_REL_PATH,
+} from "@/entities/scratchpads";
 import { moveIntoFolder } from "@/utils/drop-actions";
 import { attachTreeStatHydration } from "./tree-stat-hydration";
 import {
@@ -485,9 +488,19 @@ function FileTreeInner({
       resetModelPaths(
         treePaths,
         applyDefault
-          ? treePaths
-              .filter((p) => p.endsWith("/") && !p.slice(0, -1).includes("/"))
-              .map((p) => p.replace(/\/+$/, ""))
+          ? [
+              ...treePaths
+                .filter(
+                  (p) => p.endsWith("/") && !p.slice(0, -1).includes("/"),
+                )
+                .map((p) => p.replace(/\/+$/, "")),
+              // The scratchpads row is a flattened .notefig/scratchpads
+              // chain (see tree-model-cache.ts) — it's nested, not a
+              // root-level dir, so the filter above misses it. Open by
+              // default anyway: it's a first-class surface, not a
+              // buried folder.
+              SCRATCHPADS_REL_PATH,
+            ]
           : [],
       );
     }
