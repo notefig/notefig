@@ -561,16 +561,12 @@ function HarnessEditorFields({
   return (
     <div className="space-y-4">
       <div className="space-y-4">
-        {mode !== "builtin" && (
-          <Field label={t("harnessLabelField")}>
-            <Input
-              value={form.label}
-              placeholder={t("harnessLabelPlaceholder")}
-              onChange={(e) => patch({ label: e.target.value })}
-            />
-            {errors.label && <FieldError text={t("harnessLabelRequired")} />}
-          </Field>
-        )}
+        <HarnessLabelField
+          mode={mode}
+          value={form.label}
+          error={errors.label}
+          onChange={(label) => patch({ label })}
+        />
 
         <Field label={t("harnessCommandField")}>
           <Input
@@ -592,28 +588,11 @@ function HarnessEditorFields({
           />
         </Field>
 
-        <Field label={t("harnessEnvField")}>
-          <Textarea
-            value={form.envText}
-            placeholder={t("harnessEnvPlaceholder")}
-            onChange={(e) => patch({ envText: e.target.value })}
-            rows={3}
-            className="font-mono text-xs"
-          />
-          {errors.env?.map((error) => (
-            <FieldError
-              key={`${error.kind}:${error.line}`}
-              text={t(
-                error.kind === "no-equals"
-                  ? "harnessEnvErrorNoEquals"
-                  : error.kind === "bad-key"
-                    ? "harnessEnvErrorBadKey"
-                    : "harnessEnvErrorDuplicate",
-                { line: error.line },
-              )}
-            />
-          ))}
-        </Field>
+        <HarnessEnvField
+          value={form.envText}
+          errors={errors.env}
+          onChange={(envText) => patch({ envText })}
+        />
 
         <Field label={t("harnessProbeField")}>
           <Input
@@ -633,53 +612,150 @@ function HarnessEditorFields({
           />
         </Field>
 
-        {mode === "create" && (
-          <Field label={t("harnessMcpField")}>
-            <Select
-              value={form.mcpOptIn}
-              onValueChange={(value) =>
-                patch({ mcpOptIn: value as HarnessFormState["mcpOptIn"] })
-              }
-            >
-              <SelectTrigger className="w-64">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">{t("harnessMcpNone")}</SelectItem>
-                <SelectItem value="session-new">
-                  {t("harnessMcpSessionNew")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            {form.mcpOptIn === "session-new" && (
-              <p className="text-xs text-amber-600 dark:text-amber-500">
-                {t("harnessMcpOptInWarning")}
-              </p>
-            )}
-          </Field>
-        )}
+        <HarnessMcpField
+          mode={mode}
+          value={form.mcpOptIn}
+          onChange={(mcpOptIn) => patch({ mcpOptIn })}
+        />
       </div>
 
-      <div className="flex items-center gap-2">
+      <HarnessEditorButtons
+        saveDisabled={touched && Object.keys(errors).length > 0}
+        onSave={handleSave}
+        onCancel={onCancel}
+        onReset={onReset}
+      />
+    </div>
+  );
+}
+
+/** Label is only editable off the builtin path; renders nothing there. */
+function HarnessLabelField({
+  mode,
+  value,
+  error,
+  onChange,
+}: {
+  mode: "builtin" | "custom" | "create";
+  value: string;
+  error: HarnessFormErrors["label"];
+  onChange: (label: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (mode === "builtin") return null;
+  return (
+    <Field label={t("harnessLabelField")}>
+      <Input
+        value={value}
+        placeholder={t("harnessLabelPlaceholder")}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {error && <FieldError text={t("harnessLabelRequired")} />}
+    </Field>
+  );
+}
+
+const ENV_ERROR_MESSAGE_KEY = {
+  "no-equals": "harnessEnvErrorNoEquals",
+  "bad-key": "harnessEnvErrorBadKey",
+  duplicate: "harnessEnvErrorDuplicate",
+} as const;
+
+function HarnessEnvField({
+  value,
+  errors,
+  onChange,
+}: {
+  value: string;
+  errors: HarnessFormErrors["env"];
+  onChange: (envText: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Field label={t("harnessEnvField")}>
+      <Textarea
+        value={value}
+        placeholder={t("harnessEnvPlaceholder")}
+        onChange={(e) => onChange(e.target.value)}
+        rows={3}
+        className="font-mono text-xs"
+      />
+      {errors?.map((error) => (
+        <FieldError
+          key={`${error.kind}:${error.line}`}
+          text={t(ENV_ERROR_MESSAGE_KEY[error.kind], { line: error.line })}
+        />
+      ))}
+    </Field>
+  );
+}
+
+/** The MCP opt-in only exists at create time; renders nothing otherwise. */
+function HarnessMcpField({
+  mode,
+  value,
+  onChange,
+}: {
+  mode: "builtin" | "custom" | "create";
+  value: HarnessFormState["mcpOptIn"];
+  onChange: (mcpOptIn: HarnessFormState["mcpOptIn"]) => void;
+}) {
+  const { t } = useTranslation();
+  if (mode !== "create") return null;
+  return (
+    <Field label={t("harnessMcpField")}>
+      <Select
+        value={value}
+        onValueChange={(next) => onChange(next as HarnessFormState["mcpOptIn"])}
+      >
+        <SelectTrigger className="w-64">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none">{t("harnessMcpNone")}</SelectItem>
+          <SelectItem value="session-new">
+            {t("harnessMcpSessionNew")}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      {value === "session-new" && (
+        <p className="text-xs text-amber-600 dark:text-amber-500">
+          {t("harnessMcpOptInWarning")}
+        </p>
+      )}
+    </Field>
+  );
+}
+
+function HarnessEditorButtons({
+  saveDisabled,
+  onSave,
+  onCancel,
+  onReset,
+}: {
+  saveDisabled: boolean;
+  onSave: () => void;
+  onCancel: () => void;
+  onReset?: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center gap-2">
+      <Button onClick={onSave} disabled={saveDisabled}>
+        {t("harnessSave")}
+      </Button>
+      <Button variant="ghost" onClick={onCancel}>
+        {t("cancel")}
+      </Button>
+      {onReset && (
         <Button
-          onClick={handleSave}
-          disabled={touched && Object.keys(errors).length > 0}
+          variant="ghost"
+          className="ms-auto text-muted-foreground"
+          onClick={onReset}
         >
-          {t("harnessSave")}
+          {t("harnessResetDefaults")}
         </Button>
-        <Button variant="ghost" onClick={onCancel}>
-          {t("cancel")}
-        </Button>
-        {onReset && (
-          <Button
-            variant="ghost"
-            className="ms-auto text-muted-foreground"
-            onClick={onReset}
-          >
-            {t("harnessResetDefaults")}
-          </Button>
-        )}
-      </div>
+      )}
     </div>
   );
 }

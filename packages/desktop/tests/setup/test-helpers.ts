@@ -244,36 +244,44 @@ export async function waitForContentSaved(
 /**
  * Gets file content directly from IndexedDB
  */
+/** Every row of the test DB's files store, read in the page. The one
+ * IndexedDB-open in this half of the helpers — content lookups and
+ * listings both derive from it (test DBs are tiny). */
+async function readAllFileRows(
+  page: Page,
+): Promise<{ path?: string; content?: string; type?: string }[]> {
+  return page.evaluate(async () => {
+    const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "notefig-fs";
+    return new Promise<{ path?: string; content?: string; type?: string }[]>(
+      (resolve, reject) => {
+        const request = indexedDB.open(dbName, 1);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const db = request.result;
+          const store = db
+            .transaction(["files"], "readonly")
+            .objectStore("files");
+          const getAll = store.getAll();
+          getAll.onsuccess = () => {
+            db.close();
+            resolve(getAll.result ?? []);
+          };
+          getAll.onerror = () => {
+            db.close();
+            reject(getAll.error);
+          };
+        };
+      },
+    );
+  });
+}
+
 export async function getFileContentFromDB(
   page: Page,
   filePath: string,
 ): Promise<string | null> {
-  return page.evaluate(async (path) => {
-    const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "notefig-fs";
-    return new Promise<string | null>((resolve, reject) => {
-      const request = indexedDB.open(dbName, 1);
-
-      request.onerror = () => reject(request.error);
-
-      request.onsuccess = () => {
-        const db = request.result;
-        const transaction = db.transaction(["files"], "readonly");
-        const store = transaction.objectStore("files");
-        const getRequest = store.get(path);
-
-        getRequest.onsuccess = () => {
-          const result = getRequest.result;
-          db.close();
-          resolve(result?.content || null);
-        };
-
-        getRequest.onerror = () => {
-          db.close();
-          reject(getRequest.error);
-        };
-      };
-    });
-  }, filePath);
+  const rows = await readAllFileRows(page);
+  return rows.find((row) => row.path === filePath)?.content || null;
 }
 
 /**
@@ -413,48 +421,16 @@ export async function listScratchpadFiles(
   workspacePath: string,
 ): Promise<{ path: string; content: string }[]> {
   const prefix = `${workspacePath}/.notefig/scratchpads/`;
-  return page.evaluate(async (dirPrefix) => {
-    const dbName = (window as any).__VITE_INDEXEDDB_NAME__ || "notefig-fs";
-    return new Promise<{ path: string; content: string }[]>(
-      (resolve, reject) => {
-        const request = indexedDB.open(dbName, 1);
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => {
-          const db = request.result;
-          const store = db
-            .transaction(["files"], "readonly")
-            .objectStore("files");
-          const getAll = store.getAll();
-          getAll.onsuccess = () => {
-            const rows = (getAll.result ?? []) as {
-              path?: string;
-              content?: string;
-              type?: string;
-            }[];
-            db.close();
-            resolve(
-              rows
-                .filter(
-                  (row) =>
-                    row.type !== "directory" &&
-                    typeof row.path === "string" &&
-                    row.path.startsWith(dirPrefix) &&
-                    !row.path.slice(dirPrefix.length).includes("/"),
-                )
-                .map((row) => ({
-                  path: row.path as string,
-                  content: row.content ?? "",
-                })),
-            );
-          };
-          getAll.onerror = () => {
-            db.close();
-            reject(getAll.error);
-          };
-        };
-      },
-    );
-  }, prefix);
+  const rows = await readAllFileRows(page);
+  return rows
+    .filter(
+      (row): row is { path: string; content?: string; type?: string } =>
+        row.type !== "directory" &&
+        typeof row.path === "string" &&
+        row.path.startsWith(prefix) &&
+        !row.path.slice(prefix.length).includes("/"),
+    )
+    .map((row) => ({ path: row.path, content: row.content ?? "" }));
 }
 
 /**
