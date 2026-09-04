@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  ArrowLeft,
   Check,
+  ChevronDown,
   Loader2,
   MoreHorizontal,
   Plus,
@@ -93,9 +93,11 @@ function naturalEnabled(row: HarnessSettingsRow): boolean {
  * The SettingsModal "Harnesses" section: a unified list of every configured
  * harness — including ones the pickers hide — as single-line rows (status
  * dot, logo, name; controls behind a … menu), with an add-row at the bottom
- * and an icon-only rescan. Editing swaps the whole section for a form view
- * (back arrow returns). All state lives in the `harness-settings` KV
- * namespace, written through useKv so pickers update live.
+ * and an icon-only rescan. Editing expands that row inline into a
+ * collapsible form (the rest of the list stays visible); the add-row
+ * expands the same way for a new custom entry. All state lives in the
+ * `harness-settings` KV namespace, written through useKv so pickers update
+ * live.
  */
 export function HarnessSettings() {
   const { t } = useTranslation();
@@ -160,119 +162,59 @@ export function HarnessSettings() {
     }
   };
 
-  // Editor view (replaces the list): mock "Edit server" with back arrow.
-  const editingRow =
-    editingId !== null && editingId !== NEW_ENTRY_ID
-      ? rows.find((row) => row.definition.id === editingId)
-      : undefined;
-
-  if (editingId === NEW_ENTRY_ID) {
-    return (
-      <HarnessEditorView
-        title={t("harnessAdd")}
-        mode="create"
-        initialForm={EMPTY_FORM}
-        onBack={() => setEditingId(null)}
-        onSave={(form) => {
-          const { errors, parsed } = validateHarnessForm(form, {
-            requireLabel: true,
-          });
-          if (!parsed) return errors;
-          const entry = formToCustomEntry(
-            parsed,
-            form,
-            newCustomHarnessId(),
-            true,
-          );
-          const checked = CustomHarnessEntrySchema.safeParse(entry);
-          if (!checked.success) return errors;
-          const nextCustom = [...custom, checked.data];
-          writeCustom(nextCustom);
-          setEditingId(null);
-          // New entry gets a found/not-found status right away.
-          void refreshHarnessDiscovery(overrides, nextCustom);
-          return null;
-        }}
-      />
-    );
-  }
-
-  if (editingRow) {
-    const { definition, origin, enabled } = editingRow;
-    const save = (form: HarnessFormState): HarnessFormErrors | null => {
-      const { errors, parsed } = validateHarnessForm(form, {
-        requireLabel: origin === "custom",
-      });
-      if (!parsed) return errors;
-      if (origin === "custom") {
-        const entry = formToCustomEntry(parsed, form, definition.id, enabled);
-        const checked = CustomHarnessEntrySchema.safeParse(entry);
-        if (!checked.success) return errors;
-        const nextCustom = custom.map((existing) =>
-          existing.id === definition.id ? checked.data : existing,
+  const saveRow = (
+    row: HarnessSettingsRow,
+    form: HarnessFormState,
+  ): HarnessFormErrors | null => {
+    const { definition, origin, enabled } = row;
+    const { errors, parsed } = validateHarnessForm(form, {
+      requireLabel: origin === "custom",
+    });
+    if (!parsed) return errors;
+    if (origin === "custom") {
+      const entry = formToCustomEntry(parsed, form, definition.id, enabled);
+      const checked = CustomHarnessEntrySchema.safeParse(entry);
+      if (!checked.success) return errors;
+      const nextCustom = custom.map((existing) =>
+        existing.id === definition.id ? checked.data : existing,
+      );
+      writeCustom(nextCustom);
+      // Re-probe with the edited definition, exactly as the new-entry
+      // path does. Discovery results are keyed by harness id alone, so
+      // without this the stored verdict keeps describing the executable
+      // the harness pointed at BEFORE the edit — the pickers and the
+      // welcome screen would then report on the wrong binary.
+      void refreshHarnessDiscovery(overrides, nextCustom);
+    } else {
+      const override = formToOverride(
+        parsed,
+        builtInHarness(definition.id)!,
+        enabled,
+        naturalEnabled(row),
+      );
+      let nextOverrides: Record<string, HarnessOverride>;
+      if (override === null) {
+        deleteOverride(definition.id);
+        // Reverting to the built-in re-probes too: the stored result may
+        // describe the override's command, not the built-in's.
+        nextOverrides = Object.fromEntries(
+          Object.entries(overrides).filter(([id]) => id !== definition.id),
         );
-        writeCustom(nextCustom);
-        // Re-probe with the edited definition, exactly as the new-entry
-        // path does. Discovery results are keyed by harness id alone, so
-        // without this the stored verdict keeps describing the executable
-        // the harness pointed at BEFORE the edit — the pickers and the
-        // welcome screen would then report on the wrong binary.
-        void refreshHarnessDiscovery(overrides, nextCustom);
       } else {
-        const override = formToOverride(
-          parsed,
-          builtInHarness(definition.id)!,
-          enabled,
-          naturalEnabled(editingRow),
-        );
-        let nextOverrides: Record<string, HarnessOverride>;
-        if (override === null) {
-          deleteOverride(definition.id);
-          // Reverting to the built-in re-probes too: the stored result may
-          // describe the override's command, not the built-in's.
-          nextOverrides = Object.fromEntries(
-            Object.entries(overrides).filter(([id]) => id !== definition.id),
-          );
-        } else {
-          const checked = HarnessOverrideSchema.safeParse(override);
-          if (!checked.success) return errors;
-          nextOverrides = { ...overrides, [definition.id]: checked.data };
-          writeOverrides(nextOverrides);
-        }
-        void refreshHarnessDiscovery(nextOverrides, custom);
+        const checked = HarnessOverrideSchema.safeParse(override);
+        if (!checked.success) return errors;
+        nextOverrides = { ...overrides, [definition.id]: checked.data };
+        writeOverrides(nextOverrides);
       }
-      setEditingId(null);
-      return null;
-    };
+      void refreshHarnessDiscovery(nextOverrides, custom);
+    }
+    setEditingId(null);
+    return null;
+  };
 
-    return (
-      <>
-        <HarnessEditorView
-          title={t("harnessEditTitle")}
-          mode={origin === "custom" ? "custom" : "builtin"}
-          initialForm={definitionToForm(definition)}
-          onBack={() => setEditingId(null)}
-          onSave={save}
-          onReset={
-            origin === "overridden"
-              ? () => setConfirmResetId(definition.id)
-              : undefined
-          }
-        />
-        <ResetConfirmDialog
-          row={editingRow}
-          open={confirmResetId === definition.id}
-          onOpenChange={(open) =>
-            setConfirmResetId(open ? definition.id : null)
-          }
-          onConfirm={() => {
-            deleteOverride(definition.id);
-            setEditingId(null);
-          }}
-        />
-      </>
-    );
-  }
+  const confirmResetRow = rows.find(
+    (row) => row.definition.id === confirmResetId,
+  );
 
   const confirmDeleteRow = rows.find(
     (row) => row.definition.id === confirmDeleteId,
@@ -305,25 +247,83 @@ export function HarnessSettings() {
       </div>
 
       <div className="divide-y divide-border rounded-lg border border-border">
-        {rows.map((row) => (
-          <HarnessRow
-            key={row.definition.id}
-            row={row}
-            isDefault={row.definition.id === defaultHarness.id}
-            onMakeDefault={() => setDefaultHarness(row.definition.id)}
-            onToggleEnabled={() => toggleEnabled(row)}
-            onEdit={() => setEditingId(row.definition.id)}
-            onDelete={() => setConfirmDeleteId(row.definition.id)}
-          />
-        ))}
-        <button
-          type="button"
-          className="flex w-full cursor-pointer items-center gap-2 rounded-b-lg px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-accent/50"
-          onClick={() => setEditingId(NEW_ENTRY_ID)}
-        >
-          <Plus className="size-4" />
-          {t("harnessAdd")}
-        </button>
+        {rows.map((row) => {
+          const isEditing = editingId === row.definition.id;
+          return (
+            <div key={row.definition.id}>
+              <HarnessRow
+                row={row}
+                isDefault={row.definition.id === defaultHarness.id}
+                isEditing={isEditing}
+                onMakeDefault={() => setDefaultHarness(row.definition.id)}
+                onToggleEnabled={() => toggleEnabled(row)}
+                onEdit={() =>
+                  setEditingId(isEditing ? null : row.definition.id)
+                }
+                onDelete={() => setConfirmDeleteId(row.definition.id)}
+              />
+              {isEditing && (
+                <div className="border-t border-border bg-muted/30 p-4">
+                  <HarnessEditorFields
+                    mode={row.origin === "custom" ? "custom" : "builtin"}
+                    initialForm={definitionToForm(row.definition)}
+                    onSave={(form) => saveRow(row, form)}
+                    onCancel={() => setEditingId(null)}
+                    onReset={
+                      row.origin === "overridden"
+                        ? () => setConfirmResetId(row.definition.id)
+                        : undefined
+                    }
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+        <div>
+          <button
+            type="button"
+            className={cn(
+              "flex w-full cursor-pointer items-center gap-2 px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-accent/50",
+              editingId !== NEW_ENTRY_ID && "rounded-b-lg",
+            )}
+            onClick={() =>
+              setEditingId(editingId === NEW_ENTRY_ID ? null : NEW_ENTRY_ID)
+            }
+          >
+            <Plus className="size-4" />
+            {t("harnessAdd")}
+          </button>
+          {editingId === NEW_ENTRY_ID && (
+            <div className="rounded-b-lg border-t border-border bg-muted/30 p-4">
+              <HarnessEditorFields
+                mode="create"
+                initialForm={EMPTY_FORM}
+                onCancel={() => setEditingId(null)}
+                onSave={(form) => {
+                  const { errors, parsed } = validateHarnessForm(form, {
+                    requireLabel: true,
+                  });
+                  if (!parsed) return errors;
+                  const entry = formToCustomEntry(
+                    parsed,
+                    form,
+                    newCustomHarnessId(),
+                    true,
+                  );
+                  const checked = CustomHarnessEntrySchema.safeParse(entry);
+                  if (!checked.success) return errors;
+                  const nextCustom = [...custom, checked.data];
+                  writeCustom(nextCustom);
+                  setEditingId(null);
+                  // New entry gets a found/not-found status right away.
+                  void refreshHarnessDiscovery(overrides, nextCustom);
+                  return null;
+                }}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       <AlertDialog
@@ -362,6 +362,20 @@ export function HarnessSettings() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {confirmResetRow && (
+        <ResetConfirmDialog
+          row={confirmResetRow}
+          open={confirmResetId === confirmResetRow.definition.id}
+          onOpenChange={(open) =>
+            setConfirmResetId(open ? confirmResetRow.definition.id : null)
+          }
+          onConfirm={() => {
+            deleteOverride(confirmResetRow.definition.id);
+            setEditingId(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -372,6 +386,7 @@ export function HarnessSettings() {
 function HarnessRow({
   row,
   isDefault,
+  isEditing,
   onMakeDefault,
   onToggleEnabled,
   onEdit,
@@ -379,6 +394,7 @@ function HarnessRow({
 }: {
   row: HarnessSettingsRow;
   isDefault: boolean;
+  isEditing: boolean;
   onMakeDefault: () => void;
   onToggleEnabled: () => void;
   onEdit: () => void;
@@ -431,7 +447,7 @@ function HarnessRow({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem onSelect={onEdit}>
-            {t("harnessEdit")}
+            {isEditing ? t("harnessCollapse") : t("harnessEdit")}
           </DropdownMenuItem>
           {!isDefault && enabled && (
             <DropdownMenuItem onSelect={onMakeDefault}>
@@ -499,19 +515,17 @@ function ResetConfirmDialog({
  * placeholders, not helper paragraphs. onSave returns errors to render
  * (null = saved; the caller navigates back).
  */
-function HarnessEditorView({
-  title,
+function HarnessEditorFields({
   mode,
   initialForm,
   onSave,
-  onBack,
+  onCancel,
   onReset,
 }: {
-  title: string;
   mode: "builtin" | "custom" | "create";
   initialForm: HarnessFormState;
   onSave: (form: HarnessFormState) => HarnessFormErrors | null;
-  onBack: () => void;
+  onCancel: () => void;
   onReset?: () => void;
 }) {
   const { t } = useTranslation();
@@ -546,21 +560,7 @@ function HarnessEditorView({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7 text-muted-foreground"
-          title={t("cancel")}
-          aria-label={t("cancel")}
-          onClick={onBack}
-        >
-          <ArrowLeft className="size-4" />
-        </Button>
-        <h2 className="text-lg font-semibold">{title}</h2>
-      </div>
-
-      <div className="space-y-4 rounded-lg bg-muted/40 p-4">
+      <div className="space-y-4">
         {mode !== "builtin" && (
           <Field label={t("harnessLabelField")}>
             <Input
@@ -666,6 +666,9 @@ function HarnessEditorView({
           disabled={touched && Object.keys(errors).length > 0}
         >
           {t("harnessSave")}
+        </Button>
+        <Button variant="ghost" onClick={onCancel}>
+          {t("cancel")}
         </Button>
         {onReset && (
           <Button

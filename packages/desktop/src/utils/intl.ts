@@ -500,6 +500,7 @@ i18n
           harnessEnable: "Enable",
           harnessDisable: "Disable",
           harnessEdit: "Edit",
+          harnessCollapse: "Collapse",
           harnessDelete: "Delete",
           harnessDeleteConfirmTitle: "Delete {{label}}?",
           harnessDeleteConfirmDescription:
