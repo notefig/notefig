@@ -196,7 +196,7 @@ function captureDraftCaret(editor: Editor): DraftCaret | null {
  * bug. Deterministic restore: same widget, same offset (clamped).
  */
 function restoreDraftCaret(
-  tr: { doc: PMNode; selection: { $head: { pos: number } }; setSelection: (sel: TextSelection) => unknown },
+  tr: { doc: PMNode; setSelection: (sel: TextSelection) => unknown },
   caret: DraftCaret | null,
 ): void {
   if (!caret) return;
@@ -215,12 +215,11 @@ function restoreDraftCaret(
   if (!draft) return;
   const draftStart = widgetPos + 2;
   const target = draftStart + Math.min(Math.max(caret.offset, 0), draft.content.size);
-  const mappedIsInside =
-    tr.selection.$head.pos > widgetPos &&
-    tr.selection.$head.pos <= widgetPos + caret.widget.nodeSize;
-  if (!mappedIsInside) {
-    tr.setSelection(TextSelection.create(tr.doc, target));
-  }
+  // Unconditional: when the mapping already kept the caret in place this
+  // re-sets the identical position; when it collapsed the caret to a
+  // replaced range's edge (including edges of the re-inserted widget
+  // itself), this is the correction.
+  tr.setSelection(TextSelection.create(tr.doc, target));
 }
 
 /** Re-insert widgets the diff removed, at their mapped positions. Runs on

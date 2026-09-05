@@ -271,6 +271,32 @@ describe("adoptExternalContent — caret in a draft", () => {
     expect(caretParent(editor)).toEqual({ parent: "promptDraft", offset: 7 });
   });
 
+  it("preserves a caret at a line boundary in the draft, on either side of the break", () => {
+    // The "index 0 of line 2" position: before-br (end of line 1) and
+    // after-br (start of line 2) are distinct positions one apart, and a
+    // re-assertion must put the caret back on the same side of the break.
+    for (const side of ["before", "after"] as const) {
+      const ed = makeEditor(
+        `<p>aa</p>${WIDGET_HTML("blob_br", "line one<br>line two")}<p>cc</p>`,
+      );
+      let breakPos = -1;
+      ed.state.doc.descendants((node, pos) => {
+        if (node.type.name === "hardBreak") breakPos = pos;
+        return true;
+      });
+      ed.commands.setTextSelection(side === "before" ? breakPos : breakPos + 1);
+      const result = adoptExternalContent(ed, docJSON("<p>all rewritten</p>"));
+      expect(result.reinsertedWidgets).toBe(1);
+      const { $from } = ed.state.selection;
+      expect($from.parent.type.name).toBe("promptDraft");
+      expect($from.parentOffset).toBe(side === "before" ? 8 : 9);
+      expect(
+        (side === "before" ? $from.nodeAfter : $from.nodeBefore)?.type.name,
+      ).toBe("hardBreak");
+      ed.destroy();
+    }
+  });
+
   it("clamps the caret when the carried draft is shorter than the offset", () => {
     // Offset beyond the re-seated draft cannot resolve outside it.
     editor = makeEditor(`<p>aa</p>${WIDGET_HTML("blob_c2", "hi")}<p>cc</p>`);
