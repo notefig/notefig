@@ -184,6 +184,10 @@ export type MockTurnContext = {
   emit: (update: Json) => void;
   /** Abort-aware delay; 0 still yields a macrotask so the UI breathes. */
   sleep: (ms: number) => Promise<void>;
+  /** Send a client-directed request (fs/*, request_permission) and await
+   *  the reply — the write half is how rewrite scenarios reach
+   *  writeWorkspaceTextFile through the real client, same as an adapter. */
+  request: (method: string, params: Json) => Promise<Json>;
   /** Fires on `session/cancel`; scenarios should return promptly after. */
   signal: AbortSignal;
 };
@@ -554,6 +558,7 @@ function attachScenarioAgent(agentSide: LoopbackTransport): void {
         },
         sleep,
         signal: abort.signal,
+        request: (method, params) => agent.request(method, params),
       });
       return (
         result ?? {
