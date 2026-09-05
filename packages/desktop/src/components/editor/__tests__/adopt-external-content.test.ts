@@ -206,6 +206,31 @@ describe("adoptExternalContent — drafts, caret, fallbacks", () => {
     expect(result.mode).toBe("replaced");
   });
 
+  it("re-asserts dropped widgets in the oversized-document fallback", () => {
+    editor = makeEditor(
+      `<p>aa</p>${WIDGET_HTML("blob_fb", "fallback draft")}<p>cc</p>`,
+    );
+    let target = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text === "fallback draft") target = pos + 8;
+      return true;
+    });
+    editor.commands.setTextSelection(target);
+    const result = adoptExternalContent(
+      editor,
+      docJSON("<h1>No markers</h1><p>rewritten</p>"),
+      { maxDiffNodeSize: 1 },
+    );
+    expect(result.mode).toBe("replaced");
+    expect(result.reinsertedWidgets).toBe(1);
+    const [widget] = findWidgets(editor);
+    expect(widget.draftText).toBe("fallback draft");
+    expect(widget.attrs.blobId).toBe("blob_fb");
+    const { $from } = editor.state.selection;
+    expect($from.parent.type.name).toBe("promptDraft");
+    expect($from.parentOffset).toBe(8);
+  });
+
   it("carries drafts through the oversized-document fallback", () => {
     editor = makeEditor(
       `<p>intro</p>${WIDGET_HTML("blob_big", "survives the fallback")}`,

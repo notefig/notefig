@@ -138,8 +138,7 @@ export function adoptExternalContent(
   }
 
   if (!newDoc || oldDoc.nodeSize + newDoc.nodeSize > maxDiffNodeSize) {
-    editor.commands.setContent(prepared, { emitUpdate: false });
-    return { mode: "replaced", reinsertedWidgets: 0 };
+    return applyReplaceFallback(editor, prepared, oldDoc);
   }
 
   try {
@@ -154,7 +153,9 @@ export function adoptExternalContent(
       if (applied.failed) throw new Error(applied.failed);
     }
     const draftCaret = captureDraftCaret(editor);
-    const reinsertedWidgets = reassertDroppedWidgets(oldDoc, tr);
+    const reinsertedWidgets = reassertDroppedWidgets(oldDoc, tr, (pos) =>
+      tr.mapping.map(pos),
+    );
     restoreDraftCaret(tr, draftCaret);
     tr.setMeta(ADOPTION_TRANSACTION_META, true);
     editor.view.dispatch(tr);
@@ -166,9 +167,37 @@ export function adoptExternalContent(
       "[adoption] differential adoption failed, falling back to replace",
       error,
     );
-    editor.commands.setContent(prepared, { emitUpdate: false });
-    return { mode: "replaced", reinsertedWidgets: 0 };
+    return applyReplaceFallback(editor, prepared, oldDoc);
   }
+}
+
+/**
+ * The setContent fallback with the same widget guarantees as the diff
+ * path: dropped widgets are re-asserted (at proportionally scaled
+ * positions — a wholesale replace has no step mapping) and a draft caret
+ * is restored. Without this, an oversized document or a diff-engine
+ * failure coinciding with a marker-dropping rewrite deleted widgets for
+ * good.
+ */
+function applyReplaceFallback(
+  editor: Editor,
+  prepared: JSONContent,
+  oldDoc: PMNode,
+): AdoptionResult {
+  const draftCaret = captureDraftCaret(editor);
+  editor.commands.setContent(prepared, { emitUpdate: false });
+  const tr = editor.state.tr;
+  const oldSize = Math.max(oldDoc.content.size, 1);
+  const scale = tr.doc.content.size / oldSize;
+  const reinsertedWidgets = reassertDroppedWidgets(oldDoc, tr, (pos) =>
+    Math.round(pos * scale),
+  );
+  restoreDraftCaret(tr, draftCaret);
+  tr.setMeta(ADOPTION_TRANSACTION_META, true);
+  if (tr.steps.length > 0 || tr.selectionSet) {
+    editor.view.dispatch(tr);
+  }
+  return { mode: "replaced", reinsertedWidgets };
 }
 
 /** The caret's home when it sits inside a widget's draft: which widget
@@ -226,7 +255,8 @@ function restoreDraftCaret(
  *  the open transaction so each insertion participates in the mapping. */
 function reassertDroppedWidgets(
   oldDoc: PMNode,
-  tr: { doc: PMNode; mapping: { map: (pos: number) => number }; insert: (pos: number, node: PMNode) => unknown },
+  tr: { doc: PMNode; insert: (pos: number, node: PMNode) => unknown },
+  mapPos: (pos: number) => number,
 ): number {
   let reinserted = 0;
   const survivors = widgetBlobIds(tr.doc);
@@ -240,7 +270,7 @@ function reassertDroppedWidgets(
       orphanDroppedWidget(node);
       continue;
     }
-    const insertAt = findInsertPos(tr.doc, tr.mapping.map(pos), node.type);
+    const insertAt = findInsertPos(tr.doc, mapPos(pos), node.type);
     if (insertAt === null) {
       orphanDroppedWidget(node);
       continue;

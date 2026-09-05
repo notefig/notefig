@@ -25,7 +25,7 @@ import { getDocumentSync } from "./markdown-conversion";
 // a leaf module rather than adding a registration seam.
 import { getMarkdownEditor } from "@/components/editor/editor-store";
 import { adoptExternalContent } from "@/components/editor/adopt-external-content";
-import type { JSONContent } from "@tiptap/core";
+import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
 import { platformAdapter } from "@/adapters";
 import { path as pathutil, relativeTreePath } from "./path";
 import { activeRenameTarget } from "@/entities/tabs";
@@ -111,11 +111,28 @@ export async function writeWorkspaceTextFile(
       const doc = await sync.prepareAdoption(content);
       if (doc && !editor.isDestroyed) {
         const adoption = adoptExternalContent(editor, doc);
-        sync.commitAdoption(content, calculateContentHash(content));
-        // Re-asserted widget markers exist only in the editor at this
-        // point; push one save through the normal pipeline so disk agrees.
         if (adoption.reinsertedWidgets > 0) {
-          sync.pushUpdate(() => editor.state.doc.toJSON() as JSONContent);
+          // Re-asserted widget markers exist only in the editor at this
+          // point. Repair the file INSIDE this tracked write — a
+          // fire-and-forget save could still be in flight when the next
+          // same-path agent write arrives, which would skip that write's
+          // adoption (sync busy) and then clobber its newer content.
+          const repaired = getEditorMarkdown(editor);
+          const repair = await platformAdapter.fs.writeFiles([
+            { path: target, content: repaired },
+          ]);
+          const repairFailure = repair.failed[0];
+          if (repairFailure) {
+            throw new FsError(
+              repairFailure.type,
+              repairFailure.path,
+              repairFailure.message,
+            );
+          }
+          updateLoadedContentRow(target, repaired);
+          sync.commitAdoption(repaired, calculateContentHash(repaired));
+        } else {
+          sync.commitAdoption(content, calculateContentHash(content));
         }
       }
     }

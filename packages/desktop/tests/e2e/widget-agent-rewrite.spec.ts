@@ -144,5 +144,14 @@ test.describe("agent rewrite vs widgets", () => {
     expect(caret.inDraft).toBe(true);
     expect(caret.anchorText).toBe("mid turn note");
     expect(caret.offset).toBe("mid turn note".length);
+
+    // Persistence: the repair wrote the re-asserted markers back to disk
+    // inside the same tracked write, so a fresh parse of the file (reload)
+    // must still show both widgets.
+    await page.reload();
+    await waitForFileTree(page, "doc.md");
+    await openFileInTree(page, "doc.md");
+    await expect(editor).toContainText("REWRITTEN_SENTINEL");
+    await expect(widgets(page)).toHaveCount(2, { timeout: 10000 });
   });
 });
