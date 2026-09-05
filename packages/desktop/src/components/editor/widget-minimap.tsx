@@ -99,7 +99,7 @@ export function WidgetMinimap({
 
   return (
     <nav
-      className="group/map absolute inset-y-6 right-1.5 z-10 w-3"
+      className="group/map absolute right-4 top-1/2 z-10 h-36 max-h-[60%] w-3 -translate-y-1/2"
       aria-label="Prompt widgets in this document"
       data-widget-minimap
     >
