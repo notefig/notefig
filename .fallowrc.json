@@ -95,6 +95,7 @@
     "ignore": [
       "**/*.generated.ts",
       "packages/desktop/src/testing/shim-transport.ts",
+      "packages/desktop/src/vendor/**",
       "packages/ui/src/orb-loader.tsx"
     ]
   },
@@ -106,7 +107,8 @@
     "ignore": [
       "**/components/ui/**",
       "packages/ui/src/**",
-      "packages/desktop/src/testing/shim-transport.ts"
+      "packages/desktop/src/testing/shim-transport.ts",
+      "packages/desktop/src/vendor/**"
     ],
     "skipLocal": false
   },

@@ -24,6 +24,8 @@ import { getDocumentSync } from "./markdown-conversion";
 // references). Breaking it for real means relocating the editor registry to
 // a leaf module rather than adding a registration seam.
 import { getMarkdownEditor } from "@/components/editor/editor-store";
+import { adoptExternalContent } from "@/components/editor/adopt-external-content";
+import type { JSONContent } from "@tiptap/core";
 import { platformAdapter } from "@/adapters";
 import { path as pathutil, relativeTreePath } from "./path";
 import { activeRenameTarget } from "@/entities/tabs";
@@ -108,8 +110,13 @@ export async function writeWorkspaceTextFile(
       const sync = getDocumentSync(target);
       const doc = await sync.prepareAdoption(content);
       if (doc && !editor.isDestroyed) {
-        editor.commands.setContent(doc, { emitUpdate: false });
+        const adoption = adoptExternalContent(editor, doc);
         sync.commitAdoption(content, calculateContentHash(content));
+        // Re-asserted widget markers exist only in the editor at this
+        // point; push one save through the normal pipeline so disk agrees.
+        if (adoption.reinsertedWidgets > 0) {
+          sync.pushUpdate(() => editor.state.doc.toJSON() as JSONContent);
+        }
       }
     }
   });

@@ -17,10 +17,11 @@ import {
 } from "@/entities/files";
 import { getDocumentSync } from "@/utils/markdown-conversion";
 import { UI_ONLY_TRANSACTION_META } from "@/components/editor/editor-schema-kit";
+import { isDraftOnlyEdit } from "@/components/editor/draft-only-edit";
 import {
-  carryDraftsForward,
-  isDraftOnlyEdit,
-} from "@/components/editor/draft-only-edit";
+  adoptExternalContent,
+  ADOPTION_TRANSACTION_META,
+} from "@/components/editor/adopt-external-content";
 
 const AUTOSAVE_DEBOUNCE_MS = 500;
 
@@ -113,12 +114,14 @@ export function useEditorFileSync(
       );
 
       suppressSaveRef.current = true;
-      // A half-typed prompt is not on disk and must survive the replace.
-      editor.commands.setContent(carryDraftsForward(doc, editor.state.doc), {
-        emitUpdate: false,
-      });
+      // Diffed adoption: drafts, widgets, and the caret survive the parts
+      // of the document the external change didn't touch.
+      const adoption = adoptExternalContent(editor, doc);
       suppressSaveRef.current = false;
       sync.commitAdoption(fileContent, targetHash);
+      if (adoption.reinsertedWidgets > 0) {
+        sync.pushUpdate(() => editor.state.doc.toJSON() as JSONContent);
+      }
     })().catch((error) => {
       console.error(
         `[text-editor] Failed to adopt external change for ${file.path}:`,
@@ -157,6 +160,9 @@ export function useEditorFileSync(
       // UI-only node changes (the aiPrompt keeper) never alter the
       // serialized markdown — saving would only churn the file watcher.
       if (transaction.getMeta(UI_ONLY_TRANSACTION_META)) return;
+      // Differential adoption of external content: the file already holds
+      // this; saving it back would only churn the watcher.
+      if (transaction.getMeta(ADOPTION_TRANSACTION_META)) return;
       // Neither does typing in a prompt widget's draft: it is document
       // content, but the widget serializes to its marker and never renders
       // children. Not a meta, because these transactions come out of
