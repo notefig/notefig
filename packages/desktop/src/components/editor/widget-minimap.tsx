@@ -1,14 +1,15 @@
 /**
  * MET-172: a delicate map of the document's prompt widgets, rendered as a
- * hairline strip above the editor. One dot per widget, placed along the
- * line proportionally to the widget's position in the document; hovering
- * swells the dot slightly and reveals a sliver of the widget's title;
+ * vertical hairline rail along the editor's right edge. One dot per
+ * widget, placed along the line proportionally to the widget's position
+ * in the document; hovering the rail wakes the line and dots slightly,
+ * hovering a dot swells it and reveals a sliver of the widget's title;
  * clicking jumps to the widget (reusing jumpToBlob's scroll-and-flash).
  *
  * Everything is derived: widget positions come from the live ProseMirror
  * doc on each doc-changing transaction, titles from the draft text in the
  * node or the blob store's last sent prompt. No persistent state, no
- * registry — the strip disappears with the last widget.
+ * registry — the rail disappears with the last widget.
  */
 import { useEffect, useState } from "react";
 import type { Editor } from "@tiptap/core";
@@ -45,7 +46,7 @@ export function deriveWidgetMapEntries(doc: PMNode): WidgetMapEntry[] {
       key: `${blobId ?? "pos"}-${pos}`,
       blobId,
       // Clamped in from the edges so the first/last dot never sits on the
-      // strip's boundary.
+      // rail's boundary.
       ratio: Math.min(Math.max(pos / size, 0.01), 0.99),
       title:
         title.length > TITLE_MAX_CHARS
@@ -97,14 +98,13 @@ export function WidgetMinimap({
   if (entries.length === 0) return null;
 
   return (
-    <div
-      className="w-full max-w-2xl mx-auto px-4"
-      role="navigation"
+    <nav
+      className="group/map absolute inset-y-6 right-1.5 z-10 w-3"
       aria-label="Prompt widgets in this document"
       data-widget-minimap
     >
-      <div className="relative h-3">
-        <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-border" />
+      <div className="relative h-full">
+        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors duration-200 group-hover/map:bg-muted-foreground/40" />
         {entries.map((entry) => (
           <button
             key={entry.key}
@@ -114,19 +114,24 @@ export function WidgetMinimap({
               if (entry.blobId) jumpToBlob(filePath, entry.blobId);
             }}
             // The visible dot is tiny; the padding is the hit target.
-            className="group absolute top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-pointer p-1"
-            style={{ left: `${entry.ratio * 100}%` }}
+            className="group/dot absolute left-1/2 -translate-x-1/2 -translate-y-1/2 cursor-pointer p-1"
+            style={{ top: `${entry.ratio * 100}%` }}
           >
             <span
               aria-hidden
-              className="block h-1.5 w-1.5 rounded-full bg-muted-foreground/50 transition-transform duration-150 group-hover:scale-150 group-hover:bg-muted-foreground/80"
-            />
-            <span className="pointer-events-none absolute left-1/2 top-full z-10 mt-0.5 hidden max-w-[14rem] -translate-x-1/2 truncate whitespace-nowrap rounded border border-border bg-popover px-1.5 py-0.5 text-[0.625rem] leading-tight text-muted-foreground shadow-sm group-hover:block">
+              className="relative block h-1.5 w-1.5 transition-transform duration-150 group-hover/dot:scale-150"
+            >
+              {/* Opaque backing so the rail's line never shows through the
+                  translucent dot. */}
+              <span className="absolute inset-0 rounded-full bg-background" />
+              <span className="absolute inset-0 rounded-full bg-muted-foreground/40 transition-colors duration-200 group-hover/map:bg-muted-foreground/60 group-hover/dot:bg-muted-foreground/90" />
+            </span>
+            <span className="pointer-events-none absolute right-full top-1/2 z-10 mr-1 hidden max-w-[14rem] -translate-y-1/2 truncate whitespace-nowrap rounded border border-border bg-popover px-1.5 py-0.5 text-[0.625rem] leading-tight text-muted-foreground shadow-sm group-hover/dot:block">
               {entry.title}
             </span>
           </button>
         ))}
       </div>
-    </div>
+    </nav>
   );
 }
