@@ -11,7 +11,7 @@
  * node or the blob store's last sent prompt. No persistent state, no
  * registry — the rail disappears with the last widget.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { PROMPT_NODE_NAME, getPromptBlob } from "@notefig/widgets";
@@ -95,16 +95,64 @@ export function WidgetMinimap({
   filePath: string;
 }) {
   const entries = useWidgetMapEntries(editor);
+  const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+  const gooId = useId();
   if (entries.length === 0) return null;
 
   return (
     <nav
-      className="group/map absolute right-4 top-1/2 z-10 h-36 max-h-[60%] w-3 -translate-y-1/2"
+      className="group/map absolute right-4 top-6 z-10 h-28 max-h-[50%] w-3"
       aria-label="Prompt widgets in this document"
       data-widget-minimap
     >
+      {/* The visual layer: line and dots drawn together under a gooey
+          filter (blur + alpha contrast), so the line smoothly swells into
+          each circle instead of just crossing it. Drawn at full opacity —
+          the goo math needs solid alpha — and faded via the svg's own
+          opacity, which applies after the filter. */}
+      <svg
+        aria-hidden
+        className="pointer-events-none absolute inset-0 h-full w-full overflow-visible text-muted-foreground opacity-40 transition-opacity duration-200 group-hover/map:opacity-70"
+      >
+        <defs>
+          <filter id={gooId} x="-150%" y="-25%" width="400%" height="150%">
+            <feGaussianBlur
+              in="SourceGraphic"
+              stdDeviation="1.4"
+              result="blur"
+            />
+            <feColorMatrix
+              in="blur"
+              mode="matrix"
+              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7"
+            />
+          </filter>
+        </defs>
+        <g filter={`url(#${gooId})`}>
+          <line
+            x1="50%"
+            x2="50%"
+            y1="0%"
+            y2="100%"
+            stroke="currentColor"
+            strokeWidth="2"
+          />
+          {entries.map((entry) => (
+            <circle
+              key={entry.key}
+              cx="50%"
+              cy={`${entry.ratio * 100}%`}
+              fill="currentColor"
+              // Geometry-as-CSS so the swell animates.
+              style={{
+                r: hoveredKey === entry.key ? "6px" : "4px",
+                transition: "r 150ms ease",
+              }}
+            />
+          ))}
+        </g>
+      </svg>
       <div className="relative h-full">
-        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors duration-200 group-hover/map:bg-muted-foreground/40" />
         {entries.map((entry) => (
           <button
             key={entry.key}
@@ -113,19 +161,14 @@ export function WidgetMinimap({
             onClick={() => {
               if (entry.blobId) jumpToBlob(filePath, entry.blobId);
             }}
-            // The visible dot is tiny; the padding is the hit target.
-            className="group/dot absolute left-1/2 -translate-x-1/2 -translate-y-1/2 cursor-pointer p-1"
+            onMouseEnter={() => setHoveredKey(entry.key)}
+            onMouseLeave={() =>
+              setHoveredKey((k) => (k === entry.key ? null : k))
+            }
+            // Invisible hit target over the drawn dot; the pill hangs off it.
+            className="group/dot absolute left-1/2 size-4 -translate-x-1/2 -translate-y-1/2 cursor-pointer"
             style={{ top: `${entry.ratio * 100}%` }}
           >
-            <span
-              aria-hidden
-              className="relative block h-1.5 w-1.5 transition-transform duration-150 group-hover/dot:scale-150"
-            >
-              {/* Opaque backing so the rail's line never shows through the
-                  translucent dot. */}
-              <span className="absolute inset-0 rounded-full bg-background" />
-              <span className="absolute inset-0 rounded-full bg-muted-foreground/40 transition-colors duration-200 group-hover/map:bg-muted-foreground/60 group-hover/dot:bg-muted-foreground/90" />
-            </span>
             <span className="pointer-events-none absolute right-full top-1/2 z-10 mr-1 hidden max-w-[14rem] -translate-y-1/2 truncate whitespace-nowrap rounded border border-border bg-popover px-1.5 py-0.5 text-[0.625rem] leading-tight text-muted-foreground shadow-sm group-hover/dot:block">
               {entry.title}
             </span>
