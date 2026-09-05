@@ -12,6 +12,7 @@ import { useEditorFocusLifecycle } from "./use-editor-focus-lifecycle";
 import { useEditorViewportMemory } from "./use-editor-viewport-memory";
 import { useLinkPrompt } from "./use-link-prompt";
 import { TiptapToolbar } from "./tiptap-toolbar";
+import { WidgetMinimap } from "./widget-minimap";
 import { PromptMentionMenu, PROMPT_DRAFT_NODE_NAME } from "@notefig/widgets";
 import { LinkBubbleMenu } from "./tiptap-link-menu";
 import { TableMenu } from "./tiptap-table-menu";
@@ -120,22 +121,26 @@ export function TextEditor({
   return (
     <div className="flex flex-col flex-1 min-h-0 w-full z-0">
       <TiptapToolbar editor={editor} onLinkToggle={handleLinkToggle} />
-      <div
-        className={cn(
-          "flex-1 min-h-0 overflow-auto tiptap-editor-wrapper",
-          "data-[mtr-drop-over=true]:shadow-[0_0_0_1px_hsl(var(--ring))_inset]",
-          "data-[mtr-drop-over=true]:bg-[hsl(var(--ring)/0.06)]",
-        )}
-        onMouseDown={handleGutterMouseDown}
-        {...dropZone}
-        // This element is both the drop zone and the document's scroller,
-        // and each wants a ref.
-        ref={(element: HTMLDivElement | null) => {
-          dropZone.ref(element);
-          scrollRef.current = element;
-        }}
-      >
-        {/* Dragging a widget's draft is inert by construction — the
+      {/* The minimap rail overlays the scroller's right edge, so the two
+          share a positioned wrapper that owns the remaining height. */}
+      <div className="relative flex-1 min-h-0 flex flex-col">
+        <WidgetMinimap editor={editor} filePath={file.path} />
+        <div
+          className={cn(
+            "flex-1 min-h-0 overflow-auto tiptap-editor-wrapper",
+            "data-[mtr-drop-over=true]:shadow-[0_0_0_1px_hsl(var(--ring))_inset]",
+            "data-[mtr-drop-over=true]:bg-[hsl(var(--ring)/0.06)]",
+          )}
+          onMouseDown={handleGutterMouseDown}
+          {...dropZone}
+          // This element is both the drop zone and the document's scroller,
+          // and each wants a ref.
+          ref={(element: HTMLDivElement | null) => {
+            dropZone.ref(element);
+            scrollRef.current = element;
+          }}
+        >
+          {/* Dragging a widget's draft is inert by construction — the
             schema admits `promptDraft` only inside its own widget, so a
             drop has nowhere valid to land — but the grip still showing up
             over composer text reads as a bug even though it is harmless.
@@ -144,35 +149,39 @@ export function TextEditor({
             so this costs nothing extra and needs no state of its own. The
             widget itself is untouched — its outer aiPrompt node stays a
             valid (if pointless) drag target. */}
-        <DragHandle
-          editor={editor}
-          nested={{
-            rules: [
-              {
-                id: "excludePromptDraft",
-                evaluate: ({ node }) =>
-                  node.type.name === PROMPT_DRAFT_NODE_NAME ? 1000 : 0,
-              },
-            ],
-          }}
-        >
-          <GripVertical className="w-4 h-4 text-muted-foreground/40 hover:text-muted-foreground" />
-        </DragHandle>
-        <LinkBubbleMenu
-          editor={editor}
-          onEdit={handleLinkToggle}
-          basePath={basePath}
-          filePath={file.path}
-        />
-        <TableMenu editor={editor} />
-        {/* The "@" mention popup for this document's prompt drafts —
+          <DragHandle
+            editor={editor}
+            nested={{
+              rules: [
+                {
+                  id: "excludePromptDraft",
+                  evaluate: ({ node }) =>
+                    node.type.name === PROMPT_DRAFT_NODE_NAME ? 1000 : 0,
+                },
+              ],
+            }}
+          >
+            <GripVertical className="w-4 h-4 text-muted-foreground/40 hover:text-muted-foreground" />
+          </DragHandle>
+          <LinkBubbleMenu
+            editor={editor}
+            onEdit={handleLinkToggle}
+            basePath={basePath}
+            filePath={file.path}
+          />
+          <TableMenu editor={editor} />
+          {/* The "@" mention popup for this document's prompt drafts —
             mounted here, like the link and table menus, because the
             suggestion plugin lives on the document. */}
-        <PromptMentionMenu documentPath={file.path} workspacePath={basePath} />
-        <EditorContent
-          editor={editor}
-          className="prose prose-sm dark:prose-invert max-w-2xl mx-auto p-4 outline-none"
-        />
+          <PromptMentionMenu
+            documentPath={file.path}
+            workspacePath={basePath}
+          />
+          <EditorContent
+            editor={editor}
+            className="prose prose-sm dark:prose-invert max-w-2xl mx-auto p-4 outline-none"
+          />
+        </div>
       </div>
     </div>
   );
