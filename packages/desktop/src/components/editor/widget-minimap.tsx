@@ -17,7 +17,8 @@ import { PROMPT_NODE_NAME, getPromptBlob } from "@notefig/widgets";
 import { jumpToBlob } from "./blobs/jump-to-blob";
 
 export type WidgetMapEntry = {
-  /** Stable per-render key; the blobId when the widget has one. */
+  /** Unique per entry: blobId alone can recur (external edits can
+   *  duplicate a marker), so the document position disambiguates. */
   key: string;
   blobId: string | null;
   /** 0..1 position of the widget within the document. */
@@ -41,7 +42,7 @@ export function deriveWidgetMapEntries(doc: PMNode): WidgetMapEntry[] {
       (blobId ? getPromptBlob(blobId).lastSentPrompt.trim() : "") ||
       "Prompt";
     entries.push({
-      key: blobId ?? `pos-${pos}`,
+      key: `${blobId ?? "pos"}-${pos}`,
       blobId,
       // Clamped in from the edges so the first/last dot never sits on the
       // strip's boundary.

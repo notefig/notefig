@@ -68,6 +68,16 @@ describe("deriveWidgetMapEntries", () => {
     expect(entry.title.endsWith("…")).toBe(true);
   });
 
+  it("gives duplicated markers (same blobId) distinct keys", () => {
+    // External edits can copy-paste a marker; parsing doesn't dedupe.
+    editor = makeEditor(
+      `${WIDGET_HTML("blob_dup")}<p>between</p>${WIDGET_HTML("blob_dup")}`,
+    );
+    const entries = deriveWidgetMapEntries(editor.state.doc);
+    expect(entries).toHaveLength(2);
+    expect(new Set(entries.map((e) => e.key)).size).toBe(2);
+  });
+
   it("returns nothing for a widget-less document", () => {
     editor = makeEditor("<p>just prose</p>");
     expect(deriveWidgetMapEntries(editor.state.doc)).toEqual([]);
