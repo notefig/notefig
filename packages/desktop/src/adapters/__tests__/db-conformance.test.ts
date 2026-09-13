@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createCollection } from "@tanstack/react-db";
+import { createCollection } from "@tanstack/db";
 import { persistedCollectionOptions } from "@tanstack/tauri-db-sqlite-persistence";
 import type { PersistedCollectionPersistence } from "@tanstack/db-sqlite-persistence-core";
 import { createNodeTestDb } from "@/testing/node-db";
