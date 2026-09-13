@@ -9,6 +9,26 @@
 // bundled code resolves them at runtime like any other dep.
 import { build } from "esbuild";
 
+/**
+ * Point a vendored bundle's workspace-package imports at the sibling bundles
+ * this script already emits, instead of inlining a second copy.
+ *
+ * Without this, `dist/lib/core.js` would carry its own copy of
+ * @notefig/agent, and two copies means two of every class: an `FsError` or
+ * `AgentTransportError` thrown by one would fail `instanceof` against the
+ * other. Nothing crosses that boundary today, which is exactly why it would
+ * be found late.
+ */
+const reuseSiblingBundles = {
+  name: "reuse-sibling-bundles",
+  setup(build) {
+    build.onResolve({ filter: /^@notefig\/(agent|shared)$/ }, (args) => ({
+      path: `./${args.path.slice("@notefig/".length)}.js`,
+      external: true,
+    }));
+  },
+};
+
 const src = (path) => new URL(path, import.meta.url).pathname;
 
 const common = {
@@ -47,4 +67,16 @@ await build({
   entryPoints: [src("../agent/src/index.ts")],
   outfile: "dist/lib/agent.js",
   external: ["tweetnacl"],
+});
+
+// @notefig/core — the host-neutral orchestration package. Vendored for the
+// same reason as the two above: it is private, and its exports point at ESM
+// TypeScript source. Small today (the ACP file-system bridge and the host
+// contract), and it reuses dist/lib/agent.js rather than inlining it.
+await build({
+  ...common,
+  entryPoints: [src("../core/src/index.ts")],
+  outfile: "dist/lib/core.js",
+  external: ["tweetnacl"],
+  plugins: [reuseSiblingBundles],
 });

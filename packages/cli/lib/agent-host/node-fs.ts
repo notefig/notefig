@@ -1,91 +1,153 @@
 /**
- * The Node implementation of the `fs` surface, cut down to what an ACP
- * session actually calls: `fs/read_text_file` and `fs/write_text_file`. The
- * full surface (metadata, search, watching) belongs to the core extraction
- * (MET-183); building it here would be inventing consumers.
+ * The Node implementation of `CoreFileSystem`.
  *
- * Desktop's equivalent is readWorkspaceTextFile / writeWorkspaceTextFile in
- * packages/desktop/src/utils/file-sync.ts, which additionally adopt writes
- * into live editors. A headless host has no editors, so this is the same
- * contract minus the adoption — the line/limit slicing is kept identical so
- * a harness sees the same bytes either way.
+ * Four of the seven members are `fs.promises` with the batch shape wrapped
+ * around them. The watcher trio is not implemented: a single-turn headless
+ * run has nothing to keep fresh, and writing a chokidar layer now would be
+ * inventing a consumer. They throw a declared error rather than being
+ * absent, so the surface stays uniform and a future caller gets a sentence
+ * instead of `undefined is not a function`.
+ *
+ * Errors come back as `FsError` — the same class the desktop throws, from
+ * @notefig/core — so a caller handles one error type regardless of host.
+ * The `HostFsError` this package briefly defined was a duplicate and is gone.
  */
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { sliceTextWindow, type AcpFileSystem } from '../agent';
+import {
+  FsError,
+  type BatchResult,
+  type CoreFileSystem,
+  type FileSystemError,
+  type FileSystemErrorType,
+  type FileSystemMetadata,
+  type FsChangeListener,
+} from '../core';
 
-/** Thrown for both containment violations and underlying fs failures, so a
- *  caller renders one readable message instead of a Node errno stack. */
-export class HostFsError extends Error {
-  constructor(
-    readonly path: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'HostFsError';
+/** Map a Node errno to the shared error vocabulary. */
+function classify(error: NodeJS.ErrnoException): FileSystemErrorType {
+  switch (error.code) {
+    case 'ENOENT':
+      return 'not_found';
+    case 'EACCES':
+    case 'EPERM':
+      return 'permission_denied';
+    case 'EEXIST':
+      return 'already_exists';
+    case 'ENOTEMPTY':
+      return 'not_empty';
+    case 'EISDIR':
+      return 'is_directory';
+    case 'ENOTDIR':
+      return 'is_file';
+    case 'EIO':
+      return 'io_error';
+    default:
+      return 'unknown';
   }
 }
 
+function toFailure(target: string, error: unknown): FileSystemError {
+  const errno = error as NodeJS.ErrnoException;
+  return new FsError(classify(errno), target, errno?.message);
+}
+
 /**
- * Resolve a harness-supplied path and refuse anything outside the workspace.
+ * Run one operation per input and sort the outcomes into the batch shape.
+ * Sequential rather than concurrent: these batches are small, and keeping
+ * the failures in input order makes them readable.
  *
- * The path arrives over the wire from a process we spawned but do not
- * control, so `../` traversal is reachable input, not a theoretical case.
- * Desktop asserts an absolute-path invariant for the same reason
- * (assertAbsoluteWorkspacePath); a headless host has no dialog to fall back
- * on, so it declines instead.
+ * Takes the inputs themselves rather than a list of paths, so a caller never
+ * has to look an entry back up by path — two entries for the same path would
+ * otherwise silently resolve to the first one's content.
  */
-function resolveWithin(workspacePath: string, target: string): string {
-  const resolved = path.resolve(workspacePath, target);
-  const relative = path.relative(workspacePath, resolved);
-  const escapes =
-    relative.startsWith('..' + path.sep) ||
-    relative === '..' ||
-    path.isAbsolute(relative);
-  if (escapes) {
-    throw new HostFsError(
-      target,
-      `refusing to access a path outside the workspace: ${target}`,
-    );
+async function batch<TInput, TOutput>(
+  inputs: TInput[],
+  pathOf: (input: TInput) => string,
+  run: (input: TInput) => Promise<TOutput>,
+): Promise<BatchResult<TOutput>> {
+  const succeeded: TOutput[] = [];
+  const failed: FileSystemError[] = [];
+  for (const input of inputs) {
+    try {
+      succeeded.push(await run(input));
+    } catch (error) {
+      failed.push(toFailure(pathOf(input), error));
+    }
   }
-  return resolved;
+  return { succeeded, failed };
 }
 
-/**
- * Build the ACP client's fs dependency for a workspace. Every path the
- * harness names is resolved relative to — and confined to — that workspace.
- */
-export function createNodeAcpFileSystem(workspacePath: string): AcpFileSystem {
+function unsupported(member: string): never {
+  throw new FsError(
+    'unknown',
+    member,
+    `${member} is not implemented by the Node file system: a headless host ` +
+      `does not watch files. See MET-183.`,
+  );
+}
+
+export function createNodeFileSystem(): CoreFileSystem {
   return {
-    async readTextFile(
-      target: string,
-      options?: { line?: number; limit?: number },
-    ): Promise<string> {
-      const resolved = resolveWithin(workspacePath, target);
-      let content: string;
-      try {
-        content = await fs.readFile(resolved, 'utf8');
-      } catch (error: any) {
-        throw new HostFsError(
-          target,
-          `could not read ${target}: ${error?.message ?? error}`,
-        );
-      }
-      return sliceTextWindow(content, options);
+    readFiles: (paths) =>
+      batch(
+        paths,
+        (target) => target,
+        async (target) => ({
+          path: target,
+          content: await fs.readFile(target, 'utf8'),
+        }),
+      ),
+
+    writeFiles: (files) =>
+      batch(
+        files,
+        (file) => file.path,
+        async ({ path: target, content }) => {
+          // Harnesses create files in directories they just decided to add.
+          await fs.mkdir(path.dirname(target), { recursive: true });
+          await fs.writeFile(target, content, 'utf8');
+          return target;
+        },
+      ),
+
+    getMetadata: (paths) =>
+      batch(
+        paths,
+        (target) => target,
+        async (target): Promise<FileSystemMetadata> => {
+          const stat = await fs.stat(target);
+          return {
+            path: target,
+            type: stat.isDirectory() ? 'directory' : 'file',
+            size: stat.size,
+            modifiedAt: stat.mtime,
+            createdAt: stat.birthtime,
+          };
+        },
+      ),
+
+    async exists(paths) {
+      return Promise.all(
+        paths.map(async (target) => {
+          try {
+            const stat = await fs.stat(target);
+            return {
+              path: target,
+              exists: true,
+              type: (stat.isDirectory() ? 'directory' : 'file') as
+                | 'directory'
+                | 'file',
+            };
+          } catch {
+            return { path: target, exists: false };
+          }
+        }),
+      );
     },
 
-    async writeTextFile(target: string, content: string): Promise<void> {
-      const resolved = resolveWithin(workspacePath, target);
-      try {
-        // Harnesses create files in directories they just decided to add.
-        await fs.mkdir(path.dirname(resolved), { recursive: true });
-        await fs.writeFile(resolved, content, 'utf8');
-      } catch (error: any) {
-        throw new HostFsError(
-          target,
-          `could not write ${target}: ${error?.message ?? error}`,
-        );
-      }
-    },
+    startWatchingContent: () => unsupported('startWatchingContent'),
+    stopWatching: () => unsupported('stopWatching'),
+    onFsEvent: (_listener: FsChangeListener) => unsupported('onFsEvent'),
   };
 }

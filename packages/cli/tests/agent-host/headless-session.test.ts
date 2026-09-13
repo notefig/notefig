@@ -14,7 +14,9 @@ import {
   findHarness,
   runHeadlessTurn,
 } from '../../lib/agent-host/headless-session';
-import { createNodeAcpFileSystem } from '../../lib/agent-host/node-fs';
+import { createNodeFileSystem } from '../../lib/agent-host/node-fs';
+import { createAcpFileSystem, FsError } from '../../lib/core';
+import { posix } from '../../lib/shared';
 import {
   attachCancellableAgent,
   attachScriptedAgent,
@@ -259,47 +261,77 @@ describe('runHeadlessTurn', () => {
   });
 });
 
-describe('createNodeAcpFileSystem', () => {
+describe('the ACP bridge over the Node file system', () => {
+  // The core owns the protocol rules and is unit-tested there with a fake
+  // file system. These run the same bridge over real disk, so the two layers
+  // are proven to compose rather than only to typecheck.
+  const bridgeFor = (dir: string) =>
+    createAcpFileSystem(createNodeFileSystem(), {
+      workspacePath: dir,
+      path: posix,
+    });
+
   it('reads and writes inside the workspace', async () => {
     await withTempDir(async (dir) => {
-      const nodeFs = createNodeAcpFileSystem(dir);
-      await nodeFs.writeTextFile(path.join(dir, 'notes/a.md'), 'one\ntwo\n');
-      expect(await nodeFs.readTextFile(path.join(dir, 'notes/a.md'))).toBe(
+      const acpFs = bridgeFor(dir);
+      await acpFs.writeTextFile(path.join(dir, 'notes/a.md'), 'one\ntwo\n');
+      expect(await acpFs.readTextFile(path.join(dir, 'notes/a.md'))).toBe(
         'one\ntwo\n',
       );
     });
   });
 
+  it('creates parent directories for a harness-invented path', async () => {
+    await withTempDir(async (dir) => {
+      await bridgeFor(dir).writeTextFile(
+        path.join(dir, 'deep/deeper/new.md'),
+        'body',
+      );
+      expect(
+        await fs.readFile(path.join(dir, 'deep/deeper/new.md'), 'utf8'),
+      ).toBe('body');
+    });
+  });
+
   it('applies 1-based line/limit slicing like the desktop host', async () => {
     await withTempDir(async (dir) => {
-      const nodeFs = createNodeAcpFileSystem(dir);
+      const acpFs = bridgeFor(dir);
       const file = path.join(dir, 'lines.txt');
-      await nodeFs.writeTextFile(file, 'a\nb\nc\nd\ne');
-      expect(await nodeFs.readTextFile(file, { line: 2, limit: 2 })).toBe(
-        'b\nc',
+      await acpFs.writeTextFile(file, 'a\nb\nc\nd\ne');
+      expect(await acpFs.readTextFile(file, { line: 2, limit: 2 })).toBe('b\nc');
+      expect(await acpFs.readTextFile(file, { line: 4 })).toBe('d\ne');
+    });
+  });
+
+  it('resolves a workspace-relative path the harness sends', async () => {
+    await withTempDir(async (dir) => {
+      const acpFs = bridgeFor(dir);
+      await acpFs.writeTextFile('relative.md', 'from a relative path');
+      expect(await fs.readFile(path.join(dir, 'relative.md'), 'utf8')).toBe(
+        'from a relative path',
       );
-      expect(await nodeFs.readTextFile(file, { line: 4 })).toBe('d\ne');
     });
   });
 
   it('refuses paths that escape the workspace', async () => {
     await withTempDir(async (dir) => {
-      const nodeFs = createNodeAcpFileSystem(dir);
+      const acpFs = bridgeFor(dir);
       await expect(
-        nodeFs.readTextFile(path.join(dir, '..', 'escaped.txt')),
+        acpFs.readTextFile(path.join(dir, '..', 'escaped.txt')),
       ).rejects.toThrow(/outside the workspace/);
-      await expect(nodeFs.writeTextFile('/etc/passwd', 'nope')).rejects.toThrow(
+      await expect(acpFs.writeTextFile('/etc/passwd', 'nope')).rejects.toThrow(
         /outside the workspace/,
       );
     });
   });
 
-  it('reports a missing file as a readable error, not an errno stack', async () => {
+  it('reports a missing file as FsError, not an errno stack', async () => {
     await withTempDir(async (dir) => {
-      const nodeFs = createNodeAcpFileSystem(dir);
-      await expect(
-        nodeFs.readTextFile(path.join(dir, 'nope.md')),
-      ).rejects.toThrow(/could not read/);
+      const error = await bridgeFor(dir)
+        .readTextFile(path.join(dir, 'nope.md'))
+        .catch((e) => e);
+      expect(error).toBeInstanceOf(FsError);
+      expect(error.type).toBe('not_found');
     });
   });
 });

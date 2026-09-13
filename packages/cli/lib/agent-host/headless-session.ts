@@ -21,8 +21,8 @@ import {
   type RequestPermissionResponse,
   type SessionNotification,
 } from '../shared';
-import { createNodeAgentTransport } from './node-agent-transport';
-import { createNodeAcpFileSystem } from './node-fs';
+import { createAcpFileSystem, type ServiceHost } from '../core';
+import { createHeadlessHost } from './headless-host';
 
 /** How long a cancelled turn gets to end through the protocol before the
  *  harness tree is taken down underneath it. */
@@ -41,6 +41,12 @@ export type HeadlessSessionSpec = {
    */
   taskId: string;
   harnessId: string;
+  /**
+   * The host this turn runs against. Defaults to the CLI's own headless
+   * host; injectable so a test can vary a single surface without rebuilding
+   * the world.
+   */
+  host?: ServiceHost;
   /** Absolute, already-verified workspace directory. */
   workspacePath: string;
   prompt: string;
@@ -117,9 +123,20 @@ export async function runHeadlessTurn(
   spec: HeadlessSessionSpec,
 ): Promise<TurnOutcome> {
   const harness = findHarness(spec.harnessId);
+  const host =
+    spec.host ?? createHeadlessHost({ onDiagnostic: spec.onDiagnostic });
+  const proc = host.platform.proc;
+  if (!proc) {
+    // The surface's absence is the capability answer — asked before acting,
+    // so this is a sentence rather than an exception from inside the core.
+    throw new HeadlessSessionError(
+      'this host cannot start harness processes',
+    );
+  }
   const transport =
     spec.createTransport?.(harness) ??
-    createNodeAgentTransport({
+    proc.createAgentTransport({
+      taskId: spec.taskId,
       harness,
       workspacePath: spec.workspacePath,
     });
@@ -136,7 +153,14 @@ export async function runHeadlessTurn(
       ),
     ),
     onSessionUpdate: spec.onUpdate,
-    fs: createNodeAcpFileSystem(spec.workspacePath),
+    // One bridge, defined in the core: the containment guard, the relative
+    // path rules and the line/limit window are protocol decisions, so both
+    // hosts get them from the same function rather than each implementing
+    // their own (they had already drifted three ways).
+    fs: createAcpFileSystem(host.platform.fs, {
+      workspacePath: spec.workspacePath,
+      path: host.path,
+    }),
   });
 
   // A transport death mid-turn would otherwise leave `prompt()` pending
