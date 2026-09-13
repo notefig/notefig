@@ -27,7 +27,13 @@
     "rehype-highlight",
     "remark-gfm",
     "vaul",
-    "postcss-load-config"
+    "postcss-load-config",
+    // Vendored into the CLI bundle by esbuild rather than resolved at
+    // runtime, so it is deliberately absent from packages/cli/package.json
+    // (see packages/cli/esbuild.config.mjs).
+    "@notefig/agent",
+    // Hoisted from the workspace root; used only by CLI e2e specs.
+    "execa"
   ],
   "ignoreExports": [
     { "file": "packages/desktop/src/components/ui/**", "exports": ["*"] },

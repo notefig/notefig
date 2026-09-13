@@ -1,0 +1,21 @@
+// Declaration-only build, for the same reason @notefig/agent has one: a CJS
+// consumer (the CLI) needs types without re-checking this package's source
+// under its own looser compiler settings. Runtime comes from the bundler
+// (desktop) or the vendored esbuild entry (CLI).
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "paths": {
+      "@notefig/shared": ["../shared/dist/index.d.ts"],
+      "@notefig/shared/*": ["../shared/dist/*/index.d.ts"],
+      "@notefig/agent": ["../agent/dist/index.d.ts"]
+    }
+  },
+  "include": ["src"],
+  "exclude": ["src/**/__tests__/**"]
+}

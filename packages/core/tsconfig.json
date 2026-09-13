@@ -1,0 +1,27 @@
+// The `lib` list is the enforcement mechanism for this package's whole
+// reason to exist: with no "DOM", a stray `window`, `document`, or React
+// import is a compile error rather than something review has to catch.
+// Node types are absent for the same reason — the core must not assume a
+// Node host either; anything platform-shaped arrives through the host
+// contract.
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2020"],
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@notefig/shared": ["../shared/src/index.ts"],
+      "@notefig/shared/*": ["../shared/src/*/index.ts"],
+      "@notefig/agent": ["../agent/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}
