@@ -1,12 +1,13 @@
 import * as path from 'path';
 import { promises as fs } from 'fs';
-import * as chalk from 'chalk';
+import { newTaskId } from '../lib/shared';
 import { AbstractCommand } from './abstract.command';
 import {
   HeadlessSessionError,
   runHeadlessTurn,
 } from '../lib/agent-host/headless-session';
 import { renderSessionUpdate } from '../lib/agent-host/render-session-update';
+import type { Logger } from '../lib/utils/logger.util';
 import type { Command } from 'commander';
 
 /** 128 + SIGINT, the shell convention for "interrupted". */
@@ -19,7 +20,7 @@ const EXIT_CANCELLED = 130;
  * harness tree outlives the CLI (observed against a real harness). A second
  * signal is the escape hatch if a harness wedges.
  */
-function installCancellation(): {
+function installCancellation(logger: Logger): {
   signal: AbortSignal;
   cancelled: () => boolean;
   dispose: () => void;
@@ -28,11 +29,11 @@ function installCancellation(): {
   let cancelled = false;
   const onSignal = () => {
     if (cancelled) {
-      console.log(chalk.gray('\n  Forcing exit.'));
+      logger.info('\n  Forcing exit.');
       process.exit(EXIT_CANCELLED);
     }
     cancelled = true;
-    console.log(chalk.gray('\n  Cancelling... (Ctrl-C again to force)'));
+    logger.info('\n  Cancelling... (Ctrl-C again to force)');
     controller.abort();
   };
   process.on('SIGINT', onSignal);
@@ -59,6 +60,13 @@ function installCancellation(): {
  *
  * Note what it does NOT do: no workspace registry, no collections, no
  * persistence, no MCP app tools. One command, one session, streamed output.
+ *
+ * The task id is minted with the same `newTaskId()` the desktop uses, and
+ * printed, so headless turns already live in one id space with app tasks —
+ * a run is nameable before there is anywhere to persist it (MET-185).
+ * Streamed agent output goes straight to stdout (it is the command's
+ * product); everything the command says *about* the run goes through the
+ * shared logger, so `--verbose` behaves as it does everywhere else.
  */
 export class AgentRunCommand extends AbstractCommand {
   public load(program: Command) {
@@ -69,40 +77,39 @@ export class AgentRunCommand extends AbstractCommand {
       )
       .requiredOption('--harness <id>', 'harness to run (e.g. claude-code)')
       .option('--dir <path>', 'workspace folder the agent operates on', '.')
-      .requiredOption('--prompt <text>', 'the prompt to send')
-      .option('--verbose', 'also print adapter stderr');
+      .requiredOption('--prompt <text>', 'the prompt to send');
   }
 
   public async handle(command: Command) {
     const options = command.opts();
     const workspacePath = await this.resolveWorkspace(options.dir ?? '.');
-    const cancellation = installCancellation();
+    const cancellation = installCancellation(this.logger);
+    const taskId = newTaskId();
 
-    console.log(
-      chalk.gray(
-        `  ${options.harness} · ${workspacePath}\n  (unstable internal command — see MET-184 for the supported surface)\n`,
-      ),
+    this.logger.info(
+      `  ${options.harness} · ${workspacePath}\n  task ${taskId}\n  (unstable internal command — see MET-184 for the supported surface)\n`,
     );
 
     try {
       const outcome = await runHeadlessTurn({
+        taskId,
         harnessId: options.harness,
         workspacePath,
         prompt: options.prompt,
         onUpdate: (notification) => renderSessionUpdate(notification),
-        onDiagnostic: (line) => {
-          if (options.verbose) console.error(chalk.gray(`  [stderr] ${line}`));
-        },
+        // Adapter stderr is diagnostic, so it is verbose-only by virtue of
+        // the level, not a hand-rolled flag check.
+        onDiagnostic: (line) => this.logger.verbose(`  [stderr] ${line}`),
         signal: cancellation.signal,
       });
       // A harness that honoured the protocol cancel ends the turn itself, so
       // a normal return can still mean "cancelled".
       if (cancellation.cancelled()) {
-        console.log(chalk.gray(`\n  Cancelled (${outcome.stopReason}).`));
+        this.logger.info(`\n  Cancelled (${outcome.stopReason}).`);
         process.exitCode = EXIT_CANCELLED;
         return;
       }
-      console.log(chalk.gray(`\n  Turn ended: ${outcome.stopReason}`));
+      this.logger.info(`\n  Turn ended: ${outcome.stopReason}`);
     } catch (error: any) {
       this.reportFailure(error, cancellation.cancelled());
     } finally {
@@ -114,7 +121,7 @@ export class AgentRunCommand extends AbstractCommand {
     if (cancelled) {
       // A harness that ignored the cancel was killed by our own teardown —
       // the expected end of a cancelled run, not a failure.
-      console.log(chalk.gray('  Cancelled.'));
+      this.logger.info('  Cancelled.');
       process.exitCode = EXIT_CANCELLED;
       return;
     }
@@ -122,7 +129,7 @@ export class AgentRunCommand extends AbstractCommand {
       error instanceof HeadlessSessionError
         ? error.message
         : (error?.message ?? String(error));
-    console.error(chalk.red(`\n  Failed: ${message}`));
+    this.logger.error(`\n  Failed: ${message}`);
     process.exitCode = 1;
   }
 
