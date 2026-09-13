@@ -62,6 +62,23 @@ export function capabilitiesForLocus(
  * Desktop injects its file-sync helpers (which adopt writes into live
  * editors); the remote locus advertises fs:false and never calls these.
  */
+/**
+ * Apply ACP's `line`/`limit` read window to file content. Lines are 1-based
+ * and `limit` counts lines, not bytes. Lives here rather than in either host
+ * because it is protocol semantics: a harness must see the same slice whether
+ * the client runs in the desktop webview or a headless Node process.
+ */
+export function sliceTextWindow(
+  content: string,
+  options?: { line?: number; limit?: number },
+): string {
+  if (!options?.line && !options?.limit) return content;
+  const lines = content.split("\n");
+  const start = Math.max(0, (options.line ?? 1) - 1);
+  const end = options.limit ? start + options.limit : lines.length;
+  return lines.slice(start, end).join("\n");
+}
+
 export type AcpFileSystem = {
   readTextFile(
     path: string,

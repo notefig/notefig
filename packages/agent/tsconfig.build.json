@@ -1,0 +1,25 @@
+// Declaration-only build. The CLI consumes @notefig/agent from a CJS runtime
+// bundle (packages/cli/esbuild.config.mjs) and needs types to go with it —
+// but its tsconfig is `strict: false`, and re-checking this package's source
+// there breaks discriminated-union narrowing (ToolResult<Out>). Emitting
+// .d.ts means consumers read already-narrowed declarations instead of
+// re-checking implementations under their own compiler settings.
+//
+// @notefig/shared resolves to its dist .d.ts here (not src, as tsconfig.json
+// does) so it stays an external dependency and rootDir remains ./src.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "paths": {
+      "@notefig/shared": ["../shared/dist/index.d.ts"],
+      "@notefig/shared/*": ["../shared/dist/*/index.d.ts"]
+    }
+  },
+  "include": ["src"],
+  "exclude": ["src/__tests__"]
+}
