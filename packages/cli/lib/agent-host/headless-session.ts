@@ -15,7 +15,7 @@ import {
 } from '../agent';
 import {
   BUILT_IN_HARNESSES,
-  type ContentBlock,
+  composePrompt,
   type HarnessDefinition,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
@@ -32,6 +32,14 @@ const CANCEL_GRACE_MS = 3_000;
 export type TurnOutcome = { stopReason: string };
 
 export type HeadlessSessionSpec = {
+  /**
+   * Identity for this run, minted by the caller with the shared
+   * `newTaskId()`. Nothing persists it yet — headless has no collections or
+   * KV store until the core extraction (MET-183) gives it one — but a run
+   * that is already named in the app's id space is a run the app can adopt
+   * later, rather than one that has to be retrofitted with an identity.
+   */
+  taskId: string;
   harnessId: string;
   /** Absolute, already-verified workspace directory. */
   workspacePath: string;
@@ -119,9 +127,8 @@ export async function runHeadlessTurn(
   if (spec.onDiagnostic) transport.onDiagnostic?.(spec.onDiagnostic);
 
   const client = new NotefigAcpClient({
-    // One connection per task; nothing here persists it, so a fixed id is
-    // honest about there being exactly one.
-    taskId: 'headless',
+    // One connection per task, same as the desktop.
+    taskId: spec.taskId,
     transport,
     permissionBroker: createDecliningPermissionRequester((toolName) =>
       spec.onDiagnostic?.(
@@ -175,7 +182,14 @@ export async function runHeadlessTurn(
       () => void client.cancel(session.sessionId).catch(() => undefined),
     );
 
-    const blocks: ContentBlock[] = [{ type: 'text', text: spec.prompt }];
+    // The same composer the panel uses. No context parts here — this host
+    // has no editor to draw them from — but going through it means a
+    // headless prompt is shaped by one function, not by a second hand-rolled
+    // block array that can drift from it.
+    const blocks = composePrompt({
+      text: spec.prompt,
+      capabilities: { embeddedContext: false },
+    });
     try {
       const response = await Promise.race([
         client.prompt(session.sessionId, blocks),

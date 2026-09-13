@@ -19,7 +19,7 @@ import {
   attachCancellableAgent,
   attachScriptedAgent,
 } from './scripted-agent';
-import type { SessionNotification } from '../../lib/shared';
+import { newTaskId, type SessionNotification } from '../../lib/shared';
 
 /** Observe transport teardown without reimplementing close(). */
 function trackClose(
@@ -49,6 +49,7 @@ describe('runHeadlessTurn', () => {
       const updates: SessionNotification[] = [];
 
       const outcome = await runHeadlessTurn({
+        taskId: newTaskId(),
         harnessId: 'claude-code',
         workspacePath: dir,
         prompt: 'summarize the repo',
@@ -85,6 +86,7 @@ describe('runHeadlessTurn', () => {
     await withTempDir(async (dir) => {
       let sessionCwd: string | undefined;
       await runHeadlessTurn({
+        taskId: newTaskId(),
         harnessId: 'claude-code',
         workspacePath: dir,
         prompt: 'hi',
@@ -109,6 +111,7 @@ describe('runHeadlessTurn', () => {
     await withTempDir(async (dir) => {
       let mcpServers: unknown;
       await runHeadlessTurn({
+        taskId: newTaskId(),
         harnessId: 'claude-code',
         workspacePath: dir,
         prompt: 'hi',
@@ -133,6 +136,7 @@ describe('runHeadlessTurn', () => {
     await withTempDir(async (dir) => {
       await expect(
         runHeadlessTurn({
+          taskId: newTaskId(),
           harnessId: 'claude-code',
           workspacePath: dir,
           prompt: 'hi',
@@ -163,6 +167,7 @@ describe('runHeadlessTurn', () => {
       let closed = false;
 
       const outcome = await runHeadlessTurn({
+        taskId: newTaskId(),
         harnessId: 'claude-code',
         workspacePath: dir,
         prompt: 'long task',
@@ -193,6 +198,7 @@ describe('runHeadlessTurn', () => {
 
       await expect(
         runHeadlessTurn({
+          taskId: newTaskId(),
           harnessId: 'claude-code',
           workspacePath: dir,
           prompt: 'long task',
@@ -226,6 +232,7 @@ describe('runHeadlessTurn', () => {
 
       await expect(
         runHeadlessTurn({
+          taskId: newTaskId(),
           harnessId: 'claude-code',
           workspacePath: dir,
           prompt: 'hi',
