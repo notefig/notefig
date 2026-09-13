@@ -30,6 +30,12 @@ jobs:
       - name: Build shared package
         run: npm run build -w packages/shared
 
+      # The CLI's tsc reads @notefig/agent's emitted declarations (the package
+      # exports ESM TS source, which the CLI's CJS/TS4.8 tree can't consume),
+      # so its dist must exist before the CLI compiles.
+      - name: Build agent package
+        run: npm run build -w packages/agent
+
       - name: Build CLI
         run: npm run build -w packages/cli
 
@@ -56,6 +62,12 @@ jobs:
 
       - name: Build shared package
         run: npm run build -w packages/shared
+
+      # The CLI's tsc reads @notefig/agent's emitted declarations (the package
+      # exports ESM TS source, which the CLI's CJS/TS4.8 tree can't consume),
+      # so its dist must exist before the CLI compiles.
+      - name: Build agent package
+        run: npm run build -w packages/agent
 
       - name: Build CLI
         run: npm run build -w packages/cli
