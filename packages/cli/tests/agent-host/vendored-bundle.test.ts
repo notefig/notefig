@@ -61,14 +61,18 @@ describe('vendored @notefig/agent bundle', () => {
     }
   });
 
-  it('inlines the ESM-only ACP dependency rather than requiring it', () => {
-    // A `require` of the ESM package would throw ERR_REQUIRE_ESM at load
-    // time; this asserts the failure mode can't come back via `external`.
+  it('inlines its ESM-only and version-sensitive dependencies', () => {
+    // Two failure modes this guards, both reintroducible by one `external`
+    // entry: requiring the ESM-only ACP package throws ERR_REQUIRE_ESM at
+    // load, and requiring zod resolves the CLI's pinned 3.23.0, which has no
+    // `zod/v3` subpath for zod-to-json-schema to import.
     const out = inPlainNode(
       `const src = require('fs').readFileSync(${JSON.stringify(BUNDLE)}, 'utf8');
-       process.stdout.write(String(src.includes('require("@zed-industries/agent-client-protocol")')));`,
+       const externals = ['@zed-industries/agent-client-protocol', 'zod', 'zod/v3']
+         .filter((name) => src.includes('require("' + name + '")'));
+       process.stdout.write(JSON.stringify(externals));`,
     );
-    expect(out).toBe('false');
+    expect(JSON.parse(out)).toEqual([]);
   });
 
   it('constructs a client and completes a scripted turn in plain Node', () => {

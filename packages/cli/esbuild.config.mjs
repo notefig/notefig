@@ -34,8 +34,17 @@ await build({
 // would throw ERR_REQUIRE_ESM on every supported Node (engines: >=18.17).
 // esbuild inlines it instead. zod-to-json-schema is likewise bundled — it is
 // not a CLI dependency.
+//
+// zod is bundled here too, unlike in the shared entry above. zod-to-json-schema
+// imports `zod/v3`, a subpath the CLI's pinned zod@3.23.0 does not export;
+// the workspace root resolves zod@3.25.x, which does. Bundling takes that
+// copy and leaves the CLI's own dependency untouched — the alternative,
+// raising the CLI's pin, perturbs the lockfile for the whole workspace.
+// Nothing hands zod objects across the two copies: the agent package uses zod
+// only for MCP tool schemas, which this host does not register.
 await build({
   ...common,
   entryPoints: [src("../agent/src/index.ts")],
   outfile: "dist/lib/agent.js",
+  external: ["tweetnacl"],
 });
