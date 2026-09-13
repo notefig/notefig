@@ -18,6 +18,11 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@notefig/agent": "*",
+    "@notefig/shared": "*",
+    "@tanstack/db-sqlite-persistence-core": "0.2.9"
+  },
   "devDependencies": {
     "typescript": "^5.0.2",
     "vitest": "^3.2.4"

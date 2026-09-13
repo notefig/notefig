@@ -33,7 +33,10 @@
     // (see packages/cli/esbuild.config.mjs).
     "@notefig/agent",
     // Hoisted from the workspace root; used only by CLI e2e specs.
-    "execa"
+    "execa",
+    // Vendored into the CLI bundle alongside @notefig/agent, for the same
+    // reason: private package, ESM TypeScript exports.
+    "@notefig/core"
   ],
   "ignoreExports": [
     { "file": "packages/desktop/src/components/ui/**", "exports": ["*"] },

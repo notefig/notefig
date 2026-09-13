@@ -1,52 +1,38 @@
 import type { Theme } from "@/components/theme-provider";
-import type { PersistedCollectionPersistence } from "@tanstack/db-sqlite-persistence-core";
-import type { HarnessDefinition } from "@notefig/shared/agent";
-import type { AgentTransport, McpEndpoint } from "@notefig/agent";
-
-export type FileSystemErrorType =
-  | "not_found"
-  | "permission_denied"
-  | "handle_missing"
-  | "already_exists"
-  | "invalid_path"
-  | "not_empty"
-  | "is_directory"
-  | "is_file"
-  | "io_error"
-  | "unknown";
-
-export type FileSystemError = {
-  path: string;
-  type: FileSystemErrorType;
-  message: string;
-};
 
 /**
- * Throwable form of FileSystemError — one class shared across platforms,
- * discriminated by the same FileSystemErrorType. Satisfies the
- * FileSystemError shape so it can be returned in Result/BatchResult as-is.
+ * The file-system vocabulary — error types, the throwable `FsError`, the
+ * Result/BatchResult shapes, metadata and watcher events — is defined in
+ * @notefig/core and re-exported here.
+ *
+ * Core owns it because the orchestration package needs the same types and
+ * cannot import this file (it pulls in `Theme`, and core compiles with no
+ * DOM lib). Re-exporting rather than moving keeps all 39 importers of this
+ * module, and all 13 users of `FsError`, untouched — this is still the
+ * address they ask at.
  */
-export class FsError extends Error implements FileSystemError {
-  constructor(
-    readonly type: FileSystemErrorType,
-    readonly path: string,
-    message?: string,
-  ) {
-    super(message ?? `${type.replace(/_/g, " ")}: ${path}`);
-    this.name = "FsError";
-  }
-}
+export {
+  FsError,
+  isWorkspaceAccessError,
+  type BatchResult,
+  type ContentChange,
+  type ContentChangeEvent,
+  type FileSystemError,
+  type FileSystemErrorType,
+  type FileSystemMetadata,
+  type FsChangeEvent,
+  type FsChangeListener,
+  type MetadataChange,
+  type MetadataChangeEvent,
+  type Result,
+} from "@notefig/core";
 
-/**
- * True when the error means the app lost access to the workspace folder and
- * the user can recover it (re-grant on web, OS settings on desktop, re-pick).
- */
-export function isWorkspaceAccessError(error: unknown): error is FsError {
-  return (
-    error instanceof FsError &&
-    (error.type === "permission_denied" || error.type === "handle_missing")
-  );
-}
+import type {
+  BatchResult,
+  FileSystemMetadata,
+  FsChangeListener,
+  Result,
+} from "@notefig/core";
 
 /** One listing row from `readDirectory`. */
 export interface DirectoryEntry {
@@ -54,54 +40,12 @@ export interface DirectoryEntry {
   type: "file" | "directory";
 }
 
-export type Result<T, E = FileSystemError> =
-  { ok: true; value: T } | { ok: false; error: E };
-
-export type BatchResult<T> = {
-  succeeded: T[];
-  failed: FileSystemError[];
-};
-
-export type FileSystemMetadata = {
-  path: string;
-  type: "file" | "directory";
-  size: number;
-  modifiedAt: Date;
-  createdAt: Date;
-};
-
 export type TextPromptOptions = {
   title: string;
   message?: string;
   defaultValue?: string;
   placeholder?: string;
   confirmLabel?: string;
-};
-
-export type MetadataChange = {
-  type: "created" | "deleted" | "renamed";
-  path: string;
-  oldPath?: string; // populated only for rename events
-  isDirectory: boolean;
-};
-
-export type MetadataChangeEvent = {
-  /** The watch that produced this event — consumers route by it, so one
-   *  workspace's events never reach another's handlers (MET-177). */
-  watchId: string;
-  changes: MetadataChange[];
-};
-
-export type ContentChange = {
-  path: string;
-  content: string;
-  contentHash: string;
-};
-
-export type ContentChangeEvent = {
-  /** See MetadataChangeEvent.watchId. */
-  watchId: string;
-  changes: ContentChange[];
 };
 
 /**
@@ -149,18 +93,6 @@ export type SearchMatch = SearchTarget & {
   /** Absolute path to the file */
   filePath: string;
 };
-
-/**
- * Watcher events, delivered on the fs surface rather than the general
- * platform bus so that surface is self-contained. The `fs-` prefixed names
- * are kept deliberately: they are the same strings the Rust watcher emits
- * (`file_watcher.rs`), so the wire name stays greppable from the consumer.
- */
-export type FsChangeEvent =
-  | { type: "fs-metadata-changed"; payload: MetadataChangeEvent }
-  | { type: "fs-content-changed"; payload: ContentChangeEvent };
-
-export type FsChangeListener = (event: FsChangeEvent) => void;
 
 /** Window/OS-level events. Watcher events live on the fs surface instead. */
 export type PlatformEvent =
@@ -413,74 +345,17 @@ export interface FileSystemSurface {
 }
 
 /**
- * Local process surface. Per MET-119 these keep their agent-specific
- * contracts verbatim — they are regrouped here, not generalized.
+ * The process and database surfaces are defined in @notefig/core — the
+ * orchestration package uses all of both, so core owns them and this module
+ * re-exports under the names the adapters already implement. Their docs
+ * live with the definitions.
  */
-export interface ProcessSurface {
-  /**
-   * Create the agent transport for a new task. Desktop spawns the harness as
-   * a local child process (Tauri stdio transport); other platforms plug in
-   * their own transport here (e.g. a relay transport) without the agent
-   * service ever knowing a transport constructor exists.
-   */
-  createAgentTransport(spec: {
-    taskId: string;
-    harness: HarnessDefinition;
-    workspacePath: string;
-    /**
-     * Per-task env on top of the harness's static env — e.g. the
-     * OPENCODE_CONFIG path registering this task's MCP server
-     * (mcpRegistration: "opencode-config").
-     */
-    extraEnv?: Record<string, string>;
-  }): AgentTransport;
+export type {
+  CoreProcess as ProcessSurface,
+  CoreDb as DbSurface,
+} from "@notefig/core";
 
-  /**
-   * Create the endpoint for a task's app-tools MCP server (Stage 3.5) —
-   * same construction contract as `createAgentTransport` right above: a
-   * dumb constructor that does nothing async. The caller calls `start()`
-   * itself and reads `mcpServer` off the returned instance afterward
-   * (populated after start, same pattern as `spawnInfo`) to build ACP
-   * `session/new.mcpServers` or a harness config. Deliberately not an
-   * AgentTransport: harnesses may run several concurrent instances of the
-   * server command, so requests arrive with a per-connection `respond`
-   * instead of a single line channel (see McpEndpoint). Desktop's instance
-   * spawns its own binary as a stdio↔loopback-TCP relay (`McpServer::Stdio`,
-   * mandatory per the ACP spec, unlike `http`/`sse`); other platforms plug
-   * in their own mechanism without `mcp-server.ts` or `acp-client.ts` ever
-   * seeing a port or process.
-   */
-  createMcpEndpoint(spec: { taskId: string }): McpEndpoint;
-
-  /**
-   * Run a script through the user's local login shell and capture its
-   * output. A raw execution primitive — this adapter has no notion of what
-   * the script does (harness discovery is the first caller, from
-   * src/agent/harness-discovery.ts, which owns all script-building and
-   * output-parsing). Desktop-only capability: no equivalent exists on a
-   * web/relay platform, so non-desktop adapters reject it, same as
-   * `createAgentTransport`'s placeholder above.
-   */
-  runShellCommand(
-    script: string,
-  ): Promise<{ stdout: string; exitCode: number }>;
-}
-
-/**
- * SQLite-backed storage for persisted TanStack DB collections.
- *
- * Driver-level only: the adapter never names a collection. Ids, schemas and
- * `schemaVersion` belong above it, in the entities layer.
- */
-export interface DbSurface {
-  /**
-   * The shared persistence every persisted collection is built on. Synchronous
-   * because collections are defined at module scope, and it touches no storage
-   * — the database file, and on web the OPFS entry and its worker, are created
-   * by the first collection query.
-   */
-  get(): PersistedCollectionPersistence;
-}
+import type { CoreDb, CoreProcess } from "@notefig/core";
 
 /** Window/OS-level shell: dialogs, external links, chrome, platform events. */
 export interface PlatformUiSurface {
@@ -530,8 +405,8 @@ export interface PlatformUiSurface {
  */
 export interface IPlatformAdapter {
   fs: FileSystemSurface;
-  proc: ProcessSurface;
-  db: DbSurface;
+  proc: CoreProcess;
+  db: CoreDb;
   ui: PlatformUiSurface;
   updates: PlatformUpdater;
 }

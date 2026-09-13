@@ -2,43 +2,60 @@
  * The service host contract: everything the orchestration core needs from
  * whatever is hosting it, and the only channel through which it may ask.
  *
- * This interface was derived by inventory, not designed — every member below
- * exists because a module moved into this package used to import it from
- * `packages/desktop/src`. The list turned out small: the desktop-reaching
- * imports were dominated by `utils/fs`, `utils/file-sync` and
- * `utils/history-service`, which are already platform abstractions and arrive
- * as surfaces rather than host members. What was left is four ambient
- * services and the editor.
+ * Derived by inventory, not designed — every member exists because a module
+ * moving into this package used to reach for it. Two sources fed the list:
+ * the platform surfaces the core calls (`platform`, see ./platform.ts) and
+ * the ambient services it reaches for directly. The second list is small:
+ * across ~2,800 lines the moved code calls `i18n.t` once, `captureEvent`
+ * twice and reads `APP_DIR_NAME` once. That is the whole ambient surface.
  *
- * Two rules keep it honest:
+ * ## Two rules
  *
- *  - **Capabilities, never platform identity.** Core code branches on
- *    `capabilities.canSpawnHarnesses`, never on `isBrowser`/`isDesktop`. A
- *    host that cannot do something says so; the core does not guess from
- *    where it thinks it is running.
- *  - **Degrade, don't disappear.** A host that has no editor still satisfies
- *    `editor` — with an implementation that returns `{ attached: false }`.
- *    The tool surface is then identical everywhere, and a harness gets a
- *    declared answer instead of a missing tool.
+ * **Capabilities, never platform identity.** Core code asks what a host can
+ * do; it never branches on `isBrowser`/`isDesktop`, and never guesses from
+ * where it thinks it is running.
+ *
+ * **Degrade, don't disappear.** A host that lacks something still satisfies
+ * the contract, so the tool surface is identical everywhere and a harness
+ * gets a declared answer instead of a missing tool.
+ *
+ * ## Which degradation style
+ *
+ * Both styles below are legitimate; the difference is who needs the answer
+ * and when.
+ *
+ *   - **Optional member** — when a caller must branch *before* acting, so
+ *     the compiler should force the check. `platform.proc` is absent on a
+ *     host that cannot spawn processes: task creation asks first and fails
+ *     with a declared error.
+ *
+ *   - **Always present, self-declaring** — when the thing must still answer
+ *     rather than vanish. `editor` is always there; a headless host supplies
+ *     `detachedEditorContext`, whose `attached: false` is the answer. Making
+ *     it optional instead would let editor-backed tools disappear from the
+ *     registry, which is exactly what this contract exists to prevent.
+ *
+ * A capability that duplicates a surface belongs to neither style and should
+ * not exist. An earlier draft carried `canSpawnHarnesses`, which restated
+ * what `platform.proc`'s presence already says; it is gone.
  */
+import type { PathFlavor } from "@notefig/shared/utils";
 import type { EditorContextPort } from "./editor-context-port";
+import type { CorePlatform } from "./platform";
 
 /**
- * What this host can do. Declared, not inferred — a headless CLI and a
- * browser tab differ here, and nowhere else, as far as the core is
- * concerned.
+ * What this host can do, where no surface already answers the question.
+ * Deliberately small — if a capability can be expressed as the presence of a
+ * surface, express it that way instead.
  */
 export type HostCapabilities = {
   /**
-   * Whether the host can start harness processes. False in an unpaired
-   * browser tab, which has no process surface at all; task creation fails
-   * with a declared error rather than an exception from deep in the core.
-   */
-  canSpawnHarnesses: boolean;
-  /**
    * Whether work continues when no UI is attached. False in a browser tab
    * (closing it stops everything) and true for a service process. Triggers
-   * consult this rather than pretending background execution exists.
+   * and background reconciliation consult this rather than pretending
+   * background execution exists.
+   *
+   * This has no surface equivalent, which is why it is a flag.
    */
   runsInBackground: boolean;
 };
@@ -50,7 +67,19 @@ export type TelemetrySink = {
 };
 
 export type ServiceHost = {
+  /** fs, and optionally proc and db. See ./platform.ts. */
+  platform: CorePlatform;
+
   capabilities: HostCapabilities;
+
+  /**
+   * The host's bound path flavor: win32 iff the shell runs on Windows,
+   * posix everywhere else (MET-157). A member rather than something this
+   * package detects, because detection needs an OS the core cannot see —
+   * and because the host has already made the decision for its adapters,
+   * so asking twice is how the two come to disagree.
+   */
+  path: PathFlavor;
 
   telemetry: TelemetrySink;
 
@@ -69,5 +98,6 @@ export type ServiceHost = {
    */
   appDirName: string;
 
+  /** Always present; `attached: false` when there is no editor. */
   editor: EditorContextPort;
 };
