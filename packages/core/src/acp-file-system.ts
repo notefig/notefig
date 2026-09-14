@@ -20,6 +20,7 @@
 import { sliceTextWindow } from "@notefig/agent";
 import type { PathFlavor } from "@notefig/shared/utils";
 import { FsError, type CoreFileSystem } from "./fs";
+import { resolveWorkspacePath } from "./paths";
 
 export type AcpFileSystemBridge = {
   readTextFile(
@@ -44,60 +45,23 @@ export type AcpBridgeOptions = {
 };
 
 /**
- * Collapse `.` and `..` segments. `PathFlavor.join`/`normalize` deliberately
- * do not (their contract says containment logic must collapse explicitly),
- * because collapsing is only correct once you have decided what a traversal
- * out of the root means — which is this function's job.
- */
-function collapse(flavor: PathFlavor, path: string): string {
-  const absolute = flavor.isAbsolute(path);
-  const separator = flavor.sep;
-  const parts: string[] = [];
-  // Accept mixed separators: win32 paths reach us with either.
-  for (const segment of path.split(/[\\/]/)) {
-    if (segment === "" || segment === ".") continue;
-    if (segment === ".." && parts.length > 0 && parts[parts.length - 1] !== "..") {
-      parts.pop();
-      continue;
-    }
-    parts.push(segment);
-  }
-  const joined = parts.join(separator);
-  // A leading separator is meaningful on posix and on win32 UNC/rooted
-  // paths; normalize() restores the flavor's canonical spelling either way.
-  return flavor.normalize(absolute && !/^[A-Za-z]:/.test(joined) ? `${separator}${joined}` : joined);
-}
-
-/**
- * Resolve a harness-supplied path and refuse anything outside the workspace.
+ * The throwing face of `resolveWorkspacePath`, for the wire seam.
  *
- * The path arrives over the wire from a process we spawned but do not
- * control, so `../` traversal is reachable input rather than a theoretical
- * case. Relative paths resolve against the workspace root — harnesses emit
- * them routinely — which is why the desktop's absolute-only assertion could
- * not simply be adopted for both hosts.
+ * ACP has no "refused" result shape — a bad path is an error response — so
+ * the bridge converts the resolution's error value into the house `FsError`
+ * here. The containment rule itself lives in `paths.ts` and is shared with
+ * the tool domain, which needs the same decision as a value.
  */
 export function resolveWithinWorkspace(
   flavor: PathFlavor,
   workspacePath: string,
   target: string,
 ): string {
-  const root = flavor.normalize(workspacePath);
-  const joined = flavor.isAbsolute(target)
-    ? target
-    : flavor.join(root, target);
-  const resolved = collapse(flavor, joined);
-  const inside =
-    flavor.toKey(resolved) === flavor.toKey(root) ||
-    flavor.contains(root, resolved);
-  if (!inside) {
-    throw new FsError(
-      "invalid_path",
-      target,
-      `refusing to access a path outside the workspace: ${target}`,
-    );
+  const resolved = resolveWorkspacePath(flavor, workspacePath, target);
+  if (!resolved.ok) {
+    throw new FsError("invalid_path", target, resolved.error);
   }
-  return resolved;
+  return resolved.absolute;
 }
 
 export function createAcpFileSystem(
