@@ -23,6 +23,7 @@ export default defineConfig({
   test: {
     environment: "happy-dom",
     globals: true,
+    setupFiles: ["src/testing/setup-core-host.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     exclude: ["tests/e2e/**", "**/node_modules/**"],
     coverage: {
