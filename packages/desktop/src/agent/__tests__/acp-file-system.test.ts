@@ -15,7 +15,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { platformAdapter } from "@/adapters";
-import { createDesktopAcpFileSystem } from "../file-sync";
+import { createDesktopAcpFileSystem } from "../acp-file-system";
 
 vi.mock("@/adapters", async () => ({
   platformAdapter: {

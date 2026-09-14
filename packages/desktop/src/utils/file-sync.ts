@@ -16,7 +16,7 @@ import {
   projectSettingsQueryKey,
 } from "./project-settings";
 import { IGNORE_RULES, isIgnoredPath } from "./ignore";
-import { createAcpFileSystem, getServiceHost } from "@notefig/core";
+import { getServiceHost } from "@notefig/core";
 import { getDocumentSync } from "./markdown-conversion";
 // The utils → components edge that used to be justified here is gone: the
 // editor is reached through the host's editor port (MET-193), which also
@@ -153,44 +153,6 @@ export function metadataWatchIdFor(workspacePath: string): string {
 
 export function contentWatchIdFor(workspacePath: string): string {
   return `content-${PORTAL_ID}-${workspacePath}`;
-}
-
-/**
- * The desktop's ACP file-system bridge.
- *
- * The path rules a harness feels — relative-path resolution, `../` escapes,
- * containment in the workspace, the 1-based line/limit window — are protocol
- * decisions, not platform ones, so they come from core's
- * `createAcpFileSystem` and are identical on both hosts. Before this, desktop
- * passed `readWorkspaceTextFile`/`writeWorkspaceTextFile` straight to the ACP
- * client: relative paths threw instead of resolving, and **containment was
- * never checked at all** — `assertAbsoluteWorkspacePath` tests `isAbsolute`
- * and nothing more, so an absolute path outside the workspace was written.
- *
- * What stays desktop-shaped is the bytes underneath, and that is the whole
- * reason this is a wrapper rather than `createAcpFileSystem(platformAdapter.fs)`:
- * the write has to go through `writeWorkspaceTextFile` to keep the
- * rename redirect, the tracked-write echo suppression, the row update, and
- * the editor adoption. Reads go raw, because the windowing that
- * `readWorkspaceTextFile` applies is now the bridge's job — applying it in
- * both places would slice twice.
- */
-export function createDesktopAcpFileSystem(workspacePath: string) {
-  return createAcpFileSystem(
-    {
-      ...platformAdapter.fs,
-      writeFiles: async (files) => {
-        // The bridge writes one resolved file at a time; a throw from the
-        // desktop primitive is already an FsError and propagates as the
-        // bridge's own failures would.
-        for (const file of files) {
-          await writeWorkspaceTextFile(file.path, file.content);
-        }
-        return { succeeded: files.map((file) => file.path), failed: [] };
-      },
-    },
-    { workspacePath, path: pathutil },
-  );
 }
 
 function invalidateProjectSettingsIfChanged(

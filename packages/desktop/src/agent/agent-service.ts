@@ -47,7 +47,7 @@ import { serverInstructions } from "./mcp-instructions";
 import { buildWidgetContextPayload } from "./widget-context-resource";
 import i18n from "@/utils/intl";
 import { captureEvent } from "@/telemetry/telemetry";
-import { createDesktopAcpFileSystem } from "@/utils/file-sync";
+import { createDesktopAcpFileSystem } from "./acp-file-system";
 import { checkpointWorkspaceHistory } from "@/utils/history-service";
 import { invalidateGit } from "@/entities/git";
 import {
