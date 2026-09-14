@@ -13,9 +13,11 @@
  * The same path string from the same harness therefore behaved differently
  * depending on which host it reached. Those are decisions about the
  * protocol, not about a platform, so they live here once. A host supplies
- * only the bytes, through `CoreFileSystem`; the desktop layers editor
- * adoption on top of the write, which is the one genuine per-host
- * difference and arrives as `afterWrite`.
+ * only the bytes, through `CoreFileSystem` — and that is the whole seam. The
+ * desktop's extra per-write work (rename redirect, echo suppression, row
+ * update, editor adoption) lives inside the `CoreFileSystem` it passes in,
+ * not in a hook here: it has to happen within the desktop's own tracked
+ * write, which an "after the bytes landed" callback cannot express.
  */
 import { sliceTextWindow } from "@notefig/agent";
 import type { PathFlavor } from "@notefig/shared/utils";
@@ -37,11 +39,6 @@ export type AcpBridgeOptions = {
    *  elsewhere. Supplied rather than detected: this package has no way to
    *  ask the OS, and detection is the host's existing decision (MET-157). */
   path: PathFlavor;
-  /**
-   * Applied after the bytes reach disk. The desktop passes the adoption step
-   * that pushes content into a live editor; a headless host passes nothing.
-   */
-  afterWrite?: (absolutePath: string, content: string) => Promise<void>;
 };
 
 /**
@@ -68,9 +65,9 @@ export function createAcpFileSystem(
   fs: CoreFileSystem,
   options: AcpBridgeOptions,
 ): AcpFileSystemBridge {
-  const { workspacePath, path: flavor, afterWrite } = options;
+  const { workspacePath, path: flavor } = options;
   return {
-    async readTextFile(target, window) {
+    async readTextFile(target, textWindow) {
       const resolved = resolveWithinWorkspace(flavor, workspacePath, target);
       const result = await fs.readFiles([resolved]);
       const failure = result.failed[0];
@@ -78,7 +75,7 @@ export function createAcpFileSystem(
         throw new FsError(failure.type, failure.path, failure.message);
       }
       // ACP's 1-based line/limit window, applied identically on every host.
-      return sliceTextWindow(result.succeeded[0].content, window);
+      return sliceTextWindow(result.succeeded[0].content, textWindow);
     },
 
     async writeTextFile(target, content) {
@@ -88,7 +85,6 @@ export function createAcpFileSystem(
       if (failure) {
         throw new FsError(failure.type, failure.path, failure.message);
       }
-      await afterWrite?.(resolved, content);
     },
   };
 }

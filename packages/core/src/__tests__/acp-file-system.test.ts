@@ -129,18 +129,6 @@ describe("createAcpFileSystem", () => {
     expect(fs.written).toEqual({ "/ws/deep/new.md": "body" });
   });
 
-  it("runs afterWrite once the bytes have landed — the desktop's adoption hook", async () => {
-    const fs = fakeFs();
-    const afterWrite = vi.fn(async () => {});
-    const bridge = createAcpFileSystem(fs, {
-      workspacePath: "/ws",
-      path: posix,
-      afterWrite,
-    });
-    await bridge.writeTextFile("a.md", "body");
-    expect(afterWrite).toHaveBeenCalledWith("/ws/a.md", "body");
-  });
-
   it("refuses to write outside the workspace", async () => {
     const fs = fakeFs();
     const bridge = createAcpFileSystem(fs, {

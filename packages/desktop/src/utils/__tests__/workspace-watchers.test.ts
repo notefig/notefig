@@ -125,6 +125,20 @@ describe("startWorkspaceWatcherSubscription", () => {
     expect(watchers.started).toEqual(["/ws"]);
   });
 
+  it("is idempotent: a second start while one is live is a no-op", () => {
+    // `watchers` is module scope, so a second real subscription would share
+    // it — the second disposer would stop the first's watchers and leave the
+    // first subscribed to an empty map. The doc comment asserted this
+    // property before anything enforced it.
+    stopSubscription = startWorkspaceWatcherSubscription();
+    const second = startWorkspaceWatcherSubscription();
+
+    openWorkspacesCollection.insert(row("/ws"));
+
+    expect(second).toBe(stopSubscription);
+    expect(watchers.started).toEqual(["/ws"]);
+  });
+
   it("stops every watcher it armed when the subscription is torn down", () => {
     const stop = startWorkspaceWatcherSubscription();
     openWorkspacesCollection.insert(row("/ws-a"));

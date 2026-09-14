@@ -60,12 +60,22 @@ export function ensureWatching(workspacePath: string): void {
   watchers.get(workspaceKey(workspacePath))?.ensureStarted();
 }
 
+/** Non-null while a subscription is live. `watchers` is module scope, so a
+ *  second concurrent subscription would share it: the second call's disposer
+ *  would stop the watchers the first armed and leave the first subscribed to
+ *  an empty map. The guard is what makes the idempotence below real rather
+ *  than asserted. */
+let activeSubscription: (() => void) | null = null;
+
 /**
  * Begin mirroring the open set into live watchers. Idempotent per process:
- * call it once during boot. Returns the unsubscribe, which also stops every
+ * call it once during boot — a second call while one is live is a no-op that
+ * returns the same disposer. Returns the unsubscribe, which also stops every
  * watcher it armed — app teardown and tests both need that.
  */
 export function startWorkspaceWatcherSubscription(): () => void {
+  if (activeSubscription) return activeSubscription;
+
   // Rows can already exist when this runs (boot order is the host's choice,
   // and a restored session opens workspaces before the portal is ready), so
   // reconcile the current set before listening for changes to it.
@@ -91,8 +101,12 @@ export function startWorkspaceWatcherSubscription(): () => void {
     }
   });
 
-  return () => {
+  const dispose = () => {
+    if (activeSubscription !== dispose) return;
+    activeSubscription = null;
     subscription.unsubscribe();
     for (const key of [...watchers.keys()]) disarm(key);
   };
+  activeSubscription = dispose;
+  return dispose;
 }

@@ -16,7 +16,7 @@ import {
   projectSettingsQueryKey,
 } from "./project-settings";
 import { IGNORE_RULES, isIgnoredPath } from "./ignore";
-import { getServiceHost } from "@notefig/core";
+import { createAcpFileSystem, getServiceHost } from "@notefig/core";
 import { getDocumentSync } from "./markdown-conversion";
 // The utils → components edge that used to be justified here is gone: the
 // editor is reached through the host's editor port (MET-193), which also
@@ -24,6 +24,7 @@ import { getDocumentSync } from "./markdown-conversion";
 // acp-client → file-sync.
 import { platformAdapter } from "@/adapters";
 import { path as pathutil, relativeTreePath } from "./path";
+import { PORTAL_ID } from "./portal-id";
 import { activeRenameTarget } from "@/entities/tabs";
 import { trackWorkspaceWrite } from "./workspace-write-tracker";
 
@@ -135,6 +136,61 @@ export async function readWorkspaceTextFile(
   // ACP's 1-based line/limit window — shared with the headless host so a
   // harness sees the same slice on either.
   return sliceTextWindow(content, options);
+}
+
+/**
+ * Watch-id construction, in one place for both kinds.
+ *
+ * The id is the key the platform's watcher registry is stored under, and on
+ * the Tauri side that registry is process-global while events are broadcast
+ * to every webview — so the id has to name the portal as well as the
+ * workspace, or two windows on one workspace share (and clobber) one entry.
+ * Nothing parses these; they are compared for equality on both sides.
+ */
+export function metadataWatchIdFor(workspacePath: string): string {
+  return `metadata-${PORTAL_ID}-${workspacePath}`;
+}
+
+export function contentWatchIdFor(workspacePath: string): string {
+  return `content-${PORTAL_ID}-${workspacePath}`;
+}
+
+/**
+ * The desktop's ACP file-system bridge.
+ *
+ * The path rules a harness feels — relative-path resolution, `../` escapes,
+ * containment in the workspace, the 1-based line/limit window — are protocol
+ * decisions, not platform ones, so they come from core's
+ * `createAcpFileSystem` and are identical on both hosts. Before this, desktop
+ * passed `readWorkspaceTextFile`/`writeWorkspaceTextFile` straight to the ACP
+ * client: relative paths threw instead of resolving, and **containment was
+ * never checked at all** — `assertAbsoluteWorkspacePath` tests `isAbsolute`
+ * and nothing more, so an absolute path outside the workspace was written.
+ *
+ * What stays desktop-shaped is the bytes underneath, and that is the whole
+ * reason this is a wrapper rather than `createAcpFileSystem(platformAdapter.fs)`:
+ * the write has to go through `writeWorkspaceTextFile` to keep the
+ * rename redirect, the tracked-write echo suppression, the row update, and
+ * the editor adoption. Reads go raw, because the windowing that
+ * `readWorkspaceTextFile` applies is now the bridge's job — applying it in
+ * both places would slice twice.
+ */
+export function createDesktopAcpFileSystem(workspacePath: string) {
+  return createAcpFileSystem(
+    {
+      ...platformAdapter.fs,
+      writeFiles: async (files) => {
+        // The bridge writes one resolved file at a time; a throw from the
+        // desktop primitive is already an FsError and propagates as the
+        // bridge's own failures would.
+        for (const file of files) {
+          await writeWorkspaceTextFile(file.path, file.content);
+        }
+        return { succeeded: files.map((file) => file.path), failed: [] };
+      },
+    },
+    { workspacePath, path: pathutil },
+  );
 }
 
 function invalidateProjectSettingsIfChanged(
@@ -353,7 +409,7 @@ export interface WorkspaceMetadataWatcher {
 export function startWorkspaceMetadataWatcher(
   workspacePath: string,
 ): WorkspaceMetadataWatcher {
-  const metadataWatchId = `metadata-${workspacePath}`;
+  const metadataWatchId = metadataWatchIdFor(workspacePath);
   let isActive = true;
   let startFailed = false;
 
@@ -376,6 +432,17 @@ export function startWorkspaceMetadataWatcher(
     platformAdapter.fs
       .startWatchingMetadata([workspacePath], metadataWatchId, {
         ignore: IGNORE_RULES,
+      })
+      .then(() => {
+        // The start is not awaited by the caller, so a close can land while
+        // it is still in flight. Without this the watcher registers *after*
+        // stop() already tried to remove it: the JS handle is gone, nothing
+        // can ever stop it again, and it keeps walking the tree for the life
+        // of the process (on the browser adapter, a full recursive stat
+        // sweep every 5s). Re-issuing the stop is idempotent.
+        if (!isActive) {
+          void platformAdapter.fs.stopWatching(metadataWatchId).catch(() => {});
+        }
       })
       .catch((error) => {
         startFailed = true;
@@ -408,7 +475,7 @@ export function useContentWatchers(
   openFilePaths: string[],
 ): void {
   useEffect(() => {
-    const contentWatchId = `content-${workspacePath}`;
+    const contentWatchId = contentWatchIdFor(workspacePath);
     let eventCleanup: (() => void) | undefined;
     let isActive = true;
 
@@ -432,6 +499,13 @@ export function useContentWatchers(
             openFilePaths,
             contentWatchId,
           );
+          // The effect's cleanup can run while that start is in flight (a
+          // fast tab close, or StrictMode's double-invoke). Its stop would
+          // then find nothing and this registration would outlive it with no
+          // handle left to stop it — same leak as the metadata side.
+          if (!isActive) {
+            void platformAdapter.fs.stopWatching(contentWatchId).catch(() => {});
+          }
         }
       } catch (error) {
         console.error("Failed to setup watchers:", error);

@@ -105,6 +105,13 @@ jobs:
       - name: Build agent package
         run: npm run build -w @notefig/agent
 
+      # `lib/core.ts` re-exports @notefig/core, whose package `types` resolve
+      # to ./dist/index.d.ts. Same failure mode as shared above: without this
+      # the CLI's tsc cannot find the declarations and the release fails
+      # partway, after the version bump.
+      - name: Build core package
+        run: npm run build -w @notefig/core
+
       - name: Build CLI
         working-directory: packages/cli
         run: npm run build

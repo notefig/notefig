@@ -10,6 +10,15 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "lib": ["ES2020"],
+    // Stops tsc's automatic sweep of every @types/* hoisted to the monorepo
+    // root. Necessary but NOT sufficient: @types/node still reaches this
+    // program through `/// <reference types="node" />` in @types/ws, which
+    // arrives with @notefig/agent's source, and `types` does not suppress
+    // reference directives from files already in the program. So `lib` +
+    // `types` together still leave `process` and `import "fs"` compiling
+    // clean in here — the actual enforcement is the source scan in
+    // src/__tests__/host-neutrality.test.ts.
+    "types": [],
     "strict": true,
     "noEmit": true,
     "esModuleInterop": true,

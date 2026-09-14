@@ -22,7 +22,6 @@ import { WorkspaceErrorBoundary } from "@/components/workspace-error-boundary";
 import { EditorHarness } from "@/test-harness/editor-harness";
 import { ensureStartupHarnessDiscovery } from "@/agent/harness-discovery";
 import { ensureAgentTasksReconciled } from "@/agent/agent-collections";
-import { startWorkspaceWatcherSubscription } from "@/utils/workspace-watchers";
 import { PairDialog } from "@/components/tunnel/pair-dialog";
 import {
   autoConnectStoredPairing,
@@ -50,12 +49,6 @@ export const App = () => {
   useEffect(() => {
     ensureStartupHarnessDiscovery();
   }, []);
-
-  // Mirror the open-workspace set into live metadata watchers. Portal-side
-  // by design (MET-183): the registry says what is open, this says what is
-  // watched. Mounted for the app's lifetime, not a route's, so a
-  // backgrounded workspace keeps ingesting file events.
-  useEffect(() => startWorkspaceWatcherSubscription(), []);
 
   // Bring persisted agent tasks in line with this session: rows without a live
   // runtime demote to "restored", rows with no session at all are dropped.
