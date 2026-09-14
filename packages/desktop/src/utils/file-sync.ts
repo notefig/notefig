@@ -16,17 +16,12 @@ import {
   projectSettingsQueryKey,
 } from "./project-settings";
 import { IGNORE_RULES, isIgnoredPath } from "./ignore";
-import { calculateContentHash } from "./hash";
+import { getServiceHost } from "@notefig/core";
 import { getDocumentSync } from "./markdown-conversion";
-// Conscious utils → components import (direct-imports-over-injection house
-// rule). This edge participates in a long pre-existing cycle back through
-// the editor/blob component graph → agent-service → acp-client → file-sync
-// (suppressed at acp-client's import; safe — all edges are function-body
-// references). Breaking it for real means relocating the editor registry to
-// a leaf module rather than adding a registration seam.
-import { getMarkdownEditor } from "@/components/editor/editor-store";
-import { adoptExternalContent } from "@/components/editor/adopt-external-content";
-import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
+// The utils → components edge that used to be justified here is gone: the
+// editor is reached through the host's editor port (MET-193), which also
+// breaks the cycle that ran editor/blob components → agent-service →
+// acp-client → file-sync.
 import { platformAdapter } from "@/adapters";
 import { path as pathutil, relativeTreePath } from "./path";
 import { activeRenameTarget } from "@/entities/tabs";
@@ -106,37 +101,23 @@ export async function writeWorkspaceTextFile(
     // to the stale row.
     updateLoadedContentRow(target, content);
 
-    const editor = getMarkdownEditor(target);
-    if (editor && !editor.isDestroyed) {
-      const sync = getDocumentSync(target);
-      const doc = await sync.prepareAdoption(content);
-      if (doc && !editor.isDestroyed) {
-        const adoption = adoptExternalContent(editor, doc);
-        if (adoption.reinsertedWidgets > 0) {
-          // Re-asserted widget markers exist only in the editor at this
-          // point. Repair the file INSIDE this tracked write — a
-          // fire-and-forget save could still be in flight when the next
-          // same-path agent write arrives, which would skip that write's
-          // adoption (sync busy) and then clobber its newer content.
-          const repaired = getEditorMarkdown(editor);
-          const repair = await platformAdapter.fs.writeFiles([
-            { path: target, content: repaired },
-          ]);
-          const repairFailure = repair.failed[0];
-          if (repairFailure) {
-            throw new FsError(
-              repairFailure.type,
-              repairFailure.path,
-              repairFailure.message,
-            );
-          }
-          updateLoadedContentRow(target, repaired);
-          sync.commitAdoption(repaired, calculateContentHash(repaired));
-        } else {
-          sync.commitAdoption(content, calculateContentHash(content));
-        }
+    // Everything editor-shaped happens behind the port. The repair write it
+    // may ask for stays inside this tracked write, which is the whole reason
+    // `persist` is a callback rather than a returned value.
+    await getServiceHost().editor.adoptWrite(target, content, async (repaired) => {
+      const repair = await platformAdapter.fs.writeFiles([
+        { path: target, content: repaired },
+      ]);
+      const repairFailure = repair.failed[0];
+      if (repairFailure) {
+        throw new FsError(
+          repairFailure.type,
+          repairFailure.path,
+          repairFailure.message,
+        );
       }
-    }
+      updateLoadedContentRow(target, repaired);
+    });
   });
 }
 

@@ -84,6 +84,40 @@ export interface EditorContextPort {
 
   /** Blob types available for authoring. Null when nothing is attached. */
   blobTypes(): BlobTypeDescriptor[] | null;
+
+  /**
+   * Push freshly written content into a live editor for `absolutePath`, if
+   * there is one. A no-op when nothing is open — the bytes are already on
+   * disk, and this is only about the view catching up.
+   *
+   * ## Why markdown in and markdown out
+   *
+   * The exchange is deliberately strings. Adoption is a ProseMirror
+   * operation, but a document is the host's representation, not the core's,
+   * and core does not own markdown↔PM conversion (decided 2026-09-13). Were
+   * this to take or return a `PMNode`, the whole editor schema and markdown
+   * codec would follow it into this package through the type — which is the
+   * door the rest of the port was shaped to close.
+   *
+   * ## Why `persist` is a callback rather than a return value
+   *
+   * Adopting content that contains prompt widgets can re-assert widget
+   * markers that exist only in the editor, and the file then has to be
+   * repaired to match. That repair is a second write, and it must happen
+   * *inside* the caller's tracked write: a fire-and-forget save can still be
+   * in flight when the next same-path write arrives, which would skip that
+   * write's adoption and then clobber its newer content.
+   *
+   * So the implementation calls `persist` with the repaired markdown and
+   * waits for it, and only then settles its own sync state — the ordering
+   * that keeps disk, row, and editor from disagreeing if the write fails.
+   * A return value could not express "persist this, then let me finish."
+   */
+  adoptWrite(
+    absolutePath: string,
+    content: string,
+    persist: (repaired: string) => Promise<void>,
+  ): Promise<void>;
 }
 
 /**
@@ -99,4 +133,5 @@ export const detachedEditorContext: EditorContextPort = {
   documentContext: async () => null,
   readRange: async () => null,
   blobTypes: () => null,
+  adoptWrite: async () => undefined,
 };

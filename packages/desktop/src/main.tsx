@@ -16,12 +16,18 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@notefig/ui/tooltip";
 import { queryClient } from "@/entities/query-client";
 import { App } from "./App";
+import { configureCore } from "@notefig/core";
+import { desktopHost } from "@/adapters/desktop-host";
 
 import "./styles.css";
 
 if (typeof globalThis.Buffer === "undefined") {
   globalThis.Buffer = Buffer;
 }
+
+// Before render: the core is reached from module scope by collections and
+// registries, so a host has to exist before any of them are touched.
+configureCore(desktopHost);
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
