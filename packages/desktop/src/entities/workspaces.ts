@@ -35,17 +35,6 @@ export interface OpenWorkspaceRow {
   /** Normalized native spelling, safe for display and navigation. */
   path: string;
   openedAt: number;
-  /**
-   * Bumped whenever this workspace's view-freshness runtime should be
-   * re-checked: re-entry into a backgrounded workspace, and recovery after
-   * fs access is restored. Both are moments when a watcher whose start
-   * failed can finally arm, and neither changes membership — so without an
-   * epoch a membership-only subscription would never hear about them.
-   *
-   * It is deliberately a row field rather than a call: watching is the
-   * portal's business, and the registry's business is to say what is open.
-   */
-  watchEpoch: number;
 }
 
 /** Reactive open set — the workspace switcher's data source. */
@@ -86,24 +75,15 @@ export function openWorkspace(workspacePath: string): void {
     // Re-entry into a backgrounded workspace: the watcher kept the
     // collection current, but a listing refresh on entry is what the
     // route always did — keep it (cheap re-stat, catches watcher gaps).
-    // The epoch bump is the other half of what re-entry used to do
-    // directly: it re-arms a watcher whose start failed because the
-    // workspace was unreadable when first opened.
-    openWorkspacesCollection.update(key, (row) => {
-      row.watchEpoch += 1;
-    });
+    // Re-arming a watcher that failed to start is the portal's other half
+    // of re-entry; the route loader calls `ensureWatching` for that.
     void refreshDirectoryMetadata(native);
     return;
   }
 
   getOrCreateWorkspaceCollections(native);
   void refreshDirectoryMetadata(native);
-  openWorkspacesCollection.insert({
-    key,
-    path: native,
-    openedAt: Date.now(),
-    watchEpoch: 0,
-  });
+  openWorkspacesCollection.insert({ key, path: native, openedAt: Date.now() });
 }
 
 export function isWorkspaceOpen(workspacePath: string): boolean {
@@ -156,15 +136,9 @@ export function reloadWorkspaceFiles(workspacePath: string): void {
   getOrCreateWorkspaceCollections(native);
   void refreshDirectoryMetadata(native);
   // Access was just restored — if the watcher's start failed while the
-  // workspace was unreadable, this is the moment it can finally arm. Said
-  // as data, so the portal hears it through the same channel as everything
-  // else about this workspace.
-  const key = workspaceKey(native);
-  if (openWorkspacesCollection.has(key)) {
-    openWorkspacesCollection.update(key, (row) => {
-      row.watchEpoch += 1;
-    });
-  }
+  // workspace was unreadable, this is the moment it can finally arm. The
+  // error boundary calls `ensureWatching` alongside this, for the same
+  // reason the loader does: watching is the portal's business.
 }
 
 /** Close every open workspace (close-all affordances and tests; process

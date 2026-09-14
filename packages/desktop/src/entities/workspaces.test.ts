@@ -46,11 +46,9 @@ const history = vi.hoisted(() => ({
   checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("@/utils/history-service", () => history);
-// No file-sync mock: watcher lifetime left the registry in MET-183 and is
-// now driven by a subscription to the collection below. What the registry
-// owes the portal is the `watchEpoch` signal, which these tests assert
-// directly; the watchers themselves are covered by
-// utils/__tests__/workspace-watchers.test.ts.
+// No file-sync mock: watcher lifetime left the registry in MET-183. The
+// registry publishes membership and nothing else; arming, stopping and
+// re-arming are covered by utils/__tests__/workspace-watchers.test.ts.
 
 import {
   openWorkspace,
@@ -94,21 +92,15 @@ beforeEach(async () => {
 });
 
 describe("openWorkspace", () => {
-  it("seeds collections, refreshes, inserts the row at epoch 0", () => {
+  it("seeds collections, refreshes, inserts the row", () => {
     openWorkspace("/ws");
 
     expect(files.getOrCreateWorkspaceCollections).toHaveBeenCalledWith("/ws");
     expect(files.refreshDirectoryMetadata).toHaveBeenCalledWith("/ws");
     expect(isWorkspaceOpen("/ws")).toBe(true);
     expect([...openWorkspacesCollection.values()]).toMatchObject([
-      { path: "/ws", watchEpoch: 0 },
+      { path: "/ws" },
     ]);
-  });
-
-  it("re-entry bumps the epoch — the portal's cue to re-arm a failed watcher", () => {
-    openWorkspace("/ws");
-    openWorkspace("/ws");
-    expect(openWorkspacesCollection.get("/ws")?.watchEpoch).toBe(1);
   });
 
   it("is idempotent: re-entry refreshes the listing but never re-seeds", () => {
@@ -120,7 +112,6 @@ describe("openWorkspace", () => {
     expect(files.getOrCreateWorkspaceCollections).toHaveBeenCalledTimes(1);
     expect(files.refreshDirectoryMetadata).toHaveBeenCalledTimes(3);
     expect(openWorkspacesCollection.size).toBe(1);
-    expect(openWorkspacesCollection.get("/ws")?.watchEpoch).toBe(2);
   });
 
   it("keeps independent entries per workspace", () => {

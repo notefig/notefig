@@ -18,9 +18,11 @@
  *     membership, never off what is currently rendered.
  *  2. **A watcher whose start failed re-arms.** A workspace that was
  *     unreadable when first opened gets another chance on re-entry and on
- *     access-restored recovery. Neither of those changes membership, which
- *     is why the row carries `watchEpoch`: the retry arrives as an update
- *     rather than as a call the registry would have had to make.
+ *     access-restored recovery. Neither changes membership, so neither
+ *     reaches the subscription — they arrive as `ensureWatching` calls from
+ *     the two portal-side places that already know those moments happened
+ *     (the route loader and the error boundary). That keeps the registry
+ *     publishing pure membership, which is the thing core is going to own.
  */
 import {
   openWorkspacesCollection,
@@ -30,6 +32,7 @@ import {
   startWorkspaceMetadataWatcher,
   type WorkspaceMetadataWatcher,
 } from "@/utils/file-sync";
+import { workspaceKey } from "@/utils/path";
 
 const watchers = new Map<string, WorkspaceMetadataWatcher>();
 
@@ -41,6 +44,20 @@ function arm(row: OpenWorkspaceRow): void {
 function disarm(key: string): void {
   watchers.get(key)?.stop();
   watchers.delete(key);
+}
+
+/**
+ * Give a workspace's watcher another chance to arm.
+ *
+ * A watcher whose OS-level start failed (the workspace was unreadable when
+ * it was opened) parks itself; `ensureStarted` is a no-op on a healthy one.
+ * The two moments worth retrying — re-entering a backgrounded workspace,
+ * and recovering after fs access is restored — both originate in the
+ * portal, so they call this directly rather than round-tripping a signal
+ * through the registry.
+ */
+export function ensureWatching(workspacePath: string): void {
+  watchers.get(workspaceKey(workspacePath))?.ensureStarted();
 }
 
 /**
@@ -62,12 +79,10 @@ export function startWorkspaceWatcherSubscription(): () => void {
           arm(change.value);
           break;
         case "update":
-          // The epoch is the retry signal. `ensureStarted` is a no-op on a
-          // watcher that is already running, so an unrelated row edit
-          // costs nothing — but arm() first, because a workspace whose
-          // very first start threw has no watcher to ensure.
+          // Membership is unchanged, so there is nothing to arm or stop —
+          // but a row can be re-inserted under the same key by a
+          // close/reopen race, and arm() is idempotent.
           arm(change.value);
-          watchers.get(key)?.ensureStarted();
           break;
         case "delete":
           disarm(key);

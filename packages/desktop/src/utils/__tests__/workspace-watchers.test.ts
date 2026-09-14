@@ -3,8 +3,8 @@
  *
  * These assertions used to live in entities/workspaces.test.ts, where the
  * registry started watchers directly. The registry no longer knows watchers
- * exist — it publishes membership and a `watchEpoch` — so the coverage moves
- * here, to the subscription that now owns them. The two behaviors MET-177
+ * exist — it publishes membership, nothing more — so the coverage moves
+ * here, to the module that now owns them. The two behaviors MET-177
  * established are the ones most at risk from the inversion and are asserted
  * explicitly below.
  */
@@ -31,10 +31,13 @@ import {
   openWorkspacesCollection,
   type OpenWorkspaceRow,
 } from "@/entities/workspaces";
-import { startWorkspaceWatcherSubscription } from "../workspace-watchers";
+import {
+  ensureWatching,
+  startWorkspaceWatcherSubscription,
+} from "../workspace-watchers";
 
-function row(key: string, watchEpoch = 0): OpenWorkspaceRow {
-  return { key, path: key, openedAt: 1, watchEpoch };
+function row(key: string): OpenWorkspaceRow {
+  return { key, path: key, openedAt: 1 };
 }
 
 let stopSubscription: (() => void) | undefined;
@@ -94,20 +97,25 @@ describe("startWorkspaceWatcherSubscription", () => {
     expect(watchers.stops[0]).not.toHaveBeenCalled();
   });
 
-  it("re-arms on an epoch bump — the failed-start retry (MET-177)", () => {
+  it("re-arms through ensureWatching — the failed-start retry (MET-177)", () => {
     stopSubscription = startWorkspaceWatcherSubscription();
     openWorkspacesCollection.insert(row("/ws"));
 
-    openWorkspacesCollection.update("/ws", (draft) => {
-      draft.watchEpoch += 1;
-    });
+    ensureWatching("/ws");
 
     expect(watchers.ensures[0]).toHaveBeenCalledTimes(1);
     // Re-arming must not stack a second watcher on the same workspace.
     expect(watchers.started).toEqual(["/ws"]);
   });
 
-  it("does not double-arm when the same workspace is inserted twice", () => {
+  it("ensureWatching is a no-op for a workspace that is not open", () => {
+    stopSubscription = startWorkspaceWatcherSubscription();
+
+    expect(() => ensureWatching("/never-opened")).not.toThrow();
+    expect(watchers.started).toEqual([]);
+  });
+
+  it("does not double-arm when the row is updated in place", () => {
     stopSubscription = startWorkspaceWatcherSubscription();
     openWorkspacesCollection.insert(row("/ws"));
     openWorkspacesCollection.update("/ws", (draft) => {
