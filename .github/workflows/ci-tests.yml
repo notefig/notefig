@@ -36,6 +36,12 @@ jobs:
       - name: Build agent package
         run: npm run build -w packages/agent
 
+      # Same reason as the agent package above: @notefig/core's exports point
+      # at ESM TS source with types coming from dist/, so the CLI's tsc has
+      # nothing to read until core has emitted its declarations.
+      - name: Build core package
+        run: npm run build -w packages/core
+
       - name: Build CLI
         run: npm run build -w packages/cli
 
@@ -68,6 +74,12 @@ jobs:
       # so its dist must exist before the CLI compiles.
       - name: Build agent package
         run: npm run build -w packages/agent
+
+      # Same reason as the agent package above: @notefig/core's exports point
+      # at ESM TS source with types coming from dist/, so the CLI's tsc has
+      # nothing to read until core has emitted its declarations.
+      - name: Build core package
+        run: npm run build -w packages/core
 
       - name: Build CLI
         run: npm run build -w packages/cli

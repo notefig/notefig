@@ -13,8 +13,8 @@ import {
   type EditorContextPort,
 } from "../editor-context-port";
 
-/** Every method on the port, with arguments that are valid but unanswerable
- *  when nothing is attached. */
+/** The read projections: arguments valid, but unanswerable when nothing is
+ *  attached, so each declines with null. */
 const CALLS: Array<{
   name: keyof EditorContextPort;
   invoke: (port: EditorContextPort) => unknown;
@@ -24,6 +24,11 @@ const CALLS: Array<{
   { name: "readRange", invoke: (p) => p.readRange("/ws/a.md", 0, 10) },
   { name: "blobTypes", invoke: (p) => p.blobTypes() },
 ];
+
+/** Members that are not read projections and therefore do not answer with
+ *  null. Listed separately so the coverage guard below still forces a
+ *  decision for each one, rather than letting it be skipped. */
+const NON_PROJECTIONS: Array<keyof EditorContextPort> = ["adoptWrite"];
 
 describe("detachedEditorContext", () => {
   it("reports itself as unattached", () => {
@@ -36,7 +41,24 @@ describe("detachedEditorContext", () => {
     const declared = Object.keys(detachedEditorContext).filter(
       (key) => key !== "attached",
     );
-    expect(declared.sort()).toEqual(CALLS.map((c) => c.name).sort());
+    const accountedFor = [
+      ...CALLS.map((c) => c.name),
+      ...NON_PROJECTIONS,
+    ];
+    expect(declared.sort()).toEqual(accountedFor.sort());
+  });
+
+  it("adopts nothing, and never asks the caller to persist", async () => {
+    // The write member's headless answer is "do nothing" rather than "return
+    // null" — but silence is not enough: invoking `persist` with no editor
+    // would make a headless host write a file it never adopted.
+    let persisted: string | undefined;
+    await expect(
+      detachedEditorContext.adoptWrite("/ws/a.md", "hello", async (repaired) => {
+        persisted = repaired;
+      }),
+    ).resolves.toBeUndefined();
+    expect(persisted).toBeUndefined();
   });
 
   it.each(CALLS.map((c) => [c.name, c] as const))(
