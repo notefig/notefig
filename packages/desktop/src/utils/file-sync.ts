@@ -4,7 +4,6 @@ import type {
   ContentChangeEvent,
 } from "@/adapters/platform-adapter.interface";
 import { FsError } from "@/adapters/platform-adapter.interface";
-import { sliceTextWindow } from "@notefig/agent";
 import {
   getOrCreateWorkspaceCollections,
   updateLoadedContentRow,
@@ -16,7 +15,7 @@ import {
   projectSettingsQueryKey,
 } from "./project-settings";
 import { IGNORE_RULES, isIgnoredPath } from "./ignore";
-import { getServiceHost } from "@notefig/core";
+import { getServiceHost, sliceTextWindow } from "@notefig/core";
 import { getDocumentSync } from "./markdown-conversion";
 // The utils → components edge that used to be justified here is gone: the
 // editor is reached through the host's editor port (MET-193), which also

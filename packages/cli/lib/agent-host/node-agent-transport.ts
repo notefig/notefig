@@ -26,6 +26,7 @@ import {
 } from '../agent';
 import { resolveHarnessSpawn, type HarnessDefinition } from '../shared';
 import { LineBuffer } from '../line-buffer';
+import { DETACH_FOR_TREE_KILL, killProcessTree } from '../process-tree';
 import { TransportListeners } from './transport-listeners';
 
 /** How long a harness gets to exit on SIGTERM before the group is SIGKILLed. */
@@ -39,39 +40,6 @@ export type NodeAgentTransportSpec = {
   extraEnv?: Record<string, string>;
 };
 
-/**
- * Kill a harness's whole process tree, not just the process we spawned.
- *
- * The built-in harnesses are npx wrappers, so the direct child is a launcher
- * and the real adapter is a grandchild. Killing only the wrapper leaves the
- * adapter reparented to init and running — verified on the desktop side
- * (agent_proc.rs:112-118), where an orphaned adapter survived stdin EOF for
- * minutes. Unix: `detached: true` at spawn makes the child a process-group
- * leader whose pgid is its pid, so a negative-pid signal reaches the group.
- * Windows has no process groups in this sense; `taskkill /T` walks the tree
- * instead (the Rust host uses a Job Object, which Node cannot create).
- */
-function killProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
-  const pid = child.pid;
-  if (pid === undefined) return;
-  if (process.platform === 'win32') {
-    // /T kills the tree, /F forces it. SIGTERM has no Windows analogue, so
-    // the graceful attempt is skipped there and the tree is taken down once.
-    if (signal === 'SIGKILL') {
-      spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
-        stdio: 'ignore',
-      }).on('error', () => {
-        /* best effort: the child may already be gone */
-      });
-    }
-    return;
-  }
-  try {
-    process.kill(-pid, signal);
-  } catch {
-    // ESRCH: the group is already gone. Nothing to do.
-  }
-}
 
 export class NodeAgentTransport implements AgentTransport {
   readonly locus = 'local' as const;
@@ -111,7 +79,7 @@ export class NodeAgentTransport implements AgentTransport {
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
         // Own process group, so teardown reaches the whole tree.
-        detached: process.platform !== 'win32',
+        detached: DETACH_FOR_TREE_KILL,
       });
     } catch (error: any) {
       throw new AgentTransportError(

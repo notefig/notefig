@@ -22,8 +22,12 @@ import { build } from "esbuild";
 const reuseSiblingBundles = {
   name: "reuse-sibling-bundles",
   setup(build) {
-    build.onResolve({ filter: /^@notefig\/(agent|shared)$/ }, (args) => ({
-      path: `./${args.path.slice("@notefig/".length)}.js`,
+    // Subpaths included: @notefig/agent imports "@notefig/shared/agent", and
+    // an exact-match filter let that one slip through and inline a second
+    // copy of shared into dist/lib/agent.js. `shared/src/index.ts` re-exports
+    // every subpath, so dist/lib/shared.js already carries them.
+    build.onResolve({ filter: /^@notefig\/(agent|shared)(\/|$)/ }, (args) => ({
+      path: `./${args.path.slice("@notefig/".length).split("/")[0]}.js`,
       external: true,
     }));
   },
@@ -67,6 +71,11 @@ await build({
   entryPoints: [src("../agent/src/index.ts")],
   outfile: "dist/lib/agent.js",
   external: ["tweetnacl"],
+  // Without this the bundle inlined its own copy of @notefig/shared beside
+  // the dist/lib/shared.js emitted above — two copies of BlobParseError,
+  // BlobPatchError and FrameCipher in one process. Nothing crosses that
+  // boundary today, which is precisely why it would be found late.
+  plugins: [reuseSiblingBundles],
 });
 
 // @notefig/core — the host-neutral orchestration package. Vendored for the

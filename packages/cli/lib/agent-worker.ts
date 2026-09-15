@@ -45,6 +45,7 @@ import {
 } from './shared';
 import type { Logger } from './utils/logger.util';
 import { LineBuffer } from './line-buffer';
+import { DETACH_FOR_TREE_KILL, killProcessTree } from './process-tree';
 
 const KILL_GRACE_MS = 5_000;
 
@@ -371,6 +372,10 @@ export class AgentWorker {
         cwd: spawnCwd,
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
+        // Own process group, so stopTask reaches the whole tree. A harness
+        // command is usually an `npx` wrapper around the real adapter;
+        // without this, killing the wrapper orphaned the adapter.
+        detached: DETACH_FOR_TREE_KILL,
       });
     } catch (error: any) {
       this.sendCtl({ op: 'task-spawn-error', taskId, message: String(error?.message ?? error) });
@@ -411,12 +416,28 @@ export class AgentWorker {
     const child = this.tasks.get(taskId);
     if (!child) return;
     await new Promise<void>((resolve) => {
-      const kill = setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS);
-      child.once('exit', () => {
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
         clearTimeout(kill);
         resolve();
-      });
-      child.kill('SIGTERM');
+      };
+      const kill = setTimeout(() => {
+        killProcessTree(child, 'SIGKILL');
+        // SIGKILL is a request to the kernel, not a guarantee of reaping.
+        // teardownPeer awaits every stopTask, and the agent command awaits
+        // that from its SIGINT handler — so an unreaped child would hang
+        // shutdown rather than end it.
+        settle();
+      }, KILL_GRACE_MS);
+      child.once('exit', settle);
+      child.once('close', settle);
+      killProcessTree(child, 'SIGTERM');
+      if (process.platform === 'win32') {
+        // No SIGTERM equivalent — go straight to the forced tree kill.
+        killProcessTree(child, 'SIGKILL');
+      }
     });
   }
 

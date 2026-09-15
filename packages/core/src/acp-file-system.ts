@@ -19,10 +19,31 @@
  * not in a hook here: it has to happen within the desktop's own tracked
  * write, which an "after the bytes landed" callback cannot express.
  */
-import { sliceTextWindow } from "@notefig/agent";
 import type { PathFlavor } from "@notefig/shared/utils";
 import { FsError, type CoreFileSystem } from "./fs";
 import { resolveWorkspacePath } from "./paths";
+
+/**
+ * Apply ACP's `line`/`limit` read window to file content. Lines are 1-based
+ * and `limit` counts lines, not bytes.
+ *
+ * Protocol semantics, so it belongs with the other protocol decisions in this
+ * file — a harness must see the same slice whether the client runs in the
+ * desktop webview or a headless Node process. It lived in `@notefig/agent`,
+ * which made this six-line pure function the *only* value import core made
+ * from another package, and so the reason `@notefig/agent` was a runtime
+ * dependency of `@notefig/core` at all.
+ */
+export function sliceTextWindow(
+  content: string,
+  options?: { line?: number; limit?: number },
+): string {
+  if (!options?.line && !options?.limit) return content;
+  const lines = content.split("\n");
+  const start = Math.max(0, (options.line ?? 1) - 1);
+  const end = options.limit ? start + options.limit : lines.length;
+  return lines.slice(start, end).join("\n");
+}
 
 export type AcpFileSystemBridge = {
   readTextFile(
