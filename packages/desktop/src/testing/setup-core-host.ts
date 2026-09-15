@@ -50,11 +50,15 @@ const testHost: ServiceHost = {
   translate: (key) => key,
   appDirName: ".notefig",
   editor: {
-    // Mirrors `desktopEditorContext` exactly: real write half, read
-    // projections still detached until the read cut lands. `attached` stays
-    // false because it describes the reads, and claiming otherwise here
-    // would make the test host disagree with the host it stands in for.
+    // Mirrors `desktopEditorContext`: real write half delegating to the real
+    // adapter, read projections still detached until the read cut lands, and
+    // `attached` true because this stands in for a host that has an editor.
+    // Hand-mirroring is the weak point — when the read cut implements the
+    // four projections on the real adapter, this object keeps answering null
+    // and every test of those tools passes vacuously. Delegate them here in
+    // the same change that implements them.
     ...detachedEditorContext,
+    attached: true,
     async adoptWrite(absolutePath, content, persist) {
       const { desktopEditorContext } = await import(
         "@/adapters/editor-context"

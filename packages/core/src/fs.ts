@@ -144,19 +144,15 @@ export interface CoreFileSystem {
     paths: string[],
   ): Promise<{ path: string; exists: boolean; type?: "file" | "directory" }[]>;
 
-  /**
-   * Start or update watching individual files for content changes. Pass the
-   * complete list each time — the implementation reconciles.
-   */
-  startWatchingContent(paths: string[], watchId: string): Promise<void>;
-
-  /** Stop a watch session. */
-  stopWatching(watchId: string): Promise<void>;
-
-  /**
-   * Subscribe to watcher events for every active session. Events are not
-   * scoped per watchId — callers filter by workspace themselves.
-   * @returns cleanup function
-   */
-  onFsEvent(listener: FsChangeListener): () => void;
+  // Deliberately no watcher members. They were here in the first draft and
+  // failed the inventory this surface claims to come from: no module in
+  // `packages/core` calls them, the desktop's callers are portal-side by
+  // design (`useContentWatchers` is a React hook, `workspace-watchers.ts`
+  // names itself the portal), and the headless host cannot implement them at
+  // all — it had to throw, which is a third degradation style the host
+  // contract explicitly rules out. The asymmetry gave it away: the surface
+  // declared `startWatchingContent` but not the `startWatchingMetadata` that
+  // file-sync actually calls, so `stopWatching` stopped watches it could not
+  // start. Watching reaches the platform through the desktop's full
+  // `FileSystemSurface`, which is a superset of this one.
 }

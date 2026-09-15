@@ -44,41 +44,9 @@ import {
   type TunnelErrorCode,
 } from './shared';
 import type { Logger } from './utils/logger.util';
+import { LineBuffer } from './line-buffer';
 
 const KILL_GRACE_MS = 5_000;
-
-// ========================================================================
-// Newline framing for child stdio and loopback sockets
-// ========================================================================
-
-/**
- * Splits a byte stream into lines, delivered as one *batch* per chunk.
- *
- * Batching is a tunnel-side economy (unrelated to the desktop's pull streams
- * in src-tauri/src/line_stream.rs — WebSocket frames don't have the desktop's
- * eval-path hazards): a streaming agent emits many lines per stdout chunk, and sending one tunnel
- * frame each costs one encryption pass and one WebSocket frame apiece. Since a
- * chunk's lines are already in hand, coalescing them adds no latency and needs
- * no timer — the batch is simply whatever the OS handed us. Deliberately no
- * cross-chunk buffering, so nothing ever waits on a future read.
- */
-class LineBuffer {
-  private tail = '';
-  constructor(private readonly onLines: (lines: string[]) => void) {}
-  push(chunk: Buffer | string): void {
-    const pieces = (this.tail + chunk.toString()).split('\n');
-    this.tail = pieces.pop() ?? '';
-    const lines = pieces.filter((line) => line.length > 0);
-    if (lines.length > 0) this.onLines(lines);
-  }
-  flush(): void {
-    if (this.tail.length > 0) {
-      const line = this.tail;
-      this.tail = '';
-      this.onLines([line]);
-    }
-  }
-}
 
 // ========================================================================
 // Harness discovery — only ever runs shared-hardcoded probe commands

@@ -11,9 +11,16 @@
  * (`openFiles`, `documentContext`, `readRange`, `blobTypes`) still answer
  * from `detachedEditorContext` because their real implementations live in
  * `agent/widget-context-resource.ts`, which reaches the editor store
- * directly and moves in a later cut. Spreading the detached defaults is
- * deliberate: it keeps the object honest about what it can actually do,
- * instead of claiming `attached: true` and returning nulls.
+ * directly and moves in a later cut.
+ *
+ * `attached` is nevertheless true, and the spread's `false` is overridden
+ * below. It describes whether an editor backs this host at all, and on the
+ * desktop one does — `adoptWrite` reaches straight into it. Reporting false
+ * here would mean the one host with a live editor declares it has none, so
+ * the first caller to write the documented guard
+ * (`if (!attached) return "no editor attached"`) would skip a real editor.
+ * A per-call null is how an individual projection declines; the flag is not
+ * a stand-in for it.
  */
 import {
   detachedEditorContext,
@@ -27,6 +34,7 @@ import { calculateContentHash } from "@/utils/hash";
 
 export const desktopEditorContext: EditorContextPort = {
   ...detachedEditorContext,
+  attached: true,
 
   async adoptWrite(absolutePath, content, persist) {
     const editor = getMarkdownEditor(absolutePath);

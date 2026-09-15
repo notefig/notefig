@@ -21,7 +21,6 @@ import {
   type FileSystemError,
   type FileSystemErrorType,
   type FileSystemMetadata,
-  type FsChangeListener,
 } from '../core';
 
 /** Map a Node errno to the shared error vocabulary. */
@@ -76,15 +75,6 @@ async function batch<TInput, TOutput>(
     }
   }
   return { succeeded, failed };
-}
-
-function unsupported(member: string): never {
-  throw new FsError(
-    'unknown',
-    member,
-    `${member} is not implemented by the Node file system: a headless host ` +
-      `does not watch files. See MET-183.`,
-  );
 }
 
 export function createNodeFileSystem(): CoreFileSystem {
@@ -146,8 +136,5 @@ export function createNodeFileSystem(): CoreFileSystem {
       );
     },
 
-    startWatchingContent: () => unsupported('startWatchingContent'),
-    stopWatching: () => unsupported('stopWatching'),
-    onFsEvent: (_listener: FsChangeListener) => unsupported('onFsEvent'),
   };
 }

@@ -35,9 +35,6 @@ function fakeFs(files: Record<string, string> = {}): CoreFileSystem & {
     },
     getMetadata: async () => ({ succeeded: [], failed: [] }),
     exists: async (paths) => paths.map((p) => ({ path: p, exists: p in files })),
-    startWatchingContent: async () => {},
-    stopWatching: async () => {},
-    onFsEvent: () => () => {},
   };
 }
 

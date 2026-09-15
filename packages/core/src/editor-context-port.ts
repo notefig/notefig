@@ -53,13 +53,20 @@ export type BlobTypeDescriptor = {
 
 export interface EditorContextPort {
   /**
-   * Whether a real editor backs this port. When false every method below
-   * returns null, and callers report that as a declared outcome rather than
-   * an error — a headless run legitimately has nothing open.
+   * Whether a real editor backs this port at all.
+   *
+   * False means there is no editor in this host — a headless run — so every
+   * method below returns null and callers report that as a declared outcome
+   * rather than an error. True does NOT promise any individual call answers:
+   * a projection still returns null when the specific file is not open, and
+   * the four read projections are unimplemented on every host until the read
+   * cut lands (they return null there too). Ask the method, not the flag,
+   * whether you got an answer; the flag only tells you whether asking is
+   * meaningful.
    */
   readonly attached: boolean;
 
-  /** What the user has open. Null when nothing is attached. */
+  /** What the user has open. Null when it cannot be answered. */
   openFiles(workspacePath: string): WorkspaceEditorSnapshot | null;
 
   /**

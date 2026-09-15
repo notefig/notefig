@@ -25,7 +25,7 @@ import {
   type Unsubscribe,
 } from '../agent';
 import { resolveHarnessSpawn, type HarnessDefinition } from '../shared';
-import { LineBuffer } from './line-buffer';
+import { LineBuffer } from '../line-buffer';
 import { TransportListeners } from './transport-listeners';
 
 /** How long a harness gets to exit on SIGTERM before the group is SIGKILLed. */
@@ -192,15 +192,32 @@ export class NodeAgentTransport implements AgentTransport {
     if (child.exitCode !== null || child.signalCode !== null) return;
 
     await new Promise<void>((resolve) => {
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(forceKill);
+        resolve();
+      };
       const forceKill = setTimeout(() => {
         killProcessTree(child, 'SIGKILL');
+        // SIGKILL is a request to the kernel, not a guarantee of reaping: a
+        // process wedged in uninterruptible sleep never fires 'exit'. Nothing
+        // else settles this promise, and `runHeadlessTurn` awaits close() in
+        // its `finally`, so that turn would park forever rather than report.
+        // Resolving here bounds teardown at the grace window.
+        settle();
       }, KILL_GRACE_MS);
       // Unref so a lingering grace timer can't hold the CLI's event loop open.
       forceKill.unref?.();
-      child.once('exit', () => {
-        clearTimeout(forceKill);
-        resolve();
-      });
+      // 'exit' is the normal path. 'close' is the belt-and-braces one: it is
+      // the event Node guarantees for a child that never spawned, where
+      // 'exit' is never emitted at all. That case does not reach here today —
+      // an ENOENT spawn sets exitCode to -2, so the guard above returns early
+      // — but the early return depends on a libuv detail, and listening for
+      // the terminal event costs nothing.
+      child.once('exit', settle);
+      child.once('close', settle);
       killProcessTree(child, 'SIGTERM');
       if (process.platform === 'win32') {
         // No SIGTERM equivalent — go straight to the forced tree kill.
