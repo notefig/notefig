@@ -53,16 +53,17 @@ function TreeChevron({ className }: { className?: string }) {
   );
 }
 
-/** One backgrounded workspace in the switcher: name, running-task badge,
- *  and the explicit close affordance (MET-177). */
+/** One backgrounded workspace in the switcher: name plus the explicit close
+ *  affordance (MET-177). Deliberately shows nothing about what is running
+ *  inside it — a live-agent indicator here was cut as premature; the only
+ *  place running work surfaces is the confirmation on close, where it
+ *  changes what the user is about to do. */
 function OpenWorkspaceItem({
   path,
-  runningCount,
   onOpen,
   onClose,
 }: {
   path: string;
-  runningCount: number;
   onOpen: () => void;
   onClose: () => void;
 }) {
@@ -71,15 +72,6 @@ function OpenWorkspaceItem({
     <DropdownMenuItem className="group py-1 text-xs" onSelect={onOpen}>
       <span className="truncate">{deriveProjectName(path)}</span>
       <span className="ml-auto flex shrink-0 items-center gap-1.5 ps-2">
-        {runningCount > 0 && (
-          <span
-            className="flex items-center gap-1 text-[10px] text-muted-foreground"
-            aria-label={`${runningCount} running`}
-          >
-            <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-            {runningCount}
-          </span>
-        )}
         <button
           type="button"
           aria-label={t("closeWorkspaceAction")}
@@ -229,7 +221,6 @@ export function WorkspaceSwitcher({ workspacePath }: WorkspaceSwitcherProps) {
                 <OpenWorkspaceItem
                   key={row.key}
                   path={row.path}
-                  runningCount={runningCounts.get(row.key) ?? 0}
                   onOpen={() => openProject(row.path)}
                   onClose={() => requestClose(row.path)}
                 />

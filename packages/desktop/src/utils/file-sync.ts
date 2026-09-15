@@ -28,6 +28,7 @@ import { adoptExternalContent } from "@/components/editor/adopt-external-content
 import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
 import { platformAdapter } from "@/adapters";
 import { path as pathutil, relativeTreePath } from "./path";
+import { PORTAL_ID } from "./portal-id";
 import { activeRenameTarget } from "@/entities/tabs";
 import { trackWorkspaceWrite } from "./workspace-write-tracker";
 
@@ -156,6 +157,23 @@ export async function readWorkspaceTextFile(
   const start = Math.max(0, (options.line ?? 1) - 1);
   const end = options.limit ? start + options.limit : lines.length;
   return lines.slice(start, end).join("\n");
+}
+
+/**
+ * Watch-id construction, in one place for both kinds.
+ *
+ * The id is the key the platform's watcher registry is stored under, and on
+ * the Tauri side that registry is process-global while events are broadcast
+ * to every webview — so the id has to name the portal as well as the
+ * workspace, or two windows on one workspace share (and clobber) one entry.
+ * Nothing parses these; they are compared for equality on both sides.
+ */
+export function metadataWatchIdFor(workspacePath: string): string {
+  return `metadata-${PORTAL_ID}-${workspacePath}`;
+}
+
+export function contentWatchIdFor(workspacePath: string): string {
+  return `content-${PORTAL_ID}-${workspacePath}`;
 }
 
 function invalidateProjectSettingsIfChanged(
@@ -374,7 +392,7 @@ export interface WorkspaceMetadataWatcher {
 export function startWorkspaceMetadataWatcher(
   workspacePath: string,
 ): WorkspaceMetadataWatcher {
-  const metadataWatchId = `metadata-${workspacePath}`;
+  const metadataWatchId = metadataWatchIdFor(workspacePath);
   let isActive = true;
   let startFailed = false;
 
@@ -397,6 +415,17 @@ export function startWorkspaceMetadataWatcher(
     platformAdapter.fs
       .startWatchingMetadata([workspacePath], metadataWatchId, {
         ignore: IGNORE_RULES,
+      })
+      .then(() => {
+        // The start is not awaited by the caller, so a close can land while
+        // it is still in flight. Without this the watcher registers *after*
+        // stop() already tried to remove it: the JS handle is gone, nothing
+        // can ever stop it again, and it keeps walking the tree for the life
+        // of the process (on the browser adapter, a full recursive stat
+        // sweep every 5s). Re-issuing the stop is idempotent.
+        if (!isActive) {
+          void platformAdapter.fs.stopWatching(metadataWatchId).catch(() => {});
+        }
       })
       .catch((error) => {
         startFailed = true;
@@ -429,7 +458,7 @@ export function useContentWatchers(
   openFilePaths: string[],
 ): void {
   useEffect(() => {
-    const contentWatchId = `content-${workspacePath}`;
+    const contentWatchId = contentWatchIdFor(workspacePath);
     let eventCleanup: (() => void) | undefined;
     let isActive = true;
 
@@ -453,6 +482,13 @@ export function useContentWatchers(
             openFilePaths,
             contentWatchId,
           );
+          // The effect's cleanup can run while that start is in flight (a
+          // fast tab close, or StrictMode's double-invoke). Its stop would
+          // then find nothing and this registration would outlive it with no
+          // handle left to stop it — same leak as the metadata side.
+          if (!isActive) {
+            void platformAdapter.fs.stopWatching(contentWatchId).catch(() => {});
+          }
         }
       } catch (error) {
         console.error("Failed to setup watchers:", error);
