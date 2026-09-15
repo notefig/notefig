@@ -45,9 +45,11 @@ import {
 } from './shared';
 import type { Logger } from './utils/logger.util';
 import { LineBuffer } from './line-buffer';
-import { DETACH_FOR_TREE_KILL, killProcessTree } from './process-tree';
-
-const KILL_GRACE_MS = 5_000;
+import {
+  DETACH_FOR_TREE_KILL,
+  KILL_GRACE_MS,
+  terminateProcessTree,
+} from './process-tree';
 
 // ========================================================================
 // Harness discovery — only ever runs shared-hardcoded probe commands
@@ -415,30 +417,7 @@ export class AgentWorker {
   private async stopTask(taskId: string): Promise<void> {
     const child = this.tasks.get(taskId);
     if (!child) return;
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      const settle = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(kill);
-        resolve();
-      };
-      const kill = setTimeout(() => {
-        killProcessTree(child, 'SIGKILL');
-        // SIGKILL is a request to the kernel, not a guarantee of reaping.
-        // teardownPeer awaits every stopTask, and the agent command awaits
-        // that from its SIGINT handler — so an unreaped child would hang
-        // shutdown rather than end it.
-        settle();
-      }, KILL_GRACE_MS);
-      child.once('exit', settle);
-      child.once('close', settle);
-      killProcessTree(child, 'SIGTERM');
-      if (process.platform === 'win32') {
-        // No SIGTERM equivalent — go straight to the forced tree kill.
-        killProcessTree(child, 'SIGKILL');
-      }
-    });
+    await terminateProcessTree(child, KILL_GRACE_MS);
   }
 
   // ---- MCP loopback listeners ----

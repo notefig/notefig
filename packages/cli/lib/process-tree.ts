@@ -53,3 +53,55 @@ export function killProcessTree(
  * which the agent command wires to SIGINT and SIGTERM.
  */
 export const DETACH_FOR_TREE_KILL = process.platform !== 'win32';
+
+/** How long a tree gets to exit on SIGTERM before it is SIGKILLed. */
+export const KILL_GRACE_MS = 5_000;
+
+/**
+ * Ask a harness tree to exit, force it if it does not, and resolve once it is
+ * gone — or once the grace window closes, whichever comes first.
+ *
+ * Both spawners need the identical dance and had it written out twice, which
+ * is what let the worker's copy drift into killing only the direct child.
+ *
+ * Resolving on the grace timer matters: SIGKILL is a request to the kernel,
+ * not a guarantee of reaping, and a process wedged in uninterruptible sleep
+ * never fires 'exit'. Both callers await this from a teardown path that
+ * something else awaits in turn — `runHeadlessTurn`'s `finally`, and
+ * `teardownPeer` under the agent command's SIGINT handler — so an unreaped
+ * child would hang the caller instead of ending it.
+ *
+ * 'close' is listened for alongside 'exit' because it is the terminal event
+ * Node guarantees for a child that never spawned at all, where 'exit' is
+ * never emitted.
+ */
+export function terminateProcessTree(
+  child: ChildProcess,
+  graceMs: number = KILL_GRACE_MS,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(forceKill);
+      resolve();
+    };
+
+    const forceKill = setTimeout(() => {
+      killProcessTree(child, 'SIGKILL');
+      settle();
+    }, graceMs);
+    // Don't let the grace timer hold the process's event loop open by itself.
+    forceKill.unref?.();
+
+    child.once('exit', settle);
+    child.once('close', settle);
+
+    killProcessTree(child, 'SIGTERM');
+    if (process.platform === 'win32') {
+      // No SIGTERM equivalent — go straight to the forced tree kill.
+      killProcessTree(child, 'SIGKILL');
+    }
+  });
+}
