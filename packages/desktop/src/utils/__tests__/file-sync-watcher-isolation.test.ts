@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { platformAdapter } from "@/adapters";
 import type { FsChangeEvent } from "@/adapters/platform-adapter.interface";
-import { startWorkspaceMetadataWatcher } from "../file-sync";
+import {
+  metadataWatchIdFor,
+  startWorkspaceMetadataWatcher,
+} from "../file-sync";
 import {
   getOrCreateWorkspaceCollections,
   clearWorkspaceCollections,
@@ -96,7 +99,7 @@ describe("watcher event isolation across open workspaces", () => {
     emit({
       type: "fs-metadata-changed",
       payload: {
-        watchId: `metadata-${WS_B}`,
+        watchId: metadataWatchIdFor(WS_B),
         changes: [
           { type: "created", path: `${WS_B}/from-b.md`, isDirectory: false },
         ],
@@ -121,7 +124,7 @@ describe("watcher event isolation across open workspaces", () => {
     emit({
       type: "fs-metadata-changed",
       payload: {
-        watchId: `metadata-${WS_A}`,
+        watchId: metadataWatchIdFor(WS_A),
         changes: [
           { type: "created", path: `${WS_A}/late.md`, isDirectory: false },
         ],
@@ -153,7 +156,7 @@ describe("watcher event isolation across open workspaces", () => {
     emit({
       type: "fs-content-changed",
       payload: {
-        watchId: `metadata-${WS_A}`,
+        watchId: metadataWatchIdFor(WS_A),
         changes: [{ path, content: "new", contentHash: "new-hash" }],
       },
     });

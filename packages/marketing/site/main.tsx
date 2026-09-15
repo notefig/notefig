@@ -12,6 +12,7 @@ import { TextPromptDialog } from "@/components/text-prompt-dialog";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@notefig/ui/tooltip";
 import { queryClient } from "@/entities/query-client";
+import { bootstrapAppRuntime } from "@/app-runtime";
 import { SiteShell } from "./site-shell";
 import { defaultPage, marketingPages } from "./content-manifest";
 
@@ -22,6 +23,12 @@ import "./styles.css";
 if (typeof globalThis.Buffer === "undefined") {
   globalThis.Buffer = Buffer;
 }
+
+// The same runtime boot the desktop root runs. This root renders the real
+// Workspace, so it needs the open-workspace watchers armed exactly as the
+// shell does — it just never renders `App`, which is where a React-effect
+// version would have lived.
+bootstrapAppRuntime();
 
 // The prerender script (scripts/prerender.mjs) reads the route list and
 // per-page metadata from the running app, so the manifest never needs a

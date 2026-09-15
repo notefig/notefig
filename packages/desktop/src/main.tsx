@@ -16,12 +16,15 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@notefig/ui/tooltip";
 import { queryClient } from "@/entities/query-client";
 import { App } from "./App";
+import { bootstrapAppRuntime } from "@/app-runtime";
 
 import "./styles.css";
 
 if (typeof globalThis.Buffer === "undefined") {
   globalThis.Buffer = Buffer;
 }
+
+bootstrapAppRuntime();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
