@@ -41,6 +41,13 @@
       "@notefig/agent": [
         "../agent/src/index.ts"
       ],
+      // Same reason as @notefig/shared above, and this one is load-bearing:
+      // @notefig/core's package `types` points at ./dist/index.d.ts, so
+      // without this entry every desktop tsc needs core built first. It
+      // worked only because a dist happened to exist in the author's tree.
+      "@notefig/core": [
+        "../core/src/index.ts"
+      ],
       "@notefig/ui/*": [
         "../ui/src/*"
       ],

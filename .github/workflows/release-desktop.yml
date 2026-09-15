@@ -3,7 +3,8 @@ name: Release Desktop App
 # Two modes, selected by the version input:
 #   "0.0.93"        — normal release: bump committed to main, tagged, published
 #                     as the latest release the in-app updater serves.
-#   "0.0.93-debug"  — debug build of current main: `tauri build --debug`
+#   "0.0.93-debug"  — debug build of the dispatched branch (default main):
+#                     `tauri build --debug`
 #                     (devtools enabled, debug assertions on). Nothing is
 #                     committed or tagged on main, deploy-web is skipped, and
 #                     the release is published as a prerelease with
@@ -208,11 +209,14 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     steps:
-      # Debug builds have no tag — they build whatever main currently is.
+      # Debug builds have no tag — they build the dispatched branch's tip.
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ contains(inputs.version, '-debug') && 'main' || format('desktop-v{0}', inputs.version) }}
+          # Debug builds take the branch the dispatch ran from, so a stack
+          # can be tested before it is merged — which is the whole reason to
+          # cut one. Normal releases still come from their tag.
+          ref: ${{ contains(inputs.version, '-debug') && github.ref_name || format('desktop-v{0}', inputs.version) }}
 
       # For debug builds the version was never committed, so stamp it into
       # this checkout only (BSD sed on macOS runners — hence perl).

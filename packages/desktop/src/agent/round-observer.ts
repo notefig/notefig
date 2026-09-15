@@ -5,7 +5,7 @@
  * Reads the same collections `useRound` queries — the minimap can never
  * disagree with the widget face.
  */
-import { eq } from "@tanstack/react-db";
+import { eq } from "@tanstack/db";
 import type {
   PromptRoundObserverFactory,
   PromptRoundSnapshot,

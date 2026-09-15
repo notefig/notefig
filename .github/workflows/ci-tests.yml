@@ -30,6 +30,18 @@ jobs:
       - name: Build shared package
         run: npm run build -w packages/shared
 
+      # The CLI's tsc reads @notefig/agent's emitted declarations (the package
+      # exports ESM TS source, which the CLI's CJS/TS4.8 tree can't consume),
+      # so its dist must exist before the CLI compiles.
+      - name: Build agent package
+        run: npm run build -w packages/agent
+
+      # Same reason as the agent package above: @notefig/core's exports point
+      # at ESM TS source with types coming from dist/, so the CLI's tsc has
+      # nothing to read until core has emitted its declarations.
+      - name: Build core package
+        run: npm run build -w packages/core
+
       - name: Build CLI
         run: npm run build -w packages/cli
 
@@ -56,6 +68,18 @@ jobs:
 
       - name: Build shared package
         run: npm run build -w packages/shared
+
+      # The CLI's tsc reads @notefig/agent's emitted declarations (the package
+      # exports ESM TS source, which the CLI's CJS/TS4.8 tree can't consume),
+      # so its dist must exist before the CLI compiles.
+      - name: Build agent package
+        run: npm run build -w packages/agent
+
+      # Same reason as the agent package above: @notefig/core's exports point
+      # at ESM TS source with types coming from dist/, so the CLI's tsc has
+      # nothing to read until core has emitted its declarations.
+      - name: Build core package
+        run: npm run build -w packages/core
 
       - name: Build CLI
         run: npm run build -w packages/cli
@@ -90,6 +114,41 @@ jobs:
 
       - name: Run git package tests
         run: npm run test -w packages/git
+
+  test-host-neutral:
+    name: Test Host-Neutral Packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build shared package
+        run: npm run build -w packages/shared
+
+      # @notefig/core compiles with no DOM lib and no Node types. That
+      # tsconfig is the enforcement mechanism for host-neutrality — a stray
+      # `window` or React import is meant to fail the build rather than rely
+      # on review catching it — which only holds if CI actually compiles it.
+      - name: Typecheck agent package
+        run: npm run typecheck -w packages/agent
+
+      - name: Typecheck core package
+        run: npm run typecheck -w packages/core
+
+      - name: Run agent package tests
+        run: npm run test -w packages/agent
+
+      - name: Run core package tests
+        run: npm run test -w packages/core
 
   test-desktop-unit:
     name: Test Desktop (Unit)

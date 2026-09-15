@@ -13,6 +13,7 @@ import {
 } from "@/adapters/platform-adapter.interface";
 import { useWorkspaceParams } from "@/hooks/use-workspace-params";
 import { closeWorkspace, reloadWorkspaceFiles } from "@/entities/workspaces";
+import { ensureWatching } from "@/utils/workspace-watchers";
 import { queryClient } from "@/entities/query-client";
 import { isWeb } from "@/utils/platform";
 import { captureError } from "@/telemetry/telemetry";
@@ -166,6 +167,9 @@ function WorkspaceAccessError({
   // lost fs handle is the webview's, not the harness processes').
   const resume = (path: string) => {
     reloadWorkspaceFiles(path);
+    // Access was just restored, so a watcher that could not start while the
+    // workspace was unreadable can finally arm.
+    ensureWatching(path);
     onResolved();
   };
 

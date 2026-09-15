@@ -9,6 +9,7 @@ import { PruneCommand } from './prune.command';
 import { EpubCommand } from './epub.command';
 import { AudiobookCommand } from './audiobook.command';
 import { AgentCommand } from './agent.command';
+import { AgentRunCommand } from './agent-run.command';
 import { McpRelayCommand } from './mcp-relay.command';
 import {
   ConsoleLogger,
@@ -33,6 +34,7 @@ export class CommandLoader {
     this.loadCommandAndAction(new EpubCommand(), program);
     this.loadCommandAndAction(new AudiobookCommand(), program);
     this.loadCommandAndAction(new AgentCommand(), program);
+    this.loadCommandAndAction(new AgentRunCommand(), program);
     this.loadCommandAndAction(new McpRelayCommand(), program);
     this.handleInvalidCommand(program);
   }

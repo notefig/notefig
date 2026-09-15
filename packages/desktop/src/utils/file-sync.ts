@@ -15,19 +15,15 @@ import {
   projectSettingsQueryKey,
 } from "./project-settings";
 import { IGNORE_RULES, isIgnoredPath } from "./ignore";
-import { calculateContentHash } from "./hash";
+import { getServiceHost, sliceTextWindow } from "@notefig/core";
 import { getDocumentSync } from "./markdown-conversion";
-// Conscious utils → components import (direct-imports-over-injection house
-// rule). This edge participates in a long pre-existing cycle back through
-// the editor/blob component graph → agent-service → acp-client → file-sync
-// (suppressed at acp-client's import; safe — all edges are function-body
-// references). Breaking it for real means relocating the editor registry to
-// a leaf module rather than adding a registration seam.
-import { getMarkdownEditor } from "@/components/editor/editor-store";
-import { adoptExternalContent } from "@/components/editor/adopt-external-content";
-import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
+// The utils → components edge that used to be justified here is gone: the
+// editor is reached through the host's editor port (MET-193), which also
+// breaks the cycle that ran editor/blob components → agent-service →
+// acp-client → file-sync.
 import { platformAdapter } from "@/adapters";
 import { path as pathutil, relativeTreePath } from "./path";
+import { PORTAL_ID } from "./portal-id";
 import { activeRenameTarget } from "@/entities/tabs";
 import { trackWorkspaceWrite } from "./workspace-write-tracker";
 
@@ -105,37 +101,23 @@ export async function writeWorkspaceTextFile(
     // to the stale row.
     updateLoadedContentRow(target, content);
 
-    const editor = getMarkdownEditor(target);
-    if (editor && !editor.isDestroyed) {
-      const sync = getDocumentSync(target);
-      const doc = await sync.prepareAdoption(content);
-      if (doc && !editor.isDestroyed) {
-        const adoption = adoptExternalContent(editor, doc);
-        if (adoption.reinsertedWidgets > 0) {
-          // Re-asserted widget markers exist only in the editor at this
-          // point. Repair the file INSIDE this tracked write — a
-          // fire-and-forget save could still be in flight when the next
-          // same-path agent write arrives, which would skip that write's
-          // adoption (sync busy) and then clobber its newer content.
-          const repaired = getEditorMarkdown(editor);
-          const repair = await platformAdapter.fs.writeFiles([
-            { path: target, content: repaired },
-          ]);
-          const repairFailure = repair.failed[0];
-          if (repairFailure) {
-            throw new FsError(
-              repairFailure.type,
-              repairFailure.path,
-              repairFailure.message,
-            );
-          }
-          updateLoadedContentRow(target, repaired);
-          sync.commitAdoption(repaired, calculateContentHash(repaired));
-        } else {
-          sync.commitAdoption(content, calculateContentHash(content));
-        }
+    // Everything editor-shaped happens behind the port. The repair write it
+    // may ask for stays inside this tracked write, which is the whole reason
+    // `persist` is a callback rather than a returned value.
+    await getServiceHost().editor.adoptWrite(target, content, async (repaired) => {
+      const repair = await platformAdapter.fs.writeFiles([
+        { path: target, content: repaired },
+      ]);
+      const repairFailure = repair.failed[0];
+      if (repairFailure) {
+        throw new FsError(
+          repairFailure.type,
+          repairFailure.path,
+          repairFailure.message,
+        );
       }
-    }
+      updateLoadedContentRow(target, repaired);
+    });
   });
 }
 
@@ -150,12 +132,26 @@ export async function readWorkspaceTextFile(
     throw new FsError(failure.type, failure.path, failure.message);
   }
   const content = result.succeeded[0].content;
-  if (!options?.line && !options?.limit) return content;
-  // ACP lines are 1-based.
-  const lines = content.split("\n");
-  const start = Math.max(0, (options.line ?? 1) - 1);
-  const end = options.limit ? start + options.limit : lines.length;
-  return lines.slice(start, end).join("\n");
+  // ACP's 1-based line/limit window — shared with the headless host so a
+  // harness sees the same slice on either.
+  return sliceTextWindow(content, options);
+}
+
+/**
+ * Watch-id construction, in one place for both kinds.
+ *
+ * The id is the key the platform's watcher registry is stored under, and on
+ * the Tauri side that registry is process-global while events are broadcast
+ * to every webview — so the id has to name the portal as well as the
+ * workspace, or two windows on one workspace share (and clobber) one entry.
+ * Nothing parses these; they are compared for equality on both sides.
+ */
+export function metadataWatchIdFor(workspacePath: string): string {
+  return `metadata-${PORTAL_ID}-${workspacePath}`;
+}
+
+export function contentWatchIdFor(workspacePath: string): string {
+  return `content-${PORTAL_ID}-${workspacePath}`;
 }
 
 function invalidateProjectSettingsIfChanged(
@@ -374,7 +370,7 @@ export interface WorkspaceMetadataWatcher {
 export function startWorkspaceMetadataWatcher(
   workspacePath: string,
 ): WorkspaceMetadataWatcher {
-  const metadataWatchId = `metadata-${workspacePath}`;
+  const metadataWatchId = metadataWatchIdFor(workspacePath);
   let isActive = true;
   let startFailed = false;
 
@@ -397,6 +393,17 @@ export function startWorkspaceMetadataWatcher(
     platformAdapter.fs
       .startWatchingMetadata([workspacePath], metadataWatchId, {
         ignore: IGNORE_RULES,
+      })
+      .then(() => {
+        // The start is not awaited by the caller, so a close can land while
+        // it is still in flight. Without this the watcher registers *after*
+        // stop() already tried to remove it: the JS handle is gone, nothing
+        // can ever stop it again, and it keeps walking the tree for the life
+        // of the process (on the browser adapter, a full recursive stat
+        // sweep every 5s). Re-issuing the stop is idempotent.
+        if (!isActive) {
+          void platformAdapter.fs.stopWatching(metadataWatchId).catch(() => {});
+        }
       })
       .catch((error) => {
         startFailed = true;
@@ -429,7 +436,7 @@ export function useContentWatchers(
   openFilePaths: string[],
 ): void {
   useEffect(() => {
-    const contentWatchId = `content-${workspacePath}`;
+    const contentWatchId = contentWatchIdFor(workspacePath);
     let eventCleanup: (() => void) | undefined;
     let isActive = true;
 
@@ -453,6 +460,13 @@ export function useContentWatchers(
             openFilePaths,
             contentWatchId,
           );
+          // The effect's cleanup can run while that start is in flight (a
+          // fast tab close, or StrictMode's double-invoke). Its stop would
+          // then find nothing and this registration would outlive it with no
+          // handle left to stop it — same leak as the metadata side.
+          if (!isActive) {
+            void platformAdapter.fs.stopWatching(contentWatchId).catch(() => {});
+          }
         }
       } catch (error) {
         console.error("Failed to setup watchers:", error);

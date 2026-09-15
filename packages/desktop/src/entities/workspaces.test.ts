@@ -46,20 +46,9 @@ const history = vi.hoisted(() => ({
   checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("@/utils/history-service", () => history);
-const watchers = vi.hoisted(() => ({
-  stops: [] as Array<ReturnType<typeof vi.fn>>,
-  ensures: [] as Array<ReturnType<typeof vi.fn>>,
-  start: vi.fn((_path: string) => {
-    const stop = vi.fn();
-    const ensureStarted = vi.fn();
-    watchers.stops.push(stop);
-    watchers.ensures.push(ensureStarted);
-    return { stop, ensureStarted };
-  }),
-}));
-vi.mock("@/utils/file-sync", () => ({
-  startWorkspaceMetadataWatcher: watchers.start,
-}));
+// No file-sync mock: watcher lifetime left the registry in MET-183. The
+// registry publishes membership and nothing else; arming, stopping and
+// re-arming are covered by utils/__tests__/workspace-watchers.test.ts.
 
 import {
   openWorkspace,
@@ -91,14 +80,10 @@ function taskRow(overrides: Partial<AgentTaskRow> = {}): AgentTaskRow {
 beforeEach(async () => {
   dbRef.current!.repairWrites();
   vi.clearAllMocks();
-  watchers.stops.length = 0;
-  watchers.ensures.length = 0;
   for (const row of [...openWorkspacesCollection.values()]) {
     await closeWorkspace(row.path);
   }
   vi.clearAllMocks();
-  watchers.stops.length = 0;
-  watchers.ensures.length = 0;
   for (const t of agentTasksCollection.toArray) {
     unregisterTask(t.taskId);
     await agentTasksCollection.delete(t.taskId).isPersisted.promise;
@@ -107,31 +92,23 @@ beforeEach(async () => {
 });
 
 describe("openWorkspace", () => {
-  it("seeds collections, refreshes, starts the metadata watcher, inserts the row", () => {
+  it("seeds collections, refreshes, inserts the row", () => {
     openWorkspace("/ws");
 
     expect(files.getOrCreateWorkspaceCollections).toHaveBeenCalledWith("/ws");
     expect(files.refreshDirectoryMetadata).toHaveBeenCalledWith("/ws");
-    expect(watchers.start).toHaveBeenCalledTimes(1);
     expect(isWorkspaceOpen("/ws")).toBe(true);
     expect([...openWorkspacesCollection.values()]).toMatchObject([
       { path: "/ws" },
     ]);
   });
 
-  it("re-entry gives a failed watcher another chance to arm", () => {
-    openWorkspace("/ws");
-    openWorkspace("/ws");
-    expect(watchers.ensures[0]).toHaveBeenCalledTimes(1);
-  });
-
-  it("is idempotent: re-entry refreshes the listing but never re-arms", () => {
+  it("is idempotent: re-entry refreshes the listing but never re-seeds", () => {
     openWorkspace("/ws");
     openWorkspace("/ws");
     // Same workspace under a respelled path collapses onto one entry.
     openWorkspace("/ws/");
 
-    expect(watchers.start).toHaveBeenCalledTimes(1);
     expect(files.getOrCreateWorkspaceCollections).toHaveBeenCalledTimes(1);
     expect(files.refreshDirectoryMetadata).toHaveBeenCalledTimes(3);
     expect(openWorkspacesCollection.size).toBe(1);
@@ -141,19 +118,18 @@ describe("openWorkspace", () => {
     openWorkspace("/ws-a");
     openWorkspace("/ws-b");
 
-    expect(watchers.start).toHaveBeenCalledTimes(2);
+    expect(openWorkspacesCollection.size).toBe(2);
     expect(isWorkspaceOpen("/ws-a")).toBe(true);
     expect(isWorkspaceOpen("/ws-b")).toBe(true);
   });
 });
 
 describe("closeWorkspace", () => {
-  it("stops the watcher and tears down every per-workspace subsystem", async () => {
+  it("tears down every per-workspace subsystem and drops the row", async () => {
     openWorkspace("/ws");
 
     await closeWorkspace("/ws");
 
-    expect(watchers.stops[0]).toHaveBeenCalledTimes(1);
     expect(history.disposeWorkspaceHistoryService).toHaveBeenCalledWith("/ws");
     expect(git.clearGitCollection).toHaveBeenCalledWith("/ws");
     expect(files.clearWorkspaceCollections).toHaveBeenCalledWith("/ws");
@@ -189,7 +165,7 @@ describe("closeWorkspace", () => {
     expect(files.clearWorkspaceCollections).toHaveBeenCalledWith(
       "/never-opened",
     );
-    expect(watchers.stops).toHaveLength(0);
+    expect(openWorkspacesCollection.size).toBe(0);
   });
 });
 
@@ -229,7 +205,7 @@ describe("close/reopen race", () => {
     const second = closeWorkspace("/ws");
     expect(second).toBe(first);
     await first;
-    expect(watchers.stops[0]).toHaveBeenCalledTimes(1);
+    expect(openWorkspacesCollection.size).toBe(0);
   });
 });
 
@@ -243,8 +219,5 @@ describe("closeAllWorkspaces", () => {
     expect(isWorkspaceOpen("/ws-a")).toBe(false);
     expect(isWorkspaceOpen("/ws-b")).toBe(false);
     expect(openWorkspacesCollection.size).toBe(0);
-    for (const stop of watchers.stops) {
-      expect(stop).toHaveBeenCalledTimes(1);
-    }
   });
 });

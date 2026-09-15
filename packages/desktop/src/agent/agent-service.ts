@@ -47,10 +47,7 @@ import { serverInstructions } from "./mcp-instructions";
 import { buildWidgetContextPayload } from "./widget-context-resource";
 import i18n from "@/utils/intl";
 import { captureEvent } from "@/telemetry/telemetry";
-import {
-  readWorkspaceTextFile,
-  writeWorkspaceTextFile,
-} from "@/utils/file-sync";
+import { createDesktopAcpFileSystem } from "./acp-file-system";
 import { checkpointWorkspaceHistory } from "@/utils/history-service";
 import { invalidateGit } from "@/entities/git";
 import {
@@ -414,10 +411,11 @@ export class AgentTask {
         permissionBroker: this.permissionBroker,
         onSessionUpdate: (notification) =>
           this.handleSessionUpdate(notification),
-        fs: {
-          readTextFile: readWorkspaceTextFile,
-          writeTextFile: writeWorkspaceTextFile,
-        },
+        // One bridge, defined in core: the containment guard, the relative
+        // path rules and the line/limit window are protocol decisions, so
+        // both hosts get them from the same function rather than each
+        // implementing their own.
+        fs: createDesktopAcpFileSystem(this.workspacePath),
         onUnsupportedProtocolVersion: (negotiated) =>
           captureEvent("agent_protocol_version_unsupported", {
             protocol: "acp",

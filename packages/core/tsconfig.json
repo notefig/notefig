@@ -1,0 +1,36 @@
+// The `lib` list is the enforcement mechanism for this package's whole
+// reason to exist: with no "DOM", a stray `window`, `document`, or React
+// import is a compile error rather than something review has to catch.
+// Node types are absent for the same reason — the core must not assume a
+// Node host either; anything platform-shaped arrives through the host
+// contract.
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2020"],
+    // Stops tsc's automatic sweep of every @types/* hoisted to the monorepo
+    // root. Necessary but NOT sufficient: @types/node still reaches this
+    // program through `/// <reference types="node" />` in @types/ws, which
+    // arrives with @notefig/agent's source, and `types` does not suppress
+    // reference directives from files already in the program. So `lib` +
+    // `types` together still leave `process` and `import "fs"` compiling
+    // clean in here — the actual enforcement is the source scan in
+    // src/__tests__/host-neutrality.test.ts.
+    "types": [],
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@notefig/shared": ["../shared/src/index.ts"],
+      "@notefig/shared/*": ["../shared/src/*/index.ts"],
+      "@notefig/agent": ["../agent/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

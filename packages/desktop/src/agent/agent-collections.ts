@@ -9,7 +9,7 @@ import {
   BasicIndex,
   createCollection,
   localOnlyCollectionOptions,
-} from "@tanstack/react-db";
+} from "@tanstack/db";
 import { persistedCollectionOptions } from "@tanstack/db-sqlite-persistence-core";
 import type {
   AgentEntry,

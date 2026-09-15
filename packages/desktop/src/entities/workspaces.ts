@@ -13,11 +13,12 @@
  * native spelling — the same convention as taskManagerRegistry.
  */
 import { useMemo } from "react";
-import {
-  createCollection,
-  localOnlyCollectionOptions,
-  useLiveQuery,
-} from "@tanstack/react-db";
+// Split deliberately: the collection itself is host-neutral and comes from
+// @tanstack/db, while `useLiveQuery` is the React binding. Keeping them apart
+// makes the seam visible — the collection half of this module is what moves
+// into @notefig/core, and it must not drag a renderer with it.
+import { createCollection, localOnlyCollectionOptions } from "@tanstack/db";
+import { useLiveQuery } from "@tanstack/react-db";
 import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
 import {
   clearWorkspaceCollections,
@@ -26,10 +27,6 @@ import {
 } from "@/entities/files";
 import { clearGitCollection } from "@/entities/git";
 import { disposeWorkspaceHistoryService } from "@/utils/history-service";
-import {
-  startWorkspaceMetadataWatcher,
-  type WorkspaceMetadataWatcher,
-} from "@/utils/file-sync";
 import { path as pathutil, workspaceKey } from "@/utils/path";
 
 export interface OpenWorkspaceRow {
@@ -48,12 +45,13 @@ export const openWorkspacesCollection = createCollection(
   }),
 );
 
-/** Per-workspace runtime the registry owns directly (everything else —
- *  task managers, history services, git collections — has its own keyed
- *  registry that open/close delegates to). */
-const runtimes = new Map<string, { watcher: WorkspaceMetadataWatcher }>();
+// There is deliberately no runtime map here any more. It used to hold one
+// thing — the metadata watcher — and once watching moved to the portal
+// (subscription below), membership *is* the collection. Everything else the
+// registry tears down (task managers, history services, git collections)
+// has its own keyed registry that open/close delegates to.
 
-/** In-flight closes, keyed like `runtimes`: a reopen racing a close must
+/** In-flight closes, keyed like the collection: a reopen racing a close must
  *  wait for the teardown to finish rather than interleave with it. */
 const pendingCloses = new Map<string, Promise<void>>();
 
@@ -72,26 +70,24 @@ export function openWorkspace(workspacePath: string): void {
     void pendingClose.then(() => openWorkspace(workspacePath));
     return;
   }
-  const runtime = runtimes.get(key);
-  if (runtime) {
+  const existing = openWorkspacesCollection.get(key);
+  if (existing) {
     // Re-entry into a backgrounded workspace: the watcher kept the
     // collection current, but a listing refresh on entry is what the
     // route always did — keep it (cheap re-stat, catches watcher gaps).
-    // Also the moment to re-arm a watcher whose start failed (workspace
-    // was unreadable when first opened).
-    runtime.watcher.ensureStarted();
+    // Re-arming a watcher that failed to start is the portal's other half
+    // of re-entry; the route loader calls `ensureWatching` for that.
     void refreshDirectoryMetadata(native);
     return;
   }
 
   getOrCreateWorkspaceCollections(native);
   void refreshDirectoryMetadata(native);
-  runtimes.set(key, { watcher: startWorkspaceMetadataWatcher(native) });
   openWorkspacesCollection.insert({ key, path: native, openedAt: Date.now() });
 }
 
 export function isWorkspaceOpen(workspacePath: string): boolean {
-  return runtimes.has(workspaceKey(workspacePath));
+  return openWorkspacesCollection.has(workspaceKey(workspacePath));
 }
 
 /**
@@ -106,12 +102,10 @@ export function closeWorkspace(workspacePath: string): Promise<void> {
   const pending = pendingCloses.get(key);
   if (pending) return pending;
 
-  // Synchronous part first: the workspace leaves the open set and stops
-  // watching immediately, so the switcher row disappears at once and a
-  // reopen during the async teardown is unambiguous (pendingCloses).
-  const runtime = runtimes.get(key);
-  runtimes.delete(key);
-  runtime?.watcher.stop();
+  // Synchronous part first: the workspace leaves the open set at once, so
+  // the switcher row disappears immediately and a reopen during the async
+  // teardown is unambiguous (pendingCloses). Dropping the row is also what
+  // stops the metadata watcher — the portal's subscription sees the delete.
   if (openWorkspacesCollection.has(key)) {
     openWorkspacesCollection.delete(key);
   }
@@ -142,8 +136,9 @@ export function reloadWorkspaceFiles(workspacePath: string): void {
   getOrCreateWorkspaceCollections(native);
   void refreshDirectoryMetadata(native);
   // Access was just restored — if the watcher's start failed while the
-  // workspace was unreadable, this is the moment it can finally arm.
-  runtimes.get(workspaceKey(native))?.watcher.ensureStarted();
+  // workspace was unreadable, this is the moment it can finally arm. The
+  // error boundary calls `ensureWatching` alongside this, for the same
+  // reason the loader does: watching is the portal's business.
 }
 
 /** Close every open workspace (close-all affordances and tests; process

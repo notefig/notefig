@@ -1,0 +1,30 @@
+{
+  "name": "@notefig/core",
+  "version": "0.1.0",
+  "private": true,
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@notefig/agent": "*",
+    "@notefig/shared": "*",
+    "@tanstack/db-sqlite-persistence-core": "0.2.9"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.2",
+    "vitest": "^3.2.4"
+  }
+}
