@@ -28,6 +28,7 @@ import { spawn, exec, type ChildProcess } from 'child_process';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
   BUILT_IN_HARNESSES,
+  composeHarnessEnv,
   CtlMessageSchema,
   FrameCipher,
   MCP_SERVER_NAME,
@@ -386,13 +387,12 @@ export class AgentWorker {
     // The agent spawns in the worker's real --dir; the browser's workspace
     // prefix in cwd + any path-bearing env is rewritten to that root.
     const cwd = this.options.workspacePath;
-    const env: NodeJS.ProcessEnv = { ...process.env, ...harness.env };
+    const extraEnv: Record<string, string> = {};
     for (const [key, value] of Object.entries(message.extraEnv)) {
-      env[key] = rewriteToWorkspaceRoot(value, message.cwd, cwd);
+      extraEnv[key] = rewriteToWorkspaceRoot(value, message.cwd, cwd);
     }
-    // Adapters misbehave if they think they're inside Claude Code (same strip
-    // the desktop host applies).
-    delete env.CLAUDECODE;
+    // Same composition and guard-var strip as every other harness spawner.
+    const env = composeHarnessEnv(process.env, harness, extraEnv);
     // Templating + cwd default live with the harness definition
     // (resolveHarnessSpawn) — the worker just hands them to the process.
     const { args, cwd: spawnCwd } = resolveHarnessSpawn(harness, cwd);

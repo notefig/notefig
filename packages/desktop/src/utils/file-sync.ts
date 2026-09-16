@@ -4,6 +4,7 @@ import type {
   ContentChangeEvent,
 } from "@/adapters/platform-adapter.interface";
 import { FsError } from "@/adapters/platform-adapter.interface";
+import { sliceTextWindow } from "@notefig/agent";
 import {
   getOrCreateWorkspaceCollections,
   updateLoadedContentRow,
@@ -151,12 +152,9 @@ export async function readWorkspaceTextFile(
     throw new FsError(failure.type, failure.path, failure.message);
   }
   const content = result.succeeded[0].content;
-  if (!options?.line && !options?.limit) return content;
-  // ACP lines are 1-based.
-  const lines = content.split("\n");
-  const start = Math.max(0, (options.line ?? 1) - 1);
-  const end = options.limit ? start + options.limit : lines.length;
-  return lines.slice(start, end).join("\n");
+  // ACP's 1-based line/limit window — shared with the headless host so a
+  // harness sees the same slice on either.
+  return sliceTextWindow(content, options);
 }
 
 /**

@@ -17,7 +17,7 @@ import {
   type HarnessSpawnPrep,
   parseCustomHarnessEntries,
   parseHarnessOverrides,
-  resolveEffectiveHarnesses,
+  resolveHarness,
   type ContentBlock,
   type HarnessDefinition,
   type McpServer,
@@ -1574,11 +1574,10 @@ function effectiveHarnessById(
   const kv = getOrCreateKvCollection(HARNESS_SETTINGS_NAMESPACE);
   const overrides = parseHarnessOverrides(kv.get(HARNESS_OVERRIDES_KEY)?.value);
   const custom = parseCustomHarnessEntries(kv.get(HARNESS_CUSTOM_KEY)?.value);
-  return (
-    resolveEffectiveHarnesses(overrides, custom).find(
-      (h) => h.id === harnessId,
-    ) ?? BUILT_IN_HARNESSES.find((h) => h.id === harnessId)
-  );
+  const resolved = resolveHarness(harnessId, overrides, custom);
+  return resolved.ok
+    ? resolved.harness
+    : BUILT_IN_HARNESSES.find((h) => h.id === harnessId);
 }
 
 /**

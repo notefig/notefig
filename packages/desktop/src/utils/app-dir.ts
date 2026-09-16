@@ -13,6 +13,10 @@
  * history repo's checkpoints, and excluded wholesale from the user's own
  * repo. App-internal files therefore need no dot prefix.
  */
-export const APP_DIR_NAME = ".notefig";
-export const SCRATCHPADS_DIR_NAME = "scratchpads";
-export const SCRATCHPADS_REL_PATH = `${APP_DIR_NAME}/${SCRATCHPADS_DIR_NAME}`;
+// The values live in @notefig/shared so the CLI resolves the same app dir;
+// this module stays the desktop's leaf import site for them.
+export {
+  APP_DIR_NAME,
+  SCRATCHPADS_DIR_NAME,
+  SCRATCHPADS_REL_PATH,
+} from "@notefig/shared/utils";
