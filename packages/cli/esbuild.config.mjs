@@ -9,6 +9,26 @@
 // bundled code resolves them at runtime like any other dep.
 import { build } from "esbuild";
 
+/**
+ * Point a vendored bundle's workspace-package imports at the sibling bundles
+ * this script already emits, instead of inlining a second copy.
+ *
+ * Without it, `dist/lib/agent.js` carries its own copy of @notefig/shared
+ * beside `dist/lib/shared.js`, and two copies means two of every class: an
+ * error thrown by one fails `instanceof` against the other. Subpaths are
+ * matched too (`@notefig/shared/agent`, `/utils`): `shared/src/index.ts`
+ * re-exports every subpath, so `dist/lib/shared.js` already carries them.
+ */
+const reuseSiblingBundles = {
+  name: "reuse-sibling-bundles",
+  setup(build) {
+    build.onResolve({ filter: /^@notefig\/(agent|shared)(\/|$)/ }, (args) => ({
+      path: `./${args.path.slice("@notefig/".length).split("/")[0]}.js`,
+      external: true,
+    }));
+  },
+};
+
 const src = (path) => new URL(path, import.meta.url).pathname;
 
 const common = {
@@ -47,4 +67,5 @@ await build({
   entryPoints: [src("../agent/src/index.ts")],
   outfile: "dist/lib/agent.js",
   external: ["tweetnacl"],
+  plugins: [reuseSiblingBundles],
 });
