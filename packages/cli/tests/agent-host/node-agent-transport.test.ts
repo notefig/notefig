@@ -181,6 +181,33 @@ describe('NodeAgentTransport', () => {
     });
   });
 
+  it('close() resolves after a failed spawn', async () => {
+    // Characterization, not a regression guard. An ENOENT spawn emits 'error'
+    // then 'close' and never 'exit', so a teardown that waited on 'exit'
+    // alone would hang — it does not, because node sets exitCode to -2 and
+    // close() returns at its already-exited guard. That guard is the only
+    // thing standing between this path and a parked turn, so pin it.
+    await withTempDir(async (dir) => {
+      const transport = new NodeAgentTransport({
+        harness: {
+          id: 'missing',
+          command: 'notefig-no-such-binary-xyz',
+          args: [],
+          env: {},
+        } as unknown as HarnessDefinition,
+        workspacePath: dir,
+      });
+
+      await expect(transport.start()).rejects.toMatchObject({
+        type: 'spawn_failed',
+      });
+
+      // The assertion is that this settles at all; jest's timeout is the
+      // failure mode if the regression returns.
+      await expect(transport.close()).resolves.toBeUndefined();
+    });
+  }, 10_000);
+
   it('exposes spawnInfo after start', async () => {
     await withTempDir(async (dir) => {
       const transport = new NodeAgentTransport({

@@ -29,11 +29,13 @@ import {
   resolveHarnessSpawn,
   type HarnessDefinition,
 } from '../shared';
-import { LineBuffer } from './line-buffer';
+import { LineBuffer } from '../line-buffer';
+import {
+  DETACH_FOR_TREE_KILL,
+  KILL_GRACE_MS,
+  terminateProcessTree,
+} from '../process-tree';
 import { TransportListeners } from './transport-listeners';
-
-/** How long a harness gets to exit on SIGTERM before the group is SIGKILLed. */
-const KILL_GRACE_MS = 5_000;
 
 export type NodeAgentTransportSpec = {
   harness: HarnessDefinition;
@@ -42,40 +44,6 @@ export type NodeAgentTransportSpec = {
   /** Per-task env layered over the harness's static env. */
   extraEnv?: Record<string, string>;
 };
-
-/**
- * Kill a harness's whole process tree, not just the process we spawned.
- *
- * The built-in harnesses are npx wrappers, so the direct child is a launcher
- * and the real adapter is a grandchild. Killing only the wrapper leaves the
- * adapter reparented to init and running — verified on the desktop side
- * (agent_proc.rs:112-118), where an orphaned adapter survived stdin EOF for
- * minutes. Unix: `detached: true` at spawn makes the child a process-group
- * leader whose pgid is its pid, so a negative-pid signal reaches the group.
- * Windows has no process groups in this sense; `taskkill /T` walks the tree
- * instead (the Rust host uses a Job Object, which Node cannot create).
- */
-function killProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
-  const pid = child.pid;
-  if (pid === undefined) return;
-  if (process.platform === 'win32') {
-    // /T kills the tree, /F forces it. SIGTERM has no Windows analogue, so
-    // the graceful attempt is skipped there and the tree is taken down once.
-    if (signal === 'SIGKILL') {
-      spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
-        stdio: 'ignore',
-      }).on('error', () => {
-        /* best effort: the child may already be gone */
-      });
-    }
-    return;
-  }
-  try {
-    process.kill(-pid, signal);
-  } catch {
-    // ESRCH: the group is already gone. Nothing to do.
-  }
-}
 
 export class NodeAgentTransport implements AgentTransport {
   readonly locus = 'local' as const;
@@ -111,7 +79,7 @@ export class NodeAgentTransport implements AgentTransport {
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
         // Own process group, so teardown reaches the whole tree.
-        detached: process.platform !== 'win32',
+        detached: DETACH_FOR_TREE_KILL,
       });
     } catch (error: any) {
       throw new AgentTransportError(
@@ -191,22 +159,9 @@ export class NodeAgentTransport implements AgentTransport {
     this.closed = true;
     if (child.exitCode !== null || child.signalCode !== null) return;
 
-    await new Promise<void>((resolve) => {
-      const forceKill = setTimeout(() => {
-        killProcessTree(child, 'SIGKILL');
-      }, KILL_GRACE_MS);
-      // Unref so a lingering grace timer can't hold the CLI's event loop open.
-      forceKill.unref?.();
-      child.once('exit', () => {
-        clearTimeout(forceKill);
-        resolve();
-      });
-      killProcessTree(child, 'SIGTERM');
-      if (process.platform === 'win32') {
-        // No SIGTERM equivalent — go straight to the forced tree kill.
-        killProcessTree(child, 'SIGKILL');
-      }
-    });
+    // Terminate the whole group, not just the child we spawned: a harness
+    // command is usually an `npx` wrapper around the real adapter.
+    await terminateProcessTree(child, KILL_GRACE_MS);
   }
 
 }
