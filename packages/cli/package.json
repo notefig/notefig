@@ -52,6 +52,7 @@
     "zod": "3.23.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/jest": "^29.5.5",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^18.11.18",
@@ -75,5 +76,8 @@
   },
   "lint-staged": {
     "**/*.{ts,json}": []
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^12.6.2"
   }
 }

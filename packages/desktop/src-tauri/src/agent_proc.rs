@@ -435,6 +435,62 @@ const NESTED_SESSION_GUARD_VARS: &[&str] = &[
     "CLAUDE_CODE_CHILD_SESSION",
 ];
 
+/// Whether a process with this pid is running.
+///
+/// The app shares its database with other processes (`notefig agent-run`),
+/// and a task row one of them is still driving must not be demoted and
+/// offered for revival here. The row records its owner's pid; this answers
+/// from the OS whether that owner is still there — current state, not a
+/// timeout or a heartbeat.
+///
+/// A recycled pid reads as alive, which errs toward leaving a row alone: the
+/// worst case is a finished task showing as running until the next launch
+/// finds the pid gone, never a second harness forked onto a live session.
+#[tauri::command]
+pub fn process_is_alive(pid: u32) -> bool {
+    is_process_alive(pid)
+}
+
+pub(crate) fn is_process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        let Ok(pid) = i32::try_from(pid) else {
+            return false;
+        };
+        // Signal 0 checks existence without signaling. EPERM means the
+        // process exists but belongs to someone else: still alive.
+        if unsafe { libc::kill(pid, 0) } == 0 {
+            return true;
+        }
+        std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+        use windows_sys::Win32::System::Threading::{
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if handle.is_null() {
+                return false;
+            }
+            let mut exit_code: u32 = 0;
+            let queried = GetExitCodeProcess(handle, &mut exit_code);
+            CloseHandle(handle);
+            queried != 0 && exit_code == STILL_ACTIVE as u32
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
 /// Result of `run_shell_command`.
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -853,6 +909,27 @@ mod tests {
         // grandchild died with the group; 0 would mean it leaked.
         let alive = unsafe { libc::kill(grandchild, 0) } == 0;
         assert!(!alive, "grandchild {} survived the group kill", grandchild);
+    }
+
+    #[test]
+    fn process_is_alive_reports_this_process() {
+        assert!(is_process_alive(std::process::id()));
+    }
+
+    #[test]
+    fn process_is_alive_reports_an_exited_child_as_gone() {
+        let mut child = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" })
+            .args(if cfg!(windows) { vec!["/C", "exit"] } else { vec![] })
+            .spawn()
+            .expect("spawn a short-lived process");
+        let pid = child.id();
+        child.wait().expect("reap it");
+        assert!(!is_process_alive(pid), "pid {} still reported alive after exit", pid);
+    }
+
+    #[test]
+    fn process_is_alive_rejects_pid_zero() {
+        assert!(!is_process_alive(0));
     }
 
     #[test]

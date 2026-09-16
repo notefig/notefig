@@ -3,9 +3,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // The tasks collection persists into a real (in-memory) SQLite through the
 // same driver the desktop uses, so these tests exercise write-through and the
 // boot mapping end to end rather than against a stub.
-const { dbRef, transportFactory } = vi.hoisted(() => ({
+const { dbRef, transportFactory, liveOwnerPids } = vi.hoisted(() => ({
   dbRef: { current: null as null | import("@/testing/node-db").NodeTestDb },
   transportFactory: { current: null as null | (() => unknown) },
+  /** Pids the fake OS reports as running. */
+  liveOwnerPids: new Set<number>(),
 }));
 vi.mock("@/adapters", async () => ({
   platformAdapter: {
@@ -28,6 +30,7 @@ vi.mock("@/adapters", async () => ({
         close: vi.fn(async () => {}),
       })),
       createAgentTransport: vi.fn(() => transportFactory.current!()),
+      isProcessAlive: vi.fn(async (pid: number) => liveOwnerPids.has(pid)),
     },
   },
 }));
@@ -93,6 +96,7 @@ beforeEach(async () => {
   // deletes and leak rows into the next test.
   dbRef.current!.repairWrites();
   transportFactory.current = null;
+  liveOwnerPids.clear();
   for (const e of agentEntriesCollection.toArray)
     agentEntriesCollection.delete(e.id);
   for (const t of agentTurnsCollection.toArray)
@@ -185,6 +189,45 @@ describe("persisted tasks collection", () => {
       status: "running",
     });
     unregisterTask("task_a");
+  });
+
+  it("boot leaves a row alone while another live process owns it", async () => {
+    // A CLI run writing into the shared database, mid-turn when the app opens.
+    await seedDisk({ status: "running", ownerPid: 4242 });
+    liveOwnerPids.add(4242);
+
+    await boot();
+
+    // Not demoted: a "restored" row would offer a revival that forks a
+    // second harness onto the session the CLI is still driving.
+    expect(agentTasksCollection.get("task_a")).toMatchObject({
+      status: "running",
+      ownerPid: 4242,
+    });
+    expect(onDisk("task_a")).toMatchObject({ status: "running", ownerPid: 4242 });
+    expect(reviveAgentTask("task_a")).toBeNull();
+  });
+
+  it("boot treats a row whose owner has exited like any other dead row", async () => {
+    // The CLI crashed before writing its final row.
+    await seedDisk({ status: "running", ownerPid: 4242 });
+
+    await boot();
+
+    const row = agentTasksCollection.get("task_a");
+    expect(row).toMatchObject({ status: "restored", sessionId: "sess_1" });
+    // The owner is gone, so the row no longer claims one.
+    expect(row?.ownerPid).toBeUndefined();
+    expect(onDisk("task_a")?.ownerPid).toBeUndefined();
+  });
+
+  it("boot deletes a dead owner's row that never got a session", async () => {
+    await seedDisk({ status: "starting", ownerPid: 4242, sessionId: undefined });
+
+    await boot();
+
+    expect(agentTasksCollection.get("task_a")).toBeUndefined();
+    expect(onDisk("task_a")).toBeUndefined();
   });
 
   it("a foreign status on a live task's stored row falls back to the runtime status", async () => {

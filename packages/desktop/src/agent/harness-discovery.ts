@@ -18,9 +18,13 @@ import {
  * The KV keys are exported as the single source of the storage layout;
  * use-harness-selection.ts (and the future settings UI) import them.
  */
-export const HARNESS_SETTINGS_NAMESPACE = "harness-settings";
-export const HARNESS_OVERRIDES_KEY = "overrides";
-export const HARNESS_CUSTOM_KEY = "custom";
+// Storage keys shared with the CLI, which reads the same rows.
+import {
+  HARNESS_SETTINGS_NAMESPACE,
+  HARNESS_OVERRIDES_KEY,
+  HARNESS_CUSTOM_KEY,
+} from "@notefig/shared/agent";
+export { HARNESS_SETTINGS_NAMESPACE, HARNESS_OVERRIDES_KEY, HARNESS_CUSTOM_KEY };
 export const HARNESS_DISCOVERY_KEY = "discovery";
 
 const SENTINEL_PREFIX = "__MHD";

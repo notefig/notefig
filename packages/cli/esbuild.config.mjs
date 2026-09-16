@@ -36,7 +36,17 @@ const common = {
   platform: "node",
   target: "node18",
   format: "cjs",
-  external: ["zod", "tweetnacl"],
+  // better-sqlite3 backs @notefig/shared/persistence (the app's database,
+  // opened from the CLI) and is a native addon, so it cannot be bundled.
+  //
+  // TanStack DB, by contrast, MUST be bundled. Its CommonJS build requires
+  // `fractional-indexing`, which is ESM-only, and Node can require() ESM only
+  // from 20.19 / 22.12 on: left external, loading this bundle throws
+  // ERR_REQUIRE_ESM on Node 18 and early 22 — every command that loads the
+  // shared barrel, `notefig agent` included. Bundling converts it. There is
+  // still exactly one copy: nothing in the CLI imports TanStack except
+  // through this bundle.
+  external: ["zod", "tweetnacl", "better-sqlite3"],
   logLevel: "info",
 };
 
@@ -66,6 +76,6 @@ await build({
   ...common,
   entryPoints: [src("../agent/src/index.ts")],
   outfile: "dist/lib/agent.js",
-  external: ["tweetnacl"],
+  external: ["tweetnacl", "better-sqlite3"],
   plugins: [reuseSiblingBundles],
 });

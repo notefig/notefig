@@ -39,6 +39,15 @@ export type AgentTaskRow = {
   sessionId?: string;
   createdAt: number;
   /**
+   * The pid of the process running this task's harness, when that process
+   * is not the app — a CLI run writing into the shared database. The app
+   * leaves a row alone while that process is alive: it must not demote it to
+   * "restored" and so offer to revive a session another process is still
+   * driving. Absent on rows the app runs itself, and dropped by the boot
+   * mapping once the owner is gone.
+   */
+  ownerPid?: number;
+  /**
    * Last-activity timestamp: bumped on insert, every status transition, and
    * prompt enqueue (queueing onto a busy task doesn't change status). Drives
    * session-list ordering; deliberately NOT bumped per streamed chunk.

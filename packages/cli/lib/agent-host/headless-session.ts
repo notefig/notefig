@@ -68,6 +68,12 @@ export type HeadlessSessionSpec = {
   createTransport?: (harness: HarnessDefinition) => AgentTransport;
   /** Abort the turn: ACP `session/cancel` first, then a forced teardown. */
   signal?: AbortSignal;
+  /**
+   * The harness accepted a session. Awaited before the prompt is sent, so a
+   * caller recording the task (its session id is what makes it resumable)
+   * has done so before the turn can produce anything.
+   */
+  onSessionReady?: (sessionId: string) => Promise<void> | void;
 };
 
 export class HeadlessSessionError extends Error {
@@ -218,6 +224,7 @@ export async function runHeadlessTurn(
       abortedEarly,
     ]);
     disposeEarlyAbort();
+    await spec.onSessionReady?.(session.sessionId);
 
     // Cancellation is only meaningful once there is a session to cancel.
     // ACP `session/cancel` asks the harness to end the turn, which makes

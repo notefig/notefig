@@ -50,6 +50,7 @@ pub fn register_handlers<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
         agent_proc::write_agent_stdin,
         agent_proc::kill_agent,
         agent_proc::run_shell_command,
+        agent_proc::process_is_alive,
         // MCP tool bridge (Stage 3.5, errors-as-values pattern)
         mcp_bridge::start_mcp_relay,
         mcp_bridge::stop_mcp_relay,

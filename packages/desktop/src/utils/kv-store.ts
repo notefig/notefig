@@ -18,10 +18,10 @@ import { useLiveQuery, createCollection } from "@tanstack/react-db";
 import { persistedCollectionOptions } from "@tanstack/db-sqlite-persistence-core";
 import { platformAdapter } from "@/adapters";
 
-export interface KvRow {
-  key: string;
-  value: unknown;
-}
+// The row shape and collection identity are shared with the CLI, which reads
+// the same rows (harness settings) from the same database.
+import { kvCollectionIdentity, type KvRow } from "@notefig/shared/persistence";
+export type { KvRow };
 
 type KvCollection = ReturnType<typeof createKvCollection>;
 
@@ -33,8 +33,7 @@ function createKvCollection(namespace: string) {
       // Explicit, always: the default is a random UUID, and the table name is
       // derived from it — so an omitted id silently writes to a fresh table
       // every launch and nothing ever comes back.
-      id: `kv:${namespace}`,
-      getKey: (item) => item.key,
+      ...kvCollectionIdentity(namespace),
       persistence: platformAdapter.db.get(),
       // No write-through handlers: the persisted wrapper commits every
       // mutation to SQLite itself.

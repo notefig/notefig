@@ -197,6 +197,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     createAgentTransport: this.createAgentTransport.bind(this),
     createMcpEndpoint: this.createMcpEndpoint.bind(this),
     runShellCommand: this.runShellCommand.bind(this),
+    isProcessAlive: this.isProcessAlive.bind(this),
   };
 
   // Shared by both web variants — the OPFS database is per-origin.
@@ -416,6 +417,12 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     // Callers (harness-discovery.ts) treat this rejection the same as "found
     // nothing locally".
     throw new Error("Shell commands are not supported on this adapter.");
+  }
+
+  protected async isProcessAlive(_pid: number): Promise<boolean> {
+    // This adapter's database is the browser's own; no other process writes
+    // it, so no row here can have a live foreign owner.
+    return false;
   }
 
   protected createUpdater(): PlatformUpdater {

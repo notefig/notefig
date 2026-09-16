@@ -1,11 +1,10 @@
 import * as path from 'path';
 import { promises as fs } from 'fs';
-import { newTaskId } from '../lib/shared';
+import { newTaskId, type SharedDb } from '../lib/shared';
 import { AbstractCommand } from './abstract.command';
-import {
-  HeadlessSessionError,
-  runHeadlessTurn,
-} from '../lib/agent-host/headless-session';
+import { HeadlessSessionError } from '../lib/agent-host/headless-session';
+import { openAppDb, type OpenAppDbResult } from '../lib/agent-host/app-db';
+import { runPersistedHeadlessTurn } from '../lib/agent-host/persisted-turn';
 import { renderSessionUpdate } from '../lib/agent-host/render-session-update';
 import type { Logger } from '../lib/utils/logger.util';
 import type { Command } from 'commander';
@@ -58,12 +57,14 @@ function installCancellation(logger: Logger): {
  * domain in MET-184, and `agent run` there supersedes this with an output
  * contract and exit-code contract. Do not build on this.
  *
- * Note what it does NOT do: no workspace registry, no collections, no
- * persistence, no MCP app tools. One command, one session, streamed output.
+ * The run is a task in the app's own database: it shows in the app while it
+ * runs, reads the harness settings the app's settings screen wrote, and hands
+ * the task back resumable when the turn ends (see persisted-turn.ts). What it
+ * still does NOT do: no workspace registry, no transcript rows, no MCP app
+ * tools. One command, one session, streamed output.
  *
- * The task id is minted with the same `newTaskId()` the desktop uses, and
- * printed, so headless turns already live in one id space with app tasks —
- * a run is nameable before there is anywhere to persist it (MET-185).
+ * The task id is minted with the same `newTaskId()` the desktop uses, so the
+ * row is indistinguishable from one the app created.
  * Streamed agent output goes straight to stdout (it is the command's
  * product); everything the command says *about* the run goes through the
  * shared logger, so `--verbose` behaves as it does everywhere else.
@@ -90,8 +91,24 @@ export class AgentRunCommand extends AbstractCommand {
       `  ${options.harness} · ${workspacePath}\n  task ${taskId}\n  (unstable internal command — see MET-184 for the supported surface)\n`,
     );
 
+    const opened = openAppDb();
+    // Explicit narrowing: this package compiles with `strict: false`, where
+    // the `ok` discriminant does not narrow the union by itself.
+    let db: SharedDb | null = null;
+    if (opened.ok === true) {
+      db = (opened as Extract<OpenAppDbResult, { ok: true }>).db;
+    } else {
+      const failed = opened as Extract<OpenAppDbResult, { ok: false }>;
+      this.logger.info(
+        `  (not recording this run in the app: could not open ${failed.path}: ${failed.error})\n`,
+      );
+    }
+
     try {
-      const outcome = await runHeadlessTurn({
+      const outcome = await runPersistedHeadlessTurn({
+        db,
+        onPersistenceWarning: (message) =>
+          this.logger.info(`  (app database: ${message})`),
         taskId,
         harnessId: options.harness,
         workspacePath,
@@ -114,6 +131,7 @@ export class AgentRunCommand extends AbstractCommand {
       this.reportFailure(error, cancellation.cancelled());
     } finally {
       cancellation.dispose();
+      await db?.close();
     }
   }
 

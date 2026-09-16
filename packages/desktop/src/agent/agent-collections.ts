@@ -20,11 +20,8 @@ import type {
 } from "@notefig/shared/agent";
 import { platformAdapter } from "@/adapters";
 import { getRegisteredTask } from "./task-registry";
-import {
-  AGENT_TASKS_COLLECTION_ID,
-  bootAgentTaskRow,
-  parsePersistedAgentTask,
-} from "./agent-persistence";
+import { agentTasksCollectionIdentity } from "@notefig/shared/persistence";
+import { bootAgentTaskRow, parsePersistedAgentTask } from "./agent-persistence";
 
 // The row shapes live in @notefig/shared/agent — @notefig/widgets derives the
 // prompt widget's state machine from turns and entries, and neither package
@@ -76,8 +73,8 @@ function isAgentTaskStatus(value: string): value is AgentTaskStatus {
  */
 export const agentTasksCollection = createCollection(
   persistedCollectionOptions<AgentTaskRow, string>({
-    id: AGENT_TASKS_COLLECTION_ID,
-    getKey: (task) => task.taskId,
+    // Id and key shared with the CLI, which opens the same table.
+    ...agentTasksCollectionIdentity,
     persistence: platformAdapter.db.get(),
   }),
 );
@@ -113,6 +110,10 @@ function matchesBootRow(row: AgentTaskRow, boot: AgentTaskRow): boolean {
  *   old code merely skipped these on read, which left them in storage forever.
  * - a row that fails validation is deleted for the same reason it was dropped
  *   before: it must never reach revival or spawn.
+ * - a row owned by another live process (`ownerPid`, a CLI run) is left
+ *   alone. Once that process is gone, the rules above apply to it like any
+ *   other row, so a run that crashed before finishing still becomes
+ *   restorable on the next launch.
  */
 export async function reconcileAgentTasksAtBoot(): Promise<void> {
   await agentTasksCollection.preload();
@@ -121,6 +122,17 @@ export async function reconcileAgentTasksAtBoot(): Promise<void> {
     const stored = parsePersistedAgentTask(row);
     if (!stored) {
       await agentTasksCollection.delete(row.taskId).isPersisted.promise;
+      continue;
+    }
+
+    // Another process is still driving this task (a CLI run sharing the
+    // database). Demoting it to "restored" would offer a revival that forks
+    // a second harness onto its live session, so leave it exactly as its
+    // owner last wrote it. The owner writes the final, restorable row itself.
+    if (
+      typeof stored.ownerPid === "number" &&
+      (await platformAdapter.proc.isProcessAlive(stored.ownerPid))
+    ) {
       continue;
     }
 

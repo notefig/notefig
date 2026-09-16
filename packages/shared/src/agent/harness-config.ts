@@ -841,3 +841,12 @@ export function composeHarnessEnv(
   for (const name of NESTED_SESSION_GUARD_VARS) delete env[name];
   return env;
 }
+
+/**
+ * Where harness settings are stored: the `harness-settings` KV namespace, one
+ * row per key. Shared because the CLI reads the same rows the app's settings
+ * screen writes.
+ */
+export const HARNESS_SETTINGS_NAMESPACE = "harness-settings";
+export const HARNESS_OVERRIDES_KEY = "overrides";
+export const HARNESS_CUSTOM_KEY = "custom";

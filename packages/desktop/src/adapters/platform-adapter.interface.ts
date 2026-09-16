@@ -464,6 +464,16 @@ export interface ProcessSurface {
   runShellCommand(
     script: string,
   ): Promise<{ stdout: string; exitCode: number }>;
+
+  /**
+   * Whether a local process with this pid is running. The app shares its
+   * database with other processes (`notefig agent-run`), and a task row one
+   * of them still owns must not be demoted and offered for revival here.
+   * Desktop asks the OS. Adapters whose storage no other process can open
+   * (the browser's per-origin OPFS database) answer false: there is never a
+   * foreign owner to protect.
+   */
+  isProcessAlive(pid: number): Promise<boolean>;
 }
 
 /**

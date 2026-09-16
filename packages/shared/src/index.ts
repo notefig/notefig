@@ -5,3 +5,4 @@ export * from "./validation";
 export * from "./agent";
 export * from "./blobs";
 export * from "./tunnel";
+export * from "./persistence";

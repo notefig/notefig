@@ -106,6 +106,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     createAgentTransport: this.createAgentTransport.bind(this),
     createMcpEndpoint: this.createMcpEndpoint.bind(this),
     runShellCommand: this.runShellCommand.bind(this),
+    isProcessAlive: this.isProcessAlive.bind(this),
   };
 
   readonly db: DbSurface = createTauriDb();
@@ -691,6 +692,10 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       stdout: result.value.stdout,
       exitCode: result.value.exitCode ?? -1,
     };
+  }
+
+  private isProcessAlive(pid: number): Promise<boolean> {
+    return invoke<boolean>("process_is_alive", { pid });
   }
 
   private createUpdater(): PlatformUpdater {

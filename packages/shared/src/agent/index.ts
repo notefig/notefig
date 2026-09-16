@@ -3,4 +3,5 @@ export * from "./harness-config";
 export * from "./ids";
 export * from "./prompt-composer";
 export * from "./task-state";
+export * from "./task-persistence";
 export * from "./widget-response";

@@ -17,5 +17,10 @@ export default {
     // packaging itself is under test. Run `npm run build` first — the same
     // convention the e2e specs already rely on to exec dist/bin/notefig.js.
     '^@notefig/agent$': '<rootDir>/dist/lib/agent.js',
+    // Same for @notefig/shared, since it carries the persistence layer: the
+    // bundle is where TanStack DB's ESM-only dependency has been converted to
+    // CommonJS. Required unbundled, it fails to load under Jest (and on Node
+    // older than 20.19 / 22.12).
+    '^@notefig/shared$': '<rootDir>/dist/lib/shared.js',
   },
 };

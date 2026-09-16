@@ -40,7 +40,9 @@
     { "extends": "BaseBrowserAdapter", "members": ["*"] },
     { "implements": "GitStorageHost", "members": ["*"] },
     { "implements": "Client", "members": ["*"] },
-    { "implements": "AgentTransport", "members": ["*"] }
+    { "implements": "AgentTransport", "members": ["*"] },
+    // Called by TanStack DB's persisted collections, never by our own code.
+    { "implements": "PersistedCollectionCoordinator", "members": ["*"] }
   ],
   "dynamicallyLoaded": [
     "packages/cli/commands/*.command.ts"
