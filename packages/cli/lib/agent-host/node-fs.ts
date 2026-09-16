@@ -12,10 +12,16 @@
  */
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { sliceTextWindow, type AcpFileSystem } from '../agent';
+import {
+  sliceTextWindow,
+  withWorkspaceContainment,
+  type AcpFileSystem,
+} from '../agent';
+import { posix, win32 } from '../shared';
 
-/** Thrown for both containment violations and underlying fs failures, so a
- *  caller renders one readable message instead of a Node errno stack. */
+/** Thrown for underlying fs failures, so a caller renders one readable
+ *  message instead of a Node errno stack. Containment refusals come from the
+ *  shared wrapper as `AcpPathError`. */
 export class HostFsError extends Error {
   constructor(
     readonly path: string,
@@ -26,45 +32,43 @@ export class HostFsError extends Error {
   }
 }
 
+/** This process's path flavor, for the shared containment rule. */
+export const nodePathFlavor = process.platform === 'win32' ? win32 : posix;
+
 /**
- * Resolve a harness-supplied path and refuse anything outside the workspace.
- *
- * The path arrives over the wire from a process we spawned but do not
- * control, so `../` traversal is reachable input, not a theoretical case.
- * Desktop asserts an absolute-path invariant for the same reason
- * (assertAbsoluteWorkspacePath); a headless host has no dialog to fall back
- * on, so it declines instead.
+ * Write files, creating parent directories, reporting failures as values —
+ * the shape a harness invoke hook expects (`HarnessInvokeContext.writeFiles`).
  */
-function resolveWithin(workspacePath: string, target: string): string {
-  const resolved = path.resolve(workspacePath, target);
-  const relative = path.relative(workspacePath, resolved);
-  const escapes =
-    relative.startsWith('..' + path.sep) ||
-    relative === '..' ||
-    path.isAbsolute(relative);
-  if (escapes) {
-    throw new HostFsError(
-      target,
-      `refusing to access a path outside the workspace: ${target}`,
-    );
+export async function writeNodeFiles(
+  files: { path: string; content: string }[],
+): Promise<{ failed: { path: string; message: string }[] }> {
+  const failed: { path: string; message: string }[] = [];
+  for (const file of files) {
+    try {
+      await fs.mkdir(path.dirname(file.path), { recursive: true });
+      await fs.writeFile(file.path, file.content, 'utf8');
+    } catch (error: any) {
+      failed.push({ path: file.path, message: error?.message ?? String(error) });
+    }
   }
-  return resolved;
+  return { failed };
 }
 
 /**
- * Build the ACP client's fs dependency for a workspace. Every path the
- * harness names is resolved relative to — and confined to — that workspace.
+ * Build the ACP client's fs dependency for a workspace.
+ *
+ * Containment is the shared rule from `@notefig/agent` — the same wrapper the
+ * desktop puts in front of its write path — so a harness-supplied path is
+ * resolved and refused identically on both hosts. What is left here is only
+ * the bytes: by the time these run, every path is absolute and inside the
+ * workspace.
  */
 export function createNodeAcpFileSystem(workspacePath: string): AcpFileSystem {
-  return {
-    async readTextFile(
-      target: string,
-      options?: { line?: number; limit?: number },
-    ): Promise<string> {
-      const resolved = resolveWithin(workspacePath, target);
+  const raw: AcpFileSystem = {
+    async readTextFile(target, options) {
       let content: string;
       try {
-        content = await fs.readFile(resolved, 'utf8');
+        content = await fs.readFile(target, 'utf8');
       } catch (error: any) {
         throw new HostFsError(
           target,
@@ -74,18 +78,18 @@ export function createNodeAcpFileSystem(workspacePath: string): AcpFileSystem {
       return sliceTextWindow(content, options);
     },
 
-    async writeTextFile(target: string, content: string): Promise<void> {
-      const resolved = resolveWithin(workspacePath, target);
-      try {
-        // Harnesses create files in directories they just decided to add.
-        await fs.mkdir(path.dirname(resolved), { recursive: true });
-        await fs.writeFile(resolved, content, 'utf8');
-      } catch (error: any) {
+    async writeTextFile(target, content) {
+      const { failed } = await writeNodeFiles([{ path: target, content }]);
+      if (failed.length > 0) {
         throw new HostFsError(
           target,
-          `could not write ${target}: ${error?.message ?? error}`,
+          `could not write ${target}: ${failed[0].message}`,
         );
       }
     },
   };
+  return withWorkspaceContainment(raw, {
+    workspacePath,
+    path: nodePathFlavor,
+  });
 }

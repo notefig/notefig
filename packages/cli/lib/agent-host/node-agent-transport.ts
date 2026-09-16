@@ -24,7 +24,11 @@ import {
   type SpawnAgentInfo,
   type Unsubscribe,
 } from '../agent';
-import { resolveHarnessSpawn, type HarnessDefinition } from '../shared';
+import {
+  composeHarnessEnv,
+  resolveHarnessSpawn,
+  type HarnessDefinition,
+} from '../shared';
 import { LineBuffer } from './line-buffer';
 import { TransportListeners } from './transport-listeners';
 
@@ -95,14 +99,10 @@ export class NodeAgentTransport implements AgentTransport {
     // any one host — same call the worker and the desktop adapter make.
     const { args, cwd } = resolveHarnessSpawn(harness, workspacePath);
 
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      ...harness.env,
-      ...extraEnv,
-    };
-    // Adapters misbehave if they think they're running inside Claude Code —
-    // the same strip the desktop host and the worker apply.
-    delete env.CLAUDECODE;
+    // Host env, harness env, this task's prepared env, then the
+    // nested-session guard vars stripped — one composition for every Node
+    // spawner, with the same guard list the desktop's Rust spawner uses.
+    const env = composeHarnessEnv(process.env, harness, extraEnv);
 
     let child: ChildProcess;
     try {

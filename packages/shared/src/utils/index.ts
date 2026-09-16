@@ -1,3 +1,4 @@
+export * from "./app-dir";
 export * from "./files";
 export * from "./common";
 export * from "./pathutil";

@@ -13,16 +13,22 @@ import {
   NotefigAcpClient,
   type AgentTransport,
 } from '../agent';
+import * as path from 'path';
 import {
-  BUILT_IN_HARNESSES,
+  APP_DIR_NAME,
   composePrompt,
+  harnessAdapterFor,
+  resolveHarness,
   type HarnessDefinition,
+  type HarnessOverride,
+  type HarnessResolution,
+  type CustomHarnessEntry,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
   type SessionNotification,
 } from '../shared';
 import { createNodeAgentTransport } from './node-agent-transport';
-import { createNodeAcpFileSystem } from './node-fs';
+import { createNodeAcpFileSystem, writeNodeFiles } from './node-fs';
 
 /** How long a cancelled turn gets to end through the protocol before the
  *  harness tree is taken down underneath it. */
@@ -41,6 +47,16 @@ export type HeadlessSessionSpec = {
    */
   taskId: string;
   harnessId: string;
+  /**
+   * The user's harness settings, as the app stores them. Optional because
+   * this host has nowhere to read them from yet; once it shares the app's
+   * database it passes the same `harness-settings` rows, and an override or a
+   * disabled harness then means the same thing here as in the app.
+   */
+  harnessSettings?: {
+    overrides?: Record<string, HarnessOverride>;
+    custom?: CustomHarnessEntry[];
+  };
   /** Absolute, already-verified workspace directory. */
   workspacePath: string;
   prompt: string;
@@ -95,15 +111,23 @@ function createDecliningPermissionRequester(
   };
 }
 
-export function findHarness(harnessId: string): HarnessDefinition {
-  const harness = BUILT_IN_HARNESSES.find((h) => h.id === harnessId);
-  if (!harness) {
-    const known = BUILT_IN_HARNESSES.map((h) => h.id).join(', ');
-    throw new HeadlessSessionError(
-      `unknown harness "${harnessId}". Available: ${known}`,
-    );
-  }
-  return harness;
+export function findHarness(
+  harnessId: string,
+  settings: HeadlessSessionSpec['harnessSettings'] = {},
+): HarnessDefinition {
+  // The same lookup the app makes, so overrides, custom entries and disabled
+  // harnesses resolve identically; only the message is this host's.
+  const resolved = resolveHarness(harnessId, settings.overrides, settings.custom);
+  if (resolved.ok === true) return resolved.harness;
+  // Explicit: this package compiles with `strict: false`, under which the
+  // `ok` discriminant does not narrow the union on its own.
+  const refused = resolved as Extract<HarnessResolution, { ok: false }>;
+  const available = refused.available.join(', ');
+  throw new HeadlessSessionError(
+    refused.reason === 'disabled'
+      ? `harness "${harnessId}" is disabled in your settings. Available: ${available}`
+      : `unknown harness "${harnessId}". Available: ${available}`,
+  );
 }
 
 /**
@@ -116,12 +140,31 @@ export function findHarness(harnessId: string): HarnessDefinition {
 export async function runHeadlessTurn(
   spec: HeadlessSessionSpec,
 ): Promise<TurnOutcome> {
-  const harness = findHarness(spec.harnessId);
+  const harness = findHarness(spec.harnessId, spec.harnessSettings);
+
+  // The harness's own invoke hook, exactly as the app runs it: whatever its
+  // dialect needs before the process exists (env to inject, a config file,
+  // session params) comes back as a plan this code applies without reading.
+  // No app-tools MCP server is offered here yet, and every hook returns an
+  // empty plan without one — so today this changes nothing about a headless
+  // run, and it starts carrying real setup the moment a server is passed.
+  const prep = await harnessAdapterFor(harness).onInvoke({
+    workspacePath: spec.workspacePath,
+    joinPath: (...parts) => path.join(...parts),
+    appDir: APP_DIR_NAME,
+    harnessEnv: harness.env,
+    mcpServer: undefined,
+    writeFiles: writeNodeFiles,
+    warn: (label, detail) =>
+      spec.onDiagnostic?.(detail ? `${label}: ${detail}` : label),
+  });
+
   const transport =
     spec.createTransport?.(harness) ??
     createNodeAgentTransport({
       harness,
       workspacePath: spec.workspacePath,
+      extraEnv: prep.env,
     });
 
   if (spec.onDiagnostic) transport.onDiagnostic?.(spec.onDiagnostic);
@@ -166,7 +209,11 @@ export async function runHeadlessTurn(
 
     // No MCP servers: app tools are not part of this ticket.
     const session = await Promise.race([
-      client.newSession(transport.agentCwd ?? spec.workspacePath, []),
+      client.newSession(
+        transport.agentCwd ?? spec.workspacePath,
+        [],
+        prep.sessionParams,
+      ),
       died,
       abortedEarly,
     ]);

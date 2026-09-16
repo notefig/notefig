@@ -257,6 +257,28 @@ describe('runHeadlessTurn', () => {
     expect(() => findHarness('not-a-harness')).toThrow(HeadlessSessionError);
     expect(() => findHarness('not-a-harness')).toThrow(/Available:/);
   });
+
+  it('honours the user settings: a disabled harness is refused as disabled', () => {
+    expect(() =>
+      findHarness('claude-code', {
+        overrides: { 'claude-code': { id: 'claude-code', enabled: false } },
+      }),
+    ).toThrow(/disabled in your settings/);
+  });
+
+  it('honours the user settings: an override replaces the command', () => {
+    expect(
+      findHarness('claude-code', {
+        overrides: {
+          'claude-code': {
+            id: 'claude-code',
+            enabled: true,
+            command: '/custom/claude-acp',
+          },
+        },
+      }).command,
+    ).toBe('/custom/claude-acp');
+  });
 });
 
 describe('createNodeAcpFileSystem', () => {
