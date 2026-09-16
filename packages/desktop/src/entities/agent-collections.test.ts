@@ -4,7 +4,7 @@ import {
   CollectionConfigurationError,
   createCollection,
   localOnlyCollectionOptions,
-} from "@tanstack/react-db";
+} from "@tanstack/db";
 
 // The tasks collection's queryFn reaches @/adapters (getAllKv) and the task
 // registry; turns/entries are local-only and touch neither. A stub adapter

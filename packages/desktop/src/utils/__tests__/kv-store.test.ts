@@ -21,7 +21,7 @@ vi.mock("@/adapters", async () => ({
   },
 }));
 
-import { createCollection } from "@tanstack/react-db";
+import { createCollection } from "@tanstack/db";
 import { persistedCollectionOptions } from "@tanstack/db-sqlite-persistence-core";
 import {
   getOrCreateKvCollection,

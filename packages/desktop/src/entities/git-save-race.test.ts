@@ -25,7 +25,7 @@ vi.mock("@/adapters", async () => ({
     db: (await import("@/testing/node-db")).createNodeTestDb(),
   },
 }));
-import { createLiveQueryCollection, eq } from "@tanstack/react-db";
+import { createLiveQueryCollection, eq } from "@tanstack/db";
 import { getOrCreateGitCollection, invalidateGit, saveCheckpoint } from "./git";
 
 const WS = "/tmp/ws-git-save-race-test";
