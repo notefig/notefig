@@ -18,6 +18,7 @@ import { execFileSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { openSharedDb } from '../../lib/shared';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const Database = require('better-sqlite3');
@@ -53,16 +54,13 @@ function runWriter(
   });
 }
 
-function rowsOnDisk(dbPath: string): number {
-  const db = new Database(dbPath, { readonly: true });
+/** Rows in the file, read by a fresh connection through TanStack. */
+async function rowsOnDisk(dbPath: string): Promise<number> {
+  const db = openSharedDb(new Database(dbPath, { timeout: 5000 }));
   try {
-    const registry = db
-      .prepare("SELECT table_name FROM collection_registry WHERE collection_id = 'agent-tasks'")
-      .get() as { table_name: string } | undefined;
-    if (!registry) return 0;
-    return (db.prepare(`SELECT COUNT(*) AS n FROM "${registry.table_name}"`).get() as { n: number }).n;
+    return (await db.tasks.all()).length;
   } finally {
-    db.close();
+    await db.close();
   }
 }
 
@@ -81,7 +79,7 @@ describe('processes sharing the app database', () => {
           fs.writeFileSync(`${dbPath}.go`, '');
           const results = await Promise.all(writers);
 
-          expect({ round, onDisk: rowsOnDisk(dbPath) }).toEqual({
+          expect({ round, onDisk: await rowsOnDisk(dbPath) }).toEqual({
             round,
             onDisk: expectedTotal,
           });

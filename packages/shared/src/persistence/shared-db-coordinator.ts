@@ -48,11 +48,10 @@
  *      its optimistic layer after the write is confirmed, and a truncate
  *      re-applies that layer: a row this process inserted and another process
  *      deleted comes straight back. So other processes' changes arrive as
- *      targeted updates and deletes, with values read from the table as they
- *      are now — not replayed from the library's transaction log, which is
- *      pruned (after a day, or a thousand commits) and then answers only with
- *      a full reload. A normal sync commit also recomputes the optimistic
- *      layer, which is what clears the stale entry.
+ *      targeted updates and deletes — the keys the adapter reports changed,
+ *      with their values as they are now (`scanRows`), never the historical
+ *      values in its transaction log. A normal sync commit also recomputes
+ *      the optimistic layer, which is what clears the stale entry.
  *
  * What this does not arbitrate: two processes writing the same row within one
  * poll interval. The collection may then show the older value until that row
@@ -60,16 +59,19 @@
  * task row is written only by the process that owns it, and settings only by
  * the app — so it is a boundary to keep, not a case handled here.
  *
- * This relies on library internals, pinned at 0.2.9 and covered by the
- * two-process test and the desktop's two-connection test: `runInTransaction`
- * and `driver` on the SQLite adapter, a transaction driver whose nested
- * transactions become savepoints, the registry and table layout read below,
- * and rules 1 and 4's reading of how positions and truncates are applied.
- * Revisit all of them on any upgrade.
+ * Everything it reads about TanStack's storage goes through the adapter's
+ * public methods — `getStreamPosition`, `pullSince`, `scanRows`,
+ * `applyCommittedTx` — so each call initializes the collection itself and
+ * nothing here depends on the library's table layout. Three things are still
+ * internal, pinned at 0.2.9 and checked at startup (`asInternals`):
+ * `runInTransaction`, so the position and the write share one transaction;
+ * `driver`, to read this module's own counter table; and a transaction driver
+ * whose nested transactions become savepoints. Rules 1 and 4 also rest on how
+ * the library applies positions and truncates. The two-process test and the
+ * desktop's two-connection test cover all of it; revisit on any upgrade.
  */
 import {
   createSQLiteCorePersistenceAdapter,
-  decodePersistedStorageKey,
   safeRandomUUID,
   type ApplyLocalMutationsResponse,
   type PersistedCollectionCoordinator,
@@ -78,6 +80,7 @@ import {
   type PersistenceAdapter,
   type ProtocolEnvelope,
   type PullSinceResponse,
+  type SQLiteCorePersistenceAdapter,
   type SQLiteDriver,
 } from "@tanstack/db-sqlite-persistence-core";
 
@@ -100,6 +103,8 @@ const STREAM_TABLE = "notefig_stream";
 type SQLiteAdapterInternals = PersistenceAdapter & {
   driver: SQLiteDriver;
   scanRows: NonNullable<PersistenceAdapter["scanRows"]>;
+  getStreamPosition: NonNullable<PersistenceAdapter["getStreamPosition"]>;
+  pullSince: SQLiteCorePersistenceAdapter["pullSince"];
   runInTransaction<T>(fn: (driver: SQLiteDriver) => Promise<T>): Promise<T>;
   schemaVersion?: number;
   schemaMismatchPolicy?: string;
@@ -130,6 +135,8 @@ function asInternals(adapter: PersistenceAdapter): SQLiteAdapterInternals {
     typeof candidate.runInTransaction !== "function" && "runInTransaction",
     !candidate.driver && "driver",
     typeof candidate.scanRows !== "function" && "scanRows",
+    typeof candidate.getStreamPosition !== "function" && "getStreamPosition",
+    typeof candidate.pullSince !== "function" && "pullSince",
     ...COPIED_CONFIG_FIELDS.filter((field) => !(field in candidate)),
   ].filter((name): name is string => Boolean(name));
   if (missing.length > 0) {
@@ -274,12 +281,11 @@ export class SharedDbCoordinator implements PersistedCollectionCoordinator {
           `SELECT seq FROM ${STREAM_TABLE} WHERE collection_id = ?`,
           [collectionId],
         );
-        // applied_tx covers databases written before this coordinator existed.
-        const [applied] = await tx.query<{ seq: number | null }>(
-          `SELECT MAX(seq) AS seq FROM applied_tx WHERE collection_id = ?`,
-          [collectionId],
-        );
-        const seq = Math.max(counter?.seq ?? 0, applied?.seq ?? 0) + 1;
+        // The adapter's own position covers databases written before this
+        // coordinator existed. Read through the join adapter, so inside this
+        // transaction.
+        const position = await join.adapter.getStreamPosition(collectionId);
+        const seq = Math.max(counter?.seq ?? 0, position.latestSeq) + 1;
         await tx.run(
           `INSERT INTO ${STREAM_TABLE} (collection_id, seq) VALUES (?, ?)
            ON CONFLICT(collection_id) DO UPDATE SET seq = excluded.seq`,
@@ -300,11 +306,8 @@ export class SharedDbCoordinator implements PersistedCollectionCoordinator {
             value: mutation.value,
           })) as never,
         });
-        const [version] = await tx.query<{ latest_row_version: number }>(
-          `SELECT latest_row_version FROM collection_version WHERE collection_id = ?`,
-          [collectionId],
-        );
-        return { seq, txId, rowVersion: version?.latest_row_version ?? 0 };
+        const after = await join.adapter.getStreamPosition(collectionId);
+        return { seq, txId, rowVersion: after.latestRowVersion };
       } finally {
         join.bind(null);
       }
@@ -352,7 +355,18 @@ export class SharedDbCoordinator implements PersistedCollectionCoordinator {
     // Rule 2: the counter first.
     const seq = await this.readSeq(base, collectionId);
     const changes = await this.readChangesSince(base, collectionId, fromRowVersion);
-    // Rule 4: one delta of current rows, never a full reload.
+    if (changes.requiresFullReload) {
+      return {
+        type: "rpc:pullSince:res",
+        rpcId: safeRandomUUID(),
+        ok: true,
+        latestTerm: TERM,
+        latestSeq: seq,
+        latestRowVersion: changes.rowVersion,
+        requiresFullReload: true,
+      };
+    }
+    // Rule 4: one delta of current rows.
     return {
       type: "rpc:pullSince:res",
       rpcId: safeRandomUUID(),
@@ -476,8 +490,15 @@ export class SharedDbCoordinator implements PersistedCollectionCoordinator {
 
   /**
    * The rows changed since a row version, as they are now, and the keys
-   * deleted since. Read from the collection's own table and tombstones, which
-   * are never pruned, rather than the transaction log, which is (rule 4).
+   * deleted since — through the adapter's public `pullSince` (which keys
+   * changed) and `scanRows` (their current values). Never the deltas
+   * `pullSince` also returns: those are the values at each commit (rule 4).
+   *
+   * `requiresFullReload` comes back only when the adapter cannot say which
+   * keys changed: more than its reload threshold (128) in one poll, or a gap
+   * past what its transaction log still holds. Neither happens to a process
+   * polling every quarter second. When it does, the collection reloads, and
+   * rule 4's stale-row hazard applies to that one reload.
    */
   private async readChangesSince(
     adapter: SQLiteAdapterInternals,
@@ -485,35 +506,27 @@ export class SharedDbCoordinator implements PersistedCollectionCoordinator {
     fromRowVersion: number,
   ): Promise<{
     rowVersion: number;
+    requiresFullReload: boolean;
     changedRows: Array<{ key: string | number; value: unknown }>;
     deletedKeys: Array<string | number>;
   }> {
+    // Rule 2 again, inside this read: the version first, the keys second.
+    // `pullSince` reads the changed keys before its own latest row version, as
+    // separate statements, so a commit landing between them would be counted
+    // in that version but missing from the keys — recorded as seen, never
+    // delivered (one row went missing this way in a three-process run). The
+    // version read here comes first, so the keys are a superset of it.
     const rowVersion = await this.readRowVersion(adapter, collectionId);
-    const [registry] = await adapter.driver.query<{
-      table_name: string;
-      tombstone_table_name: string;
-    }>(
-      `SELECT table_name, tombstone_table_name FROM collection_registry WHERE collection_id = ?`,
-      [collectionId],
-    );
-    if (!registry) return { rowVersion, changedRows: [], deletedKeys: [] };
-
-    const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;
-    const [changed, deleted] = await Promise.all([
-      adapter.driver.query<{ key: string }>(
-        `SELECT key FROM ${quote(registry.table_name)} WHERE row_version > ?`,
-        [fromRowVersion],
-      ),
-      adapter.driver.query<{ key: string }>(
-        `SELECT key FROM ${quote(registry.tombstone_table_name)} WHERE row_version > ?`,
-        [fromRowVersion],
-      ),
-    ]);
-    const changedKeys = new Set(
-      changed.map((row) => String(decodePersistedStorageKey(row.key))),
-    );
-    // Decoded values come from the adapter itself; the key set above filters
-    // them to what changed.
+    const pulled = await adapter.pullSince(collectionId, fromRowVersion);
+    if (pulled.requiresFullReload) {
+      return {
+        rowVersion,
+        requiresFullReload: true,
+        changedRows: [],
+        deletedKeys: [],
+      };
+    }
+    const changedKeys = new Set(pulled.changedKeys.map(String));
     const changedRows =
       changedKeys.size === 0
         ? []
@@ -522,8 +535,9 @@ export class SharedDbCoordinator implements PersistedCollectionCoordinator {
             .map((row) => ({ key: row.key, value: row.value }));
     return {
       rowVersion,
+      requiresFullReload: false,
       changedRows,
-      deletedKeys: deleted.map((row) => decodePersistedStorageKey(row.key)),
+      deletedKeys: pulled.deletedKeys,
     };
   }
 
@@ -531,11 +545,7 @@ export class SharedDbCoordinator implements PersistedCollectionCoordinator {
     adapter: SQLiteAdapterInternals,
     collectionId: string,
   ): Promise<number> {
-    const [row] = await adapter.driver.query<{ latest_row_version: number }>(
-      `SELECT latest_row_version FROM collection_version WHERE collection_id = ?`,
-      [collectionId],
-    );
-    return row?.latest_row_version ?? 0;
+    return (await adapter.getStreamPosition(collectionId)).latestRowVersion;
   }
 
   private async readCounters(
@@ -599,7 +609,7 @@ export class SharedDbCoordinator implements PersistedCollectionCoordinator {
             seq,
             txId: safeRandomUUID(),
             latestRowVersion: changes.rowVersion,
-            requiresFullReload: false,
+            requiresFullReload: changes.requiresFullReload,
             changedRows: changes.changedRows,
             deletedKeys: changes.deletedKeys,
           }),

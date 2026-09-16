@@ -3,6 +3,7 @@
 // process writes at once, inserts its rows, then waits until it can see every
 // process's rows. Prints what it saw as one JSON line.
 /* eslint-disable */
+const runMain = require('./run-main');
 const fs = require('fs');
 const Database = require('better-sqlite3');
 const { openSharedDb } = require('../../dist/lib/shared.js');
@@ -12,7 +13,7 @@ const count = Number(countArg);
 const labels = labelsCsv.split(',');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-(async () => {
+runMain(async () => {
   const handle = new Database(dbPath, { timeout: 5000 });
   const db = openSharedDb(handle, { pollIntervalMs: 50 });
 
@@ -41,7 +42,4 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const seen = expected.filter((id) => db.tasks.get(id)).length;
   process.stdout.write(JSON.stringify({ label, seen }) + '\n');
   await db.close();
-})().catch((error) => {
-  process.stderr.write(String(error && error.stack ? error.stack : error));
-  process.exit(1);
 });

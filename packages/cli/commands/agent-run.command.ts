@@ -35,14 +35,16 @@ function installCancellation(logger: Logger): {
     logger.info('\n  Cancelling... (Ctrl-C again to force)');
     controller.abort();
   };
-  process.on('SIGINT', onSignal);
-  process.on('SIGTERM', onSignal);
+  // SIGHUP is the terminal window closing mid-run. Unhandled, it kills the
+  // process with no teardown: the harness tree is left running and the task
+  // row is never handed back to the app. It is a cancel like any other.
+  const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+  for (const name of signals) process.on(name, onSignal);
   return {
     signal: controller.signal,
     cancelled: () => cancelled,
     dispose: () => {
-      process.removeListener('SIGINT', onSignal);
-      process.removeListener('SIGTERM', onSignal);
+      for (const name of signals) process.removeListener(name, onSignal);
     },
   };
 }

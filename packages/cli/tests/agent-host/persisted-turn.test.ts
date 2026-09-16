@@ -15,6 +15,7 @@ import {
   HARNESS_SETTINGS_NAMESPACE,
   newTaskId,
   openSharedDb,
+  type AgentTaskRow,
   type SharedDb,
 } from '../../lib/shared';
 import { attachScriptedAgent } from './scripted-agent';
@@ -22,25 +23,13 @@ import { attachScriptedAgent } from './scripted-agent';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const Database = require('better-sqlite3');
 
-type StoredTask = Record<string, unknown>;
-
-/** The task rows exactly as SQLite holds them, read through a second
- *  connection — what another process (the app) would see. */
-function storedTasks(dbPath: string): Map<string, StoredTask> {
-  const db = new Database(dbPath, { readonly: true });
+/** Every task row as a separate connection sees it, read through TanStack. */
+async function tasksIn(dbPath: string): Promise<AgentTaskRow[]> {
+  const other = openSharedDb(new Database(dbPath, { timeout: 5000 }));
   try {
-    const registry = db
-      .prepare("SELECT table_name FROM collection_registry WHERE collection_id = 'agent-tasks'")
-      .get() as { table_name: string } | undefined;
-    if (!registry) return new Map();
-    const rows = db.prepare(`SELECT key, value FROM "${registry.table_name}"`).all() as Array<{
-      key: string;
-      value: string;
-    }>;
-    // Keys are stored encoded as `s:<id>`.
-    return new Map(rows.map((row) => [row.key.replace(/^s:/, ''), JSON.parse(row.value)]));
+    return await other.tasks.all();
   } finally {
-    db.close();
+    await other.close();
   }
 }
 
@@ -60,7 +49,7 @@ describe('runPersistedHeadlessTurn', () => {
   it('owns the row while running and hands it back restorable', async () => {
     await withSharedDb(async (db, dbPath, dir) => {
       const taskId = newTaskId();
-      let duringTurn: StoredTask | undefined;
+      let duringTurn: AgentTaskRow | undefined;
 
       const outcome = await runPersistedHeadlessTurn({
         db,
@@ -75,9 +64,10 @@ describe('runPersistedHeadlessTurn', () => {
             turns: [
               {
                 chunks: ['done'],
-                // Mid-turn, as the app would read it.
+                // Mid-turn, as the app would see it: this process's collection
+                // already holds the row, so read it back through the store.
                 onPrompt: () => {
-                  duringTurn = storedTasks(dbPath).get(taskId);
+                  duringTurn = db.tasks.get(taskId);
                 },
               },
             ],
@@ -97,7 +87,8 @@ describe('runPersistedHeadlessTurn', () => {
         workspacePath: dir,
       });
 
-      const after = storedTasks(dbPath).get(taskId);
+      // After the turn, from a separate connection — what another process sees.
+      const after = (await tasksIn(dbPath)).find((task) => task.taskId === taskId);
       expect(after).toMatchObject({
         taskId,
         status: 'restored',
@@ -128,7 +119,7 @@ describe('runPersistedHeadlessTurn', () => {
         }),
       ).rejects.toBeInstanceOf(HeadlessSessionError);
 
-      expect(storedTasks(dbPath).has(taskId)).toBe(false);
+      expect((await tasksIn(dbPath)).some((task) => task.taskId === taskId)).toBe(false);
     });
   });
 
@@ -151,7 +142,7 @@ describe('runPersistedHeadlessTurn', () => {
         }),
       ).rejects.toThrow(/disabled in your settings/);
 
-      expect(storedTasks(dbPath).has(taskId)).toBe(false);
+      expect((await tasksIn(dbPath)).some((task) => task.taskId === taskId)).toBe(false);
     });
   });
 

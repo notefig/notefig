@@ -157,6 +157,8 @@ function tauriDatabaseOver(handle: SyncSqliteHandle) {
 /** The task rows, through the same collection the app uses. */
 export interface SharedAgentTaskStore {
   get(taskId: string): AgentTaskRow | undefined;
+  /** Every task row, once the collection has loaded. */
+  all(): Promise<AgentTaskRow[]>;
   insert(row: AgentTaskRow): Promise<void>;
   update(taskId: string, patch: Partial<AgentTaskRow>): Promise<void>;
   /**
@@ -233,6 +235,10 @@ export function openSharedDb(
   return {
     tasks: {
       get: (taskId) => tasks.get(taskId),
+      async all() {
+        await ready();
+        return [...tasks.values()];
+      },
       async insert(row) {
         await ready();
         await tasks.insert(row).isPersisted.promise;
