@@ -9,7 +9,10 @@
  * imported; npm pulls its types in as a peer, and that is all it is.
  */
 import { invoke } from "@tauri-apps/api/core";
-import { createTauriSQLitePersistence } from "@tanstack/tauri-db-sqlite-persistence";
+import {
+  createTauriSQLitePersistence,
+  type TauriSQLiteDatabaseLike,
+} from "@tanstack/tauri-db-sqlite-persistence";
 import type { PersistedCollectionPersistence } from "@tanstack/db-sqlite-persistence-core";
 import type { DbSurface } from "./platform-adapter.interface";
 import {
@@ -88,11 +91,8 @@ class RusqliteDatabase {
   private resetInFlight: Promise<void> | null = null;
 
   execute(query: string, bindValues?: unknown[]): Promise<QueryResult> {
-    // Registering a new collection is the one library statement that races
-    // across processes (see raceSafeRegistrationSql); the CLI shares this file.
-    const sql = raceSafeRegistrationSql(query);
     return this.guarded(() =>
-      invoke<QueryResult>("db_execute", { sql, params: bindValues }),
+      invoke<QueryResult>("db_execute", { sql: query, params: bindValues }),
     );
   }
 
@@ -151,29 +151,52 @@ class RusqliteDatabase {
  * one statement queue — per database object. A fresh database per call would
  * give each collection its own queue, letting two transactions interleave.
  */
+/**
+ * The persistence over one database connection, as the app builds it.
+ *
+ * Other processes write this file too — `notefig agent-run` shares it — so
+ * writes are serialized and each other's commits delivered through the shared
+ * coordinator, rather than the library's single-process default, which
+ * silently drops a second writer's rows (see SharedDbCoordinator). Registering
+ * a brand-new collection is the one library statement that races across
+ * processes, so it goes through `raceSafeRegistrationSql` on the way in.
+ *
+ * Exported so the test double (testing/node-db.ts) builds exactly this over
+ * `node:sqlite`: the coordination is then exercised by every desktop test that
+ * persists anything, not by a copy of this wiring.
+ */
+export function createCoordinatedPersistence(
+  database: TauriSQLiteDatabaseLike,
+  options: { pollIntervalMs?: number } = {},
+): { persistence: PersistedCollectionPersistence; dispose: () => void } {
+  const coordinator = new SharedDbCoordinator(options);
+  const raceSafe: TauriSQLiteDatabaseLike = {
+    path: database.path,
+    execute: (query, bindValues) =>
+      database.execute(raceSafeRegistrationSql(query), bindValues),
+    select: (query, bindValues) => database.select(query, bindValues),
+    close: (db) => database.close(db),
+  };
+  const persistence = coordinator.coordinate(
+    createTauriSQLitePersistence({
+      database: raceSafe,
+      coordinator,
+      // Pre-GA, and upstream ships no migration API: a `schemaVersion` bump
+      // drops the stored rows rather than failing to open. Whichever ticket
+      // first bumps a version owes a release note.
+      schemaMismatchPolicy: "reset",
+    }),
+  );
+  return { persistence, dispose: () => coordinator.dispose() };
+}
+
 export function createTauriDb(): DbSurface {
   let persistence: PersistedCollectionPersistence | null = null;
 
   return {
     get(): PersistedCollectionPersistence {
-      if (!persistence) {
-        // Other processes write this file too — `notefig agent-run` shares
-        // it — so writes are serialized and each other's commits delivered
-        // through the shared coordinator rather than the library's
-        // single-process default, which silently drops a second writer's
-        // rows. See SharedDbCoordinator.
-        const coordinator = new SharedDbCoordinator();
-        persistence = coordinator.coordinate(
-          createTauriSQLitePersistence({
-            database: new RusqliteDatabase(),
-            coordinator,
-            // Pre-GA, and upstream ships no migration API: a `schemaVersion`
-            // bump drops the stored rows rather than failing to open.
-            // Whichever ticket first bumps a version owes a release note.
-            schemaMismatchPolicy: "reset",
-          }),
-        );
-      }
+      persistence ??= createCoordinatedPersistence(new RusqliteDatabase())
+        .persistence;
       return persistence;
     },
   };

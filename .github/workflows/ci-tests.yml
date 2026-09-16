@@ -81,6 +81,55 @@ jobs:
           VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
         run: npm run test -w packages/cli
 
+  # The CLI suites above only run on push: they include the book-building e2e
+  # suites (slow, and one needs Vercel secrets). That left the tests guarding
+  # the shared-database coordinator — which depends on pinned TanStack
+  # internals — running only after merge, so an upgrade PR would pass here
+  # and break main. These suites are fast and need no secrets, so they run on
+  # every pull request; on push the full job above already covers them.
+  #
+  # Two Node versions because the packaging is part of what they test: the
+  # vendored bundle must load, and better-sqlite3 must install, on both.
+  test-cli-agent-host:
+    name: Test CLI agent host (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22"]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build shared package
+        run: npm run build -w packages/shared
+
+      - name: Build agent package
+        run: npm run build -w packages/agent
+
+      - name: Build CLI
+        run: npm run build -w packages/cli
+
+      - name: Run agent host, shared database and bundle tests
+        working-directory: packages/cli
+        run: >-
+          npx jest --runInBand
+          tests/shared-db
+          tests/agent-host
+          tests/vendor-bundles.test.ts
+          tests/line-buffer.test.ts
+          tests/e2e/agent-worker
+
   test-git:
     name: Test Git Package
     runs-on: ubuntu-latest

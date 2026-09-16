@@ -5,17 +5,16 @@
  * touches settings, recent projects or agent tasks needs a real persistence —
  * an in-memory stub would not exercise the hydrate-from-storage path that is
  * the entire point of the cutover. This drives the real
- * `createTauriSQLitePersistence` against `node:sqlite`, so the only thing not
- * covered is the IPC hop (which `db_ops.rs`'s tests and `tests/shim/` cover).
+ * `createCoordinatedPersistence` from tauri-db.ts — the app's own construction,
+ * shared-database coordinator included — against `node:sqlite`, so the only
+ * thing not covered is the IPC hop (which `db_ops.rs`'s tests and `tests/shim/` cover).
  *
  * Test-only: it imports `node:sqlite` and must never be reachable from app code.
  */
 import { DatabaseSync } from "node:sqlite";
 import { createTauriSQLitePersistence } from "@tanstack/tauri-db-sqlite-persistence";
-import {
-  decodePersistedStorageKey,
-  type PersistedCollectionPersistence,
-} from "@tanstack/db-sqlite-persistence-core";
+import { decodePersistedStorageKey } from "@tanstack/db-sqlite-persistence-core";
+import { createCoordinatedPersistence } from "@/adapters/tauri-db";
 import type { DbSurface } from "@/adapters/platform-adapter.interface";
 
 /**
@@ -84,16 +83,35 @@ export interface NodeTestDb extends DbSurface {
   storedRows(
     collectionId: string,
   ): Array<{ key: string | number; value: Record<string, unknown> }>;
+  /** Stop coordinating and close the connection. */
+  close(): void;
 }
 
 /**
  * A fresh, isolated database. Call it per test — collections are module-scoped
  * singletons, so sharing one across tests leaks rows between them.
  */
-export function createNodeTestDb(): NodeTestDb {
-  const database = new DatabaseSync(":memory:");
+export function createNodeTestDb(
+  options: {
+    /** A file, so a second test db can open the same one — two connections,
+     *  as the app and a CLI run are. In memory when omitted. */
+    path?: string;
+    pollIntervalMs?: number;
+    /**
+     * False builds the library's default single-process persistence instead
+     * of the app's. Only for showing what the coordinator prevents.
+     */
+    coordinated?: boolean;
+  } = {},
+): NodeTestDb {
+  const database = new DatabaseSync(options.path ?? ":memory:");
+  if (options.path) {
+    // As the app's connection is (db_ops.rs). WAL is a property of the file.
+    database.exec("PRAGMA journal_mode = WAL");
+    database.exec("PRAGMA busy_timeout = 5000");
+  }
   const writeFailure: { reason: string | null } = { reason: null };
-  let persistence: PersistedCollectionPersistence | null = null;
+  let built: ReturnType<typeof createCoordinatedPersistence> | null = null;
 
   return {
     breakWrites(reason) {
@@ -106,12 +124,27 @@ export function createNodeTestDb(): NodeTestDb {
 
     get() {
       // Memoized like both real surfaces: one persistence means one driver, so
-      // one statement queue over the file.
-      persistence ??= createTauriSQLitePersistence({
-        database: nodeDatabase(database, writeFailure),
-        schemaMismatchPolicy: "reset",
-      });
-      return persistence;
+      // one statement queue over the file. Built by the app's own function,
+      // coordinator included.
+      built ??=
+        options.coordinated === false
+          ? {
+              persistence: createTauriSQLitePersistence({
+                database: nodeDatabase(database, writeFailure),
+                schemaMismatchPolicy: "reset",
+              }),
+              dispose: () => {},
+            }
+          : createCoordinatedPersistence(
+              nodeDatabase(database, writeFailure) as never,
+              { pollIntervalMs: options.pollIntervalMs },
+            );
+      return built.persistence;
+    },
+
+    close() {
+      built?.dispose();
+      database.close();
     },
 
     storedRows(collectionId) {

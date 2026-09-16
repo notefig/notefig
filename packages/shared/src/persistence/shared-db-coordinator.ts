@@ -24,11 +24,12 @@
  *   contiguous in commit order and can never collide.
  *
  *   Reads. Each process polls that counter table. When a collection's
- *   counter has moved past what this process has seen, it pulls the changed
- *   rows from the database and delivers them as an ordinary commit message.
+ *   counter has moved past what this process has seen, it reads the rows
+ *   changed since, as they are now, and delivers them as an ordinary commit.
  *
- * Two ordering rules make delivery correct; both were found as real races in
- * a two-process repro and are why the code below reads the way it does:
+ * Four rules make delivery correct. Each was found as a real failure — two in
+ * a two-process repro, two by the desktop's own test suite — and they are why
+ * the code below reads the way it does:
  *
  *   1. Own writes do not move the collection's position directly. The library
  *      applies a write response's position without a gap check, so reporting
@@ -37,16 +38,38 @@
  *      seen. The response carries a position that moves nothing; the real
  *      one arrives as a delivered commit, through the gap check.
  *   2. Read the counter before the rows. A commit landing between the two
- *      reads is then in the rows but not the counter (re-applied later,
+ *      reads is then in the rows but not the counter (picked up again later,
  *      harmless), never in the counter but not the rows (skipped for good).
+ *   3. Own commits carry no rows. The collection already holds them (the
+ *      library confirms a persisted write itself), and a delivered message is
+ *      applied later, on the collection's queue: rows in it can land after a
+ *      newer local write.
+ *   4. Never reload by truncating. TanStack DB keeps a locally written row in
+ *      its optimistic layer after the write is confirmed, and a truncate
+ *      re-applies that layer: a row this process inserted and another process
+ *      deleted comes straight back. So other processes' changes arrive as
+ *      targeted updates and deletes, with values read from the table as they
+ *      are now — not replayed from the library's transaction log, which is
+ *      pruned (after a day, or a thousand commits) and then answers only with
+ *      a full reload. A normal sync commit also recomputes the optimistic
+ *      layer, which is what clears the stale entry.
+ *
+ * What this does not arbitrate: two processes writing the same row within one
+ * poll interval. The collection may then show the older value until that row
+ * next changes. Ownership avoids it rather than this module resolving it — a
+ * task row is written only by the process that owns it, and settings only by
+ * the app — so it is a boundary to keep, not a case handled here.
  *
  * This relies on library internals, pinned at 0.2.9 and covered by the
- * two-process test: `runInTransaction` and `driver` on the SQLite adapter, a
- * transaction driver whose nested transactions become savepoints, and rule 1's
- * reading of how positions are recorded. Revisit all three on any upgrade.
+ * two-process test and the desktop's two-connection test: `runInTransaction`
+ * and `driver` on the SQLite adapter, a transaction driver whose nested
+ * transactions become savepoints, the registry and table layout read below,
+ * and rules 1 and 4's reading of how positions and truncates are applied.
+ * Revisit all of them on any upgrade.
  */
 import {
   createSQLiteCorePersistenceAdapter,
+  decodePersistedStorageKey,
   safeRandomUUID,
   type ApplyLocalMutationsResponse,
   type PersistedCollectionCoordinator,
@@ -76,23 +99,8 @@ const STREAM_TABLE = "notefig_stream";
  */
 type SQLiteAdapterInternals = PersistenceAdapter & {
   driver: SQLiteDriver;
+  scanRows: NonNullable<PersistenceAdapter["scanRows"]>;
   runInTransaction<T>(fn: (driver: SQLiteDriver) => Promise<T>): Promise<T>;
-  pullSince(
-    collectionId: string,
-    fromRowVersion: number,
-  ): Promise<
-    | { latestRowVersion: number; requiresFullReload: true }
-    | {
-        latestRowVersion: number;
-        requiresFullReload: false;
-        changedKeys: Array<string | number>;
-        deletedKeys: Array<string | number>;
-        deltas: Array<{
-          changedRows: Array<{ key: string | number; value: unknown }>;
-          deletedKeys: Array<string | number>;
-        }>;
-      }
-  >;
   schemaVersion?: number;
   schemaMismatchPolicy?: string;
   appliedTxPruneMaxRows?: number;
@@ -100,16 +108,35 @@ type SQLiteAdapterInternals = PersistenceAdapter & {
   pullSinceReloadThreshold?: number;
 };
 
+/**
+ * The configuration fields the join adapter copies from its base (see
+ * `joinAdapterFor`). Checked by presence, not value: `schemaVersion` is
+ * legitimately undefined, but the adapter assigns every one of these in its
+ * constructor, so a missing property means the library renamed it — and a
+ * renamed field would otherwise read as undefined and quietly fall back to a
+ * library default.
+ */
+const COPIED_CONFIG_FIELDS = [
+  "schemaVersion",
+  "schemaMismatchPolicy",
+  "appliedTxPruneMaxRows",
+  "appliedTxPruneMaxAgeSeconds",
+  "pullSinceReloadThreshold",
+] as const;
+
 function asInternals(adapter: PersistenceAdapter): SQLiteAdapterInternals {
   const candidate = adapter as Partial<SQLiteAdapterInternals>;
-  if (
-    typeof candidate.runInTransaction !== "function" ||
-    typeof candidate.pullSince !== "function" ||
-    !candidate.driver
-  ) {
+  const missing = [
+    typeof candidate.runInTransaction !== "function" && "runInTransaction",
+    !candidate.driver && "driver",
+    typeof candidate.scanRows !== "function" && "scanRows",
+    ...COPIED_CONFIG_FIELDS.filter((field) => !(field in candidate)),
+  ].filter((name): name is string => Boolean(name));
+  if (missing.length > 0) {
     throw new Error(
-      "SharedDbCoordinator needs the SQLite core adapter's runInTransaction, " +
-        "pullSince and driver; the persistence library's internals changed.",
+      `SharedDbCoordinator relies on SQLite core adapter internals that are ` +
+        `missing (${missing.join(", ")}); the persistence library changed. ` +
+        `See the module comment in shared-db-coordinator.ts before upgrading.`,
     );
   }
   return candidate as SQLiteAdapterInternals;
@@ -299,12 +326,9 @@ export class SharedDbCoordinator implements PersistedCollectionCoordinator {
         txId: committed.txId,
         latestRowVersion: committed.rowVersion,
         requiresFullReload: false,
-        changedRows: mutations
-          .filter((mutation) => mutation.type !== "delete")
-          .map((mutation) => ({ key: mutation.key, value: mutation.value })),
-        deletedKeys: mutations
-          .filter((mutation) => mutation.type === "delete")
-          .map((mutation) => mutation.key),
+        // Rule 3: no rows. This process's collection already holds them.
+        changedRows: [],
+        deletedKeys: [],
       }),
     );
 
@@ -325,31 +349,30 @@ export class SharedDbCoordinator implements PersistedCollectionCoordinator {
     fromRowVersion: number,
   ): Promise<PullSinceResponse> {
     const base = this.adapterFor(collectionId);
-    // Rule 2 (module comment): counter first, rows second.
+    // Rule 2: the counter first.
     const seq = await this.readSeq(base, collectionId);
-    const pulled = await base.pullSince(collectionId, fromRowVersion);
-    if (pulled.requiresFullReload) {
-      return {
-        type: "rpc:pullSince:res",
-        rpcId: safeRandomUUID(),
-        ok: true,
-        latestTerm: TERM,
-        latestSeq: seq,
-        latestRowVersion: pulled.latestRowVersion,
-        requiresFullReload: true,
-      };
-    }
+    const changes = await this.readChangesSince(base, collectionId, fromRowVersion);
+    // Rule 4: one delta of current rows, never a full reload.
     return {
       type: "rpc:pullSince:res",
       rpcId: safeRandomUUID(),
       ok: true,
       latestTerm: TERM,
       latestSeq: seq,
-      latestRowVersion: pulled.latestRowVersion,
+      latestRowVersion: changes.rowVersion,
       requiresFullReload: false,
-      changedKeys: pulled.changedKeys,
-      deletedKeys: pulled.deletedKeys,
-      deltas: pulled.deltas,
+      changedKeys: changes.changedRows.map((row) => row.key),
+      deletedKeys: changes.deletedKeys,
+      deltas: [
+        {
+          txId: safeRandomUUID(),
+          latestRowVersion: changes.rowVersion,
+          changedRows: changes.changedRows,
+          deletedKeys: changes.deletedKeys,
+          rowMetadataMutations: [],
+          collectionMetadataMutations: [],
+        },
+      ],
     } as PullSinceResponse;
   }
 
@@ -451,6 +474,70 @@ export class SharedDbCoordinator implements PersistedCollectionCoordinator {
     return counters.get(collectionId) ?? 0;
   }
 
+  /**
+   * The rows changed since a row version, as they are now, and the keys
+   * deleted since. Read from the collection's own table and tombstones, which
+   * are never pruned, rather than the transaction log, which is (rule 4).
+   */
+  private async readChangesSince(
+    adapter: SQLiteAdapterInternals,
+    collectionId: string,
+    fromRowVersion: number,
+  ): Promise<{
+    rowVersion: number;
+    changedRows: Array<{ key: string | number; value: unknown }>;
+    deletedKeys: Array<string | number>;
+  }> {
+    const rowVersion = await this.readRowVersion(adapter, collectionId);
+    const [registry] = await adapter.driver.query<{
+      table_name: string;
+      tombstone_table_name: string;
+    }>(
+      `SELECT table_name, tombstone_table_name FROM collection_registry WHERE collection_id = ?`,
+      [collectionId],
+    );
+    if (!registry) return { rowVersion, changedRows: [], deletedKeys: [] };
+
+    const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;
+    const [changed, deleted] = await Promise.all([
+      adapter.driver.query<{ key: string }>(
+        `SELECT key FROM ${quote(registry.table_name)} WHERE row_version > ?`,
+        [fromRowVersion],
+      ),
+      adapter.driver.query<{ key: string }>(
+        `SELECT key FROM ${quote(registry.tombstone_table_name)} WHERE row_version > ?`,
+        [fromRowVersion],
+      ),
+    ]);
+    const changedKeys = new Set(
+      changed.map((row) => String(decodePersistedStorageKey(row.key))),
+    );
+    // Decoded values come from the adapter itself; the key set above filters
+    // them to what changed.
+    const changedRows =
+      changedKeys.size === 0
+        ? []
+        : (await adapter.scanRows(collectionId))
+            .filter((row) => changedKeys.has(String(row.key)))
+            .map((row) => ({ key: row.key, value: row.value }));
+    return {
+      rowVersion,
+      changedRows,
+      deletedKeys: deleted.map((row) => decodePersistedStorageKey(row.key)),
+    };
+  }
+
+  private async readRowVersion(
+    adapter: SQLiteAdapterInternals,
+    collectionId: string,
+  ): Promise<number> {
+    const [row] = await adapter.driver.query<{ latest_row_version: number }>(
+      `SELECT latest_row_version FROM collection_version WHERE collection_id = ?`,
+      [collectionId],
+    );
+    return row?.latest_row_version ?? 0;
+  }
+
   private async readCounters(
     adapter: SQLiteAdapterInternals,
   ): Promise<Map<string, number>> {
@@ -494,12 +581,16 @@ export class SharedDbCoordinator implements PersistedCollectionCoordinator {
         const seen = this.seenFor(collectionId);
         if (seq <= seen.seq) continue;
         const base = this.adapterFor(collectionId);
-        // Rows after the counter (rule 2).
-        const pulled = await base.pullSince(collectionId, seen.rowVersion);
-        this.observe(collectionId, seq, pulled.latestRowVersion);
+        // The counter was read above, so these rows are at least that new
+        // (rule 2), read as they are now (rule 4).
+        const changes = await this.readChangesSince(
+          base,
+          collectionId,
+          seen.rowVersion,
+        );
+        this.observe(collectionId, seq, changes.rowVersion);
         // The real position. Missed more than one commit: the collection sees
-        // a gap and recovers through pullSince. Missed exactly one: these rows
-        // are that commit.
+        // a gap and recovers through pullSince, which reads the same way.
         this.deliver(
           collectionId,
           this.envelope(collectionId, {
@@ -507,14 +598,10 @@ export class SharedDbCoordinator implements PersistedCollectionCoordinator {
             term: TERM,
             seq,
             txId: safeRandomUUID(),
-            latestRowVersion: pulled.latestRowVersion,
-            requiresFullReload: pulled.requiresFullReload,
-            changedRows: pulled.requiresFullReload
-              ? []
-              : pulled.deltas.flatMap((delta) => delta.changedRows),
-            deletedKeys: pulled.requiresFullReload
-              ? []
-              : pulled.deltas.flatMap((delta) => delta.deletedKeys),
+            latestRowVersion: changes.rowVersion,
+            requiresFullReload: false,
+            changedRows: changes.changedRows,
+            deletedKeys: changes.deletedKeys,
           }),
         );
       }
