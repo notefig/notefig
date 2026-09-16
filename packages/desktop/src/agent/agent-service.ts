@@ -39,6 +39,7 @@ import {
   NotefigAcpClient,
   attachMcpEndpoint,
   createMcpRequestHandler,
+  withWorkspaceContainment,
   type AgentTransport,
   type McpEndpoint,
 } from "@notefig/agent";
@@ -414,10 +415,19 @@ export class AgentTask {
         permissionBroker: this.permissionBroker,
         onSessionUpdate: (notification) =>
           this.handleSessionUpdate(notification),
-        fs: {
-          readTextFile: readWorkspaceTextFile,
-          writeTextFile: writeWorkspaceTextFile,
-        },
+        // Containment in front of the write path, not inside it: a
+        // harness-supplied path is input from a process we do not control,
+        // and `writeWorkspaceTextFile` only asserts absoluteness. Without
+        // this wrapper `fs/write_text_file` with any absolute path reaches
+        // the disk. The wrapper also resolves relative paths, so the inner
+        // pair still always receives the absolute path it requires.
+        fs: withWorkspaceContainment(
+          {
+            readTextFile: readWorkspaceTextFile,
+            writeTextFile: writeWorkspaceTextFile,
+          },
+          { workspacePath: this.workspacePath, path: pathutil },
+        ),
         onUnsupportedProtocolVersion: (negotiated) =>
           captureEvent("agent_protocol_version_unsupported", {
             protocol: "acp",
