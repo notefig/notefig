@@ -1,6 +1,12 @@
 import { platformAdapter } from "@/adapters";
 import type { TextPromptOptions } from "@/adapters/platform-adapter.interface";
 import { path as pathutil } from "./path";
+import {
+  resolveWorkspacePath as resolveWorkspacePathWithin,
+  type WorkspacePathResolution,
+} from "@notefig/shared/utils";
+
+export type { WorkspacePathResolution };
 
 export interface FileEntry {
   path: string; // Absolute path
@@ -143,66 +149,21 @@ export function joinPaths(...paths: string[]): string {
 // (derivations) in @/utils/path. For real mac inputs all of these produce
 // byte-identical output, so persisted keys never changed spelling.
 
-export type WorkspacePathResolution =
-  | { ok: true; absolute: string; relative: string }
-  | { ok: false; error: string };
 
 /**
  * Resolve an agent-supplied document path against a workspace root, errors
- * as values. Agents send workspace-relative paths ("notes.md" — the tool
- * schemas ask for them) but sometimes absolute ones; both are accepted, and
- * the result is always `{ absolute, relative }` with containment enforced —
- * `..` escapes and absolute paths outside the workspace are rejected.
+ * as values, with the flavor this host is bound to.
  *
- * This exists because an unresolved relative path reaches the OS resolved
- * against the *process CWD* — under `cargo tauri dev` that's `src-tauri/`,
- * so an agent authoring "canto-ii.md" wrote into the app's own source tree
- * and the dev watcher restarted the app on every question.
+ * The rule itself lives in `@notefig/shared/utils` because the ACP bridge in
+ * `@notefig/agent` enforces the same containment on the same kind of input,
+ * and two copies of a containment rule is one copy too many. This binds the
+ * flavor so the twelve desktop call sites keep their two-argument shape.
  */
 export function resolveWorkspacePath(
   workspacePath: string,
   inputPath: string,
 ): WorkspacePathResolution {
-  const root = pathutil.normalize(workspacePath);
-  // Agent-supplied relative paths are "/"-separated (the tool schemas'
-  // contract) — tree-domain, converted to native before joining.
-  const joined = pathutil.isAbsolute(inputPath)
-    ? pathutil.normalize(inputPath)
-    : pathutil.join(root, pathutil.fromTreePath(inputPath));
-
-  // Collapse "." and ".." segments so escapes are caught structurally, in
-  // forward-slash space so one loop serves both flavors. The filesystem-root
-  // segments can never be popped:
-  //   posix  /a/b        → [""]        win32  C:/a → ["C:"]
-  //   UNC    //srv/sh/a  → ["", "", "srv", "sh"]
-  const posixForm = pathutil.toPosixAbsolute(joined);
-  const parts = posixForm.split("/");
-  const rootCount = posixForm.startsWith("//") ? 4 : 1;
-  const kept = parts.slice(0, rootCount);
-  const segments: string[] = [];
-  for (const segment of parts.slice(rootCount)) {
-    if (segment === "" || segment === ".") continue;
-    if (segment === "..") {
-      if (segments.length === 0) {
-        return { ok: false, error: `path escapes the workspace: ${inputPath}` };
-      }
-      segments.pop();
-      continue;
-    }
-    segments.push(segment);
-  }
-  const absolute = pathutil.normalize([...kept, ...segments].join("/"));
-
-  const relativeNative = pathutil.relative(root, absolute);
-  if (relativeNative === undefined) {
-    return {
-      ok: false,
-      error: `path is outside the workspace (${workspacePath}): ${inputPath}`,
-    };
-  }
-  // The relative half stays "/"-separated: every consumer (tool results,
-  // metadata rows, tree paths) lives in the tree-path domain.
-  return { ok: true, absolute, relative: pathutil.toTreePath(relativeNative) };
+  return resolveWorkspacePathWithin(pathutil, workspacePath, inputPath);
 }
 
 export function flatEntriesToTree(
