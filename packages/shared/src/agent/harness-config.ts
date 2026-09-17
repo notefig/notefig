@@ -179,9 +179,9 @@ export interface HarnessSpawnPrep {
 export interface HarnessInvokeContext {
   workspacePath: string;
   joinPath: (...parts: string[]) => string;
-  /** The app-owned directory name inside the workspace — every host passes
-   *  `APP_DIR_NAME` from `@notefig/shared/utils`. Supplied rather than
-   *  imported so a hook stays a pure function of its context. */
+  /** The app-owned directory name inside the workspace, supplied by the
+   *  host from its own source of truth (desktop's `APP_DIR_NAME`) so this
+   *  package holds no second copy of it. */
   appDir: string;
   /** The harness's static env, for dialects that must layer onto a value
    *  the user set themselves (OpenCode's `OPENCODE_CONFIG_CONTENT`). */
@@ -761,83 +761,4 @@ export function resolveEffectiveHarnesses(
   }
 
   return effective;
-}
-
-/** What looking a harness up by id can come back with. */
-export type HarnessResolution =
-  | { ok: true; harness: HarnessDefinition }
-  | {
-      ok: false;
-      /** `disabled`: the id exists but the user's settings turned it off.
-       *  `unknown`: no built-in or custom harness has this id. */
-      reason: "unknown" | "disabled";
-      harnessId: string;
-      /** Ids that would resolve, for a message the user can act on. */
-      available: string[];
-    };
-
-/**
- * Look a harness up by id through the user's settings — the one lookup every
- * host makes, so an override, a custom entry, or a disabled harness means the
- * same thing in the app, in a headless run and anywhere else that spawns one.
- *
- * Settings are passed in rather than read: where they live is the host's
- * business (the desktop's `harness-settings` KV rows). A host that has none
- * passes nothing and gets the built-ins, which is what "no settings" means.
- */
-export function resolveHarness(
-  harnessId: string,
-  overrides: Record<string, HarnessOverride> = {},
-  custom: CustomHarnessEntry[] = [],
-): HarnessResolution {
-  const effective = resolveEffectiveHarnesses(overrides, custom);
-  const harness = effective.find((h) => h.id === harnessId);
-  if (harness) return { ok: true, harness };
-  const exists =
-    BUILT_IN_HARNESSES.some((h) => h.id === harnessId) ||
-    custom.some((c) => c.id === harnessId);
-  return {
-    ok: false,
-    reason: exists ? "disabled" : "unknown",
-    harnessId,
-    available: effective.map((h) => h.id),
-  };
-}
-
-/**
- * Env vars that make claude-agent-acp refuse to start ("cannot be launched
- * inside another Claude Code session"). Inherited whenever the host itself
- * was started from a Claude Code terminal — dev, CI, e2e, or a user running
- * the CLI from inside one.
- *
- * The desktop's Rust spawner keeps its own copy (`NESTED_SESSION_GUARD_VARS`
- * in `src-tauri/src/agent_proc.rs`) because it cannot import this; the two
- * lists must stay identical.
- */
-export const NESTED_SESSION_GUARD_VARS = [
-  "CLAUDECODE",
-  "CLAUDE_CODE_ENTRYPOINT",
-  "CLAUDE_CODE_EXECPATH",
-  "CLAUDE_CODE_SESSION_ID",
-  "CLAUDE_CODE_CHILD_SESSION",
-] as const;
-
-/**
- * The environment a harness process spawns with: the host's own env, then
- * the harness's static env, then this task's extra env (what its invoke hook
- * prepared), with the nested-session guard vars removed last so nothing
- * layered on top can put one back.
- */
-export function composeHarnessEnv(
-  baseEnv: Record<string, string | undefined>,
-  harness: Pick<HarnessDefinition, "env">,
-  extraEnv: Record<string, string> = {},
-): Record<string, string | undefined> {
-  const env: Record<string, string | undefined> = {
-    ...baseEnv,
-    ...harness.env,
-    ...extraEnv,
-  };
-  for (const name of NESTED_SESSION_GUARD_VARS) delete env[name];
-  return env;
 }

@@ -13,12 +13,11 @@
  * native spelling — the same convention as taskManagerRegistry.
  */
 import { useMemo } from "react";
-// Split deliberately: the collection itself is host-neutral and comes from
-// @tanstack/db, while `useLiveQuery` is the React binding. Keeping them apart
-// makes the seam visible — the collection half of this module is what moves
-// into @notefig/core, and it must not drag a renderer with it.
-import { createCollection, localOnlyCollectionOptions } from "@tanstack/db";
-import { useLiveQuery } from "@tanstack/react-db";
+import {
+  createCollection,
+  localOnlyCollectionOptions,
+  useLiveQuery,
+} from "@tanstack/react-db";
 import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
 import {
   clearWorkspaceCollections,

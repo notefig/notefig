@@ -10,8 +10,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
@@ -23,10 +22,5 @@
   "devDependencies": {
     "typescript": "^5.0.2",
     "vitest": "^3.2.4"
-  },
-  "types": "./dist/index.d.ts",
-  "files": [
-    "dist",
-    "src"
-  ]
+  }
 }
