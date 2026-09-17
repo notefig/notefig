@@ -40,6 +40,17 @@ jobs:
             exit 1
           fi
 
+      # A tag that already exists means a release that already exists, and
+      # published releases are immutable: tauri-action would find it, build
+      # for twenty minutes, then fail replacing its assets — leaving the OLD
+      # bundles on the page under this version's name. Refuse up front.
+      - name: Refuse an existing tag
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/desktop-v${{ inputs.version }}" >/dev/null; then
+            echo "Error: tag desktop-v${{ inputs.version }} already exists; releases are immutable — pick a new version"
+            exit 1
+          fi
+
       # The version's release notes ship inside the app (the release-notes
       # tab bundles release-notes/*.md) and become the GitHub release body
       # and latest.json notes. A hand-written release-notes/v<version>.md
