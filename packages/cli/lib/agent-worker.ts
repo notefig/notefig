@@ -28,7 +28,6 @@ import { spawn, exec, type ChildProcess } from 'child_process';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
   BUILT_IN_HARNESSES,
-  composeHarnessEnv,
   CtlMessageSchema,
   FrameCipher,
   MCP_SERVER_NAME,
@@ -46,12 +45,40 @@ import {
 } from './shared';
 import type { Logger } from './utils/logger.util';
 
-import { LineBuffer } from './line-buffer';
-import {
-  DETACH_FOR_TREE_KILL,
-  KILL_GRACE_MS,
-  terminateProcessTree,
-} from './process-tree';
+const KILL_GRACE_MS = 5_000;
+
+// ========================================================================
+// Newline framing for child stdio and loopback sockets
+// ========================================================================
+
+/**
+ * Splits a byte stream into lines, delivered as one *batch* per chunk.
+ *
+ * Batching is a tunnel-side economy (unrelated to the desktop's pull streams
+ * in src-tauri/src/line_stream.rs — WebSocket frames don't have the desktop's
+ * eval-path hazards): a streaming agent emits many lines per stdout chunk, and sending one tunnel
+ * frame each costs one encryption pass and one WebSocket frame apiece. Since a
+ * chunk's lines are already in hand, coalescing them adds no latency and needs
+ * no timer — the batch is simply whatever the OS handed us. Deliberately no
+ * cross-chunk buffering, so nothing ever waits on a future read.
+ */
+class LineBuffer {
+  private tail = '';
+  constructor(private readonly onLines: (lines: string[]) => void) {}
+  push(chunk: Buffer | string): void {
+    const pieces = (this.tail + chunk.toString()).split('\n');
+    this.tail = pieces.pop() ?? '';
+    const lines = pieces.filter((line) => line.length > 0);
+    if (lines.length > 0) this.onLines(lines);
+  }
+  flush(): void {
+    if (this.tail.length > 0) {
+      const line = this.tail;
+      this.tail = '';
+      this.onLines([line]);
+    }
+  }
+}
 
 // ========================================================================
 // Harness discovery — only ever runs shared-hardcoded probe commands
@@ -359,12 +386,13 @@ export class AgentWorker {
     // The agent spawns in the worker's real --dir; the browser's workspace
     // prefix in cwd + any path-bearing env is rewritten to that root.
     const cwd = this.options.workspacePath;
-    const extraEnv: Record<string, string> = {};
+    const env: NodeJS.ProcessEnv = { ...process.env, ...harness.env };
     for (const [key, value] of Object.entries(message.extraEnv)) {
-      extraEnv[key] = rewriteToWorkspaceRoot(value, message.cwd, cwd);
+      env[key] = rewriteToWorkspaceRoot(value, message.cwd, cwd);
     }
-    // Same composition and guard-var strip as every other harness spawner.
-    const env = composeHarnessEnv(process.env, harness, extraEnv);
+    // Adapters misbehave if they think they're inside Claude Code (same strip
+    // the desktop host applies).
+    delete env.CLAUDECODE;
     // Templating + cwd default live with the harness definition
     // (resolveHarnessSpawn) — the worker just hands them to the process.
     const { args, cwd: spawnCwd } = resolveHarnessSpawn(harness, cwd);
@@ -375,10 +403,6 @@ export class AgentWorker {
         cwd: spawnCwd,
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
-        // Own process group, so stopTask reaches the whole tree. A harness
-        // command is usually an `npx` wrapper around the real adapter;
-        // without this, killing the wrapper orphaned the adapter.
-        detached: DETACH_FOR_TREE_KILL,
       });
     } catch (error: any) {
       this.sendCtl({ op: 'task-spawn-error', taskId, message: String(error?.message ?? error) });
@@ -418,7 +442,14 @@ export class AgentWorker {
   private async stopTask(taskId: string): Promise<void> {
     const child = this.tasks.get(taskId);
     if (!child) return;
-    await terminateProcessTree(child, KILL_GRACE_MS);
+    await new Promise<void>((resolve) => {
+      const kill = setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS);
+      child.once('exit', () => {
+        clearTimeout(kill);
+        resolve();
+      });
+      child.kill('SIGTERM');
+    });
   }
 
   // ---- MCP loopback listeners ----
