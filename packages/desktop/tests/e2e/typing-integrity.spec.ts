@@ -53,7 +53,9 @@ test.describe("Typing integrity", () => {
 
     // Match the reported environment: sort by date modified so every save's
     // metadata update re-sorts the tree.
-    await page.goto(`/${encodeURIComponent(WORKSPACE)}?sort=date-modified`);
+    // The open set is persisted: a reload with the sort in the URL comes
+    // back into the workspace.
+    await page.goto("/?sort=date-modified");
     await waitForFileTree(page, "target.md");
 
     await openFileInTree(page, "target.md");

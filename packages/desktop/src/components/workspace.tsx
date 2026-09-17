@@ -9,12 +9,25 @@ import { StatusBar } from "@/components/editor/status-bar";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
-import { useContentFetching } from "@/entities/files";
-import { useContentWatchers } from "@/utils/file-sync";
+import {
+  getOrCreateWorkspaceCollections,
+  refetchWorkspaceMetadata,
+  useContentFetching,
+  useOpenFileRows,
+} from "@/entities/files";
+import { syncContentWatchers } from "@/utils/file-sync";
+import {
+  openWorkspacesCollection,
+  useFocusedWorkspace,
+  useOpenWorkspacesReady,
+  useWorkspaceOfPath,
+  workspaceOfPath,
+} from "@/entities/workspaces";
 import { useWorkspaceTabs, renameOpenFileTab } from "@/entities/tabs";
 import { DebugPanel } from "./debug-panel";
-import { useWorkspaceParams } from "@/hooks/use-workspace-params";
-import { useNavigationPersistence } from "@/hooks/use-recent-projects";
+import { useOpenProject } from "@/hooks/use-open-project";
+import { Welcome } from "@/components/welcome";
+import { platformAdapter } from "@/adapters";
 import { useProjectSettings } from "@/utils/project-settings";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
 import { useWorkspaceCommands } from "@/hooks/use-workspace-commands";
@@ -24,8 +37,7 @@ import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { WorkspaceTabsProvider } from "@/components/workspace-tabs-provider";
 import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary";
 import { useThrowWorkspaceAccessError } from "@/components/workspace-error-boundary";
-import { disposeAllEditors } from "@/components/editor/editor-store";
-import { agentTabId, tabKind } from "@/entities/tabs";
+import { agentTabId, isFileTabId, tabKind } from "@/entities/tabs";
 import { useTabElements } from "@/tabs/tab-types";
 import { useReleaseNotesOnUpdate } from "@/hooks/use-release-notes-on-update";
 import {
@@ -33,14 +45,62 @@ import {
   FILE_TREE_IDLE,
 } from "@/components/editor/file-tree";
 
+/**
+ * The app at "/": the dock over every open workspace, with the sidebar
+ * showing the focused one — or the welcome screen with nothing open. Waits
+ * for the persisted open set so a restored session never flashes welcome.
+ */
 export const Workspace = () => {
-  const { workspacePath } = useWorkspaceParams();
+  const ready = useOpenWorkspacesReady();
+  const focusedWorkspace = useFocusedWorkspace();
+  useOpenProjectFromHost();
+  useOpenProjectTestSeam();
 
-  if (!workspacePath) {
-    return null;
-  }
+  if (!ready) return null;
+  if (focusedWorkspace === null) return <Welcome />;
+  return <WorkspaceShell workspacePath={focusedWorkspace} />;
+};
 
-  useWorkspaceLifecycle(workspacePath);
+/** The native "Open Folder" menu item (Rust emits `folder-selected`). */
+function useOpenProjectFromHost(): void {
+  const openProject = useOpenProject();
+  useEffect(
+    () =>
+      platformAdapter.ui.addEventListener((event) => {
+        if (event.type === "folder-selected") void openProject(event.payload);
+      }),
+    [openProject],
+  );
+}
+
+/**
+ * Test seam: the e2e suites open workspaces through this rather than the
+ * native folder picker, which neither the browser adapter's mock nor the
+ * real-backend shim can drive for a given path. Dev/test builds only.
+ */
+function useOpenProjectTestSeam(): void {
+  const openProject = useOpenProject();
+  useEffect(() => {
+    if (!import.meta.env.DEV && !import.meta.env.VITE_TEST_BACKEND) return;
+    (window as Window & { __notefigTest?: unknown }).__notefigTest = {
+      openProject,
+      openWorkspaces: () =>
+        [...openWorkspacesCollection.values()].map((row) => row.path),
+      metadataPaths: (workspacePath: string) =>
+        getOrCreateWorkspaceCollections(workspacePath).metadata.toArray.map(
+          (row) => row.path,
+        ),
+      refetchMetadata: (workspacePath: string) =>
+        refetchWorkspaceMetadata(workspacePath),
+    };
+  }, [openProject]);
+}
+
+/** The workspace surface: `workspacePath` is the focused workspace — what
+ *  the sidebar shows and new-item actions target. The dock is not scoped
+ *  by it; every tab resolves its own workspace. */
+function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
+  useThrowWorkspaceAccessError(workspacePath);
   const dockableRef = useRef<HTMLDivElement>(null);
   const searchPanelRef = useRef<SearchPanelHandle>(null);
 
@@ -63,7 +123,6 @@ export const Workspace = () => {
   });
 
   const { allDockableTabs, wordCount, isSynced } = useWorkspaceDocuments({
-    workspacePath,
     openTabs,
     activeTabId,
     layout,
@@ -192,7 +251,7 @@ export const Workspace = () => {
       </PromptWidgetBoundary>
     </WorkspaceTabsProvider>
   );
-};
+}
 
 /** Open-as-tab entry points, exposed via WorkspaceTabsContext so components
  *  nested in the layout (link menu, search panel) can open files as tabs. */
@@ -267,16 +326,33 @@ function useStaleTabPruning(
   }, [staleTabIds, layout, handleLayoutChange]);
 }
 
-/** Status-bar word count of the active document, null with nothing open. */
-function useWordCount(content: string): number | null {
-  return useMemo(() => {
-    if (!content) return null;
-    const words = content
-      .trim()
-      .split(/\s+/)
-      .filter((word: string) => word.length > 0);
-    return words.length;
-  }, [content]);
+/** The active tab's file content, "" unless a file tab is active and its
+ *  content has loaded. Joined here, not lifted from the tab: the active tab
+ *  resolves its own workspace like every file tab does. */
+function useActiveFileContent(activeTabId: string | null): string {
+  const activePath = activeFilePath(activeTabId);
+  // No file tab active → no workspace contains "" → no rows, no query.
+  const workspacePath = useWorkspaceOfPath(activePath ?? "");
+  const paths = useMemo(
+    () => (activePath === null ? [] : [activePath]),
+    [activePath],
+  );
+  const [row] = useOpenFileRows(workspacePath, paths);
+  return row?.content ?? "";
+}
+
+function activeFilePath(activeTabId: string | null): string | null {
+  if (activeTabId === null || !isFileTabId(activeTabId)) return null;
+  return activeTabId;
+}
+
+/** Status-bar word count, null with nothing to count. */
+function countWords(content: string): number | null {
+  if (!content) return null;
+  return content
+    .trim()
+    .split(/\s+/)
+    .filter((word: string) => word.length > 0).length;
 }
 
 /** Only file tabs are gated on the editor's format support; the other tab
@@ -285,27 +361,10 @@ function canOpenFileInTab(file: { type: string; path: string }): boolean {
   return file.type === "file" && canOpenInEditor(file.path);
 }
 
-/** Workspace-scoped lifecycle: access guard, navigation persistence, and
- *  editor disposal on leaving. Agent runtimes deliberately survive
- *  navigation (MET-177): the workspace stays open in the registry, and its
- *  TaskManager is only torn down by an explicit close
- *  (entities/workspaces.ts closeWorkspace — rows demote to "restored" per
- *  MET-54). */
-function useWorkspaceLifecycle(workspacePath: string): void {
-  useThrowWorkspaceAccessError(workspacePath);
-  useNavigationPersistence();
-  useEffect(() => {
-    return () => {
-      disposeAllEditors();
-    };
-  }, []);
-}
-
 /** Everything derived from the open tabs' backing rows: the cross-entity
  *  join (agent/file split, metadata ⋈ content rows, stale-tab detection),
  *  the rendered tab elements, watchers, and the status bar's inputs. */
 function useWorkspaceDocuments({
-  workspacePath,
   openTabs,
   activeTabId,
   layout,
@@ -313,7 +372,6 @@ function useWorkspaceDocuments({
   closeTab,
   openFile,
 }: {
-  workspacePath: string;
   openTabs: string[];
   activeTabId: string | null;
   layout: Parameters<typeof removeTabFromLayout>[0];
@@ -324,31 +382,29 @@ function useWorkspaceDocuments({
   openFile: (options: OpenFileInLayoutOptions) => void;
 }) {
   const {
-    fileTabIds: fileOpenTabIds,
-    fileRows: fileDataWithContent,
+    fileTabsByWorkspace,
     agentTaskRows: openAgentTaskRows,
     staleTabIds,
-  } = useWorkspaceTabs(workspacePath, openTabs);
+  } = useWorkspaceTabs(openTabs);
 
   useReleaseNotesOnUpdate(openFile);
 
   // One element per open tab, built from the tab-type registry (title +
   // content per kind) and memoised per tab id.
   const allDockableTabs = useTabElements(openTabs, {
-    workspacePath,
-    fileRows: fileDataWithContent,
     agentTaskRows: openAgentTaskRows,
     closeTab,
   });
 
-  const activeFileData = fileDataWithContent.find(
-    (f) => f.path === activeTabId,
-  );
-  const wordCount = useWordCount(activeFileData?.content || "");
+  const activeContent = useActiveFileContent(activeTabId);
+  const wordCount = useMemo(() => countWords(activeContent), [activeContent]);
 
-  const isFetchingContent = useContentFetching(workspacePath);
+  const isFetchingContent = useContentFetching();
   useStaleTabPruning(staleTabIds, layout, handleLayoutChange);
-  useContentWatchers(workspacePath, fileOpenTabIds);
+  useEffect(() => {
+    syncContentWatchers(fileTabsByWorkspace);
+  }, [fileTabsByWorkspace]);
+  useEffect(() => () => syncContentWatchers(new Map()), []);
 
   return { allDockableTabs, wordCount, isSynced: !isFetchingContent };
 }
@@ -433,7 +489,9 @@ function useRenameOpenFile(
   return useCallback(
     (oldPath: string, newPath: string) =>
       renameOpenFileTab({
-        workspacePath,
+        // The tab belongs to the workspace that holds its file, which need
+        // not be the one the sidebar shows.
+        workspacePath: workspaceOfPath(oldPath) ?? workspacePath,
         oldPath,
         newPath,
         applyLayoutRename: renameTab,

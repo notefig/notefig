@@ -190,9 +190,10 @@ test.describe("shim: read-only code viewer", () => {
         size: 1,
       },
     ]);
-    await page.goto(
-      `/${encodeURIComponent(workspace)}?layout=${encodeURIComponent(layout)}`,
-    );
+    // The open set is persisted, so the workspace comes back on the
+    // reload that carries the layout.
+    await openWorkspace(page, workspace);
+    await page.goto(`/?layout=${encodeURIComponent(layout)}`);
 
     await expect(page.getByText("greetFromTypescript").first()).toBeVisible({
       timeout: 15000,

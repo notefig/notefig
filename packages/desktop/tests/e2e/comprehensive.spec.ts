@@ -387,9 +387,8 @@ test.describe("Notefig E2E Comprehensive Tests", () => {
         },
       ];
 
-      const encodedPath = encodeURIComponent(workspacePath);
       const encodedLayout = encodeURIComponent(JSON.stringify(twoWindowLayout));
-      await page.goto(`/${encodedPath}?layout=${encodedLayout}`);
+      await page.goto(`/?layout=${encodedLayout}`);
       await waitForFileTree(page);
 
       const rightEditor = page

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useParams } from "react-router";
 import { useSearchParams } from "react-router-dom";
+import { useFocusedWorkspace } from "@/entities/workspaces";
 import { Button } from "@notefig/ui/button";
 import { Input } from "@notefig/ui/input";
 import { ScrollArea } from "@notefig/ui/scroll-area";
@@ -267,7 +267,10 @@ function DebugPanelContent({
   onClose?: () => void;
   searchParams: URLSearchParams;
 }) {
-  const { basePath, "*": filePath } = useParams();
+  // The focused workspace stands in for the old route param: the dock
+  // spans every open workspace, so this is only the sidebar's scope.
+  const workspacePath = useFocusedWorkspace();
+  const basePath = workspacePath ?? undefined;
 
   const dockableLayout = useMemo(
     () => parseLayout(searchParams.get(LAYOUT_PARAM)),
@@ -407,7 +410,6 @@ function DebugPanelContent({
       lines.push(`URL (decoded): ${decoded}`);
     }
     lines.push(`basePath: ${basePath || "undefined"}`);
-    lines.push(`filePath: ${filePath || "undefined"}`);
 
     const displayParams = new URLSearchParams(searchParams);
     displayParams.delete("debug");
@@ -457,7 +459,6 @@ function DebugPanelContent({
     return lines.join("\n");
   }, [
     basePath,
-    filePath,
     searchParams,
     openTabs,
     activeTabId,
@@ -516,8 +517,6 @@ function DebugPanelContent({
     setAstCopied(true);
     setTimeout(() => setAstCopied(false), 2000);
   }, [buildPlateAstReport]);
-
-  const workspacePath = basePath ? decodeURIComponent(basePath) : null;
 
   // Query everything unconditionally (rules of hooks) and filter client-side —
   // this is a debug view, not a hot path, so a full-collection subscription
@@ -921,7 +920,6 @@ function DebugPanelContent({
                 )}
               </Row>
               <Row label="basePath">{basePath || "undefined"}</Row>
-              <Row label="filePath (*)">{filePath || "undefined"}</Row>
               <Row label="searchParams">{searchParamsStr || "(none)"}</Row>
             </div>
 

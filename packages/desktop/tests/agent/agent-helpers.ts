@@ -3,6 +3,7 @@
  * (VITE_AGENT_MOCK=1, see src/agent/mock-harness.ts) through the real UI.
  */
 import type { Page } from "@playwright/test";
+import { openWorkspace } from "../setup/test-helpers";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -11,8 +12,10 @@ export async function startMockSession(
   page: Page,
   workspacePath: string,
 ): Promise<void> {
-  const encoded = encodeURIComponent(workspacePath);
-  await page.goto(`/${encoded}?sidebarView=sessions`);
+  await openWorkspace(page, workspacePath);
+  // The open set is persisted, so a reload with the sessions view in the
+  // URL comes back into the same workspace.
+  await page.goto("/?sidebarView=sessions");
   await page
     .getByRole("button", { name: /New session with/ })
     .first()

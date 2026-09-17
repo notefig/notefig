@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import type {
   MetadataChangeEvent,
   ContentChangeEvent,
@@ -27,7 +26,7 @@ import { getMarkdownEditor } from "@/components/editor/editor-store";
 import { adoptExternalContent } from "@/components/editor/adopt-external-content";
 import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
 import { platformAdapter } from "@/adapters";
-import { path as pathutil, relativeTreePath } from "./path";
+import { path as pathutil, relativeTreePath, workspaceKey } from "./path";
 import { PORTAL_ID } from "./portal-id";
 import { activeRenameTarget } from "@/entities/tabs";
 import { trackWorkspaceWrite } from "./workspace-write-tracker";
@@ -449,63 +448,83 @@ export function startWorkspaceMetadataWatcher(
 }
 
 /**
- * Content watching for the focused workspace's open files, re-armed when
- * the open-file set changes. Metadata watching is not here — it belongs to
- * the workspace registry for the whole open lifetime.
+ * Content watching for the open file tabs, one watch per workspace, kept in
+ * step with the dock by `syncContentWatchers`. Metadata watching is not
+ * here — it belongs to the workspace registry for the whole open lifetime.
  */
-export function useContentWatchers(
+interface ContentWatcher {
+  /** The watched paths, joined — the identity a re-sync compares against. */
+  pathsKey: string;
+  stop: () => void;
+}
+
+const contentWatchers = new Map<string, ContentWatcher>();
+
+function startContentWatcher(
   workspacePath: string,
   openFilePaths: string[],
-): void {
-  useEffect(() => {
-    const contentWatchId = contentWatchIdFor(workspacePath);
-    let eventCleanup: (() => void) | undefined;
-    let isActive = true;
-
-    const setupWatchers = async () => {
-      try {
-        eventCleanup = platformAdapter.fs.onFsEvent((event) => {
-          if (!isActive) return;
-          // Same watch-id routing as the metadata side: this watch's
-          // pipeline also emits both kinds (a delete/rename of an open
-          // file surfaces as a metadata change).
-          if (event.payload.watchId !== contentWatchId) return;
-          if (event.type === "fs-content-changed") {
-            handleContentFileSystemChange(event.payload, workspacePath);
-          } else {
-            handleMetadataFileSystemChange(event.payload, workspacePath);
-          }
-        });
-
-        if (openFilePaths.length > 0) {
-          await platformAdapter.fs.startWatchingContent(
-            openFilePaths,
-            contentWatchId,
-          );
-          // The effect's cleanup can run while that start is in flight (a
-          // fast tab close, or StrictMode's double-invoke). Its stop would
-          // then find nothing and this registration would outlive it with no
-          // handle left to stop it — same leak as the metadata side.
-          if (!isActive) {
-            void platformAdapter.fs.stopWatching(contentWatchId).catch(() => {});
-          }
-        }
-      } catch (error) {
-        console.error("Failed to setup watchers:", error);
+): ContentWatcher {
+  const contentWatchId = contentWatchIdFor(workspacePath);
+  let isActive = true;
+  const eventCleanup = platformAdapter.fs.onFsEvent((event) => {
+    if (!isActive) return;
+    // Same watch-id routing as the metadata side: this watch's pipeline
+    // also emits both kinds (a delete/rename of an open file surfaces as a
+    // metadata change).
+    if (event.payload.watchId !== contentWatchId) return;
+    if (event.type === "fs-content-changed") {
+      handleContentFileSystemChange(event.payload, workspacePath);
+    } else {
+      handleMetadataFileSystemChange(event.payload, workspacePath);
+    }
+  });
+  platformAdapter.fs
+    .startWatchingContent(openFilePaths, contentWatchId)
+    .then(() => {
+      // A stop can land while the start is in flight (a fast tab close).
+      // Its stop found nothing, so this registration would outlive it with
+      // no handle left to stop it — same leak as the metadata side.
+      if (!isActive) {
+        void platformAdapter.fs.stopWatching(contentWatchId).catch(() => {});
       }
-    };
-
-    setupWatchers();
-
-    return () => {
+    })
+    .catch((error) => {
+      console.error("Failed to setup watchers:", error);
+    });
+  return {
+    pathsKey: openFilePaths.join(","),
+    stop: () => {
       isActive = false;
-      eventCleanup?.();
+      eventCleanup();
       // Unconditional stop: cheaper to swallow the "no watcher" rejection
       // than to keep the stop condition mirroring the start condition.
       void platformAdapter.fs.stopWatching(contentWatchId).catch(() => {});
-    };
-    // Join: re-arm only when the actual set of open paths changes, not on
-    // every render's fresh array identity.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspacePath, openFilePaths.join(",")]);
+    },
+  };
+}
+
+/**
+ * Make the live content watches match `openFilesByWorkspace` (workspace →
+ * its open file paths): a workspace whose set changed is re-armed, one
+ * that left the map is stopped, an unchanged one is left alone. Call with
+ * an empty map to stop everything (shell teardown, tests).
+ */
+export function syncContentWatchers(
+  openFilesByWorkspace: Map<string, string[]>,
+): void {
+  const wanted = new Map<string, string[]>();
+  for (const [workspacePath, paths] of openFilesByWorkspace) {
+    if (paths.length > 0) wanted.set(workspaceKey(workspacePath), paths);
+  }
+  for (const [key, watcher] of contentWatchers) {
+    const paths = wanted.get(key);
+    if (paths && paths.join(",") === watcher.pathsKey) continue;
+    watcher.stop();
+    contentWatchers.delete(key);
+  }
+  for (const [workspacePath, paths] of openFilesByWorkspace) {
+    const key = workspaceKey(workspacePath);
+    if (paths.length === 0 || contentWatchers.has(key)) continue;
+    contentWatchers.set(key, startContentWatcher(workspacePath, paths));
+  }
 }

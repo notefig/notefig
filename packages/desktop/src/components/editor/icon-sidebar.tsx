@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@notefig/ui/tooltip";
 import { cn } from "@notefig/ui/utils";
-import { useNavigate } from "react-router";
 import { useSearchParams } from "react-router-dom";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { PlainLogo } from "@/components/logo";
@@ -32,16 +31,11 @@ export const IconSidebar = memo(function IconSidebar({
 }: IconSidebarProps) {
   const { t } = useTranslation();
   const [searchParams, setUrlSearchParams] = useSearchParams();
-  const navigate = useNavigate();
   const sidebarView = searchParams.get("sidebarView") || "files";
 
   useHotkey("Mod+\\", () => {
     onToggleCollapse();
   });
-
-  const handleLogoClick = useCallback(() => {
-    navigate("/welcome");
-  }, [navigate]);
 
   const handleSidebarViewChange = useCallback(
     (view: string) => {
@@ -117,24 +111,14 @@ export const IconSidebar = memo(function IconSidebar({
       )}
       style={{ backgroundColor: "rgba(15, 15, 15, 0.05)" }}
     >
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            onClick={handleLogoClick}
-            className="mb-3 p-0.5 pt-0 rounded-md transition-colors hover:bg-sidebar-accent cursor-pointer"
-          >
-            {/* Light mode keeps the pre-theming mark: fill rides the --logo
-                token so everything sharing the logo color stays in sync. */}
-            <PlainLogo size="1.25rem" fill="var(--logo)" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="right" className="rtl:hidden" sideOffset={8}>
-          {t("goToWelcomePage")}
-        </TooltipContent>
-        <TooltipContent side="left" className="ltr:hidden" sideOffset={8}>
-          {t("goToWelcomePage")}
-        </TooltipContent>
-      </Tooltip>
+      {/* The mark. There is no welcome page to go to any more — the app
+          is one dock over every open workspace, and welcome is what it
+          shows with nothing open. Light mode keeps the pre-theming mark:
+          fill rides the --logo token so everything sharing the logo color
+          stays in sync. */}
+      <div className="mb-3 p-0.5 pt-0">
+        <PlainLogo size="1.25rem" fill="var(--logo)" />
+      </div>
       <div className="flex flex-col items-center gap-1">
         {topIcons.map((item) => (
           <SidebarIconButton key={item.id} item={item} />

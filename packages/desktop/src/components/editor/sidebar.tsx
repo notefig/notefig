@@ -26,6 +26,7 @@ import {
 import type { FileTreeNode, SortOrder } from "@/utils/fs";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { requestElementFocus } from "@/utils/focus-arbiter";
+import { grantTabFocusHandoff } from "@/tabs/tab-controllers";
 import { createAndOpenScratchpad } from "@/entities/scratchpads";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
 
@@ -185,6 +186,14 @@ export function Sidebar({
                 contentHash: "",
                 content: "",
               });
+              // The user's create gesture is what makes the new document
+              // the entry point: the tree opens its inline rename at the
+              // same moment, and the document's ambient claims (the prompt
+              // widget's) would rightly stand down for that field. Grant
+              // the hand-off here, where the gesture is — never from the
+              // widget, which also mounts for documents the app opened
+              // under the user's hands.
+              grantTabFocusHandoff(fullPath);
             }
           })
           .catch((error: unknown) => {

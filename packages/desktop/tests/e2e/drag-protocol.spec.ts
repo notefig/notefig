@@ -15,6 +15,7 @@
  * zones outside the tree accept them); dockable tabs remain dnd-kit
  * (pointer) sources. Tree-internal moves use Playwright's real dragTo.
  */
+import { openWorkspace } from "../setup/test-helpers";
 import { test, expect, type Page } from "@playwright/test";
 import { pointerDrag, syntheticNativeDrag } from "../setup/drag-helpers";
 
@@ -51,7 +52,7 @@ async function seedWorkspace(
     ).__NOTEFIG_FORCE_INDEXEDDB__ = true;
   });
 
-  await page.goto("/welcome");
+  await page.goto("/");
 
   await page.evaluate(
     async ({ files }) => {
@@ -100,7 +101,7 @@ async function seedWorkspace(
 
 async function openNotes(page: Page) {
   await seedWorkspace(page);
-  await page.goto(`/${encodeURIComponent(WORKSPACE)}`);
+  await openWorkspace(page, WORKSPACE);
   await page.getByRole("treeitem", { name: NOTES_NAME }).click();
   await expect(page.locator(".ProseMirror")).toBeVisible({ timeout: 15_000 });
   await expect(
@@ -329,7 +330,7 @@ test.describe("drag protocol: file tree → tabs/editor", () => {
       content: `# filler ${i}\n`,
     }));
     await seedWorkspace(page, filler);
-    await page.goto(`/${encodeURIComponent(WORKSPACE)}`);
+    await openWorkspace(page, WORKSPACE);
     await page.getByRole("treeitem", { name: NOTES_NAME }).click();
     await expect(page.locator(".ProseMirror")).toBeVisible({
       timeout: 15_000,

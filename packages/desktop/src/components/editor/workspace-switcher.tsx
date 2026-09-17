@@ -2,8 +2,6 @@
 
 import { useState } from "react";
 import { X } from "lucide-react";
-import { useNavigate } from "react-router";
-import { toast } from "sonner";
 import { Button } from "@notefig/ui/button";
 import {
   AlertDialog,
@@ -27,10 +25,13 @@ import {
   useRecentProjects,
   deriveProjectName,
 } from "@/hooks/use-recent-projects";
+import {
+  showWorkspace,
+  useOpenProject,
+  useOpenProjectFromPicker,
+} from "@/hooks/use-open-project";
 import { closeWorkspace, useOpenWorkspaces } from "@/entities/workspaces";
 import { useRunningTaskCounts } from "@/entities/agents";
-import { pickDirectory } from "@/utils/fs";
-import { FsError } from "@/adapters/platform-adapter.interface";
 import { workspaceKey } from "@/utils/path";
 import { useTranslation } from "react-i18next";
 
@@ -141,17 +142,17 @@ function CloseWorkspaceDialog({
 }
 
 /**
- * Sidebar dropdown for jumping between workspaces. Open (backgrounded)
- * workspaces come from the workspaces entity — switching to one keeps its
- * agents and watchers running, and the ✕ closes it explicitly (MET-177).
- * Recent projects below behave as before: switching records recency and
- * restores the target's saved session URL (the entry redirect in
- * useNavigationPersistence handles the restore).
+ * Sidebar dropdown for choosing which open workspace the sidebar shows.
+ * Open (backgrounded) workspaces come from the workspaces entity — bringing
+ * one to the front changes nothing about what is running, and the ✕ closes
+ * it explicitly (MET-177). Recent projects below open into the same dock;
+ * the tabs already open stay where they are.
  */
 export function WorkspaceSwitcher({ workspacePath }: WorkspaceSwitcherProps) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const { recentProjects, addRecentProject } = useRecentProjects();
+  const openProject = useOpenProject();
+  const handleOpenFolder = useOpenProjectFromPicker();
+  const { recentProjects } = useRecentProjects();
   const openRows = useOpenWorkspaces();
   const runningCounts = useRunningTaskCounts();
   const [pendingClose, setPendingClose] = useState<PendingClose | null>(null);
@@ -168,11 +169,6 @@ export function WorkspaceSwitcher({ workspacePath }: WorkspaceSwitcherProps) {
     )
     .slice(0, MAX_SWITCHER_ENTRIES);
 
-  const openProject = (path: string) => {
-    addRecentProject(path);
-    navigate(`/${encodeURIComponent(path)}`);
-  };
-
   const requestClose = (path: string) => {
     const runningCount = runningCounts.get(workspaceKey(path)) ?? 0;
     if (runningCount === 0) {
@@ -180,20 +176,6 @@ export function WorkspaceSwitcher({ workspacePath }: WorkspaceSwitcherProps) {
       return;
     }
     setPendingClose({ path, name: deriveProjectName(path), runningCount });
-  };
-
-  const handleOpenFolder = async () => {
-    try {
-      const selectedPath = await pickDirectory("Select a folder");
-      if (selectedPath) openProject(selectedPath);
-    } catch (error) {
-      // null means cancel; a throw means the browser denied the picker.
-      if (error instanceof FsError && error.type === "permission_denied") {
-        toast.error(t("pickerPermissionDenied"));
-      } else {
-        throw error;
-      }
-    }
   };
 
   return (
@@ -221,7 +203,7 @@ export function WorkspaceSwitcher({ workspacePath }: WorkspaceSwitcherProps) {
                 <OpenWorkspaceItem
                   key={row.key}
                   path={row.path}
-                  onOpen={() => openProject(row.path)}
+                  onOpen={() => showWorkspace(row.path)}
                   onClose={() => requestClose(row.path)}
                 />
               ))}
@@ -232,7 +214,7 @@ export function WorkspaceSwitcher({ workspacePath }: WorkspaceSwitcherProps) {
             <DropdownMenuItem
               key={project.path}
               className="py-1 text-xs"
-              onSelect={() => openProject(project.path)}
+              onSelect={() => void openProject(project.path)}
             >
               <span className="truncate">{project.name}</span>
             </DropdownMenuItem>

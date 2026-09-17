@@ -41,12 +41,11 @@ import {
 import { useHotkey, formatForDisplay } from "@tanstack/react-hotkeys";
 import { useTheme } from "../theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
-import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
-import { pickDirectory } from "../../utils/fs";
 import { getLocalizedCommandKeywords } from "@/utils/command-keywords";
 import { useFileSearch, type FileSearchResult } from "@/hooks/use-file-search";
 import { closeWorkspace } from "@/entities/workspaces";
+import { useOpenProjectFromPicker } from "@/hooks/use-open-project";
 import { canOpenFile } from "./polymorphic-editor";
 import { FileTypeIcon } from "./file-type-icon";
 import { useWorkspaceTabsOptional } from "@/components/workspace-tabs-provider";
@@ -179,15 +178,7 @@ export function CommandPalette({
   const [query, setQuery] = useState("");
   const [highlighted, setHighlighted] = useState("");
 
-  const navigate = useNavigate();
-
-  const handleOpenFolder = useCallback(async () => {
-    const selectedPath = await pickDirectory("Select a folder");
-    if (selectedPath) {
-      const encodedPath = encodeURIComponent(selectedPath);
-      navigate(`/${encodedPath}`);
-    }
-  }, [navigate]);
+  const handleOpenFolder = useOpenProjectFromPicker();
 
   useHotkey("Mod+K", () => {
     onOpenChange(!open);
@@ -283,12 +274,10 @@ export function CommandPalette({
       keywordKey: "commandKeywords.closeWorkspace",
       icon: Home,
       action: () => {
-        // Really close (MET-177): navigating alone only backgrounds the
-        // workspace now that the route unmount no longer tears it down.
-        // Matches the pre-registry behavior of leaving via this command,
-        // which disposed the workspace's agents on unmount.
+        // Really close (MET-177): the workspace leaves the open set and its
+        // agents demote; focus moves to the next open workspace, or the
+        // welcome screen with none left.
         void closeWorkspace(workspacePath);
-        navigate("/welcome");
       },
     },
     {

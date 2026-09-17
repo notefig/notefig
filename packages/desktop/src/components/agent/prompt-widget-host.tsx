@@ -311,10 +311,14 @@ export function usePromptWidgetHost(): PromptWidgetHost {
           intent: "new-tab" as const,
         }),
       openAgentTab: (taskId) => latest.current.openAgentTab(taskId),
+      // Kept alive until it can land: the widget's claim on a new document
+      // is ambient, so it waits out a live text entry (the tree's create
+      // field closing) instead of being dropped on the first refusal.
       focusDocument: (documentPath, options) =>
         void requestTabFocus(documentPath, {
           reason: options.reason,
           steal: options.steal,
+          when: "when-mounted",
         }),
 
       slots,

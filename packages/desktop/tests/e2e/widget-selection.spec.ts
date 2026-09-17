@@ -41,7 +41,9 @@ const WORKSPACE_PATH = "/workspace/widget-selection";
  *  caret already in its draft — the same node view, and the same cascade, as
  *  one summoned with "/" mid-prose. */
 async function summonWidget(page: import("@playwright/test").Page) {
-  await page.getByRole("button", { name: "New file" }).click();
+  // "New scratchpad" is the instant one; "New file" is the tree's naming
+  // flow and creates nothing until the name is confirmed.
+  await page.getByRole("button", { name: "New scratchpad" }).click();
 }
 
 test.describe("prompt widget selection", () => {

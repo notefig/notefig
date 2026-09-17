@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useFocusedWorkspace } from "@/entities/workspaces";
 import {
   TelemetryConsentDialog,
   type TelemetryConsentAnswer,
@@ -105,15 +105,6 @@ async function persistConsentAnswer(
   }
 }
 
-const NON_WORKSPACE_PATHS = new Set(["/", "/welcome", "/pair"]);
-
-/** The consent dialog waits until the user is actually inside a workspace. */
-function isWorkspaceRoute(pathname: string): boolean {
-  return (
-    !NON_WORKSPACE_PATHS.has(pathname) && !pathname.startsWith("/__harness")
-  );
-}
-
 /**
  * App-global telemetry gate, mounted once in main.tsx (sibling of
  * AppUpdaterBootstrap). Registers global error handlers immediately, then
@@ -122,7 +113,9 @@ function isWorkspaceRoute(pathname: string): boolean {
  * a workspace — first contact (/welcome) stays prompt-free.
  */
 export function TelemetryBootstrap() {
-  const location = useLocation();
+  // The consent dialog waits until the user is actually inside a workspace
+  // — first contact (the welcome screen) stays prompt-free.
+  const insideWorkspace = useFocusedWorkspace() !== null;
   const [showConsent, setShowConsent] = useState(false);
 
   useEffect(() => {
@@ -180,7 +173,7 @@ export function TelemetryBootstrap() {
 
   return (
     <TelemetryConsentDialog
-      open={showConsent && isWorkspaceRoute(location.pathname)}
+      open={showConsent && insideWorkspace}
       onAnswer={handleAnswer}
     />
   );

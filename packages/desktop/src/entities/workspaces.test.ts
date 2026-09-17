@@ -56,6 +56,7 @@ import {
   closeAllWorkspaces,
   isWorkspaceOpen,
   openWorkspacesCollection,
+  workspaceOfPath,
 } from "./workspaces";
 import {
   agentTasksCollection,
@@ -219,5 +220,30 @@ describe("closeAllWorkspaces", () => {
     expect(isWorkspaceOpen("/ws-a")).toBe(false);
     expect(isWorkspaceOpen("/ws-b")).toBe(false);
     expect(openWorkspacesCollection.size).toBe(0);
+  });
+});
+
+describe("workspaceOfPath", () => {
+  it("resolves by tree membership, never by string prefix", () => {
+    openWorkspace("/ws");
+    openWorkspace("/ws-backup");
+
+    expect(workspaceOfPath("/ws/a.md")).toBe("/ws");
+    expect(workspaceOfPath("/ws-backup/x.md")).toBe("/ws-backup");
+    expect(workspaceOfPath("/ws")).toBe("/ws");
+  });
+
+  it("picks the deepest of nested open workspaces", () => {
+    openWorkspace("/ws");
+    openWorkspace("/ws/inner");
+
+    expect(workspaceOfPath("/ws/inner/y.md")).toBe("/ws/inner");
+    expect(workspaceOfPath("/ws/top.md")).toBe("/ws");
+  });
+
+  it("is null for a path no open workspace contains", () => {
+    openWorkspace("/ws");
+
+    expect(workspaceOfPath("/elsewhere/z.md")).toBeNull();
   });
 });

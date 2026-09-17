@@ -13,8 +13,19 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@notefig/ui/tooltip";
 import { queryClient } from "@/entities/query-client";
 import { bootstrapAppRuntime } from "@/app-runtime";
+import {
+  closeWorkspace,
+  openWorkspace,
+  openWorkspacesCollection,
+  whenOpenWorkspacesLoaded,
+} from "@/entities/workspaces";
+import { workspaceKey } from "@/utils/path";
 import { SiteShell } from "./site-shell";
-import { defaultPage, marketingPages } from "./content-manifest";
+import {
+  WORKSPACE_ROOT,
+  defaultPage,
+  marketingPages,
+} from "./content-manifest";
 
 // The site-local wrapper around @/styles.css — registers the desktop source
 // tree with Tailwind, whose auto-detection cannot see outside this package.
@@ -27,8 +38,20 @@ if (typeof globalThis.Buffer === "undefined") {
 // The same runtime boot the desktop root runs. This root renders the real
 // Workspace, so it needs the open-workspace watchers armed exactly as the
 // shell does — it just never renders `App`, which is where a React-effect
-// version would have lived.
-bootstrapAppRuntime();
+// version would have lived. It does not restore a persisted open set: the
+// site always opens its one seeded root itself.
+bootstrapAppRuntime({ restoreWorkspaces: false });
+
+// The one workspace this site ever shows is the seeded content root. The
+// open set persists in the visitor's browser, so a root from an earlier
+// manifest may still be in it: close anything that is not today's root.
+void whenOpenWorkspacesLoaded().then(() => {
+  const rootKey = workspaceKey(WORKSPACE_ROOT);
+  for (const row of [...openWorkspacesCollection.values()]) {
+    if (row.key !== rootKey) void closeWorkspace(row.path);
+  }
+  openWorkspace(WORKSPACE_ROOT);
+});
 
 // The prerender script (scripts/prerender.mjs) reads the route list and
 // per-page metadata from the running app, so the manifest never needs a

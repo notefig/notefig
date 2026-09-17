@@ -21,7 +21,7 @@ test.describe("scratchpad close → reopen project", () => {
     await setupTestDatabase(page, "scratchpad-lifecycle");
     // Seed from a route with no workspace mounted, so the entry auto-open
     // can't navigate mid-seed.
-    await page.goto("/welcome");
+    await page.goto("/");
     await seedTestFiles(page, [
       { path: `${ws}/README.md`, content: "# Seeded\n", type: "file" },
     ]);
@@ -94,7 +94,7 @@ test.describe("scratchpad close → reopen project", () => {
     const basename = await scratchpadBasenameContaining(page, "body text");
     await closeScratchpadTab(page);
 
-    await page.goto("/welcome");
+    await page.goto("/");
     await openWorkspace(page, ws);
     await visibleEditor(page).waitFor({ state: "visible", timeout: 15000 });
     await expectNoLoadError(page);
@@ -118,7 +118,7 @@ test.describe("scratchpad close → reopen project", () => {
     await closeScratchpadTab(page);
 
     // Only README remains in the layout; drop it so the next entry is empty.
-    await page.goto("/welcome");
+    await page.goto("/");
     await openWorkspace(page, ws);
     await visibleEditor(page).waitFor({ state: "visible", timeout: 15000 });
     await expectNoLoadError(page);

@@ -1,3 +1,4 @@
+import { openWorkspace } from "../setup/test-helpers";
 import { test, expect, type Page } from "@playwright/test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -24,7 +25,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
   });
 
   async function openProject(page: Page) {
-    await page.goto(`/${encodeURIComponent(workspace)}`);
+    await openWorkspace(page, workspace);
   }
 
   function visibleEditor(page: Page) {
@@ -223,7 +224,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
 
     // Re-enter at the bare root: the saved layout must restore intact —
     // the auto-open must not race the restore and clobber it.
-    await page.goto("/welcome");
+    await page.goto("/");
     await openProject(page);
 
     await expect(visibleEditor(page)).toContainText("Seeded", {
@@ -307,7 +308,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
 
     // Re-enter: the empty saved session must auto-open the scratchpad
     // again — this is the "come back to my scratchpad" loop.
-    await page.goto("/welcome");
+    await page.goto("/");
     await openProject(page);
     await expect(visibleEditor(page)).toContainText("notes body", {
       timeout: 15000,
@@ -347,7 +348,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
 
     // Re-enter at the bare root: README restores, both empty leftovers
     // (generated-name and renamed) are swept, only content survives.
-    await page.goto("/welcome");
+    await page.goto("/");
     await openProject(page);
     await expect(visibleEditor(page)).toContainText("Seeded", {
       timeout: 15000,

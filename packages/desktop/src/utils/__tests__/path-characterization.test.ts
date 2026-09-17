@@ -9,13 +9,6 @@ import {
   type FileEntries,
 } from "../fs";
 import { path as pathutil, workspaceKey } from "../path";
-import {
-  buildDirectoryUrl,
-  buildEditFileUrl,
-  buildPreviewFileUrl,
-  getAbsolutePathFromUrl,
-  getRelativePathForUrl,
-} from "../routing";
 import { isIgnoredPath } from "../ignore";
 import { historyGitDir } from "../history-service";
 
@@ -161,33 +154,6 @@ describe("flatEntriesToTree", () => {
     expect(sub.children?.[0].children?.map((n) => n.path)).toEqual([
       `${WS}/sub/deep/b.md`,
     ]);
-  });
-});
-
-describe("routing builders", () => {
-  it("buildEditFileUrl encodes base and absolute file path as segments", () => {
-    expect(buildEditFileUrl(WS, `${WS}/a b.md`)).toBe(
-      `/${encodeURIComponent(WS)}/edit/${encodeURIComponent(`${WS}/a b.md`)}`,
-    );
-  });
-
-  it("buildPreviewFileUrl mirrors the edit shape", () => {
-    expect(buildPreviewFileUrl(WS, `${WS}/x.md`)).toBe(
-      `/${encodeURIComponent(WS)}/preview/${encodeURIComponent(`${WS}/x.md`)}`,
-    );
-  });
-
-  it("buildDirectoryUrl encodes the workspace as one segment", () => {
-    expect(buildDirectoryUrl(WS)).toBe(`/${encodeURIComponent(WS)}`);
-  });
-
-  it("route param round-trips byte-identical (registry keys depend on it)", () => {
-    const segment = encodeURIComponent(WS);
-    expect(getAbsolutePathFromUrl(segment)).toBe(WS);
-  });
-
-  it("getRelativePathForUrl derives the workspace-relative path", () => {
-    expect(getRelativePathForUrl(WS, `${WS}/sub/x.md`)).toBe("sub/x.md");
   });
 });
 

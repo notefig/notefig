@@ -113,13 +113,33 @@ export function hasTabController(tabId: string): boolean {
 let observedIntentId: string | null = null;
 let observedResult = false;
 
+/**
+ * Tabs whose next focus claim may take focus away from a live text entry.
+ * A user gesture that opens a document as the thing to type into next —
+ * creating a file, whose tree field is still open — grants this; the
+ * document's own ambient claim (the prompt widget on a new document) then
+ * lands as the hand-off the gesture meant. One-shot: consumed by the claim
+ * that lands, dropped with the tab. Without a grant, no claim ever yanks
+ * focus out of a field the user is typing in.
+ */
+const focusHandoffs = new Set<string>();
+
+export function grantTabFocusHandoff(tabId: string): void {
+  focusHandoffs.add(tabId);
+}
+
+
 focusArbiter.registerResolver("tab", (intent) => {
   if (intent.target.type !== "tab") return false;
 
-  const controller = controllers.get(intent.target.tabId);
+  const { tabId } = intent.target;
+  const controller = controllers.get(tabId);
   if (!controller) return false;
 
-  const result = controller.focus({ steal: intent.steal });
+  const result = controller.focus({
+    steal: intent.steal || focusHandoffs.has(tabId),
+  });
+  if (result) focusHandoffs.delete(tabId);
   if (observedIntentId === intent.id) {
     observedResult = result;
   }
@@ -195,6 +215,7 @@ export function getTabSelectedText(tabId: string): string | undefined {
  * stale entry behind.
  */
 export function disposeTab(tabId: string): void {
+  focusHandoffs.delete(tabId);
   const controller = controllers.get(tabId);
   if (!controller) return;
   controllers.delete(tabId);

@@ -12,7 +12,7 @@ import {
   BUILT_IN_HARNESSES,
   buildHarnessResumeCommand,
 } from "@notefig/shared/agent";
-import { path as pathutil, workspaceKey } from "@/utils/path";
+import { workspaceKey } from "@/utils/path";
 import { getDesktopOs } from "@/utils/platform";
 import { formatTimeAgo } from "@/utils/format";
 import i18n from "@/utils/intl";
@@ -159,17 +159,15 @@ export function useAgentTasksReady(): boolean {
 /**
  * The workspace's tasks ordered by last activity (updatedAt desc, taskId as
  * tiebreak — descending ids = newest-created first), each joined with its
- * queued-turn count.
+ * queued-turn count. Rows are matched by `workspaceKey`, the one identity
+ * every registry uses, so a respelled path (trailing slash, Windows case)
+ * still finds its sessions.
  */
 export function useAgentTaskList(workspacePath: string): AgentTaskMeta[] {
-  const normalized = pathutil.normalize(workspacePath);
+  const key = workspaceKey(workspacePath);
 
-  const { data: tasks = [] } = useLiveQuery(
-    (q) =>
-      q
-        .from({ task: agentTasksCollection })
-        .where(({ task }) => eq(task.workspacePath, normalized)),
-    [normalized],
+  const { data: tasks = [] } = useLiveQuery((q) =>
+    q.from({ task: agentTasksCollection }),
   );
   const { data: queuedTurns = [] } = useLiveQuery((q) =>
     q
@@ -182,7 +180,8 @@ export function useAgentTaskList(workspacePath: string): AgentTaskMeta[] {
     for (const turn of queuedTurns) {
       queuedByTask.set(turn.taskId, (queuedByTask.get(turn.taskId) ?? 0) + 1);
     }
-    return [...tasks]
+    return tasks
+      .filter((task) => workspaceKey(task.workspacePath) === key)
       .sort((a, b) =>
         a.updatedAt !== b.updatedAt
           ? b.updatedAt - a.updatedAt
@@ -198,7 +197,7 @@ export function useAgentTaskList(workspacePath: string): AgentTaskMeta[] {
         isError: task.status === "error",
         isUnavailable: task.status === "unavailable",
       }));
-  }, [tasks, queuedTurns]);
+  }, [tasks, queuedTurns, key]);
 }
 
 /**
