@@ -258,9 +258,12 @@ export function createAndOpenScratchpad(
     .then((path) => {
       // The user asked for something to type into: the new document's
       // own claim (its prompt widget) may take focus from whatever field
-      // they were in — a hand-off the gesture grants, not the widget.
-      grantTabFocusHandoff(path);
-      openFile({ tabId: path, intent: "replace" });
+      // they were in — a hand-off the gesture grants, not the widget, and
+      // only once the tab is really in the dock (an open the editor
+      // refuses leaves nothing to own the grant).
+      if (openFile({ tabId: path, intent: "replace" })) {
+        grantTabFocusHandoff(path);
+      }
     })
     .catch((error) => console.error("Failed to create a new file:", error));
 }

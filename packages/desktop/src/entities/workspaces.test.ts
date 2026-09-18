@@ -104,7 +104,7 @@ describe("openWorkspace", () => {
     ]);
   });
 
-  it("is idempotent: re-entry refreshes the listing but never re-seeds", () => {
+  it("re-entry refreshes the listing but never re-seeds", () => {
     openWorkspace("/ws");
     openWorkspace("/ws");
     // Same workspace under a respelled path collapses onto one entry.
@@ -113,6 +113,25 @@ describe("openWorkspace", () => {
     expect(files.getOrCreateWorkspaceCollections).toHaveBeenCalledTimes(1);
     expect(files.refreshDirectoryMetadata).toHaveBeenCalledTimes(3);
     expect(openWorkspacesCollection.size).toBe(1);
+  });
+
+  it("re-entry brings the workspace to the front: focusedAt rises above every other row", async () => {
+    vi.useFakeTimers({ now: 1_000 });
+    try {
+      await openWorkspace("/ws-a");
+      vi.setSystemTime(2_000);
+      await openWorkspace("/ws-b");
+      vi.setSystemTime(3_000);
+      await openWorkspace("/ws-a");
+
+      const byFocus = [...openWorkspacesCollection.values()].sort(
+        (a, b) => b.focusedAt - a.focusedAt,
+      );
+      expect(byFocus.map((row) => row.path)).toEqual(["/ws-a", "/ws-b"]);
+      expect(byFocus[0]?.focusedAt).toBe(3_000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps independent entries per workspace", () => {

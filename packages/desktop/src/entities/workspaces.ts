@@ -14,7 +14,8 @@
  * layout is trusted (`restoreOpenWorkspaces`, run by the boot sequence).
  * One of them is "focused": the workspace the sidebar shows and new-item
  * actions target. Focus is a row attribute (`focusedAt`), never a second
- * store that could name a closed workspace.
+ * store that could name a closed workspace, and opening IS focusing: there
+ * is no way to open a workspace without bringing it to the front.
  *
  * Registry key vs value: `workspaceKey` collapses respellings onto one
  * entry (Windows), while rows and downstream calls carry the normalized
@@ -57,9 +58,20 @@ export const openWorkspacesCollection = createCollection(
   }),
 );
 
-/** Resolves once the persisted open set has loaded. Idempotent. */
-export function whenOpenWorkspacesLoaded(): Promise<void> {
-  return openWorkspacesCollection.preload();
+/**
+ * The one boot obligation: the persisted open set is hydrated AND every row
+ * in it has been brought back to life. Set once by `restoreOpenWorkspaces`;
+ * a root that never restores (the marketing site seeds its own root) has
+ * nothing to wait for beyond the load itself, which is what the fallback
+ * returns. One promise, so "ready" cannot mean two things that merely
+ * happen to coincide.
+ */
+let restored: Promise<void> | null = null;
+
+/** Resolves once the open set is hydrated and, if this root restores, its
+ *  workspaces are seeded with their listing walks under way. Idempotent. */
+export function whenOpenWorkspacesReady(): Promise<void> {
+  return restored ?? openWorkspacesCollection.preload();
 }
 
 /**
@@ -67,26 +79,29 @@ export function whenOpenWorkspacesLoaded(): Promise<void> {
  * its collections and kick the listing walk, exactly as `openWorkspace`
  * does for a fresh open — minus the insert, since the row is what told us
  * to. Watchers arm through the registry subscription, which reconciles the
- * rows it finds. Called once by the boot sequence (app-runtime.ts).
+ * rows it finds. Called once by the boot sequence (app-runtime.ts), before
+ * render, so nothing observes `whenOpenWorkspacesReady` ahead of it.
  */
-export async function restoreOpenWorkspaces(): Promise<void> {
-  await whenOpenWorkspacesLoaded();
-  for (const row of openWorkspacesCollection.values()) {
-    getOrCreateWorkspaceCollections(row.path);
-    void refreshDirectoryMetadata(row.path);
-  }
+export function restoreOpenWorkspaces(): Promise<void> {
+  restored ??= openWorkspacesCollection.preload().then(() => {
+    for (const row of openWorkspacesCollection.values()) {
+      getOrCreateWorkspaceCollections(row.path);
+      void refreshDirectoryMetadata(row.path);
+    }
+  });
+  return restored;
 }
 
 /**
- * True once the persisted open set has loaded — gates anything that would
- * treat "not in the open set" as meaningful (stale-tab pruning) so a
+ * True once `whenOpenWorkspacesReady` has resolved — gates anything that
+ * would treat "not in the open set" as meaningful (stale-tab pruning) so a
  * restored layout is never emptied while its workspaces are still loading.
  */
 export function useOpenWorkspacesReady(): boolean {
   const [ready, setReady] = useState(false);
   useEffect(() => {
     let live = true;
-    void whenOpenWorkspacesLoaded().finally(() => live && setReady(true));
+    void whenOpenWorkspacesReady().finally(() => live && setReady(true));
     return () => {
       live = false;
     };
@@ -105,12 +120,17 @@ export function useOpenWorkspacesReady(): boolean {
 const pendingCloses = new Map<string, Promise<void>>();
 
 /**
- * Idempotent: seeds the file collections, kicks the initial listing walk,
- * and adds the workspace to the open set — synchronously, so it is open
- * (and watched, via the registry subscription) by the time this returns.
- * The promise resolves once the membership is durable: a reload before
- * that would forget the workspace, so callers that can be followed by one
- * (the test seam) await it.
+ * Open-or-focus, the one verb every entry point uses. A workspace not yet
+ * open joins the open set — synchronously, so it is open (and watched, via
+ * the registry subscription) by the time this returns — with its file
+ * collections seeded and its listing walk under way. One already open is
+ * brought to the front instead: the sidebar shows it and new-item actions
+ * target it. Either way its listing is re-stat'd, as entry always did
+ * (cheap, catches watcher gaps), and the promise resolves once the write
+ * is durable: a reload before that would forget the workspace or land on
+ * the previous focus, so callers that can be followed by one (the test
+ * seam) await it. Re-arming a watcher whose start failed is the portal's
+ * other half of re-entry (`showWorkspace` in hooks/use-open-project.ts).
  */
 export function openWorkspace(workspacePath: string): Promise<void> {
   const key = workspaceKey(workspacePath);
@@ -123,13 +143,12 @@ export function openWorkspace(workspacePath: string): Promise<void> {
   }
   const existing = openWorkspacesCollection.get(key);
   if (existing) {
-    // Re-entry into a backgrounded workspace: the watcher kept the
-    // collection current, but a listing refresh on entry is what the
-    // route always did — keep it (cheap re-stat, catches watcher gaps).
-    // Re-arming a watcher that failed to start is the portal's other half
-    // of re-entry (`showWorkspace` in hooks/use-open-project.ts).
-    void refreshDirectoryMetadata(native);
-    return Promise.resolve();
+    void refreshDirectoryMetadata(existing.path);
+    return openWorkspacesCollection
+      .update(key, (draft) => {
+        draft.focusedAt = Date.now();
+      })
+      .isPersisted.promise.then(() => undefined);
   }
 
   getOrCreateWorkspaceCollections(native);
@@ -137,24 +156,6 @@ export function openWorkspace(workspacePath: string): Promise<void> {
   const now = Date.now();
   return openWorkspacesCollection
     .insert({ key, path: native, openedAt: now, focusedAt: now })
-    .isPersisted.promise.then(() => undefined);
-}
-
-/**
- * Bring an open workspace to the front: the sidebar shows it and new-item
- * actions target it. Also the moment to re-stat its listing, as re-entry
- * always did (cheap, catches watcher gaps). No-op for a workspace that is
- * not open — opening is a separate, explicit act.
- */
-export function focusWorkspace(workspacePath: string): Promise<void> {
-  const key = workspaceKey(workspacePath);
-  const row = openWorkspacesCollection.get(key);
-  if (!row) return Promise.resolve();
-  void refreshDirectoryMetadata(row.path);
-  return openWorkspacesCollection
-    .update(key, (draft) => {
-      draft.focusedAt = Date.now();
-    })
     .isPersisted.promise.then(() => undefined);
 }
 

@@ -17,7 +17,7 @@ import {
   closeWorkspace,
   openWorkspace,
   openWorkspacesCollection,
-  whenOpenWorkspacesLoaded,
+  whenOpenWorkspacesReady,
 } from "@/entities/workspaces";
 import { workspaceKey } from "@/utils/path";
 import { SiteShell } from "./site-shell";
@@ -45,7 +45,7 @@ bootstrapAppRuntime({ restoreWorkspaces: false });
 // The one workspace this site ever shows is the seeded content root. The
 // open set persists in the visitor's browser, so a root from an earlier
 // manifest may still be in it: close anything that is not today's root.
-void whenOpenWorkspacesLoaded().then(() => {
+void whenOpenWorkspacesReady().then(() => {
   const rootKey = workspaceKey(WORKSPACE_ROOT);
   for (const row of [...openWorkspacesCollection.values()]) {
     if (row.key !== rootKey) void closeWorkspace(row.path);

@@ -9,7 +9,7 @@ import {
 import { Workspace } from "@/components/workspace";
 import { MockDirectoryPickerDialog } from "@/components/mock-directory-picker-dialog";
 import { TextPromptDialog } from "@/components/text-prompt-dialog";
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useTheme } from "@/components/theme-provider";
 import { platformAdapter } from "@/adapters";
 import { isWeb } from "@/utils/platform";
@@ -72,12 +72,14 @@ export const App = () => {
 
   // The URL carries the session (layout, chrome); the pathname is always
   // "/". Restore last session's search once settings have hydrated — a
-  // cold boot lands on a bare "/" — then keep recording it. Recording waits
-  // for that decision so the bare boot URL never overwrites the saved one.
-  const restoredSearchRef = useRef(false);
+  // cold boot lands on a bare "/" — then keep recording it. The restore is
+  // a render phase, not a ref: the record effect must not run in the same
+  // commit as the restore, or it would persist the bare boot URL over the
+  // saved one before the navigation lands. Flipping state defers it by
+  // exactly one render, which is also the render the navigation reaches.
+  const [sessionRestored, setSessionRestored] = useState(false);
   useEffect(() => {
-    if (!settingsReady || restoredSearchRef.current) return;
-    restoredSearchRef.current = true;
+    if (!settingsReady || sessionRestored) return;
     if (
       location.pathname === "/" &&
       !location.search &&
@@ -85,11 +87,14 @@ export const App = () => {
     ) {
       navigate(`/${settings.lastSearch}`, { replace: true });
     }
-  }, [settingsReady, settings.lastSearch, location, navigate]);
+    setSessionRestored(true);
+  }, [settingsReady, sessionRestored, settings.lastSearch, location, navigate]);
   useEffect(() => {
-    if (!restoredSearchRef.current || location.pathname !== "/") return;
-    setLastSearch(location.search);
-  }, [location.pathname, location.search, setLastSearch]);
+    if (!sessionRestored || location.pathname !== "/") return;
+    // One encoding of "nothing": an empty search is stored as null, the
+    // declared default, never as "".
+    setLastSearch(location.search || null);
+  }, [sessionRestored, location.pathname, location.search, setLastSearch]);
 
   useEffect(() => {
     const cleanup = platformAdapter.ui.addEventListener((event) => {

@@ -386,7 +386,7 @@ export interface WorkspaceMetadataWatcher {
  * Workspace-lifetime metadata watching, owned by the workspaces entity
  * (MET-177): runs from open to explicit close, so a backgrounded workspace
  * keeps ingesting external changes. Content watching stays render-driven
- * (`useContentWatchers`) — a backgrounded workspace has no rendered tabs.
+ * (`syncContentWatchers`) — a backgrounded workspace has no rendered tabs.
  */
 export function startWorkspaceMetadataWatcher(
   workspacePath: string,
@@ -455,6 +455,10 @@ export function startWorkspaceMetadataWatcher(
 interface ContentWatcher {
   /** The watched paths, joined — the identity a re-sync compares against. */
   pathsKey: string;
+  /** Re-issue the watch with a new path set under the same watch id: both
+   *  backends reconcile the delta on a live id, so this never tears the
+   *  registration or its listener down. */
+  setPaths: (paths: string[]) => void;
   stop: () => void;
 }
 
@@ -478,53 +482,69 @@ function startContentWatcher(
       handleMetadataFileSystemChange(event.payload, workspacePath);
     }
   });
-  platformAdapter.fs
-    .startWatchingContent(openFilePaths, contentWatchId)
-    .then(() => {
-      // A stop can land while the start is in flight (a fast tab close).
-      // Its stop found nothing, so this registration would outlive it with
-      // no handle left to stop it — same leak as the metadata side.
-      if (!isActive) {
-        void platformAdapter.fs.stopWatching(contentWatchId).catch(() => {});
-      }
-    })
-    .catch((error) => {
-      console.error("Failed to setup watchers:", error);
+  // One serialized command lane per watch id. Starts and the final stop
+  // are separate host commands with no ordering guarantee between them
+  // (Tauri spawns each invoke as its own task), so a fast tab change could
+  // otherwise land an older path set after a newer one, or a stop before
+  // the start it was meant to undo — leaving a registration nobody holds.
+  // Chaining them makes the last call issued the last to take effect.
+  let lane: Promise<unknown> | null = null;
+  const enqueue = (command: () => Promise<unknown>) => {
+    lane = lane ? lane.then(command, command) : command();
+    lane = lane.catch((error) => {
+      console.error("Content watcher command failed:", error);
     });
-  return {
-    pathsKey: openFilePaths.join(","),
+  };
+  const watcher: ContentWatcher = {
+    pathsKey: "",
+    setPaths: (paths) => {
+      if (!isActive) return;
+      watcher.pathsKey = paths.join(",");
+      enqueue(() =>
+        platformAdapter.fs.startWatchingContent(paths, contentWatchId),
+      );
+    },
     stop: () => {
       isActive = false;
       eventCleanup();
       // Unconditional stop: cheaper to swallow the "no watcher" rejection
       // than to keep the stop condition mirroring the start condition.
-      void platformAdapter.fs.stopWatching(contentWatchId).catch(() => {});
+      enqueue(() =>
+        platformAdapter.fs.stopWatching(contentWatchId).catch(() => {}),
+      );
     },
   };
+  watcher.setPaths(openFilePaths);
+  return watcher;
 }
 
 /**
  * Make the live content watches match `openFilesByWorkspace` (workspace →
- * its open file paths): a workspace whose set changed is re-armed, one
- * that left the map is stopped, an unchanged one is left alone. Call with
- * an empty map to stop everything (shell teardown, tests).
+ * its open file paths): a workspace whose set changed has its watch
+ * re-issued with the new paths, one that left the map is stopped, an
+ * unchanged one is left alone. Call with an empty map to stop everything
+ * (shell teardown, tests).
  */
 export function syncContentWatchers(
   openFilesByWorkspace: Map<string, string[]>,
 ): void {
-  const wanted = new Map<string, string[]>();
+  const wanted = new Map<string, { workspacePath: string; paths: string[] }>();
   for (const [workspacePath, paths] of openFilesByWorkspace) {
-    if (paths.length > 0) wanted.set(workspaceKey(workspacePath), paths);
+    if (paths.length > 0) {
+      wanted.set(workspaceKey(workspacePath), { workspacePath, paths });
+    }
   }
   for (const [key, watcher] of contentWatchers) {
-    const paths = wanted.get(key);
-    if (paths && paths.join(",") === watcher.pathsKey) continue;
+    if (wanted.has(key)) continue;
     watcher.stop();
     contentWatchers.delete(key);
   }
-  for (const [workspacePath, paths] of openFilesByWorkspace) {
-    const key = workspaceKey(workspacePath);
-    if (paths.length === 0 || contentWatchers.has(key)) continue;
-    contentWatchers.set(key, startContentWatcher(workspacePath, paths));
+  for (const [key, { workspacePath, paths }] of wanted) {
+    const watcher = contentWatchers.get(key);
+    if (!watcher) {
+      contentWatchers.set(key, startContentWatcher(workspacePath, paths));
+    } else if (paths.join(",") !== watcher.pathsKey) {
+      watcher.setPaths(paths);
+    }
   }
 }

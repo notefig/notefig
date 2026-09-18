@@ -87,9 +87,9 @@ describe("restoreOpenWorkspaces at boot", () => {
     );
 
     bootstrapAppRuntime();
-    await workspaces.whenOpenWorkspacesLoaded();
-    // The restore runs after the load; let it and the subscription settle.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Ready means restored, not merely loaded: no settle sleep needed for
+    // the seeding and walks below to have been issued.
+    await workspaces.whenOpenWorkspacesReady();
 
     const { isWorkspaceOpen, openWorkspacesCollection } = workspaces;
     expect(isWorkspaceOpen("/ws-a")).toBe(true);

@@ -40,10 +40,13 @@ export interface UseDockableTabsResult {
 
   activeTabId: string | null;
 
+  /** Open a tree entry as a tab. Returns whether it did: directories and
+   *  files the editor cannot open are refused, and a caller that grants
+   *  something on the strength of the open (a focus hand-off) must know. */
   handleFileSelect: (
     file: FileTreeNode,
     options?: Omit<OpenFileInLayoutOptions, "tabId">,
-  ) => void;
+  ) => boolean;
 
   handleLayoutChange: (newLayout: LayoutNode[]) => void;
 
@@ -220,12 +223,15 @@ export function useDockableTabs(
   );
 
   const handleFileSelect = useCallback(
-    (file: FileTreeNode, options?: Omit<OpenFileInLayoutOptions, "tabId">) => {
-      if (file.type !== "file") return;
+    (
+      file: FileTreeNode,
+      options?: Omit<OpenFileInLayoutOptions, "tabId">,
+    ): boolean => {
+      if (file.type !== "file") return false;
 
       if (canOpenFile && !canOpenFile(file)) {
         console.warn(`File cannot be opened as tab: ${file.path}`);
-        return;
+        return false;
       }
 
       openFileDisposing({
@@ -234,6 +240,7 @@ export function useDockableTabs(
         targetWindowId:
           options?.targetWindowId ?? getActiveWindowId() ?? undefined,
       });
+      return true;
     },
     [openFileDisposing, canOpenFile, getActiveWindowId],
   );

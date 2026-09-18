@@ -190,26 +190,73 @@ describe("content watchers across open workspaces", () => {
     ]);
   });
 
-  it("re-arms only the workspace whose open set changed, stops the one that emptied", () => {
+  it("re-issues the watch for the workspace whose open set changed (same id, no stop), stops the one that emptied", async () => {
     syncContentWatchers(
       new Map([
         [WS_A, [`${WS_A}/a.md`]],
         [WS_B, [`${WS_B}/b.md`]],
       ]),
     );
+    await settle();
     vi.mocked(platformAdapter.fs.startWatchingContent).mockClear();
     vi.mocked(platformAdapter.fs.stopWatching).mockClear();
 
     syncContentWatchers(
       new Map([[WS_A, [`${WS_A}/a.md`, `${WS_A}/d.md`]]]),
     );
+    await settle();
 
-    expect(stops().map(([id]) => id).sort()).toEqual(
-      [contentWatchIdFor(WS_A), contentWatchIdFor(WS_B)].sort(),
-    );
+    // A's path set changed: the backend reconciles the delta on the live
+    // id, so the registration and its listener are never torn down.
+    expect(stops().map(([id]) => id)).toEqual([contentWatchIdFor(WS_B)]);
     expect(startContent()).toEqual([
       [[`${WS_A}/a.md`, `${WS_A}/d.md`], contentWatchIdFor(WS_A)],
     ]);
+  });
+
+  it("serializes a re-issue behind an in-flight start, and never stops a still-wanted watch", async () => {
+    let resolveFirst!: () => void;
+    vi.mocked(platformAdapter.fs.startWatchingContent).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    syncContentWatchers(new Map([[WS_A, [`${WS_A}/a.md`]]]));
+    // The dock changes before the host acknowledged the first start.
+    syncContentWatchers(new Map([[WS_A, [`${WS_A}/a.md`, `${WS_A}/d.md`]]]));
+    await settle();
+
+    // The second start waits for the first: the last set issued is the
+    // last to take effect at the host, whatever its task scheduling.
+    expect(startContent()).toHaveLength(1);
+    resolveFirst();
+    await settle();
+    expect(startContent()).toEqual([
+      [[`${WS_A}/a.md`], contentWatchIdFor(WS_A)],
+      [[`${WS_A}/a.md`, `${WS_A}/d.md`], contentWatchIdFor(WS_A)],
+    ]);
+    expect(stops()).toEqual([]);
+  });
+
+  it("a stop that lands while the start is in flight is issued after it, exactly once", async () => {
+    let resolveStart!: () => void;
+    vi.mocked(platformAdapter.fs.startWatchingContent).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    syncContentWatchers(new Map([[WS_A, [`${WS_A}/a.md`]]]));
+    syncContentWatchers(new Map());
+    await settle();
+
+    // Not yet: a stop racing ahead of its start would find nothing to
+    // remove and leave the registration orphaned once the start landed.
+    expect(stops()).toEqual([]);
+    resolveStart();
+    await settle();
+    expect(stops().map(([id]) => id)).toEqual([contentWatchIdFor(WS_A)]);
   });
 
   it("routes a content event to the workspace whose watch produced it", async () => {

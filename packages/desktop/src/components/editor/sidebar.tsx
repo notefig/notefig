@@ -37,7 +37,7 @@ interface SidebarProps {
   onFileSelect: (
     file: FileTreeNode,
     options?: Omit<OpenFileInLayoutOptions, "tabId">,
-  ) => void;
+  ) => boolean;
   closeTab: (tabId: string) => void;
   /** Rename/move a file whose tab is open (close-and-reopen primitive). */
   onRenameOpenFile: (oldPath: string, newPath: string) => Promise<void>;
@@ -180,7 +180,7 @@ export function Sidebar({
         createFile(workspacePath, fullPath)
           .then(() => {
             if (isTextFile(fullPath)) {
-              onFileSelect({
+              const opened = onFileSelect({
                 path: fullPath,
                 type: "file",
                 contentHash: "",
@@ -192,8 +192,11 @@ export function Sidebar({
               // widget's) would rightly stand down for that field. Grant
               // the hand-off here, where the gesture is — never from the
               // widget, which also mounts for documents the app opened
-              // under the user's hands.
-              grantTabFocusHandoff(fullPath);
+              // under the user's hands — and only for a tab that actually
+              // entered the dock: a grant with no tab has no owner to
+              // consume or drop it, and would upgrade whatever opened that
+              // path next.
+              if (opened) grantTabFocusHandoff(fullPath);
             }
           })
           .catch((error: unknown) => {

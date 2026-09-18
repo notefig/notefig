@@ -13,11 +13,10 @@ vi.mock("@/adapters", async () => ({
 
 const workspaces = vi.hoisted(() => ({
   open: new Set<string>(),
+  // Open-or-focus: the entity's one verb.
   openWorkspace: vi.fn(async (path: string) => {
     workspaces.open.add(path);
   }),
-  focusWorkspace: vi.fn(async () => {}),
-  isWorkspaceOpen: vi.fn((path: string) => workspaces.open.has(path)),
   workspaceOfPath: (path: string) =>
     [...workspaces.open].find((ws) => path.startsWith(`${ws}/`)) ?? null,
 }));
@@ -100,7 +99,6 @@ describe("useOpenProject", () => {
 
     expect(recents.addRecentProject).toHaveBeenCalledWith("/ws");
     expect(workspaces.openWorkspace).toHaveBeenCalledWith("/ws");
-    expect(workspaces.focusWorkspace).toHaveBeenCalledWith("/ws");
     expect(watchers.ensureWatching).toHaveBeenCalledWith("/ws");
     expect(scratchpads.enterScratchpad).toHaveBeenCalledWith("/ws", []);
     expect(openTabs()).toEqual(["/ws/.notefig/scratchpads/sunny-otter.md"]);
@@ -120,7 +118,7 @@ describe("useOpenProject", () => {
     });
     await tick();
 
-    expect(workspaces.openWorkspace).not.toHaveBeenCalled();
+    expect(workspaces.openWorkspace).toHaveBeenCalledWith("/ws");
     expect(scratchpads.enterScratchpad).toHaveBeenCalledWith("/ws", []);
     expect(openTabs()).toEqual(["/ws/.notefig/scratchpads/sunny-otter.md"]);
   });
@@ -137,9 +135,8 @@ describe("useOpenProject", () => {
     });
     await tick();
 
-    expect(workspaces.openWorkspace).not.toHaveBeenCalled();
     expect(scratchpads.enterScratchpad).not.toHaveBeenCalled();
-    expect(workspaces.focusWorkspace).toHaveBeenCalledWith("/ws");
+    expect(workspaces.openWorkspace).toHaveBeenCalledWith("/ws");
     expect(openTabs()).toEqual(["/ws/.notefig/scratchpads/sunny-otter.md"]);
   });
 
@@ -163,6 +160,34 @@ describe("useOpenProject", () => {
     ]);
   });
 
+  it("two overlapping opens of one project enter the scratchpad once and open one tab", async () => {
+    // The open is a user gesture, but nothing serialises gestures: a second
+    // call can arrive before the first has finished its disk work. Both
+    // would see no open file tab, both would sweep and create — two
+    // scratchpads on disk, two tabs in the dock.
+    let release!: () => void;
+    scratchpads.enterScratchpad.mockImplementationOnce(
+      (ws: string) =>
+        new Promise<string | null>((resolve) => {
+          release = () =>
+            resolve(`${ws}/.notefig/scratchpads/sunny-otter.md`);
+        }),
+    );
+    let first!: Promise<void>;
+    let second!: Promise<void>;
+    await act(async () => {
+      first = openProject!("/ws");
+      second = openProject!("/ws");
+      await tick();
+      release();
+      await Promise.all([first, second]);
+    });
+    await tick();
+
+    expect(scratchpads.enterScratchpad).toHaveBeenCalledTimes(1);
+    expect(openTabs()).toEqual(["/ws/.notefig/scratchpads/sunny-otter.md"]);
+  });
+
   it("scratchpad-on-startup off: opens with no new tab", async () => {
     scratchpads.enterScratchpad.mockResolvedValueOnce(null);
     await act(async () => {
@@ -173,9 +198,9 @@ describe("useOpenProject", () => {
     expect(openTabs()).toEqual([]);
   });
 
-  it("showWorkspace focuses and re-arms the watcher", () => {
+  it("showWorkspace opens-or-focuses and re-arms the watcher", () => {
     showWorkspace("/ws");
-    expect(workspaces.focusWorkspace).toHaveBeenCalledWith("/ws");
+    expect(workspaces.openWorkspace).toHaveBeenCalledWith("/ws");
     expect(watchers.ensureWatching).toHaveBeenCalledWith("/ws");
   });
 });
