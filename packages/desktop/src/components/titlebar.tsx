@@ -51,6 +51,12 @@ function useTitlebarHeightVar<T extends HTMLElement>() {
  */
 const TRAFFIC_LIGHT_INSET_PX = 78;
 
+/** The bar's height in physical pixels: the traffic lights (y:14, 12px
+ *  tall) sit on its centre line, so one row reads as one row. */
+const TOP_BAR_HEIGHT_PX = 40;
+/** Without traffic lights to centre on, a touch shorter. */
+const TOP_BAR_HEIGHT_PLAIN_PX = 34;
+
 /**
  * The window's top bar: the drag region and platform window controls with
  * the app's own chrome laid into it — a single boxy strip above the
@@ -69,13 +75,21 @@ export function TopBar({ children }: { children: ReactNode }) {
     <div
       ref={ref}
       data-tauri-drag-region
-      className="flex h-10 w-full shrink-0 select-none items-center border-b border-border bg-background"
+      className="flex w-full shrink-0 select-none items-center border-b border-border"
       style={{
         WebkitAppRegion: "drag",
+        // Physical px, divided by the webview zoom: the traffic lights
+        // don't scale with the page, so the row that centres on them
+        // can't either.
+        height: Math.round(
+          (isMac ? TOP_BAR_HEIGHT_PX : TOP_BAR_HEIGHT_PLAIN_PX) / zoom,
+        ),
         minHeight: isMac
           ? Math.ceil(TRAFFIC_LIGHT_CLEARANCE_PX / zoom)
           : undefined,
-        paddingInlineStart: isMac ? Math.ceil(TRAFFIC_LIGHT_INSET_PX / zoom) : undefined,
+        paddingInlineStart: isMac
+          ? Math.ceil(TRAFFIC_LIGHT_INSET_PX / zoom)
+          : undefined,
       } as React.CSSProperties}
     >
       <div

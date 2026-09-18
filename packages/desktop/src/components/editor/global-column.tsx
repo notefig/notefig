@@ -1,6 +1,7 @@
 import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { LayoutGrid, Plus, Settings } from "lucide-react";
+import { Plus, Settings } from "lucide-react";
+import { PlainLogo } from "@/components/logo";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@notefig/ui/tooltip";
 import {
   ContextMenu,
@@ -62,13 +63,13 @@ export function GlobalColumn({
   const focusedKey = workspaceKey(workspacePath);
 
   return (
-    <div className="flex h-full w-11 shrink-0 flex-col items-center gap-1 border-e border-border bg-muted/40 py-2">
+    <div className="flex h-full w-10 shrink-0 flex-col items-center gap-1 border-e border-border bg-muted/40 py-1.5">
       <ColumnButton
         label={t("everything")}
         active={isEverything}
         onClick={onShowEverything}
       >
-        <LayoutGrid className="size-4" />
+        <PlainLogo size="1.125rem" fill="var(--logo)" />
       </ColumnButton>
       <div className="my-1 h-px w-5 bg-border" />
 

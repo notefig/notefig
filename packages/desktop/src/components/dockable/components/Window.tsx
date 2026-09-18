@@ -111,7 +111,7 @@ function TabView({
             onDrop: (payload) => openDroppedFile(payload, id),
           })}
           className={cn(
-            "relative mx-2 flex min-w-0 w-[calc(100%-1rem)] rounded-lg border border-sidebar-border overflow-clip",
+            "relative flex min-w-0 w-full border-b border-border overflow-clip",
             "data-[mtr-drop-over=true]:border-ring",
             "data-[mtr-drop-over=true]:shadow-[0_0_0_1px_hsl(var(--ring))_inset]",
           )}
@@ -148,7 +148,6 @@ function TabView({
       )}
 
       <div
-        className="px-2"
         style={{
           overflow: "clip",
           display: "flex",

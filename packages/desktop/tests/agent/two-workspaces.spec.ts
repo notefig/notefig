@@ -75,7 +75,7 @@ test.describe("two workspaces in one dock", () => {
     // Both workspaces are listed as projects in the Everything view,
     // whichever is focused; the focused one (B) is the current row.
     await page
-      .getByRole("button", { name: "Everything — all workspaces", exact: true })
+      .getByRole("button", { name: "Everything", exact: true })
       .click();
     await expect(
       page.getByRole("button", { name: "two-workspaces-a", exact: true }),

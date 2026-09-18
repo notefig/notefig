@@ -6,7 +6,6 @@ import type { SearchPanelHandle } from "@/components/editor/search-panel";
 import { canOpenFile as canOpenInEditor } from "@/components/editor/polymorphic-editor";
 import { StatusCells } from "@/components/editor/status-bar";
 import { Titlebar, TopBar } from "@/components/titlebar";
-import { PlainLogo } from "@/components/logo";
 import { PanelLeft, PanelLeftClose, Search } from "lucide-react";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
@@ -191,12 +190,14 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
       openAgentTab={openAgentTab}
     >
       <PromptWidgetBoundary>
-        <div dir={direction} className="flex h-full w-full flex-col overflow-clip">
+        <div
+          dir={direction}
+          className="texture-surface flex h-full w-full flex-col overflow-clip bg-background"
+        >
           <TopBar>
             <TopBarChrome
               isSidebarCollapsed={isSidebarCollapsed}
               onToggleSidebar={toggleSidebarCollapsed}
-              onShowEverything={showEverything}
               onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
               wordCount={wordCount}
               isSynced={isSynced}
@@ -274,37 +275,26 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
   );
 }
 
-/** What the app lays into the window's top bar: the mark (back to the
- *  Everything view), the sidebar toggle, the command palette, and the
- *  status cells at the far end. */
+/** What the app lays into the window's top bar: the sidebar toggle, the
+ *  command palette, and the status cells at the far end. */
 function TopBarChrome({
   isSidebarCollapsed,
   onToggleSidebar,
-  onShowEverything,
   onOpenCommandPalette,
   wordCount,
   isSynced,
 }: {
   isSidebarCollapsed: boolean;
   onToggleSidebar: () => void;
-  onShowEverything: () => void;
   onOpenCommandPalette: () => void;
   wordCount: number | null;
   isSynced: boolean;
 }) {
   const { t } = useTranslation();
   const iconButton =
-    "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
+    "flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
   return (
-    <div className="flex h-full w-full items-center gap-1 px-2">
-      <button
-        type="button"
-        onClick={onShowEverything}
-        aria-label={t("everythingHint")}
-        className={iconButton}
-      >
-        <PlainLogo size="1.125rem" fill="var(--logo)" />
-      </button>
+    <div className="flex h-full w-full items-center gap-1 px-1.5">
       <button
         type="button"
         onClick={onToggleSidebar}
@@ -320,7 +310,7 @@ function TopBarChrome({
       <button
         type="button"
         onClick={onOpenCommandPalette}
-        className="ms-2 flex h-7 w-64 max-w-[40vw] items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="ms-1.5 flex h-6 w-64 max-w-[40vw] items-center gap-2 rounded-md border border-border bg-muted/50 px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
         <Search className="size-3.5" />
         <span className="flex-1 truncate text-start">{t("quickSwitcher")}</span>

@@ -121,7 +121,7 @@ export function Sidebar({
           <div
             ref={containerRef}
             data-sidebar
-            className="flex min-h-0 shrink-0 flex-col overflow-hidden border-e border-border bg-background"
+            className="flex min-h-0 shrink-0 flex-col overflow-hidden border-e border-border"
             style={{ width: sidebarWidth }}
           >
             <div
@@ -246,7 +246,7 @@ function WorkspacePanel({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div
-        className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3 text-sm font-medium"
+        className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3 text-sm font-medium"
         title={workspacePath}
       >
         <Folder className="size-4 shrink-0 text-muted-foreground" />
@@ -267,7 +267,7 @@ function WorkspacePanel({
               aria-pressed={active}
               title={t(TOOL_LABEL_KEYS[candidate])}
               className={cn(
-                "-mb-px flex h-9 min-w-0 flex-1 items-center justify-center gap-1.5 border-b-2 px-1.5 text-xs transition-colors",
+                "-mb-px flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 border-b-2 px-1.5 text-xs transition-colors",
                 active
                   ? "border-foreground font-medium text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground",

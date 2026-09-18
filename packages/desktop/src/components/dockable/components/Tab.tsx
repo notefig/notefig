@@ -51,7 +51,7 @@ function Tab({
         title={name}
       >
         <div className="flex min-w-0 flex-shrink items-center overflow-hidden">
-          <span className="min-w-0 flex-1 truncate whitespace-nowrap px-4 py-2">
+          <span className="min-w-0 flex-1 truncate whitespace-nowrap px-3 py-1.5">
             {name}
           </span>
           {onClose && (
