@@ -53,7 +53,7 @@ import {
 } from "./doc-helpers";
 import type { PromptReference } from "./doc-helpers";
 import { PromptBlob } from "./ui/prompt-blob";
-import { adoptPersistedPromptBinding } from "./store";
+import { adoptPersistedPromptBinding, bindPromptBlobDocument } from "./store";
 import {
   getMentionService,
   mentionPopupHasResults,
@@ -250,6 +250,10 @@ function AiPromptNodeView(props: NodeViewProps) {
       </NodeViewWrapper>
     );
   }
+
+  // Where this widget lives, for the app's session → widget lookups (the
+  // sidebar's "Jump"). Cheap and idempotent, so it simply rides the render.
+  bindPromptBlobDocument(blobId, filePath);
 
   const removeNode = (options?: {
     insertSlash?: boolean;

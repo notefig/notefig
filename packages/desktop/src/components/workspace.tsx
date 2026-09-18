@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type React from "react";
 import { Dockable } from "@/components/dockable";
-import { IconSidebar } from "@/components/editor/icon-sidebar";
 import { Sidebar } from "@/components/editor/sidebar";
 import type { SearchPanelHandle } from "@/components/editor/search-panel";
 import { canOpenFile as canOpenInEditor } from "@/components/editor/polymorphic-editor";
@@ -38,6 +37,7 @@ import { WorkspaceTabsProvider } from "@/components/workspace-tabs-provider";
 import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary";
 import { useThrowWorkspaceAccessError } from "@/components/workspace-error-boundary";
 import { agentTabId, isFileTabId, tabKind } from "@/entities/tabs";
+import { touchRecentDocument } from "@/entities/recent-documents";
 import { useTabElements } from "@/tabs/tab-types";
 import { useReleaseNotesOnUpdate } from "@/hooks/use-release-notes-on-update";
 import {
@@ -132,10 +132,14 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
   });
 
   const {
+    sidebarView,
     isSidebarCollapsed,
     toggleSidebarCollapsed,
     openSidebarIfCollapsed,
     openSettings,
+    showSidebarView,
+    showEverything,
+    showWorkspaceTools,
     openSearchPanel,
     openSessionsSidebar,
     isCommandPaletteOpen,
@@ -180,24 +184,24 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
           className="relative flex h-full w-full overflow-clip p-2"
         >
           <div className="flex h-full shrink-0 overflow-clip rounded-xl border border-border">
-            <IconSidebar
+            <Sidebar
+              workspacePath={workspacePath}
+              sidebarView={sidebarView}
               isCollapsed={isSidebarCollapsed}
+              activeTabId={activeTabId}
+              openTabs={openTabs}
+              onFileSelect={handleFileSelect}
+              closeTab={closeTab}
+              onRenameOpenFile={handleRenameOpenFile}
+              mode={fileTreeMode}
+              onModeChange={setFileTreeMode}
+              searchPanelRef={searchPanelRef}
               onToggleCollapse={toggleSidebarCollapsed}
+              onShowEverything={showEverything}
+              onShowTool={showSidebarView}
+              onShowWorkspaceTools={showWorkspaceTools}
+              onOpenSettings={openSettings}
             />
-
-            {!isSidebarCollapsed && (
-              <Sidebar
-                workspacePath={workspacePath}
-                activeTabId={activeTabId}
-                openTabs={openTabs}
-                onFileSelect={handleFileSelect}
-                closeTab={closeTab}
-                onRenameOpenFile={handleRenameOpenFile}
-                mode={fileTreeMode}
-                onModeChange={setFileTreeMode}
-                searchPanelRef={searchPanelRef}
-              />
-            )}
           </div>
 
           <div className="flex-1 flex flex-col min-w-0 overflow-clip">
@@ -399,6 +403,13 @@ function useWorkspaceDocuments({
   const activeContent = useActiveFileContent(activeTabId);
   const wordCount = useMemo(() => countWords(activeContent), [activeContent]);
 
+  // The Everything view's recent documents: whatever file tab is in front.
+  useEffect(() => {
+    if (activeTabId !== null && isFileTabId(activeTabId)) {
+      touchRecentDocument(activeTabId);
+    }
+  }, [activeTabId]);
+
   const isFetchingContent = useContentFetching();
   useStaleTabPruning(staleTabIds, layout, handleLayoutChange);
   useEffect(() => {
@@ -416,7 +427,11 @@ function useWorkspaceChrome(
   searchPanelRef: React.RefObject<SearchPanelHandle | null>,
   focusActiveTab: () => boolean,
 ) {
-  const panels = useWorkspacePanels({ searchPanelRef, focusActiveTab });
+  const panels = useWorkspacePanels({
+    workspacePath,
+    searchPanelRef,
+    focusActiveTab,
+  });
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const { direction, setDirection } = useDirectionSetting(workspacePath);
   return {

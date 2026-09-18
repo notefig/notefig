@@ -17,7 +17,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@notefig/ui/dropdown-menu";
-import { WorkspaceSwitcher } from "@/components/editor/workspace-switcher";
 import { cn } from "@notefig/ui/utils";
 import { useTranslation } from "react-i18next";
 import type { SortOrder } from "@/utils/fs";
@@ -44,8 +43,7 @@ export function FileControls({
   const SortIcon = sortIcons[sortOrder];
 
   return (
-    <div className="flex h-9 items-center justify-between gap-1 border-b border-sidebar-border bg-sidebar px-2">
-      <WorkspaceSwitcher workspacePath={workspacePath} />
+    <div className="flex h-9 items-center justify-end gap-1 border-t border-sidebar-border bg-sidebar px-2">
       <DropdownMenu>
         <Tooltip>
           <TooltipTrigger asChild>

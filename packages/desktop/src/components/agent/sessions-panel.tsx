@@ -63,7 +63,7 @@ import {
 import { HarnessLogo } from "@notefig/ui/harness-logo";
 
 /**
- * The left-sidebar sessions menu (sidebarView === "sessions"): every agent
+ * The left-sidebar sessions tool (sidebarView === "sessions"): every agent
  * session in the workspace, last-activity ordered with live status meta.
  * Clicking a row opens (or focuses) that session's dockable chat tab; the
  * `+` menu starts a new session on a chosen harness — behind the same
@@ -232,7 +232,7 @@ export function SessionRow({
  * gesture is deliberate enough that delete needs no extra confirm step (it
  * replaced the MET-91 two-step inline trash button).
  */
-function SessionRowMenu({ task }: { task: AgentTaskRow }) {
+export function SessionRowMenu({ task }: { task: AgentTaskRow }) {
   const { t } = useTranslation();
   const actions = useSessionActions(task);
   return (

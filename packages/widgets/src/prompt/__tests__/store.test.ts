@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   adoptPersistedPromptBinding,
+  bindPromptBlobDocument,
+  findPromptBlobForTask,
   getPromptBlob,
   updatePromptBlob,
   clearPromptBlobTurn,
@@ -13,7 +15,32 @@ describe("prompt-blob-store", () => {
       boundTurnId: null,
       boundTaskId: null,
       lastSentPrompt: "",
+      documentPath: null,
     });
+  });
+
+  it("finds the widget bound to a task by its document, preferring the raising turn", () => {
+    updatePromptBlob("blob_t1", { boundTaskId: "task_x", boundTurnId: "trn_a" });
+    // No document known yet: not locatable.
+    expect(findPromptBlobForTask("task_x")).toBeNull();
+    bindPromptBlobDocument("blob_t1", "/ws/a.md");
+    updatePromptBlob("blob_t2", { boundTaskId: "task_x", boundTurnId: "trn_b" });
+    bindPromptBlobDocument("blob_t2", "/ws/b.md");
+    expect(findPromptBlobForTask("task_x", "trn_b")).toEqual({
+      blobId: "blob_t2",
+      documentPath: "/ws/b.md",
+      boundTurnId: "trn_b",
+    });
+    expect(findPromptBlobForTask("task_x", "trn_none")?.blobId).toBe("blob_t1");
+    expect(findPromptBlobForTask("task_other")).toBeNull();
+  });
+
+  it("bindPromptBlobDocument is silent when the path is unchanged", () => {
+    const onE = vi.fn();
+    subscribePromptBlob("blob_e", onE);
+    bindPromptBlobDocument("blob_e", "/ws/e.md");
+    bindPromptBlobDocument("blob_e", "/ws/e.md");
+    expect(onE).toHaveBeenCalledTimes(1);
   });
 
   it("patches persist across reads (remount restoration)", () => {

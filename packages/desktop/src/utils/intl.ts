@@ -74,8 +74,6 @@ i18n
           newFolder: "New folder",
           sort: "Sort",
           sortFiles: "Sort files",
-          switchWorkspace: "Switch workspace",
-          openWorkspacesSection: "Open",
           closeWorkspaceAction: "Close workspace",
           closeWorkspaceTitle: "Close workspace?",
           closeWorkspaceBody_one:
@@ -402,11 +400,29 @@ i18n
           minimize: "Minimize",
           maximize: "Maximize",
 
-          // Icon Sidebar
+          // Workspace rail + sidebar panels
           goToWelcomePage: "Go to Welcome Page",
           files: "Files",
           git: "Git",
           agentSessionsFull: "Agent Sessions",
+          everything: "Everything",
+          everythingHint: "Everything \u2014 all workspaces",
+          addWorkspace: "Add workspace",
+          projects: "Projects",
+          needsAttention: "Needs attention",
+          showMore_one: "Show {{count}} more",
+          showMore_other: "Show {{count}} more",
+          showLess: "Show less",
+          attentionPermission: "{{title}} is waiting for approval",
+          attentionAuth: "{{title}} needs sign-in",
+          attentionUnavailable: "{{title}} disconnected",
+          attentionError: "{{title}} failed",
+          agentRuns: "Working",
+          runsNeedYouHere_one: "{{count}} run needs you here",
+          runsNeedYouHere_other: "{{count}} runs need you here",
+          recentDocuments: "Recents",
+          noRecentDocuments: "Documents you open show up here.",
+          scratchTag: "scratch",
 
           // Advanced settings
           debugMode: "Debug mode",

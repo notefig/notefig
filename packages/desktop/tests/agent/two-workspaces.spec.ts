@@ -72,12 +72,17 @@ test.describe("two workspaces in one dock", () => {
     await dockTabs(page).last().click();
     await expect(page.getByText("hello from b").first()).toBeVisible();
 
-    // Both workspaces are listed as open, whichever is focused. The
-    // switcher sits in the files view of the sidebar.
-    await page.getByRole("button", { name: "Files" }).click();
-    await page.getByRole("button", { name: "Switch workspace" }).click();
-    await expect(page.getByText("two-workspaces-a")).toBeVisible();
-    await page.keyboard.press("Escape");
+    // Both workspaces are listed as projects in the Everything view,
+    // whichever is focused; the focused one (B) is the current row.
+    await page
+      .getByRole("button", { name: "Everything — all workspaces", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "two-workspaces-a", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "two-workspaces-b", exact: true }),
+    ).toHaveAttribute("aria-current", "true");
 
     // Reload: the persisted open set and the restored URL bring back both
     // workspaces and every tab.

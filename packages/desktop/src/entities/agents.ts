@@ -165,39 +165,198 @@ export function useAgentTasksReady(): boolean {
  */
 export function useAgentTaskList(workspacePath: string): AgentTaskMeta[] {
   const key = workspaceKey(workspacePath);
+  const tasks = useAllTasks();
+  const queuedTurns = useTurnsWithStatus("queued");
 
-  const { data: tasks = [] } = useLiveQuery((q) =>
+  return useMemo(
+    () =>
+      tasks
+        .filter((task) => workspaceKey(task.workspacePath) === key)
+        .sort(byLastActivity)
+        .map((task) => toTaskMeta(task, countQueuedByTask(queuedTurns))),
+    [tasks, queuedTurns, key],
+  );
+}
+
+function useAllTasks(): AgentTaskRow[] {
+  const { data = [] } = useLiveQuery((q) =>
     q.from({ task: agentTasksCollection }),
   );
-  const { data: queuedTurns = [] } = useLiveQuery((q) =>
-    q
-      .from({ turn: agentTurnsCollection })
-      .where(({ turn }) => eq(turn.status, "queued")),
-  );
+  return data;
+}
 
-  return useMemo(() => {
-    const queuedByTask = new Map<string, number>();
-    for (const turn of queuedTurns) {
-      queuedByTask.set(turn.taskId, (queuedByTask.get(turn.taskId) ?? 0) + 1);
-    }
-    return tasks
-      .filter((task) => workspaceKey(task.workspacePath) === key)
-      .sort((a, b) =>
-        a.updatedAt !== b.updatedAt
-          ? b.updatedAt - a.updatedAt
-          : a.taskId < b.taskId
-            ? -1
-            : 1,
-      )
-      .map((task) => ({
+function useTurnsWithStatus(status: AgentTurn["status"]): AgentTurn[] {
+  const { data = [] } = useLiveQuery(
+    (q) =>
+      q
+        .from({ turn: agentTurnsCollection })
+        .where(({ turn }) => eq(turn.status, status)),
+    [status],
+  );
+  return data;
+}
+
+/** updatedAt desc, taskId as tiebreak (descending ids = newest-created first). */
+function byLastActivity(a: AgentTaskRow, b: AgentTaskRow): number {
+  if (a.updatedAt !== b.updatedAt) return b.updatedAt - a.updatedAt;
+  return a.taskId < b.taskId ? -1 : 1;
+}
+
+function countQueuedByTask(queuedTurns: AgentTurn[]): Map<string, number> {
+  const queuedByTask = new Map<string, number>();
+  for (const turn of queuedTurns) {
+    queuedByTask.set(turn.taskId, (queuedByTask.get(turn.taskId) ?? 0) + 1);
+  }
+  return queuedByTask;
+}
+
+function toTaskMeta(
+  task: AgentTaskRow,
+  queuedByTask: Map<string, number>,
+): AgentTaskMeta {
+  return {
+    task,
+    queuedCount: queuedByTask.get(task.taskId) ?? 0,
+    isRunning: task.status === "running",
+    needsAuth: !!task.authRequired,
+    isError: task.status === "error",
+    isUnavailable: task.status === "unavailable",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The cross-workspace overview — what the sidebar's Everything view and the
+// workspace rail's badges read. Pure derivation over the rows every task
+// already writes (status, authRequired, pending permission requests): no
+// row, flag or event exists for "needs attention"; it is read off the state
+// the service already keeps.
+// ---------------------------------------------------------------------------
+
+/** Why a task is waiting on the user, most pressing first. */
+export type AgentAttentionKind =
+  | "permission"
+  | "auth"
+  | "unavailable"
+  | "error";
+
+export type AgentAttentionItem = {
+  task: AgentTaskRow;
+  kind: AgentAttentionKind;
+  /** The head of the task's pending permission queue (kind "permission"). */
+  permission?: AgentPermissionRequestRow;
+  /** The turn in flight when the item was raised, if any — what a "jump"
+   *  prefers when the task has several widgets. */
+  turnId: string | null;
+  /** When the task last changed — the "waiting since" readout. */
+  since: number;
+};
+
+export type WorkspaceRunCounts = { attention: number; working: number };
+
+export type AgentRunsOverview = {
+  /** Tasks waiting on the user, last activity first. */
+  attention: AgentAttentionItem[];
+  /** Tasks running or starting, last activity first. */
+  working: AgentTaskMeta[];
+  /** Per workspaceKey — the rail's badges and the panel's footer. */
+  byWorkspace: Map<string, WorkspaceRunCounts>;
+};
+
+function isWorking(task: AgentTaskRow): boolean {
+  return task.status === "running" || task.status === "starting";
+}
+
+function attentionKind(
+  task: AgentTaskRow,
+  hasPendingPermission: boolean,
+): AgentAttentionKind | null {
+  if (hasPendingPermission) return "permission";
+  if (task.authRequired) return "auth";
+  if (task.status === "unavailable") return "unavailable";
+  if (task.status === "error") return "error";
+  return null;
+}
+
+/** Pending permission requests per task, oldest first (ids sort chronological). */
+function headPermissionByTask(
+  pending: AgentPermissionRequestRow[],
+): Map<string, AgentPermissionRequestRow> {
+  const heads = new Map<string, AgentPermissionRequestRow>();
+  const sorted = pending
+    .filter((request) => request.status === "pending")
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
+  for (const request of sorted) {
+    if (!heads.has(request.taskId)) heads.set(request.taskId, request);
+  }
+  return heads;
+}
+
+/**
+ * The overview, as a pure function of the rows — exported for tests and so
+ * the hook below stays a thin subscription.
+ */
+export function deriveAgentRunsOverview(rows: {
+  tasks: AgentTaskRow[];
+  runningTurns: AgentTurn[];
+  queuedTurns: AgentTurn[];
+  pendingPermissions: AgentPermissionRequestRow[];
+}): AgentRunsOverview {
+  const heads = headPermissionByTask(rows.pendingPermissions);
+  const runningTurnByTask = new Map(
+    rows.runningTurns.map((turn) => [turn.taskId, turn.turnId]),
+  );
+  const queuedByTask = countQueuedByTask(rows.queuedTurns);
+  const attention: AgentAttentionItem[] = [];
+  const working: AgentTaskMeta[] = [];
+  const byWorkspace = new Map<string, WorkspaceRunCounts>();
+  const bump = (task: AgentTaskRow, field: keyof WorkspaceRunCounts) => {
+    const key = workspaceKey(task.workspacePath);
+    const counts = byWorkspace.get(key) ?? { attention: 0, working: 0 };
+    counts[field] += 1;
+    byWorkspace.set(key, counts);
+  };
+
+  for (const task of [...rows.tasks].sort(byLastActivity)) {
+    const permission = heads.get(task.taskId);
+    const kind = attentionKind(task, permission !== undefined);
+    if (kind) {
+      attention.push({
         task,
-        queuedCount: queuedByTask.get(task.taskId) ?? 0,
-        isRunning: task.status === "running",
-        needsAuth: !!task.authRequired,
-        isError: task.status === "error",
-        isUnavailable: task.status === "unavailable",
-      }));
-  }, [tasks, queuedTurns, key]);
+        kind,
+        permission,
+        turnId: runningTurnByTask.get(task.taskId) ?? null,
+        since: task.updatedAt,
+      });
+      bump(task, "attention");
+    }
+    if (isWorking(task)) {
+      working.push(toTaskMeta(task, queuedByTask));
+      bump(task, "working");
+    }
+  }
+  return { attention, working, byWorkspace };
+}
+
+/** Live `deriveAgentRunsOverview` over the agent collections. */
+export function useAgentRunsOverview(): AgentRunsOverview {
+  const tasks = useAllTasks();
+  const runningTurns = useTurnsWithStatus("running");
+  const queuedTurns = useTurnsWithStatus("queued");
+  const { data: pendingPermissions = [] } = useLiveQuery((q) =>
+    q
+      .from({ req: agentPermissionRequestsCollection })
+      .where(({ req }) => eq(req.status, "pending")),
+  );
+  return useMemo(
+    () =>
+      deriveAgentRunsOverview({
+        tasks,
+        runningTurns,
+        queuedTurns,
+        pendingPermissions,
+      }),
+    [tasks, runningTurns, queuedTurns, pendingPermissions],
+  );
 }
 
 /**
@@ -257,8 +416,8 @@ export function useSessionActions(task: AgentTaskRow): AgentSessionActions {
 }
 
 /**
- * Running/starting task counts per workspaceKey — the workspace switcher's
- * activity badge and its close confirmation read this.
+ * Running/starting task counts per workspaceKey — the close-workspace
+ * confirmation reads this.
  */
 export function useRunningTaskCounts(): Map<string, number> {
   const { data: tasks = [] } = useLiveQuery((q) =>
@@ -267,7 +426,7 @@ export function useRunningTaskCounts(): Map<string, number> {
   return useMemo(() => {
     const counts = new Map<string, number>();
     for (const task of tasks) {
-      if (task.status !== "running" && task.status !== "starting") continue;
+      if (!isWorking(task)) continue;
       const key = workspaceKey(task.workspacePath);
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
