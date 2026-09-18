@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Minus, Square, X } from "lucide-react";
@@ -42,6 +42,51 @@ function useTitlebarHeightVar<T extends HTMLElement>() {
   }, []);
 
   return ref;
+}
+
+/**
+ * Horizontal room the native traffic lights take on macOS (x:14 origin,
+ * three 12px lights on 20px centres), in physical pixels — the top bar's
+ * content starts after it.
+ */
+const TRAFFIC_LIGHT_INSET_PX = 78;
+
+/**
+ * The window's top bar: the drag region and platform window controls with
+ * the app's own chrome laid into it — a single boxy strip above the
+ * sidebar and the tabs rather than a bare spacer. Rendered by the
+ * workspace shell; `Titlebar` below is the content-less form for screens
+ * that have nothing to put there.
+ */
+export function TopBar({ children }: { children: ReactNode }) {
+  const os = getDesktopOs();
+  const { settings } = useAppSettings();
+  const ref = useTitlebarHeightVar<HTMLDivElement>();
+  const zoom = settings.zoomLevel || 1;
+  const isMac = os === "macos";
+
+  return (
+    <div
+      ref={ref}
+      data-tauri-drag-region
+      className="flex h-10 w-full shrink-0 select-none items-center border-b border-border bg-background"
+      style={{
+        WebkitAppRegion: "drag",
+        minHeight: isMac
+          ? Math.ceil(TRAFFIC_LIGHT_CLEARANCE_PX / zoom)
+          : undefined,
+        paddingInlineStart: isMac ? Math.ceil(TRAFFIC_LIGHT_INSET_PX / zoom) : undefined,
+      } as React.CSSProperties}
+    >
+      <div
+        className="flex h-full min-w-0 flex-1 items-center"
+        style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+      >
+        {children}
+      </div>
+      {os === "windows" && <WindowsControls />}
+    </div>
+  );
 }
 
 export function Titlebar() {
@@ -96,8 +141,22 @@ function MacTitlebarSpacer() {
 // low-contrast (no border, background matches the app) so it reads as part
 // of the app's own chrome rather than a bolted-on OS title bar.
 function WindowsTitlebar() {
-  const { t } = useTranslation();
   const ref = useTitlebarHeightVar<HTMLDivElement>();
+  return (
+    <div
+      ref={ref}
+      data-tauri-drag-region
+      className="w-full shrink-0 h-5 bg-background flex items-center justify-end select-none"
+      style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+    >
+      <WindowsControls />
+    </div>
+  );
+}
+
+/** The minimize / maximize / close cluster, in the bar's own style. */
+function WindowsControls() {
+  const { t } = useTranslation();
 
   async function minimize() {
     await getCurrentWindow().minimize();
@@ -116,40 +175,33 @@ function WindowsTitlebar() {
 
   return (
     <div
-      ref={ref}
-      data-tauri-drag-region
-      className="w-full shrink-0 h-5 bg-background flex items-center justify-end select-none"
-      style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+      className="flex h-full items-stretch"
+      style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
     >
-      <div
-        className="flex h-full items-stretch"
-        style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+      <button
+        type="button"
+        aria-label={t("minimize")}
+        onClick={minimize}
+        className={buttonClass}
       >
-        <button
-          type="button"
-          aria-label={t("minimize")}
-          onClick={minimize}
-          className={buttonClass}
-        >
-          <Minus size={10} strokeWidth={1.5} />
-        </button>
-        <button
-          type="button"
-          aria-label={t("maximize")}
-          onClick={toggleMaximize}
-          className={buttonClass}
-        >
-          <Square size={8} strokeWidth={1.5} />
-        </button>
-        <button
-          type="button"
-          aria-label={t("close")}
-          onClick={close}
-          className={`${buttonClass} hover:bg-destructive hover:text-destructive-foreground`}
-        >
-          <X size={10} strokeWidth={1.5} />
-        </button>
-      </div>
+        <Minus size={10} strokeWidth={1.5} />
+      </button>
+      <button
+        type="button"
+        aria-label={t("maximize")}
+        onClick={toggleMaximize}
+        className={buttonClass}
+      >
+        <Square size={8} strokeWidth={1.5} />
+      </button>
+      <button
+        type="button"
+        aria-label={t("close")}
+        onClick={close}
+        className={`${buttonClass} hover:bg-destructive hover:text-destructive-foreground`}
+      >
+        <X size={10} strokeWidth={1.5} />
+      </button>
     </div>
   );
 }

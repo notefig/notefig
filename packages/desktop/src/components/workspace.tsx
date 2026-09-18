@@ -4,7 +4,10 @@ import { Dockable } from "@/components/dockable";
 import { Sidebar } from "@/components/editor/sidebar";
 import type { SearchPanelHandle } from "@/components/editor/search-panel";
 import { canOpenFile as canOpenInEditor } from "@/components/editor/polymorphic-editor";
-import { StatusBar } from "@/components/editor/status-bar";
+import { StatusCells } from "@/components/editor/status-bar";
+import { Titlebar, TopBar } from "@/components/titlebar";
+import { PlainLogo } from "@/components/logo";
+import { PanelLeft, PanelLeftClose, Search } from "lucide-react";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
@@ -57,7 +60,16 @@ export const Workspace = () => {
   useOpenProjectTestSeam();
 
   if (!ready) return null;
-  if (focusedWorkspace === null) return <Welcome />;
+  if (focusedWorkspace === null) {
+    return (
+      <div className="flex h-full flex-col">
+        <Titlebar />
+        <div className="min-h-0 flex-1">
+          <Welcome />
+        </div>
+      </div>
+    );
+  }
   return <WorkspaceShell workspacePath={focusedWorkspace} />;
 };
 
@@ -179,11 +191,19 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
       openAgentTab={openAgentTab}
     >
       <PromptWidgetBoundary>
-        <div
-          dir={direction}
-          className="relative flex h-full w-full overflow-clip p-2"
-        >
-          <div className="flex h-full shrink-0 overflow-clip rounded-xl border border-border">
+        <div dir={direction} className="flex h-full w-full flex-col overflow-clip">
+          <TopBar>
+            <TopBarChrome
+              isSidebarCollapsed={isSidebarCollapsed}
+              onToggleSidebar={toggleSidebarCollapsed}
+              onShowEverything={showEverything}
+              onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+              wordCount={wordCount}
+              isSynced={isSynced}
+            />
+          </TopBar>
+
+          <div className="flex min-h-0 flex-1">
             <Sidebar
               workspacePath={workspacePath}
               sidebarView={sidebarView}
@@ -202,29 +222,26 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
               onShowWorkspaceTools={showWorkspaceTools}
               onOpenSettings={openSettings}
             />
-          </div>
 
-          <div className="flex-1 flex flex-col min-w-0 overflow-clip">
-            <DebugPanel />
-
-            <div className="flex-1 flex min-h-0 overflow-clip">
-              <div
-                ref={dockableRef}
-                className="flex-1 min-w-0 h-full overflow-clip"
-                tabIndex={-1}
-              >
-                <DockArea
-                  hasTabs={openTabs.length > 0}
-                  layout={layout}
-                  onLayoutChange={handleLayoutChange}
+            <div className="flex min-w-0 flex-1 flex-col overflow-clip">
+              <DebugPanel />
+              <div className="flex min-h-0 flex-1 overflow-clip">
+                <div
+                  ref={dockableRef}
+                  className="h-full min-w-0 flex-1 overflow-clip"
+                  tabIndex={-1}
                 >
-                  {allDockableTabs}
-                </DockArea>
+                  <DockArea
+                    hasTabs={openTabs.length > 0}
+                    layout={layout}
+                    onLayoutChange={handleLayoutChange}
+                  >
+                    {allDockableTabs}
+                  </DockArea>
+                </div>
               </div>
             </div>
           </div>
-
-          <StatusBar wordCount={wordCount} isSynced={isSynced} />
 
           <SettingsModal
             direction={direction}
@@ -254,6 +271,64 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
         </div>
       </PromptWidgetBoundary>
     </WorkspaceTabsProvider>
+  );
+}
+
+/** What the app lays into the window's top bar: the mark (back to the
+ *  Everything view), the sidebar toggle, the command palette, and the
+ *  status cells at the far end. */
+function TopBarChrome({
+  isSidebarCollapsed,
+  onToggleSidebar,
+  onShowEverything,
+  onOpenCommandPalette,
+  wordCount,
+  isSynced,
+}: {
+  isSidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
+  onShowEverything: () => void;
+  onOpenCommandPalette: () => void;
+  wordCount: number | null;
+  isSynced: boolean;
+}) {
+  const { t } = useTranslation();
+  const iconButton =
+    "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
+  return (
+    <div className="flex h-full w-full items-center gap-1 px-2">
+      <button
+        type="button"
+        onClick={onShowEverything}
+        aria-label={t("everythingHint")}
+        className={iconButton}
+      >
+        <PlainLogo size="1.125rem" fill="var(--logo)" />
+      </button>
+      <button
+        type="button"
+        onClick={onToggleSidebar}
+        aria-label={isSidebarCollapsed ? t("expandSidebar") : t("collapseSidebar")}
+        className={iconButton}
+      >
+        {isSidebarCollapsed ? (
+          <PanelLeft className="size-4" />
+        ) : (
+          <PanelLeftClose className="size-4" />
+        )}
+      </button>
+      <button
+        type="button"
+        onClick={onOpenCommandPalette}
+        className="ms-2 flex h-7 w-64 max-w-[40vw] items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <Search className="size-3.5" />
+        <span className="flex-1 truncate text-start">{t("quickSwitcher")}</span>
+        <kbd className="font-mono text-[0.625rem]">⌘K</kbd>
+      </button>
+      <div className="flex-1" />
+      <StatusCells wordCount={wordCount} isSynced={isSynced} />
+    </div>
   );
 }
 

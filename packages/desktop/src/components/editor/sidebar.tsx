@@ -8,17 +8,9 @@ import {
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import {
-  ChevronLeft,
-  Folder,
-  PanelLeft,
-  PanelLeftClose,
-  Settings,
-} from "lucide-react";
+import { Folder } from "lucide-react";
 import { useHotkey } from "@tanstack/react-hotkeys";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@notefig/ui/tooltip";
 import { cn } from "@notefig/ui/utils";
-import { PlainLogo } from "@/components/logo";
 import { FileTree, type FileTreeMode } from "@/components/editor/file-tree";
 import {
   FileControls,
@@ -29,6 +21,7 @@ import {
   type SearchPanelHandle,
 } from "@/components/editor/search-panel";
 import { EverythingPanel } from "@/components/editor/everything-panel";
+import { GlobalColumn } from "@/components/editor/global-column";
 import { TOOL_ICONS, TOOL_LABEL_KEYS } from "@/components/editor/workspace-tools";
 import { SessionsPanel } from "@/components/agent/sessions-panel";
 import { CheckpointPanel } from "@/components/editor/git/checkpoint-panel";
@@ -83,12 +76,12 @@ interface SidebarProps {
 }
 
 /**
- * The sidebar: one quiet column. The mark on top leads to the Everything
- * view over every open workspace; a project chosen there unfolds its
- * tools, and picking one swaps the column for that tool under a row that
- * leads back. Collapsed, only a slim strip with the mark and the toggle
- * remains. Views swap with a short fade so the change of subject reads
- * as a move, not a flicker.
+ * The sidebar, two columns. The global column never changes: the
+ * Everything view, the open workspaces, settings. The workspace column
+ * shows what the global column selected — the Everything view, or one
+ * tool of the focused workspace under its name and a row of tool tabs.
+ * Collapsing hides only the workspace column. Its content swaps with a
+ * short fade so the change of subject reads as a move, not a flicker.
  */
 export function Sidebar({
   workspacePath,
@@ -108,155 +101,83 @@ export function Sidebar({
   onShowWorkspaceTools,
   onOpenSettings,
 }: SidebarProps) {
-  const { t } = useTranslation();
   const { containerRef, sidebarWidth, handleResizeStart } = useSidebarResize();
 
   useHotkey("Mod+\\", () => {
     onToggleCollapse();
   });
 
-  if (isCollapsed) {
-    return (
-      <div className="flex h-full w-9 shrink-0 flex-col items-center gap-1 bg-muted/40 py-2">
-        <IconButton label={t("everythingHint")} onClick={onShowEverything}>
-          <PlainLogo size="1.125rem" fill="var(--logo)" />
-        </IconButton>
-        <div className="mt-auto flex flex-col gap-1">
-          <IconButton label={t("expandSidebar")} onClick={onToggleCollapse}>
-            <PanelLeft className="size-4" />
-          </IconButton>
-          <IconButton label={t("settings")} onClick={onOpenSettings}>
-            <Settings className="size-4" />
-          </IconButton>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <>
-      <div
-        ref={containerRef}
-        data-sidebar
-        className="flex min-h-0 shrink-0 flex-col overflow-hidden bg-muted/40"
-        style={{ width: sidebarWidth }}
-      >
-        <div className="flex h-10 shrink-0 items-center gap-1 px-2">
-          <IconButton
-            label={t("everythingHint")}
-            active={sidebarView === "everything"}
-            onClick={onShowEverything}
-          >
-            <PlainLogo size="1.125rem" fill="var(--logo)" />
-          </IconButton>
-          <div className="flex-1" />
-          <IconButton label={t("collapseSidebar")} onClick={onToggleCollapse}>
-            <PanelLeftClose className="size-4" />
-          </IconButton>
-        </div>
-
-        <div
-          key={sidebarView}
-          className="flex min-h-0 flex-1 flex-col animate-in fade-in-0 slide-in-from-start-1 duration-200 motion-reduce:animate-none"
-        >
-          {sidebarView === "everything" ? (
-            <EverythingPanel
-              workspacePath={workspacePath}
-              activeTabId={activeTabId}
-              onShowWorkspaceTools={onShowWorkspaceTools}
-              onShowTool={onShowTool}
-            />
-          ) : (
-            <WorkspacePanel
-              workspacePath={workspacePath}
-              tool={sidebarView}
-              onShowEverything={onShowEverything}
-              onShowTool={onShowTool}
-            >
-              {sidebarView === "search" ? (
-                <SearchPanel
-                  ref={searchPanelRef}
-                  workspacePath={workspacePath}
-                />
-              ) : sidebarView === "git" ? (
-                <CheckpointPanel workspacePath={workspacePath} />
-              ) : sidebarView === "sessions" ? (
-                <SessionsPanel
-                  workspacePath={workspacePath}
-                  activeTabId={activeTabId}
-                />
-              ) : (
-                <FilesTool
-                  workspacePath={workspacePath}
-                  activeTabId={activeTabId}
-                  openTabs={openTabs}
-                  onFileSelect={onFileSelect}
-                  closeTab={closeTab}
-                  onRenameOpenFile={onRenameOpenFile}
-                  mode={mode}
-                  onModeChange={onModeChange}
-                />
-              )}
-            </WorkspacePanel>
-          )}
-        </div>
-
-        <div className="shrink-0 border-t border-border/60 px-2 py-1.5">
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            className="flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-sm text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
-          >
-            <Settings className="size-4" />
-            <span>{t("settings")}</span>
-          </button>
-        </div>
-      </div>
-      <div
-        onMouseDown={handleResizeStart}
-        className="w-0.5 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-primary/50"
+      <GlobalColumn
+        workspacePath={workspacePath}
+        isEverything={sidebarView === "everything"}
+        onShowEverything={onShowEverything}
+        onShowWorkspaceTools={onShowWorkspaceTools}
+        onOpenSettings={onOpenSettings}
       />
+      {!isCollapsed && (
+        <>
+          <div
+            ref={containerRef}
+            data-sidebar
+            className="flex min-h-0 shrink-0 flex-col overflow-hidden border-e border-border bg-background"
+            style={{ width: sidebarWidth }}
+          >
+            <div
+              key={sidebarView}
+              className="flex min-h-0 flex-1 flex-col animate-in fade-in-0 duration-200 motion-reduce:animate-none"
+            >
+              {sidebarView === "everything" ? (
+                <EverythingPanel activeTabId={activeTabId} />
+              ) : (
+                <WorkspacePanel
+                  workspacePath={workspacePath}
+                  tool={sidebarView}
+                  onShowEverything={onShowEverything}
+                  onShowTool={onShowTool}
+                >
+                  {sidebarView === "search" ? (
+                    <SearchPanel
+                      ref={searchPanelRef}
+                      workspacePath={workspacePath}
+                    />
+                  ) : sidebarView === "git" ? (
+                    <CheckpointPanel workspacePath={workspacePath} />
+                  ) : sidebarView === "sessions" ? (
+                    <SessionsPanel
+                      workspacePath={workspacePath}
+                      activeTabId={activeTabId}
+                    />
+                  ) : (
+                    <FilesTool
+                      workspacePath={workspacePath}
+                      activeTabId={activeTabId}
+                      openTabs={openTabs}
+                      onFileSelect={onFileSelect}
+                      closeTab={closeTab}
+                      onRenameOpenFile={onRenameOpenFile}
+                      mode={mode}
+                      onModeChange={onModeChange}
+                    />
+                  )}
+                </WorkspacePanel>
+              )}
+            </div>
+          </div>
+          <div
+            onMouseDown={handleResizeStart}
+            className="-ms-0.5 w-1 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-primary/40"
+          />
+        </>
+      )}
     </>
   );
 }
 
-function IconButton({
-  label,
-  active,
-  onClick,
-  children,
-}: {
-  label: string;
-  active?: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={onClick}
-          aria-label={label}
-          aria-pressed={active}
-          className={cn(
-            "flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground",
-            active && "bg-accent text-foreground",
-          )}
-        >
-          {children}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" sideOffset={6}>
-        {label}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
 // Widths in rem so they track the root font-size (app-wide UI scale).
-const SIDEBAR_DEFAULT_REM = 16;
-const SIDEBAR_MIN_REM = 11;
+const SIDEBAR_DEFAULT_REM = 15;
+const SIDEBAR_MIN_REM = 10;
 const SIDEBAR_MAX_REM = 26;
 
 /** Drag-to-resize, measured from the column's own left edge. */
@@ -301,10 +222,9 @@ function useSidebarResize() {
 }
 
 /**
- * The focused workspace's frame around whichever tool is showing: a row
- * back to Everything, the workspace's name, the tools as pill tabs, the
- * tool itself, and — when runs in this workspace need the user — a footer
- * saying so.
+ * The focused workspace's frame around whichever tool is showing: its
+ * name, the tools as a row of tabs, the tool itself, and — when runs in
+ * this workspace need the user — a footer saying so.
  */
 function WorkspacePanel({
   workspacePath,
@@ -325,59 +245,48 @@ function WorkspacePanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-col gap-1 px-2 pb-2">
-        <button
-          type="button"
-          onClick={onShowEverything}
-          className="flex h-7 items-center gap-1 rounded-lg px-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
-        >
-          <ChevronLeft className="size-3.5 rtl:rotate-180" />
-          <span className="truncate">{t("everything")}</span>
-        </button>
-        <div
-          className="flex h-8 items-center gap-2.5 px-2 text-sm font-medium"
-          title={workspacePath}
-        >
-          <Folder className="size-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate">
-            {deriveProjectName(workspacePath)}
-          </span>
-        </div>
-        <div className="flex flex-wrap gap-1">
-          {WORKSPACE_TOOLS.map((candidate) => {
-            const Icon = TOOL_ICONS[candidate];
-            const active = candidate === tool;
-            return (
-              <button
-                key={candidate}
-                type="button"
-                onClick={() => onShowTool(candidate)}
-                aria-label={t(TOOL_LABEL_KEYS[candidate])}
-                aria-pressed={active}
-                className={cn(
-                  "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs transition-colors",
-                  active
-                    ? "bg-accent font-medium text-foreground"
-                    : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-                )}
-              >
-                <Icon className="size-3.5" />
-                <span>{t(TOOL_LABEL_KEYS[candidate])}</span>
-              </button>
-            );
-          })}
-        </div>
+      <div
+        className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3 text-sm font-medium"
+        title={workspacePath}
+      >
+        <Folder className="size-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate">
+          {deriveProjectName(workspacePath)}
+        </span>
+      </div>
+      <div className="flex shrink-0 border-b border-border px-1">
+        {WORKSPACE_TOOLS.map((candidate) => {
+          const Icon = TOOL_ICONS[candidate];
+          const active = candidate === tool;
+          return (
+            <button
+              key={candidate}
+              type="button"
+              onClick={() => onShowTool(candidate)}
+              aria-label={t(TOOL_LABEL_KEYS[candidate])}
+              aria-pressed={active}
+              title={t(TOOL_LABEL_KEYS[candidate])}
+              className={cn(
+                "-mb-px flex h-9 min-w-0 flex-1 items-center justify-center gap-1.5 border-b-2 px-1.5 text-xs transition-colors",
+                active
+                  ? "border-foreground font-medium text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Icon className="size-3.5 shrink-0" />
+              <span className="truncate">{t(TOOL_LABEL_KEYS[candidate])}</span>
+            </button>
+          );
+        })}
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col border-t border-border/60">
-        {children}
-      </div>
+      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
 
       {hereCount > 0 && (
         <button
           type="button"
           onClick={onShowEverything}
-          className="flex h-8 shrink-0 items-center gap-2.5 border-t border-border/60 px-4 text-sm transition-colors hover:bg-accent/60 animate-in fade-in-0 duration-200 motion-reduce:animate-none"
+          className="flex h-9 shrink-0 items-center gap-2.5 border-t border-border px-3 text-xs transition-colors hover:bg-accent/60 animate-in fade-in-0 duration-200 motion-reduce:animate-none"
         >
           <span
             aria-hidden="true"

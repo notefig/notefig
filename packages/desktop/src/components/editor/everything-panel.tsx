@@ -1,24 +1,8 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronsDown, ChevronsUp, Folder, Plus } from "lucide-react";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "@notefig/ui/context-menu";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@notefig/ui/dropdown-menu";
+import { ChevronsDown, ChevronsUp } from "lucide-react";
 import { cn } from "@notefig/ui/utils";
 import { jumpToTask } from "@/components/agent/jump-to-task";
-import { useCloseWorkspace } from "@/components/editor/close-workspace-dialog";
-import { TOOL_ICONS, TOOL_LABEL_KEYS } from "@/components/editor/workspace-tools";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
 import {
   useAgentRunsOverview,
@@ -29,52 +13,28 @@ import {
   useRecentDocuments,
   type RecentDocument,
 } from "@/entities/recent-documents";
-import { useOpenWorkspaces, type OpenWorkspaceRow } from "@/entities/workspaces";
-import {
-  useOpenProject,
-  useOpenProjectFromPicker,
-} from "@/hooks/use-open-project";
-import {
-  deriveProjectName,
-  useRecentProjects,
-} from "@/hooks/use-recent-projects";
-import {
-  WORKSPACE_TOOLS,
-  type WorkspaceTool,
-} from "@/hooks/use-workspace-panels";
+import { deriveProjectName } from "@/hooks/use-recent-projects";
 import { getFileName } from "@/utils/fs";
-import { workspaceKey } from "@/utils/path";
 
 const RECENT_DOCUMENTS_SHOWN = 8;
 const ATTENTION_COLLAPSED_ROWS = 3;
-const MAX_RECENT_IN_MENU = 5;
 
 interface EverythingPanelProps {
-  /** The focused workspace — the project whose tools are unfolded. */
-  workspacePath: string;
   activeTabId: string | null;
-  onShowWorkspaceTools: (path: string) => void;
-  onShowTool: (tool: WorkspaceTool) => void;
 }
 
 /**
  * The command-center view over every open workspace: the agent runs that
- * need the user, the ones still working, the open projects — the focused
- * one unfolded into its tools — and the documents most recently in front
- * of the user, wherever they live.
+ * need the user, the ones still working, and the documents most recently
+ * in front of the user, wherever they live.
  */
-export function EverythingPanel({
-  workspacePath,
-  activeTabId,
-  onShowWorkspaceTools,
-  onShowTool,
-}: EverythingPanelProps) {
+export function EverythingPanel({ activeTabId }: EverythingPanelProps) {
   const { t } = useTranslation();
   const overview = useAgentRunsOverview();
   const recentDocuments = useRecentDocuments(RECENT_DOCUMENTS_SHOWN);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-2 pb-3 pt-1">
+    <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-2 py-3">
       {overview.attention.length > 0 && (
         <AttentionGroup items={overview.attention} />
       )}
@@ -86,13 +46,6 @@ export function EverythingPanel({
           ))}
         </Section>
       )}
-
-      <ProjectsSection
-        workspacePath={workspacePath}
-        counts={overview.byWorkspace}
-        onShowWorkspaceTools={onShowWorkspaceTools}
-        onShowTool={onShowTool}
-      />
 
       <Section title={t("recentDocuments")}>
         {recentDocuments.length === 0 ? (
@@ -255,174 +208,6 @@ function WorkingRow({ meta }: { meta: AgentTaskMeta }) {
         jumpToTask(meta.task.taskId, { turnId: null, openAgentTab })
       }
     />
-  );
-}
-
-/**
- * The open workspaces. The focused one unfolds its tools beneath it — a
- * grid-row track animates 0fr → 1fr, so nothing is measured — and any
- * other becomes the focused one on click. A right-click closes.
- */
-function ProjectsSection({
-  workspacePath,
-  counts,
-  onShowWorkspaceTools,
-  onShowTool,
-}: {
-  workspacePath: string;
-  counts: ReturnType<typeof useAgentRunsOverview>["byWorkspace"];
-  onShowWorkspaceTools: (path: string) => void;
-  onShowTool: (tool: WorkspaceTool) => void;
-}) {
-  const { t } = useTranslation();
-  const rows = useOpenWorkspaces();
-  const { requestClose, dialog } = useCloseWorkspace();
-  const focusedKey = workspaceKey(workspacePath);
-
-  return (
-    <Section title={t("projects")}>
-      {rows.map((row) => (
-        <ProjectRow
-          key={row.key}
-          row={row}
-          attention={counts.get(row.key)?.attention ?? 0}
-          focused={row.key === focusedKey}
-          onFocus={() => onShowWorkspaceTools(row.path)}
-          onShowTool={onShowTool}
-          onClose={() => requestClose(row.path)}
-        />
-      ))}
-      <AddWorkspaceRow />
-      {dialog}
-    </Section>
-  );
-}
-
-function ProjectRow({
-  row,
-  attention,
-  focused,
-  onFocus,
-  onShowTool,
-  onClose,
-}: {
-  row: OpenWorkspaceRow;
-  attention: number;
-  focused: boolean;
-  onFocus: () => void;
-  onShowTool: (tool: WorkspaceTool) => void;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation();
-  const name = deriveProjectName(row.path);
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div data-project={row.key}>
-          <NavRow
-            leading={<Folder className="size-4" />}
-            label={name}
-            title={row.path}
-            active={focused}
-            onClick={onFocus}
-            trailing={
-              attention > 0 ? (
-                <span className="rounded-full bg-destructive/10 px-1.5 text-xs font-medium text-destructive">
-                  {attention}
-                </span>
-              ) : undefined
-            }
-          />
-          <div
-            aria-hidden={!focused}
-            className={cn(
-              "grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none",
-              focused ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
-            )}
-          >
-            <div className="min-h-0 overflow-hidden">
-              <div className="flex flex-col gap-0.5 py-0.5 ps-4">
-                {WORKSPACE_TOOLS.map((tool) => {
-                  const Icon = TOOL_ICONS[tool];
-                  return (
-                    <NavRow
-                      key={tool}
-                      leading={<Icon className="size-3.5" />}
-                      label={t(TOOL_LABEL_KEYS[tool])}
-                      tabIndex={focused ? undefined : -1}
-                      onClick={() => onShowTool(tool)}
-                      className="h-7 text-[0.8125rem] text-muted-foreground hover:text-foreground"
-                    />
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem onSelect={onClose}>
-          {t("closeWorkspaceAction")}
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
-  );
-}
-
-/** "Add workspace": recent projects not yet open, then the folder picker. */
-function AddWorkspaceRow() {
-  const { t } = useTranslation();
-  const openProject = useOpenProject();
-  const openFolder = useOpenProjectFromPicker();
-  const { recentProjects } = useRecentProjects();
-  const openRows = useOpenWorkspaces();
-
-  const otherProjects = useMemo(() => {
-    const openKeys = new Set(openRows.map((row) => row.key));
-    return recentProjects
-      .filter((project) => !openKeys.has(workspaceKey(project.path)))
-      .slice(0, MAX_RECENT_IN_MENU);
-  }, [recentProjects, openRows]);
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className="flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-start text-sm text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
-        >
-          <span className="flex size-4 items-center justify-center">
-            <Plus className="size-4" />
-          </span>
-          <span className="truncate">{t("addWorkspace")}</span>
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-52">
-        {otherProjects.length > 0 && (
-          <>
-            <DropdownMenuLabel className="py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-              {t("recentWorkspaces")}
-            </DropdownMenuLabel>
-            {otherProjects.map((project) => (
-              <DropdownMenuItem
-                key={project.path}
-                className="py-1 text-xs"
-                onSelect={() => void openProject(project.path)}
-              >
-                <span className="truncate">{project.name}</span>
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-          </>
-        )}
-        <DropdownMenuItem
-          className="py-1 text-xs"
-          onSelect={() => void openFolder()}
-        >
-          {t("openFolder")}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 
