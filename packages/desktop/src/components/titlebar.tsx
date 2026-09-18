@@ -7,10 +7,10 @@ import { useAppSettings } from "@/hooks/use-app-settings";
 
 /**
  * Physical pixels the titlebar must cover so content clears the native
- * traffic lights (trafficLightPosition y:14 + ~12px glyphs, plus the 4px
+ * traffic lights (trafficLightPosition y:18 + ~12px glyphs, plus the 4px
  * pull-up below — see tauri.conf.json).
  */
-const TRAFFIC_LIGHT_CLEARANCE_PX = 30;
+const TRAFFIC_LIGHT_CLEARANCE_PX = 34;
 
 /**
  * Measures the titlebar's own rendered height onto a CSS var on the root
@@ -51,11 +51,12 @@ function useTitlebarHeightVar<T extends HTMLElement>() {
  */
 const TRAFFIC_LIGHT_INSET_PX = 78;
 
-/** The bar's height in physical pixels: the traffic lights (y:14, 12px
- *  tall) sit on its centre line, so one row reads as one row. */
-const TOP_BAR_HEIGHT_PX = 40;
+/** The bar's height in physical pixels. tauri.conf.json puts the traffic
+ *  lights at y:18 with 12px glyphs — centred on this 48px bar — so one
+ *  row reads as one row. Change both together. */
+const TOP_BAR_HEIGHT_PX = 48;
 /** Without traffic lights to centre on, a touch shorter. */
-const TOP_BAR_HEIGHT_PLAIN_PX = 34;
+const TOP_BAR_HEIGHT_PLAIN_PX = 40;
 
 /**
  * The window's top bar: the drag region and platform window controls with

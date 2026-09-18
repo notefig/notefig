@@ -294,7 +294,7 @@ function TopBarChrome({
   const iconButton =
     "flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
   return (
-    <div className="flex h-full w-full items-center gap-1 px-1.5">
+    <div className="grid h-full w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center px-2">
       <button
         type="button"
         onClick={onToggleSidebar}
@@ -310,14 +310,15 @@ function TopBarChrome({
       <button
         type="button"
         onClick={onOpenCommandPalette}
-        className="ms-1.5 flex h-6 w-64 max-w-[40vw] items-center gap-2 rounded-md border border-border bg-muted/50 px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="flex h-7 w-[28rem] max-w-[50vw] items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
         <Search className="size-3.5" />
         <span className="flex-1 truncate text-start">{t("quickSwitcher")}</span>
         <kbd className="font-mono text-[0.625rem]">⌘K</kbd>
       </button>
-      <div className="flex-1" />
-      <StatusCells wordCount={wordCount} isSynced={isSynced} />
+      <div className="flex justify-end">
+        <StatusCells wordCount={wordCount} isSynced={isSynced} />
+      </div>
     </div>
   );
 }
