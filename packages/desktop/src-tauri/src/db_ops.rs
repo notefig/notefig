@@ -7,7 +7,15 @@
 //!      positional binding is correct. See `numbered_placeholders_bind_in_order`.
 //!   2. The driver serializes every statement through one queue, so a
 //!      `BEGIN IMMEDIATE … COMMIT` spanning invokes cannot interleave. The mutex
-//!      here only makes individual statements atomic.
+//!      here only makes individual statements atomic. The one thing that queue
+//!      cannot guard is its own death: the connection is process-global while
+//!      the driver lives in the webview, so a page that navigates or reloads
+//!      between `BEGIN` and `COMMIT` leaves the connection inside a transaction
+//!      nobody will ever finish, and every later `BEGIN` fails with "cannot
+//!      start a transaction within a transaction" until the app restarts. A
+//!      live driver never nests `BEGIN` (it uses savepoints), so a `BEGIN`
+//!      arriving mid-transaction is always that orphan: `execute_on` rolls it
+//!      back first. See `an_orphaned_transaction_is_rolled_back_by_the_next_begin`.
 
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{params_from_iter, Connection, ErrorCode};
@@ -159,12 +167,29 @@ pub fn execute_on(
     sql: &str,
     params: &[JsonValue],
 ) -> Result<QueryResult, DbError> {
+    if starts_transaction(sql) && !connection.is_autocommit() {
+        // The owner of the open transaction is gone (see the module doc);
+        // its optimistic state died with its page, so discarding its
+        // uncommitted writes is the only consistent outcome.
+        eprintln!(
+            "[db_ops] rolling back a transaction left open by a previous page before a new BEGIN"
+        );
+        connection.execute_batch("ROLLBACK")?;
+    }
     let values = bind_values(params)?;
     let rows_affected = connection.execute(sql, params_from_iter(values))?;
     Ok(QueryResult {
         rows_affected,
         last_insert_id: connection.last_insert_rowid(),
     })
+}
+
+/// `BEGIN`, `BEGIN IMMEDIATE`, `BEGIN EXCLUSIVE`, … — the statements that open
+/// a transaction (savepoints nest legitimately and are not matched).
+fn starts_transaction(sql: &str) -> bool {
+    sql.trim_start()
+        .get(..5)
+        .is_some_and(|head| head.eq_ignore_ascii_case("BEGIN"))
 }
 
 pub fn query_on(
@@ -408,6 +433,55 @@ mod tests {
         assert_eq!(rows[0]["a"], json!("first"));
         assert_eq!(rows[0]["b"], json!("second"));
         assert_eq!(rows[0]["c"], json!("third"));
+    }
+
+    /// A webview that navigates away mid-transaction cannot send its COMMIT;
+    /// the connection outlives it. The next page's BEGIN must not be refused
+    /// for the rest of the process — the orphan is rolled back and the new
+    /// transaction proceeds, with the orphan's uncommitted writes discarded.
+    #[test]
+    fn an_orphaned_transaction_is_rolled_back_by_the_next_begin() {
+        let (_dir, path) = temp_db();
+        let connection = open_at(&path).expect("open");
+        execute_on(&connection, "CREATE TABLE t (v)", &[]).expect("create");
+
+        // Page A: BEGIN, write, then vanish without COMMIT.
+        execute_on(&connection, "BEGIN IMMEDIATE", &[]).expect("begin A");
+        execute_on(&connection, "INSERT INTO t (v) VALUES ($1)", &[json!("orphan")])
+            .expect("insert A");
+        assert!(!connection.is_autocommit());
+
+        // Page B: its own transaction must start cleanly.
+        execute_on(&connection, "BEGIN IMMEDIATE", &[]).expect("begin B succeeds");
+        execute_on(&connection, "INSERT INTO t (v) VALUES ($1)", &[json!("kept")])
+            .expect("insert B");
+        execute_on(&connection, "COMMIT", &[]).expect("commit B");
+        assert!(connection.is_autocommit());
+
+        let rows = query_on(&connection, "SELECT v FROM t ORDER BY v", &[]).expect("select");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["v"], json!("kept"));
+    }
+
+    /// Savepoints are how a live driver nests; they must never trip the
+    /// orphan guard, or a legitimate nested write would roll back its parent.
+    #[test]
+    fn a_savepoint_inside_a_live_transaction_is_left_alone() {
+        let (_dir, path) = temp_db();
+        let connection = open_at(&path).expect("open");
+        execute_on(&connection, "CREATE TABLE t (v)", &[]).expect("create");
+
+        execute_on(&connection, "BEGIN IMMEDIATE", &[]).expect("begin");
+        execute_on(&connection, "INSERT INTO t (v) VALUES ($1)", &[json!("outer")])
+            .expect("insert outer");
+        execute_on(&connection, "SAVEPOINT sp1", &[]).expect("savepoint");
+        execute_on(&connection, "INSERT INTO t (v) VALUES ($1)", &[json!("inner")])
+            .expect("insert inner");
+        execute_on(&connection, "RELEASE SAVEPOINT sp1", &[]).expect("release");
+        execute_on(&connection, "COMMIT", &[]).expect("commit");
+
+        let rows = query_on(&connection, "SELECT v FROM t ORDER BY v", &[]).expect("select");
+        assert_eq!(rows.len(), 2);
     }
 
     #[test]
