@@ -2,8 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { platformAdapter } from "@/adapters";
 import type { FsChangeEvent } from "@/adapters/platform-adapter.interface";
 import {
+  contentWatchIdFor,
   metadataWatchIdFor,
   startWorkspaceMetadataWatcher,
+  syncContentWatchers,
 } from "../file-sync";
 import {
   getOrCreateWorkspaceCollections,
@@ -88,6 +90,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  syncContentWatchers(new Map());
   watcherA?.stop();
   watcherB?.stop();
   clearWorkspaceCollections(WS_A);
@@ -165,5 +168,134 @@ describe("watcher event isolation across open workspaces", () => {
     expect(collections.content.get(path)).toMatchObject({
       content: "new",
     });
+  });
+});
+
+describe("content watchers across open workspaces", () => {
+  const startContent = () =>
+    vi.mocked(platformAdapter.fs.startWatchingContent).mock.calls;
+  const stops = () => vi.mocked(platformAdapter.fs.stopWatching).mock.calls;
+
+  it("arms one content watch per workspace with open file tabs", () => {
+    syncContentWatchers(
+      new Map([
+        [WS_A, [`${WS_A}/a.md`]],
+        [WS_B, [`${WS_B}/b.md`, `${WS_B}/c.md`]],
+      ]),
+    );
+
+    expect(startContent()).toEqual([
+      [[`${WS_A}/a.md`], contentWatchIdFor(WS_A)],
+      [[`${WS_B}/b.md`, `${WS_B}/c.md`], contentWatchIdFor(WS_B)],
+    ]);
+  });
+
+  it("re-issues the watch for the workspace whose open set changed (same id, no stop), stops the one that emptied", async () => {
+    syncContentWatchers(
+      new Map([
+        [WS_A, [`${WS_A}/a.md`]],
+        [WS_B, [`${WS_B}/b.md`]],
+      ]),
+    );
+    await settle();
+    vi.mocked(platformAdapter.fs.startWatchingContent).mockClear();
+    vi.mocked(platformAdapter.fs.stopWatching).mockClear();
+
+    syncContentWatchers(
+      new Map([[WS_A, [`${WS_A}/a.md`, `${WS_A}/d.md`]]]),
+    );
+    await settle();
+
+    // A's path set changed: the backend reconciles the delta on the live
+    // id, so the registration and its listener are never torn down.
+    expect(stops().map(([id]) => id)).toEqual([contentWatchIdFor(WS_B)]);
+    expect(startContent()).toEqual([
+      [[`${WS_A}/a.md`, `${WS_A}/d.md`], contentWatchIdFor(WS_A)],
+    ]);
+  });
+
+  it("serializes a re-issue behind an in-flight start, and never stops a still-wanted watch", async () => {
+    let resolveFirst!: () => void;
+    vi.mocked(platformAdapter.fs.startWatchingContent).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    syncContentWatchers(new Map([[WS_A, [`${WS_A}/a.md`]]]));
+    // The dock changes before the host acknowledged the first start.
+    syncContentWatchers(new Map([[WS_A, [`${WS_A}/a.md`, `${WS_A}/d.md`]]]));
+    await settle();
+
+    // The second start waits for the first: the last set issued is the
+    // last to take effect at the host, whatever its task scheduling.
+    expect(startContent()).toHaveLength(1);
+    resolveFirst();
+    await settle();
+    expect(startContent()).toEqual([
+      [[`${WS_A}/a.md`], contentWatchIdFor(WS_A)],
+      [[`${WS_A}/a.md`, `${WS_A}/d.md`], contentWatchIdFor(WS_A)],
+    ]);
+    expect(stops()).toEqual([]);
+  });
+
+  it("a stop that lands while the start is in flight is issued after it, exactly once", async () => {
+    let resolveStart!: () => void;
+    vi.mocked(platformAdapter.fs.startWatchingContent).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    syncContentWatchers(new Map([[WS_A, [`${WS_A}/a.md`]]]));
+    syncContentWatchers(new Map());
+    await settle();
+
+    // Not yet: a stop racing ahead of its start would find nothing to
+    // remove and leave the registration orphaned once the start landed.
+    expect(stops()).toEqual([]);
+    resolveStart();
+    await settle();
+    expect(stops().map(([id]) => id)).toEqual([contentWatchIdFor(WS_A)]);
+  });
+
+  it("routes a content event to the workspace whose watch produced it", async () => {
+    for (const ws of [WS_A, WS_B]) {
+      const collections = getOrCreateWorkspaceCollections(ws);
+      await collections.content.preload();
+      collections.content.utils.writeInsert({
+        path: `${ws}/open.md`,
+        content: "old",
+        contentHash: "old-hash",
+      });
+    }
+    syncContentWatchers(
+      new Map([
+        [WS_A, [`${WS_A}/open.md`]],
+        [WS_B, [`${WS_B}/open.md`]],
+      ]),
+    );
+    vi.mocked(platformAdapter.fs.readFiles).mockResolvedValue({
+      succeeded: [{ path: `${WS_B}/open.md`, content: "new" }],
+      failed: [],
+    });
+
+    emit({
+      type: "fs-content-changed",
+      payload: {
+        watchId: contentWatchIdFor(WS_B),
+        changes: [
+          { path: `${WS_B}/open.md`, content: "new", contentHash: "new-hash" },
+        ],
+      },
+    });
+    await settle();
+
+    expect(
+      getOrCreateWorkspaceCollections(WS_B).content.get(`${WS_B}/open.md`),
+    ).toMatchObject({ content: "new" });
+    expect(
+      getOrCreateWorkspaceCollections(WS_A).content.get(`${WS_A}/open.md`),
+    ).toMatchObject({ content: "old" });
   });
 });

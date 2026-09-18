@@ -340,6 +340,13 @@ export function createFileContentCollection(workspaceId: string) {
         // row may be fabricated — a delete racing a recreate of the same
         // path (scratchpad sweep, MET-135) would otherwise persist a
         // poisoned error row that the recreated file's editor then trusts.
+        // A not_found read is disk truth the listing has not caught up
+        // with (an external delete): re-walk, so the tree and the file's
+        // tab go away instead of sitting on a placeholder until the next
+        // interval walk.
+        if (result.failed.some((failure) => failure.type === "not_found")) {
+          void refetchWorkspaceMetadata(workspaceId);
+        }
         for (const failure of result.failed) {
           console.warn(
             `Failed to read file ${failure.path}: ${failure.message}`,
@@ -951,20 +958,28 @@ export interface OpenFileRow extends FileMetadata {
 /**
  * Metadata ⋈ content left-join for a set of open files. Files appear as soon
  * as metadata is in (metadata loads eagerly); content follows on demand.
+ * A null workspace (the path is in no open workspace) yields no rows and
+ * touches no collection.
  */
 export function useOpenFileRows(
-  workspacePath: string,
+  workspacePath: string | null,
   paths: string[],
 ): OpenFileRow[] {
-  const { metadata, content } = useFileCollections(workspacePath);
+  const collections = useMemo(
+    () =>
+      workspacePath === null
+        ? null
+        : getOrCreateWorkspaceCollections(workspacePath),
+    [workspacePath],
+  );
   const { data = [] } = useLiveQuery(
     (q) =>
-      paths.length === 0
+      collections === null || paths.length === 0
         ? undefined
         : q
-            .from({ file: metadata })
+            .from({ file: collections.metadata })
             .where(({ file }) => inArray(file.path, paths))
-            .leftJoin({ content }, ({ file, content }) =>
+            .leftJoin({ content: collections.content }, ({ file, content }) =>
               eq(file.path, content.path),
             )
             // The callback runs once at build time with ref PROXIES, not
@@ -987,28 +1002,38 @@ export function useOpenFileRows(
 
 /** Re-walk the workspace's metadata after out-of-band disk mutations
  * (e.g. the entry-time scratchpad sweep, which runs on plain adapter fs).
- * No-op when the workspace's collection hasn't mounted yet — the initial
- * walk will see the files. */
-export function refetchWorkspaceMetadata(workspacePath: string): Promise<void> {
-  return queryClient.refetchQueries({
-    queryKey: ["file-metadata", workspacePath],
-  });
+ * Resolves once a walk that STARTED after this call has landed: a walk
+ * already in flight may predate the mutation, so it is allowed to finish
+ * and a fresh one follows. No-op when the workspace's collection hasn't
+ * mounted yet — the initial walk will see the files. */
+export async function refetchWorkspaceMetadata(
+  workspacePath: string,
+): Promise<void> {
+  const queryKey = ["file-metadata", workspacePath];
+  if (queryClient.isFetching({ queryKey }) > 0) {
+    await queryClient.refetchQueries({ queryKey }, { cancelRefetch: false });
+  }
+  await queryClient.refetchQueries({ queryKey }, { cancelRefetch: false });
 }
 
-/** Whether the workspace's eager metadata load is still in flight. */
-export function useMetadataFetching(workspacePath: string): boolean {
-  return (
-    useIsFetching({ queryKey: ["file-metadata", workspacePath] }, queryClient) >
-    0
-  );
+/** Whether an eager metadata load is in flight — the workspace's, or any
+ *  open workspace's when no path is given (the dock spans them all). */
+export function useMetadataFetching(workspacePath?: string): boolean {
+  const queryKey =
+    workspacePath === undefined
+      ? ["file-metadata"]
+      : ["file-metadata", workspacePath];
+  return useIsFetching({ queryKey }, queryClient) > 0;
 }
 
-/** Whether any on-demand content load for the workspace is in flight. */
-export function useContentFetching(workspacePath: string): boolean {
-  return (
-    useIsFetching({ queryKey: ["file-content", workspacePath] }, queryClient) >
-    0
-  );
+/** Whether an on-demand content load is in flight — the workspace's, or
+ *  any open workspace's when no path is given. */
+export function useContentFetching(workspacePath?: string): boolean {
+  const queryKey =
+    workspacePath === undefined
+      ? ["file-content"]
+      : ["file-content", workspacePath];
+  return useIsFetching({ queryKey }, queryClient) > 0;
 }
 
 // ---------------------------------------------------------------------------

@@ -14,21 +14,23 @@
  *
  * This file is the whole feature, and the feature is deliberately small.
  * Scratchpads have exactly two special powers: "New File" auto-creates a
- * generated-name file here, and an empty workspace entry auto-opens the
- * most recent one (useNavigationPersistence folds it into the entry URL),
- * after an entry-time sweep deletes abandoned empty ones — any name: the
- * folder is app territory, and an empty file holds nothing worth keeping,
- * however it got its name. The "scratchpad on
- * startup" app setting turns the empty-entry half off entirely — no
- * create, no auto-open; only the sweep still runs. In every other respect
+ * generated-name file here, and opening a project lands in the most recent
+ * one (`enterScratchpad`, called by useOpenProject), after an entry-time
+ * sweep deletes abandoned empty ones — any name: the folder is app
+ * territory, and an empty file holds nothing worth keeping, however it got
+ * its name. The "scratchpad on startup" app setting turns the landing half
+ * off entirely — no create, no auto-open; only the sweep still runs. In every other respect
  * — renaming, dragging, tab titles, deletion — they are ordinary files
  * with no special treatment. Entry lifecycle runs on plain adapter fs —
  * never on collections — so it cannot race collection or query readiness;
  * rows catch up via the normal metadata walk.
  */
 import { platformAdapter } from "@/adapters";
-import { path as pathutil, workspaceKey } from "@/utils/path";
+import { readKv } from "@/utils/kv-store";
+import { SETTINGS_NAMESPACE } from "@/hooks/use-app-settings";
+import { path as pathutil } from "@/utils/path";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
+import { grantTabFocusHandoff } from "@/tabs/tab-controllers";
 import { stripPromptMarkers } from "@notefig/widgets";
 import {
   APP_DIR_NAME,
@@ -38,6 +40,7 @@ import {
 import {
   createFile,
   getOrCreateWorkspaceCollections,
+  refetchWorkspaceMetadata,
   type FileMetadata,
 } from "./files";
 
@@ -252,40 +255,26 @@ export function createAndOpenScratchpad(
   openFile: (options: OpenFileInLayoutOptions) => boolean,
 ): void {
   void createGeneratedScratchpad(workspacePath)
-    .then((path) => openFile({ tabId: path, intent: "replace" }))
+    .then((path) => {
+      // The user asked for something to type into: the new document's
+      // own claim (its prompt widget) may take focus from whatever field
+      // they were in — a hand-off the gesture grants, not the widget, and
+      // only once the tab is really in the dock (an open the editor
+      // refuses leaves nothing to own the grant).
+      if (openFile({ tabId: path, intent: "replace" })) {
+        grantTabFocusHandoff(path);
+      }
+    })
     .catch((error) => console.error("Failed to create a new file:", error));
 }
 
 /**
- * In-flight entry resolutions, coalesced per workspace. StrictMode invokes
- * the entry effect twice back to back (see use-recent-projects.ts), and two
- * concurrent resolves of an empty folder would each create a file — under
- * the untitled scheme both computed the same basename and collided
- * harmlessly, but generated names would make the duplicate real.
- */
-const entryResolutionInFlight = new Map<string, Promise<string | null>>();
-
-/**
  * Entry-time resolution, on plain disk truth: the most recently modified
  * scratchpad, else a freshly created generated-name one. Null bails to the
- * empty state (e.g. a file squatting on the folder path). Concurrent calls
- * for one workspace share a single resolution — this is the create path,
- * and it must be idempotent under the double-entry the caller documents.
+ * empty state (e.g. a file squatting on the folder path). Called once per
+ * open (a user gesture, not an effect), so it needs no coalescing.
  */
-export function resolveScratchpadOnDisk(
-  workspacePath: string,
-): Promise<string | null> {
-  const key = workspaceKey(workspacePath);
-  const existing = entryResolutionInFlight.get(key);
-  if (existing) return existing;
-  const resolution = resolveScratchpadUncoalesced(workspacePath).finally(() =>
-    entryResolutionInFlight.delete(key),
-  );
-  entryResolutionInFlight.set(key, resolution);
-  return resolution;
-}
-
-async function resolveScratchpadUncoalesced(
+export async function resolveScratchpadOnDisk(
   workspacePath: string,
 ): Promise<string | null> {
   const dir = scratchpadsDirPath(workspacePath);
@@ -354,4 +343,53 @@ export async function sweepScratchpadsOnDisk(
     .map(({ path }) => path);
   if (empties.length === 0) return;
   await platformAdapter.fs.deleteFiles(empties);
+}
+
+/**
+ * The entry-time sweep on its own, for an entry that has nothing to land
+ * on because one of the project's files is already open in the dock: the
+ * abandoned empty scratchpads still go (the folder is app territory), the
+ * tabs already open are kept, and the listing re-walks so the tree and any
+ * tab on a swept file catch up. Never rejects.
+ */
+export async function sweepScratchpads(
+  workspacePath: string,
+  keepPaths: readonly string[],
+): Promise<void> {
+  try {
+    await sweepScratchpadsOnDisk(workspacePath, keepPaths);
+  } catch (error) {
+    console.error("[scratchpads] entry sweep failed:", error);
+  }
+  await refetchWorkspaceMetadata(workspacePath);
+}
+
+/**
+ * What opening a project lands on: sweep abandoned empty scratchpads (never
+ * one in `keepPaths` — the tabs already open), then the most recent
+ * survivor or a fresh one — unless "scratchpad on startup" is off, in
+ * which case nothing opens. Never rejects: a failure degrades to the empty
+ * state. The sweep and create mutate disk behind the collections' back, so
+ * this resolves only once a re-walk that saw them has landed — the caller
+ * then adds the tab to a layout whose row already exists, and the
+ * stale-tab pruner never sees it rowless.
+ */
+export async function enterScratchpad(
+  workspacePath: string,
+  keepPaths: readonly string[],
+): Promise<string | null> {
+  let scratchpad: string | null = null;
+  try {
+    await sweepScratchpadsOnDisk(workspacePath, keepPaths);
+    const scratchpadOnStartup =
+      (await readKv<boolean>(SETTINGS_NAMESPACE, "scratchpadOnStartup")) !==
+      false;
+    if (scratchpadOnStartup) {
+      scratchpad = await resolveScratchpadOnDisk(workspacePath);
+    }
+  } catch (error) {
+    console.error("[scratchpads] entry resolution failed:", error);
+  }
+  await refetchWorkspaceMetadata(workspacePath);
+  return scratchpad;
 }

@@ -7,15 +7,12 @@ import {
   useLocation,
 } from "react-router-dom";
 import { Workspace } from "@/components/workspace";
-import { Welcome } from "@/components/welcome";
-import { RootRedirect } from "@/components/root-redirect";
 import { MockDirectoryPickerDialog } from "@/components/mock-directory-picker-dialog";
 import { TextPromptDialog } from "@/components/text-prompt-dialog";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useTheme } from "@/components/theme-provider";
 import { platformAdapter } from "@/adapters";
 import { isWeb } from "@/utils/platform";
-import { Loader } from "./components/loader";
 import { Titlebar } from "@/components/titlebar";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { WorkspaceErrorBoundary } from "@/components/workspace-error-boundary";
@@ -35,8 +32,9 @@ export const App = () => {
   const location = useLocation();
   const {
     settings,
+    isReady: settingsReady,
     setTheme: persistTheme,
-    setLastPath,
+    setLastSearch,
     setZoomLevel,
   } = useAppSettings();
 
@@ -72,18 +70,31 @@ export const App = () => {
     return watchCrossTabPairing();
   }, []);
 
+  // The URL carries the session (layout, chrome); the pathname is always
+  // "/". Restore last session's search once settings have hydrated — a
+  // cold boot lands on a bare "/" — then keep recording it. The restore is
+  // a render phase, not a ref: the record effect must not run in the same
+  // commit as the restore, or it would persist the bare boot URL over the
+  // saved one before the navigation lands. Flipping state defers it by
+  // exactly one render, which is also the render the navigation reaches.
+  const [sessionRestored, setSessionRestored] = useState(false);
   useEffect(() => {
-    // "/pair" is a transient deep-link landing that redirects to "/" — never
-    // record it, or RootRedirect would bounce back to it in a loop.
+    if (!settingsReady || sessionRestored) return;
     if (
-      location.pathname !== "/" &&
-      location.pathname !== "/welcome" &&
-      location.pathname !== "/pair"
+      location.pathname === "/" &&
+      !location.search &&
+      settings.lastSearch
     ) {
-      const fullPath = location.pathname + location.search;
-      setLastPath(fullPath);
+      navigate(`/${settings.lastSearch}`, { replace: true });
     }
-  }, [location.pathname, location.search, setLastPath]);
+    setSessionRestored(true);
+  }, [settingsReady, sessionRestored, settings.lastSearch, location, navigate]);
+  useEffect(() => {
+    if (!sessionRestored || location.pathname !== "/") return;
+    // One encoding of "nothing": an empty search is stored as null, the
+    // declared default, never as "".
+    setLastSearch(location.search || null);
+  }, [sessionRestored, location.pathname, location.search, setLastSearch]);
 
   useEffect(() => {
     const cleanup = platformAdapter.ui.addEventListener((event) => {
@@ -92,11 +103,6 @@ export const App = () => {
           setTheme(event.payload);
           persistTheme(event.payload);
           break;
-        case "folder-selected": {
-          const encodedPath = encodeURIComponent(event.payload);
-          navigate(`/${encodedPath}`);
-          break;
-        }
         case "file-dropped":
           console.log({ app: event.payload });
           break;
@@ -107,7 +113,7 @@ export const App = () => {
     });
 
     return cleanup;
-  }, [setTheme, persistTheme, navigate, setZoomLevel]);
+  }, [setTheme, persistTheme, setZoomLevel]);
 
   return (
     <div className="flex h-screen flex-col text-foreground overflow-clip">
@@ -120,46 +126,22 @@ export const App = () => {
           {import.meta.env.DEV && (
             <Route path="/__harness/editor" element={<EditorHarness />} />
           )}
-          <Route
-            path="/:basePath/edit/*"
-            element={
-              <Loader>
-                <WorkspaceErrorBoundary>
-                  <Workspace />
-                </WorkspaceErrorBoundary>
-              </Loader>
-            }
-          />
-          <Route
-            path="/:basePath"
-            element={
-              <Loader>
-                <WorkspaceErrorBoundary>
-                  <Workspace />
-                </WorkspaceErrorBoundary>
-              </Loader>
-            }
-          />
-          <Route
-            path="/welcome"
-            element={
-              <WorkspaceErrorBoundary>
-                <Welcome />
-              </WorkspaceErrorBoundary>
-            }
-          />
           {/* Deep-link landing: the pairing code was captured + scrubbed
               from the fragment at module load (pair-dialog-store), which
               also opened the dialog — this just returns to the app. */}
           <Route path="/pair" element={<Navigate to="/" replace />} />
+          {/* The whole app lives at "/": the dock is one layout over every
+              open workspace, and the welcome screen is what "/" shows with
+              nothing open. Any other path is a stale bookmark. */}
           <Route
             path="/"
             element={
               <WorkspaceErrorBoundary>
-                <RootRedirect />
+                <Workspace />
               </WorkspaceErrorBoundary>
             }
           />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
     </div>

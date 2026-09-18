@@ -27,11 +27,9 @@ import {
 import { cn } from "@notefig/ui/utils";
 import type { HarnessAvailability } from "@notefig/shared/agent";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { platformAdapter } from "@/adapters";
-import { FsError } from "@/adapters/platform-adapter.interface";
 import Logo, { PlainLogo } from "@/components/logo";
 import {
   SettingsModal,
@@ -41,10 +39,13 @@ import { useTheme } from "@/components/theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useProbedHarnesses } from "@/hooks/use-harness-selection";
 import {
+  useOpenProject,
+  useOpenProjectFromPicker,
+} from "@/hooks/use-open-project";
+import {
   useRecentProjects,
   type RecentProjectDisplay,
 } from "@/hooks/use-recent-projects";
-import { pickDirectory } from "@/utils/fs";
 import { renderMarkdownHtml } from "@/utils/markdown-html";
 import { isWeb } from "@/utils/platform";
 import { latestReleaseBody, latestReleaseTitle } from "@/utils/release-notes";
@@ -348,9 +349,10 @@ export function Welcome() {
   const [loading, setLoading] = useState(false);
   const [, setUrlSearchParams] = useSearchParams();
   const { t } = useTranslation();
-  const navigate = useNavigate();
+  const openProject = useOpenProject();
+  const openProjectFromPicker = useOpenProjectFromPicker();
   const openButtonRef = useRef<HTMLButtonElement>(null);
-  const { addRecentProject, recentProjects } = useRecentProjects();
+  const { recentProjects } = useRecentProjects();
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -362,26 +364,14 @@ export function Welcome() {
   const handleOpenWorkspace = async () => {
     setLoading(true);
     try {
-      const selectedPath = await pickDirectory("Select a folder");
-      if (selectedPath) {
-        addRecentProject(selectedPath);
-        navigate(`/${encodeURIComponent(selectedPath)}`);
-      }
-    } catch (error) {
-      // null means cancel; a throw means the browser denied the picker.
-      if (error instanceof FsError && error.type === "permission_denied") {
-        toast.error(t("pickerPermissionDenied"));
-      } else {
-        throw error;
-      }
+      await openProjectFromPicker();
     } finally {
       setLoading(false);
     }
   };
 
   const handleOpenProject = (path: string) => {
-    addRecentProject(path);
-    navigate(`/${encodeURIComponent(path)}`);
+    void openProject(path);
   };
 
   const handleOpenSettings = () => {

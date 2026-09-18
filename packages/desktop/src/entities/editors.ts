@@ -22,6 +22,7 @@ import {
   extractTabIds,
   findLayoutSelectedTab,
 } from "@/utils/layout-codec";
+import { relativeTreePath } from "@/utils/path";
 
 const markdownCodec = createMarkdownCodec();
 
@@ -69,9 +70,13 @@ export function getWorkspaceEditorContext(
 ): WorkspaceEditorContext {
   const layout = readLayout();
   const activeFile = findLayoutSelectedTab(layout);
+  // Tree membership, not a string prefix: the layout is one dock over every
+  // open workspace, and `/ws-backup` must not read as inside `/ws`.
+  const inWorkspace = (path: string) =>
+    relativeTreePath(workspacePath, path) !== undefined;
 
   const openFiles = extractTabIds(layout)
-    .filter((path) => path.startsWith(workspacePath))
+    .filter(inWorkspace)
     .map((path) => ({
       path,
       dirty: editor(path).isDirty(),
@@ -80,8 +85,7 @@ export function getWorkspaceEditorContext(
 
   return {
     openFiles,
-    activeFile:
-      activeFile && activeFile.startsWith(workspacePath) ? activeFile : null,
+    activeFile: activeFile && inWorkspace(activeFile) ? activeFile : null,
     selection: activeFile
       ? getSelectedText(activeFile) !== undefined
       : undefined,

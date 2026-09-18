@@ -1,6 +1,5 @@
 import { Component, useEffect, useSyncExternalStore } from "react";
 import type { ReactNode, ErrorInfo } from "react";
-import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { FolderLock } from "lucide-react";
 import { toast } from "sonner";
@@ -11,8 +10,12 @@ import {
   FsError,
   isWorkspaceAccessError,
 } from "@/adapters/platform-adapter.interface";
-import { useWorkspaceParams } from "@/hooks/use-workspace-params";
-import { closeWorkspace, reloadWorkspaceFiles } from "@/entities/workspaces";
+import { useOpenProject } from "@/hooks/use-open-project";
+import {
+  closeWorkspace,
+  reloadWorkspaceFiles,
+  useFocusedWorkspace,
+} from "@/entities/workspaces";
 import { ensureWatching } from "@/utils/workspace-watchers";
 import { queryClient } from "@/entities/query-client";
 import { isWeb } from "@/utils/platform";
@@ -155,8 +158,8 @@ function WorkspaceAccessError({
   onResolved: () => void;
 }) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const { workspacePath } = useWorkspaceParams();
+  const openProject = useOpenProject();
+  const workspacePath = useFocusedWorkspace();
   const content = getRecoveryContent(error, t);
 
   useEffect(() => {
@@ -183,7 +186,7 @@ function WorkspaceAccessError({
       // fully (agents demote to "restored"; its dead handle stops being
       // watched) rather than leaving a wounded background entry.
       if (workspacePath) void closeWorkspace(workspacePath);
-      navigate(`/${encodeURIComponent(picked)}`);
+      await openProject(picked);
     }
     resume(picked);
   };
@@ -225,7 +228,15 @@ function WorkspaceAccessError({
               {t("fsOpenSystemSettings")}
             </Button>
           )}
-          <Button variant="ghost" onClick={() => navigate("/welcome")}>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              // Leave the broken workspace: focus moves to the next open
+              // one, or the welcome screen with none left.
+              if (workspacePath) void closeWorkspace(workspacePath);
+              onResolved();
+            }}
+          >
             {t("backToHome")}
           </Button>
           {content.showSitePermissionsHelp && (

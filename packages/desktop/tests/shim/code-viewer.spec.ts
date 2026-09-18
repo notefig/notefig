@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Locator } from "@playwright/test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -35,6 +35,32 @@ const SCRIPT_TS = [
  * so this suite asserts both the new surface AND that the file's bytes are
  * untouched after opening and typing at it.
  */
+/**
+ * The element's bounding box once two consecutive reads agree — the viewer
+ * has stopped re-rendering the node. Re-resolves the locator each read, so
+ * a node replaced mid-highlight is followed rather than reported as null.
+ */
+async function stableBoundingBox(locator: Locator) {
+  let previous: Awaited<ReturnType<Locator["boundingBox"]>> = null;
+  await expect
+    .poll(
+      async () => {
+        const current = await locator.boundingBox();
+        const settled =
+          current !== null &&
+          previous !== null &&
+          current.x === previous.x &&
+          current.y === previous.y &&
+          current.width === previous.width;
+        previous = current;
+        return settled;
+      },
+      { timeout: 10000 },
+    )
+    .toBe(true);
+  return previous!;
+}
+
 test.describe("shim: read-only code viewer", () => {
   let workspace = "";
 
@@ -131,7 +157,10 @@ test.describe("shim: read-only code viewer", () => {
     await expect(token).toBeVisible({ timeout: 10000 });
 
     // Drag across the token to make a real selection inside the shadow root.
-    const box = (await token.boundingBox())!;
+    // The viewer highlights asynchronously and replaces its spans as it
+    // does, so a box read right after visibility can belong to a node that
+    // is gone by the next frame — wait for the token to hold still.
+    const box = await stableBoundingBox(token);
     await page.mouse.move(box.x + 1, box.y + box.height / 2);
     await page.mouse.down();
     await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, {
@@ -190,9 +219,10 @@ test.describe("shim: read-only code viewer", () => {
         size: 1,
       },
     ]);
-    await page.goto(
-      `/${encodeURIComponent(workspace)}?layout=${encodeURIComponent(layout)}`,
-    );
+    // The open set is persisted, so the workspace comes back on the
+    // reload that carries the layout.
+    await openWorkspace(page, workspace);
+    await page.goto(`/?layout=${encodeURIComponent(layout)}`);
 
     await expect(page.getByText("greetFromTypescript").first()).toBeVisible({
       timeout: 15000,

@@ -53,8 +53,19 @@ export function getOrCreateKvCollection(namespace: string) {
   return collection;
 }
 
-/** Insert-or-update — the collection distinguishes the two, callers don't. */
-function upsert(collection: KvCollection, key: string, value: unknown) {
+/**
+ * Insert-or-update — the collection distinguishes the two, callers don't.
+ *
+ * Never before hydration: a mutation issued before the namespace has loaded
+ * is assigned a stream position from what the persistence layer has
+ * observed so far — before hydration, the very position the previous
+ * session already used — and the adapter drops it as already applied. The
+ * value shows in memory and is gone on the next launch
+ * (kv-store-hydration.test.tsx pins this). In steady state `preload()` is a
+ * resolved promise, so the write is deferred by one microtask at most.
+ */
+async function upsert(collection: KvCollection, key: string, value: unknown) {
+  await collection.preload();
   return collection.get(key)
     ? collection.update(key, (draft) => {
         draft.value = value;
@@ -95,8 +106,7 @@ export async function writeKv<T>(
   value: T,
 ): Promise<void> {
   const collection = getOrCreateKvCollection(namespace);
-  await collection.preload();
-  await upsert(collection, key, value).isPersisted.promise;
+  await (await upsert(collection, key, value)).isPersisted.promise;
 }
 
 export async function removeKv(namespace: string, key: string): Promise<void> {
@@ -124,7 +134,7 @@ export function useKv<T>(namespace: string) {
   }
 
   function set(key: string, value: T) {
-    upsert(collection, key, value);
+    void upsert(collection, key, value);
   }
 
   function get(key: string): T | undefined {
@@ -132,15 +142,22 @@ export function useKv<T>(namespace: string) {
     return row?.value as T | undefined;
   }
 
+  // Deletes wait for hydration for the same reason as `upsert`: a delete
+  // issued before the row has loaded finds nothing to delete, and the row
+  // comes back with the load.
   function remove(key: string) {
-    collection.delete(key);
+    void collection.preload().then(() => {
+      if (collection.get(key)) collection.delete(key);
+    });
   }
 
   function clear() {
     const allKeys = rows.map((r) => r.key);
-    for (const key of allKeys) {
-      collection.delete(key);
-    }
+    void collection.preload().then(() => {
+      for (const key of allKeys) {
+        if (collection.get(key)) collection.delete(key);
+      }
+    });
   }
 
   return {

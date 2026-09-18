@@ -399,11 +399,13 @@ function usePromptBlobFocus({
   // the caret in this widget's draft before the node view mounted, which is
   // why the claim is made from here rather than from the tab layout's own
   // mount intent — by then there was no widget to notice. What is left is
-  // the focus half, and it is an explicit hand-off: creating a file opens
-  // the tree's inline rename at the same moment, which an ambient intent
-  // rightly stands down for. The composer used to make the same claim by
-  // focusing its own editor directly, out of the arbiter's sight; now it
-  // goes through the arbiter and says `steal`.
+  // the focus half. It is an AMBIENT claim: a document can open under the
+  // user's hands for reasons that are not theirs (a project landing in its
+  // scratchpad while they rename a file in the tree), and yanking focus
+  // out of a text entry they are typing in is never right. The arbiter
+  // keeps the intent alive until the entry closes — the create-file field
+  // is gone by the time its file's document mounts — so the composer still
+  // ends up focused on a genuinely new document.
   const claimed = useRef(false);
   useEffect(() => {
     if (claimed.current) return;
@@ -415,7 +417,7 @@ function usePromptBlobFocus({
     if (!draftIO.holdsCaret() || editor.view.hasFocus()) return;
     host.focusDocument(documentPath, {
       reason: "empty-doc-prompt",
-      steal: true,
+      steal: false,
     });
   }, [host, documentPath, editor, draftIO]);
 

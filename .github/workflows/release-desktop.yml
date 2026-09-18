@@ -3,7 +3,8 @@ name: Release Desktop App
 # Two modes, selected by the version input:
 #   "0.0.93"        — normal release: bump committed to main, tagged, published
 #                     as the latest release the in-app updater serves.
-#   "0.0.93-debug"  — debug build of current main: `tauri build --debug`
+#   "0.0.93-debug"  — debug build of the dispatched ref (main unless run
+#                     with --ref <branch>): `tauri build --debug`
 #                     (devtools enabled, debug assertions on). Nothing is
 #                     committed or tagged on main, deploy-web is skipped, and
 #                     the release is published as a prerelease with
@@ -36,6 +37,17 @@ jobs:
         run: |
           if ! echo "${{ inputs.version }}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-debug)?$'; then
             echo "Error: Version must be semver (e.g. 0.0.3) or semver-debug (e.g. 0.0.3-debug)"
+            exit 1
+          fi
+
+      # A tag that already exists means a release that already exists, and
+      # published releases are immutable: tauri-action would find it, build
+      # for twenty minutes, then fail replacing its assets — leaving the OLD
+      # bundles on the page under this version's name. Refuse up front.
+      - name: Refuse an existing tag
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/desktop-v${{ inputs.version }}" >/dev/null; then
+            echo "Error: tag desktop-v${{ inputs.version }} already exists; releases are immutable — pick a new version"
             exit 1
           fi
 
@@ -208,11 +220,13 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     steps:
-      # Debug builds have no tag — they build whatever main currently is.
+      # Debug builds have no tag — they build the ref the workflow was
+      # dispatched on (`gh workflow run --ref <branch>`; main by default),
+      # so a branch can be test-driven before it merges.
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ contains(inputs.version, '-debug') && 'main' || format('desktop-v{0}', inputs.version) }}
+          ref: ${{ contains(inputs.version, '-debug') && github.ref || format('desktop-v{0}', inputs.version) }}
 
       # For debug builds the version was never committed, so stamp it into
       # this checkout only (BSD sed on macOS runners — hence perl).

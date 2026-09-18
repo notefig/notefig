@@ -26,6 +26,13 @@ const watchers = vi.hoisted(() => ({
 vi.mock("@/utils/file-sync", () => ({
   startWorkspaceMetadataWatcher: watchers.start,
 }));
+// The open set is a persisted collection; give it the in-memory SQLite rig
+// rather than the browser adapter's coordinator, which has no page to lead.
+vi.mock("@/adapters", async () => ({
+  platformAdapter: {
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+  },
+}));
 
 import {
   openWorkspacesCollection,
@@ -37,7 +44,7 @@ import {
 } from "../workspace-watchers";
 
 function row(key: string): OpenWorkspaceRow {
-  return { key, path: key, openedAt: 1 };
+  return { key, path: key, openedAt: 1, focusedAt: 1 };
 }
 
 let stopSubscription: (() => void) | undefined;

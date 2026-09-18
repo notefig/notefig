@@ -7,6 +7,7 @@
  *  - Bug #3: drag handle must be block-scoped (small, near the hovered block)
  *  - Bug #4: inserted 3x3 table must render 9 visibly bordered cells
  */
+import { openWorkspace } from "../setup/test-helpers";
 import { test, expect, type Page } from "@playwright/test";
 
 // Workspace paths are absolute and travel percent-encoded in a single URL
@@ -52,7 +53,7 @@ async function seedWorkspace(page: Page) {
   });
 
   // Must be on the app origin before touching IndexedDB.
-  await page.goto("/welcome");
+  await page.goto("/");
 
   await page.evaluate(
     async ({ files }) => {
@@ -95,7 +96,7 @@ async function seedWorkspace(page: Page) {
 
 async function openFixtureFile(page: Page) {
   await seedWorkspace(page);
-  await page.goto(`/${encodeURIComponent(WORKSPACE)}`);
+  await openWorkspace(page, WORKSPACE);
   // deep links mark the file active but don't open a tab — click like a user
   await page.getByRole("treeitem", { name: FILE_NAME }).click();
   await expect(page.locator(".ProseMirror")).toBeVisible({ timeout: 15_000 });

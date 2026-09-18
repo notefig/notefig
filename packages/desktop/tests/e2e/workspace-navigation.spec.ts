@@ -41,23 +41,17 @@ test.describe("Workspace Navigation", () => {
     await page.reload();
     await waitForFileTree(page);
 
-    const noFileMessage = page.getByText(
-      "No file selected. Open a file from the sidebar or create a new one.",
-    );
-    await expect(noFileMessage).toBeVisible();
+    // An empty project lands in a fresh scratchpad (MET-135): the tree
+    // shows the scratchpads folder and its one generated file, and an
+    // editor is up rather than the empty state.
+    await expect(
+      page.getByRole("treeitem", { name: /scratchpads/ }),
+    ).toBeVisible();
+    await expect(
+      page.locator('[role="textbox"]').locator("visible=true").first(),
+    ).toBeVisible({ timeout: 15000 });
 
     const newFileButton = page.getByRole("button", { name: "New file" });
     await expect(newFileButton).toBeVisible();
-  });
-
-  test("should display workspace path in UI", async ({ page }) => {
-    const fixture = workspaceNavigationFixture.populatedWorkspace;
-
-    await openWorkspace(page, fixture.path);
-    await seedTestFiles(page, fixture.files);
-    await page.waitForLoadState("networkidle");
-
-    const url = page.url();
-    expect(url).toContain(encodeURIComponent(fixture.path));
   });
 });

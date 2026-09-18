@@ -12,7 +12,13 @@ export const CURRENT_TELEMETRY_CONSENT_VERSION = 1;
 
 export interface AppSettings {
   theme: Theme;
-  lastPath: string | null;
+  /**
+   * The app URL's search string from the last session (`?layout=…` and the
+   * chrome params), restored at boot. The pathname is always `/`: the
+   * layout spans every open workspace, and the open set itself is
+   * persisted by the workspaces entity.
+   */
+  lastSearch: string | null;
   zoomLevel: number;
   crashReportingEnabled: boolean;
   analyticsEnabled: boolean;
@@ -34,7 +40,7 @@ export interface AppSettings {
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   theme: "dark",
-  lastPath: null,
+  lastSearch: null,
   zoomLevel: 1,
   crashReportingEnabled: true,
   analyticsEnabled: true,
@@ -74,8 +80,8 @@ export function useAppSettings() {
     setSetting("theme", theme);
   }
 
-  function setLastPath(path: string | null) {
-    setSetting("lastPath", path);
+  function setLastSearch(search: string | null) {
+    setSetting("lastSearch", search);
   }
 
   function setZoomLevel(zoom: number) {
@@ -87,7 +93,7 @@ export function useAppSettings() {
     isReady,
     setSetting,
     setTheme,
-    setLastPath,
+    setLastSearch,
     setZoomLevel,
   } as const;
 }

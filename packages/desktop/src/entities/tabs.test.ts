@@ -3,8 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const calls: string[] = [];
 
 const renameFileOrDirectoryMock = vi.fn();
+vi.mock("./workspaces", () => ({
+  useOpenWorkspacesReady: vi.fn(() => true),
+  useOpenWorkspaces: vi.fn(() => []),
+  workspaceOfPath: vi.fn(() => null),
+}));
 vi.mock("@/entities/files", () => ({
-  useOpenFileRows: vi.fn(() => []),
+  getOrCreateWorkspaceCollections: vi.fn(),
   useMetadataFetching: vi.fn(() => false),
   renameFileOrDirectory: (ws: string, from: string, to: string) => {
     calls.push("rename-fs");

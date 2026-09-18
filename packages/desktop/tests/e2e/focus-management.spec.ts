@@ -161,12 +161,13 @@ test.describe("Focus Management", () => {
     await expect(editor).not.toContainText("bravo content for tab b");
   });
 
-  test("new file opens an empty scratchpad showing the prompt widget first with its composer focused", async ({
+  test("new scratchpad opens showing the prompt widget first with its composer focused", async ({
     page,
   }) => {
-    // "New File" is instant (MET-135): no naming prompt, the untitled
-    // scratchpad opens straight into the empty-document prompt widget.
-    await page.getByRole("button", { name: "New file" }).click();
+    // "New scratchpad" is instant (MET-135): no naming prompt, the
+    // generated-name scratchpad opens straight into the empty-document
+    // prompt widget — and takes focus, since the user asked for it.
+    await page.getByRole("button", { name: "New scratchpad" }).click();
 
     const widget = page
       .locator('[data-type="ai-prompt"]')
@@ -253,9 +254,8 @@ test.describe("Focus Management", () => {
       },
     ];
 
-    const encodedPath = encodeURIComponent(WORKSPACE_PATH);
     const encodedLayout = encodeURIComponent(JSON.stringify(twoWindowLayout));
-    await page.goto(`/${encodedPath}?layout=${encodedLayout}`);
+    await page.goto(`/?layout=${encodedLayout}`);
     await waitForFileTree(page, "tab-a.md");
 
     const rightEditor = page

@@ -15,8 +15,10 @@ import type { TabProps } from "@/components/dockable";
 import { AgentChatTab } from "@/components/agent/agent-chat-tab";
 import { ReleaseNotesTab } from "@/components/release-notes-tab";
 import { PolymorphicEditor } from "@/components/editor/polymorphic-editor";
-import type { OpenFileRow } from "@/entities/files";
+import { useOpenFileRows } from "@/entities/files";
+import { useWorkspaceOfPath } from "@/entities/workspaces";
 import type { AgentTaskRow } from "@/entities/agents";
+import { useProjectSettings } from "@/utils/project-settings";
 import type { FileEntry } from "@/utils/fs";
 import { getFileName } from "@/utils/fs";
 import { latestReleaseTitle } from "@/utils/release-notes";
@@ -24,9 +26,6 @@ import { parseTabId, type TabKind, type TabRef } from "./tab-id";
 
 /** Everything the open tabs need in order to render, gathered once. */
 export interface TabRenderContext {
-  workspacePath: string;
-  /** Metadata ⋈ content rows for the open file tabs. */
-  fileRows: OpenFileRow[];
   /** Task rows for the open agent tabs. */
   agentTaskRows: AgentTaskRow[];
   closeTab: (tabId: string) => void;
@@ -58,22 +57,47 @@ interface TabTypeDefinition<K extends TabKind> {
   ): BuiltTab | null;
 }
 
-const fileTab: TabTypeDefinition<"file"> = {
-  build(ref, { fileRows, workspacePath }) {
-    const row = fileRows.find((candidate) => candidate.path === ref.path);
-    if (!row) return null;
+/**
+ * A file tab resolves its own workspace: the dock is one layout over every
+ * open workspace, so the tab — not the shell — knows which tree the file
+ * is in, joins that workspace's rows, and applies that project's text
+ * direction. A file in no open workspace renders nothing and is pruned by
+ * `useWorkspaceTabs`.
+ */
+function FileTab({ path }: { path: string }) {
+  const workspacePath = useWorkspaceOfPath(path);
+  if (workspacePath === null) return null;
+  return <FileTabInWorkspace path={path} workspacePath={workspacePath} />;
+}
 
+function FileTabInWorkspace({
+  path,
+  workspacePath,
+}: {
+  path: string;
+  workspacePath: string;
+}) {
+  const [row] = useOpenFileRows(workspacePath, [path]);
+  const { settings } = useProjectSettings(workspacePath);
+  if (!row) return null;
+  return (
+    <div dir={settings.direction} className="contents">
+      <PolymorphicEditor
+        file={row as FileEntry}
+        basePath={workspacePath}
+        isContentLoaded={row.isContentLoaded}
+        contentError={row.contentError}
+      />
+    </div>
+  );
+}
+
+const fileTab: TabTypeDefinition<"file"> = {
+  build(ref) {
     return {
-      name: getFileName(row.path),
-      deps: [row, workspacePath],
-      content: (
-        <PolymorphicEditor
-          file={row as FileEntry}
-          basePath={workspacePath}
-          isContentLoaded={row.isContentLoaded}
-          contentError={row.contentError}
-        />
-      ),
+      name: getFileName(ref.path),
+      deps: [ref.path],
+      content: <FileTab path={ref.path} />,
     };
   },
 };
@@ -151,12 +175,10 @@ export function useTabElements(
   );
   const { t } = useTranslation();
   const releaseNotesTitle = latestReleaseTitle ?? t("releaseNotesTitle");
-  const { workspacePath, fileRows, agentTaskRows, closeTab } = context;
+  const { agentTaskRows, closeTab } = context;
 
   return useMemo(() => {
     const resolved: ResolvedTabRenderContext = {
-      workspacePath,
-      fileRows,
       agentTaskRows,
       releaseNotesTitle,
       closeTab,
@@ -196,12 +218,5 @@ export function useTabElements(
 
     cache.current = next;
     return elements;
-  }, [
-    openTabs,
-    workspacePath,
-    fileRows,
-    agentTaskRows,
-    releaseNotesTitle,
-    closeTab,
-  ]);
+  }, [openTabs, agentTaskRows, releaseNotesTitle, closeTab]);
 }

@@ -18,7 +18,7 @@
  * parse `window.location` fresh on every call; reactive UI must go through
  * `useLayoutSearchParam`/`useDockableTabs`.
  */
-import { useMemo, useCallback, useEffect } from "react";
+import { useMemo, useCallback, useEffect, useSyncExternalStore } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { LayoutNode } from "@/components/dockable";
 import {
@@ -65,11 +65,15 @@ import {
 } from "./agents";
 import type { AgentTaskHandle } from "@/agent/agents";
 import {
-  useOpenFileRows,
+  getOrCreateWorkspaceCollections,
   useMetadataFetching,
   renameFileOrDirectory,
-  type OpenFileRow,
 } from "./files";
+import {
+  useOpenWorkspaces,
+  useOpenWorkspacesReady,
+  workspaceOfPath,
+} from "./workspaces";
 import {
   flushDocumentSync,
   whenDocumentSyncClean,
@@ -339,12 +343,13 @@ export async function renameOpenFileTab(options: {
 }
 
 export interface WorkspaceTabsState {
-  /** Open tab ids that are files (real workspace paths). */
+  /** Open tab ids that are files (absolute paths). */
   fileTabIds: string[];
+  /** The open file tabs grouped by the open workspace that contains each —
+   *  what the content watchers arm per workspace. */
+  fileTabsByWorkspace: Map<string, string[]>;
   /** Task ids of open agent chat tabs (`agent:` prefix stripped). */
   agentTaskIds: string[];
-  /** Metadata ⋈ content rows for the open file tabs. */
-  fileRows: OpenFileRow[];
   /** Task rows for the open agent tabs. */
   agentTaskRows: AgentTaskRow[];
   /** Whether the release-notes tab is in the layout. */
@@ -358,16 +363,62 @@ export interface WorkspaceTabsState {
   staleTabIds: string[];
 }
 
+/** `fileTabIds` grouped by the workspace containing each; tabs in no open
+ *  workspace are left out (they are stale). */
+function groupFileTabsByWorkspace(
+  fileTabIds: string[],
+): Map<string, string[]> {
+  const groups = new Map<string, string[]>();
+  for (const path of fileTabIds) {
+    const workspace = workspaceOfPath(path);
+    if (workspace === null) continue;
+    const group = groups.get(workspace);
+    if (group) group.push(path);
+    else groups.set(workspace, [path]);
+  }
+  return groups;
+}
+
 /**
- * The open-tabs cross-entity join: URL layout → agent/file split → file
- * rows + agent task rows + stale-tab detection, in one hook. Callers keep
- * layout interaction (selection, focus, hotkeys, writes) on
- * `useDockableTabs`; this is the read side.
+ * The file tabs whose metadata row is missing from the workspace that
+ * contains them (or that no open workspace contains), as a stable
+ * comma-joined snapshot so an unchanged answer never re-renders. Subscribes
+ * to every involved workspace's metadata collection — the dock is one
+ * layout over every open workspace.
  */
-export function useWorkspaceTabs(
-  workspacePath: string,
-  openTabs: string[],
-): WorkspaceTabsState {
+function useMissingFileTabs(fileTabsByWorkspace: Map<string, string[]>, fileTabIds: string[]): string {
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      const subscriptions = [...fileTabsByWorkspace.keys()].map((workspace) =>
+        getOrCreateWorkspaceCollections(workspace).metadata.subscribeChanges(
+          onChange,
+        ),
+      );
+      return () => {
+        for (const subscription of subscriptions) subscription.unsubscribe();
+      };
+    },
+    [fileTabsByWorkspace],
+  );
+  const read = useCallback(() => {
+    const present = new Set<string>();
+    for (const [workspace, paths] of fileTabsByWorkspace) {
+      const { metadata } = getOrCreateWorkspaceCollections(workspace);
+      for (const path of paths) if (metadata.has(path)) present.add(path);
+    }
+    return fileTabIds.filter((path) => !present.has(path)).join(",");
+  }, [fileTabsByWorkspace, fileTabIds]);
+  return useSyncExternalStore(subscribe, read, read);
+}
+
+/**
+ * The open-tabs cross-entity join: URL layout → agent/file split → per-
+ * workspace grouping + agent task rows + stale-tab detection, in one hook.
+ * Callers keep layout interaction (selection, focus, hotkeys, writes) on
+ * `useDockableTabs`; this is the read side. File rows are joined per tab
+ * (tabs/tab-types.tsx), since each tab resolves its own workspace.
+ */
+export function useWorkspaceTabs(openTabs: string[]): WorkspaceTabsState {
   const fileTabIds = useMemo(() => openTabs.filter(isFileTabId), [openTabs]);
   const agentTaskIds = useMemo(
     () =>
@@ -381,8 +432,19 @@ export function useWorkspaceTabs(
     [openTabs],
   );
 
-  const fileRows = useOpenFileRows(workspacePath, fileTabIds);
-  const isFetchingMetadata = useMetadataFetching(workspacePath);
+  // Re-group when workspaces open or close, not only when tabs change.
+  const openWorkspaces = useOpenWorkspaces();
+  const fileTabsByWorkspace = useMemo(
+    () => groupFileTabsByWorkspace(fileTabIds),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fileTabIds, openWorkspaces],
+  );
+  const missingFileTabs = useMissingFileTabs(fileTabsByWorkspace, fileTabIds);
+  // Coarse on purpose: a metadata walk in any workspace defers pruning in
+  // all of them; the walk is short and pruning is not urgent. Before the
+  // persisted open set has loaded, every file tab would look homeless.
+  const openWorkspacesReady = useOpenWorkspacesReady();
+  const isFetchingMetadata = useMetadataFetching();
   const agentTasksReady = useAgentTasksReady();
 
   const agentTaskRows = useAgentTaskRowsById(agentTaskIds);
@@ -399,28 +461,32 @@ export function useWorkspaceTabs(
   const staleTabIds = useMemo(() => {
     // File tabs wait out the metadata fetch; agent tabs wait out the tasks
     // collection's boot load (restored sessions come back as rows).
-    const existingFilePaths = new Set(fileRows.map((row) => row.path));
-    const midRenameIds = new Set(
-      [...pendingTabRenames].flat(),
-    );
-    const missingFileTabIds = isFetchingMetadata
-      ? []
-      : fileTabIds.filter(
-          // Ids mid-rename are transiently rowless by design — never stale.
-          (tabId) => !existingFilePaths.has(tabId) && !midRenameIds.has(tabId),
-        );
+    const midRenameIds = new Set([...pendingTabRenames].flat());
+    const missingFileTabIds =
+      !openWorkspacesReady || isFetchingMetadata || missingFileTabs === ""
+        ? []
+        : missingFileTabs
+            .split(",")
+            // Ids mid-rename are transiently rowless by design — never stale.
+            .filter((tabId) => !midRenameIds.has(tabId));
     const missingAgentTabIds = agentTasksReady
       ? agentTaskIds
           .filter((taskId) => !agentTasksCollection.get(taskId))
           .map(agentTabId)
       : [];
     return [...missingFileTabIds, ...missingAgentTabIds];
-  }, [fileRows, fileTabIds, agentTaskIds, isFetchingMetadata, agentTasksReady]);
+  }, [
+    missingFileTabs,
+    agentTaskIds,
+    openWorkspacesReady,
+    isFetchingMetadata,
+    agentTasksReady,
+  ]);
 
   return {
     fileTabIds,
+    fileTabsByWorkspace,
     agentTaskIds,
-    fileRows,
     agentTaskRows,
     isReleaseNotesTabOpen,
     staleTabIds,

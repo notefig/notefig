@@ -24,12 +24,13 @@ const WORKSPACE_PATH = "/workspace/prompt-draft";
  * tab-state-persistence.spec.ts, beside the caret and scroll tests it is now
  * the same mechanism as.)
  */
-/** A document with a mounted prompt widget. "New file" opens an empty
- *  scratchpad, and the empty-document keeper puts a widget in it with the
- *  caret already in its draft — the same node view, and the same cascade, as
- *  one summoned with "/" mid-prose. */
+/** A document with a mounted prompt widget. "New scratchpad" opens an
+ *  empty scratchpad, and the empty-document keeper puts a widget in it with
+ *  the caret already in its draft — the same node view, and the same
+ *  cascade, as one summoned with "/" mid-prose. ("New file" is the tree's
+ *  naming flow and creates nothing until the name is confirmed.) */
 async function summonWidget(page: import("@playwright/test").Page) {
-  await page.getByRole("button", { name: "New file" }).click();
+  await page.getByRole("button", { name: "New scratchpad" }).click();
 }
 
 test.describe("prompt draft persistence", () => {

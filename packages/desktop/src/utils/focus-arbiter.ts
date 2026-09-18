@@ -54,7 +54,7 @@ interface InternalFocusIntent extends FocusIntent {
   sequence: number;
 }
 
-const DEFAULT_COOLDOWN_MS = 150;
+export const DEFAULT_COOLDOWN_MS = 150;
 const DEFAULT_TTL_MS = 1500;
 const DEFAULT_MAX_MOUNT_ATTEMPTS = 20;
 

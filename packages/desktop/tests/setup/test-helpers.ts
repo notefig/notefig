@@ -104,14 +104,35 @@ export async function waitForFileTree(page: Page, fileName?: string) {
 }
 
 /**
- * Opens a workspace by clicking the "Open Folder" button and selecting a path
- * Note: This is a mock implementation for browser adapter
+ * Opens a workspace into the app's dock. The app lives at "/" and its open
+ * set is persisted, so this lands on "/" (a fresh page load) and opens the
+ * project through the dev/test seam the shell exposes — the native folder
+ * picker cannot be driven for a given path from either adapter.
  */
 export async function openWorkspace(page: Page, workspacePath: string) {
-  // In browser mode, we'll need to mock the directory picker
-  // For now, we'll navigate directly to the workspace URL
-  const encodedPath = encodeURIComponent(workspacePath);
-  await page.goto(`/${encodedPath}`);
+  await page.goto("/");
+  await openWorkspaceInPlace(page, workspacePath);
+}
+
+/**
+ * Opens another workspace into the dock the page already shows — no page
+ * load, so the tabs already open stay open (the layout lives in the URL).
+ */
+export async function openWorkspaceInPlace(page: Page, workspacePath: string) {
+  await page.waitForFunction(
+    () => Boolean((window as unknown as { __notefigTest?: unknown }).__notefigTest),
+    undefined,
+    { timeout: 15000 },
+  );
+  await page.evaluate(
+    (path) =>
+      (
+        window as unknown as {
+          __notefigTest: { openProject: (path: string) => Promise<void> };
+        }
+      ).__notefigTest.openProject(path),
+    workspacePath,
+  );
 }
 
 /**

@@ -1,3 +1,4 @@
+import { openWorkspace } from "../setup/test-helpers";
 import { test, expect, type Page } from "@playwright/test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -24,7 +25,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
   });
 
   async function openProject(page: Page) {
-    await page.goto(`/${encodeURIComponent(workspace)}`);
+    await openWorkspace(page, workspace);
   }
 
   function visibleEditor(page: Page) {
@@ -104,26 +105,25 @@ test.describe("shim: scratchpad entry lifecycle", () => {
   }
 
   /**
-   * `useNavigationPersistence` writes the layout's saved URL to KV
-   * fire-and-forget (use-recent-projects.ts): the DOM updates the moment a
-   * tab closes, but the durable write can still be in flight. A re-entry
-   * that lands before it completes reads the STALE row — still listing the
-   * closed tab as "restored" — so a sweep keyed off that layout wrongly
-   * keeps what should have been an abandoned leftover.
+   * The app records the session URL's search string (`?layout=…`) to the
+   * `settings.lastSearch` KV row fire-and-forget (App.tsx): the DOM updates
+   * the moment a tab closes, but the durable write can still be in flight.
+   * A re-entry that lands before it completes reads the STALE row — still
+   * listing the closed tab — so a sweep keyed off that layout wrongly keeps
+   * what should have been an abandoned leftover.
    *
    * Poll the actual KV row instead of a fixed delay: the app's own
    * `kv-store` module, imported page-side exactly as kv-persistence.spec.ts
    * does, is the only thing that can say "this write has landed" — a
-   * timeout can only guess how long that takes.
+   * timeout can only guess how long that takes. An empty search is stored
+   * as null (one encoding of "nothing"), never as "".
    */
   async function waitForNavigationPersisted(page: Page) {
-    const currentUrl = await page.evaluate(
-      () => location.pathname + location.search,
-    );
+    const currentSearch = await page.evaluate(() => location.search || null);
     await expect
       .poll(
         () =>
-          page.evaluate(async (workspacePath) => {
+          page.evaluate(async () => {
             // A Vite dev-server-served path, not a bundler-resolvable
             // specifier from this file's location — fallow's static
             // analyzer can't know that (kv-persistence.spec.ts dodges the
@@ -131,15 +131,11 @@ test.describe("shim: scratchpad entry lifecycle", () => {
             // plain string instead of real code).
             // fallow-ignore-next-line unresolved-import
             const kv = await import("/src/utils/kv-store.ts");
-            const row = await kv.readKv<{ lastUrl?: string }>(
-              "recentProjects",
-              workspacePath,
-            );
-            return row?.lastUrl ?? null;
-          }, workspace),
+            return (await kv.readKv<string | null>("settings", "lastSearch")) ?? null;
+          }),
         { timeout: 10000 },
       )
-      .toBe(currentUrl);
+      .toBe(currentSearch);
     // The optimistic local read above can be ahead of the durable write —
     // this backend throws "cannot start a transaction within a
     // transaction" when a write collides with concurrent collection
@@ -223,7 +219,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
 
     // Re-enter at the bare root: the saved layout must restore intact —
     // the auto-open must not race the restore and clobber it.
-    await page.goto("/welcome");
+    await page.goto("/");
     await openProject(page);
 
     await expect(visibleEditor(page)).toContainText("Seeded", {
@@ -307,7 +303,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
 
     // Re-enter: the empty saved session must auto-open the scratchpad
     // again — this is the "come back to my scratchpad" loop.
-    await page.goto("/welcome");
+    await page.goto("/");
     await openProject(page);
     await expect(visibleEditor(page)).toContainText("notes body", {
       timeout: 15000,
@@ -347,7 +343,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
 
     // Re-enter at the bare root: README restores, both empty leftovers
     // (generated-name and renamed) are swept, only content survives.
-    await page.goto("/welcome");
+    await page.goto("/");
     await openProject(page);
     await expect(visibleEditor(page)).toContainText("Seeded", {
       timeout: 15000,
