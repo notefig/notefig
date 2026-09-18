@@ -40,6 +40,17 @@ export interface WorkspaceCommands {
  * keyboard shortcuts: Mod+N new scratchpad, Mod+F search in file,
  * Mod+Shift+F global search, Mod+Shift+A agent sessions sidebar.
  */
+/**
+ * What a selection seeds the search box with: the text without the
+ * whitespace a drag picks up at either end (a selection that starts on the
+ * space before a token, or runs onto the next line). Nothing, when only
+ * whitespace was selected.
+ */
+function seedQuery(selectedText: string | undefined): string | undefined {
+  const trimmed = selectedText?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 export function useWorkspaceCommands({
   workspacePath,
   activeTabId,
@@ -97,7 +108,7 @@ export function useWorkspaceCommands({
    * whatever is selected in that tab.
    */
   const handleSearchInFile = useCallback(() => {
-    const selectedText = getSelectedText();
+    const selectedText = seedQuery(getSelectedText());
     const searchableFile =
       activeTabId && tabKind(activeTabId) === "file" ? activeTabId : null;
 
@@ -109,7 +120,7 @@ export function useWorkspaceCommands({
 
   /** Mod+Shift+F — global search across all files */
   const handleSearchInFiles = useCallback(() => {
-    const selectedText = getSelectedText();
+    const selectedText = seedQuery(getSelectedText());
 
     openSearchPanel({ initialQuery: selectedText });
   }, [getSelectedText, openSearchPanel]);
