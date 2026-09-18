@@ -109,6 +109,19 @@ export function useOpenWorkspacesReady(): boolean {
   return ready;
 }
 
+/**
+ * Every mutation of the open set waits for this. A write issued before the
+ * persisted collection has hydrated is assigned a stream position from what
+ * the persistence layer has observed so far — before hydration, the very
+ * position the previous session already used — and the adapter drops it as
+ * already applied: the row shows in memory and is gone on the next launch
+ * (workspaces-restore.test.ts pins this). In steady state the wait is a
+ * resolved promise.
+ */
+function hydrated(): Promise<void> {
+  return openWorkspacesCollection.preload();
+}
+
 // There is deliberately no runtime map here any more. It used to hold one
 // thing — the metadata watcher — and once watching moved to the portal
 // (subscription below), membership *is* the collection. Everything else the
@@ -121,26 +134,29 @@ const pendingCloses = new Map<string, Promise<void>>();
 
 /**
  * Open-or-focus, the one verb every entry point uses. A workspace not yet
- * open joins the open set — synchronously, so it is open (and watched, via
- * the registry subscription) by the time this returns — with its file
- * collections seeded and its listing walk under way. One already open is
- * brought to the front instead: the sidebar shows it and new-item actions
- * target it. Either way its listing is re-stat'd, as entry always did
- * (cheap, catches watcher gaps), and the promise resolves once the write
- * is durable: a reload before that would forget the workspace or land on
- * the previous focus, so callers that can be followed by one (the test
- * seam) await it. Re-arming a watcher whose start failed is the portal's
- * other half of re-entry (`showWorkspace` in hooks/use-open-project.ts).
+ * open joins the open set — open (and watched, via the registry
+ * subscription) once the persisted set has hydrated, which in steady state
+ * is immediate — with its file collections seeded and its listing walk
+ * under way. One already open is brought to the front instead: the sidebar
+ * shows it and new-item actions target it. Either way its listing is
+ * re-stat'd, as entry always did (cheap, catches watcher gaps), and the
+ * promise resolves once the write is durable: a reload before that would
+ * forget the workspace or land on the previous focus, so callers that can
+ * be followed by one (the test seam) await it. Re-arming a watcher whose
+ * start failed is the portal's other half of re-entry (`showWorkspace` in
+ * hooks/use-open-project.ts).
  */
-export function openWorkspace(workspacePath: string): Promise<void> {
+export async function openWorkspace(workspacePath: string): Promise<void> {
   const key = workspaceKey(workspacePath);
   const native = pathutil.normalize(workspacePath);
   const pendingClose = pendingCloses.get(key);
   if (pendingClose) {
     // Reopen racing an in-flight close of the same workspace: let the
     // teardown finish, then open fresh — never interleave the two.
-    return pendingClose.then(() => openWorkspace(workspacePath));
+    await pendingClose;
+    return openWorkspace(workspacePath);
   }
+  await hydrated();
   const existing = openWorkspacesCollection.get(key);
   if (existing) {
     void refreshDirectoryMetadata(existing.path);

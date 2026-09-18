@@ -93,8 +93,8 @@ beforeEach(async () => {
 });
 
 describe("openWorkspace", () => {
-  it("seeds collections, refreshes, inserts the row", () => {
-    openWorkspace("/ws");
+  it("seeds collections, refreshes, inserts the row", async () => {
+    await openWorkspace("/ws");
 
     expect(files.getOrCreateWorkspaceCollections).toHaveBeenCalledWith("/ws");
     expect(files.refreshDirectoryMetadata).toHaveBeenCalledWith("/ws");
@@ -104,11 +104,11 @@ describe("openWorkspace", () => {
     ]);
   });
 
-  it("re-entry refreshes the listing but never re-seeds", () => {
-    openWorkspace("/ws");
-    openWorkspace("/ws");
+  it("re-entry refreshes the listing but never re-seeds", async () => {
+    await openWorkspace("/ws");
+    await openWorkspace("/ws");
     // Same workspace under a respelled path collapses onto one entry.
-    openWorkspace("/ws/");
+    await openWorkspace("/ws/");
 
     expect(files.getOrCreateWorkspaceCollections).toHaveBeenCalledTimes(1);
     expect(files.refreshDirectoryMetadata).toHaveBeenCalledTimes(3);
@@ -134,9 +134,9 @@ describe("openWorkspace", () => {
     }
   });
 
-  it("keeps independent entries per workspace", () => {
-    openWorkspace("/ws-a");
-    openWorkspace("/ws-b");
+  it("keeps independent entries per workspace", async () => {
+    await openWorkspace("/ws-a");
+    await openWorkspace("/ws-b");
 
     expect(openWorkspacesCollection.size).toBe(2);
     expect(isWorkspaceOpen("/ws-a")).toBe(true);
@@ -146,7 +146,7 @@ describe("openWorkspace", () => {
 
 describe("closeWorkspace", () => {
   it("tears down every per-workspace subsystem and drops the row", async () => {
-    openWorkspace("/ws");
+    await openWorkspace("/ws");
 
     await closeWorkspace("/ws");
 
@@ -158,7 +158,7 @@ describe("closeWorkspace", () => {
   });
 
   it("demotes sessionful task rows to restored and purges sessionless ones (MET-54 contract)", async () => {
-    openWorkspace("/ws");
+    await openWorkspace("/ws");
     await agentTasksCollection.insert(taskRow({ status: "running" }))
       .isPersisted.promise;
     await agentTasksCollection.insert(
@@ -191,7 +191,7 @@ describe("closeWorkspace", () => {
 
 describe("close/reopen race", () => {
   it("a reopen during an in-flight close waits for the teardown, then opens fresh", async () => {
-    openWorkspace("/ws");
+    await openWorkspace("/ws");
     await agentTasksCollection.insert(taskRow({ status: "running" }))
       .isPersisted.promise;
 
@@ -201,7 +201,7 @@ describe("close/reopen race", () => {
     expect(openWorkspacesCollection.size).toBe(0);
 
     // …and a reopen issued mid-teardown neither throws nor interleaves.
-    openWorkspace("/ws");
+    await openWorkspace("/ws");
     await closing;
     await Promise.resolve();
 
@@ -220,7 +220,7 @@ describe("close/reopen race", () => {
   });
 
   it("double-close returns the same in-flight teardown", async () => {
-    openWorkspace("/ws");
+    await openWorkspace("/ws");
     const first = closeWorkspace("/ws");
     const second = closeWorkspace("/ws");
     expect(second).toBe(first);
@@ -231,8 +231,8 @@ describe("close/reopen race", () => {
 
 describe("closeAllWorkspaces", () => {
   it("closes every open workspace", async () => {
-    openWorkspace("/ws-a");
-    openWorkspace("/ws-b");
+    await openWorkspace("/ws-a");
+    await openWorkspace("/ws-b");
 
     await closeAllWorkspaces();
 
@@ -243,25 +243,25 @@ describe("closeAllWorkspaces", () => {
 });
 
 describe("workspaceOfPath", () => {
-  it("resolves by tree membership, never by string prefix", () => {
-    openWorkspace("/ws");
-    openWorkspace("/ws-backup");
+  it("resolves by tree membership, never by string prefix", async () => {
+    await openWorkspace("/ws");
+    await openWorkspace("/ws-backup");
 
     expect(workspaceOfPath("/ws/a.md")).toBe("/ws");
     expect(workspaceOfPath("/ws-backup/x.md")).toBe("/ws-backup");
     expect(workspaceOfPath("/ws")).toBe("/ws");
   });
 
-  it("picks the deepest of nested open workspaces", () => {
-    openWorkspace("/ws");
-    openWorkspace("/ws/inner");
+  it("picks the deepest of nested open workspaces", async () => {
+    await openWorkspace("/ws");
+    await openWorkspace("/ws/inner");
 
     expect(workspaceOfPath("/ws/inner/y.md")).toBe("/ws/inner");
     expect(workspaceOfPath("/ws/top.md")).toBe("/ws");
   });
 
-  it("is null for a path no open workspace contains", () => {
-    openWorkspace("/ws");
+  it("is null for a path no open workspace contains", async () => {
+    await openWorkspace("/ws");
 
     expect(workspaceOfPath("/elsewhere/z.md")).toBeNull();
   });

@@ -26,6 +26,7 @@ const scratchpads = vi.hoisted(() => ({
     async (ws: string, _keep: readonly string[]): Promise<string | null> =>
       `${ws}/.notefig/scratchpads/sunny-otter.md`,
   ),
+  sweepScratchpads: vi.fn(async (_ws: string, _keep: readonly string[]) => {}),
 }));
 vi.mock("@/entities/scratchpads", () => scratchpads);
 const watchers = vi.hoisted(() => ({ ensureWatching: vi.fn() }));
@@ -123,7 +124,7 @@ describe("useOpenProject", () => {
     expect(openTabs()).toEqual(["/ws/.notefig/scratchpads/sunny-otter.md"]);
   });
 
-  it("re-open of an open workspace with a file tab only brings it to the front — no scratchpad, tabs untouched", async () => {
+  it("re-open of an open workspace with a file tab only brings it to the front — sweep, no landing, tabs untouched", async () => {
     await act(async () => {
       await openProject!("/ws");
     });
@@ -136,6 +137,10 @@ describe("useOpenProject", () => {
     await tick();
 
     expect(scratchpads.enterScratchpad).not.toHaveBeenCalled();
+    // The entry sweep still runs, keeping the tab that is open.
+    expect(scratchpads.sweepScratchpads).toHaveBeenCalledWith("/ws", [
+      "/ws/.notefig/scratchpads/sunny-otter.md",
+    ]);
     expect(workspaces.openWorkspace).toHaveBeenCalledWith("/ws");
     expect(openTabs()).toEqual(["/ws/.notefig/scratchpads/sunny-otter.md"]);
   });

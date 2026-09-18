@@ -20,7 +20,7 @@ import {
 import { workspaceKey } from "@/utils/path";
 import { openFileInLayout } from "@/utils/dockable-layout";
 import { openWorkspace, workspaceOfPath } from "@/entities/workspaces";
-import { enterScratchpad } from "@/entities/scratchpads";
+import { enterScratchpad, sweepScratchpads } from "@/entities/scratchpads";
 import { ensureWatching } from "@/utils/workspace-watchers";
 import { useRecentProjects } from "./use-recent-projects";
 
@@ -70,10 +70,15 @@ export function useOpenProject(): (workspacePath: string) => Promise<void> {
       const open = (async () => {
         // Durable before anything else: a reload right after must find it.
         await showWorkspace(workspacePath);
-        // Empty entry: with none of the project's files open, sweep
-        // abandoned empty scratchpads (never one open as a tab) and land in
-        // the most recent survivor or a fresh one.
-        if (hasOpenFileTab(workspacePath)) return;
+        // The entry sweep runs either way: abandoned empty scratchpads go
+        // (never one open as a tab). Only an EMPTY entry — none of the
+        // project's files open in the dock — also lands in the most recent
+        // survivor or a fresh one; with a file already open there is
+        // nothing to land on.
+        if (hasOpenFileTab(workspacePath)) {
+          await sweepScratchpads(workspacePath, readOpenTabIds());
+          return;
+        }
         const scratchpad = await enterScratchpad(
           workspacePath,
           readOpenTabIds(),

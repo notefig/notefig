@@ -447,14 +447,22 @@ mod tests {
 
         // Page A: BEGIN, write, then vanish without COMMIT.
         execute_on(&connection, "BEGIN IMMEDIATE", &[]).expect("begin A");
-        execute_on(&connection, "INSERT INTO t (v) VALUES ($1)", &[json!("orphan")])
-            .expect("insert A");
+        execute_on(
+            &connection,
+            "INSERT INTO t (v) VALUES ($1)",
+            &[json!("orphan")],
+        )
+        .expect("insert A");
         assert!(!connection.is_autocommit());
 
         // Page B: its own transaction must start cleanly.
         execute_on(&connection, "BEGIN IMMEDIATE", &[]).expect("begin B succeeds");
-        execute_on(&connection, "INSERT INTO t (v) VALUES ($1)", &[json!("kept")])
-            .expect("insert B");
+        execute_on(
+            &connection,
+            "INSERT INTO t (v) VALUES ($1)",
+            &[json!("kept")],
+        )
+        .expect("insert B");
         execute_on(&connection, "COMMIT", &[]).expect("commit B");
         assert!(connection.is_autocommit());
 
@@ -472,11 +480,19 @@ mod tests {
         execute_on(&connection, "CREATE TABLE t (v)", &[]).expect("create");
 
         execute_on(&connection, "BEGIN IMMEDIATE", &[]).expect("begin");
-        execute_on(&connection, "INSERT INTO t (v) VALUES ($1)", &[json!("outer")])
-            .expect("insert outer");
+        execute_on(
+            &connection,
+            "INSERT INTO t (v) VALUES ($1)",
+            &[json!("outer")],
+        )
+        .expect("insert outer");
         execute_on(&connection, "SAVEPOINT sp1", &[]).expect("savepoint");
-        execute_on(&connection, "INSERT INTO t (v) VALUES ($1)", &[json!("inner")])
-            .expect("insert inner");
+        execute_on(
+            &connection,
+            "INSERT INTO t (v) VALUES ($1)",
+            &[json!("inner")],
+        )
+        .expect("insert inner");
         execute_on(&connection, "RELEASE SAVEPOINT sp1", &[]).expect("release");
         execute_on(&connection, "COMMIT", &[]).expect("commit");
 

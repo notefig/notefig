@@ -346,6 +346,25 @@ export async function sweepScratchpadsOnDisk(
 }
 
 /**
+ * The entry-time sweep on its own, for an entry that has nothing to land
+ * on because one of the project's files is already open in the dock: the
+ * abandoned empty scratchpads still go (the folder is app territory), the
+ * tabs already open are kept, and the listing re-walks so the tree and any
+ * tab on a swept file catch up. Never rejects.
+ */
+export async function sweepScratchpads(
+  workspacePath: string,
+  keepPaths: readonly string[],
+): Promise<void> {
+  try {
+    await sweepScratchpadsOnDisk(workspacePath, keepPaths);
+  } catch (error) {
+    console.error("[scratchpads] entry sweep failed:", error);
+  }
+  await refetchWorkspaceMetadata(workspacePath);
+}
+
+/**
  * What opening a project lands on: sweep abandoned empty scratchpads (never
  * one in `keepPaths` — the tabs already open), then the most recent
  * survivor or a fresh one — unless "scratchpad on startup" is off, in
