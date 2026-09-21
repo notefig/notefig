@@ -148,6 +148,12 @@ function draftEntryTarget(state: EditorState, dir: -1 | 1): Selection | null {
   return selectionDraft({ selection: target }) ? target : null;
 }
 
+/** Pasted text as a draft admits it: every run of line breaks becomes one
+ *  space, so the paste stays on the draft's line. */
+export function flattenDraftPaste(text: string): string {
+  return text.replace(/(?:\r?\n)+/g, " ");
+}
+
 /** The keeper's insertion, or null when the doc doesn't need one. */
 function appendPromptTr(
   state: EditorState,
@@ -535,6 +541,32 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
     return [
       new Plugin({
         props: {
+          // Paste into a draft. The draft admits inline content only, so
+          // a multi-line paste — parsed into paragraphs by tiptap-markdown's
+          // transformPastedText — gets "fitted" by ProseMirror closing the
+          // draft and the widget, and everything from the first line break
+          // on lands in the document below. Line breaks are collapsed to
+          // spaces and the plain text inserted, clamped to the draft the
+          // same way the Backspace variants clamp (a drag selection can end
+          // past it). Consumed even when the clipboard has no plain text:
+          // a rich-only paste must not reach the block-fitting path either.
+          handlePaste(view, event) {
+            const draft = selectionDraft(view.state);
+            if (!draft) return false;
+            const text = flattenDraftPaste(
+              event.clipboardData?.getData("text/plain") ?? "",
+            );
+            const { selection } = view.state;
+            const to = Math.min(selection.to, draft.to);
+            if (text) {
+              view.dispatch(
+                view.state.tr
+                  .insertText(text, selection.from, to)
+                  .scrollIntoView(),
+              );
+            }
+            return true;
+          },
           // The "/" summon. Returning true consumes the keystroke.
           handleTextInput(view, _from, _to, text) {
             if (!options.filePath || text !== "/") return false;
