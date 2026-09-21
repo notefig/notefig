@@ -554,13 +554,13 @@ test.describe("Notefig E2E Comprehensive Tests", () => {
       await openFileInTree(page, "tab-a.md");
       await page.waitForTimeout(300);
 
-      // Single-tab windows hide the tab bar.
-      await expect(dockableTabs()).toHaveCount(0);
+      // The top tab bar is always there; one tab shows as one tab.
+      await expect(dockableTabs()).toHaveCount(1);
 
       // Default open replaces existing selected tab in the focused window.
       await openFileInTree(page, "tab-b.md");
       await page.waitForTimeout(300);
-      await expect(dockableTabs()).toHaveCount(0);
+      await expect(dockableTabs()).toHaveCount(1);
       await expect(page.locator('[role="textbox"]').first()).toContainText(
         "Content for tab B",
       );
