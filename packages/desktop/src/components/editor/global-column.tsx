@@ -43,11 +43,11 @@ interface GlobalColumnProps {
 }
 
 /**
- * The sidebar's global column — always there, whatever the workspace
- * column shows: the Everything view on top, one chip per open workspace
- * (the current one marked, each carrying the count of runs waiting on the
- * user in it), a way to add one, and settings at the foot. A right-click
- * on a chip closes its workspace.
+ * The rail down the sidebar card's left edge, under the header row: the
+ * Everything view (the logo) on top, one chip per open workspace (the
+ * current one marked, each carrying the count of runs waiting on the user
+ * in it), a way to add one, and settings at the foot. A right-click on a
+ * chip closes its workspace. Gone with the card when the sidebar closes.
  */
 export function GlobalColumn({
   workspacePath,
@@ -63,15 +63,15 @@ export function GlobalColumn({
   const focusedKey = workspaceKey(workspacePath);
 
   return (
-    <div className="flex h-full w-10 shrink-0 flex-col items-center gap-1 border-e border-border bg-muted/40 py-1.5">
+    <div className="flex h-full w-8 shrink-0 flex-col items-center gap-1 border-e border-border py-1.5">
       <ColumnButton
         label={t("everything")}
         active={isEverything}
         onClick={onShowEverything}
       >
-        <PlainLogo size="1.125rem" fill="var(--logo)" />
+        <PlainLogo size="1rem" fill="var(--logo)" />
       </ColumnButton>
-      <div className="my-1 h-px w-5 bg-border" />
+      <div className="my-0.5 h-px w-4 bg-border" />
 
       {rows.map((row) => {
         const name = deriveProjectName(row.path);
@@ -118,7 +118,7 @@ export function GlobalColumn({
 
       <div className="mt-auto">
         <ColumnButton label={t("settings")} onClick={onOpenSettings}>
-          <Settings className="size-4" />
+          <Settings className="size-3.5" />
         </ColumnButton>
       </div>
       {dialog}
@@ -155,7 +155,7 @@ function ColumnButton({
           aria-pressed={active}
           aria-current={current ? "true" : undefined}
           className={cn(
-            "relative flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            "relative flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
             active && "bg-accent text-foreground shadow-sm ring-1 ring-border",
           )}
         >
@@ -195,9 +195,9 @@ function AddWorkspaceButton() {
             <button
               type="button"
               aria-label={t("addWorkspace")}
-              className="flex size-8 items-center justify-center rounded-md border border-dashed border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="flex size-6 items-center justify-center rounded-md border border-dashed border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              <Plus className="size-4" />
+              <Plus className="size-3.5" />
             </button>
           </DropdownMenuTrigger>
         </TooltipTrigger>

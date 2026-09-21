@@ -15,7 +15,12 @@ import type {
   DragEndEvent,
   DragOverEvent,
 } from "@dnd-kit/core";
-import { StoreContext } from "../store";
+import {
+  StoreContext,
+  DockChromeContext,
+  DEFAULT_DOCK_CHROME,
+  type DockChrome,
+} from "../store";
 import { dockableCollision } from "../dndkit/dockableCollision";
 import DroppableDivider from "../dndkit/DroppableDivider";
 import Droppable from "../dndkit/Droppable";
@@ -37,6 +42,8 @@ type DockableProps = {
   onChange?: (panels: LayoutNode[]) => void;
   gap?: number;
   radius?: number;
+  /** Chrome the host lays into the tab bars — see `DockChrome`. */
+  chrome?: Partial<DockChrome>;
 };
 
 export function DockableRoot({
@@ -46,6 +53,7 @@ export function DockableRoot({
   onChange,
   gap = 2,
   radius = 0,
+  chrome,
 }: DockableProps) {
   const views: React.ReactElement<TabProps>[] = [];
   const [active, setActive] = useState<{
@@ -269,6 +277,7 @@ export function DockableRoot({
 
   return (
     <StoreContext.Provider value={{ state, dispatch }}>
+      <DockChromeContext.Provider value={{ ...DEFAULT_DOCK_CHROME, ...chrome }}>
       <div
         className={styles.container}
         style={{
@@ -313,6 +322,7 @@ export function DockableRoot({
           {renderEdgeDroppables()}
         </DndContext>
       </div>
+      </DockChromeContext.Provider>
     </StoreContext.Provider>
   );
 }

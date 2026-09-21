@@ -16,6 +16,10 @@ type PanelProps = {
     | React.ReactElement<React.ComponentProps<typeof View>>
     | React.ReactElement<React.ComponentProps<typeof View>>[];
   address: number[];
+  /** On the path to the top window at the reading direction's end
+   *  (top-right in LTR, top-left in RTL): last child of every row, first
+   *  child of every column. Root defaults to true. */
+  atEnd?: boolean;
   gap?: number;
   panels: LayoutNode[];
   rootPanels?: LayoutNode[];
@@ -44,6 +48,7 @@ function PanelView({
   gap,
   panels,
   rootPanels,
+  atEnd = true,
 }: PanelProps) {
   const { dispatch } = useDockable();
   const layoutRoot = rootPanels ?? panels;
@@ -55,6 +60,10 @@ function PanelView({
   const childArray = React.Children.toArray(children) as React.ReactElement<
     React.ComponentProps<typeof View>
   >[];
+
+  const childAtEnd = (index: number) =>
+    atEnd &&
+    (orientation === "row" ? index === panels.length - 1 : index === 0);
 
   function handleResizeEnd(sizes: number[]) {
     dispatch({ type: "resize", sizes, address });
@@ -100,6 +109,7 @@ function PanelView({
                 selected={(panel as WindowNode).selected.toString()}
                 orientation={orientation}
                 address={address.concat(index)}
+                atEnd={childAtEnd(index)}
               />
             );
           } else {
@@ -119,6 +129,7 @@ function PanelView({
                 address={address.concat(index)}
                 gap={gap}
                 rootPanels={layoutRoot}
+                atEnd={childAtEnd(index)}
               />
             );
           }

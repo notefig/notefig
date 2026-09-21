@@ -1,12 +1,21 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type React from "react";
 import { Dockable } from "@/components/dockable";
-import { Sidebar } from "@/components/editor/sidebar";
+import type { DockChrome } from "@/components/dockable/store";
+import {
+  CollapsedSidebarHeader,
+  Sidebar,
+} from "@/components/editor/sidebar";
 import type { SearchPanelHandle } from "@/components/editor/search-panel";
 import { canOpenFile as canOpenInEditor } from "@/components/editor/polymorphic-editor";
-import { StatusCells } from "@/components/editor/status-bar";
-import { Titlebar, TopBar } from "@/components/titlebar";
-import { PanelLeft, PanelLeftClose, Search } from "lucide-react";
+import { StatusBar } from "@/components/editor/status-bar";
+import {
+  SHELL_CARD_CLASS,
+  Titlebar,
+  WindowsControlsInline,
+  useShellChromeMetrics,
+} from "@/components/titlebar";
+import { cn } from "@notefig/ui/utils";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
@@ -33,6 +42,8 @@ import { useProjectSettings } from "@/utils/project-settings";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
 import { useWorkspaceCommands } from "@/hooks/use-workspace-commands";
 import { useWorkspacePanels } from "@/hooks/use-workspace-panels";
+import { useSidebarResize } from "@/hooks/use-sidebar-resize";
+import { useSidebarCollapseTween } from "@/hooks/use-sidebar-collapse-tween";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { WorkspaceTabsProvider } from "@/components/workspace-tabs-provider";
@@ -184,6 +195,13 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
     renameTab,
   });
 
+  const chrome = useShellChromeMetrics();
+  const sidebarResize = useSidebarResize();
+  const sidebarTween = useSidebarCollapseTween(isSidebarCollapsed);
+  // The macOS lights sit at the window's physical top-left: over the
+  // sidebar in LTR, over the dock's end-most tab bar in RTL.
+  const lightsInset = direction === "rtl" ? undefined : chrome.insetStart;
+
   return (
     <WorkspaceTabsProvider
       openFile={openFileInTabs}
@@ -192,39 +210,42 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
       <PromptWidgetBoundary>
         <div
           dir={direction}
-          className="texture-surface flex h-full w-full flex-col overflow-clip bg-background"
+          className={cn(
+            "texture-surface flex h-full w-full overflow-clip bg-background",
+            chrome.rootClassName,
+          )}
+          style={chrome.rootStyle}
         >
-          <TopBar>
-            <TopBarChrome
-              isSidebarCollapsed={isSidebarCollapsed}
-              onToggleSidebar={toggleSidebarCollapsed}
-              onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
-              wordCount={wordCount}
-              isSynced={isSynced}
-            />
-          </TopBar>
+          <Sidebar
+            workspacePath={workspacePath}
+            sidebarView={sidebarView}
+            isCollapsed={isSidebarCollapsed}
+            activeTabId={activeTabId}
+            openTabs={openTabs}
+            onFileSelect={handleFileSelect}
+            closeTab={closeTab}
+            onRenameOpenFile={handleRenameOpenFile}
+            mode={fileTreeMode}
+            onModeChange={setFileTreeMode}
+            searchPanelRef={searchPanelRef}
+            onToggleCollapse={toggleSidebarCollapsed}
+            onShowEverything={showEverything}
+            onShowTool={showSidebarView}
+            onShowWorkspaceTools={showWorkspaceTools}
+            onOpenSettings={openSettings}
+            resize={sidebarResize}
+            tween={sidebarTween}
+            lightsInset={lightsInset}
+          />
 
-          <div className="flex min-h-0 flex-1">
-            <Sidebar
-              workspacePath={workspacePath}
-              sidebarView={sidebarView}
-              isCollapsed={isSidebarCollapsed}
-              activeTabId={activeTabId}
-              openTabs={openTabs}
-              onFileSelect={handleFileSelect}
-              closeTab={closeTab}
-              onRenameOpenFile={handleRenameOpenFile}
-              mode={fileTreeMode}
-              onModeChange={setFileTreeMode}
-              searchPanelRef={searchPanelRef}
-              onToggleCollapse={toggleSidebarCollapsed}
-              onShowEverything={showEverything}
-              onShowTool={showSidebarView}
-              onShowWorkspaceTools={showWorkspaceTools}
-              onOpenSettings={openSettings}
-            />
-
-            <div className="flex min-w-0 flex-1 flex-col overflow-clip">
+          <div
+            className={cn(
+              "flex min-w-0 flex-1 flex-col overflow-clip",
+              chrome.stackClassName,
+            )}
+            style={chrome.stackStyle}
+          >
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-clip">
               <DebugPanel />
               <div className="flex min-h-0 flex-1 overflow-clip">
                 <div
@@ -236,11 +257,31 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
                     hasTabs={openTabs.length > 0}
                     layout={layout}
                     onLayoutChange={handleLayoutChange}
+                    chrome={{
+                      tabBarLeading: (
+                        <CollapsedSidebarHeader
+                          workspacePath={workspacePath}
+                          width={sidebarResize.sidebarWidth}
+                          open={!isSidebarCollapsed}
+                          lightsInset={lightsInset}
+                          onToggleCollapse={toggleSidebarCollapsed}
+                        />
+                      ),
+                      tabBarTrailing: <WindowsControlsInline />,
+                      tabBarLeadingActive: isSidebarCollapsed,
+                      endInset:
+                        direction === "rtl" ? (chrome.insetStart ?? null) : null,
+                    }}
                   >
                     {allDockableTabs}
                   </DockArea>
                 </div>
               </div>
+              <StatusBar
+                wordCount={wordCount}
+                isSynced={isSynced}
+                direction={direction}
+              />
             </div>
           </div>
 
@@ -272,54 +313,6 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
         </div>
       </PromptWidgetBoundary>
     </WorkspaceTabsProvider>
-  );
-}
-
-/** What the app lays into the window's top bar: the sidebar toggle, the
- *  command palette, and the status cells at the far end. */
-function TopBarChrome({
-  isSidebarCollapsed,
-  onToggleSidebar,
-  onOpenCommandPalette,
-  wordCount,
-  isSynced,
-}: {
-  isSidebarCollapsed: boolean;
-  onToggleSidebar: () => void;
-  onOpenCommandPalette: () => void;
-  wordCount: number | null;
-  isSynced: boolean;
-}) {
-  const { t } = useTranslation();
-  const iconButton =
-    "flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
-  return (
-    <div className="grid h-full w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center px-2">
-      <button
-        type="button"
-        onClick={onToggleSidebar}
-        aria-label={isSidebarCollapsed ? t("expandSidebar") : t("collapseSidebar")}
-        className={iconButton}
-      >
-        {isSidebarCollapsed ? (
-          <PanelLeft className="size-4" />
-        ) : (
-          <PanelLeftClose className="size-4" />
-        )}
-      </button>
-      <button
-        type="button"
-        onClick={onOpenCommandPalette}
-        className="flex h-7 w-[28rem] max-w-[50vw] items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-      >
-        <Search className="size-3.5" />
-        <span className="flex-1 truncate text-start">{t("quickSwitcher")}</span>
-        <kbd className="font-mono text-[0.625rem]">⌘K</kbd>
-      </button>
-      <div className="flex justify-end">
-        <StatusCells wordCount={wordCount} isSynced={isSynced} />
-      </div>
-    </div>
   );
 }
 
@@ -581,28 +574,53 @@ function useRenameOpenFile(
   );
 }
 
-/** The dock's tab surface, or the empty-state message with no tabs open. */
+/** The dock's tab surface, or the empty-state message with no tabs open.
+ *  The header row (the top-left tab bar, host of the collapsed sidebar's
+ *  header) is there in both, so the content never moves. */
 function DockArea({
   hasTabs,
   layout,
   onLayoutChange,
+  chrome,
   children,
 }: {
   hasTabs: boolean;
   layout: Parameters<typeof removeTabFromLayout>[0];
   onLayoutChange: (layout: Parameters<typeof removeTabFromLayout>[0]) => void;
+  chrome: Partial<DockChrome>;
   children: React.ComponentProps<typeof Dockable.Root>["children"];
 }) {
   const { t } = useTranslation();
   if (!hasTabs) {
     return (
-      <div className="flex items-center justify-center h-full text-muted-foreground p-4 ps-0">
-        <p className="text-center">{t("noFileSelected")}</p>
+      <div className="flex h-full flex-col">
+        <div
+          className={cn(
+            SHELL_CARD_CLASS,
+            "flex h-[calc(var(--shell-header-height)+2px)] shrink-0 overflow-clip rounded-lg transition-[margin] duration-200 ease-out motion-reduce:transition-none",
+            chrome.tabBarLeadingActive ? "ms-0 me-2" : "mx-2",
+          )}
+        >
+          {chrome.tabBarLeading}
+          <div className="flex-1" />
+          {chrome.endInset != null && (
+            <div className="shrink-0" style={{ width: chrome.endInset }} />
+          )}
+          {chrome.tabBarTrailing}
+        </div>
+        <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-muted-foreground">
+          <p className="text-center">{t("noFileSelected")}</p>
+        </div>
       </div>
     );
   }
   return (
-    <Dockable.Root orientation="row" layout={layout} onChange={onLayoutChange}>
+    <Dockable.Root
+      orientation="row"
+      layout={layout}
+      onChange={onLayoutChange}
+      chrome={chrome}
+    >
       {children}
     </Dockable.Root>
   );

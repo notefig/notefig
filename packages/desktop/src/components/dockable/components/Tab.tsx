@@ -38,7 +38,7 @@ function Tab({
       <div
         className={cn(
           "group relative flex h-full cursor-pointer items-center overflow-visible border-x border-transparent bg-background first:border-l-0 rtl:first:border-r-0",
-          "text-sm font-medium leading-tight",
+          "text-xs font-medium leading-tight",
           "transition-colors duration-150",
           selected
             ? "border-border text-foreground"

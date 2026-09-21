@@ -418,8 +418,6 @@ i18n
           attentionUnavailable: "{{title}} disconnected",
           attentionError: "{{title}} failed",
           agentRuns: "Working",
-          runsNeedYouHere_one: "{{count}} run needs you here",
-          runsNeedYouHere_other: "{{count}} runs need you here",
           recentDocuments: "Recents",
           noRecentDocuments: "Documents you open show up here.",
           scratchTag: "scratch",

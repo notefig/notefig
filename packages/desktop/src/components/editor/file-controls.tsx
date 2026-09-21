@@ -18,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@notefig/ui/dropdown-menu";
 import { cn } from "@notefig/ui/utils";
+import { ToolBar } from "@/components/editor/tool-bar";
 import { useTranslation } from "react-i18next";
 import type { SortOrder } from "@/utils/fs";
 
@@ -43,7 +44,7 @@ export function FileControls({
   const SortIcon = sortIcons[sortOrder];
 
   return (
-    <div className="flex h-9 items-center justify-end gap-1 border-t border-sidebar-border bg-sidebar px-2">
+    <ToolBar className="justify-end">
       <DropdownMenu>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -93,7 +94,7 @@ export function FileControls({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-    </div>
+    </ToolBar>
   );
 }
 

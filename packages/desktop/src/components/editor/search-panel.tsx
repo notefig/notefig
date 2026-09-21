@@ -1,3 +1,4 @@
+import { ToolBar } from "@/components/editor/tool-bar";
 import {
   useState,
   useCallback,
@@ -155,8 +156,22 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
 
     return (
       <div className="flex flex-col h-full">
-        <div className="flex items-center gap-1 px-2 pt-2 pb-1">
-          <div className="flex-1 min-w-0 flex items-center gap-1.5 rounded-md border border-input bg-background px-2 py-1 text-sm">
+        <ToolBar
+          expanded={
+            showFilters ? (
+              <div className="px-2 pb-1.5">
+                <input
+                  type="text"
+                  value={filePattern}
+                  onChange={(e) => setFilePattern(e.target.value)}
+                  placeholder={t("fileFilterPlaceholder")}
+                  className="h-6 w-full rounded-md border border-input bg-background px-2 text-xs outline-none placeholder:text-muted-foreground"
+                />
+              </div>
+            ) : null
+          }
+        >
+          <div className="flex h-6 min-w-0 flex-1 items-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs">
             <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
             <input
               ref={inputRef}
@@ -164,7 +179,7 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t("search")}
-              className="flex-1 bg-transparent outline-none placeholder:text-muted-foreground text-sm min-w-0"
+              className="flex-1 bg-transparent outline-none placeholder:text-muted-foreground text-xs min-w-0"
             />
             <button
               onClick={() => setCaseSensitive(!caseSensitive)}
@@ -206,19 +221,7 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
           >
             <SlidersHorizontal className="w-4 h-4" />
           </button>
-        </div>
-
-        {showFilters && (
-          <div className="px-2 pb-1">
-            <input
-              type="text"
-              value={filePattern}
-              onChange={(e) => setFilePattern(e.target.value)}
-              placeholder={t("fileFilterPlaceholder")}
-              className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm outline-none placeholder:text-muted-foreground"
-            />
-          </div>
-        )}
+        </ToolBar>
 
         {query.trim() && (
           <div className="flex items-center px-2 py-1 text-xs text-muted-foreground">

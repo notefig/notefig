@@ -1,16 +1,24 @@
 import {
   useState,
   useEffect,
-  useRef,
   useCallback,
+  type CSSProperties,
   type ReactNode,
   type Ref,
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Folder } from "lucide-react";
+import { PanelLeft, PanelLeftClose } from "lucide-react";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { cn } from "@notefig/ui/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@notefig/ui/tooltip";
+import {
+  SHELL_CARD_CLASS,
+  SHELL_HEADER_HEIGHT_CLASS,
+  ShellHeaderCard,
+} from "@/components/titlebar";
+import type { SidebarResize } from "@/hooks/use-sidebar-resize";
+import type { SidebarCollapseTween } from "@/hooks/use-sidebar-collapse-tween";
 import { FileTree, type FileTreeMode } from "@/components/editor/file-tree";
 import {
   FileControls,
@@ -50,7 +58,8 @@ import {
   type SidebarView,
   type WorkspaceTool,
 } from "@/hooks/use-workspace-panels";
-import { workspaceKey } from "@/utils/path";
+
+const NO_DRAG = { WebkitAppRegion: "no-drag" } as CSSProperties;
 
 interface SidebarProps {
   workspacePath: string;
@@ -73,15 +82,25 @@ interface SidebarProps {
   onShowTool: (tool: WorkspaceTool) => void;
   onShowWorkspaceTools: (path: string) => void;
   onOpenSettings: () => void;
+  /** Owned by the shell so the collapsed header keeps the same width. */
+  resize: SidebarResize;
+  /** Owned by the shell; the tab-bar header tweens against it. */
+  tween: SidebarCollapseTween;
+  /** Clearance for the macOS lights at the header's start, when the
+   *  sidebar is what they overlap (LTR on macOS); undefined otherwise. */
+  lightsInset: number | undefined;
 }
 
 /**
- * The sidebar, two columns. The global column never changes: the
- * Everything view, the open workspaces, settings. The workspace column
- * shows what the global column selected — the Everything view, or one
- * tool of the focused workspace under its name and a row of tool tabs.
- * Collapsing hides only the workspace column. Its content swaps with a
- * short fade so the change of subject reads as a move, not a flicker.
+ * The sidebar: one floating card that owns the window's header row. Closed,
+ * only that header remains — the OS lights, the focused workspace's name,
+ * an attention dot and the open button — pinned into the dock's tab bar.
+ * Open, the same header sits on top and the rest unrolls beneath it: the
+ * global rail down the left (logo = Everything, the open workspaces, +,
+ * settings) beside the tool tabs and the tool (or the Everything view),
+ * and a footer with the agent run counts. The header never moves between
+ * the two. The content swaps with a short fade so a change of subject
+ * reads as a move, not a flicker.
  */
 export function Sidebar({
   workspacePath,
@@ -100,203 +119,348 @@ export function Sidebar({
   onShowTool,
   onShowWorkspaceTools,
   onOpenSettings,
+  resize,
+  tween,
+  lightsInset,
 }: SidebarProps) {
-  const { containerRef, sidebarWidth, handleResizeStart } = useSidebarResize();
+  const { containerRef, sidebarWidth, handleResizeStart } = resize;
 
   useHotkey("Mod+\\", () => {
     onToggleCollapse();
   });
 
+  const { rendered, expanded } = tween;
+  // Collapsed and done tweening, the sidebar has no column at all: the
+  // shell lays its header into the dock's tab bar (`CollapsedSidebarHeader`).
+  if (!rendered) return null;
+
   return (
-    <>
+    <div
+      ref={containerRef}
+      data-sidebar
+      className="relative flex min-h-0 shrink-0 flex-col overflow-hidden transition-[width,margin] duration-200 ease-out motion-reduce:transition-none"
+      style={{
+        width: expanded ? sidebarWidth : 0,
+        // Give the gap back while closed so the dock lands flush.
+        marginInlineEnd: expanded ? 0 : "calc(var(--shell-gap) * -1)",
+      }}
+    >
+      <div
+        className={cn(
+          SHELL_CARD_CLASS,
+          "flex min-h-0 flex-1 flex-col overflow-hidden transition-opacity duration-200 motion-reduce:transition-none",
+          expanded ? "opacity-100" : "opacity-0",
+        )}
+        // Fixed to the open width so nothing inside reflows mid-tween.
+        style={{ width: sidebarWidth }}
+      >
+        <ShellHeaderCard className="h-[calc(var(--shell-header-height)+1px)] rounded-none border-0 border-b border-border bg-transparent shadow-none">
+          <SidebarHeader
+            workspacePath={workspacePath}
+            isCollapsed={false}
+            lightsInset={lightsInset}
+            onToggleCollapse={onToggleCollapse}
+          />
+        </ShellHeaderCard>
+        <SidebarBody
+          workspacePath={workspacePath}
+          sidebarView={sidebarView}
+          activeTabId={activeTabId}
+          openTabs={openTabs}
+          onFileSelect={onFileSelect}
+          closeTab={closeTab}
+          onRenameOpenFile={onRenameOpenFile}
+          mode={mode}
+          onModeChange={onModeChange}
+          searchPanelRef={searchPanelRef}
+          onShowEverything={onShowEverything}
+          onShowTool={onShowTool}
+          onShowWorkspaceTools={onShowWorkspaceTools}
+          onOpenSettings={onOpenSettings}
+        />
+      </div>
+      {expanded && (
+        <div
+          data-resize-handle
+          onMouseDown={handleResizeStart}
+          className="absolute inset-y-0 end-0 w-2 cursor-col-resize"
+        />
+      )}
+    </div>
+  );
+}
+
+/** Under the header: the global rail beside the Everything view or the
+ *  focused workspace's tool tabs and tool. */
+function SidebarBody({
+  workspacePath,
+  sidebarView,
+  activeTabId,
+  openTabs,
+  onFileSelect,
+  closeTab,
+  onRenameOpenFile,
+  mode,
+  onModeChange,
+  searchPanelRef,
+  onShowEverything,
+  onShowTool,
+  onShowWorkspaceTools,
+  onOpenSettings,
+}: Omit<
+  SidebarProps,
+  "isCollapsed" | "onToggleCollapse" | "resize" | "tween" | "lightsInset"
+>) {
+  const isEverything = sidebarView === "everything";
+  return (
+    <div className="flex min-h-0 flex-1">
       <GlobalColumn
         workspacePath={workspacePath}
-        isEverything={sidebarView === "everything"}
+        isEverything={isEverything}
         onShowEverything={onShowEverything}
         onShowWorkspaceTools={onShowWorkspaceTools}
         onOpenSettings={onOpenSettings}
       />
-      {!isCollapsed && (
-        <>
-          <div
-            ref={containerRef}
-            data-sidebar
-            className="flex min-h-0 shrink-0 flex-col overflow-hidden border-e border-border"
-            style={{ width: sidebarWidth }}
-          >
-            <div
-              key={sidebarView}
-              className="flex min-h-0 flex-1 flex-col animate-in fade-in-0 duration-200 motion-reduce:animate-none"
+      <div
+        key={sidebarView}
+        className="flex min-h-0 min-w-0 flex-1 flex-col animate-in fade-in-0 duration-200 motion-reduce:animate-none"
+      >
+        {isEverything ? (
+          <EverythingPanel activeTabId={activeTabId} />
+        ) : (
+          <WorkspacePanel
+            tool={sidebarView}
+            onShowTool={onShowTool}
             >
-              {sidebarView === "everything" ? (
-                <EverythingPanel activeTabId={activeTabId} />
-              ) : (
-                <WorkspacePanel
-                  workspacePath={workspacePath}
-                  tool={sidebarView}
-                  onShowEverything={onShowEverything}
-                  onShowTool={onShowTool}
-                >
-                  {sidebarView === "search" ? (
-                    <SearchPanel
-                      ref={searchPanelRef}
-                      workspacePath={workspacePath}
-                    />
-                  ) : sidebarView === "git" ? (
-                    <CheckpointPanel workspacePath={workspacePath} />
-                  ) : sidebarView === "sessions" ? (
-                    <SessionsPanel
-                      workspacePath={workspacePath}
-                      activeTabId={activeTabId}
-                    />
-                  ) : (
-                    <FilesTool
-                      workspacePath={workspacePath}
-                      activeTabId={activeTabId}
-                      openTabs={openTabs}
-                      onFileSelect={onFileSelect}
-                      closeTab={closeTab}
-                      onRenameOpenFile={onRenameOpenFile}
-                      mode={mode}
-                      onModeChange={onModeChange}
-                    />
-                  )}
-                </WorkspacePanel>
-              )}
-            </div>
-          </div>
-          <div
-            onMouseDown={handleResizeStart}
-            className="-ms-0.5 w-1 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-primary/40"
-          />
-        </>
-      )}
-    </>
+            <ToolContent
+              tool={sidebarView}
+              workspacePath={workspacePath}
+              activeTabId={activeTabId}
+              openTabs={openTabs}
+              onFileSelect={onFileSelect}
+              closeTab={closeTab}
+              onRenameOpenFile={onRenameOpenFile}
+              mode={mode}
+              onModeChange={onModeChange}
+              searchPanelRef={searchPanelRef}
+            />
+          </WorkspacePanel>
+        )}
+      </div>
+    </div>
   );
 }
 
-// Widths in rem so they track the root font-size (app-wide UI scale).
-const SIDEBAR_DEFAULT_REM = 15;
-const SIDEBAR_MIN_REM = 10;
-const SIDEBAR_MAX_REM = 26;
-
-/** Drag-to-resize, measured from the column's own left edge. */
-function useSidebarResize() {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [sidebarWidth, setSidebarWidth] = useState(`${SIDEBAR_DEFAULT_REM}rem`);
-  const [isResizing, setIsResizing] = useState(false);
-
-  useEffect(() => {
-    if (!isResizing) return;
-    const handleMouseMove = (e: MouseEvent) => {
-      const left = containerRef.current?.getBoundingClientRect().left ?? 0;
-      const remPx = parseFloat(
-        getComputedStyle(document.documentElement).fontSize,
+/** The focused workspace's tool, by name. */
+function ToolContent({
+  tool,
+  workspacePath,
+  activeTabId,
+  openTabs,
+  onFileSelect,
+  closeTab,
+  onRenameOpenFile,
+  mode,
+  onModeChange,
+  searchPanelRef,
+}: { tool: WorkspaceTool } & Pick<
+  SidebarProps,
+  | "workspacePath"
+  | "activeTabId"
+  | "openTabs"
+  | "onFileSelect"
+  | "closeTab"
+  | "onRenameOpenFile"
+  | "mode"
+  | "onModeChange"
+  | "searchPanelRef"
+>) {
+  switch (tool) {
+    case "search":
+      return <SearchPanel ref={searchPanelRef} workspacePath={workspacePath} />;
+    case "git":
+      return <CheckpointPanel workspacePath={workspacePath} />;
+    case "sessions":
+      return (
+        <SessionsPanel workspacePath={workspacePath} activeTabId={activeTabId} />
       );
-      const clampedRem = Math.max(
-        SIDEBAR_MIN_REM,
-        Math.min(SIDEBAR_MAX_REM, (e.clientX - left) / remPx),
+    default:
+      return (
+        <FilesTool
+          workspacePath={workspacePath}
+          activeTabId={activeTabId}
+          openTabs={openTabs}
+          onFileSelect={onFileSelect}
+          closeTab={closeTab}
+          onRenameOpenFile={onRenameOpenFile}
+          mode={mode}
+          onModeChange={onModeChange}
+        />
       );
-      setSidebarWidth(`${clampedRem}rem`);
-    };
-    const handleMouseUp = () => setIsResizing(false);
-
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-  }, [isResizing]);
-
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsResizing(true);
-  }, []);
-
-  return { containerRef, sidebarWidth, handleResizeStart };
+  }
 }
 
 /**
- * The focused workspace's frame around whichever tool is showing: its
- * name, the tools as a row of tabs, the tool itself, and — when runs in
- * this workspace need the user — a footer saying so.
+ * The collapsed sidebar: its header alone, laid into the start of the
+ * dock's top tab bar so the dock takes the whole width. Always mounted
+ * there: while the sidebar is open it is a zero-width, hidden slot, and
+ * it tweens to the open sidebar's width as the column tweens away — so
+ * the tabs after it glide instead of jumping. Same height, width and
+ * inset as the open card's header, so the buttons never move.
+ */
+export function CollapsedSidebarHeader({
+  workspacePath,
+  width,
+  open,
+  lightsInset,
+  onToggleCollapse,
+}: {
+  workspacePath: string;
+  /** The open sidebar's width, so the buttons stay where they were. */
+  width: string;
+  /** The sidebar is open: collapse this to nothing. */
+  open: boolean;
+  lightsInset: number | undefined;
+  onToggleCollapse: () => void;
+}) {
+  return (
+    <div
+      aria-hidden={open || undefined}
+      className={cn(
+        "flex shrink-0 select-none items-center overflow-hidden border-border transition-[width,visibility] duration-200 ease-out motion-reduce:transition-none",
+        open ? "invisible" : "visible border-e",
+        SHELL_HEADER_HEIGHT_CLASS,
+      )}
+      // The open header sits inside the card's two 1px borders and this one
+      // draws its own end border: net 1px off, so the buttons land on the
+      // same pixel in both states.
+      style={{ width: open ? 0 : `calc(${width} - 1px)` }}
+    >
+      <div className="flex h-full shrink-0" style={{ width: `calc(${width} - 1px)` }}>
+        <SidebarHeader
+          workspacePath={workspacePath}
+          isCollapsed
+          lightsInset={lightsInset}
+          onToggleCollapse={onToggleCollapse}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The header row: room for the macOS lights (a window drag region), then
+ * one tab-like button — the focused workspace's name, a dot when any run
+ * anywhere is waiting on the user, and the open/close glyph — that toggles
+ * the sidebar wherever it is clicked. Closed, this row is all that is left
+ * of the sidebar (pinned at the start of the dock's tab bar).
+ */
+function SidebarHeader({
+  workspacePath,
+  isCollapsed,
+  lightsInset,
+  onToggleCollapse,
+}: {
+  workspacePath: string;
+  isCollapsed: boolean;
+  lightsInset: number | undefined;
+  onToggleCollapse: () => void;
+}) {
+  const { t } = useTranslation();
+  const { attention } = useAgentRunsOverview();
+
+  return (
+    <div className="flex h-full min-w-0 flex-1 items-stretch">
+      <div
+        data-tauri-drag-region
+        className="shrink-0"
+        style={{ WebkitAppRegion: "drag", width: lightsInset ?? 0 } as CSSProperties}
+      />
+      <button
+        type="button"
+        onClick={onToggleCollapse}
+        aria-label={isCollapsed ? t("expandSidebar") : t("collapseSidebar")}
+        aria-pressed={!isCollapsed}
+        title={workspacePath}
+        className="flex min-w-0 flex-1 items-center gap-1.5 pe-1.5 ps-2.5 text-start transition-colors hover:bg-accent/60"
+        style={NO_DRAG}
+      >
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+          {deriveProjectName(workspacePath)}
+        </span>
+        {attention.length > 0 && (
+          <span
+            aria-hidden="true"
+            className="size-1.5 shrink-0 rounded-full bg-destructive animate-in zoom-in-50 duration-200 motion-reduce:animate-none"
+          />
+        )}
+        <span
+          aria-hidden="true"
+          className={cn(
+            "flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground",
+            !isCollapsed && "bg-accent text-foreground",
+          )}
+        >
+          {isCollapsed ? (
+            <PanelLeft className="size-3.5" />
+          ) : (
+            <PanelLeftClose className="size-3.5" />
+          )}
+        </span>
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The focused workspace's tools as a row of icon tabs (names in their
+ * tooltips) over the tool itself.
  */
 function WorkspacePanel({
-  workspacePath,
   tool,
-  onShowEverything,
   onShowTool,
   children,
 }: {
-  workspacePath: string;
   tool: WorkspaceTool;
-  onShowEverything: () => void;
   onShowTool: (tool: WorkspaceTool) => void;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
-  const { byWorkspace } = useAgentRunsOverview();
-  const hereCount = byWorkspace.get(workspaceKey(workspacePath))?.attention ?? 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div
-        className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3 text-sm font-medium"
-        title={workspacePath}
-      >
-        <Folder className="size-4 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate">
-          {deriveProjectName(workspacePath)}
-        </span>
-      </div>
-      <div className="flex shrink-0 border-b border-border px-1">
+      <div className="flex shrink-0 items-center gap-0.5 border-b border-border px-1.5 py-1.5">
         {WORKSPACE_TOOLS.map((candidate) => {
           const Icon = TOOL_ICONS[candidate];
           const active = candidate === tool;
+          const label = t(TOOL_LABEL_KEYS[candidate]);
           return (
-            <button
-              key={candidate}
-              type="button"
-              onClick={() => onShowTool(candidate)}
-              aria-label={t(TOOL_LABEL_KEYS[candidate])}
-              aria-pressed={active}
-              title={t(TOOL_LABEL_KEYS[candidate])}
-              className={cn(
-                "-mb-px flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 border-b-2 px-1.5 text-xs transition-colors",
-                active
-                  ? "border-foreground font-medium text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icon className="size-3.5 shrink-0" />
-              <span className="truncate">{t(TOOL_LABEL_KEYS[candidate])}</span>
-            </button>
+            <Tooltip key={candidate}>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => onShowTool(candidate)}
+                  aria-label={label}
+                  aria-pressed={active}
+                  className={cn(
+                    "flex h-5 w-7 shrink-0 items-center justify-center rounded-md transition-colors",
+                    active
+                      ? "bg-accent text-foreground"
+                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                  )}
+                >
+                  <Icon className="size-3.5 shrink-0" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>
+                {label}
+              </TooltipContent>
+            </Tooltip>
           );
         })}
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>
-
-      {hereCount > 0 && (
-        <button
-          type="button"
-          onClick={onShowEverything}
-          className="flex h-9 shrink-0 items-center gap-2.5 border-t border-border px-3 text-xs transition-colors hover:bg-accent/60 animate-in fade-in-0 duration-200 motion-reduce:animate-none"
-        >
-          <span
-            aria-hidden="true"
-            className="size-2 shrink-0 rounded-full bg-destructive"
-          />
-          <span className="min-w-0 flex-1 truncate text-start">
-            {t("runsNeedYouHere", { count: hereCount })}
-          </span>
-        </button>
-      )}
     </div>
   );
 }
@@ -451,6 +615,11 @@ function FilesTool({
 
   return (
     <>
+      <FileControls
+        workspacePath={workspacePath}
+        sortOrder={sortOrder}
+        onSortChange={setSortOrder}
+      />
       <div className="relative flex min-h-0 grow flex-col">
         <FileTree
           selectedFilePath={activeTabId}
@@ -471,11 +640,6 @@ function FilesTool({
           onNewFolder={handleNewFolder}
         />
       </div>
-      <FileControls
-        workspacePath={workspacePath}
-        sortOrder={sortOrder}
-        onSortChange={setSortOrder}
-      />
     </>
   );
 }

@@ -1,3 +1,4 @@
+import { ToolBar } from "@/components/editor/tool-bar";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -125,12 +126,9 @@ export function SessionsPanel({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-9 items-center justify-between border-b border-sidebar-border px-2">
-        <span className="text-xs font-medium text-muted-foreground">
-          {t("agentSessions")}
-        </span>
+      <ToolBar className="justify-end">
         <NewSessionButton onCreate={handleCreate} />
-      </div>
+      </ToolBar>
 
       {taskMetas.length === 0 ? (
         <p className="p-3 text-xs text-muted-foreground">

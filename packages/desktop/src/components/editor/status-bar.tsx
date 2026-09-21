@@ -1,12 +1,14 @@
 import { useState, useEffect } from "react";
 import { Cloud, CloudUpload, Type } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { cn } from "@notefig/ui/utils";
 import { TunnelStatus } from "@/components/tunnel/tunnel-status";
 
-interface StatusCellsProps {
+interface StatusBarProps {
   /** Omitted (null) when the focused tab has no text content of its own. */
   wordCount: number | null;
   isSynced: boolean;
+  direction?: "ltr" | "rtl";
 }
 
 function useDebouncedSyncState(
@@ -29,17 +31,27 @@ function useDebouncedSyncState(
   return debouncedSynced;
 }
 
-// Deliberately no git subscription here: the cells are always mounted,
-// and a live git query from them kept the workspace's whole status/log
-// fetch hot on every save. Git state now renders only inside the git
-// panels, so the collection has zero subscribers (and invalidations cost
-// nothing) while no git UI is open.
-/** Save state, word count and the tunnel pill — laid into the top bar. */
-export function StatusCells({ wordCount, isSynced }: StatusCellsProps) {
+// Deliberately no git subscription here: the status bar is always mounted,
+// and a live git query from it kept the workspace's whole status/log fetch
+// hot on every save. Git state now renders only inside the git panels, so
+// the collection has zero subscribers (and invalidations cost nothing)
+// while no git UI is open.
+/** Save state, word count and the tunnel pill, pinned to the dock card's
+ *  bottom corner at the reading-direction end. */
+export function StatusBar({
+  wordCount,
+  isSynced,
+  direction = "ltr",
+}: StatusBarProps) {
   const debouncedSynced = useDebouncedSyncState(isSynced);
 
   return (
-    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+    <div
+      className={cn(
+        "absolute bottom-0 flex items-center gap-4 px-4 py-1.5 bg-secondary/80 backdrop-blur-sm border-t border-border text-xs text-muted-foreground",
+        cornerClasses(direction === "rtl"),
+      )}
+    >
       <SaveCell synced={debouncedSynced} />
       {wordCount !== null && <WordCountCell count={wordCount} />}
       <TunnelStatus />
@@ -75,4 +87,9 @@ function WordCountCell({ count }: { count: number }) {
   );
 }
 
-
+/** Pinned to the reading-direction end of the window. */
+function cornerClasses(isRtl: boolean): string {
+  return isRtl
+    ? "left-0 right-auto border-r rounded-tr-lg"
+    : "right-0 left-auto border-l rounded-tl-lg";
+}
