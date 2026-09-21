@@ -1,0 +1,77 @@
+{
+  "format": "notefig-agent-recording",
+  "version": 1,
+  "recordedAt": "2026-09-19T12:00:00.000Z",
+  "harnessId": "opencode",
+  "taskId": "task_fixture_opencode",
+  "workspacePath": "/workspace/recorded",
+  "sessionId": "sess_fixture_opencode",
+  "outOfTurn": [],
+  "turns": [
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "Run the build"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "oc_1",
+            "title": "bash",
+            "kind": "execute",
+            "status": "pending",
+            "rawInput": {
+              "command": "npm run build"
+            }
+          },
+          "at": 120
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "oc_1",
+            "status": "in_progress"
+          },
+          "at": 240
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "oc_1",
+            "status": "failed",
+            "content": [
+              {
+                "type": "content",
+                "content": {
+                  "type": "text",
+                  "text": "src/index.ts(4,3): error TS2322: Type 'string' is not assignable to type 'number'.\nexit code 2"
+                }
+              }
+            ]
+          },
+          "at": 360
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "The build fails on a type error in `src/index.ts:4`. Want me to fix it?"
+            }
+          },
+          "at": 480
+        }
+      ],
+      "stopReason": "end_turn",
+      "endedAt": 600
+    }
+  ]
+}

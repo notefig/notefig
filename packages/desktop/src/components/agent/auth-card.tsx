@@ -47,6 +47,7 @@ export function AuthCard({
 
   return (
     <div
+      data-auth-card
       className={cn(
         "pointer-events-auto flex flex-col gap-2 text-xs",
         // The amber tint rides a gradient *image* over an opaque

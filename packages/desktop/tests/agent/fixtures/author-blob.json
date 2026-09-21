@@ -1,0 +1,66 @@
+{
+  "format": "notefig-agent-recording",
+  "version": 1,
+  "recordedAt": "2026-09-19T12:00:00.000Z",
+  "harnessId": "claude-code",
+  "taskId": "task_fixture_claude-code",
+  "workspacePath": "/workspace/recorded",
+  "sessionId": "sess_fixture_claude-code",
+  "outOfTurn": [],
+  "turns": [
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "Ask me a clarifying question in the notes"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_ab",
+            "title": "mcp__notefig__author_blob",
+            "kind": "other",
+            "status": "pending",
+            "rawInput": {
+              "path": "notes.md",
+              "type": "question",
+              "id": "blob_q1"
+            },
+            "locations": [
+              {
+                "path": "/workspace/recorded/notes.md"
+              }
+            ]
+          },
+          "at": 120
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_ab",
+            "status": "completed"
+          },
+          "at": 240
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "I left a question in notes.md."
+            }
+          },
+          "at": 360
+        }
+      ],
+      "stopReason": "end_turn",
+      "endedAt": 480
+    }
+  ]
+}
