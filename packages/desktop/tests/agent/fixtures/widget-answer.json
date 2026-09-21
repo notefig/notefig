@@ -1,0 +1,183 @@
+{
+  "format": "notefig-agent-recording",
+  "version": 1,
+  "recordedAt": "2026-09-19T12:00:00.000Z",
+  "harnessId": "claude-code",
+  "taskId": "task_fixture_claude-code",
+  "workspacePath": "/workspace/recorded",
+  "sessionId": "sess_fixture_claude-code",
+  "outOfTurn": [],
+  "turns": [
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "Summarize this document in one line"
+        },
+        {
+          "type": "resource_link",
+          "uri": "notefig://widget-context?path=%2Fworkspace%2Frecorded%2Fnotes.md&pos=12",
+          "name": "widget-context",
+          "mimeType": "application/json"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_thought_chunk",
+            "content": {
+              "type": "text",
+              "text": "Reading the document the widget points at."
+            }
+          },
+          "at": 120
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_r",
+            "title": "Read",
+            "kind": "read",
+            "status": "pending",
+            "rawInput": {
+              "file_path": "/workspace/recorded/notes.md"
+            }
+          },
+          "at": 240
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_r",
+            "status": "completed",
+            "content": [
+              {
+                "type": "content",
+                "content": {
+                  "type": "text",
+                  "text": "para one\n\npara two\n"
+                }
+              }
+            ]
+          },
+          "at": 360
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_wr",
+            "title": "mcp__notefig__widget_respond",
+            "kind": "other",
+            "status": "pending",
+            "rawInput": {
+              "kind": "answer",
+              "title": "Summary",
+              "markdown": "Two short paragraphs about **nothing in particular**."
+            }
+          },
+          "at": 480
+        },
+        {
+          "kind": "mcp",
+          "method": "tools/call",
+          "params": {
+            "name": "widget_respond",
+            "arguments": {
+              "kind": "answer",
+              "title": "Summary",
+              "markdown": "Two short paragraphs about **nothing in particular**."
+            }
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"recorded\":true}"
+              }
+            ]
+          },
+          "at": 600
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_wr",
+            "status": "completed"
+          },
+          "at": 720
+        }
+      ],
+      "stopReason": "end_turn",
+      "endedAt": 840
+    },
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "Now translate it to French"
+        },
+        {
+          "type": "resource_link",
+          "uri": "notefig://widget-context?path=%2Fworkspace%2Frecorded%2Fnotes.md&pos=12",
+          "name": "widget-context",
+          "mimeType": "application/json"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_wr2",
+            "title": "mcp__notefig__widget_respond",
+            "kind": "other",
+            "status": "pending",
+            "rawInput": {
+              "kind": "issue",
+              "markdown": "I can't tell which paragraph you mean — the document changed since the summary."
+            }
+          },
+          "at": 120
+        },
+        {
+          "kind": "mcp",
+          "method": "tools/call",
+          "params": {
+            "name": "widget_respond",
+            "arguments": {
+              "kind": "issue",
+              "markdown": "I can't tell which paragraph you mean — the document changed since the summary."
+            }
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"recorded\":true}"
+              }
+            ]
+          },
+          "at": 240
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_wr2",
+            "status": "completed"
+          },
+          "at": 360
+        }
+      ],
+      "stopReason": "end_turn",
+      "endedAt": 480
+    }
+  ]
+}

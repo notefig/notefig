@@ -1,0 +1,103 @@
+{
+  "format": "notefig-agent-recording",
+  "version": 1,
+  "recordedAt": "2026-09-19T12:00:00.000Z",
+  "harnessId": "claude-code",
+  "taskId": "task_fixture_claude-code",
+  "workspacePath": "/workspace/recorded",
+  "sessionId": "sess_fixture_claude-code",
+  "outOfTurn": [],
+  "turns": [
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "Create a scratch file"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_w",
+            "title": "Write",
+            "kind": "edit",
+            "status": "pending",
+            "rawInput": {
+              "file_path": "/workspace/recorded/scratch.md"
+            }
+          },
+          "at": 120
+        },
+        {
+          "kind": "request",
+          "method": "session/request_permission",
+          "params": {
+            "sessionId": "sess_fixture_claude-code",
+            "toolCall": {
+              "toolCallId": "toolu_w",
+              "title": "Write scratch.md",
+              "kind": "edit"
+            },
+            "options": [
+              {
+                "optionId": "allow_always",
+                "name": "Always allow",
+                "kind": "allow_always"
+              },
+              {
+                "optionId": "allow_once",
+                "name": "Allow",
+                "kind": "allow_once"
+              },
+              {
+                "optionId": "reject_once",
+                "name": "Deny",
+                "kind": "reject_once"
+              }
+            ]
+          },
+          "response": {
+            "outcome": {
+              "outcome": "selected",
+              "optionId": "allow_always"
+            }
+          },
+          "at": 240
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_w",
+            "status": "completed",
+            "content": [
+              {
+                "type": "diff",
+                "path": "/workspace/recorded/scratch.md",
+                "oldText": null,
+                "newText": "# scratch\n"
+              }
+            ]
+          },
+          "at": 360
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "Created scratch.md."
+            }
+          },
+          "at": 480
+        }
+      ],
+      "stopReason": "end_turn",
+      "endedAt": 600
+    }
+  ]
+}

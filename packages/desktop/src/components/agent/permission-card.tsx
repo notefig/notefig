@@ -37,6 +37,9 @@ export function PermissionCard({
 
   return (
     <div
+      data-permission-card
+      data-permission-id={head.id}
+      data-permission-pending={pending.length}
       className={cn(
         "text-sm",
         // Muted tint over an opaque bg-background (gradient-image trick):

@@ -22,6 +22,11 @@
 import { createLoopbackPair } from "@notefig/agent";
 import type { LoopbackTransport } from "@notefig/agent";
 import type { AgentTransport, McpEndpoint } from "@notefig/agent";
+import {
+  isAgentRecording,
+  type AgentRecording,
+  type RecordedEvent,
+} from "@/components/debug-panel-recording";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Json = any;
@@ -178,8 +183,15 @@ export class FakeAgent {
 /** What a scenario gets to work with for one `session/prompt` turn. */
 export type MockTurnContext = {
   sessionId: string;
+  /** The app task this agent serves (the key the recorder / MCP loopback
+   *  use); "" for a bare FakeAgent outside the harness. */
+  taskId: string;
+  /** The `cwd` the app passed on session/new — the live workspace path. */
+  workspacePath: string;
   /** Concatenated text blocks of the prompt that started this turn. */
   promptText: string;
+  /** The prompt's content blocks verbatim (text + resource_link parts). */
+  prompt: Json[];
   /** Emit one `session/update` notification to the client. */
   emit: (update: Json) => void;
   /** Abort-aware delay; 0 still yields a macrotask so the UI breathes. */
@@ -188,6 +200,13 @@ export type MockTurnContext = {
    *  the reply — the write half is how rewrite scenarios reach
    *  writeWorkspaceTextFile through the real client, same as an adapter. */
   request: (method: string, params: Json) => Promise<Json>;
+  /**
+   * Call the app's own MCP tool server the way a harness does — a JSON-RPC
+   * request over the task's (loopback) McpEndpoint, answered by the real
+   * handler with the real tools (widget_respond, author_blob, history_*…).
+   * `mcp.call("tools/call", { name, arguments })` is the common form.
+   */
+  mcp: { call: (method: string, params: Json) => Promise<Json> };
   /** Fires on `session/cancel`; scenarios should return promptly after. */
   signal: AbortSignal;
 };
@@ -409,6 +428,175 @@ export function echo(): MockScenario {
   };
 }
 
+// ─── Replay: a recording, played back ───────────────────────────────────────
+
+export type ReplayOptions = {
+  /** A recording from the debug panel's "Recording" button (debug-panel-recording.ts),
+   *  or a fixture file in tests/agent/fixtures/). */
+  recording: AgentRecording;
+  /**
+   * Which recorded turn this prompt plays. Default: the next unplayed turn
+   * of the recording for this session, in order — so a test that sends the
+   * recording's prompts in sequence gets the recording back in sequence.
+   * Once every turn has played, further prompts replay the last one.
+   */
+  turn?: number;
+  /**
+   * Pacing. 0 (default) plays flat out, yielding a macrotask between events
+   * so the UI streams; 1 reproduces the recorded gaps; n plays them n×
+   * faster. Every gap is capped by `maxDelayMs`.
+   */
+  speed?: number;
+  /** Cap on one inter-event gap when pacing (default 1500ms) — recordings
+   *  of a thinking model have multi-second silences nobody wants to sit
+   *  through in a test. */
+  maxDelayMs?: number;
+};
+
+/** Per-session, per-recording cursor for the default "next turn" rule. */
+const replayCursors = new Map<string, number>();
+
+function replayCursorKey(sessionId: string, recording: AgentRecording) {
+  return `${sessionId}\u0000${recording.taskId}\u0000${recording.recordedAt}`;
+}
+
+/**
+ * Substitute the live workspace path for the recorded one wherever it
+ * appears in an event (tool locations, fs/* paths, diff paths, resource
+ * URIs) — a deep walk over strings, so the JSON shape is untouched.
+ */
+export function remapWorkspacePath<T>(value: T, from: string, to: string): T {
+  if (!from || from === to) return value;
+  const walk = (node: Json): Json => {
+    if (typeof node === "string") {
+      return node.includes(from) ? node.split(from).join(to) : node;
+    }
+    if (Array.isArray(node)) return node.map(walk);
+    if (node && typeof node === "object") {
+      const out: Record<string, Json> = {};
+      for (const [key, inner] of Object.entries(node)) out[key] = walk(inner);
+      return out;
+    }
+    return node;
+  };
+  return walk(value) as T;
+}
+
+/**
+ * Play one recorded turn through the real client: updates are emitted as
+ * recorded; agent→client requests (permission, fs/*) are made for real and
+ * the LIVE app answers them (the recorded reply is not imposed — the
+ * permission card the test clicks is the real one); MCP calls run the real
+ * tools through the mock loopback. The recorded stopReason/error ends the
+ * turn; a cancel mid-replay stops it with "cancelled".
+ */
+export function replay(options: Json): MockScenario {
+  const { recording, turn: turnIndex, speed = 0, maxDelayMs = 1500 } =
+    (options ?? {}) as Partial<ReplayOptions>;
+  if (!isAgentRecording(recording)) {
+    throw new Error(
+      "replay scenario needs options.recording in the notefig-agent-recording format",
+    );
+  }
+  if (recording.turns.length === 0) {
+    throw new Error("replay scenario: the recording has no turns");
+  }
+
+  return async (ctx) => {
+    const turn = recording.turns[resolveReplayTurn(ctx.sessionId, recording, turnIndex)];
+    const player = new ReplayPlayer(ctx, recording, { speed, maxDelayMs });
+    for (const event of turn.events as RecordedEvent[]) {
+      if (ctx.signal.aborted) return { stopReason: "cancelled" };
+      await player.play(event);
+    }
+    if (ctx.signal.aborted) return { stopReason: "cancelled" };
+    if (turn.error) throw new Error(turn.error.message);
+    return { stopReason: turn.stopReason ?? "end_turn" };
+  };
+}
+
+/** The default "next unplayed turn" rule, with an explicit index override. */
+function resolveReplayTurn(
+  sessionId: string,
+  recording: AgentRecording,
+  explicit: number | undefined,
+): number {
+  if (explicit !== undefined) {
+    if (!Number.isInteger(explicit) || explicit < 0 || explicit >= recording.turns.length) {
+      throw new Error(
+        `replay scenario: turn ${explicit} is out of range (recording has ${recording.turns.length} turns)`,
+      );
+    }
+    return explicit;
+  }
+  const key = replayCursorKey(sessionId, recording);
+  const index = Math.min(
+    replayCursors.get(key) ?? 0,
+    recording.turns.length - 1,
+  );
+  replayCursors.set(key, index + 1);
+  return index;
+}
+
+/** Plays one recorded event against the live session, paced. */
+class ReplayPlayer {
+  private previousAt = 0;
+
+  constructor(
+    private readonly ctx: MockTurnContext,
+    private readonly recording: AgentRecording,
+    private readonly pace: { speed: number; maxDelayMs: number },
+  ) {}
+
+  private remap<T>(value: T): T {
+    return remapWorkspacePath(
+      value,
+      this.recording.workspacePath,
+      this.ctx.workspacePath,
+    );
+  }
+
+  private withSession(params: Json): Json {
+    return params && typeof params === "object" && !Array.isArray(params)
+      ? { ...params, sessionId: this.ctx.sessionId }
+      : params;
+  }
+
+  private gap(at: number): number {
+    const { speed, maxDelayMs } = this.pace;
+    const gap =
+      speed > 0 ? Math.min((at - this.previousAt) / speed, maxDelayMs) : 0;
+    this.previousAt = at;
+    return Math.max(0, gap);
+  }
+
+  async play(event: RecordedEvent): Promise<void> {
+    await this.ctx.sleep(this.gap(event.at));
+    if (this.ctx.signal.aborted) return;
+    switch (event.kind) {
+      case "update":
+        this.ctx.emit(this.remap(event.update));
+        return;
+      case "request":
+        await this.ctx.request(
+          event.method,
+          this.withSession(this.remap(event.params)),
+        );
+        return;
+      case "mcp":
+        try {
+          await this.ctx.mcp.call(event.method, this.remap(event.params));
+        } catch (error) {
+          // A recorded call that fails live (a tool the app no longer has,
+          // a blob path that doesn't exist here) must not derail the
+          // replay — the transcript entry for it already arrived as an
+          // ACP update. Surface it, keep going.
+          console.warn("[mock-harness] replayed MCP call failed:", error);
+        }
+    }
+  }
+}
+
 // ─── The env-gated harness ──────────────────────────────────────────────────
 
 export const MOCK_AGENT_MODE = import.meta.env.VITE_AGENT_MOCK === "1";
@@ -421,6 +609,7 @@ export type MockAgentConfig = {
 const scenarioRegistry = new Map<string, MockScenarioFactory>([
   ["echo", () => echo()],
   ["longTranscript", (options) => longTranscript(options ?? {})],
+  ["replay", (options) => replay(options)],
 ]);
 
 let activeConfig: MockAgentConfig = { scenario: "echo" };
@@ -471,6 +660,10 @@ function promptText(params: Json): string {
 }
 
 let mockSessionCounter = 0;
+/** The most recent `session/prompt` params any mock agent received — the
+ *  prompt as it went on the wire (text + resource_link parts), for specs
+ *  that assert what the composer/widget actually sent. */
+let lastMockPromptParams: Json = null;
 
 /**
  * Per-session update history for the scenario agent, keyed by sessionId and
@@ -496,21 +689,32 @@ function recordMockUpdate(sessionId: string, update: Json): void {
  * The app side of a loopback pair whose far side is a scenario-driven
  * FakeAgent. One per task, same as a spawned process.
  */
-export function createMockAgentTransport(): AgentTransport {
+export function createMockAgentTransport(
+  spec: { taskId?: string } = {},
+): AgentTransport {
   const [appSide, agentSide] = createLoopbackPair();
-  attachScenarioAgent(agentSide);
+  attachScenarioAgent(agentSide, spec.taskId ?? "");
   return appSide;
 }
 
-function attachScenarioAgent(agentSide: LoopbackTransport): void {
+function attachScenarioAgent(
+  agentSide: LoopbackTransport,
+  taskId: string,
+): void {
   const agent = new FakeAgent(agentSide);
   let currentAbort: AbortController | null = null;
+  // The live workspace path arrives as session/new's `cwd` (session/load
+  // carries it too); scenarios need it to address files like a real
+  // harness would.
+  let workspacePath = "";
 
-  agent.onNewSession = async () => ({
-    sessionId: `mock_session_${++mockSessionCounter}`,
-  });
+  agent.onNewSession = async (params) => {
+    workspacePath = params?.cwd ?? "";
+    return { sessionId: `mock_session_${++mockSessionCounter}` };
+  };
 
   agent.onLoadSession = async (params) => {
+    workspacePath = params?.cwd ?? workspacePath;
     for (const update of mockSessionHistories.get(params.sessionId) ?? []) {
       agent.update(params.sessionId, update);
     }
@@ -520,6 +724,7 @@ function attachScenarioAgent(agentSide: LoopbackTransport): void {
   agent.onCancel = () => currentAbort?.abort();
 
   agent.onPrompt = async (params) => {
+    lastMockPromptParams = params;
     const text = promptText(params);
     const config = configFromPrompt(text) ?? activeConfig;
     const factory = scenarioRegistry.get(config.scenario)!;
@@ -551,7 +756,10 @@ function attachScenarioAgent(agentSide: LoopbackTransport): void {
     try {
       const result = await scenario({
         sessionId: params.sessionId,
+        taskId,
+        workspacePath,
         promptText: text,
+        prompt: params?.prompt ?? [],
         emit: (update) => {
           recordMockUpdate(params.sessionId, update);
           agent.update(params.sessionId, update);
@@ -559,6 +767,7 @@ function attachScenarioAgent(agentSide: LoopbackTransport): void {
         sleep,
         signal: abort.signal,
         request: (method, params) => agent.request(method, params),
+        mcp: { call: (method, params) => callMockMcp(taskId, method, params) },
       });
       return (
         result ?? {
@@ -571,19 +780,81 @@ function attachScenarioAgent(agentSide: LoopbackTransport): void {
   };
 }
 
+// ─── The MCP loopback ───────────────────────────────────────────────────────
+
+type MockMcpLoopback = McpEndpoint & {
+  /** Deliver one request line as a harness would; resolves with the
+   *  handler's response line. */
+  call(line: string): Promise<string>;
+};
+
+/** Live mock endpoints by taskId — the scenario agent reaches its task's
+ *  tool server through here (there is no process or socket between them). */
+const mockMcpEndpoints = new Map<string, MockMcpLoopback>();
+let mockMcpRequestId = 0;
+
 /**
- * The MCP seam's stand-in: never advertises an `mcpServer`, so the session
- * simply runs without app tools — the mock agent doesn't call any.
+ * The MCP seam's stand-in: an in-memory endpoint the scenario agent can
+ * call directly. It never advertises an `mcpServer` (nothing spawns), but
+ * the real request handler is attached to it by AgentTask.start exactly as
+ * in production, so `tools/call` runs the real tools — which is what lets
+ * recordings of widget_respond / author_blob / history_* turns replay.
  */
-export function createMockMcpEndpoint(): McpEndpoint {
-  return {
+export function createMockMcpEndpoint(
+  spec: { taskId?: string } = {},
+): McpEndpoint {
+  let handler:
+    | ((line: string, respond: (line: string) => void) => void)
+    | null = null;
+  const endpoint: MockMcpLoopback = {
     async start() {},
     mcpServer: undefined,
-    onRequest() {
-      return () => {};
+    onRequest(callback) {
+      handler = callback;
+      return () => {
+        if (handler === callback) handler = null;
+      };
     },
-    async close() {},
+    call(line) {
+      return new Promise<string>((resolve, reject) => {
+        if (!handler) {
+          reject(new Error("mock MCP endpoint has no handler attached"));
+          return;
+        }
+        handler(line, resolve);
+      });
+    },
+    async close() {
+      if (spec.taskId && mockMcpEndpoints.get(spec.taskId) === endpoint) {
+        mockMcpEndpoints.delete(spec.taskId);
+      }
+    },
   };
+  if (spec.taskId) mockMcpEndpoints.set(spec.taskId, endpoint);
+  return endpoint;
+}
+
+/** One JSON-RPC MCP request against a task's mock endpoint; the `result`
+ *  comes back, an `error` throws (same contract a harness sees). */
+async function callMockMcp(
+  taskId: string,
+  method: string,
+  params: Json,
+): Promise<Json> {
+  const endpoint = mockMcpEndpoints.get(taskId);
+  if (!endpoint) {
+    throw new Error(`no mock MCP endpoint for task "${taskId || "(none)"}"`);
+  }
+  const id = ++mockMcpRequestId;
+  const reply = JSON.parse(
+    await endpoint.call(JSON.stringify({ jsonrpc: "2.0", id, method, params })),
+  );
+  if (reply.error) {
+    throw new Error(
+      `MCP ${method} failed: ${reply.error.message ?? JSON.stringify(reply.error)}`,
+    );
+  }
+  return reply.result;
 }
 
 declare global {
@@ -594,7 +865,21 @@ declare global {
       scenarios: () => string[];
       /** Collection row counts — DOM-independent, so specs can assert
        *  transcript size regardless of how the transcript renders. */
-      stats: () => Promise<{ tasks: number; turns: number; entries: number }>;
+      stats: () => Promise<{
+        tasks: number;
+        turns: number;
+        /** Turns that reached completed / error / cancelled. */
+        settledTurns: number;
+        entries: number;
+      }>;
+      /** The last `session/prompt` params a mock agent received. */
+      lastPrompt: () => Json;
+      /** `configure({ scenario: "replay", options })` with validation —
+       *  the recording is what the debug panel's Recording button copies. */
+      replay: (
+        recording: AgentRecording,
+        options?: Omit<ReplayOptions, "recording">,
+      ) => void;
     };
   }
 }
@@ -608,12 +893,22 @@ if (MOCK_AGENT_MODE && typeof window !== "undefined") {
     // graph — only mock-mode sessions in a running app ever call this.
     stats: async () => {
       const collections = await import("./agent-collections");
+      const turns = collections.agentTurnsCollection.toArray;
       return {
         tasks: collections.agentTasksCollection.toArray.length,
-        turns: collections.agentTurnsCollection.toArray.length,
+        turns: turns.length,
+        settledTurns: turns.filter((turn) =>
+          ["completed", "error", "cancelled"].includes(turn.status),
+        ).length,
         entries: collections.agentEntriesCollection.toArray.length,
       };
     },
+    lastPrompt: () => lastMockPromptParams,
+    replay: (recording, options) =>
+      configureMockAgent({
+        scenario: "replay",
+        options: { ...options, recording },
+      }),
   };
   // eslint-disable-next-line no-console
   console.info(

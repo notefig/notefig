@@ -1,0 +1,57 @@
+{
+  "format": "notefig-agent-recording",
+  "version": 1,
+  "recordedAt": "2026-09-19T12:00:00.000Z",
+  "harnessId": "gemini-cli",
+  "taskId": "task_fixture_gemini-cli",
+  "workspacePath": "/workspace/recorded",
+  "sessionId": "sess_fixture_gemini-cli",
+  "outOfTurn": [],
+  "turns": [
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "hi"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "available_commands_update",
+            "availableCommands": [
+              {
+                "name": "help",
+                "description": "Show help"
+              }
+            ]
+          },
+          "at": 120
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "current_mode_update",
+            "currentModeId": "architect"
+          },
+          "at": 240
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "Hi! Mode set."
+            }
+          },
+          "at": 360
+        }
+      ],
+      "stopReason": "end_turn",
+      "endedAt": 480
+    }
+  ]
+}

@@ -149,6 +149,14 @@ type TurnState = {
   joiner: MarkdownJoiner;
   /** The currently-open streamed run, or null (next chunk opens one). */
   run: StreamRun | null;
+  /**
+   * The turn's plan entry, once a `plan` update has arrived. ACP: "the
+   * client replaces the entire plan with each update" — so later plan
+   * updates in the same turn mutate this entry in place (Claude Code's
+   * TodoWrite and Devin's task list re-send the full list on every change;
+   * one card per update stacked stale, contradictory snapshots).
+   */
+  planEntryId: string | null;
   /** The user prompt that started this turn (checkpoint commit message). */
   userText: string;
   /**
@@ -353,7 +361,7 @@ export class AgentTask {
       // createMcpEndpoint is a dumb sync constructor, we call start()
       // ourselves, and mcpServer only exists on the instance afterward.
       const mcpEndpoint = MOCK_AGENT_MODE
-        ? createMockMcpEndpoint()
+        ? createMockMcpEndpoint({ taskId: this.taskId })
         : platformAdapter.proc.createMcpEndpoint({ taskId: this.taskId });
       this.mcpEndpoint = mcpEndpoint;
       await mcpEndpoint.start();
@@ -559,6 +567,7 @@ export class AgentTask {
       turnId,
       joiner: new MarkdownJoiner(),
       run: null,
+      planEntryId: null,
       userText: "",
       entries: stage,
     };
@@ -787,6 +796,7 @@ export class AgentTask {
       turnId,
       joiner: new MarkdownJoiner(),
       run: null,
+      planEntryId: null,
       userText: text,
       entries: liveEntryWriter,
     };
@@ -1020,19 +1030,9 @@ export class AgentTask {
         this.appendToRun(turn, "thought", chunk);
         break;
       }
-      case "plan": {
-        // Plans are peers of text/tools; close the open run so a following
-        // reply opens a fresh entry after the plan.
-        this.closeRun(turn);
-        turn.entries.insert({
-          id: newEventId(),
-          taskId: this.taskId,
-          turnId: turn.turnId,
-          type: "plan",
-          plan: update,
-        });
+      case "plan":
+        this.upsertPlanEntry(turn, update);
         break;
-      }
       case "user_message_chunk": {
         // Only ever observed on session/load replay — live user entries are
         // inserted by prompt() itself, and adapters replay each historical
@@ -1041,6 +1041,10 @@ export class AgentTask {
         const chunk = contentBlockText(update.content);
         if (!chunk) break;
         this.closeRun(turn);
+        // A replayed user message is a historical turn boundary: the whole
+        // load streams through one TurnState, so the per-turn plan slot
+        // must reset here or the next turn's plan overwrites this one's.
+        turn.planEntryId = null;
         turn.entries.insert({
           id: newEventId(),
           taskId: this.taskId,
@@ -1064,6 +1068,31 @@ export class AgentTask {
         });
         break;
     }
+  }
+
+  /**
+   * One live plan per turn: the first `plan` update inserts the entry (a
+   * peer of text/tools, so the open run closes and a following reply opens
+   * a fresh entry after the plan); every later update replaces its contents
+   * in place — ACP: "the client replaces the entire plan with each update".
+   */
+  private upsertPlanEntry(turn: TurnState, update: unknown): void {
+    if (turn.planEntryId) {
+      turn.entries.update(turn.planEntryId, (draft) => {
+        draft.plan = update;
+      });
+      return;
+    }
+    this.closeRun(turn);
+    const id = newEventId();
+    turn.planEntryId = id;
+    turn.entries.insert({
+      id,
+      taskId: this.taskId,
+      turnId: turn.turnId,
+      type: "plan",
+      plan: update,
+    });
   }
 
   /**
@@ -1552,7 +1581,9 @@ export function startAgentTask(
 
 /** The one place a task's spawn spec meets the platform transport. */
 function transportFactory(task: AgentTask) {
-  if (MOCK_AGENT_MODE) return () => createMockAgentTransport();
+  if (MOCK_AGENT_MODE) {
+    return () => createMockAgentTransport({ taskId: task.taskId });
+  }
   return ({ extraEnv }: { extraEnv: Record<string, string> }) =>
     platformAdapter.proc.createAgentTransport({
       taskId: task.taskId,

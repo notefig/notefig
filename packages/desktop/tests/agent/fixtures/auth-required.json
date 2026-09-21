@@ -1,0 +1,51 @@
+{
+  "format": "notefig-agent-recording",
+  "version": 1,
+  "recordedAt": "2026-09-19T12:00:00.000Z",
+  "harnessId": "claude-code",
+  "taskId": "task_fixture_claude-code",
+  "workspacePath": "/workspace/recorded",
+  "sessionId": "sess_fixture_claude-code",
+  "outOfTurn": [],
+  "turns": [
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "hello"
+        }
+      ],
+      "startedAt": 0,
+      "events": [],
+      "error": {
+        "code": -32000,
+        "message": "Authentication required"
+      },
+      "endedAt": 120
+    },
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "hello"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "Hello! Signed in and ready."
+            }
+          },
+          "at": 120
+        }
+      ],
+      "stopReason": "end_turn",
+      "endedAt": 240
+    }
+  ]
+}

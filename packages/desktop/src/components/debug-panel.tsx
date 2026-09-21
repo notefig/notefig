@@ -46,6 +46,7 @@ import {
   agentTasksCollection,
   agentTurnsCollection,
 } from "@/agent/agent-collections";
+import { buildSessionRecording } from "./debug-panel-recording";
 
 function useQueryCacheTick(): number {
   const queryClient = useQueryClient();
@@ -675,6 +676,22 @@ function DebugPanelContent({
     setTimeout(() => setSessionCopied(false), 2000);
   }, [buildSessionReport]);
 
+  // The replayable form of the same rows (debug-panel-recording.ts): the JSON the
+  // mock harness's `replay` scenario and the tests/agent fixtures consume.
+  const [recordingCopied, setRecordingCopied] = useState(false);
+  const copySessionRecording = useCallback(async () => {
+    if (!sessionTask) return;
+    const recording = buildSessionRecording({
+      task: sessionTask,
+      turns: sessionTurns,
+      entries: sessionEntries,
+      permissionRequests: sessionPermissionRequests,
+    });
+    await copyTextWithFallback(JSON.stringify(recording, null, 2));
+    setRecordingCopied(true);
+    setTimeout(() => setRecordingCopied(false), 2000);
+  }, [sessionTask, sessionTurns, sessionEntries, sessionPermissionRequests]);
+
   const [showLayout, setShowLayout] = useState(false);
   const [activeTab, setActiveTab] = useState<"state" | "console" | "session">(
     error ? "state" : "state",
@@ -1022,6 +1039,22 @@ function DebugPanelContent({
                 ) : (
                   <Copy className="h-3 w-3" />
                 )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 shrink-0 px-1.5 text-[0.625rem]"
+                onClick={copySessionRecording}
+                title="Copy the session as a recording (JSON replayable via the mock harness / tests/agent fixtures)"
+                disabled={!sessionTask}
+                data-testid="copy-agent-recording"
+              >
+                {recordingCopied ? (
+                  <Check className="h-3 w-3 text-green-500" />
+                ) : (
+                  <Copy className="h-3 w-3" />
+                )}
+                <span className="ml-1">Recording</span>
               </Button>
             </div>
 

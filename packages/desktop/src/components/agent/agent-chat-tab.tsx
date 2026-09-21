@@ -681,6 +681,9 @@ function TranscriptRowView({
   return (
     <div
       data-index={virtualRow.index}
+      // Test/inspection hooks: which transcript element this row holds.
+      data-entry-type={row.kind === "error" ? "turn_error" : row.entry.type}
+      data-turn-id={row.kind === "error" ? row.turn.turnId : row.entry.turnId}
       ref={measureElement}
       style={{
         position: "absolute",
@@ -866,9 +869,19 @@ function PlanView({ plan }: { plan: unknown }) {
     (plan as { entries?: PlanEntry[] } | undefined)?.entries ?? [];
   if (entries.length === 0) return null;
   return (
-    <div className="w-full rounded-lg border border-border bg-card px-2.5 py-2 text-xs">
+    <div
+      className="w-full rounded-lg border border-border bg-card px-2.5 py-2 text-xs"
+      data-plan
+      data-plan-entries={entries.length}
+    >
       {entries.map((planEntry, i) => (
-        <div key={i} className="flex items-center gap-2 py-0.5">
+        <div
+          key={i}
+          className="flex items-center gap-2 py-0.5"
+          data-plan-entry
+          data-plan-status={planEntry.status}
+          data-plan-priority={planEntry.priority}
+        >
           {planEntry.status === "completed" ? (
             <Check className="size-3.5 shrink-0 text-green-600 dark:text-green-400" />
           ) : planEntry.status === "in_progress" ? (
@@ -897,7 +910,7 @@ function ThoughtEntry({ text }: { text?: string }) {
   const { t } = useTranslation();
   if (!text) return null;
   return (
-    <details className="w-full text-sm text-muted-foreground">
+    <details className="w-full text-sm text-muted-foreground" data-thought>
       <summary className="cursor-pointer select-none font-semibold">
         {t("agentThinking")}
       </summary>
@@ -936,7 +949,12 @@ function AuthorBlobCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
   const jumpPath = call.locations?.[0]?.path ?? rawInput.path;
   const fileName = rawInput.path.split("/").pop();
   return (
-    <div className="flex w-full items-center gap-2 text-xs text-muted-foreground">
+    <div
+      className="flex w-full items-center gap-2 text-xs text-muted-foreground"
+      data-tool-call
+      data-tool-title="author_blob"
+      data-tool-status={status}
+    >
       <Sparkles className="size-3.5 shrink-0" />
       <span className="min-w-0 flex-1 truncate">
         {t("agentAuthoredBlob", { type: rawInput.type })}{" "}
@@ -987,11 +1005,24 @@ function ToolCallCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
   // content mid-flight (pending → completed), and an early return above any
   // hook would shrink the hook count across renders and tear the tab down.
   if (diffs.length > 0) {
-    return <ChangedFilesCard diffs={diffs} status={status} />;
+    return (
+      <ChangedFilesCard
+        diffs={diffs}
+        status={status}
+        title={call.title ?? undefined}
+      />
+    );
   }
 
   return (
-    <div className="w-full text-xs">
+    <div
+      className="w-full text-xs"
+      data-tool-call
+      data-tool-title={title}
+      data-tool-kind={call.kind}
+      data-tool-status={status}
+      data-tool-open={open}
+    >
       <button
         type="button"
         onClick={() => hasBody && setOverride(!open)}
@@ -1062,9 +1093,11 @@ function toolPreview(call: ToolCallUpdate): string {
 function ChangedFilesCard({
   diffs,
   status,
+  title,
 }: {
   diffs: Extract<ToolCallContent, { type: "diff" }>[];
   status: ToolCallStatus;
+  title?: string;
 }) {
   const { t } = useTranslation();
   const [openIndex, setOpenIndex] = useState<number | null>(null);
@@ -1077,7 +1110,13 @@ function ChangedFilesCard({
   const inFlight = status === "pending" || status === "in_progress";
 
   return (
-    <div className="w-full text-xs">
+    <div
+      className="w-full text-xs"
+      data-tool-call
+      data-tool-title={title}
+      data-tool-status={status}
+      data-tool-diffs={diffs.length}
+    >
       <div className="flex items-center gap-2">
         <span
           className={cn(
@@ -1101,7 +1140,7 @@ function ChangedFilesCard({
           const base = slash >= 0 ? diff.path.slice(slash + 1) : diff.path;
           const open = openIndex === i;
           return (
-            <div key={`${diff.path}-${i}`}>
+            <div key={`${diff.path}-${i}`} data-diff-path={diff.path}>
               <button
                 type="button"
                 onClick={() => setOpenIndex(open ? null : i)}
