@@ -44,6 +44,7 @@ function Tab({
             ? "border-border text-foreground"
             : "text-muted-foreground opacity-70 hover:text-foreground hover:opacity-100",
         )}
+        data-tab-id={id}
         onPointerDown={onClick}
         onDoubleClick={(e) => {
           console.log("double click", e);
