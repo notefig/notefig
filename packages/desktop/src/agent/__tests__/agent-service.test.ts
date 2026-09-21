@@ -273,6 +273,82 @@ describe("AgentTask vertical slice", () => {
     ]);
   });
 
+  it("a plan update replaces the turn's plan in place (ACP: the client replaces the entire plan)", async () => {
+    // Claude Code's TodoWrite and Devin's task list both re-send the FULL
+    // entry list on every change. The spec says the client replaces the
+    // plan; stacking one checklist per update leaves the transcript full of
+    // stale, contradictory snapshots (the "todo never works" complaint).
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const plan = (a: FakeAgent, statuses: string[]) =>
+      a.update("sess_test", {
+        sessionUpdate: "plan",
+        entries: ["Read", "Edit", "Verify"].map((content, i) => ({
+          content,
+          priority: "medium",
+          status: statuses[i],
+        })),
+      });
+    agent.onPrompt = async (_params, a) => {
+      plan(a, ["in_progress", "pending", "pending"]);
+      a.update("sess_test", {
+        sessionUpdate: "tool_call",
+        toolCallId: "t1",
+        title: "Read",
+        kind: "read",
+        status: "completed",
+      });
+      plan(a, ["completed", "in_progress", "pending"]);
+      plan(a, ["completed", "completed", "in_progress"]);
+      a.update("sess_test", {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "All done." },
+      });
+      plan(a, ["completed", "completed", "completed"]);
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "do the thing");
+
+    const entries = entriesFor(task.taskId);
+    // One plan entry, where the first update landed; later updates mutate it.
+    expect(entries.map((e) => e.type)).toEqual([
+      "user",
+      "plan",
+      "tool_call",
+      "assistant",
+    ]);
+    const planEntry = entries.find((e) => e.type === "plan")!;
+    expect(
+      (planEntry.plan as { entries: { status: string }[] }).entries.map(
+        (e) => e.status,
+      ),
+    ).toEqual(["completed", "completed", "completed"]);
+  });
+
+  it("a plan in a later turn is a new plan entry", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async (params, a) => {
+      a.update("sess_test", {
+        sessionUpdate: "plan",
+        entries: [
+          { content: lastPromptText(params), priority: "low", status: "pending" },
+        ],
+      });
+      return { stopReason: "end_turn" };
+    };
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "first");
+    await runPrompt(task, "second");
+    const plans = entriesFor(task.taskId).filter((e) => e.type === "plan");
+    expect(plans).toHaveLength(2);
+    expect(new Set(plans.map((p) => p.turnId)).size).toBe(2);
+  });
+
   it("routes agent file writes through the platform adapter", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);

@@ -738,7 +738,13 @@ export function PromptBlobFace({
   actions: PromptBlobFaceActions;
 }) {
   return (
-    <div onMouseDown={claimWidgetPointerEvents} className="w-full">
+    <div
+      onMouseDown={claimWidgetPointerEvents}
+      className="w-full"
+      // Test/inspection hook: the widget's phase-machine state.
+      data-blob-phase={phase}
+      data-blob-response={display.widgetResponse?.kind}
+    >
       <AnimatedHeight>
         <div
           className={cn(

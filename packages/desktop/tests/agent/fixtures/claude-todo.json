@@ -1,0 +1,389 @@
+{
+  "format": "notefig-agent-recording",
+  "version": 1,
+  "recordedAt": "2026-09-19T12:00:00.000Z",
+  "harnessId": "claude-code",
+  "taskId": "task_fixture_claude-code",
+  "workspacePath": "/workspace/recorded",
+  "sessionId": "sess_fixture_claude-code",
+  "outOfTurn": [],
+  "turns": [
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "Refactor the resolver and verify it"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_thought_chunk",
+            "content": {
+              "type": "text",
+              "text": "The user wants the path resolver refactored. I'll read it first, "
+            }
+          },
+          "at": 120
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_thought_chunk",
+            "content": {
+              "type": "text",
+              "text": "then edit, then run the tests. Let me track this with a todo list."
+            }
+          },
+          "at": 240
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "plan",
+            "entries": [
+              {
+                "content": "Read resolver.ts",
+                "status": "in_progress",
+                "priority": "high"
+              },
+              {
+                "content": "Refactor resolveWorkspacePath",
+                "status": "pending",
+                "priority": "high"
+              },
+              {
+                "content": "Run the unit tests",
+                "status": "pending",
+                "priority": "medium"
+              }
+            ]
+          },
+          "at": 360
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_01",
+            "title": "Read",
+            "kind": "read",
+            "status": "pending",
+            "rawInput": {
+              "file_path": "/workspace/recorded/src/resolver.ts"
+            }
+          },
+          "at": 480
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_01",
+            "status": "in_progress"
+          },
+          "at": 600
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_01",
+            "status": "completed",
+            "content": [
+              {
+                "type": "content",
+                "content": {
+                  "type": "text",
+                  "text": "export function resolveWorkspacePath(p: string) {\n  return p;\n}\n"
+                }
+              }
+            ]
+          },
+          "at": 720
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "plan",
+            "entries": [
+              {
+                "content": "Read resolver.ts",
+                "status": "completed",
+                "priority": "high"
+              },
+              {
+                "content": "Refactor resolveWorkspacePath",
+                "status": "in_progress",
+                "priority": "high"
+              },
+              {
+                "content": "Run the unit tests",
+                "status": "pending",
+                "priority": "medium"
+              }
+            ]
+          },
+          "at": 840
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_02",
+            "title": "Edit",
+            "kind": "edit",
+            "status": "pending",
+            "rawInput": {
+              "file_path": "/workspace/recorded/src/resolver.ts"
+            },
+            "locations": [
+              {
+                "path": "/workspace/recorded/src/resolver.ts"
+              }
+            ]
+          },
+          "at": 960
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_02",
+            "status": "completed",
+            "content": [
+              {
+                "type": "diff",
+                "path": "/workspace/recorded/src/resolver.ts",
+                "oldText": "export function resolveWorkspacePath(p: string) {\n  return p;\n}\n",
+                "newText": "export function resolveWorkspacePath(p: string): Resolved {\n  return { ok: true, path: p };\n}\n"
+              }
+            ]
+          },
+          "at": 1080
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "plan",
+            "entries": [
+              {
+                "content": "Read resolver.ts",
+                "status": "completed",
+                "priority": "high"
+              },
+              {
+                "content": "Refactor resolveWorkspacePath",
+                "status": "completed",
+                "priority": "high"
+              },
+              {
+                "content": "Run the unit tests",
+                "status": "in_progress",
+                "priority": "medium"
+              }
+            ]
+          },
+          "at": 1200
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_03",
+            "title": "Bash",
+            "kind": "execute",
+            "status": "pending",
+            "rawInput": {
+              "command": "npx vitest run src/resolver.test.ts"
+            }
+          },
+          "at": 1320
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_03",
+            "status": "completed",
+            "content": [
+              {
+                "type": "content",
+                "content": {
+                  "type": "text",
+                  "text": " ✓ src/resolver.test.ts (3 tests) 12ms\n\n Test Files  1 passed (1)\n      Tests  3 passed (3)\n"
+                }
+              }
+            ]
+          },
+          "at": 1440
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "plan",
+            "entries": [
+              {
+                "content": "Read resolver.ts",
+                "status": "completed",
+                "priority": "high"
+              },
+              {
+                "content": "Refactor resolveWorkspacePath",
+                "status": "completed",
+                "priority": "high"
+              },
+              {
+                "content": "Run the unit tests",
+                "status": "completed",
+                "priority": "medium"
+              }
+            ]
+          },
+          "at": 1560
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "Done. The resolver now returns a **discriminated union**:\n\n- `re"
+            }
+          },
+          "at": 1680
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "solveWorkspacePath` returns `{ ok, path }`\n- callers narrow befo"
+            }
+          },
+          "at": 1800
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "re use\n\n```ts\nconst r = resolveWorkspacePath(input);\nif (r.ok) o"
+            }
+          },
+          "at": 1920
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "pen(r.path);\n```\n\nAll 3 tests pass."
+            }
+          },
+          "at": 2040
+        }
+      ],
+      "stopReason": "end_turn",
+      "endedAt": 2160
+    },
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "Now add a test for the error branch"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "plan",
+            "entries": [
+              {
+                "content": "Add error-branch test",
+                "status": "in_progress",
+                "priority": "high"
+              },
+              {
+                "content": "Run tests",
+                "status": "pending",
+                "priority": "medium"
+              }
+            ]
+          },
+          "at": 120
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_04",
+            "title": "Edit",
+            "kind": "edit",
+            "status": "pending",
+            "rawInput": {
+              "file_path": "/workspace/recorded/src/resolver.test.ts"
+            }
+          },
+          "at": 240
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_04",
+            "status": "completed",
+            "content": [
+              {
+                "type": "diff",
+                "path": "/workspace/recorded/src/resolver.test.ts",
+                "oldText": "",
+                "newText": "it('rejects paths outside the workspace', () => {\n  expect(resolveWorkspacePath('../x').ok).toBe(false);\n});\n"
+              }
+            ]
+          },
+          "at": 360
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "plan",
+            "entries": [
+              {
+                "content": "Add error-branch test",
+                "status": "completed",
+                "priority": "high"
+              },
+              {
+                "content": "Run tests",
+                "status": "completed",
+                "priority": "medium"
+              }
+            ]
+          },
+          "at": 480
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "Added the error-branch test; 4 tests pass now."
+            }
+          },
+          "at": 600
+        }
+      ],
+      "stopReason": "end_turn",
+      "endedAt": 720
+    }
+  ]
+}

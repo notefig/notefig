@@ -1,0 +1,78 @@
+{
+  "format": "notefig-agent-recording",
+  "version": 1,
+  "recordedAt": "2026-09-19T12:00:00.000Z",
+  "harnessId": "claude-code",
+  "taskId": "task_fixture_claude-code",
+  "workspacePath": "/workspace/recorded",
+  "sessionId": "sess_fixture_claude-code",
+  "outOfTurn": [],
+  "turns": [
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "Add a heading to notes.md"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_fw",
+            "title": "Write",
+            "kind": "edit",
+            "status": "pending",
+            "rawInput": {
+              "file_path": "/workspace/recorded/notes.md"
+            }
+          },
+          "at": 120
+        },
+        {
+          "kind": "request",
+          "method": "fs/write_text_file",
+          "params": {
+            "sessionId": "sess_fixture_claude-code",
+            "path": "/workspace/recorded/notes.md",
+            "content": "# AGENT_HEADING\n\npara one\n\npara two\n"
+          },
+          "response": {},
+          "at": 240
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_fw",
+            "status": "completed",
+            "content": [
+              {
+                "type": "diff",
+                "path": "/workspace/recorded/notes.md",
+                "oldText": "para one\n\npara two\n",
+                "newText": "# AGENT_HEADING\n\npara one\n\npara two\n"
+              }
+            ]
+          },
+          "at": 360
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "Added the heading."
+            }
+          },
+          "at": 480
+        }
+      ],
+      "stopReason": "end_turn",
+      "endedAt": 600
+    }
+  ]
+}

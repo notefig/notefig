@@ -1,0 +1,108 @@
+{
+  "format": "notefig-agent-recording",
+  "version": 1,
+  "recordedAt": "2026-09-19T12:00:00.000Z",
+  "harnessId": "claude-code",
+  "taskId": "task_fixture_claude-code",
+  "workspacePath": "/workspace/recorded",
+  "sessionId": "sess_fixture_claude-code",
+  "outOfTurn": [],
+  "turns": [
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "Rename Foo to Bar across the package"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_multi",
+            "title": "MultiEdit",
+            "kind": "edit",
+            "status": "pending",
+            "rawInput": {
+              "edits": 3
+            }
+          },
+          "at": 120
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_multi",
+            "status": "completed",
+            "content": [
+              {
+                "type": "diff",
+                "path": "/workspace/recorded/src/foo.ts",
+                "oldText": "export class Foo {}\n",
+                "newText": "export class Bar {}\n"
+              },
+              {
+                "type": "diff",
+                "path": "/workspace/recorded/src/index.ts",
+                "oldText": "export { Foo } from './foo';\n",
+                "newText": "export { Bar } from './foo';\n"
+              },
+              {
+                "type": "diff",
+                "path": "/workspace/recorded/src/new-bar.ts",
+                "oldText": null,
+                "newText": "export const bar = new Bar();\n"
+              }
+            ]
+          },
+          "at": 240
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_term",
+            "title": "Bash",
+            "kind": "execute",
+            "status": "pending",
+            "rawInput": {
+              "command": "npm test"
+            }
+          },
+          "at": 360
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_term",
+            "status": "completed",
+            "content": [
+              {
+                "type": "terminal",
+                "terminalId": "term_42"
+              }
+            ]
+          },
+          "at": 480
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "Renamed in 2 files and added `new-bar.ts`; tests ran in terminal 42."
+            }
+          },
+          "at": 600
+        }
+      ],
+      "stopReason": "end_turn",
+      "endedAt": 720
+    }
+  ]
+}

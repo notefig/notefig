@@ -1,0 +1,110 @@
+{
+  "format": "notefig-agent-recording",
+  "version": 1,
+  "recordedAt": "2026-09-19T12:00:00.000Z",
+  "harnessId": "claude-code",
+  "taskId": "task_fixture_claude-code",
+  "workspacePath": "/workspace/recorded",
+  "sessionId": "sess_fixture_claude-code",
+  "outOfTurn": [],
+  "turns": [
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "Delete the build directory"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_thought_chunk",
+            "content": {
+              "type": "text",
+              "text": "This is destructive; I'll ask first."
+            }
+          },
+          "at": 120
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_rm",
+            "title": "Bash",
+            "kind": "execute",
+            "status": "pending",
+            "rawInput": {
+              "command": "rm -rf build/"
+            }
+          },
+          "at": 240
+        },
+        {
+          "kind": "request",
+          "method": "session/request_permission",
+          "params": {
+            "sessionId": "sess_fixture_claude-code",
+            "toolCall": {
+              "toolCallId": "toolu_rm",
+              "title": "Run rm -rf build/",
+              "kind": "execute"
+            },
+            "options": [
+              {
+                "optionId": "reject_once",
+                "name": "Not now",
+                "kind": "reject_once"
+              },
+              {
+                "optionId": "reject_always",
+                "name": "Never",
+                "kind": "reject_always"
+              }
+            ]
+          },
+          "response": {
+            "outcome": {
+              "outcome": "selected",
+              "optionId": "reject_once"
+            }
+          },
+          "at": 360
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_rm",
+            "status": "failed",
+            "content": [
+              {
+                "type": "content",
+                "content": {
+                  "type": "text",
+                  "text": "Permission denied by user"
+                }
+              }
+            ]
+          },
+          "at": 480
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "Understood — I left the build directory alone."
+            }
+          },
+          "at": 600
+        }
+      ],
+      "stopReason": "end_turn",
+      "endedAt": 720
+    }
+  ]
+}

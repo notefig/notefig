@@ -1,0 +1,166 @@
+{
+  "format": "notefig-agent-recording",
+  "version": 1,
+  "recordedAt": "2026-09-19T12:00:00.000Z",
+  "harnessId": "devin",
+  "taskId": "task_fixture_devin",
+  "workspacePath": "/workspace/recorded",
+  "sessionId": "sess_fixture_devin",
+  "outOfTurn": [],
+  "turns": [
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "Wire the settings page to the new API"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "plan",
+            "entries": [
+              {
+                "content": "Inspect current settings page",
+                "status": "in_progress",
+                "priority": "high"
+              },
+              {
+                "content": "Add API client method",
+                "status": "pending",
+                "priority": "high"
+              },
+              {
+                "content": "Update form submit",
+                "status": "pending",
+                "priority": "medium"
+              },
+              {
+                "content": "Manual QA",
+                "status": "pending",
+                "priority": "low"
+              }
+            ]
+          },
+          "at": 120
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "dv_1",
+            "title": "shell",
+            "kind": "execute",
+            "status": "pending",
+            "rawInput": {
+              "command": "rg -n 'settings' src/pages"
+            }
+          },
+          "at": 240
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "dv_1",
+            "status": "completed",
+            "content": [
+              {
+                "type": "content",
+                "content": {
+                  "type": "text",
+                  "text": "src/pages/settings.tsx:12: export function SettingsPage()\n"
+                }
+              }
+            ]
+          },
+          "at": 360
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "plan",
+            "entries": [
+              {
+                "content": "Inspect current settings page",
+                "status": "completed",
+                "priority": "high"
+              },
+              {
+                "content": "Add API client method + form submit",
+                "status": "in_progress",
+                "priority": "high"
+              }
+            ]
+          },
+          "at": 480
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "dv_2",
+            "title": "str_replace_editor",
+            "kind": "edit",
+            "status": "pending",
+            "rawInput": {
+              "path": "/workspace/recorded/src/pages/settings.tsx"
+            }
+          },
+          "at": 600
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "dv_2",
+            "status": "completed",
+            "content": [
+              {
+                "type": "diff",
+                "path": "/workspace/recorded/src/pages/settings.tsx",
+                "oldText": "onSubmit={save}",
+                "newText": "onSubmit={(v) => api.saveSettings(v)}"
+              }
+            ]
+          },
+          "at": 720
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "plan",
+            "entries": [
+              {
+                "content": "Inspect current settings page",
+                "status": "completed",
+                "priority": "high"
+              },
+              {
+                "content": "Add API client method + form submit",
+                "status": "completed",
+                "priority": "high"
+              }
+            ]
+          },
+          "at": 840
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "Wired the settings form to `api.saveSettings`. Two tasks completed."
+            }
+          },
+          "at": 960
+        }
+      ],
+      "stopReason": "end_turn",
+      "endedAt": 1080
+    }
+  ]
+}

@@ -195,6 +195,8 @@ export function SessionRow({
         <div
           onClick={onOpen}
           title={task.title}
+          data-session-row={task.taskId}
+          data-session-status={task.status}
           className={cn(
             "group flex w-full cursor-pointer items-center gap-2 px-2 py-1 text-xs transition-colors",
             active ? "bg-accent" : "hover:bg-accent/50",
