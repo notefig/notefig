@@ -1041,6 +1041,10 @@ export class AgentTask {
         const chunk = contentBlockText(update.content);
         if (!chunk) break;
         this.closeRun(turn);
+        // A replayed user message is a historical turn boundary: the whole
+        // load streams through one TurnState, so the per-turn plan slot
+        // must reset here or the next turn's plan overwrites this one's.
+        turn.planEntryId = null;
         turn.entries.insert({
           id: newEventId(),
           taskId: this.taskId,

@@ -521,7 +521,14 @@ function resolveReplayTurn(
   recording: AgentRecording,
   explicit: number | undefined,
 ): number {
-  if (explicit !== undefined) return explicit;
+  if (explicit !== undefined) {
+    if (!Number.isInteger(explicit) || explicit < 0 || explicit >= recording.turns.length) {
+      throw new Error(
+        `replay scenario: turn ${explicit} is out of range (recording has ${recording.turns.length} turns)`,
+      );
+    }
+    return explicit;
+  }
   const key = replayCursorKey(sessionId, recording);
   const index = Math.min(
     replayCursors.get(key) ?? 0,

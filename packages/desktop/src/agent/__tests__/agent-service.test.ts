@@ -1750,6 +1750,43 @@ describe("session hydration: buffered replay + manual refresh", () => {
     expect(turnFor(task.taskId).map((t) => t.stopReason)).toEqual(["replay"]);
   });
 
+  it("a replayed history keeps one plan per historical turn", async () => {
+    // session/load streams every historical turn through ONE TurnState; a
+    // replayed user message is the turn boundary, so the plan bookkeeping
+    // must reset there — otherwise turn 2's plan overwrites turn 1's card.
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const plan = (a: FakeAgent, sessionId: string, content: string) =>
+      a.update(sessionId, {
+        sessionUpdate: "plan",
+        entries: [{ content, priority: "medium", status: "completed" }],
+      });
+    agent.onLoadSession = async (params, a) => {
+      a.update(params.sessionId, {
+        sessionUpdate: "user_message_chunk",
+        content: { type: "text", text: "first" },
+      });
+      plan(a, params.sessionId, "plan one");
+      plan(a, params.sessionId, "plan one revised");
+      a.update(params.sessionId, {
+        sessionUpdate: "user_message_chunk",
+        content: { type: "text", text: "second" },
+      });
+      plan(a, params.sessionId, "plan two");
+      return {};
+    };
+
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client, { resumeSessionId: "sess_old" });
+
+    const entries = entriesFor(task.taskId);
+    expect(entries.map((e) => e.type)).toEqual(["user", "plan", "user", "plan"]);
+    const plans = entries
+      .filter((e) => e.type === "plan")
+      .map((e) => (e.plan as { entries: { content: string }[] }).entries[0].content);
+    expect(plans).toEqual(["plan one revised", "plan two"]);
+  });
+
   it("a failed session/load keeps the previous transcript readable", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
