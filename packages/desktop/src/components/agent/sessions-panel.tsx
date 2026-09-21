@@ -126,7 +126,7 @@ export function SessionsPanel({
 
   return (
     <div className="flex h-full flex-col">
-      <ToolBar className="justify-end">
+      <ToolBar className="justify-start">
         <NewSessionButton onCreate={handleCreate} />
       </ToolBar>
 
@@ -293,7 +293,7 @@ function NewSessionButton({
     <ButtonGroup>
       <Button
         variant="ghost"
-        className="h-7 gap-1 px-1.5 text-xs text-muted-foreground [&_svg]:size-3.5"
+        className="h-6 gap-1 px-1.5 text-xs font-normal text-muted-foreground [&_svg]:size-3"
         title={t("agentNewSessionWith", { harness: defaultHarness.label })}
         aria-label={t("agentNewSessionWith", {
           harness: defaultHarness.label,
@@ -302,13 +302,14 @@ function NewSessionButton({
       >
         <Plus />
         <HarnessLogo harnessId={defaultHarness.id} />
+        <span className="truncate">{defaultHarness.label}</span>
       </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-6 text-muted-foreground"
+            className="h-6 w-5 text-muted-foreground [&_svg]:size-3"
             title={t("agentChooseHarness")}
             aria-label={t("agentChooseHarness")}
           >
@@ -319,7 +320,7 @@ function NewSessionButton({
           {harnesses.map((harness) => (
             <DropdownMenuItem
               key={harness.id}
-                  onSelect={() => {
+              onSelect={() => {
                 setDefaultHarness(harness.id);
                 onCreate(harness);
               }}

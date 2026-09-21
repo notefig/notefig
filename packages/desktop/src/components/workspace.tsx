@@ -2,10 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type React from "react";
 import { Dockable } from "@/components/dockable";
 import type { DockChrome } from "@/components/dockable/store";
-import {
-  CollapsedSidebarHeader,
-  Sidebar,
-} from "@/components/editor/sidebar";
+import { CollapsedSidebarHeader, Sidebar } from "@/components/editor/sidebar";
 import type { SearchPanelHandle } from "@/components/editor/search-panel";
 import { canOpenFile as canOpenInEditor } from "@/components/editor/polymorphic-editor";
 import { StatusBar } from "@/components/editor/status-bar";
@@ -196,6 +193,13 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
   });
 
   const chrome = useShellChromeMetrics();
+  // Search follows the file in front of the user, not the sidebar's
+  // workspace: the two differ once tabs from several workspaces share
+  // the dock.
+  const activeFileWorkspace = useWorkspaceOfPath(
+    activeFilePath(activeTabId) ?? "",
+  );
+  const searchWorkspacePath = activeFileWorkspace ?? workspacePath;
   const sidebarResize = useSidebarResize();
   const sidebarTween = useSidebarCollapseTween(isSidebarCollapsed);
   // The macOS lights sit at the window's physical top-left: over the
@@ -218,6 +222,7 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
         >
           <Sidebar
             workspacePath={workspacePath}
+            searchWorkspacePath={searchWorkspacePath}
             sidebarView={sidebarView}
             isCollapsed={isSidebarCollapsed}
             activeTabId={activeTabId}
@@ -270,7 +275,9 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
                       tabBarTrailing: <WindowsControlsInline />,
                       tabBarLeadingActive: isSidebarCollapsed,
                       endInset:
-                        direction === "rtl" ? (chrome.insetStart ?? null) : null,
+                        direction === "rtl"
+                          ? (chrome.insetStart ?? null)
+                          : null,
                     }}
                   >
                     {allDockableTabs}

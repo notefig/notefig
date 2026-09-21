@@ -63,63 +63,71 @@ export function GlobalColumn({
   const focusedKey = workspaceKey(workspacePath);
 
   return (
-    <div className="flex h-full w-8 shrink-0 flex-col items-center gap-1 border-e border-border py-1.5">
-      <ColumnButton
-        label={t("everything")}
-        active={isEverything}
-        onClick={onShowEverything}
-      >
-        <PlainLogo size="1rem" fill="var(--logo)" />
-      </ColumnButton>
-      <div className="my-0.5 h-px w-4 bg-border" />
-
-      {rows.map((row) => {
-        const name = deriveProjectName(row.path);
-        const attention = byWorkspace.get(row.key)?.attention ?? 0;
-        const current = !isEverything && row.key === focusedKey;
-        return (
-          <ContextMenu key={row.key}>
-            <ContextMenuTrigger asChild>
-              <div>
-                <ColumnButton
-                  label={
-                    attention
-                      ? t("workspaceChipAttention", { name, count: attention })
-                      : name
-                  }
-                  active={current}
-                  current={current}
-                  onClick={() => onShowWorkspaceTools(row.path)}
-                >
-                  <span className="text-xs font-semibold">
-                    {initial(name)}
-                  </span>
-                  {attention > 0 && (
-                    <span
-                      aria-hidden="true"
-                      className="absolute -end-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-0.5 text-[0.5625rem] font-bold leading-none text-destructive-foreground animate-in zoom-in-50 duration-200 motion-reduce:animate-none"
-                    >
-                      {attention}
-                    </span>
-                  )}
-                </ColumnButton>
-              </div>
-            </ContextMenuTrigger>
-            <ContextMenuContent>
-              <ContextMenuItem onSelect={() => requestClose(row.path)}>
-                {t("closeWorkspaceAction")}
-              </ContextMenuItem>
-            </ContextMenuContent>
-          </ContextMenu>
-        );
-      })}
-
-      <AddWorkspaceButton />
-
-      <div className="mt-auto">
-        <ColumnButton label={t("settings")} onClick={onOpenSettings}>
-          <Settings className="size-3.5" />
+    <div className="flex h-full w-8 shrink-0 flex-col items-center pb-1.5">
+      {/* Same height as the tool tabs row beside it, and the same kind of
+          inset separator under it, so the two rows read as one line. */}
+      <div className="flex h-8 shrink-0 items-center">
+        <ColumnButton
+          label={t("everything")}
+          active={isEverything}
+          onClick={onShowEverything}
+        >
+          <PlainLogo size="1rem" fill="var(--logo)" />
         </ColumnButton>
+      </div>
+      <div className="h-px w-4 shrink-0 bg-border" />
+      <div className="flex min-h-0 flex-1 flex-col items-center gap-1 pt-1.5">
+        {rows.map((row) => {
+          const name = deriveProjectName(row.path);
+          const attention = byWorkspace.get(row.key)?.attention ?? 0;
+          const current = !isEverything && row.key === focusedKey;
+          return (
+            <ContextMenu key={row.key}>
+              <ContextMenuTrigger asChild>
+                <div>
+                  <ColumnButton
+                    label={
+                      attention
+                        ? t("workspaceChipAttention", {
+                            name,
+                            count: attention,
+                          })
+                        : name
+                    }
+                    active={current}
+                    current={current}
+                    onClick={() => onShowWorkspaceTools(row.path)}
+                  >
+                    <span className="text-xs font-semibold">
+                      {initial(name)}
+                    </span>
+                    {attention > 0 && (
+                      <span
+                        aria-hidden="true"
+                        className="absolute -end-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-0.5 text-[0.5625rem] font-bold leading-none text-destructive-foreground animate-in zoom-in-50 duration-200 motion-reduce:animate-none"
+                      >
+                        {attention}
+                      </span>
+                    )}
+                  </ColumnButton>
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuItem onSelect={() => requestClose(row.path)}>
+                  {t("closeWorkspaceAction")}
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
+          );
+        })}
+
+        <AddWorkspaceButton />
+
+        <div className="mt-auto">
+          <ColumnButton label={t("settings")} onClick={onOpenSettings}>
+            <Settings className="size-3.5" />
+          </ColumnButton>
+        </div>
       </div>
       {dialog}
     </div>

@@ -20,17 +20,18 @@ import {
 import type { SidebarResize } from "@/hooks/use-sidebar-resize";
 import type { SidebarCollapseTween } from "@/hooks/use-sidebar-collapse-tween";
 import { FileTree, type FileTreeMode } from "@/components/editor/file-tree";
-import {
-  FileControls,
-  FileCreateActions,
-} from "@/components/editor/file-controls";
+import { FileControls } from "@/components/editor/file-controls";
 import {
   SearchPanel,
   type SearchPanelHandle,
 } from "@/components/editor/search-panel";
 import { EverythingPanel } from "@/components/editor/everything-panel";
 import { GlobalColumn } from "@/components/editor/global-column";
-import { TOOL_ICONS, TOOL_LABEL_KEYS } from "@/components/editor/workspace-tools";
+import {
+  TOOL_ICONS,
+  TOOL_LABEL_KEYS,
+} from "@/components/editor/workspace-tools";
+import { SidebarSeparator } from "@/components/editor/tool-bar";
 import { SessionsPanel } from "@/components/agent/sessions-panel";
 import { CheckpointPanel } from "@/components/editor/git/checkpoint-panel";
 import {
@@ -63,6 +64,10 @@ const NO_DRAG = { WebkitAppRegion: "no-drag" } as CSSProperties;
 
 interface SidebarProps {
   workspacePath: string;
+  /** What the search tool searches: the active file's workspace when a
+   *  file is open, else the focused one. Searching the sidebar's
+   *  workspace while reading a file from another read as a bug. */
+  searchWorkspacePath: string;
   sidebarView: SidebarView;
   isCollapsed: boolean;
   activeTabId: string | null;
@@ -99,11 +104,12 @@ interface SidebarProps {
  * global rail down the left (logo = Everything, the open workspaces, +,
  * settings) beside the tool tabs and the tool (or the Everything view),
  * and a footer with the agent run counts. The header never moves between
- * the two. The content swaps with a short fade so a change of subject
- * reads as a move, not a flicker.
+ * the two. Tool switches swap content instantly — no fade, which read as
+ * jank.
  */
 export function Sidebar({
   workspacePath,
+  searchWorkspacePath,
   sidebarView,
   isCollapsed,
   activeTabId,
@@ -154,7 +160,7 @@ export function Sidebar({
         // Fixed to the open width so nothing inside reflows mid-tween.
         style={{ width: sidebarWidth }}
       >
-        <ShellHeaderCard className="h-[calc(var(--shell-header-height)+1px)] rounded-none border-0 border-b border-border bg-transparent shadow-none">
+        <ShellHeaderCard className="rounded-none border-0 bg-transparent shadow-none">
           <SidebarHeader
             workspacePath={workspacePath}
             isCollapsed={false}
@@ -162,8 +168,10 @@ export function Sidebar({
             onToggleCollapse={onToggleCollapse}
           />
         </ShellHeaderCard>
+        <SidebarSeparator />
         <SidebarBody
           workspacePath={workspacePath}
+          searchWorkspacePath={searchWorkspacePath}
           sidebarView={sidebarView}
           activeTabId={activeTabId}
           openTabs={openTabs}
@@ -194,6 +202,7 @@ export function Sidebar({
  *  focused workspace's tool tabs and tool. */
 function SidebarBody({
   workspacePath,
+  searchWorkspacePath,
   sidebarView,
   activeTabId,
   openTabs,
@@ -221,20 +230,16 @@ function SidebarBody({
         onShowWorkspaceTools={onShowWorkspaceTools}
         onOpenSettings={onOpenSettings}
       />
-      <div
-        key={sidebarView}
-        className="flex min-h-0 min-w-0 flex-1 flex-col animate-in fade-in-0 duration-200 motion-reduce:animate-none"
-      >
+      <SidebarSeparator vertical />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {isEverything ? (
           <EverythingPanel activeTabId={activeTabId} />
         ) : (
-          <WorkspacePanel
-            tool={sidebarView}
-            onShowTool={onShowTool}
-            >
+          <WorkspacePanel tool={sidebarView} onShowTool={onShowTool}>
             <ToolContent
               tool={sidebarView}
               workspacePath={workspacePath}
+              searchWorkspacePath={searchWorkspacePath}
               activeTabId={activeTabId}
               openTabs={openTabs}
               onFileSelect={onFileSelect}
@@ -255,6 +260,7 @@ function SidebarBody({
 function ToolContent({
   tool,
   workspacePath,
+  searchWorkspacePath,
   activeTabId,
   openTabs,
   onFileSelect,
@@ -266,6 +272,7 @@ function ToolContent({
 }: { tool: WorkspaceTool } & Pick<
   SidebarProps,
   | "workspacePath"
+  | "searchWorkspacePath"
   | "activeTabId"
   | "openTabs"
   | "onFileSelect"
@@ -277,12 +284,17 @@ function ToolContent({
 >) {
   switch (tool) {
     case "search":
-      return <SearchPanel ref={searchPanelRef} workspacePath={workspacePath} />;
+      return (
+        <SearchPanel ref={searchPanelRef} workspacePath={searchWorkspacePath} />
+      );
     case "git":
       return <CheckpointPanel workspacePath={workspacePath} />;
     case "sessions":
       return (
-        <SessionsPanel workspacePath={workspacePath} activeTabId={activeTabId} />
+        <SessionsPanel
+          workspacePath={workspacePath}
+          activeTabId={activeTabId}
+        />
       );
     default:
       return (
@@ -328,21 +340,25 @@ export function CollapsedSidebarHeader({
       aria-hidden={open || undefined}
       className={cn(
         "flex shrink-0 select-none items-center overflow-hidden border-border transition-[width,visibility] duration-200 ease-out motion-reduce:transition-none",
-        open ? "invisible" : "visible border-e",
+        open ? "invisible" : "visible",
         SHELL_HEADER_HEIGHT_CLASS,
       )}
       // The open header sits inside the card's two 1px borders and this one
-      // draws its own end border: net 1px off, so the buttons land on the
+      // ends in a 1px separator: net 1px off, so the buttons land on the
       // same pixel in both states.
       style={{ width: open ? 0 : `calc(${width} - 1px)` }}
     >
-      <div className="flex h-full shrink-0" style={{ width: `calc(${width} - 1px)` }}>
+      <div
+        className="flex h-full shrink-0"
+        style={{ width: `calc(${width} - 1px)` }}
+      >
         <SidebarHeader
           workspacePath={workspacePath}
           isCollapsed
           lightsInset={lightsInset}
           onToggleCollapse={onToggleCollapse}
         />
+        <SidebarSeparator vertical className="my-1.5" />
       </div>
     </div>
   );
@@ -374,7 +390,9 @@ function SidebarHeader({
       <div
         data-tauri-drag-region
         className="shrink-0"
-        style={{ WebkitAppRegion: "drag", width: lightsInset ?? 0 } as CSSProperties}
+        style={
+          { WebkitAppRegion: "drag", width: lightsInset ?? 0 } as CSSProperties
+        }
       />
       <button
         type="button"
@@ -429,35 +447,38 @@ function WorkspacePanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-0.5 border-b border-border px-1.5 py-1.5">
-        {WORKSPACE_TOOLS.map((candidate) => {
-          const Icon = TOOL_ICONS[candidate];
-          const active = candidate === tool;
-          const label = t(TOOL_LABEL_KEYS[candidate]);
-          return (
-            <Tooltip key={candidate}>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => onShowTool(candidate)}
-                  aria-label={label}
-                  aria-pressed={active}
-                  className={cn(
-                    "flex h-5 w-7 shrink-0 items-center justify-center rounded-md transition-colors",
-                    active
-                      ? "bg-accent text-foreground"
-                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-                  )}
-                >
-                  <Icon className="size-3.5 shrink-0" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={6}>
-                {label}
-              </TooltipContent>
-            </Tooltip>
-          );
-        })}
+      <div className="shrink-0 px-1.5">
+        <div className="flex h-8 items-center gap-0.5">
+          {WORKSPACE_TOOLS.map((candidate) => {
+            const Icon = TOOL_ICONS[candidate];
+            const active = candidate === tool;
+            const label = t(TOOL_LABEL_KEYS[candidate]);
+            return (
+              <Tooltip key={candidate}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => onShowTool(candidate)}
+                    aria-label={label}
+                    aria-pressed={active}
+                    className={cn(
+                      "flex h-5 w-7 shrink-0 items-center justify-center rounded-md transition-colors",
+                      active
+                        ? "bg-accent text-foreground"
+                        : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                    )}
+                  >
+                    <Icon className="size-3.5 shrink-0" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={6}>
+                  {label}
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </div>
+        <SidebarSeparator className="mx-0" />
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>
@@ -619,6 +640,9 @@ function FilesTool({
         workspacePath={workspacePath}
         sortOrder={sortOrder}
         onSortChange={setSortOrder}
+        onNewScratchpad={handleNewScratchpad}
+        onNewFile={handleNewFile}
+        onNewFolder={handleNewFolder}
       />
       <div className="relative flex min-h-0 grow flex-col">
         <FileTree
@@ -633,11 +657,6 @@ function FilesTool({
           sortOrder={sortOrder}
           mode={mode}
           onModeChange={onModeChange}
-        />
-        <FileCreateActions
-          onNewScratchpad={handleNewScratchpad}
-          onNewFile={handleNewFile}
-          onNewFolder={handleNewFolder}
         />
       </div>
     </>

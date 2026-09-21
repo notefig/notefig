@@ -19,11 +19,35 @@ export function ToolBar({
   className?: string;
 }) {
   return (
-    <div className="shrink-0 border-b border-border">
+    <div className="shrink-0">
       <div className={cn("flex h-9 items-center gap-1 px-2", className)}>
         {children}
       </div>
       {expanded}
+      <SidebarSeparator />
     </div>
+  );
+}
+
+/**
+ * The sidebar's separator: a hairline that stops short of the edges,
+ * never a full-bleed border. `vertical` for the line beside the rail.
+ */
+export function SidebarSeparator({
+  vertical,
+  className,
+}: {
+  vertical?: boolean;
+  className?: string;
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      className={cn(
+        "shrink-0 bg-border",
+        vertical ? "my-2 w-px" : "mx-2 h-px",
+        className,
+      )}
+    />
   );
 }

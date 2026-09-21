@@ -1,3 +1,4 @@
+import { deriveProjectName } from "@/hooks/use-recent-projects";
 import { ToolBar } from "@/components/editor/tool-bar";
 import {
   useState,
@@ -178,7 +179,9 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={t("search")}
+              placeholder={t("searchIn", {
+                workspace: deriveProjectName(workspacePath),
+              })}
               className="flex-1 bg-transparent outline-none placeholder:text-muted-foreground text-xs min-w-0"
             />
             <button

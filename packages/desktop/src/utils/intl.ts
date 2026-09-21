@@ -455,6 +455,7 @@ i18n
 
           // Search panel
           search: "Search",
+          searchIn: "Search {{workspace}}",
           matchCase: "Match case",
           clearSearch: "Clear search",
           toggleFilters: "Toggle filters",
