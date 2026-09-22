@@ -81,11 +81,18 @@ export const COMMIT_AUTHOR = { name: "Notefig", email: "git@notefig.com" };
 // moving that off the main thread is tracked separately.
 const CHECKPOINT_LOG_DEPTH = 25;
 
+// The query key normalizes here, not at the call sites: it was spelled two
+// ways in this file — raw for the collection and useIsFetching, normalized
+// for invalidate/cancel/remove — so a workspace path arriving with a
+// trailing slash or a Windows respelling watched a key the collection never
+// registered. useGitFetching then reported "not fetching" forever and the
+// checkpoint panel's anti-flicker freeze was silently off.
+//
 // debug-panel.tsx (the crash fallback — deliberately self-sufficient) peeks
-// this key raw with a hand-inlined ["git", basePath]. If this key shape ever
-// changes, update debug-panel in the same commit.
+// this key with a hand-inlined ["git", normalized basePath]. If this key
+// shape ever changes, update debug-panel in the same commit.
 function gitQueryKey(workspacePath: string) {
-  return ["git", workspacePath] as const;
+  return ["git", pathutil.normalize(workspacePath)] as const;
 }
 
 function serializeGitError(error: unknown): SerializedGitError {
@@ -246,7 +253,7 @@ export function getOrCreateGitCollection(workspacePath: string): GitCollection {
 export function clearGitCollection(workspacePath: string): void {
   gitCollectionsRegistry.delete(workspaceKey(workspacePath));
   queryClient.removeQueries({
-    queryKey: gitQueryKey(pathutil.normalize(workspacePath)),
+    queryKey: gitQueryKey(workspacePath),
   });
 }
 
@@ -369,7 +376,7 @@ export async function refetchGit(workspacePath: string): Promise<void> {
 /** Debounce-friendly invalidation for file-sync's derived-state pass. */
 export function invalidateGit(workspacePath: string): void {
   void queryClient.invalidateQueries({
-    queryKey: gitQueryKey(pathutil.normalize(workspacePath)),
+    queryKey: gitQueryKey(workspacePath),
   });
 }
 

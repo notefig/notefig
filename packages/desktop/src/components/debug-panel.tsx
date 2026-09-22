@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useFocusedWorkspace } from "@/entities/workspaces";
+import { path as pathutil } from "@/utils/path";
 import { Button } from "@notefig/ui/button";
 import { Input } from "@notefig/ui/input";
 import { ScrollArea } from "@notefig/ui/scroll-area";
@@ -289,7 +290,11 @@ function DebugPanelContent({
   const queryClient = useQueryClient();
   // Key hand-inlined on purpose (self-sufficiency): matches entities/git.ts's
   // gitQueryKey — the git collection stores its GitRow[] in the query cache.
-  const gitStatusQueryKey = basePath ? (["git", basePath] as const) : null;
+  // Normalized, because gitQueryKey normalizes; a respelled basePath would
+  // otherwise read an empty cache and the panel would show no git state.
+  const gitStatusQueryKey = basePath
+    ? (["git", pathutil.normalize(basePath)] as const)
+    : null;
   const latestGitRows = gitStatusQueryKey
     ? (queryClient.getQueryData<GitRow[]>(gitStatusQueryKey) ?? null)
     : null;
