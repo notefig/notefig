@@ -1,16 +1,188 @@
-import { useLayoutEffect, useRef } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  type CSSProperties,
+  type HTMLAttributes,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Minus, Square, X } from "lucide-react";
+import { cn } from "@notefig/ui/utils";
 import { getDesktopOs } from "@/utils/platform";
 import { useAppSettings } from "@/hooks/use-app-settings";
 
-/**
- * Physical pixels the titlebar must cover so content clears the native
- * traffic lights (trafficLightPosition y:14 + ~12px glyphs, plus the 4px
- * pull-up below — see tauri.conf.json).
+/*
+ * The native macOS traffic lights are positioned by tauri.conf.json
+ * (`trafficLightPosition`) in PHYSICAL pixels from the window's top-left,
+ * and they do not scale with the webview zoom. Everything here that has
+ * to line up with them is therefore a physical-pixel budget divided by
+ * the zoom factor, never a rem — the one place the rem-only sizing rule
+ * is broken on purpose. Change these together with the config.
  */
-const TRAFFIC_LIGHT_CLEARANCE_PX = 30;
+
+/** `trafficLightPosition.x/y` from tauri.conf.json. */
+const TRAFFIC_LIGHT_X_PX = 21;
+const TRAFFIC_LIGHT_Y_PX = 29;
+/**
+ * Where the glyphs actually land relative to that origin, measured on a
+ * window capture (`screencapture -l <id>`, 2026-09-21, macOS 15): the
+ * close glyph's left edge sits ~2px right of x and its centre ~1.5px
+ * below y. Re-measure before changing either.
+ */
+const TRAFFIC_LIGHT_GLYPH_DX_PX = 2;
+const TRAFFIC_LIGHT_GLYPH_CENTRE_DY_PX = 1.5;
+/** Three 12px glyphs on 20px centres. */
+const TRAFFIC_LIGHT_GLYPH_PX = 12;
+const TRAFFIC_LIGHT_SPAN_PX = 52;
+
+/**
+ * The shell's outer padding: the floating cards sit this far in from the
+ * window edge. The sidebar's header card starts here, so the lights land
+ * inside it.
+ */
+const SHELL_PADDING_PX = 12;
+/** The card's border, which the header row sits inside. */
+const SHELL_CARD_BORDER_PX = 1;
+/**
+ * The header row's height. The lights centre on it:
+ * SHELL_PADDING_PX + SHELL_CARD_BORDER_PX + HEADER/2
+ *   == TRAFFIC_LIGHT_Y_PX + TRAFFIC_LIGHT_GLYPH_CENTRE_DY_PX  (12+1+18 ≈ 29+1.5)
+ */
+const SHELL_HEADER_HEIGHT_PX = 36;
+/** Breathing room between the last light and the workspace name. */
+const TRAFFIC_LIGHT_GAP_PX = 12;
+/** Padding at the header row's start that clears the lights. */
+const TRAFFIC_LIGHT_INSET_PX =
+  TRAFFIC_LIGHT_X_PX +
+  TRAFFIC_LIGHT_GLYPH_DX_PX +
+  TRAFFIC_LIGHT_SPAN_PX -
+  SHELL_PADDING_PX -
+  SHELL_CARD_BORDER_PX +
+  TRAFFIC_LIGHT_GAP_PX;
+
+/**
+ * Physical pixels a content-less spacer must cover so content clears the
+ * lights (the Welcome screen, which has no header card to host them).
+ */
+const TRAFFIC_LIGHT_CLEARANCE_PX =
+  TRAFFIC_LIGHT_Y_PX +
+  TRAFFIC_LIGHT_GLYPH_CENTRE_DY_PX +
+  TRAFFIC_LIGHT_GLYPH_PX / 2 +
+  4;
+
+/**
+ * What the workspace shell needs to lay its floating chrome around the OS:
+ * on macOS the padding, header height and start inset are physical-pixel
+ * budgets over the zoom (see above); elsewhere they are rem classes like
+ * the rest of the UI and `insetStart` is nothing.
+ */
+export interface ShellChromeMetrics {
+  os: ReturnType<typeof getDesktopOs>;
+  /** The shell root's padding and gap (macOS: inline px over zoom), and
+   *  the `--shell-header-height` var every header-height row reads. */
+  rootStyle: CSSProperties;
+  rootClassName: string;
+  /** The same gap for a column of cards inside the root. */
+  stackStyle: CSSProperties | undefined;
+  stackClassName: string;
+  /** Padding-inline-start that clears the traffic lights (macOS only). */
+  insetStart: number | undefined;
+}
+
+/** The faint wash the dock's tab strips paint over the card colour (their
+ *  "empty" run beside the tabs); the sidebar's header row wears the same
+ *  wash. Theme-aware in styles.css. */
+export const SHELL_CHROME_WASH_CLASS = "shell-chrome-wash";
+
+/**
+ * Every row that must line up across the window — the sidebar's header,
+ * the dock's top tab bar, the Windows control card — is exactly this tall.
+ * The shell root sets the var (rem off macOS, physical px over zoom on it).
+ */
+export const SHELL_HEADER_HEIGHT_CLASS = "h-[var(--shell-header-height)]";
+const HEADER_HEIGHT_VAR = "--shell-header-height";
+/** The gap between the shell's cards, for the sidebar's collapse tween. */
+const GAP_VAR = "--shell-gap";
+
+export function useShellChromeMetrics(): ShellChromeMetrics {
+  const os = getDesktopOs();
+  const { settings } = useAppSettings();
+  const zoom = settings.zoomLevel || 1;
+  if (os !== "macos") {
+    return {
+      os,
+      rootStyle: {
+        [HEADER_HEIGHT_VAR]: "1.5rem",
+        [GAP_VAR]: "0.5rem",
+      } as CSSProperties,
+      rootClassName: "p-2 gap-2",
+      stackStyle: undefined,
+      stackClassName: "gap-2",
+      insetStart: undefined,
+    };
+  }
+  const padding = SHELL_PADDING_PX / zoom;
+  return {
+    os,
+    rootStyle: {
+      padding,
+      gap: padding,
+      [HEADER_HEIGHT_VAR]: `${SHELL_HEADER_HEIGHT_PX / zoom}px`,
+      [GAP_VAR]: `${padding}px`,
+    } as CSSProperties,
+    rootClassName: "",
+    stackStyle: { gap: padding },
+    stackClassName: "",
+    insetStart: Math.ceil(TRAFFIC_LIGHT_INSET_PX / zoom),
+  };
+}
+
+/** The floating-card surface every piece of shell chrome shares. */
+export const SHELL_CARD_CLASS =
+  "rounded-lg border border-border bg-card shadow-sm";
+
+/**
+ * A header-height floating card that is also a window drag region. The
+ * sidebar's header and the Windows control cluster are both one of these
+ * so they read as the same row across the window.
+ */
+export function ShellHeaderCard({
+  className,
+  style,
+  children,
+  ...rest
+}: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      data-tauri-drag-region
+      {...rest}
+      className={cn(
+        SHELL_CARD_CLASS,
+        "flex shrink-0 select-none items-center",
+        SHELL_HEADER_HEIGHT_CLASS,
+        className,
+      )}
+      style={{ WebkitAppRegion: "drag", ...style } as CSSProperties}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Windows gets decorations: false (tauri.windows.conf.json) so the native
+ * title bar never shows; the shell lays minimize/maximize/close into the
+ * end of the dock's top tab bar instead. Nothing on the other platforms.
+ */
+export function WindowsControlsInline() {
+  if (getDesktopOs() !== "windows") return null;
+  return (
+    <div className="flex h-full shrink-0 items-center border-s border-border px-1">
+      <WindowsControls />
+    </div>
+  );
+}
 
 /**
  * Measures the titlebar's own rendered height onto a CSS var on the root
@@ -44,6 +216,11 @@ function useTitlebarHeightVar<T extends HTMLElement>() {
   return ref;
 }
 
+/**
+ * The content-less titlebar for screens with no shell chrome of their own
+ * (Welcome): a drag-region spacer that clears the traffic lights on macOS,
+ * the window controls on Windows, nothing on Linux.
+ */
 export function Titlebar() {
   const os = getDesktopOs();
 
@@ -85,19 +262,31 @@ function MacTitlebarSpacer() {
       // TRAFFIC_LIGHT_CLEARANCE_PX's fixed-px budget. Pinned to px so this
       // can't drift again the next time the root scale changes.
       className="texture-surface -m-[4px] w-[calc(100%+8px)] shrink-0 h-[5vh] md:h-[3vh] xl:h-[2.5vh] bg-background"
-      style={{ WebkitAppRegion: "drag", minHeight } as React.CSSProperties}
+      style={{ WebkitAppRegion: "drag", minHeight } as CSSProperties}
     />
   );
 }
 
-// Windows gets decorations: false (tauri.windows.conf.json) so the native
-// title bar never shows; this renders the drag region + a slim
-// minimize/maximize/close cluster in its place. Kept deliberately
-// low-contrast (no border, background matches the app) so it reads as part
-// of the app's own chrome rather than a bolted-on OS title bar.
+// Kept deliberately low-contrast (no border, background matches the app)
+// so it reads as part of the app's own chrome rather than a bolted-on OS
+// title bar.
 function WindowsTitlebar() {
-  const { t } = useTranslation();
   const ref = useTitlebarHeightVar<HTMLDivElement>();
+  return (
+    <div
+      ref={ref}
+      data-tauri-drag-region
+      className="w-full shrink-0 h-5 bg-background flex items-center justify-end select-none"
+      style={{ WebkitAppRegion: "drag" } as CSSProperties}
+    >
+      <WindowsControls />
+    </div>
+  );
+}
+
+/** The minimize / maximize / close cluster, in the card's own style. */
+function WindowsControls() {
+  const { t } = useTranslation();
 
   async function minimize() {
     await getCurrentWindow().minimize();
@@ -112,44 +301,44 @@ function WindowsTitlebar() {
   }
 
   const buttonClass =
-    "h-full w-8 flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-colors";
+    "flex h-5 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors";
 
   return (
     <div
-      ref={ref}
-      data-tauri-drag-region
-      className="w-full shrink-0 h-5 bg-background flex items-center justify-end select-none"
-      style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+      className="flex items-center gap-px"
+      style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
     >
-      <div
-        className="flex h-full items-stretch"
-        style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+      <ControlButton label={t("minimize")} onClick={minimize} className={buttonClass}>
+        <Minus size={10} strokeWidth={1.5} />
+      </ControlButton>
+      <ControlButton label={t("maximize")} onClick={toggleMaximize} className={buttonClass}>
+        <Square size={8} strokeWidth={1.5} />
+      </ControlButton>
+      <ControlButton
+        label={t("close")}
+        onClick={close}
+        className={`${buttonClass} hover:bg-destructive hover:text-destructive-foreground`}
       >
-        <button
-          type="button"
-          aria-label={t("minimize")}
-          onClick={minimize}
-          className={buttonClass}
-        >
-          <Minus size={10} strokeWidth={1.5} />
-        </button>
-        <button
-          type="button"
-          aria-label={t("maximize")}
-          onClick={toggleMaximize}
-          className={buttonClass}
-        >
-          <Square size={8} strokeWidth={1.5} />
-        </button>
-        <button
-          type="button"
-          aria-label={t("close")}
-          onClick={close}
-          className={`${buttonClass} hover:bg-destructive hover:text-destructive-foreground`}
-        >
-          <X size={10} strokeWidth={1.5} />
-        </button>
-      </div>
+        <X size={10} strokeWidth={1.5} />
+      </ControlButton>
     </div>
+  );
+}
+
+function ControlButton({
+  label,
+  onClick,
+  className,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  className: string;
+  children: ReactNode;
+}) {
+  return (
+    <button type="button" aria-label={label} onClick={onClick} className={className}>
+      {children}
+    </button>
   );
 }

@@ -1,24 +1,23 @@
 "use client";
 
-import { ArrowDownAZ, ArrowUpZA, CalendarArrowDown } from "lucide-react";
+import { ArrowDownAZ, ArrowUpZA, CalendarArrowDown, FilePlus, FolderPlus } from "lucide-react";
 // The three creation actions use Pierre's set, matching the file tree they
 // sit on (@pierre/trees renders the rows and their file-type glyphs) and the
 // tree's own context menu. Sized to 3.5 to match that menu — passed as a
 // className so tailwind-merge drops the Button's own `[&_svg]:size-4` rather
 // than the two fighting on specificity. The icons default to `currentcolor`,
 // so they inherit the button's text color like the lucide ones did.
-import { IconFilePlus, IconFolderPlus, IconHash } from "@pierre/icons";
+import { ScratchpadIcon } from "@/components/editor/scratchpad-icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@notefig/ui/tooltip";
 import { Button } from "@notefig/ui/button";
-import { ButtonGroup } from "@notefig/ui/button-group";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@notefig/ui/dropdown-menu";
-import { WorkspaceSwitcher } from "@/components/editor/workspace-switcher";
 import { cn } from "@notefig/ui/utils";
+import { ToolBar } from "@/components/editor/tool-bar";
 import { useTranslation } from "react-i18next";
 import type { SortOrder } from "@/utils/fs";
 
@@ -26,6 +25,9 @@ interface FileControlsProps {
   workspacePath: string;
   sortOrder: SortOrder;
   onSortChange: (order: SortOrder) => void;
+  onNewScratchpad: () => void;
+  onNewFile: () => void;
+  onNewFolder: () => void;
 }
 
 const sortIcons: Record<SortOrder, typeof ArrowDownAZ> = {
@@ -34,18 +36,27 @@ const sortIcons: Record<SortOrder, typeof ArrowDownAZ> = {
   "date-modified": CalendarArrowDown,
 };
 
+/** The file tree's control row: the three creation actions at the
+ *  start, the sort menu at the end. */
 export function FileControls({
   workspacePath,
   sortOrder,
   onSortChange,
+  onNewScratchpad,
+  onNewFile,
+  onNewFolder,
 }: FileControlsProps) {
   const { t } = useTranslation();
 
   const SortIcon = sortIcons[sortOrder];
 
   return (
-    <div className="flex h-9 items-center justify-between gap-1 border-b border-sidebar-border bg-sidebar px-2">
-      <WorkspaceSwitcher workspacePath={workspacePath} />
+    <ToolBar className="justify-between">
+      <FileCreateActions
+        onNewScratchpad={onNewScratchpad}
+        onNewFile={onNewFile}
+        onNewFolder={onNewFolder}
+      />
       <DropdownMenu>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -95,7 +106,7 @@ export function FileControls({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-    </div>
+    </ToolBar>
   );
 }
 
@@ -105,70 +116,36 @@ interface FileCreateActionsProps {
   onNewFolder: () => void;
 }
 
-/**
- * The three creation actions, floating over the bottom end of the file
- * tree (the tree wrapper provides the positioning context).
- */
-export function FileCreateActions({
+/** The three creation actions, as plain icon buttons in the control row. */
+function FileCreateActions({
   onNewScratchpad,
   onNewFile,
   onNewFolder,
 }: FileCreateActionsProps) {
   const { t } = useTranslation();
-
-  // No z-index on the pill: later-in-DOM keeps it over plain tree rows,
-  // while the tree's context menu (z-index 3-4 inside its host) paints —
-  // and clicks — above it instead of having menu items intercepted.
+  const actions = [
+    { label: t("newScratchpad"), Icon: ScratchpadIcon, onClick: onNewScratchpad },
+    { label: t("newFile"), Icon: FilePlus, onClick: onNewFile },
+    { label: t("newFolder"), Icon: FolderPlus, onClick: onNewFolder },
+  ];
   return (
-    // bg-popover/border-border, not bg-sidebar/border-sidebar-border: there
-    // are no --sidebar tokens in this theme, so those two utilities compiled
-    // to nothing and the pill floated over the tree with no background at
-    // all — just a default-coloured border and a shadow. These are the same
-    // tokens the tree's own context menu uses, which is the app's existing
-    // "floating surface" treatment.
-    <ButtonGroup className="absolute bottom-2 end-2 rounded-md border border-border bg-popover shadow-md">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground [&_svg]:size-3.5"
-            onClick={onNewScratchpad}
-          >
-            <IconHash />
-            <span className="sr-only">{t("newScratchpad")}</span>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="top">{t("newScratchpad")}</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground [&_svg]:size-3.5"
-            onClick={onNewFile}
-          >
-            <IconFilePlus />
-            <span className="sr-only">{t("newFile")}</span>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="top">{t("newFile")}</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground [&_svg]:size-3.5"
-            onClick={onNewFolder}
-          >
-            <IconFolderPlus />
-            <span className="sr-only">{t("newFolder")}</span>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="top">{t("newFolder")}</TooltipContent>
-      </Tooltip>
-    </ButtonGroup>
+    <div className="flex items-center gap-0.5">
+      {actions.map(({ label, Icon, onClick }) => (
+        <Tooltip key={label}>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground [&_svg]:size-3.5"
+              onClick={onClick}
+            >
+              <Icon />
+              <span className="sr-only">{label}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{label}</TooltipContent>
+        </Tooltip>
+      ))}
+    </div>
   );
 }

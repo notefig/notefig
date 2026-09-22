@@ -56,7 +56,9 @@ async function bootWorkspace(page: Page, testName: string) {
 }
 
 async function searchAndClick(page: Page, query: string, rowText: string) {
-  await page.getByRole("button", { name: "Search" }).click();
+  // The rail's Search tool (exact: the header's "Search in all files" and
+  // a workspace chip whose name contains "search" would match otherwise).
+  await page.getByRole("button", { name: "Search", exact: true }).click();
   const input = page.getByPlaceholder(/search/i).first();
   await input.fill(query);
   // Scope to the result rows (buttons) so we never hit the editor's copy.

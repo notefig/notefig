@@ -94,13 +94,13 @@ test.describe("shim: scratchpad entry lifecycle", () => {
 
   async function closeScratchpadTab(page: Page) {
     await openFileInNewTab(page, "README.md");
-    const tab = page
-      .getByRole("button", { name: /Close tab/ })
-      .filter({ hasNotText: "README.md" })
-      .first();
+    // The top tab bar is always there now (even with one tab), so count
+    // tabs by their own marker rather than by the presence of the bar.
+    const tabs = page.locator('[data-tab-id]:not([title="README.md"])');
+    const tab = tabs.first();
     await tab.hover();
     await tab.getByLabel("Close tab").click();
-    await expect(tab).toHaveCount(0);
+    await expect(tabs).toHaveCount(0);
     await waitForNavigationPersisted(page);
   }
 
@@ -230,9 +230,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
     // tab is the only one (scratchpad names are generated, so match by
     // exclusion rather than a fixed basename).
     await expect(
-      page
-        .getByRole("button", { name: /Close tab/ })
-        .filter({ hasNotText: "README.md" }),
+      page.locator('[data-tab-id]:not([title="README.md"])'),
     ).toHaveCount(0);
   });
 

@@ -6,6 +6,7 @@
 // (see file-sync's editor-store import comment); new cycles elsewhere still
 // gate.
 // fallow-ignore-file circular-dependency
+import { emitAppEvent } from "@/utils/app-events";
 import {
   newTaskId,
   newTurnId,
@@ -726,6 +727,11 @@ export class AgentTask {
       });
     }
     this.resolveTurn(turnId, outcome);
+    emitAppEvent("agent:turn-settled", {
+      taskId: this.taskId,
+      turnId,
+      status: outcome.status,
+    });
   }
 
   /** Resolve and clear a turn's prompt-handle promise, if one is pending. */
@@ -955,6 +961,16 @@ export class AgentTask {
       draft.status = turnStatus;
       draft.stopReason = stopReason;
       if (error) draft.error = error;
+    });
+    emitAppEvent("agent:turn-settled", {
+      taskId: this.taskId,
+      turnId: turn.turnId,
+      status:
+        turnStatus === "error"
+          ? "error"
+          : turnStatus === "cancelled"
+            ? "cancelled"
+            : "completed",
     });
 
     this.resolveTurn(

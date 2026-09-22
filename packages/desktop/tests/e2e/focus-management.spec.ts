@@ -105,6 +105,30 @@ test.describe("Focus Management", () => {
     ).toBeVisible();
   });
 
+  test("clicking the editor while naming a new file focuses the editor", async ({
+    page,
+  }) => {
+    await openFileInTree(page, "notes.md");
+
+    // "New file" opens the tree's inline name field. Clicking into the
+    // document ends it — and the click's own target must end up focused:
+    // the tree re-focuses the edited row as it commits, and that must not
+    // outlive the press the user made somewhere else.
+    await page.getByRole("button", { name: "New file" }).click();
+    const nameField = page.locator("file-tree-container input");
+    await expect(nameField).toBeFocused();
+
+    const editor = page.locator('[role="textbox"]').locator("visible=true").first();
+    await editor.click();
+
+    await expect(nameField).toHaveCount(0);
+    expect(await isEditorFocused(page)).toBe(true);
+
+    // And it is the editor that receives what is typed next.
+    await page.keyboard.type("typed after naming");
+    await expect(editor).toContainText("typed after naming");
+  });
+
   test("settings close restores editor focus", async ({ page }) => {
     await openFileInTree(page, "notes.md");
 
@@ -255,7 +279,8 @@ test.describe("Focus Management", () => {
     ];
 
     const encodedLayout = encodeURIComponent(JSON.stringify(twoWindowLayout));
-    await page.goto(`/?layout=${encodedLayout}`);
+    // A bare URL opens on the Everything view; this test wants the tree.
+    await page.goto(`/?layout=${encodedLayout}&sidebarView=files`);
     await waitForFileTree(page, "tab-a.md");
 
     const rightEditor = page

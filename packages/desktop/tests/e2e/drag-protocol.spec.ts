@@ -237,8 +237,8 @@ test.describe("drag protocol: file tree → tabs/editor", () => {
     await expect(page.locator(".ProseMirror [data-drag-handle]")).toHaveCount(
       2,
     );
-    // …and no tab was opened for it (still a single tab → no tab bar)
-    await expect(page.locator('[data-testid="tab-bar"]')).not.toBeVisible();
+    // …and no tab was opened for it (still the single notes tab)
+    await expect(page.locator("[data-tab-id]")).toHaveCount(1);
     // the drop indicator never sticks after the drop
     await expect(page.locator("[data-mtr-drop-over='true']")).toHaveCount(0);
   });

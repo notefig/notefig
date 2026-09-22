@@ -95,9 +95,11 @@ export {
 
 /** Widget state the app reaches into. */
 export {
+  findPromptBlobForTask,
   getPromptBlob,
   subscribePromptBlob,
   updatePromptBlob,
+  type PromptBlobLocation,
   type PromptBlobRecord,
 } from "./prompt/store";
 

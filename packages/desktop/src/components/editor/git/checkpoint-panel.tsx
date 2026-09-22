@@ -1,3 +1,4 @@
+import { ToolBar } from "@/components/editor/tool-bar";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import {
@@ -614,7 +615,7 @@ function QuickSaveCheckpoint({
   };
 
   return (
-    <div className="flex h-[2.6rem] items-center justify-between border-b border-sidebar-border bg-sidebar px-2">
+    <ToolBar className="justify-between">
       <ButtonGroup>
         <Button
           type="button"
@@ -730,7 +731,7 @@ function QuickSaveCheckpoint({
         <syncPresentation.Icon className="h-3.5 w-3.5 shrink-0" />
         <span className="min-w-0 truncate">{syncPresentation.label}</span>
       </span>
-    </div>
+    </ToolBar>
   );
 }
 

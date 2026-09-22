@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Cloud, CloudUpload, Type } from "lucide-react";
-import { cn } from "@notefig/ui/utils";
 import { useTranslation } from "react-i18next";
+import { cn } from "@notefig/ui/utils";
 import { TunnelStatus } from "@/components/tunnel/tunnel-status";
 
 interface StatusBarProps {
@@ -36,6 +36,8 @@ function useDebouncedSyncState(
 // hot on every save. Git state now renders only inside the git panels, so
 // the collection has zero subscribers (and invalidations cost nothing)
 // while no git UI is open.
+/** Save state, word count and the tunnel pill, pinned to the dock card's
+ *  bottom corner at the reading-direction end. */
 export function StatusBar({
   wordCount,
   isSynced,
@@ -46,7 +48,7 @@ export function StatusBar({
   return (
     <div
       className={cn(
-        "fixed bottom-0 flex items-center gap-4 px-4 py-1.5 bg-secondary/80 backdrop-blur-sm border-t border-border text-xs text-muted-foreground",
+        "absolute bottom-0 flex items-center gap-4 px-4 py-1.5 bg-secondary/80 backdrop-blur-sm border-t border-border text-xs text-muted-foreground",
         cornerClasses(direction === "rtl"),
       )}
     >
@@ -85,11 +87,9 @@ function WordCountCell({ count }: { count: number }) {
   );
 }
 
-
 /** Pinned to the reading-direction end of the window. */
 function cornerClasses(isRtl: boolean): string {
   return isRtl
     ? "left-0 right-auto border-r rounded-tr-lg"
     : "right-0 left-auto border-l rounded-tl-lg";
 }
-

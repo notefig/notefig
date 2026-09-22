@@ -4,25 +4,68 @@
  * `?settings`). Like the layout, it lives in the URL so a workspace restores
  * exactly as it was left; unlike the layout it says nothing about tabs,
  * which is why it is its own hook rather than more state in `Workspace`.
+ *
+ * The sidebar has two kinds of view: "everything" — the command-center
+ * view over every open workspace — and the focused workspace's tools
+ * (files, search, git, sessions). Which workspace is focused is a row
+ * attribute of the open set, not URL state; the URL only says which tool
+ * of it is showing.
  */
 import { useCallback, type RefObject } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { SearchPanelHandle } from "@/components/editor/search-panel";
 import { retryOnAnimationFrame } from "@/utils/retry-on-animation-frame";
 import { DEFAULT_SETTINGS_SECTION } from "@/components/editor/settings-modal";
+import { showWorkspace } from "@/hooks/use-open-project";
+import { workspaceKey } from "@/utils/path";
+
+import {
+  SIDEBAR_VIEW_PARAM,
+  WORKSPACE_TOOLS,
+  readSidebarView,
+  withSidebarView,
+  type SidebarView,
+  type WorkspaceTool,
+} from "@/hooks/sidebar-view";
+export {
+  WORKSPACE_TOOLS,
+  readSidebarView,
+  withSidebarView,
+  type SidebarView,
+  type WorkspaceTool,
+};
+/** The tool a workspace lands on when it has no remembered one. */
+const DEFAULT_TOOL: WorkspaceTool = "files";
+
+/**
+ * The tool each workspace was last using, so returning to a workspace from
+ * the rail lands on it (git for the one you were committing in, sessions
+ * for the one you were prompting). Session-scoped like the widget store:
+ * a restart lands everyone on files.
+ */
+const lastToolByWorkspace = new Map<string, WorkspaceTool>();
 
 export interface WorkspacePanelsOptions {
+  /** The focused workspace — whose tool the URL's view belongs to. */
+  workspacePath: string;
   searchPanelRef: RefObject<SearchPanelHandle | null>;
   /** Where focus goes when the sidebar closes: back into the active tab. */
   focusActiveTab: () => boolean;
 }
 
 export interface WorkspacePanels {
+  sidebarView: SidebarView;
   isSidebarCollapsed: boolean;
   toggleSidebarCollapsed: () => void;
   /** Expand the sidebar if collapsed (file creation lands in the tree). */
   openSidebarIfCollapsed: () => void;
   openSettings: () => void;
+  /** Show `view`, expanding the sidebar if it was collapsed. */
+  showSidebarView: (view: SidebarView) => void;
+  /** The command-center view over every open workspace. */
+  showEverything: () => void;
+  /** Bring `path` to the front and show the tool it was last using. */
+  showWorkspaceTools: (path: string) => void;
   /** Show the search panel and focus its input, seeded with the query. */
   openSearchPanel: (options?: {
     filePattern?: string;
@@ -33,24 +76,41 @@ export interface WorkspacePanels {
 }
 
 export function useWorkspacePanels({
+  workspacePath,
   searchPanelRef,
   focusActiveTab,
 }: WorkspacePanelsOptions): WorkspacePanels {
   const [searchParams, setUrlSearchParams] = useSearchParams();
   const isSidebarCollapsed = searchParams.get("sidebar") === "collapsed";
+  const sidebarView = readSidebarView(searchParams);
 
-  /** Show `view` in the sidebar, expanding it if it was collapsed. */
   const showSidebarView = useCallback(
-    (view: "search" | "sessions") => {
-      setUrlSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          next.set("sidebarView", view);
-          next.delete("sidebar"); // ensure expanded
-          return next;
-        },
-        { replace: true },
-      );
+    (view: SidebarView) => {
+      if (view !== "everything") {
+        lastToolByWorkspace.set(workspaceKey(workspacePath), view);
+      }
+      setUrlSearchParams((prev) => withSidebarView(prev, view), {
+        replace: true,
+      });
+    },
+    [setUrlSearchParams, workspacePath],
+  );
+
+  const showEverything = useCallback(
+    () => showSidebarView("everything"),
+    [showSidebarView],
+  );
+
+  const showWorkspaceTools = useCallback(
+    (path: string) => {
+      const tool = lastToolByWorkspace.get(workspaceKey(path)) ?? DEFAULT_TOOL;
+      // Focus is a durable write; the view flips at once. The tool is
+      // remembered under its own workspace, not the one still focused.
+      lastToolByWorkspace.set(workspaceKey(path), tool);
+      void showWorkspace(path);
+      setUrlSearchParams((prev) => withSidebarView(prev, tool), {
+        replace: true,
+      });
     },
     [setUrlSearchParams],
   );
@@ -65,7 +125,7 @@ export function useWorkspacePanels({
           next.delete("sidebar");
         } else {
           next.set("sidebar", "collapsed");
-          next.delete("sidebarView");
+          next.delete(SIDEBAR_VIEW_PARAM);
         }
         return next;
       },
@@ -129,10 +189,14 @@ export function useWorkspacePanels({
   );
 
   return {
+    sidebarView,
     isSidebarCollapsed,
     toggleSidebarCollapsed,
     openSidebarIfCollapsed,
     openSettings,
+    showSidebarView,
+    showEverything,
+    showWorkspaceTools,
     openSearchPanel,
     openSessionsSidebar,
   };

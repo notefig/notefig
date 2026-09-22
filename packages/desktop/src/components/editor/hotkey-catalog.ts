@@ -50,7 +50,7 @@ export const HOTKEY_CATALOG: HotkeyEntry[] = [
     labelKey: "openSettings",
     group: "general",
   },
-  // src/components/editor/icon-sidebar.tsx
+  // src/components/editor/sidebar.tsx
   {
     id: "toggleSidebar",
     binding: "Mod+\\",

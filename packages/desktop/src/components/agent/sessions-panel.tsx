@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react";
+import { ToolBar } from "@/components/editor/tool-bar";
+import { useCallback, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Check,
@@ -52,6 +53,7 @@ import { ensureAgentRuntime } from "@/agent/tunnel/require-connection";
 import {
   describeTaskMeta,
   useAgentTaskList,
+  type AgentTaskMeta,
   useSessionActions,
 } from "@/entities/agents";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
@@ -61,9 +63,11 @@ import {
   useDefaultHarness,
 } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "@notefig/ui/harness-logo";
+import { StatusGlyph, taskGlyphState } from "@/components/agent/status-glyph";
+import { useUnseenTargets } from "@/entities/unseen";
 
 /**
- * The left-sidebar sessions menu (sidebarView === "sessions"): every agent
+ * The left-sidebar sessions tool (sidebarView === "sessions"): every agent
  * session in the workspace, last-activity ordered with live status meta.
  * Clicking a row opens (or focuses) that session's dockable chat tab; the
  * `+` menu starts a new session on a chosen harness — behind the same
@@ -78,10 +82,51 @@ export function SessionsPanel({
   activeTabId: string | null;
 }) {
   const { t } = useTranslation();
-  const normalized = workspaceKey(workspacePath);
-  const { openAgentTab } = useWorkspaceTabs();
   const taskMetas = useAgentTaskList(workspacePath);
 
+  const { create, trustDialog } = useStartSession(workspacePath);
+
+  return (
+    <div className="flex h-full flex-col">
+      <ToolBar className="justify-start">
+        <NewSessionButton onCreate={create} />
+      </ToolBar>
+
+      {taskMetas.length === 0 ? (
+        <p className="p-3 text-xs text-muted-foreground">
+          {t("agentNoSessions")}
+        </p>
+      ) : (
+        <div className="flex-1 overflow-y-auto py-1">
+          {taskMetas.map((meta) => (
+            <SessionListRow
+              key={meta.task.taskId}
+              meta={meta}
+              activeTabId={activeTabId}
+            />
+          ))}
+        </div>
+      )}
+
+      {trustDialog}
+    </div>
+  );
+}
+
+/**
+ * Starting a session in a workspace, trust gate included: the first start
+ * in a workspace asks once (the answer is kept per workspace), later ones
+ * go straight through. Shared by the sessions panel's split button and the
+ * Everything view's quick action, so both start sessions the same way.
+ */
+export function useStartSession(workspacePath: string): {
+  create: (harness: HarnessDefinition) => void;
+  /** Mount once near the caller: the one-time trust confirmation. */
+  trustDialog: ReactNode;
+} {
+  const { t } = useTranslation();
+  const normalized = workspaceKey(workspacePath);
+  const { openAgentTab } = useWorkspaceTabs();
   const [trustPromptOpen, setTrustPromptOpen] = useState(false);
   // The harness the pending trust confirmation would start (picker choice).
   const [pendingHarness, setPendingHarness] = useState<HarnessDefinition>(
@@ -104,7 +149,7 @@ export function SessionsPanel({
     [workspacePath, openAgentTab],
   );
 
-  const handleCreate = useCallback(
+  const create = useCallback(
     (harness: HarnessDefinition) => {
       if (!ensureAgentRuntime()) return;
       if (kv.get(trustKey)) {
@@ -123,51 +168,52 @@ export function SessionsPanel({
     startTask(pendingHarness);
   }, [kv, trustKey, startTask, pendingHarness]);
 
+  const trustDialog = (
+    <AlertDialog open={trustPromptOpen} onOpenChange={setTrustPromptOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("agentTrustTitle")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("agentTrustDescription", { harness: pendingHarness.label })}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+          <AlertDialogAction onClick={confirmTrust}>
+            {t("agentTrustConfirm")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+
+  return { create, trustDialog };
+}
+
+/** A task from a session list, rendered as its row: the derived meta label,
+ *  active when its chat tab is the active one, opening that tab on click.
+ *  Shared by the workspace's sessions panel and the Everything view. */
+export function SessionListRow({
+  meta,
+  activeTabId,
+  className,
+}: {
+  meta: AgentTaskMeta;
+  activeTabId: string | null;
+  className?: string;
+}) {
+  const { openAgentTab } = useWorkspaceTabs();
+  const unseenTargets = useUnseenTargets();
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex h-9 items-center justify-between border-b border-sidebar-border px-2">
-        <span className="text-xs font-medium text-muted-foreground">
-          {t("agentSessions")}
-        </span>
-        <NewSessionButton onCreate={handleCreate} />
-      </div>
-
-      {taskMetas.length === 0 ? (
-        <p className="p-3 text-xs text-muted-foreground">
-          {t("agentNoSessions")}
-        </p>
-      ) : (
-        <div className="flex-1 overflow-y-auto py-1">
-          {taskMetas.map((meta) => (
-            <SessionRow
-              key={meta.task.taskId}
-              task={meta.task}
-              meta={describeTaskMeta(meta)}
-              isRunning={meta.isRunning}
-              active={agentTabId(meta.task.taskId) === activeTabId}
-              onOpen={() => openAgentTab(meta.task.taskId)}
-            />
-          ))}
-        </div>
-      )}
-
-      <AlertDialog open={trustPromptOpen} onOpenChange={setTrustPromptOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("agentTrustTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("agentTrustDescription", { harness: pendingHarness.label })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmTrust}>
-              {t("agentTrustConfirm")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+    <SessionRow
+      className={className}
+      task={meta.task}
+      meta={describeTaskMeta(meta)}
+      isRunning={meta.isRunning}
+      unseen={unseenTargets.has(meta.task.taskId)}
+      active={agentTabId(meta.task.taskId) === activeTabId}
+      onOpen={() => openAgentTab(meta.task.taskId)}
+    />
   );
 }
 
@@ -177,12 +223,17 @@ export function SessionRow({
   isRunning,
   active,
   onOpen,
+  className,
+  unseen = false,
 }: {
   task: AgentTaskRow;
   meta: string;
   isRunning: boolean;
   active: boolean;
   onOpen: () => void;
+  className?: string;
+  /** A turn settled since the user last had this session in front. */
+  unseen?: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -198,13 +249,20 @@ export function SessionRow({
           data-session-row={task.taskId}
           data-session-status={task.status}
           className={cn(
-            "group flex w-full cursor-pointer items-center gap-2 px-2 py-1 text-xs transition-colors",
+            "group flex w-full cursor-pointer items-center gap-2.5 px-2 py-1.5 text-xs transition-colors",
             active ? "bg-accent" : "hover:bg-accent/50",
+            className,
           )}
         >
-          <StatusDot status={task.status} />
-          <span className="min-w-0 flex-1 truncate">{task.title}</span>
-          <span className="shrink-0 text-[0.6875rem] text-muted-foreground">
+          <span className="flex size-3 shrink-0 items-center justify-center">
+            <StatusGlyph
+              state={unseen && !isRunning ? "unseen" : taskGlyphState(task)}
+            />
+          </span>
+          <span className={cn("min-w-0 flex-1 truncate", unseen && "font-medium")}>
+            {task.title}
+          </span>
+          <span className="shrink-0 text-[0.6875rem] text-muted-foreground/80">
             {meta}
           </span>
           {isRunning && (
@@ -234,7 +292,7 @@ export function SessionRow({
  * gesture is deliberate enough that delete needs no extra confirm step (it
  * replaced the MET-91 two-step inline trash button).
  */
-function SessionRowMenu({ task }: { task: AgentTaskRow }) {
+export function SessionRowMenu({ task }: { task: AgentTaskRow }) {
   const { t } = useTranslation();
   const actions = useSessionActions(task);
   return (
@@ -295,7 +353,7 @@ function NewSessionButton({
     <ButtonGroup>
       <Button
         variant="ghost"
-        className="h-7 gap-1 px-1.5 text-xs text-muted-foreground [&_svg]:size-3.5"
+        className="h-6 gap-1 px-1.5 text-xs font-normal text-muted-foreground [&_svg]:size-3"
         title={t("agentNewSessionWith", { harness: defaultHarness.label })}
         aria-label={t("agentNewSessionWith", {
           harness: defaultHarness.label,
@@ -304,13 +362,14 @@ function NewSessionButton({
       >
         <Plus />
         <HarnessLogo harnessId={defaultHarness.id} />
+        <span className="truncate">{defaultHarness.label}</span>
       </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-6 text-muted-foreground"
+            className="h-6 w-5 text-muted-foreground [&_svg]:size-3"
             title={t("agentChooseHarness")}
             aria-label={t("agentChooseHarness")}
           >
@@ -321,7 +380,7 @@ function NewSessionButton({
           {harnesses.map((harness) => (
             <DropdownMenuItem
               key={harness.id}
-                  onSelect={() => {
+              onSelect={() => {
                 setDefaultHarness(harness.id);
                 onCreate(harness);
               }}
@@ -339,22 +398,3 @@ function NewSessionButton({
   );
 }
 
-const STATUS_DOT_COLOR: Record<AgentTaskRow["status"], string> = {
-  starting: "bg-amber-500",
-  running: "bg-blue-500 animate-pulse",
-  idle: "bg-green-500",
-  // A restored session is a normal (idle-equivalent) session whose runtime
-  // revives on first interaction (MET-54).
-  restored: "bg-green-500",
-  cancelled: "bg-muted-foreground",
-  error: "bg-red-500",
-  unavailable: "bg-red-500",
-};
-
-export function StatusDot({ status }: { status: AgentTaskRow["status"] }) {
-  return (
-    <span
-      className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT_COLOR[status]}`}
-    />
-  );
-}

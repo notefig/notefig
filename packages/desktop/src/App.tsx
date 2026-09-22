@@ -13,7 +13,6 @@ import { useEffect, useState } from "react";
 import { useTheme } from "@/components/theme-provider";
 import { platformAdapter } from "@/adapters";
 import { isWeb } from "@/utils/platform";
-import { Titlebar } from "@/components/titlebar";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { WorkspaceErrorBoundary } from "@/components/workspace-error-boundary";
 import { EditorHarness } from "@/test-harness/editor-harness";
@@ -117,7 +116,6 @@ export const App = () => {
 
   return (
     <div className="flex h-screen flex-col text-foreground overflow-clip">
-      <Titlebar />
       {isWeb() && <MockDirectoryPickerDialog />}
       <TextPromptDialog />
       <PairDialog />

@@ -1,3 +1,4 @@
+import { SHELL_CHROME_WASH_CLASS } from "@/components/titlebar";
 import styles from "./Window.module.css";
 import Droppable from "../dndkit/Droppable";
 import Tab from "./Tab";
@@ -6,7 +7,7 @@ import {
   horizontalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { useDndContext } from "@dnd-kit/core";
-import { useDockable } from "../store";
+import { useDockable, useDockChrome } from "../store";
 import { ScrollArea } from "@notefig/ui/scroll-area";
 import { cn } from "@notefig/ui/utils";
 import { dropZoneProps, getProtocolContext } from "@/utils/drag-protocol";
@@ -34,6 +35,7 @@ type TabViewProps = {
   id: string;
   orientation: "row" | "column";
   address: number[];
+  atEnd?: boolean;
 };
 
 /** Either end of a drag (`active` or `over`) — only the shared shape. */
@@ -84,21 +86,34 @@ function TabView({
   id,
   orientation,
   address,
+  atEnd = false,
 }: TabViewProps) {
   const { active, over } = useDndContext();
   const { dispatch } = useDockable();
+  const { tabBarLeading, tabBarTrailing, tabBarLeadingActive, endInset } =
+    useDockChrome();
   const { isSameWindow, currentEdgeZoneSide, isOverAny } = deriveDragState(
     active,
     over,
     id,
   );
+  // The top-left window (first child at every level) is the dock's header
+  // row: it hosts the leading chrome and always shows its bar, even with
+  // a single tab, so the content never jumps when that chrome comes and
+  // goes with the sidebar.
+  const isTopLeft = address.every((index) => index === 0);
+  const leading = isTopLeft ? tabBarLeading : null;
+  // The top bar at the reading direction's end — physically top-left in
+  // RTL — keeps the macOS lights clear.
+  const endSpacer = atEnd && endInset !== null ? endInset : null;
+  const trailing = atEnd ? tabBarTrailing : null;
 
   return (
     <div
       className={`${styles.container} ${isOverAny ? styles.isOver : ""}`}
       data-dockable-window-id={id}
     >
-      {!hideTabs && (
+      {(!hideTabs || isTopLeft) && (
         <Droppable
           id={id}
           data={{
@@ -111,12 +126,21 @@ function TabView({
             onDrop: (payload) => openDroppedFile(payload, id),
           })}
           className={cn(
-            "relative mx-2 flex min-w-0 w-[calc(100%-1rem)] rounded-lg border border-sidebar-border overflow-clip",
+            // Each window's tab bar is its own floating strip. Its outer
+            // height is the shell's header row plus the card border it
+            // matches, so the collapsed sidebar header laid into the
+            // top-left strip lines up with the open card's header — and
+            // that strip drops its start margin to sit where the card was.
+            "relative flex min-w-0 h-[calc(var(--shell-header-height,2.25rem)+2px)] shrink-0 rounded-lg border border-border bg-card overflow-clip transition-[margin] duration-200 ease-out motion-reduce:transition-none",
+            SHELL_CHROME_WASH_CLASS,
+            isTopLeft && tabBarLeadingActive
+              ? "ms-0 me-2 w-[calc(100%-0.5rem)]"
+              : "mx-2 w-[calc(100%-1rem)]",
             "data-[mtr-drop-over=true]:border-ring",
             "data-[mtr-drop-over=true]:shadow-[0_0_0_1px_hsl(var(--ring))_inset]",
           )}
-          style={{ backgroundColor: "rgba(15, 15, 15, 0.05)" }}
         >
+          {leading}
           <ScrollArea className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
             <div className="flex h-full items-stretch">
               <SortableContext
@@ -144,6 +168,14 @@ function TabView({
               </SortableContext>
             </div>
           </ScrollArea>
+          {endSpacer !== null && (
+            <div
+              data-tauri-drag-region
+              className="shrink-0"
+              style={{ WebkitAppRegion: "drag", width: endSpacer } as React.CSSProperties}
+            />
+          )}
+          {trailing}
         </Droppable>
       )}
 

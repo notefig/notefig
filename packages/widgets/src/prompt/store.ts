@@ -23,12 +23,21 @@ export type PromptBlobRecord = {
   boundTaskId: string | null;
   /** Last sent prompt text, for the Edit affordance. */
   lastSentPrompt: string;
+  /**
+   * Absolute path of the document this widget is mounted in — the node
+   * view records it on mount, so the app can find its way back from a
+   * session to the widget in the document (the sidebar's "Jump"). Null
+   * until the widget has mounted in this app run; a widget persisted in a
+   * file nobody has opened since launch has no known document yet.
+   */
+  documentPath: string | null;
 };
 
 const EMPTY_RECORD: PromptBlobRecord = {
   boundTurnId: null,
   boundTaskId: null,
   lastSentPrompt: "",
+  documentPath: null,
 };
 
 const records = new Map<string, PromptBlobRecord>();
@@ -66,6 +75,59 @@ export function adoptPersistedPromptBinding(
 ): void {
   if (getPromptBlob(blobId).boundTaskId) return;
   updatePromptBlob(blobId, { boundTaskId: taskId });
+}
+
+/**
+ * Record where a widget lives. Idempotent — an unchanged path emits nothing,
+ * so the node view may call it on every render.
+ */
+export function bindPromptBlobDocument(
+  blobId: string,
+  documentPath: string,
+): void {
+  if (getPromptBlob(blobId).documentPath === documentPath) return;
+  updatePromptBlob(blobId, { documentPath });
+}
+
+/** A widget bound to a session, located in its document. */
+export type PromptBlobLocation = {
+  blobId: string;
+  documentPath: string;
+  boundTurnId: string | null;
+};
+
+/**
+ * The widget to reveal for a task — the reverse of the binding: task →
+ * widget → document. When several widgets share the task (a document with
+ * two rounds, or two documents on the shared session), the one watching
+ * `preferTurnId` wins, so an attention item lands on the round that raised
+ * it; otherwise the first bound widget with a known document. Null when no
+ * mounted widget is bound to the task — the caller falls back to the chat.
+ */
+export function findPromptBlobForTask(
+  taskId: string,
+  preferTurnId?: string | null,
+): PromptBlobLocation | null {
+  let fallback: PromptBlobLocation | null = null;
+  for (const [blobId, record] of records) {
+    if (record.boundTaskId !== taskId || record.documentPath === null) continue;
+    const location = {
+      blobId,
+      documentPath: record.documentPath,
+      boundTurnId: record.boundTurnId,
+    };
+    if (preferTurnId && record.boundTurnId === preferTurnId) return location;
+    fallback ??= location;
+  }
+  // Naming a turn makes this an exact question. One workspace session is
+  // shared by the chat tab and every widget in it, so a task can own both
+  // kinds of round: a turn no widget is watching ran in the chat, and the
+  // chat is where its permission or sign-in card is. Falling back to some
+  // other widget on the same task would land the user on an unrelated
+  // round they cannot answer from. Without a turn the question is
+  // task-level ("where do I answer for this session?") and any bound
+  // widget is a better answer than the chat.
+  return preferTurnId ? null : fallback;
 }
 
 /** Unbind the watched turn (dismiss / stale-row reset). The draft is

@@ -6,7 +6,6 @@ import {
   type ElementType,
 } from "react";
 import {
-  Hash,
   FileText,
   Settings,
   Search,
@@ -42,6 +41,7 @@ import { useHotkey, formatForDisplay } from "@tanstack/react-hotkeys";
 import { useTheme } from "../theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useTranslation } from "react-i18next";
+import { ScratchpadIcon } from "@/components/editor/scratchpad-icon";
 import { getLocalizedCommandKeywords } from "@/utils/command-keywords";
 import { useFileSearch, type FileSearchResult } from "@/hooks/use-file-search";
 import { closeWorkspace } from "@/entities/workspaces";
@@ -216,7 +216,7 @@ export function CommandPalette({
       labelKey: "newScratchpad",
       groupKey: "file",
       keywordKey: "commandKeywords.newScratchpad",
-      icon: Hash,
+      icon: ScratchpadIcon,
       shortcut: formatForDisplay("Mod+N"),
       action: () => {
         onNewScratchpad?.();

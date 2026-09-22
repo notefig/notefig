@@ -1,18 +1,21 @@
+import { FilePlus, FolderPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   FileTree as TreesFileTree,
   type FileTreeProps as TreesFileTreeProps,
 } from "@pierre/trees/react";
-import type { ContextMenuItem, ContextMenuOpenContext } from "@pierre/trees";
+import {
+  FILE_TREE_TAG_NAME,
+  type ContextMenuItem,
+  type ContextMenuOpenContext,
+} from "@pierre/trees";
 // Pierre's set, matching the rows @pierre/trees draws underneath this menu.
 // `menuButton` sizes them via [&_svg]:size-3.5 and they default to
 // `currentcolor`, so nothing is passed at the call sites.
 import {
   IconArrowUpRight,
   IconBin,
-  IconFilePlus,
-  IconFolderPlus,
   IconPencil,
 } from "@pierre/icons";
 import {
@@ -408,10 +411,19 @@ function FileTreeInner({
     model.focusFirstItem();
     requestAnimationFrame(() => {
       const container = model.getFileTreeContainer();
-      const rowButton = container?.shadowRoot?.querySelector<HTMLElement>(
-        '[data-type="item"][tabindex="0"]',
-      );
-      rowButton?.focus({ preventScroll: true });
+      // A frame is long enough for the hand-off to stop being wanted.
+      // Focus may have left the tree altogether (the host stops being the
+      // active element), or something inside it may have claimed focus in
+      // the meantime — the context menu's Rename focuses its input in
+      // exactly this frame, and stealing it back would blur the field,
+      // which commits the rename the user never typed. Complete the
+      // hand-off only while the host is still holding an empty focus.
+      if (!container || document.activeElement !== container) return;
+      const shadow = container.shadowRoot;
+      if (!shadow || shadow.activeElement) return;
+      shadow
+        .querySelector<HTMLElement>('[data-type="item"][tabindex="0"]')
+        ?.focus({ preventScroll: true });
     });
   }, [model]);
 
@@ -633,7 +645,7 @@ function FileTreeInner({
                   });
                 }}
               >
-                <IconFilePlus />
+                <FilePlus />
                 {t("newFile", "New File")}
               </button>
               <button
@@ -649,7 +661,7 @@ function FileTreeInner({
                   });
                 }}
               >
-                <IconFolderPlus />
+                <FolderPlus />
                 {t("newFolder", "New Folder")}
               </button>
             </>
@@ -823,4 +835,54 @@ function FileTreeInner({
       )}
     </div>
   );
+}
+
+/**
+ * The file tree's inline text entry — the rename field, and the name field
+ * "New file" opens — ends when it loses focus, and @pierre/trees re-focuses
+ * the row it was editing as part of that commit.
+ *
+ * That is right when the entry was ended from inside the tree (Enter, or a
+ * press on another row): the user is in the tree, so the tree keeps focus.
+ * It is wrong when the entry was ended by a press OUTSIDE the tree — into a
+ * document, a toolbar, another panel. The browser dispatches blur BEFORE it
+ * moves focus to what was pressed, so the tree's re-focus lands last and
+ * the tree ends up holding focus: the user's press does nothing, and what
+ * they type next goes wherever the tree left the caret.
+ *
+ * Ending the entry on the way down puts the order back: the commit and the
+ * tree's own row re-focus both run while the press is still being
+ * dispatched, and the browser then focuses what was actually pressed, as it
+ * does everywhere else in the app.
+ *
+ * One listener for the whole app, installed at boot — not a component
+ * effect, and not one per tree. There is no per-tree state to hold: only a
+ * tree that HAS focus can have an open entry, and `document.activeElement`
+ * names it, because focus inside a shadow root reports the host. A window
+ * with three workspace trees open still needs exactly this one listener.
+ */
+/** The attribute @pierre/trees puts on the inline entry's input. */
+const INLINE_EDIT_INPUT = "[data-item-rename-input]";
+
+/** The inline entry that currently holds focus, in whichever tree owns it. */
+function focusedInlineEdit(): { host: HTMLElement; input: HTMLElement } | null {
+  const host = document.activeElement;
+  if (!(host instanceof HTMLElement)) return null;
+  if (host.localName !== FILE_TREE_TAG_NAME) return null;
+  const input = host.shadowRoot?.activeElement;
+  if (!(input instanceof HTMLElement) || !input.matches(INLINE_EDIT_INPUT)) {
+    return null;
+  }
+  return { host, input };
+}
+
+/** Start dismissing tree inline edits on presses outside their tree. */
+export function startTreeInlineEditDismissal(): () => void {
+  const onPress = (event: MouseEvent) => {
+    const edit = focusedInlineEdit();
+    if (!edit || event.composedPath().includes(edit.host)) return;
+    edit.input.blur();
+  };
+  document.addEventListener("mousedown", onPress, true);
+  return () => document.removeEventListener("mousedown", onPress, true);
 }

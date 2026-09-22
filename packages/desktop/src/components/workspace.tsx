@@ -1,11 +1,18 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type React from "react";
 import { Dockable } from "@/components/dockable";
-import { IconSidebar } from "@/components/editor/icon-sidebar";
-import { Sidebar } from "@/components/editor/sidebar";
+import type { DockChrome } from "@/components/dockable/store";
+import { CollapsedSidebarHeader, Sidebar } from "@/components/editor/sidebar";
 import type { SearchPanelHandle } from "@/components/editor/search-panel";
 import { canOpenFile as canOpenInEditor } from "@/components/editor/polymorphic-editor";
 import { StatusBar } from "@/components/editor/status-bar";
+import {
+  SHELL_CARD_CLASS,
+  Titlebar,
+  WindowsControlsInline,
+  useShellChromeMetrics,
+} from "@/components/titlebar";
+import { cn } from "@notefig/ui/utils";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
@@ -32,12 +39,16 @@ import { useProjectSettings } from "@/utils/project-settings";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
 import { useWorkspaceCommands } from "@/hooks/use-workspace-commands";
 import { useWorkspacePanels } from "@/hooks/use-workspace-panels";
+import { useSidebarResize } from "@/hooks/use-sidebar-resize";
+import { useSidebarCollapseTween } from "@/hooks/use-sidebar-collapse-tween";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
 import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import { WorkspaceTabsProvider } from "@/components/workspace-tabs-provider";
 import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary";
 import { useThrowWorkspaceAccessError } from "@/components/workspace-error-boundary";
 import { agentTabId, isFileTabId, tabKind } from "@/entities/tabs";
+import { touchRecentDocument } from "@/entities/recent-documents";
+import { useTrackActiveTab } from "@/entities/unseen";
 import { useTabElements } from "@/tabs/tab-types";
 import { useReleaseNotesOnUpdate } from "@/hooks/use-release-notes-on-update";
 import {
@@ -57,7 +68,16 @@ export const Workspace = () => {
   useOpenProjectTestSeam();
 
   if (!ready) return null;
-  if (focusedWorkspace === null) return <Welcome />;
+  if (focusedWorkspace === null) {
+    return (
+      <div className="flex h-full flex-col">
+        <Titlebar />
+        <div className="min-h-0 flex-1">
+          <Welcome />
+        </div>
+      </div>
+    );
+  }
   return <WorkspaceShell workspacePath={focusedWorkspace} />;
 };
 
@@ -132,10 +152,14 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
   });
 
   const {
+    sidebarView,
     isSidebarCollapsed,
     toggleSidebarCollapsed,
     openSidebarIfCollapsed,
     openSettings,
+    showSidebarView,
+    showEverything,
+    showWorkspaceTools,
     openSearchPanel,
     openSessionsSidebar,
     isCommandPaletteOpen,
@@ -169,6 +193,20 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
     renameTab,
   });
 
+  const chrome = useShellChromeMetrics();
+  // Search follows the file in front of the user, not the sidebar's
+  // workspace: the two differ once tabs from several workspaces share
+  // the dock.
+  const activeFileWorkspace = useWorkspaceOfPath(
+    activeFilePath(activeTabId) ?? "",
+  );
+  const searchWorkspacePath = activeFileWorkspace ?? workspacePath;
+  const sidebarResize = useSidebarResize();
+  const sidebarTween = useSidebarCollapseTween(isSidebarCollapsed);
+  // The macOS lights sit at the window's physical top-left: over the
+  // sidebar in LTR, over the dock's end-most tab bar in RTL.
+  const lightsInset = direction === "rtl" ? undefined : chrome.insetStart;
+
   return (
     <WorkspaceTabsProvider
       openFile={openFileInTabs}
@@ -177,50 +215,83 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
       <PromptWidgetBoundary>
         <div
           dir={direction}
-          className="relative flex h-full w-full overflow-clip p-2"
+          className={cn(
+            "texture-surface flex h-full w-full overflow-clip bg-background",
+            chrome.rootClassName,
+          )}
+          style={chrome.rootStyle}
         >
-          <div className="flex h-full shrink-0 overflow-clip rounded-xl border border-border">
-            <IconSidebar
-              isCollapsed={isSidebarCollapsed}
-              onToggleCollapse={toggleSidebarCollapsed}
-            />
+          <Sidebar
+            workspacePath={workspacePath}
+            searchWorkspacePath={searchWorkspacePath}
+            sidebarView={sidebarView}
+            isCollapsed={isSidebarCollapsed}
+            activeTabId={activeTabId}
+            openTabs={openTabs}
+            onFileSelect={handleFileSelect}
+            closeTab={closeTab}
+            onRenameOpenFile={handleRenameOpenFile}
+            mode={fileTreeMode}
+            onModeChange={setFileTreeMode}
+            searchPanelRef={searchPanelRef}
+            onToggleCollapse={toggleSidebarCollapsed}
+            onShowEverything={showEverything}
+            onShowTool={showSidebarView}
+            onShowWorkspaceTools={showWorkspaceTools}
+            onOpenSettings={openSettings}
+            resize={sidebarResize}
+            tween={sidebarTween}
+            lightsInset={lightsInset}
+          />
 
-            {!isSidebarCollapsed && (
-              <Sidebar
-                workspacePath={workspacePath}
-                activeTabId={activeTabId}
-                openTabs={openTabs}
-                onFileSelect={handleFileSelect}
-                closeTab={closeTab}
-                onRenameOpenFile={handleRenameOpenFile}
-                mode={fileTreeMode}
-                onModeChange={setFileTreeMode}
-                searchPanelRef={searchPanelRef}
-              />
+          <div
+            className={cn(
+              "flex min-w-0 flex-1 flex-col overflow-clip",
+              chrome.stackClassName,
             )}
-          </div>
-
-          <div className="flex-1 flex flex-col min-w-0 overflow-clip">
-            <DebugPanel />
-
-            <div className="flex-1 flex min-h-0 overflow-clip">
-              <div
-                ref={dockableRef}
-                className="flex-1 min-w-0 h-full overflow-clip"
-                tabIndex={-1}
-              >
-                <DockArea
-                  hasTabs={openTabs.length > 0}
-                  layout={layout}
-                  onLayoutChange={handleLayoutChange}
+            style={chrome.stackStyle}
+          >
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-clip">
+              <DebugPanel />
+              <div className="flex min-h-0 flex-1 overflow-clip">
+                <div
+                  ref={dockableRef}
+                  className="h-full min-w-0 flex-1 overflow-clip"
+                  tabIndex={-1}
                 >
-                  {allDockableTabs}
-                </DockArea>
+                  <DockArea
+                    hasTabs={openTabs.length > 0}
+                    layout={layout}
+                    onLayoutChange={handleLayoutChange}
+                    chrome={{
+                      tabBarLeading: (
+                        <CollapsedSidebarHeader
+                          workspacePath={workspacePath}
+                          width={sidebarResize.sidebarWidth}
+                          open={!isSidebarCollapsed}
+                          lightsInset={lightsInset}
+                          onToggleCollapse={toggleSidebarCollapsed}
+                        />
+                      ),
+                      tabBarTrailing: <WindowsControlsInline />,
+                      tabBarLeadingActive: isSidebarCollapsed,
+                      endInset:
+                        direction === "rtl"
+                          ? (chrome.insetStart ?? null)
+                          : null,
+                    }}
+                  >
+                    {allDockableTabs}
+                  </DockArea>
+                </div>
               </div>
+              <StatusBar
+                wordCount={wordCount}
+                isSynced={isSynced}
+                direction={direction}
+              />
             </div>
           </div>
-
-          <StatusBar wordCount={wordCount} isSynced={isSynced} />
 
           <SettingsModal
             direction={direction}
@@ -399,6 +470,15 @@ function useWorkspaceDocuments({
   const activeContent = useActiveFileContent(activeTabId);
   const wordCount = useMemo(() => countWords(activeContent), [activeContent]);
 
+  // The Everything view's recent documents: whatever file tab is in front.
+  useEffect(() => {
+    if (activeTabId !== null && isFileTabId(activeTabId)) {
+      void touchRecentDocument(activeTabId);
+    }
+  }, [activeTabId]);
+  // ...and the unseen tracker: whatever tab is in front has been seen.
+  useTrackActiveTab(activeTabId);
+
   const isFetchingContent = useContentFetching();
   useStaleTabPruning(staleTabIds, layout, handleLayoutChange);
   useEffect(() => {
@@ -416,7 +496,11 @@ function useWorkspaceChrome(
   searchPanelRef: React.RefObject<SearchPanelHandle | null>,
   focusActiveTab: () => boolean,
 ) {
-  const panels = useWorkspacePanels({ searchPanelRef, focusActiveTab });
+  const panels = useWorkspacePanels({
+    workspacePath,
+    searchPanelRef,
+    focusActiveTab,
+  });
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const { direction, setDirection } = useDirectionSetting(workspacePath);
   return {
@@ -500,28 +584,53 @@ function useRenameOpenFile(
   );
 }
 
-/** The dock's tab surface, or the empty-state message with no tabs open. */
+/** The dock's tab surface, or the empty-state message with no tabs open.
+ *  The header row (the top-left tab bar, host of the collapsed sidebar's
+ *  header) is there in both, so the content never moves. */
 function DockArea({
   hasTabs,
   layout,
   onLayoutChange,
+  chrome,
   children,
 }: {
   hasTabs: boolean;
   layout: Parameters<typeof removeTabFromLayout>[0];
   onLayoutChange: (layout: Parameters<typeof removeTabFromLayout>[0]) => void;
+  chrome: Partial<DockChrome>;
   children: React.ComponentProps<typeof Dockable.Root>["children"];
 }) {
   const { t } = useTranslation();
   if (!hasTabs) {
     return (
-      <div className="flex items-center justify-center h-full text-muted-foreground p-4 ps-0">
-        <p className="text-center">{t("noFileSelected")}</p>
+      <div className="flex h-full flex-col">
+        <div
+          className={cn(
+            SHELL_CARD_CLASS,
+            "flex h-[calc(var(--shell-header-height)+2px)] shrink-0 overflow-clip rounded-lg transition-[margin] duration-200 ease-out motion-reduce:transition-none",
+            chrome.tabBarLeadingActive ? "ms-0 me-2" : "mx-2",
+          )}
+        >
+          {chrome.tabBarLeading}
+          <div className="flex-1" />
+          {chrome.endInset != null && (
+            <div className="shrink-0" style={{ width: chrome.endInset }} />
+          )}
+          {chrome.tabBarTrailing}
+        </div>
+        <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-muted-foreground">
+          <p className="text-center">{t("noFileSelected")}</p>
+        </div>
       </div>
     );
   }
   return (
-    <Dockable.Root orientation="row" layout={layout} onChange={onLayoutChange}>
+    <Dockable.Root
+      orientation="row"
+      layout={layout}
+      onChange={onLayoutChange}
+      chrome={chrome}
+    >
       {children}
     </Dockable.Root>
   );
