@@ -4,10 +4,10 @@ import { cn } from "@notefig/ui/utils";
 /**
  * The control row every sidebar tool puts above its content — the file
  * tree's sort menu, the search input, the commit controls, the new
- * session button. One height and one separator for all of them, so
- * switching tools never moves the content edge. `expanded` is the one
- * exception: extra rows (the search filters) stack beneath the row,
- * inside the same separator.
+ * session button. One height for all of them, so switching tools never
+ * moves the content edge; no rule beneath — the sidebar draws no lines,
+ * the header's tint and spacing do the separating. `expanded` is the one
+ * exception: extra rows (the search filters) stack beneath the row.
  */
 export function ToolBar({
   children,
@@ -24,7 +24,6 @@ export function ToolBar({
         {children}
       </div>
       {expanded}
-      <SidebarSeparator />
     </div>
   );
 }

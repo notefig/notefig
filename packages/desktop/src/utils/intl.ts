@@ -408,6 +408,7 @@ i18n
           everything: "Everything",
           everythingHint: "Everything \u2014 all workspaces",
           addWorkspace: "Add workspace",
+          openProject: "Open project",
           projects: "Projects",
           needsAttention: "Needs attention",
           showMore_one: "Show {{count}} more",
@@ -417,9 +418,13 @@ i18n
           attentionAuth: "{{title}} needs sign-in",
           attentionUnavailable: "{{title}} disconnected",
           attentionError: "{{title}} failed",
-          agentRuns: "Working",
-          recentDocuments: "Recents",
-          noRecentDocuments: "Documents you open show up here.",
+          promptRounds: "Prompts",
+          everythingFiles: "Files",
+          everythingScratchpads: "Scratchpads",
+          everythingEmpty:
+            "Files, prompts and sessions you work with show up here.",
+          roundQueued: "queued",
+          roundCancelled: "stopped",
           scratchTag: "scratch",
 
           // Advanced settings

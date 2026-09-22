@@ -11,6 +11,9 @@
  * cheapest thing that makes "did this root boot the runtime?" a single
  * greppable question.
  */
+import { startTreeInlineEditDismissal } from "@/components/editor/file-tree";
+import { startPromptRoundTracking } from "@/entities/prompt-rounds";
+import { startUnseenTracking } from "@/entities/unseen";
 import { startWorkspaceWatcherSubscription } from "@/utils/workspace-watchers";
 import { restoreOpenWorkspaces } from "@/entities/workspaces";
 
@@ -39,6 +42,9 @@ export function bootstrapAppRuntime({
   restoreWorkspaces = true,
 }: BootstrapAppRuntimeOptions = {}): void {
   startWorkspaceWatcherSubscription();
+  startUnseenTracking();
+  startPromptRoundTracking();
+  startTreeInlineEditDismissal();
   if (restoreWorkspaces) {
     void restoreOpenWorkspaces().catch((error) => {
       console.error("Failed to restore open workspaces:", error);

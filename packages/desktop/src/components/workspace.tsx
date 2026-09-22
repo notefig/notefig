@@ -48,6 +48,7 @@ import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary"
 import { useThrowWorkspaceAccessError } from "@/components/workspace-error-boundary";
 import { agentTabId, isFileTabId, tabKind } from "@/entities/tabs";
 import { touchRecentDocument } from "@/entities/recent-documents";
+import { useTrackActiveTab } from "@/entities/unseen";
 import { useTabElements } from "@/tabs/tab-types";
 import { useReleaseNotesOnUpdate } from "@/hooks/use-release-notes-on-update";
 import {
@@ -472,9 +473,11 @@ function useWorkspaceDocuments({
   // The Everything view's recent documents: whatever file tab is in front.
   useEffect(() => {
     if (activeTabId !== null && isFileTabId(activeTabId)) {
-      touchRecentDocument(activeTabId);
+      void touchRecentDocument(activeTabId);
     }
   }, [activeTabId]);
+  // ...and the unseen tracker: whatever tab is in front has been seen.
+  useTrackActiveTab(activeTabId);
 
   const isFetchingContent = useContentFetching();
   useStaleTabPruning(staleTabIds, layout, handleLayoutChange);

@@ -178,6 +178,24 @@ export function useAgentTaskList(workspacePath: string): AgentTaskMeta[] {
   );
 }
 
+/**
+ * Every task across every open workspace, last activity first — the
+ * Everything view's session list. Same shape and ordering as the
+ * per-workspace list, so the two pickers never disagree.
+ */
+export function useAgentSessionList(limit: number): AgentTaskMeta[] {
+  const tasks = useAllTasks();
+  const queuedTurns = useTurnsWithStatus("queued");
+  return useMemo(
+    () =>
+      [...tasks]
+        .sort(byLastActivity)
+        .slice(0, limit)
+        .map((task) => toTaskMeta(task, countQueuedByTask(queuedTurns))),
+    [tasks, queuedTurns, limit],
+  );
+}
+
 function useAllTasks(): AgentTaskRow[] {
   const { data = [] } = useLiveQuery((q) =>
     q.from({ task: agentTasksCollection }),

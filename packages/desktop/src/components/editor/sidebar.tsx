@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@notefig/ui/tooltip";
 import {
   SHELL_CARD_CLASS,
   SHELL_HEADER_HEIGHT_CLASS,
+  SHELL_CHROME_WASH_CLASS,
   ShellHeaderCard,
 } from "@/components/titlebar";
 import type { SidebarResize } from "@/hooks/use-sidebar-resize";
@@ -154,21 +155,18 @@ export function Sidebar({
       <div
         className={cn(
           SHELL_CARD_CLASS,
+          "texture-surface",
           "flex min-h-0 flex-1 flex-col overflow-hidden transition-opacity duration-200 motion-reduce:transition-none",
           expanded ? "opacity-100" : "opacity-0",
         )}
         // Fixed to the open width so nothing inside reflows mid-tween.
         style={{ width: sidebarWidth }}
       >
-        <ShellHeaderCard className="rounded-none border-0 bg-transparent shadow-none">
-          <SidebarHeader
-            workspacePath={workspacePath}
-            isCollapsed={false}
-            lightsInset={lightsInset}
-            onToggleCollapse={onToggleCollapse}
-          />
-        </ShellHeaderCard>
-        <SidebarSeparator />
+        <SidebarHeaderRow
+          workspacePath={workspacePath}
+          lightsInset={lightsInset}
+          onToggleCollapse={onToggleCollapse}
+        />
         <SidebarBody
           workspacePath={workspacePath}
           searchWorkspacePath={searchWorkspacePath}
@@ -195,6 +193,32 @@ export function Sidebar({
         />
       )}
     </div>
+  );
+}
+
+/** The card's header row: tinted, never ruled — the rules below belong to
+ *  the tools (under the tool tabs) and to the Everything view's top block. */
+function SidebarHeaderRow({
+  workspacePath,
+  lightsInset,
+  onToggleCollapse,
+}: Pick<SidebarProps, "workspacePath" | "lightsInset" | "onToggleCollapse">) {
+  return (
+    <>
+      <ShellHeaderCard
+        className={cn(
+          "rounded-none border-0 bg-transparent shadow-none",
+          SHELL_CHROME_WASH_CLASS,
+        )}
+      >
+        <SidebarHeader
+          workspacePath={workspacePath}
+          isCollapsed={false}
+          lightsInset={lightsInset}
+          onToggleCollapse={onToggleCollapse}
+        />
+      </ShellHeaderCard>
+    </>
   );
 }
 
@@ -233,7 +257,10 @@ function SidebarBody({
       <SidebarSeparator vertical />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {isEverything ? (
-          <EverythingPanel activeTabId={activeTabId} />
+          <EverythingPanel
+            workspacePath={workspacePath}
+            activeTabId={activeTabId}
+          />
         ) : (
           <WorkspacePanel tool={sidebarView} onShowTool={onShowTool}>
             <ToolContent

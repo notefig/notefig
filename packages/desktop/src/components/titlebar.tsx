@@ -90,6 +90,11 @@ export interface ShellChromeMetrics {
   insetStart: number | undefined;
 }
 
+/** The faint wash the dock's tab strips paint over the card colour (their
+ *  "empty" run beside the tabs); the sidebar's header row wears the same
+ *  wash. Theme-aware in styles.css. */
+export const SHELL_CHROME_WASH_CLASS = "shell-chrome-wash";
+
 /**
  * Every row that must line up across the window — the sidebar's header,
  * the dock's top tab bar, the Windows control card — is exactly this tall.

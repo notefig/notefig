@@ -388,7 +388,8 @@ test.describe("Notefig E2E Comprehensive Tests", () => {
       ];
 
       const encodedLayout = encodeURIComponent(JSON.stringify(twoWindowLayout));
-      await page.goto(`/?layout=${encodedLayout}`);
+      // A bare URL opens on the Everything view; this test wants the tree.
+      await page.goto(`/?layout=${encodedLayout}&sidebarView=files`);
       await waitForFileTree(page);
 
       const rightEditor = page

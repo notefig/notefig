@@ -1,3 +1,4 @@
+import { SHELL_CHROME_WASH_CLASS } from "@/components/titlebar";
 import styles from "./Window.module.css";
 import Droppable from "../dndkit/Droppable";
 import Tab from "./Tab";
@@ -131,13 +132,13 @@ function TabView({
             // top-left strip lines up with the open card's header — and
             // that strip drops its start margin to sit where the card was.
             "relative flex min-w-0 h-[calc(var(--shell-header-height,2.25rem)+2px)] shrink-0 rounded-lg border border-border bg-card overflow-clip transition-[margin] duration-200 ease-out motion-reduce:transition-none",
+            SHELL_CHROME_WASH_CLASS,
             isTopLeft && tabBarLeadingActive
               ? "ms-0 me-2 w-[calc(100%-0.5rem)]"
               : "mx-2 w-[calc(100%-1rem)]",
             "data-[mtr-drop-over=true]:border-ring",
             "data-[mtr-drop-over=true]:shadow-[0_0_0_1px_hsl(var(--ring))_inset]",
           )}
-          style={{ backgroundColor: "rgba(15, 15, 15, 0.05)" }}
         >
           {leading}
           <ScrollArea className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden">

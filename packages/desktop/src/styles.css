@@ -595,13 +595,27 @@
   }
 }
 
+/* The faint wash shell chrome paints over the card colour — the dock's tab
+   strips beside their tabs, the sidebar's header row. An opacity over the
+   card, not a token, so it reads the same on any surface; dark mode washes
+   lighter since a dark wash vanishes on a dark card. */
+.shell-chrome-wash {
+  background-color: rgba(15, 15, 15, 0.05);
+}
+.dark .shell-chrome-wash {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
 /* Normalize Lucide icon stroke rendering across zoom levels.
    Uses absolute stroke width technique from Lucide docs:
    https://lucide.dev/guide/advanced/global-styling#absolute-stroke-width */
 .lucide {
-  /* 1.75 tuned pre-scale-up; ×1.5 to match the 150% root font-size baseline,
-     since non-scaling-stroke keeps strokes at CSS-px size while icons grew. */
-  stroke-width: 2.625 !important;
+  /* An absolute CSS-px stroke (non-scaling below), so every icon draws the
+     same hairline whatever its box or the zoom level. 1.5 is lucide's own
+     "light" weight at a 24px box; the earlier 2.625 (1.75 × the 150%
+     baseline) read as bold once the icons themselves had grown 1.5×, and
+     1.5 read as too narrow. */
+  stroke-width: 1.75 !important;
 }
 
 .lucide * {

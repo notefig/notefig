@@ -19,39 +19,23 @@ import { DEFAULT_SETTINGS_SECTION } from "@/components/editor/settings-modal";
 import { showWorkspace } from "@/hooks/use-open-project";
 import { workspaceKey } from "@/utils/path";
 
-export const WORKSPACE_TOOLS = ["files", "search", "git", "sessions"] as const;
-export type WorkspaceTool = (typeof WORKSPACE_TOOLS)[number];
-export type SidebarView = "everything" | WorkspaceTool;
-
-const SIDEBAR_VIEW_PARAM = "sidebarView";
-/** Absent param = the file tree, as it always was. */
-const DEFAULT_VIEW: WorkspaceTool = "files";
-
-function isSidebarView(value: string | null): value is SidebarView {
-  return value === "everything" || WORKSPACE_TOOLS.includes(value as WorkspaceTool);
-}
-
-/** The view the URL names, defaulting past anything unrecognised. */
-export function readSidebarView(params: URLSearchParams): SidebarView {
-  const value = params.get(SIDEBAR_VIEW_PARAM);
-  return isSidebarView(value) ? value : DEFAULT_VIEW;
-}
-
-/** Name `view` in the params (the default view is the absent param) and
- *  make sure the sidebar is expanded to show it. */
-function withSidebarView(
-  prev: URLSearchParams,
-  view: SidebarView,
-): URLSearchParams {
-  const next = new URLSearchParams(prev);
-  if (view === DEFAULT_VIEW) {
-    next.delete(SIDEBAR_VIEW_PARAM);
-  } else {
-    next.set(SIDEBAR_VIEW_PARAM, view);
-  }
-  next.delete("sidebar");
-  return next;
-}
+import {
+  SIDEBAR_VIEW_PARAM,
+  WORKSPACE_TOOLS,
+  readSidebarView,
+  withSidebarView,
+  type SidebarView,
+  type WorkspaceTool,
+} from "@/hooks/sidebar-view";
+export {
+  WORKSPACE_TOOLS,
+  readSidebarView,
+  withSidebarView,
+  type SidebarView,
+  type WorkspaceTool,
+};
+/** The tool a workspace lands on when it has no remembered one. */
+const DEFAULT_TOOL: WorkspaceTool = "files";
 
 /**
  * The tool each workspace was last using, so returning to a workspace from
@@ -119,7 +103,7 @@ export function useWorkspacePanels({
 
   const showWorkspaceTools = useCallback(
     (path: string) => {
-      const tool = lastToolByWorkspace.get(workspaceKey(path)) ?? DEFAULT_VIEW;
+      const tool = lastToolByWorkspace.get(workspaceKey(path)) ?? DEFAULT_TOOL;
       // Focus is a durable write; the view flips at once. The tool is
       // remembered under its own workspace, not the one still focused.
       lastToolByWorkspace.set(workspaceKey(path), tool);

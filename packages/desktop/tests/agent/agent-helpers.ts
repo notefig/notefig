@@ -162,8 +162,9 @@ export async function exportRecording(page: Page): Promise<AgentRecordingFixture
       window.dispatchEvent(new PopStateEvent("popstate"));
     }
   });
-  // The tab button carries a task-count badge ("Session(1)").
-  await page.getByRole("button", { name: /^Session/ }).click();
+  // The tab button carries a task-count badge ("Session(1)") — anchored on
+  // the badge so the sidebar's icon-only "Sessions" tool tab can't match.
+  await page.getByRole("button", { name: /^Session\(\d+\)$/ }).click();
   await page.locator("select").last().selectOption({ index: 0 });
   const button = page.getByTestId("copy-agent-recording");
   await expect(button).toBeEnabled();

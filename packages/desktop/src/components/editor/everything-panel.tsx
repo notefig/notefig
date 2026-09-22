@@ -1,132 +1,284 @@
-import { useState, type ReactNode } from "react";
+import { useState, type ComponentType, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronsDown, ChevronsUp } from "lucide-react";
+import {
+  ChevronsDown,
+  ChevronsUp,
+  CircleAlert,
+  FolderPlus,
+  MessageSquarePlus,
+  MessageSquareText,
+} from "lucide-react";
+import { DropdownMenuTrigger } from "@notefig/ui/dropdown-menu";
+import { findPromptBlobForTask } from "@notefig/widgets";
 import { cn } from "@notefig/ui/utils";
 import { jumpToTask } from "@/components/agent/jump-to-task";
+import {
+  SessionListRow,
+  useStartSession,
+} from "@/components/agent/sessions-panel";
+import {
+  StatusGlyph,
+  attentionGlyphState,
+  turnGlyphState,
+} from "@/components/agent/status-glyph";
+import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
+import { AddWorkspaceMenu } from "@/components/editor/global-column";
+import { ScratchpadIcon } from "@/components/editor/scratchpad-icon";
+import { SidebarSeparator } from "@/components/editor/tool-bar";
+import { TOOL_ICONS } from "@/components/editor/workspace-tools";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
 import {
   useAgentRunsOverview,
+  useAgentSessionList,
   type AgentAttentionItem,
-  type AgentTaskMeta,
+  type AgentTurnStatus,
 } from "@/entities/agents";
+import { isTurnUnseen, useUnseenRows } from "@/entities/unseen";
+import {
+  isLiveRound,
+  usePromptRounds,
+  type PromptRound,
+} from "@/entities/prompt-rounds";
 import {
   useRecentDocuments,
   type RecentDocument,
 } from "@/entities/recent-documents";
+import { createAndOpenScratchpad } from "@/entities/scratchpads";
+import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { deriveProjectName } from "@/hooks/use-recent-projects";
+import { formatTimeAgo } from "@/utils/format";
 import { getFileName } from "@/utils/fs";
 
-const RECENT_DOCUMENTS_SHOWN = 8;
+const ROUNDS_SHOWN = 6;
+const SESSIONS_SHOWN = 6;
+const FILES_SHOWN = 6;
+const SCRATCHPADS_SHOWN = 4;
+/** Fetched together, then split by kind. */
+const RECENT_DOCUMENTS_FETCHED = 30;
 const ATTENTION_COLLAPSED_ROWS = 3;
 
 interface EverythingPanelProps {
+  /** The focused workspace — where the quick actions create things. */
+  workspacePath: string;
   activeTabId: string | null;
 }
 
 /**
- * The command-center view over every open workspace: the agent runs that
- * need the user, the ones still working, and the documents most recently
- * in front of the user, wherever they live.
+ * The command-center view over every open workspace: quick ways to start
+ * something, the runs that need the user, then what they were working with
+ * most recently — prompt rounds in documents, agent sessions, files and
+ * scratchpads — wherever it lives. Every list is a flat row list in the
+ * sidebar's own idiom (the sessions panel, the file tree); only "needs
+ * attention" is a card, so it reads as the one thing that is asking.
  */
-export function EverythingPanel({ activeTabId }: EverythingPanelProps) {
+export function EverythingPanel({
+  workspacePath,
+  activeTabId,
+}: EverythingPanelProps) {
   const { t } = useTranslation();
   const overview = useAgentRunsOverview();
-  const recentDocuments = useRecentDocuments(RECENT_DOCUMENTS_SHOWN);
+  const rounds = usePromptRounds(ROUNDS_SHOWN);
+  const sessions = useAgentSessionList(SESSIONS_SHOWN);
+  const recentDocuments = useRecentDocuments(RECENT_DOCUMENTS_FETCHED);
+  const unseenRows = useUnseenRows();
+  // Documents with a round in flight show it on their row too.
+  const liveDocuments = new Set(
+    rounds.filter(isLiveRound).map((round) => round.documentPath),
+  );
+
+  const renderDocument = (document: RecentDocument) => (
+    <RecentDocumentRow
+      key={document.path}
+      document={document}
+      active={document.path === activeTabId}
+      live={liveDocuments.has(document.path)}
+    />
+  );
+  const sections = [
+    listSection(MessageSquareText, t("promptRounds"), rounds, (round) => (
+      <PromptRoundRow
+        key={round.turnId}
+        round={round}
+        unseen={isTurnUnseen(unseenRows, round.documentPath, round.turnId)}
+      />
+    )),
+    listSection(TOOL_ICONS.sessions, t("agentSessions"), sessions, (meta) => (
+      <SessionListRow
+        key={meta.task.taskId}
+        meta={meta}
+        activeTabId={activeTabId}
+        className={ROW_SHAPE_CLASS}
+      />
+    )),
+    listSection(
+      TOOL_ICONS.files,
+      t("everythingFiles"),
+      recentDocuments.filter((d) => !d.isScratchpad).slice(0, FILES_SHOWN),
+      renderDocument,
+    ),
+    listSection(
+      ScratchpadIcon,
+      t("everythingScratchpads"),
+      recentDocuments.filter((d) => d.isScratchpad).slice(0, SCRATCHPADS_SHOWN),
+      renderDocument,
+    ),
+  ].filter((section) => section !== null);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-2 py-3">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-1 py-2">
+      <QuickActions workspacePath={workspacePath} />
+      <SidebarSeparator className="mx-1 mt-2 shrink-0" />
       {overview.attention.length > 0 && (
         <AttentionGroup items={overview.attention} />
       )}
-
-      {overview.working.length > 0 && (
-        <Section title={t("agentRuns")}>
-          {overview.working.map((meta) => (
-            <WorkingRow key={meta.task.taskId} meta={meta} />
-          ))}
-        </Section>
+      {sections.length === 0 ? (
+        <p className="p-3 text-xs text-muted-foreground">
+          {t("everythingEmpty")}
+        </p>
+      ) : (
+        sections
       )}
-
-      <Section title={t("recentDocuments")}>
-        {recentDocuments.length === 0 ? (
-          <p className="px-2 py-1 text-xs text-muted-foreground">
-            {t("noRecentDocuments")}
-          </p>
-        ) : (
-          recentDocuments.map((document) => (
-            <RecentDocumentRow
-              key={document.path}
-              document={document}
-              active={document.path === activeTabId}
-            />
-          ))
-        )}
-      </Section>
     </div>
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+/** A titled row list, or nothing when there is nothing to list — so the
+ *  view only ever shows what exists. */
+type Glyph = ComponentType<{ className?: string; strokeWidth?: number | string }>;
+
+function listSection<T>(
+  icon: Glyph,
+  title: string,
+  items: T[],
+  render: (item: T) => ReactNode,
+): ReactNode {
+  if (items.length === 0) return null;
   return (
-    <section className="flex flex-col gap-0.5">
-      <h3 className="px-2 pb-1 text-xs font-medium text-muted-foreground">
-        {title}
-      </h3>
-      {children}
+    <section key={title} className="flex shrink-0 flex-col pt-4">
+      <SectionTitle icon={icon}>{title}</SectionTitle>
+      {items.map(render)}
     </section>
   );
 }
 
-/** The one row shape every list here uses: a leading glyph, a label that
- *  truncates, an optional trailing detail. */
+function SectionTitle({
+  icon: Icon,
+  className,
+  children,
+}: {
+  icon: Glyph;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <h3
+      className={cn(
+        "flex items-center gap-2.5 px-2 pb-1 text-xs text-muted-foreground",
+        className,
+      )}
+    >
+      <Icon aria-hidden="true" className="size-3 shrink-0" strokeWidth={1.5} />
+      <span className="truncate">{children}</span>
+    </h3>
+  );
+}
+
+/** The sessions panel's row, as classes: a flat full-width row with a
+ *  pointer cursor, hover wash and solid accent when active. */
+/** Rows here are rounded — a list of pills in the card, not a table. */
+const ROW_SHAPE_CLASS = "rounded-md";
+
+function navRowClass(active?: boolean): string {
+  return cn(
+    "flex w-full cursor-pointer items-center gap-2.5 px-2 py-1.5 text-start text-xs transition-colors",
+    ROW_SHAPE_CLASS,
+    active ? "bg-accent" : "hover:bg-accent/50",
+  );
+}
+
+const GLYPH_SLOT_CLASS =
+  "flex size-3 shrink-0 items-center justify-center text-muted-foreground";
+
+/**
+ * The one row shape every list here uses: a leading glyph, a label that
+ * truncates, a muted trailing note.
+ */
 function NavRow({
   leading,
   label,
   trailing,
   active,
+  emphasis,
   title,
-  tabIndex,
   onClick,
-  className,
 }: {
   leading: ReactNode;
   label: string;
   trailing?: ReactNode;
   active?: boolean;
+  /** Weighted label — the row has news the user has not seen. */
+  emphasis?: boolean;
   title?: string;
-  /** -1 keeps a row out of the tab order while its fold is closed. */
-  tabIndex?: number;
   onClick: () => void;
-  className?: string;
 }) {
   return (
     <button
       type="button"
-      tabIndex={tabIndex}
       onClick={onClick}
       title={title ?? label}
       aria-current={active ? "true" : undefined}
-      className={cn(
-        "flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-start text-sm transition-colors",
-        active ? "bg-accent" : "hover:bg-accent/60",
-        className,
-      )}
+      className={navRowClass(active)}
     >
-      <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
-        {leading}
+      <span className={GLYPH_SLOT_CLASS}>{leading}</span>
+      <span className={cn("min-w-0 flex-1 truncate", emphasis && "font-medium")}>
+        {label}
       </span>
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {trailing}
+      {trailing !== undefined && (
+        <span className="shrink-0 text-[0.6875rem] text-muted-foreground/80">
+          {trailing}
+        </span>
+      )}
     </button>
   );
 }
 
-function Dot({ className }: { className?: string }) {
+/** Ways to start something in the focused workspace, at the top so they
+ *  are one click from anywhere. The "open project" row opens the rail's
+ *  add-workspace menu, so both entry points offer the same choices. */
+function QuickActions({ workspacePath }: { workspacePath: string }) {
+  const { t } = useTranslation();
+  const { openFile } = useWorkspaceTabs();
+  const { defaultHarness } = useDefaultHarness();
+  const { create, trustDialog } = useStartSession(workspacePath);
   return (
-    <span
-      aria-hidden="true"
-      className={cn("size-2 rounded-full", className)}
-    />
+    <div className="flex shrink-0 flex-col">
+      <NavRow
+        leading={<ScratchpadIcon className="size-3" />}
+        label={t("newScratchpad")}
+        onClick={() => createAndOpenScratchpad(workspacePath, openFile)}
+      />
+      <NavRow
+        leading={<MessageSquarePlus className="size-3" strokeWidth={1.5} />}
+        label={t("agentNewSession")}
+        title={t("agentNewSessionWith", { harness: defaultHarness.label })}
+        onClick={() => create(defaultHarness)}
+      />
+      <AddWorkspaceMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            title={t("openProject")}
+            className={navRowClass()}
+          >
+            <span className={GLYPH_SLOT_CLASS}>
+              <FolderPlus className="size-3" strokeWidth={1.5} />
+            </span>
+            <span className="min-w-0 flex-1 truncate">{t("openProject")}</span>
+          </button>
+        </DropdownMenuTrigger>
+      </AddWorkspaceMenu>
+      {trustDialog}
+    </div>
   );
 }
 
@@ -160,17 +312,18 @@ function AttentionGroup({ items }: { items: AgentAttentionItem[] }) {
   const shown = expanded ? items : items.slice(0, ATTENTION_COLLAPSED_ROWS);
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm animate-in fade-in-0 duration-200 motion-reduce:animate-none">
-      <div className="flex flex-col gap-0.5 p-1.5">
-        <h3 className="px-2 pb-1 pt-0.5 text-xs font-medium text-muted-foreground">
+    <div className="mx-1 mt-4 shrink-0 overflow-hidden rounded-lg border border-border/70 bg-card animate-in fade-in-0 duration-200 motion-reduce:animate-none">
+      <div className="flex flex-col p-1 pt-1.5">
+        <SectionTitle icon={CircleAlert} className="pt-0.5">
           {t("needsAttention")}
-        </h3>
+        </SectionTitle>
         {shown.map((item) => (
           <NavRow
             key={item.task.taskId}
-            leading={<Dot className="bg-destructive" />}
+            leading={<StatusGlyph state={attentionGlyphState(item.kind)} />}
             label={attentionLabel(item, t)}
             title={`${attentionLabel(item, t)} · ${deriveProjectName(item.task.workspacePath)}`}
+            trailing={formatTimeAgo(item.since)}
             onClick={() =>
               jumpToTask(item.task.taskId, { turnId: item.turnId, openAgentTab })
             }
@@ -181,13 +334,13 @@ function AttentionGroup({ items }: { items: AgentAttentionItem[] }) {
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
-          className="flex h-8 w-full items-center gap-2.5 border-t border-border bg-muted/60 px-3.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="flex w-full cursor-pointer items-center gap-2.5 bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
-          <span className="flex size-4 items-center justify-center">
+          <span className={GLYPH_SLOT_CLASS}>
             {expanded ? (
-              <ChevronsUp className="size-3.5" />
+              <ChevronsUp className="size-3" strokeWidth={1.5} />
             ) : (
-              <ChevronsDown className="size-3.5" />
+              <ChevronsDown className="size-3" strokeWidth={1.5} />
             )}
           </span>
           {expanded ? t("showLess") : t("showMore", { count: overflow })}
@@ -197,16 +350,61 @@ function AttentionGroup({ items }: { items: AgentAttentionItem[] }) {
   );
 }
 
-function WorkingRow({ meta }: { meta: AgentTaskMeta }) {
-  const { openAgentTab } = useWorkspaceTabs();
+/** The trailing note per turn status; settled rounds show when they ran. */
+const ROUND_META_KEYS: Partial<Record<AgentTurnStatus, string>> = {
+  running: "agentRunning",
+  queued: "roundQueued",
+  cancelled: "roundCancelled",
+  error: "agentFailed",
+};
+
+/** A prompt-widget round: the prompt, its state, and a jump back to the
+ *  widget in its document. */
+function PromptRoundRow({
+  round,
+  unseen,
+}: {
+  round: PromptRound;
+  /** Settled since the user last had its document in front. */
+  unseen: boolean;
+}) {
+  const { t } = useTranslation();
+  const { openFile } = useWorkspaceTabs();
+  const metaKey = ROUND_META_KEYS[round.status];
+  const label = round.prompt || getFileName(round.documentPath);
+  // The widget itself when it is mounted this run; else its document.
+  const jump = () => {
+    const widget = findPromptBlobForTask(round.taskId, round.turnId);
+    if (widget && widget.boundTurnId === round.turnId) {
+      jumpToBlob(widget.documentPath, widget.blobId);
+    } else {
+      openFile({ tabId: round.documentPath, intent: "replace" });
+    }
+  };
   return (
     <NavRow
-      leading={<Dot className="bg-brand animate-pulse" />}
-      label={meta.task.title}
-      title={`${meta.task.title} · ${deriveProjectName(meta.task.workspacePath)}`}
-      onClick={() =>
-        jumpToTask(meta.task.taskId, { turnId: null, openAgentTab })
+      leading={
+        <StatusGlyph state={unseen ? "unseen" : turnGlyphState(round.status)} />
       }
+      emphasis={unseen}
+      label={label}
+      title={`${label} · ${getFileName(round.documentPath)} · ${deriveProjectName(round.workspacePath)}`}
+      trailing={metaKey ? t(metaKey) : formatTimeAgo(round.startedAt)}
+      onClick={jump}
+    />
+  );
+}
+
+/** The recents marker: a hairline ring, filled in the brand colour for
+ *  the document in front of the user. */
+function Marker({ filled }: { filled: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "size-1.5 shrink-0 rounded-full",
+        filled ? "bg-brand" : "border border-muted-foreground/70",
+      )}
     />
   );
 }
@@ -214,31 +412,23 @@ function WorkingRow({ meta }: { meta: AgentTaskMeta }) {
 function RecentDocumentRow({
   document,
   active,
+  live,
 }: {
   document: RecentDocument;
   active: boolean;
+  /** A prompt round is running in this document. */
+  live: boolean;
 }) {
-  const { t } = useTranslation();
   const { openFile } = useWorkspaceTabs();
   return (
     <NavRow
       leading={
-        <Dot
-          className={
-            active ? "bg-brand" : "border border-muted-foreground/60"
-          }
-        />
+        live ? <StatusGlyph state="running" /> : <Marker filled={active} />
       }
       label={getFileName(document.path)}
-      title={document.path}
+      title={`${document.path} · ${deriveProjectName(document.workspacePath)}`}
       active={active}
-      trailing={
-        document.isScratchpad ? (
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {t("scratchTag")}
-          </span>
-        ) : undefined
-      }
+      trailing={deriveProjectName(document.workspacePath)}
       onClick={() => openFile({ tabId: document.path, intent: "replace" })}
     />
   );

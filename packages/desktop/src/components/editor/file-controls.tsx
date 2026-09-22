@@ -1,13 +1,13 @@
 "use client";
 
-import { ArrowDownAZ, ArrowUpZA, CalendarArrowDown } from "lucide-react";
+import { ArrowDownAZ, ArrowUpZA, CalendarArrowDown, FilePlus, FolderPlus } from "lucide-react";
 // The three creation actions use Pierre's set, matching the file tree they
 // sit on (@pierre/trees renders the rows and their file-type glyphs) and the
 // tree's own context menu. Sized to 3.5 to match that menu — passed as a
 // className so tailwind-merge drops the Button's own `[&_svg]:size-4` rather
 // than the two fighting on specificity. The icons default to `currentcolor`,
 // so they inherit the button's text color like the lucide ones did.
-import { IconFilePlus, IconFolderPlus, IconHash } from "@pierre/icons";
+import { ScratchpadIcon } from "@/components/editor/scratchpad-icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@notefig/ui/tooltip";
 import { Button } from "@notefig/ui/button";
 import {
@@ -124,9 +124,9 @@ function FileCreateActions({
 }: FileCreateActionsProps) {
   const { t } = useTranslation();
   const actions = [
-    { label: t("newScratchpad"), Icon: IconHash, onClick: onNewScratchpad },
-    { label: t("newFile"), Icon: IconFilePlus, onClick: onNewFile },
-    { label: t("newFolder"), Icon: IconFolderPlus, onClick: onNewFolder },
+    { label: t("newScratchpad"), Icon: ScratchpadIcon, onClick: onNewScratchpad },
+    { label: t("newFile"), Icon: FilePlus, onClick: onNewFile },
+    { label: t("newFolder"), Icon: FolderPlus, onClick: onNewFolder },
   ];
   return (
     <div className="flex items-center gap-0.5">

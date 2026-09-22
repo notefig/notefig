@@ -9,6 +9,8 @@
  */
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
+import { readSidebarView, withSidebarView } from "@/hooks/sidebar-view";
 import { toast } from "sonner";
 import { FsError } from "@/adapters/platform-adapter.interface";
 import { pickDirectory } from "@/utils/fs";
@@ -59,6 +61,7 @@ const opensInFlight = new Map<string, Promise<void>>();
 
 export function useOpenProject(): (workspacePath: string) => Promise<void> {
   const { setLayout } = useLayoutSearchParam();
+  const [, setUrlSearchParams] = useSearchParams();
   const { addRecentProject } = useRecentProjects();
 
   return useCallback(
@@ -67,6 +70,18 @@ export function useOpenProject(): (workspacePath: string) => Promise<void> {
       const inFlight = opensInFlight.get(key);
       if (inFlight) return inFlight;
       addRecentProject(workspacePath);
+      // Opening a project is choosing it: a sidebar on the Everything view
+      // (the default when nothing is chosen) moves to the project's files;
+      // a sidebar already on a tool stays on it. Written last, from the
+      // live URL: the layout write above goes through the router's
+      // functional updater, whose snapshot predates this open and would
+      // drop the param if it were written first — and reading the render's
+      // params here would resurrect a stale layout instead.
+      const selectFiles = () => {
+        const live = new URLSearchParams(window.location.search);
+        if (readSidebarView(live) !== "everything") return;
+        setUrlSearchParams(withSidebarView(live, "files"), { replace: true });
+      };
       const open = (async () => {
         // Durable before anything else: a reload right after must find it.
         await showWorkspace(workspacePath);
@@ -77,23 +92,26 @@ export function useOpenProject(): (workspacePath: string) => Promise<void> {
         // nothing to land on.
         if (hasOpenFileTab(workspacePath)) {
           await sweepScratchpads(workspacePath, readOpenTabIds());
+          selectFiles();
           return;
         }
         const scratchpad = await enterScratchpad(
           workspacePath,
           readOpenTabIds(),
         );
-        if (scratchpad === null) return;
-        setLayout((layout) =>
-          openFileInLayout(layout, { tabId: scratchpad, intent: "new-tab" }),
-        );
+        if (scratchpad !== null) {
+          setLayout((layout) =>
+            openFileInLayout(layout, { tabId: scratchpad, intent: "new-tab" }),
+          );
+        }
+        selectFiles();
       })().finally(() => {
         opensInFlight.delete(key);
       });
       opensInFlight.set(key, open);
       return open;
     },
-    [addRecentProject, setLayout],
+    [addRecentProject, setLayout, setUrlSearchParams],
   );
 }
 

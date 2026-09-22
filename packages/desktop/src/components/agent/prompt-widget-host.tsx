@@ -14,6 +14,7 @@
  * effects — see the stability note on usePromptWidgetHost for the loop that
  * caused.
  */
+import { emitAppEvent } from "@/utils/app-events";
 import { useMemo, useRef } from "react";
 import { useLiveQuery, eq, and } from "@tanstack/react-db";
 import type {
@@ -283,12 +284,21 @@ export function usePromptWidgetHost(): PromptWidgetHost {
       peekSession: peekSharedSession,
       isTaskReachable: (taskId) => agents.task(taskId).isReachable(),
 
-      dispatchPrompt: ({ taskId, text, workspacePath: path, target }) => ({
-        turnId: agents
+      dispatchPrompt: ({ taskId, text, workspacePath: path, target }) => {
+        const { turnId } = agents
           .task(taskId)
-          .promptFromWidget(text, target, mentionContextParts(path, text))
-          .turnId,
-      }),
+          .promptFromWidget(text, target, mentionContextParts(path, text));
+        emitAppEvent("widget:round-started", {
+          taskId,
+          turnId,
+          workspacePath: path,
+          documentPath: pathutil.isAbsolute(target.path)
+            ? target.path
+            : pathutil.join(path, target.path),
+          prompt: text,
+        });
+        return { turnId };
+      },
       cancelTask: (taskId) => void cancelAgentTask(taskId),
       cancelTurnAndForget: (taskId) => cancelAgentTurnAndForget(taskId),
       removeQueuedPrompt,

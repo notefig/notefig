@@ -75,7 +75,6 @@ export function GlobalColumn({
           <PlainLogo size="1rem" fill="var(--logo)" />
         </ColumnButton>
       </div>
-      <div className="h-px w-4 shrink-0 bg-border" />
       <div className="flex min-h-0 flex-1 flex-col items-center gap-1 pt-1.5">
         {rows.map((row) => {
           const name = deriveProjectName(row.path);
@@ -180,23 +179,11 @@ function ColumnButton({
   );
 }
 
-/** "+": recent projects not yet open, then the folder picker. */
+/** "+": the add-workspace menu behind the rail's dashed button. */
 function AddWorkspaceButton() {
   const { t } = useTranslation();
-  const openProject = useOpenProject();
-  const openFolder = useOpenProjectFromPicker();
-  const { recentProjects } = useRecentProjects();
-  const openRows = useOpenWorkspaces();
-
-  const otherProjects = useMemo(() => {
-    const openKeys = new Set(openRows.map((row) => row.key));
-    return recentProjects
-      .filter((project) => !openKeys.has(workspaceKey(project.path)))
-      .slice(0, MAX_RECENT_IN_MENU);
-  }, [recentProjects, openRows]);
-
   return (
-    <DropdownMenu>
+    <AddWorkspaceMenu>
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
@@ -213,6 +200,33 @@ function AddWorkspaceButton() {
           {t("addWorkspace")}
         </TooltipContent>
       </Tooltip>
+    </AddWorkspaceMenu>
+  );
+}
+
+/**
+ * The add-workspace menu: recent projects not yet open, then the folder
+ * picker. `children` is the trigger (wrapped in `DropdownMenuTrigger` by
+ * the caller, so a tooltip can sit between). Shared by the rail's "+" and
+ * the Everything view's "Open project" row.
+ */
+export function AddWorkspaceMenu({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
+  const openProject = useOpenProject();
+  const openFolder = useOpenProjectFromPicker();
+  const { recentProjects } = useRecentProjects();
+  const openRows = useOpenWorkspaces();
+
+  const otherProjects = useMemo(() => {
+    const openKeys = new Set(openRows.map((row) => row.key));
+    return recentProjects
+      .filter((project) => !openKeys.has(workspaceKey(project.path)))
+      .slice(0, MAX_RECENT_IN_MENU);
+  }, [recentProjects, openRows]);
+
+  return (
+    <DropdownMenu>
+      {children}
       <DropdownMenuContent side="right" align="start" className="w-52">
         {otherProjects.length > 0 && (
           <>
