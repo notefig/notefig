@@ -119,7 +119,15 @@ export function findPromptBlobForTask(
     if (preferTurnId && record.boundTurnId === preferTurnId) return location;
     fallback ??= location;
   }
-  return fallback;
+  // Naming a turn makes this an exact question. One workspace session is
+  // shared by the chat tab and every widget in it, so a task can own both
+  // kinds of round: a turn no widget is watching ran in the chat, and the
+  // chat is where its permission or sign-in card is. Falling back to some
+  // other widget on the same task would land the user on an unrelated
+  // round they cannot answer from. Without a turn the question is
+  // task-level ("where do I answer for this session?") and any bound
+  // widget is a better answer than the chat.
+  return preferTurnId ? null : fallback;
 }
 
 /** Unbind the watched turn (dismiss / stale-row reset). The draft is

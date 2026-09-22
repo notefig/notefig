@@ -31,7 +31,11 @@ describe("prompt-blob-store", () => {
       documentPath: "/ws/b.md",
       boundTurnId: "trn_b",
     });
-    expect(findPromptBlobForTask("task_x", "trn_none")?.blobId).toBe("blob_t1");
+    // A named turn no widget is watching ran in the chat: answer there,
+    // never on an unrelated widget that happens to share the session.
+    expect(findPromptBlobForTask("task_x", "trn_none")).toBeNull();
+    // No turn named — a task-level jump still prefers a bound widget.
+    expect(findPromptBlobForTask("task_x")?.blobId).toBe("blob_t1");
     expect(findPromptBlobForTask("task_other")).toBeNull();
   });
 
