@@ -79,7 +79,13 @@ export function GlobalColumn({
         {rows.map((row) => {
           const name = deriveProjectName(row.path);
           const attention = byWorkspace.get(row.key)?.attention ?? 0;
-          const current = !isEverything && row.key === focusedKey;
+          // Two different questions. "active" is which chip the sidebar is
+          // showing, so Everything owns the selection and no chip is lit.
+          // "current" is which workspace the dock is focused on, which is
+          // still true while Everything is showing — the tabs on screen
+          // belong to it — so the marker stays and screen readers keep an
+          // answer to "which project am I in?".
+          const focused = row.key === focusedKey;
           return (
             <ContextMenu key={row.key}>
               <ContextMenuTrigger asChild>
@@ -93,8 +99,8 @@ export function GlobalColumn({
                           })
                         : name
                     }
-                    active={current}
-                    current={current}
+                    active={!isEverything && focused}
+                    current={focused}
                     onClick={() => onShowWorkspaceTools(row.path)}
                   >
                     <span className="text-xs font-semibold">
