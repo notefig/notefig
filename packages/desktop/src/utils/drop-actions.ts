@@ -48,19 +48,17 @@ async function moveIntoFolderAsync(
   if (payload.path === newPath) return;
 
   if (payload.fileType === "directory") {
-    const prefix = payload.path.endsWith("/")
-      ? payload.path
-      : payload.path + "/";
+    // Containment goes through the bound path flavor, never a hand-built
+    // prefix: `startsWith(path + "/")` is false for every descendant on
+    // win32 (backslash separators) and mis-sliced sibling prefixes like
+    // "/ws-backup" on posix — the two failures path.ts was written to end.
+    // `contains` is true for the root itself, so it covers both guards.
     // A directory can't move into itself or its own descendants.
-    if (folderPath === payload.path || folderPath.startsWith(prefix)) return;
+    if (pathutil.contains(payload.path, folderPath)) return;
     // Open tabs are keyed by path; moving them out from under the layout
     // would orphan the tab (rename is disabled for open files for the same
     // reason — see FileTreeContextMenu disableRename).
-    if (
-      getAllEditorPaths().some(
-        (p) => p === payload.path || p.startsWith(prefix),
-      )
-    ) {
+    if (getAllEditorPaths().some((p) => pathutil.contains(payload.path, p))) {
       console.warn(`Not moving ${payload.path}: contains open files`);
       return;
     }
