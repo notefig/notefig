@@ -78,6 +78,23 @@ describe("deriveAttention", () => {
     expect(seen.items).toEqual([]);
   });
 
+  it("a finished turn is not news once the session has started another", () => {
+    // The title and the row must agree: a running session shows its orb,
+    // so its stale completion must not mark the section either. A failure
+    // is what the new turn follows, and still stands.
+    const done = { turnId: "t1", at: 10, status: "completed" as const };
+    const failed = { turnId: "t1", at: 10, status: "error" as const };
+    const attention = deriveAttention({
+      ...EMPTY,
+      tasks: [
+        task({ taskId: "task_moved_on", status: "running", lastSettled: done }),
+        task({ taskId: "task_reviving", status: "starting", lastSettled: done }),
+        task({ taskId: "task_retrying", status: "running", lastSettled: failed }),
+      ],
+    });
+    expect([...attention.byTask]).toEqual([["task_retrying", "error"]]);
+  });
+
   it("a widget round marks its document, never its session", () => {
     const tasks = [
       task({ taskId: "task_w", lastSettled: { turnId: "t_w", at: 10, status: "completed" } }),

@@ -65,6 +65,10 @@ export interface Attention {
   byWorkspace: ReadonlyMap<string, number>;
 }
 
+function isWorking(task: AgentTaskRow): boolean {
+  return task.status === "running" || task.status === "starting";
+}
+
 /** error outranks bau. */
 export function mostPressing(
   a: AttentionKind | null,
@@ -88,6 +92,49 @@ function headPermissionByTask(
   return heads;
 }
 
+/** What a task is blocked on, if anything: answered where the item jumps to. */
+function askOf(
+  task: AgentTaskRow,
+  permission: AgentPermissionRequestRow | undefined,
+): Pick<AttentionItem, "ask" | "permission"> | null {
+  if (permission) return { ask: "permission", permission };
+  if (task.authRequired) return { ask: "auth" };
+  return null;
+}
+
+/**
+ * An error or absence no turn produced — a harness that never came up, a
+ * load failure, a process that died while idle. A turn's own failure is
+ * the settle instead: its status is "error" too.
+ */
+function isErrorNoTurnProduced(task: AgentTaskRow): boolean {
+  return (
+    task.status === "unavailable" ||
+    (task.status === "error" && task.lastSettled?.status !== "error")
+  );
+}
+
+/** The last settle, when it is news for this session. */
+function settledTurnAttention(
+  task: AgentTaskRow,
+  settled: NonNullable<AgentTaskRow["lastSettled"]>,
+  isWidgetRound: (turnId: string) => boolean,
+  lastLooked: number,
+): Pick<AttentionItem, "kind" | "turnId" | "since"> | null {
+  // A widget round's result is in its document; the session stays quiet.
+  if (isWidgetRound(settled.turnId)) return null;
+  if (settled.at <= lastLooked) return null;
+  // A finished turn on a session that has since started another is not
+  // news: the session has moved on, and the new turn re-marks it when it
+  // settles. (A failure still stands — it is what the new turn follows.)
+  if (settled.status === "completed" && isWorking(task)) return null;
+  return {
+    kind: settled.status === "error" ? "error" : "bau",
+    turnId: settled.turnId,
+    since: settled.at,
+  };
+}
+
 function taskAttention(
   task: AgentTaskRow,
   permission: AgentPermissionRequestRow | undefined,
@@ -107,36 +154,20 @@ function taskAttention(
     task,
   };
   // Asks clear when answered, not when looked at: the run is blocked on it.
-  if (permission) {
-    return { ...base, kind: "error", ask: "permission", permission };
-  }
-  if (task.authRequired) return { ...base, kind: "error", ask: "auth" };
+  const ask = askOf(task, permission);
+  if (ask) return { ...base, kind: "error", ...ask };
 
-  const settled = task.lastSettled;
-  // An error or absence no turn produced — a harness that never came up, a
-  // load failure, a process that died while idle. Its moment is the row's
-  // last transition (`updatedAt`, bumped on the way into the status), and
-  // the comparison is the same as a turn's: newer than the last look, it
-  // is marked; looked at, it clears; failing again re-marks it. (A turn's
-  // own failure is the settle below: its status is "error" too.)
-  const noTurnBehindIt =
-    task.status === "unavailable" ||
-    (task.status === "error" && settled?.status !== "error");
-  if (noTurnBehindIt) {
-    return task.updatedAt > lastSeenAt(seen, target)
-      ? { ...base, kind: "error" }
-      : null;
+  const lastLooked = lastSeenAt(seen, target);
+  // Its moment is the row's last transition (`updatedAt`, bumped on the way
+  // into the status), and the comparison is the same as a turn's: newer
+  // than the last look it is marked; looked at, it clears; failing again
+  // re-marks it.
+  if (isErrorNoTurnProduced(task)) {
+    return task.updatedAt > lastLooked ? { ...base, kind: "error" } : null;
   }
-  if (!settled) return null;
-  // A widget round's result is in its document; the session stays quiet.
-  if (isWidgetRound(settled.turnId)) return null;
-  if (settled.at <= lastSeenAt(seen, target)) return null;
-  return {
-    ...base,
-    kind: settled.status === "error" ? "error" : "bau",
-    turnId: settled.turnId,
-    since: settled.at,
-  };
+  if (!task.lastSettled) return null;
+  const settled = settledTurnAttention(task, task.lastSettled, isWidgetRound, lastLooked);
+  return settled ? { ...base, ...settled } : null;
 }
 
 function roundAttention(
