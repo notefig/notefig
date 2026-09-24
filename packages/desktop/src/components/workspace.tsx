@@ -216,7 +216,10 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
         <div
           dir={direction}
           className={cn(
-            "texture-surface flex h-full w-full overflow-clip bg-background",
+            // `relative` so the status bar's corner is the window's, not the
+            // padded dock column's: the root's overflow clip ends at its
+            // padding edge, so bottom-0 here hugs the window's bottom.
+            "texture-surface relative flex h-full w-full overflow-clip bg-background",
             chrome.rootClassName,
           )}
           style={chrome.rootStyle}
@@ -285,13 +288,14 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
                   </DockArea>
                 </div>
               </div>
-              <StatusBar
-                wordCount={wordCount}
-                isSynced={isSynced}
-                direction={direction}
-              />
             </div>
           </div>
+
+          <StatusBar
+            wordCount={wordCount}
+            isSynced={isSynced}
+            direction={direction}
+          />
 
           <SettingsModal
             direction={direction}

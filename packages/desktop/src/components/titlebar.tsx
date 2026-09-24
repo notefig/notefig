@@ -1,15 +1,18 @@
 import {
+  useEffect,
   useLayoutEffect,
   useRef,
+  useSyncExternalStore,
   type CSSProperties,
   type HTMLAttributes,
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Minus, Square, X } from "lucide-react";
 import { cn } from "@notefig/ui/utils";
-import { getDesktopOs } from "@/utils/platform";
+import { getDesktopOs, isTauri } from "@/utils/platform";
 import { useAppSettings } from "@/hooks/use-app-settings";
 
 /*
@@ -19,20 +22,26 @@ import { useAppSettings } from "@/hooks/use-app-settings";
  * to line up with them is therefore a physical-pixel budget divided by
  * the zoom factor, never a rem — the one place the rem-only sizing rule
  * is broken on purpose. Change these together with the config.
+ *
+ * The config only fixes x; where the glyphs land vertically, and how wide
+ * the cluster runs, is AppKit's per-macOS-version layout (macOS 26 draws
+ * 14pt buttons on a 23pt pitch, 11–15 drew 12pt on 20pt). So the shell asks
+ * Rust (traffic_lights.rs) to pin the glyphs' centre on its header midline
+ * and lays out from the rect Rust measures back; the constants below are
+ * only the pre-measurement fallback (macOS 15 numbers).
  */
 
 /** `trafficLightPosition.x/y` from tauri.conf.json. */
 const TRAFFIC_LIGHT_X_PX = 21;
 const TRAFFIC_LIGHT_Y_PX = 29;
 /**
- * Where the glyphs actually land relative to that origin, measured on a
- * window capture (`screencapture -l <id>`, 2026-09-21, macOS 15): the
- * close glyph's left edge sits ~2px right of x and its centre ~1.5px
- * below y. Re-measure before changing either.
+ * Where the glyphs landed relative to that origin on macOS 15, measured on
+ * a window capture (`screencapture -l <id>`, 2026-09-21): the close glyph's
+ * left edge ~2px right of x and its centre ~1.5px below y.
  */
 const TRAFFIC_LIGHT_GLYPH_DX_PX = 2;
 const TRAFFIC_LIGHT_GLYPH_CENTRE_DY_PX = 1.5;
-/** Three 12px glyphs on 20px centres. */
+/** Three 12px glyphs on 20px centres (macOS 15). */
 const TRAFFIC_LIGHT_GLYPH_PX = 12;
 const TRAFFIC_LIGHT_SPAN_PX = 52;
 
@@ -50,26 +59,111 @@ const SHELL_CARD_BORDER_PX = 1;
  *   == TRAFFIC_LIGHT_Y_PX + TRAFFIC_LIGHT_GLYPH_CENTRE_DY_PX  (12+1+18 ≈ 29+1.5)
  */
 const SHELL_HEADER_HEIGHT_PX = 36;
+/** The header row's midline: where Rust pins the glyphs' centre. */
+const TRAFFIC_LIGHT_CENTRE_Y_PX =
+  SHELL_PADDING_PX + SHELL_CARD_BORDER_PX + SHELL_HEADER_HEIGHT_PX / 2;
 /** Breathing room between the last light and the workspace name. */
 const TRAFFIC_LIGHT_GAP_PX = 12;
-/** Padding at the header row's start that clears the lights. */
-const TRAFFIC_LIGHT_INSET_PX =
-  TRAFFIC_LIGHT_X_PX +
-  TRAFFIC_LIGHT_GLYPH_DX_PX +
-  TRAFFIC_LIGHT_SPAN_PX -
-  SHELL_PADDING_PX -
-  SHELL_CARD_BORDER_PX +
-  TRAFFIC_LIGHT_GAP_PX;
+/** Air under the lights on a content-less spacer. */
+const TRAFFIC_LIGHT_CLEARANCE_GAP_PX = 4;
 
 /**
- * Physical pixels a content-less spacer must cover so content clears the
- * lights (the Welcome screen, which has no header card to host them).
+ * The lights' bounding box in physical pixels from the window's top-left,
+ * as `place_traffic_lights` (traffic_lights.rs) measures it after pinning.
  */
-const TRAFFIC_LIGHT_CLEARANCE_PX =
-  TRAFFIC_LIGHT_Y_PX +
-  TRAFFIC_LIGHT_GLYPH_CENTRE_DY_PX +
-  TRAFFIC_LIGHT_GLYPH_PX / 2 +
-  4;
+export interface TrafficLightsRect {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+/** What the lights looked like before Rust has measured them (macOS 15). */
+const FALLBACK_TRAFFIC_LIGHTS: TrafficLightsRect = {
+  left: TRAFFIC_LIGHT_X_PX + TRAFFIC_LIGHT_GLYPH_DX_PX,
+  right: TRAFFIC_LIGHT_X_PX + TRAFFIC_LIGHT_GLYPH_DX_PX + TRAFFIC_LIGHT_SPAN_PX,
+  top:
+    TRAFFIC_LIGHT_Y_PX +
+    TRAFFIC_LIGHT_GLYPH_CENTRE_DY_PX -
+    TRAFFIC_LIGHT_GLYPH_PX / 2,
+  bottom:
+    TRAFFIC_LIGHT_Y_PX +
+    TRAFFIC_LIGHT_GLYPH_CENTRE_DY_PX +
+    TRAFFIC_LIGHT_GLYPH_PX / 2,
+};
+
+/** Padding at the header row's start that clears the lights (CSS px). */
+export function trafficLightsInsetStart(
+  lights: TrafficLightsRect,
+  zoom: number,
+): number {
+  return Math.ceil(
+    (lights.right - SHELL_PADDING_PX - SHELL_CARD_BORDER_PX + TRAFFIC_LIGHT_GAP_PX) /
+      zoom,
+  );
+}
+
+/**
+ * CSS px a content-less spacer must cover so content clears the lights
+ * (the Welcome screen, which has no header card to host them).
+ */
+export function trafficLightsClearance(
+  lights: TrafficLightsRect,
+  zoom: number,
+): number {
+  return Math.ceil((lights.bottom + TRAFFIC_LIGHT_CLEARANCE_GAP_PX) / zoom);
+}
+
+/*
+ * One measurement per page load, shared by every consumer: the pin is a
+ * window-level fact, not a component's. Rust keeps re-applying it on the
+ * window events that would undo it, so nothing here has to re-run.
+ */
+let measuredTrafficLights: TrafficLightsRect | null = null;
+let placement: Promise<void> | null = null;
+const trafficLightListeners = new Set<() => void>();
+
+function placeTrafficLights(): Promise<void> {
+  placement ??= (async () => {
+    if (!isTauri() || getDesktopOs() !== "macos") return;
+    try {
+      const rect = await invoke<TrafficLightsRect | null>(
+        "place_traffic_lights",
+        { centerY: TRAFFIC_LIGHT_CENTRE_Y_PX },
+      );
+      if (!rect) return;
+      measuredTrafficLights = rect;
+      trafficLightListeners.forEach((listener) => listener());
+    } catch (error) {
+      console.warn("[titlebar] traffic-light placement failed", error);
+    }
+  })();
+  return placement;
+}
+
+function subscribeTrafficLights(listener: () => void): () => void {
+  trafficLightListeners.add(listener);
+  return () => {
+    trafficLightListeners.delete(listener);
+  };
+}
+
+function readTrafficLights(): TrafficLightsRect {
+  return measuredTrafficLights ?? FALLBACK_TRAFFIC_LIGHTS;
+}
+
+/** The lights' rect: measured once Rust has pinned them, fallback before. */
+function useTrafficLights(): TrafficLightsRect {
+  const rect = useSyncExternalStore(
+    subscribeTrafficLights,
+    readTrafficLights,
+    readTrafficLights,
+  );
+  useEffect(() => {
+    void placeTrafficLights();
+  }, []);
+  return rect;
+}
 
 /**
  * What the workspace shell needs to lay its floating chrome around the OS:
@@ -109,6 +203,7 @@ export function useShellChromeMetrics(): ShellChromeMetrics {
   const os = getDesktopOs();
   const { settings } = useAppSettings();
   const zoom = settings.zoomLevel || 1;
+  const lights = useTrafficLights();
   if (os !== "macos") {
     return {
       os,
@@ -134,7 +229,7 @@ export function useShellChromeMetrics(): ShellChromeMetrics {
     rootClassName: "",
     stackStyle: { gap: padding },
     stackClassName: "",
-    insetStart: Math.ceil(TRAFFIC_LIGHT_INSET_PX / zoom),
+    insetStart: trafficLightsInsetStart(lights, zoom),
   };
 }
 
@@ -245,12 +340,11 @@ function NoTitlebar() {
 function MacTitlebarSpacer() {
   const { settings } = useAppSettings();
   const ref = useTitlebarHeightVar<HTMLDivElement>();
+  const lights = useTrafficLights();
 
   // Native webview zoom scales CSS pixels but not the traffic lights, so
   // the clearance floor must be divided by the zoom factor.
-  const minHeight = Math.ceil(
-    TRAFFIC_LIGHT_CLEARANCE_PX / (settings.zoomLevel || 1),
-  );
+  const minHeight = trafficLightsClearance(lights, settings.zoomLevel || 1);
 
   return (
     <div
@@ -259,7 +353,7 @@ function MacTitlebarSpacer() {
       // -m-1/w-[calc(100%+1rem)] used to do this bleed, but both are
       // rem-based and silently grew (4px -> 6px pull-up) when the root
       // font-size moved to a 150% baseline, eating into
-      // TRAFFIC_LIGHT_CLEARANCE_PX's fixed-px budget. Pinned to px so this
+      // the clearance's fixed-px budget. Pinned to px so this
       // can't drift again the next time the root scale changes.
       className="texture-surface -m-[4px] w-[calc(100%+8px)] shrink-0 h-[5vh] md:h-[3vh] xl:h-[2.5vh] bg-background"
       style={{ WebkitAppRegion: "drag", minHeight } as CSSProperties}

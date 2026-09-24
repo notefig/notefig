@@ -36,8 +36,10 @@ function useDebouncedSyncState(
 // hot on every save. Git state now renders only inside the git panels, so
 // the collection has zero subscribers (and invalidations cost nothing)
 // while no git UI is open.
-/** Save state, word count and the tunnel pill, pinned to the dock card's
- *  bottom corner at the reading-direction end. */
+/** Save state, word count and the tunnel pill, pinned to the window's
+ *  bottom corner at the reading-direction end (the shell root is its
+ *  containing block, so it sits under the root padding, flush with the
+ *  window edge). */
 export function StatusBar({
   wordCount,
   isSynced,

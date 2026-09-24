@@ -48,6 +48,8 @@ export const TAURI_COMMANDS = [
   "db_query",
   "db_close",
   "db_reset",
+  // traffic_lights
+  "place_traffic_lights",
 ] as const;
 
 export type CommandHandler = (

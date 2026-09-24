@@ -14,6 +14,7 @@ pub mod fs_ops;
 pub mod line_stream;
 pub mod mcp_bridge;
 pub mod search;
+pub mod traffic_lights;
 pub mod walkdir_utils;
 
 #[cfg(test)]
@@ -23,7 +24,9 @@ mod test_support;
 /// over the runtime so the same registration drives the real `Wry` runtime, the
 /// test `MockRuntime`, and the shim's mock app — no mirrored copy to drift.
 pub fn register_handlers<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
-    builder.invoke_handler(tauri::generate_handler![
+    builder
+        .manage(traffic_lights::TrafficLightsPin::default())
+        .invoke_handler(tauri::generate_handler![
         // File system commands (errors-as-values pattern)
         fs_ops::read_directory,
         fs_ops::create_directories,
@@ -61,5 +64,7 @@ pub fn register_handlers<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
         db_ops::db_query,
         db_ops::db_close,
         db_ops::db_reset,
+        // macOS traffic-light pinning (errors-as-values pattern)
+        traffic_lights::place_traffic_lights,
     ])
 }

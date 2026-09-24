@@ -47,6 +47,11 @@ regex = "1.10"
 # Not cfg-gated internally (objc2 imports) — hard compile error on any
 # non-macOS target, so it must live under a macOS-only dependency table.
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
+# Traffic-light pinning (traffic_lights.rs): reaches the standard window
+# buttons through AppKit. Same objc2 line tauri itself links.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSButton", "NSControl", "NSResponder", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"

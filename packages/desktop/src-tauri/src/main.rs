@@ -4,7 +4,7 @@
 // Command modules + the shared handler registration live in the library crate
 // so the app binary, the mock-app dispatch tests, and the e2e shim all share
 // one command list (MET-73).
-use notefig::{agent_proc, db_ops, mcp_bridge, register_handlers};
+use notefig::{agent_proc, db_ops, mcp_bridge, register_handlers, traffic_lights};
 
 use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager};
@@ -200,6 +200,20 @@ fn main() {
             }
 
             Ok(())
+        })
+        // AppKit re-runs its title-bar layout on these, undoing the
+        // traffic-light pin (traffic_lights.rs); put it back.
+        .on_window_event(|window, event| {
+            use tauri::WindowEvent;
+            if matches!(
+                event,
+                WindowEvent::Resized(_)
+                    | WindowEvent::ScaleFactorChanged { .. }
+                    | WindowEvent::ThemeChanged(_)
+                    | WindowEvent::Focused(true)
+            ) {
+                traffic_lights::reapply(window);
+            }
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open_folder" => {
