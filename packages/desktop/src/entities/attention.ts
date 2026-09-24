@@ -11,8 +11,9 @@
  * Two kinds, in two colours:
  *  - **bau** — a turn finished; the blue dot. Clears when looked at.
  *  - **error** — the amber the prompt widget uses for issues. A failed
- *    turn clears when looked at; a session that is *asking* (permission,
- *    sign-in) or has gone (unavailable) clears when the condition does.
+ *    turn, a harness that never came up, a session that has gone: each
+ *    clears when looked at, and a later failure marks it again. Only a
+ *    session that is *asking* (permission, sign-in) clears when answered.
  *
  * A widget round lands on its document, never on its session: the widget
  * is where the user is pointed, so the session stays quiet.
@@ -105,20 +106,26 @@ function taskAttention(
     workspaceKey: workspaceKey(task.workspacePath),
     task,
   };
-  // Asks and absences clear when the condition clears, not when looked at.
+  // Asks clear when answered, not when looked at: the run is blocked on it.
   if (permission) {
     return { ...base, kind: "error", ask: "permission", permission };
   }
   if (task.authRequired) return { ...base, kind: "error", ask: "auth" };
-  if (task.status === "unavailable") return { ...base, kind: "error" };
 
   const settled = task.lastSettled;
-  // An error that no turn produced — a spawn or load failure, a process
-  // that died while idle — has no settle to be seen; it stands until the
-  // task recovers. (A turn's own failure is the settle below: its status
-  // is "error" too, and looking at it is what clears it.)
-  if (task.status === "error" && settled?.status !== "error") {
-    return { ...base, kind: "error" };
+  // An error or absence no turn produced — a harness that never came up, a
+  // load failure, a process that died while idle. Its moment is the row's
+  // last transition (`updatedAt`, bumped on the way into the status), and
+  // the comparison is the same as a turn's: newer than the last look, it
+  // is marked; looked at, it clears; failing again re-marks it. (A turn's
+  // own failure is the settle below: its status is "error" too.)
+  const noTurnBehindIt =
+    task.status === "unavailable" ||
+    (task.status === "error" && settled?.status !== "error");
+  if (noTurnBehindIt) {
+    return task.updatedAt > lastSeenAt(seen, target)
+      ? { ...base, kind: "error" }
+      : null;
   }
   if (!settled) return null;
   // A widget round's result is in its document; the session stays quiet.

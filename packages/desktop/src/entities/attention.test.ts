@@ -89,12 +89,12 @@ describe("deriveAttention", () => {
     expect(attention.overall).toBe("bau");
   });
 
-  it("an error no turn produced stands even after the last turn was seen", () => {
-    // A process that died while idle: the task is in error, but the last
-    // settle is an old, seen (or widget) completion.
+  it("an error no turn produced is marked from the moment it was entered, not from the last turn", () => {
+    // A process that died while idle: the task entered error (updatedAt)
+    // after its last settle — an old, seen (or widget) completion.
     const tasks = [
-      task({ taskId: "task_died", status: "error", lastSettled: { turnId: "t_old", at: 5, status: "completed" } }),
-      task({ taskId: "task_widget_died", status: "error", lastSettled: { turnId: "t_w", at: 5, status: "completed" } }),
+      task({ taskId: "task_died", status: "error", updatedAt: 200, lastSettled: { turnId: "t_old", at: 5, status: "completed" } }),
+      task({ taskId: "task_widget_died", status: "error", updatedAt: 200, lastSettled: { turnId: "t_w", at: 5, status: "completed" } }),
     ];
     const attention = deriveAttention({
       ...EMPTY,
@@ -136,12 +136,29 @@ describe("deriveAttention", () => {
     expect(deriveAttention({ ...EMPTY, rounds }).items).toEqual([]);
   });
 
-  it("asks and absences are errors that looking does not clear", () => {
+  it("a harness that never came up is an error that looking clears, and failing again re-marks", () => {
+    // A spawn failure (a harness that is not installed) errors the task with
+    // no turn behind it. Opening the half-made session is the look that
+    // clears it; a later failure enters error again, later than the look.
+    const failed = task({ taskId: "task_spawn", status: "error", updatedAt: 50 });
+    const gone = task({ taskId: "task_gone", status: "unavailable", updatedAt: 50 });
+    const fresh = deriveAttention({ ...EMPTY, tasks: [failed, gone] });
+    expect([...fresh.byTask.values()]).toEqual(["error", "error"]);
+
+    const looked = seenAt([
+      [seenKey({ kind: "task", id: "task_spawn" }), 60],
+      [seenKey({ kind: "task", id: "task_gone" }), 60],
+    ]);
+    expect(deriveAttention({ ...EMPTY, tasks: [failed, gone], seen: looked }).items).toEqual([]);
+    expect(
+      deriveAttention({ ...EMPTY, tasks: [{ ...failed, updatedAt: 70 }], seen: looked }).byTask.get("task_spawn"),
+    ).toBe("error");
+  });
+
+  it("asks are errors that looking does not clear", () => {
     const tasks = [
       task({ taskId: "task_perm", status: "running" }),
       task({ taskId: "task_auth", authRequired: true }),
-      task({ taskId: "task_gone", status: "unavailable" }),
-      task({ taskId: "task_spawn", status: "error" }),
     ];
     const attention = deriveAttention({
       ...EMPTY,
@@ -150,7 +167,7 @@ describe("deriveAttention", () => {
       pendingPermissions: [permission("p2", "task_perm"), permission("p1", "task_perm")],
       seen: seenAt(tasks.map((t) => [seenKey({ kind: "task", id: t.taskId }), 1_000])),
     });
-    expect([...attention.byTask.values()]).toEqual(["error", "error", "error", "error"]);
+    expect([...attention.byTask.values()]).toEqual(["error", "error"]);
     // Only the questions make the card; the oldest request is the one asked,
     // and the ask carries the turn that raised it so a jump lands there.
     expect(attention.asks.map((item) => [item.taskId, item.ask, item.turnId])).toEqual([
@@ -180,6 +197,7 @@ describe("deriveAttention", () => {
       openWorkspaceKeys: new Set(["/ws-a", "/ws-b"]),
       tasks: [
         task({ taskId: "task_a", workspacePath: "/ws-a", status: "unavailable", updatedAt: 3 }),
+        // (unavailable since 3, never looked at: counts)
         task({ taskId: "task_b", workspacePath: "/ws-b/", lastSettled: { turnId: "t", at: 9, status: "completed" } }),
       ],
       rounds: [round({ turnId: "t_b", workspaceKey: "/ws-b", status: "error", settledAt: 7 })],
