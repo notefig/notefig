@@ -723,6 +723,7 @@ export class AgentTask {
       taskId: this.taskId,
       turnId,
       status: "cancelled",
+      at: Date.now(),
     });
   }
 

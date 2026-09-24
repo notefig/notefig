@@ -107,6 +107,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The release build is `tsc && vite build`; vitest does not typecheck,
+      # so without this a type error can pass CI and fail the release.
+      - name: Typecheck Desktop
+        working-directory: packages/desktop
+        run: npx tsc --noEmit
+
       - name: Run Desktop unit tests
         working-directory: packages/desktop
         run: npm run test:unit
