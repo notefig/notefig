@@ -703,6 +703,12 @@ export class AgentTask {
    * Drop one queued prompt (the panel's ✕ on a queued row): delete its
    * transcript rows and resolve its handle cancelled. No-op if the turn
    * already started running.
+   *
+   * Announces the settle like every other terminal path (MET-208). Deleting
+   * the rows is not itself an announcement: listeners that track a turn from
+   * outside the transcript — the persisted prompt round behind the sidebar —
+   * only learn a turn is over from this event, and a round that never hears
+   * it stays live.
    */
   removeQueuedPrompt(turnId: string): void {
     const index = this.pendingPrompts.findIndex((p) => p.turnId === turnId);
@@ -713,6 +719,11 @@ export class AgentTask {
     }
     agentTurnsCollection.delete(turnId);
     this.resolveTurn(turnId, { status: "cancelled" });
+    emitAppEvent("agent:turn-settled", {
+      taskId: this.taskId,
+      turnId,
+      status: "cancelled",
+    });
   }
 
   /** Flip a queued turn's row to its terminal state and resolve its handle. */

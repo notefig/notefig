@@ -21,7 +21,7 @@ function render(text: string) {
 async function renderResolved(text: string) {
   render(text);
   for (let i = 0; i < 200; i++) {
-    const prose = container!.querySelector(".prose");
+    const prose = container!.querySelector(".rendered");
     if (prose && prose.innerHTML !== "") return;
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));

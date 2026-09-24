@@ -72,15 +72,21 @@ describe("prompt rounds", () => {
       turnId, taskId: "task_1", workspaceKey: wsKey, documentPath: "/ws/a/doc.md", prompt: "p", status, startedAt,
     });
     const rounds = derivePromptRounds(
-      [row("old", "completed", 10), row("new", "completed", 20), row("live", "live", 5), row("queued", "live", 6), row("closed", "completed", 99, "other")],
+      [row("old", "completed", 10), row("new", "completed", 20), row("live", "live", 5), row("queued", "live", 6), row("gone", "live", 7), row("closed", "completed", 99, "other")],
       open,
-      [{ turnId: "queued", status: "queued" }],
+      [
+        { turnId: "queued", status: "queued" },
+        { turnId: "live", status: "running" },
+      ],
     );
+    // "gone" is live with no turn row — the round is over, not running
+    // (MET-208): the same answer settleOrphanedRounds writes at boot.
     expect(rounds.map((r) => [r.turnId, r.status])).toEqual([
       ["queued", "queued"],
       ["live", "running"],
       ["new", "completed"],
       ["old", "completed"],
+      ["gone", "cancelled"],
     ]);
     expect(rounds[0].workspacePath).toBe("/ws/a");
     expect(isLiveRound(rounds[0])).toBe(true);

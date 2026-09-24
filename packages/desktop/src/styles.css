@@ -17,6 +17,15 @@
 @source "../../widgets/src";
 
 @plugin "@tailwindcss/typography";
+/* Second typography namespace for rendered LLM output (components/ui/
+   markdown.tsx). The plugin bakes `not-prose` into every `.prose` selector,
+   and the prompt widget is `not-prose` chrome inside the document's `.prose`
+   — so a `.prose` response body inside it got no typography at all (lists
+   without markers, headings at body size). `rendered` has its own opt-out
+   (`not-rendered`), which the widget never sets. */
+@plugin "@tailwindcss/typography" {
+  className: "rendered";
+}
 @plugin "tailwind-scrollbar-hide";
 
 @custom-variant dark (&:is(.dark *));
@@ -124,7 +133,9 @@
    they can't be selected, and the caret at a code boundary renders on the
    wrong side of them. Unlayered so it beats the plugin's utility-layer rule. */
 .prose code::before,
-.prose code::after {
+.prose code::after,
+.rendered code::before,
+.rendered code::after {
   content: none;
 }
 

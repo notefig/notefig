@@ -101,6 +101,7 @@ import {
 } from "../agent-collections";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import { APP_DIR_NAME } from "@/utils/app-dir";
+import { onAppEvent } from "@/utils/app-events";
 import type { AgentTask } from "../agent-service";
 
 const harness = BUILT_IN_HARNESSES[0];
@@ -682,7 +683,7 @@ describe("AgentTask vertical slice", () => {
     expect(agentTurnsCollection.get(q2.turnId)?.status).toBe("cancelled");
   });
 
-  it("removeQueuedPrompt removes exactly one queued prompt and its rows", async () => {
+  it("removeQueuedPrompt removes exactly one queued prompt, its rows, and announces the settle", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
     const seen: string[] = [];
@@ -702,8 +703,20 @@ describe("AgentTask vertical slice", () => {
     const removed = task.prompt("two");
     const kept = task.prompt("three");
 
+    // Listeners outside the transcript (the persisted prompt round behind
+    // the sidebar) learn a turn is over only from the event — deleting the
+    // rows tells them nothing (MET-208).
+    const settled: { turnId: string; status: string }[] = [];
+    const stopListening = onAppEvent("agent:turn-settled", (detail) =>
+      settled.push({ turnId: detail.turnId, status: detail.status }),
+    );
+
     task.removeQueuedPrompt(removed.turnId);
 
+    expect(settled).toEqual([
+      { turnId: removed.turnId, status: "cancelled" },
+    ]);
+    stopListening();
     expect(await removed.completed).toEqual({ status: "cancelled" });
     expect(agentTurnsCollection.get(removed.turnId)).toBeUndefined();
     expect(

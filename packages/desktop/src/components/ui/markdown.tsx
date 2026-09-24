@@ -87,8 +87,11 @@ function useMarkdownHtml(text: string): string | null {
 }
 
 /**
- * Renders LLM output as markdown, styled through the same typography-plugin
- * prose classes the release-notes tab uses. The --tw-prose-* overrides pin
+ * Renders LLM output as markdown, styled through the typography plugin under
+ * its own `rendered` namespace (styles.css) rather than `prose`: the plugin
+ * bakes `not-prose` into every prose selector, and the prompt widget is
+ * `not-prose` chrome, so a `prose` body inside it lost all typography. The
+ * plugin keeps the `--tw-prose-*` variable names, so the overrides pin
  * text to currentColor so the component inherits whatever color its call
  * site sets (foreground in chat, amber for widget issue text) instead of
  * the plugin's gray scale. One delegated click listener routes links out
@@ -105,16 +108,24 @@ export function Markdown({
   return (
     <div
       className={cn(
-        "prose prose-sm dark:prose-invert max-w-none break-words",
+        "rendered rendered-sm dark:rendered-invert max-w-none break-words",
+        // WebKit's UA sheet gives editable content `line-break:
+        // after-white-space`, and a widget-hosted render inherits it from the
+        // ProseMirror contenteditable. In that mode a line's trailing space
+        // hangs past the box and counts as scrollable overflow, so a
+        // scrolling response body (DoneState's overflow-y-auto) grew a
+        // horizontal scrollbar. Rendered output is never edited: normal
+        // line breaking, whatever the host.
+        "[line-break:auto]",
         "[--tw-prose-body:currentColor] [--tw-prose-headings:currentColor]",
         "[--tw-prose-bold:currentColor] [--tw-prose-code:currentColor]",
-        "prose-pre:whitespace-pre-wrap prose-pre:break-all",
+        "rendered-pre:whitespace-pre-wrap rendered-pre:break-all",
         // Chat-density spacing: the plugin's default vertical margins are
         // sized for long-form prose and read as gaps between chat lines.
-        "prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0",
-        "prose-headings:mb-1 prose-headings:mt-2.5",
-        "prose-pre:my-1.5 prose-blockquote:my-1.5 prose-hr:my-2",
-        "prose-table:my-1.5",
+        "rendered-p:my-1 rendered-ul:my-1 rendered-ol:my-1 rendered-li:my-0",
+        "rendered-headings:mb-1 rendered-headings:mt-2.5",
+        "rendered-pre:my-1.5 rendered-blockquote:my-1.5 rendered-hr:my-2",
+        "rendered-table:my-1.5",
         className,
       )}
       onClick={(event) => {

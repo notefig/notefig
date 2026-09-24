@@ -29,7 +29,8 @@ export const PROMPT_ROUNDS_COLLECTION_ID = "prompt-rounds";
 export const MAX_PROMPT_ROUNDS = 100;
 
 /** "live" until the turn settles — queued vs running is read off the turn
- *  row while it exists. */
+ *  row while it exists. Once that row is gone the round is over: see
+ *  `derivePromptRounds`. */
 export type PromptRoundRowStatus =
   | "live"
   | Extract<AgentTurnStatus, "completed" | "cancelled" | "error">;
@@ -160,6 +161,13 @@ function byActivity(a: PromptRound, b: PromptRound): number {
 /**
  * The stored rows joined to the open set and, while live, to the turn row
  * for queued-vs-running — pure, exported for tests.
+ *
+ * A live row whose turn row is gone reads as cancelled, the same answer
+ * `settleOrphanedRounds` writes at boot (MET-208). The turn row is the only
+ * thing that can say a round is still moving, and several paths delete one
+ * without settling it first — a withdrawn queued prompt, a purged task, a
+ * revival replacing its history. Reading the absence as "running" pinned
+ * those rounds live in the sidebar until the next launch.
  */
 export function derivePromptRounds(
   rows: PromptRoundRow[],
@@ -174,7 +182,7 @@ export function derivePromptRounds(
     if (workspacePath === undefined) continue;
     const status: AgentTurnStatus =
       row.status === "live"
-        ? (turnById.get(row.turnId)?.status ?? "running")
+        ? (turnById.get(row.turnId)?.status ?? "cancelled")
         : row.status;
     rounds.push({
       turnId: row.turnId,
