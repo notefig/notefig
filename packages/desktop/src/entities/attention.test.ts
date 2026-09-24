@@ -78,12 +78,29 @@ describe("deriveAttention", () => {
     expect(seen.items).toEqual([]);
   });
 
-  it("an unread result survives the next turn, and is one mark for the session, not per turn", () => {
-    // A completes while the user is away; B, queued behind it, runs and
-    // completes; the user opens the session. The mark is "something settled
-    // here since you looked" — it holds through B's run (the row shows the
-    // orb; the label, title and header carry the mark) and B's completion
-    // continues it rather than replacing a per-turn record.
+  it("a finished turn is not news once the session has started another", () => {
+    // The title and the row must agree: a running session shows its orb,
+    // so its stale completion must not mark the section either. A failure
+    // is what the new turn follows, and still stands.
+    const done = { turnId: "t1", at: 10, status: "completed" as const };
+    const failed = { turnId: "t1", at: 10, status: "error" as const };
+    const attention = deriveAttention({
+      ...EMPTY,
+      tasks: [
+        task({ taskId: "task_moved_on", status: "running", lastSettled: done }),
+        task({ taskId: "task_reviving", status: "starting", lastSettled: done }),
+        task({ taskId: "task_retrying", status: "running", lastSettled: failed }),
+      ],
+    });
+    expect([...attention.byTask]).toEqual([["task_retrying", "error"]]);
+  });
+
+  it("a new message puts the session back into running; the next settle marks it again", () => {
+    // A completes while the user is away; B, sent behind it, runs and
+    // completes; the user opens the session. While B runs the session is
+    // running — that is the truth the row shows — and B's settle marks the
+    // session again. The mark is per session ("something settled here
+    // since you looked"), so A is not lost: opening the session shows both.
     const a = { turnId: "tA", at: 10, status: "completed" as const };
     const b = { turnId: "tB", at: 20, status: "completed" as const };
     const looked = seenAt([[seenKey({ kind: "task", id: "task_1" }), 5]]);
@@ -91,11 +108,10 @@ describe("deriveAttention", () => {
       deriveAttention({ ...EMPTY, tasks: [t], seen: looked }).byTask.get("task_1") ?? null;
 
     expect(mark(task({ taskId: "task_1", status: "idle", lastSettled: a }))).toBe("bau");
-    expect(mark(task({ taskId: "task_1", status: "running", lastSettled: a }))).toBe("bau");
+    expect(mark(task({ taskId: "task_1", status: "running", lastSettled: a }))).toBeNull();
     expect(mark(task({ taskId: "task_1", status: "idle", lastSettled: b }))).toBe("bau");
-    // B cancelled by the user leaves A as the last settle; A is still unread.
+    // B cancelled by the user leaves A as the last settle, still unread.
     expect(mark(task({ taskId: "task_1", status: "cancelled", lastSettled: a }))).toBe("bau");
-    // Opening the session is what clears it, whichever turn it lands after.
     const opened = seenAt([[seenKey({ kind: "task", id: "task_1" }), 25]]);
     expect(
       deriveAttention({ ...EMPTY, tasks: [task({ taskId: "task_1", lastSettled: b })], seen: opened }).items,

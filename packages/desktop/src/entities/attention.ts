@@ -65,6 +65,10 @@ export interface Attention {
   byWorkspace: ReadonlyMap<string, number>;
 }
 
+function isWorking(task: AgentTaskRow): boolean {
+  return task.status === "running" || task.status === "starting";
+}
+
 /** error outranks bau. */
 export function mostPressing(
   a: AttentionKind | null,
@@ -110,13 +114,9 @@ function isErrorNoTurnProduced(task: AgentTaskRow): boolean {
   );
 }
 
-/**
- * The last settle, when it is news for this session. It stays news while
- * a later turn runs — nobody has looked — and a later settle continues the
- * mark rather than replacing a per-turn record: the mark is "something
- * settled here since you looked", one per session.
- */
+/** The last settle, when it is news for this session. */
 function settledTurnAttention(
+  task: AgentTaskRow,
   settled: NonNullable<AgentTaskRow["lastSettled"]>,
   isWidgetRound: (turnId: string) => boolean,
   lastLooked: number,
@@ -124,6 +124,10 @@ function settledTurnAttention(
   // A widget round's result is in its document; the session stays quiet.
   if (isWidgetRound(settled.turnId)) return null;
   if (settled.at <= lastLooked) return null;
+  // A finished turn on a session that has since started another is not
+  // news: the session has moved on, and the new turn re-marks it when it
+  // settles. (A failure still stands — it is what the new turn follows.)
+  if (settled.status === "completed" && isWorking(task)) return null;
   return {
     kind: settled.status === "error" ? "error" : "bau",
     turnId: settled.turnId,
@@ -162,7 +166,7 @@ function taskAttention(
     return task.updatedAt > lastLooked ? { ...base, kind: "error" } : null;
   }
   if (!task.lastSettled) return null;
-  const settled = settledTurnAttention(task.lastSettled, isWidgetRound, lastLooked);
+  const settled = settledTurnAttention(task, task.lastSettled, isWidgetRound, lastLooked);
   return settled ? { ...base, ...settled } : null;
 }
 
