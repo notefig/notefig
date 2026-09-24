@@ -260,10 +260,15 @@ export function SessionRow({
         >
           <span className="flex size-3 shrink-0 items-center justify-center">
             <StatusGlyph
-              // What needs attention outranks the status: an ask or a
-              // failure is what the run is blocked on. (A finished-turn mark
-              // never coexists with a running session — entities/attention.)
-              state={attention ? attentionGlyphState(attention) : taskGlyphState(task)}
+              // The glyph slot shows the run while there is one — an unread
+              // result's mark rides the label (bold), the section title and
+              // the header meanwhile. An ask or a failure outranks the run:
+              // it is what the run is blocked on.
+              state={
+                attention && (attention === "error" || !isRunning)
+                  ? attentionGlyphState(attention)
+                  : taskGlyphState(task)
+              }
             />
           </span>
           <span className={cn("min-w-0 flex-1 truncate", attention && "font-medium")}>
