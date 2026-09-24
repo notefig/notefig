@@ -16,7 +16,10 @@
  *    session that is *asking* (permission, sign-in) clears when answered.
  *
  * A widget round lands on its document, never on its session: the widget
- * is where the user is pointed, so the session stays quiet.
+ * is where the user is pointed, so the session stays quiet. The service
+ * only announces settles; which target a settle is news for is decided
+ * here, by the listener that can see the prompt-round rows — so a widget's
+ * settle never overwrites the session's own unread news.
  */
 import { useMemo } from "react";
 import { useLiveQuery, eq } from "@tanstack/react-db";
@@ -31,6 +34,7 @@ import {
 import { promptRoundsCollection, type PromptRoundRow } from "@/entities/prompt-rounds";
 import { lastSeenAt, useSeen, type SeenTarget } from "@/entities/seen";
 import { useOpenWorkspaces } from "@/entities/workspaces";
+import { onAppEvent, type AppEvents } from "@/utils/app-events";
 import { workspaceKey } from "@/utils/path";
 
 export type AttentionKind = "bau" | "error";
@@ -67,6 +71,34 @@ export interface Attention {
 
 function isWorking(task: AgentTaskRow): boolean {
   return task.status === "running" || task.status === "starting";
+}
+
+/**
+ * The listener's body, exported for tests: a settle with no prompt round
+ * behind it is the session's news, and outlives the turn row on the task
+ * row. A widget round's settle is the round's (prompt-rounds.ts records
+ * it); a cancel was the user's own doing and says nothing.
+ */
+export async function recordSessionSettled(
+  detail: AppEvents["agent:turn-settled"],
+): Promise<void> {
+  if (detail.status === "cancelled") return;
+  await Promise.all([promptRoundsCollection.preload(), agentTasksCollection.preload()]);
+  if (promptRoundsCollection.get(detail.turnId)) return;
+  if (!agentTasksCollection.get(detail.taskId)) return;
+  const lastSettled = { turnId: detail.turnId, at: detail.at, status: detail.status };
+  await agentTasksCollection.update(detail.taskId, (draft) => {
+    draft.lastSettled = lastSettled;
+  }).isPersisted.promise;
+}
+
+/** Boot: the one global listener. Returns the unsubscribe. */
+export function startAttentionTracking(): () => void {
+  return onAppEvent("agent:turn-settled", (detail) => {
+    void recordSessionSettled(detail).catch((error) => {
+      console.error("Failed to record a session's settled turn:", error);
+    });
+  });
 }
 
 /** error outranks bau. */
@@ -118,11 +150,8 @@ function isErrorNoTurnProduced(task: AgentTaskRow): boolean {
 function settledTurnAttention(
   task: AgentTaskRow,
   settled: NonNullable<AgentTaskRow["lastSettled"]>,
-  isWidgetRound: (turnId: string) => boolean,
   lastLooked: number,
 ): Pick<AttentionItem, "kind" | "turnId" | "since"> | null {
-  // A widget round's result is in its document; the session stays quiet.
-  if (isWidgetRound(settled.turnId)) return null;
   if (settled.at <= lastLooked) return null;
   // A finished turn on a session that has since started another is not
   // news: the session has moved on, and the new turn re-marks it when it
@@ -139,7 +168,6 @@ function taskAttention(
   task: AgentTaskRow,
   permission: AgentPermissionRequestRow | undefined,
   runningTurnId: string | null,
-  isWidgetRound: (turnId: string) => boolean,
   seen: ReadonlyMap<string, number>,
 ): AttentionItem | null {
   const target: SeenTarget = { kind: "task", id: task.taskId };
@@ -166,7 +194,7 @@ function taskAttention(
     return task.updatedAt > lastLooked ? { ...base, kind: "error" } : null;
   }
   if (!task.lastSettled) return null;
-  const settled = settledTurnAttention(task, task.lastSettled, isWidgetRound, lastLooked);
+  const settled = settledTurnAttention(task, task.lastSettled, lastLooked);
   return settled ? { ...base, ...settled } : null;
 }
 
@@ -199,8 +227,6 @@ export function deriveAttention(rows: {
 }): Attention {
   const heads = headPermissionByTask(rows.pendingPermissions);
   const runningByTask = new Map(rows.runningTurns.map((t) => [t.taskId, t.turnId]));
-  const roundTurnIds = new Set(rows.rounds.map((round) => round.turnId));
-  const isWidgetRound = (turnId: string) => roundTurnIds.has(turnId);
 
   const items: AttentionItem[] = [];
   const byTask = new Map<string, AttentionKind>();
@@ -213,7 +239,6 @@ export function deriveAttention(rows: {
       task,
       heads.get(task.taskId),
       runningByTask.get(task.taskId) ?? null,
-      isWidgetRound,
       rows.seen,
     );
     if (!item) continue;

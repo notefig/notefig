@@ -118,15 +118,20 @@ describe("deriveAttention", () => {
     ).toEqual([]);
   });
 
-  it("a widget round marks its document, never its session", () => {
+  it("a widget round marks its document; the session's own news is what its row holds", () => {
+    // The task row carries session-homed settles only (recordSessionSettled
+    // skips a turn that has a prompt round), so chat-then-widget keeps the
+    // unread chat result on the session while the widget's lands on the
+    // document.
     const tasks = [
-      task({ taskId: "task_w", lastSettled: { turnId: "t_w", at: 10, status: "completed" } }),
+      task({ taskId: "task_w", lastSettled: { turnId: "t_chat", at: 10, status: "completed" } }),
+      task({ taskId: "task_quiet" }),
     ];
-    const rounds = [round({ turnId: "t_w" })];
+    const rounds = [round({ turnId: "t_w", taskId: "task_w", settledAt: 20 }), round({ turnId: "t_q", taskId: "task_quiet" })];
     const attention = deriveAttention({ ...EMPTY, tasks, rounds });
-    expect(attention.byTask.has("task_w")).toBe(false);
-    expect(attention.byRound.get("t_w")).toBe("bau");
-    expect(attention.overall).toBe("bau");
+    expect(attention.byTask.get("task_w")).toBe("bau");
+    expect(attention.byTask.has("task_quiet")).toBe(false);
+    expect([...attention.byRound.keys()].sort()).toEqual(["t_q", "t_w"]);
   });
 
   it("an error no turn produced is marked from the moment it was entered, not from the last turn", () => {
@@ -134,16 +139,13 @@ describe("deriveAttention", () => {
     // after its last settle — an old, seen (or widget) completion.
     const tasks = [
       task({ taskId: "task_died", status: "error", updatedAt: 200, lastSettled: { turnId: "t_old", at: 5, status: "completed" } }),
-      task({ taskId: "task_widget_died", status: "error", updatedAt: 200, lastSettled: { turnId: "t_w", at: 5, status: "completed" } }),
     ];
     const attention = deriveAttention({
       ...EMPTY,
       tasks,
-      rounds: [round({ turnId: "t_w" })],
       seen: seenAt([[seenKey({ kind: "task", id: "task_died" }), 100]]),
     });
     expect(attention.byTask.get("task_died")).toBe("error");
-    expect(attention.byTask.get("task_widget_died")).toBe("error");
     // Whereas a turn's own failure is the settle, and looking clears it.
     const turnFailed = deriveAttention({
       ...EMPTY,

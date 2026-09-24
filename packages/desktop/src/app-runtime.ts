@@ -13,6 +13,7 @@
  */
 import { startTreeInlineEditDismissal } from "@/components/editor/file-tree";
 import { startPromptRoundTracking } from "@/entities/prompt-rounds";
+import { startAttentionTracking } from "@/entities/attention";
 import { startSeenTracking } from "@/entities/seen";
 import { startWorkspaceWatcherSubscription } from "@/utils/workspace-watchers";
 import { startWorkspaceScopeSubscription } from "@/entities/workspace-scoped";
@@ -46,6 +47,7 @@ export function bootstrapAppRuntime({
   startWorkspaceWatcherSubscription();
   startSeenTracking();
   startPromptRoundTracking();
+  startAttentionTracking();
   startTreeInlineEditDismissal();
   if (restoreWorkspaces) {
     void restoreOpenWorkspaces().catch((error) => {
