@@ -5,6 +5,15 @@ import { createElement } from "react";
 
 // react-i18next resolves the hoisted root React copy under vitest (hooks
 // break across instances); the tab only uses it for labels, so stub it.
+// The seeded task/entry rows live in persisted collections: a failed
+// persistence commit rolls the insert back, so the tab would render no
+// task at all. node-db is the real driver over node:sqlite (MET-124).
+vi.mock("@/adapters", async () => ({
+  platformAdapter: {
+    db: (await import("@/testing/node-db")).createNodeTestDb(),
+  },
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
   initReactI18next: { type: "3rdParty" as const, init: () => {} },

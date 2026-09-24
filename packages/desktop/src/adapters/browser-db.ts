@@ -232,6 +232,20 @@ export function createBrowserDb(): DbSurface {
     get(): PersistedCollectionPersistence {
       // Memoized for the same reason as the desktop side: one driver means one
       // statement queue, and two queues over one file could interleave.
+      // Web Locks are the election medium; without them no cross-tab
+      // arbitration is possible at all, so the choice is made once, up
+      // front. It must be: the coordinator's leadership loop re-arms itself
+      // unconditionally after every failure (no backoff, no failure guard),
+      // so a synchronous `navigator.locks` miss turns into unbounded
+      // recursion — a stack overflow per collection plus a warning storm
+      // that killed the unit-test worker on CI (happy-dom has no locks).
+      const hasWebLocks =
+        typeof navigator !== "undefined" && navigator.locks != null;
+      if (!hasWebLocks && !persistence) {
+        console.warn(
+          "[browser-db] Web Locks unavailable: multi-tab coordination is off.",
+        );
+      }
       persistence ??= createBrowserWASQLitePersistence({
         database,
         // MET-117 deferred multi-tab coordination as extra work. It is one
@@ -240,7 +254,13 @@ export function createBrowserDb(): DbSurface {
         // the guard above responds to corruption by deleting the file. Leader
         // election runs over Web Locks + BroadcastChannel, both of which die
         // with the page, so there is nothing to dispose.
-        coordinator: new SettledLeadershipCoordinator({ dbName: "notefig" }),
+        ...(hasWebLocks
+          ? {
+              coordinator: new SettledLeadershipCoordinator({
+                dbName: "notefig",
+              }),
+            }
+          : {}),
         schemaMismatchPolicy: "reset",
       });
       return persistence;
