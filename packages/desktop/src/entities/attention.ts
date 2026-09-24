@@ -22,8 +22,10 @@ import { useLiveQuery, eq } from "@tanstack/react-db";
 import {
   agentPermissionRequestsCollection,
   agentTasksCollection,
+  agentTurnsCollection,
   type AgentPermissionRequestRow,
   type AgentTaskRow,
+  type AgentTurn,
 } from "@/entities/agents";
 import { promptRoundsCollection, type PromptRoundRow } from "@/entities/prompt-rounds";
 import { lastSeenAt, useSeen, type SeenTarget } from "@/entities/seen";
@@ -54,8 +56,9 @@ export interface Attention {
   asks: AttentionItem[];
   byTask: ReadonlyMap<string, AttentionKind>;
   byRound: ReadonlyMap<string, AttentionKind>;
-  /** The most pressing kind per sidebar section, and over everything. */
-  sections: { prompts: AttentionKind | null; sessions: AttentionKind | null };
+  /** The most pressing kind over everything — the sidebar's one dot. A
+   *  list that shows only some rows marks its title from those rows
+   *  (`mostPressing` over what it renders), never from here. */
   overall: AttentionKind | null;
   /** Per workspaceKey: items of kind "error" — the rail's badge. */
   byWorkspace: ReadonlyMap<string, number>;
@@ -87,6 +90,7 @@ function headPermissionByTask(
 function taskAttention(
   task: AgentTaskRow,
   permission: AgentPermissionRequestRow | undefined,
+  runningTurnId: string | null,
   isWidgetRound: (turnId: string) => boolean,
   seen: ReadonlyMap<string, number>,
 ): AttentionItem | null {
@@ -94,7 +98,9 @@ function taskAttention(
   const base = {
     target,
     taskId: task.taskId,
-    turnId: null,
+    // The turn in flight when the item was raised — what a jump prefers
+    // when the task has several widgets bound to it.
+    turnId: runningTurnId,
     since: task.updatedAt,
     workspaceKey: workspaceKey(task.workspacePath),
     task,
@@ -107,21 +113,23 @@ function taskAttention(
   if (task.status === "unavailable") return { ...base, kind: "error" };
 
   const settled = task.lastSettled;
-  if (settled) {
-    // A widget round's result is in its document; the session stays quiet.
-    if (isWidgetRound(settled.turnId)) return null;
-    if (settled.at <= lastSeenAt(seen, target)) return null;
-    return {
-      ...base,
-      kind: settled.status === "error" ? "error" : "bau",
-      turnId: settled.turnId,
-      since: settled.at,
-    };
+  // An error that no turn produced — a spawn or load failure, a process
+  // that died while idle — has no settle to be seen; it stands until the
+  // task recovers. (A turn's own failure is the settle below: its status
+  // is "error" too, and looking at it is what clears it.)
+  if (task.status === "error" && settled?.status !== "error") {
+    return { ...base, kind: "error" };
   }
-  // An error with no turn behind it (a spawn or load failure) has no
-  // settle to be seen; it stands until the task recovers.
-  if (task.status === "error") return { ...base, kind: "error" };
-  return null;
+  if (!settled) return null;
+  // A widget round's result is in its document; the session stays quiet.
+  if (isWidgetRound(settled.turnId)) return null;
+  if (settled.at <= lastSeenAt(seen, target)) return null;
+  return {
+    ...base,
+    kind: settled.status === "error" ? "error" : "bau",
+    turnId: settled.turnId,
+    since: settled.at,
+  };
 }
 
 function roundAttention(
@@ -146,11 +154,13 @@ function roundAttention(
 export function deriveAttention(rows: {
   tasks: AgentTaskRow[];
   rounds: PromptRoundRow[];
+  runningTurns: Pick<AgentTurn, "taskId" | "turnId">[];
   openWorkspaceKeys: ReadonlySet<string>;
   pendingPermissions: AgentPermissionRequestRow[];
   seen: ReadonlyMap<string, number>;
 }): Attention {
   const heads = headPermissionByTask(rows.pendingPermissions);
+  const runningByTask = new Map(rows.runningTurns.map((t) => [t.taskId, t.turnId]));
   const roundTurnIds = new Set(rows.rounds.map((round) => round.turnId));
   const isWidgetRound = (turnId: string) => roundTurnIds.has(turnId);
 
@@ -158,15 +168,19 @@ export function deriveAttention(rows: {
   const byTask = new Map<string, AttentionKind>();
   const byRound = new Map<string, AttentionKind>();
   const byWorkspace = new Map<string, number>();
-  let prompts: AttentionKind | null = null;
-  let sessions: AttentionKind | null = null;
+  let overall: AttentionKind | null = null;
 
   for (const task of rows.tasks) {
-    const item = taskAttention(task, heads.get(task.taskId), isWidgetRound, rows.seen);
+    const item = taskAttention(
+      task,
+      heads.get(task.taskId),
+      runningByTask.get(task.taskId) ?? null,
+      isWidgetRound,
+      rows.seen,
+    );
     if (!item) continue;
     items.push(item);
     byTask.set(task.taskId, item.kind);
-    sessions = mostPressing(sessions, item.kind);
   }
   for (const round of rows.rounds) {
     if (!rows.openWorkspaceKeys.has(round.workspaceKey)) continue;
@@ -174,9 +188,9 @@ export function deriveAttention(rows: {
     if (!item) continue;
     items.push(item);
     byRound.set(round.turnId, item.kind);
-    prompts = mostPressing(prompts, item.kind);
   }
   for (const item of items) {
+    overall = mostPressing(overall, item.kind);
     if (item.kind !== "error") continue;
     byWorkspace.set(item.workspaceKey, (byWorkspace.get(item.workspaceKey) ?? 0) + 1);
   }
@@ -187,8 +201,7 @@ export function deriveAttention(rows: {
     asks: items.filter((item) => item.ask !== undefined),
     byTask,
     byRound,
-    sections: { prompts, sessions },
-    overall: mostPressing(prompts, sessions),
+    overall,
     byWorkspace,
   };
 }
@@ -200,6 +213,11 @@ export function useAttention(): Attention {
   );
   const { data: rounds = [] } = useLiveQuery((q) =>
     q.from({ round: promptRoundsCollection }),
+  );
+  const { data: runningTurns = [] } = useLiveQuery((q) =>
+    q
+      .from({ turn: agentTurnsCollection })
+      .where(({ turn }) => eq(turn.status, "running")),
   );
   const { data: pendingPermissions = [] } = useLiveQuery((q) =>
     q
@@ -213,10 +231,11 @@ export function useAttention(): Attention {
       deriveAttention({
         tasks,
         rounds,
+        runningTurns,
         openWorkspaceKeys: new Set(openWorkspaces.map((row) => row.key)),
         pendingPermissions,
         seen,
       }),
-    [tasks, rounds, openWorkspaces, pendingPermissions, seen],
+    [tasks, rounds, runningTurns, openWorkspaces, pendingPermissions, seen],
   );
 }

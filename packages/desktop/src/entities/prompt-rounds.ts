@@ -97,13 +97,12 @@ export async function recordRoundStarted(
 /** The listener's settle half: only rounds we know are widget rounds. */
 export async function recordRoundSettled(
   detail: AppEvents["agent:turn-settled"],
-  now: number = Date.now(),
 ): Promise<void> {
   await promptRoundsCollection.preload();
   if (!promptRoundsCollection.get(detail.turnId)) return;
   await promptRoundsCollection.update(detail.turnId, (draft) => {
     draft.status = detail.status;
-    draft.settledAt = now;
+    draft.settledAt = detail.at;
   }).isPersisted.promise;
 }
 

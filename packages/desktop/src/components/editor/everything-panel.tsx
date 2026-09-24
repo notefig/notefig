@@ -29,6 +29,7 @@ import { TOOL_ICONS } from "@/components/editor/workspace-tools";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
 import { useAgentSessionList, type AgentTurnStatus } from "@/entities/agents";
 import {
+  mostPressing,
   useAttention,
   type AttentionItem,
   type AttentionKind,
@@ -94,19 +95,18 @@ export function EverythingPanel({
       live={liveDocuments.has(document.path)}
     />
   );
+  // A section's title marks what it shows: a dot always has a row to open.
+  const roundMarks = rounds.map((round) => attention.byRound.get(round.turnId) ?? null);
+  const sessionMarks = sessions.map((meta) => attention.byTask.get(meta.task.taskId) ?? null);
   const sections = [
     listSection(
       MessageSquareText,
       t("promptRounds"),
       rounds,
-      (round) => (
-        <PromptRoundRow
-          key={round.turnId}
-          round={round}
-          attention={attention.byRound.get(round.turnId) ?? null}
-        />
+      (round, index) => (
+        <PromptRoundRow key={round.turnId} round={round} attention={roundMarks[index]} />
       ),
-      attention.sections.prompts,
+      roundMarks.reduce(mostPressing, null),
     ),
     listSection(
       TOOL_ICONS.sessions,
@@ -120,7 +120,7 @@ export function EverythingPanel({
           className={ROW_SHAPE_CLASS}
         />
       ),
-      attention.sections.sessions,
+      sessionMarks.reduce(mostPressing, null),
     ),
     listSection(
       TOOL_ICONS.files,
@@ -160,7 +160,7 @@ function listSection<T>(
   icon: Glyph,
   title: string,
   items: T[],
-  render: (item: T) => ReactNode,
+  render: (item: T, index: number) => ReactNode,
   attention: AttentionKind | null = null,
 ): ReactNode {
   if (items.length === 0) return null;

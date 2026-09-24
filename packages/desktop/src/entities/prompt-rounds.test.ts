@@ -46,8 +46,8 @@ describe("prompt rounds", () => {
       status: "live",
       startedAt: 10,
     });
-    await recordRoundSettled({ taskId: "task_1", turnId: "t1", status: "error" }, 42);
-    await recordRoundSettled({ taskId: "task_1", turnId: "t_unknown", status: "completed" });
+    await recordRoundSettled({ taskId: "task_1", turnId: "t1", status: "error", at: 42 });
+    await recordRoundSettled({ taskId: "task_1", turnId: "t_unknown", status: "completed", at: 43 });
     expect(promptRoundsCollection.get("t1")).toMatchObject({ status: "error", settledAt: 42 });
     expect(promptRoundsCollection.size).toBe(1);
   });
@@ -91,7 +91,7 @@ describe("prompt rounds", () => {
     const stop = startPromptRoundTracking();
     emitAppEvent("widget:round-started", started("t9"));
     await vi.waitFor(() => expect(promptRoundsCollection.get("t9")).toBeDefined());
-    emitAppEvent("agent:turn-settled", { taskId: "task_1", turnId: "t9", status: "completed" });
+    emitAppEvent("agent:turn-settled", { taskId: "task_1", turnId: "t9", status: "completed", at: 1 });
     await vi.waitFor(() => expect(promptRoundsCollection.get("t9")?.status).toBe("completed"));
     stop();
   });

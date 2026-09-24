@@ -589,8 +589,9 @@ export function updateLoadedContentRow(path: string, content: string): void {
 export async function refreshDirectoryMetadata(
   workspaceId: string,
 ): Promise<void> {
-  const collections = getOrCreateWorkspaceCollections(workspaceId);
-  await collections.metadata.utils.refetch();
+  // Refresh what exists; a refresh landing after the workspace closed (an
+  // in-flight drop, a late watcher) must not bring its collections back.
+  await workspaceCollections.peek(workspaceId)?.metadata.utils.refetch();
 }
 
 export async function writeFileContent(

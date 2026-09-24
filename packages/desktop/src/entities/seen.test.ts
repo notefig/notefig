@@ -22,8 +22,8 @@ import { promptRoundsCollection, recordRoundStarted } from "./prompt-rounds";
 import { agentTabId, RELEASE_NOTES_TAB_ID } from "@/entities/tabs";
 import { emitAppEvent } from "@/utils/app-events";
 
-const settled = (taskId: string, turnId: string) =>
-  ({ taskId, turnId, status: "completed" }) as const;
+const settled = (taskId: string, turnId: string, at = 1) =>
+  ({ taskId, turnId, status: "completed", at }) as const;
 
 describe("seen", () => {
   beforeEach(async () => {
@@ -72,10 +72,10 @@ describe("seen", () => {
       expect(seenCollection.get(seenKey({ kind: "task", id: "task_1" }))).toBeDefined(),
     );
     const activated = seenCollection.get("task:task_1")!.lastSeenAt;
-    await recordSettledTurn(settled("task_1", "t1"), activated + 5);
+    await recordSettledTurn(settled("task_1", "t1", activated + 5));
     expect(seenCollection.get("task:task_1")?.lastSeenAt).toBe(activated + 5);
 
-    await recordSettledTurn(settled("task_2", "t2"), activated + 6);
+    await recordSettledTurn(settled("task_2", "t2", activated + 6));
     expect(seenCollection.get("task:task_2")).toBeUndefined();
   });
 
@@ -89,10 +89,11 @@ describe("seen", () => {
       documentPath: "/ws/doc.md",
       prompt: "p",
     });
-    const before = Date.now();
-    emitAppEvent("agent:turn-settled", settled("task_9", "t9"));
+    const at = Date.now() + 1_000;
+    emitAppEvent("agent:turn-settled", settled("task_9", "t9", at));
+    // Seen at the turn's own settle time — the value its round stores.
     await vi.waitFor(() =>
-      expect(seenCollection.get("document:/ws/doc.md")?.lastSeenAt).toBeGreaterThanOrEqual(before),
+      expect(seenCollection.get("document:/ws/doc.md")?.lastSeenAt).toBe(at),
     );
     stop();
   });

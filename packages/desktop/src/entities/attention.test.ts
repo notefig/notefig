@@ -44,6 +44,7 @@ const seenAt = (entries: [string, number][]) => new Map(entries);
 const EMPTY = {
   tasks: [],
   rounds: [],
+  runningTurns: [],
   openWorkspaceKeys: new Set(["/ws-a"]),
   pendingPermissions: [],
   seen: seenAt([]),
@@ -53,7 +54,6 @@ describe("deriveAttention", () => {
   it("is empty with nothing to show", () => {
     const attention = deriveAttention(EMPTY);
     expect(attention.items).toEqual([]);
-    expect(attention.sections).toEqual({ prompts: null, sessions: null });
     expect(attention.overall).toBeNull();
   });
 
@@ -65,7 +65,7 @@ describe("deriveAttention", () => {
     const unseen = deriveAttention({ ...EMPTY, tasks });
     expect(unseen.byTask.get("task_done")).toBe("bau");
     expect(unseen.byTask.get("task_bad")).toBe("error");
-    expect(unseen.sections.sessions).toBe("error");
+    expect(unseen.overall).toBe("error");
 
     const seen = deriveAttention({
       ...EMPTY,
@@ -86,7 +86,31 @@ describe("deriveAttention", () => {
     const attention = deriveAttention({ ...EMPTY, tasks, rounds });
     expect(attention.byTask.has("task_w")).toBe(false);
     expect(attention.byRound.get("t_w")).toBe("bau");
-    expect(attention.sections).toEqual({ prompts: "bau", sessions: null });
+    expect(attention.overall).toBe("bau");
+  });
+
+  it("an error no turn produced stands even after the last turn was seen", () => {
+    // A process that died while idle: the task is in error, but the last
+    // settle is an old, seen (or widget) completion.
+    const tasks = [
+      task({ taskId: "task_died", status: "error", lastSettled: { turnId: "t_old", at: 5, status: "completed" } }),
+      task({ taskId: "task_widget_died", status: "error", lastSettled: { turnId: "t_w", at: 5, status: "completed" } }),
+    ];
+    const attention = deriveAttention({
+      ...EMPTY,
+      tasks,
+      rounds: [round({ turnId: "t_w" })],
+      seen: seenAt([[seenKey({ kind: "task", id: "task_died" }), 100]]),
+    });
+    expect(attention.byTask.get("task_died")).toBe("error");
+    expect(attention.byTask.get("task_widget_died")).toBe("error");
+    // Whereas a turn's own failure is the settle, and looking clears it.
+    const turnFailed = deriveAttention({
+      ...EMPTY,
+      tasks: [task({ taskId: "task_bad", status: "error", lastSettled: { turnId: "t", at: 5, status: "error" } })],
+      seen: seenAt([[seenKey({ kind: "task", id: "task_bad" }), 100]]),
+    });
+    expect(turnFailed.items).toEqual([]);
   });
 
   it("a round is seen through its document; a later round on the same document is not", () => {
@@ -100,7 +124,7 @@ describe("deriveAttention", () => {
       seen: seenAt([[seenKey({ kind: "document", id: "/ws-a/doc.md" }), 10]]),
     });
     expect([...attention.byRound]).toEqual([["t_new", "error"]]);
-    expect(attention.sections.prompts).toBe("error");
+    expect(attention.overall).toBe("error");
   });
 
   it("cancelled and still-live rounds, and rounds of closed workspaces, say nothing", () => {
@@ -122,14 +146,16 @@ describe("deriveAttention", () => {
     const attention = deriveAttention({
       ...EMPTY,
       tasks,
+      runningTurns: [{ taskId: "task_perm", turnId: "t_asking" }],
       pendingPermissions: [permission("p2", "task_perm"), permission("p1", "task_perm")],
       seen: seenAt(tasks.map((t) => [seenKey({ kind: "task", id: t.taskId }), 1_000])),
     });
     expect([...attention.byTask.values()]).toEqual(["error", "error", "error", "error"]);
-    // Only the questions make the card; the oldest request is the one asked.
-    expect(attention.asks.map((item) => [item.taskId, item.ask])).toEqual([
-      ["task_perm", "permission"],
-      ["task_auth", "auth"],
+    // Only the questions make the card; the oldest request is the one asked,
+    // and the ask carries the turn that raised it so a jump lands there.
+    expect(attention.asks.map((item) => [item.taskId, item.ask, item.turnId])).toEqual([
+      ["task_perm", "permission", "t_asking"],
+      ["task_auth", "auth", null],
     ]);
     expect(attention.asks[0].permission?.id).toBe("p1");
   });
@@ -143,7 +169,8 @@ describe("deriveAttention", () => {
       tasks: [task({ taskId: "task_done", lastSettled: { turnId: "t1", at: 10, status: "completed" } })],
       rounds: [round({ turnId: "t_bad", status: "error" })],
     });
-    expect(attention.sections).toEqual({ prompts: "error", sessions: "bau" });
+    expect(attention.byTask.get("task_done")).toBe("bau");
+    expect(attention.byRound.get("t_bad")).toBe("error");
     expect(attention.overall).toBe("error");
   });
 

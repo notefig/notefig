@@ -95,13 +95,14 @@ export function useTrackActiveTab(activeTabId: string | null): void {
 }
 
 /** The listener's body, exported for tests: a turn settling on the target
- *  in front has been seen — it landed under the user's eyes. */
+ *  in front has been seen — it landed under the user's eyes. Seen at the
+ *  turn's own settle time, the value its rows store, so the comparison
+ *  cannot be split by two clocks. */
 export async function recordSettledTurn(
   detail: AppEvents["agent:turn-settled"],
-  now: number = Date.now(),
 ): Promise<void> {
   const target = targetOfSettledTurn(detail);
-  if (seenKey(target) === activeKey) await markSeen(target, now);
+  if (seenKey(target) === activeKey) await markSeen(target, detail.at);
 }
 
 /** Boot: the one global listener. Returns the unsubscribe. */

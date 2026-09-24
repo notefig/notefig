@@ -261,7 +261,10 @@ export function SessionRow({
           <span className="flex size-3 shrink-0 items-center justify-center">
             <StatusGlyph
               state={
-                attention && !isRunning
+                // An ask or failure outranks the running orb — it is what
+                // blocks the run. A finished-turn mark yields to it: the
+                // session has moved on to a new turn.
+                attention === "error" || (attention && !isRunning)
                   ? attentionGlyphState(attention)
                   : taskGlyphState(task)
               }
