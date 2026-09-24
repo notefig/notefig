@@ -22,41 +22,27 @@
  * native spelling — the same convention as taskManagerRegistry.
  */
 import { useEffect, useMemo, useState } from "react";
-import { createCollection, useLiveQuery } from "@tanstack/react-db";
-import { persistedCollectionOptions } from "@tanstack/db-sqlite-persistence-core";
-import { platformAdapter } from "@/adapters";
+import { useLiveQuery } from "@tanstack/react-db";
 import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
 import {
-  clearWorkspaceCollections,
   getOrCreateWorkspaceCollections,
   refreshDirectoryMetadata,
+  workspaceCollections,
 } from "@/entities/files";
-import { clearGitCollection } from "@/entities/git";
+import {
+  openWorkspacesCollection,
+  type OpenWorkspaceRow,
+} from "@/entities/open-workspaces";
 import { disposeWorkspaceHistoryService } from "@/utils/history-service";
 import { path as pathutil, relativeTreePath, workspaceKey } from "@/utils/path";
 
-export interface OpenWorkspaceRow {
-  /** workspaceKey(path) — the row id. */
-  key: string;
-  /** Normalized native spelling, safe for display and navigation. */
-  path: string;
-  openedAt: number;
-  /** Last time this workspace was brought to the front; the max is the
-   *  focused workspace. */
-  focusedAt: number;
-}
-
-/** The collection id, and so the SQLite table the open set lands in. */
-export const OPEN_WORKSPACES_COLLECTION_ID = "open-workspaces";
-
-/** Reactive, persisted open set — the switcher's and the boot's source. */
-export const openWorkspacesCollection = createCollection(
-  persistedCollectionOptions<OpenWorkspaceRow, string>({
-    id: OPEN_WORKSPACES_COLLECTION_ID,
-    getKey: (row) => row.key,
-    persistence: platformAdapter.db.get(),
-  }),
-);
+// The collection is a leaf (see open-workspaces.ts for why); this module
+// remains its public home.
+export {
+  OPEN_WORKSPACES_COLLECTION_ID,
+  openWorkspacesCollection,
+  type OpenWorkspaceRow,
+} from "@/entities/open-workspaces";
 
 /**
  * The one boot obligation: the persisted open set is hydrated AND every row
@@ -122,11 +108,12 @@ function hydrated(): Promise<void> {
   return openWorkspacesCollection.preload();
 }
 
-// There is deliberately no runtime map here any more. It used to hold one
-// thing — the metadata watcher — and once watching moved to the portal
-// (subscription below), membership *is* the collection. Everything else the
-// registry tears down (task managers, history services, git collections)
-// has its own keyed registry that open/close delegates to.
+// There is deliberately no runtime map here. Membership *is* the collection:
+// the metadata watcher (utils/workspace-watchers.ts) and every per-workspace
+// value declared through `workspaceScoped` (file and git collections, the
+// tree's expansion memory, the sidebar's last tool) subscribe to it and tear
+// themselves down when a row leaves. The two things closed by hand below own
+// OS resources whose teardown must be awaited and ordered.
 
 /** In-flight closes, keyed like the collection: a reopen racing a close must
  *  wait for the teardown to finish rather than interleave with it. */
@@ -167,12 +154,19 @@ export async function openWorkspace(workspacePath: string): Promise<void> {
       .isPersisted.promise.then(() => undefined);
   }
 
+  // The row first: per-workspace values are scoped to membership, so the
+  // collections must find the workspace open when the refresh reaches them.
+  // The optimistic insert is visible synchronously; only durability waits.
+  const now = Date.now();
+  const inserted = openWorkspacesCollection.insert({
+    key,
+    path: native,
+    openedAt: now,
+    focusedAt: now,
+  });
   getOrCreateWorkspaceCollections(native);
   void refreshDirectoryMetadata(native);
-  const now = Date.now();
-  return openWorkspacesCollection
-    .insert({ key, path: native, openedAt: now, focusedAt: now })
-    .isPersisted.promise.then(() => undefined);
+  return inserted.isPersisted.promise.then(() => undefined);
 }
 
 function mostRecentlyFocused(
@@ -202,6 +196,11 @@ export function isWorkspaceOpen(workspacePath: string): boolean {
  * demote to "restored" (revivable on next open) per the MET-54 contract —
  * the same semantics the route-unmount teardown had before MET-177 moved
  * ownership here.
+ *
+ * Deleting the row is the teardown for everything scoped to membership.
+ * What remains explicit owns OS resources and has an order: the task
+ * manager first (cancelling a turn can still checkpoint into the history
+ * service), then the history service's git worker.
  */
 export function closeWorkspace(workspacePath: string): Promise<void> {
   const key = workspaceKey(workspacePath);
@@ -220,8 +219,6 @@ export function closeWorkspace(workspacePath: string): Promise<void> {
     try {
       await disposeWorkspaceTaskManager(workspacePath);
       disposeWorkspaceHistoryService(workspacePath);
-      clearGitCollection(workspacePath);
-      clearWorkspaceCollections(workspacePath);
     } finally {
       pendingCloses.delete(key);
     }
@@ -238,7 +235,7 @@ export function closeWorkspace(workspacePath: string): Promise<void> {
  */
 export function reloadWorkspaceFiles(workspacePath: string): void {
   const native = pathutil.normalize(workspacePath);
-  clearWorkspaceCollections(native);
+  workspaceCollections.drop(native);
   getOrCreateWorkspaceCollections(native);
   void refreshDirectoryMetadata(native);
   // Access was just restored — if the watcher's start failed while the

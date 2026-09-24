@@ -17,7 +17,7 @@ import type { SearchPanelHandle } from "@/components/editor/search-panel";
 import { retryOnAnimationFrame } from "@/utils/retry-on-animation-frame";
 import { DEFAULT_SETTINGS_SECTION } from "@/components/editor/settings-modal";
 import { showWorkspace } from "@/hooks/use-open-project";
-import { workspaceKey } from "@/utils/path";
+import { workspaceScoped } from "@/entities/workspace-scoped";
 
 import {
   SIDEBAR_VIEW_PARAM,
@@ -40,10 +40,12 @@ const DEFAULT_TOOL: WorkspaceTool = "files";
 /**
  * The tool each workspace was last using, so returning to a workspace from
  * the rail lands on it (git for the one you were committing in, sessions
- * for the one you were prompting). Session-scoped like the widget store:
- * a restart lands everyone on files.
+ * for the one you were prompting). Lives as long as the workspace is open:
+ * a restart, or a close, lands it on files.
  */
-const lastToolByWorkspace = new Map<string, WorkspaceTool>();
+const lastTool = workspaceScoped({
+  create: (): { tool: WorkspaceTool } => ({ tool: DEFAULT_TOOL }),
+});
 
 export interface WorkspacePanelsOptions {
   /** The focused workspace — whose tool the URL's view belongs to. */
@@ -87,7 +89,8 @@ export function useWorkspacePanels({
   const showSidebarView = useCallback(
     (view: SidebarView) => {
       if (view !== "everything") {
-        lastToolByWorkspace.set(workspaceKey(workspacePath), view);
+        const remembered = lastTool.get(workspacePath);
+        if (remembered) remembered.tool = view;
       }
       setUrlSearchParams((prev) => withSidebarView(prev, view), {
         replace: true,
@@ -103,10 +106,8 @@ export function useWorkspacePanels({
 
   const showWorkspaceTools = useCallback(
     (path: string) => {
-      const tool = lastToolByWorkspace.get(workspaceKey(path)) ?? DEFAULT_TOOL;
-      // Focus is a durable write; the view flips at once. The tool is
-      // remembered under its own workspace, not the one still focused.
-      lastToolByWorkspace.set(workspaceKey(path), tool);
+      const tool = lastTool.peek(path)?.tool ?? DEFAULT_TOOL;
+      // Focus is a durable write; the view flips at once.
       void showWorkspace(path);
       setUrlSearchParams((prev) => withSidebarView(prev, tool), {
         replace: true,

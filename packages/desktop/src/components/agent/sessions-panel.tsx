@@ -63,8 +63,12 @@ import {
   useDefaultHarness,
 } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "@notefig/ui/harness-logo";
-import { StatusGlyph, taskGlyphState } from "@/components/agent/status-glyph";
-import { useUnseenTargets } from "@/entities/unseen";
+import {
+  StatusGlyph,
+  attentionGlyphState,
+  taskGlyphState,
+} from "@/components/agent/status-glyph";
+import { useAttention, type AttentionKind } from "@/entities/attention";
 
 /**
  * The left-sidebar sessions tool (sidebarView === "sessions"): every agent
@@ -203,14 +207,14 @@ export function SessionListRow({
   className?: string;
 }) {
   const { openAgentTab } = useWorkspaceTabs();
-  const unseenTargets = useUnseenTargets();
+  const { byTask } = useAttention();
   return (
     <SessionRow
       className={className}
       task={meta.task}
       meta={describeTaskMeta(meta)}
       isRunning={meta.isRunning}
-      unseen={unseenTargets.has(meta.task.taskId)}
+      attention={byTask.get(meta.task.taskId) ?? null}
       active={agentTabId(meta.task.taskId) === activeTabId}
       onOpen={() => openAgentTab(meta.task.taskId)}
     />
@@ -224,7 +228,7 @@ export function SessionRow({
   active,
   onOpen,
   className,
-  unseen = false,
+  attention = null,
 }: {
   task: AgentTaskRow;
   meta: string;
@@ -232,8 +236,8 @@ export function SessionRow({
   active: boolean;
   onOpen: () => void;
   className?: string;
-  /** A turn settled since the user last had this session in front. */
-  unseen?: boolean;
+  /** Something to point the user at here (entities/attention.ts). */
+  attention?: AttentionKind | null;
 }) {
   const { t } = useTranslation();
   return (
@@ -256,10 +260,13 @@ export function SessionRow({
         >
           <span className="flex size-3 shrink-0 items-center justify-center">
             <StatusGlyph
-              state={unseen && !isRunning ? "unseen" : taskGlyphState(task)}
+              // What needs attention outranks the status: an ask or a
+              // failure is what the run is blocked on. (A finished-turn mark
+              // never coexists with a running session — entities/attention.)
+              state={attention ? attentionGlyphState(attention) : taskGlyphState(task)}
             />
           </span>
-          <span className={cn("min-w-0 flex-1 truncate", unseen && "font-medium")}>
+          <span className={cn("min-w-0 flex-1 truncate", attention && "font-medium")}>
             {task.title}
           </span>
           <span className="shrink-0 text-[0.6875rem] text-muted-foreground/80">

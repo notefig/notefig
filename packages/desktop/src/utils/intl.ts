@@ -416,8 +416,6 @@ i18n
           showLess: "Show less",
           attentionPermission: "{{title}} is waiting for approval",
           attentionAuth: "{{title}} needs sign-in",
-          attentionUnavailable: "{{title}} disconnected",
-          attentionError: "{{title}} failed",
           promptRounds: "Prompts",
           everythingFiles: "Files",
           everythingScratchpads: "Scratchpads",

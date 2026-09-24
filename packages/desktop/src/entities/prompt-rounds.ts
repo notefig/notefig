@@ -45,6 +45,8 @@ export interface PromptRoundRow {
   prompt: string;
   status: PromptRoundRowStatus;
   startedAt: number;
+  /** When the turn ended; read against the seen timestamps for attention. */
+  settledAt?: number;
 }
 
 export interface PromptRound {
@@ -101,6 +103,7 @@ export async function recordRoundSettled(
   if (!promptRoundsCollection.get(detail.turnId)) return;
   await promptRoundsCollection.update(detail.turnId, (draft) => {
     draft.status = detail.status;
+    draft.settledAt = detail.at;
   }).isPersisted.promise;
 }
 

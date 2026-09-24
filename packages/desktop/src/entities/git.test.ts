@@ -29,9 +29,13 @@ vi.mock("@/adapters", async () => ({
 // The real GitError class, for constructing typed failures in tests.
 const { GitError: MockGitError } = await import("@notefig/git");
 
+import { openWorkspacesCollection } from "@/entities/open-workspaces";
+import { startWorkspaceScopeSubscription } from "@/entities/workspace-scoped";
+import { workspaceKey } from "@/utils/path";
 import {
   fetchGitRows,
-  getOrCreateGitCollection,
+  gitCollectionFor,
+  refetchGit,
   saveCheckpoint,
   type GitCheckpointRow,
   type GitRepoRow,
@@ -161,7 +165,7 @@ describe("saveCheckpoint (plain action + refetch)", () => {
 
     // Start the collection's sync (in the app a live-query subscription
     // does this) so the post-commit refetch lands in the synced store.
-    await getOrCreateGitCollection(WS).preload();
+    await gitCollectionFor(WS)!.preload();
     const oid = await saveCheckpoint(WS, "did things");
 
     expect(oid).toBe("feedbeef00");
@@ -170,7 +174,7 @@ describe("saveCheckpoint (plain action + refetch)", () => {
       author: { name: "Notefig", email: "git@notefig.com" },
     });
 
-    const rows = getOrCreateGitCollection(WS).toArray as GitCheckpointRow[];
+    const rows = gitCollectionFor(WS)!.toArray as GitCheckpointRow[];
     const committed = rows.find((r) => r.id === "cp:feedbeef00");
     expect(committed).toMatchObject({
       hash: "feedbee",
@@ -187,7 +191,7 @@ describe("saveCheckpoint (plain action + refetch)", () => {
       message: expect.stringContaining("busy"),
     });
 
-    const collection = getOrCreateGitCollection(WS);
+    const collection = gitCollectionFor(WS)!;
     expect(
       collection.toArray.filter(
         (r) => r.kind === "checkpoint" && r.message === "nope",
@@ -199,5 +203,31 @@ describe("saveCheckpoint (plain action + refetch)", () => {
     addAllAndCommitMock.mockResolvedValue(null);
 
     await expect(saveCheckpoint(WS, "empty")).resolves.toBeNull();
+  });
+});
+
+describe("git collection lifetime", () => {
+  it("is disposed when the workspace closes and a later read does not resurrect it", async () => {
+    // The old registry was get-or-create: a checkpoint's invalidate or a
+    // stale hook after close recreated the collection with nothing left to
+    // dispose it. Scoped to membership, a read after close yields nothing.
+    const stop = startWorkspaceScopeSubscription();
+    try {
+      openWorkspacesCollection.insert({
+        key: workspaceKey(WS),
+        path: WS,
+        openedAt: 1,
+        focusedAt: 1,
+      });
+      expect(gitCollectionFor(WS)).toBeDefined();
+
+      openWorkspacesCollection.delete(workspaceKey(WS));
+
+      expect(gitCollectionFor(WS)).toBeUndefined();
+      await expect(refetchGit(WS)).resolves.toBeUndefined();
+      expect(gitCollectionFor(WS)).toBeUndefined();
+    } finally {
+      stop();
+    }
   });
 });

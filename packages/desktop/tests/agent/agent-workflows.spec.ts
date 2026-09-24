@@ -13,6 +13,7 @@
  */
 import { test, expect, type Page } from "@playwright/test";
 import {
+  openFileInTree,
   openWorkspace,
   seedTestFiles,
   setupTestDatabase,
@@ -536,6 +537,56 @@ test.describe("agent workflows", () => {
       await page.getByRole("menuitem", { name: "Delete session" }).click();
       await expect(sessionRows(page)).toHaveCount(0);
       await expect(composer(page)).toHaveCount(0);
+    });
+  });
+
+  // ── Attention: what the sidebar points the user at ────────────────────
+
+  test.describe("attention", () => {
+    test("a turn that settles out of view marks its session; opening the session clears it", async ({
+      page,
+    }) => {
+      await setupTestDatabase(page, "workflows-attention");
+      const workspacePath = "/workspace/workflows-attention";
+      await openWorkspace(page, workspacePath);
+      await seedTestFiles(page, [
+        { path: `${workspacePath}/notes.md`, content: "# notes\n", type: "file" },
+      ]);
+      await startMockSession(page, workspacePath);
+      // Paced so the turn is still running when the user looks away.
+      const recording = loadRecording("streaming-slow.json");
+      await replayRecording(page, recording, { speed: 0.1, maxDelayMs: 3_000 });
+      const sessionGlyph = () =>
+        sessionRows(page).first().locator("[data-status-glyph]");
+      // The header row renders twice (the card and its collapsed strip);
+      // both carry the same one dot, so any visible one will do.
+      const headerGlyph = page
+        .locator(`button[title="${workspacePath}"]:visible [data-status-glyph]`)
+        .first();
+
+      // Settling under the user's eyes is seen as it lands: no mark.
+      await sendAndSettle(page, promptTextOf(recording, 0));
+      await expect(sessionGlyph()).toHaveAttribute("data-status-glyph", "idle");
+      await expect(headerGlyph).toHaveCount(0);
+
+      // Send, then look away while it runs.
+      const before = (await collectionStats(page)).settledTurns;
+      await sendPrompt(page, "again");
+      await page.getByRole("button", { name: "Files", exact: true }).click();
+      await openFileInTree(page, "notes.md");
+      await expect
+        .poll(async () => (await collectionStats(page)).settledTurns, { timeout: 60_000 })
+        .toBe(before + 1);
+
+      // The session is marked, and the sidebar's one dot agrees (blue: BAU).
+      await page.getByRole("button", { name: "Sessions", exact: true }).click();
+      await expect(sessionGlyph()).toHaveAttribute("data-status-glyph", "attention-bau");
+      await expect(headerGlyph).toHaveAttribute("data-status-glyph", "attention-bau");
+
+      // Looking at it is what clears it.
+      await sessionRows(page).first().click();
+      await expect(sessionGlyph()).toHaveAttribute("data-status-glyph", "idle");
+      await expect(headerGlyph).toHaveCount(0);
     });
   });
 

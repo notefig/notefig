@@ -42,7 +42,11 @@ import {
   createFile,
   createDirectory,
 } from "@/entities/files";
-import { useAgentRunsOverview } from "@/entities/agents";
+import { useAttention } from "@/entities/attention";
+import {
+  StatusGlyph,
+  attentionGlyphState,
+} from "@/components/agent/status-glyph";
 import {
   ensureNewFileNameHasDefaultMarkdownExtension,
   getDirectoryPath,
@@ -393,8 +397,9 @@ export function CollapsedSidebarHeader({
 
 /**
  * The header row: room for the macOS lights (a window drag region), then
- * one tab-like button — the focused workspace's name, a dot when any run
- * anywhere is waiting on the user, and the open/close glyph — that toggles
+ * one tab-like button — the focused workspace's name, one dot when
+ * anything anywhere needs attention (amber if any of it is an error, else
+ * the brand blue — never both), and the open/close glyph — that toggles
  * the sidebar wherever it is clicked. Closed, this row is all that is left
  * of the sidebar (pinned at the start of the dock's tab bar).
  */
@@ -410,7 +415,7 @@ function SidebarHeader({
   onToggleCollapse: () => void;
 }) {
   const { t } = useTranslation();
-  const { attention } = useAgentRunsOverview();
+  const { overall } = useAttention();
 
   return (
     <div className="flex h-full min-w-0 flex-1 items-stretch">
@@ -433,10 +438,10 @@ function SidebarHeader({
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
           {deriveProjectName(workspacePath)}
         </span>
-        {attention.length > 0 && (
-          <span
-            aria-hidden="true"
-            className="size-1.5 shrink-0 rounded-full bg-destructive animate-in zoom-in-50 duration-200 motion-reduce:animate-none"
+        {overall && (
+          <StatusGlyph
+            state={attentionGlyphState(overall)}
+            className="animate-in zoom-in-50 duration-200 motion-reduce:animate-none"
           />
         )}
         <span

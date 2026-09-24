@@ -33,7 +33,14 @@ export default defineConfig({
       deps: {
         // Externalized deps resolve react via Node and can grab the hoisted
         // root copy; inlining routes them through Vite so dedupe applies.
-        inline: ["@tanstack/react-db", "@tanstack/db", "@shadcn/react"],
+        // @pierre/icons ships `export * from './types'` with no extension,
+        // which Node's ESM resolver rejects but Vite resolves.
+        inline: [
+          "@tanstack/react-db",
+          "@tanstack/db",
+          "@shadcn/react",
+          "@pierre/icons",
+        ],
       },
     },
   },

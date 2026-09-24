@@ -23,6 +23,10 @@ export interface AppEvents {
     taskId: string;
     turnId: string;
     status: Extract<AgentTurnStatus, "completed" | "cancelled" | "error">;
+    /** The one settle time every record of this turn shares: what the
+     *  task row and the prompt round store, and what "seen as it landed"
+     *  compares against — so no two listeners' clocks can disagree. */
+    at: number;
   };
 }
 

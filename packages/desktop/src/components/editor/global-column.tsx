@@ -19,7 +19,7 @@ import {
 } from "@notefig/ui/dropdown-menu";
 import { cn } from "@notefig/ui/utils";
 import { useCloseWorkspace } from "@/components/editor/close-workspace-dialog";
-import { useAgentRunsOverview } from "@/entities/agents";
+import { useAttention } from "@/entities/attention";
 import { useOpenWorkspaces } from "@/entities/workspaces";
 import {
   useOpenProject,
@@ -45,8 +45,8 @@ interface GlobalColumnProps {
 /**
  * The rail down the sidebar card's left edge, under the header row: the
  * Everything view (the logo) on top, one chip per open workspace (the
- * current one marked, each carrying the count of runs waiting on the user
- * in it), a way to add one, and settings at the foot. A right-click on a
+ * current one marked, each carrying the count of things in it that failed
+ * or are asking), a way to add one, and settings at the foot. A right-click on a
  * chip closes its workspace. Gone with the card when the sidebar closes.
  */
 export function GlobalColumn({
@@ -58,7 +58,7 @@ export function GlobalColumn({
 }: GlobalColumnProps) {
   const { t } = useTranslation();
   const rows = useOpenWorkspaces();
-  const { byWorkspace } = useAgentRunsOverview();
+  const { byWorkspace } = useAttention();
   const { requestClose, dialog } = useCloseWorkspace();
   const focusedKey = workspaceKey(workspacePath);
 
@@ -78,7 +78,7 @@ export function GlobalColumn({
       <div className="flex min-h-0 flex-1 flex-col items-center gap-1 pt-1.5">
         {rows.map((row) => {
           const name = deriveProjectName(row.path);
-          const attention = byWorkspace.get(row.key)?.attention ?? 0;
+          const attention = byWorkspace.get(row.key) ?? 0;
           // Two different questions. "active" is which chip the sidebar is
           // showing, so Everything owns the selection and no chip is lit.
           // "current" is which workspace the dock is focused on, which is

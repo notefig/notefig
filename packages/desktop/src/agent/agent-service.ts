@@ -742,6 +742,7 @@ export class AgentTask {
       taskId: this.taskId,
       turnId,
       status: outcome.status,
+      at: Date.now(),
     });
   }
 
@@ -973,6 +974,20 @@ export class AgentTask {
       draft.stopReason = stopReason;
       if (error) draft.error = error;
     });
+    // What the user should hear about outlives the turn row on the task
+    // row. A cancel was the user's own doing and says nothing.
+    // One settle time for every record of this turn: the row here, the
+    // prompt round's, and the "seen as it landed" mark downstream.
+    const at = Date.now();
+    if (
+      (turnStatus === "completed" || turnStatus === "error") &&
+      agentTasksCollection.get(this.taskId)
+    ) {
+      const lastSettled = { turnId: turn.turnId, at, status: turnStatus };
+      agentTasksCollection.update(this.taskId, (draft) => {
+        draft.lastSettled = lastSettled;
+      });
+    }
     emitAppEvent("agent:turn-settled", {
       taskId: this.taskId,
       turnId: turn.turnId,
@@ -982,6 +997,7 @@ export class AgentTask {
           : turnStatus === "cancelled"
             ? "cancelled"
             : "completed",
+      at,
     });
 
     this.resolveTurn(

@@ -48,7 +48,7 @@ import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary"
 import { useThrowWorkspaceAccessError } from "@/components/workspace-error-boundary";
 import { agentTabId, isFileTabId, tabKind } from "@/entities/tabs";
 import { touchRecentDocument } from "@/entities/recent-documents";
-import { useTrackActiveTab } from "@/entities/unseen";
+import { useTrackActiveTab } from "@/entities/seen";
 import { useTabElements } from "@/tabs/tab-types";
 import { useReleaseNotesOnUpdate } from "@/hooks/use-release-notes-on-update";
 import {
@@ -476,7 +476,7 @@ function useWorkspaceDocuments({
       void touchRecentDocument(activeTabId);
     }
   }, [activeTabId]);
-  // ...and the unseen tracker: whatever tab is in front has been seen.
+  // ...and the seen tracker: whatever tab is in front has been looked at.
   useTrackActiveTab(activeTabId);
 
   const isFetchingContent = useContentFetching();
