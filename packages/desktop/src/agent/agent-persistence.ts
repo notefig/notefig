@@ -32,6 +32,13 @@ export const PersistedAgentTaskSchema = z
     sessionId: z.string().min(1).optional(),
     createdAt: z.number(),
     updatedAt: z.number(),
+    lastSettled: z
+      .object({
+        turnId: z.string().min(1),
+        at: z.number(),
+        status: z.enum(["completed", "error"]),
+      })
+      .optional(),
   })
   .passthrough();
 
@@ -63,5 +70,7 @@ export function bootAgentTaskRow(row: PersistedAgentTask): AgentTaskRow | null {
     sessionId: row.sessionId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    // Not runtime-only: it is the durable half of the attention model.
+    ...(row.lastSettled ? { lastSettled: row.lastSettled } : {}),
   };
 }

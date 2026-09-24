@@ -45,6 +45,13 @@ export type AgentTaskRow = {
    */
   updatedAt: number;
   /**
+   * The last turn that ended on its own — completed or errored, never
+   * cancelled by the user. Turn rows are ephemeral; this is what lets
+   * "something happened here since you looked" survive a relaunch. Read
+   * against the seen timestamps by `entities/attention.ts`.
+   */
+  lastSettled?: AgentTaskLastSettled;
+  /**
    * "How to sign in" hint from the adapter/harness, surfaced on auth errors.
    * On the row (not just the AgentTask instance) so the banner flows through
    * useLiveQuery and can't lag behind an unrelated collection write.
@@ -63,6 +70,12 @@ export type AgentTaskRow = {
 
 export type AgentTurnStatus =
   "queued" | "running" | "completed" | "cancelled" | "error";
+
+export type AgentTaskLastSettled = {
+  turnId: string;
+  at: number;
+  status: Extract<AgentTurnStatus, "completed" | "error">;
+};
 
 export type AgentTurn = {
   /** trn_ (ascending) — one per session/prompt round-trip */

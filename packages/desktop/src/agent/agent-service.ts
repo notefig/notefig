@@ -962,6 +962,17 @@ export class AgentTask {
       draft.stopReason = stopReason;
       if (error) draft.error = error;
     });
+    // What the user should hear about outlives the turn row on the task
+    // row. A cancel was the user's own doing and says nothing.
+    if (
+      (turnStatus === "completed" || turnStatus === "error") &&
+      agentTasksCollection.get(this.taskId)
+    ) {
+      const lastSettled = { turnId: turn.turnId, at: Date.now(), status: turnStatus };
+      agentTasksCollection.update(this.taskId, (draft) => {
+        draft.lastSettled = lastSettled;
+      });
+    }
     emitAppEvent("agent:turn-settled", {
       taskId: this.taskId,
       turnId: turn.turnId,

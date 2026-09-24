@@ -1,10 +1,7 @@
 import { OrbLoader, type OrbState } from "@notefig/ui/orb-loader";
 import { cn } from "@notefig/ui/utils";
-import type {
-  AgentAttentionKind,
-  AgentTaskRow,
-  AgentTurnStatus,
-} from "@/entities/agents";
+import type { AgentTaskRow, AgentTurnStatus } from "@/entities/agents";
+import type { AttentionKind } from "@/entities/attention";
 
 /**
  * One vocabulary for "what state is this agent thing in", wherever a row
@@ -24,10 +21,11 @@ export type StatusGlyphState =
   | "cancelled"
   | "error"
   | "unavailable"
-  | "permission"
   | "auth"
-  /** Settled since the user last looked — a filled brand dot. */
-  | "unseen";
+  /** Something finished here since the user last looked — the brand dot. */
+  | "attention-bau"
+  /** Something failed or is asking — the amber the prompt widget uses. */
+  | "attention-error";
 
 type GlyphSpec =
   | { shape: "orb"; orb: OrbState; tone: string }
@@ -44,9 +42,9 @@ const GLYPHS: Record<StatusGlyphState, GlyphSpec> = {
   cancelled: { shape: "ring", tone: "text-muted-foreground/70" },
   error: { shape: "dot", tone: "text-red-500" },
   unavailable: { shape: "dot", tone: "text-red-500" },
-  permission: { shape: "dot", tone: "text-red-500" },
   auth: { shape: "dot", tone: "text-red-500" },
-  unseen: { shape: "dot", tone: "text-brand" },
+  "attention-bau": { shape: "dot", tone: "text-brand" },
+  "attention-error": { shape: "dot", tone: "text-amber-600 dark:text-amber-400" },
 };
 
 export function StatusGlyph({
@@ -113,8 +111,6 @@ export function turnGlyphState(status: AgentTurnStatus): StatusGlyphState {
   return TURN_GLYPH[status];
 }
 
-export function attentionGlyphState(
-  kind: AgentAttentionKind,
-): StatusGlyphState {
-  return kind;
+export function attentionGlyphState(kind: AttentionKind): StatusGlyphState {
+  return `attention-${kind}`;
 }

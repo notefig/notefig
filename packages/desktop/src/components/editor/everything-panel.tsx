@@ -27,13 +27,12 @@ import { ScratchpadIcon } from "@/components/editor/scratchpad-icon";
 import { SidebarSeparator } from "@/components/editor/tool-bar";
 import { TOOL_ICONS } from "@/components/editor/workspace-tools";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
+import { useAgentSessionList, type AgentTurnStatus } from "@/entities/agents";
 import {
-  useAgentRunsOverview,
-  useAgentSessionList,
-  type AgentAttentionItem,
-  type AgentTurnStatus,
-} from "@/entities/agents";
-import { isTurnUnseen, useUnseenRows } from "@/entities/unseen";
+  useAttention,
+  type AttentionItem,
+  type AttentionKind,
+} from "@/entities/attention";
 import {
   isLiveRound,
   usePromptRounds,
@@ -68,19 +67,20 @@ interface EverythingPanelProps {
  * something, the runs that need the user, then what they were working with
  * most recently — prompt rounds in documents, agent sessions, files and
  * scratchpads — wherever it lives. Every list is a flat row list in the
- * sidebar's own idiom (the sessions panel, the file tree); only "needs
- * attention" is a card, so it reads as the one thing that is asking.
+ * sidebar's own idiom (the sessions panel, the file tree). What needs
+ * attention is marked in place — a dot on the row and on its section's
+ * title — except a question the agent is blocked on, which is the one
+ * thing that gets a card, so it reads as the one thing that is asking.
  */
 export function EverythingPanel({
   workspacePath,
   activeTabId,
 }: EverythingPanelProps) {
   const { t } = useTranslation();
-  const overview = useAgentRunsOverview();
+  const attention = useAttention();
   const rounds = usePromptRounds(ROUNDS_SHOWN);
   const sessions = useAgentSessionList(SESSIONS_SHOWN);
   const recentDocuments = useRecentDocuments(RECENT_DOCUMENTS_FETCHED);
-  const unseenRows = useUnseenRows();
   // Documents with a round in flight show it on their row too.
   const liveDocuments = new Set(
     rounds.filter(isLiveRound).map((round) => round.documentPath),
@@ -95,21 +95,33 @@ export function EverythingPanel({
     />
   );
   const sections = [
-    listSection(MessageSquareText, t("promptRounds"), rounds, (round) => (
-      <PromptRoundRow
-        key={round.turnId}
-        round={round}
-        unseen={isTurnUnseen(unseenRows, round.documentPath, round.turnId)}
-      />
-    )),
-    listSection(TOOL_ICONS.sessions, t("agentSessions"), sessions, (meta) => (
-      <SessionListRow
-        key={meta.task.taskId}
-        meta={meta}
-        activeTabId={activeTabId}
-        className={ROW_SHAPE_CLASS}
-      />
-    )),
+    listSection(
+      MessageSquareText,
+      t("promptRounds"),
+      rounds,
+      (round) => (
+        <PromptRoundRow
+          key={round.turnId}
+          round={round}
+          attention={attention.byRound.get(round.turnId) ?? null}
+        />
+      ),
+      attention.sections.prompts,
+    ),
+    listSection(
+      TOOL_ICONS.sessions,
+      t("agentSessions"),
+      sessions,
+      (meta) => (
+        <SessionListRow
+          key={meta.task.taskId}
+          meta={meta}
+          activeTabId={activeTabId}
+          className={ROW_SHAPE_CLASS}
+        />
+      ),
+      attention.sections.sessions,
+    ),
     listSection(
       TOOL_ICONS.files,
       t("everythingFiles"),
@@ -128,9 +140,7 @@ export function EverythingPanel({
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-1 py-2">
       <QuickActions workspacePath={workspacePath} />
       <SidebarSeparator className="mx-1 mt-2 shrink-0" />
-      {overview.attention.length > 0 && (
-        <AttentionGroup items={overview.attention} />
-      )}
+      {attention.asks.length > 0 && <AttentionGroup items={attention.asks} />}
       {sections.length === 0 ? (
         <p className="p-3 text-xs text-muted-foreground">
           {t("everythingEmpty")}
@@ -151,11 +161,14 @@ function listSection<T>(
   title: string,
   items: T[],
   render: (item: T) => ReactNode,
+  attention: AttentionKind | null = null,
 ): ReactNode {
   if (items.length === 0) return null;
   return (
     <section key={title} className="flex shrink-0 flex-col pt-4">
-      <SectionTitle icon={icon}>{title}</SectionTitle>
+      <SectionTitle icon={icon} attention={attention}>
+        {title}
+      </SectionTitle>
       {items.map(render)}
     </section>
   );
@@ -164,12 +177,16 @@ function listSection<T>(
 function SectionTitle({
   icon: Icon,
   className,
+  attention = null,
   children,
 }: {
   icon: Glyph;
   className?: string;
+  /** The section's most pressing mark, so a collapsed glance still sees it. */
+  attention?: AttentionKind | null;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   return (
     <h3
       className={cn(
@@ -179,6 +196,11 @@ function SectionTitle({
     >
       <Icon aria-hidden="true" className="size-3 shrink-0" strokeWidth={1.5} />
       <span className="truncate">{children}</span>
+      {attention && (
+        <span title={t("needsAttention")} className="flex shrink-0">
+          <StatusGlyph state={attentionGlyphState(attention)} />
+        </span>
+      )}
     </h3>
   );
 }
@@ -282,29 +304,22 @@ function QuickActions({ workspacePath }: { workspacePath: string }) {
   );
 }
 
-/** What an attention row says: the request itself when there is one. */
-function attentionLabel(
-  item: AgentAttentionItem,
+/** What an ask says: the request itself when there is one. */
+function askLabel(
+  item: AttentionItem,
   t: (key: string, options?: Record<string, unknown>) => string,
 ): string {
   if (item.permission) return item.permission.title;
-  return t(ATTENTION_LABEL_KEYS[item.kind], { title: item.task.title });
+  return t("attentionAuth", { title: item.task?.title ?? "" });
 }
 
-const ATTENTION_LABEL_KEYS: Record<AgentAttentionItem["kind"], string> = {
-  permission: "attentionPermission",
-  auth: "attentionAuth",
-  unavailable: "attentionUnavailable",
-  error: "attentionError",
-};
-
 /**
- * Runs waiting on the user, as a card. A row jumps to where the answer is
- * given — the prompt widget in the document when one is known, else the
- * chat tab — rather than answering here: the widget already carries the
- * request's own controls, in context.
+ * The questions the agent is blocked on, as a card. A row jumps to where
+ * the answer is given — the prompt widget in the document when one is
+ * known, else the chat tab — rather than answering here: the widget already
+ * carries the request's own controls, in context.
  */
-function AttentionGroup({ items }: { items: AgentAttentionItem[] }) {
+function AttentionGroup({ items }: { items: AttentionItem[] }) {
   const { t } = useTranslation();
   const { openAgentTab } = useWorkspaceTabs();
   const [expanded, setExpanded] = useState(false);
@@ -319,13 +334,13 @@ function AttentionGroup({ items }: { items: AgentAttentionItem[] }) {
         </SectionTitle>
         {shown.map((item) => (
           <NavRow
-            key={item.task.taskId}
+            key={item.taskId}
             leading={<StatusGlyph state={attentionGlyphState(item.kind)} />}
-            label={attentionLabel(item, t)}
-            title={`${attentionLabel(item, t)} · ${deriveProjectName(item.task.workspacePath)}`}
+            label={askLabel(item, t)}
+            title={`${askLabel(item, t)} · ${deriveProjectName(item.task?.workspacePath ?? "")}`}
             trailing={formatTimeAgo(item.since)}
             onClick={() =>
-              jumpToTask(item.task.taskId, { turnId: item.turnId, openAgentTab })
+              jumpToTask(item.taskId, { turnId: item.turnId, openAgentTab })
             }
           />
         ))}
@@ -362,11 +377,11 @@ const ROUND_META_KEYS: Partial<Record<AgentTurnStatus, string>> = {
  *  widget in its document. */
 function PromptRoundRow({
   round,
-  unseen,
+  attention,
 }: {
   round: PromptRound;
   /** Settled since the user last had its document in front. */
-  unseen: boolean;
+  attention: AttentionKind | null;
 }) {
   const { t } = useTranslation();
   const { openFile } = useWorkspaceTabs();
@@ -384,9 +399,13 @@ function PromptRoundRow({
   return (
     <NavRow
       leading={
-        <StatusGlyph state={unseen ? "unseen" : turnGlyphState(round.status)} />
+        <StatusGlyph
+          state={
+            attention ? attentionGlyphState(attention) : turnGlyphState(round.status)
+          }
+        />
       }
-      emphasis={unseen}
+      emphasis={attention !== null}
       label={label}
       title={`${label} · ${getFileName(round.documentPath)} · ${deriveProjectName(round.workspacePath)}`}
       trailing={metaKey ? t(metaKey) : formatTimeAgo(round.startedAt)}

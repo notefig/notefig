@@ -195,6 +195,11 @@ describe("AgentTask vertical slice", () => {
     expect(textFor(task.taskId, "assistant")).toContain("Hello world");
     expect(turnFor(task.taskId)[0].status).toBe("completed");
     expect(turnFor(task.taskId)[0].stopReason).toBe("end_turn");
+    // The settle outlives the turn row on the durable task row (attention).
+    expect(agentTasksCollection.get(task.taskId)?.lastSettled).toMatchObject({
+      turnId: turnFor(task.taskId)[0].turnId,
+      status: "completed",
+    });
   });
 
   it("records unknown session updates as a catch-all entry (D4)", async () => {

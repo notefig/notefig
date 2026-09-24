@@ -135,6 +135,16 @@ describe("pure helpers", () => {
     expect(bootAgentTaskRow(taskRow({ sessionId: undefined }))).toBeNull();
   });
 
+  it("lastSettled is not runtime-only: it validates and survives the boot mapping", () => {
+    const lastSettled = { turnId: "trn_1", at: 7, status: "completed" as const };
+    const stored = parsePersistedAgentTask({ ...taskRow({ status: "idle" }), lastSettled });
+    expect(stored?.lastSettled).toEqual(lastSettled);
+    expect(bootAgentTaskRow(stored!)).toMatchObject({ status: "restored", lastSettled });
+    expect(
+      parsePersistedAgentTask({ ...taskRow({}), lastSettled: { turnId: "x", at: 1, status: "cancelled" } }),
+    ).toBeNull();
+  });
+
 });
 
 describe("persisted tasks collection", () => {

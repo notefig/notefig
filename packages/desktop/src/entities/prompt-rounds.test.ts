@@ -46,9 +46,9 @@ describe("prompt rounds", () => {
       status: "live",
       startedAt: 10,
     });
-    await recordRoundSettled({ taskId: "task_1", turnId: "t1", status: "error" });
+    await recordRoundSettled({ taskId: "task_1", turnId: "t1", status: "error" }, 42);
     await recordRoundSettled({ taskId: "task_1", turnId: "t_unknown", status: "completed" });
-    expect(promptRoundsCollection.get("t1")?.status).toBe("error");
+    expect(promptRoundsCollection.get("t1")).toMatchObject({ status: "error", settledAt: 42 });
     expect(promptRoundsCollection.size).toBe(1);
   });
 
