@@ -26,12 +26,13 @@ import { queryCollectionOptions } from "@tanstack/query-db-collection";
 import { useIsFetching } from "@tanstack/react-query";
 import { GitError, type GitErrorCode, type RepoStatus } from "@notefig/git";
 import { isWorkspaceAccessError } from "@/adapters/platform-adapter.interface";
-import { path as pathutil, workspaceKey } from "@/utils/path";
+import { path as pathutil } from "@/utils/path";
 import {
   ensureWorkspaceHistoryInitialized,
   getOrCreateWorkspaceHistoryService,
 } from "@/utils/history-service";
 import { queryClient } from "./query-client";
+import { workspaceScoped } from "@/entities/workspace-scoped";
 
 /** A GitError flattened to data so it can live on a row. */
 export interface SerializedGitError {
@@ -235,26 +236,25 @@ function createGitCollection(workspacePath: string) {
 
 export type GitCollection = ReturnType<typeof createGitCollection>;
 
-const gitCollectionsRegistry = new Map<string, GitCollection>();
+/**
+ * One git collection per open workspace, disposed when the workspace leaves
+ * the open set. Membership-scoped rather than get-or-create: a lazy read
+ * after close (a checkpoint's `invalidateGit`, a stale hook) used to recreate
+ * the collection with nothing left to dispose it.
+ */
+const gitCollections = workspaceScoped({
+  create: createGitCollection,
+  // Drop cached query state too, so a fresh open refetches instead of
+  // replaying a stale error or stale data.
+  dispose: (_collection, native) =>
+    queryClient.removeQueries({ queryKey: gitQueryKey(native) }),
+});
 
-export function getOrCreateGitCollection(workspacePath: string): GitCollection {
-  // Registry key vs value: workspaceKey dedupes Windows respellings; the
-  // collection itself (and its query key) carries the native spelling.
-  const key = workspaceKey(workspacePath);
-  const native = pathutil.normalize(workspacePath);
-  let collection = gitCollectionsRegistry.get(key);
-  if (!collection) {
-    collection = createGitCollection(native);
-    gitCollectionsRegistry.set(key, collection);
-  }
-  return collection;
-}
-
-export function clearGitCollection(workspacePath: string): void {
-  gitCollectionsRegistry.delete(workspaceKey(workspacePath));
-  queryClient.removeQueries({
-    queryKey: gitQueryKey(workspacePath),
-  });
+/** The workspace's git collection, or undefined when it is not open. */
+export function gitCollectionFor(
+  workspacePath: string,
+): GitCollection | undefined {
+  return gitCollections.get(workspacePath);
 }
 
 export interface GitSummary {
@@ -277,7 +277,7 @@ function useGitCollection(
   workspacePath: string | undefined,
 ): GitCollection | undefined {
   return useMemo(
-    () => (workspacePath ? getOrCreateGitCollection(workspacePath) : undefined),
+    () => (workspacePath ? gitCollectionFor(workspacePath) : undefined),
     [workspacePath],
   );
 }
@@ -355,7 +355,7 @@ export function readFileGitState(
   workspacePath: string,
   filePath: string,
 ): GitFileRow | undefined {
-  const row = getOrCreateGitCollection(workspacePath).get(fileRowId(filePath));
+  const row = gitCollectionFor(workspacePath)?.get(fileRowId(filePath));
   return row?.kind === "file" ? row : undefined;
 }
 
@@ -370,7 +370,7 @@ export function deriveSyncState(summary: GitSummary | undefined): SyncState {
 
 /** Refetch the workspace's git rows (status + checkpoints in one pass). */
 export async function refetchGit(workspacePath: string): Promise<void> {
-  await getOrCreateGitCollection(workspacePath).utils.refetch();
+  await gitCollectionFor(workspacePath)?.utils.refetch();
 }
 
 /** Debounce-friendly invalidation for file-sync's derived-state pass. */

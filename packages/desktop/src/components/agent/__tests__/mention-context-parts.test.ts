@@ -57,7 +57,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  files.clearWorkspaceCollections(WS);
+  files.workspaceCollections.drop(WS);
 });
 
 describe("mentionContextParts", () => {

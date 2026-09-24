@@ -1,17 +1,19 @@
 import type { FileTree } from "@pierre/trees";
+import { workspaceScoped } from "@/entities/workspace-scoped";
 
 /**
- * Module-level memory of which directories are expanded, per workspace.
+ * Memory of which directories are expanded, per open workspace.
  *
  * The trees model lives and dies with the FileTree component (sidebar view
  * switches, sort-change remounts, workspace switches all unmount it), so
  * expansion state is mirrored here and replayed into the next model via
- * `initialExpandedPaths` / explicit expands. In-memory only: an app restart
- * starts fresh, matching the previous tree's behavior.
+ * `initialExpandedPaths` / explicit expands. Scoped to the workspace being
+ * open: a close (or a restart) starts fresh, matching the previous tree's
+ * behavior.
  *
  * Paths are canonical workspace-relative (no trailing slash).
  */
-const expansionByWorkspace = new Map<string, Set<string>>();
+const expansion = workspaceScoped({ create: () => new Set<string>() });
 
 /**
  * The remembered expanded set, or null if this workspace has never mounted
@@ -20,7 +22,7 @@ const expansionByWorkspace = new Map<string, Set<string>>();
 export function rememberedExpandedPaths(
   workspacePath: string,
 ): string[] | null {
-  const set = expansionByWorkspace.get(workspacePath);
+  const set = expansion.peek(workspacePath);
   return set ? [...set] : null;
 }
 
@@ -28,7 +30,7 @@ export function isRememberedExpanded(
   workspacePath: string,
   canonicalPath: string,
 ): boolean {
-  return expansionByWorkspace.get(workspacePath)?.has(canonicalPath) ?? false;
+  return expansion.peek(workspacePath)?.has(canonicalPath) ?? false;
 }
 
 /**
@@ -41,11 +43,9 @@ export function attachExpansionMemory(
   model: FileTree,
   workspacePath: string,
 ): () => void {
-  let set = expansionByWorkspace.get(workspacePath);
-  if (!set) {
-    set = new Set();
-    expansionByWorkspace.set(workspacePath, set);
-  }
+  // A rendered tree's workspace is open; the fallback only keeps a tree
+  // that outlived its workspace by a frame from throwing.
+  const set = expansion.get(workspacePath) ?? new Set<string>();
   const record = () => {
     for (const row of model.getVisibleRows(0, model.getVisibleCount())) {
       if (row.kind !== "directory") continue;

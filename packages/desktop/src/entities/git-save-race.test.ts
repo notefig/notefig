@@ -26,7 +26,7 @@ vi.mock("@/adapters", async () => ({
   },
 }));
 import { createLiveQueryCollection, eq } from "@tanstack/react-db";
-import { getOrCreateGitCollection, invalidateGit, saveCheckpoint } from "./git";
+import { gitCollectionFor, invalidateGit, saveCheckpoint } from "./git";
 
 const WS = "/tmp/ws-git-save-race-test";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -69,7 +69,7 @@ describe("saveCheckpoint vs derived live queries", () => {
   });
 
   it("leaves no pending ghost after a save with a racing invalidation", async () => {
-    const collection = getOrCreateGitCollection(WS);
+    const collection = gitCollectionFor(WS)!;
     const checkpoints = createLiveQueryCollection((q) =>
       q
         .from({ git: collection })

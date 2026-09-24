@@ -100,7 +100,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   // Drop the singleton collections so state can't leak between tests.
-  files.clearWorkspaceCollections(WS);
+  files.workspaceCollections.drop(WS);
 });
 
 describe("file create → write → read round-trip", () => {

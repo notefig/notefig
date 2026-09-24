@@ -15,6 +15,7 @@ import { startTreeInlineEditDismissal } from "@/components/editor/file-tree";
 import { startPromptRoundTracking } from "@/entities/prompt-rounds";
 import { startUnseenTracking } from "@/entities/unseen";
 import { startWorkspaceWatcherSubscription } from "@/utils/workspace-watchers";
+import { startWorkspaceScopeSubscription } from "@/entities/workspace-scoped";
 import { restoreOpenWorkspaces } from "@/entities/workspaces";
 
 export interface BootstrapAppRuntimeOptions {
@@ -41,6 +42,7 @@ export interface BootstrapAppRuntimeOptions {
 export function bootstrapAppRuntime({
   restoreWorkspaces = true,
 }: BootstrapAppRuntimeOptions = {}): void {
+  startWorkspaceScopeSubscription();
   startWorkspaceWatcherSubscription();
   startUnseenTracking();
   startPromptRoundTracking();

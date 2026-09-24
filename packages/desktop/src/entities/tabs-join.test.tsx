@@ -60,7 +60,7 @@ vi.mock("./agents", () => ({
 const openRows: { key: string; path: string }[] = [];
 
 import {
-  clearWorkspaceCollections,
+  workspaceCollections,
   getOrCreateWorkspaceCollections,
 } from "./files";
 import { useWorkspaceTabs, type WorkspaceTabsState } from "./tabs";
@@ -119,8 +119,8 @@ afterEach(async () => {
     root?.unmount();
   });
   container?.remove();
-  clearWorkspaceCollections(WS_A);
-  clearWorkspaceCollections(WS_B);
+  workspaceCollections.drop(WS_A);
+  workspaceCollections.drop(WS_B);
 });
 
 describe("useWorkspaceTabs across open workspaces", () => {

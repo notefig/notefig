@@ -3,7 +3,7 @@ import { platformAdapter } from "@/adapters";
 import { handleMetadataFileSystemChange } from "../file-sync";
 import {
   getOrCreateWorkspaceCollections,
-  clearWorkspaceCollections,
+  workspaceCollections,
 } from "@/entities/files";
 
 // The frontend backstop for ignore rules: whatever the platform watchers
@@ -50,7 +50,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  clearWorkspaceCollections(WS);
+  workspaceCollections.drop(WS);
 });
 
 describe("watcher event backstop", () => {

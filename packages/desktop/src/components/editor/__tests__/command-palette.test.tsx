@@ -117,7 +117,7 @@ afterEach(() => {
   container?.remove();
   container = null;
   root = null;
-  files.clearWorkspaceCollections(WS);
+  files.workspaceCollections.drop(WS);
   document.body.innerHTML = "";
 });
 

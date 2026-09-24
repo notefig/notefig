@@ -9,7 +9,7 @@ import {
 } from "../file-sync";
 import {
   getOrCreateWorkspaceCollections,
-  clearWorkspaceCollections,
+  workspaceCollections,
 } from "@/entities/files";
 
 // MET-177 Stage B: with several workspaces open, fs events must only reach
@@ -93,8 +93,8 @@ afterEach(() => {
   syncContentWatchers(new Map());
   watcherA?.stop();
   watcherB?.stop();
-  clearWorkspaceCollections(WS_A);
-  clearWorkspaceCollections(WS_B);
+  workspaceCollections.drop(WS_A);
+  workspaceCollections.drop(WS_B);
 });
 
 describe("watcher event isolation across open workspaces", () => {

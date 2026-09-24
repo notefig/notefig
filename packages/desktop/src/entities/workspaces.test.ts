@@ -36,11 +36,9 @@ vi.mock("@/adapters", async () => ({
 const files = vi.hoisted(() => ({
   getOrCreateWorkspaceCollections: vi.fn(),
   refreshDirectoryMetadata: vi.fn(async () => {}),
-  clearWorkspaceCollections: vi.fn(),
+  workspaceCollections: { drop: vi.fn() },
 }));
 vi.mock("@/entities/files", () => files);
-const git = vi.hoisted(() => ({ clearGitCollection: vi.fn() }));
-vi.mock("@/entities/git", () => git);
 const history = vi.hoisted(() => ({
   disposeWorkspaceHistoryService: vi.fn(),
   checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
@@ -50,6 +48,10 @@ vi.mock("@/utils/history-service", () => history);
 // registry publishes membership and nothing else; arming, stopping and
 // re-arming are covered by utils/__tests__/workspace-watchers.test.ts.
 
+import {
+  startWorkspaceScopeSubscription,
+  workspaceScoped,
+} from "./workspace-scoped";
 import {
   openWorkspace,
   closeWorkspace,
@@ -146,15 +148,26 @@ describe("openWorkspace", () => {
 
 describe("closeWorkspace", () => {
   it("tears down every per-workspace subsystem and drops the row", async () => {
-    await openWorkspace("/ws");
+    // The OS-resource owners are closed by hand; everything else is scoped
+    // to membership and disposes itself when the row goes (the real helper,
+    // not a mock — this is the seam the manual cascade used to cover).
+    const stopScopes = startWorkspaceScopeSubscription();
+    const dispose = vi.fn();
+    const scope = workspaceScoped({ create: () => ({}), dispose });
+    try {
+      await openWorkspace("/ws");
+      scope.get("/ws");
 
-    await closeWorkspace("/ws");
+      await closeWorkspace("/ws");
 
-    expect(history.disposeWorkspaceHistoryService).toHaveBeenCalledWith("/ws");
-    expect(git.clearGitCollection).toHaveBeenCalledWith("/ws");
-    expect(files.clearWorkspaceCollections).toHaveBeenCalledWith("/ws");
-    expect(isWorkspaceOpen("/ws")).toBe(false);
-    expect(openWorkspacesCollection.size).toBe(0);
+      expect(history.disposeWorkspaceHistoryService).toHaveBeenCalledWith("/ws");
+      expect(dispose).toHaveBeenCalledTimes(1);
+      expect(scope.get("/ws")).toBeUndefined();
+      expect(isWorkspaceOpen("/ws")).toBe(false);
+      expect(openWorkspacesCollection.size).toBe(0);
+    } finally {
+      stopScopes();
+    }
   });
 
   it("demotes sessionful task rows to restored and purges sessionless ones (MET-54 contract)", async () => {
@@ -181,17 +194,18 @@ describe("closeWorkspace", () => {
   });
 
   it("is a no-op for a workspace that is not open", async () => {
-    await closeWorkspace("/never-opened");
-    expect(files.clearWorkspaceCollections).toHaveBeenCalledWith(
-      "/never-opened",
-    );
+    await expect(closeWorkspace("/never-opened")).resolves.toBeUndefined();
     expect(openWorkspacesCollection.size).toBe(0);
   });
 });
 
 describe("close/reopen race", () => {
   it("a reopen during an in-flight close waits for the teardown, then opens fresh", async () => {
+    const stopScopes = startWorkspaceScopeSubscription();
+    const dispose = vi.fn();
+    const scope = workspaceScoped({ create: () => ({}), dispose });
     await openWorkspace("/ws");
+    scope.get("/ws");
     await agentTasksCollection.insert(taskRow({ status: "running" }))
       .isPersisted.promise;
 
@@ -212,11 +226,11 @@ describe("close/reopen race", () => {
     expect(agentTasksCollection.get("task_a")).toMatchObject({
       status: "restored",
     });
-    const clearOrder =
-      files.clearWorkspaceCollections.mock.invocationCallOrder[0];
+    const disposeOrder = dispose.mock.invocationCallOrder[0];
     const reseedOrder =
       files.getOrCreateWorkspaceCollections.mock.invocationCallOrder.at(-1);
-    expect(reseedOrder).toBeGreaterThan(clearOrder!);
+    expect(reseedOrder).toBeGreaterThan(disposeOrder!);
+    stopScopes();
   });
 
   it("double-close returns the same in-flight teardown", async () => {
