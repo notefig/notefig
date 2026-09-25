@@ -235,7 +235,15 @@ function describeAgent(result) {
 
 function selfTest(outFile, allowUntested) {
   return new Promise((resolveTest, reject) => {
-    const child = spawn(outFile, [], { stdio: ["pipe", "pipe", "pipe"] });
+    // The test proves the executable starts and speaks ACP, not that Claude
+    // is installed: the entry exits early when it can't find `claude`, so
+    // hand it any existing file (CI runners have no Claude) — `initialize`
+    // never touches it, only a session does.
+    const env = {
+      ...process.env,
+      CLAUDE_CODE_EXECUTABLE: process.env.CLAUDE_CODE_EXECUTABLE ?? process.execPath,
+    };
+    const child = spawn(outFile, [], { env, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d) => (stdout += d));

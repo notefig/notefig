@@ -164,10 +164,11 @@ function SessionConfigPicker({
     }
   };
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      {/* An anchor + pointerdown toggle rather than PopoverTrigger: the
-          composer's focus handling swallows the click Radix's trigger waits
-          for, while pointerdown (what its menus open on) gets through. */}
+    <Popover open={open} onOpenChange={setOpen} modal>
+      {/* Modal (like the dropdown menus), so the composer's focus handling
+          can't pull focus out of the open list and dismiss it; an anchor +
+          pointerdown toggle rather than PopoverTrigger for the same reason:
+          the click Radix's trigger waits for never arrives. */}
       <PopoverAnchor asChild>
         <button
           ref={triggerRef}
