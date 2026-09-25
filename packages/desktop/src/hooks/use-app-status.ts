@@ -173,7 +173,7 @@ function sections(
         id: `documents:${document.path}`,
         label: clip(getFileName(document.path)),
         detail: deriveProjectName(document.workspacePath),
-        mark: liveDocuments.has(document.path) ? "running" : undefined,
+        mark: liveDocuments.has(document.path) ? "running" : "document",
         activate: () =>
           tabs.openFile({ tabId: document.path, intent: "replace" }),
       })),

@@ -5,7 +5,8 @@
 //! whenever it changes (`ui.publishAppStatus` in the platform adapter).
 //! This module only draws: a template icon (with a dot beside it when
 //! anything needs the user), a native menu of the sections as disabled
-//! headers over marked rows, then the actions, then Quit. Rows and actions
+//! headers over rows led by the sidebar's own glyphs (icons/menu, from
+//! scripts/build-icons.mjs), then the actions, then Quit. Rows and actions
 //! carry ids, never behaviour; picking one brings the window forward and
 //! emits the id back (`app-status-activated`) for the frontend to act on.
 //!
@@ -42,7 +43,7 @@ pub struct AppStatusEntry {
     pub id: String,
     pub label: String,
     pub detail: Option<String>,
-    /// A `StatusMark` (platform-adapter.interface.ts); unknown marks draw plain.
+    /// An `AppStatusGlyph` (platform-adapter.interface.ts); unknown ones draw plain.
     pub mark: Option<String>,
 }
 
@@ -109,12 +110,18 @@ mod tray {
     use super::{activated_id, entry_text, item_id, AppStatus, AppStatusEntry, ACTIVATED_EVENT};
     use std::sync::Mutex;
     use tauri::image::Image;
-    use tauri::menu::{IconMenuItem, Menu, MenuEvent, MenuItem, NativeIcon, PredefinedMenuItem};
+    use tauri::menu::{IconMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
     use tauri::tray::{TrayIcon, TrayIconBuilder};
     use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-    const LOGO: Image<'static> = tauri::include_image!("icons/tray/logo.png");
-    const LOGO_ATTENTION: Image<'static> = tauri::include_image!("icons/tray/logo-attention.png");
+    const LOGO: Image<'static> = tauri::include_image!("icons/menu/logo.png");
+    const LOGO_ATTENTION: Image<'static> = tauri::include_image!("icons/menu/logo-attention.png");
+    const RUNNING: Image<'static> = tauri::include_image!("icons/menu/running.png");
+    const SETTLED: Image<'static> = tauri::include_image!("icons/menu/settled.png");
+    const QUEUED: Image<'static> = tauri::include_image!("icons/menu/queued.png");
+    const ERROR: Image<'static> = tauri::include_image!("icons/menu/error.png");
+    const ATTENTION: Image<'static> = tauri::include_image!("icons/menu/attention.png");
+    const DOCUMENT: Image<'static> = tauri::include_image!("icons/menu/document.png");
 
     /// The one menu-bar item, once the first publish has created it.
     pub struct AppStatusTray<R: Runtime>(Mutex<Option<TrayIcon<R>>>);
@@ -125,28 +132,27 @@ mod tray {
         }
     }
 
-    /// The system's own status dots, so a mark reads as it does everywhere
-    /// else on the Mac: green for something new, amber for waiting or
-    /// asking, red for failed, grey for settled. Mirrors the sidebar's
-    /// glyph table (status-glyph.tsx) in the menu's own idiom.
-    pub fn native_icon(mark: Option<&str>) -> Option<NativeIcon> {
+    /// The sidebar's glyph table (status-glyph.tsx) in the menu's idiom:
+    /// the same shapes and colours, drawn once by scripts/build-icons.mjs.
+    pub fn glyph(mark: Option<&str>) -> Option<Image<'static>> {
         Some(match mark? {
-            "attention-bau" => NativeIcon::StatusAvailable,
-            "attention-error" | "queued" => NativeIcon::StatusPartiallyAvailable,
-            "error" | "unavailable" | "auth" => NativeIcon::StatusUnavailable,
-            "running" | "starting" => NativeIcon::Refresh,
-            "idle" | "done" | "cancelled" => NativeIcon::StatusNone,
+            "running" | "starting" => RUNNING,
+            "idle" | "done" | "cancelled" => SETTLED,
+            "queued" => QUEUED,
+            "error" | "unavailable" | "auth" | "attention-error" => ERROR,
+            "attention-bau" => ATTENTION,
+            "document" => DOCUMENT,
             _ => return None,
         })
     }
 
     fn entry_item<R: Runtime>(app: &AppHandle<R>, entry: &AppStatusEntry) -> tauri::Result<IconMenuItem<R>> {
-        IconMenuItem::with_id_and_native_icon(
+        IconMenuItem::with_id(
             app,
             item_id(&entry.id),
             entry_text(entry),
             true,
-            native_icon(entry.mark.as_deref()),
+            glyph(entry.mark.as_deref()),
             None::<&str>,
         )
     }
@@ -250,12 +256,14 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn marks_draw_as_the_systems_status_dots() {
-        use tauri::menu::NativeIcon;
-        assert!(matches!(tray::native_icon(Some("attention-bau")), Some(NativeIcon::StatusAvailable)));
-        assert!(matches!(tray::native_icon(Some("error")), Some(NativeIcon::StatusUnavailable)));
-        assert!(matches!(tray::native_icon(Some("done")), Some(NativeIcon::StatusNone)));
-        assert!(tray::native_icon(Some("not-a-mark")).is_none());
-        assert!(tray::native_icon(None).is_none());
+    fn every_glyph_has_an_image_and_unknown_ones_draw_plain() {
+        for mark in [
+            "starting", "running", "queued", "idle", "done", "cancelled", "error",
+            "unavailable", "auth", "attention-bau", "attention-error", "document",
+        ] {
+            assert!(tray::glyph(Some(mark)).is_some(), "{mark}");
+        }
+        assert!(tray::glyph(Some("not-a-mark")).is_none());
+        assert!(tray::glyph(None).is_none());
     }
 }

@@ -8,6 +8,7 @@
 //   brand/*.svg                       – editable SVG variants (mark, tile, macOS, Tahoe layers)
 //   public/icon.svg, ../marketing/site-public/icon.svg – favicon / header mark (the tile)
 //   src-tauri/icons/*.png|ico|icns    – Tauri bundle icons (Windows, Linux, pre-Tahoe macOS)
+//   src-tauri/icons/menu/*.png        – macOS menu-bar item + its menu's row glyphs
 //   src-tauri/icons/Notefig.icon      – Icon Composer bundle: macOS 26 Liquid Glass
 //                                       (compiled to Assets.car by tauri-bundler ≥ 2.11 when
 //                                       the build host has Xcode 26's actool; older hosts
@@ -138,6 +139,57 @@ writeFileSync(join(bundle, "Assets", "leaf.svg"), layerLeafSvg);
 
 // ---- rasters ---------------------------------------------------------------
 const work = mkdtempSync(join(tmpdir(), "notefig-icons-"));
+
+// ---- menu bar (src-tauri/src/app_status.rs) --------------------------------
+// The status item and its menu's row glyphs, at 2x of the 18pt height AppKit
+// draws them at. The item is a template image (black on transparent, tinted
+// by the system); the row glyphs are the sidebar's status marks in its
+// colours, drawn once to read on both menu appearances, plus a document.
+const MENU_PX = 36;
+const menuDir = join(icons, "menu");
+mkdirSync(menuDir, { recursive: true });
+const GLYPH_GREY = "#8e8e93";
+const GLYPH_SUCCESS = "#979a7e";
+const GLYPH_WARNING = "#c9533a";
+const rasterSvg = (svgText, w, h, out) => {
+  const src = join(work, `${out.split("/").pop()}.svg`);
+  writeFileSync(src, svgText);
+  execFileSync("rsvg-convert", ["-w", String(w), "-h", String(h), src, "-o", out]);
+};
+const markBlack = `<path fill="#000" d="${BODY}"/>\n<path fill="#000" d="${LEAF}"/>`;
+const menuSvg = (body, w = MENU_PX) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${MENU_PX}" width="${w}" height="${MENU_PX}">\n${body}\n</svg>\n`;
+// The mark 32px tall, centred; the attention variant adds a dot beside it.
+const markScale = 32 / MARK_H;
+const markW = MARK_W * markScale;
+const trayMark = (x) =>
+  `<g transform="translate(${f(x)} 2) scale(${f(markScale)})">\n${markBlack}\n</g>`;
+rasterSvg(menuSvg(trayMark((MENU_PX - markW) / 2)), MENU_PX, MENU_PX, join(menuDir, "logo.png"));
+const attentionW = Math.round(markW + 18);
+rasterSvg(
+  menuSvg(`${trayMark(0)}\n<circle cx="${attentionW - 5}" cy="18" r="5" fill="#000"/>`, attentionW),
+  attentionW,
+  MENU_PX,
+  join(menuDir, "logo-attention.png"),
+);
+const dot = (fill) => `<circle cx="18" cy="18" r="6" fill="${fill}"/>`;
+const ring = (stroke) => `<circle cx="18" cy="18" r="5" fill="none" stroke="${stroke}" stroke-width="2"/>`;
+// Moving: the sidebar's orb, still — a dot inside a wider ring.
+const pulse = (fill) =>
+  `<circle cx="18" cy="18" r="9" fill="none" stroke="${fill}" stroke-width="2" opacity="0.45"/>\n<circle cx="18" cy="18" r="4" fill="${fill}"/>`;
+const document = (fill) =>
+  `<path fill="none" stroke="${fill}" stroke-width="2" stroke-linejoin="round" d="M11 7h9l6 6v16H11z M20 7v6h6"/>`;
+for (const [name, body] of [
+  ["running", pulse(GLYPH_GREY)],
+  ["settled", ring(GLYPH_GREY)],
+  ["queued", ring(GLYPH_WARNING)],
+  ["error", dot(GLYPH_WARNING)],
+  ["attention", dot(GLYPH_SUCCESS)],
+  ["document", document(GLYPH_GREY)],
+]) {
+  rasterSvg(menuSvg(body), MENU_PX, MENU_PX, join(menuDir, `${name}.png`));
+}
+
 const tileFile = join(brand, "tile.svg");
 const macosFile = join(brand, "icon-macos.svg");
 const png = (src, size, out) =>

@@ -503,6 +503,9 @@ export type StatusMark =
   /** Something failed or is asking. */
   | "attention-error";
 
+/** What leads an entry: its status mark, or the kind of thing it is. */
+export type AppStatusGlyph = StatusMark | "document";
+
 /** One thing the user can jump to from outside the window. */
 export interface AppStatusEntry {
   /** Unique across the whole `AppStatus` — the platform hands it back. */
@@ -510,7 +513,7 @@ export interface AppStatusEntry {
   label: string;
   /** A short trailing note: the turn's state, a project name, a time ago. */
   detail?: string;
-  mark?: StatusMark;
+  mark?: AppStatusGlyph;
   /** What picking it does — the app owns the behaviour, not the platform. */
   activate: () => void;
 }

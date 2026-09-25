@@ -148,6 +148,7 @@ describe("deriveAppStatus", () => {
     const status = deriveAppStatus(
       inputs({ sessions: [session("task_a")], documents: [document("/ws-a/a.md")] }),
     );
+    expect(status.sections[0].entries[0].mark).toBe("document");
     status.sections[0].entries[0].activate();
     expect(tabs.openFile).toHaveBeenCalledWith({ tabId: "/ws-a/a.md", intent: "replace" });
     status.sections[1].entries[0].activate();
