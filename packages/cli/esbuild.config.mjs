@@ -9,7 +9,11 @@
 // zod + tweetnacl stay external — they're already CLI dependencies, so the
 // bundled shared code resolves them at runtime like any other dep.
 import { build } from "esbuild";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { bundleSidecar } from "../../sidecars/bundle.mjs";
+
+const cliDir = dirname(fileURLToPath(import.meta.url));
 
 await build({
   entryPoints: [new URL("../shared/src/index.ts", import.meta.url).pathname],
@@ -28,5 +32,5 @@ await build({
 // spawns dist/lib/sidecars/<name>.cjs with its own node (adapter needs 22+).
 await bundleSidecar(
   "claude-agent-acp",
-  new URL("./dist/lib/sidecars/claude-agent-acp.cjs", import.meta.url).pathname,
+  join(cliDir, "dist", "lib", "sidecars", "claude-agent-acp.cjs"),
 );

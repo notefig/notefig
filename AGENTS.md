@@ -21,7 +21,7 @@ packages/
 ## Package Management
 
 - **Tool**: npm workspaces
-- **Node version**: 18+ (check `.nvmrc`)
+- **Node version**: 22+ (check `.nvmrc`). The CLI ships the Claude ACP adapter, which needs Node 22+.
 - **Install all dependencies**: `npm ci` at root
 
 ## Key Commands

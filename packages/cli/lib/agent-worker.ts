@@ -160,10 +160,21 @@ export const defaultSidecarsDir = () => path.join(__dirname, 'sidecars');
  * no npx, no registry at session start. Missing file = the CLI wasn't built
  * (`npm run build`), reported as such rather than as a spawn ENOENT.
  */
+/** The adapter bundle's own floor — the same as the CLI's `engines.node`;
+ *  this guard is for an install that ignored engines. */
+const SIDECAR_MIN_NODE_MAJOR = 22;
+
 export function resolveSidecarProgram(
   name: string,
   sidecarsDir: string = defaultSidecarsDir(),
+  nodeVersion: string = process.versions.node,
 ): { command: string; args: string[] } {
+  const major = Number(nodeVersion.split('.')[0]);
+  if (!(major >= SIDECAR_MIN_NODE_MAJOR)) {
+    throw new Error(
+      `bundled adapter \`${name}\` needs Node ${SIDECAR_MIN_NODE_MAJOR}+ (this CLI is running on Node ${nodeVersion})`,
+    );
+  }
   const bundle = path.join(sidecarsDir, `${name}.cjs`);
   if (!fs.existsSync(bundle)) {
     throw new Error(

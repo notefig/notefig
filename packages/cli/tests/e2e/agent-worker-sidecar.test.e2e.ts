@@ -25,6 +25,17 @@ describe('agent worker sidecar resolution', () => {
     });
   });
 
+  it('refuses to run the adapter on a Node older than it supports', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'notefig-sidecars-'));
+    await fs.writeFile(path.join(dir, 'claude-agent-acp.cjs'), '// stub');
+    expect(() => resolveSidecarProgram('claude-agent-acp', dir, '20.19.0')).toThrow(
+      /needs Node 22\+ .*running on Node 20\.19\.0/,
+    );
+    expect(resolveSidecarProgram('claude-agent-acp', dir, '22.0.0').command).toBe(
+      process.execPath,
+    );
+  });
+
   it('reports an unbuilt CLI as such, not as a spawn failure', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'notefig-sidecars-'));
     expect(() => resolveSidecarProgram('claude-agent-acp', dir)).toThrow(

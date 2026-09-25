@@ -3,14 +3,17 @@
 // applications: `src-tauri/binaries/<name>-<target-triple>[.exe]`, the naming
 // Tauri's `bundle.externalBin` requires.
 //
-//   node scripts/build-sidecars.mjs [--target <triple>]... [--force]
+//   node scripts/build-sidecars.mjs [--target <triple>]... [--force] [--allow-untested]
 //
 // No --target = Tauri's TAURI_ENV_TARGET_TRIPLE when set (so `tauri build
 // --target x` via beforeBuildCommand builds the right one), else the host
 // triple. A same-OS, other-arch triple (the macOS x86_64 release leg runs on
 // an arm64 runner) works too: the SEA blob is architecture-neutral, so the
-// script downloads the matching official Node binary for that arch and
-// injects into it. Cross-OS is not possible.
+// script downloads the matching official Node binary for that arch (checked
+// against Node's published SHASUMS256) and injects into it. Cross-OS is not
+// possible. Every output is self-tested (must answer ACP `initialize`); a
+// host that can't execute the output (other arch, no Rosetta) fails the
+// build unless --allow-untested says that's expected.
 //
 // Steps per sidecar: sidecars/bundle.mjs (isolated install of the pinned
 // adapter + esbuild to one CommonJS file — shared with the CLI's vendoring)
@@ -30,6 +33,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { pipeline } from "node:stream/promises";
@@ -66,33 +70,38 @@ function hostTriple() {
   return match[0];
 }
 
+/** Boolean flags → the option they set. `--target <triple>` is the one
+ *  valued flag and is handled inline. */
+const FLAGS = { "--force": "force", "--allow-untested": "allowUntested" };
+
 function parseArgs(argv) {
-  const targets = [];
-  let force = false;
+  const options = { targets: [], force: false, allowUntested: false };
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--target") targets.push(argv[++i]);
-    else if (argv[i] === "--force") force = true;
+    const flag = FLAGS[argv[i]];
+    if (flag) options[flag] = true;
+    else if (argv[i] === "--target") options.targets.push(argv[++i]);
     else throw new Error(`unknown argument ${argv[i]}`);
   }
-  const fallback = process.env.TAURI_ENV_TARGET_TRIPLE || hostTriple();
-  return { targets: targets.length ? targets : [fallback], force };
+  if (!options.targets.length) {
+    options.targets = [process.env.TAURI_ENV_TARGET_TRIPLE || hostTriple()];
+  }
+  return options;
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Resolve a bin from the desktop package's node_modules (works from any cwd
- *  and without relying on npx's network fallback). */
-function localBin(name) {
-  const candidates = [
-    join(desktopDir, "node_modules", ".bin", name),
-    join(repoRoot, "node_modules", ".bin", name),
-  ];
-  const suffix = process.platform === "win32" ? ".cmd" : "";
-  const found = candidates.map((c) => c + suffix).find((c) => existsSync(c));
-  if (!found) throw new Error(`${name} not installed — run npm install`);
-  return found;
+/** postject's CLI script, resolved from its package so it runs under this
+ *  same Node on every OS (the `.bin` shim is a .cmd file on Windows, which
+ *  Node can't execute as a script). */
+function postjectCli() {
+  const require = createRequire(import.meta.url);
+  const pkgPath = require.resolve("postject/package.json");
+  const { bin } = JSON.parse(readFileSync(pkgPath, "utf8"));
+  const entry = typeof bin === "string" ? bin : bin?.postject;
+  if (!entry) throw new Error("postject package has no bin entry");
+  return join(dirname(pkgPath), entry);
 }
 
 function sha256(...parts) {
@@ -101,18 +110,38 @@ function sha256(...parts) {
   return hash.digest("hex");
 }
 
+/** The published sha256 of `archive` from the release's SHASUMS256.txt. */
+async function publishedSha256(distUrl, archive) {
+  const url = `${distUrl}/SHASUMS256.txt`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`download failed: ${response.status} ${url}`);
+  const line = (await response.text())
+    .split("\n")
+    .find((l) => l.trim().endsWith(`  ${archive}`));
+  if (!line) throw new Error(`${archive} not listed in ${url}`);
+  return line.trim().split(/\s+/)[0];
+}
+
 /** Download + extract the official Node `version` build for `t` into
  *  cacheDir; returns the extracted binary's path. */
 async function downloadNode(t, version, cacheDir, expectedBinary) {
   const base = `node-v${version}-${t.nodeDist}`;
   const archive = t.os === "win32" ? `${base}.zip` : `${base}.tar.gz`;
-  const url = `https://nodejs.org/dist/v${version}/${archive}`;
+  const distUrl = `https://nodejs.org/dist/v${version}`;
+  const url = `${distUrl}/${archive}`;
   console.log(`[sidecars] downloading ${url}`);
   mkdirSync(cacheDir, { recursive: true });
   const archivePath = join(cacheDir, archive);
   const response = await fetch(url);
   if (!response.ok) throw new Error(`download failed: ${response.status} ${url}`);
   await pipeline(Readable.fromWeb(response.body), createWriteStream(archivePath));
+  // This binary ships inside the app: verify it is the release Node published.
+  const expected = await publishedSha256(distUrl, archive);
+  const actual = sha256(readFileSync(archivePath));
+  if (actual !== expected) {
+    rmSync(archivePath);
+    throw new Error(`checksum mismatch for ${archive}: got ${actual}, published ${expected}`);
+  }
   // bsdtar (macOS, Windows) reads both formats; gzip is auto-detected.
   run("tar", ["-xf", archivePath, "-C", cacheDir]);
   rmSync(archivePath);
@@ -163,7 +192,7 @@ async function inject(triple, blob, outFile, cacheDir) {
   const t = TRIPLES[triple];
   if (t.os === "darwin") run("codesign", ["--remove-signature", outFile]);
   const args = [
-    localBin("postject"),
+    postjectCli(),
     outFile,
     "NODE_SEA_BLOB",
     blob,
@@ -181,8 +210,10 @@ async function inject(triple, blob, outFile, cacheDir) {
  * Self-test the freshly built executable: it must start and answer ACP
  * `initialize`. A SEA can link fine and still die at startup (the first
  * build did, on `import.meta.url`), and this is where that should surface —
- * not at the user's first session. Skipped when the binary can't run here
- * (other arch without Rosetta): the exec error says so.
+ * not at the user's first session. A host that can't execute the output at
+ * all (other arch without Rosetta: ENOEXEC/EACCES) fails the build too,
+ * unless --allow-untested says that's expected — an untested sidecar must
+ * be a deliberate choice, never a silent pass.
  */
 function parseJsonLine(line) {
   try {
@@ -202,7 +233,7 @@ function describeAgent(result) {
   return `${info.name ?? "agent"} ${info.version ?? ""}`.trim();
 }
 
-function selfTest(outFile) {
+function selfTest(outFile, allowUntested) {
   return new Promise((resolveTest, reject) => {
     const child = spawn(outFile, [], { stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
@@ -216,11 +247,16 @@ function selfTest(outFile) {
       error ? reject(error) : resolveTest();
     };
     child.on("error", (error) => {
-      if (error.code === "ENOEXEC" || error.code === "EACCES") {
-        console.log(`[sidecars] self-test skipped: ${error.message}`);
+      const cannotRunHere = error.code === "ENOEXEC" || error.code === "EACCES";
+      if (cannotRunHere && allowUntested) {
+        console.log(`[sidecars] self-test skipped (--allow-untested): ${error.message}`);
         return finish();
       }
-      finish(error);
+      finish(
+        cannotRunHere
+          ? new Error(`cannot execute ${outFile} on this host (${error.code}); pass --allow-untested to ship it untested`)
+          : error,
+      );
     });
     child.on("exit", (code) => finish(new Error(`exited ${code} before answering\n${stderr}`)));
     child.stdout.on("data", () => {
@@ -254,7 +290,7 @@ function stampFor(name, pin, triple, bundlePath) {
   );
 }
 
-async function buildOne(name, pin, triple, force) {
+async function buildOne(name, pin, triple, { force, allowUntested }) {
   const buildDir = join(sidecarsDir, name, ".build");
   mkdirSync(buildDir, { recursive: true });
   const bundlePath = join(buildDir, "bundle.cjs");
@@ -271,18 +307,18 @@ async function buildOne(name, pin, triple, force) {
   console.log(`[sidecars] building ${name} ${pin.version} for ${triple}`);
   const blob = makeBlob(buildDir, bundlePath);
   await inject(triple, blob, outFile, join(buildDir, "node-cache"));
-  await selfTest(outFile);
+  await selfTest(outFile, allowUntested);
   writeFileSync(stampFile, stamp);
   const size = (statSync(outFile).size / 1024 / 1024).toFixed(1);
   console.log(`[sidecars] wrote ${outFile} (${size} MB)`);
 }
 
-const { targets, force } = parseArgs(process.argv.slice(2));
+const { targets, ...options } = parseArgs(process.argv.slice(2));
 for (const triple of targets) {
   if (!TRIPLES[triple]) throw new Error(`unknown target triple ${triple}`);
 }
 const names = Object.keys(pins);
 if (!names.length) throw new Error("no sidecars found");
 for (const name of names) {
-  for (const triple of targets) await buildOne(name, pins[name], triple, force);
+  for (const triple of targets) await buildOne(name, pins[name], triple, options);
 }
