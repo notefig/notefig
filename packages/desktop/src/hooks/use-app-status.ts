@@ -109,7 +109,8 @@ function listedIdOf(item: AttentionItem): string {
 /**
  * The sidebar's "needs attention" card, for what the recency cut leaves
  * out: an unseen result or an ask on a fourth session still lights the
- * dot, so the menu must still have a row for it.
+ * dot, so the menu must still have a row for it. Uncapped — every item
+ * that lights the dot has a row, and looking at one clears it.
  */
 function attentionSection(
   { attention, t }: AppStatusInputs,
@@ -121,7 +122,7 @@ function attentionSection(
   return {
     id: "attention",
     title: t("needsAttention"),
-    entries: leftOut.slice(0, APP_STATUS_ROWS).map((item) => ({
+    entries: leftOut.map((item) => ({
       id: `attention:${item.taskId}:${item.turnId}`,
       label: clip(
         item.target.kind === "document"
