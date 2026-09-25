@@ -4,6 +4,12 @@
 // Tauri's `bundle.externalBin` requires.
 //
 //   node scripts/build-sidecars.mjs [--target <triple>]... [--force] [--allow-untested]
+//   node scripts/build-sidecars.mjs --check <executable> --target <triple>
+//
+// --check builds nothing: it runs the same self-test on an executable that
+// already exists. The release uses it on the sidecar inside the signed app,
+// because signing (the hardened runtime and its entitlements) decides whether
+// Node can start at all (MET-211).
 //
 // No --target = Tauri's TAURI_ENV_TARGET_TRIPLE when set (so `tauri build
 // --target x` via beforeBuildCommand builds the right one), else the host
@@ -70,16 +76,21 @@ function hostTriple() {
   return match[0];
 }
 
-/** Boolean flags → the option they set. `--target <triple>` is the one
- *  valued flag and is handled inline. */
+/** Boolean flags → the option they set. */
 const FLAGS = { "--force": "force", "--allow-untested": "allowUntested" };
+/** Valued flags → how their value lands in the options. */
+const VALUED_FLAGS = {
+  "--target": (options, value) => options.targets.push(value),
+  "--check": (options, value) => (options.check = value),
+};
 
 function parseArgs(argv) {
-  const options = { targets: [], force: false, allowUntested: false };
+  const options = { targets: [], force: false, allowUntested: false, check: null };
   for (let i = 0; i < argv.length; i++) {
     const flag = FLAGS[argv[i]];
+    const valued = VALUED_FLAGS[argv[i]];
     if (flag) options[flag] = true;
-    else if (argv[i] === "--target") options.targets.push(argv[++i]);
+    else if (valued) valued(options, argv[++i]);
     else throw new Error(`unknown argument ${argv[i]}`);
   }
   if (!options.targets.length) {
@@ -332,9 +343,15 @@ async function buildOne(name, pin, triple, { force, allowUntested }) {
   console.log(`[sidecars] wrote ${outFile} (${size} MB)`);
 }
 
-const { targets, ...options } = parseArgs(process.argv.slice(2));
+const { targets, check, ...options } = parseArgs(process.argv.slice(2));
 for (const triple of targets) {
   if (!TRIPLES[triple]) throw new Error(`unknown target triple ${triple}`);
+}
+// --check: self-test an executable that already exists — the sidecar as it
+// ships inside a signed app, where signing can break what the build tested.
+if (check) {
+  await selfTest(check, targets[0], false);
+  process.exit(0);
 }
 const names = Object.keys(pins);
 if (!names.length) throw new Error("no sidecars found");

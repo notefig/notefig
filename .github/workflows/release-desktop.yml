@@ -359,6 +359,25 @@ jobs:
           includeRelease: ${{ !contains(inputs.version, '-debug') }}
           args: ${{ matrix.args }}
 
+      # The sidecar self-test in "Build sidecars" runs before Tauri signs the
+      # app, and signing decides whether Node can start at all: under the
+      # hardened runtime without the allow-jit entitlement V8 aborts at launch
+      # (MET-211). Test the sidecar as it ships, inside the signed app. A
+      # failure fails this leg, and the publish job needs every leg, so the
+      # draft release is never published.
+      - name: Self-test the signed sidecar
+        if: matrix.platform == 'macos-latest'
+        working-directory: packages/desktop
+        shell: bash
+        run: |
+          APP=$(find "src-tauri/target/${{ matrix.sidecar_target }}" -maxdepth 4 -type d -path '*/bundle/macos/Notefig.app' | head -1)
+          if [ -z "$APP" ]; then
+            echo "::error::no Notefig.app bundle found for ${{ matrix.sidecar_target }}"
+            exit 1
+          fi
+          codesign -d --entitlements - "$APP/Contents/MacOS/claude-agent-acp"
+          node scripts/build-sidecars.mjs --check "$APP/Contents/MacOS/claude-agent-acp" --target "${{ matrix.sidecar_target }}"
+
       # Belt-and-braces: hosted runners are ephemeral, but remove the key as
       # soon as the build step is done regardless of its outcome.
       - name: Remove App Store Connect API key
