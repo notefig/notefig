@@ -1238,10 +1238,12 @@ function ToolContentView({ item }: { item: ToolCallContent }) {
 }
 
 /** One-line-ish preview of a tool's raw input; prefer a `command` field. */
-function rawInputPreview(rawInput: Record<string, unknown>): string {
-  if (typeof rawInput.command === "string") return rawInput.command;
+// `rawInput` is `unknown` on the wire (whatever the harness handed its tool).
+function rawInputPreview(rawInput: unknown): string {
+  const command = (rawInput as { command?: unknown } | null)?.command;
+  if (typeof command === "string") return command;
   try {
-    return JSON.stringify(rawInput);
+    return JSON.stringify(rawInput) ?? String(rawInput);
   } catch {
     return String(rawInput);
   }

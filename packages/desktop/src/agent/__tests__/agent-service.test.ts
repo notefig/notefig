@@ -932,9 +932,9 @@ describe("AgentTask vertical slice", () => {
         status: "in_progress",
       });
       // claude-agent-acp attaches the raw Anthropic tool_result content — an
-      // array (or bare string) — which agent-client-protocol 0.4.5's schema
-      // rejects, silently dropping the whole frame. sanitizeAcpFrame must
-      // keep it valid or the tool shimmers until turn end (MET-104).
+      // array (or bare string). The 0.4.5 schema rejected non-object values
+      // and silently dropped the whole frame (MET-104); the SDK's 1.x schema
+      // types rawOutput as `unknown`, so the frame must land as sent.
       a.update("sess_test", {
         sessionUpdate: "tool_call_update",
         toolCallId: "t1",
@@ -953,10 +953,10 @@ describe("AgentTask vertical slice", () => {
     await task.start(() => client);
     await runPrompt(task, "test");
 
-    // The boxed shape the sanitizer wraps non-object payloads into.
-    expect(toolEntries(task.taskId)[0].toolCall?.rawOutput).toEqual({
-      output: [{ type: "text", text: "ok" }],
-    });
+    // Passed through verbatim — no repair layer between transport and library.
+    expect(toolEntries(task.taskId)[0].toolCall?.rawOutput).toEqual([
+      { type: "text", text: "ok" },
+    ]);
   });
 
   it("sweeps turnless straggler tool calls at the next turn end", async () => {

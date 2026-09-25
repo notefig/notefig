@@ -10,7 +10,14 @@
     "**/*.d.ts",
     "**/*.generated.ts",
     "**/node_modules/**",
-    "visual-texture-update/**"
+    "visual-texture-update/**",
+    // sidecars/<name>/ are deliberately NOT npm workspaces (MET-210): each
+    // pins an ACP adapter whose SDK drags a ~200 MB native CLI in as an
+    // optional dependency, so they are installed in isolation by
+    // sidecars/bundle.mjs. Fallow has no notion of a non-workspace package
+    // and would report their one import as unlisted. bundle.mjs itself
+    // (root level) stays analysed.
+    "sidecars/*/**"
   ],
   "ignoreDependencies": [
     "@tanstack/query-core",

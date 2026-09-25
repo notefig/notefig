@@ -9,6 +9,7 @@
 // zod + tweetnacl stay external — they're already CLI dependencies, so the
 // bundled shared code resolves them at runtime like any other dep.
 import { build } from "esbuild";
+import { bundleSidecar } from "../../sidecars/bundle.mjs";
 
 await build({
   entryPoints: [new URL("../shared/src/index.ts", import.meta.url).pathname],
@@ -20,3 +21,12 @@ await build({
   external: ["zod", "tweetnacl"],
   logLevel: "info",
 });
+
+// MET-210: the Claude Code ACP adapter ships INSIDE the CLI too (same pinned
+// bundle the desktop app wraps into its sidecar executable), so the
+// `notefig agent` worker never reaches for npx at session start. The worker
+// spawns dist/lib/sidecars/<name>.cjs with its own node (adapter needs 22+).
+await bundleSidecar(
+  "claude-agent-acp",
+  new URL("./dist/lib/sidecars/claude-agent-acp.cjs", import.meta.url).pathname,
+);

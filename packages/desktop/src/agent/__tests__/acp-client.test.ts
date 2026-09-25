@@ -80,42 +80,24 @@ describe("NotefigAcpClient", () => {
   });
 
   describe("closeSession", () => {
-    it("resolves when the agent acknowledges and carries the sessionId", async () => {
-      const { client, agent } = makeClient();
-      await client.connect();
-      await client.closeSession("sess_close_ok");
-      expect(agent.closeSessionParams).toEqual({ sessionId: "sess_close_ok" });
-    });
-
-    it("ignores non-JSON and unrelated lines while waiting for its response", async () => {
+    it("sends session/close through the library and carries the sessionId", async () => {
       const { client, agent, agentSide } = makeClient();
       await client.connect();
-      // Hang the scripted handler so we control the wire by hand.
-      agent.onCloseSession = () => new Promise(() => {});
-      let requestId: string | undefined;
+      const methods: string[] = [];
       agentSide.onLine((line) => {
         try {
-          const msg = JSON.parse(line) as { id?: string; method?: string };
-          if (msg.method === "session/close") requestId = msg.id;
+          const msg = JSON.parse(line) as { method?: string };
+          if (msg.method) methods.push(msg.method);
         } catch {
           // not ours
         }
       });
-      const pending = client.closeSession("sess_noise");
-      expect(requestId).toBeDefined();
-      // Noise the waiter must skip: a non-JSON frame (the ACP library also
-      // sees and tolerates it) and a response addressed to someone else.
-      agentSide.send("garbage, not json");
-      agentSide.send(
-        JSON.stringify({ jsonrpc: "2.0", id: "other", result: {} }),
-      );
-      agentSide.send(
-        JSON.stringify({ jsonrpc: "2.0", id: requestId, result: {} }),
-      );
-      await expect(pending).resolves.toBeUndefined();
+      await client.closeSession("sess_close_ok");
+      expect(agent.closeSessionParams).toEqual({ sessionId: "sess_close_ok" });
+      expect(methods).toContain("session/close");
     });
 
-    it("rejects with the agent's error message", async () => {
+    it("rejects with the agent's error message (an adapter without the method answers -32601)", async () => {
       const { client, agent } = makeClient();
       await client.connect();
       agent.onCloseSession = async () => {
@@ -126,37 +108,13 @@ describe("NotefigAcpClient", () => {
       );
     });
 
-    it("falls back to a generic message when the error carries no string", async () => {
-      const { client, agent, agentSide } = makeClient();
-      await client.connect();
-      agent.onCloseSession = () => new Promise(() => {});
-      let requestId: string | undefined;
-      agentSide.onLine((line) => {
-        try {
-          const msg = JSON.parse(line) as { id?: string; method?: string };
-          if (msg.method === "session/close") requestId = msg.id;
-        } catch {
-          // not ours
-        }
-      });
-      const pending = client.closeSession("sess_weird_err");
-      agentSide.send(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          id: requestId,
-          error: { code: -32000, message: 42 },
-        }),
-      );
-      await expect(pending).rejects.toThrow("session/close failed");
-    });
-
     it("rejects when the transport closes before a response arrives", async () => {
       const { client, agent, clientSide } = makeClient();
       await client.connect();
       agent.onCloseSession = () => new Promise(() => {});
       const pending = client.closeSession("sess_dead");
       await clientSide.close();
-      await expect(pending).rejects.toThrow("transport closed");
+      await expect(pending).rejects.toThrow("ACP connection closed");
     });
   });
 

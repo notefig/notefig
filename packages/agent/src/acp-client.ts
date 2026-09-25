@@ -1,7 +1,4 @@
-import {
-  ClientSideConnection,
-  ndJsonStream,
-} from "@zed-industries/agent-client-protocol";
+import { ClientSideConnection, ndJsonStream } from "@agentclientprotocol/sdk";
 import type {
   AuthMethod,
   Client,
@@ -35,10 +32,6 @@ import type { PermissionRequester } from "./permission-requester";
 export const SUPPORTED_ACP_PROTOCOL_VERSIONS: readonly number[] = [1];
 
 const PROTOCOL_VERSION = Math.max(...SUPPORTED_ACP_PROTOCOL_VERSIONS);
-
-/** Ids for raw requests sent outside the library (closeSession) — string
- *  ids, so they can never collide with the library's numeric counter. */
-let rawRequestCounter = 0;
 
 /**
  * Capabilities are a function of where the agent process runs relative to
@@ -107,7 +100,10 @@ export class NotefigAcpClient implements Client {
     // input is where we receive them. Our transport's writable decodes lines
     // into transport.send(); its readable enqueues incoming lines.
     const stream = ndJsonStream(writable, readable);
-    // The ClientSideConnection is itself the Agent-side handle we call.
+    // The ClientSideConnection is itself the Agent-side handle we call. The
+    // SDK marks this constructor deprecated in favour of its `client()`
+    // builder; the builder only adds connection-scoped context we don't use,
+    // so the direct form stays until a spec bump forces the switch.
     this.connection = new ClientSideConnection(() => this, stream);
 
     const response = await this.connection.initialize({
@@ -187,62 +183,13 @@ export class NotefigAcpClient implements Client {
    * killing the process — a following `session/load` then rebuilds it from
    * the harness's persisted store, which is the full re-sync primitive
    * (docs/architecture/acp-two-way-spike.md §4.5; a repeat load without the
-   * close re-syncs only the transcript, not the model's context).
-   *
-   * Current adapters route the method, but the pinned @zed-industries client
-   * doesn't surface it (its extMethod prefixes `_`), so this rides the
-   * transport as a raw JSON-RPC request. A string id can't collide with the
-   * library's own numeric counter; the library's only reaction to the
-   * response is a console note ("unknown request"). Rejects on a JSON-RPC
-   * error (an adapter without the method answers -32601) and on transport
-   * close — callers treat failure as "close unsupported" and fall back to a
-   * plain reload.
+   * close re-syncs only the transcript, not the model's context). Rejects on
+   * a JSON-RPC error (an adapter without the method answers -32601) and on
+   * transport close — callers treat failure as "close unsupported" and fall
+   * back to a plain reload.
    */
   async closeSession(sessionId: string): Promise<void> {
-    this.requireConnection(); // same pipe — only meaningful once connected
-    const transport = this.deps.transport;
-    const id = `notefig-close-${++rawRequestCounter}`;
-    await new Promise<void>((resolve, reject) => {
-      const unsubscribers: Array<() => void> = [];
-      const settle = (finish: () => void) => {
-        for (const unsubscribe of unsubscribers) unsubscribe();
-        finish();
-      };
-      unsubscribers.push(
-        transport.onLine((line) => {
-          let message: { id?: unknown; error?: { message?: unknown } };
-          try {
-            message = JSON.parse(line);
-          } catch {
-            return;
-          }
-          if (message.id !== id) return;
-          if (message.error) {
-            const reason = message.error.message;
-            settle(() =>
-              reject(
-                new Error(
-                  typeof reason === "string" ? reason : "session/close failed",
-                ),
-              ),
-            );
-          } else {
-            settle(resolve);
-          }
-        }),
-        transport.onClose(() =>
-          settle(() => reject(new Error("transport closed"))),
-        ),
-      );
-      transport.send(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          id,
-          method: "session/close",
-          params: { sessionId },
-        }),
-      );
-    });
+    await this.requireConnection().closeSession({ sessionId });
   }
 
   /**

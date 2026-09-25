@@ -203,9 +203,14 @@ jobs:
           - platform: macos-latest
             args: --target aarch64-apple-darwin
             id: macos-aarch64
+            sidecar_target: aarch64-apple-darwin
           - platform: macos-latest
             args: --target x86_64-apple-darwin
             id: macos-x86_64
+            # Built on the arm64 runner: the sidecar script downloads the
+            # x64 Node of the same version to inject into (SEA blobs are
+            # architecture-neutral).
+            sidecar_target: x86_64-apple-darwin
           # - platform: ubuntu-22.04
           #   args: --bundles deb,appimage
           #   id: linux
@@ -216,6 +221,7 @@ jobs:
           - platform: windows-latest
             args: --bundles nsis
             id: windows
+            sidecar_target: x86_64-pc-windows-msvc
 
     runs-on: ${{ matrix.platform }}
 
@@ -258,6 +264,16 @@ jobs:
       - name: Install frontend dependencies
         working-directory: packages/desktop
         run: npm install
+
+      # MET-210: compile the bundled ACP adapter sidecar for THIS leg's
+      # target as a Node single-executable application (the runner's Node is
+      # the runtime); the script self-tests the binary. tauri-action's
+      # beforeBuildCommand would build it too, but doing it here first
+      # surfaces a sidecar failure as its own step before the slow app build.
+      - name: Build sidecars
+        working-directory: packages/desktop
+        shell: bash
+        run: node scripts/build-sidecars.mjs --target "${{ matrix.sidecar_target }}"
 
       # The bundled notes file doubles as the GitHub release body (and, via
       # tauri-action's updater manifest, latest.json's `notes` — what the

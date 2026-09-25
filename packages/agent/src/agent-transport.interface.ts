@@ -137,45 +137,12 @@ export interface McpEndpoint {
 }
 
 /**
- * Wire-format repair for one known ACP spec drift (MET-104): claude-agent-acp
- * emits `tool_call_update.rawOutput` as the raw Anthropic tool_result content
- * — a string or a content-block array — while the pinned
- * @zed-industries/agent-client-protocol@0.4.5 schema requires a plain object
- * (`z.record(z.unknown())`) and silently DROPS any notification that fails
- * validation. Those are exactly the frames carrying each tool call's
- * terminal status, so without this every tool shimmers until turn end. Box
- * the offending value as `{ output }` so the frame validates; nothing
- * downstream reads rawOutput structurally. (Current ACP SDKs loosened the
- * field to `unknown` — this repair dies with the dependency upgrade.)
- */
-export function sanitizeAcpFrame(line: string): string {
-  if (!line.includes('"rawOutput"')) return line;
-  try {
-    const frame = JSON.parse(line);
-    const update = frame?.params?.update;
-    if (
-      frame?.method === "session/update" &&
-      update !== null &&
-      typeof update === "object" &&
-      "rawOutput" in update &&
-      (typeof update.rawOutput !== "object" ||
-        update.rawOutput === null ||
-        Array.isArray(update.rawOutput))
-    ) {
-      update.rawOutput = { output: update.rawOutput };
-      return JSON.stringify(frame);
-    }
-    return line;
-  } catch {
-    return line;
-  }
-}
-
-/**
  * Adapt an AgentTransport to the Writable/Readable stream pair that the
- * official ACP library's ClientSideConnection consumes. Incoming frames pass
- * through sanitizeAcpFrame so known adapter/schema drift never reaches the
- * library's throw-and-drop validation.
+ * official ACP library's ClientSideConnection consumes. Frames pass through
+ * untouched: the library validates each notification against its schema and
+ * drops what fails, so a new adapter/schema drift shows up as a missing
+ * update, never as a crash (MET-104 had one such repair here for 0.4.5's
+ * `rawOutput: object` — the 1.x schema types it `unknown`).
  */
 export function transportToStreams(transport: AgentTransport): {
   writable: WritableStream<Uint8Array>;
@@ -187,7 +154,7 @@ export function transportToStreams(transport: AgentTransport): {
   const readable = new ReadableStream<Uint8Array>({
     start(controller) {
       transport.onLine((line) =>
-        controller.enqueue(encoder.encode(sanitizeAcpFrame(line) + "\n")),
+        controller.enqueue(encoder.encode(line + "\n")),
       );
       transport.onClose(() => {
         try {

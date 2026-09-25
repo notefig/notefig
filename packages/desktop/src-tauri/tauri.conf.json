@@ -1,8 +1,8 @@
 {
   "$schema": "https://v2.tauri.app/schemas/config.json",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npx vite build",
+    "beforeDevCommand": "npm run build:sidecars && npm run dev",
+    "beforeBuildCommand": "npm run build:sidecars && npx vite build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },
@@ -49,6 +49,7 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "targets": "all",
+    "externalBin": ["binaries/claude-agent-acp"],
     "icon": [
       "icons/32x32.png",
       "icons/64x64.png",

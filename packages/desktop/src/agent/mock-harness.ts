@@ -80,9 +80,8 @@ export class FakeAgent {
     async () => ({});
   /** Captured `session/close` params (refresh re-sync assertions). */
   closeSessionParams: Json | null = null;
-  /** Scripted `session/close` (the app sends it as a raw request — the
-   *  pinned client library predates the method); throwing rejects it,
-   *  which callers treat as "close unsupported". */
+  /** Scripted `session/close`; throwing rejects it, which callers treat
+   *  as "close unsupported". */
   onCloseSession: (params: Json, agent: FakeAgent) => Promise<Json> =
     async () => ({});
   /** `session/cancel` notification hook (the harness aborts its scenario). */
