@@ -482,6 +482,66 @@ export interface DbSurface {
   get(): PersistedCollectionPersistence;
 }
 
+/**
+ * One vocabulary for "what state is this in", shared by the sidebar's row
+ * glyphs (`components/agent/status-glyph.tsx`) and whatever the platform
+ * shows outside the window (`AppStatus` below): a menu-bar item and a
+ * sidebar row say the same thing about the same session or prompt.
+ */
+export type StatusMark =
+  | "starting"
+  | "running"
+  | "queued"
+  | "idle"
+  | "done"
+  | "cancelled"
+  | "error"
+  | "unavailable"
+  | "auth"
+  /** Something finished here since the user last looked. */
+  | "attention-bau"
+  /** Something failed or is asking. */
+  | "attention-error";
+
+/** One thing the user can jump to from outside the window. */
+export interface AppStatusEntry {
+  /** Unique across the whole `AppStatus` — the platform hands it back. */
+  id: string;
+  label: string;
+  /** A short trailing note: the turn's state, a project name, a time ago. */
+  detail?: string;
+  mark?: StatusMark;
+  /** What picking it does — the app owns the behaviour, not the platform. */
+  activate: () => void;
+}
+
+export interface AppStatusSection {
+  id: string;
+  title: string;
+  entries: AppStatusEntry[];
+}
+
+export interface AppStatusAction {
+  id: string;
+  label: string;
+  activate: () => void;
+}
+
+/**
+ * What the app would tell a glance from outside its window: whether anything
+ * needs the user, the few things they were last working with, and the
+ * general ways in. Platform-neutral — a desktop shows it as a menu-bar item,
+ * another platform may show it elsewhere or not at all. The app publishes a
+ * fresh value whenever the underlying state changes; the platform decides
+ * what a change costs it.
+ */
+export interface AppStatus {
+  /** The most pressing unseen mark across everything, or nothing to point at. */
+  attention: StatusMark | null;
+  sections: AppStatusSection[];
+  actions: AppStatusAction[];
+}
+
 /** Window/OS-level shell: dialogs, external links, chrome, platform events. */
 export interface PlatformUiSurface {
   /**
@@ -507,6 +567,12 @@ export interface PlatformUiSurface {
 
   /** Toggle application fullscreen state. */
   toggleFullscreen(): Promise<void>;
+
+  /**
+   * Show `status` outside the window (see `AppStatus`). Fire-and-forget: a
+   * platform with nowhere to show it ignores the call.
+   */
+  publishAppStatus(status: AppStatus): void;
 
   /**
    * Adds a platform event listener.

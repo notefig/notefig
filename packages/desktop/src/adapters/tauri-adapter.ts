@@ -1,4 +1,5 @@
 import type {
+  AppStatus,
   DbSurface,
   FileSystemSurface,
   FsChangeListener,
@@ -68,7 +69,40 @@ function ignoreArgs(ignore?: IgnoreRulesOption): {
   };
 }
 
+/**
+ * `publish_app_status`'s payload (app_status.rs): the status with every
+ * callback replaced by the id the platform hands back on activation.
+ */
+function appStatusWire(status: AppStatus) {
+  return {
+    attention: status.attention,
+    sections: status.sections.map(({ id, title, entries }) => ({
+      id,
+      title,
+      entries: entries.map(({ id, label, detail, mark }) => ({
+        id,
+        label,
+        detail: detail ?? null,
+        mark: mark ?? null,
+      })),
+    })),
+    actions: status.actions.map(({ id, label }) => ({ id, label })),
+  };
+}
+
+function appStatusActivations(status: AppStatus): Map<string, () => void> {
+  const items = [...status.sections.flatMap((s) => s.entries), ...status.actions];
+  return new Map(items.map((item) => [item.id, item.activate]));
+}
+
 export class TauriPlatformAdapter implements IPlatformAdapter {
+  // The last published status's callbacks by id, and what the native side
+  // was last told to show — so a republish whose only change is a callback
+  // identity costs no native menu rebuild.
+  private appStatusActivations = new Map<string, () => void>();
+  private lastAppStatusWire: string | null = null;
+  private appStatusUnlisten: Promise<UnlistenFn> | null = null;
+
   // Two listener registries, one native subscription. Splitting the bus
   // across the fs and ui surfaces must not change *when* Tauri's `listen()`
   // calls happen, so both registries share one refcount: the native
@@ -115,6 +149,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     promptText: this.promptText.bind(this),
     openExternal: this.openExternal.bind(this),
     toggleFullscreen: this.toggleFullscreen.bind(this),
+    publishAppStatus: this.publishAppStatus.bind(this),
     addEventListener: this.addEventListener.bind(this),
     removeEventListener: this.removeEventListener.bind(this),
   };
@@ -609,6 +644,20 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
         }
       })
       .then((unlisten) => this.unlistenFns.push(Promise.resolve(unlisten)));
+  }
+
+  private publishAppStatus(status: AppStatus): void {
+    this.appStatusActivations = appStatusActivations(status);
+    this.appStatusUnlisten ??= listen<string>("app-status-activated", (event) => {
+      this.appStatusActivations.get(event.payload)?.();
+    });
+    const wire = appStatusWire(status);
+    const serialized = JSON.stringify(wire);
+    if (serialized === this.lastAppStatusWire) return;
+    this.lastAppStatusWire = serialized;
+    invoke("publish_app_status", { status: wire }).catch((error) => {
+      console.error("Failed to publish app status:", error);
+    });
   }
 
   private async toggleFullscreen(): Promise<void> {
