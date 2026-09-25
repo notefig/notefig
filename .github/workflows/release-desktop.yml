@@ -314,6 +314,22 @@ jobs:
           printf '%s' "$APPLE_API_KEY_CONTENT" | base64 --decode > "$KEY_PATH"
           echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
 
+      # The Tahoe icon (icons/Notefig.icon) is compiled by `actool`, which
+      # tauri-bundler spawns with stdin inherited. Under the Node CLI that
+      # descriptor is close-on-exec, so actool starts with fd 0 closed and
+      # its ibtoold helper crashes ("attempt to insert nil object from
+      # objects[0]") — tauri-apps/tauri#15315, fix pending in #15991. Put an
+      # `actool` first on PATH that hands the real one /dev/null as stdin.
+      # Remove once the bundler fix ships in @tauri-apps/cli.
+      - name: Give actool a stdin
+        if: matrix.platform == 'macos-latest'
+        run: |
+          SHIM="$RUNNER_TEMP/actool-shim"
+          mkdir -p "$SHIM"
+          printf '#!/bin/sh\nexec /usr/bin/xcrun actool "$@" </dev/null\n' > "$SHIM/actool"
+          chmod +x "$SHIM/actool"
+          echo "$SHIM" >> "$GITHUB_PATH"
+
       - name: Build and release Tauri app
         uses: tauri-apps/tauri-action@v0
         env:

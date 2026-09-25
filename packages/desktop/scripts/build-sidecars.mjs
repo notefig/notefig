@@ -233,7 +233,14 @@ function describeAgent(result) {
   return `${info.name ?? "agent"} ${info.version ?? ""}`.trim();
 }
 
-function selfTest(outFile, allowUntested) {
+/** How long the first start may take. A translated binary (the x86_64 one
+ *  on an Apple Silicon runner) is slow the first time: Rosetta translates
+ *  the whole executable before it runs, well past 20s on a cold CI runner. */
+function startupTimeoutMs(triple) {
+  return TRIPLES[triple].arch === process.arch ? 20_000 : 180_000;
+}
+
+function selfTest(outFile, triple, allowUntested) {
   return new Promise((resolveTest, reject) => {
     // The test proves the executable starts and speaks ACP, not that Claude
     // is installed: the entry exits early when it can't find `claude`, so
@@ -248,7 +255,11 @@ function selfTest(outFile, allowUntested) {
     let stderr = "";
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
-    const timer = setTimeout(() => finish(new Error(`no initialize answer in 20s\n${stderr}`)), 20_000);
+    const timeoutMs = startupTimeoutMs(triple);
+    const timer = setTimeout(
+      () => finish(new Error(`no initialize answer in ${timeoutMs / 1000}s\n${stderr}`)),
+      timeoutMs,
+    );
     const finish = (error) => {
       clearTimeout(timer);
       child.kill("SIGKILL");
@@ -315,7 +326,7 @@ async function buildOne(name, pin, triple, { force, allowUntested }) {
   console.log(`[sidecars] building ${name} ${pin.version} for ${triple}`);
   const blob = makeBlob(buildDir, bundlePath);
   await inject(triple, blob, outFile, join(buildDir, "node-cache"));
-  await selfTest(outFile, allowUntested);
+  await selfTest(outFile, triple, allowUntested);
   writeFileSync(stampFile, stamp);
   const size = (statSync(outFile).size / 1024 / 1024).toFixed(1);
   console.log(`[sidecars] wrote ${outFile} (${size} MB)`);
