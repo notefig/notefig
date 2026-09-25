@@ -48,8 +48,8 @@ body {
   --card-foreground: 24 10% 10%;
   --popover: 60 9% 98%;
   --popover-foreground: 24 10% 10%;
-  /* Logo green from /icon.svg fill #1D4528 */
-  --primary: 138 41% 19%;
+  /* Pear terracotta from /icon.svg (#C56A4A) */
+  --primary: 16 52% 53%;
   --primary-foreground: 60 9% 98%;
   --secondary: 20 6% 90%;
   --secondary-foreground: 24 10% 10%;
@@ -69,7 +69,7 @@ body {
   --chart-5: 24 10% 10%;
   --brand: #1d4528;
   --highlight: #1d4528;
-  --logo: #1d4528;
+  --logo: #c56a4a;
   color-scheme: light;
   overflow-x: clip;
   isolation: isolate;
@@ -150,7 +150,7 @@ body {
   --chart-5: 340 75% 55%;
   --brand: oklch(0.707 0.165 254.624);
   --highlight: oklch(0.852 0.199 91.936);
-  --logo: #ceff1a;
+  --logo: #d98a6b;
   color-scheme: dark;
   color: hsl(var(--foreground));
   height: min(62vh, 40rem);

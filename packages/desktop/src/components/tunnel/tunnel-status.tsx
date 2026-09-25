@@ -23,8 +23,10 @@ export function TunnelStatus() {
         onClick={() => openPairDialog()}
         className="flex items-center justify-center gap-2 hover:text-foreground"
       >
-        <Wifi className="h-3.5 w-3.5 text-green-500" />
-        <span>{t("tunnelStatusConnected", { host: state.workerInfo.name })}</span>
+        <Wifi className="h-3.5 w-3.5 text-success" />
+        <span>
+          {t("tunnelStatusConnected", { host: state.workerInfo.name })}
+        </span>
       </button>
     );
   }
@@ -32,7 +34,7 @@ export function TunnelStatus() {
   if (state.status === "connecting") {
     return (
       <div className="flex items-center justify-center gap-2">
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-500" />
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-warning" />
         <span>{t("tunnelStatusConnecting")}</span>
       </div>
     );

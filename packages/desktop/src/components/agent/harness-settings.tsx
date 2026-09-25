@@ -408,7 +408,7 @@ function HarnessRow({
       <span
         className={cn(
           "size-2 shrink-0 rounded-full",
-          discovery?.found ? "bg-green-500" : "bg-muted-foreground/30",
+          discovery?.found ? "bg-success" : "bg-muted-foreground/30",
         )}
       />
       <HarnessLogo
@@ -719,9 +719,7 @@ function HarnessMcpField({
         </SelectContent>
       </Select>
       {value === "session-new" && (
-        <p className="text-xs text-amber-600 dark:text-amber-500">
-          {t("harnessMcpOptInWarning")}
-        </p>
+        <p className="text-xs text-warning">{t("harnessMcpOptInWarning")}</p>
       )}
     </Field>
   );

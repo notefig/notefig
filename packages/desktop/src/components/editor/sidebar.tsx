@@ -398,8 +398,8 @@ export function CollapsedSidebarHeader({
 /**
  * The header row: room for the macOS lights (a window drag region), then
  * one tab-like button — the focused workspace's name, one dot when
- * anything anywhere needs attention (amber if any of it is an error, else
- * the brand blue — never both), and the open/close glyph — that toggles
+ * anything anywhere needs attention (terracotta if any of it is an error,
+ * else sage — never both), and the open/close glyph — that toggles
  * the sidebar wherever it is clicked. Closed, this row is all that is left
  * of the sidebar (pinned at the start of the dock's tab bar).
  */

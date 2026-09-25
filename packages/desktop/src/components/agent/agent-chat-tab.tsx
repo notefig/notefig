@@ -701,7 +701,7 @@ function TranscriptRowView({
       className="pb-3"
     >
       {row.kind === "error" ? (
-        <div className="select-text rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+        <div className="select-text rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
           <span className="select-text font-medium">
             {t("agentTurnFailed")}
           </span>{" "}
@@ -885,7 +885,7 @@ function PlanView({ plan }: { plan: unknown }) {
           data-plan-priority={planEntry.priority}
         >
           {planEntry.status === "completed" ? (
-            <Check className="size-3.5 shrink-0 text-green-600 dark:text-green-400" />
+            <Check className="size-3.5 shrink-0 text-success" />
           ) : planEntry.status === "in_progress" ? (
             <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
           ) : (
@@ -1128,9 +1128,7 @@ function ChangedFilesCard({
         >
           {t("agentChangedFiles", { count: diffs.length })}
         </span>
-        <span className="text-green-600 dark:text-green-400">
-          +{totalAdded}
-        </span>
+        <span className="text-success">+{totalAdded}</span>
         {totalRemoved > 0 && (
           <span className="text-destructive">−{totalRemoved}</span>
         )}
@@ -1152,7 +1150,7 @@ function ChangedFilesCard({
                   <span className="text-muted-foreground">{dir}</span>
                   <span className="font-semibold">{base}</span>
                 </span>
-                <span className="shrink-0 text-green-600 dark:text-green-400">
+                <span className="shrink-0 text-success">
                   +{counts[i].added}
                 </span>
                 {diff.oldText != null && (
@@ -1182,9 +1180,7 @@ function ChangedFilesCard({
 
 function ToolStatusIcon({ status }: { status: ToolCallStatus }) {
   if (status === "completed") {
-    return (
-      <Check className="size-3.5 shrink-0 text-green-600 dark:text-green-400" />
-    );
+    return <Check className="size-3.5 shrink-0 text-success" />;
   }
   if (status === "failed") {
     return <X className="size-3.5 shrink-0 text-destructive" />;
@@ -1203,9 +1199,7 @@ function ToolContentView({ item }: { item: ToolCallContent }) {
       <div className="overflow-hidden rounded border border-border/60">
         <div className="flex items-center gap-2 bg-muted/60 px-2 py-1 font-mono text-[0.6875rem]">
           <span className="min-w-0 flex-1 truncate">{item.path}</span>
-          <span className="shrink-0 text-green-600 dark:text-green-400">
-            +{added}
-          </span>
+          <span className="shrink-0 text-success">+{added}</span>
           {item.oldText != null && (
             <span className="shrink-0 text-destructive">−{removed}</span>
           )}

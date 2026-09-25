@@ -463,7 +463,7 @@ function UpdaterButton() {
     case "up-to-date":
       return (
         <Button variant="secondary" size="sm" onClick={check}>
-          <CheckCircle2 className="h-4 w-4 mr-1.5 text-green-500" />
+          <CheckCircle2 className="h-4 w-4 mr-1.5 text-success" />
           {t("updaterUpToDateShort")}
         </Button>
       );
@@ -674,10 +674,7 @@ function DebugModeToggle() {
   );
 
   return (
-    <SettingRow
-      title={t("debugMode")}
-      description={t("debugModeDesc")}
-    >
+    <SettingRow title={t("debugMode")} description={t("debugModeDesc")}>
       <Switch checked={isDebugActive} onCheckedChange={handleToggle} />
     </SettingRow>
   );

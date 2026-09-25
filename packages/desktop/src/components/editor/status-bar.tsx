@@ -61,21 +61,19 @@ export function StatusBar({
   );
 }
 
-
 function SaveCell({ synced }: { synced: boolean }) {
   const { t } = useTranslation();
   return (
     <div className="flex items-center justify-center gap-2 min-w-[4.5rem]">
       {synced ? (
-        <Cloud className="w-3.5 h-3.5 text-green-500" />
+        <Cloud className="w-3.5 h-3.5 text-success" />
       ) : (
-        <CloudUpload className="w-3.5 h-3.5 text-amber-500" />
+        <CloudUpload className="w-3.5 h-3.5 text-warning" />
       )}
       <span>{synced ? t("saved") : t("saving")}</span>
     </div>
   );
 }
-
 
 function WordCountCell({ count }: { count: number }) {
   const { t } = useTranslation();

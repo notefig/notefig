@@ -56,7 +56,7 @@ export function AuthCard({
         // show through it. `bare` hosts (the prompt-blob widget) already
         // wrap this in their own equivalently-tinted card, so they skip it.
         !bare &&
-          "rounded-md border border-amber-500/40 bg-background bg-gradient-to-b from-amber-500/10 to-amber-500/10 p-3",
+          "rounded-md border border-warning/40 bg-background bg-gradient-to-b from-warning/10 to-warning/10 p-3",
       )}
     >
       <span className="font-medium">{t("agentSignInRequired")}</span>

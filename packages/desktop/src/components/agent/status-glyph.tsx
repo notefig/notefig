@@ -22,9 +22,9 @@ export type StatusGlyphState =
   | "error"
   | "unavailable"
   | "auth"
-  /** Something finished here since the user last looked — the brand dot. */
+  /** Something finished here since the user last looked — the sage dot. */
   | "attention-bau"
-  /** Something failed or is asking — the amber the prompt widget uses. */
+  /** Something failed or is asking — the terracotta the prompt widget uses. */
   | "attention-error";
 
 type GlyphSpec =
@@ -36,15 +36,15 @@ const GLYPHS: Record<StatusGlyphState, GlyphSpec> = {
   // spawns and shakes hands, "working" once a turn is running.
   starting: { shape: "orb", orb: "connecting", tone: "text-muted-foreground" },
   running: { shape: "orb", orb: "working", tone: "text-foreground" },
-  queued: { shape: "ring", tone: "text-amber-500" },
+  queued: { shape: "ring", tone: "text-warning" },
   idle: { shape: "ring", tone: "text-muted-foreground/70" },
   done: { shape: "ring", tone: "text-muted-foreground/70" },
   cancelled: { shape: "ring", tone: "text-muted-foreground/70" },
-  error: { shape: "dot", tone: "text-red-500" },
-  unavailable: { shape: "dot", tone: "text-red-500" },
-  auth: { shape: "dot", tone: "text-red-500" },
-  "attention-bau": { shape: "dot", tone: "text-brand" },
-  "attention-error": { shape: "dot", tone: "text-amber-600 dark:text-amber-400" },
+  error: { shape: "dot", tone: "text-warning" },
+  unavailable: { shape: "dot", tone: "text-warning" },
+  auth: { shape: "dot", tone: "text-warning" },
+  "attention-bau": { shape: "dot", tone: "text-success" },
+  "attention-error": { shape: "dot", tone: "text-warning" },
 };
 
 export function StatusGlyph({
@@ -60,7 +60,11 @@ export function StatusGlyph({
       <span
         aria-hidden="true"
         data-status-glyph={state}
-        className={cn("flex size-3 shrink-0 items-center justify-center", spec.tone, className)}
+        className={cn(
+          "flex size-3 shrink-0 items-center justify-center",
+          spec.tone,
+          className,
+        )}
       >
         <OrbLoader state={spec.orb} size="0.75rem" />
       </span>

@@ -30,7 +30,7 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { platformAdapter } from "@/adapters";
-import Logo, { PlainLogo } from "@/components/logo";
+import Logo from "@/components/logo";
 import {
   SettingsModal,
   DEFAULT_SETTINGS_SECTION,
@@ -123,7 +123,7 @@ function ThemeToggle() {
 }
 
 const AVAILABILITY_DOT: Record<HarnessAvailability, string> = {
-  found: "bg-emerald-500",
+  found: "bg-success",
   missing: "bg-muted-foreground/30",
   // "We haven't checked" is not "it's missing": an unknown row keeps the
   // dot's column so the list stays aligned, but paints nothing in it rather
@@ -324,9 +324,8 @@ function RecentProjectRow({
       // is what made focused cards look sheared off.
       className="group flex w-full items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:border-primary hover:bg-accent focus-visible:border-primary focus-visible:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
     >
-      <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted dark:rounded-none dark:bg-transparent">
-        <PlainLogo size="0.875rem" fill="var(--logo)" className="block dark:hidden" />
-        <Logo size="1.75rem" className="hidden dark:block" />
+      <div className="flex size-7 shrink-0 items-center justify-center">
+        <Logo size="1.75rem" />
       </div>
       <div className="min-w-0 flex-1">
         <h3 className="truncate text-xs font-medium text-foreground">

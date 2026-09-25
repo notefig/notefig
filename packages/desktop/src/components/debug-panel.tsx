@@ -89,15 +89,15 @@ type ConsoleLevel = ConsoleEntry["level"];
 
 const LEVEL_COLORS: Record<ConsoleLevel, string> = {
   log: "text-foreground",
-  info: "text-blue-400",
-  warn: "text-amber-400",
+  info: "text-brand",
+  warn: "text-warning",
   error: "text-destructive",
 };
 
 const LEVEL_BG: Record<ConsoleLevel, string> = {
   log: "",
   info: "",
-  warn: "bg-amber-500/5",
+  warn: "bg-warning/5",
   error: "bg-destructive/5",
 };
 
@@ -803,7 +803,7 @@ function DebugPanelContent({
             title="Copy debug report to clipboard"
           >
             {copied ? (
-              <Check className="h-3 w-3 text-green-500" />
+              <Check className="h-3 w-3 text-success" />
             ) : (
               <Copy className="h-3 w-3" />
             )}
@@ -850,14 +850,14 @@ function DebugPanelContent({
       </div>
 
       {showAstWarning && (
-        <div className="px-3 py-2 bg-amber-500/10 border-b border-amber-500/30 shrink-0">
+        <div className="px-3 py-2 bg-warning/10 border-b border-warning/30 shrink-0">
           <div className="flex items-start gap-2">
-            <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+            <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
-              <div className="text-amber-700 dark:text-amber-400 font-semibold text-xs mb-1">
+              <div className="text-warning font-semibold text-xs mb-1">
                 Warning: File content will be copied
               </div>
-              <div className="text-amber-600/80 dark:text-amber-300/70 text-[0.6875rem] mb-2">
+              <div className="text-warning/80 text-[0.6875rem] mb-2">
                 The Plate AST includes the full content of your open files. Only
                 share this with trusted parties.
               </div>
@@ -865,7 +865,7 @@ function DebugPanelContent({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-6 text-[0.6875rem] border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
+                  className="h-6 text-[0.6875rem] border-warning/30 text-warning hover:bg-warning/10"
                   onClick={() => {
                     copyPlateAst();
                     setShowAstWarning(false);
@@ -1040,7 +1040,7 @@ function DebugPanelContent({
                 disabled={!sessionTask}
               >
                 {sessionCopied ? (
-                  <Check className="h-3 w-3 text-green-500" />
+                  <Check className="h-3 w-3 text-success" />
                 ) : (
                   <Copy className="h-3 w-3" />
                 )}
@@ -1055,7 +1055,7 @@ function DebugPanelContent({
                 data-testid="copy-agent-recording"
               >
                 {recordingCopied ? (
-                  <Check className="h-3 w-3 text-green-500" />
+                  <Check className="h-3 w-3 text-success" />
                 ) : (
                   <Copy className="h-3 w-3" />
                 )}

@@ -740,15 +740,15 @@ describe("deriveDoneLine", () => {
 });
 
 describe("blobCardClass", () => {
-  it("done rests muted; a flagged issue borrows the amber error treatment", () => {
+  it("done rests muted; a flagged issue borrows the warning error treatment", () => {
     expect(blobCardClass("done", false)).toBe("border-border/60 bg-card/80");
-    expect(blobCardClass("done", true)).toBe("border-amber-500/40 bg-card/80");
+    expect(blobCardClass("done", true)).toBe("border-warning/40 bg-card/80");
   });
 
   it("active phases keep the raised card; attention states get their washes", () => {
     expect(blobCardClass("running", false)).toContain("shadow-lg");
     expect(blobCardClass("running", false)).toContain("border-border bg-card");
-    expect(blobCardClass("needs-auth", false)).toContain("border-amber-500/40");
+    expect(blobCardClass("needs-auth", false)).toContain("border-warning/40");
     expect(blobCardClass("needs-permission", false)).toContain("from-muted/40");
     // Issue-ness only matters at rest — an active phase ignores it.
     expect(blobCardClass("running", true)).toBe(

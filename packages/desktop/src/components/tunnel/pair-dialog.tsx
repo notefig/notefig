@@ -101,7 +101,7 @@ export function PairDialog() {
         {connected ? (
           <div className="space-y-3">
             <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
-              <Wifi className="h-4 w-4 text-green-500" />
+              <Wifi className="h-4 w-4 text-success" />
               <span className="truncate">{state.workerInfo.workspacePath}</span>
             </div>
             <div className="flex justify-end gap-2">
@@ -140,7 +140,7 @@ export function PairDialog() {
             >
               <span className="truncate">npx notefig agent</span>
               {copied ? (
-                <Check className="h-3.5 w-3.5 shrink-0 text-green-500" />
+                <Check className="h-3.5 w-3.5 shrink-0 text-success" />
               ) : (
                 <Copy className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               )}
@@ -157,7 +157,9 @@ export function PairDialog() {
               {t("tunnelPairConnect")}
             </Button>
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <p className="text-xs text-muted-foreground">{t("tunnelPairHint")}</p>
+            <p className="text-xs text-muted-foreground">
+              {t("tunnelPairHint")}
+            </p>
           </form>
         )}
       </DialogContent>
