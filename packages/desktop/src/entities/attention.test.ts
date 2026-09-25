@@ -217,7 +217,7 @@ describe("deriveAttention", () => {
     expect(attention.asks[0].permission?.id).toBe("p1");
   });
 
-  it("the sidebar's one dot is amber when anything is an error, else blue", () => {
+  it("the sidebar's one dot is terracotta when anything is an error, else sage", () => {
     expect(mostPressing(null, null)).toBeNull();
     expect(mostPressing("bau", null)).toBe("bau");
     expect(mostPressing("bau", "error")).toBe("error");

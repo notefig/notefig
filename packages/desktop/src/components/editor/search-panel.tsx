@@ -358,7 +358,7 @@ function SearchResultItem({
           seg.highlight ? (
             <mark
               key={i}
-              className="bg-yellow-500/30 text-foreground rounded-sm px-px"
+              className="bg-highlight/70 text-foreground rounded-sm px-px"
             >
               {seg.text}
             </mark>

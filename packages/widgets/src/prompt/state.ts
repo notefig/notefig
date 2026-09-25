@@ -157,12 +157,12 @@ export function referenceRemovalArmed(phase: BlobPhase): boolean {
 export function blobCardClass(phase: BlobPhase, hasIssue: boolean): string {
   if (phase === "done") {
     return hasIssue
-      ? "border-amber-500/40 bg-card/80"
+      ? "border-warning/40 bg-card/80"
       : "border-border/60 bg-card/80";
   }
   const raised = "shadow-lg shadow-black/5 dark:shadow-black/40";
   if (phase === "needs-auth") {
-    return `${raised} border-amber-500/40 bg-background bg-gradient-to-b from-amber-500/10 to-amber-500/10`;
+    return `${raised} border-warning/40 bg-background bg-gradient-to-b from-warning/10 to-warning/10`;
   }
   if (phase === "needs-permission") {
     return `${raised} border-border bg-background bg-gradient-to-b from-muted/40 to-muted/40`;

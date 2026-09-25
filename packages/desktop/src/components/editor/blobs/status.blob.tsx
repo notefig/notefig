@@ -4,8 +4,10 @@ import { defineBlobType } from "./blob-type";
 
 const STATE_ICON = {
   queued: <Circle className="size-3.5 shrink-0 text-muted-foreground" />,
-  working: <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />,
-  done: <Check className="size-3.5 shrink-0 text-green-600 dark:text-green-400" />,
+  working: (
+    <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+  ),
+  done: <Check className="size-3.5 shrink-0 text-success" />,
   failed: <X className="size-3.5 shrink-0 text-destructive" />,
 } as const;
 
@@ -27,7 +29,9 @@ export default defineBlobType({
         <div>
           <div className="font-medium">{payload.title}</div>
           {payload.detail && (
-            <div className="text-xs text-muted-foreground">{payload.detail}</div>
+            <div className="text-xs text-muted-foreground">
+              {payload.detail}
+            </div>
           )}
         </div>
       </div>

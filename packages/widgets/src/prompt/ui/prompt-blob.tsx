@@ -1422,7 +1422,7 @@ function DraftRow({
       {composing && confirmTrust && (
         <span
           contentEditable={false}
-          className="px-3 pb-1.5 text-[0.6875rem] text-amber-600 dark:text-amber-400"
+          className="px-3 pb-1.5 text-[0.6875rem] text-warning"
         >
           {t("promptBlobTrustWarning", { name: trustName })}
         </span>
@@ -1659,9 +1659,9 @@ function DoneSummaryLine({
   return (
     <>
       {isIssue ? (
-        <TriangleAlert className="size-3 shrink-0 text-amber-600 dark:text-amber-400" />
+        <TriangleAlert className="size-3 shrink-0 text-warning" />
       ) : (
-        <Check className="size-3 shrink-0 text-green-600/80 dark:text-green-400/80" />
+        <Check className="size-3 shrink-0 text-success/80" />
       )}
       <button
         type="button"
@@ -1675,9 +1675,7 @@ function DoneSummaryLine({
         }
         className={cn(
           "min-w-0 flex-1 truncate text-left text-xs",
-          isIssue
-            ? "text-amber-600 dark:text-amber-400"
-            : "text-muted-foreground",
+          isIssue ? "text-warning" : "text-muted-foreground",
           expandable &&
             "cursor-pointer transition-colors hover:text-foreground",
         )}
@@ -1861,9 +1859,7 @@ export function DoneState({
             // Issue text mirrors ErrorState's uniform tinted text, in amber
             // — the card border (blobCardClass) carries the rest; no filled
             // callout box.
-            isIssue
-              ? "text-amber-600 dark:text-amber-400"
-              : "text-foreground/80",
+            isIssue ? "text-warning" : "text-foreground/80",
           )}
         />
       )}

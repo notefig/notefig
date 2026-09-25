@@ -642,7 +642,7 @@ test.describe("agent workflows", () => {
         .poll(async () => (await collectionStats(page)).settledTurns, { timeout: 60_000 })
         .toBe(before + 1);
 
-      // The session is marked, and the sidebar's one dot agrees (blue: BAU).
+      // The session is marked, and the sidebar's one dot agrees (sage: BAU).
       await page.getByRole("button", { name: "Sessions", exact: true }).click();
       await expect(sessionGlyph()).toHaveAttribute("data-status-glyph", "attention-bau");
       await expect(headerGlyph).toHaveAttribute("data-status-glyph", "attention-bau");

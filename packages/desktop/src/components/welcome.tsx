@@ -123,7 +123,7 @@ function ThemeToggle() {
 }
 
 const AVAILABILITY_DOT: Record<HarnessAvailability, string> = {
-  found: "bg-emerald-500",
+  found: "bg-success",
   missing: "bg-muted-foreground/30",
   // "We haven't checked" is not "it's missing": an unknown row keeps the
   // dot's column so the list stays aligned, but paints nothing in it rather

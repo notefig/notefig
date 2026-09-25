@@ -109,7 +109,7 @@ export function GlobalColumn({
                     {attention > 0 && (
                       <span
                         aria-hidden="true"
-                        className="absolute -end-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-0.5 text-[0.5625rem] font-bold leading-none text-destructive-foreground animate-in zoom-in-50 duration-200 motion-reduce:animate-none"
+                        className="absolute -end-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-warning px-0.5 text-[0.5625rem] font-bold leading-none text-white animate-in zoom-in-50 duration-200 motion-reduce:animate-none"
                       >
                         {attention}
                       </span>
