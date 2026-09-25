@@ -26,8 +26,9 @@ import {
   useAgentSessionList,
   type AgentTaskMeta,
 } from "@/entities/agents";
-import { useAttention, type Attention } from "@/entities/attention";
+import { mostPressing, useAttention, type Attention } from "@/entities/attention";
 import {
+  MAX_PROMPT_ROUNDS,
   describePromptRound,
   isLiveRound,
   usePromptRounds,
@@ -65,10 +66,12 @@ export interface AppStatusHost {
 
 export interface AppStatusInputs {
   host: AppStatusHost;
+  /** Every round, live first: a document's "running" is read off all of
+   *  them, not just the few listed. */
   rounds: PromptRound[];
   sessions: AgentTaskMeta[];
   documents: RecentDocument[];
-  attention: Pick<Attention, "overall" | "byRound" | "byTask">;
+  attention: Pick<Attention, "byRound" | "byTask">;
   t: (key: string) => string;
 }
 
@@ -104,7 +107,7 @@ function sections(
     {
       id: "prompts",
       title: t("promptRounds"),
-      entries: rounds.map((round) => ({
+      entries: rounds.slice(0, APP_STATUS_ROWS).map((round) => ({
         id: `prompts:${round.turnId}`,
         label: clip(round.prompt || getFileName(round.documentPath)),
         // A completed round names where its result is: a relative time
@@ -132,7 +135,9 @@ function sections(
       entries: sessions.map((meta) => ({
         id: `sessions:${meta.task.taskId}`,
         label: clip(meta.task.title),
-        detail: describeTaskMeta(meta),
+        // A settled session names its project — the sidebar's "time ago"
+        // would sit stale here.
+        detail: describeTaskMeta(meta) ?? deriveProjectName(meta.task.workspacePath),
         mark: sessionMark(meta, attention),
         activate: () => tabs.openAgentTab(meta.task.taskId),
       })),
@@ -157,12 +162,27 @@ function actions({ host, t }: AppStatusInputs): AppStatusAction[] {
   return list;
 }
 
+/** The most pressing attention mark among the listed rows — so the dot
+ *  always has a row to open, as a section title's dot does in the sidebar. */
+function attentionOf(sections: AppStatusSection[]): StatusMark | null {
+  const kind = sections
+    .flatMap((section) => section.entries)
+    .map((entry) =>
+      entry.mark === "attention-bau" || entry.mark === "attention-error"
+        ? entry.mark.slice("attention-".length) as "bau" | "error"
+        : null,
+    )
+    .reduce(mostPressing, null);
+  return kind && attentionGlyphState(kind);
+}
+
 /** Pure, for tests: the status as a function of what the sidebar shows. */
 export function deriveAppStatus(inputs: AppStatusInputs): AppStatus {
-  const { attention, host } = inputs;
+  const { host } = inputs;
+  const listed = host.tabs ? sections(inputs, host.tabs) : [];
   return {
-    attention: attention.overall ? attentionGlyphState(attention.overall) : null,
-    sections: host.tabs ? sections(inputs, host.tabs) : [],
+    attention: attentionOf(listed),
+    sections: listed,
     actions: actions(inputs),
   };
 }
@@ -177,7 +197,7 @@ export function usePublishAppStatus(
 ): void {
   const { t } = useTranslation();
   const attention = useAttention();
-  const rounds = usePromptRounds(APP_STATUS_ROWS);
+  const rounds = usePromptRounds(MAX_PROMPT_ROUNDS);
   const sessions = useAgentSessionList(APP_STATUS_ROWS);
   const documents = useRecentDocuments(APP_STATUS_ROWS);
   const openWorkspace = useOpenProjectFromPicker();

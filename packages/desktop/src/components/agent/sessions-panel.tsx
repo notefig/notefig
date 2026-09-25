@@ -69,6 +69,7 @@ import {
   taskGlyphState,
 } from "@/components/agent/status-glyph";
 import { useAttention, type AttentionKind } from "@/entities/attention";
+import { formatTimeAgo } from "@/utils/format";
 
 /**
  * The left-sidebar sessions tool (sidebarView === "sessions"): every agent
@@ -212,7 +213,7 @@ export function SessionListRow({
     <SessionRow
       className={className}
       task={meta.task}
-      meta={describeTaskMeta(meta)}
+      meta={describeTaskMeta(meta) ?? formatTimeAgo(meta.task.updatedAt)}
       isRunning={meta.isRunning}
       attention={byTask.get(meta.task.taskId) ?? null}
       active={agentTabId(meta.task.taskId) === activeTabId}

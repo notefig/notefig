@@ -14,7 +14,6 @@ import {
 } from "@notefig/shared/agent";
 import { workspaceKey } from "@/utils/path";
 import { getDesktopOs } from "@/utils/platform";
-import { formatTimeAgo } from "@/utils/format";
 import i18n from "@/utils/intl";
 import { useActiveHarnesses } from "@/hooks/use-harness-selection";
 import {
@@ -322,13 +321,13 @@ export function useRunningTaskCounts(): Map<string, number> {
 }
 
 /**
- * The right-aligned meta label for a session row. Priority: sign-in blocks
- * everything else > live activity (running/queued) > failure > last touch.
+ * A session row's status note, or null when it has none. Priority: sign-in
+ * blocks everything else > live activity (running/queued) > failure.
  * Uses the i18n instance directly (not useTranslation) so it stays a pure
  * function callable from any consumer; consumers re-render on language
  * change through their own useTranslation subscriptions.
  */
-export function describeTaskMeta(meta: AgentTaskMeta): string {
+export function describeTaskMeta(meta: AgentTaskMeta): string | null {
   if (meta.needsAuth) return i18n.t("agentNeedsSignIn");
   if (meta.isRunning) {
     return meta.queuedCount > 0
@@ -341,6 +340,7 @@ export function describeTaskMeta(meta: AgentTaskMeta): string {
   if (meta.isError) return i18n.t("agentFailed");
   if (meta.isUnavailable) return i18n.t("agentSessionUnavailable");
   // "restored" deliberately gets no special label — a restored session is a
-  // normal session whose runtime just hasn't spawned yet (MET-54).
-  return formatTimeAgo(meta.task.updatedAt);
+  // normal session whose runtime just hasn't spawned yet (MET-54). Nothing
+  // to say: each list trails what suits it (the sidebar, a time ago).
+  return null;
 }

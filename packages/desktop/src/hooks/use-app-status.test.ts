@@ -61,7 +61,7 @@ function inputs(overrides: Partial<AppStatusInputs> = {}): AppStatusInputs {
     rounds: [],
     sessions: [],
     documents: [],
-    attention: { overall: null, byRound: new Map(), byTask: new Map() },
+    attention: { byRound: new Map(), byTask: new Map() },
     t: (key) => key,
     ...overrides,
   };
@@ -83,7 +83,6 @@ describe("deriveAppStatus", () => {
         sessions: [session("task_a", "running"), session("task_b")],
         documents: [document("/ws-a/notes.md")],
         attention: {
-          overall: "error",
           byRound: new Map([["t2", "error"]]),
           byTask: new Map([["task_b", "bau"]]),
         },
@@ -95,7 +94,29 @@ describe("deriveAppStatus", () => {
     // A document with a round in flight shows it, like its sidebar row.
     expect(documents.entries[0]).toMatchObject({ label: "notes.md", mark: "running" });
     expect(sessions.entries.map((e) => e.mark)).toEqual(["running", "attention-bau"]);
+    expect(sessions.entries.map((e) => e.detail)).toEqual(["agentRunning", "ws-a"]);
     expect(status.attention).toBe("attention-error");
+  });
+
+  it("marks the dot only from a listed row, so the menu can always show what it points at", () => {
+    const status = deriveAppStatus(
+      inputs({
+        sessions: [session("task_a")],
+        attention: { byRound: new Map(), byTask: new Map([["task_unlisted", "error"]]) },
+      }),
+    );
+    expect(status.attention).toBeNull();
+  });
+
+  it("reads a document's running mark off every live round, not only the listed ones", () => {
+    const live = ["t1", "t2", "t3", "t4"].map((id) =>
+      round(id, { status: "running", documentPath: `/ws-a/${id}.md` }),
+    );
+    const status = deriveAppStatus(
+      inputs({ rounds: live, documents: [document("/ws-a/t4.md")] }),
+    );
+    expect(status.sections[0].entries).toHaveLength(3);
+    expect(status.sections[1].entries[0].mark).toBe("running");
   });
 
   it("names the document for a completed prompt instead of a time that would go stale", () => {
