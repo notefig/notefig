@@ -4,7 +4,7 @@
 // Command modules + the shared handler registration live in the library crate
 // so the app binary, the mock-app dispatch tests, and the e2e shim all share
 // one command list (MET-73).
-use notefig::{agent_proc, db_ops, mcp_bridge, register_handlers, traffic_lights};
+use notefig::{agent_proc, app_status, db_ops, mcp_bridge, register_handlers, traffic_lights};
 
 use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager};
@@ -178,7 +178,8 @@ fn main() {
     // file at plugin init.
     migrate_app_data_from_old_identifier();
 
-    let builder = tauri::Builder::default();
+    // The menu-bar item (app_status.rs) is the app's, not the shim's.
+    let builder = app_status::register(tauri::Builder::default());
     #[cfg(target_os = "macos")]
     let builder = builder.plugin(tauri_nspanel::init());
     let builder = builder
