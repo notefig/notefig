@@ -27,16 +27,14 @@ import {
 import { cn } from "@notefig/ui/utils";
 import type { HarnessAvailability } from "@notefig/shared/agent";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { platformAdapter } from "@/adapters";
 import Logo from "@/components/logo";
-import {
-  SettingsModal,
-  DEFAULT_SETTINGS_SECTION,
-} from "@/components/editor/settings-modal";
+import { SettingsModal } from "@/components/editor/settings-modal";
 import { useTheme } from "@/components/theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
+import { usePublishAppStatus } from "@/hooks/use-app-status";
+import { useOpenSettings } from "@/hooks/use-workspace-panels";
 import { useProbedHarnesses } from "@/hooks/use-harness-selection";
 import {
   useOpenProject,
@@ -346,7 +344,6 @@ function RecentProjectRow({
 
 export function Welcome() {
   const [loading, setLoading] = useState(false);
-  const [, setUrlSearchParams] = useSearchParams();
   const { t } = useTranslation();
   const openProject = useOpenProject();
   const openProjectFromPicker = useOpenProjectFromPicker();
@@ -373,16 +370,9 @@ export function Welcome() {
     void openProject(path);
   };
 
-  const handleOpenSettings = () => {
-    setUrlSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.set("settings", DEFAULT_SETTINGS_SECTION);
-        return next;
-      },
-      { replace: true },
-    );
-  };
+  const handleOpenSettings = useOpenSettings();
+  // Nothing open: the platform's view offers the ways in, no rows.
+  usePublishAppStatus({ workspacePath: null, tabs: null, openSettings: handleOpenSettings });
 
   return (
     <div className="texture-surface relative flex h-full flex-col overflow-hidden bg-background">

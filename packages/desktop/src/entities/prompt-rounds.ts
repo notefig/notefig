@@ -22,6 +22,7 @@ import {
 } from "@/entities/agents";
 import { useOpenWorkspaces, type OpenWorkspaceRow } from "@/entities/workspaces";
 import { onAppEvent, type AppEvents } from "@/utils/app-events";
+import i18n from "@/utils/intl";
 import { workspaceKey } from "@/utils/path";
 
 export const PROMPT_ROUNDS_COLLECTION_ID = "prompt-rounds";
@@ -66,6 +67,23 @@ export const promptRoundsCollection = createCollection(
     persistence: platformAdapter.db.get(),
   }),
 );
+
+/** The note per turn status; a completed round has nothing to add. */
+const ROUND_META_KEYS: Partial<Record<AgentTurnStatus, string>> = {
+  running: "agentRunning",
+  queued: "roundQueued",
+  cancelled: "roundCancelled",
+  error: "agentFailed",
+};
+
+/** A round's status note wherever it is listed, or null once it has
+ *  completed — each list then trails what suits it. */
+export function describePromptRound(
+  round: Pick<PromptRound, "status">,
+): string | null {
+  const key = ROUND_META_KEYS[round.status];
+  return key ? i18n.t(key) : null;
+}
 
 /** Still moving: in flight or waiting its turn. */
 export function isLiveRound(round: Pick<PromptRound, "status">): boolean {

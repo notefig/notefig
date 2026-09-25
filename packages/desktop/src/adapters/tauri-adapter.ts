@@ -648,6 +648,8 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
 
   private publishAppStatus(status: AppStatus): void {
     this.appStatusActivations = appStatusActivations(status);
+    // Subscribed once, for the life of the process: the status is
+    // published for as long as the app runs.
     this.appStatusUnlisten ??= listen<string>("app-status-activated", (event) => {
       this.appStatusActivations.get(event.payload)?.();
     });

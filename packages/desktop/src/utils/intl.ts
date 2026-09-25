@@ -419,6 +419,7 @@ i18n
           promptRounds: "Prompts",
           everythingFiles: "Files",
           everythingScratchpads: "Scratchpads",
+          recentDocuments: "Recent files",
           everythingEmpty:
             "Files, prompts and sessions you work with show up here.",
           roundQueued: "queued",

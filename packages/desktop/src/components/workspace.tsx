@@ -35,6 +35,7 @@ import { DebugPanel } from "./debug-panel";
 import { useOpenProject } from "@/hooks/use-open-project";
 import { Welcome } from "@/components/welcome";
 import { platformAdapter } from "@/adapters";
+import { usePublishAppStatus } from "@/hooks/use-app-status";
 import { useProjectSettings } from "@/utils/project-settings";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
 import { useWorkspaceCommands } from "@/hooks/use-workspace-commands";
@@ -192,6 +193,13 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
     openFile,
     renameTab,
   });
+
+  // What the platform shows outside the window follows this shell.
+  const appStatusTabs = useMemo(
+    () => ({ openFile: openFileInTabs, openAgentTab }),
+    [openFileInTabs, openAgentTab],
+  );
+  usePublishAppStatus({ workspacePath, tabs: appStatusTabs, openSettings });
 
   const chrome = useShellChromeMetrics();
   // Search follows the file in front of the user, not the sidebar's
