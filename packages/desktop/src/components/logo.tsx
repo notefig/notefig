@@ -1,8 +1,24 @@
+// The Notefig pear. Geometry mirrors scripts/build-icons.mjs (the source of
+// every raster icon): a 1024 canvas, the mark 660 tall and centred, the tile
+// a #F7EFE7 squircle with Apple's 22.37% corner ratio. Keep the two in step.
+const BODY =
+  "M74.4744 211C170.78 212.516 160.043 125.834 152.974 110C140.474 81.9999 137.604 83.2574 124.474 64.4999C117.474 54.4999 118.837 45.0908 115.974 36.4999C114.974 33.5 111.325 36.8062 113.474 29.5C118.474 12.4999 128.974 15 129.974 5.99992C130.641 -0.000283718 124.522 -9.40709e-05 121.509 0H121.474C108.236 1.24212e-05 104.602 8 102.974 12C96.057 29.0001 99.2921 20.7503 96.4741 28.5C94.4741 34 92.4746 31 90.4744 33.5C86.2885 38.7316 83.0104 45.6708 69.4741 56.5C46.9744 74.5 30.6686 81.9173 10.9743 110C-16.0256 148.5 7.41261 209.944 74.4744 211Z";
+const LEAF =
+  "M154.422 16.7531C137.35 11.5508 117.781 26.1789 117.781 27.5895C117.781 29.0001 127.438 48.525 143.719 50.5125C160 52.5 170 46.5 180 41C173.5 36 170 21.5001 154.422 16.7531Z";
+
+export const LOGO_BODY_COLOR = "#C56A4A";
+export const LOGO_LEAF_COLOR = "#8C8F72";
+export const LOGO_TILE_COLOR = "#F7EFE7";
+
+// translate/scale that puts the 180×211 mark at 660px tall, centred on 1024.
+const MARK_TRANSFORM = "translate(230.474 182) scale(3.128)";
+
 interface LogoProps {
   size?: number | string;
   animated?: boolean;
   hoverAnimate?: boolean;
   showBackground?: boolean;
+  /** Monochrome override: paints body and leaf in one colour. */
   fill?: string;
   className?: string;
 }
@@ -12,7 +28,7 @@ export default function Logo({
   animated = false,
   hoverAnimate = false,
   showBackground = true,
-  fill = "#1D4528",
+  fill,
   className = "",
 }: LogoProps) {
   const shouldAnimate = animated || hoverAnimate;
@@ -21,7 +37,7 @@ export default function Logo({
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 128 128"
+      viewBox="0 0 1024 1024"
       width={size}
       height={size}
       className={`${animationClass} ${className}`.trim()}
@@ -34,12 +50,12 @@ export default function Logo({
             <stop offset="100%" stopColor="rgba(255,255,255,0)" />
           </linearGradient>
           <mask id="glaze-mask">
-            <rect width="128" height="128" fill="url(#glaze)">
+            <rect width="1024" height="1024" fill="url(#glaze)">
               <animateTransform
                 attributeName="transform"
                 type="translate"
-                from="-128 0"
-                to="128 0"
+                from="-1024 0"
+                to="1024 0"
                 dur="2.5s"
                 repeatCount={hoverAnimate ? "1" : "indefinite"}
                 begin={hoverAnimate ? "indefinite" : "0s"}
@@ -51,26 +67,21 @@ export default function Logo({
 
       {showBackground && (
         <rect
-          x="4"
-          y="4"
-          width="124"
-          height="124"
-          rx="40"
-          ry="40"
-          fill="white"
-          stroke="#E5E5E5"
-          strokeWidth="1"
+          width="1024"
+          height="1024"
+          rx="229"
+          ry="229"
+          fill={LOGO_TILE_COLOR}
+          className="dark:fill-[#4A3A32]"
         />
       )}
 
-      <g transform="translate(2,2)">
-        <g {...(shouldAnimate ? { mask: "url(#glaze-mask)" } : {})}>
-          <path
-            fill={fill}
-            fillRule="evenodd"
-            d="m6 45c0-21.5 17.5-39 39-39h38c21.5 0 39 17.5 39 39v38c0 21.5-17.5 39-39 39h-38c-21.5 0-39-17.5-39-39zm15.5-1.8c-1.2 0.7-2.3 1.6-2.9 2.9-1 2.1-1.2 4.4-0.8 6.6 0.6 2.7 3.9 3.1 6.3 1.5q0.9-0.6 1.9-1.3c2.8-1.6 6 0.8 5.8 3.9-0.2 2.3 1.5 4.1 3.8 4.1h1.5c2.8 0 5.2-2.3 5.5-5.1q0.3-2.6 0.8-5.1c0.7-3.7 3.6-6.6 7.3-7.3q2.5-0.5 5.1-0.8c2.8-0.3 5.1-2.7 5.1-5.6v-1.5c0-2.2-1.8-4-4-3.8-3.2 0.3-5.6-3-3.9-5.7q0.6-1 1.3-2c1.5-2.3 1.1-5.6-1.6-6.2-2.1-0.4-4.4-0.3-6.5 0.7-1.3 0.7-2.3 1.8-3 3q-0.8 1.2-1.5 2.5c-4.1 7.4-10.3 13.6-17.7 17.7q-1.2 0.7-2.5 1.5zm63.3-21.7c-0.7-1.2-1.7-2.3-2.9-3-2.2-1-4.5-1.1-6.6-0.7-2.7 0.6-3.1 3.9-1.6 6.2q0.7 1 1.3 2c1.7 2.7-0.7 6-3.9 5.7-2.2-0.2-4 1.6-4 3.8v1.5c0 2.9 2.3 5.3 5.1 5.6q2.6 0.3 5.1 0.8c3.7 0.7 6.6 3.6 7.3 7.3q0.5 2.5 0.8 5.1c0.3 2.8 2.7 5.1 5.5 5.1h1.5c2.3 0 4-1.8 3.9-4.1-0.3-3.1 2.9-5.5 5.7-3.9q1 0.7 2 1.3c2.3 1.6 5.6 1.2 6.2-1.5 0.4-2.2 0.2-4.5-0.8-6.6-0.6-1.3-1.7-2.2-2.9-2.9q-1.3-0.8-2.5-1.5c-7.4-4.1-13.6-10.3-17.7-17.7q-0.7-1.3-1.5-2.5zm21.7 63.3c1.2-0.7 2.3-1.7 2.9-3 1-2.1 1.2-4.4 0.8-6.5-0.6-2.8-3.9-3.1-6.2-1.6q-1 0.7-2 1.3c-2.8 1.7-6-0.7-5.7-3.9 0.1-2.2-1.6-4-3.9-4h-1.5c-2.8 0-5.2 2.2-5.5 5.1q-0.3 2.5-0.8 5.1c-0.7 3.7-3.6 6.6-7.3 7.3q-2.5 0.5-5.1 0.8c-2.8 0.3-5.1 2.6-5.1 5.5v1.5c0 2.2 1.8 4 4 3.8 3.2-0.2 5.6 3 3.9 5.7q-0.6 1-1.3 2c-1.5 2.3-1.1 5.6 1.6 6.2 2.1 0.5 4.4 0.3 6.5-0.7 1.3-0.6 2.3-1.7 3-2.9q0.8-1.3 1.5-2.5c4.1-7.5 10.3-13.7 17.7-17.8q1.3-0.7 2.5-1.4zm-63.3 21.7c0.7 1.2 1.7 2.3 3 2.9 2.1 1 4.4 1.2 6.5 0.7 2.7-0.6 3.1-3.9 1.6-6.2q-0.7-1-1.3-2c-1.7-2.7 0.7-5.9 3.9-5.7 2.2 0.2 4-1.6 4-3.8v-1.5c0-2.9-2.3-5.2-5.1-5.5q-2.6-0.3-5.1-0.8c-3.7-0.7-6.6-3.6-7.3-7.3q-0.5-2.6-0.8-5.1c-0.3-2.9-2.7-5.1-5.5-5.1h-1.5c-2.3 0-4 1.8-3.8 4 0.2 3.2-3 5.6-5.7 3.9q-1.1-0.6-2-1.3c-2.4-1.5-5.7-1.2-6.3 1.6-0.4 2.1-0.2 4.4 0.8 6.5 0.6 1.3 1.7 2.2 2.9 3q1.3 0.7 2.5 1.4c7.4 4.1 13.6 10.3 17.7 17.8q0.7 1.2 1.5 2.5z"
-          />
-        </g>
+      <g
+        transform={MARK_TRANSFORM}
+        {...(shouldAnimate ? { mask: "url(#glaze-mask)" } : {})}
+      >
+        <path fill={fill ?? LOGO_LEAF_COLOR} d={LEAF} />
+        <path fill={fill ?? LOGO_BODY_COLOR} d={BODY} />
       </g>
     </svg>
   );
@@ -80,6 +91,8 @@ export function AnimatedLogo(props: Omit<LogoProps, "animated">) {
   return <Logo {...props} animated={true} />;
 }
 
-export function PlainLogo(props: Omit<LogoProps, "animated" | "showBackground">) {
+export function PlainLogo(
+  props: Omit<LogoProps, "animated" | "showBackground">,
+) {
   return <Logo {...props} animated={false} showBackground={false} />;
 }

@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "build:sidecars": "node scripts/build-sidecars.mjs",
+    "build:icons": "node scripts/build-icons.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "dev-debug": "npm run tauri build -- --debug && open \"src-tauri/target/debug/bundle/macos/Notefig.app\"",
@@ -106,7 +107,7 @@
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "@tailwindcss/typography": "^0.5.10",
-    "@tauri-apps/cli": "^2",
+    "@tauri-apps/cli": "^2.11.5",
     "@types/lodash": "^4.17.23",
     "@types/markdown-it": "^14.1.2",
     "@types/md5": "^2.3.6",

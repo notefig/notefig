@@ -1,7 +1,7 @@
 import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Settings } from "lucide-react";
-import { PlainLogo } from "@/components/logo";
+import Logo from "@/components/logo";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@notefig/ui/tooltip";
 import {
   ContextMenu,
@@ -72,7 +72,7 @@ export function GlobalColumn({
           active={isEverything}
           onClick={onShowEverything}
         >
-          <PlainLogo size="1rem" fill="var(--logo)" />
+          <Logo size="1.25rem" />
         </ColumnButton>
       </div>
       <div className="flex min-h-0 flex-1 flex-col items-center gap-1 pt-1.5">
