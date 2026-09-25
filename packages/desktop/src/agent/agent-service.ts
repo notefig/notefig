@@ -27,6 +27,7 @@ import {
   type SessionNotification,
   type ToolCallUpdate,
   type TurnOutcome,
+  type SessionConfigSelect,
 } from "@notefig/shared/agent";
 import { platformAdapter } from "@/adapters";
 import { resolveWorkspacePath } from "@/utils/fs";
@@ -167,6 +168,28 @@ type TurnState = {
    */
   entries: AgentEntryWriter;
 };
+
+type SessionUpdate = SessionNotification["update"];
+
+function isToolCallUpdate(
+  update: SessionUpdate,
+): update is Extract<
+  SessionUpdate,
+  { sessionUpdate: "tool_call" | "tool_call_update" }
+> {
+  return (
+    update.sessionUpdate === "tool_call" ||
+    update.sessionUpdate === "tool_call_update"
+  );
+}
+
+/** Session-setting notifications (MET-81) — task-row state, never entries. */
+function isSessionConfigUpdate(update: SessionUpdate): boolean {
+  return (
+    update.sessionUpdate === "current_mode_update" ||
+    update.sessionUpdate === "config_option_update"
+  );
+}
 
 export function contentBlockText(content: ContentBlock): string {
   return content.type === "text" ? content.text : "";
@@ -418,32 +441,7 @@ export class AgentTask {
         );
       }
 
-      this.client = new NotefigAcpClient({
-        taskId: this.taskId,
-        transport,
-        permissionBroker: this.permissionBroker,
-        onSessionUpdate: (notification) =>
-          this.handleSessionUpdate(notification),
-        // Containment in front of the write path, not inside it: a
-        // harness-supplied path is input from a process we do not control,
-        // and `writeWorkspaceTextFile` only asserts absoluteness. Without
-        // this wrapper `fs/write_text_file` with any absolute path reaches
-        // the disk. The wrapper also resolves relative paths, so the inner
-        // pair still always receives the absolute path it requires.
-        fs: withWorkspaceContainment(
-          {
-            readTextFile: readWorkspaceTextFile,
-            writeTextFile: writeWorkspaceTextFile,
-          },
-          { workspacePath: this.workspacePath, path: pathutil },
-        ),
-        onUnsupportedProtocolVersion: (negotiated) =>
-          captureEvent("agent_protocol_version_unsupported", {
-            protocol: "acp",
-            harness: this.harness.id,
-            version: String(negotiated),
-          }),
-      });
+      this.client = this.createClient(transport);
 
       // Bring the transport live before any ACP traffic; spawn failure
       // surfaces here as an AgentTransportError and marks the task errored.
@@ -452,23 +450,7 @@ export class AgentTask {
       // Note: we do NOT surface authHint here — the adapter always advertises
       // authMethods regardless of login (see the auth spike), so the hint only
       // becomes meaningful when a prompt actually fails with "auth required".
-      const mcpServers = this.currentMcpServers();
-      if (options?.resumeSessionId) {
-        await withStartupTimeout(
-          this.resumeSession(options.resumeSessionId, mcpServers),
-          "session/load",
-        );
-      } else {
-        const session = await withStartupTimeout(
-          this.client.newSession(
-            this.agentCwd,
-            mcpServers,
-            this.spawnPrep?.sessionParams,
-          ),
-          "session/new",
-        );
-        this.sessionId = session.sessionId;
-      }
+      await this.establishSession(this.client, options?.resumeSessionId);
       // The sessionId rides the task row — it's what agent-persistence.ts
       // persists and what revival needs back (the old `session:<taskId>` KV
       // side-key is retired; stale keys are inert).
@@ -511,6 +493,60 @@ export class AgentTask {
       }
       throw error instanceof AgentTransportError ? error : new Error(message);
     }
+  }
+
+  private createClient(transport: AgentTransport): NotefigAcpClient {
+    return new NotefigAcpClient({
+      taskId: this.taskId,
+      transport,
+      permissionBroker: this.permissionBroker,
+      onSessionUpdate: (notification) => this.handleSessionUpdate(notification),
+      // Containment in front of the write path, not inside it: a
+      // harness-supplied path is input from a process we do not control,
+      // and `writeWorkspaceTextFile` only asserts absoluteness. Without
+      // this wrapper `fs/write_text_file` with any absolute path reaches
+      // the disk. The wrapper also resolves relative paths, so the inner
+      // pair still always receives the absolute path it requires.
+      fs: withWorkspaceContainment(
+        {
+          readTextFile: readWorkspaceTextFile,
+          writeTextFile: writeWorkspaceTextFile,
+        },
+        { workspacePath: this.workspacePath, path: pathutil },
+      ),
+      onUnsupportedProtocolVersion: (negotiated) =>
+        captureEvent("agent_protocol_version_unsupported", {
+          protocol: "acp",
+          harness: this.harness.id,
+          version: String(negotiated),
+        }),
+      onSessionConfigChange: (_sessionId, options) =>
+        this.writeConfigOptions(options),
+    });
+  }
+
+  /** session/load for a revival, session/new otherwise; sets `sessionId`. */
+  private async establishSession(
+    client: NotefigAcpClient,
+    resumeSessionId: string | undefined,
+  ): Promise<void> {
+    const mcpServers = this.currentMcpServers();
+    if (resumeSessionId) {
+      await withStartupTimeout(
+        this.resumeSession(resumeSessionId, mcpServers),
+        "session/load",
+      );
+      return;
+    }
+    const session = await withStartupTimeout(
+      client.newSession(
+        this.agentCwd,
+        mcpServers,
+        this.spawnPrep?.sessionParams,
+      ),
+      "session/new",
+    );
+    this.sessionId = session.sessionId;
   }
 
   /**
@@ -887,6 +923,48 @@ export class AgentTask {
   }
 
   /**
+   * Switch one of the session's settings (mode, model, …) — MET-81. Allowed
+   * mid-turn: ACP permits it and adapters apply it from the next turn on.
+   * The row is written from the client's callback, so a rejected switch
+   * leaves it showing the real current value. Errors as values, like
+   * `authenticate`.
+   */
+  async setConfigOption(
+    optionId: string,
+    value: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!this.client || !this.sessionId) {
+      return { ok: false, error: "agent session is not ready" };
+    }
+    const category =
+      this.client
+        .sessionConfigOptions(this.sessionId)
+        .find((option) => option.id === optionId)?.category ?? "other";
+    try {
+      await this.client.setSessionConfigOption(
+        this.sessionId,
+        optionId,
+        value,
+      );
+    } catch (error) {
+      return { ok: false, error: errorMessage(error) };
+    }
+    captureEvent("agent_session_config_changed", {
+      harness: this.harness.id,
+      category,
+    });
+    return { ok: true };
+  }
+
+  private writeConfigOptions(options: SessionConfigSelect[]): void {
+    if (agentTasksCollection.get(this.taskId)) {
+      agentTasksCollection.update(this.taskId, (draft) => {
+        draft.configOptions = options;
+      });
+    }
+  }
+
+  /**
    * Clear the auth block and re-send the prompt it interrupted (jumping the
    * queue — it was sent before anything queued behind it). Also the "I've
    * signed in" affordance for out-of-band logins: optimistic, since there's
@@ -1043,13 +1121,15 @@ export class AgentTask {
     // Tool calls coalesce at the task level, so a final tool_call_update that
     // arrives at/after the turn boundary still lands. Handle it before the
     // active-turn guard below.
-    if (
-      update.sessionUpdate === "tool_call" ||
-      update.sessionUpdate === "tool_call_update"
-    ) {
+    if (isToolCallUpdate(update)) {
       this.upsertToolEntry(update);
       return;
     }
+
+    // Mode/config changes are session state the client already folded into
+    // the task row (MET-81); they arrive between turns as readily as during
+    // one and never become transcript entries.
+    if (isSessionConfigUpdate(update)) return;
 
     const turn = this.currentTurn;
     if (!turn) return; // other updates need a turn to attach to
@@ -1099,9 +1179,9 @@ export class AgentTask {
         break;
       }
       default:
-        // D4: available_commands_update / current_mode_update — not rendered
-        // yet, but kept as transcript data rather than dropped. Run
-        // boundaries are left alone.
+        // available_commands_update and the rest — not rendered yet, but
+        // kept as transcript data rather than dropped. Run boundaries are
+        // left alone.
         turn.entries.insert({
           id: newEventId(),
           taskId: this.taskId,
@@ -1778,6 +1858,23 @@ export async function authenticateAgentTask(
   const task = getRegisteredTask(taskId);
   if (!task) return { ok: false, error: "agent task is not started" };
   return task.authenticate(methodId);
+}
+
+/**
+ * Switch one of a task's session settings (MET-81). A restored row revives
+ * first (the switch waits for session/load, which re-advertises the
+ * options), matching how prompts treat asleep sessions.
+ */
+export async function setAgentTaskConfigOption(
+  taskId: string,
+  optionId: string,
+  value: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const revival = reviveAgentTask(taskId);
+  if (revival) await revival.started.catch(() => {});
+  const task = getRegisteredTask(taskId);
+  if (!task) return { ok: false, error: "agent task is not started" };
+  return task.setConfigOption(optionId, value);
 }
 
 /** "I've signed in" — clear the auth block and retry the held prompt. */

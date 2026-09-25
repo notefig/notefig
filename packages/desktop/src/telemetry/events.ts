@@ -26,6 +26,13 @@ export type TelemetryEvent =
       name: "agent_protocol_version_unsupported";
       properties: { protocol: "mcp" | "acp"; harness: string; version: string };
     }
+  | {
+      // A session setting (mode, model, …) switched from the composer
+      // (MET-81). `category` is the spec's coarse option category, never the
+      // chosen value.
+      name: "agent_session_config_changed";
+      properties: { harness: string; category: string };
+    }
   | { name: "tunnel_paired"; properties?: undefined }
   | { name: "update_available"; properties: { to_version: string } }
   | {

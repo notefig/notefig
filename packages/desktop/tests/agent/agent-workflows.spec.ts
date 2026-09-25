@@ -23,6 +23,8 @@ import {
   composer,
   composerButton,
   collectionStats,
+  configPicker,
+  lastWireSet,
   entries,
   exportRecording,
   lastWirePrompt,
@@ -176,15 +178,69 @@ test.describe("agent workflows", () => {
       await sendAndSettle(page, promptTextOf(recording));
 
       await expect(entries(page, "assistant").last()).toContainText("Mode set.");
-      // user, unknown, unknown, assistant in the collection…
-      expect((await collectionStats(page)).entries).toBe(4);
-      // …the unknown ones are rows, but empty ones (kept as data only).
+      // user, unknown (available_commands), assistant in the collection —
+      // current_mode_update is session state on the task row (MET-81), never
+      // an entry…
+      expect((await collectionStats(page)).entries).toBe(3);
+      // …the unknown one is a row, but an empty one (kept as data only).
       const unknownTexts = await entries(page, "unknown").evaluateAll((nodes) =>
         nodes.map((node) => node.textContent?.trim() ?? ""),
       );
-      expect(unknownTexts).toEqual(["", ""]);
+      expect(unknownTexts).toEqual([""]);
       await expect(entries(page, "user")).toHaveCount(1);
       await expect(entries(page, "assistant")).toHaveCount(1);
+      // A harness that advertises no settings gets no pickers, and a mode
+      // update for a session without a mode option changes nothing.
+      await expect(page.locator("[data-session-config]")).toHaveCount(0);
+    });
+
+    test("session settings: pickers read the session's mode/model and switch them over the wire", async ({
+      page,
+    }) => {
+      await setupTestDatabase(page, "workflows-settings");
+      const workspacePath = "/workspace/workflows-settings";
+      await startMockSession(page, workspacePath, {
+        modes: {
+          currentModeId: "default",
+          availableModes: [
+            { id: "default", name: "Default" },
+            { id: "plan", name: "Plan", description: "Read-only planning" },
+          ],
+        },
+        models: {
+          currentModelId: "sonnet",
+          availableModels: [
+            { modelId: "sonnet", name: "Sonnet" },
+            { modelId: "opus", name: "Opus" },
+          ],
+        },
+      });
+
+      const model = configPicker(page, "model");
+      await expect(model).toHaveText(/Sonnet/);
+      // Modes are tracked but parked out of the toolbar for now.
+      await expect(configPicker(page, "mode")).toHaveCount(0);
+
+      // Switch the model: the choice goes out as the unstable set_model and
+      // the trigger follows.
+      await model.click();
+      await page.locator('[data-session-config-choice="opus"]').click();
+      await expect(model).toHaveText(/Opus/);
+      // Closing the menu hands focus back to the composer, not the trigger.
+      await expect(composer(page)).toBeFocused();
+      expect(await lastWireSet(page, "session/set_model")).toEqual({
+        sessionId: expect.any(String),
+        modelId: "opus",
+      });
+
+      // The agent moving its own mode mid-turn stays row state (no entry)
+      // and still doesn't surface a mode picker.
+      const recording = loadRecording("unknown-updates.json");
+      await replayRecording(page, recording);
+      await sendAndSettle(page, promptTextOf(recording));
+      expect((await collectionStats(page)).entries).toBe(3);
+      await expect(configPicker(page, "mode")).toHaveCount(0);
+      await expect(model).toHaveText(/Opus/);
     });
 
     test("a turn that errors keeps its partial text and shows the error banner", async ({

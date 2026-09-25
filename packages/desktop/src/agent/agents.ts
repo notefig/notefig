@@ -25,7 +25,11 @@ import { getRegisteredTask } from "./task-registry";
 // Deferred-use import (see agent-service.ts's matching note): only
 // `workspaceHandle.createTask` and `taskHandle.prompt`'s revival path reach
 // back into the service, at call time.
-import { getOrReviveTask, startAgentTask } from "./agent-service";
+import {
+  getOrReviveTask,
+  setAgentTaskConfigOption,
+  startAgentTask,
+} from "./agent-service";
 import { encodeWidgetContextUri } from "@notefig/agent";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -93,6 +97,13 @@ export interface AgentTaskHandle {
   authenticate(methodId: string): Promise<ActionResult>;
   /** "I've signed in" — clear the auth block and retry the held prompt. */
   retryAfterAuth(): ActionResult;
+  /**
+   * Switch one of the session's settings (mode, model, …) to `value` —
+   * the composer's pickers (MET-81). Reads come off the task row's
+   * `configOptions`; a restored row revives first. Rejections come back as
+   * values and leave the row showing the real current value.
+   */
+  setConfigOption(optionId: string, value: string): Promise<ActionResult>;
 }
 
 export interface AgentTurnHandle {
@@ -211,6 +222,9 @@ function taskHandle(taskId: string): AgentTaskHandle {
       if (!task) return { ok: false, error: "agent task is not started" };
       task.retryHeldPrompt();
       return { ok: true };
+    },
+    setConfigOption(optionId, value) {
+      return setAgentTaskConfigOption(taskId, optionId, value);
     },
   };
 }

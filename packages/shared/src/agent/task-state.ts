@@ -8,7 +8,11 @@
  * neither package owns the other. The collections in the desktop app remain
  * the only place these rows are written.
  */
-import type { AuthMethod, ToolCallUpdate } from "./acp-types";
+import type {
+  AuthMethod,
+  SessionConfigSelect,
+  ToolCallUpdate,
+} from "./acp-types";
 
 export type AgentTaskStatus =
   | "starting"
@@ -66,6 +70,14 @@ export type AgentTaskRow = {
    */
   authRequired?: boolean;
   authMethods?: AuthMethod[];
+  /**
+   * The session's switchable settings (mode, model, …) as the agent last
+   * reported them — MET-81. Runtime-only like `authMethods`: dropped by
+   * `bootAgentTaskRow`, repopulated when session/new or session/load
+   * answers, and kept current by the agent's config/mode notifications.
+   * Absent or empty = the harness advertises nothing (picker hidden).
+   */
+  configOptions?: SessionConfigSelect[];
 };
 
 export type AgentTurnStatus =

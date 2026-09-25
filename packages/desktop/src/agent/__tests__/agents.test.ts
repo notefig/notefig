@@ -77,6 +77,10 @@ describe("agents facade (Stage 1)", () => {
       ok: false,
       error: expect.any(String),
     });
+    expect(await handle.setConfigOption("mode", "plan")).toEqual({
+      ok: false,
+      error: expect.any(String),
+    });
   });
 
   it("task(id).prompt() drives the same underlying AgentTask as the raw class", async () => {
