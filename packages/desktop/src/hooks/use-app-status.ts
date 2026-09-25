@@ -15,7 +15,7 @@ import type {
   AppStatusSection,
   StatusMark,
 } from "@/adapters/platform-adapter.interface";
-import { jumpToRound } from "@/components/agent/jump-to-task";
+import { jumpToRound, jumpToTask } from "@/components/agent/jump-to-task";
 import {
   attentionGlyphState,
   taskGlyphState,
@@ -26,7 +26,11 @@ import {
   useAgentSessionList,
   type AgentTaskMeta,
 } from "@/entities/agents";
-import { mostPressing, useAttention, type Attention } from "@/entities/attention";
+import {
+  useAttention,
+  type Attention,
+  type AttentionItem,
+} from "@/entities/attention";
 import {
   MAX_PROMPT_ROUNDS,
   describePromptRound,
@@ -71,7 +75,7 @@ export interface AppStatusInputs {
   rounds: PromptRound[];
   sessions: AgentTaskMeta[];
   documents: RecentDocument[];
-  attention: Pick<Attention, "byRound" | "byTask">;
+  attention: Pick<Attention, "items" | "overall" | "byRound" | "byTask">;
   t: (key: string) => string;
 }
 
@@ -95,11 +99,55 @@ function sessionMark(
   return kind ? attentionGlyphState(kind) : taskGlyphState(meta.task);
 }
 
-/** The three sections, in the sidebar's order, empty ones left out. */
+/** Where an attention item would be listed, were it recent enough. */
+function listedIdOf(item: AttentionItem): string {
+  return item.target.kind === "document"
+    ? `prompts:${item.turnId}`
+    : `sessions:${item.taskId}`;
+}
+
+/**
+ * The sidebar's "needs attention" card, for what the recency cut leaves
+ * out: an unseen result or an ask on a fourth session still lights the
+ * dot, so the menu must still have a row for it.
+ */
+function attentionSection(
+  { attention, t }: AppStatusInputs,
+  listed: AppStatusSection[],
+  tabs: AppStatusTabs,
+): AppStatusSection {
+  const listedIds = new Set(listed.flatMap((s) => s.entries.map((e) => e.id)));
+  const leftOut = attention.items.filter((item) => !listedIds.has(listedIdOf(item)));
+  return {
+    id: "attention",
+    title: t("needsAttention"),
+    entries: leftOut.slice(0, APP_STATUS_ROWS).map((item) => ({
+      id: `attention:${item.taskId}:${item.turnId}`,
+      label: clip(
+        item.target.kind === "document"
+          ? getFileName(item.target.id)
+          : (item.task?.title ?? item.taskId),
+      ),
+      detail: deriveProjectName(item.workspaceKey),
+      mark: attentionGlyphState(item.kind),
+      activate: () =>
+        item.target.kind === "document" && item.turnId
+          ? jumpToRound(
+              { taskId: item.taskId, turnId: item.turnId, documentPath: item.target.id },
+              tabs.openFile,
+            )
+          : jumpToTask(item.taskId, { turnId: item.turnId, openAgentTab: tabs.openAgentTab }),
+    })),
+  };
+}
+
+/** The three recency sections in the sidebar's order, the attention card
+ *  ahead of them when it has rows, empty ones left out. */
 function sections(
-  { rounds, sessions, documents, attention, t }: AppStatusInputs,
+  inputs: AppStatusInputs,
   tabs: AppStatusTabs,
 ): AppStatusSection[] {
+  const { rounds, sessions, documents, attention, t } = inputs;
   const liveDocuments = new Set(
     rounds.filter(isLiveRound).map((round) => round.documentPath),
   );
@@ -143,7 +191,9 @@ function sections(
       })),
     },
   ];
-  return all.filter((section) => section.entries.length > 0);
+  return [attentionSection(inputs, all, tabs), ...all].filter(
+    (section) => section.entries.length > 0,
+  );
 }
 
 function actions({ host, t }: AppStatusInputs): AppStatusAction[] {
@@ -162,27 +212,14 @@ function actions({ host, t }: AppStatusInputs): AppStatusAction[] {
   return list;
 }
 
-/** The most pressing attention mark among the listed rows — so the dot
- *  always has a row to open, as a section title's dot does in the sidebar. */
-function attentionOf(sections: AppStatusSection[]): StatusMark | null {
-  const kind = sections
-    .flatMap((section) => section.entries)
-    .map((entry) =>
-      entry.mark === "attention-bau" || entry.mark === "attention-error"
-        ? entry.mark.slice("attention-".length) as "bau" | "error"
-        : null,
-    )
-    .reduce(mostPressing, null);
-  return kind && attentionGlyphState(kind);
-}
-
 /** Pure, for tests: the status as a function of what the sidebar shows. */
 export function deriveAppStatus(inputs: AppStatusInputs): AppStatus {
-  const { host } = inputs;
-  const listed = host.tabs ? sections(inputs, host.tabs) : [];
+  const { host, attention } = inputs;
+  // No tabs (welcome), no rows — and no dot, which would point at nothing.
+  const overall = host.tabs ? attention.overall : null;
   return {
-    attention: attentionOf(listed),
-    sections: listed,
+    attention: overall && attentionGlyphState(overall),
+    sections: host.tabs ? sections(inputs, host.tabs) : [],
     actions: actions(inputs),
   };
 }

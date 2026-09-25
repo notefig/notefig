@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentTaskMeta } from "@/entities/agents";
 import type { PromptRound } from "@/entities/prompt-rounds";
 import type { RecentDocument } from "@/entities/recent-documents";
+import type { AttentionItem } from "@/entities/attention";
 import { deriveAppStatus, type AppStatusInputs } from "./use-app-status";
 
 vi.mock("@/adapters", async () => ({
@@ -9,7 +10,7 @@ vi.mock("@/adapters", async () => ({
 }));
 vi.mock("@/entities/workspaces", () => ({ useOpenWorkspaces: () => [] }));
 vi.mock("@/utils/intl", () => ({ default: { t: (key: string) => key } }));
-vi.mock("@/components/agent/jump-to-task", () => ({ jumpToRound: vi.fn() }));
+vi.mock("@/components/agent/jump-to-task", () => ({ jumpToRound: vi.fn(), jumpToTask: vi.fn() }));
 vi.mock("@/entities/scratchpads", () => ({ createAndOpenScratchpad: vi.fn() }));
 
 const tabs = { openFile: vi.fn(() => true), openAgentTab: vi.fn() };
@@ -61,7 +62,7 @@ function inputs(overrides: Partial<AppStatusInputs> = {}): AppStatusInputs {
     rounds: [],
     sessions: [],
     documents: [],
-    attention: { byRound: new Map(), byTask: new Map() },
+    attention: { items: [], overall: null, byRound: new Map(), byTask: new Map() },
     t: (key) => key,
     ...overrides,
   };
@@ -83,6 +84,8 @@ describe("deriveAppStatus", () => {
         sessions: [session("task_a", "running"), session("task_b")],
         documents: [document("/ws-a/notes.md")],
         attention: {
+          items: [],
+          overall: "error",
           byRound: new Map([["t2", "error"]]),
           byTask: new Map([["task_b", "bau"]]),
         },
@@ -98,14 +101,31 @@ describe("deriveAppStatus", () => {
     expect(status.attention).toBe("attention-error");
   });
 
-  it("marks the dot only from a listed row, so the menu can always show what it points at", () => {
+  it("lists what the recency cut leaves out under needs-attention, so the dot always has a row", () => {
+    const unlisted: AttentionItem = {
+      target: { kind: "task", id: "task_z" },
+      kind: "error",
+      taskId: "task_z",
+      turnId: null,
+      since: 5,
+      workspaceKey: "/ws-a",
+      task: session("task_z").task,
+    };
+    const listed: AttentionItem = { ...unlisted, target: { kind: "task", id: "task_a" }, taskId: "task_a" };
     const status = deriveAppStatus(
       inputs({
         sessions: [session("task_a")],
-        attention: { byRound: new Map(), byTask: new Map([["task_unlisted", "error"]]) },
+        attention: {
+          items: [listed, unlisted],
+          overall: "error",
+          byRound: new Map(),
+          byTask: new Map([["task_a", "error"], ["task_z", "error"]]),
+        },
       }),
     );
-    expect(status.attention).toBeNull();
+    expect(status.attention).toBe("attention-error");
+    expect(status.sections.map((s) => s.id)).toEqual(["attention", "sessions"]);
+    expect(status.sections[0].entries.map((e) => e.label)).toEqual(["session task_z"]);
   });
 
   it("reads a document's running mark off every live round, not only the listed ones", () => {
@@ -152,9 +172,11 @@ describe("deriveAppStatus", () => {
       inputs({
         host: { workspacePath: null, tabs: null, openWorkspace: vi.fn(), openSettings: vi.fn() },
         rounds: [round("t1")],
+        attention: { items: [], overall: "bau", byRound: new Map(), byTask: new Map() },
       }),
     );
     expect(welcome.sections).toEqual([]);
+    expect(welcome.attention).toBeNull();
     expect(welcome.actions.map((a) => a.id)).toEqual(["open-workspace", "settings"]);
   });
 });
