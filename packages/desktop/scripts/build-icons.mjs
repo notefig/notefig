@@ -148,8 +148,11 @@ const work = mkdtempSync(join(tmpdir(), "notefig-icons-"));
 const MENU_PX = 36;
 const menuDir = join(icons, "menu");
 mkdirSync(menuDir, { recursive: true });
+// Settled things are quiet (a hairline ring in the muted grey); anything
+// unseen or asking is a filled dot in the sidebar's success / warning.
 const GLYPH_GREY = "#8e8e93";
-const GLYPH_SUCCESS = "#979a7e";
+const GLYPH_MUTED = "#a9a9ae";
+const GLYPH_SUCCESS = "#8c8f72";
 const GLYPH_WARNING = "#c9533a";
 const rasterSvg = (svgText, w, h, out) => {
   const src = join(work, `${out.split("/").pop()}.svg`);
@@ -173,7 +176,7 @@ rasterSvg(
   join(menuDir, "logo-attention.png"),
 );
 const dot = (fill) => `<circle cx="18" cy="18" r="6" fill="${fill}"/>`;
-const ring = (stroke) => `<circle cx="18" cy="18" r="5" fill="none" stroke="${stroke}" stroke-width="2"/>`;
+const ring = (stroke) => `<circle cx="18" cy="18" r="5.5" fill="none" stroke="${stroke}" stroke-width="1.25"/>`;
 // Moving: the sidebar's orb, still — a dot inside a wider ring.
 const pulse = (fill) =>
   `<circle cx="18" cy="18" r="9" fill="none" stroke="${fill}" stroke-width="2" opacity="0.45"/>\n<circle cx="18" cy="18" r="4" fill="${fill}"/>`;
@@ -181,7 +184,7 @@ const document = (fill) =>
   `<path fill="none" stroke="${fill}" stroke-width="2" stroke-linejoin="round" d="M11 7h9l6 6v16H11z M20 7v6h6"/>`;
 for (const [name, body] of [
   ["running", pulse(GLYPH_GREY)],
-  ["settled", ring(GLYPH_GREY)],
+  ["settled", ring(GLYPH_MUTED)],
   ["queued", ring(GLYPH_WARNING)],
   ["error", dot(GLYPH_WARNING)],
   ["attention", dot(GLYPH_SUCCESS)],
