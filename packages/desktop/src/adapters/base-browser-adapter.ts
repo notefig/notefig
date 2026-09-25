@@ -1,6 +1,7 @@
 import type {
   DirectoryEntry,
   BatchResult,
+  AppStatus,
   DbSurface,
   FileSystemError,
   FileSystemMetadata,
@@ -207,6 +208,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     promptText: this.promptText.bind(this),
     openExternal: this.openExternal.bind(this),
     toggleFullscreen: this.toggleFullscreen.bind(this),
+    publishAppStatus: this.publishAppStatus.bind(this),
     addEventListener: this.addEventListener.bind(this),
     removeEventListener: this.removeEventListener.bind(this),
   };
@@ -367,6 +369,9 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   protected onFsEvent(_listener: FsChangeListener): () => void {
     return () => {};
   }
+
+  /** A browser tab has nothing outside its window to show this in. */
+  protected publishAppStatus(_status: AppStatus): void {}
 
   protected async toggleFullscreen(): Promise<void> {
     if (document.fullscreenElement) {

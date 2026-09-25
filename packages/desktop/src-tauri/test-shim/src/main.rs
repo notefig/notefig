@@ -119,6 +119,13 @@ async fn invoke(
     Query(query): Query<HashMap<String, String>>,
     body: Bytes,
 ) -> Response {
+    // The mock window has no AppKit window behind it: `place_traffic_lights`
+    // would dereference the runtime's stand-in pointer and take the shim
+    // down. Answer as a window without standard buttons does — no lights.
+    if cmd == "place_traffic_lights" {
+        return Json(Value::Null).into_response();
+    }
+
     let raw = query.get("raw").map(String::as_str) == Some("1");
 
     let mut headers = tauri::http::HeaderMap::new();

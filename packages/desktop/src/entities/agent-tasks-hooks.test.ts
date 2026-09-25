@@ -57,6 +57,6 @@ describe("describeTaskMeta", () => {
   });
 
   it("idle falls through to relative time", () => {
-    expect(describeTaskMeta(meta())).toBe("just now");
+    expect(describeTaskMeta(meta())).toBeNull();
   });
 });

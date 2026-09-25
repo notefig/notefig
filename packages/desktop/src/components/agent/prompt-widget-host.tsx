@@ -60,6 +60,7 @@ import {
   getOrStartSharedSession,
   peekSharedSession,
 } from "./blob-session-store";
+import { formatTimeAgo } from "@/utils/format";
 
 /** Does this tree-domain token name a real file in the workspace? The
  *  workspace path must stay byte-identical to the collection's workspaceId
@@ -184,7 +185,7 @@ function useSessionList(workspacePath: string): SessionOption[] {
         .map((meta) => ({
           taskId: meta.task.taskId,
           title: meta.task.title,
-          description: describeTaskMeta(meta),
+          description: describeTaskMeta(meta) ?? formatTimeAgo(meta.task.updatedAt),
           harnessId: meta.task.harnessId,
         })),
     [metas],

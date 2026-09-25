@@ -9,9 +9,8 @@ import {
   MessageSquareText,
 } from "lucide-react";
 import { DropdownMenuTrigger } from "@notefig/ui/dropdown-menu";
-import { findPromptBlobForTask } from "@notefig/widgets";
 import { cn } from "@notefig/ui/utils";
-import { jumpToTask } from "@/components/agent/jump-to-task";
+import { jumpToRound, jumpToTask } from "@/components/agent/jump-to-task";
 import {
   SessionListRow,
   useStartSession,
@@ -21,13 +20,12 @@ import {
   attentionGlyphState,
   turnGlyphState,
 } from "@/components/agent/status-glyph";
-import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
 import { AddWorkspaceMenu } from "@/components/editor/global-column";
 import { ScratchpadIcon } from "@/components/editor/scratchpad-icon";
 import { SidebarSeparator } from "@/components/editor/tool-bar";
 import { TOOL_ICONS } from "@/components/editor/workspace-tools";
 import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
-import { useAgentSessionList, type AgentTurnStatus } from "@/entities/agents";
+import { useAgentSessionList } from "@/entities/agents";
 import {
   mostPressing,
   useAttention,
@@ -35,6 +33,7 @@ import {
   type AttentionKind,
 } from "@/entities/attention";
 import {
+  describePromptRound,
   isLiveRound,
   usePromptRounds,
   type PromptRound,
@@ -365,14 +364,6 @@ function AttentionGroup({ items }: { items: AttentionItem[] }) {
   );
 }
 
-/** The trailing note per turn status; settled rounds show when they ran. */
-const ROUND_META_KEYS: Partial<Record<AgentTurnStatus, string>> = {
-  running: "agentRunning",
-  queued: "roundQueued",
-  cancelled: "roundCancelled",
-  error: "agentFailed",
-};
-
 /** A prompt-widget round: the prompt, its state, and a jump back to the
  *  widget in its document. */
 function PromptRoundRow({
@@ -383,19 +374,8 @@ function PromptRoundRow({
   /** Settled since the user last had its document in front. */
   attention: AttentionKind | null;
 }) {
-  const { t } = useTranslation();
   const { openFile } = useWorkspaceTabs();
-  const metaKey = ROUND_META_KEYS[round.status];
   const label = round.prompt || getFileName(round.documentPath);
-  // The widget itself when it is mounted this run; else its document.
-  const jump = () => {
-    const widget = findPromptBlobForTask(round.taskId, round.turnId);
-    if (widget && widget.boundTurnId === round.turnId) {
-      jumpToBlob(widget.documentPath, widget.blobId);
-    } else {
-      openFile({ tabId: round.documentPath, intent: "replace" });
-    }
-  };
   return (
     <NavRow
       leading={
@@ -408,8 +388,8 @@ function PromptRoundRow({
       emphasis={attention !== null}
       label={label}
       title={`${label} · ${getFileName(round.documentPath)} · ${deriveProjectName(round.workspacePath)}`}
-      trailing={metaKey ? t(metaKey) : formatTimeAgo(round.startedAt)}
-      onClick={jump}
+      trailing={describePromptRound(round) ?? formatTimeAgo(round.startedAt)}
+      onClick={() => jumpToRound(round, openFile)}
     />
   );
 }

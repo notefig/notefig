@@ -231,6 +231,9 @@ writes:
 - `public/icon.svg` and `../marketing/site-public/icon.svg` — favicon/header.
 - `src-tauri/icons/*.png`, `icon.ico` (PNG-compressed, 16–256), `Square*Logo.png`
   — Windows/Linux/window icons, full-bleed tile.
+- `src-tauri/icons/menu/*.png` — the macOS menu-bar item (black mark as a
+  template image, plus a variant with a dot beside it) and its menu's row
+  glyphs: the sidebar's status marks and a document, at 2x of AppKit's 18pt.
 - `src-tauri/icons/icon.icns` — via `iconutil`, from `icon-macos.svg`
   (transparent margin + pre-rounded corners, the grid macOS ≤ 15 expects).
 - `src-tauri/icons/Notefig.icon` — Icon Composer bundle for macOS 26 Liquid

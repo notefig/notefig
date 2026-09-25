@@ -44,6 +44,9 @@ grep-regex = "0.1"
 regex = "1.10"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# The menu-bar item (app_status.rs). macOS only: a template icon is a
+# macOS idiom, and the Linux tray would add a libappindicator link.
+tauri = { version = "2", features = ["tray-icon"] }
 # Not cfg-gated internally (objc2 imports) — hard compile error on any
 # non-macOS target, so it must live under a macOS-only dependency table.
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }

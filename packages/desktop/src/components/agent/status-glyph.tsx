@@ -1,31 +1,20 @@
 import { OrbLoader, type OrbState } from "@notefig/ui/orb-loader";
 import { cn } from "@notefig/ui/utils";
 import type { AgentTaskRow, AgentTurnStatus } from "@/entities/agents";
+import type { StatusMark } from "@/adapters/platform-adapter.interface";
 import type { AttentionKind } from "@/entities/attention";
 
 /**
- * One vocabulary for "what state is this agent thing in", wherever a row
- * lists a session, a prompt round or something waiting on the user: the
- * sessions panel and the Everything view draw from the same glyphs, so a
- * spinner means the same thing in both. Deliberately quiet — a hairline
- * ring for anything settled, a filled dot for anything asking, a thin
- * orb (the prompt widget's own) for anything moving — so a list of them
- * reads as text, not as an icon strip.
+ * The sidebar's rendering of `StatusMark` — one vocabulary for "what state
+ * is this agent thing in", wherever a row lists a session, a prompt round
+ * or something waiting on the user: the sessions panel, the Everything view
+ * and the platform's outside-the-window view all draw from it, so a spinner
+ * means the same thing in each. Deliberately quiet — a hairline ring for
+ * anything settled, a filled dot for anything asking, a thin orb (the prompt
+ * widget's own) for anything moving — so a list of them reads as text, not
+ * as an icon strip.
  */
-export type StatusGlyphState =
-  | "starting"
-  | "running"
-  | "queued"
-  | "idle"
-  | "done"
-  | "cancelled"
-  | "error"
-  | "unavailable"
-  | "auth"
-  /** Something finished here since the user last looked — the sage dot. */
-  | "attention-bau"
-  /** Something failed or is asking — the terracotta the prompt widget uses. */
-  | "attention-error";
+export type StatusGlyphState = StatusMark;
 
 type GlyphSpec =
   | { shape: "orb"; orb: OrbState; tone: string }

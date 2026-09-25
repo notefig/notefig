@@ -77,6 +77,22 @@ export interface WorkspacePanels {
   openSessionsSidebar: () => void;
 }
 
+/** Open the settings modal — a URL param, so it works with or without a
+ *  workspace in front (the shell and the welcome screen both use it). */
+export function useOpenSettings(): () => void {
+  const [, setUrlSearchParams] = useSearchParams();
+  return useCallback(() => {
+    setUrlSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("settings", DEFAULT_SETTINGS_SECTION);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setUrlSearchParams]);
+}
+
 export function useWorkspacePanels({
   workspacePath,
   searchPanelRef,
@@ -156,16 +172,7 @@ export function useWorkspacePanels({
     );
   }, [isSidebarCollapsed, setUrlSearchParams]);
 
-  const openSettings = useCallback(() => {
-    setUrlSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.set("settings", DEFAULT_SETTINGS_SECTION);
-        return next;
-      },
-      { replace: true },
-    );
-  }, [setUrlSearchParams]);
+  const openSettings = useOpenSettings();
 
   const openSearchPanel = useCallback(
     (options?: { filePattern?: string; initialQuery?: string }) => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { withMockedTauri } from "@/testing/tauri-mock";
 import { createGitStorageHost } from "../git-storage-host";
 import { TauriPlatformAdapter } from "../tauri-adapter";
@@ -161,5 +161,68 @@ describe("metadata date revival", () => {
     expect(entry.modifiedAt.getTime()).toBe(1_700_000_000_000);
     expect(entry.createdAt).toBeInstanceOf(Date);
     expect(entry.createdAt.getTime()).toBe(1_600_000_000_000);
+  });
+});
+
+describe("TauriPlatformAdapter app status", () => {
+  const status = (label: string, activate = () => {}) => ({
+    attention: "attention-bau" as const,
+    sections: [
+      {
+        id: "prompts",
+        title: "Prompts",
+        entries: [{ id: "prompts:t1", label, mark: "done" as const, activate }],
+      },
+    ],
+    actions: [{ id: "settings", label: "Settings", activate }],
+  });
+
+  it("sends the status with callbacks stripped, once per distinct content", () => {
+    const tauri = withMockedTauri({ publish_app_status: () => null });
+    const adapter = new TauriPlatformAdapter();
+
+    adapter.ui.publishAppStatus(status("Fix the tests"));
+    adapter.ui.publishAppStatus(status("Fix the tests", () => {}));
+    adapter.ui.publishAppStatus(status("Write docs"));
+
+    expect(tauri.calls("publish_app_status")).toEqual([
+      {
+        status: {
+          attention: "attention-bau",
+          sections: [
+            {
+              id: "prompts",
+              title: "Prompts",
+              entries: [
+                { id: "prompts:t1", label: "Fix the tests", detail: null, mark: "done" },
+              ],
+            },
+          ],
+          actions: [{ id: "settings", label: "Settings" }],
+        },
+      },
+      expect.objectContaining({
+        status: expect.objectContaining({
+          sections: [expect.objectContaining({ entries: [expect.objectContaining({ label: "Write docs" })] })],
+        }),
+      }),
+    ]);
+  });
+
+  it("routes an activation from the platform to the latest published callback", async () => {
+    const tauri = withMockedTauri({ publish_app_status: () => null });
+    const adapter = new TauriPlatformAdapter();
+    const stale = vi.fn();
+    const fresh = vi.fn();
+
+    adapter.ui.publishAppStatus(status("Fix the tests", stale));
+    adapter.ui.publishAppStatus(status("Fix the tests", fresh));
+    // listen() rides IPC; let its registration settle before emitting.
+    await Promise.resolve();
+    tauri.emit("app-status-activated", "settings");
+    tauri.emit("app-status-activated", "unknown");
+
+    expect(stale).not.toHaveBeenCalled();
+    expect(fresh).toHaveBeenCalledTimes(1);
   });
 });

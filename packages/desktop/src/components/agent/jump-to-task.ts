@@ -8,6 +8,8 @@
  */
 import { findPromptBlobForTask } from "@notefig/widgets";
 import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
+import type { PromptRound } from "@/entities/prompt-rounds";
+import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 
 export type JumpTarget = "widget" | "chat";
 
@@ -38,4 +40,20 @@ export function jumpToTask(
   }
   options.openAgentTab(taskId);
   return "chat";
+}
+
+/**
+ * Jump to a prompt round: the widget itself when it is mounted this run
+ * and still bound to the round, else its document.
+ */
+export function jumpToRound(
+  round: Pick<PromptRound, "taskId" | "turnId" | "documentPath">,
+  openFile: (options: OpenFileInLayoutOptions) => boolean,
+): void {
+  const widget = findPromptBlobForTask(round.taskId, round.turnId);
+  if (widget && widget.boundTurnId === round.turnId) {
+    jumpToBlob(widget.documentPath, widget.blobId);
+  } else {
+    openFile({ tabId: round.documentPath, intent: "replace" });
+  }
 }

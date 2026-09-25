@@ -8,6 +8,7 @@
 //!   - the real-backend e2e shim (`test-shim` crate, a workspace sibling).
 
 pub mod agent_proc;
+pub mod app_status;
 pub mod db_ops;
 pub mod file_watcher;
 pub mod fs_ops;
@@ -66,5 +67,7 @@ pub fn register_handlers<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
         db_ops::db_reset,
         // macOS traffic-light pinning (errors-as-values pattern)
         traffic_lights::place_traffic_lights,
+        // The menu-bar item, drawn from the frontend's status
+        app_status::publish_app_status,
     ])
 }
