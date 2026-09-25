@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for every binary Tauri signs in the macOS bundle (the app and
+  its sidecars). Release builds run under the hardened runtime, which denies
+  JIT memory by default; the bundled Claude adapter is Node (V8), which aborts
+  at startup without it ("Failed to reserve virtual memory for CodeRange").
+  MET-211. Keep this minimal: allow-jit is all V8 needs.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+</dict>
+</plist>

@@ -50,6 +50,9 @@
     "createUpdaterArtifacts": true,
     "targets": "all",
     "externalBin": ["binaries/claude-agent-acp"],
+    "macOS": {
+      "entitlements": "./Entitlements.plist"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/64x64.png",
