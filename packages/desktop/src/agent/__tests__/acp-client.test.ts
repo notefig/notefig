@@ -333,6 +333,27 @@ describe("session config options over the wire", () => {
     expect(after[0].currentValue).toBe("opus");
   });
 
+  it("concurrent legacy switches both survive (each applies onto the latest list)", async () => {
+    const { client, agent } = makeConfigClient({ modes, models });
+    agent.onSetMode = async () => ({});
+    let releaseModel: (() => void) | undefined;
+    agent.onSetModel = () =>
+      new Promise((resolve) => {
+        releaseModel = () => resolve({});
+      });
+    await client.connect();
+    await client.newSession("/ws");
+    // The model switch is in flight when the mode switch completes.
+    const modelSwitch = client.setSessionConfigOption("sess_cfg", "model", "opus");
+    await client.setSessionConfigOption("sess_cfg", "mode", "plan");
+    await vi.waitFor(() => expect(releaseModel).toBeDefined());
+    releaseModel!();
+    await modelSwitch;
+    expect(
+      client.sessionConfigOptions("sess_cfg").map((o) => o.currentValue),
+    ).toEqual(["plan", "opus"]);
+  });
+
   it("rejects a switch the agent refuses and leaves the options unchanged", async () => {
     const { client, agent } = makeConfigClient({ modes });
     agent.onSetMode = async () => {

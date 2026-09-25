@@ -12,7 +12,7 @@
  * lists every provider's models) get a filter box at the top; short lists
  * (an effort level) stay a plain menu.
  */
-import { useRef, useState } from "react";
+import { useState } from "react";
 import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -30,7 +30,7 @@ import {
   CommandItem,
   CommandList,
 } from "@notefig/ui/command";
-import { Popover, PopoverAnchor, PopoverContent } from "@notefig/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@notefig/ui/popover";
 import { agents } from "@/agent/agents";
 import { useTaskRow } from "@/entities/agents";
 
@@ -150,7 +150,6 @@ function SessionConfigPicker({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
   const groups = choiceGroups(option);
   const choiceCount = groups.reduce((n, g) => n + g.choices.length, 0);
   const choose = async (value: string) => {
@@ -166,19 +165,10 @@ function SessionConfigPicker({
   return (
     <Popover open={open} onOpenChange={setOpen} modal>
       {/* Modal (like the dropdown menus), so the composer's focus handling
-          can't pull focus out of the open list and dismiss it; an anchor +
-          pointerdown toggle rather than PopoverTrigger for the same reason:
-          the click Radix's trigger waits for never arrives. */}
-      <PopoverAnchor asChild>
+          can't pull focus out of the open list and dismiss it. */}
+      <PopoverTrigger asChild>
         <button
-          ref={triggerRef}
           type="button"
-          onPointerDown={(event) => {
-            event.preventDefault();
-            setOpen((wasOpen) => !wasOpen);
-          }}
-          aria-haspopup="listbox"
-          aria-expanded={open}
           className="flex h-4 max-w-[8rem] items-center rounded px-1 text-[0.625rem] leading-4 text-muted-foreground hover:bg-accent hover:text-foreground"
           title={option.description ?? option.name}
           aria-label={t("agentChangeSetting", { name: option.name })}
@@ -187,16 +177,10 @@ function SessionConfigPicker({
         >
           <span className="truncate">{triggerLabel(option)}</span>
         </button>
-      </PopoverAnchor>
+      </PopoverTrigger>
       <PopoverContent
         align="start"
         className="w-auto min-w-[9rem] max-w-[16rem] p-0"
-        onInteractOutside={(event) => {
-          // The anchor's own pointerdown toggles; don't also close here.
-          if (triggerRef.current?.contains(event.target as Node)) {
-            event.preventDefault();
-          }
-        }}
         onCloseAutoFocus={(event) => {
           // Radix would hand focus back to the trigger; the composer is
           // where the user was going.

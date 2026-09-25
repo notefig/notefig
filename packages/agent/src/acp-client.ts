@@ -323,12 +323,23 @@ export class NotefigAcpClient implements Client {
     optionId: string,
     value: string,
   ): Promise<SessionConfigSelect[]> {
-    const state = this.sessionConfigs.get(sessionId) ?? EMPTY_CONFIG;
-    const source = state.sources.get(optionId);
+    const source = this.sessionConfigs.get(sessionId)?.sources.get(optionId);
     if (!source) {
       throw new Error(`session has no config option "${optionId}"`);
     }
     const connection = this.requireConnection();
+    // The legacy methods answer nothing, so the value is applied onto the
+    // list as it is AFTER the round trip — a concurrent switch of another
+    // option (or a folded notification) landed meanwhile and must survive.
+    const applyLocally = () =>
+      this.storeSessionConfig(
+        sessionId,
+        withCurrentValue(
+          this.sessionConfigs.get(sessionId) ?? EMPTY_CONFIG,
+          optionId,
+          value,
+        ),
+      );
     switch (source) {
       case "config": {
         const response = await connection.setSessionConfigOption({
@@ -344,10 +355,7 @@ export class NotefigAcpClient implements Client {
       }
       case "mode":
         await connection.setSessionMode({ sessionId, modeId: value });
-        this.storeSessionConfig(
-          sessionId,
-          withCurrentValue(state, optionId, value),
-        );
+        applyLocally();
         break;
       case "model":
         // Pre-1.x unstable method: not in the SDK's typed surface, so it
@@ -356,10 +364,7 @@ export class NotefigAcpClient implements Client {
           sessionId,
           modelId: value,
         });
-        this.storeSessionConfig(
-          sessionId,
-          withCurrentValue(state, optionId, value),
-        );
+        applyLocally();
         break;
     }
     return this.sessionConfigOptions(sessionId);

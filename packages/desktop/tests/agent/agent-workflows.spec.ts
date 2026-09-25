@@ -228,6 +228,14 @@ test.describe("agent workflows", () => {
       await expect(model).toHaveText(/Opus/);
       // Closing the menu hands focus back to the composer, not the trigger.
       await expect(composer(page)).toBeFocused();
+
+      // Keyboard path: a focused trigger opens on Enter, and the list is
+      // navigable without a pointer.
+      await model.focus();
+      await page.keyboard.press("Enter");
+      await expect(page.locator('[data-session-config-choice="sonnet"]')).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(composer(page)).toBeFocused();
       expect(await lastWireSet(page, "session/set_model")).toEqual({
         sessionId: expect.any(String),
         modelId: "opus",
