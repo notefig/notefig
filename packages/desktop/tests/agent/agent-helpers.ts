@@ -21,11 +21,21 @@ import {
 export async function startMockSession(
   page: Page,
   workspacePath: string,
+  /** Extra `session/new` answer fields the mock agent advertises — `modes`,
+   *  `models`, `configOptions` — for the session-settings pickers (MET-81). */
+  session?: Record<string, unknown>,
 ): Promise<void> {
   await openWorkspace(page, workspacePath);
   // The open set is persisted, so a reload with the sessions view in the
   // URL comes back into the same workspace.
   await page.goto("/?sidebarView=sessions");
+  if (session) {
+    await page.evaluate(
+      (session) =>
+        (window as any).__mockAgent.configure({ scenario: "echo", session }),
+      session,
+    );
+  }
   await page
     .getByRole("button", { name: /New session with/ })
     .first()
@@ -296,4 +306,22 @@ export async function sendWidgetPrompt(
   if (await trustGate.isVisible().catch(() => false)) {
     await page.keyboard.press("Enter");
   }
+}
+
+// ─── Session settings (MET-81) ──────────────────────────────────────────────
+
+/** The composer's picker for one session setting (`data-session-config` = option id). */
+export function configPicker(page: Page, optionId: string) {
+  return page.locator(`[data-session-config="${optionId}"]`);
+}
+
+/** The params the mock agent captured for a `session/set_*` method. */
+export async function lastWireSet(
+  page: Page,
+  method: string,
+): Promise<Record<string, unknown> | null> {
+  return page.evaluate(
+    (method) => (window as any).__mockAgent.lastSet(method),
+    method,
+  );
 }

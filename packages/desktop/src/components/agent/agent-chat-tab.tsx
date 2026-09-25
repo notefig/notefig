@@ -63,6 +63,7 @@ import { mentionContextParts } from "./prompt-widget-host";
 import { PermissionCard } from "./permission-card";
 import { AuthCard } from "./auth-card";
 import { HarnessLogo } from "@notefig/ui/harness-logo";
+import { SessionConfigBar } from "./session-config-bar";
 import {
   clearComposerDraft,
   getComposerDraft,
@@ -324,6 +325,7 @@ function ComposerOverlay({
           onCancelRestore={cancelAndRestore}
           isRunning={isRunning}
           disabled={isLoadingSession}
+          taskId={taskId}
           harnessId={taskRow.harnessId}
           workspacePath={taskRow.workspacePath}
           composerRef={composerRef}
@@ -1238,10 +1240,12 @@ function ToolContentView({ item }: { item: ToolCallContent }) {
 }
 
 /** One-line-ish preview of a tool's raw input; prefer a `command` field. */
-function rawInputPreview(rawInput: Record<string, unknown>): string {
-  if (typeof rawInput.command === "string") return rawInput.command;
+// `rawInput` is `unknown` on the wire (whatever the harness handed its tool).
+function rawInputPreview(rawInput: unknown): string {
+  const command = (rawInput as { command?: unknown } | null)?.command;
+  if (typeof command === "string") return command;
   try {
-    return JSON.stringify(rawInput);
+    return JSON.stringify(rawInput) ?? String(rawInput);
   } catch {
     return String(rawInput);
   }
@@ -1263,6 +1267,7 @@ function PromptBox({
   onCancelRestore,
   isRunning,
   disabled = false,
+  taskId,
   harnessId,
   workspacePath,
   composerRef,
@@ -1276,6 +1281,7 @@ function PromptBox({
   isRunning: boolean;
   /** Session history is loading (session/load) — no inputs until it lands. */
   disabled?: boolean;
+  taskId: string;
   harnessId: string;
   workspacePath: string;
   /** The tab controller focuses the tab by focusing this. */
@@ -1314,11 +1320,13 @@ function PromptBox({
       />
       <div className="flex items-center gap-1 px-2 pb-2">
         {/* The session is pinned to one harness — a passive indicator, not
-            a picker (the sidebar's new-session split button chooses). */}
-        <span className="flex items-center gap-1.5 px-1.5 text-[0.6875rem] text-muted-foreground">
-          <HarnessLogo harnessId={harnessId} className="size-3" />
+            a picker (the sidebar's new-session split button chooses). The
+            session's switchable settings (mode, model, …) follow it. */}
+        <span className="flex h-4 items-center gap-1 px-1 text-[0.625rem] leading-4 text-muted-foreground">
+          <HarnessLogo harnessId={harnessId} className="size-2.5" />
           {harnessLabel}
         </span>
+        <SessionConfigBar taskId={taskId} composerRef={composerRef} />
 
         <div className="ms-auto flex items-center gap-1">
           <ComposerActionButton

@@ -41,6 +41,12 @@ jobs:
         working-directory: packages/desktop
         run: npm install
 
+      # MET-210: the bundled ACP adapter sidecar (see release-desktop.yml).
+      - name: Build sidecars
+        working-directory: packages/desktop
+        shell: bash
+        run: node scripts/build-sidecars.mjs --target x86_64-pc-windows-msvc
+
       # createUpdaterArtifacts: true makes the build produce (and require the
       # key for) the minisign .sig next to the installer.
       - name: Build NSIS installer

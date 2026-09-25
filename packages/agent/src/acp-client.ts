@@ -1,13 +1,11 @@
-import {
-  ClientSideConnection,
-  ndJsonStream,
-} from "@zed-industries/agent-client-protocol";
+import { ClientSideConnection, ndJsonStream } from "@agentclientprotocol/sdk";
 import type {
   AuthMethod,
   Client,
   ClientCapabilities,
   ContentBlock,
   InitializeResponse,
+  LegacyModelState,
   LoadSessionResponse,
   McpServer,
   NewSessionResponse,
@@ -16,6 +14,8 @@ import type {
   ReadTextFileResponse,
   RequestPermissionRequest,
   RequestPermissionResponse,
+  SessionConfigOption,
+  SessionConfigSelect,
   SessionNotification,
   WriteTextFileRequest,
   WriteTextFileResponse,
@@ -35,10 +35,6 @@ import type { PermissionRequester } from "./permission-requester";
 export const SUPPORTED_ACP_PROTOCOL_VERSIONS: readonly number[] = [1];
 
 const PROTOCOL_VERSION = Math.max(...SUPPORTED_ACP_PROTOCOL_VERSIONS);
-
-/** Ids for raw requests sent outside the library (closeSession) — string
- *  ids, so they can never collide with the library's numeric counter. */
-let rawRequestCounter = 0;
 
 /**
  * Capabilities are a function of where the agent process runs relative to
@@ -70,6 +66,117 @@ export type AcpFileSystem = {
   writeTextFile(path: string, content: string): Promise<void>;
 };
 
+/**
+ * Which wire surface a normalized config option came from — decides the
+ * method a switch goes out as. Module-private on purpose: above this file
+ * every option is just a `SessionConfigSelect`.
+ */
+type ConfigSource = "config" | "mode" | "model";
+
+type SessionConfigState = {
+  options: SessionConfigSelect[];
+  sources: Map<string, ConfigSource>;
+};
+
+/** The unstable `models` block older adapters still attach to session answers. */
+type LegacyModels = { models?: LegacyModelState | null };
+
+const EMPTY_CONFIG: SessionConfigState = { options: [], sources: new Map() };
+
+/** Ids of the options synthesized from the legacy mode/model surfaces. */
+const LEGACY_MODE_OPTION_ID = "mode";
+const LEGACY_MODEL_OPTION_ID = "model";
+
+function isSelectOption(
+  option: SessionConfigOption,
+): option is SessionConfigSelect {
+  return option.type === "select";
+}
+
+/** Native `configOptions` as the state: booleans dropped (never advertised). */
+function fromConfigOptions(
+  configOptions: readonly SessionConfigOption[],
+): SessionConfigState {
+  const options = configOptions.filter(isSelectOption);
+  return {
+    options,
+    sources: new Map(options.map((option) => [option.id, "config"])),
+  };
+}
+
+/**
+ * Fold whatever a session/new or session/load answer carries into one
+ * option list. Native `configOptions` win outright (spec: clients SHOULD
+ * ignore `modes` when they are present); otherwise legacy `modes` and the
+ * unstable pre-1.x `models` block synthesize a mode and a model option, in
+ * that order, so a picker built on this list looks the same either way.
+ */
+export function normalizeSessionConfig(
+  response: Pick<NewSessionResponse, "modes" | "configOptions"> & {
+    models?: LegacyModelState | null;
+  },
+): SessionConfigState {
+  if (response.configOptions && response.configOptions.length > 0) {
+    return fromConfigOptions(response.configOptions);
+  }
+  const state: SessionConfigState = { options: [], sources: new Map() };
+  if (response.modes) {
+    state.options.push({
+      id: LEGACY_MODE_OPTION_ID,
+      name: "Mode",
+      category: "mode",
+      type: "select",
+      currentValue: response.modes.currentModeId,
+      options: response.modes.availableModes.map((mode) => ({
+        value: mode.id,
+        name: mode.name,
+        description: mode.description,
+      })),
+    });
+    state.sources.set(LEGACY_MODE_OPTION_ID, "mode");
+  }
+  if (response.models) {
+    state.options.push({
+      id: LEGACY_MODEL_OPTION_ID,
+      name: "Model",
+      category: "model",
+      type: "select",
+      currentValue: response.models.currentModelId,
+      options: response.models.availableModels.map((model) => ({
+        value: model.modelId,
+        name: model.name,
+        description: model.description,
+      })),
+    });
+    state.sources.set(LEGACY_MODEL_OPTION_ID, "model");
+  }
+  return state;
+}
+
+/** The same state with one option's current value replaced. */
+function withCurrentValue(
+  state: SessionConfigState,
+  optionId: string,
+  value: string,
+): SessionConfigState {
+  return {
+    sources: state.sources,
+    options: state.options.map((option) =>
+      option.id === optionId ? { ...option, currentValue: value } : option,
+    ),
+  };
+}
+
+/**
+ * The option a `current_mode_update` addresses: the legacy-sourced mode
+ * option, else the native option in the `mode` category (an agent may send
+ * both surfaces). Undefined when the session advertises no mode at all.
+ */
+function modeOptionId(state: SessionConfigState): string | undefined {
+  for (const [id, source] of state.sources) if (source === "mode") return id;
+  return state.options.find((option) => option.category === "mode")?.id;
+}
+
 export type AcpClientDeps = {
   /** The task this connection belongs to — one connection per task. */
   taskId: string;
@@ -77,6 +184,16 @@ export type AcpClientDeps = {
   permissionBroker: PermissionRequester;
   /** AgentTask sink for session/update notifications */
   onSessionUpdate: (notification: SessionNotification) => void;
+  /**
+   * The session's switchable settings changed — after session/new and
+   * session/load answer, after a switch, and on the agent's own
+   * config/mode notifications (folded here, so the sink never re-derives
+   * them from the raw update). Always the full current list.
+   */
+  onSessionConfigChange?: (
+    sessionId: string,
+    options: SessionConfigSelect[],
+  ) => void;
   fs: AcpFileSystem;
   /** Fired just before connect() rejects on an unsupported negotiated
    *  version — observability hook (desktop wires telemetry). */
@@ -97,6 +214,8 @@ export class NotefigAcpClient implements Client {
   private authMethods: AuthMethod[] = [];
   private agentCapabilities: InitializeResponse["agentCapabilities"] =
     undefined;
+  /** Per-session normalized config options + where each one came from. */
+  private readonly sessionConfigs = new Map<string, SessionConfigState>();
 
   constructor(private readonly deps: AcpClientDeps) {}
 
@@ -107,7 +226,10 @@ export class NotefigAcpClient implements Client {
     // input is where we receive them. Our transport's writable decodes lines
     // into transport.send(); its readable enqueues incoming lines.
     const stream = ndJsonStream(writable, readable);
-    // The ClientSideConnection is itself the Agent-side handle we call.
+    // The ClientSideConnection is itself the Agent-side handle we call. The
+    // SDK marks this constructor deprecated in favour of its `client()`
+    // builder; the builder only adds connection-scoped context we don't use,
+    // so the direct form stays until a spec bump forces the switch.
     this.connection = new ClientSideConnection(() => this, stream);
 
     const response = await this.connection.initialize({
@@ -142,11 +264,16 @@ export class NotefigAcpClient implements Client {
      *  `additionalDirectories`), spread into the request verbatim. */
     extensionParams: Record<string, unknown> = {},
   ): Promise<NewSessionResponse> {
-    return this.requireConnection().newSession({
+    const response = await this.requireConnection().newSession({
       cwd,
       mcpServers,
       ...extensionParams,
     });
+    this.storeSessionConfig(
+      response.sessionId,
+      normalizeSessionConfig(response as NewSessionResponse & LegacyModels),
+    );
+    return response;
   }
 
   /**
@@ -163,12 +290,118 @@ export class NotefigAcpClient implements Client {
      *  fields it was created with would drop what they granted. */
     extensionParams: Record<string, unknown> = {},
   ): Promise<LoadSessionResponse> {
-    return this.requireConnection().loadSession({
+    const response = await this.requireConnection().loadSession({
       sessionId,
       cwd,
       mcpServers,
       ...extensionParams,
     });
+    this.storeSessionConfig(
+      sessionId,
+      normalizeSessionConfig(response as LoadSessionResponse & LegacyModels),
+    );
+    return response;
+  }
+
+  /** The session's switchable settings as last reported (empty = none). */
+  sessionConfigOptions(sessionId: string): SessionConfigSelect[] {
+    return this.sessionConfigs.get(sessionId)?.options ?? [];
+  }
+
+  /**
+   * Switch one of the session's settings. Dispatches on where the option
+   * came from: native options go out as `session/set_config_option` and the
+   * agent's answer becomes the new list; a legacy mode as
+   * `session/set_mode`; the unstable model surface as `session/set_model`.
+   * The legacy methods answer nothing, so the value is applied locally (the
+   * agent may echo a `current_mode_update` too, which folds to the same
+   * state). Rejects on a JSON-RPC error with the list unchanged. Resolves
+   * with the list after the switch.
+   */
+  async setSessionConfigOption(
+    sessionId: string,
+    optionId: string,
+    value: string,
+  ): Promise<SessionConfigSelect[]> {
+    const source = this.sessionConfigs.get(sessionId)?.sources.get(optionId);
+    if (!source) {
+      throw new Error(`session has no config option "${optionId}"`);
+    }
+    const connection = this.requireConnection();
+    // The legacy methods answer nothing, so the value is applied onto the
+    // list as it is AFTER the round trip — a concurrent switch of another
+    // option (or a folded notification) landed meanwhile and must survive.
+    const applyLocally = () =>
+      this.storeSessionConfig(
+        sessionId,
+        withCurrentValue(
+          this.sessionConfigs.get(sessionId) ?? EMPTY_CONFIG,
+          optionId,
+          value,
+        ),
+      );
+    switch (source) {
+      case "config": {
+        const response = await connection.setSessionConfigOption({
+          sessionId,
+          configId: optionId,
+          value,
+        });
+        this.storeSessionConfig(
+          sessionId,
+          fromConfigOptions(response.configOptions),
+        );
+        break;
+      }
+      case "mode":
+        await connection.setSessionMode({ sessionId, modeId: value });
+        applyLocally();
+        break;
+      case "model":
+        // Pre-1.x unstable method: not in the SDK's typed surface, so it
+        // goes out as an extension call with the params it always took.
+        await connection.extMethod("session/set_model", {
+          sessionId,
+          modelId: value,
+        });
+        applyLocally();
+        break;
+    }
+    return this.sessionConfigOptions(sessionId);
+  }
+
+  private storeSessionConfig(
+    sessionId: string,
+    state: SessionConfigState,
+  ): void {
+    this.sessionConfigs.set(sessionId, state);
+    this.deps.onSessionConfigChange?.(sessionId, state.options);
+  }
+
+  /**
+   * Keep the stored options current from the agent's own notifications:
+   * `config_option_update` carries the whole new list; `current_mode_update`
+   * moves the mode option's value (a value outside the advertised choices is
+   * kept as-is — the picker shows the raw id rather than nothing).
+   */
+  private foldSessionConfigUpdate(notification: SessionNotification): void {
+    const { sessionId, update } = notification;
+    if (update.sessionUpdate === "config_option_update") {
+      this.storeSessionConfig(
+        sessionId,
+        fromConfigOptions(update.configOptions),
+      );
+      return;
+    }
+    if (update.sessionUpdate === "current_mode_update") {
+      const state = this.sessionConfigs.get(sessionId);
+      const optionId = state && modeOptionId(state);
+      if (!state || !optionId) return;
+      this.storeSessionConfig(
+        sessionId,
+        withCurrentValue(state, optionId, update.currentModeId),
+      );
+    }
   }
 
   async prompt(
@@ -187,62 +420,14 @@ export class NotefigAcpClient implements Client {
    * killing the process — a following `session/load` then rebuilds it from
    * the harness's persisted store, which is the full re-sync primitive
    * (docs/architecture/acp-two-way-spike.md §4.5; a repeat load without the
-   * close re-syncs only the transcript, not the model's context).
-   *
-   * Current adapters route the method, but the pinned @zed-industries client
-   * doesn't surface it (its extMethod prefixes `_`), so this rides the
-   * transport as a raw JSON-RPC request. A string id can't collide with the
-   * library's own numeric counter; the library's only reaction to the
-   * response is a console note ("unknown request"). Rejects on a JSON-RPC
-   * error (an adapter without the method answers -32601) and on transport
-   * close — callers treat failure as "close unsupported" and fall back to a
-   * plain reload.
+   * close re-syncs only the transcript, not the model's context). Rejects on
+   * a JSON-RPC error (an adapter without the method answers -32601) and on
+   * transport close — callers treat failure as "close unsupported" and fall
+   * back to a plain reload.
    */
   async closeSession(sessionId: string): Promise<void> {
-    this.requireConnection(); // same pipe — only meaningful once connected
-    const transport = this.deps.transport;
-    const id = `notefig-close-${++rawRequestCounter}`;
-    await new Promise<void>((resolve, reject) => {
-      const unsubscribers: Array<() => void> = [];
-      const settle = (finish: () => void) => {
-        for (const unsubscribe of unsubscribers) unsubscribe();
-        finish();
-      };
-      unsubscribers.push(
-        transport.onLine((line) => {
-          let message: { id?: unknown; error?: { message?: unknown } };
-          try {
-            message = JSON.parse(line);
-          } catch {
-            return;
-          }
-          if (message.id !== id) return;
-          if (message.error) {
-            const reason = message.error.message;
-            settle(() =>
-              reject(
-                new Error(
-                  typeof reason === "string" ? reason : "session/close failed",
-                ),
-              ),
-            );
-          } else {
-            settle(resolve);
-          }
-        }),
-        transport.onClose(() =>
-          settle(() => reject(new Error("transport closed"))),
-        ),
-      );
-      transport.send(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          id,
-          method: "session/close",
-          params: { sessionId },
-        }),
-      );
-    });
+    await this.requireConnection().closeSession({ sessionId });
+    this.sessionConfigs.delete(sessionId);
   }
 
   /**
@@ -332,6 +517,7 @@ export class NotefigAcpClient implements Client {
   }
 
   async sessionUpdate(notification: SessionNotification): Promise<void> {
+    this.foldSessionConfigUpdate(notification);
     this.deps.onSessionUpdate(notification);
   }
 }

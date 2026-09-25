@@ -80,13 +80,41 @@ export class FakeAgent {
     async () => ({});
   /** Captured `session/close` params (refresh re-sync assertions). */
   closeSessionParams: Json | null = null;
-  /** Scripted `session/close` (the app sends it as a raw request — the
-   *  pinned client library predates the method); throwing rejects it,
-   *  which callers treat as "close unsupported". */
+  /** Scripted `session/close`; throwing rejects it, which callers treat
+   *  as "close unsupported". */
   onCloseSession: (params: Json, agent: FakeAgent) => Promise<Json> =
     async () => ({});
   /** `session/cancel` notification hook (the harness aborts its scenario). */
   onCancel: (params: Json, agent: FakeAgent) => void = () => {};
+  /** Captured params of the last `session/set_mode` / `session/set_model`
+   *  / `session/set_config_option` call, keyed by method (MET-81). */
+  setParams = new Map<string, Json>();
+  /** Scripted `session/set_mode`: defaults to echoing a `current_mode_update`
+   *  the way claude-code-acp does; throwing rejects the call. */
+  onSetMode: (params: Json, agent: FakeAgent) => Promise<Json> = async (
+    params,
+  ) => {
+    this.update(params.sessionId, {
+      sessionUpdate: "current_mode_update",
+      currentModeId: params.modeId,
+    });
+    return {};
+  };
+  /** Scripted `session/set_model` (unstable 0.x surface); throwing rejects. */
+  onSetModel: (params: Json, agent: FakeAgent) => Promise<Json> = async () =>
+    ({});
+  /** Scripted `session/set_config_option`: must answer the full option
+   *  list; the default reflects the chosen value into what session/new
+   *  advertised. Throwing rejects the call. */
+  onSetConfigOption: (params: Json, agent: FakeAgent) => Promise<Json> =
+    async (params) => ({
+      configOptions: (this.newSessionResult?.configOptions ?? []).map(
+        (option: Json) =>
+          option.id === params.configId
+            ? { ...option, currentValue: params.value }
+            : option,
+      ),
+    });
 
   constructor(private readonly transport: ScriptedAgentLineChannel) {
     transport.onLine((line) => void this.handle(JSON.parse(line)));
@@ -173,8 +201,24 @@ export class FakeAgent {
         this.onCancel(params, this);
         return; // notification, no response
       default:
+        if (this.handleSessionSetting(id, method, params)) return;
         if (id !== undefined) this.respondError(id, -32601, "not implemented");
     }
+  }
+
+  /** The three session-setting methods (MET-81): capture the params, answer
+   *  from the scripted hook. False when `method` is none of them. */
+  private handleSessionSetting(id: number, method: string, params: Json) {
+    const hooks: Record<string, (p: Json, a: FakeAgent) => Promise<Json>> = {
+      "session/set_mode": this.onSetMode,
+      "session/set_model": this.onSetModel,
+      "session/set_config_option": this.onSetConfigOption,
+    };
+    const hook = hooks[method];
+    if (!hook) return false;
+    this.setParams.set(method, params);
+    this.answer(id, -32000, () => hook.call(this, params, this));
+    return true;
   }
 }
 
@@ -604,6 +648,10 @@ export const MOCK_AGENT_MODE = import.meta.env.VITE_AGENT_MOCK === "1";
 export type MockAgentConfig = {
   scenario: string;
   options?: Json;
+  /** Extra fields every mock `session/new` / `session/load` answers with —
+   *  `modes`, `models`, `configOptions` — so specs can seed the session's
+   *  switchable settings (MET-81). Default: none advertised. */
+  session?: Json;
 };
 
 const scenarioRegistry = new Map<string, MockScenarioFactory>([
@@ -660,6 +708,15 @@ function promptText(params: Json): string {
 }
 
 let mockSessionCounter = 0;
+/** The scenario agent most recently attached — specs read the params its
+ *  `session/set_*` calls captured. */
+let lastScenarioAgent: FakeAgent | null = null;
+
+/** The params the latest scenario agent captured for a `session/set_mode` /
+ *  `set_model` / `set_config_option` call (null = never called). */
+export function lastMockSetParams(method: string): Json {
+  return lastScenarioAgent?.setParams.get(method) ?? null;
+}
 /** The most recent `session/prompt` params any mock agent received — the
  *  prompt as it went on the wire (text + resource_link parts), for specs
  *  that assert what the composer/widget actually sent. */
@@ -702,6 +759,7 @@ function attachScenarioAgent(
   taskId: string,
 ): void {
   const agent = new FakeAgent(agentSide);
+  lastScenarioAgent = agent;
   let currentAbort: AbortController | null = null;
   // The live workspace path arrives as session/new's `cwd` (session/load
   // carries it too); scenarios need it to address files like a real
@@ -710,7 +768,10 @@ function attachScenarioAgent(
 
   agent.onNewSession = async (params) => {
     workspacePath = params?.cwd ?? "";
-    return { sessionId: `mock_session_${++mockSessionCounter}` };
+    return {
+      sessionId: `mock_session_${++mockSessionCounter}`,
+      ...(activeConfig.session ?? {}),
+    };
   };
 
   agent.onLoadSession = async (params) => {
@@ -718,8 +779,19 @@ function attachScenarioAgent(
     for (const update of mockSessionHistories.get(params.sessionId) ?? []) {
       agent.update(params.sessionId, update);
     }
-    return {};
+    return { ...(activeConfig.session ?? {}) };
   };
+
+  // The default set_config_option reflects into `newSessionResult`, which the
+  // scenario agent doesn't use — answer from the configured session instead.
+  agent.onSetConfigOption = async (params) => ({
+    configOptions: (activeConfig.session?.configOptions ?? []).map(
+      (option: Json) =>
+        option.id === params.configId
+          ? { ...option, currentValue: params.value }
+          : option,
+    ),
+  });
 
   agent.onCancel = () => currentAbort?.abort();
 
@@ -874,6 +946,9 @@ declare global {
       }>;
       /** The last `session/prompt` params a mock agent received. */
       lastPrompt: () => Json;
+      /** The params the latest scenario agent captured for a
+       *  `session/set_mode` / `set_model` / `set_config_option` call. */
+      lastSet: (method: string) => Json;
       /** `configure({ scenario: "replay", options })` with validation —
        *  the recording is what the debug panel's Recording button copies. */
       replay: (
@@ -904,6 +979,7 @@ if (MOCK_AGENT_MODE && typeof window !== "undefined") {
       };
     },
     lastPrompt: () => lastMockPromptParams,
+    lastSet: lastMockSetParams,
     replay: (recording, options) =>
       configureMockAgent({
         scenario: "replay",

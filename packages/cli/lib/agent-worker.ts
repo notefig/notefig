@@ -22,7 +22,9 @@
  * ever crosses the wire. start-task carries only a harnessId + cwd + env.
  */
 import * as http from 'http';
+import * as fs from 'fs';
 import * as net from 'net';
+import * as path from 'path';
 import { randomBytes } from 'crypto';
 import { spawn, exec, type ChildProcess } from 'child_process';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -32,6 +34,7 @@ import {
   FrameCipher,
   MCP_SERVER_NAME,
   TUNNEL_PROTOCOL_VERSION,
+  parseSidecarCommand,
   resolveHarnessSpawn,
   TunnelEnvelopeSchema,
   deriveFrameKey,
@@ -143,6 +146,43 @@ export type McpRelayCommandBuilder = (port: number) => {
   command: string;
   args: string[];
 };
+
+/**
+ * Where the CLI's vendored sidecar bundles live (MET-210): `esbuild.config.mjs`
+ * writes `dist/lib/sidecars/<name>.cjs` next to this module's compiled output.
+ */
+export const defaultSidecarsDir = () => path.join(__dirname, 'sidecars');
+
+/**
+ * A `sidecar:<name>` harness command names an adapter the desktop app ships
+ * as an executable beside its binary. This host ships the same pinned
+ * adapter as a CommonJS bundle and runs it on its own node — no PATH search,
+ * no npx, no registry at session start. Missing file = the CLI wasn't built
+ * (`npm run build`), reported as such rather than as a spawn ENOENT.
+ */
+/** The adapter bundle's own floor — the same as the CLI's `engines.node`;
+ *  this guard is for an install that ignored engines. */
+const SIDECAR_MIN_NODE_MAJOR = 22;
+
+export function resolveSidecarProgram(
+  name: string,
+  sidecarsDir: string = defaultSidecarsDir(),
+  nodeVersion: string = process.versions.node,
+): { command: string; args: string[] } {
+  const major = Number(nodeVersion.split('.')[0]);
+  if (!(major >= SIDECAR_MIN_NODE_MAJOR)) {
+    throw new Error(
+      `bundled adapter \`${name}\` needs Node ${SIDECAR_MIN_NODE_MAJOR}+ (this CLI is running on Node ${nodeVersion})`,
+    );
+  }
+  const bundle = path.join(sidecarsDir, `${name}.cjs`);
+  if (!fs.existsSync(bundle)) {
+    throw new Error(
+      `bundled adapter \`${name}\` missing at ${bundle} — build the CLI (npm run build)`,
+    );
+  }
+  return { command: process.execPath, args: [bundle] };
+}
 
 /** The relay the harness spawns is this CLI itself (hidden `mcp-relay`). */
 export const defaultRelayCommand: McpRelayCommandBuilder = (port) => ({
@@ -383,6 +423,25 @@ export class AgentWorker {
       return;
     }
 
+    let child: ChildProcess;
+    try {
+      child = this.spawnHarness(harness, message);
+    } catch (error: any) {
+      this.sendCtl({ op: 'task-spawn-error', taskId, message: String(error?.message ?? error) });
+      return;
+    }
+    this.tasks.set(taskId, child);
+    this.pipeTaskProcess(taskId, child);
+  }
+
+  /**
+   * Resolve program + args + env for a harness and spawn it. Throws (and
+   * spawns nothing) when the program can't be resolved or spawned.
+   */
+  private spawnHarness(
+    harness: HarnessDefinition,
+    message: Extract<CtlMessage, { op: 'start-task' }>,
+  ): ChildProcess {
     // The agent spawns in the worker's real --dir; the browser's workspace
     // prefix in cwd + any path-bearing env is rewritten to that root.
     const cwd = this.options.workspacePath;
@@ -396,20 +455,22 @@ export class AgentWorker {
     // Templating + cwd default live with the harness definition
     // (resolveHarnessSpawn) — the worker just hands them to the process.
     const { args, cwd: spawnCwd } = resolveHarnessSpawn(harness, cwd);
+    // MET-210: a `sidecar:` command resolves to the adapter bundle vendored
+    // into this CLI (see resolveSidecarProgram) — the host's half of the
+    // scheme; shared code only names the sidecar.
+    const sidecar = parseSidecarCommand(harness.command);
+    const program = sidecar
+      ? resolveSidecarProgram(sidecar)
+      : { command: harness.command, args: [] as string[] };
+    return spawn(program.command, [...program.args, ...args], {
+      cwd: spawnCwd,
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  }
 
-    let child: ChildProcess;
-    try {
-      child = spawn(harness.command, args, {
-        cwd: spawnCwd,
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-    } catch (error: any) {
-      this.sendCtl({ op: 'task-spawn-error', taskId, message: String(error?.message ?? error) });
-      return;
-    }
-    this.tasks.set(taskId, child);
-
+  /** Wire a spawned harness's stdio and lifecycle onto the tunnel. */
+  private pipeTaskProcess(taskId: string, child: ChildProcess): void {
     // One frame per batch: `data` is an opaque string to the protocol, and the
     // ACP stream is newline-delimited already, so a batch is just a slice of
     // that stream. The browser splits it back into lines on receipt.

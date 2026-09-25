@@ -1,8 +1,36 @@
 import { z } from "zod";
-import type { McpServer } from "@zed-industries/agent-client-protocol";
+import type { McpServer } from "./acp-types";
 
 /** Substituted with the workspace path when a harness spawns (`args`, `cwd`). */
 export const WORKSPACE_PLACEHOLDER = "${workspace}";
+
+/**
+ * Adapters shipped with the hosts (MET-210), by sidecar name. Each has a
+ * folder `sidecars/<name>/` at the repo root whose package.json pins the
+ * adapter version; `sidecars/bundle.mjs` installs and bundles it, the
+ * desktop build compiles that into an executable next to the app binary and
+ * the CLI build vendors it into its dist.
+ */
+export const SIDECAR_NAMES: readonly string[] = ["claude-agent-acp"];
+
+/**
+ * `HarnessDefinition.command` scheme naming a bundled sidecar instead of a
+ * PATH executable: `sidecar:claude-agent-acp`. Resolution is the HOST's job
+ * (the Tauri app maps it to the file beside its own executable; the CLI
+ * worker to its vendored bundle) — shared code only names it.
+ */
+export const SIDECAR_SCHEME = "sidecar:";
+
+/** The sidecar a `command` names, or null for an ordinary executable. */
+export function parseSidecarCommand(command: string): string | null {
+  if (!command.startsWith(SIDECAR_SCHEME)) return null;
+  const name = command.slice(SIDECAR_SCHEME.length);
+  return SIDECAR_NAMES.includes(name) ? name : null;
+}
+
+export function sidecarCommand(name: string): string {
+  return `${SIDECAR_SCHEME}${name}`;
+}
 
 /**
  * A harness definition describes how to spawn an ACP agent adapter on the
@@ -14,7 +42,8 @@ export const HarnessDefinitionSchema = z.object({
   id: z.string().min(1),
   /** Human-readable name shown in settings and the agent panel */
   label: z.string().min(1),
-  /** Executable to spawn (resolved against PATH) */
+  /** Executable to spawn (resolved against PATH), or `sidecar:<name>` for
+   *  an adapter bundled with the app (see {@link SIDECARS}). */
   command: z.string().min(1),
   /** `${workspace}` in an arg is replaced with the workspace path at spawn. */
   args: z.array(z.string()).default([]),
@@ -23,8 +52,8 @@ export const HarnessDefinitionSchema = z.object({
    * Discovery probe: a shell snippet whose stdout is the evidence the
    * harness is installed (typically a resolved binary path); empty output ⇒
    * not found. Absent = `command -v <command>`. Needed when `command` alone
-   * says nothing about availability — e.g. claude-code spawns via `npx`, so
-   * probing `npx` would report "found" on any machine with Node.
+   * says nothing about availability — e.g. claude-code's bundled adapter is
+   * always present; what matters is whether the Claude CLI it drives is.
    */
   probeCommand: z.string().optional(),
   /**
@@ -449,12 +478,14 @@ const BUILT_INS: BuiltInHarness[] = [
     definition: {
       id: "claude-code",
       label: "Claude Code",
-      command: "npx",
-      args: ["-y", "@agentclientprotocol/claude-agent-acp"],
+      // The adapter ships inside the app (MET-210); it drives the user's own
+      // Claude Code CLI, found on PATH or via CLAUDE_CODE_EXECUTABLE.
+      command: sidecarCommand("claude-agent-acp"),
+      args: [],
       env: {},
-      // `command -v npx` would report "found" on any machine with Node; the
-      // meaningful availability signal is the Claude Code CLI itself (which
-      // the adapter's auth flow needs anyway — see authHint).
+      // The bundled adapter is always present; the meaningful availability
+      // signal is the Claude Code CLI itself (which the adapter's auth flow
+      // needs anyway — see authHint).
       probeCommand: "command -v claude",
       authHint: "Run `claude /login` in a terminal on this machine.",
       // Claude sessions are keyed by cwd, so the resume must run from the
@@ -493,8 +524,8 @@ const BUILT_INS: BuiltInHarness[] = [
       command: "devin",
       args: ["acp"],
       env: {},
-      // `command -v devin` is the whole story here (unlike claude-code's npx):
-      // the binary IS the harness. A build too old for the `acp` subcommand
+      // `command -v devin` is the whole story here (unlike claude-code's
+      // bundled adapter): the binary IS the harness. A build too old for the `acp` subcommand
       // can't be told apart by probing — devin parses an unknown subcommand as
       // a path argument and still exits 0 printing help — so that check is
       // left to fail loudly at spawn.

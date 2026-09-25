@@ -1,0 +1,8 @@
+{
+  "name": "claude-agent-acp-sidecar",
+  "private": true,
+  "description": "Pins the Claude Code ACP adapter both hosts ship (MET-210). Installed in isolation by sidecars/bundle.mjs; never a workspace.",
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.81.2"
+  }
+}

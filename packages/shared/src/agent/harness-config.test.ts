@@ -4,7 +4,10 @@ import {
   describeProbedHarnesses,
   filterDiscoveredHarnesses,
   isMaterialOverride,
+  parseSidecarCommand,
   resolveEffectiveHarnesses,
+  resolveHarnessSpawn,
+  sidecarCommand,
 } from "./harness-config";
 import type {
   CustomHarnessEntry,
@@ -414,5 +417,30 @@ describe("buildHarnessResumeCommand", () => {
     const gemini = BUILT_IN_HARNESSES.find((h) => h.id === "gemini-cli")!;
     expect(gemini.resumeCommand).toBeUndefined();
     expect(buildHarnessResumeCommand(gemini, params)).toBeNull();
+  });
+});
+
+describe("sidecar commands (MET-210)", () => {
+  it("claude-code spawns the bundled adapter, never npx", () => {
+    expect(claude.command).toBe("sidecar:claude-agent-acp");
+    expect(claude.args).toEqual([]);
+    expect(parseSidecarCommand(claude.command)).toBe("claude-agent-acp");
+  });
+
+  it("parses only known sidecar names", () => {
+    expect(parseSidecarCommand(sidecarCommand("claude-agent-acp"))).toBe(
+      "claude-agent-acp",
+    );
+    expect(parseSidecarCommand("sidecar:nope")).toBeNull();
+    expect(parseSidecarCommand("sidecar:")).toBeNull();
+    expect(parseSidecarCommand("npx")).toBeNull();
+    expect(parseSidecarCommand("/usr/local/bin/claude-agent-acp")).toBeNull();
+  });
+
+  it("resolveHarnessSpawn leaves the scheme for the host to resolve", () => {
+    const spawn = resolveHarnessSpawn(claude, "/ws");
+    expect(spawn).toEqual({ args: [], cwd: "/ws" });
+    // command is not part of the spawn shape — hosts read it off the harness
+    expect(claude.command.startsWith("sidecar:")).toBe(true);
   });
 });

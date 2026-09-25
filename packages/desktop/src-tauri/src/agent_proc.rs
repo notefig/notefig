@@ -424,9 +424,55 @@ async fn probe_login_path() -> Option<String> {
     }
 }
 
+/// `HarnessDefinition.command` scheme naming an adapter bundled with the app
+/// (MET-210, `sidecar:<name>`). Tauri's `bundle.externalBin` places each
+/// sidecar next to the main executable as `<name>[.exe]` — in every layout
+/// we ship (`.app/Contents/MacOS`, the NSIS install dir, `target/<profile>`
+/// in dev) — so resolution is a sibling lookup off `current_exe()`, never a
+/// PATH search. Shared code only names the sidecar; this is the host's half.
+const SIDECAR_SCHEME: &str = "sidecar:";
+
+/// Path of the bundled sidecar `name`, given the directory the app binary
+/// lives in. Pure: the caller supplies the directory (tests pass a temp dir).
+fn sidecar_path_in(exe_dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let file = if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_string()
+    };
+    exe_dir.join(file)
+}
+
+/// Map a `sidecar:<name>` program to its absolute path, or pass an ordinary
+/// program through. A missing sidecar is a broken install, reported as a
+/// distinct message so it can't be mistaken for a PATH problem.
+fn resolve_sidecar_program(program: &str) -> Result<String, String> {
+    let Some(name) = program.strip_prefix(SIDECAR_SCHEME) else {
+        return Ok(program.to_string());
+    };
+    if name.is_empty() || name.contains(['/', '\\']) {
+        return Err(format!("invalid sidecar name in `{program}`"));
+    }
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("cannot locate the app executable: {e}"))?;
+    let dir = exe
+        .parent()
+        .ok_or_else(|| "app executable has no parent directory".to_string())?;
+    let path = sidecar_path_in(dir, name);
+    if !path.is_file() {
+        return Err(format!(
+            "bundled adapter `{name}` missing at {} (broken install?)",
+            path.display()
+        ));
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// Guard vars that make claude-code-acp refuse to start ("cannot be launched
 /// inside another Claude Code session"). Inherited whenever Notefig itself is
-/// launched from a Claude Code terminal (dev/CI/e2e).
+/// launched from a Claude Code terminal (dev/CI/e2e). Deliberately NOT
+/// `CLAUDE_CODE_EXECUTABLE`: the bundled adapter sidecar sets that itself to
+/// point at the user's Claude CLI (MET-210).
 const NESTED_SESSION_GUARD_VARS: &[&str] = &[
     "CLAUDECODE",
     "CLAUDE_CODE_ENTRYPOINT",
@@ -503,6 +549,16 @@ pub async fn spawn_agent<R: tauri::Runtime>(
     // value: on Windows this is a live registry read (MET-158), not the
     // app's own stale inherited PATH.
     let resolved_path = resolve_login_path().await;
+
+    // MET-210: a bundled adapter is addressed by absolute path beside the app
+    // binary — no PATH involved (the Windows lookup below passes absolute
+    // paths through untouched).
+    let program = match resolve_sidecar_program(&program) {
+        Ok(program) => program,
+        Err(message) => {
+            return AgentResult::err(proc_id, AgentProcErrorType::SpawnFailed, message);
+        }
+    };
 
     // B3 (MET-157): bare names like "npx" only exist as .cmd shims on
     // Windows; resolve against PATH × PATHEXT before CreateProcess sees it.
@@ -859,6 +915,40 @@ mod tests {
     fn nested_session_guard_vars_include_claudecode() {
         // The auth spike found claude-code-acp refuses to start with these set.
         assert!(NESTED_SESSION_GUARD_VARS.contains(&"CLAUDECODE"));
+        // MET-210: the sidecar sets this one on purpose; stripping it would
+        // send the adapter looking for a native CLI we deliberately don't ship.
+        assert!(!NESTED_SESSION_GUARD_VARS.contains(&"CLAUDE_CODE_EXECUTABLE"));
+    }
+
+    /// MET-210: sidecars live beside the app binary, `.exe`-suffixed on
+    /// Windows only.
+    #[test]
+    fn sidecar_path_is_a_sibling_of_the_executable() {
+        let dir = std::path::Path::new("/Applications/Notefig.app/Contents/MacOS");
+        let path = sidecar_path_in(dir, "claude-agent-acp");
+        assert_eq!(path.parent(), Some(dir));
+        let file = path.file_name().unwrap().to_string_lossy().into_owned();
+        if cfg!(windows) {
+            assert_eq!(file, "claude-agent-acp.exe");
+        } else {
+            assert_eq!(file, "claude-agent-acp");
+        }
+    }
+
+    /// Ordinary programs pass through; a sidecar that isn't on disk next to
+    /// the (test) executable is a distinct, explicit failure; malformed names
+    /// never reach the filesystem.
+    #[test]
+    fn sidecar_program_resolution() {
+        assert_eq!(resolve_sidecar_program("npx").unwrap(), "npx");
+        assert_eq!(
+            resolve_sidecar_program("/usr/local/bin/opencode").unwrap(),
+            "/usr/local/bin/opencode"
+        );
+        let missing = resolve_sidecar_program("sidecar:definitely-not-bundled").unwrap_err();
+        assert!(missing.contains("bundled adapter `definitely-not-bundled` missing"), "{missing}");
+        assert!(resolve_sidecar_program("sidecar:").is_err());
+        assert!(resolve_sidecar_program("sidecar:../etc").is_err());
     }
 
     /// End-to-end guard for the pull design (MET-98): spawn a real child

@@ -932,9 +932,9 @@ describe("AgentTask vertical slice", () => {
         status: "in_progress",
       });
       // claude-agent-acp attaches the raw Anthropic tool_result content — an
-      // array (or bare string) — which agent-client-protocol 0.4.5's schema
-      // rejects, silently dropping the whole frame. sanitizeAcpFrame must
-      // keep it valid or the tool shimmers until turn end (MET-104).
+      // array (or bare string). The 0.4.5 schema rejected non-object values
+      // and silently dropped the whole frame (MET-104); the SDK's 1.x schema
+      // types rawOutput as `unknown`, so the frame must land as sent.
       a.update("sess_test", {
         sessionUpdate: "tool_call_update",
         toolCallId: "t1",
@@ -953,10 +953,10 @@ describe("AgentTask vertical slice", () => {
     await task.start(() => client);
     await runPrompt(task, "test");
 
-    // The boxed shape the sanitizer wraps non-object payloads into.
-    expect(toolEntries(task.taskId)[0].toolCall?.rawOutput).toEqual({
-      output: [{ type: "text", text: "ok" }],
-    });
+    // Passed through verbatim — no repair layer between transport and library.
+    expect(toolEntries(task.taskId)[0].toolCall?.rawOutput).toEqual([
+      { type: "text", text: "ok" },
+    ]);
   });
 
   it("sweeps turnless straggler tool calls at the next turn end", async () => {
@@ -2089,5 +2089,91 @@ describe("AgentTask dispose (MET-72)", () => {
 
     expect(writeFiles).not.toHaveBeenCalled();
     expect(deleteFiles).not.toHaveBeenCalled();
+  });
+});
+
+describe("session config options (MET-81)", () => {
+  const modes = {
+    currentModeId: "default",
+    availableModes: [
+      { id: "default", name: "Default" },
+      { id: "plan", name: "Plan" },
+    ],
+  };
+
+  async function startWithModes() {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.newSessionResult = { sessionId: "sess_cfg", modes };
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    return { task, agent };
+  }
+
+  it("writes the session's options to the task row once session/new answers", async () => {
+    const { task } = await startWithModes();
+    expect(agentTasksCollection.get(task.taskId)?.configOptions).toEqual([
+      expect.objectContaining({ id: "mode", currentValue: "default" }),
+    ]);
+  });
+
+  it("a current_mode_update between turns moves the row's value and creates no entry", async () => {
+    const { task, agent } = await startWithModes();
+    agent.update("sess_cfg", {
+      sessionUpdate: "current_mode_update",
+      currentModeId: "plan",
+    });
+    await vi.waitFor(() =>
+      expect(
+        agentTasksCollection.get(task.taskId)?.configOptions?.[0].currentValue,
+      ).toBe("plan"),
+    );
+    expect(entriesFor(task.taskId)).toEqual([]);
+  });
+
+  it("a current_mode_update during a turn is row state too, never an unknown entry", async () => {
+    const { task, agent } = await startWithModes();
+    agent.onPrompt = async (params, a) => {
+      a.update(params.sessionId, {
+        sessionUpdate: "current_mode_update",
+        currentModeId: "plan",
+      });
+      a.update(params.sessionId, {
+        sessionUpdate: "available_commands_update",
+        availableCommands: [],
+      });
+      return { stopReason: "end_turn" };
+    };
+    await runPrompt(task, "go");
+    expect(entriesFor(task.taskId).map((e) => e.type)).toEqual([
+      "user",
+      "unknown",
+    ]);
+    expect(
+      agentTasksCollection.get(task.taskId)?.configOptions?.[0].currentValue,
+    ).toBe("plan");
+  });
+
+  it("setConfigOption switches over the wire and the row follows; a refusal fails as a value", async () => {
+    const { task, agent } = await startWithModes();
+    expect(await task.setConfigOption("mode", "plan")).toEqual({ ok: true });
+    expect(agent.setParams.get("session/set_mode")).toEqual({
+      sessionId: "sess_cfg",
+      modeId: "plan",
+    });
+    expect(
+      agentTasksCollection.get(task.taskId)?.configOptions?.[0].currentValue,
+    ).toBe("plan");
+
+    agent.onSetMode = async () => {
+      throw new Error("mode locked");
+    };
+    expect(await task.setConfigOption("mode", "default")).toEqual({
+      ok: false,
+      error: "mode locked",
+    });
+    expect(
+      agentTasksCollection.get(task.taskId)?.configOptions?.[0].currentValue,
+    ).toBe("plan");
   });
 });

@@ -21,7 +21,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
 
       - name: Install dependencies
@@ -48,7 +48,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
 
       - name: Install dependencies
@@ -185,6 +185,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # tauri-build verifies every `bundle.externalBin` entry exists for the
+      # target triple, so the sidecar executables (MET-210) must be built
+      # before anything compiles the Tauri crate.
+      - name: Build sidecars
+        working-directory: packages/desktop
+        run: node scripts/build-sidecars.mjs
+
       - name: Run Tauri tests
         working-directory: packages/desktop/src-tauri
         run: cargo test
@@ -223,6 +230,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # The shim lives in the Tauri workspace, whose build script checks the
+      # sidecar executables exist (see the Tauri job above).
+      - name: Build sidecars
+        working-directory: packages/desktop
+        run: node scripts/build-sidecars.mjs
 
       # Compile the shim OUTSIDE Playwright's webServer timeout — a cold
       # workspace build takes well past the old 180s (both legs timed out on
@@ -333,7 +346,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
 
       - name: Install dependencies

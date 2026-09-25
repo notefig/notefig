@@ -16,6 +16,7 @@ import {
   createMockAgentTransport,
   createMockMcpEndpoint,
   configureMockAgent,
+  lastMockSetParams,
   registerMockScenario,
 } from "../mock-harness";
 
@@ -122,5 +123,80 @@ describe("mock harness", () => {
     const unsubscribe = endpoint.onRequest(() => {});
     unsubscribe();
     await endpoint.close();
+  });
+});
+
+describe("mock harness session settings (MET-81)", () => {
+  it("seeds configured session fields into session/new and scripts the set_* methods", async () => {
+    configureMockAgent({
+      scenario: "echo",
+      session: {
+        modes: {
+          currentModeId: "default",
+          availableModes: [
+            { id: "default", name: "Default" },
+            { id: "plan", name: "Plan" },
+          ],
+        },
+      },
+    });
+    try {
+      const updates: SessionNotification[] = [];
+      const { client, sessionId } = await connectedClient((n) =>
+        updates.push(n),
+      );
+      expect(client.sessionConfigOptions(sessionId).map((o) => o.id)).toEqual(
+        ["mode"],
+      );
+      const after = await client.setSessionConfigOption(sessionId, "mode", "plan");
+      expect(after[0].currentValue).toBe("plan");
+      expect(lastMockSetParams("session/set_mode")).toEqual({
+        sessionId,
+        modeId: "plan",
+      });
+      // The default set_mode echoes a current_mode_update like claude-code-acp.
+      await vi.waitFor(() =>
+        expect(
+          updates.some((n) => n.update.sessionUpdate === "current_mode_update"),
+        ).toBe(true),
+      );
+    } finally {
+      configureMockAgent({ scenario: "echo" });
+    }
+  });
+
+  it("answers set_config_option from the configured native options", async () => {
+    configureMockAgent({
+      scenario: "echo",
+      session: {
+        configOptions: [
+          {
+            id: "model",
+            name: "Model",
+            category: "model",
+            type: "select",
+            currentValue: "a",
+            options: [
+              { value: "a", name: "A" },
+              { value: "b", name: "B" },
+            ],
+          },
+        ],
+      },
+    });
+    try {
+      const { client, sessionId } = await connectedClient(() => {});
+      const after = await client.setSessionConfigOption(sessionId, "model", "b");
+      expect(after).toEqual([
+        expect.objectContaining({ id: "model", currentValue: "b" }),
+      ]);
+      expect(lastMockSetParams("session/set_config_option")).toEqual({
+        sessionId,
+        configId: "model",
+        value: "b",
+      });
+    } finally {
+      configureMockAgent({ scenario: "echo" });
+    }
   });
 });

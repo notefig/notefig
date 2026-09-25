@@ -47,6 +47,7 @@ import {
   disposeWorkspaceTaskManager,
   promptAgentTask,
   reviveAgentTask,
+  setAgentTaskConfigOption,
 } from "../agent-service";
 import {
   agentEntriesCollection,
@@ -130,6 +131,16 @@ describe("pure helpers", () => {
       ...taskRow({ status: "running" }),
       authRequired: true,
       authHint: "hint",
+      // Session settings are re-advertised by session/load (MET-81).
+      configOptions: [
+        {
+          id: "mode",
+          name: "Mode",
+          type: "select",
+          currentValue: "plan",
+          options: [{ value: "plan", name: "Plan" }],
+        },
+      ],
     });
     expect(boot).toEqual(taskRow({ status: "restored" }));
     expect(bootAgentTaskRow(taskRow({ sessionId: undefined }))).toBeNull();
@@ -571,6 +582,34 @@ describe("revival via session/load", () => {
     );
     expect(entries.map((e) => e.type).sort()).toEqual(["assistant", "user"]);
     await disposeWorkspaceTaskManager("/ws");
+  });
+
+  it("a settings switch on a restored row revives it first, then switches (MET-81)", async () => {
+    restoredRow();
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    transportFactory.current = () => client;
+    agent.onLoadSession = async () => ({
+      modes: {
+        currentModeId: "default",
+        availableModes: [
+          { id: "default", name: "Default" },
+          { id: "plan", name: "Plan" },
+        ],
+      },
+    });
+
+    expect(await setAgentTaskConfigOption("task_a", "mode", "plan")).toEqual({
+      ok: true,
+    });
+    expect(agent.loadSessionParams).toMatchObject({ sessionId: "sess_1" });
+    expect(agent.setParams.get("session/set_mode")).toEqual({
+      sessionId: "sess_1",
+      modeId: "plan",
+    });
+    const row = agentTasksCollection.get("task_a")!;
+    expect(row.status).toBe("idle");
+    expect(row.configOptions?.[0].currentValue).toBe("plan");
   });
 
   it("reviveAgentTask is a no-op for unknown or non-restored tasks", () => {

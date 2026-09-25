@@ -39,7 +39,7 @@ originally, not a script.
 ## Provenance of the current files
 
 All of these were **hand-authored** (2026-09-19) to the shapes the pinned
-`@zed-industries/agent-client-protocol` schema and the claude-agent-acp /
+`@agentclientprotocol/sdk` schema and the claude-agent-acp /
 devin / opencode adapters emit, so the workflow suite has something to run
 against from day one. Replace any of them with a real capture of the same
 scenario — same file name — and the corresponding tests run against the real
