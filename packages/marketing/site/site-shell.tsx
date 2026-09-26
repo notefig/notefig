@@ -44,9 +44,9 @@ function SitePage({
   useArriveAtApp(isMobileShot, workspaceReady, isDeepLink, product.jumpToApp);
 
   return (
-    <div className="site-stage bg-background text-foreground">
-      <div className="select-text">
-        <MarketingHeader onEnterApp={product.scrollToApp} />
+    <div className="site-stage">
+      <MarketingHeader onEnterApp={product.scrollToApp} />
+      <div className="mk select-text">
         <Hero />
       </div>
       <ProductStage
@@ -56,7 +56,7 @@ function SitePage({
         workspaceReady={workspaceReady}
         onEnterApp={product.scrollToApp}
       />
-      <div className="select-text">
+      <div className="mk select-text">
         <MarketingSections />
         <MarketingFooter onEnterApp={product.scrollToApp} />
       </div>
@@ -96,27 +96,23 @@ function ProductStage({
   return (
     <section
       ref={frameRef as React.RefObject<HTMLElement>}
-      className="site-column product-window relative pb-8"
+      className="site-column product-window pb-[96px]"
     >
-      <img
-        src="/app-preview-desktop.png"
-        alt="The Notefig homepage: stone paper page around a framed dark editor"
-        className="product-shot"
-      />
       <div className="product-live">
-        <div className="product-chrome" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
-        <div className="relative">
+        <div className="product-glow" aria-hidden="true" />
+        <div className="product-bezel">
+          <img
+            src="/app-preview-desktop.png"
+            alt="The Notefig editor with a markdown document open beside the project sidebar"
+            className="product-shot"
+          />
           <div
-            className="product-frame dark"
+            className="product-frame"
             {...(!live ? { inert: true } : {})}
           >
             {!isMobileShot && workspaceReady && <AppSurface />}
           </div>
-          {!live && (
+          {!live && !isMobileShot && (
             <button
               type="button"
               className="absolute inset-0 cursor-pointer"

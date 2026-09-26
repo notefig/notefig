@@ -9,6 +9,7 @@ import {
   WORKSPACE_ROOT,
   manifestHash,
   marketingPages,
+  workspaceFiles,
 } from "./content-manifest";
 
 const HASH_FILE = `${WORKSPACE_ROOT}/.notefig-marketing-manifest`;
@@ -21,10 +22,13 @@ export async function ensureMarketingWorkspaceSeeded(
     return;
   }
 
-  const files = marketingPages.map((page) => ({
-    path: page.filePath,
-    content: page.markdown,
-  }));
+  const files = [
+    ...marketingPages.map((page) => ({
+      path: page.filePath,
+      content: page.markdown,
+    })),
+    ...workspaceFiles,
+  ];
 
   const result = await fs.writeFiles(files);
   if (result.failed.length > 0) {

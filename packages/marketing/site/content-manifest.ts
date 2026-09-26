@@ -114,10 +114,32 @@ export function findPageByFilePath(filePath: string): MarketingPage | undefined 
 export const defaultPage: MarketingPage =
   findPageByRoute("/docs/index") ?? marketingPages[0];
 
+const rawWorkspaceFiles = import.meta.glob<string>(
+  "../content/workspace/**/*.md",
+  { eager: true, query: "?raw", import: "default" },
+);
+
+/**
+ * Example files seeded beside the pages — plain workspace content with no
+ * route of its own (`content/workspace/notes/roadmap.md` is seeded as
+ * `notefig/notes/roadmap.md`). They are the workspace the page's demo cards
+ * describe, so the live app and the cards tell one story.
+ */
+export const workspaceFiles: { path: string; content: string }[] =
+  Object.entries(rawWorkspaceFiles)
+    .map(([modulePath, content]) => ({
+      path: `${WORKSPACE_ROOT}/${modulePath.replace(/^.*\/content\/workspace\//, "")}`,
+      content,
+    }))
+    .sort((a, b) => a.path.localeCompare(b.path));
+
 /**
  * Hash over every seeded path + body. Deploys with changed content get a new
  * hash, which triggers a re-seed that overwrites any in-browser edits.
  */
 export const manifestHash: string = calculateContentHash(
-  marketingPages.map((page) => `${page.filePath}\n${page.markdown}`).join("\n \n"),
+  [
+    ...marketingPages.map((page) => `${page.filePath}\n${page.markdown}`),
+    ...workspaceFiles.map((file) => `${file.path}\n${file.content}`),
+  ].join("\n \n"),
 );

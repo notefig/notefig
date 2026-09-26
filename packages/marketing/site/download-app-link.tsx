@@ -1,8 +1,12 @@
 import { useEffect, useState } from "react";
+import { Download } from "lucide-react";
+import type { BrandName } from "./brand-marks";
+import { Brand } from "./marketing-mocks";
 import {
   detectPlatform,
   LATEST_RELEASE_API,
   resolveDownloadTarget,
+  type DownloadPlatform,
   type DownloadTarget,
   type NavigatorHints,
   type ReleaseAsset,
@@ -40,18 +44,21 @@ function loadLatestAssets(): Promise<ReleaseAsset[] | null> {
   return assetsPromise;
 }
 
-function useDownloadTarget(): DownloadTarget {
+function initialPlatform(): DownloadPlatform {
+  return typeof navigator === "undefined"
+    ? "unknown"
+    : detectPlatform(navigator as NavigatorHints);
+}
+
+function useDownloadTarget(): DownloadTarget & { platform: DownloadPlatform } {
+  const [platform, setPlatform] = useState<DownloadPlatform>(initialPlatform);
   const [target, setTarget] = useState<DownloadTarget>(() =>
-    resolveDownloadTarget(
-      typeof navigator === "undefined"
-        ? "unknown"
-        : detectPlatform(navigator as NavigatorHints),
-      null,
-    ),
+    resolveDownloadTarget(initialPlatform(), null),
   );
 
   useEffect(() => {
     const platform = detectPlatform(navigator as NavigatorHints);
+    setPlatform(platform);
     setTarget(resolveDownloadTarget(platform, null));
     let cancelled = false;
     void loadLatestAssets().then((assets) => {
@@ -64,18 +71,42 @@ function useDownloadTarget(): DownloadTarget {
     };
   }, []);
 
-  return target;
+  return { ...target, platform };
 }
 
-export function DownloadAppLink({ className }: { className?: string }) {
-  const { href, label, isAsset } = useDownloadTarget();
+const PLATFORM_MARK: Partial<Record<DownloadPlatform, BrandName>> = {
+  mac: "Apple",
+  windows: "Windows",
+  linux: "Linux",
+};
+
+/** The visitor's OS mark (a generic download arrow when unknown). */
+function PlatformIcon({ platform }: { platform: DownloadPlatform }) {
+  const mark = PLATFORM_MARK[platform];
+  return mark ? (
+    <Brand name={mark} size={15} />
+  ) : (
+    <Download size={15} strokeWidth={2.25} aria-hidden="true" />
+  );
+}
+
+export function DownloadAppLink({
+  className,
+  label: labelOverride,
+}: {
+  className?: string;
+  /** Replaces the platform label ("Download for macOS") where space is tight. */
+  label?: string;
+}) {
+  const { href, label, isAsset, platform } = useDownloadTarget();
   return (
     <a
       href={href}
       className={className}
       {...(isAsset ? { download: true } : { rel: "noopener" })}
     >
-      {label}
+      <PlatformIcon platform={platform} />
+      {labelOverride ?? label}
     </a>
   );
 }

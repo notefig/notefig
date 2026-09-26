@@ -4,7 +4,7 @@ import {
   type MarketingPage,
 } from "./content-manifest";
 
-export const LANDING_TITLE = "Notefig — Write Markdown. Continuously Publish.";
+export const LANDING_TITLE = "Notefig — Every AI agent. One productive workspace.";
 
 /**
  * Which page a URL shows. `/` opens the introduction, every other page is at

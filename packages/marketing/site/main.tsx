@@ -85,7 +85,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <ThemeProvider>
+        <ThemeProvider defaultTheme="light">
           <TooltipProvider>
             <MarketingApp />
             <Toaster />

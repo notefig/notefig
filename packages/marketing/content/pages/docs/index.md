@@ -1,24 +1,24 @@
 ---
 title: Introduction
-description: Notefig transforms markdown files into published artifacts — write and deliver continuously.
+description: Notefig is an AI metaharness — run your agents side by side, right in your documents.
 order: 0
 ---
 # Notefig
 
-Notefig transforms markdown files into published artifacts. It handles the conversion, formatting, and publishing so you can write and deliver continuously.
+Notefig is an AI metaharness. It runs the agents you already use — Claude Code, Codex, Cursor, OpenCode, Gemini CLI, Devin, or any agent that speaks ACP — side by side, inside a workspace of plain markdown files.
 
-The project has three components:
+## How it works
 
-- **Editor**: A desktop application for writing and publishing
-- **CLI**: Command-line tools for automation and scripting
-- **Git integration**: Version control for tracking changes and collaborating
+- **Prompt from any document.** Press `/` over a selection and ask. The answer lands in the document, next to the text it's about.
+- **Sessions keep going.** Queue follow-ups, switch projects, and come back to finished work. Close the window and your agents carry on.
+- **Every change is reversible.** Notefig commits your workspace as you and your agents work, so any edit is one click from undone.
 
-Your content stays in plain markdown files. You own your work. No proprietary formats. No lock-in.
+## Try it
 
-## Core Principles
+This workspace has a few example notes in `notes/`:
 
-**Incremental publishing**: Content evolves. Publish chapters as you write them. Update content after release. Track changes with git.
+- [Q3 kickoff](../notes/q3-kickoff.md) — meeting notes to turn into action items
+- [Roadmap](../notes/roadmap.md) — where those action items land
+- [Customer insights](../notes/insights.md) — a summary drawn from `notes/interviews/`
 
-**File-first**: Text files are portable, universal, and future-proof. Your content will always be in Markdown; it's just the artifacts that change.
-
-**Automation**: Set up a publishing workflow once. Publish continuously, book updates automatically.
+Open one, select some text, and press `/` to ask an agent about it. Agents run in the desktop app, or on your own machine with `npx notefig agent`.

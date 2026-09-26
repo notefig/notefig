@@ -717,7 +717,7 @@ function TranscriptRowView({
 /** Render one transcript entry by type; tool calls are peers of text.
  *  Memoized: a stream chunk replaces only the mutating entry's row object,
  *  so every settled entry skips its re-render (MET-136). */
-const EntryView = memo(function EntryView({
+export const EntryView = memo(function EntryView({
   entry,
   queued,
 }: {
@@ -1253,7 +1253,7 @@ function rawInputPreview(rawInput: unknown): string {
  * newline. The left affordances mirror the target design; they are visual
  * placeholders until wired to real actions.
  */
-function PromptBox({
+export function PromptBox({
   value,
   onChange,
   onSend,

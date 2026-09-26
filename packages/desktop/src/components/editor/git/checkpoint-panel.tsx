@@ -747,7 +747,7 @@ interface CheckpointsListProps {
   activeRevertId: string | null;
 }
 
-function CheckpointsList({
+export function CheckpointsList({
   panelState,
   checkpoints,
   actions,

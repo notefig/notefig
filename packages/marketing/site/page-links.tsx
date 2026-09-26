@@ -1,7 +1,6 @@
 import { useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { cn } from "@notefig/ui/utils";
-import { marketingPages, type MarketingPage } from "./content-manifest";
+import { type MarketingPage } from "./content-manifest";
 
 /**
  * A page anchor whose `href` is always the clean canonical path, while an
@@ -58,40 +57,5 @@ export function isPlainLeftClick(event: {
     !event.shiftKey &&
     !event.altKey &&
     !event.defaultPrevented
-  );
-}
-
-/**
- * The site's link graph, kept deliberately quiet: the file tree in the app
- * below is how people navigate. It exists because that tree renders into a
- * shadow root and its rows are not anchors, so without these every page would
- * be an orphan reachable only from sitemap.xml.
- */
-export function PageLinkRow({
-  activeRoute,
-  onNavigate,
-}: {
-  activeRoute?: string;
-  onNavigate?: () => void;
-}) {
-  return (
-    <nav aria-label="All pages" className="max-w-3xl">
-      <ul className="flex flex-wrap gap-x-2.5 gap-y-1 text-xs text-muted-foreground/45">
-        {marketingPages.map((page) => (
-          <li key={page.route}>
-            <PageLink
-              page={page}
-              onNavigate={onNavigate}
-              className={cn(
-                "hover:text-muted-foreground hover:underline",
-                page.route === activeRoute && "text-muted-foreground",
-              )}
-            >
-              {page.title}
-            </PageLink>
-          </li>
-        ))}
-      </ul>
-    </nav>
   );
 }

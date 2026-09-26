@@ -383,7 +383,7 @@ export function HarnessSettings() {
 /** Single-line row: status dot, logo, name (+origin chip), default check,
  *  and a … menu holding every control (mock: Edit / Set as default /
  *  Enable-Disable / Delete). */
-function HarnessRow({
+export function HarnessRow({
   row,
   isDefault,
   isEditing,
