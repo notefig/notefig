@@ -130,12 +130,13 @@ function PromptSplit() {
         </p>
         <WebAppLink className="mt-10" />
       </div>
-      <div className="mk-well mk-well-dots min-h-[420px] min-w-0 !items-start p-6 pt-10 md:aspect-[524/480] md:p-10 md:pt-14">
+      <div className="mk-well mk-well-dots min-w-0 p-6 md:p-12">
         <DemoPromptWidget
           script="lifecycle"
           document={KICKOFF_NOTES}
-          zoom={0.8}
+          zoom={0.7}
           width={440}
+          height={500}
         />
       </div>
     </section>
@@ -274,41 +275,86 @@ function BentoCard({
   );
 }
 
-/** The tile field spans the page column: 19 × 64px tiles + 18 × 12px gaps. */
-const TILE_COLUMNS = 19;
-const TILE_ROWS = 6;
+type Tile = { id: string; label: string; row: number; col: number };
 
-const AGENT_TILES: { id: string; label: string; row: number; col: number }[] = [
-  { id: "claude-code", label: "Claude Code", row: 1, col: 4 },
-  { id: "codex", label: "Codex", row: 1, col: 14 },
-  { id: "cursor", label: "Cursor", row: 2, col: 12 },
-  { id: "opencode", label: "OpenCode", row: 3, col: 3 },
-  { id: "gemini-cli", label: "Gemini CLI", row: 4, col: 10 },
-  { id: "devin", label: "Devin", row: 4, col: 6 },
-  { id: "claude-code", label: "Claude Code", row: 3, col: 16 },
-];
+/** Wide screens: 19 × 64px tiles + 18 × 12px gaps span the page column,
+ *  logos around the heading. */
+const WIDE_FIELD = {
+  columns: 19,
+  rows: 6,
+  tiles: [
+    { id: "claude-code", label: "Claude Code", row: 1, col: 4 },
+    { id: "codex", label: "Codex", row: 1, col: 14 },
+    { id: "cursor", label: "Cursor", row: 2, col: 12 },
+    { id: "opencode", label: "OpenCode", row: 3, col: 3 },
+    { id: "gemini-cli", label: "Gemini CLI", row: 4, col: 10 },
+    { id: "devin", label: "Devin", row: 4, col: 6 },
+    { id: "claude-code", label: "Claude Code", row: 3, col: 16 },
+  ] as Tile[],
+};
+
+/** Phones: five columns, the heading across the top rows, every logo in the
+ *  rows below it. */
+const NARROW_FIELD = {
+  columns: 5,
+  rows: 7,
+  mask: "radial-gradient(ellipse 85% 75% at 50% 50%, #000 60%, transparent 100%)",
+  tiles: [
+    { id: "claude-code", label: "Claude Code", row: 3, col: 1 },
+    { id: "codex", label: "Codex", row: 3, col: 3 },
+    { id: "cursor", label: "Cursor", row: 4, col: 0 },
+    { id: "opencode", label: "OpenCode", row: 4, col: 2 },
+    { id: "gemini-cli", label: "Gemini CLI", row: 4, col: 4 },
+    { id: "devin", label: "Devin", row: 5, col: 1 },
+  ] as Tile[],
+};
+
+function TileField({
+  columns,
+  rows,
+  tiles,
+  mask,
+  className,
+}: {
+  columns: number;
+  rows: number;
+  tiles: Tile[];
+  /** Overrides the default fade (tuned for the wide field). */
+  mask?: string;
+  className: string;
+}) {
+  const byCell = new Map(tiles.map((tile) => [tile.row * columns + tile.col, tile]));
+  return (
+    <div
+      className={`mk-tiles ${className}`}
+      style={{
+        gridTemplateColumns: `repeat(${columns}, 64px)`,
+        ...(mask ? { maskImage: mask, WebkitMaskImage: mask } : {}),
+      }}
+      aria-hidden="true"
+    >
+      {Array.from({ length: columns * rows }, (_, cell) => {
+        const tile = byCell.get(cell);
+        return tile ? (
+          <span key={cell} className="mk-tile" data-filled title={tile.label}>
+            <AgentMark id={tile.id} size={26} />
+          </span>
+        ) : (
+          <span key={cell} className="mk-tile" />
+        );
+      })}
+    </div>
+  );
+}
 
 function AgentsSection() {
-  const byCell = new Map(
-    AGENT_TILES.map((tile) => [tile.row * TILE_COLUMNS + tile.col, tile]),
-  );
   return (
     <section
       id="agents"
       className="relative overflow-hidden bg-[linear-gradient(var(--mk-chip),var(--mk-section)_70%,var(--mk-white))] pb-[120px] pt-[72px]"
     >
-      <div className="mk-tiles" aria-hidden="true">
-        {Array.from({ length: TILE_COLUMNS * TILE_ROWS }, (_, cell) => {
-          const tile = byCell.get(cell);
-          return tile ? (
-            <span key={cell} className="mk-tile" data-filled title={tile.label}>
-              <AgentMark id={tile.id} size={26} />
-            </span>
-          ) : (
-            <span key={cell} className="mk-tile" />
-          );
-        })}
-      </div>
+      <TileField {...WIDE_FIELD} className="hidden md:grid" />
+      <TileField {...NARROW_FIELD} className="grid md:hidden" />
       <div className="pointer-events-none absolute inset-x-0 top-[72px] flex justify-center px-5">
         <div className="flex max-w-[520px] flex-col items-center rounded-[40px] bg-[radial-gradient(closest-side,var(--mk-chip)_65%,transparent)] px-2 pb-8 pt-6 sm:px-10 text-center">
           <Kicker color="var(--mk-sage-text)" icon={Workflow}>

@@ -46,11 +46,11 @@ function task(
 /** The sessions list: one working, one finished, one older. */
 export const DEMO_SESSIONS = [
   {
-    task: task("task_c", "Summarize this week's customer interviews", "running", "claude-code", minutes(1)),
+    task: task("task_c", "Summarize interviews", "running", "claude-code", minutes(1)),
     meta: { isRunning: true, queuedCount: 1 },
   },
   {
-    task: task("task_b", "Draft the Q3 planning doc", "idle", "opencode", minutes(12)),
+    task: task("task_b", "Draft the Q3 plan", "idle", "opencode", minutes(12)),
     meta: { isRunning: false, queuedCount: 0 },
     attention: "bau" as const,
   },
@@ -59,12 +59,12 @@ export const DEMO_SESSIONS = [
     meta: { isRunning: false, queuedCount: 1 },
   },
   {
-    task: task("task_e", "Clean up the team handbook", "error", "opencode", minutes(40)),
+    task: task("task_e", "Clean up the handbook", "error", "opencode", minutes(40)),
     meta: { isRunning: false, queuedCount: 0, isError: true },
     attention: "error" as const,
   },
   {
-    task: task("task_a", "Turn meeting notes into action items", "idle", "claude-code", minutes(95)),
+    task: task("task_a", "Kickoff action items", "idle", "claude-code", minutes(95)),
     meta: { isRunning: false, queuedCount: 0 },
   },
 ];

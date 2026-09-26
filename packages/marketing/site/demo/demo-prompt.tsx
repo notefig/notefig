@@ -10,7 +10,6 @@ import {
   type BlobPhase,
 } from "@notefig/widgets/prompt/state";
 import type { AgentEntry, AgentTurn } from "@notefig/shared/agent";
-import { FileTypeIcon } from "@/components/editor/file-type-icon";
 import { AppEmbed } from "./app-embed";
 import { DEMO_FILES, DEMO_ROOT } from "./demo-fixtures";
 import { timeline, typed, useDemoClock } from "./use-demo-clock";
@@ -28,18 +27,23 @@ const noop = () => {};
 const DOC_PATH = `${DEMO_ROOT}/notes/q3-kickoff.md`;
 const ROADMAP_PATH = `${DEMO_ROOT}/notes/roadmap.md`;
 
-const PROMPT_LEAD = "Turn these notes into action items with owners, and add them to ";
+const PROMPT_LEAD = "Turn these notes into action items with owners, using ";
 const MENTION_QUERY = "ro";
 const MENTION_PATH = "notes/roadmap.md";
-const PROMPT_TEXT = `${PROMPT_LEAD}@${MENTION_PATH}`;
+const PROMPT_TAIL = " for priorities";
+const PROMPT_TEXT = `${PROMPT_LEAD}@${MENTION_PATH}${PROMPT_TAIL}`;
 
-const ADDED_LINES = [
-  "- [ ] Ship onboarding templates (Maya)",
-  "- [ ] Pricing page for small teams (Sam)",
-  "- [ ] Search beta to all workspaces (Lee)",
+/** What the round writes into the document, under the widget. */
+export const ACTION_ITEMS = [
+  { task: "Ship onboarding templates", owner: "Maya" },
+  { task: "Pricing page for small teams", owner: "Sam" },
+  { task: "Search beta to all workspaces", owner: "Lee" },
 ];
+const ADDED_MARKDOWN = `## Action items\n\n${ACTION_ITEMS.map(
+  (item) => `- [ ] ${item.task} (${item.owner})`,
+).join("\n")}\n`;
 const REPLY_TEXT =
-  "Added three action items with owners to the Q3 section of the roadmap.";
+  "Added three action items with owners, ordered by the roadmap's Q3 priorities.";
 
 type PromptState = {
   phase: BlobPhase;
@@ -57,7 +61,8 @@ function toolEntry(
   status: "in_progress" | "completed",
   edit = false,
 ): AgentEntry {
-  const path = edit ? ROADMAP_PATH : DOC_PATH;
+  // Reads the mentioned roadmap, then writes into this document.
+  const path = edit ? DOC_PATH : ROADMAP_PATH;
   return {
     id,
     taskId: "task_demo",
@@ -76,8 +81,8 @@ function toolEntry(
               {
                 type: "diff" as const,
                 path,
-                oldText: "## Q3\n",
-                newText: `## Q3\n\n${ADDED_LINES.join("\n")}\n`,
+                oldText: "",
+                newText: ADDED_MARKDOWN,
               },
             ],
           }
@@ -126,12 +131,19 @@ const WRITING = [
       return composing(PROMPT_LEAD + query, query.length > 0 ? query.slice(1) : null);
     },
   },
-  { ms: 1400, state: () => composing(`${PROMPT_TEXT} `) },
+  {
+    ms: 700 + PROMPT_TAIL.length * 26,
+    state: (ms: number) =>
+      composing(
+        `${PROMPT_LEAD}@${MENTION_PATH}${typed(PROMPT_TAIL, ms - 700, 26)}`,
+      ),
+  },
+  { ms: 1200, state: () => composing(PROMPT_TEXT) },
 ];
 
 /** The round: sent, waits its turn, works, lands. */
 const ROUND = [
-  { ms: 600, state: () => ({ ...bound("sending"), draft: `${PROMPT_TEXT} ` }) },
+  { ms: 600, state: () => ({ ...bound("sending"), draft: PROMPT_TEXT }) },
   { ms: 1100, state: () => bound("queued", [], 1) },
   { ms: 1300, state: () => bound("running", READ_RUNNING) },
   { ms: 1200, state: () => bound("running", EDIT_RUNNING) },
@@ -197,15 +209,17 @@ export function DemoPromptWidget({
   document,
   zoom,
   width,
+  height,
 }: {
   script: keyof typeof SCRIPTS;
   /** The selection the widget was summoned over. */
   reference?: string;
-  /** Document text around the widget, as in the editor; its result lands
-   *  below it. */
+  /** Show the widget in a document page, where the round's result lands. */
   document?: { heading: string; body: string };
   zoom: number;
   width: number;
+  /** A document page's fixed height, so nothing moves as the round runs. */
+  height?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const { at, total } = SCRIPTS[script];
@@ -214,31 +228,53 @@ export function DemoPromptWidget({
 
   return (
     <div ref={ref} className="w-full min-w-0">
-      <AppEmbed zoom={zoom} width={width}>
+      <AppEmbed zoom={zoom} width={width} height={height}>
         {document ? (
-          <div className="flex flex-col gap-3">
-            {/* The editor's surface: the widget is a node inside the
-                document's prose, under the paragraph it was summoned on. */}
-            <div className="rounded-xl border border-border bg-background px-2 py-3 shadow-sm">
-              <div className="prose prose-sm max-w-none p-4">
-                <h2>{document.heading}</h2>
-                <p>{document.body}</p>
-                <div className="not-prose">{face}</div>
-              </div>
-            </div>
-            {/* Space reserved from the start, so the card never jumps when
-                the round lands; the result fades in then. */}
-            <div
-              key={state.phase === "done" ? "landed" : "pending"}
-              className={state.phase === "done" ? "demo-rise" : "invisible"}
-            >
-              <ResultPeek />
-            </div>
-          </div>
+          <DocumentPage document={document} landed={state.phase === "done"}>
+            {face}
+          </DocumentPage>
         ) : (
           face
         )}
       </AppEmbed>
+    </div>
+  );
+}
+
+/**
+ * The editor's surface at a fixed height: the widget is a node inside the
+ * document's prose, under the paragraph it was summoned on, and the round's
+ * result is written into the same page below it — the empty page below
+ * absorbs every change in height.
+ */
+function DocumentPage({
+  document,
+  landed,
+  children,
+}: {
+  document: { heading: string; body: string };
+  landed: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="h-full overflow-hidden rounded-xl border border-border bg-background px-2 py-3 shadow-sm">
+      <div className="prose prose-sm max-w-none p-4">
+        <h2>{document.heading}</h2>
+        <p>{document.body}</p>
+        <div className="not-prose">{children}</div>
+        {landed && (
+          <div className="demo-land -mx-2 mt-4 rounded-lg px-2 pb-1">
+            <h3 className="mt-2">Action items</h3>
+            <ul className="contains-task-list">
+              {ACTION_ITEMS.map((item) => (
+                <li key={item.task}>
+                  {item.task} <span className="text-muted-foreground">({item.owner})</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -336,28 +372,6 @@ function DraftText({ text }: { text: string }) {
         placeholder=""
         className="w-full"
       />
-    </div>
-  );
-}
-
-/** Where the round's work landed: the lines it added to the roadmap. */
-function ResultPeek() {
-  return (
-    <div className="overflow-hidden rounded-xl border border-border bg-background text-xs shadow-sm">
-      <div className="flex items-center gap-1.5 border-b border-border px-3 py-2 text-muted-foreground">
-        <FileTypeIcon path={ROADMAP_PATH} className="size-3.5" />
-        <span className="font-medium text-foreground">notes/roadmap.md</span>
-        <span className="ms-auto text-success">+{ADDED_LINES.length}</span>
-      </div>
-      <div className="py-1.5 font-mono text-[0.6875rem] leading-relaxed">
-        <div className="px-3 text-muted-foreground">## Q3</div>
-        {ADDED_LINES.map((line) => (
-          <div key={line} className="bg-success/10 px-3">
-            <span className="me-2 text-success">+</span>
-            {line}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

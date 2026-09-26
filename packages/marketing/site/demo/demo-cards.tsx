@@ -66,7 +66,7 @@ export function DemoHarnesses() {
 
 export function DemoSessions() {
   return (
-    <AppEmbed zoom={0.82} width={360}>
+    <AppEmbed zoom={0.82} width={380}>
       <div className="rounded-lg border border-border bg-card py-1 shadow-sm">
         {DEMO_SESSIONS.map(({ task, meta, attention }, index) => (
           <SessionRow

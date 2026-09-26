@@ -337,12 +337,15 @@ body {
 /*
  * Real app components embedded in marketing cards (site/demo). Undo the
  * page's own type and spacing so the component renders exactly as in the
- * app — its tokens, its font, its rem-based spacing — then `zoom` it down to
- * card size, which keeps every proportion intact.
+ * app — its tokens, its font, its rem-based spacing. AppEmbed then scales it
+ * to card size with a transform, which keeps every proportion intact.
  */
 .app-embed {
   --spacing: 0.25rem;
-  zoom: var(--app-zoom, 0.66);
+  /* Scaled by AppEmbed's transform. No text autosizing inside: iOS would
+     inflate the text of a block laid out wider than the screen. */
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
   font-family: var(--font-sans);
   font-optical-sizing: none;
   font-size: 1rem;
@@ -418,6 +421,23 @@ body {
   }
 }
 
+/* Content an agent just wrote into a demo document: it rises in on a warm
+   highlight that fades, the way an edit lands in the editor. */
+.demo-land {
+  animation:
+    demo-rise 360ms cubic-bezier(0.2, 0.7, 0.2, 1) both,
+    demo-land 2400ms ease-out both;
+}
+
+@keyframes demo-land {
+  from {
+    background-color: rgb(232 201 184 / 0.6);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
 .mk-spinner {
   animation: mk-spin 1.4s linear infinite;
 }
@@ -430,8 +450,7 @@ body {
 
 /* Dashed tile field behind the publishing hosts. */
 .mk-tiles {
-  display: grid;
-  grid-template-columns: repeat(19, 64px);
+  /* Columns come from the field (marketing-sections TileField). */
   gap: 12px;
   justify-content: center;
   mask-image: radial-gradient(
@@ -483,20 +502,9 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  /* A demo element arriving: new transcript entries, the mention popup, a
-   result card. */
-.demo-rise {
-  animation: demo-rise 360ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
-}
-
-@keyframes demo-rise {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-}
-
-.mk-spinner {
+  .mk-spinner,
+  .demo-rise,
+  .demo-land {
     animation: none;
   }
 }
