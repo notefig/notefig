@@ -120,6 +120,9 @@ const iconJson = {
       name: "Pear",
       // Bottom-most first: the leaf sits over the stem.
       layers: [layer("body"), layer("leaf")],
+      // Opaque glass: default translucency lets the tile show through the
+      // pear, leaving only a rim (reads hollow). Keep the specular edge.
+      translucency: { enabled: false, value: 0 },
       specular: true,
       shadow: { kind: "neutral", opacity: 0.5 },
       "blur-material": null,
