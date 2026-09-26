@@ -141,7 +141,7 @@ export const DEMO_TRANSCRIPT: AgentEntry[] = [
     ],
   }),
   entry("assistant", {
-    text: "Done. **Three themes** from six interviews: onboarding friction, search, and small-team pricing. Each one links back to its [source notes](interviews/).",
+    text: "Done. **Three themes** from six interviews: onboarding friction, search, and small-team pricing. Each theme cites the interviews it came from.",
   }),
 ];
 

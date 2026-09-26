@@ -13,19 +13,19 @@ export function Hero() {
     <section className="site-column flex flex-col items-center pb-16 pt-[80px] text-center">
       <span className="mk-badge">
         <Sparkles size={14} strokeWidth={2} aria-hidden="true" />
-        Claude Code, Codex and Cursor in one workspace
+        Claude Code, Codex and OpenCode in one workspace
       </span>
       <h1 className="mk-display mt-6">
-        Make your md files
+        Put your .md
         <br />
-        work for you
+        to work
       </h1>
       <p className="mk-lede mt-6 max-w-[520px]">
         The AI metaharness. Run all your agents side by side, right in your
         documents.
       </p>
 
-      <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
+      <div className="mt-10 flex items-center justify-center gap-2 sm:gap-3">
         <DownloadAppLink className="mk-btn mk-btn-dark" />
         <a
           href={APP_URL}

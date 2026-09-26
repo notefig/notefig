@@ -123,7 +123,7 @@ body {
 }
 
 .mk-h2 {
-  font-size: clamp(32px, 4.2vw, 40px);
+  font-size: clamp(28px, 4.2vw, 40px);
   font-weight: 600;
   line-height: 1.2;
   letter-spacing: -0.01em;
@@ -249,6 +249,8 @@ body {
 
 .mk-badge {
   display: inline-flex;
+  max-width: 100%;
+  white-space: nowrap;
   align-items: center;
   gap: 6px;
   height: 32px;
@@ -403,6 +405,19 @@ body {
   background: var(--mk-paper);
 }
 
+/* A demo element arriving: new transcript entries, the mention popup, a
+   result card. */
+.demo-rise {
+  animation: demo-rise 360ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes demo-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
 .mk-spinner {
   animation: mk-spin 1.4s linear infinite;
 }
@@ -468,7 +483,40 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mk-spinner {
+  /* A demo element arriving: new transcript entries, the mention popup, a
+   result card. */
+.demo-rise {
+  animation: demo-rise 360ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes demo-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.mk-spinner {
     animation: none;
+  }
+}
+
+/* Phones: tighter controls, so rows of them never wrap. Last in the file so
+   it outranks the base rules above. */
+@media (max-width: 639px) {
+  .mk-btn {
+    height: 40px;
+    padding-inline: 15px;
+    font-size: 14px;
+  }
+
+  .mk-btn-link {
+    padding-inline: 8px;
+  }
+
+  .mk-badge {
+    gap: 5px;
+    padding-inline: 10px;
+    font-size: 11px;
   }
 }

@@ -5,11 +5,11 @@ import { APP_URL } from "./links";
 import {
   DemoHarnesses,
   DemoHistory,
-  DemoPromptWidget,
   DemoSessions,
-  DemoTranscript,
   DemoWorkspaces,
 } from "./demo/demo-cards";
+import { DemoPromptWidget } from "./demo/demo-prompt";
+import { DemoTranscript } from "./demo/demo-transcript";
 import {
   AGENTS,
   AgentMark,
@@ -45,13 +45,13 @@ function HarnessStrip() {
       <p className="text-[16px] font-medium text-[var(--mk-body)]">
         Works with the agents you already use
       </p>
-      <ul className="mt-9 flex flex-wrap items-center justify-center gap-x-12 gap-y-6 text-[var(--mk-faint)]">
+      <ul className="mx-auto mt-9 grid max-w-[360px] grid-cols-3 gap-x-4 gap-y-5 text-[var(--mk-faint)] sm:flex sm:max-w-none sm:flex-wrap sm:items-center sm:justify-center sm:gap-x-12 sm:gap-y-6">
         {AGENTS.map(({ id, label }) => (
           <li
             key={id}
-            className="flex items-center gap-2 text-[21px] font-semibold tracking-[-0.02em]"
+            className="flex items-center justify-center gap-1.5 whitespace-nowrap text-[14px] font-semibold tracking-[-0.01em] sm:gap-2 sm:text-[21px] sm:tracking-[-0.02em]"
           >
-            <AgentMark id={id} size={22} />
+            <AgentMark id={id} size={20} />
             {label}
           </li>
         ))}
@@ -130,13 +130,12 @@ function PromptSplit() {
         </p>
         <WebAppLink className="mt-10" />
       </div>
-      <div className="mk-well mk-well-dots min-h-[420px] min-w-0 p-6 md:aspect-[524/480] md:p-10">
+      <div className="mk-well mk-well-dots min-h-[420px] min-w-0 !items-start p-6 pt-10 md:aspect-[524/480] md:p-10 md:pt-14">
         <DemoPromptWidget
           script="lifecycle"
           document={KICKOFF_NOTES}
           zoom={0.8}
-          width={420}
-          className="relative w-full min-w-0"
+          width={440}
         />
       </div>
     </section>
@@ -267,7 +266,7 @@ function BentoCard({
   children: React.ReactNode;
 }) {
   return (
-    <article className="mk-card min-w-0 p-8">
+    <article className="mk-card min-w-0 p-6 sm:p-8">
       <div className="min-h-[268px] flex-1">{children}</div>
       <h3 className="mk-card-title mt-8">{title}</h3>
       <p className="mk-card-body max-w-[440px]">{body}</p>
@@ -311,12 +310,12 @@ function AgentsSection() {
         })}
       </div>
       <div className="pointer-events-none absolute inset-x-0 top-[72px] flex justify-center px-5">
-        <div className="flex max-w-[520px] flex-col items-center rounded-[40px] bg-[radial-gradient(closest-side,var(--mk-chip)_65%,transparent)] px-10 pb-8 pt-6 text-center">
+        <div className="flex max-w-[520px] flex-col items-center rounded-[40px] bg-[radial-gradient(closest-side,var(--mk-chip)_65%,transparent)] px-2 pb-8 pt-6 sm:px-10 text-center">
           <Kicker color="var(--mk-sage-text)" icon={Workflow}>
             Metaharness
           </Kicker>
           <h2 className="mk-h2 mt-3">Every agent, one workspace</h2>
-          <div className="pointer-events-auto mt-8 flex flex-wrap items-center justify-center gap-3">
+          <div className="pointer-events-auto mt-8 flex items-center justify-center gap-2 sm:gap-3">
             <DownloadAppLink className="mk-btn mk-btn-dark" />
             <a
               href={APP_URL}

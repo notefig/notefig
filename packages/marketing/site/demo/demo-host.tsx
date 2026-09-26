@@ -6,7 +6,7 @@ import {
 } from "@notefig/widgets";
 import { FileTypeIcon } from "@/components/editor/file-type-icon";
 import { Markdown } from "@/components/ui/markdown";
-import { DEMO_FILES, DEMO_ROOT } from "./demo-fixtures";
+import { DEMO_FILES } from "./demo-fixtures";
 
 /*
  * The fake environment the marketing demos run in: a prompt-widget host with
@@ -54,14 +54,12 @@ const demoHost: PromptWidgetHost = {
 
   isWorkspaceFile: (_root, relativePath) =>
     DEMO_FILES.includes(relativePath),
-  searchWorkspaceFiles: (_root, query, limit) =>
-    DEMO_FILES.filter((file) => file.includes(query))
-      .slice(0, limit)
-      .map((relativePath) => ({
-        relativePath,
-        title: relativePath.split("/").pop() ?? relativePath,
-        path: `${DEMO_ROOT}/${relativePath}`,
-      })),
+  // The composer's own "@" menu mounts in a floating layer outside the
+  // scaled demo, so it would render at full app size beside the card. The
+  // scripted demos draw the same SuggestionList inside the card instead
+  // (demo-prompt.tsx), and the live menu stays closed: no search results.
+  // Chips still resolve — isWorkspaceFile above knows the files.
+  searchWorkspaceFiles: () => [],
   toRelativePath: (root, absolute) =>
     absolute.startsWith(`${root}/`) ? absolute.slice(root.length + 1) : undefined,
 
