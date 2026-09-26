@@ -1310,7 +1310,10 @@ function PromptBox({
         placeholder={
           disabled ? t("agentLoadingSession") : t("agentPromptPlaceholder")
         }
-        className="min-h-[2.75rem] w-full px-4 pt-3 text-sm"
+        // Bounded: the box is an overlay on the transcript, so an unbounded
+        // draft would grow past the tab and hide everything behind it. The
+        // wrapper is the scroll container; the action row below stays put.
+        className="max-h-[40vh] min-h-[2.75rem] w-full overflow-y-auto px-4 pt-3 text-sm"
       />
       <div className="flex items-center gap-1 px-2 pb-2">
         {/* The session is pinned to one harness — a passive indicator, not
