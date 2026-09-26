@@ -13,7 +13,7 @@ export function Hero() {
     <section className="site-column flex flex-col items-center pb-16 pt-[80px] text-center">
       <span className="mk-badge">
         <Sparkles size={14} strokeWidth={2} aria-hidden="true" />
-        Claude Code, Codex, Cursor — one workspace
+        Claude Code, Codex and Cursor in one workspace
       </span>
       <h1 className="mk-display mt-6">
         Make your md files

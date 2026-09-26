@@ -1,6 +1,6 @@
 ---
 title: Advanced
-description: Self-hosted infrastructure — run your own git server and CI runners.
+description: Self-hosted infrastructure: run your own git server and CI runners.
 order: 10
 ---
 # Advanced

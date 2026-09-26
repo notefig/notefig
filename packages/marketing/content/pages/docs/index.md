@@ -1,11 +1,11 @@
 ---
 title: Introduction
-description: Notefig is an AI metaharness — run your agents side by side, right in your documents.
+description: Notefig is an AI metaharness. Run your agents side by side, right in your documents.
 order: 0
 ---
 # Notefig
 
-Notefig is an AI metaharness. It runs the agents you already use — Claude Code, Codex, Cursor, OpenCode, Gemini CLI, Devin, or any agent that speaks ACP — side by side, inside a workspace of plain markdown files.
+Notefig is an AI metaharness. It runs the agents you already use (Claude Code, Codex, Cursor, OpenCode, Gemini CLI, Devin, or any agent that speaks ACP) side by side, inside a workspace of plain markdown files.
 
 ## How it works
 
@@ -17,8 +17,8 @@ Notefig is an AI metaharness. It runs the agents you already use — Claude Code
 
 This workspace has a few example notes in `notes/`:
 
-- [Q3 kickoff](../notes/q3-kickoff.md) — meeting notes to turn into action items
-- [Roadmap](../notes/roadmap.md) — where those action items land
-- [Customer insights](../notes/insights.md) — a summary drawn from `notes/interviews/`
+- [Q3 kickoff](../notes/q3-kickoff.md): meeting notes to turn into action items
+- [Roadmap](../notes/roadmap.md): where those action items land
+- [Customer insights](../notes/insights.md): a summary drawn from `notes/interviews/`
 
 Open one, select some text, and press `/` to ask an agent about it. Agents run in the desktop app, or on your own machine with `npx notefig agent`.

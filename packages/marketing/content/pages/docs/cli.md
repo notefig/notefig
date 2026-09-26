@@ -1,6 +1,6 @@
 ---
 title: CLI
-description: Command-line tools that convert markdown files into static websites — building, theming, and deployment.
+description: Command-line tools that convert markdown files into static websites: building, theming, and deployment.
 order: 3
 ---
 # CLI

@@ -211,7 +211,7 @@ function toolEntry(
                 path,
                 oldText: "## Q3\n",
                 newText:
-                  "## Q3\n\n- [ ] Ship onboarding templates — Maya\n- [ ] Pricing page for small teams — Sam\n- [ ] Search beta to all workspaces — Lee\n",
+                  "## Q3\n\n- [ ] Ship onboarding templates (Maya)\n- [ ] Pricing page for small teams (Sam)\n- [ ] Search beta to all workspaces (Lee)\n",
               },
             ],
           }

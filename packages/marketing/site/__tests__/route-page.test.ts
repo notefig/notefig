@@ -25,6 +25,6 @@ describe("titleForRoute", () => {
   it("pitches on the landing page and names the page on a deep link", () => {
     const cli = findPageByRoute("/docs/cli")!;
     expect(titleForRoute(cli, false)).toBe(LANDING_TITLE);
-    expect(titleForRoute(cli, true)).toBe("CLI — Notefig");
+    expect(titleForRoute(cli, true)).toBe("CLI | Notefig");
   });
 });

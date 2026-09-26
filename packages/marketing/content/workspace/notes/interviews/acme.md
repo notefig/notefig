@@ -1,4 +1,4 @@
-# Acme — customer interview
+# Acme: customer interview
 
 - Setup took their team most of a week; they want starter templates.
 - Search is "the reason we stayed".

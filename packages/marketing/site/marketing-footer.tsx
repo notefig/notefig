@@ -1,7 +1,6 @@
 import { ArrowUpRight } from "lucide-react";
 import { marketingPages, type MarketingPage } from "./content-manifest";
 import { APP_URL, GITHUB_URL, RELEASES_URL } from "./links";
-import { Brand } from "./marketing-mocks";
 import { PageLink } from "./page-links";
 
 const isPublishingPage = (page: MarketingPage) =>
@@ -28,15 +27,6 @@ export function MarketingFooter({ onEnterApp }: { onEnterApp: () => void }) {
             <img src="/icon.svg" alt="" className="size-7" aria-hidden="true" />
             Notefig
           </div>
-          <a
-            href={GITHUB_URL}
-            target="_blank"
-            rel="noopener"
-            className="mt-5 inline-flex text-[var(--mk-blush)] transition-colors hover:text-[var(--mk-cream)]"
-          >
-            <Brand name="GitHub" size={18} />
-            <span className="sr-only">GitHub</span>
-          </a>
         </div>
 
         <FooterColumn title="Product">

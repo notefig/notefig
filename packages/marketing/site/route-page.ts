@@ -4,7 +4,7 @@ import {
   type MarketingPage,
 } from "./content-manifest";
 
-export const LANDING_TITLE = "Notefig — Every AI agent. One productive workspace.";
+export const LANDING_TITLE = "Notefig | Every AI agent. One productive workspace.";
 
 /**
  * Which page a URL shows. `/` opens the introduction, every other page is at
@@ -20,5 +20,5 @@ export function pageForPathname(pathname: string): MarketingPage | null {
 
 /** The tab title for a URL: the landing pitch on `/`, the page elsewhere. */
 export function titleForRoute(page: MarketingPage, isDeepLink: boolean): string {
-  return isDeepLink ? `${page.title} — Notefig` : LANDING_TITLE;
+  return isDeepLink ? `${page.title} | Notefig` : LANDING_TITLE;
 }

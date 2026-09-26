@@ -109,7 +109,7 @@ async function prerenderLanding(page, shellHtml) {
   // site/main.tsx from the content manifest) — one parser total.
   const pages = await page.evaluate(() => window.__MARKETING_ROUTES__);
   const html = composePage(shellHtml, {
-    title: "Notefig — Every AI agent. One productive workspace.",
+    title: "Notefig | Every AI agent. One productive workspace.",
     description:
       "Notefig is an AI metaharness: run Claude Code, OpenCode, Devin and other agents side by side, prompt them from any document, and undo any change they make.",
     canonicalPath: "/",
@@ -134,7 +134,7 @@ async function prerenderPages(page, shellHtml, pages) {
     writeRoute(
       routeFile(entry.route),
       composePage(shellHtml, {
-        title: `${entry.title} — Notefig`,
+        title: `${entry.title} | Notefig`,
         description: entry.description,
         // The landing page shows this same content; point search engines
         // there rather than competing with ourselves for it.

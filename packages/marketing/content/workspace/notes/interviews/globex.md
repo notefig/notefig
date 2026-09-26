@@ -1,4 +1,4 @@
-# Globex — customer interview
+# Globex: customer interview
 
 - Onboarding: asked twice for an example workspace.
 - Uses search dozens of times a day.
