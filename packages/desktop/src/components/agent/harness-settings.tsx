@@ -515,7 +515,7 @@ function ResetConfirmDialog({
  * placeholders, not helper paragraphs. onSave returns errors to render
  * (null = saved; the caller navigates back).
  */
-export function HarnessEditorFields({
+function HarnessEditorFields({
   mode,
   initialForm,
   onSave,

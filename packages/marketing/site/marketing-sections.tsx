@@ -84,7 +84,7 @@ const PILLARS = [
   {
     kicker: "Metaharness",
     title: "Every agent, configured once",
-    body: "Claude Code, OpenCode, Devin and any ACP agent side by side, each set up with its own command, environment and tools.",
+    body: "Claude Code, OpenCode, Devin and any ACP agent side by side, each with its own settings.",
     demo: () => <DemoHarnesses />,
   },
 ];
