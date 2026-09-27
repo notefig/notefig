@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
-import { ChevronRight, History, Sparkles, Workflow } from "lucide-react";
-import { DownloadAppLink } from "./download-app-link";
+import { ChevronRight, History, Users, Workflow } from "lucide-react";
+import { DownloadButton } from "./download-app-link";
 import { APP_URL } from "./links";
 import {
   DemoHarnesses,
@@ -8,12 +8,12 @@ import {
   DemoSessions,
   DemoWorkspaces,
 } from "./demo/demo-cards";
-import { DemoPromptWidget } from "./demo/demo-prompt";
+import { DemoCollaboration, DemoPromptWidget } from "./demo/demo-prompt";
 import { DemoTranscript } from "./demo/demo-transcript";
 import {
   AGENTS,
   AgentMark,
-  OrbitMock,
+  OpenSourceMock,
   PairingMock,
   PipelineMock,
 } from "./marketing-mocks";
@@ -29,8 +29,8 @@ export function MarketingSections() {
     <>
       <HarnessStrip />
       <div className="mk-white">
-        <WorkflowSection />
         <PromptSplit />
+        <PillarsSection />
         <HistorySplit />
       </div>
       <BentoSection />
@@ -60,18 +60,21 @@ function HarnessStrip() {
   );
 }
 
-const WORKFLOW = [
+/** The three selling points, each shown with the part of the app that
+ *  proves it. */
+const PILLARS = [
   {
-    title: "Bring your own agent",
-    body: "Every agent you use, in one place.",
-    demo: () => <DemoHarnesses />,
+    kicker: "Open source",
+    title: "Yours to read, run and change",
+    body: "MIT licensed, on GitHub. No black box between you and your agents.",
+    demo: () => <OpenSourceMock />,
   },
   {
-    title: "Prompt from any document",
-    body: "Press / and ask. Answers land in the doc.",
+    kicker: "Markdown first",
+    title: "A better harness, built on .md",
+    body: "Agents work in plain Markdown you can read, diff and version, so context never gets lost in a chat log.",
     demo: () => (
       <DemoPromptWidget
-        script="summon"
         reference="Onboarding templates came up in every customer call."
         zoom={0.8}
         width={360}
@@ -79,29 +82,32 @@ const WORKFLOW = [
     ),
   },
   {
-    title: "Sessions that keep going",
-    body: "Queue work and come back to results.",
-    demo: () => <DemoSessions />,
+    kicker: "Metaharness",
+    title: "Every agent, configured once",
+    body: "Claude Code, OpenCode, Devin and any ACP agent side by side, each set up with its own command, environment and tools.",
+    demo: () => <DemoHarnesses />,
   },
 ];
 
-function WorkflowSection() {
+function PillarsSection() {
   return (
-    <section id="features" className="site-column pb-[120px] pt-[140px]">
+    <section id="why" className="site-column pb-[120px] pt-[100px]">
       <h2 className="mk-h2 max-w-[1000px]" style={{ textWrap: "pretty" }}>
-        One harness for all your agents.{" "}
+        Open source. Markdown first. Every agent.{" "}
         <span className="text-[var(--mk-muted)]">
-          Working in your documents, not a chat window beside them.
+          A harness you can read, on files you own, running the agents you
+          already use.
         </span>
       </h2>
       <div className="mt-[96px] grid gap-12 md:grid-cols-3 md:gap-10">
-        {WORKFLOW.map(({ title, body, demo: Demo }) => (
-          <article key={title} className="min-w-0">
+        {PILLARS.map(({ kicker, title, body, demo: Demo }) => (
+          <article key={kicker} className="min-w-0">
             <div className="mk-well aspect-square p-6">
               <Demo />
             </div>
-            <h3 className="mk-card-title mt-7">{title}</h3>
-            <p className="mk-card-body max-w-[300px]">{body}</p>
+            <p className="mk-kicker mt-7 text-[var(--mk-accent-text)]">{kicker}</p>
+            <h3 className="mk-card-title mt-1.5">{title}</h3>
+            <p className="mk-card-body max-w-[320px]">{body}</p>
           </article>
         ))}
       </div>
@@ -116,27 +122,30 @@ const KICKOFF_NOTES = {
 
 function PromptSplit() {
   return (
-    <section className="site-column grid items-center gap-14 py-[100px] md:grid-cols-[1fr_1.15fr] md:gap-16">
+    <section
+      id="features"
+      className="site-column grid items-center gap-14 pb-[100px] pt-[120px] md:grid-cols-[1fr_1.15fr] md:gap-16"
+    >
       <div>
-        <Kicker color="var(--mk-accent-text)" icon={Sparkles}>
-          Inline prompts
+        <Kicker color="var(--mk-accent-text)" icon={Users}>
+          Collaboration
         </Kicker>
-        <h2 className="mk-h2 mt-4 max-w-[420px]">
-          Ask for an edit without leaving the page.
+        <h2 className="mk-h2 mt-4 max-w-[440px]">
+          You and your agents, in one document.
         </h2>
-        <p className="mk-body mt-5 max-w-[420px]">
-          Prompt from any document, pull in other files with @, and pick the
-          agent that answers.
+        <p className="mk-body mt-5 max-w-[440px]">
+          Ask Claude Code about one part and OpenCode about another. They work
+          side by side while you keep writing, and every answer lands in the
+          doc.
         </p>
         <WebAppLink className="mt-10" />
       </div>
       <div className="mk-well mk-well-dots min-w-0 p-6 md:p-12">
-        <DemoPromptWidget
-          script="lifecycle"
+        <DemoCollaboration
           document={KICKOFF_NOTES}
-          zoom={0.7}
-          width={440}
-          height={500}
+          zoom={0.64}
+          width={460}
+          height={680}
         />
       </div>
     </section>
@@ -244,11 +253,11 @@ function BentoSection() {
             </div>
           </BentoCard>
           <BentoCard
-            title="Fits your stack"
-            body="Your agents, remotes and files, connected."
+            title="Sessions that keep going"
+            body="Queue work and come back to results."
           >
             <div className="flex h-full items-center">
-              <OrbitMock />
+              <DemoSessions />
             </div>
           </BentoCard>
         </div>
@@ -362,7 +371,7 @@ function AgentsSection() {
           </Kicker>
           <h2 className="mk-h2 mt-3">Every agent, one workspace</h2>
           <div className="pointer-events-auto mt-8 flex items-center justify-center gap-2 sm:gap-3">
-            <DownloadAppLink className="mk-btn mk-btn-dark" />
+            <DownloadButton />
             <a
               href={APP_URL}
               target="_blank"

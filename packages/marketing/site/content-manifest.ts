@@ -100,19 +100,31 @@ function buildPages(files: Record<string, string>): MarketingPage[] {
   return pages.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
 }
 
+/** Every content page, all seeded into the live workspace. */
 export const marketingPages: MarketingPage[] = buildPages(rawPages);
 
+/** The page `/` opens: the introduction, in the live app. */
+export const defaultPage: MarketingPage =
+  marketingPages.find((page) => page.id === "docs/index") ?? marketingPages[0];
+
+/**
+ * The pages that are pages of the site, with a URL, a prerender and a
+ * sitemap entry: the landing (which opens the introduction) and the ones
+ * outside `docs/`. The rest of the docs are demo content for the live
+ * editor only — opening one there leaves the URL alone, like any file a
+ * visitor makes.
+ */
+export const routedPages: MarketingPage[] = marketingPages.filter(
+  (page) => page === defaultPage || !page.id.startsWith("docs/"),
+);
+
 export function findPageByRoute(route: string): MarketingPage | undefined {
-  return marketingPages.find((page) => page.route === route);
+  return routedPages.find((page) => page.route === route);
 }
 
 export function findPageByFilePath(filePath: string): MarketingPage | undefined {
-  return marketingPages.find((page) => page.filePath === filePath);
+  return routedPages.find((page) => page.filePath === filePath);
 }
-
-/** The page `/` opens. */
-export const defaultPage: MarketingPage =
-  findPageByRoute("/docs/index") ?? marketingPages[0];
 
 const rawWorkspaceFiles = import.meta.glob<string>(
   "../content/workspace/**/*.md",

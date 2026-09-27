@@ -6,6 +6,7 @@ import {
   findPageByRoute,
   manifestHash,
   marketingPages,
+  routedPages,
   pageIdFromModulePath,
   parseFrontmatter,
 } from "../content-manifest";
@@ -67,10 +68,14 @@ describe("marketing pages", () => {
     }
   });
 
-  it("keeps the docs in their own directory", () => {
+  it("seeds the docs as editor content but routes only the site's pages", () => {
     const docs = marketingPages.filter((page) => page.id.startsWith("docs/"));
     expect(docs.length).toBeGreaterThan(5);
-    expect(findPageByRoute("/download")).toBeDefined();
+    expect(routedPages.map((page) => page.route)).toEqual([
+      defaultPage.route,
+      "/download",
+    ]);
+    expect(findPageByRoute("/docs/cli")).toBeUndefined();
   });
 
   it("has unique routes and a stable order", () => {
@@ -81,9 +86,11 @@ describe("marketing pages", () => {
   });
 
   it("looks pages up by route and by workspace file path", () => {
-    const cli = findPageByRoute("/docs/cli");
-    expect(cli).toBeDefined();
-    expect(findPageByFilePath(cli!.filePath)).toBe(cli);
+    const download = findPageByRoute("/download");
+    expect(download).toBeDefined();
+    expect(findPageByFilePath(download!.filePath)).toBe(download);
+    // A doc is a file in the editor, not a page: the URL doesn't follow it.
+    expect(findPageByFilePath("notefig/docs/cli.md")).toBeUndefined();
     expect(findPageByFilePath("notefig/whatever-a-visitor-made.md")).toBeUndefined();
   });
 

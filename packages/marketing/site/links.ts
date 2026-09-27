@@ -47,7 +47,6 @@ export function detectPlatform(nav: NavigatorHints): DownloadPlatform {
 export function downloadLabel(platform: DownloadPlatform): string {
   if (platform === "windows") return "Download for Windows";
   if (platform === "mac") return "Download for macOS";
-  if (platform === "linux") return "Download for Linux";
   return "Download the app";
 }
 
@@ -70,28 +69,34 @@ export function pickAssetUrl(
   }
 
   if (platform === "mac") {
-    // Apple Silicon is the default; Intel Macs can install via Rosetta or
-    // pick x64 from the releases page. userAgentData does not expose arch.
+    // Apple Silicon is the default (userAgentData does not expose arch);
+    // Intel Macs pick their build from the header's download menu.
     return (
-      lower.find(
-        (asset) =>
-          asset.name.endsWith(".dmg") && asset.name.includes("aarch64"),
-      )?.url ??
+      pickMacDmg(assets, "arm64") ??
       lower.find((asset) => asset.name.endsWith(".dmg"))?.url ??
       null
     );
   }
 
-  if (platform === "linux") {
-    return (
-      lower.find(
-        (asset) =>
-          asset.name.endsWith(".appimage") || asset.name.endsWith(".deb"),
-      )?.url ?? null
-    );
-  }
-
+  // No Linux build is published yet.
   return null;
+}
+
+export type MacArch = "arm64" | "x64";
+
+/** The macOS disk image for one architecture (Tauri names them aarch64 and
+ *  x64), or null when the release doesn't carry it. */
+export function pickMacDmg(
+  assets: readonly ReleaseAsset[],
+  arch: MacArch,
+): string | null {
+  const tag = arch === "arm64" ? "aarch64" : "x64";
+  return (
+    assets.find((asset) => {
+      const name = asset.name.toLowerCase();
+      return name.endsWith(".dmg") && name.includes(tag);
+    })?.browser_download_url ?? null
+  );
 }
 
 export function resolveDownloadTarget(

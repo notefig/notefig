@@ -3,7 +3,11 @@ import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import i18n from "@/utils/intl";
 import { describeTaskMeta } from "@/entities/agents";
 import { formatTimeAgo } from "@/utils/format";
-import { HarnessRow } from "@/components/agent/harness-settings";
+import {
+  HarnessEditorFields,
+  HarnessRow,
+} from "@/components/agent/harness-settings";
+import { definitionToForm } from "@/components/agent/harness-settings-form";
 import { SessionRow } from "@/components/agent/sessions-panel";
 import {
   StatusGlyph,
@@ -25,36 +29,55 @@ const noop = () => {};
 
 // ---------- Harnesses: the Settings › Agents list ----------
 
+/** Other agents as rows, then Claude Code open in its editor below them. */
 const HARNESS_ROWS = [
-  { id: "claude-code", found: true },
   { id: "opencode", found: true },
   { id: "devin", found: true },
-  { id: "gemini-cli", found: false },
+  { id: "claude-code", found: true },
 ];
 
+/** Settings › Agents: several agents, and Claude Code open in its editor —
+ *  each keeps its own command, arguments, environment and resume command. */
 export function DemoHarnesses() {
   return (
-    <AppEmbed zoom={0.82} width={340}>
+    <AppEmbed
+      zoom={0.82}
+      width={380}
+      height={330}
+      className="overflow-hidden [mask-image:linear-gradient(black_72%,transparent)]"
+    >
       <div className="divide-y divide-border rounded-lg border border-border bg-card shadow-sm">
         {HARNESS_ROWS.map(({ id, found }) => {
           const definition = BUILT_IN_HARNESSES.find((h) => h.id === id);
           if (!definition) return null;
+          const editing = id === "claude-code";
           return (
-            <HarnessRow
-              key={id}
-              row={{
-                definition,
-                origin: "builtin",
-                enabled: found,
-                discovery: { harnessId: id, found, probedAt: 0 },
-              }}
-              isDefault={id === "claude-code"}
-              isEditing={false}
-              onMakeDefault={noop}
-              onToggleEnabled={noop}
-              onEdit={noop}
-              onDelete={noop}
-            />
+            <div key={id}>
+              <HarnessRow
+                row={{
+                  definition,
+                  origin: "builtin",
+                  enabled: found,
+                  discovery: { harnessId: id, found, probedAt: 0 },
+                }}
+                isDefault={editing}
+                isEditing={editing}
+                onMakeDefault={noop}
+                onToggleEnabled={noop}
+                onEdit={noop}
+                onDelete={noop}
+              />
+              {editing && (
+                <div className="pointer-events-none border-t border-border bg-muted/30 p-4">
+                  <HarnessEditorFields
+                    mode="builtin"
+                    initialForm={definitionToForm(definition)}
+                    onSave={() => null}
+                    onCancel={noop}
+                  />
+                </div>
+              )}
+            </div>
           );
         })}
       </div>

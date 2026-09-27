@@ -24,7 +24,7 @@ import { SiteShell } from "./site-shell";
 import {
   WORKSPACE_ROOT,
   defaultPage,
-  marketingPages,
+  routedPages,
 } from "./content-manifest";
 
 // The site-local wrapper around @/styles.css — registers the desktop source
@@ -57,7 +57,7 @@ void whenOpenWorkspacesReady().then(() => {
 // per-page metadata from the running app, so the manifest never needs a
 // second, node-side frontmatter parser.
 (window as unknown as { __MARKETING_ROUTES__: unknown }).__MARKETING_ROUTES__ =
-  marketingPages.map(({ route, title, description }) => ({
+  routedPages.map(({ route, title, description }) => ({
     route,
     title,
     description,

@@ -1,65 +1,38 @@
 import { ArrowUpRight } from "lucide-react";
-import { marketingPages, type MarketingPage } from "./content-manifest";
+import { findPageByRoute } from "./content-manifest";
 import { APP_URL, GITHUB_URL, RELEASES_URL } from "./links";
 import { PageLink } from "./page-links";
 
-const isPublishingPage = (page: MarketingPage) =>
-  page.id === "docs/publishing" || page.id.startsWith("docs/publish-");
-
 /**
- * Black footer with link columns. The page columns are the site's link
- * graph: the file tree in the app renders into a shadow root and its rows
- * are not anchors, so without these every page would be an orphan reachable
- * only from sitemap.xml. Every manifest page must land in a column.
+ * A compact footer: the mark, the product links, the copyright. The site's
+ * only page besides the landing (the Download page) is linked here, so it is
+ * not an orphan reachable only from sitemap.xml.
  */
 export function MarketingFooter({ onEnterApp }: { onEnterApp: () => void }) {
-  const docs = marketingPages.filter(
-    (page) => page.id.startsWith("docs/") && !isPublishingPage(page),
-  );
-  const publishing = marketingPages.filter(isPublishingPage);
-  const other = marketingPages.filter((page) => !page.id.startsWith("docs/"));
-
+  const download = findPageByRoute("/download");
   return (
     <footer className="mk-footer">
-      <div className="site-column grid gap-12 pb-12 pt-20 md:grid-cols-[192px_repeat(3,minmax(0,1fr))] md:gap-8">
-        <div className="self-start">
-          <div className="flex items-center gap-2 text-[21px] font-semibold tracking-[-0.02em]">
-            <img src="/icon.svg" alt="" className="size-7" aria-hidden="true" />
-            Notefig
-          </div>
+      <div className="site-column flex flex-col gap-6 py-10 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2 text-[18px] font-semibold tracking-[-0.02em]">
+          <img src="/icon.svg" alt="" className="size-6" aria-hidden="true" />
+          Notefig
         </div>
-
-        <FooterColumn title="Product">
-          <li>
-            <ExternalLink href={APP_URL}>Open the web app</ExternalLink>
-          </li>
-          {other.map((page) => (
-            <PageItem key={page.route} page={page} onNavigate={onEnterApp} />
-          ))}
-          <li>
-            <ExternalLink href={GITHUB_URL}>GitHub</ExternalLink>
-          </li>
-          <li>
-            <ExternalLink href={RELEASES_URL}>Releases</ExternalLink>
-          </li>
-        </FooterColumn>
-
-        <FooterColumn title="Docs">
-          {docs.map((page) => (
-            <PageItem key={page.route} page={page} onNavigate={onEnterApp} />
-          ))}
-        </FooterColumn>
-
-        <FooterColumn title="Publishing">
-          {publishing.map((page) => (
-            <PageItem key={page.route} page={page} onNavigate={onEnterApp} />
-          ))}
-        </FooterColumn>
+        <nav
+          aria-label="Footer"
+          className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:gap-x-6"
+        >
+          <ExternalLink href={APP_URL}>Web app</ExternalLink>
+          {download && (
+            <PageLink page={download} onNavigate={onEnterApp} className="mk-footer-link">
+              Download
+            </PageLink>
+          )}
+          <ExternalLink href={GITHUB_URL}>GitHub</ExternalLink>
+          <ExternalLink href={RELEASES_URL}>Releases</ExternalLink>
+        </nav>
       </div>
-
-      <div className="site-column flex flex-wrap items-center justify-between gap-4 pb-10 pt-6 text-[14px] font-medium text-[var(--mk-blush)]">
-        <span>© {new Date().getFullYear()} Notefig. All rights reserved</span>
-        <span>The AI metaharness.</span>
+      <div className="site-column border-t border-[rgb(247_239_231/0.12)] py-5 text-[13px] font-medium text-[var(--mk-blush)] opacity-80">
+        © {new Date().getFullYear()} Notefig. Open source under the MIT license.
       </div>
     </footer>
   );
@@ -83,36 +56,5 @@ function ExternalLink({
       {children}
       <ArrowUpRight size={14} strokeWidth={2} aria-hidden="true" />
     </a>
-  );
-}
-
-function FooterColumn({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <nav aria-label={title}>
-      <p className="text-[15px] font-semibold">{title}</p>
-      <ul className="mt-5 space-y-3">{children}</ul>
-    </nav>
-  );
-}
-
-function PageItem({
-  page,
-  onNavigate,
-}: {
-  page: MarketingPage;
-  onNavigate: () => void;
-}) {
-  return (
-    <li>
-      <PageLink page={page} onNavigate={onNavigate} className="mk-footer-link">
-        {page.title}
-      </PageLink>
-    </li>
   );
 }

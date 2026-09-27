@@ -4,13 +4,14 @@ import {
   type MarketingPage,
 } from "./content-manifest";
 
-export const LANDING_TITLE = "Notefig | Every AI agent. One productive workspace.";
+export const LANDING_TITLE = "Notefig | The open-source AI metaharness";
 
 /**
- * Which page a URL shows. `/` opens the introduction, every other page is at
- * the path its file sits on in the content tree (`/docs/cli`, `/download`).
- * `/docs` is a convenience alias for the introduction. Anything else is not a
- * page of this site (null → `/`).
+ * Which page a URL shows. `/` opens the introduction; the site's other
+ * pages sit at the path their file has in the content tree (`/download`).
+ * `/docs` stays an alias for the introduction. Anything else, the other docs
+ * included (they are editor demo content now), is not a page of this site
+ * (null → `/`).
  */
 export function pageForPathname(pathname: string): MarketingPage | null {
   const route = `/${pathname.split("/").filter(Boolean).join("/")}`;

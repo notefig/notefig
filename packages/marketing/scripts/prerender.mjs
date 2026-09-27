@@ -109,9 +109,9 @@ async function prerenderLanding(page, shellHtml) {
   // site/main.tsx from the content manifest) — one parser total.
   const pages = await page.evaluate(() => window.__MARKETING_ROUTES__);
   const html = composePage(shellHtml, {
-    title: "Notefig | Every AI agent. One productive workspace.",
+    title: "Notefig | The open-source AI metaharness",
     description:
-      "Notefig is an AI metaharness: run Claude Code, OpenCode, Devin and other agents side by side, prompt them from any document, and undo any change they make.",
+      "Notefig is the open-source AI metaharness. Markdown first, with Claude Code, Codex, OpenCode and more side by side, each with its own config.",
     canonicalPath: "/",
     snapshot,
   });

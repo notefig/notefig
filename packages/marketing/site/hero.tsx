@@ -1,7 +1,35 @@
-import { ChevronRight, Globe, Sparkles } from "lucide-react";
-import { DownloadAppLink } from "./download-app-link";
-import { APP_URL } from "./links";
+import { ArrowUpRight, ChevronRight, Sparkles } from "lucide-react";
+import { DownloadButton } from "./download-app-link";
+import { APP_URL, GITHUB_URL } from "./links";
 import { Brand } from "./marketing-mocks";
+
+/** The Markdown mark (dcurtis/markdown-mark, public domain), hollow: an
+ *  outlined frame around the M and arrow, set at text size in the headline. */
+function MarkdownMark() {
+  return (
+    <svg
+      viewBox="0 0 208 128"
+      role="img"
+      aria-label="Markdown"
+      className="inline-block h-[0.72em] w-auto align-[-0.02em]"
+    >
+      <rect
+        x="7"
+        y="7"
+        width="194"
+        height="114"
+        rx="14"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="13"
+      />
+      <path
+        fill="currentColor"
+        d="M30 98V30h20l20 25 20-25h20v68H90V59L70 84 50 59v39zm125 0l-30-33h20V30h20v35h20z"
+      />
+    </svg>
+  );
+}
 
 /**
  * Short pitch and the two CTAs — download first, the web app second. The
@@ -16,17 +44,17 @@ export function Hero() {
         Claude Code, Codex and OpenCode in one workspace
       </span>
       <h1 className="mk-display mt-6">
-        Put your .md
+        Put your <MarkdownMark />
         <br />
         to work
       </h1>
       <p className="mk-lede mt-6 max-w-[520px]">
-        The AI metaharness. Run all your agents side by side, right in your
-        documents.
+        The open-source AI metaharness. Run all your agents side by side,
+        right in your Markdown.
       </p>
 
       <div className="mt-10 flex items-center justify-center gap-2 sm:gap-3">
-        <DownloadAppLink className="mk-btn mk-btn-dark" />
+        <DownloadButton />
         <a
           href={APP_URL}
           target="_blank"
@@ -37,22 +65,16 @@ export function Hero() {
           <ChevronRight size={16} strokeWidth={2.25} aria-hidden="true" />
         </a>
       </div>
-      <p className="mt-5 flex items-center gap-3 text-[13px] font-medium text-[var(--mk-muted)]">
-        <span className="inline-flex items-center gap-1.5">
-          <Brand name="Apple" size={13} /> macOS
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <Brand name="Windows" size={12} /> Windows
-        </span>
-        <a
-          href={APP_URL}
-          target="_blank"
-          rel="noopener"
-          className="inline-flex items-center gap-1.5 transition-colors hover:text-[var(--mk-ink)]"
-        >
-          <Globe size={13} strokeWidth={2} aria-hidden="true" /> Web
-        </a>
-      </p>
+      <a
+        href={GITHUB_URL}
+        target="_blank"
+        rel="noopener"
+        className="mt-6 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--mk-soft)] transition-colors hover:text-[var(--mk-ink)]"
+      >
+        <Brand name="GitHub" size={14} />
+        Open source, MIT licensed
+        <ArrowUpRight size={13} strokeWidth={2} aria-hidden="true" />
+      </a>
     </section>
   );
 }

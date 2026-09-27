@@ -9,12 +9,12 @@ describe("pageForPathname", () => {
     expect(pageForPathname("/docs/")).toBe(defaultPage);
   });
 
-  it("opens the page a deep link names, nested or not", () => {
-    expect(pageForPathname("/docs/cli")).toBe(findPageByRoute("/docs/cli"));
+  it("opens the page a deep link names", () => {
     expect(pageForPathname("/download")).toBe(findPageByRoute("/download"));
   });
 
-  it("rejects paths that are not pages of this site", () => {
+  it("rejects paths that are not pages of this site, docs included", () => {
+    expect(pageForPathname("/docs/cli")).toBeNull();
     expect(pageForPathname("/docs/nope")).toBeNull();
     expect(pageForPathname("/pricing")).toBeNull();
     expect(pageForPathname("/docs/cli/extra")).toBeNull();
@@ -23,8 +23,8 @@ describe("pageForPathname", () => {
 
 describe("titleForRoute", () => {
   it("pitches on the landing page and names the page on a deep link", () => {
-    const cli = findPageByRoute("/docs/cli")!;
-    expect(titleForRoute(cli, false)).toBe(LANDING_TITLE);
-    expect(titleForRoute(cli, true)).toBe("CLI | Notefig");
+    const download = findPageByRoute("/download")!;
+    expect(titleForRoute(download, false)).toBe(LANDING_TITLE);
+    expect(titleForRoute(download, true)).toBe("Download | Notefig");
   });
 });

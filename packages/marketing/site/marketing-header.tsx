@@ -1,9 +1,9 @@
 import { ArrowUpRight } from "lucide-react";
 import { Link } from "react-router-dom";
-import { DownloadAppLink } from "./download-app-link";
+import { HeaderDownload } from "./download-app-link";
 import { GITHUB_URL } from "./links";
 
-export function MarketingHeader({ onEnterApp }: { onEnterApp: () => void }) {
+export function MarketingHeader() {
   return (
     <header className="mk mk-header select-text">
       <div className="site-column grid h-full grid-cols-[1fr_auto] items-center gap-6 md:grid-cols-[1fr_auto_1fr]">
@@ -21,9 +21,6 @@ export function MarketingHeader({ onEnterApp }: { onEnterApp: () => void }) {
           <a href="#agents" className="mk-nav-link">
             Agents
           </a>
-          <button type="button" onClick={onEnterApp} className="mk-nav-link">
-            Docs
-          </button>
           <a
             href={GITHUB_URL}
             target="_blank"
@@ -35,7 +32,7 @@ export function MarketingHeader({ onEnterApp }: { onEnterApp: () => void }) {
           </a>
         </nav>
         <div className="flex justify-end">
-          <DownloadAppLink label="Download" className="mk-btn mk-btn-dark" />
+          <HeaderDownload />
         </div>
       </div>
     </header>

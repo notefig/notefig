@@ -45,7 +45,9 @@ function SitePage({
 
   return (
     <div className="site-stage">
-      <MarketingHeader onEnterApp={product.scrollToApp} />
+      <MarketingHeader />
+      {/* Holds the fixed header's place (styles.css .mk-header). */}
+      <div className="h-[74px]" aria-hidden="true" />
       <div className="mk select-text">
         <Hero />
       </div>

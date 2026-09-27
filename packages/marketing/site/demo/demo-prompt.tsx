@@ -10,40 +10,27 @@ import {
   type BlobPhase,
 } from "@notefig/widgets/prompt/state";
 import type { AgentEntry, AgentTurn } from "@notefig/shared/agent";
+import { HarnessLogo } from "@notefig/ui/harness-logo";
 import { AppEmbed } from "./app-embed";
 import { DEMO_FILES, DEMO_ROOT } from "./demo-fixtures";
+import { AgentHost } from "./demo-host";
 import { timeline, typed, useDemoClock } from "./use-demo-clock";
 
 /*
- * The inline prompt widget (the app's PromptBlobFace), scripted end to end:
- * the prompt is typed, a file is @-mentioned through the real suggestion
- * popup, and the round goes sending → queued → running → done, with the
- * widget deriving its status line, summary and touched files from the
- * transcript exactly as it does live.
+ * The inline prompt widget (the app's PromptBlobFace), scripted end to end.
+ * The card version writes one prompt with an @-mention. The document version
+ * puts two agents in one page: Claude Code turns the notes into action
+ * items while OpenCode, summoned further down, writes the team summary.
+ * Both run at once, and each one's edit streams into its own part of the
+ * page. Every widget derives its status line, summary and touched files
+ * from its transcript, as it does live.
  */
 
 const noop = () => {};
 
 const DOC_PATH = `${DEMO_ROOT}/notes/q3-kickoff.md`;
 const ROADMAP_PATH = `${DEMO_ROOT}/notes/roadmap.md`;
-
-const PROMPT_LEAD = "Turn these notes into action items with owners, using ";
-const MENTION_QUERY = "ro";
-const MENTION_PATH = "notes/roadmap.md";
-const PROMPT_TAIL = " for priorities";
-const PROMPT_TEXT = `${PROMPT_LEAD}@${MENTION_PATH}${PROMPT_TAIL}`;
-
-/** What the round writes into the document, under the widget. */
-export const ACTION_ITEMS = [
-  { task: "Ship onboarding templates", owner: "Maya" },
-  { task: "Pricing page for small teams", owner: "Sam" },
-  { task: "Search beta to all workspaces", owner: "Lee" },
-];
-const ADDED_MARKDOWN = `## Action items\n\n${ACTION_ITEMS.map(
-  (item) => `- [ ] ${item.task} (${item.owner})`,
-).join("\n")}\n`;
-const REPLY_TEXT =
-  "Added three action items with owners, ordered by the roadmap's Q3 priorities.";
+const TYPE_MS = 24;
 
 type PromptState = {
   phase: BlobPhase;
@@ -53,16 +40,25 @@ type PromptState = {
   queueAhead: number;
   /** The "@" query being typed, while the suggestion popup is open. */
   mention: string | null;
+  /** How much of the round's edit has been written into the page, 0 to 1. */
+  written: number;
 };
+
+function composing(draft: string, mention: string | null = null): PromptState {
+  return { phase: "composing", draft, entries: [], queueAhead: 0, mention, written: 0 };
+}
+
+function bound(phase: BlobPhase, entries: AgentEntry[] = [], written = 0): PromptState {
+  return { phase, draft: "", entries, queueAhead: 0, mention: null, written };
+}
 
 function toolEntry(
   id: string,
   title: string,
   status: "in_progress" | "completed",
-  edit = false,
+  path: string,
+  newText?: string,
 ): AgentEntry {
-  // Reads the mentioned roadmap, then writes into this document.
-  const path = edit ? DOC_PATH : ROADMAP_PATH;
   return {
     id,
     taskId: "task_demo",
@@ -72,21 +68,12 @@ function toolEntry(
     toolCall: {
       toolCallId: id,
       title,
-      kind: edit ? "edit" : "read",
+      kind: newText === undefined ? "read" : "edit",
       status,
       locations: [{ path }],
-      ...(edit
-        ? {
-            content: [
-              {
-                type: "diff" as const,
-                path,
-                oldText: "",
-                newText: ADDED_MARKDOWN,
-              },
-            ],
-          }
-        : {}),
+      ...(newText === undefined
+        ? {}
+        : { content: [{ type: "diff" as const, path, oldText: "", newText }] }),
     },
   };
 }
@@ -95,34 +82,65 @@ function reply(text: string): AgentEntry {
   return { id: "evt_9", taskId: "task_demo", turnId: "trn_demo", type: "assistant", text };
 }
 
-const READ_RUNNING = [toolEntry("evt_1", "Read", "in_progress")];
-const EDIT_RUNNING = [
-  toolEntry("evt_1", "Read", "completed"),
-  toolEntry("evt_2", "Edit", "in_progress", true),
-];
-const EDIT_DONE = [
-  toolEntry("evt_1", "Read", "completed"),
-  toolEntry("evt_2", "Edit", "completed", true),
-];
-
-function composing(draft: string, mention: string | null = null): PromptState {
-  return { phase: "composing", draft, entries: [], queueAhead: 0, mention };
+/**
+ * One agent's round after the send: it reads, writes into the page (the
+ * edit streams in), replies, and lands.
+ */
+function round({
+  read,
+  edit,
+  replyText,
+  readMs,
+  editMs,
+}: {
+  read: string;
+  edit: string;
+  replyText: string;
+  readMs: number;
+  editMs: number;
+}) {
+  const reading = [toolEntry("evt_1", "Read", "in_progress", read)];
+  const editing = [
+    toolEntry("evt_1", "Read", "completed", read),
+    toolEntry("evt_2", "Edit", "in_progress", DOC_PATH, edit),
+  ];
+  const edited = [
+    toolEntry("evt_1", "Read", "completed", read),
+    toolEntry("evt_2", "Edit", "completed", DOC_PATH, edit),
+  ];
+  return [
+    { ms: 500, state: () => bound("sending") },
+    { ms: readMs, state: () => bound("running", reading) },
+    { ms: editMs, state: (ms: number) => bound("running", editing, ms / editMs) },
+    {
+      ms: 900,
+      state: (ms: number) =>
+        bound("running", [...edited, reply(typed(replyText, ms, 14) || " ")], 1),
+    },
+    { ms: 1, state: () => bound("done", [...edited, reply(replyText)], 1) },
+  ];
 }
 
-function bound(
-  phase: BlobPhase,
-  entries: AgentEntry[] = [],
-  queueAhead = 0,
-): PromptState {
-  return { phase, draft: "", entries, queueAhead, mention: null };
-}
+// ---------- Claude Code: action items, with an @-mention ----------
 
-/** Writing the prompt: type, open "@", pick the file. */
+const PROMPT_LEAD = "Turn these notes into action items with owners, using ";
+const MENTION_QUERY = "ro";
+const MENTION_PATH = "notes/roadmap.md";
+const PROMPT_TAIL = " for priorities";
+const PROMPT_TEXT = `${PROMPT_LEAD}@${MENTION_PATH}${PROMPT_TAIL}`;
+
+export const ACTION_ITEMS = [
+  { task: "Ship onboarding templates", owner: "Maya" },
+  { task: "Pricing page for small teams", owner: "Sam" },
+  { task: "Search beta to all workspaces", owner: "Lee" },
+];
+
+/** Writing the prompt: type, open "@", pick the file, finish the sentence. */
 const WRITING = [
   { ms: 700, state: () => composing("") },
   {
-    ms: PROMPT_LEAD.length * 26,
-    state: (ms: number) => composing(typed(PROMPT_LEAD, ms, 26)),
+    ms: PROMPT_LEAD.length * TYPE_MS,
+    state: (ms: number) => composing(typed(PROMPT_LEAD, ms, TYPE_MS)),
   },
   {
     ms: 1300,
@@ -132,35 +150,54 @@ const WRITING = [
     },
   },
   {
-    ms: 700 + PROMPT_TAIL.length * 26,
+    ms: 600 + PROMPT_TAIL.length * TYPE_MS,
     state: (ms: number) =>
-      composing(
-        `${PROMPT_LEAD}@${MENTION_PATH}${typed(PROMPT_TAIL, ms - 700, 26)}`,
-      ),
+      composing(`${PROMPT_LEAD}@${MENTION_PATH}${typed(PROMPT_TAIL, ms - 600, TYPE_MS)}`),
   },
-  { ms: 1200, state: () => composing(PROMPT_TEXT) },
+  { ms: 500, state: () => composing(PROMPT_TEXT) },
 ];
 
-/** The round: sent, waits its turn, works, lands. */
-const ROUND = [
-  { ms: 600, state: () => ({ ...bound("sending"), draft: PROMPT_TEXT }) },
-  { ms: 1100, state: () => bound("queued", [], 1) },
-  { ms: 1300, state: () => bound("running", READ_RUNNING) },
-  { ms: 1200, state: () => bound("running", EDIT_RUNNING) },
+const CLAUDE_TRACK = timeline<PromptState>([
+  ...WRITING,
+  ...round({
+    read: ROADMAP_PATH,
+    edit: ACTION_ITEMS.map((item) => `- [ ] ${item.task} (${item.owner})`).join("\n"),
+    replyText: "Added three action items with owners, ordered by the roadmap.",
+    readMs: 1100,
+    editMs: 2600,
+  }),
+]);
+
+// ---------- OpenCode: the team summary, summoned while Claude works ----------
+
+const SUMMARY_PROMPT = "Summarize this for the team channel in two lines";
+export const SUMMARY_TEXT =
+  "Templates ship first, then small-team pricing. Search goes to every workspace in beta before the offsite.";
+
+const OPENCODE_TRACK = timeline<PromptState>([
+  { ms: 500, state: () => composing("") },
   {
-    ms: 1300,
-    state: (ms: number) =>
-      bound("running", [...EDIT_DONE, reply(typed(REPLY_TEXT, ms, 16) || " ")]),
+    ms: SUMMARY_PROMPT.length * TYPE_MS,
+    state: (ms: number) => composing(typed(SUMMARY_PROMPT, ms, TYPE_MS)),
   },
-  { ms: 5200, state: () => bound("done", [...EDIT_DONE, reply(REPLY_TEXT)]) },
-];
+  { ms: 300, state: () => composing(SUMMARY_PROMPT) },
+  ...round({
+    read: DOC_PATH,
+    edit: SUMMARY_TEXT,
+    replyText: "Wrote a two-line summary for the team channel.",
+    readMs: 900,
+    editMs: 2200,
+  }),
+]);
 
-const SCRIPTS = {
-  /** The card: summoned over a selection, the prompt written with a mention. */
-  summon: timeline<PromptState>(WRITING),
-  /** The feature section: the whole round, and what it changed. */
-  lifecycle: timeline<PromptState>([...WRITING, ...ROUND]),
-};
+/** OpenCode is summoned once Claude's prompt is on its way. */
+const OPENCODE_START = WRITING.reduce((sum, segment) => sum + segment.ms, 0) + 500;
+const HOLD_MS = 4500;
+const COLLAB_TOTAL =
+  Math.max(CLAUDE_TRACK.total, OPENCODE_START + OPENCODE_TRACK.total) + HOLD_MS;
+
+/** The card: summoned over a selection, the prompt written with a mention. */
+const SUMMON = timeline<PromptState>(WRITING);
 
 const RUNNING_TURN: AgentTurn = {
   turnId: "trn_demo",
@@ -203,87 +240,126 @@ const PROMPT_ACTIONS = {
   openAgentTab: noop,
 };
 
+/** The card: one widget, summoned over a selection, writing a prompt. */
 export function DemoPromptWidget({
-  script,
   reference,
-  document,
   zoom,
   width,
-  height,
 }: {
-  script: keyof typeof SCRIPTS;
-  /** The selection the widget was summoned over. */
-  reference?: string;
-  /** Show the widget in a document page, where the round's result lands. */
-  document?: { heading: string; body: string };
+  reference: string;
   zoom: number;
   width: number;
-  /** A document page's fixed height, so nothing moves as the round runs. */
-  height?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const { at, total } = SCRIPTS[script];
-  const state = at(useDemoClock(ref, total));
-  const face = <PromptFace state={state} reference={reference} />;
-
+  const state = SUMMON.at(useDemoClock(ref, SUMMON.total));
   return (
     <div ref={ref} className="w-full min-w-0">
-      <AppEmbed zoom={zoom} width={width} height={height}>
-        {document ? (
-          <DocumentPage document={document} landed={state.phase === "done"}>
-            {face}
-          </DocumentPage>
-        ) : (
-          face
-        )}
+      <AppEmbed zoom={zoom} width={width}>
+        <PromptFace state={state} prompt={PROMPT_TEXT} reference={reference} />
       </AppEmbed>
     </div>
   );
 }
 
 /**
- * The editor's surface at a fixed height: the widget is a node inside the
- * document's prose, under the paragraph it was summoned on, and the round's
- * result is written into the same page below it — the empty page below
- * absorbs every change in height.
+ * The feature section: one document, two agents working in it at once with
+ * the user. A fixed-height page, so the empty page below absorbs every
+ * change in height and nothing moves.
  */
-function DocumentPage({
+export function DemoCollaboration({
   document,
-  landed,
-  children,
+  zoom,
+  width,
+  height,
 }: {
   document: { heading: string; body: string };
-  landed: boolean;
-  children: React.ReactNode;
+  zoom: number;
+  width: number;
+  height: number;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const ms = useDemoClock(ref, COLLAB_TOTAL);
+  const claude = CLAUDE_TRACK.at(ms);
+  const opencode = ms >= OPENCODE_START ? OPENCODE_TRACK.at(ms - OPENCODE_START) : null;
+
   return (
-    <div className="h-full overflow-hidden rounded-xl border border-border bg-background px-2 py-3 shadow-sm">
-      <div className="prose prose-sm max-w-none p-4">
-        <h2>{document.heading}</h2>
-        <p>{document.body}</p>
-        <div className="not-prose">{children}</div>
-        {landed && (
-          <div className="demo-land -mx-2 mt-4 rounded-lg px-2 pb-1">
-            <h3 className="mt-2">Action items</h3>
-            <ul className="contains-task-list">
-              {ACTION_ITEMS.map((item) => (
-                <li key={item.task}>
-                  {item.task} <span className="text-muted-foreground">({item.owner})</span>
-                </li>
-              ))}
-            </ul>
+    <div ref={ref} className="w-full min-w-0">
+      <AppEmbed zoom={zoom} width={width} height={height}>
+        <div className="h-full overflow-hidden rounded-xl border border-border bg-background px-2 py-3 shadow-sm">
+          <div className="prose prose-sm max-w-none p-4">
+            <h2>{document.heading}</h2>
+            <p>{document.body}</p>
+            <AgentWidget harnessId="claude-code" label="Claude Code" state={claude} prompt={PROMPT_TEXT} />
+            <ActionItems written={claude.written} />
+            <h3>For the team channel</h3>
+            {opencode && (
+              <AgentWidget harnessId="opencode" label="OpenCode" state={opencode} prompt={SUMMARY_PROMPT} />
+            )}
+            <Summary written={opencode?.written ?? 0} />
           </div>
-        )}
-      </div>
+        </div>
+      </AppEmbed>
     </div>
   );
 }
 
+/** One agent's widget in the page, under its presence tag. */
+function AgentWidget({
+  harnessId,
+  label,
+  state,
+  prompt,
+}: {
+  harnessId: string;
+  label: string;
+  state: PromptState;
+  prompt: string;
+}) {
+  return (
+    <div className="not-prose demo-rise my-3">
+      <p className="mb-1 flex items-center gap-1.5 text-[0.6875rem] font-medium text-muted-foreground">
+        <HarnessLogo harnessId={harnessId} className="size-3" />
+        {label}
+      </p>
+      <AgentHost harnessId={harnessId}>
+        <PromptFace state={state} prompt={prompt} />
+      </AgentHost>
+    </div>
+  );
+}
+
+/** Claude's edit, streaming into the page item by item. */
+function ActionItems({ written }: { written: number }) {
+  if (written <= 0) return null;
+  const shown = Math.ceil(written * ACTION_ITEMS.length);
+  return (
+    <div className="demo-land -mx-2 rounded-lg px-2 pb-1">
+      <h3 className="mt-1">Action items</h3>
+      <ul>
+        {ACTION_ITEMS.slice(0, shown).map((item) => (
+          <li key={item.task} className="demo-rise">
+            {item.task} <span className="text-muted-foreground">({item.owner})</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** OpenCode's edit, streaming into the page as it writes. */
+function Summary({ written }: { written: number }) {
+  if (written <= 0) return null;
+  const text = SUMMARY_TEXT.slice(0, Math.ceil(written * SUMMARY_TEXT.length));
+  return <p className="demo-land -mx-2 rounded-lg px-2">{text}</p>;
+}
+
 function PromptFace({
   state,
+  prompt,
   reference,
 }: {
   state: PromptState;
+  prompt: string;
   reference?: string;
 }) {
   const binding = bindingFor(state.phase);
@@ -294,7 +370,7 @@ function PromptFace({
         record={{
           boundTurnId: binding.turnId,
           boundTaskId: binding.taskId,
-          lastSentPrompt: PROMPT_TEXT,
+          lastSentPrompt: prompt,
           documentPath: DOC_PATH,
         }}
         turn={binding.turn}
@@ -306,7 +382,7 @@ function PromptFace({
         confirmTrust={false}
         isSending={state.phase === "sending"}
         display={displayFor(state)}
-        draft={state.draft}
+        draft={sendingDraft(state, prompt)}
         draftIO={{ read: () => state.draft, write: noop, holdsCaret: () => false }}
         draftSlot={<DraftText text={state.draft} />}
         reference={referenceFor(reference)}
@@ -315,6 +391,11 @@ function PromptFace({
       {state.mention !== null && <MentionPopup query={state.mention} />}
     </div>
   );
+}
+
+/** The sending row shows the prompt it is sending. */
+function sendingDraft(state: PromptState, prompt: string): string {
+  return state.phase === "sending" ? prompt : state.draft;
 }
 
 /** The widget's binding for a phase: none while composing, the demo turn

@@ -82,3 +82,27 @@ export function DemoHost({ children }: { children: ReactNode }) {
     <PromptWidgetHostProvider host={demoHost}>{children}</PromptWidgetHostProvider>
   );
 }
+
+/** The same host with another default agent: one per harness, built once,
+ *  so the widgets under it show that agent as theirs. */
+const hostsByHarness = new Map(
+  HARNESSES.map((harness) => [
+    harness.id,
+    { ...demoHost, useDefaultHarness: () => harness },
+  ]),
+);
+
+/** Scope a widget to one agent — two widgets in one document, two agents. */
+export function AgentHost({
+  harnessId,
+  children,
+}: {
+  harnessId: string;
+  children: ReactNode;
+}) {
+  return (
+    <PromptWidgetHostProvider host={hostsByHarness.get(harnessId) ?? demoHost}>
+      {children}
+    </PromptWidgetHostProvider>
+  );
+}

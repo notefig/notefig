@@ -3,6 +3,7 @@ import {
   detectPlatform,
   downloadLabel,
   pickAssetUrl,
+  pickMacDmg,
   RELEASES_URL,
   resolveDownloadTarget,
   type ReleaseAsset,
@@ -62,6 +63,12 @@ describe("pickAssetUrl", () => {
     expect(pickAssetUrl(assets, "mac")).toBe(
       "https://github.com/notefig/notefig/releases/download/desktop-v0.0.113/Notefig_0.0.113_aarch64.dmg",
     );
+  });
+
+  it("picks each macOS architecture's disk image", () => {
+    expect(pickMacDmg(assets, "arm64")).toContain("aarch64.dmg");
+    expect(pickMacDmg(assets, "x64")).toContain("x64.dmg");
+    expect(pickMacDmg(windowsAssets.slice(2), "x64")).toBeNull();
   });
 
   it("picks a Windows installer when one exists", () => {

@@ -1,9 +1,11 @@
 import {
   CircleCheck,
   CircleDashed,
+  Star,
 } from "lucide-react";
 import { HarnessLogo } from "@notefig/ui/harness-logo";
 import { BRAND_MARKS, type BrandName } from "./brand-marks";
+import { GITHUB_URL } from "./links";
 
 /*
  * Illustrations for ideas the app has no single component for: a turn's
@@ -172,49 +174,40 @@ export function PairingMock() {
   );
 }
 
-/** Agents (the app's own harness marks) and the tools they work with. */
-const ORBIT: {
-  key: string;
-  mark: { harness: string } | { brand: BrandName };
-  x: number;
-  y: number;
-  rotate: number;
-}[] = [
-  { key: "github", mark: { brand: "GitHub" }, x: 8, y: 16, rotate: -8 },
-  { key: "claude", mark: { harness: "claude-code" }, x: 40, y: 2, rotate: 6 },
-  { key: "opencode", mark: { harness: "opencode" }, x: 72, y: 20, rotate: -4 },
-  { key: "gitlab", mark: { brand: "GitLab" }, x: 22, y: 54, rotate: 8 },
-  { key: "devin", mark: { harness: "devin" }, x: 55, y: 46, rotate: -10 },
-  { key: "git", mark: { brand: "Git" }, x: 84, y: 60, rotate: 6 },
-  { key: "codex", mark: { harness: "codex" }, x: 4, y: 84, rotate: -4 },
-  { key: "markdown", mark: { brand: "Markdown" }, x: 40, y: 82, rotate: 4 },
-  { key: "cursor", mark: { harness: "cursor" }, x: 70, y: 92, rotate: -8 },
-];
-
-export function OrbitMock() {
+/** The open-source pillar: the repository, its license, one command away. */
+export function OpenSourceMock() {
   return (
-    <div
-      className="relative mx-auto h-[220px] w-full max-w-[280px]"
-      aria-hidden="true"
-    >
-      {ORBIT.map(({ key, mark, x, y, rotate }) => (
-        <span
-          key={key}
-          className="mk-ui flex size-[52px] items-center justify-center rounded-2xl"
-          style={{
-            position: "absolute",
-            left: `${x}%`,
-            top: `${y}%`,
-            transform: `translate(-20%, -30%) rotate(${rotate}deg)`,
-          }}
-        >
-          {"harness" in mark ? (
-            <AgentMark id={mark.harness} size={22} />
-          ) : (
-            <Brand name={mark.brand} size={22} />
-          )}
+    <div className="mk-ui w-full max-w-[330px] px-5 py-5 text-left">
+      <div className="flex items-center gap-2.5">
+        <Brand name="GitHub" size={20} />
+        <span className="min-w-0 flex-1 truncate text-[15px] font-semibold">
+          notefig<span className="text-[var(--mk-faint)]"> / </span>notefig
         </span>
-      ))}
+        <a
+          href={GITHUB_URL}
+          target="_blank"
+          rel="noopener"
+          className="inline-flex h-7 items-center gap-1 rounded-full border border-[var(--mk-line)] px-2.5 text-[12px] font-semibold transition-colors hover:bg-[var(--mk-chip)]"
+        >
+          <Star size={12} strokeWidth={2.25} aria-hidden="true" />
+          Star
+        </a>
+      </div>
+      <p className="mt-2 text-[13px] font-medium text-[var(--mk-soft)]">
+        The open-source AI metaharness.
+      </p>
+      <div className="mt-3 flex gap-1.5">
+        <span className="rounded-full bg-[var(--mk-chip)] px-2.5 py-0.5 text-[11.5px] font-semibold text-[var(--mk-soft)]">
+          MIT License
+        </span>
+        <span className="rounded-full bg-[var(--mk-chip)] px-2.5 py-0.5 text-[11.5px] font-semibold text-[var(--mk-soft)]">
+          TypeScript
+        </span>
+      </div>
+      <div className="mt-4 truncate rounded-xl bg-[var(--mk-section)] px-3 py-2 font-mono text-[11.5px] text-[var(--mk-body)]">
+        <span className="text-[var(--mk-accent-text)]">$</span> git clone
+        github.com/notefig/notefig
+      </div>
     </div>
   );
 }

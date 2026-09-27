@@ -175,16 +175,96 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  height: 44px;
-  padding-inline: 20px;
+  gap: 6px;
+  height: 40px;
+  padding-inline: 18px;
   border-radius: 999px;
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 600;
   white-space: nowrap;
   transition:
     background-color 160ms ease,
     transform 160ms ease;
+}
+
+/* The header's size: sits level with the 28px logo. */
+.mk-btn-sm {
+  height: 34px;
+  padding-inline: 14px;
+  font-size: 13.5px;
+}
+
+/* Split download button: the main part and its chevron, one pill. */
+.mk-split-main {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+  padding-inline-end: 14px;
+}
+
+.mk-split-toggle {
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  border-inline-start: 1px solid rgb(247 239 231 / 0.18);
+  padding-inline: 10px 12px;
+}
+
+.mk-split-toggle.mk-btn-sm {
+  padding-inline: 8px 10px;
+}
+
+.mk-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  z-index: 50;
+  min-width: 210px;
+  padding: 6px;
+  border-radius: 16px;
+  background: var(--mk-paper);
+  box-shadow:
+    0 0 0 1px rgb(74 58 50 / 0.08),
+    0 16px 36px -12px rgb(74 58 50 / 0.3);
+  text-align: left;
+  animation: demo-rise 200ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.mk-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--mk-ink);
+  white-space: nowrap;
+}
+
+.mk-menu-item:hover,
+.mk-menu-item:focus-visible {
+  background: var(--mk-chip);
+  outline: none;
+}
+
+.mk-menu-item-soon,
+.mk-menu-item-soon:hover {
+  background: none;
+  color: var(--mk-faint);
+  cursor: default;
+}
+
+.mk-soon {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--mk-chip);
+  color: var(--mk-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.mk-menu-divider {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--mk-line);
 }
 
 .mk-btn:active {
@@ -225,10 +305,14 @@ body {
 
 /* ---------- Header ---------- */
 
+/* Fixed, on its own compositing layer: a sticky header jitters under iOS
+   Safari's collapsing toolbar. SiteShell holds its place with a spacer. */
 .mk-header {
-  position: sticky;
+  position: fixed;
+  inset-inline: 0;
   top: 0;
   z-index: 40;
+  transform: translateZ(0);
   height: 74px;
   border-bottom: 1px solid var(--mk-line);
   background: rgb(247 239 231 / 0.85);
@@ -513,9 +597,27 @@ body {
    it outranks the base rules above. */
 @media (max-width: 639px) {
   .mk-btn {
-    height: 40px;
+    height: 38px;
     padding-inline: 15px;
     font-size: 14px;
+  }
+
+  .mk-btn-sm {
+    height: 34px;
+    padding-inline: 12px;
+    font-size: 13px;
+  }
+
+  .mk-split-main {
+    padding-inline-end: 11px;
+  }
+
+  .mk-footer-link {
+    font-size: 14px;
+  }
+
+  .mk-split-toggle {
+    padding-inline: 8px 10px;
   }
 
   .mk-btn-link {
