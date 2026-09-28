@@ -224,14 +224,39 @@ export function applyPromptChanges(
   return round && tr.docChanged ? recordRound(next, tr, round) : next;
 }
 
+/**
+ * The review gesture: forget every change touching `from..to` (a block's
+ * range, edges included — a deletion marked at the block's edge goes with
+ * it). The document is untouched; only the changes go.
+ */
+export function dismissPromptChangesTr(
+  state: EditorState,
+  from: number,
+  to: number,
+): Transaction {
+  return state.tr
+    .setMeta(promptChangesKey, { dismiss: { from, to } })
+    .setMeta(UI_ONLY_TRANSACTION_META, true)
+    .setMeta("addToHistory", false);
+}
+
+type TrackingMeta = typeof RELOAD_META | { dismiss: Span } | undefined;
+
 export function promptChangeTrackingPlugin(documentPath: string): Plugin {
   return new Plugin<readonly PromptChange[]>({
     key: promptChangesKey,
     state: {
       init: (_config, state) => restore(documentPath, state.doc),
       apply(tr, changes, _oldState, newState) {
-        if (tr.getMeta(promptChangesKey) === RELOAD_META) {
+        const meta = tr.getMeta(promptChangesKey) as TrackingMeta;
+        if (meta === RELOAD_META) {
           return fitToDoc(getDocumentPromptChanges(documentPath), newState.doc);
+        }
+        if (meta?.dismiss) {
+          const { from, to } = meta.dismiss;
+          return changes.filter(
+            (change) => change.to < from || change.from > to,
+          );
         }
         return applyPromptChanges(changes, tr);
       },

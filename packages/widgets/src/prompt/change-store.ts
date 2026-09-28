@@ -14,7 +14,7 @@
  *
  * This module knows nothing about who decides a change belongs to a round
  * (the app, via PROMPT_CHANGE_META on the transaction) or how changes look
- * (./change-decorations.ts): it is the contract between those two.
+ * (./change-gutter.ts): it is the contract between those two.
  */
 import { useMemo, useSyncExternalStore } from "react";
 

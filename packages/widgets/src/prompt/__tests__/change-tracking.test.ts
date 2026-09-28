@@ -15,9 +15,11 @@ import {
   setDocumentPromptChanges,
 } from "../change-store";
 import {
+  dismissPromptChangesTr,
   promptChangeTrackingPlugin,
   promptChangesOf,
 } from "../change-tracking";
+import { promptChangeMarks } from "../change-gutter";
 import { getPromptBlob, updatePromptBlob } from "../store";
 
 const schema = new Schema({
@@ -68,9 +70,7 @@ describe("prompt change tracking", () => {
     expect(promptChangesOf(state)).toEqual([]);
 
     state = state.apply(asRound(state.tr.insertText("big ", 7)));
-    expect(promptChangesOf(state)).toEqual([
-      { ...ROUND, from: 7, to: 11 },
-    ]);
+    expect(promptChangesOf(state)).toEqual([{ ...ROUND, from: 7, to: 11 }]);
   });
 
   it("keeps a change on its text as the document moves, and drops it once overwritten", () => {
@@ -116,6 +116,31 @@ describe("prompt change tracking", () => {
     tr.insert(widgetPos, widget);
     state = state.apply(asRound(tr));
     expect(promptChangesOf(state)).toEqual([]);
+  });
+
+  it("marks each changed block once in the gutter, and a removal on the block after it", () => {
+    let state = stateOf("one", "two", "three");
+    // Edit two words in "one", and remove the "two" paragraph outright.
+    state = state.apply(
+      asRound(state.tr.insertText("1", 1, 2).insertText("e", 3, 4)),
+    );
+    state = state.apply(asRound(state.tr.delete(5, 10)));
+    const marks = promptChangeMarks(state).map((mark) => [mark.pos, mark.kind]);
+    expect(marks).toEqual([
+      [0, "changed"],
+      [5, "removed"],
+    ]);
+  });
+
+  it("dismisses a block's changes without touching the document", () => {
+    let state = stateOf("one", "two");
+    state = state.apply(asRound(state.tr.insertText("1", 1, 2)));
+    state = state.apply(asRound(state.tr.insertText("2", 6, 7)));
+    expect(promptChangesOf(state)).toHaveLength(2);
+    const doc = state.doc;
+    state = state.apply(dismissPromptChangesTr(state, 0, 5));
+    expect(spans(state)).toEqual([[6, 7]]);
+    expect(state.doc).toBe(doc);
   });
 
   it("restores into a recreated editor only onto the document it was mapped on", () => {

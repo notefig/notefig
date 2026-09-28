@@ -55,7 +55,7 @@ import type { PromptReference } from "./doc-helpers";
 import { PromptBlob } from "./ui/prompt-blob";
 import { adoptPersistedPromptBinding, bindPromptBlobDocument } from "./store";
 import { promptChangeTrackingPlugin } from "./change-tracking";
-import { promptChangeDecorationsPlugin } from "./change-decorations";
+import { promptChangeGutterPlugin } from "./change-gutter";
 import {
   getMentionService,
   mentionPopupHasResults,
@@ -544,7 +544,7 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       ...(options.filePath
         ? [
             promptChangeTrackingPlugin(options.filePath),
-            promptChangeDecorationsPlugin(),
+            promptChangeGutterPlugin(),
           ]
         : []),
       new Plugin({
