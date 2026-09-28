@@ -134,7 +134,11 @@ describe("prompt change tracking", () => {
       });
     expect(spans(recreate(doc))).toEqual([[7, 11]]);
     // Same size, other text: the file changed while no editor held it.
-    expect(spans(recreate(stateOf("hello WORLD big").doc))).toEqual([]);
+    const changed = recreate(stateOf("hello WORLD big").doc);
+    expect(spans(changed)).toEqual([]);
+    // Mounting it clears what it could not restore.
+    new EditorView(document.createElement("div"), { state: changed }).destroy();
+    expect(getDocumentPromptChanges(DOC_PATH)).toEqual([]);
   });
 
   it("forgets a widget's changes when it binds a new turn", () => {

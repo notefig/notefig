@@ -77,7 +77,7 @@ describe("turn writes", () => {
       toolCallId: "tc_rel",
       kind: "edit",
       status: "in_progress",
-      content: [{ type: "diff", path: "notes.md", oldText: null, newText: "x" }],
+      content: [{ type: "diff", path: "./notes.md", oldText: null, newText: "x" }],
     } as ToolCallUpdate);
     expect(attributeAdoption(DOC, "h")?.blobId).toBe("blob_1");
   });
@@ -88,11 +88,24 @@ describe("turn writes", () => {
       boundTurnId: "trn_2",
       documentPath: DOC,
     });
+    // Round two starts editing, then round one's edit settles.
     disk.set(DOC, "round one");
-    await call(edit("completed"));
     await call(edit("in_progress", "tc_2"), "trn_2");
+    await call(edit("completed"));
     expect(attributeAdoption(DOC, calculateContentHash("round one"))?.turnId).toBe("trn_1");
     expect(attributeAdoption(DOC, "other")?.turnId).toBe("trn_2");
+  });
+
+  it("credits a later round that writes an earlier round's bytes back", async () => {
+    updatePromptBlob("blob_2", {
+      boundTaskId: "task_1",
+      boundTurnId: "trn_2",
+      documentPath: DOC,
+    });
+    disk.set(DOC, "same bytes");
+    await call(edit("completed"));
+    await call(edit("in_progress", "tc_2"), "trn_2");
+    expect(attributeAdoption(DOC, calculateContentHash("same bytes"))?.turnId).toBe("trn_2");
   });
 
   it("closes the calls a turn left open when it settles", async () => {

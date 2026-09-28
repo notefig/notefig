@@ -237,6 +237,15 @@ export function promptChangeTrackingPlugin(documentPath: string): Plugin {
       },
     },
     view(view) {
+      // Restore rejected what was stored (the file changed while closed):
+      // clear it, so the widget's face stops counting highlights no
+      // document shows.
+      if (
+        promptChangesOf(view.state).length === 0 &&
+        getDocumentPromptChanges(documentPath).length > 0
+      ) {
+        setDocumentPromptChanges(documentPath, []);
+      }
       const unsubscribe = subscribePromptChanges(() => {
         const stored = getDocumentPromptChanges(documentPath);
         if (stored === promptChangesOf(view.state) || view.isDestroyed) return;

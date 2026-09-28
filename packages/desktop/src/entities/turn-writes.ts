@@ -32,7 +32,7 @@ import {
 import { platformAdapter } from "@/adapters";
 import { onAppEvent, type AppEvents } from "@/utils/app-events";
 import { calculateContentHash } from "@/utils/hash";
-import { path as pathutil } from "@/utils/path";
+import { resolveWorkspacePath } from "@/utils/fs";
 
 type Writer = { taskId: string; turnId: string };
 type InFlightCall = Writer & { key: string; paths: string[] };
@@ -56,9 +56,10 @@ function toolCallPaths(
       item.type === "diff" ? [item.path] : [],
     ),
   ];
-  const paths = named.map((path) =>
-    pathutil.isAbsolute(path) ? path : pathutil.join(workspacePath, path),
-  );
+  const paths = named.map((path) => {
+    const resolved = resolveWorkspacePath(workspacePath, path);
+    return resolved.ok ? resolved.absolute : path;
+  });
   return [...new Set(paths)];
 }
 
@@ -108,6 +109,9 @@ export async function recordToolCall(
     paths,
   };
   for (const path of paths) {
+    // A new write on the path supersedes whatever the last one left: bytes
+    // matching an earlier round's hash from here on are this call's doing.
+    written.delete(path);
     let calls = inFlight.get(path);
     if (!calls) inFlight.set(path, (calls = new Map()));
     calls.set(call.key, call);
