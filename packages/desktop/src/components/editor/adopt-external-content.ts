@@ -28,7 +28,8 @@ import type { Editor } from "@tiptap/core";
 import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode, NodeType } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
-import { PROMPT_NODE_NAME } from "@notefig/widgets";
+import { PROMPT_CHANGE_META, PROMPT_NODE_NAME } from "@notefig/widgets";
+import { attributeAdoption } from "@/entities/turn-writes";
 import { recreateTransform } from "@/vendor/prosemirror-recreate-transform/recreateTransform";
 import { carryDraftsForward } from "./draft-only-edit";
 
@@ -112,16 +113,23 @@ function findInsertPos(
   return null;
 }
 
+/** The file bytes an adoption brings in, by path and content hash. */
+export type AdoptionSource = { path: string; contentHash: string };
+
 /**
  * Replace the editor's content with `incoming` (parsed external file
  * content), preserving as much editor state as the diff allows. Dispatches
  * exactly one transaction (or one setContent fallback). Callers still own
  * `DocumentSync.commitAdoption` and any marker write-back.
+ *
+ * With a `source`, the diffed transaction is also tagged with the prompt
+ * round that wrote those bytes, when one did — the minimal edits of that
+ * transaction are exactly what the round changed (widget change tracking).
  */
 export function adoptExternalContent(
   editor: Editor,
   incoming: JSONContent,
-  options: { maxDiffNodeSize?: number } = {},
+  options: { maxDiffNodeSize?: number; source?: AdoptionSource } = {},
 ): AdoptionResult {
   const maxDiffNodeSize = options.maxDiffNodeSize ?? MAX_DIFF_NODE_SIZE;
   const oldDoc = editor.state.doc;
@@ -158,6 +166,10 @@ export function adoptExternalContent(
     );
     restoreDraftCaret(tr, draftCaret);
     tr.setMeta(ADOPTION_TRANSACTION_META, true);
+    const round =
+      options.source &&
+      attributeAdoption(options.source.path, options.source.contentHash);
+    if (round) tr.setMeta(PROMPT_CHANGE_META, round);
     editor.view.dispatch(tr);
     return { mode: "diffed", reinsertedWidgets };
   } catch (error) {

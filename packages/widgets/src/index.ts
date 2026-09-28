@@ -103,6 +103,16 @@ export {
   type PromptBlobRecord,
 } from "./prompt/store";
 
+/** Prompt change tracking: the app tags a round's edits, the widget keeps
+ *  and shows them. */
+export {
+  PROMPT_CHANGE_META,
+  getDocumentPromptChanges,
+  type PromptChange,
+  type PromptChangeAttribution,
+} from "./prompt/change-store";
+export { isMutatingToolCall } from "./prompt/state";
+
 /** The document minimap (MET-172): the collector the editor registers,
  *  and the live-rows seam the app fills in at setup. */
 export { widgetMinimapExtension } from "./registry";

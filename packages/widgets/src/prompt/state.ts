@@ -239,7 +239,7 @@ export function deriveDoneLine(params: {
 /** Kinds that mean "this call changed a document". */
 const MUTATING_KINDS = new Set(["edit", "delete", "move"]);
 
-function isMutatingCall(call: ToolCallUpdate): boolean {
+export function isMutatingToolCall(call: ToolCallUpdate): boolean {
   if (call.kind && MUTATING_KINDS.has(call.kind)) return true;
   return (call.content ?? []).some((item) => item.type === "diff");
 }
@@ -257,7 +257,7 @@ export function deriveTouchedFiles(
   const paths = new Set<string>();
   for (const entry of entries) {
     if (entry.type !== "tool_call" || !entry.toolCall) continue;
-    if (!isMutatingCall(entry.toolCall)) continue;
+    if (!isMutatingToolCall(entry.toolCall)) continue;
     const locations = entry.toolCall.locations ?? [];
     for (const location of locations) paths.add(location.path);
     if (locations.length === 0) {

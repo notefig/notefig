@@ -1263,6 +1263,12 @@ export class AgentTask {
             previous?.locations,
         };
       });
+      // Read back rather than announce the draft: the merged row is what
+      // the transcript now holds.
+      const merged = agentEntriesCollection.get(existingId);
+      if (merged?.toolCall) {
+        this.announceToolCall(merged.turnId, merged.toolCall);
+      }
       return;
     }
 
@@ -1271,20 +1277,34 @@ export class AgentTask {
     if (this.currentTurn) this.closeRun(this.currentTurn);
     const id = newEventId();
     if (toolCallId) this.toolEventIds.set(toolCallId, id);
+    const toolCall: ToolCallUpdate = {
+      ...update,
+      title: normalizeMcpToolName(update.title),
+      locations:
+        update.locations ??
+        deriveToolLocations(update.rawInput, this.workspacePath),
+    };
+    const turnId = this.currentTurn?.turnId ?? "";
     entries.insert({
       id,
       taskId: this.taskId,
-      turnId: this.currentTurn?.turnId ?? "",
+      turnId,
       type: "tool_call",
       toolCallId: toolCallId ?? undefined,
-      toolCall: {
-        ...update,
-        title: normalizeMcpToolName(update.title),
-        locations:
-          update.locations ??
-          deriveToolLocations(update.rawInput, this.workspacePath),
-      },
+      toolCall,
     });
+    this.announceToolCall(turnId, toolCall);
+  }
+
+  /**
+   * The live tool-call hook: every state a live turn's tool call reaches,
+   * announced on the app bus for whoever tracks what turns do (the prompt
+   * change attribution in entities/turn-writes.ts). A session/load replay
+   * is history, not activity, and a turnless straggler belongs to no round.
+   */
+  private announceToolCall(turnId: string, toolCall: ToolCallUpdate): void {
+    if (!turnId || this.currentTurn?.entries instanceof ReplayStage) return;
+    emitAppEvent("agent:tool-call", { taskId: this.taskId, turnId, toolCall });
   }
 
   /**

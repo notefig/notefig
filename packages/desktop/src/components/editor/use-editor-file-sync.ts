@@ -116,7 +116,9 @@ export function useEditorFileSync(
       suppressSaveRef.current = true;
       // Diffed adoption: drafts, widgets, and the caret survive the parts
       // of the document the external change didn't touch.
-      const adoption = adoptExternalContent(editor, doc);
+      const adoption = adoptExternalContent(editor, doc, {
+        source: { path: file.path, contentHash: targetHash },
+      });
       suppressSaveRef.current = false;
       sync.commitAdoption(fileContent, targetHash);
       if (adoption.reinsertedWidgets > 0) {

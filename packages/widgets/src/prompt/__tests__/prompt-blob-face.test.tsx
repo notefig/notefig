@@ -89,6 +89,8 @@ function render(
             activeToolLine: null,
             assistantTeaser: null,
             queueAhead: 0,
+            changeCounts: new Map(),
+            changeColor: "",
             ...overrides.display,
           },
           actions,

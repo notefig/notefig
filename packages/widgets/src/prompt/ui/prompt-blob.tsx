@@ -46,6 +46,7 @@ import { draftToNode, readDraftNode } from "../composer/draft-text";
 import { mentionPopupHasResults } from "../composer/mention-bridge";
 import { registerComposerKeyHandler } from "../composer/key-bridge";
 import { CopyTextButton } from "./copy-text-button";
+import { promptChangeColor, usePromptChangeCounts } from "../change-store";
 import { usePromptWidgetHost } from "../host-context";
 import type { PromptWidgetHost } from "../host";
 import {
@@ -268,18 +269,20 @@ function usePromptBlobRound({
  * work and vice versa.
  */
 function usePromptBlobDisplay({
+  blobId,
   phase,
   sortedEntries,
   taskTurns,
   boundTurnId,
   workspacePath,
 }: {
+  blobId: string;
   phase: BlobPhase;
   sortedEntries: AgentEntry[];
   taskTurns: AgentTurn[];
   boundTurnId: string | null;
   workspacePath: string;
-}) {
+}): PromptBlobDisplay {
   const touchedFiles = useMemo(
     () =>
       phase === "done" ? deriveTouchedFiles(sortedEntries, workspacePath) : [],
@@ -303,12 +306,16 @@ function usePromptBlobDisplay({
       ? deriveQueuePosition(taskTurns, boundTurnId)
       : 0;
 
+  const changeCounts = usePromptChangeCounts(blobId);
+
   return {
     touchedFiles,
     widgetResponse,
     activeToolLine,
     assistantTeaser,
     queueAhead,
+    changeCounts,
+    changeColor: promptChangeColor(blobId),
   };
 }
 
@@ -531,6 +538,10 @@ interface PromptBlobDisplay {
   activeToolLine: string | null;
   assistantTeaser: string | null;
   queueAhead: number;
+  /** Changes this widget's round left highlighted, per document. */
+  changeCounts: ReadonlyMap<string, number>;
+  /** The widget's review colour — the highlight's, repeated on its face. */
+  changeColor: string;
 }
 
 /** Everything the face can do. Grouped so the container hands over one
@@ -824,6 +835,8 @@ function SettledState({
         response={display.widgetResponse}
         fallbackText={display.assistantTeaser}
         touchedFiles={display.touchedFiles}
+        changeCounts={display.changeCounts}
+        changeColor={display.changeColor}
         onOpenFile={(path) => actions.openFile(path)}
         onOpenChat={() => boundTaskId && actions.openAgentTab(boundTaskId)}
         onDismiss={actions.dismiss}
@@ -920,6 +933,7 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
   });
 
   const display = usePromptBlobDisplay({
+    blobId,
     phase,
     sortedEntries,
     taskTurns,
@@ -1737,25 +1751,48 @@ export function ReferenceChip({
  *  already the branchiest part of the widget. */
 function TouchedFileChips({
   paths,
+  changeCounts,
+  changeColor,
   onOpenFile,
 }: {
   paths: string[];
+  changeCounts: ReadonlyMap<string, number>;
+  changeColor: string;
   onOpenFile: (path: string) => void;
 }) {
+  const { t } = useTranslation();
   if (paths.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1">
-      {paths.map((path) => (
-        <button
-          key={path}
-          type="button"
-          className="flex cursor-pointer items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[0.6875rem] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          onClick={() => onOpenFile(path)}
-        >
-          <FileText className="size-3" />
-          {basename(path)}
-        </button>
-      ))}
+      {paths.map((path) => {
+        // A dot in the widget's colour ties the chip to the highlights the
+        // round left in that document, while they last.
+        const changes = changeCounts.get(path) ?? 0;
+        return (
+          <button
+            key={path}
+            type="button"
+            data-changes={changes || undefined}
+            title={
+              changes
+                ? t("promptBlobChangesHighlighted", { count: changes })
+                : undefined
+            }
+            className="flex cursor-pointer items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[0.6875rem] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            onClick={() => onOpenFile(path)}
+          >
+            <FileText className="size-3" />
+            {basename(path)}
+            {changes > 0 && (
+              <span
+                aria-hidden
+                className="size-1.5 rounded-full"
+                style={{ backgroundColor: changeColor }}
+              />
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -1775,6 +1812,8 @@ export function DoneState({
   response,
   fallbackText,
   touchedFiles,
+  changeCounts = new Map(),
+  changeColor = "",
   onOpenFile,
   onOpenChat,
   onDismiss,
@@ -1785,6 +1824,8 @@ export function DoneState({
    *  agent didn't deliver a widget_respond response. */
   fallbackText: string | null;
   touchedFiles: string[];
+  changeCounts?: ReadonlyMap<string, number>;
+  changeColor?: string;
   onOpenFile: (path: string) => void;
   onOpenChat: () => void;
   onDismiss: () => void;
@@ -1863,7 +1904,12 @@ export function DoneState({
           )}
         />
       )}
-      <TouchedFileChips paths={touchedFiles} onOpenFile={onOpenFile} />
+      <TouchedFileChips
+        paths={touchedFiles}
+        changeCounts={changeCounts}
+        changeColor={changeColor}
+        onOpenFile={onOpenFile}
+      />
     </div>
   );
 }

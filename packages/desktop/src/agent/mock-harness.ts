@@ -33,6 +33,34 @@ type Json = any;
 
 // ─── The scripted agent ─────────────────────────────────────────────────────
 
+/** `MockTurnContext.writeNatively` / `notifyWatcher`. The app modules are
+ *  imported lazily: they already reach this one through the agent service. */
+async function writeNatively(path: string, content: string): Promise<void> {
+  const { platformAdapter } = await import("@/adapters");
+  const written = await platformAdapter.fs.writeFiles([{ path, content }]);
+  if (written.failed.length > 0) throw new Error(written.failed[0].message);
+}
+
+async function notifyWatcher(
+  workspacePath: string,
+  path: string,
+): Promise<void> {
+  const [{ platformAdapter }, fileSync, { calculateContentHash }] =
+    await Promise.all([
+      import("@/adapters"),
+      import("@/utils/file-sync"),
+      import("@/utils/hash"),
+    ]);
+  const { content } = (await platformAdapter.fs.readFiles([path])).succeeded[0];
+  await fileSync.handleContentFileSystemChange(
+    {
+      watchId: fileSync.contentWatchIdFor(workspacePath),
+      changes: [{ path, content, contentHash: calculateContentHash(content) }],
+    },
+    workspacePath,
+  );
+}
+
 /** The slice of a transport the scripted agent drives (the agent side of a
  *  LoopbackTransport pair — or anything line-shaped). */
 export type ScriptedAgentLineChannel = {
@@ -251,6 +279,15 @@ export type MockTurnContext = {
    * `mcp.call("tools/call", { name, arguments })` is the common form.
    */
   mcp: { call: (method: string, params: Json) => Promise<Json> };
+  /**
+   * Write a file the way a harness with its own tools does (Claude Code):
+   * straight to disk, not through the client. The app hears nothing until
+   * `notifyWatcher` — the browser test build has no watcher, so the
+   * scenario decides when the OS would have reported the change.
+   */
+  writeNatively: (path: string, content: string) => Promise<void>;
+  /** Deliver a watcher event for `path` through the app's real handler. */
+  notifyWatcher: (path: string) => Promise<void>;
   /** Fires on `session/cancel`; scenarios should return promptly after. */
   signal: AbortSignal;
 };
@@ -840,6 +877,8 @@ function attachScenarioAgent(
         signal: abort.signal,
         request: (method, params) => agent.request(method, params),
         mcp: { call: (method, params) => callMockMcp(taskId, method, params) },
+        writeNatively,
+        notifyWatcher: (path) => notifyWatcher(workspacePath, path),
       });
       return (
         result ?? {
