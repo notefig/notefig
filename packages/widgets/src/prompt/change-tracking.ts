@@ -93,6 +93,11 @@ function withoutWidgets(spans: Span[], doc: PMNode): Span[] {
   for (const widget of widgets) {
     result = result.flatMap((span) => {
       if (span.to < widget.from || span.from > widget.to) return [span];
+      // A deletion right beside a widget is a real change. (The re-insert
+      // round trip merged into the widget's own span before getting here.)
+      if (span.from === span.to) {
+        return span.from > widget.from && span.from < widget.to ? [] : [span];
+      }
       const pieces: Span[] = [];
       if (span.from < widget.from) pieces.push({ from: span.from, to: widget.from });
       if (span.to > widget.to) pieces.push({ from: widget.to, to: span.to });
@@ -170,7 +175,21 @@ function recordRound(
   ];
 }
 
-/** Stored changes that still fit the document (a recreated editor). */
+/**
+ * The document each path's stored changes were last mapped onto. A
+ * recreated editor (tab replace) restores them only onto that same
+ * document: if the file changed while no editor held it, the positions
+ * point at other text, and nothing can map them — they are dropped.
+ */
+const anchors = new Map<string, PMNode>();
+
+function restore(documentPath: string, doc: PMNode): readonly PromptChange[] {
+  const stored = getDocumentPromptChanges(documentPath);
+  if (stored.length === 0) return stored;
+  return anchors.get(documentPath)?.eq(doc) ? stored : [];
+}
+
+/** Stored changes that still fit the document (a live editor's reload). */
 function fitToDoc(
   changes: readonly PromptChange[],
   doc: PMNode,
@@ -209,8 +228,7 @@ export function promptChangeTrackingPlugin(documentPath: string): Plugin {
   return new Plugin<readonly PromptChange[]>({
     key: promptChangesKey,
     state: {
-      init: (_config, state) =>
-        fitToDoc(getDocumentPromptChanges(documentPath), state.doc),
+      init: (_config, state) => restore(documentPath, state.doc),
       apply(tr, changes, _oldState, newState) {
         if (tr.getMeta(promptChangesKey) === RELOAD_META) {
           return fitToDoc(getDocumentPromptChanges(documentPath), newState.doc);
@@ -232,6 +250,7 @@ export function promptChangeTrackingPlugin(documentPath: string): Plugin {
       return {
         update(updated, previous) {
           const changes = promptChangesOf(updated.state);
+          if (changes.length > 0) anchors.set(documentPath, updated.state.doc);
           if (changes !== promptChangesOf(previous)) {
             setDocumentPromptChanges(documentPath, changes);
           }

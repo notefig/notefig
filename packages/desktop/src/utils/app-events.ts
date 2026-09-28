@@ -24,6 +24,8 @@ export interface AppEvents {
   "agent:tool-call": {
     taskId: string;
     turnId: string;
+    /** The task's workspace — what relative tool paths are relative to. */
+    workspacePath: string;
     toolCall: ToolCallUpdate;
   };
   /** A turn reached a terminal status. */

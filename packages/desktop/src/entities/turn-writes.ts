@@ -32,6 +32,7 @@ import {
 import { platformAdapter } from "@/adapters";
 import { onAppEvent, type AppEvents } from "@/utils/app-events";
 import { calculateContentHash } from "@/utils/hash";
+import { path as pathutil } from "@/utils/path";
 
 type Writer = { taskId: string; turnId: string };
 type InFlightCall = Writer & { key: string; paths: string[] };
@@ -43,13 +44,22 @@ const inFlight = new Map<string, Map<string, InFlightCall>>();
 /** path → the round whose write the file held when its call settled. */
 const written = new Map<string, Writer & { contentHash: string }>();
 
-function toolCallPaths(toolCall: ToolCallUpdate): string[] {
-  const paths = new Set<string>();
-  for (const location of toolCall.locations ?? []) paths.add(location.path);
-  for (const item of toolCall.content ?? []) {
-    if (item.type === "diff") paths.add(item.path);
-  }
-  return [...paths];
+/** Absolute paths the call names — adoption looks files up by absolute
+ *  path, and a diff item may carry a workspace-relative one. */
+function toolCallPaths(
+  toolCall: ToolCallUpdate,
+  workspacePath: string,
+): string[] {
+  const named = [
+    ...(toolCall.locations ?? []).map((location) => location.path),
+    ...(toolCall.content ?? []).flatMap((item) =>
+      item.type === "diff" ? [item.path] : [],
+    ),
+  ];
+  const paths = named.map((path) =>
+    pathutil.isAbsolute(path) ? path : pathutil.join(workspacePath, path),
+  );
+  return [...new Set(paths)];
 }
 
 async function readHash(path: string): Promise<string | null> {
@@ -87,9 +97,9 @@ async function settleCall(call: InFlightCall): Promise<void> {
 export async function recordToolCall(
   detail: AppEvents["agent:tool-call"],
 ): Promise<void> {
-  const { toolCall, taskId, turnId } = detail;
+  const { toolCall, taskId, turnId, workspacePath } = detail;
   if (!isMutatingToolCall(toolCall)) return;
-  const paths = toolCallPaths(toolCall);
+  const paths = toolCallPaths(toolCall, workspacePath);
   if (paths.length === 0) return;
   const call: InFlightCall = {
     taskId,
@@ -118,14 +128,18 @@ export async function recordTurnSettled(
   await Promise.all([...open.values()].map(settleCall));
 }
 
+/**
+ * The exact bytes a settled call left win; failing that, a call still
+ * mid-write on the path is the author. The in-flight answer cannot tell a
+ * round's write from another process writing the same file in the same
+ * moment — nothing observable can — so it is only the fallback. Several
+ * rounds mid-write on one file: the latest call is the likelier author.
+ */
 function writerOf(path: string, contentHash: string): Writer | null {
-  const calls = [...(inFlight.get(path)?.values() ?? [])];
-  // Several rounds mid-write on one file: the latest call is the likelier
-  // author, and the file will say for certain once they settle.
-  const running = calls[calls.length - 1];
-  if (running) return running;
   const settled = written.get(path);
-  return settled?.contentHash === contentHash ? settled : null;
+  if (settled?.contentHash === contentHash) return settled;
+  const calls = [...(inFlight.get(path)?.values() ?? [])];
+  return calls[calls.length - 1] ?? null;
 }
 
 /**

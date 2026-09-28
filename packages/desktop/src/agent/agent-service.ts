@@ -1304,7 +1304,12 @@ export class AgentTask {
    */
   private announceToolCall(turnId: string, toolCall: ToolCallUpdate): void {
     if (!turnId || this.currentTurn?.entries instanceof ReplayStage) return;
-    emitAppEvent("agent:tool-call", { taskId: this.taskId, turnId, toolCall });
+    emitAppEvent("agent:tool-call", {
+      taskId: this.taskId,
+      turnId,
+      workspacePath: this.workspacePath,
+      toolCall,
+    });
   }
 
   /**

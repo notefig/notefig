@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { Schema } from "@tiptap/pm/model";
 import { EditorState, type Transaction } from "@tiptap/pm/state";
+import { EditorView } from "@tiptap/pm/view";
 import { PROMPT_NODE_NAME } from "../node";
 import {
   PROMPT_CHANGE_META,
@@ -22,8 +23,8 @@ import { getPromptBlob, updatePromptBlob } from "../store";
 const schema = new Schema({
   nodes: {
     doc: { content: "block+" },
-    paragraph: { group: "block", content: "text*" },
-    [PROMPT_NODE_NAME]: { group: "block", atom: true },
+    paragraph: { group: "block", content: "text*", toDOM: () => ["p", 0] },
+    [PROMPT_NODE_NAME]: { group: "block", atom: true, toDOM: () => ["div"] },
     text: {},
   },
 });
@@ -99,6 +100,12 @@ describe("prompt change tracking", () => {
     expect(spans(state)).toEqual([[6, 6]]);
   });
 
+  it("keeps a deletion right beside a widget", () => {
+    let state = stateOf("intro", "widget", "outro");
+    state = state.apply(asRound(state.tr.delete(0, 7)));
+    expect(spans(state)).toEqual([[0, 0]]);
+  });
+
   it("never counts a prompt widget the round re-inserted", () => {
     let state = stateOf("intro", "widget", "outro");
     const widgetPos = 7;
@@ -111,16 +118,23 @@ describe("prompt change tracking", () => {
     expect(promptChangesOf(state)).toEqual([]);
   });
 
-  it("mirrors into the store, which a recreated editor starts from", () => {
-    let state = stateOf("hello world");
-    state = state.apply(asRound(state.tr.insertText("big ", 7)));
-    // The plugin view does the mirroring; stand in for it.
-    setDocumentPromptChanges(DOC_PATH, promptChangesOf(state));
-    const recreated = EditorState.create({
-      doc: state.doc,
-      plugins: [promptChangeTrackingPlugin(DOC_PATH)],
+  it("restores into a recreated editor only onto the document it was mapped on", () => {
+    const view = new EditorView(document.createElement("div"), {
+      state: stateOf("hello world"),
     });
-    expect(spans(recreated)).toEqual([[7, 11]]);
+    view.dispatch(asRound(view.state.tr.insertText("big ", 7)));
+    expect(getDocumentPromptChanges(DOC_PATH)).toHaveLength(1);
+    const doc = view.state.doc;
+    view.destroy();
+
+    const recreate = (content: typeof doc) =>
+      EditorState.create({
+        doc: content,
+        plugins: [promptChangeTrackingPlugin(DOC_PATH)],
+      });
+    expect(spans(recreate(doc))).toEqual([[7, 11]]);
+    // Same size, other text: the file changed while no editor held it.
+    expect(spans(recreate(stateOf("hello WORLD big").doc))).toEqual([]);
   });
 
   it("forgets a widget's changes when it binds a new turn", () => {

@@ -36,7 +36,7 @@ function edit(status: ToolCallUpdate["status"], id = "tc_1"): ToolCallUpdate {
 }
 
 const call = (toolCall: ToolCallUpdate, turnId = "trn_1") =>
-  recordToolCall({ taskId: "task_1", turnId, toolCall });
+  recordToolCall({ taskId: "task_1", turnId, workspacePath: "/ws", toolCall });
 
 describe("turn writes", () => {
   beforeEach(() => {
@@ -70,6 +70,29 @@ describe("turn writes", () => {
     });
     // Different bytes are someone else's change.
     expect(attributeAdoption(DOC, calculateContentHash("user edit"))).toBeNull();
+  });
+
+  it("resolves a workspace-relative diff path", async () => {
+    await call({
+      toolCallId: "tc_rel",
+      kind: "edit",
+      status: "in_progress",
+      content: [{ type: "diff", path: "notes.md", oldText: null, newText: "x" }],
+    } as ToolCallUpdate);
+    expect(attributeAdoption(DOC, "h")?.blobId).toBe("blob_1");
+  });
+
+  it("prefers the round whose settled write matches over a later call in flight", async () => {
+    updatePromptBlob("blob_2", {
+      boundTaskId: "task_1",
+      boundTurnId: "trn_2",
+      documentPath: DOC,
+    });
+    disk.set(DOC, "round one");
+    await call(edit("completed"));
+    await call(edit("in_progress", "tc_2"), "trn_2");
+    expect(attributeAdoption(DOC, calculateContentHash("round one"))?.turnId).toBe("trn_1");
+    expect(attributeAdoption(DOC, "other")?.turnId).toBe("trn_2");
   });
 
   it("closes the calls a turn left open when it settles", async () => {
