@@ -1,7 +1,8 @@
 /**
  * Reviewing what a prompt widget's round changed: every block the agent's
- * edits touched carries a gutter mark in the widget's colour until it is
- * dismissed, overwritten, or the widget moves on.
+ * edits touched carries a passive gutter bar in the widget's colour, and
+ * the widget steps through them (scrolling each into view) or clears them.
+ * Marks also go when the text is overwritten or the widget moves on.
  *
  * Both ways an agent write reaches the editor are covered — an ACP
  * `fs/write_text_file` (adopted while the tool call runs) and a harness
@@ -37,11 +38,9 @@ function markedBlocks(page: Page): Promise<string[]> {
         const middle = box.top + Math.max(box.height, 1) / 2;
         const block = blocks.find((el) => {
           const r = el.getBoundingClientRect();
-          return mark.dataset.promptChangeMark === "removed"
-            ? r.top >= box.top && r.top - box.bottom < 24
-            : middle >= r.top && middle <= r.bottom;
+          return middle >= r.top && middle <= r.bottom;
         });
-        return `${mark.dataset.promptChangeMark}:${block?.textContent ?? "?"}`;
+        return block?.textContent ?? "?";
       });
   });
 }
@@ -100,7 +99,7 @@ async function scriptEdit(
 test.describe("prompt change review", () => {
   test.setTimeout(90_000);
 
-  test("an ACP write marks the blocks it changed; the gutter and the widget dismiss them", async ({
+  test("an ACP write marks the blocks it changed; the widget steps through and clears them", async ({
     page,
   }) => {
     const workspacePath = "/workspace/change-review-acp";
@@ -120,19 +119,26 @@ test.describe("prompt change review", () => {
     // widget the rewrite had to re-insert.
     await expect
       .poll(() => markedBlocks(page))
-      .toEqual(["changed:AGENT_HEADING", "changed:para two, revised"]);
+      .toEqual(["AGENT_HEADING", "para two, revised"]);
     // The done face ties its file chip to the marks.
     await expect(widget.locator("button[data-changes]")).toHaveText("notes.md");
 
-    // A mark dismisses its own block, and leaves the text alone.
-    await marks(page).first().click();
-    await expect
-      .poll(() => markedBlocks(page))
-      .toEqual(["changed:para two, revised"]);
-    await expect(editor).toContainText("AGENT_HEADING");
+    // The widget steps through them in document order, pulsing each bar.
+    const navigator = widget.locator("[data-change-navigator]");
+    await expect(navigator).toContainText("2 changed");
+    await navigator.getByRole("button", { name: "Next change" }).click();
+    await expect(navigator).toContainText("1 of 2");
+    await expect(marks(page).first()).toHaveAttribute("data-pulse", "");
+    await navigator.getByRole("button", { name: "Next change" }).click();
+    await expect(navigator).toContainText("2 of 2");
+    await navigator.getByRole("button", { name: "Previous change" }).click();
+    await expect(navigator).toContainText("1 of 2");
 
-    await widget.getByRole("button", { name: "Dismiss" }).click();
+    // Clear drops every mark and leaves the text alone.
+    await navigator.getByRole("button", { name: "Clear" }).click();
     await expect(marks(page)).toHaveCount(0);
+    await expect(navigator).toHaveCount(0);
+    await expect(editor).toContainText("para two, revised");
   });
 
   test("a native write adopted after the tool settles is credited; overwriting it clears it", async ({
@@ -152,7 +158,7 @@ test.describe("prompt change review", () => {
     await expect(editor).toContainText("NATIVE_LINE", { timeout: 30_000 });
     await expect
       .poll(() => markedBlocks(page))
-      .toEqual(["changed:NATIVE_LINE from the harness"]);
+      .toEqual(["NATIVE_LINE from the harness"]);
 
     // The user rewrites the line: the round's text is gone, and so is its
     // mark.

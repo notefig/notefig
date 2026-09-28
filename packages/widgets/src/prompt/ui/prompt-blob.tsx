@@ -12,6 +12,8 @@ import { useHotkey } from "@tanstack/react-hotkeys";
 import { useTranslation } from "react-i18next";
 import {
   Check,
+  ChevronDown,
+  ChevronUp,
   FileText,
   MessageSquare,
   Pencil,
@@ -46,7 +48,11 @@ import { draftToNode, readDraftNode } from "../composer/draft-text";
 import { mentionPopupHasResults } from "../composer/mention-bridge";
 import { registerComposerKeyHandler } from "../composer/key-bridge";
 import { CopyTextButton } from "./copy-text-button";
-import { promptChangeColor, usePromptChangeCounts } from "../change-store";
+import { usePromptChangeCounts } from "../change-store";
+import {
+  usePromptChangeNavigation,
+  type PromptChangeNavigation,
+} from "../change-navigator";
 import { usePromptWidgetHost } from "../host-context";
 import type { PromptWidgetHost } from "../host";
 import {
@@ -270,6 +276,7 @@ function usePromptBlobRound({
  */
 function usePromptBlobDisplay({
   blobId,
+  editor,
   phase,
   sortedEntries,
   taskTurns,
@@ -277,6 +284,7 @@ function usePromptBlobDisplay({
   workspacePath,
 }: {
   blobId: string;
+  editor: Editor;
   phase: BlobPhase;
   sortedEntries: AgentEntry[];
   taskTurns: AgentTurn[];
@@ -315,7 +323,7 @@ function usePromptBlobDisplay({
     assistantTeaser,
     queueAhead,
     changeCounts,
-    changeColor: promptChangeColor(blobId),
+    changes: usePromptChangeNavigation(blobId, editor),
   };
 }
 
@@ -538,10 +546,10 @@ interface PromptBlobDisplay {
   activeToolLine: string | null;
   assistantTeaser: string | null;
   queueAhead: number;
-  /** Changes this widget's round left highlighted, per document. */
+  /** Changes this widget's round left marked, per document. */
   changeCounts: ReadonlyMap<string, number>;
-  /** The widget's review colour — the highlight's, repeated on its face. */
-  changeColor: string;
+  /** Review of the round's changes in this document. */
+  changes: PromptChangeNavigation;
 }
 
 /** Everything the face can do. Grouped so the container hands over one
@@ -836,7 +844,7 @@ function SettledState({
         fallbackText={display.assistantTeaser}
         touchedFiles={display.touchedFiles}
         changeCounts={display.changeCounts}
-        changeColor={display.changeColor}
+        changes={display.changes}
         onOpenFile={(path) => actions.openFile(path)}
         onOpenChat={() => boundTaskId && actions.openAgentTab(boundTaskId)}
         onDismiss={actions.dismiss}
@@ -934,6 +942,7 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
 
   const display = usePromptBlobDisplay({
     blobId,
+    editor,
     phase,
     sortedEntries,
     taskTurns,
@@ -1797,6 +1806,60 @@ function TouchedFileChips({
   );
 }
 
+/** The round's changes in this document: a dot in the widget's colour (its
+ *  gutter bars' colour), where the reader is, and stepping / clearing. Up and
+ *  down because the changes are in document order. */
+function ChangeNavigatorRow({ changes }: { changes: PromptChangeNavigation }) {
+  const { t } = useTranslation();
+  const iconButton =
+    "shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
+  return (
+    <div
+      data-change-navigator
+      className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground"
+    >
+      <span
+        aria-hidden
+        className="size-1.5 shrink-0 rounded-full"
+        style={{ backgroundColor: changes.color }}
+      />
+      <span className="tabular-nums">
+        {changes.index === null
+          ? t("promptChangesCount", { count: changes.count })
+          : t("promptChangesPosition", {
+              index: changes.index + 1,
+              count: changes.count,
+            })}
+      </span>
+      <button
+        type="button"
+        title={t("promptChangesPrevious")}
+        aria-label={t("promptChangesPrevious")}
+        className={iconButton}
+        onClick={() => changes.step(-1)}
+      >
+        <ChevronUp className="size-3" />
+      </button>
+      <button
+        type="button"
+        title={t("promptChangesNext")}
+        aria-label={t("promptChangesNext")}
+        className={iconButton}
+        onClick={() => changes.step(1)}
+      >
+        <ChevronDown className="size-3" />
+      </button>
+      <button
+        type="button"
+        className="ml-0.5 cursor-pointer rounded px-1 py-0.5 transition-colors hover:bg-accent hover:text-foreground"
+        onClick={changes.clear}
+      >
+        {t("promptChangesClear")}
+      </button>
+    </div>
+  );
+}
+
 /** Done: the widget's single resting face — the full response body,
  *  rendered as markdown and visible immediately (MET-133); the heading line
  *  above it doubles as the collapse toggle back to a one-line summary. The
@@ -1813,7 +1876,7 @@ export function DoneState({
   fallbackText,
   touchedFiles,
   changeCounts = new Map(),
-  changeColor = "",
+  changes,
   onOpenFile,
   onOpenChat,
   onDismiss,
@@ -1825,7 +1888,7 @@ export function DoneState({
   fallbackText: string | null;
   touchedFiles: string[];
   changeCounts?: ReadonlyMap<string, number>;
-  changeColor?: string;
+  changes?: PromptChangeNavigation;
   onOpenFile: (path: string) => void;
   onOpenChat: () => void;
   onDismiss: () => void;
@@ -1904,10 +1967,11 @@ export function DoneState({
           )}
         />
       )}
+      {changes && changes.count > 0 && <ChangeNavigatorRow changes={changes} />}
       <TouchedFileChips
         paths={touchedFiles}
         changeCounts={changeCounts}
-        changeColor={changeColor}
+        changeColor={changes?.color ?? ""}
         onOpenFile={onOpenFile}
       />
     </div>

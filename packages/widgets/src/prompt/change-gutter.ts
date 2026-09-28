@@ -1,16 +1,20 @@
 /**
- * How a round's changes look in the document: a bar in the editor's left
- * gutter beside every block the round changed, in the widget's colour, and
- * a small diamond at the top edge of the block where the round only removed
- * content — the dirty-diff gutter of a code editor. The text itself is
- * never styled.
+ * How a round's changes look in the document: a thin bar in the editor's
+ * left gutter beside every block the round changed, in the widget's colour —
+ * the dirty-diff gutter of a code editor. The text itself is never styled.
+ *
+ * The marks are passive: they show state, nothing more. Moving between
+ * changes and clearing them is the widget's job (./change-navigator.ts),
+ * which asks this module to reveal a block — scroll it into view and pulse
+ * its bar so the eye lands on it. A block the round only removed has no
+ * mark: there is no undo to offer for it yet, and a mark with nothing to
+ * do is noise.
  *
  * The gutter is a layer beside the editor, not decorations on its blocks: a
  * nested list item's bar still lands in the gutter (block CSS cannot know
- * its depth), the marks are real elements with a hover and a tooltip (the
- * prompt that made the change), and ProseMirror's DOM is never touched.
- * Like the minimap rail, it is a plugin view — registering the plugin is
- * the whole installation. Clicking a mark dismisses that block's changes.
+ * its depth), and ProseMirror's DOM is never touched. Like the minimap
+ * rail, it is a plugin view — registering the plugin is the whole
+ * installation.
  *
  * Purely a view of `promptChangesOf(state)` — swapping this module for a
  * margin list or a diff overlay touches nothing in the tracking.
@@ -18,54 +22,31 @@
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { EditorState, PluginView } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
-import { dismissPromptChangesTr, promptChangesOf } from "./change-tracking";
-import { promptChangeColor, type PromptChange } from "./change-store";
-import { getPromptBlob } from "./store";
+import { promptChangesOf } from "./change-tracking";
+import { promptChangeColor } from "./change-store";
 
 const gutterKey = new PluginKey("promptChangeGutter");
 
-/** One widget's mark on one block. */
+/** One widget's mark on one changed block. */
 export type PromptChangeMark = {
   /** Position before the block. */
   pos: number;
   blobId: string;
-  /** "changed": the block's content changed; "removed": content that sat
-   *  just above the block was removed. */
-  kind: "changed" | "removed";
 };
 
 /**
- * The block a change belongs to. A span or a point inside a textblock marks
- * that block as changed; a point between blocks (a removed block) marks the
- * block that now sits where it was, or the last one at the document's end.
+ * The changed blocks, one mark per block and widget, in document order. A
+ * change inside a textblock (text written, or text removed from the line)
+ * marks that block; a change between blocks (a whole block removed) has no
+ * block left to mark.
  */
-function markOf(state: EditorState, change: PromptChange): PromptChangeMark | null {
-  const $pos = state.doc.resolve(change.from);
-  if ($pos.parent.isTextblock) {
-    return { pos: $pos.before(), blobId: change.blobId, kind: "changed" };
-  }
-  if ($pos.nodeAfter?.isBlock) {
-    return { pos: change.from, blobId: change.blobId, kind: "removed" };
-  }
-  const before = $pos.nodeBefore;
-  if (before?.isBlock) {
-    return {
-      pos: change.from - before.nodeSize,
-      blobId: change.blobId,
-      kind: "removed",
-    };
-  }
-  return null;
-}
-
-/** One mark per block and widget, in document order; "changed" wins. */
 export function promptChangeMarks(state: EditorState): PromptChangeMark[] {
   const marks = new Map<string, PromptChangeMark>();
   for (const change of promptChangesOf(state)) {
-    const mark = markOf(state, change);
-    if (!mark) continue;
-    const key = `${mark.pos}:${mark.blobId}`;
-    if (marks.get(key)?.kind !== "changed") marks.set(key, mark);
+    const $pos = state.doc.resolve(change.from);
+    if (!$pos.parent.isTextblock) continue;
+    const pos = $pos.before();
+    marks.set(`${pos}:${change.blobId}`, { pos, blobId: change.blobId });
   }
   return [...marks.values()].sort((a, b) => a.pos - b.pos);
 }
@@ -74,26 +55,46 @@ export function promptChangeMarks(state: EditorState): PromptChangeMark[] {
  *  bars on one block (px). */
 const GUTTER_OFFSET = 14;
 const BAR_SPACING = 6;
+/** How long a revealed bar stays emphasised. Cosmetic only. */
+const PULSE_MS = 900;
 
 const BAR_CLASS =
-  "group/mark absolute w-2.5 -translate-x-1/2 cursor-pointer before:absolute before:inset-y-0 before:left-1/2 before:w-[3px] before:-translate-x-1/2 before:rounded-full before:bg-(--prompt-change) before:transition-[width] hover:before:w-[5px]";
-const REMOVED_CLASS =
-  "absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 cursor-pointer rounded-[2px] bg-(--prompt-change) transition-transform hover:scale-125";
+  "pointer-events-none absolute w-[3px] -translate-x-1/2 rounded-full bg-(--prompt-change) transition-[width,box-shadow] duration-300 data-[pulse]:w-[5px] data-[pulse]:shadow-[0_0_0_3px_var(--prompt-change-glow)]";
+
+const gutters = new WeakMap<EditorView, PromptChangeGutter>();
+
+/**
+ * Bring one of a widget's changed blocks into view and pulse its bar. The
+ * navigator's half of the contract; a no-op in an editor without the plugin.
+ */
+export function revealPromptChange(
+  view: EditorView,
+  mark: PromptChangeMark,
+): void {
+  const dom = view.nodeDOM(mark.pos);
+  if (dom instanceof HTMLElement) {
+    dom.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+  gutters.get(view)?.pulse(mark);
+}
 
 class PromptChangeGutter implements PluginView {
   private readonly layer: HTMLDivElement;
   private readonly resize: ResizeObserver | null;
   private lastMarks: PromptChangeMark[] = [];
   private observed = new Set<Element>();
+  private pulsed: PromptChangeMark | null = null;
+  private pulseTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private readonly view: EditorView) {
     // A zero-height layer just before the editor: it scrolls with the
     // document, so marks placed once stay put until layout changes.
     this.layer = document.createElement("div");
     this.layer.setAttribute("data-prompt-change-gutter", "");
-    this.layer.style.cssText = "position:relative;height:0;overflow:visible;";
+    this.layer.setAttribute("aria-hidden", "true");
+    this.layer.style.cssText =
+      "position:relative;height:0;overflow:visible;pointer-events:none;";
     view.dom.before(this.layer);
-    this.layer.addEventListener("mousedown", this.onMouseDown);
     // Reflow moves blocks without a transaction: a resized pane, a wrapped
     // line, a loaded image, a tab shown again, a widget card growing. The
     // editor element itself often keeps its size (it fills the pane), so
@@ -103,6 +104,7 @@ class PromptChangeGutter implements PluginView {
       typeof ResizeObserver === "undefined"
         ? null
         : new ResizeObserver(() => this.render(true));
+    gutters.set(view, this);
     this.render(true);
   }
 
@@ -114,23 +116,21 @@ class PromptChangeGutter implements PluginView {
   }
 
   destroy(): void {
+    clearTimeout(this.pulseTimer);
     this.resize?.disconnect();
-    this.layer.removeEventListener("mousedown", this.onMouseDown);
+    gutters.delete(this.view);
     this.layer.remove();
   }
 
-  private readonly onMouseDown = (event: MouseEvent) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
-    const pos = Number(target.dataset.pos);
-    const node = this.view.state.doc.nodeAt(pos);
-    if (!target.dataset.pos || !node) return;
-    // Keep the caret and focus where they were: the gutter is not text.
-    event.preventDefault();
-    this.view.dispatch(
-      dismissPromptChangesTr(this.view.state, pos, pos + node.nodeSize),
-    );
-  };
+  pulse(mark: PromptChangeMark): void {
+    clearTimeout(this.pulseTimer);
+    this.pulsed = mark;
+    this.render(true);
+    this.pulseTimer = setTimeout(() => {
+      this.pulsed = null;
+      this.render(true);
+    }, PULSE_MS);
+  }
 
   /**
    * Watch the editor and its top-level blocks while there are marks to keep
@@ -160,7 +160,8 @@ class PromptChangeGutter implements PluginView {
     this.observeLayout(marks.length > 0);
     if (marks.length === 0) return;
     const origin = this.layer.getBoundingClientRect();
-    const textLeft = this.view.dom.getBoundingClientRect().left;
+    const gutterX =
+      this.view.dom.getBoundingClientRect().left - origin.left - GUTTER_OFFSET;
     const barsOnBlock = new Map<number, number>();
     for (const mark of marks) {
       const dom = this.view.nodeDOM(mark.pos);
@@ -168,35 +169,42 @@ class PromptChangeGutter implements PluginView {
       const box = dom.getBoundingClientRect();
       const index = barsOnBlock.get(mark.pos) ?? 0;
       barsOnBlock.set(mark.pos, index + 1);
-      const el = document.createElement("button");
-      el.type = "button";
-      el.tabIndex = -1;
-      el.dataset.pos = String(mark.pos);
-      el.dataset.promptChangeMark = mark.kind;
-      el.dataset.blobId = mark.blobId;
-      el.className = mark.kind === "changed" ? BAR_CLASS : REMOVED_CLASS;
-      el.style.setProperty("--prompt-change", promptChangeColor(mark.blobId));
-      el.style.left = `${textLeft - origin.left - GUTTER_OFFSET - index * BAR_SPACING}px`;
-      el.style.top = `${box.top - origin.top}px`;
-      if (mark.kind === "changed") el.style.height = `${box.height}px`;
-      else el.style.top = `${box.top - origin.top - 6}px`;
-      const prompt = getPromptBlob(mark.blobId).lastSentPrompt.trim();
-      if (prompt) el.title = prompt.split("\n", 1)[0];
-      this.layer.append(el);
+      const bar = markBar(mark, {
+        left: gutterX - index * BAR_SPACING,
+        top: box.top - origin.top,
+        height: box.height,
+      });
+      if (this.pulsed && sameMark(this.pulsed, mark)) bar.dataset.pulse = "";
+      this.layer.append(bar);
     }
   }
 }
 
-function sameMarks(a: PromptChangeMark[], b: PromptChangeMark[]): boolean {
-  return (
-    a.length === b.length &&
-    a.every(
-      (mark, i) =>
-        mark.pos === b[i].pos &&
-        mark.blobId === b[i].blobId &&
-        mark.kind === b[i].kind,
-    )
+/** One mark: a bar spanning its block. */
+function markBar(
+  mark: PromptChangeMark,
+  at: { left: number; top: number; height: number },
+): HTMLDivElement {
+  const el = document.createElement("div");
+  el.dataset.promptChangeMark = mark.blobId;
+  el.className = BAR_CLASS;
+  el.style.setProperty("--prompt-change", promptChangeColor(mark.blobId));
+  el.style.setProperty(
+    "--prompt-change-glow",
+    promptChangeColor(mark.blobId, 0.25),
   );
+  el.style.left = `${at.left}px`;
+  el.style.top = `${at.top}px`;
+  el.style.height = `${at.height}px`;
+  return el;
+}
+
+function sameMark(a: PromptChangeMark, b: PromptChangeMark): boolean {
+  return a.pos === b.pos && a.blobId === b.blobId;
+}
+
+function sameMarks(a: PromptChangeMark[], b: PromptChangeMark[]): boolean {
+  return a.length === b.length && a.every((mark, i) => sameMark(mark, b[i]));
 }
 
 export function promptChangeGutterPlugin(): Plugin {

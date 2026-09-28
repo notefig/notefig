@@ -574,7 +574,12 @@ i18n
           promptBlobRetry: "Retry",
           promptBlobDismiss: "Dismiss",
           promptBlobChangesHighlighted:
-            "Changes highlighted in the document: {{count}}",
+            "Changes marked in the document: {{count}}",
+          promptChangesCount: "{{count}} changed",
+          promptChangesPosition: "{{index}} of {{count}}",
+          promptChangesPrevious: "Previous change",
+          promptChangesNext: "Next change",
+          promptChangesClear: "Clear",
           promptBlobOpenChat: "Open chat",
           promptBlobReply: "Reply…",
           promptBlobShowMore: "Show more",
