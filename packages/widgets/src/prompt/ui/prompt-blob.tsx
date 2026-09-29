@@ -25,7 +25,6 @@ import { toast } from "sonner";
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import { Button } from "@notefig/ui/button";
-import { Switch } from "@notefig/ui/switch";
 import { OrbLoader } from "@notefig/ui/orb-loader";
 import {
   DropdownMenu,
@@ -800,6 +799,7 @@ export function PromptBlobFace({
               turn={turn}
               display={display}
               boundTaskId={boundTaskId}
+              documentPath={documentPath}
               actions={actions}
             />
           </div>
@@ -827,12 +827,14 @@ function SettledState({
   turn,
   display,
   boundTaskId,
+  documentPath,
   actions,
 }: {
   phase: BlobPhase;
   turn: AgentTurn | undefined;
   display: PromptBlobDisplay;
   boundTaskId: string | null;
+  documentPath: string;
   actions: PromptBlobFaceActions;
 }) {
   if (phase === "done") {
@@ -842,6 +844,7 @@ function SettledState({
         response={display.widgetResponse}
         fallbackText={display.assistantTeaser}
         touchedFiles={display.touchedFiles}
+        documentPath={documentPath}
         changeCounts={display.changeCounts}
         changes={display.changes}
         onOpenFile={(path) => actions.openFile(path)}
@@ -1754,60 +1757,77 @@ export function ReferenceChip({
   );
 }
 
+/** What a file chip does. The widget's own document is already open, so
+ *  its chip toggles the highlighting there; another document the round
+ *  marked opens with the highlighting on — that is why you go there; any
+ *  other chip just opens its file. */
+type ChipAction = "toggle" | "open-highlighted" | "open";
+
+function chipAction(
+  path: string,
+  documentPath: string,
+  changeCounts: ReadonlyMap<string, number>,
+  changes: PromptChangeNavigation | undefined,
+): ChipAction {
+  if (!changes || !changeCounts.has(path)) return "open";
+  return path === documentPath ? "toggle" : "open-highlighted";
+}
+
 /** The documents a finished turn wrote to, each a shortcut back into the
- *  file. Its own component so the done face stays readable — that face is
- *  already the branchiest part of the widget. */
+ *  file — and the switch for highlighting what the round changed (see
+ *  `chipAction`). Its own component so the done face stays readable — that
+ *  face is already the branchiest part of the widget. */
 function TouchedFileChips({
   paths,
-  leading,
+  documentPath,
+  changeCounts,
+  changes,
   onOpenFile,
 }: {
   paths: string[];
-  /** Rendered ahead of the chips, on the same row. */
-  leading?: React.ReactNode;
+  documentPath: string;
+  changeCounts: ReadonlyMap<string, number>;
+  changes: PromptChangeNavigation | undefined;
   onOpenFile: (path: string) => void;
 }) {
-  if (paths.length === 0 && !leading) return null;
+  const { t } = useTranslation();
+  if (paths.length === 0) return null;
+  const highlighting = Boolean(changes?.reviewing);
   return (
     <div className="flex flex-wrap items-center gap-1">
-      {leading}
-      {paths.map((path) => (
-        <button
-          key={path}
-          type="button"
-          className="flex cursor-pointer items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[0.6875rem] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          onClick={() => onOpenFile(path)}
-        >
-          <FileText className="size-3" />
-          {basename(path)}
-        </button>
-      ))}
+      {paths.map((path) => {
+        const action = chipAction(path, documentPath, changeCounts, changes);
+        const pressed = action !== "open" && highlighting;
+        return (
+          <button
+            key={path}
+            type="button"
+            title={action === "open" ? undefined : t("promptChangesHighlight")}
+            aria-pressed={action === "toggle" ? highlighting : undefined}
+            className={cn(
+              "flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.6875rem] transition-colors hover:bg-accent hover:text-foreground",
+              pressed
+                ? "bg-accent text-foreground"
+                : "bg-muted text-muted-foreground",
+            )}
+            // On, the chip is ringed in the colour its gutter bars take.
+            style={
+              pressed
+                ? { boxShadow: `inset 0 0 0 1px ${changes?.color}` }
+                : undefined
+            }
+            onClick={() => {
+              if (action === "toggle") return changes?.toggleReview();
+              if (action === "open-highlighted") changes?.showChanges();
+              onOpenFile(path);
+            }}
+          >
+            <FileText className="size-3" />
+            {basename(path)}
+          </button>
+        );
+      })}
     </div>
-  );
-}
-
-/** The review switch: while on, this widget's changed blocks are marked
- *  in the gutter — one widget at a time. On, its track takes the colour the
- *  marks are drawn in. */
-function HighlightChangesSwitch({
-  changes,
-}: {
-  changes: PromptChangeNavigation;
-}) {
-  const { t } = useTranslation();
-  return (
-    <label className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[0.6875rem] text-muted-foreground transition-colors hover:text-foreground">
-      <Switch
-        data-highlight-changes
-        checked={changes.reviewing}
-        onCheckedChange={changes.toggleReview}
-        className="h-3 w-5 [&>div]:size-2.5"
-        style={
-          changes.reviewing ? { backgroundColor: changes.color } : undefined
-        }
-      />
-      {t("promptChangesHighlight")}
-    </label>
   );
 }
 
@@ -1826,6 +1846,7 @@ export function DoneState({
   response,
   fallbackText,
   touchedFiles,
+  documentPath = "",
   changeCounts = new Map(),
   changes,
   onOpenFile,
@@ -1838,6 +1859,8 @@ export function DoneState({
    *  agent didn't deliver a widget_respond response. */
   fallbackText: string | null;
   touchedFiles: string[];
+  /** The document this widget sits in — its chip is the highlight toggle. */
+  documentPath?: string;
   changeCounts?: ReadonlyMap<string, number>;
   changes?: PromptChangeNavigation;
   onOpenFile: (path: string) => void;
@@ -1920,11 +1943,9 @@ export function DoneState({
       )}
       <TouchedFileChips
         paths={touchedFiles}
-        leading={
-          changes && changeCounts.size > 0 ? (
-            <HighlightChangesSwitch changes={changes} />
-          ) : null
-        }
+        documentPath={documentPath}
+        changeCounts={changeCounts}
+        changes={changes}
         onOpenFile={onOpenFile}
       />
     </div>

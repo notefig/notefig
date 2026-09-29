@@ -95,6 +95,7 @@ function render(
               reviewing: false,
               color: "",
               toggleReview: noop,
+              showChanges: noop,
               index: null,
               step: noop,
             },
