@@ -244,6 +244,19 @@ export function isMutatingToolCall(call: ToolCallUpdate): boolean {
   return (call.content ?? []).some((item) => item.type === "diff");
 }
 
+/** Collapse `.` and `..` segments, so a diff item's `./notes.md` names the
+ *  same document as the absolute path everything else uses (the widget's
+ *  own document path, the app's change attribution). */
+function normalizeSlashPath(path: string): string {
+  const out: string[] = [];
+  for (const segment of path.split("/")) {
+    if (segment === ".") continue;
+    if (segment === ".." && out.length > 1) out.pop();
+    else if (segment !== "..") out.push(segment);
+  }
+  return out.join("/");
+}
+
 /**
  * Documents this turn touched, for the done-state chips. Locations carry
  * workspace-resolved absolute paths (the service synthesizes them from
@@ -264,9 +277,11 @@ export function deriveTouchedFiles(
       for (const item of entry.toolCall.content ?? []) {
         if (item.type !== "diff") continue;
         paths.add(
-          item.path.startsWith("/")
-            ? item.path
-            : `${workspacePath.replace(/\/$/, "")}/${item.path}`,
+          normalizeSlashPath(
+            item.path.startsWith("/")
+              ? item.path
+              : `${workspacePath.replace(/\/$/, "")}/${item.path}`,
+          ),
         );
       }
     }
