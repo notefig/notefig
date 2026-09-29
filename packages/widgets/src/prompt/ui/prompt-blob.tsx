@@ -12,8 +12,6 @@ import { useHotkey } from "@tanstack/react-hotkeys";
 import { useTranslation } from "react-i18next";
 import {
   Check,
-  ChevronDown,
-  ChevronUp,
   FileText,
   MessageSquare,
   Pencil,
@@ -1762,17 +1760,21 @@ function TouchedFileChips({
   paths,
   changeCounts,
   changeColor,
+  leading,
   onOpenFile,
 }: {
   paths: string[];
   changeCounts: ReadonlyMap<string, number>;
   changeColor: string;
+  /** Rendered ahead of the chips, on the same row. */
+  leading?: React.ReactNode;
   onOpenFile: (path: string) => void;
 }) {
   const { t } = useTranslation();
-  if (paths.length === 0) return null;
+  if (paths.length === 0 && !leading) return null;
   return (
     <div className="flex flex-wrap items-center gap-1">
+      {leading}
       {paths.map((path) => {
         // A dot in the widget's colour ties the chip to the highlights the
         // round left in that document, while they last.
@@ -1806,57 +1808,34 @@ function TouchedFileChips({
   );
 }
 
-/** The round's changes in this document: a dot in the widget's colour (its
- *  gutter bars' colour), where the reader is, and stepping / clearing. Up and
- *  down because the changes are in document order. */
-function ChangeNavigatorRow({ changes }: { changes: PromptChangeNavigation }) {
+/** The review toggle: marks this widget's changed blocks in the gutter,
+ *  one widget at a time. The dot is the colour those marks are drawn in. */
+function ReviewChangesButton({
+  changes,
+}: {
+  changes: PromptChangeNavigation;
+}) {
   const { t } = useTranslation();
-  const iconButton =
-    "shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
   return (
-    <div
-      data-change-navigator
-      className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground"
+    <button
+      type="button"
+      data-review-changes
+      aria-pressed={changes.reviewing}
+      className={cn(
+        "flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.6875rem] transition-colors",
+        changes.reviewing
+          ? "bg-accent text-foreground"
+          : "text-muted-foreground hover:bg-accent hover:text-foreground",
+      )}
+      onClick={changes.toggleReview}
     >
       <span
         aria-hidden
         className="size-1.5 shrink-0 rounded-full"
         style={{ backgroundColor: changes.color }}
       />
-      <span className="tabular-nums">
-        {changes.index === null
-          ? t("promptChangesCount", { count: changes.count })
-          : t("promptChangesPosition", {
-              index: changes.index + 1,
-              count: changes.count,
-            })}
-      </span>
-      <button
-        type="button"
-        title={t("promptChangesPrevious")}
-        aria-label={t("promptChangesPrevious")}
-        className={iconButton}
-        onClick={() => changes.step(-1)}
-      >
-        <ChevronUp className="size-3" />
-      </button>
-      <button
-        type="button"
-        title={t("promptChangesNext")}
-        aria-label={t("promptChangesNext")}
-        className={iconButton}
-        onClick={() => changes.step(1)}
-      >
-        <ChevronDown className="size-3" />
-      </button>
-      <button
-        type="button"
-        className="ml-0.5 cursor-pointer rounded px-1 py-0.5 transition-colors hover:bg-accent hover:text-foreground"
-        onClick={changes.clear}
-      >
-        {t("promptChangesClear")}
-      </button>
-    </div>
+      {t("promptChangesReview")}
+    </button>
   );
 }
 
@@ -1967,11 +1946,15 @@ export function DoneState({
           )}
         />
       )}
-      {changes && changes.count > 0 && <ChangeNavigatorRow changes={changes} />}
       <TouchedFileChips
         paths={touchedFiles}
         changeCounts={changeCounts}
         changeColor={changes?.color ?? ""}
+        leading={
+          changes && changeCounts.size > 0 ? (
+            <ReviewChangesButton changes={changes} />
+          ) : null
+        }
         onOpenFile={onOpenFile}
       />
     </div>

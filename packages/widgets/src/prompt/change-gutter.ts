@@ -3,10 +3,11 @@
  * left gutter beside every block the round changed, in the widget's colour —
  * the dirty-diff gutter of a code editor. The text itself is never styled.
  *
- * The marks are passive: they show state, nothing more. Moving between
- * changes and clearing them is the widget's job (./change-navigator.ts),
- * which asks this module to reveal a block — scroll it into view and pulse
- * its bar so the eye lands on it. A block the round only removed has no
+ * Only the widget under review is drawn (review is one widget at a time,
+ * started from the widget — see `setPromptReview`). The marks are passive:
+ * they show state, nothing more. Moving between changes is the widget's
+ * job (./change-navigator.ts), which asks this module to reveal a block —
+ * scroll it into view and pulse its bar so the eye lands on it. A block the round only removed has no
  * mark: there is no undo to offer for it yet, and a mark with nothing to
  * do is noise.
  *
@@ -23,7 +24,11 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { EditorState, PluginView } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import { promptChangesOf } from "./change-tracking";
-import { promptChangeColor } from "./change-store";
+import {
+  getPromptReview,
+  promptChangeColor,
+  subscribePromptChanges,
+} from "./change-store";
 
 const gutterKey = new PluginKey("promptChangeGutter");
 
@@ -85,6 +90,7 @@ class PromptChangeGutter implements PluginView {
   private observed = new Set<Element>();
   private pulsed: PromptChangeMark | null = null;
   private pulseTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly unsubscribe: () => void;
 
   constructor(private readonly view: EditorView) {
     // A zero-height layer just before the editor: it scrolls with the
@@ -105,6 +111,9 @@ class PromptChangeGutter implements PluginView {
         ? null
         : new ResizeObserver(() => this.render(true));
     gutters.set(view, this);
+    // A review starting or ending changes what is drawn without touching
+    // the document.
+    this.unsubscribe = subscribePromptChanges(() => this.render(false));
     this.render(true);
   }
 
@@ -117,6 +126,7 @@ class PromptChangeGutter implements PluginView {
 
   destroy(): void {
     clearTimeout(this.pulseTimer);
+    this.unsubscribe();
     this.resize?.disconnect();
     gutters.delete(this.view);
     this.layer.remove();
@@ -153,7 +163,10 @@ class PromptChangeGutter implements PluginView {
   }
 
   private render(force: boolean): void {
-    const marks = promptChangeMarks(this.view.state);
+    const reviewing = getPromptReview();
+    const marks = promptChangeMarks(this.view.state).filter(
+      (mark) => mark.blobId === reviewing,
+    );
     if (!force && sameMarks(marks, this.lastMarks)) return;
     this.lastMarks = marks;
     this.layer.replaceChildren();

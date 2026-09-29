@@ -12,7 +12,9 @@ import {
   PROMPT_CHANGE_META,
   discardPromptChanges,
   getDocumentPromptChanges,
+  getPromptReview,
   setDocumentPromptChanges,
+  setPromptReview,
 } from "../change-store";
 import {
   promptChangeTrackingPlugin,
@@ -148,6 +150,16 @@ describe("prompt change tracking", () => {
     // Mounting it clears what it could not restore.
     new EditorView(document.createElement("div"), { state: changed }).destroy();
     expect(getDocumentPromptChanges(DOC_PATH)).toEqual([]);
+  });
+
+  it("reviews one widget at a time, and ends a review whose changes are gone", () => {
+    setPromptReview(ROUND.blobId);
+    setPromptReview("blob_b");
+    expect(getPromptReview()).toBe("blob_b");
+    discardPromptChanges(ROUND.blobId);
+    expect(getPromptReview()).toBe("blob_b");
+    discardPromptChanges("blob_b");
+    expect(getPromptReview()).toBeNull();
   });
 
   it("forgets a widget's changes when it binds a new turn", () => {

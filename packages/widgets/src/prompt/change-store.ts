@@ -64,9 +64,29 @@ export function setDocumentPromptChanges(
   emit();
 }
 
+/**
+ * The one widget under review, or null. Review is a mode, not a filter:
+ * only that widget's changes are marked in the documents, and starting a
+ * review on another widget ends this one.
+ */
+let reviewing: string | null = null;
+
+export function getPromptReview(): string | null {
+  return reviewing;
+}
+
+/** Start reviewing `blobId`, or end the review with null. */
+export function setPromptReview(blobId: string | null): void {
+  if (reviewing === blobId) return;
+  reviewing = blobId;
+  emit();
+}
+
 /** Forget every change a widget's rounds made, in every document. */
 export function discardPromptChanges(blobId: string): void {
-  let changed = false;
+  // Nothing left to review once the changes are gone.
+  let changed = reviewing === blobId;
+  if (changed) reviewing = null;
   for (const [documentPath, changes] of byDocument) {
     const kept = changes.filter((change) => change.blobId !== blobId);
     if (kept.length === changes.length) continue;

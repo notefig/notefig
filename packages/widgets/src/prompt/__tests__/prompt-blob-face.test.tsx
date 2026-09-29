@@ -92,10 +92,11 @@ function render(
             changeCounts: new Map(),
             changes: {
               count: 0,
-              index: null,
+              reviewing: false,
               color: "",
+              toggleReview: noop,
+              index: null,
               step: noop,
-              clear: noop,
             },
             ...overrides.display,
           },

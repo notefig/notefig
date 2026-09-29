@@ -1,7 +1,13 @@
 /**
- * The widget's side of change review: how many blocks its round changed in
- * this document, stepping through them (each step scrolls the block into
- * view and pulses its gutter bar), and clearing them all.
+ * The widget's side of change review. A review is a mode on one widget at a
+ * time: turning it on marks this widget's changed blocks in the gutter (and
+ * ends any other widget's review); turning it off hides them again. The
+ * changes themselves stay until the widget moves on to a new turn, so there
+ * is nothing to clear.
+ *
+ * `step` walks the changed blocks in this document — scrolling each into
+ * view and pulsing its bar. The widget does not render it yet; it is kept
+ * for the stepping controls to come.
  *
  * Reads the same marks the gutter draws (`promptChangeMarks`), so the count
  * and the bars can never disagree, and re-reads whenever the change store
@@ -11,8 +17,9 @@
 import { useCallback, useState, useSyncExternalStore } from "react";
 import type { Editor } from "@tiptap/core";
 import {
-  discardPromptChanges,
+  getPromptReview,
   promptChangeColor,
+  setPromptReview,
   subscribePromptChanges,
 } from "./change-store";
 import {
@@ -24,12 +31,14 @@ import {
 export type PromptChangeNavigation = {
   /** Changed blocks in this document. */
   count: number;
-  /** 0-based position of the last revealed block, null before the first. */
-  index: number | null;
+  /** Whether this widget is the one under review. */
+  reviewing: boolean;
   /** The widget's review colour — its gutter bars'. */
   color: string;
+  toggleReview(): void;
+  /** 0-based position of the last revealed block, null before the first. */
+  index: number | null;
   step(direction: 1 | -1): void;
-  clear(): void;
 };
 
 function widgetMarks(editor: Editor, blobId: string): PromptChangeMark[] {
@@ -47,10 +56,20 @@ export function usePromptChangeNavigation(
     subscribePromptChanges,
     () => widgetMarks(editor, blobId).length,
   );
+  const reviewing = useSyncExternalStore(
+    subscribePromptChanges,
+    () => getPromptReview() === blobId,
+  );
   const [position, setPosition] = useState<number | null>(null);
   // Blocks can merge or go away under the cursor; the position never
   // points past the end.
-  const index = position === null || count === 0 ? null : Math.min(position, count - 1);
+  const index =
+    position === null || count === 0 ? null : Math.min(position, count - 1);
+
+  const toggleReview = useCallback(() => {
+    setPosition(null);
+    setPromptReview(getPromptReview() === blobId ? null : blobId);
+  }, [blobId]);
 
   const step = useCallback(
     (direction: 1 | -1) => {
@@ -63,15 +82,18 @@ export function usePromptChangeNavigation(
             : marks.length - 1
           : (index + direction + marks.length) % marks.length;
       setPosition(next);
+      setPromptReview(blobId);
       revealPromptChange(editor.view, marks[next]);
     },
     [editor, blobId, index],
   );
 
-  const clear = useCallback(() => {
-    setPosition(null);
-    discardPromptChanges(blobId);
-  }, [blobId]);
-
-  return { count, index, color: promptChangeColor(blobId), step, clear };
+  return {
+    count,
+    reviewing,
+    color: promptChangeColor(blobId),
+    toggleReview,
+    index,
+    step,
+  };
 }
