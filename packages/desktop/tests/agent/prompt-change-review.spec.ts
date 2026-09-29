@@ -1,7 +1,7 @@
 /**
- * Reviewing what a prompt widget's round changed: turning review on in the
- * widget marks every block the agent's edits touched with a passive gutter
- * bar in the widget's colour; turning it off hides them. A mark also goes
+ * Reviewing what a prompt widget's round changed: switching "Highlight
+ * changes" on in the widget marks every block the agent's edits touched with
+ * a passive gutter bar in the widget's colour; switching it off hides them. A mark also goes
  * when its text is overwritten, and all of them when the widget moves on.
  *
  * Both ways an agent write reaches the editor are covered — an ACP
@@ -115,23 +115,21 @@ test.describe("prompt change review", () => {
     await sendWidgetPrompt(page, widget, "add a heading");
     await expect(editor).toContainText("AGENT_HEADING", { timeout: 30_000 });
 
-    // Nothing is marked until the widget's review is on.
-    const review = widget.locator("[data-review-changes]");
-    await expect(review).toHaveAttribute("aria-pressed", "false");
+    // Nothing is marked until the widget's switch is on.
+    const highlight = widget.getByRole("switch", { name: "Highlight changes" });
+    await expect(highlight).toHaveAttribute("aria-checked", "false");
     await expect(marks(page)).toHaveCount(0);
-    await review.click();
-    await expect(review).toHaveAttribute("aria-pressed", "true");
+    await highlight.click();
+    await expect(highlight).toHaveAttribute("aria-checked", "true");
 
     // Exactly the blocks it touched — not the untouched paragraph, not the
     // widget the rewrite had to re-insert.
     await expect
       .poll(() => markedBlocks(page))
       .toEqual(["AGENT_HEADING", "para two, revised"]);
-    // The done face ties its file chip to the marks.
-    await expect(widget.locator("button[data-changes]")).toHaveText("notes.md");
-
-    // Turning review off hides the marks and leaves the text alone.
-    await review.click();
+    // Switching it off hides the marks and leaves the text alone.
+    await highlight.click();
+    await expect(highlight).toHaveAttribute("aria-checked", "false");
     await expect(marks(page)).toHaveCount(0);
     await expect(editor).toContainText("para two, revised");
   });
@@ -151,7 +149,7 @@ test.describe("prompt change review", () => {
     const widget = await summonWidget(page, editor);
     await sendWidgetPrompt(page, widget, "add a closing line");
     await expect(editor).toContainText("NATIVE_LINE", { timeout: 30_000 });
-    await widget.locator("[data-review-changes]").click();
+    await widget.getByRole("switch", { name: "Highlight changes" }).click();
     await expect
       .poll(() => markedBlocks(page))
       .toEqual(["NATIVE_LINE from the harness"]);

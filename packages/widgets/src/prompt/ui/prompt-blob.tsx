@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import { Button } from "@notefig/ui/button";
+import { Switch } from "@notefig/ui/switch";
 import { OrbLoader } from "@notefig/ui/orb-loader";
 import {
   DropdownMenu,
@@ -1758,84 +1759,55 @@ export function ReferenceChip({
  *  already the branchiest part of the widget. */
 function TouchedFileChips({
   paths,
-  changeCounts,
-  changeColor,
   leading,
   onOpenFile,
 }: {
   paths: string[];
-  changeCounts: ReadonlyMap<string, number>;
-  changeColor: string;
   /** Rendered ahead of the chips, on the same row. */
   leading?: React.ReactNode;
   onOpenFile: (path: string) => void;
 }) {
-  const { t } = useTranslation();
   if (paths.length === 0 && !leading) return null;
   return (
     <div className="flex flex-wrap items-center gap-1">
       {leading}
-      {paths.map((path) => {
-        // A dot in the widget's colour ties the chip to the highlights the
-        // round left in that document, while they last.
-        const changes = changeCounts.get(path) ?? 0;
-        return (
-          <button
-            key={path}
-            type="button"
-            data-changes={changes || undefined}
-            title={
-              changes
-                ? t("promptBlobChangesHighlighted", { count: changes })
-                : undefined
-            }
-            className="flex cursor-pointer items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[0.6875rem] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            onClick={() => onOpenFile(path)}
-          >
-            <FileText className="size-3" />
-            {basename(path)}
-            {changes > 0 && (
-              <span
-                aria-hidden
-                className="size-1.5 rounded-full"
-                style={{ backgroundColor: changeColor }}
-              />
-            )}
-          </button>
-        );
-      })}
+      {paths.map((path) => (
+        <button
+          key={path}
+          type="button"
+          className="flex cursor-pointer items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[0.6875rem] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          onClick={() => onOpenFile(path)}
+        >
+          <FileText className="size-3" />
+          {basename(path)}
+        </button>
+      ))}
     </div>
   );
 }
 
-/** The review toggle: marks this widget's changed blocks in the gutter,
- *  one widget at a time. The dot is the colour those marks are drawn in. */
-function ReviewChangesButton({
+/** The review switch: while on, this widget's changed blocks are marked
+ *  in the gutter — one widget at a time. On, its track takes the colour the
+ *  marks are drawn in. */
+function HighlightChangesSwitch({
   changes,
 }: {
   changes: PromptChangeNavigation;
 }) {
   const { t } = useTranslation();
   return (
-    <button
-      type="button"
-      data-review-changes
-      aria-pressed={changes.reviewing}
-      className={cn(
-        "flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.6875rem] transition-colors",
-        changes.reviewing
-          ? "bg-accent text-foreground"
-          : "text-muted-foreground hover:bg-accent hover:text-foreground",
-      )}
-      onClick={changes.toggleReview}
-    >
-      <span
-        aria-hidden
-        className="size-1.5 shrink-0 rounded-full"
-        style={{ backgroundColor: changes.color }}
+    <label className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[0.6875rem] text-muted-foreground transition-colors hover:text-foreground">
+      <Switch
+        data-highlight-changes
+        checked={changes.reviewing}
+        onCheckedChange={changes.toggleReview}
+        className="h-3 w-5 [&>div]:size-2.5"
+        style={
+          changes.reviewing ? { backgroundColor: changes.color } : undefined
+        }
       />
-      {t("promptChangesReview")}
-    </button>
+      {t("promptChangesHighlight")}
+    </label>
   );
 }
 
@@ -1948,11 +1920,9 @@ export function DoneState({
       )}
       <TouchedFileChips
         paths={touchedFiles}
-        changeCounts={changeCounts}
-        changeColor={changes?.color ?? ""}
         leading={
           changes && changeCounts.size > 0 ? (
-            <ReviewChangesButton changes={changes} />
+            <HighlightChangesSwitch changes={changes} />
           ) : null
         }
         onOpenFile={onOpenFile}

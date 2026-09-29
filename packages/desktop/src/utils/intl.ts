@@ -573,9 +573,7 @@ i18n
           promptBlobFailed: "Failed.",
           promptBlobRetry: "Retry",
           promptBlobDismiss: "Dismiss",
-          promptBlobChangesHighlighted:
-            "Changes marked in the document: {{count}}",
-          promptChangesReview: "Review changes",
+          promptChangesHighlight: "Highlight changes",
           promptBlobOpenChat: "Open chat",
           promptBlobReply: "Reply…",
           promptBlobShowMore: "Show more",
