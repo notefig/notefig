@@ -142,9 +142,14 @@ describe("DoneState", () => {
     );
     const chip = (name: string) =>
       [...container!.querySelectorAll("button")].find(
-        (button) => button.textContent === name,
+        (button) => button.textContent?.startsWith(name),
       )!;
     expect(chip("doc.md").getAttribute("aria-pressed")).toBe("false");
+    // Highlight chips say what they toggle to a screen reader; a plain
+    // chip is just its file name.
+    expect(chip("doc.md").textContent).toBe("doc.mdpromptChangesHighlight");
+    expect(chip("other.md").textContent).toBe("other.mdpromptChangesHighlight");
+    expect(chip("plain.md").textContent).toBe("plain.md");
     for (const name of ["doc.md", "other.md", "plain.md"]) {
       act(() => {
         chip(name).dispatchEvent(new MouseEvent("click", { bubbles: true }));

@@ -1791,6 +1791,7 @@ function TouchedFileChips({
   changes: PromptChangeNavigation | undefined;
   onOpenFile: (path: string) => void;
 }) {
+  const { t } = useTranslation();
   if (paths.length === 0) return null;
   const highlighting = Boolean(changes?.reviewing);
   return (
@@ -1833,6 +1834,9 @@ function TouchedFileChips({
           >
             <ChangeDot on={on} />
             {basename(path)}
+            {/* The dot says what the chip toggles to the eye; this says it
+                to a screen reader. aria-pressed carries on/off. */}
+            <span className="sr-only">{t("promptChangesHighlight")}</span>
           </button>
         );
       })}
