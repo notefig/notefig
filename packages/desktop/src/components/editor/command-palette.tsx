@@ -52,7 +52,6 @@ import { useWorkspaceTabsOptional } from "@/components/workspace-tabs-provider";
 
 interface CommandPaletteProps {
   open: boolean;
-  sidebarOpen: boolean;
   workspacePath: string;
   onOpenChange: (open: boolean) => void;
   onNewScratchpad?: () => void;
@@ -153,7 +152,6 @@ function FileQuickResults({
 
 export function CommandPalette({
   open,
-  sidebarOpen,
   workspacePath,
   onOpenChange,
   onNewScratchpad,
@@ -228,12 +226,7 @@ export function CommandPalette({
       groupKey: "file",
       keywordKey: "commandKeywords.newFile",
       icon: FilePlus,
-      action: () => {
-        if (sidebarOpen) {
-          onToggleSidebar?.();
-        }
-        onNewFile?.();
-      },
+      action: () => onNewFile?.(),
     },
     {
       id: "close-file",
@@ -250,12 +243,7 @@ export function CommandPalette({
       groupKey: "file",
       keywordKey: "commandKeywords.newFolder",
       icon: FolderPlus,
-      action: () => {
-        if (sidebarOpen) {
-          onToggleSidebar?.();
-        }
-        onNewDirectory?.();
-      },
+      action: () => onNewDirectory?.(),
     },
     {
       id: "open-folder",

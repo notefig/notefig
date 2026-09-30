@@ -13,8 +13,9 @@ export interface WorkspaceCommandsOptions {
   activeTabId: string | null;
   getFocusedTabId: () => string | null;
   getSelectedText: () => string | undefined;
-  /** Expand the sidebar if collapsed (file creation lands in the tree). */
-  openSidebarIfCollapsed: () => void;
+  /** Show the file tree, expanding the sidebar if collapsed (file creation
+   *  lands in the tree's inline name input). */
+  showFileTree: () => void;
   setFileTreeMode: (mode: FileTreeMode) => void;
   openFile: (options: OpenFileInLayoutOptions) => boolean;
   openSearchPanel: (options?: {
@@ -56,7 +57,7 @@ export function useWorkspaceCommands({
   activeTabId,
   getFocusedTabId,
   getSelectedText,
-  openSidebarIfCollapsed,
+  showFileTree,
   setFileTreeMode,
   openFile,
   openSearchPanel,
@@ -69,22 +70,22 @@ export function useWorkspaceCommands({
   }, [workspacePath, openFile]);
 
   const handleNewFile = useCallback(() => {
-    openSidebarIfCollapsed();
+    showFileTree();
     setFileTreeMode({
       type: "creating",
       parentPath: workspacePath,
       itemType: "file",
     });
-  }, [workspacePath, openSidebarIfCollapsed, setFileTreeMode]);
+  }, [workspacePath, showFileTree, setFileTreeMode]);
 
   const handleNewDirectory = useCallback(() => {
-    openSidebarIfCollapsed();
+    showFileTree();
     setFileTreeMode({
       type: "creating",
       parentPath: workspacePath,
       itemType: "directory",
     });
-  }, [workspacePath, openSidebarIfCollapsed, setFileTreeMode]);
+  }, [workspacePath, showFileTree, setFileTreeMode]);
 
   const runHistoryAction = useCallback(
     (action: "undo" | "redo") => {

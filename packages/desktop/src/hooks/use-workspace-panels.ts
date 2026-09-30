@@ -59,8 +59,9 @@ export interface WorkspacePanels {
   sidebarView: SidebarView;
   isSidebarCollapsed: boolean;
   toggleSidebarCollapsed: () => void;
-  /** Expand the sidebar if collapsed (file creation lands in the tree). */
-  openSidebarIfCollapsed: () => void;
+  /** Show the file tree, expanding the sidebar if it was collapsed (file
+   *  creation lands in the tree). */
+  showFileTree: () => void;
   openSettings: () => void;
   /** Show `view`, expanding the sidebar if it was collapsed. */
   showSidebarView: (view: SidebarView) => void;
@@ -159,19 +160,6 @@ export function useWorkspacePanels({
     retryOnAnimationFrame(focusActiveTab);
   }, [isSidebarCollapsed, setUrlSearchParams, focusActiveTab]);
 
-  const openSidebarIfCollapsed = useCallback(() => {
-    if (!isSidebarCollapsed) return;
-
-    setUrlSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete("sidebar");
-        return next;
-      },
-      { replace: true },
-    );
-  }, [isSidebarCollapsed, setUrlSearchParams]);
-
   const openSettings = useOpenSettings();
 
   const openSearchPanel = useCallback(
@@ -196,11 +184,16 @@ export function useWorkspacePanels({
     [showSidebarView],
   );
 
+  const showFileTree = useCallback(
+    () => showSidebarView("files"),
+    [showSidebarView],
+  );
+
   return {
     sidebarView,
     isSidebarCollapsed,
     toggleSidebarCollapsed,
-    openSidebarIfCollapsed,
+    showFileTree,
     openSettings,
     showSidebarView,
     showEverything,

@@ -205,6 +205,42 @@ function useDraftIO(editor: Editor, blobId: string, workspacePath: string) {
 
 export type DraftIO = ReturnType<typeof useDraftIO>;
 
+/** The phases whose draft row is on screen: the composer, and the reply
+ *  under a finished round. Every other phase hides it (display: none). */
+function draftRowShown(phase: BlobPhase): boolean {
+  return phase === "composing" || phase === "done" || phase === "error";
+}
+
+/**
+ * Repaint the caret when the draft row comes back on screen. Send leaves the
+ * caret in the draft, and the row is then hidden while the round runs; when
+ * it reappears the editor state's selection hasn't changed, so ProseMirror
+ * writes nothing to the DOM — and WebKit doesn't paint a caret for a
+ * selection that was set while its node had no box. Typing still lands (the
+ * selection is right), the caret just stays invisible until the first key.
+ * Re-collapsing the DOM selection where ProseMirror has it forces the paint;
+ * the selectionchange it causes reads back as the same selection.
+ */
+function useRepaintCaretOnReveal(
+  editor: Editor,
+  draftIO: DraftIO,
+  shown: boolean,
+): void {
+  const wasShown = useRef(shown);
+  useLayoutEffect(() => {
+    const revealed = shown && !wasShown.current;
+    wasShown.current = shown;
+    if (!revealed) return;
+    const { view } = editor;
+    if (!view.hasFocus() || !draftIO.holdsCaret()) return;
+    const domSelection = view.dom.ownerDocument.getSelection();
+    if (!domSelection) return;
+    const { node, offset } = view.domAtPos(view.state.selection.head);
+    domSelection.removeAllRanges();
+    domSelection.collapse(node, offset);
+  }, [editor, draftIO, shown]);
+}
+
 /**
  * Where this widget's next prompt goes.
  *
@@ -934,6 +970,7 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
   });
 
   useInFlightEscape({ blobId, phase, boundTurnId, cancelAndRestore });
+  useRepaintCaretOnReveal(editor, draftIO, draftRowShown(phase));
   useStaleTurnReset({ blobId, boundTurnId, isSending, hasTurn: Boolean(turn) });
   const escapeToEditor = usePromptBlobFocus({
     blobId,
@@ -1407,9 +1444,8 @@ function DraftRow({
 }) {
   const { t } = useTranslation();
   const composing = phase === "composing";
-  const replying = phase === "done" || phase === "error";
   return (
-    <div className="flex flex-col" hidden={!composing && !replying}>
+    <div className="flex flex-col" hidden={!draftRowShown(phase)}>
       <div
         className={cn(
           "flex items-start",
@@ -1481,7 +1517,7 @@ function SessionControl({
 }) {
   const { t } = useTranslation();
   const host = usePromptWidgetHost();
-  // Default first, never empty — the top two become the explicit
+  // Default first, never empty — the top three become the explicit
   // new-conversation entries below.
   const harnesses = host.useHarnessList();
   // Already filtered to live sessions and ordered newest-first by the host.
@@ -1540,7 +1576,7 @@ function SessionControl({
             <DropdownMenuSeparator />
           </>
         )}
-        {harnesses.slice(0, 2).map((harness) => (
+        {harnesses.slice(0, 3).map((harness) => (
           <DropdownMenuItem
             key={harness.id}
             className="cursor-pointer gap-2 text-xs"

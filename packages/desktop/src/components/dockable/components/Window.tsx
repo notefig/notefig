@@ -141,7 +141,10 @@ function TabView({
           )}
         >
           {leading}
-          <ScrollArea className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
+          {/* No visible scrollbar: the strip's height is fixed to the header
+              row, so an always-on bar (classic macOS, WebView2) would squeeze
+              the tabs. Overflow still scrolls by wheel/trackpad. */}
+          <ScrollArea className="scrollbar-hide flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
             <div className="flex h-full items-stretch">
               <SortableContext
                 items={tabs.map((tab) => tab.id)}
