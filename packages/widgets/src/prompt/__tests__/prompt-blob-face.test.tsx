@@ -44,6 +44,7 @@ const actions = {
   backspaceDismiss: noop,
   escapeToEditor: noop,
   rebindSession: noop,
+  startNewSession: noop,
   openBoundChat: noop,
   openFile: noop,
   openAgentTab: noop,
@@ -230,5 +231,43 @@ describe("PromptBlobFace", () => {
 
   it("shows the failure reason on error", () => {
     expect(render("error", { turn: { error: "boom" } })).toContain("boom");
+  });
+});
+
+describe("the session picker's new-conversation rows (MET-198)", () => {
+  it("hands the pick to the widget's own startNewSession action", async () => {
+    const startNewSession = vi.fn();
+    const originalAction = actions.startNewSession;
+    actions.startNewSession = startNewSession;
+    try {
+      render("composing");
+      const trigger = container!.querySelector<HTMLButtonElement>(
+        'button[aria-label="agentChooseHarness"]',
+      );
+      expect(trigger).not.toBeNull();
+      // Keyboard open: Radix toggles on Enter without the pointer dance.
+      await act(async () => {
+        trigger!.focus();
+        trigger!.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      const rows = Array.from(
+        document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+      ).filter((row) => row.textContent?.includes("promptBlobNewSessionWith"));
+      // The fake host lists two harnesses — both are offered.
+      expect(rows).toHaveLength(2);
+      await act(async () => {
+        rows[1].click();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      // The pick goes through the widget (which unbinds itself), never
+      // straight to the host's dropSession — a bound widget would
+      // otherwise keep prompting its old session.
+      expect(startNewSession).toHaveBeenCalledWith("opencode");
+    } finally {
+      actions.startNewSession = originalAction;
+    }
   });
 });

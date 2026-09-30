@@ -82,6 +82,29 @@ const NativeFormatIntercept = Extension.create({
   },
 });
 
+/**
+ * Tab must never leave the document. Outside the two contexts that bind it
+ * (list items indent/outdent, code blocks insert a tab) the key fell
+ * through to the browser's focus navigation and landed on the first
+ * focusable control — a prompt widget's session picker or the first
+ * toolbar button. Low priority puts this keymap after every other
+ * extension's (ListItem, CodeBlock) and after the widget's mention
+ * Suggestion plugin, which owns Tab while its popup has rows: the guard
+ * only catches the fall-through. Deliberately a no-op rather than an
+ * insertion — a literal tab in markdown prose starts a code block.
+ */
+const TabGuard = Extension.create({
+  name: "tabGuard",
+  priority: 10,
+
+  addKeyboardShortcuts() {
+    return {
+      Tab: () => true,
+      "Shift-Tab": () => true,
+    };
+  },
+});
+
 export const editorExtensions = [
   ...createSchemaExtensions(
     MarkdownImage,
@@ -104,4 +127,5 @@ export const editorExtensions = [
   }),
   CharacterCount,
   NativeFormatIntercept,
+  TabGuard,
 ];

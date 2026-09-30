@@ -144,7 +144,9 @@ interface PromptBlobPlacement {
   /** Record which agent session this widget's round belongs to on the
    *  document node, so it survives a re-parse and app restarts (MET-163).
    *  Provided by the node view, which owns the node's attributes. */
-  onSessionBound?: (taskId: string) => void;
+  /** Record the session on the node (null: unbind — the widget will start
+   *  afresh, and its marker leaves the file on the next save). */
+  onSessionBound?: (taskId: string | null) => void;
   /** The draft's current text, read off the node by the view. */
   draft?: string;
   /** The widget's content hole — the draft the user types, as document
@@ -548,6 +550,9 @@ interface PromptBlobFaceActions {
   escapeToEditor: () => void;
   /** Point this widget at a different session (the composer's picker). */
   rebindSession: (taskId: string) => void;
+  /** Start the next prompt on a fresh session of `harnessId` (the picker's
+   *  new-conversation rows). */
+  startNewSession: (harnessId: string) => void;
   openBoundChat?: () => void;
   /** Open a touched document in a tab. */
   openFile: (path: string) => void;
@@ -795,6 +800,7 @@ export function PromptBlobFace({
             workspacePath={workspacePath}
             boundTaskId={boundTaskId}
             onSelectSession={actions.rebindSession}
+            onNewSession={actions.startNewSession}
           />
         </div>
       </AnimatedHeight>
@@ -1017,7 +1023,9 @@ function usePromptSendActions({
   documentPath: string;
   editor: Editor;
   getPos?: () => number | undefined;
-  onSessionBound?: (taskId: string) => void;
+  /** Record the session on the node (null: unbind — the widget will start
+   *  afresh, and its marker leaves the file on the next save). */
+  onSessionBound?: (taskId: string | null) => void;
   draftIO: DraftIO;
 }) {
   const { t } = useTranslation();
@@ -1284,6 +1292,22 @@ function usePromptBlobActions({
     [host, blobId, workspacePath, onSessionBound],
   );
 
+  // The picker's "new session" rows. Dropping the workspace's shared
+  // session is not enough for a widget that is already bound (a restored
+  // one, or one mid-conversation): resolvePromptTarget prefers the bound
+  // task, so the next prompt would still go to the old session and the
+  // trigger's logo would keep naming it — the pick looked like it did
+  // nothing. Unbinding here is what makes the fresh session the target;
+  // the round it was watching goes with it, same as a rebind.
+  const startNewSession = useCallback(
+    (harnessId: string) => {
+      host.dropSession(workspacePath, harnessId);
+      updatePromptBlob(blobId, { boundTaskId: null, boundTurnId: null });
+      onSessionBound?.(null);
+    },
+    [host, blobId, workspacePath, onSessionBound],
+  );
+
   return {
     isSending,
     confirmTrust,
@@ -1297,6 +1321,7 @@ function usePromptBlobActions({
     revertToSlash,
     backspaceDismiss,
     rebindSession,
+    startNewSession,
   };
 }
 
@@ -1369,6 +1394,7 @@ function DraftRow({
   workspacePath,
   boundTaskId,
   onSelectSession,
+  onNewSession,
 }: {
   phase: BlobPhase;
   draftSlot: React.ReactNode;
@@ -1378,6 +1404,7 @@ function DraftRow({
   workspacePath: string;
   boundTaskId?: string | null;
   onSelectSession?: (taskId: string) => void;
+  onNewSession: (harnessId: string) => void;
 }) {
   const { t } = useTranslation();
   const composing = phase === "composing";
@@ -1398,6 +1425,7 @@ function DraftRow({
               workspacePath={workspacePath}
               boundTaskId={boundTaskId}
               onSelectSession={onSelectSession}
+              onNewSession={onNewSession}
             />
           </div>
         ) : null}
@@ -1439,10 +1467,15 @@ function DraftRow({
  * harnesses — each its own entry with its logo; picking one also becomes the
  * remembered default (the sessions panel's split-button rule).
  */
+/** How many harnesses the picker offers a new conversation on — the menu
+ *  stays short; the rest are reachable from the sessions panel. */
+const NEW_SESSION_HARNESS_COUNT = 3;
+
 function SessionControl({
   workspacePath,
   boundTaskId,
   onSelectSession,
+  onNewSession,
 }: {
   workspacePath: string;
   /** The session this widget is already bound to (a restored widget, MET-163)
@@ -1452,11 +1485,14 @@ function SessionControl({
   /** Re-target a bound widget. Absent for an unbound one, whose selection
    *  just moves the shared session as it always did. */
   onSelectSession?: (taskId: string) => void;
+  /** A fresh conversation on this harness — the widget's own action, since
+   *  a bound widget has to let go of its session for the pick to matter. */
+  onNewSession: (harnessId: string) => void;
 }) {
   const { t } = useTranslation();
   const host = usePromptWidgetHost();
-  // Default first, never empty — the top two become the explicit
-  // new-conversation entries below.
+  // Default first, never empty — the top NEW_SESSION_HARNESS_COUNT become
+  // the explicit new-conversation entries below.
   const harnesses = host.useHarnessList();
   // Already filtered to live sessions and ordered newest-first by the host.
   const sessions = host.useSessionList(workspacePath);
@@ -1514,11 +1550,11 @@ function SessionControl({
             <DropdownMenuSeparator />
           </>
         )}
-        {harnesses.slice(0, 2).map((harness) => (
+        {harnesses.slice(0, NEW_SESSION_HARNESS_COUNT).map((harness) => (
           <DropdownMenuItem
             key={harness.id}
             className="cursor-pointer gap-2 text-xs"
-            onSelect={() => host.dropSession(workspacePath, harness.id)}
+            onSelect={() => onNewSession(harness.id)}
           >
             <HarnessLogo
               harnessId={harness.id}
