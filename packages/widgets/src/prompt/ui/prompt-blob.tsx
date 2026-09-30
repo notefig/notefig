@@ -1,4 +1,5 @@
 import {
+  type CSSProperties,
   memo,
   useCallback,
   useEffect,
@@ -1790,44 +1791,72 @@ function TouchedFileChips({
   changes: PromptChangeNavigation | undefined;
   onOpenFile: (path: string) => void;
 }) {
-  const { t } = useTranslation();
   if (paths.length === 0) return null;
   const highlighting = Boolean(changes?.reviewing);
   return (
     <div className="flex flex-wrap items-center gap-1">
       {paths.map((path) => {
         const action = chipAction(path, documentPath, changeCounts, changes);
-        const pressed = action !== "open" && highlighting;
+        if (action === "open" || !changes) {
+          return (
+            <button
+              key={path}
+              type="button"
+              className={cn(fileChipClass, fileChipIdleClass)}
+              onClick={() => onOpenFile(path)}
+            >
+              <FileText className="size-3" />
+              {basename(path)}
+            </button>
+          );
+        }
+        const on = highlighting;
         return (
           <button
             key={path}
             type="button"
-            title={action === "open" ? undefined : t("promptChangesHighlight")}
-            aria-pressed={action === "toggle" ? highlighting : undefined}
+            aria-pressed={action === "toggle" ? on : undefined}
             className={cn(
-              "flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.6875rem] transition-colors hover:bg-accent hover:text-foreground",
-              pressed
-                ? "bg-accent text-foreground"
-                : "bg-muted text-muted-foreground",
+              fileChipClass,
+              on
+                ? "bg-(--prompt-change)/15 text-foreground hover:bg-(--prompt-change)/25"
+                : fileChipIdleClass,
             )}
-            // On, the chip is ringed in the colour its gutter bars take.
-            style={
-              pressed
-                ? { boxShadow: `inset 0 0 0 1px ${changes?.color}` }
-                : undefined
-            }
+            // The dot and the tint take the colour of this widget's gutter
+            // bars — the chip and the marks it shows read as one thing.
+            style={{ "--prompt-change": changes.color } as CSSProperties}
             onClick={() => {
-              if (action === "toggle") return changes?.toggleReview();
-              if (action === "open-highlighted") changes?.showChanges();
+              if (action === "toggle") return changes.toggleReview();
+              changes.showChanges();
               onOpenFile(path);
             }}
           >
-            <FileText className="size-3" />
+            <ChangeDot on={on} />
             {basename(path)}
           </button>
         );
       })}
     </div>
+  );
+}
+
+const fileChipClass =
+  "flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.6875rem] transition-colors";
+const fileChipIdleClass =
+  "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground";
+
+/** The chip's key to the gutter: a dot in the bars' colour, hollow while
+ *  they are hidden, filled while they show. Sits in the icon's 12px box. */
+function ChangeDot({ on }: { on: boolean }) {
+  return (
+    <span aria-hidden className="flex size-3 items-center justify-center">
+      <span
+        className={cn(
+          "size-2 rounded-full ring-[1.5px] ring-(--prompt-change) ring-inset transition-colors",
+          on ? "bg-(--prompt-change)" : "bg-transparent",
+        )}
+      />
+    </span>
   );
 }
 

@@ -24,7 +24,6 @@ export const PROMPT_WIDGET_I18N_KEYS = [
   "copy",
   "copyMessage",
   "mentionFilesLabel",
-  "promptChangesHighlight",
   "promptBlobDismiss",
   "promptBlobDone",
   "promptBlobEdit",
