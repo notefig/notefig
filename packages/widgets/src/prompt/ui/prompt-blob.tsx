@@ -1,4 +1,5 @@
 import {
+  type CSSProperties,
   memo,
   useCallback,
   useEffect,
@@ -46,6 +47,11 @@ import { draftToNode, readDraftNode } from "../composer/draft-text";
 import { mentionPopupHasResults } from "../composer/mention-bridge";
 import { registerComposerKeyHandler } from "../composer/key-bridge";
 import { CopyTextButton } from "./copy-text-button";
+import { usePromptChangeCounts } from "../change-store";
+import {
+  usePromptChangeNavigation,
+  type PromptChangeNavigation,
+} from "../change-navigator";
 import { usePromptWidgetHost } from "../host-context";
 import type { PromptWidgetHost } from "../host";
 import {
@@ -268,18 +274,22 @@ function usePromptBlobRound({
  * work and vice versa.
  */
 function usePromptBlobDisplay({
+  blobId,
+  editor,
   phase,
   sortedEntries,
   taskTurns,
   boundTurnId,
   workspacePath,
 }: {
+  blobId: string;
+  editor: Editor;
   phase: BlobPhase;
   sortedEntries: AgentEntry[];
   taskTurns: AgentTurn[];
   boundTurnId: string | null;
   workspacePath: string;
-}) {
+}): PromptBlobDisplay {
   const touchedFiles = useMemo(
     () =>
       phase === "done" ? deriveTouchedFiles(sortedEntries, workspacePath) : [],
@@ -303,12 +313,16 @@ function usePromptBlobDisplay({
       ? deriveQueuePosition(taskTurns, boundTurnId)
       : 0;
 
+  const changeCounts = usePromptChangeCounts(blobId);
+
   return {
     touchedFiles,
     widgetResponse,
     activeToolLine,
     assistantTeaser,
     queueAhead,
+    changeCounts,
+    changes: usePromptChangeNavigation(blobId, editor),
   };
 }
 
@@ -531,6 +545,10 @@ interface PromptBlobDisplay {
   activeToolLine: string | null;
   assistantTeaser: string | null;
   queueAhead: number;
+  /** Changes this widget's round left marked, per document. */
+  changeCounts: ReadonlyMap<string, number>;
+  /** Review of the round's changes in this document. */
+  changes: PromptChangeNavigation;
 }
 
 /** Everything the face can do. Grouped so the container hands over one
@@ -782,6 +800,7 @@ export function PromptBlobFace({
               turn={turn}
               display={display}
               boundTaskId={boundTaskId}
+              documentPath={documentPath}
               actions={actions}
             />
           </div>
@@ -809,12 +828,14 @@ function SettledState({
   turn,
   display,
   boundTaskId,
+  documentPath,
   actions,
 }: {
   phase: BlobPhase;
   turn: AgentTurn | undefined;
   display: PromptBlobDisplay;
   boundTaskId: string | null;
+  documentPath: string;
   actions: PromptBlobFaceActions;
 }) {
   if (phase === "done") {
@@ -824,6 +845,9 @@ function SettledState({
         response={display.widgetResponse}
         fallbackText={display.assistantTeaser}
         touchedFiles={display.touchedFiles}
+        documentPath={documentPath}
+        changeCounts={display.changeCounts}
+        changes={display.changes}
         onOpenFile={(path) => actions.openFile(path)}
         onOpenChat={() => boundTaskId && actions.openAgentTab(boundTaskId)}
         onDismiss={actions.dismiss}
@@ -920,6 +944,8 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
   });
 
   const display = usePromptBlobDisplay({
+    blobId,
+    editor,
     phase,
     sortedEntries,
     taskTurns,
@@ -1732,31 +1758,109 @@ export function ReferenceChip({
   );
 }
 
+/** What a file chip does. The widget's own document is already open, so
+ *  its chip toggles the highlighting there; another document the round
+ *  marked opens with the highlighting on — that is why you go there; any
+ *  other chip just opens its file. */
+type ChipAction = "toggle" | "open-highlighted" | "open";
+
+function chipAction(
+  path: string,
+  documentPath: string,
+  changeCounts: ReadonlyMap<string, number>,
+  changes: PromptChangeNavigation | undefined,
+): ChipAction {
+  if (!changes || !changeCounts.has(path)) return "open";
+  return path === documentPath ? "toggle" : "open-highlighted";
+}
+
 /** The documents a finished turn wrote to, each a shortcut back into the
- *  file. Its own component so the done face stays readable — that face is
- *  already the branchiest part of the widget. */
+ *  file — and the switch for highlighting what the round changed (see
+ *  `chipAction`). Its own component so the done face stays readable — that
+ *  face is already the branchiest part of the widget. */
 function TouchedFileChips({
   paths,
+  documentPath,
+  changeCounts,
+  changes,
   onOpenFile,
 }: {
   paths: string[];
+  documentPath: string;
+  changeCounts: ReadonlyMap<string, number>;
+  changes: PromptChangeNavigation | undefined;
   onOpenFile: (path: string) => void;
 }) {
+  const { t } = useTranslation();
   if (paths.length === 0) return null;
+  const highlighting = Boolean(changes?.reviewing);
   return (
     <div className="flex flex-wrap items-center gap-1">
-      {paths.map((path) => (
-        <button
-          key={path}
-          type="button"
-          className="flex cursor-pointer items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[0.6875rem] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          onClick={() => onOpenFile(path)}
-        >
-          <FileText className="size-3" />
-          {basename(path)}
-        </button>
-      ))}
+      {paths.map((path) => {
+        const action = chipAction(path, documentPath, changeCounts, changes);
+        if (action === "open" || !changes) {
+          return (
+            <button
+              key={path}
+              type="button"
+              className={cn(fileChipClass, fileChipIdleClass)}
+              onClick={() => onOpenFile(path)}
+            >
+              <FileText className="size-3" />
+              {basename(path)}
+            </button>
+          );
+        }
+        const on = highlighting;
+        return (
+          <button
+            key={path}
+            type="button"
+            aria-pressed={action === "toggle" ? on : undefined}
+            className={cn(
+              fileChipClass,
+              on
+                ? "bg-(--prompt-change)/15 text-foreground hover:bg-(--prompt-change)/25"
+                : fileChipIdleClass,
+            )}
+            // The dot and the tint take the colour of this widget's gutter
+            // bars — the chip and the marks it shows read as one thing.
+            style={{ "--prompt-change": changes.color } as CSSProperties}
+            onClick={() => {
+              if (action === "toggle") return changes.toggleReview();
+              changes.showChanges();
+              onOpenFile(path);
+            }}
+          >
+            <ChangeDot on={on} />
+            {basename(path)}
+            {/* The dot says what the chip toggles to the eye; this says it
+                to a screen reader. aria-pressed carries on/off. */}
+            <span className="sr-only">{t("promptChangesHighlight")}</span>
+          </button>
+        );
+      })}
     </div>
+  );
+}
+
+const fileChipClass =
+  "flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.6875rem] transition-colors";
+const fileChipIdleClass =
+  "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground";
+
+/** The chip's key to the gutter: a dot in the bars' colour, hollow while
+ *  they are hidden, filled while they show. Sits in the icon's 12px box. */
+function ChangeDot({ on }: { on: boolean }) {
+  return (
+    <span aria-hidden className="flex size-3 items-center justify-center">
+      <span
+        className={cn(
+          "size-2 rounded-full ring-[1.5px] ring-(--prompt-change) ring-inset transition-colors",
+          on ? "bg-(--prompt-change)" : "bg-transparent",
+        )}
+      />
+    </span>
   );
 }
 
@@ -1775,6 +1879,9 @@ export function DoneState({
   response,
   fallbackText,
   touchedFiles,
+  documentPath = "",
+  changeCounts = new Map(),
+  changes,
   onOpenFile,
   onOpenChat,
   onDismiss,
@@ -1785,6 +1892,10 @@ export function DoneState({
    *  agent didn't deliver a widget_respond response. */
   fallbackText: string | null;
   touchedFiles: string[];
+  /** The document this widget sits in — its chip is the highlight toggle. */
+  documentPath?: string;
+  changeCounts?: ReadonlyMap<string, number>;
+  changes?: PromptChangeNavigation;
   onOpenFile: (path: string) => void;
   onOpenChat: () => void;
   onDismiss: () => void;
@@ -1863,7 +1974,13 @@ export function DoneState({
           )}
         />
       )}
-      <TouchedFileChips paths={touchedFiles} onOpenFile={onOpenFile} />
+      <TouchedFileChips
+        paths={touchedFiles}
+        documentPath={documentPath}
+        changeCounts={changeCounts}
+        changes={changes}
+        onOpenFile={onOpenFile}
+      />
     </div>
   );
 }

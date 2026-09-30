@@ -110,7 +110,10 @@ export async function writeWorkspaceTextFile(
       const sync = getDocumentSync(target);
       const doc = await sync.prepareAdoption(content);
       if (doc && !editor.isDestroyed) {
-        const adoption = adoptExternalContent(editor, doc);
+        const contentHash = calculateContentHash(content);
+        const adoption = adoptExternalContent(editor, doc, {
+          source: { path: target, contentHash },
+        });
         if (adoption.reinsertedWidgets > 0) {
           // Re-asserted widget markers exist only in the editor at this
           // point. Repair the file INSIDE this tracked write — a
@@ -132,7 +135,7 @@ export async function writeWorkspaceTextFile(
           updateLoadedContentRow(target, repaired);
           sync.commitAdoption(repaired, calculateContentHash(repaired));
         } else {
-          sync.commitAdoption(content, calculateContentHash(content));
+          sync.commitAdoption(content, contentHash);
         }
       }
     }

@@ -5,7 +5,7 @@
  * boot. Not a substitute for the collections, which remain the bus for
  * state: an event here is a moment, not a fact to query later.
  */
-import type { AgentTurnStatus } from "@notefig/shared/agent";
+import type { AgentTurnStatus, ToolCallUpdate } from "@notefig/shared/agent";
 
 export interface AppEvents {
   /** A prompt widget sent a prompt: a round began in a document. */
@@ -17,6 +17,16 @@ export interface AppEvents {
     documentPath: string;
     /** The prompt as sent. */
     prompt: string;
+  };
+  /** A live turn's tool call was reported or moved on (pending →
+   *  in_progress → completed/failed); `toolCall` is the merged state so
+   *  far. Never raised for a session/load replay. */
+  "agent:tool-call": {
+    taskId: string;
+    turnId: string;
+    /** The task's workspace — what relative tool paths are relative to. */
+    workspacePath: string;
+    toolCall: ToolCallUpdate;
   };
   /** A turn reached a terminal status. */
   "agent:turn-settled": {

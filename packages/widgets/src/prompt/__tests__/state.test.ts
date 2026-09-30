@@ -230,8 +230,16 @@ describe("deriveTouchedFiles", () => {
         status: "completed",
         content: [{ type: "diff", path: "notes/c.md", newText: "x" }],
       }),
+      toolEntry("evt_3", {
+        kind: "edit",
+        status: "completed",
+        content: [{ type: "diff", path: "./notes/../d.md", newText: "x" }],
+      }),
     ];
-    expect(deriveTouchedFiles(entries, "/ws")).toEqual(["/ws/notes/c.md"]);
+    expect(deriveTouchedFiles(entries, "/ws")).toEqual([
+      "/ws/notes/c.md",
+      "/ws/d.md",
+    ]);
   });
 });
 

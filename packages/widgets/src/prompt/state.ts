@@ -239,9 +239,22 @@ export function deriveDoneLine(params: {
 /** Kinds that mean "this call changed a document". */
 const MUTATING_KINDS = new Set(["edit", "delete", "move"]);
 
-function isMutatingCall(call: ToolCallUpdate): boolean {
+export function isMutatingToolCall(call: ToolCallUpdate): boolean {
   if (call.kind && MUTATING_KINDS.has(call.kind)) return true;
   return (call.content ?? []).some((item) => item.type === "diff");
+}
+
+/** Collapse `.` and `..` segments, so a diff item's `./notes.md` names the
+ *  same document as the absolute path everything else uses (the widget's
+ *  own document path, the app's change attribution). */
+function normalizeSlashPath(path: string): string {
+  const out: string[] = [];
+  for (const segment of path.split("/")) {
+    if (segment === ".") continue;
+    if (segment === ".." && out.length > 1) out.pop();
+    else if (segment !== "..") out.push(segment);
+  }
+  return out.join("/");
 }
 
 /**
@@ -257,16 +270,18 @@ export function deriveTouchedFiles(
   const paths = new Set<string>();
   for (const entry of entries) {
     if (entry.type !== "tool_call" || !entry.toolCall) continue;
-    if (!isMutatingCall(entry.toolCall)) continue;
+    if (!isMutatingToolCall(entry.toolCall)) continue;
     const locations = entry.toolCall.locations ?? [];
     for (const location of locations) paths.add(location.path);
     if (locations.length === 0) {
       for (const item of entry.toolCall.content ?? []) {
         if (item.type !== "diff") continue;
         paths.add(
-          item.path.startsWith("/")
-            ? item.path
-            : `${workspacePath.replace(/\/$/, "")}/${item.path}`,
+          normalizeSlashPath(
+            item.path.startsWith("/")
+              ? item.path
+              : `${workspacePath.replace(/\/$/, "")}/${item.path}`,
+          ),
         );
       }
     }

@@ -104,4 +104,62 @@ describe("DoneState", () => {
     render({ fallbackText: "last assistant words" });
     expect(renderedBody()?.textContent).toBe("last assistant words");
   });
+
+  it("file chips: the widget's own document toggles highlighting, another marked one opens highlighted", () => {
+    const calls: string[] = [];
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() =>
+      root!.render(
+        withHost(
+          fakePromptWidgetHost(),
+          createElement(DoneState, {
+            cancelled: false,
+            response: null,
+            fallbackText: null,
+            touchedFiles: ["/ws/doc.md", "/ws/other.md", "/ws/plain.md"],
+            documentPath: "/ws/doc.md",
+            changeCounts: new Map([
+              ["/ws/doc.md", 2],
+              ["/ws/other.md", 1],
+            ]),
+            changes: {
+              count: 2,
+              reviewing: false,
+              color: "red",
+              toggleReview: () => calls.push("toggle"),
+              showChanges: () => calls.push("show"),
+              index: null,
+              step: noop,
+            },
+            onOpenFile: (path: string) => calls.push(`open ${path}`),
+            onOpenChat: noop,
+            onDismiss: noop,
+          }),
+        ),
+      ),
+    );
+    const chip = (name: string) =>
+      [...container!.querySelectorAll("button")].find(
+        (button) => button.textContent?.startsWith(name),
+      )!;
+    expect(chip("doc.md").getAttribute("aria-pressed")).toBe("false");
+    // Highlight chips say what they toggle to a screen reader; a plain
+    // chip is just its file name.
+    expect(chip("doc.md").textContent).toBe("doc.mdpromptChangesHighlight");
+    expect(chip("other.md").textContent).toBe("other.mdpromptChangesHighlight");
+    expect(chip("plain.md").textContent).toBe("plain.md");
+    for (const name of ["doc.md", "other.md", "plain.md"]) {
+      act(() => {
+        chip(name).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+    }
+    expect(calls).toEqual([
+      "toggle",
+      "show",
+      "open /ws/other.md",
+      "open /ws/plain.md",
+    ]);
+  });
 });

@@ -54,6 +54,8 @@ import {
 import type { PromptReference } from "./doc-helpers";
 import { PromptBlob } from "./ui/prompt-blob";
 import { adoptPersistedPromptBinding, bindPromptBlobDocument } from "./store";
+import { promptChangeTrackingPlugin } from "./change-tracking";
+import { promptChangeGutterPlugin } from "./change-gutter";
 import {
   getMentionService,
   mentionPopupHasResults,
@@ -537,6 +539,14 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
   addProseMirrorPlugins() {
     const { options } = this;
     return [
+      // What each widget's latest round changed in this document — the
+      // tracking and its look are separate plugins on purpose.
+      ...(options.filePath
+        ? [
+            promptChangeTrackingPlugin(options.filePath),
+            promptChangeGutterPlugin(),
+          ]
+        : []),
       new Plugin({
         props: {
           // The "/" summon. Returning true consumes the keystroke.

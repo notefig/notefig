@@ -15,6 +15,8 @@
  * the agent collections: nothing persists across app runs, ids never recur,
  * and a stale bound turn (rows gone) simply renders as composing again.
  */
+import { discardPromptChanges } from "./change-store";
+
 export type PromptBlobRecord = {
   /** The turn this widget is watching, or null while composing. */
   boundTurnId: string | null;
@@ -56,7 +58,17 @@ export function updatePromptBlob(
   blobId: string,
   patch: Partial<PromptBlobRecord>,
 ): void {
-  records.set(blobId, { ...getPromptBlob(blobId), ...patch });
+  const previous = getPromptBlob(blobId);
+  records.set(blobId, { ...previous, ...patch });
+  // Review state belongs to the watched round: a new send, a dismiss or an
+  // edit rebinds the widget, and what the old round changed stops being
+  // this widget's to show.
+  if (
+    patch.boundTurnId !== undefined &&
+    patch.boundTurnId !== previous.boundTurnId
+  ) {
+    discardPromptChanges(blobId);
+  }
   emit(blobId);
 }
 
