@@ -12,7 +12,7 @@
  * A target is where a turn's result shows up: the chat tab for a session's
  * own turns, the document for a prompt widget's rounds.
  */
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect } from "react";
 import { createCollection, useLiveQuery } from "@tanstack/react-db";
 import { persistedCollectionOptions } from "@tanstack/db-sqlite-persistence-core";
 import { platformAdapter } from "@/adapters";
@@ -78,56 +78,68 @@ export async function markSeen(
   await write.isPersisted.promise;
 }
 
-let activeKey: string | null = null;
+// In front means under the user's eyes: the active tab of a focused window.
+// Both halves are plain module state, updated synchronously by the events
+// that change them — a blur flips `windowFocused` before any turn that
+// settles after it can be read against it (no React render in between).
+let activeTarget: SeenTarget | null = null;
+let windowFocused = true;
 
-/** Tests / the shell: the tab in front. Its target is seen now. */
+const inFrontKey = () =>
+  windowFocused && activeTarget ? seenKey(activeTarget) : null;
+
+/** Tests / the shell: the tab in front. Its target is seen now — if the
+ *  window is focused; otherwise when the user comes back to it. */
 export function setActiveTabForSeen(tabId: string | null): void {
-  const target = targetOfTab(tabId);
-  activeKey = target && seenKey(target);
-  if (target) void markSeen(target);
+  activeTarget = targetOfTab(tabId);
+  if (windowFocused && activeTarget) void markSeen(activeTarget);
 }
 
-function subscribeWindowFocus(onChange: () => void): () => void {
-  window.addEventListener("focus", onChange);
-  window.addEventListener("blur", onChange);
-  return () => {
-    window.removeEventListener("focus", onChange);
-    window.removeEventListener("blur", onChange);
-  };
-}
-
-const windowHasFocus = () => document.hasFocus();
-
-/** Mount once, in the shell: keeps the tracker told which tab is in front.
- *  In front means under the user's eyes — the active tab of a focused
- *  window. A backgrounded app has nothing in front, so a turn settling there
- *  needs attention; coming back marks the active tab seen. */
+/** Mount once, in the shell: keeps the tracker told which tab is in front. */
 export function useTrackActiveTab(activeTabId: string | null): void {
-  const focused = useSyncExternalStore(subscribeWindowFocus, windowHasFocus);
-  const inFront = focused ? activeTabId : null;
   useEffect(() => {
-    setActiveTabForSeen(inFront);
-  }, [inFront]);
+    setActiveTabForSeen(activeTabId);
+  }, [activeTabId]);
 }
 
 /** The listener's body, exported for tests: a turn settling on the target
  *  in front has been seen — it landed under the user's eyes. Seen at the
  *  turn's own settle time, the value its rows store, so the comparison
- *  cannot be split by two clocks. */
+ *  cannot be split by two clocks. A backgrounded window has nothing in
+ *  front, so a turn settling there needs attention. */
 export async function recordSettledTurn(
   detail: AppEvents["agent:turn-settled"],
 ): Promise<void> {
   const target = targetOfSettledTurn(detail);
-  if (seenKey(target) === activeKey) await markSeen(target, detail.at);
+  if (seenKey(target) === inFrontKey()) await markSeen(target, detail.at);
 }
 
-/** Boot: the one global listener. Returns the unsubscribe. */
+function onWindowFocus(): void {
+  windowFocused = true;
+  // Coming back is looking again: the tab in front is seen now.
+  if (activeTarget) void markSeen(activeTarget);
+}
+
+function onWindowBlur(): void {
+  windowFocused = false;
+}
+
+/** Boot: the one global listener, plus the window's focus. Returns the
+ *  unsubscribe. */
 export function startSeenTracking(): () => void {
-  return onAppEvent("agent:turn-settled", (detail) => {
+  window.addEventListener("focus", onWindowFocus);
+  window.addEventListener("blur", onWindowBlur);
+  const stopSettled = onAppEvent("agent:turn-settled", (detail) => {
     void recordSettledTurn(detail).catch((error) => {
       console.error("Failed to mark a settled turn seen:", error);
     });
   });
+  return () => {
+    window.removeEventListener("focus", onWindowFocus);
+    window.removeEventListener("blur", onWindowBlur);
+    windowFocused = true;
+    stopSettled();
+  };
 }
 
 /** `seenKey` → lastSeenAt, live. */

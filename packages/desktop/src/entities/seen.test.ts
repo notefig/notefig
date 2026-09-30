@@ -97,4 +97,30 @@ describe("seen", () => {
     );
     stop();
   });
+
+  it("a turn settling while the window is in the background needs attention", async () => {
+    const stop = startSeenTracking();
+    try {
+      setActiveTabForSeen(agentTabId("task_1"));
+      await vi.waitFor(() =>
+        expect(seenCollection.get("task:task_1")).toBeDefined(),
+      );
+      const activated = seenCollection.get("task:task_1")!.lastSeenAt;
+      // The blur lands synchronously: a turn settling right after it is not
+      // read against the tab that was in front.
+      window.dispatchEvent(new Event("blur"));
+      await recordSettledTurn(settled("task_1", "t1", activated + 5));
+      expect(seenCollection.get("task:task_1")?.lastSeenAt).toBe(activated);
+
+      // Coming back marks it seen.
+      window.dispatchEvent(new Event("focus"));
+      await vi.waitFor(() =>
+        expect(seenCollection.get("task:task_1")!.lastSeenAt).toBeGreaterThan(
+          activated,
+        ),
+      );
+    } finally {
+      stop();
+    }
+  });
 });
