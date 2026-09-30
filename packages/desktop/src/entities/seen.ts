@@ -127,6 +127,8 @@ function onWindowBlur(): void {
 /** Boot: the one global listener, plus the window's focus. Returns the
  *  unsubscribe. */
 export function startSeenTracking(): () => void {
+  // An app launched (or reloaded) behind another window starts unfocused.
+  windowFocused = document.hasFocus();
   window.addEventListener("focus", onWindowFocus);
   window.addEventListener("blur", onWindowBlur);
   const stopSettled = onAppEvent("agent:turn-settled", (detail) => {

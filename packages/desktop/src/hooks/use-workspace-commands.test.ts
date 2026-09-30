@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
 
 vi.mock("@/adapters", () => ({ platformAdapter: {} }));
 vi.mock("@/entities/scratchpads", () => ({ createAndOpenScratchpad: vi.fn() }));
@@ -13,14 +13,20 @@ import {
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
+let root: Root | null = null;
+afterEach(() => {
+  act(() => root?.unmount());
+  root = null;
+});
+
 function renderCommands(options: WorkspaceCommandsOptions): WorkspaceCommands {
   let commands: WorkspaceCommands | null = null;
   function Probe() {
     commands = useWorkspaceCommands(options);
     return null;
   }
-  const root = createRoot(document.createElement("div"));
-  act(() => root.render(createElement(Probe)));
+  root = createRoot(document.createElement("div"));
+  act(() => root!.render(createElement(Probe)));
   return commands!;
 }
 

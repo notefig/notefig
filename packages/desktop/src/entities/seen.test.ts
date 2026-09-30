@@ -123,4 +123,17 @@ describe("seen", () => {
       stop();
     }
   });
+
+  it("an app that starts unfocused has nothing in front until it is focused", async () => {
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    const stop = startSeenTracking();
+    try {
+      setActiveTabForSeen(agentTabId("task_1"));
+      await recordSettledTurn(settled("task_1", "t1", 50));
+      expect(seenCollection.get("task:task_1")).toBeUndefined();
+    } finally {
+      stop();
+      hasFocus.mockRestore();
+    }
+  });
 });
