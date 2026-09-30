@@ -5,14 +5,14 @@
  * thing needs attention when it settled after the user last looked at where
  * it lives. That leaves this module one fact to keep — "last looked", one
  * persisted timestamp per target — and one global listener to keep it: a
- * tab coming to the front marks its target seen, and a turn that settles on
- * the target already in front is seen the moment it lands. Nothing is
- * stored per item, so nothing per item can be missed.
+ * tab coming to the front (of a focused window) marks its target seen, and a
+ * turn that settles on the target already in front is seen the moment it
+ * lands. Nothing is stored per item, so nothing per item can be missed.
  *
  * A target is where a turn's result shows up: the chat tab for a session's
  * own turns, the document for a prompt widget's rounds.
  */
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { createCollection, useLiveQuery } from "@tanstack/react-db";
 import { persistedCollectionOptions } from "@tanstack/db-sqlite-persistence-core";
 import { platformAdapter } from "@/adapters";
@@ -87,11 +87,27 @@ export function setActiveTabForSeen(tabId: string | null): void {
   if (target) void markSeen(target);
 }
 
-/** Mount once, in the shell: keeps the tracker told which tab is in front. */
+function subscribeWindowFocus(onChange: () => void): () => void {
+  window.addEventListener("focus", onChange);
+  window.addEventListener("blur", onChange);
+  return () => {
+    window.removeEventListener("focus", onChange);
+    window.removeEventListener("blur", onChange);
+  };
+}
+
+const windowHasFocus = () => document.hasFocus();
+
+/** Mount once, in the shell: keeps the tracker told which tab is in front.
+ *  In front means under the user's eyes — the active tab of a focused
+ *  window. A backgrounded app has nothing in front, so a turn settling there
+ *  needs attention; coming back marks the active tab seen. */
 export function useTrackActiveTab(activeTabId: string | null): void {
+  const focused = useSyncExternalStore(subscribeWindowFocus, windowHasFocus);
+  const inFront = focused ? activeTabId : null;
   useEffect(() => {
-    setActiveTabForSeen(activeTabId);
-  }, [activeTabId]);
+    setActiveTabForSeen(inFront);
+  }, [inFront]);
 }
 
 /** The listener's body, exported for tests: a turn settling on the target

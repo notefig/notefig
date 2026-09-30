@@ -32,6 +32,7 @@ import {
 import type { NodeViewProps } from "@tiptap/react";
 import { Plugin } from "@tiptap/pm/state";
 import { Selection, TextSelection } from "@tiptap/pm/state";
+import { GapCursor } from "@tiptap/pm/gapcursor";
 import Suggestion from "@tiptap/suggestion";
 import { useEffect, useRef } from "react";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
@@ -120,8 +121,8 @@ function insertDraftHardBreak(editor: NodeViewProps["editor"]): boolean {
 }
 
 /** Leaving the draft: the selection in the block next to the widget, or
- *  null at the doc's edge — the gap cursor plugin offers its position
- *  there instead. */
+ *  null at the doc's edge — the key falls through, and gapBesideWidgetTr
+ *  keeps the gap cursor it would offer off the widget. */
 function draftExitTarget(state: EditorState, dir: -1 | 1): Selection | null {
   const { $from } = state.selection;
   let widgetDepth = -1;
@@ -137,6 +138,39 @@ function draftExitTarget(state: EditorState, dir: -1 | 1): Selection | null {
   const escaped =
     target.$from.pos !== $from.pos && !selectionDraft({ selection: target });
   return escaped ? target : null;
+}
+
+/** A gap cursor never rests against a widget: that spot renders as a stray
+ *  line above/below the card, which reads as a caret in the widget's
+ *  parent. Every route there (arrows off a draft's edge or the doc's, a
+ *  click in the card's margin, a raw position restored or clicked in the
+ *  gutter) lands here, and is carried on to the nearest text in the
+ *  direction of travel — or, with none that way, left where it was. */
+function gapBesideWidgetTr(
+  oldState: EditorState,
+  state: EditorState,
+): Transaction | null {
+  const { selection } = state;
+  if (!(selection instanceof GapCursor)) return null;
+  const { $from } = selection;
+  const beside = [$from.nodeBefore, $from.nodeAfter].some(
+    (node) => node?.type.name === PROMPT_NODE_NAME,
+  );
+  if (!beside) return null;
+  const dir = $from.pos < oldState.selection.from ? -1 : 1;
+  const stay =
+    oldState.doc.eq(state.doc) && oldState.selection instanceof TextSelection
+      ? TextSelection.create(
+          state.doc,
+          oldState.selection.anchor,
+          oldState.selection.head,
+        )
+      : null;
+  const target =
+    Selection.findFrom($from, dir, true) ??
+    stay ??
+    Selection.findFrom($from, -dir, true);
+  return target ? state.tr.setSelection(target) : null;
 }
 
 /** Entering a draft: only when the top-level sibling in that direction is a
@@ -444,8 +478,8 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // chrome), but Chromium's cannot — the caret just sticks. Handling
       // both directions here makes the crossing deterministic on every
       // engine: one press in, one press out. The doc-start/doc-end cases
-      // fall through (return false) so the gap cursor can still offer a
-      // place above/below a widget at the document's edge.
+      // fall through (return false); a gap cursor that would land against
+      // the widget there is carried back to text by gapBesideWidgetTr.
       //
       // An open mention popup owns vertical navigation — the same deferral
       // Enter/Escape get through the composer handler: while the popup has
@@ -589,7 +623,9 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
             return true;
           },
         },
-        appendTransaction(transactions, _oldState, newState) {
+        appendTransaction(transactions, oldState, newState) {
+          const gap = gapBesideWidgetTr(oldState, newState);
+          if (gap) return gap;
           if (!options.filePath) return null;
           if (!transactions.some((tr) => tr.docChanged)) return null;
           // Became-empty reinsert: no caret move — the user's cursor is in

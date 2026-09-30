@@ -8,6 +8,8 @@
  */
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { Editor } from "@tiptap/core";
+import { TextSelection } from "@tiptap/pm/state";
+import { GapCursor } from "@tiptap/pm/gapcursor";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
 import { widgetRendererNodes } from "@notefig/widgets";
 import {
@@ -529,5 +531,32 @@ describe("arrow traversal vs the mention popup", () => {
     } finally {
       unregister();
     }
+  });
+});
+
+describe("no gap cursor against a widget", () => {
+  it("a gap cursor above the keeper is carried into its draft", async () => {
+    editor = await documentEditor("");
+    expect(editor.state.doc.firstChild?.type.name).toBe("aiPrompt");
+    editor.view.dispatch(
+      editor.state.tr.setSelection(new GapCursor(editor.state.doc.resolve(0))),
+    );
+    expect(editor.state.selection).toBeInstanceOf(TextSelection);
+    expect(selectionDraft(editor.state)?.blobId).toBe(
+      findPromptNode(editor)!.blobId,
+    );
+  });
+
+  it("leaving the draft upward with nothing above stays in the draft", async () => {
+    editor = await documentEditor("---\ntitle: x\n---");
+    expect(editor.state.doc.child(1).type.name).toBe("aiPrompt");
+    editor.commands.insertContent("hello");
+    const caret = editor.state.selection.from;
+    const gap = editor.state.doc.child(0).nodeSize;
+    editor.view.dispatch(
+      editor.state.tr.setSelection(new GapCursor(editor.state.doc.resolve(gap))),
+    );
+    expect(editor.state.selection).toBeInstanceOf(TextSelection);
+    expect(editor.state.selection.from).toBe(caret);
   });
 });

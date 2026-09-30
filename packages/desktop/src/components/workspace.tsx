@@ -156,7 +156,7 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
     sidebarView,
     isSidebarCollapsed,
     toggleSidebarCollapsed,
-    openSidebarIfCollapsed,
+    showFileTree,
     openSettings,
     showSidebarView,
     showEverything,
@@ -187,7 +187,7 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
     activeTabId,
     getFocusedTabId,
     getSelectedText,
-    openSidebarIfCollapsed,
+    showFileTree,
     openSearchPanel,
     openSessionsSidebar,
     openFile,
@@ -313,7 +313,6 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
 
           <CommandPalette
             open={isCommandPaletteOpen}
-            sidebarOpen={isSidebarCollapsed}
             workspacePath={workspacePath}
             onOpenChange={setIsCommandPaletteOpen}
             onNewScratchpad={handleNewScratchpad}
@@ -532,7 +531,7 @@ function useWorkspaceActions({
   activeTabId,
   getFocusedTabId,
   getSelectedText,
-  openSidebarIfCollapsed,
+  showFileTree,
   openSearchPanel,
   openSessionsSidebar,
   openFile,
@@ -542,7 +541,7 @@ function useWorkspaceActions({
   activeTabId: string | null;
   getFocusedTabId: () => string | null;
   getSelectedText: () => string | undefined;
-  openSidebarIfCollapsed: () => void;
+  showFileTree: () => void;
   openSearchPanel: () => void;
   openSessionsSidebar: () => void;
   openFile: (options: OpenFileInLayoutOptions) => void;
@@ -557,7 +556,7 @@ function useWorkspaceActions({
     activeTabId,
     getFocusedTabId,
     getSelectedText,
-    openSidebarIfCollapsed,
+    showFileTree,
     setFileTreeMode,
     openFile: openFileInTabs,
     openSearchPanel,

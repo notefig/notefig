@@ -54,7 +54,6 @@ function renderPalette() {
             openFile,
             children: createElement(CommandPalette, {
               open: true,
-              sidebarOpen: false,
               workspacePath: WS,
               onOpenChange: vi.fn(),
             }),

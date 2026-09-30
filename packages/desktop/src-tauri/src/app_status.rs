@@ -199,6 +199,9 @@ mod tray {
             Some(tray) => {
                 tray.set_menu(Some(menu))?;
                 tray.set_icon(Some(icon))?;
+                // set_icon drops the template flag (tray-icon passes false),
+                // which left the mark black instead of tinted by the menu bar.
+                tray.set_icon_as_template(true)?;
             }
             None => {
                 let tray = TrayIconBuilder::with_id("app-status")
