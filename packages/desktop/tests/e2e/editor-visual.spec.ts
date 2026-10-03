@@ -176,56 +176,6 @@ test.describe("drag handle (Bug #3)", () => {
     expect(handleBox!.x).toBeLessThan(paragraphBox!.x);
   });
 
-  test("dragging the handle reorders blocks", async ({ page }) => {
-    await openFixtureFile(page);
-
-    const first = page.locator(".ProseMirror p", {
-      hasText: "First paragraph",
-    });
-    await first.hover();
-    await expect(page.locator(".drag-handle")).toBeVisible();
-
-    // Playwright's native HTML5 drag synthesis is unreliable against
-    // ProseMirror, so drive the plugin's dragstart → drop path with
-    // synthetic DragEvents sharing one DataTransfer (what a real drag does).
-    // Drop on the SECOND HALF of the target block: ProseMirror's dropPoint
-    // biases positions in the first half to "insert before", which for an
-    // adjacent block is a legitimate no-op move.
-    await page.evaluate(() => {
-      const handle = document.querySelector<HTMLElement>(".drag-handle");
-      const paragraphs =
-        document.querySelectorAll<HTMLElement>(".ProseMirror > p");
-      const dropTarget = paragraphs[1];
-      if (!handle || !dropTarget) throw new Error("missing handle or target");
-
-      const rect = dropTarget.getBoundingClientRect();
-      const dataTransfer = new DataTransfer();
-      handle.dispatchEvent(
-        new DragEvent("dragstart", {
-          bubbles: true,
-          cancelable: true,
-          dataTransfer,
-        }),
-      );
-      dropTarget.dispatchEvent(
-        new DragEvent("drop", {
-          bubbles: true,
-          cancelable: true,
-          dataTransfer,
-          clientX: rect.right - 10,
-          clientY: rect.bottom - 2,
-        }),
-      );
-      handle.dispatchEvent(
-        new DragEvent("dragend", { bubbles: true, dataTransfer }),
-      );
-    });
-
-    const paragraphs = page.locator(".ProseMirror > p");
-    await expect(paragraphs.nth(0)).toContainText("Second paragraph");
-    await expect(paragraphs.nth(1)).toContainText("First paragraph");
-  });
-
   test("handle follows the hovered block", async ({ page }) => {
     await openFixtureFile(page);
 

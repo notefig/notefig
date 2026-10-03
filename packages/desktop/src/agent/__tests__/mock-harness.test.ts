@@ -68,6 +68,25 @@ describe("mock harness", () => {
     expect(terminal.length).toBe(3);
   });
 
+  it("session/load replays the recorded history (revival and manual refresh)", async () => {
+    const updates: SessionNotification[] = [];
+    const { client, sessionId } = await connectedClient((n) => updates.push(n));
+    configureMockAgent({
+      scenario: "longTranscript",
+      options: { sections: 1, delayMs: 0, chunkSize: 200 },
+    });
+    await client.prompt(sessionId, [{ type: "text", text: "codeword ORCA" }]);
+    const live = updates.map((n) => n.update.sessionUpdate);
+
+    updates.length = 0;
+    await client.loadSession(sessionId, "/workspace/mock");
+
+    const replayed = updates.map((n) => n.update.sessionUpdate);
+    expect(replayed[0]).toBe("user_message_chunk");
+    expect(JSON.stringify(updates[0].update)).toContain("ORCA");
+    expect(replayed.slice(1)).toEqual(live);
+  });
+
   it("honors the @@mock: prompt directive for a single turn", async () => {
     const updates: SessionNotification[] = [];
     const { client, sessionId } = await connectedClient((n) => updates.push(n));
