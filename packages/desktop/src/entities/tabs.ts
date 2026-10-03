@@ -214,8 +214,13 @@ export function useLayoutSearchParam(): UseLayoutSearchParam {
       nextLayout:
         LayoutNode[] | ((currentLayout: LayoutNode[]) => LayoutNode[]),
     ) => {
-      setUrlSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
+      // Resolve against the live URL, not react-router's `prev` (the search
+      // params of this hook's last render): two updates before a re-render
+      // — quick successive opens on a busy main thread — would otherwise
+      // both start from the same layout and the first would be lost.
+      // BrowserRouter's navigate writes window.location synchronously.
+      setUrlSearchParams(() => {
+        const next = new URLSearchParams(window.location.search);
         const currentLayout = parseLayout(next.get(LAYOUT_PARAM));
         const resolvedLayout =
           typeof nextLayout === "function"

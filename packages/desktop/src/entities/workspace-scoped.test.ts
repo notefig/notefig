@@ -48,7 +48,7 @@ function scope() {
 }
 
 describe("workspaceScoped", () => {
-  it("creates once per workspace on first read and returns the same value after", () => {
+  it("creates once per workspace on first read and returns the same value after, with no live subscription", () => {
     const { s, created } = scope();
 
     const a = s.get("/ws");
@@ -89,11 +89,6 @@ describe("workspaceScoped", () => {
     openWorkspacesCollection.delete("/ws");
 
     expect(disposed).toEqual(["/ws"]);
-  });
-
-  it("without a live subscription, get creates freely (suites that never boot)", () => {
-    const { s } = scope();
-    expect(s.get("/ws")).toBeDefined();
   });
 
   it("does not dispose when the row is updated in place", () => {

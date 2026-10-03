@@ -5,12 +5,6 @@ import {
   type WidgetResponse,
 } from "@notefig/shared/agent";
 
-// The schema and the tool name live in @notefig/shared/agent: @notefig/widgets
-// reads them to derive the widget's done face from the transcript, and neither
-// package owns the other. Re-exported here so the tool's own call sites keep
-// their existing import.
-export { WidgetRespondInputSchema, type WidgetResponse };
-
 /**
  * Deliver the agent's final response to the in-document prompt widget the
  * prompt came from (MET-92). `execute` is validate-and-acknowledge ONLY:

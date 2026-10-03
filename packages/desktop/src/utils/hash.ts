@@ -13,19 +13,3 @@ export function calculateContentHash(content: string): string {
   // the lossy disk write, so JS and Rust digests stay in agreement.
   return md5(new TextEncoder().encode(content));
 }
-
-export function hashesEqual(
-  hash1: string | undefined,
-  hash2: string | undefined,
-): boolean {
-  return hash1 === hash2;
-}
-
-export function isContentModified(
-  currentContent: string,
-  savedContentHash: string | undefined,
-): boolean {
-  if (!savedContentHash) return true; // No saved hash means it's new/modified
-  const currentHash = calculateContentHash(currentContent);
-  return currentHash !== savedContentHash;
-}

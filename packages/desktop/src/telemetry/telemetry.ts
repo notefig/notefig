@@ -202,9 +202,4 @@ export function __resetTelemetryForTests(): void {
   recentErrors.clear();
 }
 
-/** Test-only: inject a fake PostHog client without dynamic import. */
-export function __setPosthogForTests(instance: PostHogLike | null): void {
-  posthogInstance = instance;
-}
-
 export { scrubString };

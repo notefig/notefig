@@ -21,39 +21,6 @@
 import { mockIPC, mockWindows, clearMocks } from "@tauri-apps/api/mocks";
 import { afterEach } from "vitest";
 
-/**
- * The Tauri commands this app registers (see `main.rs` `generate_handler!`).
- * Handler maps are open (`Record<string, …>`) so a test only stubs what its
- * module calls — this list is the reference of valid names, not a requirement
- * to stub them all.
- */
-export const TAURI_COMMANDS = [
-  // agent_proc
-  "spawn_agent",
-  "write_agent_stdin",
-  "kill_agent",
-  "run_shell_command",
-  // mcp_bridge
-  "start_mcp_relay",
-  "stop_mcp_relay",
-  "write_mcp_line",
-  // file_watcher
-  "start_watching_metadata",
-  "start_watching_content",
-  "stop_watching",
-  // search
-  "search_content",
-  // db_ops
-  "db_execute",
-  "db_query",
-  "db_close",
-  "db_reset",
-  // traffic_lights
-  "place_traffic_lights",
-  // app_status
-  "publish_app_status",
-] as const;
-
 export type CommandHandler = (
   payload: Record<string, unknown>,
 ) => unknown | Promise<unknown>;

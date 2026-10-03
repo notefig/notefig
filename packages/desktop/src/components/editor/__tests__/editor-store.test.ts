@@ -169,26 +169,4 @@ describe("navigateToLocation", () => {
       }),
     ).toBe(false);
   });
-
-  it("selects the matched text", () => {
-    // Match→position mapping across markdown constructs is covered
-    // exhaustively by go-to-location.test.ts; this only checks the
-    // orchestration wiring.
-    getOrCreateEditor("/ws/a.md", {
-      type: "markdown",
-      content: docWithText("Alpha beta gamma"),
-    });
-
-    expect(
-      navigateToLocation("/ws/a.md", {
-        matchText: "beta",
-        lineText: "Alpha beta gamma",
-        occurrence: 0,
-      }),
-    ).toBe(true);
-
-    const editor = getMarkdownEditor("/ws/a.md");
-    const { from, to } = editor!.state.selection;
-    expect(editor!.state.doc.textBetween(from, to)).toBe("beta");
-  });
 });

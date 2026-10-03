@@ -194,6 +194,29 @@ describe("adoptExternalContent — drafts, caret, fallbacks", () => {
     expect(editor.state.doc.textContent).toContain("grew considerably");
   });
 
+  // Regression: an agent's write adopted while the user is mid-typing must
+  // not join the next keystroke's undo step — one undo reverting the
+  // adoption too dropped the caret at the document start.
+  it.each([
+    ["diffed", undefined],
+    ["replaced", 0],
+  ] as const)("undoing an edit typed right after a %s adoption reverts only that edit", (mode, maxDiffNodeSize) => {
+    editor = makeEditor("<p>alpha</p><p>bravo</p>");
+    const result = adoptExternalContent(
+      editor,
+      docJSON("<p>alpha changed</p><p>bravo</p>"),
+      { maxDiffNodeSize },
+    );
+    expect(result.mode).toBe(mode);
+
+    editor.commands.setTextSelection(posOfText(editor, "bravo") + 5);
+    editor.commands.insertContent("!");
+    editor.commands.undo();
+
+    expect(editor.state.doc.textContent).toBe("alpha changedbravo");
+    expect(editor.state.selection.$from.parent.textContent).toBe("bravo");
+  });
+
   it("falls back to replace for content the schema rejects, without throwing", () => {
     editor = makeEditor("<p>stable</p>");
     // promptDraft is only admitted inside a widget; a top-level one parses

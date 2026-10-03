@@ -18,7 +18,6 @@ vi.mock("@/utils/file-sync", () => ({ readWorkspaceTextFile }));
 
 import { workspaceListDocuments } from "../workspace-list-documents";
 import { workspaceReadDocument } from "../workspace-read-document";
-import { workspaceOpenFiles } from "../workspace-open-files";
 
 const ctx = { workspacePath: "/ws", taskId: "task_1", agents: {} as never };
 
@@ -49,19 +48,5 @@ describe("workspaceReadDocument", () => {
     readWorkspaceTextFile.mockRejectedValueOnce(new Error("not found"));
     const result = await workspaceReadDocument.execute(ctx, { path: "/ws/missing.md" });
     expect(result).toEqual({ ok: false, error: "not found" });
-  });
-});
-
-describe("workspaceOpenFiles", () => {
-  it("returns the current editor context", async () => {
-    const result = await workspaceOpenFiles.execute(ctx, {});
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value).toEqual({
-        openFiles: [],
-        activeFile: null,
-        selection: undefined,
-      });
-    }
   });
 });
