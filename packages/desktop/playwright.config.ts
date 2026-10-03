@@ -12,8 +12,12 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 2,
-  workers: process.env.CI ? 1 : undefined,
-  reporter: "list",
+  // CI runners have 4 cores; two workers per shard leaves room for the
+  // shard's own dev server. Locally Playwright picks half the cores.
+  workers: process.env.CI ? 2 : undefined,
+  // CI shards emit blob reports that the workflow merges into one HTML
+  // report; `github` annotates failures inline on the PR.
+  reporter: process.env.CI ? [["blob"], ["github"], ["list"]] : "list",
 
   use: {
     baseURL: "http://localhost:1422",

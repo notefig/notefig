@@ -2,5 +2,17 @@
 
 set -eu
 
-echo "Running desktop E2E tests before push..."
-npm run -w packages/desktop test:e2e -- --project=chromium
+# The full desktop E2E suite runs sharded in CI (ci-tests.yml). Before a
+# push, run the cheap safety net: the @smoke tests, plus every spec file
+# changed since this branch left main. --only-changed follows imports, but
+# the specs drive the app through the browser rather than importing it, so
+# app-source changes alone select nothing; that coverage is CI's job.
+base=$(git merge-base HEAD origin/main 2>/dev/null || echo "")
+
+echo "Running desktop E2E smoke tests before push..."
+npm run -w packages/desktop test:e2e -- --grep "@smoke"
+
+if [ -n "$base" ]; then
+  echo "Running desktop E2E specs changed since $base..."
+  npm run -w packages/desktop test:e2e -- --only-changed="$base" --pass-with-no-tests
+fi
