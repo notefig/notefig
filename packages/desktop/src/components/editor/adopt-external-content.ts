@@ -28,6 +28,7 @@ import type { Editor } from "@tiptap/core";
 import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode, NodeType } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
+import { closeHistory } from "@tiptap/pm/history";
 import { PROMPT_CHANGE_META, PROMPT_NODE_NAME } from "@notefig/widgets";
 import { attributeAdoption } from "@/entities/turn-writes";
 import { recreateTransform } from "@/vendor/prosemirror-recreate-transform/recreateTransform";
@@ -130,6 +131,21 @@ export function adoptExternalContent(
   editor: Editor,
   incoming: JSONContent,
   options: { maxDiffNodeSize?: number; source?: AdoptionSource } = {},
+): AdoptionResult {
+  // Adoption is its own undo step: never merged into the typing just before
+  // it, nor absorbing the typing just after. Without the fence, a wholesale
+  // replace (the fallback) joins the next keystroke's history event, so one
+  // undo reverts the adoption too and drops the caret at the document start.
+  editor.view.dispatch(closeHistory(editor.state.tr));
+  const result = adopt(editor, incoming, options);
+  editor.view.dispatch(closeHistory(editor.state.tr));
+  return result;
+}
+
+function adopt(
+  editor: Editor,
+  incoming: JSONContent,
+  options: { maxDiffNodeSize?: number; source?: AdoptionSource },
 ): AdoptionResult {
   const maxDiffNodeSize = options.maxDiffNodeSize ?? MAX_DIFF_NODE_SIZE;
   const oldDoc = editor.state.doc;

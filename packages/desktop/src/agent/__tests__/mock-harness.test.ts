@@ -2,11 +2,28 @@ import { describe, it, expect, vi } from "vitest";
 
 // acp-client pulls in file-sync → platform adapter, and permission-broker
 // reaches the agent collections (which need a db surface at module eval).
-// Nothing else on the adapter is exercised by a mock-harness round trip.
+// fs and proc are only reached by the task-level replay test, which runs a
+// real TaskManager over the mock transport.
 vi.mock("@/adapters", async () => ({
   platformAdapter: {
     db: (await import("@/testing/node-db")).createNodeTestDb(),
+    fs: {
+      writeFiles: vi.fn(async () => ({ succeeded: [], failed: [] })),
+      readFiles: vi.fn(async () => ({ succeeded: [], failed: [] })),
+      deleteFiles: vi.fn(async (paths: string[]) => ({ succeeded: paths, failed: [] })),
+    },
+    proc: {
+      createMcpEndpoint: vi.fn(() => ({
+        mcpServer: undefined,
+        start: vi.fn(async () => {}),
+        onRequest: vi.fn(() => () => {}),
+        close: vi.fn(async () => {}),
+      })),
+    },
   },
+}));
+vi.mock("@/utils/history-service", () => ({
+  checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
 }));
 
 import { NotefigAcpClient } from "@notefig/agent";
@@ -19,6 +36,9 @@ import {
   lastMockSetParams,
   registerMockScenario,
 } from "../mock-harness";
+import { TaskManager } from "../agent-service";
+import { agentEntriesCollection, agentTurnsCollection } from "../agent-collections";
+import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 
 async function connectedClient(onUpdate: (n: SessionNotification) => void) {
   const transport = createMockAgentTransport();
@@ -66,25 +86,6 @@ describe("mock harness", () => {
         (n.update as { status?: string }).status === "completed",
     );
     expect(terminal.length).toBe(3);
-  });
-
-  it("session/load replays the recorded history (revival and manual refresh)", async () => {
-    const updates: SessionNotification[] = [];
-    const { client, sessionId } = await connectedClient((n) => updates.push(n));
-    configureMockAgent({
-      scenario: "longTranscript",
-      options: { sections: 1, delayMs: 0, chunkSize: 200 },
-    });
-    await client.prompt(sessionId, [{ type: "text", text: "codeword ORCA" }]);
-    const live = updates.map((n) => n.update.sessionUpdate);
-
-    updates.length = 0;
-    await client.loadSession(sessionId, "/workspace/mock");
-
-    const replayed = updates.map((n) => n.update.sessionUpdate);
-    expect(replayed[0]).toBe("user_message_chunk");
-    expect(JSON.stringify(updates[0].update)).toContain("ORCA");
-    expect(replayed.slice(1)).toEqual(live);
   });
 
   it("honors the @@mock: prompt directive for a single turn", async () => {
@@ -217,5 +218,27 @@ describe("mock harness session settings (MET-81)", () => {
     } finally {
       configureMockAgent({ scenario: "echo" });
     }
+  });
+});
+
+describe("mock harness replay through a task", () => {
+  // The sessions panel's Refresh (and revival) rebuild a task's transcript
+  // from the harness's session/load replay; in mock mode that replay is the
+  // recorded scenario history.
+  it("refreshFromHarness rebuilds the transcript from the recorded history", async () => {
+    const task = new TaskManager("/ws").createTask(BUILT_IN_HARNESSES[0]);
+    await task.start(() => createMockAgentTransport());
+    task.prompt("codeword ORCA");
+    await vi.waitFor(() => {
+      const turns = agentTurnsCollection.toArray.filter((t) => t.taskId === task.taskId);
+      expect(turns.some((t) => t.status === "completed")).toBe(true);
+    });
+    const entries = () =>
+      agentEntriesCollection.toArray.filter((e) => e.taskId === task.taskId);
+    expect(entries().length).toBeGreaterThan(0);
+
+    expect(await task.refreshFromHarness()).toEqual({ ok: true });
+
+    expect(entries().some((e) => e.type === "user" && e.text?.includes("ORCA"))).toBe(true);
   });
 });

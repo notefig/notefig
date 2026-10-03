@@ -7,12 +7,17 @@ set -eu
 # changed since this branch left main. --only-changed follows imports, but
 # the specs drive the app through the browser rather than importing it, so
 # app-source changes alone select nothing; that coverage is CI's job.
-base=$(git merge-base HEAD origin/main 2>/dev/null || echo "")
+base=$(git merge-base HEAD origin/main 2>/dev/null ||
+  git merge-base HEAD main 2>/dev/null || echo "")
 
 echo "Running desktop E2E smoke tests before push..."
 npm run -w packages/desktop test:e2e -- --grep "@smoke"
 
-if [ -n "$base" ]; then
-  echo "Running desktop E2E specs changed since $base..."
-  npm run -w packages/desktop test:e2e -- --only-changed="$base" --pass-with-no-tests
+if [ -z "$base" ]; then
+  echo "WARNING: no merge-base with origin/main or main; changed E2E specs were NOT run." >&2
+  echo "         Fetch main (git fetch origin main) to restore the changed-spec check." >&2
+  exit 0
 fi
+
+echo "Running desktop E2E specs changed since $base..."
+npm run -w packages/desktop test:e2e -- --only-changed="$base" --pass-with-no-tests
