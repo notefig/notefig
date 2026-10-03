@@ -165,6 +165,14 @@ jobs:
           path: packages/desktop/blob-report
           retention-days: 1
 
+      - name: Upload failure traces
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-traces-${{ matrix.shard }}
+          path: packages/desktop/test-results
+          retention-days: 7
+
   merge-desktop-e2e-reports:
     name: Merge Desktop E2E reports
     needs: test-desktop-e2e

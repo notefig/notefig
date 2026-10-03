@@ -21,7 +21,9 @@ export default defineConfig({
 
   use: {
     baseURL: "http://localhost:1422",
-    trace: "off",
+    // CI keeps a trace for any test that ends up failing (uploaded by the
+    // workflow); locally traces stay off.
+    trace: process.env.CI ? "retain-on-failure" : "off",
     screenshot: "off",
     video: "off",
   },
