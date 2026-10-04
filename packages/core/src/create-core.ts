@@ -94,6 +94,9 @@ export function createCore(options: CreateCoreOptions): Core {
   // Workspaces
   // ---------------------------------------------------------------------
 
+  /** Set when shutdown starts; from then on nothing opens. */
+  let shuttingDown = false;
+  let disposed: Promise<void> | null = null;
   const open = new Map<string, OpenWorkspace>();
   const closing = new Map<
     string,
@@ -105,41 +108,8 @@ export function createCore(options: CreateCoreOptions): Core {
   };
   const workspaceModules = ordered.filter((module) => module.workspace);
 
-  const createWorkspace = (ref: WorkspaceRef): OpenWorkspace => {
-    const instances = new Map<string, unknown>();
-    for (const module of workspaceModules) {
-      const part = module.workspace!;
-      const ctx: WorkspaceContext<never, never> = {
-        ...contextFor(module),
-        workspace: ref,
-        useWorkspace(name: string) {
-          if (!(part.needs ?? []).includes(name)) {
-            throw new CoreConfigError(
-              `Module "${module.name}" uses the workspace instance of "${name}" without listing it in workspace.needs.`,
-            );
-          }
-          if (!instances.has(name)) {
-            throw new Error(
-              `The workspace instance of "${name}" failed to create, so "${module.name}" cannot use it.`,
-            );
-          }
-          return instances.get(name) as never;
-        },
-      } as WorkspaceContext<never, never>;
-      try {
-        instances.set(module.name, part.create(ctx, apis.get(module.name)));
-      } catch (error) {
-        onError(error, `workspace create of "${module.name}" for ${ref.path}`);
-      }
-    }
-    const view = Object.freeze(
-      Object.fromEntries(instances),
-    ) as Readonly<WorkspaceModules>;
-    return { ref, instances, view };
-  };
-
-  const disposeWorkspace = async (entry: OpenWorkspace) => {
-    await hooks.emitSerial("workspace:closing", entry.ref);
+  /** Dispose an entry's instances in reverse need order. Never throws. */
+  const disposeInstances = async (entry: OpenWorkspace) => {
     for (const module of [...workspaceModules].reverse()) {
       if (!entry.instances.has(module.name)) continue;
       try {
@@ -156,8 +126,55 @@ export function createCore(options: CreateCoreOptions): Core {
     }
   };
 
+  /**
+   * Every module's instance, or null when one failed to create. A partial
+   * set is never published: the ones already built are disposed and the
+   * workspace stays closed, so the next `open` retries from scratch.
+   */
+  const createWorkspace = (ref: WorkspaceRef): OpenWorkspace | null => {
+    const instances = new Map<string, unknown>();
+    const entryOf = () => ({
+      ref,
+      instances,
+      view: Object.freeze(
+        Object.fromEntries(instances),
+      ) as Readonly<WorkspaceModules>,
+    });
+    for (const module of workspaceModules) {
+      const part = module.workspace!;
+      const ctx: WorkspaceContext<never, never> = {
+        ...contextFor(module),
+        workspace: ref,
+        useWorkspace(name: string) {
+          if (!(part.needs ?? []).includes(name)) {
+            throw new CoreConfigError(
+              `Module "${module.name}" uses the workspace instance of "${name}" without listing it in workspace.needs.`,
+            );
+          }
+          return instances.get(name) as never;
+        },
+      } as WorkspaceContext<never, never>;
+      try {
+        instances.set(module.name, part.create(ctx, apis.get(module.name)));
+      } catch (error) {
+        onError(error, `workspace create of "${module.name}" for ${ref.path}`);
+        void disposeInstances(entryOf());
+        return null;
+      }
+    }
+    return entryOf();
+  };
+
+  const disposeWorkspace = async (entry: OpenWorkspace) => {
+    await hooks.emitSerial("workspace:closing", entry.ref);
+    await disposeInstances(entry);
+  };
+
   const workspaces: WorkspaceLifecycle = {
     async open(path) {
+      // A core that is shutting down opens nothing: its dispose has already
+      // taken the list of workspaces to close.
+      if (shuttingDown) return;
       const key = keyOf(path);
       const pending = closing.get(key);
       if (pending) {
@@ -166,6 +183,7 @@ export function createCore(options: CreateCoreOptions): Core {
       }
       if (open.has(key)) return;
       const entry = createWorkspace({ key, path });
+      if (!entry) return;
       open.set(key, entry);
       notify();
       hooks.emit("workspace:opened", entry.ref);
@@ -232,7 +250,6 @@ export function createCore(options: CreateCoreOptions): Core {
 
   const disposers: Disposer[] = [];
   let booted = false;
-  let disposed: Promise<void> | null = null;
 
   const base: CoreBase = {
     use(name) {
@@ -267,6 +284,7 @@ export function createCore(options: CreateCoreOptions): Core {
       hooks.emit("core:booted", undefined);
     },
     dispose() {
+      shuttingDown = true;
       disposed ??= (async () => {
         await hooks.emitSerial("core:shutdown", undefined);
         await Promise.all(

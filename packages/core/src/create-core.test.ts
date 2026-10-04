@@ -324,6 +324,59 @@ describe("workspaces", () => {
     );
   });
 
+  it("never publishes a partial workspace: a failed create rolls back and the next open retries", async () => {
+    const log: string[] = [];
+    let failTasks = true;
+    const flakyTasks = defineModule({
+      name: "t-tasks",
+      workspace: {
+        needs: ["t-history"],
+        create: (ctx) => {
+          if (failTasks) throw new Error("tasks failed");
+          return { history: ctx.useWorkspace("t-history") };
+        },
+      },
+    });
+    const onError = vi.fn();
+    const opened = vi.fn();
+    const core = createCore({
+      services: {},
+      modules: [history(log), flakyTasks],
+      onError,
+    });
+    core.hooks.on("workspace:opened", opened);
+
+    await core.workspaces.open("/ws");
+    await Promise.resolve();
+    expect(core.workspaces.isOpen("/ws")).toBe(false);
+    expect(core.workspace("/ws")).toBeUndefined();
+    expect(opened).not.toHaveBeenCalled();
+    expect(log).toEqual(["create history /ws", "dispose history"]);
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "tasks failed" }),
+      'workspace create of "t-tasks" for /ws',
+    );
+
+    failTasks = false;
+    await core.workspaces.open("/ws");
+    expect(core.workspace("/ws")?.["t-tasks"].history.log).toBe(log);
+    expect(opened).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens nothing once shutdown has started", async () => {
+    const log: string[] = [];
+    const core = createCore({ services: {}, modules: [history(log)] });
+    core.boot();
+    // An open that lands while shutdown hooks run must not outlive dispose.
+    core.hooks.on("core:shutdown", () => core.workspaces.open("/late"));
+
+    await core.dispose();
+    await core.workspaces.open("/after");
+
+    expect(core.workspaces.list()).toEqual([]);
+    expect(log).toEqual([]);
+  });
+
   it("closes open workspaces on dispose", async () => {
     const log: string[] = [];
     const core = createCore({ services: {}, modules: [history(log)] });
