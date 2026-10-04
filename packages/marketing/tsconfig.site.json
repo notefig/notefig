@@ -28,6 +28,8 @@
       // (sharedResolveAliases), but tsc has no such thing, so a workspace
       // package added there has to be added in BOTH tsconfigs or the site
       // build is the one that finds out.
+      "@notefig/core": ["../core/src/index.ts"],
+      "@notefig/core/react": ["../core/src/react.tsx"],
       "@notefig/ui/*": ["../ui/src/*"],
       "@notefig/widgets": ["../widgets/src/index.ts"],
       "@notefig/widgets/*": ["../widgets/src/*"],

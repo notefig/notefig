@@ -8,6 +8,7 @@ This is a monorepo containing the Metrists CLI and Desktop applications, along w
 packages/
 ├── cli/              # CLI package (published to npm as 'notefig')
 ├── desktop/          # Desktop app (Tauri + React, published as binaries)
+├── core/             # Kernel: module registration, boot order, workspace lifetime, hooks (source-only)
 ├── shared/           # Internal shared package (not published)
 │   ├── src/
 │   │   ├── types/    # Shared TypeScript types
@@ -63,6 +64,24 @@ export * from "./parsing/index.js";
 // In CLI or Desktop
 import { parseMarkdown } from "@notefig/shared";
 ```
+
+## Core Modules
+
+The desktop app boots through `@notefig/core` (`packages/core`). Each root
+(`packages/desktop/src/main.tsx`, `packages/marketing/site/main.tsx`) picks a
+module list from `packages/desktop/src/core/app-core.ts`, then calls
+`core.boot()` before render.
+
+- Something that has to run for the life of the app (a subscription, a
+  tracker, a startup scan) is a module declared with `defineModule` next to
+  the code it starts, and added to a list in `app-core.ts`. Never add a
+  module-scope side effect or a startup `useEffect` in `App.tsx` for this.
+- `needs` decides order: core registers and boots a module after everything
+  it lists, and fails at startup on a missing need or a cycle.
+- A module that exposes an API, or that other modules need, declares itself
+  on `CoreModules` (`declare module "@notefig/core"`). Per-workspace state
+  goes on `WorkspaceModules` with a `workspace: { create, dispose }` part.
+- The plan this follows: the "Core Layer Architecture" doc (stages 1–7).
 
 ## Release Process
 

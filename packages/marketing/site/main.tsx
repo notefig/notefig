@@ -12,7 +12,8 @@ import { TextPromptDialog } from "@/components/text-prompt-dialog";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@notefig/ui/tooltip";
 import { queryClient } from "@/entities/query-client";
-import { bootstrapAppRuntime } from "@/app-runtime";
+import { CoreProvider } from "@notefig/core/react";
+import { createAppCore, runtimeModules } from "@/core/app-core";
 import {
   closeWorkspace,
   openWorkspace,
@@ -35,12 +36,13 @@ if (typeof globalThis.Buffer === "undefined") {
   globalThis.Buffer = Buffer;
 }
 
-// The same runtime boot the desktop root runs. This root renders the real
-// Workspace, so it needs the open-workspace watchers armed exactly as the
-// shell does — it just never renders `App`, which is where a React-effect
-// version would have lived. It does not restore a persisted open set: the
-// site always opens its one seeded root itself.
-bootstrapAppRuntime({ restoreWorkspaces: false });
+// The same runtime modules the desktop root boots, minus the shell-only ones
+// (agent startup, tunnel). This root renders the real Workspace, so it needs
+// the open-workspace watchers armed exactly as the shell does. It does not
+// restore a persisted open set: the site always opens its one seeded root
+// itself.
+const core = createAppCore(runtimeModules({ restoreWorkspaces: false }));
+core.boot();
 
 // The one workspace this site ever shows is the seeded content root. The
 // open set persists in the visitor's browser, so a root from an earlier
@@ -83,15 +85,17 @@ const MarketingApp = () => (
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <ThemeProvider defaultTheme="light">
-          <TooltipProvider>
-            <MarketingApp />
-            <Toaster />
-          </TooltipProvider>
-        </ThemeProvider>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <CoreProvider core={core}>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <ThemeProvider defaultTheme="light">
+            <TooltipProvider>
+              <MarketingApp />
+              <Toaster />
+            </TooltipProvider>
+          </ThemeProvider>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </CoreProvider>
   </React.StrictMode>,
 );

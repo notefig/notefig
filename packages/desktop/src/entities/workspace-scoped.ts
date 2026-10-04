@@ -21,6 +21,7 @@
  */
 import { openWorkspacesCollection } from "@/entities/open-workspaces";
 import { path as pathutil, workspaceKey } from "@/utils/path";
+import { defineModule } from "@notefig/core";
 
 export interface WorkspaceScope<T> {
   /**
@@ -132,3 +133,15 @@ export function startWorkspaceScopeSubscription(): () => void {
   activeSubscription = dispose;
   return dispose;
 }
+
+declare module "@notefig/core" {
+  interface CoreModules {
+    /** Boot-only: mirrors the open set into every scope's lifetime. */
+    "workspace-scopes": undefined;
+  }
+}
+
+export const workspaceScopesModule = defineModule({
+  name: "workspace-scopes",
+  boot: () => startWorkspaceScopeSubscription(),
+});

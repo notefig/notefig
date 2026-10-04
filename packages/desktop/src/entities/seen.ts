@@ -19,6 +19,7 @@ import { platformAdapter } from "@/adapters";
 import { promptRoundsCollection } from "@/entities/prompt-rounds";
 import { agentTaskIdFromTabId, isFileTabId } from "@/entities/tabs";
 import { onAppEvent, type AppEvents } from "@/utils/app-events";
+import { defineModule } from "@notefig/core";
 
 export const SEEN_COLLECTION_ID = "seen";
 
@@ -154,3 +155,9 @@ export function lastSeenAt(
 ): number {
   return seen.get(seenKey(target)) ?? 0;
 }
+
+/** Window focus and settled turns feed the seen ledger. */
+export const seenModule = defineModule({
+  name: "seen",
+  boot: () => startSeenTracking(),
+});

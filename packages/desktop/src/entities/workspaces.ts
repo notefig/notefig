@@ -23,6 +23,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
+import { defineModule, type WorkspaceLifecycle } from "@notefig/core";
 import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
 import {
   getOrCreateWorkspaceCollections,
@@ -65,8 +66,8 @@ export function whenOpenWorkspacesReady(): Promise<void> {
  * its collections and kick the listing walk, exactly as `openWorkspace`
  * does for a fresh open — minus the insert, since the row is what told us
  * to. Watchers arm through the registry subscription, which reconciles the
- * rows it finds. Called once by the boot sequence (app-runtime.ts), before
- * render, so nothing observes `whenOpenWorkspacesReady` ahead of it.
+ * rows it finds. Called once by `workspacesModule`'s boot, before render,
+ * so nothing observes `whenOpenWorkspacesReady` ahead of it.
  */
 export function restoreOpenWorkspaces(): Promise<void> {
   restored ??= openWorkspacesCollection.preload().then(() => {
@@ -295,4 +296,50 @@ export function useOpenWorkspaces(): OpenWorkspaceRow[] {
     () => [...rows].sort((a, b) => a.openedAt - b.openedAt),
     [rows],
   );
+}
+
+declare module "@notefig/core" {
+  interface CoreModules {
+    "workspace-registry": undefined;
+  }
+}
+
+/**
+ * Mirror the open set into core's workspace lifecycle, so per-workspace
+ * module instances and the `workspace:*` hooks follow the same rows the
+ * switcher shows. Rows already present (a restore that ran first) open
+ * before the subscription starts; hydrated rows arrive as inserts.
+ */
+function mirrorOpenSet(lifecycle: WorkspaceLifecycle): () => void {
+  for (const row of openWorkspacesCollection.values()) {
+    void lifecycle.open(row.path);
+  }
+  const subscription = openWorkspacesCollection.subscribeChanges((changes) => {
+    for (const change of changes) {
+      if (change.type === "delete") void lifecycle.close(change.value.path);
+      else void lifecycle.open(change.value.path);
+    }
+  });
+  return () => subscription.unsubscribe();
+}
+
+/**
+ * The open set's runtime half. Scopes and watchers must be live before a
+ * restore hydrates rows, so they are needs. The desktop shell restores the
+ * persisted open set; the marketing site opens its one root itself.
+ */
+export function workspacesModule({ restore }: { restore: boolean }) {
+  return defineModule({
+    name: "workspace-registry",
+    needs: ["workspace-scopes", "workspace-watchers"],
+    boot: (_api, ctx) => {
+      const stop = mirrorOpenSet(ctx.workspaces);
+      if (restore) {
+        void restoreOpenWorkspaces().catch((error) => {
+          console.error("Failed to restore open workspaces:", error);
+        });
+      }
+      return stop;
+    },
+  });
 }

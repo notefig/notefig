@@ -16,14 +16,7 @@ import { isWeb } from "@/utils/platform";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { WorkspaceErrorBoundary } from "@/components/workspace-error-boundary";
 import { EditorHarness } from "@/test-harness/editor-harness";
-import { ensureStartupHarnessDiscovery } from "@/agent/harness-discovery";
-import { ensureAgentTasksReconciled } from "@/agent/agent-collections";
 import { PairDialog } from "@/components/tunnel/pair-dialog";
-import {
-  autoConnectStoredPairing,
-  watchCrossTabPairing,
-} from "@/agent/tunnel/connect-flow";
-import { hadDeepLinkPairing } from "@/agent/tunnel/pair-dialog-store";
 
 export const App = () => {
   const { setTheme } = useTheme();
@@ -41,34 +34,6 @@ export const App = () => {
     setTheme(settings.theme);
   }, [settings.theme, setTheme]);
 
-  // One harness-discovery scan per app session (self-guarded; StrictMode's
-  // double-invoke and remounts are no-ops).
-  useEffect(() => {
-    ensureStartupHarnessDiscovery();
-  }, []);
-
-  // Bring persisted agent tasks in line with this session: rows without a live
-  // runtime demote to "restored", rows with no session at all are dropped.
-  // Same self-guarded, fire-and-forget shape as the scan above.
-  useEffect(() => {
-    ensureAgentTasksReconciled();
-  }, []);
-
-  // Web only: reconnect to a previously paired worker on boot. Non-fatal —
-  // a stale pairing (worker restarted → new URL) just leaves the tunnel
-  // disconnected and the status pill offers a re-pair. Also listen for a
-  // pairing done in another tab (the CLI-opened tab) and connect this one.
-  //
-  // Skip the stored reconnect when this load carried a deep-link code: the
-  // CLI-opened `/pair#<code>` tab has a FRESH code the dialog is about to
-  // connect, and the stored pairing points at the previous (now-dead) port —
-  // racing it would clobber the fresh connect with "could not reach the worker".
-  useEffect(() => {
-    if (!isWeb()) return;
-    if (!hadDeepLinkPairing) void autoConnectStoredPairing();
-    return watchCrossTabPairing();
-  }, []);
-
   // The URL carries the session (layout, chrome); the pathname is always
   // "/". Restore last session's search once settings have hydrated — a
   // cold boot lands on a bare "/" — then keep recording it. The restore is
@@ -79,11 +44,7 @@ export const App = () => {
   const [sessionRestored, setSessionRestored] = useState(false);
   useEffect(() => {
     if (!settingsReady || sessionRestored) return;
-    if (
-      location.pathname === "/" &&
-      !location.search &&
-      settings.lastSearch
-    ) {
+    if (location.pathname === "/" && !location.search && settings.lastSearch) {
       navigate(`/${settings.lastSearch}`, { replace: true });
     }
     setSessionRestored(true);
