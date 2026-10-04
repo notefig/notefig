@@ -41,7 +41,7 @@ import {
   prefetchFileContent,
 } from "@/entities/files";
 import { useLiveQuery } from "@tanstack/react-db";
-import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
+import type { OpenTabOptions } from "@/entities/tabs";
 import { dropZoneProps, tagCurrentDrag } from "@/utils/drag-protocol";
 import { path as pathutil, relativeTreePath } from "@/utils/path";
 import {
@@ -93,10 +93,7 @@ export const FILE_TREE_IDLE: FileTreeMode = { type: "idle" };
  */
 interface FileTreeComponentProps {
   selectedFilePath: string | null;
-  onFileSelect: (
-    file: FileTreeNode,
-    options?: Omit<OpenFileInLayoutOptions, "tabId">,
-  ) => void;
+  onFileSelect: (file: FileTreeNode, options?: OpenTabOptions) => void;
   onDelete?: (path: string) => void;
   onRename?: (oldPath: string, newName: string) => void;
   /** Rename/move a file whose tab is open (close-and-reopen primitive). */
@@ -307,7 +304,7 @@ function FileTreeInner({
   // onSelectionChange: the model applies selection as a side effect of
   // startRenaming and programmatic sync, which must not open tabs.
   const openFileAtPath = useCallback(
-    (rel: string, options?: Omit<OpenFileInLayoutOptions, "tabId">) => {
+    (rel: string, options?: OpenTabOptions) => {
       const abs = toAbs(rel);
       if (!options?.intent && abs === selectedFilePathRef.current) return;
       onFileSelect(

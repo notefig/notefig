@@ -7,7 +7,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Buffer } from "buffer";
-import { BrowserRouter } from "react-router-dom";
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import "./utils/intl";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AppUpdaterBootstrap } from "@/components/app-updater";
@@ -18,6 +18,7 @@ import { queryClient } from "@/entities/query-client";
 import { App } from "./App";
 import { CoreProvider } from "@notefig/core/react";
 import { createAppCore, desktopModules } from "@/core/app-core";
+import { urlStateFromRouter } from "@/entities/layout";
 
 import "./styles.css";
 
@@ -25,23 +26,34 @@ if (typeof globalThis.Buffer === "undefined") {
   globalThis.Buffer = Buffer;
 }
 
-const core = createAppCore(desktopModules());
+// A data router, so the URL (which carries the tab layout) can be read and
+// navigated outside React. One splat route: App's own <Routes> do the rest.
+const router = createBrowserRouter([
+  {
+    path: "*",
+    element: (
+      <ThemeProvider>
+        <TooltipProvider>
+          <AppUpdaterBootstrap />
+          <TelemetryBootstrap />
+          <App />
+          <Toaster />
+        </TooltipProvider>
+      </ThemeProvider>
+    ),
+  },
+]);
+
+const core = createAppCore(desktopModules(), {
+  url: urlStateFromRouter(router),
+});
 core.boot();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <CoreProvider core={core}>
       <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <ThemeProvider>
-            <TooltipProvider>
-              <AppUpdaterBootstrap />
-              <TelemetryBootstrap />
-              <App />
-              <Toaster />
-            </TooltipProvider>
-          </ThemeProvider>
-        </BrowserRouter>
+        <RouterProvider router={router} />
       </QueryClientProvider>
     </CoreProvider>
   </React.StrictMode>,

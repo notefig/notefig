@@ -19,6 +19,10 @@ vi.mock("@/utils/file-sync", () => ({ readWorkspaceTextFile }));
 import { workspaceListDocuments } from "../workspace-list-documents";
 import { workspaceReadDocument } from "../workspace-read-document";
 import { workspaceOpenFiles } from "../workspace-open-files";
+import { createTestCore, windowUrlState } from "@/testing/test-core";
+
+// getWorkspaceEditorContext reads the layout through core.
+createTestCore({ url: windowUrlState() });
 
 const ctx = { workspacePath: "/ws", taskId: "task_1", agents: {} as never };
 

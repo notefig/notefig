@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
+import { useCore } from "@notefig/core/react";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { RELEASE_NOTES_TAB_ID } from "@/entities/tabs";
 
@@ -10,9 +10,8 @@ import { RELEASE_NOTES_TAB_ID } from "@/entities/tabs";
  * layout like any other tab. Fresh installs (null) skip the tab and just
  * record the version.
  */
-export function useReleaseNotesOnUpdate(
-  openFile: (options: OpenFileInLayoutOptions) => void,
-) {
+export function useReleaseNotesOnUpdate() {
+  const { tabs } = useCore();
   const { settings, isReady, setSetting } = useAppSettings();
   const hasRun = useRef(false);
 
@@ -22,8 +21,8 @@ export function useReleaseNotesOnUpdate(
 
     if (settings.lastSeenVersion === __APP_VERSION__) return;
     if (settings.lastSeenVersion !== null) {
-      openFile({ tabId: RELEASE_NOTES_TAB_ID, intent: "new-tab" });
+      tabs.open(RELEASE_NOTES_TAB_ID, { intent: "new-tab" });
     }
     setSetting("lastSeenVersion", __APP_VERSION__);
-  }, [isReady, settings.lastSeenVersion, openFile, setSetting]);
+  }, [isReady, settings.lastSeenVersion, tabs, setSetting]);
 }

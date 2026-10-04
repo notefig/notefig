@@ -5,7 +5,6 @@ import { getFileName } from "@/utils/fs";
 import { runTabHistoryAction } from "@/tabs/tab-controllers";
 import { tabKind } from "@/tabs/tab-id";
 import { createAndOpenScratchpad } from "@/entities/scratchpads";
-import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import type { FileTreeMode } from "@/components/editor/file-tree";
 
 export interface WorkspaceCommandsOptions {
@@ -17,7 +16,6 @@ export interface WorkspaceCommandsOptions {
    *  lands in the tree's inline name input). */
   showFileTree: () => void;
   setFileTreeMode: (mode: FileTreeMode) => void;
-  openFile: (options: OpenFileInLayoutOptions) => boolean;
   openSearchPanel: (options?: {
     filePattern?: string;
     initialQuery?: string;
@@ -59,15 +57,14 @@ export function useWorkspaceCommands({
   getSelectedText,
   showFileTree,
   setFileTreeMode,
-  openFile,
   openSearchPanel,
   openSessionsSidebar,
 }: WorkspaceCommandsOptions): WorkspaceCommands {
   // "New Scratchpad" is instant and nameless; "New File" keeps the
   // explicit inline-naming flow in the tree.
   const handleNewScratchpad = useCallback(() => {
-    createAndOpenScratchpad(workspacePath, openFile);
-  }, [workspacePath, openFile]);
+    createAndOpenScratchpad(workspacePath);
+  }, [workspacePath]);
 
   const handleNewFile = useCallback(() => {
     showFileTree();

@@ -1,6 +1,10 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { getWorkspaceEditorContext } from "@/entities/editors";
 import type { LayoutNode } from "@/components/dockable";
+import { createTestCore, windowUrlState } from "@/testing/test-core";
+
+// getWorkspaceEditorContext reads the layout through core.
+createTestCore({ url: windowUrlState() });
 
 function setLayout(nodes: LayoutNode[]): void {
   const params = new URLSearchParams(window.location.search);

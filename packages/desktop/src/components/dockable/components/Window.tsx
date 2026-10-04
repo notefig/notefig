@@ -10,7 +10,8 @@ import { useDndContext } from "@dnd-kit/core";
 import { useDockable, useDockChrome } from "../store";
 import { ScrollArea } from "@notefig/ui/scroll-area";
 import { cn } from "@notefig/ui/utils";
-import { dropZoneProps, getProtocolContext } from "@/utils/drag-protocol";
+import { dropZoneProps } from "@/utils/drag-protocol";
+import { appCore } from "@/core/current";
 export type tabObject = {
   id: string;
   name: string;
@@ -71,8 +72,7 @@ function openDroppedFile(
   windowId: string,
 ): void {
   if (payload.fileType !== "file") return;
-  getProtocolContext().openFile?.({
-    tabId: payload.path,
+  appCore().tabs.open(payload.path, {
     intent: "new-tab",
     targetWindowId: windowId,
     moveIfOpen: true,

@@ -53,11 +53,9 @@ import {
   isTextFile,
 } from "@/utils/fs";
 import type { FileTreeNode, SortOrder } from "@/utils/fs";
-import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
+import type { OpenTabOptions } from "@/entities/tabs";
 import { requestElementFocus } from "@/utils/focus-arbiter";
-import { grantTabFocusHandoff } from "@/tabs/tab-controllers";
 import { createAndOpenScratchpad } from "@/entities/scratchpads";
-import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
 import { deriveProjectName } from "@/hooks/use-recent-projects";
 import {
   WORKSPACE_TOOLS,
@@ -77,10 +75,7 @@ interface SidebarProps {
   isCollapsed: boolean;
   activeTabId: string | null;
   openTabs: string[];
-  onFileSelect: (
-    file: FileTreeNode,
-    options?: Omit<OpenFileInLayoutOptions, "tabId">,
-  ) => boolean;
+  onFileSelect: (file: FileTreeNode, options?: OpenTabOptions) => boolean;
   closeTab: (tabId: string) => void;
   /** Rename/move a file whose tab is open (close-and-reopen primitive). */
   onRenameOpenFile: (oldPath: string, newPath: string) => Promise<void>;
@@ -541,8 +536,6 @@ function FilesTool({
 >) {
   const { metadata } = useFileCollections(workspacePath);
   const { sortOrder, setSortOrder } = useSortOrder();
-  const { openFile } = useWorkspaceTabs();
-
   useEffect(() => {
     if (mode.type !== "idle") return;
 
@@ -558,8 +551,8 @@ function FilesTool({
   // inline-naming flow at the workspace root (per-folder creation stays on
   // the context menu — both land in handleCreate).
   const handleNewScratchpad = useCallback(() => {
-    createAndOpenScratchpad(workspacePath, openFile);
-  }, [workspacePath, openFile]);
+    createAndOpenScratchpad(workspacePath);
+  }, [workspacePath]);
 
   const handleNewFile = useCallback(() => {
     onModeChange({
@@ -595,23 +588,23 @@ function FilesTool({
         createFile(workspacePath, fullPath)
           .then(() => {
             if (isTextFile(fullPath)) {
-              const opened = onFileSelect({
-                path: fullPath,
-                type: "file",
-                contentHash: "",
-                content: "",
-              });
               // The user's create gesture is what makes the new document
               // the entry point: the tree opens its inline rename at the
               // same moment, and the document's ambient claims (the prompt
               // widget's) would rightly stand down for that field. Grant
               // the hand-off here, where the gesture is — never from the
               // widget, which also mounts for documents the app opened
-              // under the user's hands — and only for a tab that actually
-              // entered the dock: a grant with no tab has no owner to
-              // consume or drop it, and would upgrade whatever opened that
-              // path next.
-              if (opened) grantTabFocusHandoff(fullPath);
+              // under the user's hands. `open` grants it only for a tab
+              // that actually entered the dock.
+              onFileSelect(
+                {
+                  path: fullPath,
+                  type: "file",
+                  contentHash: "",
+                  content: "",
+                },
+                { handoff: true },
+              );
             }
           })
           .catch((error: unknown) => {

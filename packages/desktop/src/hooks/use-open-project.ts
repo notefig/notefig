@@ -9,18 +9,14 @@
  */
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router-dom";
 import { readSidebarView, withSidebarView } from "@/hooks/sidebar-view";
 import { toast } from "sonner";
 import { FsError } from "@/adapters/platform-adapter.interface";
 import { pickDirectory } from "@/utils/fs";
-import {
-  isFileTabId,
-  readOpenTabIds,
-  useLayoutSearchParam,
-} from "@/entities/tabs";
+import { useCore } from "@notefig/core/react";
+import type { LayoutApi } from "@/entities/layout";
+import { isFileTabId } from "@/entities/tabs";
 import { workspaceKey } from "@/utils/path";
-import { openFileInLayout } from "@/utils/dockable-layout";
 import { openWorkspace, workspaceOfPath } from "@/entities/workspaces";
 import { enterScratchpad, sweepScratchpads } from "@/entities/scratchpads";
 import { ensureWatching } from "@/utils/workspace-watchers";
@@ -39,9 +35,9 @@ export function showWorkspace(workspacePath: string): Promise<void> {
 }
 
 /** Whether any file tab in the dock belongs to the workspace. */
-function hasOpenFileTab(workspacePath: string): boolean {
+function hasOpenFileTab(layout: LayoutApi, workspacePath: string): boolean {
   const key = workspaceKey(workspacePath);
-  return readOpenTabIds().some((tabId) => {
+  return layout.openTabIds().some((tabId) => {
     if (!isFileTabId(tabId)) return false;
     const owner = workspaceOfPath(tabId);
     return owner !== null && workspaceKey(owner) === key;
@@ -60,8 +56,9 @@ function hasOpenFileTab(workspacePath: string): boolean {
 const opensInFlight = new Map<string, Promise<void>>();
 
 export function useOpenProject(): (workspacePath: string) => Promise<void> {
-  const { setLayout } = useLayoutSearchParam();
-  const [, setUrlSearchParams] = useSearchParams();
+  const core = useCore();
+  const { layout, tabs } = core;
+  const url = core.use("url");
   const { addRecentProject } = useRecentProjects();
 
   return useCallback(
@@ -72,15 +69,13 @@ export function useOpenProject(): (workspacePath: string) => Promise<void> {
       addRecentProject(workspacePath);
       // Opening a project is choosing it: a sidebar on the Everything view
       // (the default when nothing is chosen) moves to the project's files;
-      // a sidebar already on a tool stays on it. Written last, from the
-      // live URL: the layout write above goes through the router's
-      // functional updater, whose snapshot predates this open and would
-      // drop the param if it were written first — and reading the render's
-      // params here would resurrect a stale layout instead.
+      // a sidebar already on a tool stays on it. Written from the live URL:
+      // a render's params would predate this open's layout write, and
+      // writing them back would drop the tab it just opened.
       const selectFiles = () => {
-        const live = new URLSearchParams(window.location.search);
+        const live = new URLSearchParams(url.search());
         if (readSidebarView(live) !== "everything") return;
-        setUrlSearchParams(withSidebarView(live, "files"), { replace: true });
+        url.setSearch(`?${withSidebarView(live, "files")}`, { replace: true });
       };
       const open = (async () => {
         // Durable before anything else: a reload right after must find it.
@@ -90,20 +85,16 @@ export function useOpenProject(): (workspacePath: string) => Promise<void> {
         // project's files open in the dock — also lands in the most recent
         // survivor or a fresh one; with a file already open there is
         // nothing to land on.
-        if (hasOpenFileTab(workspacePath)) {
-          await sweepScratchpads(workspacePath, readOpenTabIds());
+        if (hasOpenFileTab(layout, workspacePath)) {
+          await sweepScratchpads(workspacePath, layout.openTabIds());
           selectFiles();
           return;
         }
         const scratchpad = await enterScratchpad(
           workspacePath,
-          readOpenTabIds(),
+          layout.openTabIds(),
         );
-        if (scratchpad !== null) {
-          setLayout((layout) =>
-            openFileInLayout(layout, { tabId: scratchpad, intent: "new-tab" }),
-          );
-        }
+        if (scratchpad !== null) tabs.open(scratchpad, { intent: "new-tab" });
         selectFiles();
       })().finally(() => {
         opensInFlight.delete(key);
@@ -111,7 +102,7 @@ export function useOpenProject(): (workspacePath: string) => Promise<void> {
       opensInFlight.set(key, open);
       return open;
     },
-    [addRecentProject, setLayout, setUrlSearchParams],
+    [addRecentProject, layout, tabs, url],
   );
 }
 

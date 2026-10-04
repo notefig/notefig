@@ -4,7 +4,6 @@ import { Dockable } from "@/components/dockable";
 import type { DockChrome } from "@/components/dockable/store";
 import { CollapsedSidebarHeader, Sidebar } from "@/components/editor/sidebar";
 import type { SearchPanelHandle } from "@/components/editor/search-panel";
-import { canOpenFile as canOpenInEditor } from "@/components/editor/polymorphic-editor";
 import { StatusBar } from "@/components/editor/status-bar";
 import {
   SHELL_CARD_CLASS,
@@ -43,11 +42,10 @@ import { useWorkspacePanels } from "@/hooks/use-workspace-panels";
 import { useSidebarResize } from "@/hooks/use-sidebar-resize";
 import { useSidebarCollapseTween } from "@/hooks/use-sidebar-collapse-tween";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
-import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
-import { WorkspaceTabsProvider } from "@/components/workspace-tabs-provider";
 import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary";
 import { useThrowWorkspaceAccessError } from "@/components/workspace-error-boundary";
-import { agentTabId, isFileTabId, tabKind } from "@/entities/tabs";
+import { isFileTabId } from "@/entities/tabs";
+import { useCore } from "@notefig/core/react";
 import { touchRecentDocument } from "@/entities/recent-documents";
 import { useTrackActiveTab } from "@/entities/seen";
 import { useTabElements } from "@/tabs/tab-types";
@@ -124,6 +122,7 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
   useThrowWorkspaceAccessError(workspacePath);
   const dockableRef = useRef<HTMLDivElement>(null);
   const searchPanelRef = useRef<SearchPanelHandle>(null);
+  const { tabs } = useCore();
 
   const {
     layout,
@@ -131,25 +130,17 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
     activeTabId,
     handleFileSelect,
     handleLayoutChange,
-    closeTab,
-    renameTab,
     closeActiveTab,
     getFocusedTabId,
     focusActiveTab,
     getSelectedText,
-    openFile,
-  } = useDockableTabs({
-    canOpenFile: canOpenFileInTab,
-    dockableRef,
-  });
+  } = useDockableTabs({ dockableRef });
 
   const { allDockableTabs, wordCount, isSynced } = useWorkspaceDocuments({
     openTabs,
     activeTabId,
     layout,
     handleLayoutChange,
-    closeTab,
-    openFile,
   });
 
   const {
@@ -170,8 +161,6 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
   } = useWorkspaceChrome(workspacePath, searchPanelRef, focusActiveTab);
 
   const {
-    openFileInTabs,
-    openAgentTab,
     handleRenameOpenFile,
     fileTreeMode,
     setFileTreeMode,
@@ -190,16 +179,10 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
     showFileTree,
     openSearchPanel,
     openSessionsSidebar,
-    openFile,
-    renameTab,
   });
 
   // What the platform shows outside the window follows this shell.
-  const appStatusTabs = useMemo(
-    () => ({ openFile: openFileInTabs, openAgentTab }),
-    [openFileInTabs, openAgentTab],
-  );
-  usePublishAppStatus({ workspacePath, tabs: appStatusTabs, openSettings });
+  usePublishAppStatus({ workspacePath, tabs, openSettings });
 
   const chrome = useShellChromeMetrics();
   // Search follows the file in front of the user, not the sidebar's
@@ -216,156 +199,116 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
   const lightsInset = direction === "rtl" ? undefined : chrome.insetStart;
 
   return (
-    <WorkspaceTabsProvider
-      openFile={openFileInTabs}
-      openAgentTab={openAgentTab}
-    >
-      <PromptWidgetBoundary>
-        <div
-          dir={direction}
-          className={cn(
-            // `relative` so the status bar's corner is the window's, not the
-            // padded dock column's: the root's overflow clip ends at its
-            // padding edge, so bottom-0 here hugs the window's bottom.
-            "texture-surface relative flex h-full w-full overflow-clip bg-background",
-            chrome.rootClassName,
-          )}
-          style={chrome.rootStyle}
-        >
-          <Sidebar
-            workspacePath={workspacePath}
-            searchWorkspacePath={searchWorkspacePath}
-            sidebarView={sidebarView}
-            isCollapsed={isSidebarCollapsed}
-            activeTabId={activeTabId}
-            openTabs={openTabs}
-            onFileSelect={handleFileSelect}
-            closeTab={closeTab}
-            onRenameOpenFile={handleRenameOpenFile}
-            mode={fileTreeMode}
-            onModeChange={setFileTreeMode}
-            searchPanelRef={searchPanelRef}
-            onToggleCollapse={toggleSidebarCollapsed}
-            onShowEverything={showEverything}
-            onShowTool={showSidebarView}
-            onShowWorkspaceTools={showWorkspaceTools}
-            onOpenSettings={openSettings}
-            resize={sidebarResize}
-            tween={sidebarTween}
-            lightsInset={lightsInset}
-          />
+    <PromptWidgetBoundary>
+      <div
+        dir={direction}
+        className={cn(
+          // `relative` so the status bar's corner is the window's, not the
+          // padded dock column's: the root's overflow clip ends at its
+          // padding edge, so bottom-0 here hugs the window's bottom.
+          "texture-surface relative flex h-full w-full overflow-clip bg-background",
+          chrome.rootClassName,
+        )}
+        style={chrome.rootStyle}
+      >
+        <Sidebar
+          workspacePath={workspacePath}
+          searchWorkspacePath={searchWorkspacePath}
+          sidebarView={sidebarView}
+          isCollapsed={isSidebarCollapsed}
+          activeTabId={activeTabId}
+          openTabs={openTabs}
+          onFileSelect={handleFileSelect}
+          closeTab={tabs.close}
+          onRenameOpenFile={handleRenameOpenFile}
+          mode={fileTreeMode}
+          onModeChange={setFileTreeMode}
+          searchPanelRef={searchPanelRef}
+          onToggleCollapse={toggleSidebarCollapsed}
+          onShowEverything={showEverything}
+          onShowTool={showSidebarView}
+          onShowWorkspaceTools={showWorkspaceTools}
+          onOpenSettings={openSettings}
+          resize={sidebarResize}
+          tween={sidebarTween}
+          lightsInset={lightsInset}
+        />
 
-          <div
-            className={cn(
-              "flex min-w-0 flex-1 flex-col overflow-clip",
-              chrome.stackClassName,
-            )}
-            style={chrome.stackStyle}
-          >
-            <div className="relative flex min-h-0 flex-1 flex-col overflow-clip">
-              <DebugPanel />
-              <div className="flex min-h-0 flex-1 overflow-clip">
-                <div
-                  ref={dockableRef}
-                  className="h-full min-w-0 flex-1 overflow-clip"
-                  tabIndex={-1}
+        <div
+          className={cn(
+            "flex min-w-0 flex-1 flex-col overflow-clip",
+            chrome.stackClassName,
+          )}
+          style={chrome.stackStyle}
+        >
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-clip">
+            <DebugPanel />
+            <div className="flex min-h-0 flex-1 overflow-clip">
+              <div
+                ref={dockableRef}
+                className="h-full min-w-0 flex-1 overflow-clip"
+                tabIndex={-1}
+              >
+                <DockArea
+                  hasTabs={openTabs.length > 0}
+                  layout={layout}
+                  onLayoutChange={handleLayoutChange}
+                  chrome={{
+                    tabBarLeading: (
+                      <CollapsedSidebarHeader
+                        workspacePath={workspacePath}
+                        width={sidebarResize.sidebarWidth}
+                        open={!isSidebarCollapsed}
+                        lightsInset={lightsInset}
+                        onToggleCollapse={toggleSidebarCollapsed}
+                      />
+                    ),
+                    tabBarTrailing: <WindowsControlsInline />,
+                    tabBarLeadingActive: isSidebarCollapsed,
+                    endInset:
+                      direction === "rtl" ? (chrome.insetStart ?? null) : null,
+                  }}
                 >
-                  <DockArea
-                    hasTabs={openTabs.length > 0}
-                    layout={layout}
-                    onLayoutChange={handleLayoutChange}
-                    chrome={{
-                      tabBarLeading: (
-                        <CollapsedSidebarHeader
-                          workspacePath={workspacePath}
-                          width={sidebarResize.sidebarWidth}
-                          open={!isSidebarCollapsed}
-                          lightsInset={lightsInset}
-                          onToggleCollapse={toggleSidebarCollapsed}
-                        />
-                      ),
-                      tabBarTrailing: <WindowsControlsInline />,
-                      tabBarLeadingActive: isSidebarCollapsed,
-                      endInset:
-                        direction === "rtl"
-                          ? (chrome.insetStart ?? null)
-                          : null,
-                    }}
-                  >
-                    {allDockableTabs}
-                  </DockArea>
-                </div>
+                  {allDockableTabs}
+                </DockArea>
               </div>
             </div>
           </div>
-
-          <StatusBar
-            wordCount={wordCount}
-            isSynced={isSynced}
-            direction={direction}
-          />
-
-          <SettingsModal
-            direction={direction}
-            onDirectionChange={setDirection}
-            onFocusTab={focusActiveTab}
-          />
-
-          <CommandPalette
-            open={isCommandPaletteOpen}
-            workspacePath={workspacePath}
-            onOpenChange={setIsCommandPaletteOpen}
-            onNewScratchpad={handleNewScratchpad}
-            onNewFile={handleNewFile}
-            onNewDirectory={handleNewDirectory}
-            onCloseFile={closeActiveTab}
-            onUndo={() => runHistoryAction("undo")}
-            onRedo={() => runHistoryAction("redo")}
-            onOpenSettings={openSettings}
-            onToggleSidebar={toggleSidebarCollapsed}
-            onToggleFullscreen={handleToggleFullscreen}
-            onSearchInFile={handleSearchInFile}
-            onSearchInFiles={handleSearchInFiles}
-            onFocusTab={focusActiveTab}
-            direction={direction}
-          />
         </div>
-      </PromptWidgetBoundary>
-    </WorkspaceTabsProvider>
-  );
-}
 
-/** Open-as-tab entry points, exposed via WorkspaceTabsContext so components
- *  nested in the layout (link menu, search panel) can open files as tabs. */
-function useWorkspaceFileOpeners(
-  openFile: (options: OpenFileInLayoutOptions) => void,
-) {
-  const openFileInTabs = useCallback(
-    (options: OpenFileInLayoutOptions) => {
-      // Only file tabs are gated on the editor's format support; the other
-      // tab kinds carry their own content.
-      if (
-        tabKind(options.tabId) === "file" &&
-        !canOpenInEditor(options.tabId)
-      ) {
-        return false;
-      }
-      openFile(options);
-      return true;
-    },
-    [openFile],
-  );
+        <StatusBar
+          wordCount={wordCount}
+          isSynced={isSynced}
+          direction={direction}
+        />
 
-  // Open (or focus — openFileInLayout dedupes by id) a session's chat tab.
-  // `new-tab` intent: a session must never replace the file tab in view.
-  const openAgentTab = useCallback(
-    (taskId: string) => {
-      openFile({ tabId: agentTabId(taskId), intent: "new-tab" });
-    },
-    [openFile],
-  );
+        <SettingsModal
+          direction={direction}
+          onDirectionChange={setDirection}
+          onFocusTab={focusActiveTab}
+        />
 
-  return { openFileInTabs, openAgentTab };
+        <CommandPalette
+          open={isCommandPaletteOpen}
+          workspacePath={workspacePath}
+          onOpenChange={setIsCommandPaletteOpen}
+          onNewScratchpad={handleNewScratchpad}
+          onNewFile={handleNewFile}
+          onNewDirectory={handleNewDirectory}
+          onCloseFile={closeActiveTab}
+          onUndo={() => runHistoryAction("undo")}
+          onRedo={() => runHistoryAction("redo")}
+          onOpenSettings={openSettings}
+          onToggleSidebar={toggleSidebarCollapsed}
+          onToggleFullscreen={handleToggleFullscreen}
+          onSearchInFile={handleSearchInFile}
+          onSearchInFiles={handleSearchInFiles}
+          onFocusTab={focusActiveTab}
+          direction={direction}
+        />
+      </div>
+    </PromptWidgetBoundary>
+  );
 }
 
 /** The workspace's text direction, persisted in project settings. */
@@ -437,12 +380,6 @@ function countWords(content: string): number | null {
     .filter((word: string) => word.length > 0).length;
 }
 
-/** Only file tabs are gated on the editor's format support; the other tab
- *  kinds carry their own content. */
-function canOpenFileInTab(file: { type: string; path: string }): boolean {
-  return file.type === "file" && canOpenInEditor(file.path);
-}
-
 /** Everything derived from the open tabs' backing rows: the cross-entity
  *  join (agent/file split, metadata ⋈ content rows, stale-tab detection),
  *  the rendered tab elements, watchers, and the status bar's inputs. */
@@ -451,8 +388,6 @@ function useWorkspaceDocuments({
   activeTabId,
   layout,
   handleLayoutChange,
-  closeTab,
-  openFile,
 }: {
   openTabs: string[];
   activeTabId: string | null;
@@ -460,22 +395,21 @@ function useWorkspaceDocuments({
   handleLayoutChange: (
     layout: Parameters<typeof removeTabFromLayout>[0],
   ) => void;
-  closeTab: (tabId: string) => void;
-  openFile: (options: OpenFileInLayoutOptions) => void;
 }) {
+  const { tabs } = useCore();
   const {
     fileTabsByWorkspace,
     agentTaskRows: openAgentTaskRows,
     staleTabIds,
   } = useWorkspaceTabs(openTabs);
 
-  useReleaseNotesOnUpdate(openFile);
+  useReleaseNotesOnUpdate();
 
   // One element per open tab, built from the tab-type registry (title +
   // content per kind) and memoised per tab id.
   const allDockableTabs = useTabElements(openTabs, {
     agentTaskRows: openAgentTaskRows,
-    closeTab,
+    closeTab: tabs.close,
   });
 
   const activeContent = useActiveFileContent(activeTabId);
@@ -523,9 +457,8 @@ function useWorkspaceChrome(
   };
 }
 
-/** The workspace's command surface: open-as-tab entry points, the command
- *  bundle behind the palette and hotkeys, the open-file rename, and the
- *  file tree's transient mode. */
+/** The workspace's command surface: the command bundle behind the palette
+ *  and hotkeys, the open-file rename, and the file tree's transient mode. */
 function useWorkspaceActions({
   workspacePath,
   activeTabId,
@@ -534,8 +467,6 @@ function useWorkspaceActions({
   showFileTree,
   openSearchPanel,
   openSessionsSidebar,
-  openFile,
-  renameTab,
 }: {
   workspacePath: string;
   activeTabId: string | null;
@@ -544,10 +475,7 @@ function useWorkspaceActions({
   showFileTree: () => void;
   openSearchPanel: () => void;
   openSessionsSidebar: () => void;
-  openFile: (options: OpenFileInLayoutOptions) => void;
-  renameTab: (oldId: string, newId: string) => void;
 }) {
-  const { openFileInTabs, openAgentTab } = useWorkspaceFileOpeners(openFile);
   const [fileTreeMode, setFileTreeMode] =
     useState<FileTreeMode>(FILE_TREE_IDLE);
 
@@ -558,16 +486,13 @@ function useWorkspaceActions({
     getSelectedText,
     showFileTree,
     setFileTreeMode,
-    openFile: openFileInTabs,
     openSearchPanel,
     openSessionsSidebar,
   });
 
-  const handleRenameOpenFile = useRenameOpenFile(workspacePath, renameTab);
+  const handleRenameOpenFile = useRenameOpenFile(workspacePath);
 
   return {
-    openFileInTabs,
-    openAgentTab,
     handleRenameOpenFile,
     fileTreeMode,
     setFileTreeMode,
@@ -577,10 +502,8 @@ function useWorkspaceActions({
 
 /** Rename/move a file while its tab is open — the close-and-reopen
  *  primitive keeps the tab in its window slot. */
-function useRenameOpenFile(
-  workspacePath: string,
-  renameTab: (oldId: string, newId: string) => void,
-) {
+function useRenameOpenFile(workspacePath: string) {
+  const { tabs } = useCore();
   return useCallback(
     (oldPath: string, newPath: string) =>
       renameOpenFileTab({
@@ -589,9 +512,9 @@ function useRenameOpenFile(
         workspacePath: workspaceOfPath(oldPath) ?? workspacePath,
         oldPath,
         newPath,
-        applyLayoutRename: renameTab,
+        applyLayoutRename: tabs.rename,
       }),
-    [workspacePath, renameTab],
+    [workspacePath, tabs],
   );
 }
 

@@ -82,11 +82,14 @@ describe("restoreOpenWorkspaces at boot", () => {
   it("reopens every persisted workspace: collections seeded, listings walked, watchers armed, focus kept", async () => {
     const workspaces = await import("./workspaces");
     const { createAppCore, runtimeModules } = await import("@/core/app-core");
+    const { memoryUrlState } = await import("@/testing/test-core");
     expect(workspaces.OPEN_WORKSPACES_COLLECTION_ID).toBe(
       OPEN_WORKSPACES_COLLECTION_ID,
     );
 
-    createAppCore(runtimeModules({ restoreWorkspaces: true })).boot();
+    createAppCore(runtimeModules({ restoreWorkspaces: true }), {
+      url: memoryUrlState(),
+    }).boot();
     // Ready means restored, not merely loaded: no settle sleep needed for
     // the seeding and walks below to have been issued.
     await workspaces.whenOpenWorkspacesReady();

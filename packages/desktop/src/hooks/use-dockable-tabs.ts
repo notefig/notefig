@@ -1,35 +1,20 @@
 import {
   useCallback,
-  useMemo,
-  useRef,
   useEffect,
-  useState,
+  useMemo,
+  useSyncExternalStore,
   type RefObject,
 } from "react";
 import { useHotkey } from "@tanstack/react-hotkeys";
+import { useCore } from "@notefig/core/react";
 import type { LayoutNode } from "@/components/dockable";
-import { useLayoutSearchParam, extractTabIds } from "@/entities/tabs";
-import {
-  findFirstWindow,
-  findWindowById,
-  openFileInLayout,
-  type OpenFileInLayoutOptions,
-  removeTabFromLayout,
-  renameTabInLayout,
-  selectTabInLayout,
-} from "@/utils/dockable-layout";
-import {
-  disposeTab,
-  focusTab,
-  getTabSelectedText,
-  requestTabFocus,
-  setActiveTab,
-} from "@/tabs/tab-controllers";
+import { useLayout } from "@/entities/layout";
+import type { OpenTabOptions } from "@/entities/tabs";
+import { getTabSelectedText, setActiveTab } from "@/tabs/tab-controllers";
 import type { FileTreeNode } from "@/utils/fs";
 
 export interface UseDockableTabsOptions {
-  canOpenFile?: (file: FileTreeNode) => boolean;
-
+  /** Scopes the tab hotkeys to the dock. */
   dockableRef?: RefObject<HTMLElement | null>;
 }
 
@@ -43,35 +28,14 @@ export interface UseDockableTabsResult {
   /** Open a tree entry as a tab. Returns whether it did: directories and
    *  files the editor cannot open are refused, and a caller that grants
    *  something on the strength of the open (a focus hand-off) must know. */
-  handleFileSelect: (
-    file: FileTreeNode,
-    options?: Omit<OpenFileInLayoutOptions, "tabId">,
-  ) => boolean;
+  handleFileSelect: (file: FileTreeNode, options?: OpenTabOptions) => boolean;
 
+  /** The dock's onChange: takes its layout, disposing removed tabs. */
   handleLayoutChange: (newLayout: LayoutNode[]) => void;
-
-  openFile: (options: OpenFileInLayoutOptions) => void;
-
-  closeTab: (tabId: string) => void;
-
-  /**
-   * Swap a tab id in place (rename-open-tab flow). Raw layout write: no
-   * dispose, no onBeforeClose — the orchestrator in entities/tabs.ts owns
-   * the editor teardown ordering.
-   */
-  renameTab: (oldId: string, newId: string) => void;
-
-  getFocusedTabId: () => string | null;
 
   closeActiveTab: () => void;
 
-  selectTab: (tabId: string) => void;
-
-  selectTabAtIndex: (index: number) => void;
-
-  selectNextTab: () => void;
-
-  selectPrevTab: () => void;
+  getFocusedTabId: () => string | null;
 
   /** Focus the active tab's own surface — whatever kind of tab it is. */
   focusActiveTab: () => boolean;
@@ -81,251 +45,73 @@ export interface UseDockableTabsResult {
 }
 
 /**
- * The layout half of the tab system: what is open, what is selected, and the
- * hotkeys that move between them — for every kind of tab, since it addresses
- * tabs only by id and routes per-tab work through the tab-controller
- * registry. What each tab *renders* is the other half (`tabs/tab-types.tsx`).
- *
- * @example
- * ```tsx
- * const { layout, openTabs, handleLayoutChange } = useDockableTabs({
- *   canOpenFile: (file) => file.type === 'file' && isTextFile(file.path),
- *   dockableRef,
- * });
- * const tabs = useTabElements(openTabs, renderContext);
- *
- * return (
- *   <Dockable.Root layout={layout} onChange={handleLayoutChange}>
- *     {tabs}
- *   </Dockable.Root>
- * );
- * ```
+ * The dock's React half: re-renders on layout and focused-window changes,
+ * keeps the focus arbiter pointed at the active tab, and binds the tab
+ * hotkeys. Every change to tabs goes through `core.tabs`; what each tab
+ * *renders* is `tabs/tab-types.tsx`.
  */
 export function useDockableTabs(
-  options: UseDockableTabsOptions,
+  options: UseDockableTabsOptions = {},
 ): UseDockableTabsResult {
-  const { canOpenFile, dockableRef } = options;
-  const { layout, setLayout, openTabs, layoutSelectedTabId } =
-    useLayoutSearchParam();
-  const lastFocusedWindowIdRef = useRef<string | null>(null);
-  const [, setFocusedWindowId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const root = dockableRef?.current;
-    if (!root) return;
-
-    const handleFocusIn = (event: FocusEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (!target) return;
-      const windowEl = target.closest<HTMLElement>("[data-dockable-window-id]");
-      const nextFocusedWindowId = windowEl?.dataset.dockableWindowId;
-      if (nextFocusedWindowId) {
-        lastFocusedWindowIdRef.current = nextFocusedWindowId;
-        setFocusedWindowId((current) =>
-          current === nextFocusedWindowId ? current : nextFocusedWindowId,
-        );
-      }
-    };
-
-    root.addEventListener("focusin", handleFocusIn);
-    return () => {
-      root.removeEventListener("focusin", handleFocusIn);
-    };
-  }, [dockableRef]);
-
-  const getActiveWindow = useCallback(() => {
-    const root = dockableRef?.current;
-    const activeElement = document.activeElement;
-
-    // 1) If focus is currently inside dockable, use that window
-    if (
-      root &&
-      activeElement instanceof HTMLElement &&
-      root.contains(activeElement)
-    ) {
-      const windowElement = activeElement.closest<HTMLElement>(
-        "[data-dockable-window-id]",
-      );
-      const windowId = windowElement?.dataset.dockableWindowId;
-
-      if (windowId) {
-        const activeWindow = findWindowById(layout, windowId);
-        if (activeWindow) {
-          return activeWindow;
-        }
-      }
-    }
-
-    // 2) Fallback to last-focused window (if still present)
-    if (lastFocusedWindowIdRef.current) {
-      const rememberedWindow = findWindowById(
-        layout,
-        lastFocusedWindowIdRef.current,
-      );
-      if (rememberedWindow) return rememberedWindow;
-    }
-
-    // 3) Fallback to window containing layout-selected tab
-    if (layoutSelectedTabId) {
-      const windowWithActive = layout.find((node) =>
-        "selected" in node ? node.selected === layoutSelectedTabId : false,
-      );
-      if (windowWithActive && "selected" in windowWithActive) {
-        return windowWithActive as any;
-      }
-    }
-
-    // 4) Fallback to first window
-    return findFirstWindow(layout);
-  }, [dockableRef, layout, layoutSelectedTabId]);
-
-  const getFocusedTabId = useCallback(() => {
-    return getActiveWindow()?.selected ?? layoutSelectedTabId;
-  }, [getActiveWindow, layoutSelectedTabId]);
-
-  const activeTabId = getFocusedTabId();
+  const { dockableRef } = options;
+  const { tabs } = useCore();
+  const { layout, openTabs } = useLayout();
+  const activeTabId = useSyncExternalStore(
+    tabs.subscribe,
+    tabs.activeTabId,
+    tabs.activeTabId,
+  );
 
   useEffect(() => {
     setActiveTab(activeTabId);
   }, [activeTabId]);
 
+  // Every layout change re-asks for focus on the active tab; the request
+  // waits for the tab to mount and loses to modals and live text entry.
   useEffect(() => {
-    const tabId = getFocusedTabId();
+    const tabId = tabs.activeTabId();
     if (!tabId) return;
-
-    requestTabFocus(tabId, {
-      when: "when-mounted",
-      reason: "tab-selected",
-    });
-  }, [getFocusedTabId]);
-
-  const getActiveWindowId = useCallback(() => {
-    return getActiveWindow()?.id ?? null;
-  }, [getActiveWindow]);
-
-  // Open with teardown: "replace" intent drops the target window's selected
-  // tab from the layout, and a tab that leaves the layout must be disposed —
-  // the same contract handleLayoutChange and closeTab honor. Diffing the tab
-  // ids across the transition catches it without duplicating the layout
-  // logic. disposeTab is idempotent, so a re-run of the updater is harmless.
-  const openFileDisposing = useCallback(
-    (options: OpenFileInLayoutOptions) => {
-      setLayout((currentLayout) => {
-        const nextLayout = openFileInLayout(currentLayout, options);
-        const nextTabIds = extractTabIds(nextLayout);
-        extractTabIds(currentLayout)
-          .filter((id) => !nextTabIds.includes(id))
-          .forEach((id) => disposeTab(id));
-        return nextLayout;
-      });
-    },
-    [setLayout],
-  );
+    tabs.focus(tabId, { when: "when-mounted", reason: "tab-selected" });
+  }, [tabs, layout]);
 
   const handleFileSelect = useCallback(
-    (
-      file: FileTreeNode,
-      options?: Omit<OpenFileInLayoutOptions, "tabId">,
-    ): boolean => {
+    (file: FileTreeNode, openOptions?: OpenTabOptions): boolean => {
       if (file.type !== "file") return false;
-
-      if (canOpenFile && !canOpenFile(file)) {
-        console.warn(`File cannot be opened as tab: ${file.path}`);
-        return false;
-      }
-
-      openFileDisposing({
-        tabId: file.path,
-        intent: options?.intent ?? "replace",
-        targetWindowId:
-          options?.targetWindowId ?? getActiveWindowId() ?? undefined,
-      });
-      return true;
+      const opened = tabs.open(file.path, openOptions);
+      if (!opened) console.warn(`File cannot be opened as tab: ${file.path}`);
+      return opened;
     },
-    [openFileDisposing, canOpenFile, getActiveWindowId],
+    [tabs],
   );
 
   const handleLayoutChange = useCallback(
-    (newLayout: LayoutNode[]) => {
-      // Tear down any tabs Dockable removed (e.g. via drag to close)
-      const newTabIds = extractTabIds(newLayout);
-      const removed = openTabs.filter((id) => !newTabIds.includes(id));
-      removed.forEach((id) => disposeTab(id));
-
-      setLayout(newLayout);
-    },
-    [openTabs, setLayout],
+    (newLayout: LayoutNode[]) => tabs.applyLayout(newLayout),
+    [tabs],
   );
 
-  const openFile = useCallback(
-    (options: OpenFileInLayoutOptions) => {
-      openFileDisposing({
-        ...options,
-        targetWindowId:
-          options.targetWindowId ?? getActiveWindowId() ?? undefined,
-      });
-    },
-    [openFileDisposing, getActiveWindowId],
-  );
-
-  const closeTab = useCallback(
-    (tabId: string) => {
-      if (!openTabs.includes(tabId)) return;
-
-      disposeTab(tabId);
-
-      setLayout((currentLayout) => removeTabFromLayout(currentLayout, tabId));
-    },
-    [openTabs, setLayout],
-  );
-
-  const renameTab = useCallback(
-    (oldId: string, newId: string) => {
-      setLayout((currentLayout) =>
-        renameTabInLayout(currentLayout, oldId, newId),
-      );
-    },
-    [setLayout],
-  );
-
-  const selectTab = useCallback(
-    (tabId: string) => {
-      if (!openTabs.includes(tabId)) return;
-      setLayout((currentLayout) => selectTabInLayout(currentLayout, tabId));
-    },
-    [openTabs, setLayout],
-  );
+  const getFocusedTabId = useCallback(() => tabs.activeTabId(), [tabs]);
 
   const closeActiveTab = useCallback(() => {
-    const tabId = getFocusedTabId();
-
-    if (!tabId) return;
-
-    closeTab(tabId);
-  }, [getFocusedTabId, closeTab]);
+    const tabId = tabs.activeTabId();
+    if (tabId) tabs.close(tabId);
+  }, [tabs]);
 
   const focusActiveTab = useCallback(() => {
-    const tabId = getFocusedTabId();
-    if (!tabId) return false;
-    return focusTab(tabId);
-  }, [getFocusedTabId]);
+    const tabId = tabs.activeTabId();
+    return tabId ? tabs.focus(tabId) : false;
+  }, [tabs]);
 
   const getSelectedText = useCallback(() => {
-    const tabId = getFocusedTabId();
-    if (!tabId) return undefined;
-    return getTabSelectedText(tabId);
-  }, [getFocusedTabId]);
+    const tabId = tabs.activeTabId();
+    return tabId ? getTabSelectedText(tabId) : undefined;
+  }, [tabs]);
 
   const selectTabAtIndex = useCallback(
     (index: number) => {
-      const activeWindow = getActiveWindow();
-      const tabId = activeWindow?.children[index];
-
-      if (!tabId) return;
-
-      setLayout((currentLayout) => selectTabInLayout(currentLayout, tabId));
+      const tabId = tabs.activeWindowTabs()[index];
+      if (tabId) tabs.select(tabId);
     },
-    [getActiveWindow, setLayout],
+    [tabs],
   );
 
   const dockableHotkeyOptions = useMemo(
@@ -435,18 +221,14 @@ export function useDockableTabs(
   /** Move the selection `offset` tabs along the active window, wrapping. */
   const selectTabByOffset = useCallback(
     (offset: number) => {
-      const activeWindow = getActiveWindow();
-      if (!activeWindow || activeWindow.children.length <= 1) return;
-
-      const currentIndex = activeWindow.children.indexOf(activeWindow.selected);
+      const windowTabs = tabs.activeWindowTabs();
+      if (windowTabs.length <= 1) return;
+      const currentIndex = windowTabs.indexOf(tabs.activeTabId() ?? "");
       if (currentIndex === -1) return;
-
-      const count = activeWindow.children.length;
-      const tabId =
-        activeWindow.children[(currentIndex + offset + count) % count];
-      setLayout((currentLayout) => selectTabInLayout(currentLayout, tabId));
+      const count = windowTabs.length;
+      tabs.select(windowTabs[(currentIndex + offset + count) % count]);
     },
-    [getActiveWindow, setLayout],
+    [tabs],
   );
 
   const selectNextTab = useCallback(
@@ -465,15 +247,8 @@ export function useDockableTabs(
     activeTabId,
     handleFileSelect,
     handleLayoutChange,
-    openFile,
-    closeTab,
-    renameTab,
-    getFocusedTabId,
     closeActiveTab,
-    selectTab,
-    selectTabAtIndex,
-    selectNextTab,
-    selectPrevTab,
+    getFocusedTabId,
     focusActiveTab,
     getSelectedText,
   };

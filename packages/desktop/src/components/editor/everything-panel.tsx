@@ -24,7 +24,7 @@ import { AddWorkspaceMenu } from "@/components/editor/global-column";
 import { ScratchpadIcon } from "@/components/editor/scratchpad-icon";
 import { SidebarSeparator } from "@/components/editor/tool-bar";
 import { TOOL_ICONS } from "@/components/editor/workspace-tools";
-import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
+import { useCore } from "@notefig/core/react";
 import { useAgentSessionList } from "@/entities/agents";
 import {
   mostPressing,
@@ -268,7 +268,6 @@ function NavRow({
  *  add-workspace menu, so both entry points offer the same choices. */
 function QuickActions({ workspacePath }: { workspacePath: string }) {
   const { t } = useTranslation();
-  const { openFile } = useWorkspaceTabs();
   const { defaultHarness } = useDefaultHarness();
   const { create, trustDialog } = useStartSession(workspacePath);
   return (
@@ -276,7 +275,7 @@ function QuickActions({ workspacePath }: { workspacePath: string }) {
       <NavRow
         leading={<ScratchpadIcon className="size-3" />}
         label={t("newScratchpad")}
-        onClick={() => createAndOpenScratchpad(workspacePath, openFile)}
+        onClick={() => createAndOpenScratchpad(workspacePath)}
       />
       <NavRow
         leading={<MessageSquarePlus className="size-3" strokeWidth={1.5} />}
@@ -320,7 +319,6 @@ function askLabel(
  */
 function AttentionGroup({ items }: { items: AttentionItem[] }) {
   const { t } = useTranslation();
-  const { openAgentTab } = useWorkspaceTabs();
   const [expanded, setExpanded] = useState(false);
   const overflow = items.length - ATTENTION_COLLAPSED_ROWS;
   const shown = expanded ? items : items.slice(0, ATTENTION_COLLAPSED_ROWS);
@@ -338,9 +336,7 @@ function AttentionGroup({ items }: { items: AttentionItem[] }) {
             label={askLabel(item, t)}
             title={`${askLabel(item, t)} · ${deriveProjectName(item.task?.workspacePath ?? "")}`}
             trailing={formatTimeAgo(item.since)}
-            onClick={() =>
-              jumpToTask(item.taskId, { turnId: item.turnId, openAgentTab })
-            }
+            onClick={() => jumpToTask(item.taskId, { turnId: item.turnId })}
           />
         ))}
       </div>
@@ -374,7 +370,6 @@ function PromptRoundRow({
   /** Settled since the user last had its document in front. */
   attention: AttentionKind | null;
 }) {
-  const { openFile } = useWorkspaceTabs();
   const label = round.prompt || getFileName(round.documentPath);
   return (
     <NavRow
@@ -389,7 +384,7 @@ function PromptRoundRow({
       label={label}
       title={`${label} · ${getFileName(round.documentPath)} · ${deriveProjectName(round.workspacePath)}`}
       trailing={describePromptRound(round) ?? formatTimeAgo(round.startedAt)}
-      onClick={() => jumpToRound(round, openFile)}
+      onClick={() => jumpToRound(round)}
     />
   );
 }
@@ -418,7 +413,7 @@ function RecentDocumentRow({
   /** A prompt round is running in this document. */
   live: boolean;
 }) {
-  const { openFile } = useWorkspaceTabs();
+  const { tabs } = useCore();
   return (
     <NavRow
       leading={
@@ -428,7 +423,7 @@ function RecentDocumentRow({
       title={`${document.path} · ${deriveProjectName(document.workspacePath)}`}
       active={active}
       trailing={deriveProjectName(document.workspacePath)}
-      onClick={() => openFile({ tabId: document.path, intent: "replace" })}
+      onClick={() => tabs.open(document.path, { intent: "replace" })}
     />
   );
 }

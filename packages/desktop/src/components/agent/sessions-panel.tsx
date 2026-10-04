@@ -56,7 +56,7 @@ import {
   type AgentTaskMeta,
   useSessionActions,
 } from "@/entities/agents";
-import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
+import { useCore } from "@notefig/core/react";
 import { agentTabId } from "@/entities/tabs";
 import {
   useActiveHarnesses,
@@ -131,7 +131,7 @@ export function useStartSession(workspacePath: string): {
 } {
   const { t } = useTranslation();
   const normalized = workspaceKey(workspacePath);
-  const { openAgentTab } = useWorkspaceTabs();
+  const { tabs } = useCore();
   const [trustPromptOpen, setTrustPromptOpen] = useState(false);
   // The harness the pending trust confirmation would start (picker choice).
   const [pendingHarness, setPendingHarness] = useState<HarnessDefinition>(
@@ -146,12 +146,12 @@ export function useStartSession(workspacePath: string): {
       // open the tab right away rather than sitting on the multi-second
       // spawn/handshake; a failed start shows on the row as "error".
       const { taskId, started } = startAgentTask(workspacePath, harness);
-      openAgentTab(taskId);
+      tabs.openAgent(taskId);
       started.catch((error) => {
         console.error("Failed to start agent task:", error);
       });
     },
-    [workspacePath, openAgentTab],
+    [workspacePath, tabs],
   );
 
   const create = useCallback(
@@ -207,7 +207,7 @@ export function SessionListRow({
   activeTabId: string | null;
   className?: string;
 }) {
-  const { openAgentTab } = useWorkspaceTabs();
+  const { tabs } = useCore();
   const { byTask } = useAttention();
   return (
     <SessionRow
@@ -217,7 +217,7 @@ export function SessionListRow({
       isRunning={meta.isRunning}
       attention={byTask.get(meta.task.taskId) ?? null}
       active={agentTabId(meta.task.taskId) === activeTabId}
-      onOpen={() => openAgentTab(meta.task.taskId)}
+      onOpen={() => tabs.openAgent(meta.task.taskId)}
     />
   );
 }

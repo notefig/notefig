@@ -14,6 +14,9 @@ import { agentTasksModule } from "@/agent/agent-collections";
 import { harnessDiscoveryModule } from "@/agent/harness-discovery";
 import { tunnelModule } from "@/agent/tunnel/tunnel-module";
 import { treeInlineEditModule } from "@/components/editor/file-tree";
+import { canOpenFile } from "@/components/editor/polymorphic-editor";
+import { layoutModule, type UrlState } from "@/entities/layout";
+import { tabsModule } from "@/entities/tabs";
 import { promptRoundsModule } from "@/entities/prompt-rounds";
 import { queryClient } from "@/entities/query-client";
 import { seenModule } from "@/entities/seen";
@@ -22,6 +25,7 @@ import { workspaceScopesModule } from "@/entities/workspace-scoped";
 import { workspacesModule } from "@/entities/workspaces";
 import { workspaceKey } from "@/utils/path";
 import { workspaceWatchersModule } from "@/utils/workspace-watchers";
+import { installAppCore } from "./current";
 
 declare module "@notefig/core" {
   interface CoreServices {
@@ -48,6 +52,8 @@ export function runtimeModules({
     turnWritesModule,
     treeInlineEditModule,
     workspacesModule({ restore: restoreWorkspaces }),
+    layoutModule,
+    tabsModule({ canOpenFile }),
   ];
 }
 
@@ -61,10 +67,19 @@ export function desktopModules(): AnyModule[] {
   ];
 }
 
-export function createAppCore(modules: readonly AnyModule[]): Core {
-  return createCore({
-    services: { platform: platformAdapter, queryClient },
+/**
+ * Build the root's core and install it for code outside React
+ * (`appCore()`). `url` is the root's router, seen through `UrlState`.
+ */
+export function createAppCore(
+  modules: readonly AnyModule[],
+  { url }: { url: UrlState },
+): Core {
+  const core = createCore({
+    services: { platform: platformAdapter, queryClient, url },
     modules,
     workspaceKey,
   });
+  installAppCore(core);
+  return core;
 }

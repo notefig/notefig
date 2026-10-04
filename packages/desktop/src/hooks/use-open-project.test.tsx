@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, createElement, useEffect } from "react";
+import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { BrowserRouter, useLocation } from "react-router-dom";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { CoreProvider } from "@notefig/core/react";
 
 // The layout hook lives in the tabs entity, whose module graph reaches the
 // persisted agent collections; give them the in-memory rig.
@@ -40,18 +41,17 @@ vi.mock("./use-recent-projects", () => ({
 
 import { showWorkspace, useOpenProject } from "./use-open-project";
 import { LAYOUT_PARAM, extractTabIds, parseLayout } from "@/utils/layout-codec";
+import { urlStateFromRouter } from "@/entities/layout";
+import { tabsModule } from "@/entities/tabs";
+import { createTestCore } from "@/testing/test-core";
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 let openProject: ((path: string) => Promise<void>) | undefined;
-let search = "";
+let router: ReturnType<typeof createMemoryRouter>;
 
 function Probe() {
   openProject = useOpenProject();
-  const location = useLocation();
-  useEffect(() => {
-    search = location.search;
-  });
   return null;
 }
 
@@ -62,6 +62,7 @@ async function tick(): Promise<void> {
 }
 
 function openTabs(): string[] {
+  const search = router.state.location.search;
   return extractTabIds(
     parseLayout(new URLSearchParams(search).get(LAYOUT_PARAM)),
   );
@@ -70,15 +71,20 @@ function openTabs(): string[] {
 beforeEach(async () => {
   vi.clearAllMocks();
   workspaces.open.clear();
-  search = "";
+  router = createMemoryRouter([{ path: "*", element: createElement(Probe) }]);
+  const core = createTestCore({
+    url: urlStateFromRouter(router),
+    modules: [tabsModule({ canOpenFile: () => true })],
+  });
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
     root!.render(
-      // A real history: the sweep's keep-list comes from a one-shot read
-      // of window.location, like every non-React layout reader.
-      createElement(BrowserRouter, { children: createElement(Probe) }),
+      createElement(CoreProvider, {
+        core,
+        children: createElement(RouterProvider, { router }),
+      }),
     );
   });
 });
@@ -88,7 +94,6 @@ afterEach(async () => {
     root?.unmount();
   });
   container?.remove();
-  window.history.replaceState(null, "", "/");
 });
 
 describe("useOpenProject", () => {
@@ -111,7 +116,9 @@ describe("useOpenProject", () => {
     });
     await tick();
     // The user closed the scratchpad tab, then reopened the project.
-    window.history.replaceState(null, "", "/");
+    await act(async () => {
+      await router.navigate("/", { replace: true });
+    });
     vi.clearAllMocks();
 
     await act(async () => {

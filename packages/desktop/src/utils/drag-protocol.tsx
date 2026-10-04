@@ -31,7 +31,6 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import type { EditorView } from "@tiptap/pm/view";
-import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 
 /* ------------------------------------------------------------------ */
 /* Payloads & wire format                                              */
@@ -114,27 +113,6 @@ export function hasPayloadOfKind(
   if (currentDrag && kinds.includes(currentDrag.kind)) return true;
   if (!dataTransfer) return false;
   return kinds.some((kind) => dataTransfer.types.includes(markerMime(kind)));
-}
-
-/* ------------------------------------------------------------------ */
-/* App context — non-serializable capabilities zones need at drop time */
-/* ------------------------------------------------------------------ */
-
-export interface DragProtocolContext {
-  openFile: (options: OpenFileInLayoutOptions) => boolean;
-}
-
-let protocolContext: Partial<DragProtocolContext> = {};
-
-/** Registered by the providers that own the capability (workspace tabs). */
-export function registerProtocolContext(
-  context: Partial<DragProtocolContext>,
-): void {
-  protocolContext = { ...protocolContext, ...context };
-}
-
-export function getProtocolContext(): Partial<DragProtocolContext> {
-  return protocolContext;
 }
 
 /* ------------------------------------------------------------------ */
