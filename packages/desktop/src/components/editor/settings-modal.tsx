@@ -43,14 +43,9 @@ import {
   HOTKEY_GROUPS,
   type HotkeyEntry,
 } from "./hotkey-catalog";
-import { useWorkspaceTabsOptional } from "@/components/workspace-tabs-provider";
-import {
-  RELEASE_NOTES_TAB_ID,
-  LAYOUT_PARAM,
-  parseLayout,
-} from "@/entities/tabs";
-import { openFileInLayout } from "@/utils/dockable-layout";
-import { useSearchParams } from "react-router-dom";
+import { useCore } from "@notefig/core/react";
+import { RELEASE_NOTES_TAB_ID } from "@/entities/tabs";
+import { useFocusedWorkspace } from "@/entities/workspaces";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useAppUpdater,
@@ -381,21 +376,15 @@ function AppearanceSettings() {
 function UpdateSection() {
   const { t } = useTranslation();
   const { settings, setSetting, isReady } = useAppSettings();
-  const workspaceTabs = useWorkspaceTabsOptional();
-  const [, setUrlSearchParams] = useSearchParams();
+  const { tabs } = useCore();
+  // The welcome screen has no dock to open a tab into.
+  const hasDock = useFocusedWorkspace() !== null;
 
-  // One atomic URL write for close-modal + open-tab: two writers in the same
-  // tick would each read the pre-update location and clobber the other.
+  // One navigation for close-modal + open-tab: a single history entry.
   const openWhatsNew = () => {
-    setUrlSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.delete("settings");
-      const nextLayout = openFileInLayout(parseLayout(next.get(LAYOUT_PARAM)), {
-        tabId: RELEASE_NOTES_TAB_ID,
-        intent: "new-tab",
-      });
-      next.set(LAYOUT_PARAM, JSON.stringify(nextLayout));
-      return next;
+    tabs.open(RELEASE_NOTES_TAB_ID, {
+      intent: "new-tab",
+      params: (params) => params.delete("settings"),
     });
   };
 
@@ -404,7 +393,7 @@ function UpdateSection() {
       <div className="flex items-center justify-between gap-4 py-2">
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-medium">Version {__APP_VERSION__}</h3>
-          {workspaceTabs && (
+          {hasDock && (
             <button
               onClick={openWhatsNew}
               className="cursor-pointer text-sm text-primary hover:underline"

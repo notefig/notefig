@@ -16,6 +16,9 @@ vi.mock("@/utils/markdown-conversion", () => ({
 }));
 
 import { getWorkspaceEditorContext } from "./editors";
+import { createTestCore, windowUrlState } from "@/testing/test-core";
+
+createTestCore({ url: windowUrlState() });
 
 function setLayout(children: string[], selected: string): void {
   const layout = [{ type: "Window", id: "w1", children, selected }];

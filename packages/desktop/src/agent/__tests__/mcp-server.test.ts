@@ -58,6 +58,10 @@ import { agentPermissionRequestsCollection } from "../agent-collections";
 import { toolRegistry, getTool } from "../tools";
 import { serverInstructions } from "../mcp-instructions";
 import i18n from "@/utils/intl";
+import { createTestCore, windowUrlState } from "@/testing/test-core";
+
+// getWorkspaceEditorContext reads the layout through core.
+createTestCore({ url: windowUrlState() });
 
 // vi.hoisted can't reference `z` (hoisted above the "zod" import); assign
 // real schemas onto the mocked blob types now that imports have resolved.

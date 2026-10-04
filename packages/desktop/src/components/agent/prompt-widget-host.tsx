@@ -47,8 +47,7 @@ import {
 import { canOpenFile } from "@/components/editor/polymorphic-editor";
 import { FileTypeIcon } from "@/components/editor/file-type-icon";
 import { Markdown } from "@/components/ui/markdown";
-import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
-import { requestTabFocus } from "@/tabs/tab-controllers";
+import { useCore } from "@notefig/core/react";
 import { rankFileRows } from "@/utils/file-score";
 import { useKv } from "@/utils/kv-store";
 import { path as pathutil, relativeTreePath, workspaceKey } from "@/utils/path";
@@ -259,16 +258,11 @@ function useHarnessList() {
  * also why the memo below has an empty dependency array.
  */
 export function usePromptWidgetHost(): PromptWidgetHost {
-  const { openFile, openAgentTab } = useWorkspaceTabs();
+  const { tabs } = useCore();
   const { defaultHarness, setDefaultHarness } = useDefaultHarness();
 
-  const latest = useRef({
-    defaultHarness,
-    setDefaultHarness,
-    openFile,
-    openAgentTab,
-  });
-  latest.current = { defaultHarness, setDefaultHarness, openFile, openAgentTab };
+  const latest = useRef({ defaultHarness, setDefaultHarness, tabs });
+  latest.current = { defaultHarness, setDefaultHarness, tabs };
 
   return useMemo<PromptWidgetHost>(
     () => ({
@@ -317,16 +311,13 @@ export function usePromptWidgetHost(): PromptWidgetHost {
       toRelativePath: relativeTreePath,
 
       openFile: (path) =>
-        void latest.current.openFile({
-          tabId: path,
-          intent: "new-tab" as const,
-        }),
-      openAgentTab: (taskId) => latest.current.openAgentTab(taskId),
+        void latest.current.tabs.open(path, { intent: "new-tab" }),
+      openAgentTab: (taskId) => latest.current.tabs.openAgent(taskId),
       // Kept alive until it can land: the widget's claim on a new document
       // is ambient, so it waits out a live text entry (the tree's create
       // field closing) instead of being dropped on the first refusal.
       focusDocument: (documentPath, options) =>
-        void requestTabFocus(documentPath, {
+        void latest.current.tabs.focus(documentPath, {
           reason: options.reason,
           steal: options.steal,
           when: "when-mounted",

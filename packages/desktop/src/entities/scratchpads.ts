@@ -29,8 +29,7 @@ import { platformAdapter } from "@/adapters";
 import { readKv } from "@/utils/kv-store";
 import { SETTINGS_NAMESPACE } from "@/hooks/use-app-settings";
 import { path as pathutil } from "@/utils/path";
-import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
-import { grantTabFocusHandoff } from "@/tabs/tab-controllers";
+import { appCore } from "@/core/current";
 import { stripPromptMarkers } from "@notefig/widgets";
 import {
   APP_DIR_NAME,
@@ -250,10 +249,7 @@ export async function createGeneratedScratchpad(
 
 /** The "New File" action: create a fresh generated-name scratchpad and open
  * it as a tab. Shared by the Mod+N command, the palette, and the sidebar. */
-export function createAndOpenScratchpad(
-  workspacePath: string,
-  openFile: (options: OpenFileInLayoutOptions) => boolean,
-): void {
+export function createAndOpenScratchpad(workspacePath: string): void {
   void createGeneratedScratchpad(workspacePath)
     .then((path) => {
       // The user asked for something to type into: the new document's
@@ -261,9 +257,7 @@ export function createAndOpenScratchpad(
       // they were in — a hand-off the gesture grants, not the widget, and
       // only once the tab is really in the dock (an open the editor
       // refuses leaves nothing to own the grant).
-      if (openFile({ tabId: path, intent: "replace" })) {
-        grantTabFocusHandoff(path);
-      }
+      appCore().tabs.open(path, { intent: "replace", handoff: true });
     })
     .catch((error) => console.error("Failed to create a new file:", error));
 }

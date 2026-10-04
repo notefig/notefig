@@ -13,7 +13,7 @@ vi.mock("@/utils/intl", () => ({ default: { t: (key: string) => key } }));
 vi.mock("@/components/agent/jump-to-task", () => ({ jumpToRound: vi.fn(), jumpToTask: vi.fn() }));
 vi.mock("@/entities/scratchpads", () => ({ createAndOpenScratchpad: vi.fn() }));
 
-const tabs = { openFile: vi.fn(() => true), openAgentTab: vi.fn() };
+const tabs = { open: vi.fn(() => true), openAgent: vi.fn() };
 
 function round(turnId: string, overrides: Partial<PromptRound> = {}): PromptRound {
   return {
@@ -150,9 +150,9 @@ describe("deriveAppStatus", () => {
     );
     expect(status.sections[0].entries[0].mark).toBe("document");
     status.sections[0].entries[0].activate();
-    expect(tabs.openFile).toHaveBeenCalledWith({ tabId: "/ws-a/a.md", intent: "replace" });
+    expect(tabs.open).toHaveBeenCalledWith("/ws-a/a.md", { intent: "replace" });
     status.sections[1].entries[0].activate();
-    expect(tabs.openAgentTab).toHaveBeenCalledWith("task_a");
+    expect(tabs.openAgent).toHaveBeenCalledWith("task_a");
   });
 
   it("keeps labels short and ids unique across sections", () => {
