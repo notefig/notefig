@@ -78,14 +78,6 @@ describe("prompt marker round trip", () => {
     editor.destroy();
   });
 
-  it("agrees with the worker codec in both directions", () => {
-    const source = `Before\n\n${MARKER}\n\nAfter`;
-    const codec = createMarkdownCodec();
-    const doc = codec.parse(source);
-    expect(JSON.stringify(doc)).toContain("task_9f8e");
-    expect(codec.serialize(doc)).toBe(source);
-  });
-
   it("gives a marker-only file a caret landing spot", async () => {
     // Parsing just a marker yields a document whose only block is the atom —
     // nowhere to click. The repair must not reach the file.

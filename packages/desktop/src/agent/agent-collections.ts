@@ -188,12 +188,6 @@ export function whenAgentTasksReconciled(): Promise<void> {
   return reconcileSettled ?? Promise.resolve();
 }
 
-/** Test-only: allow the once-per-session guard to re-arm. */
-export function resetAgentTasksReconciledForTest(): void {
-  reconcileStarted = false;
-  reconcileSettled = null;
-}
-
 export const agentTurnsCollection = createCollection(
   localOnlyCollectionOptions({
     id: "agent-turns",

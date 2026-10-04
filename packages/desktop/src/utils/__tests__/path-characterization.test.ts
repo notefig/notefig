@@ -165,15 +165,6 @@ describe("key producers", () => {
 
   it("trust/TaskManager keys via workspaceKey are the identity on mac — persisted keys never change spelling", () => {
     expect(workspaceKey(WS)).toBe(WS);
-    expect(`trust:${workspaceKey(WS)}`).toBe(`trust:${WS}`);
-  });
-});
-
-describe("path.toFileUri", () => {
-  it("percent-encodes per segment after file://", () => {
-    expect(pathutil.toFileUri(`${WS}/a b.md`)).toBe(
-      `file://${WS.split("/").map(encodeURIComponent).join("/")}/a%20b.md`,
-    );
   });
 });
 

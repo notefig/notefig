@@ -90,6 +90,9 @@ ${fixture.files[0].content}`,
   test("should handle multi-file workflow with tab management", async ({
     page,
   }) => {
+    // ~17s locally, mostly fixed sleeps; a CI runner overruns the default
+    // 30s. Drop this once the sleeps become state-based waits.
+    test.slow();
     const fixture = happyPathFixture.demoWorkspace;
 
     await openWorkspace(page, fixture.path);

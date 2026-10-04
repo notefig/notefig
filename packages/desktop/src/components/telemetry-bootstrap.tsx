@@ -178,8 +178,3 @@ export function TelemetryBootstrap() {
     />
   );
 }
-
-/** Test-only: allow consent-flow tests to remount from a clean slate. */
-export function __resetTelemetryBootstrapForTests() {
-  started = false;
-}

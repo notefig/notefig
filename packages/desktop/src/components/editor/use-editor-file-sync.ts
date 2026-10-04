@@ -35,19 +35,6 @@ export function getEditorMarkdown(editor: Editor): string {
   ).markdown.getMarkdown();
 }
 
-/**
- * Whether file content differs from the editor's serialization in a way
- * that warrants replacing the document. trimEnd: files conventionally end
- * with a newline that the markdown serializer never emits — that
- * difference alone is not a content change.
- */
-export function isExternalContentChange(
-  currentMarkdown: string,
-  fileContent: string,
-): boolean {
-  return currentMarkdown.trimEnd() !== fileContent.trimEnd();
-}
-
 export function useEditorFileSync(
   editor: Editor,
   file: FileEntry,

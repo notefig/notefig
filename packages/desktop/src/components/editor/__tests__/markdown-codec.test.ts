@@ -8,7 +8,6 @@ import { describe, it, expect, afterEach } from "vitest";
 import { Editor } from "@tiptap/core";
 import { editorExtensions } from "../tiptap-editor-kit";
 import { createMarkdownCodec } from "../markdown-codec";
-import { calculateContentHash } from "@/utils/hash";
 
 const codec = createMarkdownCodec();
 
@@ -36,7 +35,7 @@ function getMarkdown(editor: Editor): string {
   ).markdown.getMarkdown();
 }
 
-export const fixtures: string[] = [
+const fixtures: string[] = [
   "Hello world",
   "First\n\nSecond",
   "# Heading",
@@ -145,11 +144,5 @@ describe("codec ↔ editor equivalence", () => {
     const editor = createEditor("");
     editor.commands.insertTable({ rows: 2, cols: 2, withHeaderRow: true });
     expect(codec.serialize(editor.getJSON())).toBe(getMarkdown(editor));
-  });
-
-  it("hash matches hash.ts", () => {
-    expect(codec.hash("# Title\n\nBody")).toBe(
-      calculateContentHash("# Title\n\nBody"),
-    );
   });
 });

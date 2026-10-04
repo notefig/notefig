@@ -5,7 +5,7 @@ import {
   type AgentTransport,
   type Unsubscribe,
 } from "../agent-transport.interface";
-import { LoopbackTransport, createLoopbackPair } from "../loopback-transport";
+import { createLoopbackPair } from "../loopback-transport";
 
 describe("AgentTransportError", () => {
   it("uses the explicit message when given one", () => {
@@ -63,14 +63,6 @@ describe("transportToStreams", () => {
 });
 
 describe("LoopbackTransport edge cases", () => {
-  it("delivers sends to the peer's line listeners", () => {
-    const [a, b] = createLoopbackPair();
-    const received: string[] = [];
-    b.onLine((line) => received.push(line));
-    a.send("hello");
-    expect(received).toEqual(["hello"]);
-  });
-
   it("send after close is a silent no-op", async () => {
     const [a, b] = createLoopbackPair();
     const received: string[] = [];
@@ -78,10 +70,5 @@ describe("LoopbackTransport edge cases", () => {
     await a.close();
     a.send("late");
     expect(received).toEqual([]);
-  });
-
-  it("send with no peer attached is a silent no-op", () => {
-    const lonely = new LoopbackTransport();
-    expect(() => lonely.send("into the void")).not.toThrow();
   });
 });

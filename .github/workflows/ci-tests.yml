@@ -118,9 +118,16 @@ jobs:
         run: npm run test:unit
 
   test-desktop-e2e:
-    name: Test Desktop
+    name: Test Desktop (E2E ${{ matrix.shard }}/4)
+    # All three browser suites (chromium, editor, agent), split across four
+    # runners. Each shard boots its own dev server and runs two workers
+    # (playwright.config.ts); the merge job below stitches the shards'
+    # blob reports into one HTML report.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     runs-on: ubuntu-latest
-    if: false
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -148,12 +155,59 @@ jobs:
 
       - name: Run Desktop E2E tests
         working-directory: packages/desktop
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            npm run test:e2e -- --project=chromium --grep "@smoke"
-          else
-            npm run test:e2e -- --project=chromium
-          fi
+        run: npm run test:e2e -- --shard=${{ matrix.shard }}/4
+
+      - name: Upload blob report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-blob-report-${{ matrix.shard }}
+          path: packages/desktop/blob-report
+          retention-days: 1
+
+      - name: Upload failure traces
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-traces-${{ matrix.shard }}
+          path: packages/desktop/test-results
+          retention-days: 7
+
+  merge-desktop-e2e-reports:
+    name: Merge Desktop E2E reports
+    needs: test-desktop-e2e
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download blob reports
+        uses: actions/download-artifact@v4
+        with:
+          path: packages/desktop/all-blob-reports
+          pattern: e2e-blob-report-*
+          merge-multiple: true
+
+      - name: Merge into an HTML report
+        working-directory: packages/desktop
+        run: npx playwright merge-reports --reporter html ./all-blob-reports
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-html-report
+          path: packages/desktop/playwright-report
+          retention-days: 14
 
   test-desktop-tauri:
     name: Test Desktop (Tauri)

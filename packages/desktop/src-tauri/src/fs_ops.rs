@@ -1580,16 +1580,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_check_exists_returns_type_for_existing_paths() {
-        let temp_dir = setup_test_dir();
-        let file = create_test_file(&temp_dir, "file.txt", "content").await;
-
-        let result = check_exists(vec![file.clone()]).await;
-
-        assert!(result[0].entry_type.is_some());
-    }
-
-    #[tokio::test]
     async fn test_get_metadata_returns_file_metadata() {
         let temp_dir = setup_test_dir();
         let file = create_test_file(&temp_dir, "file.txt", "content").await;

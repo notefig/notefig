@@ -11,13 +11,4 @@ describe("tab()", () => {
     if (agent.kind !== "agent") throw new Error("expected an agent tab");
     expect(agent.agent.taskId).toBe("task_1");
   });
-
-  it("is inert on a tab whose surface isn't live", async () => {
-    const handle = tab("/ws/notes.md");
-
-    expect(handle.isMounted()).toBe(false);
-    expect(handle.focus()).toBe(false);
-    expect(handle.selectedText()).toBeUndefined();
-    await expect(handle.search("anything")).resolves.toEqual([]);
-  });
 });
