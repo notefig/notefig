@@ -33,7 +33,10 @@ import { calculateContentHash } from "@/utils/hash";
 import { getDocumentSync } from "@/utils/markdown-conversion";
 import { path as pathutil } from "@/utils/path";
 import { trackWorkspaceWrite } from "@/utils/workspace-write-tracker";
-import { adoptExternalContent } from "@/components/editor/adopt-external-content";
+import {
+  adoptExternalContent,
+  type AdoptionSource,
+} from "@/components/editor/adopt-external-content";
 import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
 
 export interface DocumentsApi {
@@ -52,6 +55,8 @@ export interface DocumentsDeps {
   fs: Pick<FileSystemSurface, "readFiles" | "writeFiles">;
   /** The files of every open workspace (a path may sit in nested ones). */
   openFiles(): WorkspaceFiles[];
+  /** Which prompt round wrote adopted bytes (`core.turnWrites.attribute`). */
+  attribute?: AdoptionSource["attribute"];
 }
 
 /**
@@ -76,6 +81,7 @@ function assertAbsolute(path: string): void {
 export function createDocuments({
   fs,
   openFiles,
+  attribute,
 }: DocumentsDeps): DocumentsApi {
   const writeToDisk = async (path: string, content: string) => {
     const result = await fs.writeFiles([{ path, content }]);
@@ -128,7 +134,7 @@ export function createDocuments({
         if (!doc || editor.isDestroyed) return;
         const contentHash = calculateContentHash(content);
         const adoption = adoptExternalContent(editor, doc, {
-          source: { path: target, contentHash },
+          source: { path: target, contentHash, attribute },
         });
         if (adoption.reinsertedWidgets === 0) {
           sync.commitAdoption(content, contentHash);
@@ -156,10 +162,11 @@ declare module "@notefig/core" {
 
 export const documentsModule = defineModule({
   name: "documents",
-  needs: ["platform"],
+  needs: ["platform", "turnWrites"],
   register: (ctx) =>
     createDocuments({
       fs: ctx.use("platform").fs,
+      attribute: ctx.use("turnWrites").attribute,
       openFiles: () =>
         ctx.workspaces
           .list()

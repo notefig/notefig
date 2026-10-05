@@ -2,17 +2,17 @@
  * Per-project settings stored in a `metrists.json` file at the workspace root.
  *
  * The file is the source of truth (tier 1 of the data-layer architecture):
- * it is read through the platform adapter, cached in a TanStack Query entry,
- * and invalidated by the fs watcher when edited externally. It is only
- * created on the first `updateProjectSettings` call — opening a workspace
- * never dirties the user's project.
+ * it is read through the platform's fs (`core.projectSettings`), cached in a
+ * TanStack Query entry, and invalidated by the fs watcher when edited
+ * externally. It is only created on the first `update` call — opening a
+ * workspace never dirties the user's project.
  */
 
 import { useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { platformAdapter } from "@/adapters";
-import { queryClient } from "@/entities/query-client";
+import { useQuery, type QueryClient } from "@tanstack/react-query";
+import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { defineModule } from "@notefig/core";
+import { useModule } from "@notefig/core/react";
 import { onAppEvent } from "./app-events";
 import { path as pathutil } from "./path";
 
@@ -56,79 +56,86 @@ export function projectSettingsPath(workspacePath: string): string {
   return pathutil.join(workspacePath, PROJECT_SETTINGS_FILENAME);
 }
 
-/**
- * Read and parse the workspace's metrists.json.
- * A missing file or invalid JSON yields `{}` — never throws.
- */
-export async function readProjectSettings(
-  workspacePath: string,
-): Promise<ProjectSettings> {
-  const result = await platformAdapter.fs.readFiles([
-    projectSettingsPath(workspacePath),
-  ]);
-  if (result.succeeded.length === 0) {
-    return {};
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(result.succeeded[0].content);
-    if (typeof parsed === "object" && parsed !== null) {
-      return parsed as ProjectSettings;
-    }
-  } catch (error) {
-    console.error(
-      `[project-settings] Invalid JSON in ${projectSettingsPath(workspacePath)}:`,
-      error,
-    );
-  }
-  return {};
+/** `core.projectSettings`: each workspace's metrists.json. */
+export interface ProjectSettingsApi {
+  /** Read and parse the file. A missing file or invalid JSON yields `{}` —
+   *  never throws. */
+  read(workspacePath: string): Promise<ProjectSettings>;
+  /** Merge `patch` into the current settings (shallow per top-level
+   *  section) and write the file back, preserving unknown keys. */
+  update(workspacePath: string, patch: Partial<ProjectSettings>): Promise<void>;
 }
 
-/**
- * Merge `patch` into the current settings (shallow per top-level section)
- * and write the file back, preserving unknown keys.
- */
-export async function updateProjectSettings(
-  workspacePath: string,
-  patch: Partial<ProjectSettings>,
-): Promise<void> {
-  const current = await readProjectSettings(workspacePath);
-  const next: ProjectSettings = { ...current };
-  if (patch.workspace) {
-    next.workspace = { ...current.workspace, ...patch.workspace };
-  }
-  if (patch.settings) {
-    next.settings = { ...current.settings, ...patch.settings };
-  }
+export function createProjectSettings({
+  fs,
+  queryClient,
+}: {
+  fs: Pick<FileSystemSurface, "readFiles" | "writeFiles">;
+  queryClient: QueryClient;
+}): ProjectSettingsApi {
+  const read = async (workspacePath: string): Promise<ProjectSettings> => {
+    const result = await fs.readFiles([projectSettingsPath(workspacePath)]);
+    if (result.succeeded.length === 0) {
+      return {};
+    }
 
-  const result = await platformAdapter.fs.writeFiles([
-    {
-      path: projectSettingsPath(workspacePath),
-      content: JSON.stringify(next, null, 2) + "\n",
+    try {
+      const parsed: unknown = JSON.parse(result.succeeded[0].content);
+      if (typeof parsed === "object" && parsed !== null) {
+        return parsed as ProjectSettings;
+      }
+    } catch (error) {
+      console.error(
+        `[project-settings] Invalid JSON in ${projectSettingsPath(workspacePath)}:`,
+        error,
+      );
+    }
+    return {};
+  };
+
+  return {
+    read,
+    async update(workspacePath, patch) {
+      const current = await read(workspacePath);
+      const next: ProjectSettings = { ...current };
+      if (patch.workspace) {
+        next.workspace = { ...current.workspace, ...patch.workspace };
+      }
+      if (patch.settings) {
+        next.settings = { ...current.settings, ...patch.settings };
+      }
+
+      const result = await fs.writeFiles([
+        {
+          path: projectSettingsPath(workspacePath),
+          content: JSON.stringify(next, null, 2) + "\n",
+        },
+      ]);
+      if (result.failed.length > 0) {
+        throw new Error(
+          `Failed to write project settings: ${result.failed.map((f) => f.message).join(", ")}`,
+        );
+      }
+
+      await queryClient.invalidateQueries({
+        queryKey: projectSettingsQueryKey(workspacePath),
+      });
     },
-  ]);
-  if (result.failed.length > 0) {
-    throw new Error(
-      `Failed to write project settings: ${result.failed.map((f) => f.message).join(", ")}`,
-    );
-  }
-
-  queryClient.invalidateQueries({
-    queryKey: projectSettingsQueryKey(workspacePath),
-  });
+  };
 }
 
 export function useProjectSettings(workspacePath: string) {
+  const projectSettings = useModule("projectSettings");
   const { data, isLoading } = useQuery({
     queryKey: projectSettingsQueryKey(workspacePath),
-    queryFn: () => readProjectSettings(workspacePath),
+    queryFn: () => projectSettings.read(workspacePath),
     staleTime: Infinity,
   });
 
   const update = useCallback(
     (patch: Partial<ProjectSettings>) =>
-      updateProjectSettings(workspacePath, patch),
-    [workspacePath],
+      projectSettings.update(workspacePath, patch),
+    [projectSettings, workspacePath],
   );
 
   return {
@@ -140,15 +147,21 @@ export function useProjectSettings(workspacePath: string) {
 
 declare module "@notefig/core" {
   interface CoreModules {
-    "project-settings": undefined;
+    projectSettings: ProjectSettingsApi;
   }
 }
 
-/** An external edit of a workspace's metrists.json (the watcher reports
- *  it) drops the cached settings, so they are read again. */
+/** Reads and writes go through the platform's fs; an external edit of a
+ *  workspace's metrists.json (the watcher reports it) drops the cached
+ *  settings, so they are read again. */
 export const projectSettingsModule = defineModule({
-  name: "project-settings",
-  needs: ["queryClient"],
+  name: "projectSettings",
+  needs: ["platform", "queryClient"],
+  register: (ctx) =>
+    createProjectSettings({
+      fs: ctx.use("platform").fs,
+      queryClient: ctx.use("queryClient"),
+    }),
   boot: (_api, ctx) => {
     const queryClient = ctx.use("queryClient");
     return onAppEvent("files:changed", ({ workspacePath, paths }) => {

@@ -114,10 +114,10 @@ test.describe("shim: scratchpad entry lifecycle", () => {
    * listing the closed tab — so a sweep keyed off that layout wrongly keeps
    * what should have been an abandoned leftover.
    *
-   * Poll the actual KV row instead of a fixed delay: the app's own
-   * `kv-store` module, imported page-side exactly as kv-persistence.spec.ts
-   * does, is the only thing that can say "this write has landed" — a
-   * timeout can only guess how long that takes. An empty search is stored
+   * Poll the actual KV row instead of a fixed delay: the app's own KV
+   * (`core.kv`, reached page-side exactly as kv-persistence.spec.ts does)
+   * is the only thing that can say "this write has landed" — a timeout can
+   * only guess how long that takes. An empty search is stored
    * as null (one encoding of "nothing"), never as "".
    */
   async function waitForNavigationPersisted(page: Page) {
@@ -126,14 +126,14 @@ test.describe("shim: scratchpad entry lifecycle", () => {
       .poll(
         () =>
           page.evaluate(async () => {
-            // A Vite dev-server-served path, not a bundler-resolvable
-            // specifier from this file's location — fallow's static
-            // analyzer can't know that (kv-persistence.spec.ts dodges the
-            // same false positive by hiding the identical import inside a
-            // plain string instead of real code).
-            // fallow-ignore-next-line unresolved-import
-            const kv = await import("/src/utils/kv-store.ts");
-            return (await kv.readKv<string | null>("settings", "lastSearch")) ?? null;
+            const { kv } = (
+              window as unknown as {
+                __notefigCore: {
+                  kv: { read(ns: string, key: string): Promise<unknown> };
+                };
+              }
+            ).__notefigCore;
+            return (await kv.read("settings", "lastSearch")) ?? null;
           }),
         { timeout: 10000 },
       )

@@ -1,13 +1,20 @@
 import { defineModule } from "@notefig/core";
 import { isWeb } from "@/utils/platform";
-import { autoConnectStoredPairing, watchCrossTabPairing } from "./connect-flow";
+import { createTunnelPairing, type TunnelPairingApi } from "./connect-flow";
 import { hadDeepLinkPairing } from "./pair-dialog-store";
+import { tunnelConnection } from "./tunnel-connection";
+
+declare module "@notefig/core" {
+  interface CoreModules {
+    tunnel: TunnelPairingApi;
+  }
+}
 
 /**
- * Web only: reconnect to a previously paired worker on boot, and connect
- * this tab when another one pairs. Non-fatal — a stale pairing (worker
- * restarted → new URL) just leaves the tunnel disconnected and the status
- * pill offers a re-pair.
+ * The tunnel pairing, as `core.tunnel`. Web only, at boot: reconnect to a
+ * previously paired worker, and connect this tab when another one pairs.
+ * Non-fatal — a stale pairing (worker restarted → new URL) just leaves the
+ * tunnel disconnected and the status pill offers a re-pair.
  *
  * Skips the stored reconnect when this load carried a deep-link code: the
  * CLI-opened `/pair#<code>` tab has a FRESH code the dialog is about to
@@ -16,9 +23,16 @@ import { hadDeepLinkPairing } from "./pair-dialog-store";
  */
 export const tunnelModule = defineModule({
   name: "tunnel",
-  boot: () => {
+  needs: ["kv", "agents"],
+  register: (ctx) =>
+    createTunnelPairing({
+      kv: ctx.use("kv"),
+      connection: tunnelConnection,
+      onDisconnect: () => ctx.use("agents").disposeAll(),
+    }),
+  boot: (tunnel) => {
     if (!isWeb()) return;
-    if (!hadDeepLinkPairing) void autoConnectStoredPairing();
-    return watchCrossTabPairing();
+    if (!hadDeepLinkPairing) void tunnel.autoConnect();
+    return tunnel.watchCrossTab();
   },
 });

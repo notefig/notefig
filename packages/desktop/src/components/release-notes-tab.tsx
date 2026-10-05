@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { useTranslation } from "react-i18next";
+import { usePlatform } from "@/core/use-platform";
 import { createSchemaExtensions } from "@/components/editor/editor-schema-kit";
 import { getOrCreateEditor } from "@/components/editor/editor-store";
 import { focusTab } from "@/tabs/tab-controllers";
@@ -62,9 +63,10 @@ export function ReleaseNotesTab() {
   // the focus arbiter's tab-selected intents resolve here — focus landing on
   // the container is what keeps the dockable hotkeys (Ctrl+Tab, ⌘W, ⌘1-9)
   // alive, and gives the notes keyboard scrolling.
+  const { fs } = usePlatform();
   useEffect(() => {
-    getOrCreateEditor(RELEASE_NOTES_TAB_ID, { type: "release-notes" });
-  }, []);
+    getOrCreateEditor(RELEASE_NOTES_TAB_ID, { type: "release-notes" }, fs);
+  }, [fs]);
 
   useEffect(() => {
     const rafId = requestAnimationFrame(() => {

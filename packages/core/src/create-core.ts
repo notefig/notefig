@@ -154,6 +154,7 @@ export function createCore(options: CreateCoreOptions): Core {
         await module.workspace!.dispose?.(
           entry.instances.get(module.name),
           entry.ref,
+          apis.get(module.name),
         );
       } catch (error) {
         onError(

@@ -7,16 +7,15 @@ const readWorkspaceTextFile = vi.fn(
 import { workspaceListDocuments } from "../workspace-list-documents";
 import { workspaceReadDocument } from "../workspace-read-document";
 import { workspaceOpenFiles } from "../workspace-open-files";
-import { createTestCore, windowUrlState } from "@/testing/test-core";
-
-// getWorkspaceEditorContext reads the layout through core.
-createTestCore({ url: windowUrlState() });
+import { createLayout } from "@/entities/layout";
+import { memoryUrlState } from "@/testing/test-core";
 
 const ctx = {
   workspacePath: "/ws",
   taskId: "task_1",
   agents: {} as never,
-  // The workspace's listing and its documents, handed to the tools.
+  // The workspace's listing, its documents and the layout (an empty one:
+  // nothing open), handed to the tools.
   services: {
     files: {
       collections: {
@@ -29,6 +28,7 @@ const ctx = {
       },
     },
     documents: { read: readWorkspaceTextFile },
+    layout: createLayout(memoryUrlState()),
   } as never,
 };
 

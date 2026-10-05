@@ -1,63 +1,34 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { createCollection } from "@tanstack/react-db";
 import { persistedCollectionOptions } from "@tanstack/db-sqlite-persistence-core";
+import {
+  OPEN_WORKSPACES_COLLECTION_ID,
+  workspacesModule,
+  type OpenWorkspaceRow,
+} from "./workspaces";
+import { createNodeTestDb, type NodeTestDb } from "@/testing/node-db";
+import { createTestCore } from "@/testing/test-core";
 
-// Same restart rig as workspaces-restore.test.ts, in its own file so the
-// module-scoped collection is fresh: an already-hydrated module collection
-// would be stale against rows a later setup wrote, which is the very
-// collision under test — but from the rig, not the app.
-const { dbRef } = vi.hoisted(() => ({
-  dbRef: { current: null as null | import("@/testing/node-db").NodeTestDb },
-}));
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (dbRef.current = (
-      await import("@/testing/node-db")
-    ).createNodeTestDb()),
-    fs: {
-      writeFiles: vi.fn(async () => ({ succeeded: [], failed: [] })),
-      readFiles: vi.fn(async () => ({ succeeded: [], failed: [] })),
-    },
-    proc: {
-      createMcpEndpoint: vi.fn(),
-      createAgentTransport: vi.fn(),
-    },
-  },
-}));
-const files = vi.hoisted(() => ({
-  getOrCreateWorkspaceCollections: vi.fn((_path: string) => undefined),
-  refreshDirectoryMetadata: vi.fn(async (_path: string) => {}),
-  clearWorkspaceCollections: vi.fn(),
-}));
-vi.mock("@/entities/files", () => files);
-vi.mock("@/entities/git", () => ({ clearGitCollection: vi.fn() }));
-const watchers = vi.hoisted(() => ({
-  start: vi.fn<
-    (path: string) => { stop: () => void; ensureStarted: () => void }
-  >(() => ({ stop: vi.fn(), ensureStarted: vi.fn() })),
-}));
-vi.mock("@/utils/file-sync", () => ({
-  startWorkspaceMetadataWatcher: watchers.start,
-}));
+// Same restart rig as workspaces-restore.test.ts: the previous run's rows
+// are on disk before the core under test — and so its registry's
+// collection — exists. A collection already hydrated before those rows
+// were written would be stale against them, which is the very collision
+// under test — but from the rig, not the app.
+let db: NodeTestDb;
 
-import type { OpenWorkspaceRow } from "./workspaces";
-
-// The persisted collection loads the moment its module is evaluated (that
-// IS the boot read), so the module under test is imported only after the
-// previous run's rows are on disk.
-const OPEN_WORKSPACES_COLLECTION_ID = "open-workspaces";
-
-beforeEach(async () => {
-  // Instantiate the mocked adapter (its factory runs on first import).
-  await import("@/adapters");
-  // "Previous run": persist two open workspaces, /ws-b focused last.
-  const previousRun = createCollection(
+const openSetOn = (database: NodeTestDb) =>
+  createCollection(
     persistedCollectionOptions<OpenWorkspaceRow, string>({
       id: OPEN_WORKSPACES_COLLECTION_ID,
       getKey: (row) => row.key,
-      persistence: dbRef.current!.get(),
+      persistence: database.get(),
     }),
   );
+
+beforeEach(async () => {
+  db = createNodeTestDb();
+  // "Previous run": persist two open workspaces, /ws-b focused last.
+  const previousRun = openSetOn(db);
   await previousRun.preload();
   await previousRun.insert({
     key: "/ws-a",
@@ -76,14 +47,9 @@ beforeEach(async () => {
 
 describe("writes issued before the persisted set has hydrated", () => {
   it("an open issued before hydration is durable: the row survives a restart", async () => {
-    const { workspacesModule } = await import("./workspaces");
-    const { defineModule } = await import("@notefig/core");
-    const { createTestCore } = await import("@/testing/test-core");
     const core = createTestCore({
-      modules: [
-        defineModule({ name: "workspace-scopes" }),
-        workspacesModule({ restore: false }),
-      ],
+      modules: [workspacesModule({ restore: false })],
+      platform: { db },
     });
     core.boot();
     // No await of readiness: the caller opens the moment core is up, as
@@ -92,13 +58,7 @@ describe("writes issued before the persisted set has hydrated", () => {
 
     // "Next run": a fresh collection over the same storage sees only what
     // was really committed.
-    const nextRun = createCollection(
-      persistedCollectionOptions<OpenWorkspaceRow, string>({
-        id: OPEN_WORKSPACES_COLLECTION_ID,
-        getKey: (row) => row.key,
-        persistence: dbRef.current!.get(),
-      }),
-    );
+    const nextRun = openSetOn(db);
     await nextRun.preload();
     expect([...nextRun.values()].map((row) => row.path).sort()).toEqual([
       "/ws-a",
@@ -108,4 +68,3 @@ describe("writes issued before the persisted set has hydrated", () => {
     await nextRun.cleanup();
   });
 });
-

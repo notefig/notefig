@@ -17,6 +17,9 @@ export const workspaceOpenFiles: AgentTool<
     "What the user currently has open: tabs, the active file, and whether there's a selection.",
   input: InputSchema,
   async execute(ctx) {
-    return { ok: true, value: getWorkspaceEditorContext(ctx.workspacePath) };
+    return {
+      ok: true,
+      value: getWorkspaceEditorContext(ctx.services.layout, ctx.workspacePath),
+    };
   },
 };

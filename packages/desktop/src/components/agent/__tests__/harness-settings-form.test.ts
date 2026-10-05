@@ -1,11 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
 import {
   definitionToForm,
   deriveHarnessSettingsRows,

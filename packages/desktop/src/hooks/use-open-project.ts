@@ -9,7 +9,7 @@ import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { FsError } from "@/adapters/platform-adapter.interface";
-import { pickDirectory } from "@/utils/fs";
+import { usePlatform } from "@/core/use-platform";
 import i18n from "@/utils/intl";
 import { useCore } from "@notefig/core/react";
 import { deriveProjectName, useRecentProjects } from "./use-recent-projects";
@@ -59,10 +59,11 @@ export function useOpenProject(): (workspacePath: string) => Promise<boolean> {
  */
 export function useOpenProjectFromPicker(): () => Promise<void> {
   const { t } = useTranslation();
+  const platform = usePlatform();
   const openProject = useOpenProject();
   return useCallback(async () => {
     try {
-      const selectedPath = await pickDirectory(t("pickDirectory"));
+      const selectedPath = await platform.ui.pickDirectory(t("pickDirectory"));
       if (selectedPath) await openProject(selectedPath);
     } catch (error) {
       if (error instanceof FsError && error.type === "permission_denied") {
@@ -71,5 +72,5 @@ export function useOpenProjectFromPicker(): () => Promise<void> {
         throw error;
       }
     }
-  }, [openProject, t]);
+  }, [platform, openProject, t]);
 }

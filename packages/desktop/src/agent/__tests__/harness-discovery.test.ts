@@ -1,51 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-
-const runShellCommand = vi.fn();
-
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-    proc: {
-      runShellCommand: (...args: unknown[]) => runShellCommand(...args),
-    },
-  },
-}));
-
 import {
   candidateProbeEntries,
+  createHarnessDiscovery,
   discoverHarnesses,
-  ensureStartupHarnessDiscovery,
-  refreshHarnessDiscovery,
-  resetStartupHarnessDiscoveryForTest,
-} from "../harness-discovery";
-import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
-import {
-  HARNESS_CUSTOM_KEY,
   HARNESS_DISCOVERY_KEY,
   HARNESS_OVERRIDES_KEY,
   HARNESS_SETTINGS_NAMESPACE,
 } from "../harness-discovery";
-import { readKv, removeKv, writeKv } from "@/utils/kv-store";
+import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
+import type { KvApi } from "@/utils/kv-store";
+import { testKv } from "@/testing/test-kv";
 
-/** Storage is real (in-memory SQLite), so it has to be emptied between tests. */
-async function clearHarnessSettings(): Promise<void> {
-  for (const key of [
-    HARNESS_OVERRIDES_KEY,
-    HARNESS_CUSTOM_KEY,
-    HARNESS_DISCOVERY_KEY,
-  ]) {
-    await removeKv(HARNESS_SETTINGS_NAMESPACE, key);
-  }
-}
+const runShellCommand = vi.fn();
+const proc = { runShellCommand };
+
+// Storage is real (in-memory SQLite), and fresh per test.
+let kv: KvApi;
 
 function storedDiscovery(): Promise<unknown> {
-  return readKv(HARNESS_SETTINGS_NAMESPACE, HARNESS_DISCOVERY_KEY);
+  return kv.read(HARNESS_SETTINGS_NAMESPACE, HARNESS_DISCOVERY_KEY);
 }
 
-beforeEach(async () => {
+beforeEach(() => {
   runShellCommand.mockReset();
-  await clearHarnessSettings();
-  resetStartupHarnessDiscoveryForTest();
+  kv = testKv();
 });
 
 describe("discoverHarnesses", () => {
@@ -54,7 +32,7 @@ describe("discoverHarnesses", () => {
       stdout: "__MHD0__/usr/bin/foo__END____MHD1____END__",
       exitCode: 0,
     });
-    const results = (await discoverHarnesses([
+    const results = (await discoverHarnesses(proc, [
       { id: "a", command: "foo" },
       { id: "b", command: "bar" },
     ]))!;
@@ -69,7 +47,7 @@ describe("discoverHarnesses", () => {
 
   it("batches every command into a single runShellCommand call", async () => {
     runShellCommand.mockResolvedValue({ stdout: "", exitCode: 0 });
-    await discoverHarnesses([
+    await discoverHarnesses(proc, [
       { id: "a", command: "foo" },
       { id: "b", command: "bar" },
       { id: "c", command: "baz" },
@@ -81,7 +59,7 @@ describe("discoverHarnesses", () => {
     runShellCommand.mockRejectedValue(
       new Error("Shell commands are not supported on this adapter."),
     );
-    const results = await discoverHarnesses([
+    const results = await discoverHarnesses(proc, [
       { id: "a", command: "foo" },
       { id: "b", command: "bar" },
     ]);
@@ -89,14 +67,14 @@ describe("discoverHarnesses", () => {
   });
 
   it("returns {} without calling the adapter for an empty entry list", async () => {
-    const results = await discoverHarnesses([]);
+    const results = await discoverHarnesses(proc, []);
     expect(results).toEqual({});
     expect(runShellCommand).not.toHaveBeenCalled();
   });
 
   it("uses a definition's probeCommand instead of the command -v default", async () => {
     runShellCommand.mockResolvedValue({ stdout: "", exitCode: 0 });
-    await discoverHarnesses([
+    await discoverHarnesses(proc, [
       { id: "a", command: "npx", probeCommand: "command -v claude" },
       { id: "b", command: "bar" },
     ]);
@@ -156,15 +134,16 @@ describe("candidateProbeEntries", () => {
   });
 });
 
-describe("ensureStartupHarnessDiscovery", () => {
+describe("startup", () => {
   it("runs one scan per session, applying stored override commands", async () => {
-    await writeKv(HARNESS_SETTINGS_NAMESPACE, HARNESS_OVERRIDES_KEY, {
+    const discovery = createHarnessDiscovery({ proc, kv });
+    await kv.write(HARNESS_SETTINGS_NAMESPACE, HARNESS_OVERRIDES_KEY, {
       opencode: { id: "opencode", enabled: true, command: "ocv" },
     });
     runShellCommand.mockResolvedValue({ stdout: "", exitCode: 0 });
 
-    ensureStartupHarnessDiscovery();
-    ensureStartupHarnessDiscovery(); // second call: no-op
+    discovery.startup();
+    discovery.startup(); // second call: no-op
     await vi.waitFor(async () => expect(await storedDiscovery()).toBeDefined());
 
     expect(runShellCommand).toHaveBeenCalledTimes(1);
@@ -174,7 +153,7 @@ describe("ensureStartupHarnessDiscovery", () => {
 
   it("persists nothing when the platform can't run shell scripts", async () => {
     runShellCommand.mockRejectedValue(new Error("unsupported"));
-    ensureStartupHarnessDiscovery();
+    createHarnessDiscovery({ proc, kv }).startup();
     await vi.waitFor(() => expect(runShellCommand).toHaveBeenCalledTimes(1));
     // "Couldn't check" must not overwrite prior results with not-found.
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -182,11 +161,11 @@ describe("ensureStartupHarnessDiscovery", () => {
   });
 });
 
-describe("refreshHarnessDiscovery", () => {
+describe("refresh", () => {
   it("writes results to the harness-settings/discovery key", async () => {
     runShellCommand.mockResolvedValue({ stdout: "", exitCode: 0 });
 
-    await refreshHarnessDiscovery({}, []);
+    await createHarnessDiscovery({ proc, kv }).refresh({}, []);
 
     expect(await storedDiscovery()).toMatchObject({
       [BUILT_IN_HARNESSES[0].id]: { harnessId: BUILT_IN_HARNESSES[0].id },

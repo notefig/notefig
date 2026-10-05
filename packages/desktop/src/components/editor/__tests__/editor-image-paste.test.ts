@@ -6,20 +6,12 @@ import {
   createImageDropHandler,
   createImagePasteHandler,
 } from "@/components/editor/editor-image-paste";
-import { platformAdapter } from "@/adapters";
+import type { EditorFs } from "@/components/editor/editor-store";
 
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-    fs: {
-      exists: vi.fn(),
-      writeBinaryFiles: vi.fn(),
-    },
-  },
-}));
-
-const existsMock = vi.mocked(platformAdapter.fs.exists);
-const writeMock = vi.mocked(platformAdapter.fs.writeBinaryFiles);
+const existsMock = vi.fn<EditorFs["exists"]>();
+const writeMock = vi.fn<EditorFs["writeBinaryFiles"]>();
+/** The platform fs the handlers write assets through. */
+const fs = { exists: existsMock, writeBinaryFiles: writeMock };
 
 const BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 
@@ -80,7 +72,7 @@ beforeEach(() => {
 describe("createImageDropHandler", () => {
   it("writes the image bytes to assets/ and inserts a node with a relative src", async () => {
     const editor = createEditor();
-    const handler = createImageDropHandler("/ws");
+    const handler = createImageDropHandler(fs, "/ws");
     const event = dropEvent([makeImageFile("photo (1).png")]);
 
     const handled = handler(stubView(editor), event, null, false);
@@ -108,7 +100,7 @@ describe("createImageDropHandler", () => {
       })),
     );
 
-    const handler = createImageDropHandler("/ws");
+    const handler = createImageDropHandler(fs, "/ws");
     handler(
       stubView(editor),
       dropEvent([makeImageFile("photo.png")]),
@@ -125,7 +117,7 @@ describe("createImageDropHandler", () => {
 
   it("lets ProseMirror handle internal node moves", () => {
     const editor = createEditor();
-    const handler = createImageDropHandler("/ws");
+    const handler = createImageDropHandler(fs, "/ws");
     const event = dropEvent([makeImageFile()]);
 
     expect(handler(stubView(editor), event, null, true)).toBe(false);
@@ -136,7 +128,7 @@ describe("createImageDropHandler", () => {
 
   it("ignores drops without image files", () => {
     const editor = createEditor();
-    const handler = createImageDropHandler("/ws");
+    const handler = createImageDropHandler(fs, "/ws");
     const event = dropEvent([makeImageFile("notes.txt", "text/plain")]);
 
     expect(handler(stubView(editor), event, null, false)).toBe(false);
@@ -146,7 +138,7 @@ describe("createImageDropHandler", () => {
 
   it("ignores drops with no files at all", () => {
     const editor = createEditor();
-    const handler = createImageDropHandler("/ws");
+    const handler = createImageDropHandler(fs, "/ws");
 
     expect(handler(stubView(editor), dropEvent([]), null, false)).toBe(false);
     editor.destroy();
@@ -156,7 +148,7 @@ describe("createImageDropHandler", () => {
 describe("createImagePasteHandler", () => {
   it("writes a pasted image and inserts it at the selection", async () => {
     const editor = createEditor();
-    const handler = createImagePasteHandler("/ws");
+    const handler = createImagePasteHandler(fs, "/ws");
     const event = pasteEvent(makeImageFile("ignored-name.png"));
 
     expect(handler(stubView(editor), event)).toBe(true);
@@ -176,7 +168,7 @@ describe("createImagePasteHandler", () => {
 
   it("ignores non-image clipboard items", () => {
     const editor = createEditor();
-    const handler = createImagePasteHandler("/ws");
+    const handler = createImagePasteHandler(fs, "/ws");
     const event = pasteEvent(null, "text/plain");
 
     expect(handler(stubView(editor), event)).toBe(false);

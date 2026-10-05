@@ -41,7 +41,7 @@ import {
 import { Markdown } from "@/components/ui/markdown";
 import { cn } from "@notefig/ui/utils";
 import {
-  agents,
+  useAgents,
   useTaskRow,
   useTaskEntries,
   useTaskTurns,
@@ -50,7 +50,7 @@ import {
   type AgentTurn,
 } from "@/entities/agents";
 import { PromptEditor, type PromptEditorHandle } from "@notefig/widgets";
-import { useWorkspaceModule } from "@notefig/core/react";
+import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import { mentionContextParts } from "./prompt-widget-host";
 import { PermissionCard } from "./permission-card";
 import { AuthCard } from "./auth-card";
@@ -106,6 +106,7 @@ export function AgentChatTab({ taskId }: { taskId: string }) {
 
 function AgentChatTabBody({ taskId }: { taskId: string }) {
   const { t } = useTranslation();
+  const agents = useAgents();
   // Publish this tab's controls (focus, selection, find-in-tab) while it is
   // mounted, so the generic tab layer can drive it like any other tab.
   const { rootRef, composerRef } = useAgentTabController(taskId);
@@ -125,7 +126,7 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
   const status = taskRow?.status;
   useEffect(() => {
     if (status === "restored") agents.task(taskId).revive();
-  }, [status, taskId]);
+  }, [agents, status, taskId]);
 
   // The floating composer overlay's live height (it grows when permission/
   // auth cards stack above the prompt box); the transcript pads its scroll
@@ -224,6 +225,7 @@ function ComposerOverlay({
   composerRef: RefObject<PromptEditorHandle>;
 }) {
   const { t } = useTranslation();
+  const agents = useAgents();
   // Focus goes through the arbiter, exactly like a document editor's mount
   // intent (use-editor-focus-lifecycle): the controller resolves it into
   // the composer's own focus call, and an ambient intent stands down for a
@@ -264,11 +266,11 @@ function ComposerOverlay({
     // reader had scrolled up into history; this also re-enters follow mode
     // for the streamed reply.
     transcriptScrollRef.current.scrollToEnd();
-  }, [draft, taskId, files, transcriptScrollRef]);
+  }, [agents, draft, taskId, files, transcriptScrollRef]);
 
   const stopTask = useCallback(() => {
     void agents.task(taskId).cancel();
-  }, [taskId]);
+  }, [agents, taskId]);
 
   // Escape while a turn runs (MET-94): cancel it and — when the agent
   // hadn't responded yet — drop its round from the transcript and put the
@@ -287,7 +289,7 @@ function ComposerOverlay({
         const lastSent = getLastSentPrompt(taskId);
         if (lastSent) setDraft(lastSent);
       });
-  }, [taskId, setDraft]);
+  }, [agents, taskId, setDraft]);
 
   return (
     <div
@@ -336,6 +338,7 @@ function ComposerOverlay({
  */
 function UnavailableCard({ taskId }: { taskId: string }) {
   const { t } = useTranslation();
+  const agents = useAgents();
   return (
     <div className="pointer-events-auto flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
       <span className="min-w-0 flex-1">
@@ -794,6 +797,7 @@ function MessageEntry({
 /** "queued" chip + withdraw ✕ inside a queued user bubble. */
 function QueuedBadge({ taskId, turnId }: { taskId: string; turnId: string }) {
   const { t } = useTranslation();
+  const agents = useAgents();
   return (
     <span className="mt-1 flex items-center justify-end gap-1.5">
       <span className="rounded-full bg-primary-foreground/20 px-1.5 py-0.5 text-[0.625rem] uppercase tracking-wide">
@@ -934,6 +938,7 @@ const TOOL_NAME_RENDERER: Record<
 /** "authored a question in notes.md" instead of the raw {blobId} JSON result. */
 function AuthorBlobCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
   const { t } = useTranslation();
+  const { editors } = useCore();
   const rawInput = call.rawInput as
     { path?: string; type?: string; id?: string } | undefined;
   const status: ToolCallStatus = call.status ?? "pending";
@@ -957,7 +962,7 @@ function AuthorBlobCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
         <button
           type="button"
           className="underline hover:text-foreground"
-          onClick={() => jumpToBlob(jumpPath, rawInput.id!)}
+          onClick={() => jumpToBlob(editors, jumpPath, rawInput.id!)}
         >
           {fileName}
         </button>

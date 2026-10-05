@@ -17,21 +17,21 @@ import { resetShimDb } from "../setup/shim-db";
 
 const NS = "settings";
 
-/** Drives the app's own kv-store module, not a probe collection. */
+/** Drives the app's own KV (`core.kv`), not a probe collection. */
 const writeSettings = `
   (async () => {
-    const kv = await import('/src/utils/kv-store.ts');
-    await kv.writeKv('${NS}', 'theme', 'light');
-    await kv.writeKv('${NS}', 'zoomLevel', 1.25);
-    await kv.writeKv('${NS}', 'recent', { name: 'notes', lastOpenedAt: 17 });
-    return kv.readAllKv('${NS}');
+    const kv = window.__notefigCore.kv;
+    await kv.write('${NS}', 'theme', 'light');
+    await kv.write('${NS}', 'zoomLevel', 1.25);
+    await kv.write('${NS}', 'recent', { name: 'notes', lastOpenedAt: 17 });
+    return kv.readAll('${NS}');
   })()
 `;
 
 const readSettings = `
   (async () => {
-    const kv = await import('/src/utils/kv-store.ts');
-    return kv.readAllKv('${NS}');
+    const kv = window.__notefigCore.kv;
+    return kv.readAll('${NS}');
   })()
 `;
 
@@ -66,9 +66,9 @@ test.describe("shim: KV persistence over the real transport", () => {
     await page.goto("/");
     await page.evaluate(`
       (async () => {
-        const kv = await import('/src/utils/kv-store.ts');
-        await kv.writeKv('${NS}', 'doomed', 'value');
-        await kv.removeKv('${NS}', 'doomed');
+        const kv = window.__notefigCore.kv;
+        await kv.write('${NS}', 'doomed', 'value');
+        await kv.remove('${NS}', 'doomed');
       })()
     `);
 
@@ -77,7 +77,7 @@ test.describe("shim: KV persistence over the real transport", () => {
     // A delete that only cleared memory would let the row reappear here — the
     // failure mode a write-through store hides until the next launch.
     const value = await page.evaluate(`
-      import('/src/utils/kv-store.ts').then((kv) => kv.readKv('${NS}', 'doomed'))
+      window.__notefigCore.kv.read('${NS}', 'doomed')
     `);
     expect(value).toBeUndefined();
   });
@@ -88,19 +88,19 @@ test.describe("shim: KV persistence over the real transport", () => {
     await page.goto("/");
     await page.evaluate(`
       (async () => {
-        const kv = await import('/src/utils/kv-store.ts');
-        await kv.writeKv('${NS}', 'shared', 'from settings');
-        await kv.writeKv('recentProjects', 'shared', 'from projects');
+        const kv = window.__notefigCore.kv;
+        await kv.write('${NS}', 'shared', 'from settings');
+        await kv.write('recentProjects', 'shared', 'from projects');
       })()
     `);
 
     await page.reload();
 
     const [settings, projects] = (await page.evaluate(`
-      import('/src/utils/kv-store.ts').then((kv) => Promise.all([
-        kv.readKv('${NS}', 'shared'),
-        kv.readKv('recentProjects', 'shared'),
-      ]))
+      Promise.all([
+        window.__notefigCore.kv.read('${NS}', 'shared'),
+        window.__notefigCore.kv.read('recentProjects', 'shared'),
+      ])
     `)) as [string, string];
     expect(settings).toBe("from settings");
     expect(projects).toBe("from projects");

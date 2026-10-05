@@ -31,8 +31,7 @@ import {
   CommandList,
 } from "@notefig/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@notefig/ui/popover";
-import { agents } from "@/agent/agents";
-import { useTaskRow } from "@/entities/agents";
+import { useAgents, useTaskRow } from "@/entities/agents";
 
 /** Model first, effort second. */
 const CATEGORY_ORDER: readonly string[] = ["model", "thought_level"];
@@ -149,6 +148,7 @@ function SessionConfigPicker({
   composerRef: RefObject<PromptEditorHandle>;
 }) {
   const { t } = useTranslation();
+  const agents = useAgents();
   const [open, setOpen] = useState(false);
   const groups = choiceGroups(option);
   const choiceCount = groups.reduce((n, g) => n + g.choices.length, 0);

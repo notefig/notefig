@@ -10,6 +10,7 @@ import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import {
   getOrCreateEditor,
   disposeEditor,
+  type EditorFs,
 } from "@/components/editor/editor-store";
 import { getMarkdownEditor } from "@/entities/editors";
 import { createWorkspaceFiles, type WorkspaceFiles } from "./files";
@@ -87,12 +88,23 @@ describe("documents.write adoption (open editor)", () => {
     disposeEditor(path);
   });
 
+  /** What the editor itself reaches on the platform; unused here. */
+  const editorFs: EditorFs = {
+    searchContent: vi.fn(async () => []),
+    exists: vi.fn(async () => []),
+    writeBinaryFiles: vi.fn(async () => ({ succeeded: [], failed: [] })),
+  };
+
   function openEditor(markdown: string) {
-    return getOrCreateEditor(path, {
-      type: "markdown",
-      content: codec.parse(markdown),
-      basePath: "/ws",
-    });
+    return getOrCreateEditor(
+      path,
+      {
+        type: "markdown",
+        content: codec.parse(markdown),
+        basePath: "/ws",
+      },
+      editorFs,
+    );
   }
 
   function liveMarkdown(): string {

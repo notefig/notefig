@@ -24,6 +24,7 @@ import {
 } from "@/components/editor/document-outline";
 import { getMarkdownEditor, getSelectedText } from "@/entities/editors";
 import { getWorkspaceEditorContext } from "@/entities/editors";
+import type { LayoutApi } from "@/entities/layout";
 import type { DocumentsApi } from "@/entities/documents";
 import { resolveWorkspacePath } from "@/utils/fs";
 import type { WidgetContextRef } from "@notefig/agent";
@@ -78,7 +79,13 @@ export interface WidgetContextPayload {
 }
 
 export async function buildWidgetContextPayload(
-  documents: Pick<DocumentsApi, "read">,
+  {
+    documents,
+    layout,
+  }: {
+    documents: Pick<DocumentsApi, "read">;
+    layout: Pick<LayoutApi, "read">;
+  },
   workspacePath: string,
   ref: WidgetContextRef,
 ): Promise<WidgetContextPayload> {
@@ -94,7 +101,7 @@ export async function buildWidgetContextPayload(
   const selectedText = getSelectedText(resolved.absolute) ?? null;
   const selectedRange = ref.selectedRange ?? null;
 
-  const editorCtx = getWorkspaceEditorContext(workspacePath);
+  const editorCtx = getWorkspaceEditorContext(layout, workspacePath);
   const otherOpenFiles = editorCtx.openFiles
     .filter((f) => f.path !== resolved.absolute)
     .map((f) => ({ path: f.path, active: f.active, dirty: f.dirty }));

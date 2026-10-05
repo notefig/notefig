@@ -13,42 +13,53 @@
  *
  * A re-render of the provider must therefore hand back the SAME object.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { PromptWidgetHost } from "@notefig/widgets";
-
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    fs: {
-      createFiles: vi.fn(),
-      writeFiles: vi.fn(),
-      deleteFiles: vi.fn(),
-      getMetadata: vi.fn(async () => ({ succeeded: [], failed: [] })),
-      readFiles: vi.fn(),
-      readDirectory: vi.fn(async () => ({ ok: true, value: [] })),
-    },
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
-vi.mock("@/utils/file-write-effects", () => ({
-  invalidateDerivedState: vi.fn(),
-}));
-
-// The tab layout is app state the host only forwards to.
-vi.mock("@notefig/core/react", () => ({
-  useCore: () => ({
-    tabs: { open: () => true, openAgent: () => {}, focus: () => false },
-  }),
-}));
+import { defineModule, type Core } from "@notefig/core";
+import { CoreProvider } from "@notefig/core/react";
+import { createTestCore } from "@/testing/test-core";
+import { testAgents } from "@/testing/test-agents";
+import { kvModule } from "@/utils/kv-store";
+import { createSharedSessions } from "../blob-session-store";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
+let core: Core;
 
 beforeEach(() => {
+  // The agent layer over fakes, and the tab layout — app state the host
+  // only forwards to.
+  const { agents, store } = testAgents();
+  core = createTestCore({
+    modules: [
+      kvModule,
+      defineModule({ name: "agentStore", register: () => store }),
+      defineModule({
+        name: "agents",
+        register: () => agents,
+        workspace: {
+          create: ({ workspace }, api) => api.workspace(workspace.path),
+        },
+      }),
+      defineModule({
+        name: "sharedSessions",
+        register: () => createSharedSessions({ agents, tasks: store.tasks }),
+      }),
+      defineModule({
+        name: "tabs",
+        register: () =>
+          ({
+            open: () => true,
+            openAgent: () => {},
+            focus: () => false,
+          }) as never,
+      }),
+    ],
+  });
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -78,7 +89,12 @@ describe("usePromptWidgetHost", () => {
     }
 
     await act(async () => {
-      root!.render(createElement(HostProbe));
+      root!.render(
+        createElement(CoreProvider, {
+          core,
+          children: createElement(HostProbe),
+        }),
+      );
     });
     await act(async () => {
       forceRender();

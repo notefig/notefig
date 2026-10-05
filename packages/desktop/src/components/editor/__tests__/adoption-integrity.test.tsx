@@ -112,16 +112,6 @@ const fake = vi.hoisted(() => {
   return { store, adapter };
 });
 
-// One flat fake serving both surfaces it touches — the extra keys on each
-// are harmless, and keeping a single object keeps the fs state in one place.
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    fs: fake.adapter,
-    ui: fake.adapter,
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
 // Real modules — imported after the adapter mock so they bind to the fake fs.
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
 import { QueryClient } from "@tanstack/react-query";

@@ -18,7 +18,6 @@ import { retryOnAnimationFrame } from "@/utils/retry-on-animation-frame";
 import { DEFAULT_SETTINGS_SECTION } from "@/components/editor/settings-modal";
 import { useCore } from "@notefig/core/react";
 import { reportOpenFailure } from "@/hooks/use-open-project";
-import { workspaceScoped } from "@/entities/workspace-scoped";
 
 import {
   SIDEBAR_VIEW_PARAM,
@@ -37,16 +36,6 @@ export {
 };
 /** The tool a workspace lands on when it has no remembered one. */
 const DEFAULT_TOOL: WorkspaceTool = "files";
-
-/**
- * The tool each workspace was last using, so returning to a workspace from
- * the rail lands on it (git for the one you were committing in, sessions
- * for the one you were prompting). Lives as long as the workspace is open:
- * a restart, or a close, lands it on files.
- */
-const lastTool = workspaceScoped({
-  create: (): { tool: WorkspaceTool } => ({ tool: DEFAULT_TOOL }),
-});
 
 export interface WorkspacePanelsOptions {
   /** The focused workspace — whose tool the URL's view belongs to. */
@@ -108,14 +97,15 @@ export function useWorkspacePanels({
   const showSidebarView = useCallback(
     (view: SidebarView) => {
       if (view !== "everything") {
-        const remembered = lastTool.get(workspacePath);
-        if (remembered) remembered.tool = view;
+        if (core.workspaces.isOpen(workspacePath)) {
+          core.workspace(workspacePath).lastTool.tool = view;
+        }
       }
       setUrlSearchParams((prev) => withSidebarView(prev, view), {
         replace: true,
       });
     },
-    [setUrlSearchParams, workspacePath],
+    [core, setUrlSearchParams, workspacePath],
   );
 
   const showEverything = useCallback(
@@ -125,7 +115,9 @@ export function useWorkspacePanels({
 
   const showWorkspaceTools = useCallback(
     (path: string) => {
-      const tool = lastTool.peek(path)?.tool ?? DEFAULT_TOOL;
+      const tool = core.workspaces.isOpen(path)
+        ? core.workspace(path).lastTool.tool
+        : DEFAULT_TOOL;
       // Focus is a durable write; the view flips at once.
       void core
         .workspace(path)

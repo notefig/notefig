@@ -14,12 +14,15 @@
  */
 import { useEffect } from "react";
 import { createCollection, useLiveQuery } from "@tanstack/react-db";
-import { persistedCollectionOptions } from "@tanstack/db-sqlite-persistence-core";
-import { platformAdapter } from "@/adapters";
-import { promptRoundsCollection } from "@/entities/prompt-rounds";
+import {
+  persistedCollectionOptions,
+  type PersistedCollectionPersistence,
+} from "@tanstack/db-sqlite-persistence-core";
+import type { PromptRoundsCollection } from "@/entities/prompt-rounds";
 import { agentTaskIdFromTabId, isFileTabId } from "@/entities/tabs";
 import { onAppEvent, type AppEvents } from "@/utils/app-events";
 import { defineModule } from "@notefig/core";
+import { useModule } from "@notefig/core/react";
 
 export const SEEN_COLLECTION_ID = "seen";
 
@@ -37,14 +40,6 @@ export function seenKey(target: SeenTarget): string {
   return `${target.kind}:${target.id}`;
 }
 
-export const seenCollection = createCollection(
-  persistedCollectionOptions<SeenRow, string>({
-    id: SEEN_COLLECTION_ID,
-    getKey: (row) => row.id,
-    persistence: platformAdapter.db.get(),
-  }),
-);
-
 /** What a tab is, as a target: the task for a chat tab, the document for a
  *  file tab, nothing for the rest. */
 export function targetOfTab(tabId: string | null): SeenTarget | null {
@@ -54,98 +49,125 @@ export function targetOfTab(tabId: string | null): SeenTarget | null {
   return isFileTabId(tabId) ? { kind: "document", id: tabId } : null;
 }
 
-/** Where a settled turn shows up: its widget's document when it was a
- *  widget round, else the session's chat tab. */
-export function targetOfSettledTurn(
-  detail: Pick<AppEvents["agent:turn-settled"], "taskId" | "turnId">,
-): SeenTarget {
-  const round = promptRoundsCollection.get(detail.turnId);
-  return round
-    ? { kind: "document", id: round.documentPath }
-    : { kind: "task", id: detail.taskId };
+/** `core.seen`: the ledger and what keeps it. */
+export interface SeenApi {
+  readonly collection: ReturnType<typeof createSeenCollection>;
+  /** Where a settled turn shows up: its widget's document when it was a
+   *  widget round, else the session's chat tab. */
+  targetOfSettledTurn(
+    detail: Pick<AppEvents["agent:turn-settled"], "taskId" | "turnId">,
+  ): SeenTarget;
+  markSeen(target: SeenTarget, at?: number): Promise<void>;
+  /** The tab in front. Its target is seen now — if the window is focused;
+   *  otherwise when the user comes back to it. */
+  setActiveTab(tabId: string | null): void;
+  /** The listener's body: a turn settling on the target in front has been
+   *  seen — it landed under the user's eyes. Seen at the turn's own settle
+   *  time, the value its rows store, so the comparison cannot be split by
+   *  two clocks. A backgrounded window has nothing in front, so a turn
+   *  settling there needs attention. */
+  recordSettledTurn(detail: AppEvents["agent:turn-settled"]): Promise<void>;
+  /** Boot: the one global listener, plus the window's focus. Returns the
+   *  unsubscribe. */
+  track(): () => void;
 }
 
-export async function markSeen(
-  target: SeenTarget,
-  at: number = Date.now(),
-): Promise<void> {
-  await seenCollection.preload();
-  const id = seenKey(target);
-  const write = seenCollection.get(id)
-    ? seenCollection.update(id, (draft) => {
-        draft.lastSeenAt = Math.max(draft.lastSeenAt, at);
-      })
-    : seenCollection.insert({ id, lastSeenAt: at });
-  await write.isPersisted.promise;
+function createSeenCollection(persistence: PersistedCollectionPersistence) {
+  return createCollection(
+    persistedCollectionOptions<SeenRow, string>({
+      id: SEEN_COLLECTION_ID,
+      getKey: (row) => row.id,
+      persistence,
+    }),
+  );
 }
 
-// In front means under the user's eyes: the active tab of a focused window.
-// Both halves are plain module state, updated synchronously by the events
-// that change them — a blur flips `windowFocused` before any turn that
-// settles after it can be read against it (no React render in between).
-let activeTarget: SeenTarget | null = null;
-let windowFocused = true;
+export function createSeen({
+  persistence,
+  rounds,
+}: {
+  persistence: PersistedCollectionPersistence;
+  rounds: Pick<PromptRoundsCollection, "get">;
+}): SeenApi {
+  const seen = createSeenCollection(persistence);
 
-const inFrontKey = () =>
-  windowFocused && activeTarget ? seenKey(activeTarget) : null;
+  // In front means under the user's eyes: the active tab of a focused
+  // window. Both halves are updated synchronously by the events that change
+  // them — a blur flips `windowFocused` before any turn that settles after
+  // it can be read against it (no React render in between).
+  let activeTarget: SeenTarget | null = null;
+  let windowFocused = true;
 
-/** Tests / the shell: the tab in front. Its target is seen now — if the
- *  window is focused; otherwise when the user comes back to it. */
-export function setActiveTabForSeen(tabId: string | null): void {
-  activeTarget = targetOfTab(tabId);
-  if (windowFocused && activeTarget) void markSeen(activeTarget);
+  const inFrontKey = () =>
+    windowFocused && activeTarget ? seenKey(activeTarget) : null;
+
+  const api: SeenApi = {
+    collection: seen,
+    targetOfSettledTurn(detail) {
+      const round = rounds.get(detail.turnId);
+      return round
+        ? { kind: "document", id: round.documentPath }
+        : { kind: "task", id: detail.taskId };
+    },
+    async markSeen(target, at = Date.now()) {
+      await seen.preload();
+      const id = seenKey(target);
+      const write = seen.get(id)
+        ? seen.update(id, (draft) => {
+            draft.lastSeenAt = Math.max(draft.lastSeenAt, at);
+          })
+        : seen.insert({ id, lastSeenAt: at });
+      await write.isPersisted.promise;
+    },
+    setActiveTab(tabId) {
+      activeTarget = targetOfTab(tabId);
+      if (windowFocused && activeTarget) void api.markSeen(activeTarget);
+    },
+    async recordSettledTurn(detail) {
+      const target = api.targetOfSettledTurn(detail);
+      if (seenKey(target) === inFrontKey()) {
+        await api.markSeen(target, detail.at);
+      }
+    },
+    track() {
+      const onFocus = () => {
+        windowFocused = true;
+        // Coming back is looking again: the tab in front is seen now.
+        if (activeTarget) void api.markSeen(activeTarget);
+      };
+      const onBlur = () => {
+        windowFocused = false;
+      };
+      window.addEventListener("focus", onFocus);
+      window.addEventListener("blur", onBlur);
+      const stopSettled = onAppEvent("agent:turn-settled", (detail) => {
+        void api.recordSettledTurn(detail).catch((error) => {
+          console.error("Failed to mark a settled turn seen:", error);
+        });
+      });
+      return () => {
+        window.removeEventListener("focus", onFocus);
+        window.removeEventListener("blur", onBlur);
+        windowFocused = true;
+        stopSettled();
+      };
+    },
+  };
+  return api;
 }
 
 /** Mount once, in the shell: keeps the tracker told which tab is in front. */
 export function useTrackActiveTab(activeTabId: string | null): void {
+  const seen = useModule("seen");
   useEffect(() => {
-    setActiveTabForSeen(activeTabId);
-  }, [activeTabId]);
-}
-
-/** The listener's body, exported for tests: a turn settling on the target
- *  in front has been seen — it landed under the user's eyes. Seen at the
- *  turn's own settle time, the value its rows store, so the comparison
- *  cannot be split by two clocks. A backgrounded window has nothing in
- *  front, so a turn settling there needs attention. */
-export async function recordSettledTurn(
-  detail: AppEvents["agent:turn-settled"],
-): Promise<void> {
-  const target = targetOfSettledTurn(detail);
-  if (seenKey(target) === inFrontKey()) await markSeen(target, detail.at);
-}
-
-function onWindowFocus(): void {
-  windowFocused = true;
-  // Coming back is looking again: the tab in front is seen now.
-  if (activeTarget) void markSeen(activeTarget);
-}
-
-function onWindowBlur(): void {
-  windowFocused = false;
-}
-
-/** Boot: the one global listener, plus the window's focus. Returns the
- *  unsubscribe. */
-export function startSeenTracking(): () => void {
-  window.addEventListener("focus", onWindowFocus);
-  window.addEventListener("blur", onWindowBlur);
-  const stopSettled = onAppEvent("agent:turn-settled", (detail) => {
-    void recordSettledTurn(detail).catch((error) => {
-      console.error("Failed to mark a settled turn seen:", error);
-    });
-  });
-  return () => {
-    window.removeEventListener("focus", onWindowFocus);
-    window.removeEventListener("blur", onWindowBlur);
-    windowFocused = true;
-    stopSettled();
-  };
+    seen.setActiveTab(activeTabId);
+  }, [seen, activeTabId]);
 }
 
 /** `seenKey` → lastSeenAt, live. */
 export function useSeen(): ReadonlyMap<string, number> {
-  const { data = [] } = useLiveQuery((q) => q.from({ seen: seenCollection }));
+  const { collection } = useModule("seen");
+  const { data = [] } = useLiveQuery((q) => q.from({ seen: collection }));
   return new Map(data.map((row) => [row.id, row.lastSeenAt]));
 }
 
@@ -156,8 +178,20 @@ export function lastSeenAt(
   return seen.get(seenKey(target)) ?? 0;
 }
 
+declare module "@notefig/core" {
+  interface CoreModules {
+    seen: SeenApi;
+  }
+}
+
 /** Window focus and settled turns feed the seen ledger. */
 export const seenModule = defineModule({
   name: "seen",
-  boot: () => startSeenTracking(),
+  needs: ["platform", "promptRounds"],
+  register: (ctx) =>
+    createSeen({
+      persistence: ctx.use("platform").db.get(),
+      rounds: ctx.use("promptRounds").collection,
+    }),
+  boot: (seen) => seen.track(),
 });

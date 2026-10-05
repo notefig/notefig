@@ -29,18 +29,6 @@ import { createElement, Fragment } from "react";
 import { Editor } from "@tiptap/core";
 import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
 
-// In-memory platform adapter with async latency (hoisted for vi.mock)
-vi.mock("@/adapters", async () => {
-  const { fake } = await import("@/testing/fake-fs-adapter");
-  return {
-    platformAdapter: {
-      fs: fake.adapter,
-      ui: fake.adapter,
-      db: (await import("@/testing/node-db")).createNodeTestDb(),
-    },
-  };
-});
-
 import { fake, installWatcherSim } from "@/testing/fake-fs-adapter";
 
 // Real modules — imported after the adapter mock so they bind to the fake fs.

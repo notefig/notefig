@@ -11,7 +11,8 @@ describe("projectSettingsModule", () => {
   it("drops a workspace's cached settings when the watcher reports its metrists.json", () => {
     const queryClient = new QueryClient();
     const core = createCore({
-      services: { queryClient } as never,
+      // The module reads nothing from the platform at boot; it only has to exist.
+      services: { queryClient, platform: {} } as never,
       modules: [projectSettingsModule],
     });
     core.boot();

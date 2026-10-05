@@ -22,6 +22,7 @@ import { isDraftOnlyEdit } from "@/components/editor/draft-only-edit";
 import {
   adoptExternalContent,
   ADOPTION_TRANSACTION_META,
+  type AdoptionSource,
 } from "@/components/editor/adopt-external-content";
 
 const AUTOSAVE_DEBOUNCE_MS = 500;
@@ -55,6 +56,8 @@ export function useEditorFileSync(
   files: EditorFiles | undefined,
   isContentLoaded: boolean,
   contentError?: string,
+  /** Which prompt round wrote adopted bytes (`core.turnWrites.attribute`). */
+  attribute?: AdoptionSource["attribute"],
 ): void {
   const suppressSaveRef = useRef(false);
   // Non-null while edits sit in the debounce window (not yet pushed to the
@@ -117,7 +120,7 @@ export function useEditorFileSync(
       // Diffed adoption: drafts, widgets, and the caret survive the parts
       // of the document the external change didn't touch.
       const adoption = adoptExternalContent(editor, doc, {
-        source: { path: file.path, contentHash: targetHash },
+        source: { path: file.path, contentHash: targetHash, attribute },
       });
       suppressSaveRef.current = false;
       sync.commitAdoption(fileContent, targetHash);

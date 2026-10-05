@@ -27,7 +27,6 @@
  */
 import { defineModule } from "@notefig/core";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
-import { readKv } from "@/utils/kv-store";
 import { SETTINGS_NAMESPACE } from "@/hooks/use-app-settings";
 import { path as pathutil } from "@/utils/path";
 import { stripPromptMarkers } from "@notefig/widgets";
@@ -396,18 +395,21 @@ declare module "@notefig/core" {
 
 export const scratchpadsModule = defineModule({
   name: "scratchpads",
-  needs: ["platform", "tabs"],
+  needs: ["platform", "tabs", "kv"],
   workspace: {
     needs: ["files"],
     create: (ctx) => {
       const tabs = ctx.use("tabs");
+      const kv = ctx.use("kv");
       return createWorkspaceScratchpads({
         workspacePath: pathutil.normalize(ctx.workspace.path),
         files: ctx.useWorkspace("files"),
         fs: ctx.use("platform").fs,
         landsOnStartup: async () =>
-          (await readKv<boolean>(SETTINGS_NAMESPACE, "scratchpadOnStartup")) !==
-          false,
+          (await kv.read<boolean>(
+            SETTINGS_NAMESPACE,
+            "scratchpadOnStartup",
+          )) !== false,
         // Only once the tab is really in the dock does the gesture's
         // hand-off apply (an open the editor refuses leaves nothing to
         // own the grant).

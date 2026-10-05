@@ -10,7 +10,6 @@ import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import type { AnyModule, Core } from "@notefig/core";
 import { CoreProvider } from "@notefig/core/react";
 import { urlStateFromRouter } from "@/entities/layout";
-import { queryClient } from "@/entities/query-client";
 import { createAppCore } from "./app-core";
 
 export function startApp({
@@ -26,11 +25,16 @@ export function startApp({
   const router = createBrowserRouter([{ path: "*", element }]);
   const core = createAppCore(modules, { url: urlStateFromRouter(router) });
   core.boot();
+  // Test seam: e2e specs reach the app's own modules (its KV, say) through
+  // the core this root built. Dev/test builds only.
+  if (import.meta.env.DEV || import.meta.env.VITE_TEST_BACKEND) {
+    (window as Window & { __notefigCore?: Core }).__notefigCore = core;
+  }
 
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <StrictMode>
       <CoreProvider core={core}>
-        <QueryClientProvider client={queryClient}>
+        <QueryClientProvider client={core.use("queryClient")}>
           <RouterProvider router={router} />
         </QueryClientProvider>
       </CoreProvider>

@@ -21,14 +21,13 @@
 import { useMemo } from "react";
 import { useLiveQuery, eq } from "@tanstack/react-db";
 import {
-  agentPermissionRequestsCollection,
-  agentTasksCollection,
-  agentTurnsCollection,
+  useAgentStore,
   type AgentPermissionRequestRow,
   type AgentTaskRow,
   type AgentTurn,
 } from "@/entities/agents";
-import { promptRoundsCollection, type PromptRoundRow } from "@/entities/prompt-rounds";
+import type { PromptRoundRow } from "@/entities/prompt-rounds";
+import { useModule } from "@notefig/core/react";
 import { lastSeenAt, useSeen, type SeenTarget } from "@/entities/seen";
 import { useOpenWorkspaces } from "@/entities/workspaces";
 import { workspaceKey } from "@/utils/path";
@@ -246,20 +245,22 @@ export function deriveAttention(rows: {
 
 /** Live `deriveAttention` over the collections. */
 export function useAttention(): Attention {
+  const store = useAgentStore();
+  const roundRows = useModule("promptRounds").collection;
   const { data: tasks = [] } = useLiveQuery((q) =>
-    q.from({ task: agentTasksCollection }),
+    q.from({ task: store.tasks }),
   );
   const { data: rounds = [] } = useLiveQuery((q) =>
-    q.from({ round: promptRoundsCollection }),
+    q.from({ round: roundRows }),
   );
   const { data: runningTurns = [] } = useLiveQuery((q) =>
     q
-      .from({ turn: agentTurnsCollection })
+      .from({ turn: store.turns })
       .where(({ turn }) => eq(turn.status, "running")),
   );
   const { data: pendingPermissions = [] } = useLiveQuery((q) =>
     q
-      .from({ req: agentPermissionRequestsCollection })
+      .from({ req: store.permissionRequests })
       .where(({ req }) => eq(req.status, "pending")),
   );
   const openWorkspaces = useOpenWorkspaces();

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { platformAdapter } from "@/adapters";
+import { usePlatform } from "@/core/use-platform";
 import { IGNORE_RULES } from "@/utils/ignore";
 import type {
   SearchOptions,
@@ -29,7 +29,7 @@ const NO_RESULTS: SearchMatch[] = [];
  * Debounced workspace search hook using TanStack Query for data fetching.
  *
  * Debounces the query string by 300ms, then runs
- * platformAdapter.fs.searchContent as a subscribed query. Revalidation on
+ * the platform's fs.searchContent as a subscribed query. Revalidation on
  * filesystem changes happens through the central invalidator in
  * utils/file-sync.ts, which invalidates ["search-content", workspacePath].
  */
@@ -38,6 +38,7 @@ export function useSearch(
   options: UseSearchOptions,
 ): UseSearchResult {
   const { query, caseSensitive, useRegex, filePattern, maxResults } = options;
+  const { fs } = usePlatform();
 
   const [debouncedQuery, setDebouncedQuery] = useState(query);
   useEffect(() => {
@@ -70,7 +71,7 @@ export function useSearch(
       filePattern,
       maxResults,
     ],
-    queryFn: () => platformAdapter.fs.searchContent(workspacePath, searchOptions),
+    queryFn: () => fs.searchContent(workspacePath, searchOptions),
     enabled: trimmed !== "",
     retry: false,
     placeholderData: (previous) => previous,

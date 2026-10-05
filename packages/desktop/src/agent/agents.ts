@@ -4,10 +4,9 @@
  * actions + identity; reads keep flowing through the collections /
  * `useLiveQuery` (handles are not a second state cache).
  *
- * The underlying free functions (`startAgentTask`, `cancelAgentTask`, …) in
- * `agent-service.ts` are the implementation — this module reorganizes access
- * to them, it does not duplicate their logic. Nothing outside `agent/`
- * imports them.
+ * The runtime in `agent-service.ts` is the implementation — this module
+ * reorganizes access to it, it does not duplicate its logic. Nothing
+ * outside `agent/` reaches the runtime.
  */
 import {
   newTurnId,
@@ -16,32 +15,11 @@ import {
   type RequestPermissionResponse,
   type TurnOutcome,
 } from "@notefig/shared/agent";
-import {
-  agentTasksCollection,
-  agentTurnsCollection,
-  whenAgentTasksReconciled,
-  type AgentTurn,
-} from "./agent-collections";
-import { getRegisteredTask } from "./task-registry";
-// Deferred-use import (see agent-service.ts's matching note): the handles
-// reach back into the service only at call time.
-import {
-  cancelAgentTurnAndForget,
-  deleteAgentSession,
-  findBlobAuthorTask,
-  getOrReviveTask,
-  getWorkspaceTaskManager,
-  refreshAgentSession,
-  removeQueuedPrompt,
-  reviveAgentTask,
-  setAgentTaskConfigOption,
-  startAgentTask,
-} from "./agent-service";
-import { ensureAgentRuntime } from "./tunnel/require-connection";
+import type { AgentStore, AgentTurn } from "./agent-collections";
+import type { AgentRuntime } from "./agent-service";
 import { encodeWidgetContextUri } from "@notefig/agent";
-import { appCore } from "@/core/current";
 import { emitAppEvent } from "@/utils/app-events";
-import { getOrCreateKvCollection, writeKv } from "@/utils/kv-store";
+import type { KvApi } from "@/utils/kv-store";
 import { path as pathutil, workspaceKey } from "@/utils/path";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -186,235 +164,273 @@ export interface AgentWorkspaceHandle {
   liveTaskIds(): string[];
 }
 
-function taskHandle(taskId: string): AgentTaskHandle {
-  // A local reference (not `this.prompt`) so promptFromWidget below stays
-  // correct even if a caller destructures the returned handle.
-  const promptImpl: AgentTaskHandle["prompt"] = (text, options) => {
-    // getOrReviveTask revives a restored session transparently — the
-    // prompt rides the queue while session/load replays history.
-    const task = getOrReviveTask(taskId);
-    if (!task) {
-      return {
-        turnId: newTurnId(),
-        completed: Promise.resolve<TurnOutcome>({
-          status: "error",
-          error: "agent task is not started",
-        }),
-      };
-    }
-    return task.prompt(text, options);
-  };
-
-  const sendFromWidget = (
-    text: string,
-    widget: Parameters<AgentTaskHandle["promptFromWidget"]>[1],
-    extraContextParts: PromptContextPart[],
-  ): PromptHandle => {
-    if (widget.isDocEmpty) {
-      // The one deliberately-embedded exception: the agent can't
-      // discover "this doc is empty" by reading a resource it doesn't
-      // know to ask for, so this stays inline in the prompt text. The
-      // widget_respond directive rides along too — this branch carries
-      // no widget-context resource_link, so the widget-keyed steering in
-      // serverInstructions() (mcp-server.ts) never fires for it. Mention
-      // parts (file:// links) still ride along; the steering keys on the
-      // widget-context URI scheme, not resource_link presence.
-      const framing = `${widget.path} is currently empty. Author directly into it — do not just describe what you would write. When finished, deliver a brief confirmation (or any issues) via the \`widget_respond\` tool, not as plain chat text.\n\n`;
-      return promptImpl(
-        framing + text,
-        extraContextParts.length
-          ? { contextParts: extraContextParts }
-          : undefined,
-      );
-    }
-    const uri = encodeWidgetContextUri({
-      path: widget.path,
-      pos: widget.pos,
-      ...(widget.reference
-        ? {
-            selectedRange: {
-              from: widget.reference.from,
-              to: widget.reference.to,
-            },
-          }
-        : {}),
-    });
-    // The referenced passage leads the prompt as a markdown blockquote —
-    // visible to the agent AND rendered as a quote in the chat transcript
-    // (the second deliberately-embedded exception, like the empty-doc
-    // framing above: the quote IS part of what the user said).
-    const quoted = widget.reference
-      ? `${widget.reference.text
-          .split("\n")
-          .map((line) => `> ${line}`)
-          .join("\n")}\n\n${text}`
-      : text;
-    return promptImpl(quoted, {
-      contextParts: [
-        { kind: "resource_link", path: uri },
-        ...extraContextParts,
-      ],
-    });
-  };
-
-  return {
-    taskId,
-    prompt: promptImpl,
-    promptFromWidget(text, widget, extraContextParts = []) {
-      const sent = sendFromWidget(text, widget, extraContextParts);
-      // The round begins in the widget's document — announced here, by
-      // the one send path, so no caller can send without it.
-      emitAppEvent("widget:round-started", {
-        taskId,
-        turnId: sent.turnId,
-        workspacePath: widget.workspacePath,
-        documentPath: pathutil.isAbsolute(widget.path)
-          ? widget.path
-          : pathutil.join(widget.workspacePath, widget.path),
-        prompt: text,
-      });
-      return sent;
-    },
-    removeQueuedPrompt(turnId) {
-      removeQueuedPrompt(taskId, turnId);
-    },
-    async isReachable() {
-      if (getRegisteredTask(taskId)) return true;
-      await whenAgentTasksReconciled();
-      if (getRegisteredTask(taskId)) return true;
-      const row = agentTasksCollection.get(taskId);
-      // Exactly reviveAgentTask's precondition: anything else — no row at
-      // all, a row already demoted to "unavailable", or one with no session
-      // to resume — is a task no prompt can reach.
-      if (!row) return false;
-      return row.status === "restored" && Boolean(row.sessionId);
-    },
-    async cancel() {
-      const task = getRegisteredTask(taskId);
-      if (!task) return { ok: false, error: "agent task is not started" };
-      await task.cancel();
-      return { ok: true };
-    },
-    cancelTurnAndForget: () => cancelAgentTurnAndForget(taskId),
-    revive() {
-      reviveAgentTask(taskId);
-    },
-    refresh: () => refreshAgentSession(taskId),
-    delete: () => deleteAgentSession(taskId),
-    open() {
-      appCore().tabs.openAgent(taskId);
-    },
-    respondPermission(requestId, response) {
-      const task = getRegisteredTask(taskId);
-      if (!task) {
-        return { ok: false, error: "agent task is not started" };
-      }
-      task.respondPermission(requestId, response);
-      return { ok: true };
-    },
-    async authenticate(methodId) {
-      const task = getRegisteredTask(taskId);
-      if (!task) return { ok: false, error: "agent task is not started" };
-      return task.authenticate(methodId);
-    },
-    retryAfterAuth() {
-      const task = getRegisteredTask(taskId);
-      if (!task) return { ok: false, error: "agent task is not started" };
-      task.retryHeldPrompt();
-      return { ok: true };
-    },
-    setConfigOption(optionId, value) {
-      return setAgentTaskConfigOption(taskId, optionId, value);
-    },
-  };
-}
-
-function turnHandle(turnId: string): AgentTurnHandle {
-  return {
-    turnId,
-    get: () => agentTurnsCollection.get(turnId),
-  };
-}
-
 /** Where a workspace's "run agents here" answer is kept (KV "agent"). */
 export const AGENT_KV_NAMESPACE = "agent";
 export function trustKey(workspacePath: string): string {
   return `trust:${workspaceKey(workspacePath)}`;
 }
 
-/**
- * Trust granted in this run. The KV write is durable only after it lands,
- * but the start the user just confirmed must see the answer at once.
- */
-const trustedThisRun = new Set<string>();
 
-function workspaceHandle(workspacePath: string): AgentWorkspaceHandle {
-  const key = trustKey(workspacePath);
-  const isTrusted = () =>
-    trustedThisRun.has(key) ||
-    getOrCreateKvCollection(AGENT_KV_NAMESPACE).get(key)?.value === true;
-  return {
-    workspacePath,
-    async start(harness) {
-      if (!ensureAgentRuntime()) return { status: "no-runtime" };
-      // A cold start may click before the answers load; reading then would
-      // ask again about a workspace the user already trusted. Once loaded
-      // (boot preloads them) nothing waits.
-      const answers = getOrCreateKvCollection(AGENT_KV_NAMESPACE);
-      if (!answers.isReady()) {
-        await answers.preload();
-        // Closing the workspace meanwhile disposed its agents; a task
-        // started now would outlive it.
-        if (!appCore().workspaces.isOpen(workspacePath)) {
-          return { status: "closed" };
-        }
-      }
-      if (!isTrusted()) return { status: "needs-trust" };
-      const { taskId, started } = startAgentTask(workspacePath, harness);
-      // The tab opens on the "starting" row rather than sitting on the
-      // multi-second spawn and handshake.
-      appCore().tabs.openAgent(taskId);
-      started.catch((error) => {
-        console.error("Failed to start agent task:", error);
-      });
-      return { status: "started", taskId };
-    },
-    isTrusted,
-    trust() {
-      trustedThisRun.add(key);
-      void writeKv(AGENT_KV_NAMESPACE, key, true);
-    },
-    startTask: (harness) => startAgentTask(workspacePath, harness),
-    async createTask(harness) {
-      // Programmatic callers (subagent pattern) prompt right after — wait
-      // for the session to be ready, unlike the UI which opens the tab on
-      // the "starting" row.
-      const { taskId, started } = startAgentTask(workspacePath, harness);
-      await started;
-      return taskHandle(taskId);
-    },
-    liveTaskIds: () =>
-      (getWorkspaceTaskManager(workspacePath)?.listTasks() ?? []).map(
-        (task) => task.taskId,
-      ),
-  };
-}
-
-export const agents = {
-  task: taskHandle,
-  turn: turnHandle,
-  workspace: workspaceHandle,
+/** The agents facade — `core.agents`. */
+export interface AgentsApi {
+  task(taskId: string): AgentTaskHandle;
+  turn(turnId: string): AgentTurnHandle;
+  workspace(workspacePath: string): AgentWorkspaceHandle;
   /** Which task authored a blob (from its `author_blob` call), if any. */
-  blobAuthor: findBlobAuthorTask,
+  blobAuthor: AgentRuntime["findBlobAuthor"];
   /**
    * Whether a new session can run here: always on desktop; on the web only
    * with a paired machine (otherwise the user is shown how to pair one).
    * Call before starting a task, not before prompting a live one.
    */
-  ensureRuntime: ensureAgentRuntime,
-};
+  ensureRuntime(): boolean;
+  /** Resolves once persisted task rows match this session (see
+   *  AgentRuntime.whenReconciled); starts that if nothing has yet. */
+  whenReconciled(): Promise<void>;
+  /** Dispose a workspace's live tasks (it closed); sessionful rows demote
+   *  to "restored". */
+  disposeWorkspace(workspacePath: string): Promise<void>;
+  /** The same for every workspace at once (the tunnel dropped). */
+  disposeAll(): Promise<void>;
+}
 
-export type AgentsApi = typeof agents;
+/** What the facade is built from. */
+export interface AgentsDeps {
+  runtime: AgentRuntime;
+  store: AgentStore;
+  kv: Pick<KvApi, "collection" | "write">;
+  openAgentTab(taskId: string): void;
+  isOpen(workspacePath: string): boolean;
+  ensureRuntime(): boolean;
+}
+
+export function createAgents({
+  runtime,
+  store,
+  kv,
+  openAgentTab,
+  isOpen,
+  ensureRuntime,
+}: AgentsDeps): AgentsApi {
+  /**
+   * Trust granted in this run. The KV write is durable only after it
+   * lands, but the start the user just confirmed must see the answer at
+   * once.
+   */
+  const trustedThisRun = new Set<string>();
+
+  const taskHandle = (taskId: string): AgentTaskHandle => {
+    // A local reference (not `this.prompt`) so promptFromWidget below stays
+    // correct even if a caller destructures the returned handle.
+    const promptImpl: AgentTaskHandle["prompt"] = (text, options) => {
+      // getOrReviveTask revives a restored session transparently — the
+      // prompt rides the queue while session/load replays history.
+      const task = runtime.getOrRevive(taskId);
+      if (!task) {
+        return {
+          turnId: newTurnId(),
+          completed: Promise.resolve<TurnOutcome>({
+            status: "error",
+            error: "agent task is not started",
+          }),
+        };
+      }
+      return task.prompt(text, options);
+    };
+
+    const sendFromWidget = (
+      text: string,
+      widget: Parameters<AgentTaskHandle["promptFromWidget"]>[1],
+      extraContextParts: PromptContextPart[],
+    ): PromptHandle => {
+      if (widget.isDocEmpty) {
+        // The one deliberately-embedded exception: the agent can't
+        // discover "this doc is empty" by reading a resource it doesn't
+        // know to ask for, so this stays inline in the prompt text. The
+        // widget_respond directive rides along too — this branch carries
+        // no widget-context resource_link, so the widget-keyed steering in
+        // serverInstructions() (mcp-server.ts) never fires for it. Mention
+        // parts (file:// links) still ride along; the steering keys on the
+        // widget-context URI scheme, not resource_link presence.
+        const framing = `${widget.path} is currently empty. Author directly into it — do not just describe what you would write. When finished, deliver a brief confirmation (or any issues) via the \`widget_respond\` tool, not as plain chat text.\n\n`;
+        return promptImpl(
+          framing + text,
+          extraContextParts.length
+            ? { contextParts: extraContextParts }
+            : undefined,
+        );
+      }
+      const uri = encodeWidgetContextUri({
+        path: widget.path,
+        pos: widget.pos,
+        ...(widget.reference
+          ? {
+              selectedRange: {
+                from: widget.reference.from,
+                to: widget.reference.to,
+              },
+            }
+          : {}),
+      });
+      // The referenced passage leads the prompt as a markdown blockquote —
+      // visible to the agent AND rendered as a quote in the chat transcript
+      // (the second deliberately-embedded exception, like the empty-doc
+      // framing above: the quote IS part of what the user said).
+      const quoted = widget.reference
+        ? `${widget.reference.text
+            .split("\n")
+            .map((line) => `> ${line}`)
+            .join("\n")}\n\n${text}`
+        : text;
+      return promptImpl(quoted, {
+        contextParts: [
+          { kind: "resource_link", path: uri },
+          ...extraContextParts,
+        ],
+      });
+    };
+
+    return {
+      taskId,
+      prompt: promptImpl,
+      promptFromWidget(text, widget, extraContextParts = []) {
+        const sent = sendFromWidget(text, widget, extraContextParts);
+        // The round begins in the widget's document — announced here, by
+        // the one send path, so no caller can send without it.
+        emitAppEvent("widget:round-started", {
+          taskId,
+          turnId: sent.turnId,
+          workspacePath: widget.workspacePath,
+          documentPath: pathutil.isAbsolute(widget.path)
+            ? widget.path
+            : pathutil.join(widget.workspacePath, widget.path),
+          prompt: text,
+        });
+        return sent;
+      },
+      removeQueuedPrompt(turnId) {
+        runtime.task(taskId)?.removeQueuedPrompt(turnId);
+      },
+      async isReachable() {
+        if (runtime.task(taskId)) return true;
+        await runtime.whenReconciled();
+        if (runtime.task(taskId)) return true;
+        const row = store.tasks.get(taskId);
+        // Exactly the runtime's revive precondition: anything else — no row at
+        // all, a row already demoted to "unavailable", or one with no session
+        // to resume — is a task no prompt can reach.
+        if (!row) return false;
+        return row.status === "restored" && Boolean(row.sessionId);
+      },
+      async cancel() {
+        const task = runtime.task(taskId);
+        if (!task) return { ok: false, error: "agent task is not started" };
+        await task.cancel();
+        return { ok: true };
+      },
+      cancelTurnAndForget: () => runtime.cancelTurnAndForget(taskId),
+      revive() {
+        runtime.revive(taskId);
+      },
+      refresh: () => runtime.refresh(taskId),
+      delete: () => runtime.delete(taskId),
+      open() {
+        openAgentTab(taskId);
+      },
+      respondPermission(requestId, response) {
+        const task = runtime.task(taskId);
+        if (!task) {
+          return { ok: false, error: "agent task is not started" };
+        }
+        task.respondPermission(requestId, response);
+        return { ok: true };
+      },
+      async authenticate(methodId) {
+        const task = runtime.task(taskId);
+        if (!task) return { ok: false, error: "agent task is not started" };
+        return task.authenticate(methodId);
+      },
+      retryAfterAuth() {
+        const task = runtime.task(taskId);
+        if (!task) return { ok: false, error: "agent task is not started" };
+        task.retryHeldPrompt();
+        return { ok: true };
+      },
+      setConfigOption(optionId, value) {
+        return runtime.setConfigOption(taskId, optionId, value);
+      },
+    };
+  };
+
+  const turnHandle = (turnId: string): AgentTurnHandle => ({
+    turnId,
+    get: () => store.turns.get(turnId),
+  });
+
+  const workspaceHandle = (workspacePath: string): AgentWorkspaceHandle => {
+    const key = trustKey(workspacePath);
+    const isTrusted = () =>
+      trustedThisRun.has(key) ||
+      kv.collection(AGENT_KV_NAMESPACE).get(key)?.value === true;
+    return {
+      workspacePath,
+      async start(harness) {
+        if (!ensureRuntime()) return { status: "no-runtime" };
+        // A cold start may click before the answers load; reading then would
+        // ask again about a workspace the user already trusted. Once loaded
+        // (boot preloads them) nothing waits.
+        const answers = kv.collection(AGENT_KV_NAMESPACE);
+        if (!answers.isReady()) {
+          await answers.preload();
+          // Closing the workspace meanwhile disposed its agents; a task
+          // started now would outlive it.
+          if (!isOpen(workspacePath)) {
+            return { status: "closed" };
+          }
+        }
+        if (!isTrusted()) return { status: "needs-trust" };
+        const { taskId, started } = runtime.start(workspacePath, harness);
+        // The tab opens on the "starting" row rather than sitting on the
+        // multi-second spawn and handshake.
+        openAgentTab(taskId);
+        started.catch((error) => {
+          console.error("Failed to start agent task:", error);
+        });
+        return { status: "started", taskId };
+      },
+      isTrusted,
+      trust() {
+        trustedThisRun.add(key);
+        void kv.write(AGENT_KV_NAMESPACE, key, true);
+      },
+      startTask: (harness) => runtime.start(workspacePath, harness),
+      async createTask(harness) {
+        // Programmatic callers (subagent pattern) prompt right after — wait
+        // for the session to be ready, unlike the UI which opens the tab on
+        // the "starting" row.
+        const { taskId, started } = runtime.start(workspacePath, harness);
+        await started;
+        return taskHandle(taskId);
+      },
+      liveTaskIds: () =>
+        (runtime.manager(workspacePath)?.listTasks() ?? []).map(
+          (task) => task.taskId,
+        ),
+    };
+  };
+
+  return {
+    task: taskHandle,
+    turn: turnHandle,
+    workspace: workspaceHandle,
+    blobAuthor: (blobId) => runtime.findBlobAuthor(blobId),
+    ensureRuntime,
+    whenReconciled: () => runtime.whenReconciled(),
+    disposeWorkspace: (workspacePath) =>
+      runtime.disposeWorkspace(workspacePath),
+    disposeAll: () => runtime.disposeAll(),
+  };
+}
 
 /**
  * The inverse of promptFromWidget's quote prepend, kept beside it: a prompt

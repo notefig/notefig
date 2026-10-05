@@ -4,22 +4,13 @@ import { createRoot, type Root } from "react-dom/client";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { CoreProvider } from "@notefig/core/react";
 
-// The layout hook lives in the tabs entity, whose module graph reaches the
-// persisted agent collections; give them the in-memory rig.
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
-const workspaces = vi.hoisted(() => ({
+const workspaces = {
   open: new Set<string>(),
   // What the registry did on `workspace:focused` (see `registry` below).
   focused: vi.fn((_path: string) => {}),
-  workspaceOfPath: (path: string) =>
+  workspaceOf: (path: string) =>
     [...workspaces.open].find((ws) => path.startsWith(`${ws}/`)) ?? null,
-}));
-vi.mock("@/entities/workspaces", () => workspaces);
+};
 // Each workspace's scratchpads, as the landing reaches them through core.
 const scratchpads = {
   enterScratchpad: vi.fn(
@@ -67,7 +58,8 @@ const scratchpadsModule = defineModule({
 /** The registry's part of a focus, as the landing relies on it: the
  *  workspace is in the open set before anything lands in it. */
 const registry = defineModule({
-  name: "workspace-registry",
+  name: "workspaceRegistry",
+  register: () => ({ workspaceOf: workspaces.workspaceOf }) as never,
   boot: (_api, ctx) =>
     ctx.hooks.on("workspace:focused", ({ path }) => {
       workspaces.open.add(path);

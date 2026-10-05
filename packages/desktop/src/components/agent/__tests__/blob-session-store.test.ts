@@ -1,44 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
 // The shared session starts its task through the workspace's agents handle.
-const startAgentTask = vi.hoisted(() =>
-  vi.fn<
-    (
-      workspacePath: string,
-      harness: unknown,
-    ) => { taskId: string; started: Promise<void> }
-  >(),
-);
-vi.mock("@/agent/agents", () => ({
-  agents: {
-    workspace: (workspacePath: string) => ({
-      startTask: (harness: unknown) => startAgentTask(workspacePath, harness),
-    }),
-  },
-}));
+const startAgentTask = vi.fn<
+  (
+    workspacePath: string,
+    harness: unknown,
+  ) => { taskId: string; started: Promise<void> }
+>();
 
-import { agentTasksCollection } from "@/agent/agent-collections";
+import type { AgentTasksCollection } from "@/agent/agent-collections";
 import {
-  getOrStartSharedSession,
-  dropSharedSession,
-  peekSharedSession,
-  adoptSharedSession,
-  resetSharedSessionsForTest,
+  createSharedSessions,
+  type SharedSessionsApi,
 } from "../blob-session-store";
+import { testAgentStore } from "@/testing/test-agents";
 
 const startMock = startAgentTask;
 const HARNESS = { id: "claude-code", label: "Claude Code" } as never;
+
+let tasks: AgentTasksCollection;
+let sessions: SharedSessionsApi;
 
 let nextTask = 0;
 function stubStart(status: "idle" | "error" = "idle") {
   const taskId = `task_${++nextTask}`;
   startMock.mockImplementationOnce((workspacePath: string) => {
-    agentTasksCollection.insert({
+    tasks.insert({
       taskId,
       workspacePath,
       title: "t",
@@ -53,13 +40,13 @@ function stubStart(status: "idle" | "error" = "idle") {
 }
 
 /** Seeds a task row directly, as if it were already live — for
- *  adoptSharedSession tests, which must never call startAgentTask. */
+ *  adopt tests, which must never start a task. */
 function insertTask(
   workspacePath: string,
   status: "idle" | "running" | "error" | "cancelled" = "idle",
 ) {
   const taskId = `task_${++nextTask}`;
-  agentTasksCollection.insert({
+  tasks.insert({
     taskId,
     workspacePath,
     title: "t",
@@ -72,18 +59,25 @@ function insertTask(
 }
 
 beforeEach(() => {
-  resetSharedSessionsForTest();
   startMock.mockReset();
-  for (const row of agentTasksCollection.toArray) {
-    agentTasksCollection.delete(row.taskId);
-  }
+  tasks = testAgentStore().tasks;
+  sessions = createSharedSessions({
+    agents: {
+      workspace: (workspacePath: string) =>
+        ({
+          startTask: (harness: unknown) =>
+            startAgentTask(workspacePath, harness),
+        }) as never,
+    },
+    tasks,
+  });
 });
 
 describe("blob-session-store", () => {
   it("starts lazily once and reuses the live session", async () => {
     const taskId = stubStart();
-    const first = await getOrStartSharedSession("/ws", HARNESS);
-    const second = await getOrStartSharedSession("/ws", HARNESS);
+    const first = await sessions.getOrStart("/ws", HARNESS);
+    const second = await sessions.getOrStart("/ws", HARNESS);
     expect(first.taskId).toBe(taskId);
     expect(second.taskId).toBe(taskId);
     expect(startMock).toHaveBeenCalledTimes(1);
@@ -92,86 +86,86 @@ describe("blob-session-store", () => {
   it("keeps workspaces separate", async () => {
     const a = stubStart();
     const b = stubStart();
-    expect((await getOrStartSharedSession("/ws-a", HARNESS)).taskId).toBe(a);
-    expect((await getOrStartSharedSession("/ws-b", HARNESS)).taskId).toBe(b);
+    expect((await sessions.getOrStart("/ws-a", HARNESS)).taskId).toBe(a);
+    expect((await sessions.getOrStart("/ws-b", HARNESS)).taskId).toBe(b);
   });
 
   it("restarts when the cached task row is dead", async () => {
     const dead = stubStart();
-    await getOrStartSharedSession("/ws", HARNESS);
-    agentTasksCollection.update(dead, (draft) => {
+    await sessions.getOrStart("/ws", HARNESS);
+    tasks.update(dead, (draft) => {
       draft.status = "error";
     });
     const fresh = stubStart();
-    expect((await getOrStartSharedSession("/ws", HARNESS)).taskId).toBe(fresh);
+    expect((await sessions.getOrStart("/ws", HARNESS)).taskId).toBe(fresh);
   });
 
-  it("dropSharedSession forgets without spawning; next send starts fresh", async () => {
+  it("drop forgets without spawning; next send starts fresh", async () => {
     const first = stubStart();
-    await getOrStartSharedSession("/ws", HARNESS);
-    dropSharedSession("/ws");
-    expect(peekSharedSession("/ws")).toBeNull();
+    await sessions.getOrStart("/ws", HARNESS);
+    sessions.drop("/ws");
+    expect(sessions.peek("/ws")).toBeNull();
     expect(startMock).toHaveBeenCalledTimes(1);
 
     const second = stubStart();
-    expect((await getOrStartSharedSession("/ws", HARNESS)).taskId).toBe(second);
+    expect((await sessions.getOrStart("/ws", HARNESS)).taskId).toBe(second);
     expect(second).not.toBe(first);
   });
 
-  it("peekSharedSession reflects liveness", async () => {
-    expect(peekSharedSession("/ws")).toBeNull();
+  it("peek reflects liveness", async () => {
+    expect(sessions.peek("/ws")).toBeNull();
     const taskId = stubStart();
-    await getOrStartSharedSession("/ws", HARNESS);
-    expect(peekSharedSession("/ws")).toBe(taskId);
-    agentTasksCollection.update(taskId, (draft) => {
+    await sessions.getOrStart("/ws", HARNESS);
+    expect(sessions.peek("/ws")).toBe(taskId);
+    tasks.update(taskId, (draft) => {
       draft.status = "cancelled";
     });
-    expect(peekSharedSession("/ws")).toBeNull();
+    expect(sessions.peek("/ws")).toBeNull();
   });
 });
 
-describe("adoptSharedSession", () => {
+describe("adopt", () => {
   it("adopts a live task without starting a new one", async () => {
     const taskId = insertTask("/ws");
-    adoptSharedSession("/ws", taskId);
-    expect((await getOrStartSharedSession("/ws", HARNESS)).taskId).toBe(taskId);
+    sessions.adopt("/ws", taskId);
+    expect((await sessions.getOrStart("/ws", HARNESS)).taskId).toBe(taskId);
     expect(startMock).not.toHaveBeenCalled();
   });
 
   it("no-ops when the taskId is missing", async () => {
-    adoptSharedSession("/ws", "task_missing");
-    expect(peekSharedSession("/ws")).toBeNull();
+    sessions.adopt("/ws", "task_missing");
+    expect(sessions.peek("/ws")).toBeNull();
   });
 
   it("no-ops when the task is errored or cancelled", async () => {
     const errored = insertTask("/ws", "error");
-    adoptSharedSession("/ws", errored);
-    expect(peekSharedSession("/ws")).toBeNull();
+    sessions.adopt("/ws", errored);
+    expect(sessions.peek("/ws")).toBeNull();
 
     const cancelled = insertTask("/ws", "cancelled");
-    adoptSharedSession("/ws", cancelled);
-    expect(peekSharedSession("/ws")).toBeNull();
+    sessions.adopt("/ws", cancelled);
+    expect(sessions.peek("/ws")).toBeNull();
   });
 
-  it("dropSharedSession after adopting starts fresh on next send", async () => {
+  it("drop after adopting starts fresh on next send", async () => {
     const adopted = insertTask("/ws");
-    adoptSharedSession("/ws", adopted);
-    dropSharedSession("/ws");
-    expect(peekSharedSession("/ws")).toBeNull();
+    sessions.adopt("/ws", adopted);
+    sessions.drop("/ws");
+    expect(sessions.peek("/ws")).toBeNull();
 
     const fresh = stubStart();
-    expect((await getOrStartSharedSession("/ws", HARNESS)).taskId).toBe(fresh);
+    expect((await sessions.getOrStart("/ws", HARNESS)).taskId).toBe(fresh);
   });
 
   it("adopted session going dead falls back to starting fresh", async () => {
     const adopted = insertTask("/ws");
-    adoptSharedSession("/ws", adopted);
-    agentTasksCollection.update(adopted, (draft) => {
+    sessions.adopt("/ws", adopted);
+    tasks.update(adopted, (draft) => {
       draft.status = "error";
     });
-    expect(peekSharedSession("/ws")).toBeNull();
+    expect(sessions.peek("/ws")).toBeNull();
 
     const fresh = stubStart();
-    expect((await getOrStartSharedSession("/ws", HARNESS)).taskId).toBe(fresh);
+    expect((await sessions.getOrStart("/ws", HARNESS)).taskId).toBe(fresh);
   });
 });

@@ -2,6 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
+import type { Core } from "@notefig/core";
+import { CoreProvider } from "@notefig/core/react";
+import { CommandPalette } from "../command-palette";
+import { ThemeProvider } from "../../theme-provider";
+import { createTestCore } from "@/testing/test-core";
+import { filesModuleOf, testWorkspaceFiles } from "@/testing/test-files";
+import type { WorkspaceFiles } from "@/entities/files";
+import { kvModule } from "@/utils/kv-store";
 
 // Real TanStack DB collections over a listing handed to them — file
 // results come from the actual metadata collection through useFileSearch.
@@ -10,23 +18,12 @@ const adapter = {
   readDirectory: vi.fn(),
 };
 
-// The settings the palette reads still persist through the platform db.
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 const WS = "/ws-palette";
 
-let files: import("@/entities/files").WorkspaceFiles;
-let testCore: import("@notefig/core").Core;
-let CommandPalette: typeof import("../command-palette").CommandPalette;
-let ThemeProvider: typeof import("../../theme-provider").ThemeProvider;
-let CoreProvider: typeof import("@notefig/core/react").CoreProvider;
-let createTestCore: typeof import("@/testing/test-core").createTestCore;
+let files: WorkspaceFiles;
+let testCore: Core;
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -97,14 +94,10 @@ beforeEach(async () => {
     }),
   );
 
-  ({ CommandPalette } = await import("../command-palette"));
-  ({ ThemeProvider } = await import("../../theme-provider"));
-  ({ CoreProvider } = await import("@notefig/core/react"));
-  ({ createTestCore } = await import("@/testing/test-core"));
-  const { filesModuleOf, testWorkspaceFiles } =
-    await import("@/testing/test-files");
   files = testWorkspaceFiles(WS, adapter);
-  testCore = createTestCore({ modules: [filesModuleOf([files])] });
+  // The settings the palette reads persist through the kv store over the
+  // test core's platform db.
+  testCore = createTestCore({ modules: [kvModule, filesModuleOf([files])] });
   await testCore.workspace(WS).open();
   await files.collections.metadata.preload();
 });

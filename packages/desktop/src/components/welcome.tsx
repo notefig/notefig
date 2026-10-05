@@ -28,7 +28,7 @@ import { cn } from "@notefig/ui/utils";
 import type { HarnessAvailability } from "@notefig/shared/agent";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { platformAdapter } from "@/adapters";
+import { usePlatform } from "@/core/use-platform";
 import Logo from "@/components/logo";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { useTheme } from "@/components/theme-provider";
@@ -50,10 +50,6 @@ import { latestReleaseBody, latestReleaseTitle } from "@/utils/release-notes";
 import { ReleaseNotesDocument } from "./release-notes-tab";
 import { DebugPanel } from "./debug-panel";
 
-function openExternalLink(url: string) {
-  platformAdapter.ui.openExternal(url);
-}
-
 /**
  * Route anchor clicks inside injected markdown to the platform opener.
  * `renderMarkdownHtml` runs markdown-it with `linkify: true`, so a bundled
@@ -63,12 +59,15 @@ function openExternalLink(url: string) {
  * because the markup is set via dangerouslySetInnerHTML and has no
  * elements of ours to bind to.
  */
-function handleMarkdownLinkClick(event: React.MouseEvent<HTMLElement>) {
+function handleMarkdownLinkClick(
+  event: React.MouseEvent<HTMLElement>,
+  openExternal: (url: string) => void,
+) {
   const anchor = (event.target as HTMLElement).closest("a");
   if (!anchor) return;
   event.preventDefault();
   const href = anchor.getAttribute("href");
-  if (href) openExternalLink(href);
+  if (href) openExternal(href);
 }
 
 /** Icon-button footprint for the rail's utility row — one size for the
@@ -235,6 +234,7 @@ function HarnessPanel() {
  */
 function ReleaseNotesPanel() {
   const { t } = useTranslation();
+  const { ui } = usePlatform();
   const [open, setOpen] = useState(false);
   if (!latestReleaseTitle || !latestReleaseBody) return null;
 
@@ -274,7 +274,7 @@ function ReleaseNotesPanel() {
           "[&_code]:font-mono",
           "[&_a]:underline [&_a]:underline-offset-2",
         )}
-        onClick={handleMarkdownLinkClick}
+        onClick={(event) => handleMarkdownLinkClick(event, ui.openExternal)}
         dangerouslySetInnerHTML={{
           __html: renderMarkdownHtml(latestReleaseBody),
         }}
@@ -345,6 +345,7 @@ function RecentProjectRow({
 export function Welcome() {
   const [loading, setLoading] = useState(false);
   const { t } = useTranslation();
+  const { ui } = usePlatform();
   const openProject = useOpenProject();
   const openProjectFromPicker = useOpenProjectFromPicker();
   const openButtonRef = useRef<HTMLButtonElement>(null);
@@ -454,14 +455,14 @@ export function Welcome() {
           <div className="ml-auto flex shrink-0 items-center gap-0.5 lg:ml-0 lg:mt-4 lg:justify-end">
             <RailIconButton
               label={t("documentation")}
-              onClick={() => openExternalLink("https://notefig.com/docs")}
+              onClick={() => ui.openExternal("https://notefig.com/docs")}
             >
               <Book className="size-4" />
             </RailIconButton>
             <RailIconButton
               label="GitHub"
               onClick={() =>
-                openExternalLink("https://github.com/notefig/notefig")
+                ui.openExternal("https://github.com/notefig/notefig")
               }
             >
               <Github className="size-4" />

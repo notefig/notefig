@@ -1,74 +1,30 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-
-const { writeFiles, readFiles } = vi.hoisted(() => ({
-  writeFiles: vi.fn(async (files: { path: string; content: string }[]) => ({
-    succeeded: files.map((f) => f.path),
-    failed: [] as unknown[],
-  })),
-  readFiles: vi.fn(async (paths: string[]) => ({
-    succeeded: paths.map((p) => ({ path: p, content: "old contents\n" })),
-    failed: [] as unknown[],
-  })),
-}));
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-    fs: {
-      writeFiles,
-      readFiles,
-    },
-    proc: {
-      createMcpEndpoint: vi.fn(() => ({
-        mcpServer: { name: "notefig", command: "notefig", args: [], env: [] },
-        start: vi.fn(async () => {}),
-        onRequest: vi.fn(() => () => {}),
-        close: vi.fn(async () => {}),
-      })),
-      // Spawning is not what these tests drive: a start that gets this far
-      // fails on the row, as a real spawn failure would.
-      createAgentTransport: vi.fn(() => {
-        throw new Error("no agent processes in unit tests");
-      }),
-    },
-  },
-}));
-// Whether a session has somewhere to run (the web needs a paired machine).
-const runtime = vi.hoisted(() => ({ ready: true }));
-vi.mock("../tunnel/require-connection", () => ({
-  ensureAgentRuntime: () => runtime.ready,
-}));
-
 import { createLoopbackPair, decodeWidgetContextUri } from "@notefig/agent";
 import { FakeAgent } from "../mock-harness";
-import { TaskManager } from "../agent-service";
+import type { AgentRuntime } from "../agent-service";
+import type { AgentStore } from "../agent-collections";
 import {
   AGENT_KV_NAMESPACE,
-  agents,
   splitLeadingQuote,
   trustKey,
+  type AgentsApi,
 } from "../agents";
-import { installAppCore } from "@/core/current";
+import { testAgents } from "@/testing/test-agents";
+import { testKv } from "@/testing/test-kv";
 import { onAppEvent } from "@/utils/app-events";
-import { removeKv, writeKv } from "@/utils/kv-store";
-import {
-  agentEntriesCollection,
-  agentPermissionRequestsCollection,
-  agentTasksCollection,
-  agentTurnsCollection,
-} from "../agent-collections";
+import type { KvApi } from "@/utils/kv-store";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 
 const harness = BUILT_IN_HARNESSES[0];
 
+// A fresh agent layer per test: nothing carries over between them. Tasks
+// are created through the runtime's manager so the facade can reach them.
+let runtime: AgentRuntime;
+let store: AgentStore;
+let agents: AgentsApi;
+
 beforeEach(() => {
-  for (const e of agentEntriesCollection.toArray)
-    agentEntriesCollection.delete(e.id);
-  for (const t of agentTurnsCollection.toArray)
-    agentTurnsCollection.delete(t.turnId);
-  for (const t of agentTasksCollection.toArray)
-    agentTasksCollection.delete(t.taskId);
-  for (const r of agentPermissionRequestsCollection.toArray)
-    agentPermissionRequestsCollection.delete(r.id);
+  ({ runtime, store, agents } = testAgents());
 });
 
 describe("agents facade (Stage 1)", () => {
@@ -103,7 +59,7 @@ describe("agents facade (Stage 1)", () => {
     const agent = new FakeAgent(agentSide);
     agent.onPrompt = async () => ({ stopReason: "end_turn" });
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = runtime.managerFor("/ws").createTask(harness);
     await task.start(() => client);
 
     const handle = agents.task(task.taskId);
@@ -120,7 +76,7 @@ describe("agents facade (Stage 1)", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = runtime.managerFor("/ws").createTask(harness);
     await task.start(() => client);
 
     const handle = agents.task(task.taskId);
@@ -154,7 +110,7 @@ describe("agents facade (Stage 1)", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = runtime.managerFor("/ws").createTask(harness);
     await task.start(() => client);
 
     const handle = agents.task(task.taskId);
@@ -186,7 +142,7 @@ describe("agents facade (Stage 1)", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = runtime.managerFor("/ws").createTask(harness);
     await task.start(() => client);
 
     await agents.task(task.taskId).promptFromWidget("shorten this", {
@@ -226,7 +182,7 @@ describe("agents facade (Stage 1)", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = runtime.managerFor("/ws").createTask(harness);
     await task.start(() => client);
 
     const handle = agents.task(task.taskId);
@@ -251,7 +207,7 @@ describe("agents facade (Stage 1)", () => {
     const agent = new FakeAgent(agentSide);
     agent.onPrompt = async () => ({ stopReason: "end_turn" });
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = runtime.managerFor("/ws").createTask(harness);
     await task.start(() => client);
     const { turnId, completed } = task.prompt("hi");
     await completed;
@@ -262,12 +218,16 @@ describe("agents facade (Stage 1)", () => {
 });
 
 describe("task reachability (MET-163)", () => {
+  // The rows below are what this session made of its tasks, so boot
+  // reconciliation has already run by the time they appear.
+  beforeEach(() => runtime.whenReconciled());
+
   it("is false for a task that never existed", async () => {
     expect(await agents.task("task_nope").isReachable()).toBe(false);
   });
 
   it("is true for a restored row a prompt would revive", async () => {
-    agentTasksCollection.insert({
+    store.tasks.insert({
       taskId: "task_restored",
       workspacePath: "/ws",
       title: "restored",
@@ -281,7 +241,7 @@ describe("task reachability (MET-163)", () => {
   });
 
   it("is false once a row has been demoted to unavailable", async () => {
-    agentTasksCollection.insert({
+    store.tasks.insert({
       taskId: "task_dead",
       workspacePath: "/ws",
       title: "dead",
@@ -295,7 +255,7 @@ describe("task reachability (MET-163)", () => {
   });
 
   it("is false for a row with no session to resume", async () => {
-    agentTasksCollection.insert({
+    store.tasks.insert({
       taskId: "task_sessionless",
       workspacePath: "/ws",
       title: "no session",
@@ -344,7 +304,7 @@ describe("the widget's send path", () => {
     new FakeAgent(agentSide).onPrompt = async () => ({
       stopReason: "end_turn",
     });
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = runtime.managerFor("/ws").createTask(harness);
     await task.start(() => client);
     const rounds: unknown[] = [];
     const stop = onAppEvent("widget:round-started", (detail) =>
@@ -376,22 +336,27 @@ describe("the widget's send path", () => {
 
 describe("starting a session from the UI", () => {
   const openAgent = vi.fn();
+  // Whether a session has somewhere to run (the web needs a paired machine).
+  let runtimeReady: boolean;
+  let kv: KvApi;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     openAgent.mockClear();
-    runtime.ready = true;
-    installAppCore({ tabs: { openAgent } } as never);
-    await removeKv(AGENT_KV_NAMESPACE, trustKey("/ws"));
+    runtimeReady = true;
+    kv = testKv();
+    ({ store, agents } = testAgents(
+      { kv },
+      { openAgentTab: openAgent, ensureRuntime: () => runtimeReady },
+    ));
   });
-
   it("starts nothing without a runtime to run on", async () => {
-    runtime.ready = false;
-    await writeKv(AGENT_KV_NAMESPACE, trustKey("/ws"), true);
+    runtimeReady = false;
+    await kv.write(AGENT_KV_NAMESPACE, trustKey("/ws"), true);
 
     expect(await agents.workspace("/ws").start(harness)).toEqual({
       status: "no-runtime",
     });
-    expect(agentTasksCollection.size).toBe(0);
+    expect(store.tasks.size).toBe(0);
   });
 
   it("asks for trust first in a workspace that never ran agents", async () => {
@@ -399,7 +364,7 @@ describe("starting a session from the UI", () => {
 
     expect(workspace.isTrusted()).toBe(false);
     expect(await workspace.start(harness)).toEqual({ status: "needs-trust" });
-    expect(agentTasksCollection.size).toBe(0);
+    expect(store.tasks.size).toBe(0);
     expect(openAgent).not.toHaveBeenCalled();
   });
 
@@ -417,14 +382,14 @@ describe("starting a session from the UI", () => {
 
   it("once trusted, starts the task and opens its tab on the starting row", async () => {
     const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
-    await writeKv(AGENT_KV_NAMESPACE, trustKey("/ws"), true);
+    await kv.write(AGENT_KV_NAMESPACE, trustKey("/ws"), true);
     const workspace = agents.workspace("/ws");
 
     const result = await workspace.start(harness);
 
     expect(result).toEqual({ status: "started", taskId: expect.any(String) });
     const { taskId } = result as { taskId: string };
-    expect(agentTasksCollection.get(taskId)?.workspacePath).toBe("/ws");
+    expect(store.tasks.get(taskId)?.workspacePath).toBe("/ws");
     expect(openAgent).toHaveBeenCalledWith(taskId);
     expect(workspace.liveTaskIds()).toContain(taskId);
     await agents.task(taskId).delete();

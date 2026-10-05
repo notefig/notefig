@@ -165,7 +165,7 @@ export async function handleMetadataFileSystemChange(
 
 export async function handleContentFileSystemChange(
   files: WorkspaceFiles,
-  fs: Fs,
+  fs: Pick<FileSystemSurface, "readFiles">,
   event: ContentChangeEvent,
 ): Promise<void> {
   for (const change of event.changes) {

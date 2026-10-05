@@ -19,7 +19,7 @@
  */
 import { findBlobs, patchBlobInMarkdown } from "@notefig/shared/blobs";
 import { toast } from "sonner";
-import { agents } from "@/agent/agents";
+import type { AgentsApi } from "@/agent/agents";
 import i18n from "@/utils/intl";
 import type { DocumentsApi } from "@/entities/documents";
 import { createMarkdownCodec } from "../markdown-codec";
@@ -59,7 +59,7 @@ async function readAuthoritativeMarkdown(
 }
 
 export async function answerBlob(
-  documents: DocumentsApi,
+  { documents, agents }: { documents: DocumentsApi; agents: AgentsApi },
   filePath: string,
   blobId: string,
   patch: Record<string, unknown>,

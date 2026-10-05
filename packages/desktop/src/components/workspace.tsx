@@ -21,17 +21,15 @@ import {
   useOpenFileRows,
 } from "@/entities/files";
 import {
-  openWorkspacesCollection,
   useFocusedWorkspace,
   useOpenWorkspacesReady,
   useWorkspaceOfPath,
-  workspaceOfPath,
 } from "@/entities/workspaces";
 import { useWorkspaceTabs, renameOpenFileTab } from "@/entities/tabs";
 import { DebugPanel } from "./debug-panel";
 import { useOpenProject } from "@/hooks/use-open-project";
 import { Welcome } from "@/components/welcome";
-import { platformAdapter } from "@/adapters";
+import { usePlatform } from "@/core/use-platform";
 import { usePublishAppStatus } from "@/hooks/use-app-status";
 import { useProjectSettings } from "@/utils/project-settings";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
@@ -44,7 +42,6 @@ import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary"
 import { useThrowWorkspaceAccessError } from "@/components/workspace-error-boundary";
 import { isFileTabId } from "@/entities/tabs";
 import { useCore } from "@notefig/core/react";
-import { touchRecentDocument } from "@/entities/recent-documents";
 import { useTrackActiveTab } from "@/entities/seen";
 import { useTabElements } from "@/tabs/tab-types";
 import { useReleaseNotesOnUpdate } from "@/hooks/use-release-notes-on-update";
@@ -81,12 +78,13 @@ export const Workspace = () => {
 /** The native "Open Folder" menu item (Rust emits `folder-selected`). */
 function useOpenProjectFromHost(): void {
   const openProject = useOpenProject();
+  const { ui } = usePlatform();
   useEffect(
     () =>
-      platformAdapter.ui.addEventListener((event) => {
+      ui.addEventListener((event) => {
         if (event.type === "folder-selected") void openProject(event.payload);
       }),
-    [openProject],
+    [ui, openProject],
   );
 }
 
@@ -103,7 +101,7 @@ function useOpenProjectTestSeam(): void {
     (window as Window & { __notefigTest?: unknown }).__notefigTest = {
       openProject,
       openWorkspaces: () =>
-        [...openWorkspacesCollection.values()].map((row) => row.path),
+        [...core.workspaceRegistry.collection.values()].map((row) => row.path),
       metadataPaths: (workspacePath: string) =>
         core
           .workspace(workspacePath)
@@ -395,7 +393,7 @@ function useWorkspaceDocuments({
     layout: Parameters<typeof removeTabFromLayout>[0],
   ) => void;
 }) {
-  const { tabs } = useCore();
+  const { tabs, recentDocuments } = useCore();
   const {
     fileTabsByWorkspace,
     agentTaskRows: openAgentTaskRows,
@@ -417,9 +415,9 @@ function useWorkspaceDocuments({
   // The Everything view's recent documents: whatever file tab is in front.
   useEffect(() => {
     if (activeTabId !== null && isFileTabId(activeTabId)) {
-      void touchRecentDocument(activeTabId);
+      void recentDocuments.touch(activeTabId);
     }
-  }, [activeTabId]);
+  }, [recentDocuments, activeTabId]);
   // ...and the seen tracker: whatever tab is in front has been looked at.
   useTrackActiveTab(activeTabId);
 
@@ -505,7 +503,9 @@ function useRenameOpenFile(workspacePath: string) {
       renameOpenFileTab({
         // The tab belongs to the workspace that holds its file, which need
         // not be the one the sidebar shows.
-        files: core.workspace(workspaceOfPath(oldPath) ?? workspacePath).files,
+        files: core.workspace(
+          core.workspaceRegistry.workspaceOf(oldPath) ?? workspacePath,
+        ).files,
         oldPath,
         newPath,
         applyLayoutRename: core.tabs.rename,

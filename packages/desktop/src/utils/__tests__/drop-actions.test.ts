@@ -33,8 +33,6 @@ vi.mock("@/entities/editors", async (importOriginal) => ({
   getMarkdownEditor: () => null,
 }));
 
-vi.mock("@/adapters", () => ({ platformAdapter: { fs: {} } }));
-
 import { moveIntoFolder } from "@/utils/drop-actions";
 
 function dragged(path: string, fileType: "file" | "directory") {

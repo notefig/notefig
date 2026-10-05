@@ -1,6 +1,6 @@
 /**
- * Main-thread access to the git worker: one lazily-booted worker for all
- * repos, serving `@notefig/git`'s worker API. The CPU-heavy side
+ * Main-thread access to the git worker — `core.gitWorker`: one
+ * lazily-booted worker for all repos, serving `@notefig/git`'s worker API. The CPU-heavy side
  * (statusMatrix's worktree hashing, packfile parsing, index rewrites) runs
  * in the worker; its filesystem access is served back to this thread over
  * worker-rpc's host channel, since Tauri `invoke` and the browser adapters
@@ -13,7 +13,7 @@
  * evidence of. If the worker can't boot or dies, calls reject, which the
  * git entity already renders as errors-as-data on the repo row; the next
  * call re-attempts the boot, so a transient failure self-heals.
- * Unit tests mock this module (happy-dom has no `Worker`).
+ * Unit tests hand history a fake instead (happy-dom has no `Worker`).
  */
 import {
   createRpcGitService,
@@ -24,7 +24,7 @@ import {
   type GitWorkerApi,
   type GitWorkerInitMessage,
 } from "@notefig/git";
-import { platformAdapter } from "@/adapters";
+import { defineModule } from "@notefig/core";
 import { type GitHostFs } from "@/adapters/git-storage-host";
 import {
   FsError,
@@ -41,9 +41,8 @@ import {
 /** Mapped alias: interfaces don't satisfy `WorkerApi`'s index constraint. */
 type GitWorkerRpc = { [K in keyof GitWorkerApi]: GitWorkerApi[K] };
 
-/** The fs slice the worker may call back into, bound late to the adapter. */
-function hostFsApi(): GitHostFs {
-  const fs = platformAdapter.fs;
+/** The fs slice the worker may call back into. */
+function hostFsApi(fs: GitHostFs): GitHostFs {
   return {
     readBinaryFiles: (paths) => fs.readBinaryFiles(paths),
     writeBinaryFiles: (files) => fs.writeBinaryFiles(files),
@@ -76,14 +75,12 @@ function reviveBoundaryFsError(error: GitBoundaryError): Error | undefined {
   );
 }
 
-let gitWorkerPromise: Promise<WorkerClient<GitWorkerRpc>> | null = null;
-
-function bootGitWorker(): Promise<WorkerClient<GitWorkerRpc>> {
+function bootGitWorker(fs: GitHostFs): Promise<WorkerClient<GitWorkerRpc>> {
   const worker = new Worker(
     new URL("../workers/git.worker.ts", import.meta.url),
     { type: "module" },
   );
-  serveWorkerHost(worker, hostFsApi(), serializeHostError);
+  serveWorkerHost(worker, hostFsApi(fs), serializeHostError);
   // The one desktop-specific global the worker's import graph needs pinned
   // before it loads: utils/path binds its posix/win32 flavor from this.
   worker.postMessage({
@@ -100,52 +97,66 @@ function bootGitWorker(): Promise<WorkerClient<GitWorkerRpc>> {
   );
 }
 
-function getGitWorker(): Promise<WorkerClient<GitWorkerRpc>> {
-  if (!gitWorkerPromise) {
-    const boot = (async () => bootGitWorker())();
-    gitWorkerPromise = boot;
-    // A failed boot doesn't pin the rejection: the next call retries.
-    boot.catch(() => {
-      if (gitWorkerPromise === boot) gitWorkerPromise = null;
-    });
-  }
-  return gitWorkerPromise;
+/** Git services whose work runs in the worker. */
+export interface GitWorker {
+  /** A `GitService` for one repo. */
+  create(repo: GitRepoRef): GitService;
+  /** Drop one repo's service (and object cache) in the worker. */
+  dispose(gitDir: string): void;
 }
 
-/** gitDirs handed out, so clear-all can reach into the worker's registry. */
-const knownGitDirs = new Set<string>();
+export function createGitWorker(fs: GitHostFs): GitWorker {
+  let gitWorkerPromise: Promise<WorkerClient<GitWorkerRpc>> | null = null;
 
-/** A `GitService` for one repo whose work runs in the git worker. */
-export function createWorkerGitService(repo: GitRepoRef): GitService {
-  knownGitDirs.add(repo.gitDir);
-  const call: GitBoundaryCall = async (method, args) => {
-    const client = await getGitWorker();
-    try {
-      return await client.gitCall(repo, method, args);
-    } catch (error) {
-      if (error instanceof WorkerRpcError && error.workerDead) {
-        // Drop the dead handle so the next call boots a fresh worker; this
-        // call still fails (its in-worker state is gone mid-operation).
-        console.error("[git-worker] Worker died mid-call:", error.message);
-        gitWorkerPromise = null;
-      }
-      throw error;
+  const getGitWorker = () => {
+    if (!gitWorkerPromise) {
+      const boot = (async () => bootGitWorker(fs))();
+      gitWorkerPromise = boot;
+      // A failed boot doesn't pin the rejection: the next call retries.
+      boot.catch(() => {
+        if (gitWorkerPromise === boot) gitWorkerPromise = null;
+      });
     }
+    return gitWorkerPromise;
   };
-  return createRpcGitService(call, reviveBoundaryFsError);
+
+  return {
+    create(repo) {
+      const call: GitBoundaryCall = async (method, args) => {
+        const client = await getGitWorker();
+        try {
+          return await client.gitCall(repo, method, args);
+        } catch (error) {
+          if (error instanceof WorkerRpcError && error.workerDead) {
+            // Drop the dead handle so the next call boots a fresh worker;
+            // this call still fails (its in-worker state is gone
+            // mid-operation).
+            console.error("[git-worker] Worker died mid-call:", error.message);
+            gitWorkerPromise = null;
+          }
+          throw error;
+        }
+      };
+      return createRpcGitService(call, reviveBoundaryFsError);
+    },
+    dispose(gitDir) {
+      // Never boots the worker just to dispose — only reaches into a live
+      // one.
+      void gitWorkerPromise
+        ?.then((client) => client.disposeRepo(gitDir))
+        .catch(() => {});
+    },
+  };
 }
 
-/** Drop one repo's service (and object cache) in the worker. */
-export function disposeWorkerGitRepo(gitDir: string): void {
-  knownGitDirs.delete(gitDir);
-  // Never boots the worker just to dispose — only reaches into a live one.
-  void gitWorkerPromise
-    ?.then((client) => client.disposeRepo(gitDir))
-    .catch(() => {});
-}
-
-export function clearWorkerGitRepos(): void {
-  for (const gitDir of [...knownGitDirs]) {
-    disposeWorkerGitRepo(gitDir);
+declare module "@notefig/core" {
+  interface CoreModules {
+    gitWorker: GitWorker;
   }
 }
+
+export const gitWorkerModule = defineModule({
+  name: "gitWorker",
+  needs: ["platform"],
+  register: (ctx) => createGitWorker(ctx.use("platform").fs),
+});

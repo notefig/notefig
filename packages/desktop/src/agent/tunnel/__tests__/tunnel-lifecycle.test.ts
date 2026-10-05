@@ -7,48 +7,11 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { kv } = vi.hoisted(() => ({ kv: new Map<string, unknown>() }));
-
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-    fs: {
-      writeFiles: vi.fn(async (files: any[]) => ({
-        succeeded: files.map((f) => f.path),
-        failed: [],
-      })),
-      readFiles: vi.fn(async (paths: string[]) => ({
-        succeeded: paths.map((p) => ({ path: p, content: "" })),
-        failed: [],
-      })),
-      deleteFiles: vi.fn(async (paths: string[]) => ({
-        succeeded: paths,
-        failed: [],
-      })),
-    },
-    proc: {
-      createMcpEndpoint: vi.fn(() => ({
-        mcpServer: { name: "notefig", command: "m", args: [], env: [] },
-        start: vi.fn(async () => {}),
-        onRequest: vi.fn(() => () => {}),
-        close: vi.fn(async () => {}),
-      })),
-    },
-  },
-}));
-
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
-import {
-  agentEntriesCollection,
-  agentPermissionRequestsCollection,
-  agentTasksCollection,
-  agentTurnsCollection,
-} from "../../agent-collections";
-import {
-  getOrCreateWorkspaceTaskManager,
-  type AgentTask,
-} from "../../agent-service";
-import { connectWithCode } from "../connect-flow";
+import type { AgentTask } from "../../agent-service";
+import { testAgents, type TestAgents } from "@/testing/test-agents";
+import { testKv } from "@/testing/test-kv";
+import { createTunnelPairing } from "../connect-flow";
 import { tunnelConnection } from "../tunnel-connection";
 import { TunnelTransport } from "../tunnel-transport";
 import { FakeWorker } from "./fake-worker";
@@ -70,21 +33,22 @@ function tunnelFactory(task: AgentTask) {
     );
 }
 
+let agents: TestAgents;
+let tunnel: ReturnType<typeof createTunnelPairing>;
+
 beforeEach(() => {
-  kv.clear();
-  for (const e of agentEntriesCollection.toArray)
-    agentEntriesCollection.delete(e.id);
-  for (const t of agentTurnsCollection.toArray)
-    agentTurnsCollection.delete(t.turnId);
-  for (const t of agentTasksCollection.toArray)
-    agentTasksCollection.delete(t.taskId);
-  for (const r of agentPermissionRequestsCollection.toArray)
-    agentPermissionRequestsCollection.delete(r.id);
+  agents = testAgents();
+  // The pairing as the tunnel module builds it: a drop disposes every task.
+  tunnel = createTunnelPairing({
+    kv: testKv(),
+    connection: tunnelConnection,
+    onDisconnect: () => agents.runtime.disposeAll(),
+  });
 });
 
 async function connect(worker: FakeWorker) {
   (tunnelConnection as any).socketFactory = worker.socketFactory;
-  await connectWithCode(encodePairingCode(worker.secret, "wss://fake"));
+  await tunnel.connect(encodePairingCode(worker.secret, "wss://fake"));
 }
 
 describe("tunnel lifecycle", () => {
@@ -93,16 +57,16 @@ describe("tunnel lifecycle", () => {
     await connect(worker);
 
     const task =
-      getOrCreateWorkspaceTaskManager(WORKSPACE).createTask(claudeHarness);
+      agents.runtime.managerFor(WORKSPACE).createTask(claudeHarness);
     await task.start(tunnelFactory(task));
     await vi.waitFor(() => {
-      expect(agentTasksCollection.get(task.taskId)?.sessionId).toBeTruthy();
+      expect(agents.store.tasks.get(task.taskId)?.sessionId).toBeTruthy();
     });
 
     worker.dropConnection();
 
     await vi.waitFor(() => {
-      const row = agentTasksCollection.get(task.taskId);
+      const row = agents.store.tasks.get(task.taskId);
       expect(row?.status).toBe("restored");
     });
     expect(tunnelConnection.getState().status).toBe("disconnected");
@@ -116,16 +80,16 @@ describe("tunnel lifecycle", () => {
     await connect(worker);
 
     const task =
-      getOrCreateWorkspaceTaskManager(WORKSPACE).createTask(claudeHarness);
+      agents.runtime.managerFor(WORKSPACE).createTask(claudeHarness);
     // start() rejects (spawn error) → row exists but never got a sessionId.
     await task.start(tunnelFactory(task)).catch(() => undefined);
-    expect(agentTasksCollection.get(task.taskId)?.sessionId).toBeFalsy();
+    expect(agents.store.tasks.get(task.taskId)?.sessionId).toBeFalsy();
 
     worker.dropConnection();
     await vi.waitFor(() => {
       expect(tunnelConnection.getState().status).toBe("disconnected");
       // Session-less rows can't revive → purged, not left as a ghost.
-      expect(agentTasksCollection.get(task.taskId)).toBeUndefined();
+      expect(agents.store.tasks.get(task.taskId)).toBeUndefined();
     });
   });
 });

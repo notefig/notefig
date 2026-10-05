@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { PermissionBroker } from "../permission-broker";
-import { agentPermissionRequestsCollection } from "../agent-collections";
+import type { AgentStore } from "../agent-collections";
+import { testAgentStore } from "@/testing/test-agents";
 import type { RequestPermissionRequest } from "@notefig/shared/agent";
 
 function req(title: string): RequestPermissionRequest {
@@ -11,21 +12,21 @@ function req(title: string): RequestPermissionRequest {
   } as RequestPermissionRequest;
 }
 
+let requests: AgentStore["permissionRequests"];
+
 function rowsFor(taskId: string) {
-  return agentPermissionRequestsCollection.toArray
+  return requests.toArray
     .filter((r) => r.taskId === taskId)
     .sort((a, b) => (a.id < b.id ? -1 : 1));
 }
 
 beforeEach(() => {
-  for (const r of agentPermissionRequestsCollection.toArray) {
-    agentPermissionRequestsCollection.delete(r.id);
-  }
+  requests = testAgentStore().permissionRequests;
 });
 
 describe("PermissionBroker", () => {
   it("publishes a pending row and resolves the awaited promise on answer", async () => {
-    const broker = new PermissionBroker("task_1");
+    const broker = new PermissionBroker("task_1", requests);
     const pending = broker.request(req("one"));
 
     const head = rowsFor("task_1")[0];
@@ -39,13 +40,11 @@ describe("PermissionBroker", () => {
       outcome: { outcome: "selected", optionId: "allow" },
     });
     // Row is no longer pending, so the UI query drops it.
-    expect(agentPermissionRequestsCollection.get(head.id)?.status).toBe(
-      "granted",
-    );
+    expect(requests.get(head.id)?.status).toBe("granted");
   });
 
   it("queues multiple requests, exposed in order via the collection", () => {
-    const broker = new PermissionBroker("task_2");
+    const broker = new PermissionBroker("task_2", requests);
     broker.request(req("one"));
     broker.request(req("two"));
     const rows = rowsFor("task_2");
@@ -55,7 +54,7 @@ describe("PermissionBroker", () => {
   });
 
   it("cancelAll resolves every pending request as cancelled", async () => {
-    const broker = new PermissionBroker("task_3");
+    const broker = new PermissionBroker("task_3", requests);
     const a = broker.request(req("a"));
     const b = broker.request(req("b"));
     broker.cancelAll();
@@ -65,7 +64,7 @@ describe("PermissionBroker", () => {
   });
 
   it("ignores responses to unknown ids", () => {
-    const broker = new PermissionBroker("task_4");
+    const broker = new PermissionBroker("task_4", requests);
     expect(() =>
       broker.respond("task_4_perm_999", {
         outcome: { outcome: "selected", optionId: "allow" },
@@ -74,7 +73,7 @@ describe("PermissionBroker", () => {
   });
 
   it("falls back to a generic row title when the tool call has none", () => {
-    const broker = new PermissionBroker("task_5");
+    const broker = new PermissionBroker("task_5", requests);
     const request = req("ignored");
     request.toolCall = { toolCallId: "c2" };
     broker.request(request);
@@ -84,17 +83,17 @@ describe("PermissionBroker", () => {
   });
 
   it("responding after the row was already dropped still resolves the promise", async () => {
-    const broker = new PermissionBroker("task_6");
+    const broker = new PermissionBroker("task_6", requests);
     const pending = broker.request(req("gone"));
     const row = rowsFor("task_6")[0];
     // UI (or a workspace teardown) removed the row out from under the broker.
-    agentPermissionRequestsCollection.delete(row.id);
+    requests.delete(row.id);
     broker.respond(row.id, {
       outcome: { outcome: "selected", optionId: "allow" },
     });
     await expect(pending).resolves.toEqual({
       outcome: { outcome: "selected", optionId: "allow" },
     });
-    expect(agentPermissionRequestsCollection.get(row.id)).toBeUndefined();
+    expect(requests.get(row.id)).toBeUndefined();
   });
 });

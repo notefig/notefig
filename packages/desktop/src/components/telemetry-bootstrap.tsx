@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
+import { defineModule } from "@notefig/core";
+import { useModule } from "@notefig/core/react";
 import { useFocusedWorkspace } from "@/entities/workspaces";
 import {
   TelemetryConsentDialog,
   type TelemetryConsentAnswer,
 } from "@/components/telemetry-consent-dialog";
-import { readAllKv, readKv, writeKv } from "@/utils/kv-store";
+import type { KvApi } from "@/utils/kv-store";
 import {
   CURRENT_TELEMETRY_CONSENT_VERSION,
   SETTINGS_NAMESPACE,
@@ -15,10 +17,6 @@ import {
   initGlobalErrorHandlers,
   telemetryAvailable,
 } from "@/telemetry/telemetry";
-// Module-level so StrictMode's double-mount can't re-run startup
-// configuration or double-fire app_opened.
-let started = false;
-
 function fireAppOpened() {
   captureEvent("app_opened");
 }
@@ -30,7 +28,7 @@ function fireAppOpened() {
  * can no longer disagree.
  * Returns whether the first-run consent dialog is still owed.
  */
-async function startTelemetry(): Promise<"show-consent" | "done"> {
+async function startTelemetry(kv: KvApi): Promise<"show-consent" | "done"> {
   if (!telemetryAvailable()) {
     // Keyless build: resolve the pending buffer as fully disabled and
     // never show the dialog — there is nothing to consent to.
@@ -43,13 +41,14 @@ async function startTelemetry(): Promise<"show-consent" | "done"> {
   }
 
   const consent = readStoredConsent(
-    await readAllKv<unknown>(SETTINGS_NAMESPACE),
+    await kv.readAll<unknown>(SETTINGS_NAMESPACE),
   );
   if (!consent.answered) {
     return "show-consent";
   }
 
   const installId = await ensureInstallId(
+    kv,
     consent.installId,
     consent.crashEnabled || consent.analyticsEnabled,
   );
@@ -75,12 +74,13 @@ function readStoredConsent(stored: Record<string, unknown>) {
 }
 
 async function ensureInstallId(
+  kv: KvApi,
   existing: string | null,
   anyEnabled: boolean,
 ): Promise<string | null> {
   if (!anyEnabled || existing) return existing;
   const installId = crypto.randomUUID();
-  await writeKv(SETTINGS_NAMESPACE, "telemetryInstallId", installId);
+  await kv.write(SETTINGS_NAMESPACE, "telemetryInstallId", installId);
   return installId;
 }
 
@@ -91,6 +91,7 @@ async function ensureInstallId(
  * actual choices are missing (the dialog re-asks on the next launch).
  */
 async function persistConsentAnswer(
+  kv: KvApi,
   answer: TelemetryConsentAnswer,
   installId: string | null,
 ): Promise<void> {
@@ -101,85 +102,117 @@ async function persistConsentAnswer(
   if (installId) entries.push(["telemetryInstallId", installId]);
   entries.push(["telemetryConsentVersion", CURRENT_TELEMETRY_CONSENT_VERSION]);
   for (const [key, value] of entries) {
-    await writeKv(SETTINGS_NAMESPACE, key, value);
+    await kv.write(SETTINGS_NAMESPACE, key, value);
   }
 }
 
-/**
- * App-global telemetry gate, mounted once in main.tsx (sibling of
- * AppUpdaterBootstrap). Registers global error handlers immediately, then
- * either configures telemetry from stored consent or arms the first-run
- * consent dialog. The dialog itself is deferred until the user has opened
- * a workspace — first contact (/welcome) stays prompt-free.
- */
-export function TelemetryBootstrap() {
-  // The consent dialog waits until the user is actually inside a workspace
-  // — first contact (the welcome screen) stays prompt-free.
-  const insideWorkspace = useFocusedWorkspace() !== null;
-  const [showConsent, setShowConsent] = useState(false);
-
-  useEffect(() => {
-    if (started) return;
-    started = true;
-    initGlobalErrorHandlers();
-    void startTelemetry()
-      .then((outcome) => {
-        if (outcome === "show-consent") setShowConsent(true);
-      })
-      .catch((error) => {
-        console.error("[telemetry] startup failed:", error);
-        // Resolve the pending buffer as fully disabled instead of leaving
-        // the module stuck in "pending" for the rest of the session.
-        return configureTelemetry({
-          crashEnabled: false,
-          analyticsEnabled: false,
-          installId: null,
-        });
-      });
-  }, []);
-
-  const handleAnswer = (answer: TelemetryConsentAnswer) => {
-    setShowConsent(false);
-    void (async () => {
-      const anyEnabled = answer.crashEnabled || answer.analyticsEnabled;
-      // Reuse a stored ID so a consent-version bump (which re-shows this
-      // dialog) doesn't rotate the install identity, matching the Settings
-      // toggles' behavior.
-      const installId = anyEnabled
-        ? ((await readKv<string>(SETTINGS_NAMESPACE, "telemetryInstallId")) ??
-          crypto.randomUUID())
-        : null;
-      try {
-        // Settings → Privacy picks this up without a reload: the write goes
-        // through the same collection `useAppSettings` subscribes to.
-        await persistConsentAnswer(answer, installId);
-      } catch (error) {
-        // Honor the answer for this session regardless; the version
-        // marker didn't land, so the dialog re-asks on the next launch.
-        console.error("[telemetry] failed to persist consent:", error);
-      }
-      await configureTelemetry({
-        crashEnabled: answer.crashEnabled,
-        analyticsEnabled: answer.analyticsEnabled,
-        installId,
-      });
-      captureEvent("telemetry_consent_answered", {
-        crash_enabled: answer.crashEnabled,
-        analytics_enabled: answer.analyticsEnabled,
-      });
-      fireAppOpened();
-    })();
-  };
-
-  return (
-    <TelemetryConsentDialog
-      open={showConsent && insideWorkspace}
-      onAnswer={handleAnswer}
-    />
-  );
+/** `core.telemetry`: whether the first-run consent is still owed, and
+ *  the user's answer to it. */
+export interface TelemetryApi {
+  /** Registers global error handlers, then either configures telemetry
+   *  from stored consent or arms the first-run consent dialog. Boot runs
+   *  this, once. */
+  start(): void;
+  consentOwed(): boolean;
+  subscribe(listener: () => void): () => void;
+  answer(answer: TelemetryConsentAnswer): void;
 }
 
-/** Test-only: allow consent-flow tests to remount from a clean slate. */
-export function __resetTelemetryBootstrapForTests() {
-  started = false;
+function createTelemetry(kv: KvApi): TelemetryApi {
+  let owed = false;
+  const listeners = new Set<() => void>();
+  const setOwed = (next: boolean) => {
+    owed = next;
+    for (const listener of [...listeners]) listener();
+  };
+  return {
+    consentOwed: () => owed,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+    start() {
+      initGlobalErrorHandlers();
+      void startTelemetry(kv)
+        .then((outcome) => {
+          if (outcome === "show-consent") setOwed(true);
+        })
+        .catch((error) => {
+          console.error("[telemetry] startup failed:", error);
+          // Resolve the pending buffer as fully disabled instead of leaving
+          // the module stuck in "pending" for the rest of the session.
+          return configureTelemetry({
+            crashEnabled: false,
+            analyticsEnabled: false,
+            installId: null,
+          });
+        });
+    },
+    answer(answer) {
+      setOwed(false);
+      void (async () => {
+        const anyEnabled = answer.crashEnabled || answer.analyticsEnabled;
+        // Reuse a stored ID so a consent-version bump (which re-shows this
+        // dialog) doesn't rotate the install identity, matching the
+        // Settings toggles' behavior.
+        const installId = anyEnabled
+          ? ((await kv.read<string>(
+              SETTINGS_NAMESPACE,
+              "telemetryInstallId",
+            )) ?? crypto.randomUUID())
+          : null;
+        try {
+          // Settings → Privacy picks this up without a reload: the write
+          // goes through the same collection `useAppSettings` subscribes to.
+          await persistConsentAnswer(kv, answer, installId);
+        } catch (error) {
+          // Honor the answer for this session regardless; the version
+          // marker didn't land, so the dialog re-asks on the next launch.
+          console.error("[telemetry] failed to persist consent:", error);
+        }
+        await configureTelemetry({
+          crashEnabled: answer.crashEnabled,
+          analyticsEnabled: answer.analyticsEnabled,
+          installId,
+        });
+        captureEvent("telemetry_consent_answered", {
+          crash_enabled: answer.crashEnabled,
+          analytics_enabled: answer.analyticsEnabled,
+        });
+        fireAppOpened();
+      })();
+    },
+  };
+}
+
+declare module "@notefig/core" {
+  interface CoreModules {
+    telemetry: TelemetryApi;
+  }
+}
+
+/** Telemetry for the app's run: configured from stored consent at boot,
+ *  once — StrictMode remounts never re-run it or double-fire app_opened. */
+export const telemetryModule = defineModule({
+  name: "telemetry",
+  needs: ["kv"],
+  register: (ctx) => createTelemetry(ctx.use("kv")),
+  boot: (telemetry) => telemetry.start(),
+});
+
+/**
+ * The first-run consent dialog, mounted once in main.tsx (sibling of
+ * AppUpdaterBootstrap). Deferred until the user has opened a workspace —
+ * first contact (the welcome screen) stays prompt-free.
+ */
+export function TelemetryBootstrap() {
+  const telemetry = useModule("telemetry");
+  const owed = useSyncExternalStore(telemetry.subscribe, telemetry.consentOwed);
+  const insideWorkspace = useFocusedWorkspace() !== null;
+  return (
+    <TelemetryConsentDialog
+      open={owed && insideWorkspace}
+      onAnswer={telemetry.answer}
+    />
+  );
 }

@@ -2,9 +2,10 @@
  * Agents entity — the app-facing import point over `src/agent/`.
  *
  * `src/agent/` stays the implementation directory (service, collections,
- * transports, tools); this module re-exports the facade + collections and
- * owns the consolidated reactive hooks, so per-task joins (task row, turns,
- * entries, pending permissions) are written once instead of per component.
+ * transports, tools); this module owns the consolidated reactive hooks over
+ * `core.agentStore`, so per-task joins (task row, turns, entries, pending
+ * permissions) are written once instead of per component, and hands
+ * components the facade (`useAgents`).
  */
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery, eq, and, inArray } from "@tanstack/react-db";
@@ -16,29 +17,24 @@ import { workspaceKey } from "@/utils/path";
 import { getDesktopOs } from "@/utils/platform";
 import i18n from "@/utils/intl";
 import { useActiveHarnesses } from "@/hooks/use-harness-selection";
+import { useModule } from "@notefig/core/react";
 import {
-  agentTasksCollection,
-  agentTurnsCollection,
-  agentEntriesCollection,
-  agentPermissionRequestsCollection,
+  useAgentStore,
   type AgentTaskRow,
   type AgentTurn,
   type AgentEntry,
   type AgentPermissionRequestRow,
 } from "@/agent/agent-collections";
+import type { AgentsApi } from "@/agent/agents";
 
-// One-shot handles + actions live on the facade (identity + actions,
-// re-resolved live, typed failures) — the pattern this entity layer
-// generalized from.
-export { agents } from "@/agent/agents";
-export {
-  agentTasksCollection,
-  agentTurnsCollection,
-  agentEntriesCollection,
-  agentPermissionRequestsCollection,
-  agentEntriesForTask,
-  agentTurnsForTask,
-} from "@/agent/agent-collections";
+export { useAgentStore } from "@/agent/agent-collections";
+
+/** One-shot handles + actions (identity + actions, re-resolved live, typed
+ *  failures) — `core.agents`, the pattern this entity layer generalized
+ *  from. */
+export function useAgents(): AgentsApi {
+  return useModule("agents");
+}
 export type {
   AgentTaskRow,
   AgentTaskStatus,
@@ -51,10 +47,11 @@ export type {
 
 /** The task's collection row; undefined until it exists (or after deletion). */
 export function useTaskRow(taskId: string): AgentTaskRow | undefined {
+  const store = useAgentStore();
   const { data = [] } = useLiveQuery(
     (q) =>
       q
-        .from({ task: agentTasksCollection })
+        .from({ task: store.tasks })
         .where(({ task }) => eq(task.taskId, taskId)),
     [taskId],
   );
@@ -63,12 +60,13 @@ export function useTaskRow(taskId: string): AgentTaskRow | undefined {
 
 /** Task rows for a set of ids (e.g. the open agent tabs). */
 export function useAgentTaskRowsById(taskIds: string[]): AgentTaskRow[] {
+  const store = useAgentStore();
   const { data = [] } = useLiveQuery(
     (q) =>
       taskIds.length === 0
         ? undefined
         : q
-            .from({ task: agentTasksCollection })
+            .from({ task: store.tasks })
             .where(({ task }) => inArray(task.taskId, taskIds)),
     [...taskIds],
   );
@@ -77,10 +75,11 @@ export function useAgentTaskRowsById(taskIds: string[]): AgentTaskRow[] {
 
 /** All turns of a task (unsorted — order by turnId/status at the call site). */
 export function useTaskTurns(taskId: string): AgentTurn[] {
+  const store = useAgentStore();
   const { data = [] } = useLiveQuery(
     (q) =>
       q
-        .from({ turn: agentTurnsCollection })
+        .from({ turn: store.turns })
         .where(({ turn }) => eq(turn.taskId, taskId)),
     [taskId],
   );
@@ -89,10 +88,11 @@ export function useTaskTurns(taskId: string): AgentTurn[] {
 
 /** All transcript entries of a task. */
 export function useTaskEntries(taskId: string): AgentEntry[] {
+  const store = useAgentStore();
   const { data = [] } = useLiveQuery(
     (q) =>
       q
-        .from({ entry: agentEntriesCollection })
+        .from({ entry: store.entries })
         .where(({ entry }) => eq(entry.taskId, taskId)),
     [taskId],
   );
@@ -106,10 +106,11 @@ export function useTaskEntries(taskId: string): AgentEntry[] {
 export function usePendingPermissions(
   taskId: string,
 ): AgentPermissionRequestRow[] {
+  const store = useAgentStore();
   const { data = [] } = useLiveQuery(
     (q) =>
       q
-        .from({ req: agentPermissionRequestsCollection })
+        .from({ req: store.permissionRequests })
         .where(({ req }) =>
           and(eq(req.taskId, taskId), eq(req.status, "pending")),
         ),
@@ -144,14 +145,15 @@ export type AgentTaskMeta = {
  * once the first sync lands.
  */
 export function useAgentTasksReady(): boolean {
+  const store = useAgentStore();
   const [ready, setReady] = useState(false);
   useEffect(() => {
     let live = true;
-    void agentTasksCollection.preload().finally(() => live && setReady(true));
+    void store.tasks.preload().finally(() => live && setReady(true));
     return () => {
       live = false;
     };
-  }, []);
+  }, [store]);
   return ready;
 }
 
@@ -196,17 +198,17 @@ export function useAgentSessionList(limit: number): AgentTaskMeta[] {
 }
 
 function useAllTasks(): AgentTaskRow[] {
-  const { data = [] } = useLiveQuery((q) =>
-    q.from({ task: agentTasksCollection }),
-  );
+  const store = useAgentStore();
+  const { data = [] } = useLiveQuery((q) => q.from({ task: store.tasks }));
   return data;
 }
 
 function useTurnsWithStatus(status: AgentTurn["status"]): AgentTurn[] {
+  const store = useAgentStore();
   const { data = [] } = useLiveQuery(
     (q) =>
       q
-        .from({ turn: agentTurnsCollection })
+        .from({ turn: store.turns })
         .where(({ turn }) => eq(turn.status, status)),
     [status],
   );
@@ -306,8 +308,9 @@ export function useSessionActions(task: AgentTaskRow): AgentSessionActions {
  * confirmation reads this.
  */
 export function useRunningTaskCounts(): Map<string, number> {
+  const store = useAgentStore();
   const { data: tasks = [] } = useLiveQuery((q) =>
-    q.from({ task: agentTasksCollection }),
+    q.from({ task: store.tasks }),
   );
   return useMemo(() => {
     const counts = new Map<string, number>();

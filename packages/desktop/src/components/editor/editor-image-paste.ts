@@ -7,7 +7,7 @@
  */
 
 import type { EditorView } from "@tiptap/pm/view";
-import { platformAdapter } from "@/adapters";
+import type { EditorFs } from "./editor-store";
 
 /** Sanitize a filename for use in markdown image paths.
  * Spaces become hyphens, parentheses are removed — both break many markdown
@@ -21,7 +21,10 @@ export function normalizeImageName(name: string): string {
  * existing file, suffixing `-1`, `-2`, … before the extension. Overwriting
  * would silently swap the image in every document referencing the old path.
  */
+type AssetFs = Pick<EditorFs, "exists" | "writeBinaryFiles">;
+
 export async function dedupeAssetName(
+  fs: Pick<AssetFs, "exists">,
   baseDir: string,
   name: string,
 ): Promise<string> {
@@ -31,15 +34,14 @@ export async function dedupeAssetName(
 
   let candidate = name;
   for (let i = 1; ; i++) {
-    const result = await platformAdapter.fs.exists([
-      `${baseDir}/assets/${candidate}`,
-    ]);
+    const result = await fs.exists([`${baseDir}/assets/${candidate}`]);
     if (!result[0]?.exists) return candidate;
     candidate = `${stem}-${i}${ext}`;
   }
 }
 
 async function writeAssetAndInsert(
+  fs: AssetFs,
   view: EditorView,
   baseDir: string,
   name: string,
@@ -49,7 +51,7 @@ async function writeAssetAndInsert(
   const destPath = `${baseDir}/assets/${name}`;
   const data = new Uint8Array(await file.arrayBuffer());
 
-  await platformAdapter.fs.writeBinaryFiles([{ path: destPath, data }]);
+  await fs.writeBinaryFiles([{ path: destPath, data }]);
 
   view.dispatch(
     view.state.tr.insert(
@@ -63,7 +65,7 @@ async function writeAssetAndInsert(
  * editorProps.handleDrop for OS image-file drops. Internal node moves
  * (`moved`) and non-file drops fall through to ProseMirror.
  */
-export function createImageDropHandler(baseDir: string) {
+export function createImageDropHandler(fs: AssetFs, baseDir: string) {
   return function handleDrop(
     view: EditorView,
     event: DragEvent,
@@ -92,10 +94,12 @@ export function createImageDropHandler(baseDir: string) {
       for (const file of imageFiles) {
         try {
           const normalized = await dedupeAssetName(
+            fs,
             baseDir,
             normalizeImageName(file.name),
           );
           await writeAssetAndInsert(
+            fs,
             view,
             baseDir,
             normalized,
@@ -113,7 +117,7 @@ export function createImageDropHandler(baseDir: string) {
 }
 
 /** editorProps.handlePaste for clipboard images (e.g. screenshots). */
-export function createImagePasteHandler(baseDir: string) {
+export function createImagePasteHandler(fs: AssetFs, baseDir: string) {
   return function handlePaste(
     view: EditorView,
     event: ClipboardEvent,
@@ -132,10 +136,12 @@ export function createImagePasteHandler(baseDir: string) {
           try {
             const extension = item.type.split("/")[1] || "png";
             const name = await dedupeAssetName(
+              fs,
               baseDir,
               `pasted-${Date.now()}.${extension}`,
             );
             await writeAssetAndInsert(
+              fs,
               view,
               baseDir,
               name,

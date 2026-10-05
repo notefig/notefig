@@ -24,14 +24,13 @@ import type {
 } from "@notefig/widgets";
 import { extractMentionPaths } from "@notefig/widgets";
 import type { PromptContextPart } from "@notefig/shared/agent";
+import { AGENT_KV_NAMESPACE, trustKey } from "@/agent/agents";
 import {
-  agentEntriesCollection,
-  agentPermissionRequestsCollection,
-  agentTasksCollection,
-  agentTurnsCollection,
-} from "@/agent/agent-collections";
-import { AGENT_KV_NAMESPACE, agents, trustKey } from "@/agent/agents";
-import { describeTaskMeta, useAgentTaskList } from "@/entities/agents";
+  describeTaskMeta,
+  useAgentStore,
+  useAgentTaskList,
+  useAgents,
+} from "@/entities/agents";
 import type { WorkspaceFiles } from "@/entities/files";
 import type { Core } from "@notefig/core";
 import {
@@ -47,12 +46,6 @@ import { useKv } from "@/utils/kv-store";
 import { path as pathutil, relativeTreePath } from "@/utils/path";
 import { AuthCard } from "./auth-card";
 import { PermissionCard } from "./permission-card";
-import {
-  adoptSharedSession,
-  dropSharedSession,
-  getOrStartSharedSession,
-  peekSharedSession,
-} from "./blob-session-store";
 import { formatTimeAgo } from "@/utils/format";
 
 /** Does this tree-domain token name a real file in the workspace? The
@@ -125,40 +118,41 @@ function useRound({
   turnId: string | null;
   taskId: string | null;
 }): PromptRound {
+  const store = useAgentStore();
   const turnKey = turnId ?? " none";
   const taskKey = taskId ?? " none";
   const { data: turnRows = [] } = useLiveQuery(
     (q) =>
       q
-        .from({ turn: agentTurnsCollection })
+        .from({ turn: store.turns })
         .where(({ turn }) => eq(turn.turnId, turnKey)),
     [turnKey],
   );
   const { data: taskRows = [] } = useLiveQuery(
     (q) =>
       q
-        .from({ task: agentTasksCollection })
+        .from({ task: store.tasks })
         .where(({ task }) => eq(task.taskId, taskKey)),
     [taskKey],
   );
   const { data: entries = [] } = useLiveQuery(
     (q) =>
       q
-        .from({ entry: agentEntriesCollection })
+        .from({ entry: store.entries })
         .where(({ entry }) => eq(entry.turnId, turnKey)),
     [turnKey],
   );
   const { data: taskTurns = [] } = useLiveQuery(
     (q) =>
       q
-        .from({ turn: agentTurnsCollection })
+        .from({ turn: store.turns })
         .where(({ turn }) => eq(turn.taskId, taskKey)),
     [taskKey],
   );
   const { data: pendingPermissions = [] } = useLiveQuery(
     (q) =>
       q
-        .from({ req: agentPermissionRequestsCollection })
+        .from({ req: store.permissionRequests })
         .where(({ req }) =>
           and(eq(req.taskId, taskKey), eq(req.status, "pending")),
         ),
@@ -212,7 +206,7 @@ const slots: PromptWidgetHost["slots"] = {
 function useTrust(workspacePath: string) {
   // Subscribed for reactivity; the answer and the grant are the facade's.
   useKv<boolean>(AGENT_KV_NAMESPACE).get(trustKey(workspacePath));
-  const workspace = agents.workspace(workspacePath);
+  const workspace = useAgents().workspace(workspacePath);
   return { isTrusted: workspace.isTrusted(), grant: workspace.trust };
 }
 
@@ -263,7 +257,7 @@ function useHarnessList() {
 export function usePromptWidgetHost(): PromptWidgetHost {
   // Stable for the life of the app, so the memo below may close over it.
   const core = useCore();
-  const { tabs } = core;
+  const { tabs, agents, agentStore, sharedSessions } = core;
   const { defaultHarness, setDefaultHarness } = useDefaultHarness();
 
   const latest = useRef({ defaultHarness, setDefaultHarness, tabs });
@@ -272,16 +266,16 @@ export function usePromptWidgetHost(): PromptWidgetHost {
   return useMemo<PromptWidgetHost>(
     () => ({
       startOrGetSharedSession: async (path) =>
-        (await getOrStartSharedSession(path, latest.current.defaultHarness))
+        (await sharedSessions.getOrStart(path, latest.current.defaultHarness))
           .taskId,
-      adoptSession: adoptSharedSession,
+      adoptSession: (path, taskId) => sharedSessions.adopt(path, taskId),
       // Choosing a harness both starts the fresh session on it and remembers
       // it as the default — the sessions panel's split-button rule.
       dropSession: (path, harnessId) => {
         latest.current.setDefaultHarness(harnessId);
-        dropSharedSession(path);
+        sharedSessions.drop(path);
       },
-      peekSession: peekSharedSession,
+      peekSession: (path) => sharedSessions.peek(path),
       isTaskReachable: (taskId) => agents.task(taskId).isReachable(),
 
       dispatchPrompt: ({ taskId, text, workspacePath: path, target }) => {
@@ -299,8 +293,8 @@ export function usePromptWidgetHost(): PromptWidgetHost {
         agents.task(taskId).cancelTurnAndForget(),
       removeQueuedPrompt: (taskId, turnId) =>
         agents.task(taskId).removeQueuedPrompt(turnId),
-      getTurnStatus: (turnId) => agentTurnsCollection.get(turnId)?.status,
-      ensureRuntime: agents.ensureRuntime,
+      getTurnStatus: (turnId) => agentStore.turns.get(turnId)?.status,
+      ensureRuntime: () => agents.ensureRuntime(),
 
       useRound,
       useSessionList,

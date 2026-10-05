@@ -1,14 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { platformAdapter } from "@/adapters";
+import { defineModule } from "@notefig/core";
+import { useModule } from "@notefig/core/react";
+import { usePlatform } from "@/core/use-platform";
 import { LAYOUT_PARAM, parseLayout } from "@/utils/layout-codec";
 import type { LayoutNode } from "@/components/dockable";
 import { openFileInLayout } from "@/utils/dockable-layout";
 import { ensureMarketingWorkspaceSeeded } from "./seed";
 import { findPageByFilePath, type MarketingPage } from "./content-manifest";
 
-// One seed per page load, shared by every mount.
-let seedPromise: Promise<void> | null = null;
+declare module "@notefig/core" {
+  interface CoreModules {
+    marketingSeed: { seeded: Promise<void> };
+  }
+}
+
+/** One seed per page load, shared by every mount: the marketing content
+ *  written into IndexedDB at boot. */
+export const marketingSeedModule = defineModule({
+  name: "marketingSeed",
+  needs: ["platform"],
+  register: (ctx) => ({
+    seeded: ensureMarketingWorkspaceSeeded(ctx.use("platform").fs),
+  }),
+});
 
 /**
  * True once the workspace can mount for this page: content seeded AND the
@@ -29,18 +44,19 @@ export function useWorkspaceReady(page: MarketingPage): boolean {
  */
 export function usePageIsEmpty(page: MarketingPage, enabled: boolean): boolean {
   const [isEmpty, setIsEmpty] = useState(false);
+  const { fs } = usePlatform();
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    void platformAdapter.fs.readFiles([page.filePath]).then((result) => {
+    void fs.readFiles([page.filePath]).then((result) => {
       const content = result.succeeded[0]?.content ?? "";
       if (!cancelled) setIsEmpty(content.trim().length === 0);
     });
     return () => {
       cancelled = true;
     };
-  }, [page.filePath, enabled]);
+  }, [fs, page.filePath, enabled]);
 
   return isEmpty;
 }
@@ -48,17 +64,17 @@ export function usePageIsEmpty(page: MarketingPage, enabled: boolean): boolean {
 /** True once the marketing workspace content is in IndexedDB. */
 function useMarketingSeed(): boolean {
   const [seeded, setSeeded] = useState(false);
+  const seed = useModule("marketingSeed");
 
   useEffect(() => {
     let cancelled = false;
-    seedPromise ??= ensureMarketingWorkspaceSeeded(platformAdapter.fs);
-    void seedPromise.then(() => {
+    void seed.seeded.then(() => {
       if (!cancelled) setSeeded(true);
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [seed]);
 
   return seeded;
 }

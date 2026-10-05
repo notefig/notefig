@@ -9,9 +9,15 @@
 import { findPromptBlobForTask } from "@notefig/widgets";
 import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
 import type { PromptRound } from "@/entities/prompt-rounds";
-import { appCore } from "@/core/current";
+import type { Core } from "@notefig/core";
 
 export type JumpTarget = "widget" | "chat";
+
+/** What a jump drives: the tabs, and the editors that reveal a widget. */
+export interface Jumper {
+  tabs: Pick<Core["tabs"], "open" | "openAgent">;
+  editors: Pick<Core["editors"], "reveal">;
+}
 
 /** Where a jump for the task would land. */
 export function jumpTargetForTask(
@@ -30,15 +36,16 @@ export function jumpDocumentForTask(
 }
 
 export function jumpToTask(
+  core: Jumper,
   taskId: string,
   options: { turnId?: string | null } = {},
 ): JumpTarget {
   const widget = findPromptBlobForTask(taskId, options.turnId);
   if (widget) {
-    jumpToBlob(widget.documentPath, widget.blobId);
+    jumpToBlob(core.editors, widget.documentPath, widget.blobId);
     return "widget";
   }
-  appCore().tabs.openAgent(taskId);
+  core.tabs.openAgent(taskId);
   return "chat";
 }
 
@@ -47,12 +54,13 @@ export function jumpToTask(
  * and still bound to the round, else its document.
  */
 export function jumpToRound(
+  core: Jumper,
   round: Pick<PromptRound, "taskId" | "turnId" | "documentPath">,
 ): void {
   const widget = findPromptBlobForTask(round.taskId, round.turnId);
   if (widget && widget.boundTurnId === round.turnId) {
-    jumpToBlob(widget.documentPath, widget.blobId);
+    jumpToBlob(core.editors, widget.documentPath, widget.blobId);
   } else {
-    appCore().tabs.open(round.documentPath, { intent: "replace" });
+    core.tabs.open(round.documentPath, { intent: "replace" });
   }
 }

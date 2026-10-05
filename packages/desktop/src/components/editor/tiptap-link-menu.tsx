@@ -5,7 +5,7 @@ import type { Editor } from "@tiptap/core";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { getDirectoryPath } from "@/utils/fs";
-import { platformAdapter } from "@/adapters";
+import { usePlatform } from "@/core/use-platform";
 import { useCore } from "@notefig/core/react";
 import { isExternalUrl, buildInternalCandidates } from "./tiptap-link-utils";
 
@@ -26,6 +26,7 @@ export function LinkBubbleMenu({
 }: LinkBubbleMenuProps) {
   const { t } = useTranslation();
   const { tabs } = useCore();
+  const platform = usePlatform();
   // Subscribe to editor state — a plain getAttributes() read at render time
   // goes stale because nothing re-renders this component on selection change.
   const href = useEditorState({
@@ -39,14 +40,14 @@ export function LinkBubbleMenu({
     if (!href) return;
 
     if (isExternal) {
-      platformAdapter.ui.openExternal(href);
+      platform.ui.openExternal(href);
       return;
     }
 
     const fileDir = getDirectoryPath(filePath);
     const candidates = buildInternalCandidates(href, { fileDir, basePath });
 
-    const results = await platformAdapter.fs.exists(candidates);
+    const results = await platform.fs.exists(candidates);
     const target = candidates.find((candidate) =>
       results.some(
         (r) => r.path === candidate && r.exists && r.type !== "directory",

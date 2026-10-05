@@ -11,71 +11,47 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mocks } = vi.hoisted(() => {
-  const mocks = {
-    /** The browser's own fs (this is where writeFiles lands now — files no
-     *  longer cross the tunnel). Kept per-test. */
-    fsFiles: new Map<string, string>(),
-    createMcpEndpoint: null as ((spec: { taskId: string }) => any) | null,
-  };
-  return { mocks };
-});
-
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-    fs: {
-      writeFiles: vi.fn(async (files: { path: string; content: string }[]) => {
-        for (const file of files) mocks.fsFiles.set(file.path, file.content);
-        return { succeeded: files.map((f) => f.path), failed: [] as unknown[] };
-      }),
-      readFiles: vi.fn(async (paths: string[]) => ({
-        succeeded: paths.map((p) => ({
-          path: p,
-          content: mocks.fsFiles.get(p) ?? "",
-        })),
-        failed: [] as unknown[],
-      })),
-      deleteFiles: vi.fn(async (paths: string[]) => {
-        for (const path of paths) mocks.fsFiles.delete(path);
-        return { succeeded: paths, failed: [] as unknown[] };
-      }),
-    },
-    proc: {
-      createMcpEndpoint: vi.fn((spec: { taskId: string }) =>
-        mocks.createMcpEndpoint
-          ? mocks.createMcpEndpoint(spec)
-          : {
-              mcpServer: { name: "notefig", command: "m", args: [], env: [] },
-              start: vi.fn(async () => {}),
-              onRequest: vi.fn(() => () => {}),
-              close: vi.fn(async () => {}),
-            },
-      ),
-    },
-  },
-}));
-
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
-import { AgentTransportError } from "@notefig/agent";
+import { AgentTransportError, type McpEndpoint } from "@notefig/agent";
 import {
-  agentEntriesCollection,
-  agentPermissionRequestsCollection,
-  agentTasksCollection,
-  agentTurnsCollection,
-} from "../../agent-collections";
-import { TaskManager, type AgentTask } from "../../agent-service";
+  TaskManager,
+  type AgentRuntimeDeps,
+  type AgentTask,
+} from "../../agent-service";
+import {
+  fakeMcpEndpoint,
+  testAgents,
+  type TestAgents,
+} from "@/testing/test-agents";
 import { TunnelConnection } from "../tunnel-connection";
 import { TunnelTransport } from "../tunnel-transport";
 import { TunnelMcpEndpoint } from "../tunnel-mcp-endpoint";
 import { FakeWorker } from "./fake-worker";
+
+/** The browser's own fs (this is where writeFiles lands now — files no
+ *  longer cross the tunnel). Kept per-test. */
+let fsFiles: Map<string, string>;
+/** The MCP endpoint a task opens: the tunnel's once a pair connects. */
+let createMcpEndpoint: ((spec: { taskId: string }) => McpEndpoint) | null;
+let agents: TestAgents;
+
+const fs: AgentRuntimeDeps["fs"] = {
+  writeFiles: async (files) => {
+    for (const file of files) fsFiles.set(file.path, file.content);
+    return { succeeded: files.map((f) => f.path), failed: [] };
+  },
+  readFiles: async (paths) => ({
+    succeeded: paths.map((p) => ({ path: p, content: fsFiles.get(p) ?? "" })),
+    failed: [],
+  }),
+};
 
 const claudeHarness = BUILT_IN_HARNESSES.find((h) => h.id === "claude-code")!;
 const opencodeHarness = BUILT_IN_HARNESSES.find((h) => h.id === "opencode")!;
 const WORKSPACE = "/remote/ws";
 
 function entriesFor(taskId: string) {
-  return agentEntriesCollection.toArray
+  return agents.store.entries.toArray
     .filter((e) => e.taskId === taskId)
     .sort((a, b) => (a.id < b.id ? -1 : 1));
 }
@@ -88,7 +64,7 @@ function textFor(taskId: string, role: "user" | "assistant"): string {
 }
 
 function turnsFor(taskId: string) {
-  return agentTurnsCollection.toArray
+  return agents.store.turns.toArray
     .filter((t) => t.taskId === taskId)
     .sort((a, b) => (a.turnId < b.turnId ? -1 : 1));
 }
@@ -112,7 +88,7 @@ async function connectedPair(
   const worker = new FakeWorker({ workspacePath: WORKSPACE, ...workerOptions });
   const connection = new TunnelConnection(worker.socketFactory);
   await connection.connect({ secret: worker.secret, url: "wss://fake" });
-  mocks.createMcpEndpoint = (spec) =>
+  createMcpEndpoint = (spec) =>
     new TunnelMcpEndpoint(spec.taskId, connection);
   return { worker, connection };
 }
@@ -131,16 +107,18 @@ function tunnelFactory(connection: TunnelConnection, task: AgentTask) {
 }
 
 beforeEach(() => {
-  mocks.fsFiles.clear();
-  mocks.createMcpEndpoint = null;
-  for (const e of agentEntriesCollection.toArray)
-    agentEntriesCollection.delete(e.id);
-  for (const t of agentTurnsCollection.toArray)
-    agentTurnsCollection.delete(t.turnId);
-  for (const t of agentTasksCollection.toArray)
-    agentTasksCollection.delete(t.taskId);
-  for (const r of agentPermissionRequestsCollection.toArray)
-    agentPermissionRequestsCollection.delete(r.id);
+  fsFiles = new Map();
+  createMcpEndpoint = null;
+  agents = testAgents({
+    fs,
+    proc: {
+      createMcpEndpoint: (spec) =>
+        createMcpEndpoint ? createMcpEndpoint(spec) : fakeMcpEndpoint(),
+      createAgentTransport: () => {
+        throw new Error("tasks start over the tunnel transport");
+      },
+    },
+  });
 });
 
 describe("tunnel transport symmetry", () => {
@@ -161,7 +139,7 @@ describe("tunnel transport symmetry", () => {
       },
     });
 
-    const task = new TaskManager(WORKSPACE).createTask(claudeHarness);
+    const task = new TaskManager(agents.deps, WORKSPACE).createTask(claudeHarness);
     await task.start(tunnelFactory(connection, task));
     await runPrompt(task, "hi");
 
@@ -186,7 +164,7 @@ describe("tunnel transport symmetry", () => {
       },
     });
 
-    const task = new TaskManager("/browser-synthetic").createTask(
+    const task = new TaskManager(agents.deps, "/browser-synthetic").createTask(
       claudeHarness,
     );
     await task.start(tunnelFactory(connection, task));
@@ -198,7 +176,7 @@ describe("tunnel transport symmetry", () => {
   it("carries OPENCODE_CONFIG_CONTENT onto the worker: inline config in spawn env, no file", async () => {
     const { worker, connection } = await connectedPair();
 
-    const task = new TaskManager(WORKSPACE).createTask(opencodeHarness);
+    const task = new TaskManager(agents.deps, WORKSPACE).createTask(opencodeHarness);
     await task.start(tunnelFactory(connection, task));
 
     const startTask = worker.receivedCtl.find(
@@ -218,13 +196,13 @@ describe("tunnel transport symmetry", () => {
     ]);
     expect(config.mcp.notefig.environment.NOTEFIG_MCP_TOKEN).toBe("fake-token");
     expect(startTask.extraEnv.OPENCODE_CONFIG).toBeUndefined();
-    expect(mocks.fsFiles.size).toBe(0);
+    expect(fsFiles.size).toBe(0);
   });
 
   it("answers MCP request lines from a harness relay connection (connId routing)", async () => {
     const { worker, connection } = await connectedPair();
 
-    const task = new TaskManager(WORKSPACE).createTask(claudeHarness);
+    const task = new TaskManager(agents.deps, WORKSPACE).createTask(claudeHarness);
     await task.start(tunnelFactory(connection, task));
 
     const relayA = worker.mcpConnect(task.taskId);
@@ -248,21 +226,21 @@ describe("tunnel transport symmetry", () => {
       },
     });
 
-    const task = new TaskManager(WORKSPACE).createTask(claudeHarness);
+    const task = new TaskManager(agents.deps, WORKSPACE).createTask(claudeHarness);
     await expect(task.start(tunnelFactory(connection, task))).rejects.toThrow(
       "command not found",
     );
-    expect(agentTasksCollection.get(task.taskId)?.status).toBe("error");
+    expect(agents.store.tasks.get(task.taskId)?.status).toBe("error");
   });
 
   it("task-exit closes the transport with desktop-identical semantics", async () => {
     const { worker, connection } = await connectedPair();
-    const task = new TaskManager(WORKSPACE).createTask(claudeHarness);
+    const task = new TaskManager(agents.deps, WORKSPACE).createTask(claudeHarness);
     await task.start(tunnelFactory(connection, task));
 
     worker.exitTask(task.taskId, 1);
     await vi.waitFor(() => {
-      expect(agentTasksCollection.get(task.taskId)?.status).toBe("error");
+      expect(agents.store.tasks.get(task.taskId)?.status).toBe("error");
     });
   });
 
@@ -283,7 +261,7 @@ describe("tunnel transport symmetry", () => {
       },
     });
 
-    const manager = new TaskManager(WORKSPACE);
+    const manager = new TaskManager(agents.deps, WORKSPACE);
     const task = manager.createTask(claudeHarness);
     await task.start(tunnelFactory(connection, task), {
       resumeSessionId: "sess_restored",
@@ -304,7 +282,7 @@ describe("tunnel transport symmetry", () => {
     });
     connection.onClosed(() => order.push("transport-close"));
 
-    const task = new TaskManager(WORKSPACE).createTask(claudeHarness);
+    const task = new TaskManager(agents.deps, WORKSPACE).createTask(claudeHarness);
     await task.start(tunnelFactory(connection, task));
 
     worker.dropConnection();

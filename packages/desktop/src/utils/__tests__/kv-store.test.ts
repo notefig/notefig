@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 /**
  * The KV store over the `db` surface (MET-124).
@@ -9,30 +9,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * the collection `useKv` reads are the same thing.
  */
 
-const { dbRef } = vi.hoisted(() => ({
-  dbRef: { current: null as null | import("../../testing/node-db").NodeTestDb },
-}));
-
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (dbRef.current = (
-      await import("../../testing/node-db")
-    ).createNodeTestDb()),
-  },
-}));
-
 import { createCollection } from "@tanstack/react-db";
 import { persistedCollectionOptions } from "@tanstack/db-sqlite-persistence-core";
-import {
-  getOrCreateKvCollection,
-  readAllKv,
-  readKv,
-  removeKv,
-  writeKv,
-  type KvRow,
-} from "../kv-store";
+import { createKv, type KvApi, type KvRow } from "../kv-store";
+import { createNodeTestDb, type NodeTestDb } from "@/testing/node-db";
 
 const NS = "settings";
+
+let db: NodeTestDb;
+let kv: KvApi;
+
+beforeEach(() => {
+  db = createNodeTestDb();
+  kv = createKv(() => db.get());
+});
 
 /**
  * A second collection over the same storage, built exactly as `kv-store` builds
@@ -44,73 +34,65 @@ async function reopen(namespace: string) {
     persistedCollectionOptions<KvRow, string>({
       id: `kv:${namespace}`,
       getKey: (item) => item.key,
-      persistence: dbRef.current!.get(),
+      persistence: db.get(),
     }),
   );
   await collection.preload();
   return collection;
 }
 
-beforeEach(async () => {
-  const collection = getOrCreateKvCollection(NS);
-  await collection.preload();
-  for (const row of collection.toArray) {
-    await collection.delete(row.key).isPersisted.promise;
-  }
-});
-
 describe("reading and writing", () => {
   it("round-trips a value", async () => {
-    await writeKv(NS, "theme", "dark");
-    expect(await readKv(NS, "theme")).toBe("dark");
+    await kv.write(NS, "theme", "dark");
+    expect(await kv.read(NS, "theme")).toBe("dark");
   });
 
   it("overwrites rather than duplicating on a second write", async () => {
-    await writeKv(NS, "zoomLevel", 1);
-    await writeKv(NS, "zoomLevel", 1.5);
+    await kv.write(NS, "zoomLevel", 1);
+    await kv.write(NS, "zoomLevel", 1.5);
 
-    expect(await readKv(NS, "zoomLevel")).toBe(1.5);
-    expect(getOrCreateKvCollection(NS).size).toBe(1);
+    expect(await kv.read(NS, "zoomLevel")).toBe(1.5);
+    expect(kv.collection(NS).size).toBe(1);
   });
 
   it("reads a missing key as undefined", async () => {
-    expect(await readKv(NS, "never-written")).toBeUndefined();
+    expect(await kv.read(NS, "never-written")).toBeUndefined();
   });
 
   it("returns every value in the namespace", async () => {
-    await writeKv(NS, "theme", "dark");
-    await writeKv(NS, "zoomLevel", 1.25);
+    await kv.write(NS, "theme", "dark");
+    await kv.write(NS, "zoomLevel", 1.25);
 
-    expect(await readAllKv(NS)).toEqual({ theme: "dark", zoomLevel: 1.25 });
+    expect(await kv.readAll(NS)).toEqual({ theme: "dark", zoomLevel: 1.25 });
   });
 
   it("keeps namespaces apart", async () => {
-    await writeKv(NS, "shared-key", "settings value");
-    await writeKv("recentProjects", "shared-key", "projects value");
+    await kv.write(NS, "shared-key", "settings value");
+    await kv.write("recentProjects", "shared-key", "projects value");
 
-    expect(await readKv(NS, "shared-key")).toBe("settings value");
-    expect(await readKv("recentProjects", "shared-key")).toBe("projects value");
+    expect(await kv.read(NS, "shared-key")).toBe("settings value");
+    expect(await kv.read("recentProjects", "shared-key")).toBe("projects value");
   });
 
   it("removes a key, and removing a missing one is not an error", async () => {
-    await writeKv(NS, "theme", "dark");
-    await removeKv(NS, "theme");
-    expect(await readKv(NS, "theme")).toBeUndefined();
+    await kv.write(NS, "theme", "dark");
+    await kv.remove(NS, "theme");
+    expect(await kv.read(NS, "theme")).toBeUndefined();
 
-    await expect(removeKv(NS, "never-written")).resolves.toBeUndefined();
+    await expect(kv.remove(NS, "never-written")).resolves.toBeUndefined();
   });
 
   it("stores structured values without flattening them", async () => {
     const project = { name: "notes", lastOpenedAt: 1712345678 };
-    await writeKv("recentProjects", "/home/p/notes", project);
+    await kv.write("recentProjects", "/home/p/notes", project);
 
-    expect(await readKv("recentProjects", "/home/p/notes")).toEqual(project);
+    expect(await kv.read("recentProjects", "/home/p/notes")).toEqual(project);
   });
 });
 
 describe("durability", () => {
   it("brings a value back from storage after the collection is torn down", async () => {
-    await writeKv(NS, "telemetryInstallId", "install-123");
+    await kv.write(NS, "telemetryInstallId", "install-123");
 
     const collection = await reopen(NS);
 
@@ -126,7 +108,7 @@ describe("durability", () => {
   it("survives a namespace being written before it is ever read", async () => {
     // The telemetry bootstrap writes consent before anything has read the
     // namespace, so the very first touch of the collection is a write.
-    await writeKv("first-touch-is-a-write", "consent", 1);
+    await kv.write("first-touch-is-a-write", "consent", 1);
 
     const collection = await reopen("first-touch-is-a-write");
 
@@ -140,23 +122,23 @@ describe("the imperative helpers and the collection are one store", () => {
     // the adapter, so `useKv` subscribers did not see it until the next
     // refetch — the reason harness discovery had to write through the
     // collection by hand.
-    await writeKv(NS, "theme", "light");
+    await kv.write(NS, "theme", "light");
 
-    expect(getOrCreateKvCollection(NS).get("theme")?.value).toBe("light");
+    expect(kv.collection(NS).get("theme")?.value).toBe("light");
   });
 
   it("a collection write is visible to an imperative read", async () => {
-    const collection = getOrCreateKvCollection(NS);
+    const collection = kv.collection(NS);
     await collection.insert({ key: "lastPath", value: "/home/p/notes" })
       .isPersisted.promise;
 
-    expect(await readKv(NS, "lastPath")).toBe("/home/p/notes");
+    expect(await kv.read(NS, "lastPath")).toBe("/home/p/notes");
   });
 
   it("an imperative delete is visible to the collection", async () => {
-    await writeKv(NS, "theme", "dark");
-    await removeKv(NS, "theme");
+    await kv.write(NS, "theme", "dark");
+    await kv.remove(NS, "theme");
 
-    expect(getOrCreateKvCollection(NS).get("theme")).toBeUndefined();
+    expect(kv.collection(NS).get("theme")).toBeUndefined();
   });
 });

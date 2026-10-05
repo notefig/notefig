@@ -4,13 +4,14 @@
  */
 
 import type { Editor } from "@tiptap/core";
-import { promptText } from "@/utils/fs";
+import { usePlatform } from "@/core/use-platform";
 import { normalizeLinkInput } from "./tiptap-link-utils";
 
 export function useLinkPrompt(editor: Editor): () => Promise<void> {
+  const platform = usePlatform();
   return async function handleLinkToggle() {
     const previousUrl = editor.getAttributes("link").href as string | undefined;
-    const url = await promptText({
+    const url = await platform.ui.promptText({
       title: previousUrl ? "Edit link" : "Add link",
       message: previousUrl ? "Clear the URL to remove the link." : undefined,
       defaultValue: previousUrl ?? "",

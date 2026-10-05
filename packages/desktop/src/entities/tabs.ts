@@ -63,20 +63,20 @@ import {
 // Sibling entities — only referenced inside function bodies (cycle rule).
 import { editor, type EditorHandle } from "./editors";
 import {
-  agents,
-  agentTasksCollection,
+  useAgentStore,
   useAgentTasksReady,
   useAgentTaskRowsById,
   type AgentTaskRow,
 } from "./agents";
-import type { AgentTaskHandle } from "@/agent/agents";
+import type { AgentsApi, AgentTaskHandle } from "@/agent/agents";
 import { useMetadataFetching, type WorkspaceFiles } from "./files";
 import { useCore } from "@notefig/core/react";
 import type { Core } from "@notefig/core";
 import {
   useOpenWorkspaces,
   useOpenWorkspacesReady,
-  workspaceOfPath,
+  useWorkspaceRegistry,
+  type WorkspaceRegistry,
 } from "./workspaces";
 import {
   flushDocumentSync,
@@ -152,8 +152,9 @@ export type TabHandle = FileTabHandle | AgentTabHandle | ReleaseNotesTabHandle;
 /**
  * The handle over one open tab, whether or not it is currently mounted (an
  * unmounted tab reports `isMounted() === false` and its controls no-op).
+ * An agent tab's half comes from `agents` (`core.agents`).
  */
-export function tab(tabId: string): TabHandle {
+export function tab(tabId: string, agents: Pick<AgentsApi, "task">): TabHandle {
   const base: TabHandleBase = {
     tabId,
     isMounted: () => getTabController(tabId) !== undefined,
@@ -309,11 +310,12 @@ export interface WorkspaceTabsState {
 /** `fileTabIds` grouped by the workspace containing each; tabs in no open
  *  workspace are left out (they are stale). */
 function groupFileTabsByWorkspace(
+  registry: WorkspaceRegistry,
   fileTabIds: string[],
 ): Map<string, string[]> {
   const groups = new Map<string, string[]>();
   for (const path of fileTabIds) {
-    const workspace = workspaceOfPath(path);
+    const workspace = registry.workspaceOf(path);
     if (workspace === null) continue;
     const group = groups.get(workspace);
     if (group) group.push(path);
@@ -380,6 +382,7 @@ function openFilesOf(
  * (tabs/tab-types.tsx), since each tab resolves its own workspace.
  */
 export function useWorkspaceTabs(openTabs: string[]): WorkspaceTabsState {
+  const agentStore = useAgentStore();
   const fileTabIds = useMemo(() => openTabs.filter(isFileTabId), [openTabs]);
   const agentTaskIds = useMemo(
     () =>
@@ -395,10 +398,11 @@ export function useWorkspaceTabs(openTabs: string[]): WorkspaceTabsState {
 
   // Re-group when workspaces open or close, not only when tabs change.
   const openWorkspaces = useOpenWorkspaces();
+  const registry = useWorkspaceRegistry();
   const fileTabsByWorkspace = useMemo(
-    () => groupFileTabsByWorkspace(fileTabIds),
+    () => groupFileTabsByWorkspace(registry, fileTabIds),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [fileTabIds, openWorkspaces],
+    [registry, fileTabIds, openWorkspaces],
   );
   const missingFileTabs = useMissingFileTabs(fileTabsByWorkspace, fileTabIds);
   // Coarse on purpose: a metadata walk in any workspace defers pruning in
@@ -432,7 +436,7 @@ export function useWorkspaceTabs(openTabs: string[]): WorkspaceTabsState {
             .filter((tabId) => !midRenameIds.has(tabId));
     const missingAgentTabIds = agentTasksReady
       ? agentTaskIds
-          .filter((taskId) => !agentTasksCollection.get(taskId))
+          .filter((taskId) => !agentStore.tasks.get(taskId))
           .map(agentTabId)
       : [];
     return [...missingFileTabIds, ...missingAgentTabIds];
@@ -442,6 +446,7 @@ export function useWorkspaceTabs(openTabs: string[]): WorkspaceTabsState {
     openWorkspacesReady,
     isFetchingMetadata,
     agentTasksReady,
+    agentStore,
   ]);
 
   return {

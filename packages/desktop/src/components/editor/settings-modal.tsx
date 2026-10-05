@@ -45,6 +45,7 @@ import {
 } from "./hotkey-catalog";
 import { useCore } from "@notefig/core/react";
 import { RELEASE_NOTES_TAB_ID } from "@/entities/tabs";
+import { usePlatform } from "@/core/use-platform";
 import { useFocusedWorkspace } from "@/entities/workspaces";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -434,6 +435,7 @@ function UpdateSection() {
 function UpdaterButton() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const { updates } = usePlatform();
   const updater = useAppUpdater();
   const { status, progress, error, flow } = updater;
 
@@ -473,7 +475,7 @@ function UpdaterButton() {
         <Button
           size="sm"
           onClick={() => {
-            startDownloadWithToastPromise(queryClient);
+            startDownloadWithToastPromise({ queryClient, updates });
           }}
         >
           <Download className="h-4 w-4 mr-1.5" />
@@ -497,7 +499,7 @@ function UpdaterButton() {
         <Button
           size="sm"
           onClick={() => {
-            void relaunchApp(queryClient);
+            void relaunchApp({ queryClient, updates });
           }}
         >
           {t("updaterRestart")}

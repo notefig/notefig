@@ -14,7 +14,11 @@ import type {
   AppStatusSection,
   StatusMark,
 } from "@/adapters/platform-adapter.interface";
-import { jumpToRound, jumpToTask } from "@/components/agent/jump-to-task";
+import {
+  jumpToRound,
+  jumpToTask,
+  type Jumper,
+} from "@/components/agent/jump-to-task";
 import {
   attentionGlyphState,
   taskGlyphState,
@@ -58,6 +62,8 @@ const LABEL_CHARS = 48;
 export type AppStatusTabs = Pick<TabsApi, "open" | "openAgent">;
 
 export interface AppStatusHost {
+  /** Reveals a prompt widget in its document (a jump's other half). */
+  editors: Jumper["editors"];
   /** The focused workspace's scratchpads — where a new one goes; null on
    *  welcome. */
   scratchpads: Pick<WorkspaceScratchpads, "createAndOpen"> | null;
@@ -113,7 +119,7 @@ function listedIdOf(item: AttentionItem): string {
 function attentionSection(
   { attention, t }: AppStatusInputs,
   listed: AppStatusSection[],
-  tabs: AppStatusTabs,
+  jumper: Jumper,
 ): AppStatusSection {
   const listedIds = new Set(listed.flatMap((s) => s.entries.map((e) => e.id)));
   const leftOut = attention.items.filter((item) => !listedIds.has(listedIdOf(item)));
@@ -131,22 +137,20 @@ function attentionSection(
       mark: attentionGlyphState(item.kind),
       activate: () =>
         item.target.kind === "document" && item.turnId
-          ? jumpToRound({
+          ? jumpToRound(jumper, {
               taskId: item.taskId,
               turnId: item.turnId,
               documentPath: item.target.id,
             })
-          : jumpToTask(item.taskId, { turnId: item.turnId }),
+          : jumpToTask(jumper, item.taskId, { turnId: item.turnId }),
     })),
   };
 }
 
 /** The three recency sections in the sidebar's order, the attention card
  *  ahead of them when it has rows, empty ones left out. */
-function sections(
-  inputs: AppStatusInputs,
-  tabs: AppStatusTabs,
-): AppStatusSection[] {
+function sections(inputs: AppStatusInputs, jumper: Jumper): AppStatusSection[] {
+  const { tabs } = jumper;
   const { rounds, sessions, documents, attention, t } = inputs;
   const liveDocuments = new Set(
     rounds.filter(isLiveRound).map((round) => round.documentPath),
@@ -162,7 +166,7 @@ function sections(
         // would sit stale in a menu that only redraws on change.
         detail: describePromptRound(round) ?? getFileName(round.documentPath),
         mark: roundMark(round, attention),
-        activate: () => jumpToRound(round),
+        activate: () => jumpToRound(jumper, round),
       })),
     },
     {
@@ -190,7 +194,7 @@ function sections(
       })),
     },
   ];
-  return [attentionSection(inputs, all, tabs), ...all].filter(
+  return [attentionSection(inputs, all, jumper), ...all].filter(
     (section) => section.entries.length > 0,
   );
 }
@@ -218,7 +222,9 @@ export function deriveAppStatus(inputs: AppStatusInputs): AppStatus {
   const overall = host.tabs ? attention.overall : null;
   return {
     attention: overall && attentionGlyphState(overall),
-    sections: host.tabs ? sections(inputs, host.tabs) : [],
+    sections: host.tabs
+      ? sections(inputs, { tabs: host.tabs, editors: host.editors })
+      : [],
     actions: actions(inputs),
   };
 }
@@ -247,7 +253,13 @@ export function usePublishAppStatus(host: {
   useEffect(() => {
     core.use("platform").ui.publishAppStatus(
       deriveAppStatus({
-        host: { scratchpads, tabs, openSettings, openWorkspace },
+        host: {
+          scratchpads,
+          tabs,
+          editors: core.editors,
+          openSettings,
+          openWorkspace,
+        },
         rounds,
         sessions,
         documents,

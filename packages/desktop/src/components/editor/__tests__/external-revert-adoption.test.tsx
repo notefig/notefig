@@ -30,17 +30,6 @@ import { createElement, Fragment } from "react";
 import { Editor } from "@tiptap/core";
 import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
 
-vi.mock("@/adapters", async () => {
-  const { fake } = await import("@/testing/fake-fs-adapter");
-  return {
-    platformAdapter: {
-      fs: fake.adapter,
-      ui: fake.adapter,
-      db: (await import("@/testing/node-db")).createNodeTestDb(),
-    },
-  };
-});
-
 import { fake, installWatcherSim } from "@/testing/fake-fs-adapter";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
 import { QueryClient } from "@tanstack/react-query";

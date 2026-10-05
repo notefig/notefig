@@ -1,6 +1,13 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createMarkdownCodec } from "../../markdown-codec";
-import { getOrCreateEditor, disposeEditor } from "../../editor-store";
+import {
+  getOrCreateEditor,
+  disposeEditor,
+  type EditorFs,
+} from "../../editor-store";
+import { answerBlob } from "../blob-actions";
+import type { DocumentsApi } from "@/entities/documents";
+import type { AgentsApi } from "@/agent/agents";
 
 const readWorkspaceTextFile = vi.fn();
 const writeWorkspaceTextFile = vi.fn();
@@ -8,29 +15,35 @@ const writeWorkspaceTextFile = vi.fn();
 const documents = {
   read: (...args: unknown[]) => readWorkspaceTextFile(...args),
   write: (...args: unknown[]) => writeWorkspaceTextFile(...args),
-};
+} as unknown as DocumentsApi;
 
 const findBlobAuthorTask = vi.fn();
 
 const taskPrompt = vi.fn();
-vi.mock("@/agent/agents", () => ({
-  agents: {
-    blobAuthor: (...args: unknown[]) => findBlobAuthorTask(...args),
-    task: (taskId: string) => ({
-      prompt: (text: string) => {
-        taskPrompt(taskId, text);
-        // Real handles are infallible: answerBlob watches `completed` to
-        // surface orphaned answers (MET-54).
-        return {
-          turnId: "trn_test",
-          completed: Promise.resolve({ status: "completed" }),
-        };
-      },
-    }),
-  },
-}));
+// Only the authoring lookup and a task's prompt are reached.
+const agents = {
+  blobAuthor: (...args: unknown[]) => findBlobAuthorTask(...args),
+  task: (taskId: string) => ({
+    prompt: (text: string) => {
+      taskPrompt(taskId, text);
+      // Real handles are infallible: answerBlob watches `completed` to
+      // surface orphaned answers (MET-54).
+      return {
+        turnId: "trn_test",
+        completed: Promise.resolve({ status: "completed" }),
+      };
+    },
+  }),
+} as unknown as AgentsApi;
 
-const { answerBlob } = await import("../blob-actions");
+const host = { documents, agents };
+
+/** The platform fs the editor reaches; nothing here searches or pastes. */
+const editorFs: EditorFs = {
+  searchContent: vi.fn(async () => []),
+  exists: vi.fn(async () => []),
+  writeBinaryFiles: vi.fn(async () => ({ succeeded: [], failed: [] })),
+};
 
 const codec = createMarkdownCodec();
 
@@ -54,10 +67,14 @@ afterEach(() => {
 describe("answerBlob", () => {
   it("answer-while-open: reads the live editor and writes through the adopting primitive", async () => {
     const content = codec.parse(baseMarkdown);
-    getOrCreateEditor("/ws/notes.md", { type: "markdown", content, basePath: "/ws" });
+    getOrCreateEditor(
+      "/ws/notes.md",
+      { type: "markdown", content, basePath: "/ws" },
+      editorFs,
+    );
     findBlobAuthorTask.mockReturnValue(undefined);
 
-    const result = await answerBlob(documents, "/ws/notes.md", "q_test1", {
+    const result = await answerBlob(host, "/ws/notes.md", "q_test1", {
       status: "answered",
       answer: "Pro",
     });
@@ -77,7 +94,7 @@ describe("answerBlob", () => {
     readWorkspaceTextFile.mockResolvedValue(baseMarkdown);
     findBlobAuthorTask.mockReturnValue(undefined);
 
-    const result = await answerBlob(documents, "/ws/closed.md", "q_test1", {
+    const result = await answerBlob(host, "/ws/closed.md", "q_test1", {
       status: "answered",
       answer: "Free",
     });
@@ -91,7 +108,7 @@ describe("answerBlob", () => {
   it("agent-deleted: returns not_found when the blob id is no longer present", async () => {
     readWorkspaceTextFile.mockResolvedValue("# Doc\n\nno blobs here\n");
 
-    const result = await answerBlob(documents, "/ws/gone.md", "q_missing", {
+    const result = await answerBlob(host, "/ws/gone.md", "q_missing", {
       status: "answered",
     });
 
@@ -109,7 +126,7 @@ describe("answerBlob", () => {
     // "conflict" reason in answerBlob (see blob-actions.ts).
     readWorkspaceTextFile.mockResolvedValue(baseMarkdown);
 
-    const result = await answerBlob(documents, "/ws/race.md", "q_test1", {
+    const result = await answerBlob(host, "/ws/race.md", "q_test1", {
       status: "not-a-real-status",
     });
 
@@ -121,7 +138,7 @@ describe("answerBlob", () => {
     readWorkspaceTextFile.mockResolvedValue(baseMarkdown);
     findBlobAuthorTask.mockReturnValue({ taskId: "t_1", blobType: "question", path: "/ws/closed.md" });
 
-    await answerBlob(documents, "/ws/closed.md", "q_test1", {
+    await answerBlob(host, "/ws/closed.md", "q_test1", {
       status: "answered",
       answer: "Enterprise",
     });
@@ -141,7 +158,7 @@ describe("answerBlob", () => {
     readWorkspaceTextFile.mockResolvedValue(baseMarkdown);
     findBlobAuthorTask.mockReturnValue({ taskId: "t_1", blobType: "status", path: "/ws/closed.md" });
 
-    await answerBlob(documents, "/ws/closed.md", "q_test1", {
+    await answerBlob(host, "/ws/closed.md", "q_test1", {
       status: "answered",
       answer: "done",
     });
@@ -156,7 +173,7 @@ describe("answerBlob", () => {
   it("does not prompt any task when the patch fails", async () => {
     readWorkspaceTextFile.mockResolvedValue("# Doc\n\nno blobs here\n");
 
-    await answerBlob(documents, "/ws/gone.md", "q_missing", {
+    await answerBlob(host, "/ws/gone.md", "q_missing", {
       status: "answered",
     });
 

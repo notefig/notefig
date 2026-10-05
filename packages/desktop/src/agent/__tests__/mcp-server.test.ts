@@ -41,14 +41,13 @@ import {
 } from "@notefig/agent";
 import type { McpEndpoint, ToolContext } from "@notefig/agent";
 import { PermissionBroker } from "../permission-broker";
-import { agentPermissionRequestsCollection } from "../agent-collections";
+import type { AgentStore } from "../agent-collections";
 import { toolRegistry, getTool } from "../tools";
 import { serverInstructions } from "../mcp-instructions";
 import i18n from "@/utils/intl";
-import { createTestCore, windowUrlState } from "@/testing/test-core";
-
-// getWorkspaceEditorContext reads the layout through core.
-createTestCore({ url: windowUrlState() });
+import { createLayout } from "@/entities/layout";
+import { memoryUrlState } from "@/testing/test-core";
+import { testAgentStore } from "@/testing/test-agents";
 
 // vi.hoisted can't reference `z` (hoisted above the "zod" import); assign
 // real schemas onto the mocked blob types now that imports have resolved.
@@ -71,10 +70,20 @@ const ctx: ToolContext = {
   },
   services: {
     documents: { read: readWorkspaceTextFile, write: writeWorkspaceTextFile },
+    // workspace_open_files reads the task's layout.
+    layout: createLayout(memoryUrlState()),
   } as unknown as ToolContext["services"],
 };
 
-function handler(permissionBroker = new PermissionBroker(ctx.taskId)) {
+// The broker's permission requests, fresh per test.
+let store: AgentStore;
+
+function handler(
+  permissionBroker = new PermissionBroker(
+    ctx.taskId,
+    store.permissionRequests,
+  ),
+) {
   return createMcpRequestHandler({
     ctx,
     permissionBroker,
@@ -89,9 +98,7 @@ function handler(permissionBroker = new PermissionBroker(ctx.taskId)) {
 
 describe("createMcpRequestHandler", () => {
   beforeEach(() => {
-    for (const r of agentPermissionRequestsCollection.toArray) {
-      agentPermissionRequestsCollection.delete(r.id);
-    }
+    store = testAgentStore();
     buildWidgetContextPayload.mockReset();
   });
 
@@ -332,7 +339,7 @@ describe("createMcpRequestHandler", () => {
   });
 
   it("tools/call: a requiresPermission tool blocks on the broker and returns isError on deny", async () => {
-    const broker = new PermissionBroker(ctx.taskId);
+    const broker = new PermissionBroker(ctx.taskId, store.permissionRequests);
     const pending = handler(broker)({
       jsonrpc: "2.0",
       id: 6,
@@ -343,7 +350,7 @@ describe("createMcpRequestHandler", () => {
       },
     });
 
-    const row = agentPermissionRequestsCollection.toArray.find(
+    const row = store.permissionRequests.toArray.find(
       (r) => r.taskId === ctx.taskId && r.status === "pending",
     );
     expect(row).toBeDefined();

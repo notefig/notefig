@@ -5,7 +5,7 @@ import { FolderLock } from "lucide-react";
 import { toast } from "sonner";
 import { DebugPanel } from "./debug-panel";
 import { Button } from "@notefig/ui/button";
-import { platformAdapter } from "@/adapters";
+import { usePlatform } from "@/core/use-platform";
 import {
   FsError,
   isWorkspaceAccessError,
@@ -158,6 +158,7 @@ function WorkspaceAccessError({
 }) {
   const { t } = useTranslation();
   const core = useCore();
+  const platform = usePlatform();
   const openProject = useOpenProject();
   const workspacePath = useFocusedWorkspace();
   const content = getRecoveryContent(error, t);
@@ -180,7 +181,7 @@ function WorkspaceAccessError({
   };
 
   const handleRepick = async () => {
-    const picked = await platformAdapter.ui
+    const picked = await platform.ui
       .pickDirectory(t("pickDirectory"))
       .catch(() => null);
     if (!picked) return;
@@ -199,7 +200,7 @@ function WorkspaceAccessError({
     const target = workspacePath ?? error.path;
     // Web: must call requestPermission inside this click. Desktop: no-op
     // true — the retry refetch will surface the error again if still denied.
-    const granted = await platformAdapter.fs.requestWorkspaceAccess(target);
+    const granted = await platform.fs.requestWorkspaceAccess(target);
     if (!granted) {
       toast.error(t("fsAccessLostBodyWeb"));
       return;
@@ -224,9 +225,7 @@ function WorkspaceAccessError({
             <Button
               variant="secondary"
               onClick={() =>
-                platformAdapter.ui.openExternal(
-                  MACOS_FILES_AND_FOLDERS_SETTINGS_URL,
-                )
+                platform.ui.openExternal(MACOS_FILES_AND_FOLDERS_SETTINGS_URL)
               }
             >
               {t("fsOpenSystemSettings")}
@@ -247,9 +246,7 @@ function WorkspaceAccessError({
             <button
               className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
               onClick={() =>
-                platformAdapter.ui.openExternal(
-                  CHROME_SITE_PERMISSIONS_HELP_URL,
-                )
+                platform.ui.openExternal(CHROME_SITE_PERMISSIONS_HELP_URL)
               }
             >
               {t("fsSitePermissionsHelp")}

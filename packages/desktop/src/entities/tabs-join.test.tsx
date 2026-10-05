@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
-// Real file collections over an fs handed to them, read through core;
-// everything else the tabs entity reaches is stubbed (same set as
-// tabs.test.ts).
+// Real file collections over an fs handed to them, the real open set and
+// agent store, all read through core; everything else the tabs entity
+// reaches is stubbed (same set as tabs.test.ts).
 const adapter = {
   readDirectory: vi.fn(),
   getMetadata: vi.fn(),
@@ -27,28 +27,15 @@ vi.mock("./editors", () => ({ editor: vi.fn() }));
 vi.mock("@/utils/workspace-write-tracker", () => ({
   whenWorkspaceWritesSettled: vi.fn(async () => {}),
 }));
-vi.mock("./workspaces", () => ({
-  useOpenWorkspacesReady: () => true,
-  useOpenWorkspaces: () => openRows,
-  workspaceOfPath: (path: string) =>
-    openRows.find((row) => path.startsWith(`${row.path}/`))?.path ?? null,
-}));
-vi.mock("./agents", () => ({
-  agents: { task: vi.fn() },
-  agentTasksCollection: { get: vi.fn() },
-  useAgentTasksReady: vi.fn(() => true),
-  useAgentTaskRowsById: vi.fn(() => []),
-}));
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
-
-// The open set, as the workspaces entity would publish it.
-const openRows: { key: string; path: string }[] = [];
 
 import type { Core } from "@notefig/core";
 import { CoreProvider } from "@notefig/core/react";
 import type { WorkspaceFiles } from "./files";
 import { useWorkspaceTabs, type WorkspaceTabsState } from "./tabs";
+import { workspacesModule } from "./workspaces";
+import { agentStoreModule } from "@/agent/agent-collections";
 import { createTestCore } from "@/testing/test-core";
 import { filesModuleOf, testWorkspaceFiles } from "@/testing/test-files";
 
@@ -97,14 +84,17 @@ beforeEach(async () => {
     succeeded: paths.map((path) => ({ path, content: "" })),
     failed: [],
   }));
-  openRows.length = 0;
   files = [WS_A, WS_B].map((ws) => testWorkspaceFiles(ws, adapter));
-  core = createTestCore({ modules: [filesModuleOf(files)] });
+  core = createTestCore({
+    modules: [
+      filesModuleOf(files),
+      workspacesModule({ restore: false }),
+      agentStoreModule,
+    ],
+  });
+  core.boot();
   for (const workspace of files) {
-    openRows.push({
-      key: workspace.workspacePath,
-      path: workspace.workspacePath,
-    });
+    // Opening joins the open set, as the switcher's open does.
     await core.workspace(workspace.workspacePath).open();
     await workspace.collections.metadata.preload();
   }

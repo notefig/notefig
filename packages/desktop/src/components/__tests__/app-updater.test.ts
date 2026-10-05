@@ -8,6 +8,7 @@ import {
   UPDATE_CHECK_QUERY_KEY,
   type InstallState,
   type UpdateCheckData,
+  type UpdaterHost,
 } from "@/components/app-updater";
 
 const mockCaptureEvent = vi.fn();
@@ -20,17 +21,13 @@ const mockUpdater = {
   apply: vi.fn(),
   restart: vi.fn(),
 };
-// A getter, not a plain property: vi.mock is hoisted above `mockUpdater`'s
-// declaration, so reading it eagerly here would hit the TDZ. The old
-// `getUpdater()` method deferred the read for free; this keeps that.
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-    get updates() {
-      return mockUpdater;
-    },
-  },
-}));
+
+function hostOf(queryClient: QueryClient): UpdaterHost {
+  return {
+    queryClient,
+    updates: mockUpdater as unknown as UpdaterHost["updates"],
+  };
+}
 
 const idleInstall: InstallState = {
   phase: "idle",
@@ -160,10 +157,10 @@ describe("update telemetry", () => {
     mockUpdater.restart.mockReset();
   });
 
-  function clientWithAvailableUpdate(): QueryClient {
+  function hostWithAvailableUpdate(): UpdaterHost {
     const queryClient = new QueryClient();
     queryClient.setQueryData(UPDATE_CHECK_QUERY_KEY, available);
-    return queryClient;
+    return hostOf(queryClient);
   }
 
   it("captures started and completed on a successful download", async () => {
@@ -174,7 +171,7 @@ describe("update telemetry", () => {
       })(),
     );
 
-    await downloadAndInstall(clientWithAvailableUpdate());
+    await downloadAndInstall(hostWithAvailableUpdate());
 
     expect(mockCaptureEvent).toHaveBeenCalledWith("update_download_started", {
       to_version: "1.2.3",
@@ -192,7 +189,7 @@ describe("update telemetry", () => {
       })(),
     );
 
-    await downloadAndInstall(clientWithAvailableUpdate(), "auto");
+    await downloadAndInstall(hostWithAvailableUpdate(), "auto");
 
     expect(mockCaptureEvent).toHaveBeenCalledWith("update_download_started", {
       to_version: "1.2.3",
@@ -208,7 +205,7 @@ describe("update telemetry", () => {
     );
 
     await expect(
-      downloadAndInstall(clientWithAvailableUpdate()),
+      downloadAndInstall(hostWithAvailableUpdate()),
     ).rejects.toThrow();
 
     expect(mockCaptureEvent).toHaveBeenCalledWith("update_failed", {
@@ -224,7 +221,7 @@ describe("update telemetry", () => {
   it("captures update_failed (stage restart) when relaunch errors", async () => {
     mockUpdater.restart.mockResolvedValue({ status: "error" });
 
-    await relaunchApp(clientWithAvailableUpdate());
+    await relaunchApp(hostWithAvailableUpdate());
 
     expect(mockCaptureEvent).toHaveBeenCalledWith("update_failed", {
       stage: "restart",
@@ -235,7 +232,7 @@ describe("update telemetry", () => {
   it("falls back to an unknown target version when no check data exists", async () => {
     mockUpdater.restart.mockResolvedValue({ status: "error" });
 
-    await relaunchApp(new QueryClient());
+    await relaunchApp(hostOf(new QueryClient()));
 
     expect(mockCaptureEvent).toHaveBeenCalledWith("update_failed", {
       stage: "restart",

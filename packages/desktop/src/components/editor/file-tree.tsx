@@ -47,10 +47,7 @@ import {
 } from "@/entities/scratchpads";
 import { moveIntoFolder } from "@/utils/drop-actions";
 import { attachTreeStatHydration } from "./tree-stat-hydration";
-import {
-  attachExpansionMemory,
-  rememberedExpandedPaths,
-} from "./tree-expansion-memory";
+import type { ExpansionMemory } from "./tree-expansion-memory";
 import { acquireTreeModel } from "./tree-model-cache";
 import { defineModule } from "@notefig/core";
 
@@ -113,11 +110,19 @@ const ROW_HEIGHT_REM = 1.75;
 export function FileTree(props: FileTreeComponentProps) {
   // The workspace's files, once core has it open (its row can show first).
   const files = useWorkspaceModule(props.basePath, "files");
-  if (!files) return null;
+  const expansion = useWorkspaceModule(props.basePath, "treeExpansion");
+  if (!files || !expansion) return null;
   // Remount per workspace: the inner component's transient state (pending
   // delete dialog, hover memo) must not leak across workspaces. The MODEL
   // is cached per workspace either way.
-  return <FileTreeInner key={props.basePath} {...props} files={files} />;
+  return (
+    <FileTreeInner
+      key={props.basePath}
+      {...props}
+      files={files}
+      expansion={expansion}
+    />
+  );
 }
 
 // fallow-ignore-next-line complexity
@@ -134,7 +139,11 @@ function FileTreeInner({
   mode,
   onModeChange,
   files,
-}: FileTreeComponentProps & { files: WorkspaceFiles }) {
+  expansion,
+}: FileTreeComponentProps & {
+  files: WorkspaceFiles;
+  expansion: ExpansionMemory;
+}) {
   const { t } = useTranslation();
   const core = useCore();
   const { metadata } = files.collections;
@@ -212,7 +221,7 @@ function FileTreeInner({
                 selectedFilePathRef.current,
             ]
           : [],
-        initialExpandedPaths: rememberedExpandedPaths(basePath),
+        initialExpandedPaths: expansion.paths(),
         delegate: {
           containsOpenTab: () => false,
           moveFile: () => {},
@@ -273,7 +282,7 @@ function FileTreeInner({
   // Mirror expansion into the module store — see tree-expansion-memory.ts.
   // With the cached model, this feeds sort-switch resets and rebuilds after
   // cache eviction.
-  useEffect(() => attachExpansionMemory(model, basePath), [model, basePath]);
+  useEffect(() => expansion.attach(model), [model, expansion]);
 
   // Single-selection semantics: item.select() is additive in trees, so clear
   // the rest whenever we programmatically mirror the active tab.
@@ -295,7 +304,7 @@ function FileTreeInner({
     if (entry.sortState.order === sortOrder) return;
     entry.sortState.order = sortOrder;
     model.resetPaths(treePathsRef.current, {
-      initialExpandedPaths: rememberedExpandedPaths(basePath) ?? [],
+      initialExpandedPaths: expansion.paths() ?? [],
     });
     if (selectedFilePathRef.current) {
       selectOnly(toRel(selectedFilePathRef.current));
@@ -460,7 +469,7 @@ function FileTreeInner({
   const resetModelPaths = useCallback(
     (paths: string[], extraExpanded: readonly string[] = []) => {
       const expanded = new Set(
-        rememberedExpandedPaths(basePath) ??
+        expansion.paths() ??
           model
             .getVisibleRows(0, model.getVisibleCount())
             .filter((row) => row.kind === "directory" && row.isExpanded)

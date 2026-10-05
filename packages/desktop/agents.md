@@ -43,11 +43,12 @@ Works on macOS, Linux, Windows (Tauri), and web browsers. **Always use platform 
 ### State Management: TanStack DB + Query
 
 ```typescript
-// Define collection
+// Define collection — inside a factory, from the fs it is handed
+// (`createWorkspaceFiles({ workspacePath, fs, queryClient })`)
 const metadataCollection = createCollection(
   queryCollectionOptions({
     queryKey: ["file-metadata", workspaceId],
-    queryFn: () => platformAdapter.readDirectory(workspaceId),
+    queryFn: () => fs.readDirectory(workspaceId),
     queryClient,
     getKey: (item) => item.path,
     syncMode: "eager", // or "on-demand"
@@ -75,7 +76,7 @@ const contentCollection = createCollection(
       const parsed = parseLoadSubsetOptions(context.meta?.loadSubsetOptions);
       const requestedPaths = extractPathsFromFilters(parsed.filters);
       if (requestedPaths.length === 0) return [];
-      const result = await platformAdapter.readFiles(requestedPaths);
+      const result = await fs.readFiles(requestedPaths);
       return result.succeeded.map(...);
     },
     syncMode: "on-demand",
@@ -133,11 +134,17 @@ tanstack ecosystem --category auth --json
 - Keep platform details internal - never expose outside adapter layer
 - **When in doubt, discuss first**
 
-**Usage:**
+**Usage:** the adapter is a core service. Only the composition root
+(`src/core/app-core.ts`) imports `@/adapters`; Fallow's boundary rules
+reject any other import of an adapter implementation.
 
 ```typescript
-import { platformAdapter } from "@/adapters";
-const dirPath = await platformAdapter.pickDirectory("Select workspace");
+// In a module
+register: (ctx) => createThing({ fs: ctx.use("platform").fs }),
+
+// In a component
+const { ui } = usePlatform();
+const dirPath = await ui.pickDirectory("Select workspace");
 ```
 
 **Never:** Import Tauri APIs directly, use `window.__TAURI__` checks, platform logic outside adapters

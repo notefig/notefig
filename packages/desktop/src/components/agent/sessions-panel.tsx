@@ -48,8 +48,8 @@ import { cn } from "@notefig/ui/utils";
 import { copyTextToClipboard } from "@notefig/ui/clipboard";
 import type { AgentTaskRow } from "@/agent/agent-collections";
 import {
-  agents,
   describeTaskMeta,
+  useAgents,
   useAgentTaskList,
   type AgentTaskMeta,
   useSessionActions,
@@ -128,6 +128,7 @@ export function useStartSession(workspacePath: string): {
   trustDialog: ReactNode;
 } {
   const { t } = useTranslation();
+  const agents = useAgents();
   const [trustPromptOpen, setTrustPromptOpen] = useState(false);
   // What the pending trust confirmation would start, and where: a start
   // resolves after a load, by when the panel may show another workspace.
@@ -157,7 +158,7 @@ export function useStartSession(workspacePath: string): {
           setTrustPromptOpen(true);
         });
     },
-    [workspacePath],
+    [agents, workspacePath],
   );
 
   const confirmTrust = useCallback(() => {
@@ -165,7 +166,7 @@ export function useStartSession(workspacePath: string): {
     workspace.trust();
     setTrustPromptOpen(false);
     void workspace.start(pending.harness);
-  }, [pending]);
+  }, [agents, pending]);
 
   const trustDialog = (
     <AlertDialog open={trustPromptOpen} onOpenChange={setTrustPromptOpen}>
@@ -235,6 +236,7 @@ export function SessionRow({
   attention?: AttentionKind | null;
 }) {
   const { t } = useTranslation();
+  const agents = useAgents();
   return (
     // Flat full-width rows, same affordances as the file tree / commit
     // list: pointer cursor (Tailwind's preflight defaults buttons to the
@@ -296,6 +298,7 @@ export function SessionRow({
  */
 export function SessionRowMenu({ task }: { task: AgentTaskRow }) {
   const { t } = useTranslation();
+  const agents = useAgents();
   const actions = useSessionActions(task);
   return (
     <ContextMenuContent>

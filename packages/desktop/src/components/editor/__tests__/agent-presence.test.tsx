@@ -2,8 +2,10 @@ import { describe, it, expect, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createElement } from "react";
+import { CoreProvider } from "@notefig/core/react";
 import { useAgentEditingPaths } from "@/components/editor/agent-presence";
-import { agentEntriesCollection } from "@/agent/agent-collections";
+import { agentStoreModule } from "@/agent/agent-collections";
+import { createTestCore } from "@/testing/test-core";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -24,22 +26,26 @@ afterEach(() => {
   container?.remove();
   container = null;
   root = null;
-  for (const entry of agentEntriesCollection.toArray) {
-    agentEntriesCollection.delete(entry.id);
-  }
 });
 
 describe("useAgentEditingPaths", () => {
   it("shows a file's path while its tool call is pending, and drops it on completion", async () => {
+    // A fresh core: the agent store the hook reads.
+    const core = createTestCore({ modules: [agentStoreModule] });
+    const entries = core.use("agentStore").entries;
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    act(() => root!.render(createElement(Probe)));
+    act(() =>
+      root!.render(
+        createElement(CoreProvider, { core, children: createElement(Probe) }),
+      ),
+    );
 
     expect(readProbe()).toBe("");
 
     act(() => {
-      agentEntriesCollection.insert({
+      entries.insert({
         id: "evt_1",
         taskId: "task_1",
         turnId: "turn_1",
@@ -58,7 +64,7 @@ describe("useAgentEditingPaths", () => {
     expect(readProbe()).toBe("/ws/notes.md");
 
     act(() => {
-      agentEntriesCollection.update("evt_1", (draft) => {
+      entries.update("evt_1", (draft) => {
         if (draft.toolCall) draft.toolCall.status = "completed";
       });
     });

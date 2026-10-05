@@ -46,13 +46,13 @@ import {
   AlertDialogTitle,
 } from "@notefig/ui/alert-dialog";
 import { cn } from "@notefig/ui/utils";
+import { useModule } from "@notefig/core/react";
 import { useKv } from "@/utils/kv-store";
 import {
   HARNESS_CUSTOM_KEY,
   HARNESS_DISCOVERY_KEY,
   HARNESS_OVERRIDES_KEY,
   HARNESS_SETTINGS_NAMESPACE,
-  refreshHarnessDiscovery,
 } from "@/agent/harness-discovery";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "@notefig/ui/harness-logo";
@@ -102,6 +102,7 @@ function naturalEnabled(row: HarnessSettingsRow): boolean {
 export function HarnessSettings() {
   const { t } = useTranslation();
   const kv = useKv<unknown>(HARNESS_SETTINGS_NAMESPACE);
+  const discovery = useModule("harnessDiscovery");
   const rawOverrides = kv.get(HARNESS_OVERRIDES_KEY);
   const rawCustom = kv.get(HARNESS_CUSTOM_KEY);
   const rawDiscovery = kv.get(HARNESS_DISCOVERY_KEY);
@@ -140,7 +141,7 @@ export function HarnessSettings() {
   const rescan = async () => {
     setScanning(true);
     try {
-      const results = await refreshHarnessDiscovery(overrides, custom);
+      const results = await discovery.refresh(overrides, custom);
       if (results === null) toast.error(t("harnessRescanFailed"));
     } finally {
       setScanning(false);
@@ -184,7 +185,7 @@ export function HarnessSettings() {
       // without this the stored verdict keeps describing the executable
       // the harness pointed at BEFORE the edit — the pickers and the
       // welcome screen would then report on the wrong binary.
-      void refreshHarnessDiscovery(overrides, nextCustom);
+      void discovery.refresh(overrides, nextCustom);
     } else {
       const override = formToOverride(
         parsed,
@@ -206,7 +207,7 @@ export function HarnessSettings() {
         nextOverrides = { ...overrides, [definition.id]: checked.data };
         writeOverrides(nextOverrides);
       }
-      void refreshHarnessDiscovery(nextOverrides, custom);
+      void discovery.refresh(nextOverrides, custom);
     }
     setEditingId(null);
     return null;
@@ -317,7 +318,7 @@ export function HarnessSettings() {
                   writeCustom(nextCustom);
                   setEditingId(null);
                   // New entry gets a found/not-found status right away.
-                  void refreshHarnessDiscovery(overrides, nextCustom);
+                  void discovery.refresh(overrides, nextCustom);
                   return null;
                 }}
               />

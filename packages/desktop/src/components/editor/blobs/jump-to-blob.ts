@@ -4,10 +4,14 @@
  * (unlike file locations elsewhere in the app), so the editor targets the
  * `data-blob-id` attribute BlobNodeView already sets on its wrapper.
  */
-import { appCore } from "@/core/current";
+import type { Core } from "@notefig/core";
 
-export function jumpToBlob(path: string, blobId: string): void {
-  void appCore().editors.reveal(
+export function jumpToBlob(
+  editors: Pick<Core["editors"], "reveal">,
+  path: string,
+  blobId: string,
+): void {
+  void editors.reveal(
     path,
     { blockId: blobId },
     { intent: "new-tab", moveIfOpen: true },

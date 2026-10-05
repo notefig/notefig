@@ -1,7 +1,6 @@
 import { useCore } from "@notefig/core/react";
 import { useCallback } from "react";
 import { useHotkey } from "@tanstack/react-hotkeys";
-import { platformAdapter } from "@/adapters";
 import { getFileName } from "@/utils/fs";
 import { runTabHistoryAction } from "@/tabs/tab-controllers";
 import { tabKind } from "@/tabs/tab-id";
@@ -95,10 +94,13 @@ export function useWorkspaceCommands({
   );
 
   const handleToggleFullscreen = useCallback(() => {
-    platformAdapter.ui.toggleFullscreen().catch((error: unknown) => {
-      console.error("Failed to toggle fullscreen:", error);
-    });
-  }, []);
+    void core
+      .use("platform")
+      .ui.toggleFullscreen()
+      .catch((error: unknown) => {
+        console.error("Failed to toggle fullscreen:", error);
+      });
+  }, [core]);
 
   /**
    * Mod+F — search within the active tab. The file filter only means
