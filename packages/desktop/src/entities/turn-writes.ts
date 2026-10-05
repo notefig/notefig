@@ -33,6 +33,7 @@ import { platformAdapter } from "@/adapters";
 import { onAppEvent, type AppEvents } from "@/utils/app-events";
 import { calculateContentHash } from "@/utils/hash";
 import { resolveWorkspacePath } from "@/utils/fs";
+import { defineModule } from "@notefig/core";
 
 type Writer = { taskId: string; turnId: string };
 type InFlightCall = Writer & { key: string; paths: string[] };
@@ -182,3 +183,9 @@ export function startTurnWriteTracking(): () => void {
   ];
   return () => stops.forEach((stop) => stop());
 }
+
+/** Attributes agent writes to the turn that made them. */
+export const turnWritesModule = defineModule({
+  name: "turn-writes",
+  boot: () => startTurnWriteTracking(),
+});

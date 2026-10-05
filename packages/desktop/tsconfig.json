@@ -41,6 +41,12 @@
       "@notefig/agent": [
         "../agent/src/index.ts"
       ],
+      "@notefig/core": [
+        "../core/src/index.ts"
+      ],
+      "@notefig/core/react": [
+        "../core/src/react.tsx"
+      ],
       "@notefig/ui/*": [
         "../ui/src/*"
       ],

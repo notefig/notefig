@@ -55,6 +55,7 @@ import {
   rememberedExpandedPaths,
 } from "./tree-expansion-memory";
 import { acquireTreeModel } from "./tree-model-cache";
+import { defineModule } from "@notefig/core";
 
 /** Discriminated union representing the file tree's inline-editing state. */
 export type FileTreeMode =
@@ -886,3 +887,9 @@ export function startTreeInlineEditDismissal(): () => void {
   document.addEventListener("mousedown", onPress, true);
   return () => document.removeEventListener("mousedown", onPress, true);
 }
+
+/** Dismisses an inline tree edit on an outside press. */
+export const treeInlineEditModule = defineModule({
+  name: "tree-inline-edit",
+  boot: () => startTreeInlineEditDismissal(),
+});

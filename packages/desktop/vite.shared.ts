@@ -60,7 +60,7 @@ export function flattenPierreShadowCss(): Plugin {
 }
 
 /**
- * Resolve the workspace packages (@notefig/shared, @notefig/agent) to their
+ * Resolve the workspace packages (@notefig/shared, @notefig/agent, …) to their
  * TS source. The published shared dist is CommonJS with `export *` star
  * re-exports, which Vite's browser optimizer (cjs-module-lexer) can't see
  * named exports through — so a value import like `newEventId` fails at
@@ -83,6 +83,14 @@ export function workspaceSourceAliases(dirname: string) {
     {
       find: /^@notefig\/agent$/,
       replacement: path.resolve(dirname, "../agent/src/index.ts"),
+    },
+    {
+      find: /^@notefig\/core$/,
+      replacement: path.resolve(dirname, "../core/src/index.ts"),
+    },
+    {
+      find: /^@notefig\/core\/react$/,
+      replacement: path.resolve(dirname, "../core/src/react.tsx"),
     },
     // @notefig/ui and @notefig/widgets are source-only (no dist at all):
     // they ship .tsx, which only a bundler can consume. Subpath imports

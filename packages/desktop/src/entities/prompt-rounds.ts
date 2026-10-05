@@ -24,6 +24,7 @@ import { useOpenWorkspaces, type OpenWorkspaceRow } from "@/entities/workspaces"
 import { onAppEvent, type AppEvents } from "@/utils/app-events";
 import i18n from "@/utils/intl";
 import { workspaceKey } from "@/utils/path";
+import { defineModule } from "@notefig/core";
 
 export const PROMPT_ROUNDS_COLLECTION_ID = "prompt-rounds";
 /** Rows kept in storage across every workspace; the panel shows fewer. */
@@ -235,3 +236,9 @@ export function usePromptRounds(limit: number): PromptRound[] {
     [rows, openWorkspaces, turns, limit],
   );
 }
+
+/** Settles orphaned rounds, then follows prompt events. */
+export const promptRoundsModule = defineModule({
+  name: "prompt-rounds",
+  boot: () => startPromptRoundTracking(),
+});

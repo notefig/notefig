@@ -25,6 +25,7 @@ import {
   bootAgentTaskRow,
   parsePersistedAgentTask,
 } from "./agent-persistence";
+import { defineModule } from "@notefig/core";
 
 // The row shapes live in @notefig/shared/agent — @notefig/widgets derives the
 // prompt widget's state machine from turns and entries, and neither package
@@ -339,3 +340,12 @@ export class ReplayStage implements AgentEntryWriter {
     }
   }
 }
+
+/**
+ * Brings persisted agent tasks in line with this session: rows without a
+ * live runtime demote to "restored", rows with no session are dropped.
+ */
+export const agentTasksModule = defineModule({
+  name: "agent-tasks",
+  boot: () => ensureAgentTasksReconciled(),
+});

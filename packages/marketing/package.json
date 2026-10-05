@@ -9,6 +9,7 @@
     "test:site": "vitest run --config vitest.site.config.mts"
   },
   "dependencies": {
+    "@notefig/core": "*",
     "@tanstack/react-query": "^5.90.21",
     "lucide-react": "^0.454.0",
     "react": "^19.1.0",

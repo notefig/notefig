@@ -117,6 +117,11 @@ jobs:
         working-directory: packages/desktop
         run: npm run test:unit
 
+      # The kernel the desktop app boots through; source-only, so its own
+      # typecheck is its build.
+      - name: Typecheck and test Core
+        run: npm run build -w packages/core && npm run test -w packages/core
+
   test-desktop-e2e:
     name: Test Desktop
     runs-on: ubuntu-latest

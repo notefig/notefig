@@ -16,7 +16,8 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@notefig/ui/tooltip";
 import { queryClient } from "@/entities/query-client";
 import { App } from "./App";
-import { bootstrapAppRuntime } from "@/app-runtime";
+import { CoreProvider } from "@notefig/core/react";
+import { createAppCore, desktopModules } from "@/core/app-core";
 
 import "./styles.css";
 
@@ -24,21 +25,24 @@ if (typeof globalThis.Buffer === "undefined") {
   globalThis.Buffer = Buffer;
 }
 
-bootstrapAppRuntime();
+const core = createAppCore(desktopModules());
+core.boot();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <ThemeProvider>
-          <TooltipProvider>
-            <AppUpdaterBootstrap />
-            <TelemetryBootstrap />
-            <App />
-            <Toaster />
-          </TooltipProvider>
-        </ThemeProvider>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <CoreProvider core={core}>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <ThemeProvider>
+            <TooltipProvider>
+              <AppUpdaterBootstrap />
+              <TelemetryBootstrap />
+              <App />
+              <Toaster />
+            </TooltipProvider>
+          </ThemeProvider>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </CoreProvider>
   </React.StrictMode>,
 );

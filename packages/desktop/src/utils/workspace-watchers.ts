@@ -33,6 +33,7 @@ import {
   type WorkspaceMetadataWatcher,
 } from "@/utils/file-sync";
 import { workspaceKey } from "@/utils/path";
+import { defineModule } from "@notefig/core";
 
 const watchers = new Map<string, WorkspaceMetadataWatcher>();
 
@@ -110,3 +111,15 @@ export function startWorkspaceWatcherSubscription(): () => void {
   activeSubscription = dispose;
   return dispose;
 }
+
+declare module "@notefig/core" {
+  interface CoreModules {
+    /** Boot-only: arms a metadata watcher per open workspace. */
+    "workspace-watchers": undefined;
+  }
+}
+
+export const workspaceWatchersModule = defineModule({
+  name: "workspace-watchers",
+  boot: () => startWorkspaceWatcherSubscription(),
+});

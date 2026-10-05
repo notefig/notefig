@@ -8,6 +8,7 @@ import {
   type HarnessDiscoveryResult,
   type HarnessOverride,
 } from "@notefig/shared/agent";
+import { defineModule } from "@notefig/core";
 
 /**
  * All domain knowledge for harness discovery lives here: the probe script,
@@ -176,3 +177,9 @@ export function ensureStartupHarnessDiscovery(): void {
 export function resetStartupHarnessDiscoveryForTest(): void {
   startupScanStarted = false;
 }
+
+/** One harness-discovery scan per app session. */
+export const harnessDiscoveryModule = defineModule({
+  name: "harness-discovery",
+  boot: () => ensureStartupHarnessDiscovery(),
+});
