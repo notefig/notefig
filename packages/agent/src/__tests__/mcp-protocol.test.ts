@@ -20,6 +20,7 @@ function stubDeps(): McpHandlerDeps {
         }),
         workspace: () => ({ createTask: async () => undefined }),
       },
+      services: {},
     },
     permissionBroker: {
       request: async () => ({

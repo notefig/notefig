@@ -6,7 +6,10 @@
  * `.notefig/` bar the scratchpads. Both real git and isomorphic-git honor
  * this file.
  */
-import { platformAdapter } from "@/adapters";
+import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
+
+/** The file reads and writes an exclude needs. */
+export type ExcludeFs = Pick<FileSystemSurface, "readFiles" | "writeFiles">;
 
 /**
  * Read `<gitDir>/info/exclude`, treating only a verifiably-missing file as
@@ -14,8 +17,11 @@ import { platformAdapter } from "@/adapters";
  * treating it as empty would rewrite the exclude with only the app's
  * entries, destroying user-authored patterns.
  */
-async function readExclude(excludePath: string): Promise<string> {
-  const existing = await platformAdapter.fs.readFiles([excludePath]);
+async function readExclude(
+  fs: ExcludeFs,
+  excludePath: string,
+): Promise<string> {
+  const existing = await fs.readFiles([excludePath]);
   const failure = existing.failed[0];
   if (failure && failure.type !== "not_found") {
     throw new Error(`Failed to read '${excludePath}': ${failure.message}`);
@@ -30,11 +36,12 @@ async function readExclude(excludePath: string): Promise<string> {
  * file if it doesn't exist.
  */
 export async function ensureExcludeLines(
+  fs: ExcludeFs,
   gitDir: string,
   lines: string[],
 ): Promise<void> {
   const excludePath = `${gitDir}/info/exclude`;
-  const current = await readExclude(excludePath);
+  const current = await readExclude(fs, excludePath);
 
   const present = new Set(current.split("\n").map((line) => line.trim()));
   const missing = lines.filter((line) => !present.has(line));
@@ -44,16 +51,15 @@ export async function ensureExcludeLines(
 
   const prefix =
     current.length === 0 || current.endsWith("\n") ? current : `${current}\n`;
-  await writeExclude(excludePath, `${prefix}${missing.join("\n")}\n`);
+  await writeExclude(fs, excludePath, `${prefix}${missing.join("\n")}\n`);
 }
 
 async function writeExclude(
+  fs: ExcludeFs,
   excludePath: string,
   content: string,
 ): Promise<void> {
-  const result = await platformAdapter.fs.writeFiles([
-    { path: excludePath, content },
-  ]);
+  const result = await fs.writeFiles([{ path: excludePath, content }]);
   if (result.failed.length > 0) {
     throw new Error(
       `Failed to update '${excludePath}': ${result.failed[0]?.message ?? "Unknown error"}`,

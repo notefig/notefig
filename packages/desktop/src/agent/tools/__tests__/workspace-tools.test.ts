@@ -24,7 +24,12 @@ import { createTestCore, windowUrlState } from "@/testing/test-core";
 // getWorkspaceEditorContext reads the layout through core.
 createTestCore({ url: windowUrlState() });
 
-const ctx = { workspacePath: "/ws", taskId: "task_1", agents: {} as never };
+const ctx = {
+  workspacePath: "/ws",
+  taskId: "task_1",
+  agents: {} as never,
+  services: {} as never,
+};
 
 describe("workspaceListDocuments", () => {
   it("maps metadata rows to {path, type, title}", async () => {

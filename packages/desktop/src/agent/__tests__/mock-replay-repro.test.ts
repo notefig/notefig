@@ -18,9 +18,6 @@ vi.mock("@/adapters", async () => ({
     },
   },
 }));
-vi.mock("@/utils/history-service", () => ({
-  checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
-}));
 
 import { createMockAgentTransport } from "../mock-harness";
 import { TaskManager } from "../agent-service";

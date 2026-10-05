@@ -1,188 +1,167 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const {
-  initMock,
-  existsMock,
-  fsMock,
-  createWorkerGitServiceMock,
-  disposeWorkerGitRepoMock,
-  ensureExcludeLinesMock,
-} = vi.hoisted(() => {
-  const initMock = vi.fn();
-  const existsMock = vi.fn();
-  return {
-    initMock,
-    existsMock,
-    fsMock: { exists: existsMock },
-    createWorkerGitServiceMock: vi.fn(() => ({ init: initMock })),
-    disposeWorkerGitRepoMock: vi.fn(),
-    ensureExcludeLinesMock: vi.fn(),
-  };
-});
-
-vi.mock("@/adapters", () => ({
-  platformAdapter: { fs: fsMock },
-}));
-
-vi.mock("@/utils/git-worker-client", () => ({
-  createWorkerGitService: createWorkerGitServiceMock,
-  disposeWorkerGitRepo: disposeWorkerGitRepoMock,
-  clearWorkerGitRepos: vi.fn(),
-}));
-
-vi.mock("@/utils/git-exclude", () => ({
-  ensureExcludeLines: ensureExcludeLinesMock,
-}));
-
+import type { GitRepoRef, GitService } from "@notefig/git";
+import { createCore } from "@notefig/core";
+import { emitAppEvent } from "@/utils/app-events";
+import { workspaceKey } from "@/utils/path";
 import {
-  clearWorkspaceHistoryServices,
-  disposeWorkspaceHistoryService,
-  ensureWorkspaceHistoryInitialized,
-  getOrCreateWorkspaceHistoryService,
+  createWorkspaceHistory,
   historyGitDir,
   historyModule,
+  type HistoryDeps,
 } from "../history-service";
-import { createCore } from "@notefig/core";
 
 const WS = "/workspace";
 const GIT_DIR = "/workspace/.notefig/.git";
-const HISTORY_EXCLUDE = [".notefig/*", "!.notefig/scratchpads", ".git/"];
 
-/** Configure fs.exists to answer per path from a lookup. */
-function setExisting(paths: Record<string, boolean>) {
-  existsMock.mockImplementation(async (queried: string[]) =>
-    queried.map((path) => ({
-      path,
-      exists: paths[path] ?? false,
-      type: paths[path] ? ("directory" as const) : undefined,
+/** A disk the repo's excludes are written to, and the folders that exist. */
+function memoryFs() {
+  const files = new Map<string, string>();
+  const dirs = new Set<string>();
+  const fs = {
+    readFiles: vi.fn(async (paths: string[]) => ({
+      succeeded: paths
+        .filter((path) => files.has(path))
+        .map((path) => ({ path, content: files.get(path)! })),
+      failed: paths
+        .filter((path) => !files.has(path))
+        .map((path) => ({ path, type: "not_found", message: "not found" })),
     })),
-  );
+    writeFiles: vi.fn(async (entries: { path: string; content: string }[]) => {
+      for (const { path, content } of entries) files.set(path, content);
+      return { succeeded: entries.map((entry) => entry.path), failed: [] };
+    }),
+    exists: vi.fn(async (paths: string[]) =>
+      paths.map((path) => ({
+        path,
+        exists: dirs.has(path),
+        type: dirs.has(path) ? "directory" : undefined,
+      })),
+    ),
+  };
+  return { fs: fs as unknown as HistoryDeps["fs"], raw: fs, files, dirs };
 }
 
-describe("history-service", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    clearWorkspaceHistoryServices();
-    initMock.mockResolvedValue(undefined);
-    ensureExcludeLinesMock.mockResolvedValue(undefined);
-    setExisting({});
-  });
+/** Where repos run: one fake service per created repo. */
+function fakeGit() {
+  const created: GitRepoRef[] = [];
+  const init = vi.fn(async () => {});
+  const git: HistoryDeps["git"] = {
+    create: vi.fn((repo: GitRepoRef) => {
+      created.push(repo);
+      return { init } as unknown as GitService;
+    }),
+    dispose: vi.fn(),
+  };
+  return { git, created, init };
+}
 
+let disk: ReturnType<typeof memoryFs>;
+let repos: ReturnType<typeof fakeGit>;
+
+beforeEach(() => {
+  disk = memoryFs();
+  repos = fakeGit();
+});
+
+const history = () =>
+  createWorkspaceHistory({ workspacePath: WS, fs: disk.fs, git: repos.git });
+
+describe("a workspace's history repo", () => {
   it("resolves the gitdir to .notefig/.git", () => {
     expect(historyGitDir("/workspace/")).toBe(GIT_DIR);
   });
 
-  it("binds the service to the history repo: repo ref fixed at creation", () => {
-    getOrCreateWorkspaceHistoryService(WS);
-
-    // The repo identity is bound once, at construction — calls can no
-    // longer aim operations at another repo's gitdir.
-    expect(createWorkerGitServiceMock).toHaveBeenCalledWith({
-      repoPath: WS,
-      gitDir: GIT_DIR,
-    });
+  it("binds its service to the history repo, once", () => {
+    const repo = history();
+    expect(repo.service()).toBe(repo.service());
+    expect(repos.created).toEqual([{ repoPath: WS, gitDir: GIT_DIR }]);
   });
 
-  it("inits at the gitdir", async () => {
-    await ensureWorkspaceHistoryInitialized(WS);
+  it("inits at the gitdir and excludes everything under the app dir but the scratchpads", async () => {
+    await history().ready();
 
-    expect(initMock).toHaveBeenCalledWith({ defaultBranch: "main" });
-  });
-
-  it("excludes everything under the app dir but the scratchpads folder", async () => {
-    await ensureWorkspaceHistoryInitialized(WS);
-
+    expect(repos.init).toHaveBeenCalledWith({ defaultBranch: "main" });
     // `dir/*` + `!dir/child` is the one git shape that re-includes inside
-    // an excluded directory — history must keep checkpointing scratchpads
-    // while never seeing the app's own gitdir or agent state.
-    expect(ensureExcludeLinesMock).toHaveBeenCalledWith(
-      GIT_DIR,
-      HISTORY_EXCLUDE,
+    // an excluded directory — history keeps checkpointing scratchpads while
+    // never seeing the app's own gitdir or agent state.
+    expect(disk.files.get(`${GIT_DIR}/info/exclude`)).toBe(
+      ".notefig/*\n!.notefig/scratchpads\n.git/\n",
     );
   });
 
-  it("hides .notefig/ from the user's repo when the workspace has one", async () => {
-    setExisting({ [`${WS}/.git`]: true });
+  it("hides .notefig/ from the user's repo once the workspace has one", async () => {
+    const repo = history();
+    await repo.ready();
+    expect(disk.files.has(`${WS}/.git/info/exclude`)).toBe(false);
 
-    await ensureWorkspaceHistoryInitialized(WS);
+    // A repo the user inits later gets the exclude on the next ensure.
+    disk.dirs.add(`${WS}/.git`);
+    await repo.ready();
 
-    expect(ensureExcludeLinesMock).toHaveBeenCalledWith(`${WS}/.git`, [
-      ".notefig/",
-    ]);
+    expect(disk.files.get(`${WS}/.git/info/exclude`)).toBe(".notefig/\n");
   });
 
-  it("self-heals: a repo the user inits later gets the exclude on the next ensure", async () => {
-    await ensureWorkspaceHistoryInitialized(WS);
-    expect(ensureExcludeLinesMock).not.toHaveBeenCalledWith(`${WS}/.git`, [
-      ".notefig/",
-    ]);
-
-    setExisting({ [`${WS}/.git`]: true });
-    await ensureWorkspaceHistoryInitialized(WS);
-
-    expect(ensureExcludeLinesMock).toHaveBeenCalledWith(`${WS}/.git`, [
-      ".notefig/",
-    ]);
-  });
-
-  it("exclude failures never block init", async () => {
-    ensureExcludeLinesMock.mockRejectedValue(new Error("read-only fs"));
+  it("never blocks init on an exclude it cannot write", async () => {
+    disk.raw.writeFiles.mockResolvedValue({
+      succeeded: [],
+      failed: [{ path: "x", type: "permission_denied", message: "read-only" }],
+    } as never);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    await expect(ensureWorkspaceHistoryInitialized(WS)).resolves.toBeTruthy();
+    await expect(history().ready()).resolves.toBeTruthy();
 
     warn.mockRestore();
   });
 
-  // Registry semantics — this is the ONLY per-workspace git service registry
-  // (entities/git.ts delegates here rather than keeping a second one aimed
-  // at a different gitdir).
-  it("returns a singleton service per normalized workspace", () => {
-    const first = getOrCreateWorkspaceHistoryService("/workspace/");
-    const second = getOrCreateWorkspaceHistoryService("/workspace");
+  it("initializes once for calls in flight together, and again for a later one", async () => {
+    const repo = history();
+    await Promise.all([repo.ready(), repo.ready()]);
+    expect(repos.init).toHaveBeenCalledTimes(1);
 
-    expect(first).toBe(second);
-    expect(createWorkerGitServiceMock).toHaveBeenCalledTimes(1);
+    await repo.ready();
+    expect(repos.init).toHaveBeenCalledTimes(2);
   });
 
-  it("initializes once per in-flight workspace", async () => {
-    await Promise.all([
-      ensureWorkspaceHistoryInitialized(WS),
-      ensureWorkspaceHistoryInitialized(WS),
-    ]);
+  it("dispose drops the service and the worker's repo state", () => {
+    const repo = history();
+    const first = repo.service();
 
-    expect(initMock).toHaveBeenCalledTimes(1);
+    repo.dispose();
+
+    expect(repos.git.dispose).toHaveBeenCalledWith(GIT_DIR);
+    expect(repo.service()).not.toBe(first);
   });
+});
 
-  it("re-runs init on later ensure calls", async () => {
-    await ensureWorkspaceHistoryInitialized(WS);
-    await ensureWorkspaceHistoryInitialized(WS);
-
-    expect(initMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("disposes a workspace's service entry", () => {
-    const first = getOrCreateWorkspaceHistoryService(WS);
-    disposeWorkspaceHistoryService(WS);
-    const second = getOrCreateWorkspaceHistoryService(WS);
-
-    expect(first).not.toBe(second);
-    expect(createWorkerGitServiceMock).toHaveBeenCalledTimes(2);
-    // The worker's per-repo service (and object cache) is dropped too.
-    expect(disposeWorkerGitRepoMock).toHaveBeenCalledWith(GIT_DIR);
-  });
-
-  it("lives as long as core keeps the workspace open", async () => {
+describe("historyModule", () => {
+  it("checkpoints each completed agent turn in its own workspace", async () => {
     const core = createCore({
-      services: {} as never,
+      services: { platform: { fs: disk.fs } } as never,
       modules: [historyModule],
+      workspaceKey,
     });
     await core.workspace(WS).open();
-    const first = getOrCreateWorkspaceHistoryService(WS);
+    const commit = vi
+      .spyOn(core.workspace(WS).history, "checkpoint")
+      .mockResolvedValue("abc123");
 
-    await core.workspace(WS).close();
+    const turn = { taskId: "t", turnId: "u", harnessId: "claude-code" };
+    emitAppEvent("agent:turn-completed", {
+      ...turn,
+      workspacePath: "/elsewhere",
+      prompt: "not here",
+    });
+    emitAppEvent("agent:turn-completed", {
+      ...turn,
+      workspacePath: WS,
+      prompt: "x".repeat(80),
+    });
 
-    expect(disposeWorkerGitRepoMock).toHaveBeenCalledWith(GIT_DIR);
-    expect(getOrCreateWorkspaceHistoryService(WS)).not.toBe(first);
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(commit).toHaveBeenCalledWith(`${"x".repeat(69)}…`, {
+      name: "claude-code",
+      email: "agent@notefig.local",
+    });
+    await core.dispose();
   });
 });

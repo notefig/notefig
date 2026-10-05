@@ -55,9 +55,6 @@ vi.mock("@/adapters", async () => ({
     },
   },
 }));
-vi.mock("@/utils/history-service", () => ({
-  checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
-}));
 
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import { AgentTransportError } from "@notefig/agent";

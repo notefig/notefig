@@ -31,7 +31,12 @@ vi.mock("@/utils/file-sync", () => ({ readWorkspaceTextFile, writeWorkspaceTextF
 
 import { authorBlob } from "../author-blob";
 
-const ctx = { workspacePath: "/ws", taskId: "task_1", agents: {} as never };
+const ctx = {
+  workspacePath: "/ws",
+  taskId: "task_1",
+  agents: {} as never,
+  services: {} as never,
+};
 
 describe("authorBlob", () => {
   beforeEach(() => {

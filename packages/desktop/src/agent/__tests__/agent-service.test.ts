@@ -82,9 +82,6 @@ vi.mock("@/adapters", async () => ({
 }));
 // History auto-checkpointing (Stage 2) is exercised separately; keep these
 // tests focused on the turn machinery, not git plumbing.
-vi.mock("@/utils/history-service", () => ({
-  checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
-}));
 
 import { createLoopbackPair } from "@notefig/agent";
 import { FakeAgent } from "../mock-harness";

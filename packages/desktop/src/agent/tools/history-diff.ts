@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { resolveWorkspacePath } from "@/utils/fs";
 import type { AgentTool } from "@notefig/agent";
-import { history } from "@/utils/history-service";
 
 const InputSchema = z.object({
   path: z.string().min(1),
@@ -29,7 +28,7 @@ export const historyDiff: AgentTool<
     const resolved = resolveWorkspacePath(ctx.workspacePath, input.path);
     if (!resolved.ok) return { ok: false, error: resolved.error };
     try {
-      const repo = history(ctx.workspacePath);
+      const repo = ctx.services.history;
       const [fromContent, toContent] = await Promise.all([
         repo.read(input.from, resolved.relative),
         repo.read(input.to, resolved.relative),

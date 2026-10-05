@@ -46,8 +46,6 @@ vi.mock("@/entities/git", async () => ({
   gitModule: await stubWorkspaceModule("git"),
 }));
 vi.mock("@/utils/history-service", async () => ({
-  disposeWorkspaceHistoryService: vi.fn(),
-  checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
   historyModule: await stubWorkspaceModule("history"),
 }));
 const watchers = vi.hoisted(() => ({

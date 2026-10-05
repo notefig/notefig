@@ -6,13 +6,7 @@
  */
 export { createCore } from "./create-core";
 export { WorkspaceClosedError, WorkspaceOpenError } from "./create-core";
-export type {
-  Core,
-  CoreBase,
-  CreateCoreOptions,
-  WorkspaceControls,
-  WorkspaceHandle,
-} from "./create-core";
+export type { Core, CoreBase, CreateCoreOptions } from "./create-core";
 export { defineModule } from "./define-module";
 export type {
   AnyModule,
@@ -32,6 +26,8 @@ export type {
   HookName,
   Provided,
   ProvidedName,
+  WorkspaceControls,
+  WorkspaceHandle,
   WorkspaceModuleName,
   WorkspaceModules,
   WorkspaceRef,

@@ -14,18 +14,6 @@ const { readTextFile, log, addAllAndCommit } = vi.hoisted(() => ({
   addAllAndCommit: vi.fn(async (..._args: unknown[]) => "def456"),
 }));
 
-vi.mock("@/utils/history-service", () => ({
-  history: () => ({
-    ready: vi.fn(async () => ({ readTextFile, log, addAllAndCommit })),
-    read: (ref: string, filepath: string) => readTextFile({ ref, filepath }),
-    checkpoint: vi.fn(
-      async (message: string, author: { name: string; email: string }) =>
-        addAllAndCommit({ message, author }),
-    ),
-  }),
-  historyGitDir: vi.fn((ws: string) => `${ws}/.notefig/history`),
-}));
-
 const { writeWorkspaceTextFile } = vi.hoisted(() => ({
   writeWorkspaceTextFile: vi.fn(async () => undefined),
 }));
@@ -38,7 +26,22 @@ import { historyDiff } from "../history-diff";
 import { historyCheckpoint } from "../history-checkpoint";
 import { historyRestore } from "../history-restore";
 
-const ctx = { workspacePath: "/ws", taskId: "task_1", agents: {} as never };
+// The workspace's history repo, handed to the tools on their context.
+const ctx = {
+  workspacePath: "/ws",
+  taskId: "task_1",
+  agents: {} as never,
+  services: {
+    history: {
+      service: vi.fn(),
+      ready: vi.fn(async () => ({ readTextFile, log, addAllAndCommit })),
+      read: (ref: string, filepath: string) => readTextFile({ ref, filepath }),
+      checkpoint: (message: string, author: { name: string; email: string }) =>
+        addAllAndCommit({ message, author }),
+      dispose: vi.fn(),
+    } as never,
+  },
+};
 
 describe("historyLog", () => {
   it("maps commits to log entries", async () => {

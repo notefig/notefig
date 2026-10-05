@@ -13,6 +13,8 @@ import type {
   Disposer,
   Provided,
   ProvidedName,
+  WorkspaceControls,
+  WorkspaceHandle,
   WorkspaceModules,
   WorkspaceRef,
 } from "./types";
@@ -30,35 +32,6 @@ export interface CreateCoreOptions {
   /** Where a failing boot, hook handler or dispose is reported. */
   onError?: (error: unknown, where: string) => void;
 }
-
-/** What a workspace handle does, open or not. */
-export interface WorkspaceControls {
-  readonly path: string;
-  /** Identity: two spellings of one workspace share it. */
-  readonly key: string;
-  isOpen(): boolean;
-  /**
-   * Open it if it is not open, then announce the entry: `workspace:focused`
-   * and `workspace:entered`, each awaited. Resolves once every handler has
-   * run. Calls for one workspace while one is in flight join it. Does
-   * nothing if a close supersedes it while it waits. Rejects with a
-   * `WorkspaceOpenError`, skipping what follows, when a module failed to
-   * create its instance or a handler failed.
-   */
-  open(): Promise<void>;
-  /** Open it if needed and bring it forward: `workspace:focused` only.
-   *  Rejects like `open`. */
-  focus(): Promise<void>;
-  /** Fire `workspace:closing` (awaited), then dispose its instances. */
-  close(): Promise<void>;
-}
-
-/**
- * A workspace, open or not. Its module instances (`handle.files`) read
- * while it is open — and while it is closing, so `closing` handlers can
- * reach what they tear down. Reading one otherwise throws.
- */
-export type WorkspaceHandle = WorkspaceControls & Readonly<WorkspaceModules>;
 
 export class WorkspaceClosedError extends Error {
   override name = "WorkspaceClosedError";
@@ -420,6 +393,7 @@ export function createCore(options: CreateCoreOptions): Core {
       },
       hooks,
       workspaces,
+      workspaceHandle: handleFor,
     } as ModuleContext<never>;
   }
 

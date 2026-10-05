@@ -59,3 +59,32 @@ export type WorkspaceModuleName = keyof WorkspaceModules & string;
 export type HookName = keyof CoreHookMap & string;
 
 export type Disposer = () => void | Promise<void>;
+
+/** What a workspace handle does, open or not. */
+export interface WorkspaceControls {
+  readonly path: string;
+  /** Identity: two spellings of one workspace share it. */
+  readonly key: string;
+  isOpen(): boolean;
+  /**
+   * Open it if it is not open, then announce the entry: `workspace:focused`
+   * and `workspace:entered`, each awaited. Resolves once every handler has
+   * run. Calls for one workspace while one is in flight join it. Does
+   * nothing if a close supersedes it while it waits. Rejects with a
+   * `WorkspaceOpenError`, skipping what follows, when a module failed to
+   * create its instance or a handler failed.
+   */
+  open(): Promise<void>;
+  /** Open it if needed and bring it forward: `workspace:focused` only.
+   *  Rejects like `open`. */
+  focus(): Promise<void>;
+  /** Fire `workspace:closing` (awaited), then dispose its instances. */
+  close(): Promise<void>;
+}
+
+/**
+ * A workspace, open or not. Its module instances (`handle.files`) read
+ * while it is open — and while it is closing, so `closing` handlers can
+ * reach what they tear down. Reading one otherwise throws.
+ */
+export type WorkspaceHandle = WorkspaceControls & Readonly<WorkspaceModules>;

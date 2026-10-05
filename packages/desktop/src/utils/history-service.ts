@@ -1,26 +1,26 @@
 /**
- * Registry for the per-workspace document-history git repo — a second,
- * app-owned git repo layered over the same worktree as the user's files,
- * gitdir at `<workspace>/.notefig/.git`, never interfering with a workspace
- * that's already its own git repo: `.notefig/` (the app's ephemeral-files
- * root) is hidden from the user's repo via its `.git/info/exclude`. Mirrors
- * `git-service-store.ts`'s registry convention exactly (lazy per-workspace
- * singleton + in-flight-init dedup map + dispose/clear).
+ * The per-workspace document-history git repo — a second, app-owned git
+ * repo layered over the same worktree as the user's files, gitdir at
+ * `<workspace>/.notefig/.git`, never interfering with a workspace that's
+ * already its own git repo: `.notefig/` (the app's ephemeral-files root) is
+ * hidden from the user's repo via its `.git/info/exclude`.
+ *
+ * Each open workspace's repo is the history module's workspace instance
+ * (`core.workspace(ws).history`), built from what core hands it and freed
+ * when the workspace closes. It also owns one policy: a checkpoint after
+ * every completed agent turn in its workspace.
  */
-import type { GitService } from "@notefig/git";
+import type { GitRepoRef, GitService } from "@notefig/git";
 import { defineModule } from "@notefig/core";
-import { platformAdapter } from "@/adapters";
+import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import {
-  clearWorkerGitRepos,
   createWorkerGitService,
   disposeWorkerGitRepo,
 } from "@/utils/git-worker-client";
+import { emitAppEvent, onAppEvent } from "@/utils/app-events";
 import { path as pathutil, workspaceKey } from "@/utils/path";
-import { ensureExcludeLines } from "@/utils/git-exclude";
+import { ensureExcludeLines, type ExcludeFs } from "@/utils/git-exclude";
 import { APP_DIR_NAME, SCRATCHPADS_REL_PATH } from "@/utils/app-dir";
-
-const historyServiceRegistry = new Map<string, GitService>();
-const historyInitRegistry = new Map<string, Promise<void>>();
 
 export function historyGitDir(workspacePath: string): string {
   return pathutil.join(
@@ -28,29 +28,6 @@ export function historyGitDir(workspacePath: string): string {
     APP_DIR_NAME,
     ".git",
   );
-}
-
-export function getOrCreateWorkspaceHistoryService(
-  workspacePath: string,
-): GitService {
-  // Registry key vs OS-facing value: the key is workspaceKey (lowercased on
-  // Windows so respelled routes share one service); repoPath/gitDir keep the
-  // caller's native spelling. Identical strings on posix.
-  const registryKey = workspaceKey(workspacePath);
-  const nativeWorkspacePath = pathutil.normalize(workspacePath);
-  let service = historyServiceRegistry.get(registryKey);
-
-  if (!service) {
-    // Worker-backed (with an inline fallback): statusMatrix's worktree
-    // hashing and packfile parsing run off the main thread.
-    service = createWorkerGitService({
-      repoPath: nativeWorkspacePath,
-      gitDir: historyGitDir(nativeWorkspacePath),
-    });
-    historyServiceRegistry.set(registryKey, service);
-  }
-
-  return service;
 }
 
 /**
@@ -69,89 +46,18 @@ const HISTORY_EXCLUDE_LINES = [
   ".git/",
 ];
 
-export async function ensureWorkspaceHistoryInitialized(
-  workspacePath: string,
-): Promise<GitService> {
-  const registryKey = workspaceKey(workspacePath);
-  const nativeWorkspacePath = pathutil.normalize(workspacePath);
-  const service = getOrCreateWorkspaceHistoryService(nativeWorkspacePath);
-
-  const inFlight = historyInitRegistry.get(registryKey);
-  if (inFlight) {
-    await inFlight;
-    return service;
-  }
-
-  const gitDir = historyGitDir(nativeWorkspacePath);
-  const initialization = (async () => {
-    await service.init({ defaultBranch: "main" });
-
-    try {
-      await ensureExcludeLines(gitDir, HISTORY_EXCLUDE_LINES);
-    } catch (error) {
-      console.warn(
-        `Failed to update the history repo's exclude for '${nativeWorkspacePath}':`,
-        error,
-      );
-    }
-
-    // Hide the whole app dir from the user's own repo via its gitdir-local
-    // exclude (never the tracked .gitignore) — scratchpads included; they
-    // are the app's, not the project's. Runs on every ensure call — this
-    // block re-executes per checkpoint, so a repo the user inits *after*
-    // history exists gets the exclude on the next turn.
-    try {
-      const userGitDir = pathutil.join(nativeWorkspacePath, ".git");
-      const [userGit] = await platformAdapter.fs.exists([userGitDir]);
-      if (userGit?.exists && userGit.type === "directory") {
-        await ensureExcludeLines(userGitDir, [`${APP_DIR_NAME}/`]);
-      }
-    } catch (error) {
-      console.warn(
-        `Failed to update the user repo's exclude for '${nativeWorkspacePath}':`,
-        error,
-      );
-    }
-  })().finally(() => {
-    historyInitRegistry.delete(registryKey);
-  });
-
-  historyInitRegistry.set(registryKey, initialization);
-  await initialization;
-  return service;
+/** What a workspace's history repo is built from. */
+export interface HistoryDeps {
+  workspacePath: string;
+  fs: ExcludeFs & Pick<FileSystemSurface, "exists">;
+  /** Where repos run: the git worker in the app. */
+  git: {
+    create(repo: GitRepoRef): GitService;
+    dispose(gitDir: string): void;
+  };
 }
 
-/**
- * Commit a checkpoint of everything currently dirty in the history repo's
- * worktree. Returns the new commit oid, or null if there was nothing to
- * commit (mirrors `IsomorphicGitService.addAllAndCommit`).
- */
-export async function checkpointWorkspaceHistory(
-  workspacePath: string,
-  message: string,
-  author: { name: string; email: string },
-): Promise<string | null> {
-  const service = await ensureWorkspaceHistoryInitialized(workspacePath);
-  return service.addAllAndCommit({
-    message,
-    author,
-  });
-}
-
-export function disposeWorkspaceHistoryService(workspacePath: string): void {
-  const registryKey = workspaceKey(workspacePath);
-  historyServiceRegistry.delete(registryKey);
-  historyInitRegistry.delete(registryKey);
-  disposeWorkerGitRepo(historyGitDir(pathutil.normalize(workspacePath)));
-}
-
-export function clearWorkspaceHistoryServices(): void {
-  historyServiceRegistry.clear();
-  historyInitRegistry.clear();
-  clearWorkerGitRepos();
-}
-
-/** One workspace's history repo — also `core.workspace(ws).history`. */
+/** One workspace's history repo — `core.workspace(ws).history`. */
 export interface WorkspaceHistory {
   /** The repo as it is: not created if it does not exist yet (its status
    *  then fails with RepoNotFound, which is how "uninitialized" reads). */
@@ -165,26 +71,88 @@ export interface WorkspaceHistory {
     message: string,
     author: { name: string; email: string },
   ): Promise<string | null>;
+  /** Drop the repo's service and its worker state. */
+  dispose(): void;
+}
+
+export function createWorkspaceHistory({
+  workspacePath,
+  fs,
+  git,
+}: HistoryDeps): WorkspaceHistory {
+  const gitDir = historyGitDir(workspacePath);
+  let service: GitService | null = null;
+  let initializing: Promise<void> | null = null;
+
+  // Worker-backed (with an inline fallback): statusMatrix's worktree
+  // hashing and packfile parsing run off the main thread.
+  const getService = () =>
+    (service ??= git.create({ repoPath: workspacePath, gitDir }));
+
+  const initialize = async () => {
+    await getService().init({ defaultBranch: "main" });
+
+    try {
+      await ensureExcludeLines(fs, gitDir, HISTORY_EXCLUDE_LINES);
+    } catch (error) {
+      console.warn(
+        `Failed to update the history repo's exclude for '${workspacePath}':`,
+        error,
+      );
+    }
+
+    // Hide the whole app dir from the user's own repo via its gitdir-local
+    // exclude (never the tracked .gitignore) — scratchpads included; they
+    // are the app's, not the project's. Runs on every ensure call — this
+    // block re-executes per checkpoint, so a repo the user inits *after*
+    // history exists gets the exclude on the next turn.
+    try {
+      const userGitDir = pathutil.join(workspacePath, ".git");
+      const [userGit] = await fs.exists([userGitDir]);
+      if (userGit?.exists && userGit.type === "directory") {
+        await ensureExcludeLines(fs, userGitDir, [`${APP_DIR_NAME}/`]);
+      }
+    } catch (error) {
+      console.warn(
+        `Failed to update the user repo's exclude for '${workspacePath}':`,
+        error,
+      );
+    }
+  };
+
+  const ready = async () => {
+    // Calls while one is running join it; a later call runs it again.
+    initializing ??= initialize().finally(() => {
+      initializing = null;
+    });
+    await initializing;
+    return getService();
+  };
+
+  return {
+    service: getService,
+    ready,
+    read: async (ref, relativePath) =>
+      (await ready()).readTextFile({ ref, filepath: relativePath }),
+    checkpoint: async (message, author) =>
+      (await ready()).addAllAndCommit({ message, author }),
+    dispose() {
+      service = null;
+      initializing = null;
+      git.dispose(gitDir);
+    },
+  };
+}
+
+/** A checkpoint's message from the prompt that led to it. */
+function checkpointMessage(prompt: string): string {
+  return prompt.length > 72 ? `${prompt.slice(0, 69)}…` : prompt;
 }
 
 declare module "@notefig/core" {
   interface WorkspaceModules {
     history: WorkspaceHistory;
   }
-}
-
-export function history(workspacePath: string): WorkspaceHistory {
-  return {
-    service: () => getOrCreateWorkspaceHistoryService(workspacePath),
-    ready: () => ensureWorkspaceHistoryInitialized(workspacePath),
-    read: async (ref, relativePath) =>
-      (await ensureWorkspaceHistoryInitialized(workspacePath)).readTextFile({
-        ref,
-        filepath: relativePath,
-      }),
-    checkpoint: (message, author) =>
-      checkpointWorkspaceHistory(workspacePath, message, author),
-  };
 }
 
 /**
@@ -194,9 +162,41 @@ export function history(workspacePath: string): WorkspaceHistory {
  */
 export const historyModule = defineModule({
   name: "history",
+  needs: ["platform"],
   workspace: {
-    create: ({ workspace }) => history(workspace.path),
-    dispose: (_history, workspace) =>
-      disposeWorkspaceHistoryService(workspace.path),
+    create: (ctx) => {
+      const history = createWorkspaceHistory({
+        workspacePath: pathutil.normalize(ctx.workspace.path),
+        fs: ctx.use("platform").fs,
+        git: { create: createWorkerGitService, dispose: disposeWorkerGitRepo },
+      });
+      const instance: WorkspaceHistory = {
+        ...history,
+        dispose() {
+          stopCheckpointing();
+          history.dispose();
+        },
+      };
+      // One checkpoint per completed agent turn here (Track D.3),
+      // best-effort: history is a convenience, never a turn's failure.
+      const stopCheckpointing = onAppEvent(
+        "agent:turn-completed",
+        ({ workspacePath, prompt, harnessId }) => {
+          if (workspaceKey(workspacePath) !== ctx.workspace.key) return;
+          void instance
+            .checkpoint(checkpointMessage(prompt), {
+              name: harnessId,
+              email: "agent@notefig.local",
+            })
+            // The commit lands in the hidden gitdir, which no watcher sees.
+            .then(() => emitAppEvent("git:stale", { workspacePath }))
+            .catch((error: unknown) =>
+              console.warn("[history] turn checkpoint failed:", error),
+            );
+        },
+      );
+      return instance;
+    },
+    dispose: (history) => history.dispose(),
   },
 });

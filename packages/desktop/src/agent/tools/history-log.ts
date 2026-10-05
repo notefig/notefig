@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { resolveWorkspacePath } from "@/utils/fs";
 import type { AgentTool } from "@notefig/agent";
-import { history } from "@/utils/history-service";
 
 const InputSchema = z.object({
   path: z.string().min(1).optional(),
@@ -32,7 +31,7 @@ export const historyLog: AgentTool<
       filepath = resolved.relative;
     }
     try {
-      const service = await history(ctx.workspacePath).ready();
+      const service = await ctx.services.history.ready();
       const commits = await service.log({
         filepath,
       });

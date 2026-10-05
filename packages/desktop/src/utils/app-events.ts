@@ -32,6 +32,16 @@ export interface AppEvents {
    *  app wrote (its watcher echo is suppressed), or a commit into the
    *  hidden gitdir. That workspace's git rows go stale. */
   "git:stale": { workspacePath: string };
+  /** A turn finished normally — not cancelled, not failed. Its
+   *  workspace's history checkpoints it (utils/history-service.ts). */
+  "agent:turn-completed": {
+    taskId: string;
+    turnId: string;
+    workspacePath: string;
+    /** What the user asked, as typed. */
+    prompt: string;
+    harnessId: string;
+  };
   /** A turn reached a terminal status. */
   "agent:turn-settled": {
     taskId: string;

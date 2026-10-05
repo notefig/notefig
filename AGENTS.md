@@ -90,8 +90,13 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   workspace's other instances via `ctx.useWorkspace`) and frees it in
   `dispose`; the entity exports the factory (`createWorkspaceGit(deps)`),
   which is also what its tests build — no module mocks. Converted so far:
-  git. Not yet: `file(ws, path)`, `scratchpads(ws)` and `history(ws)` are
-  still free functions over module state, until their groups convert.
+  git, history. Not yet: `file(ws, path)` and `scratchpads(ws)` are still
+  free functions over module state, until their groups convert.
+- Code that cannot hold core yet tells a workspace's modules something
+  happened over the app event bus (`emitAppEvent("git:stale", …)`,
+  `"agent:turn-completed"`), and each workspace's instance listens for its
+  own path. Agent tools get their workspace's instances on `ctx.services`
+  (`ToolServices`, widened by declaration merging).
 - A workspace is opened, focused and closed through its handle:
   `core.workspace(path).open()` (the user enters it), `.focus()` (brought
   forward, as the switcher does), `.close()`. What entering or focusing

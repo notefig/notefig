@@ -21,9 +21,6 @@ vi.mock("@/adapters", async () => ({
     },
   },
 }));
-vi.mock("@/utils/history-service", () => ({
-  checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
-}));
 // The mock harness is env-gated by VITE_AGENT_MOCK, which vitest doesn't
 // set — flip it so AgentTask.start wires the mock MCP loopback (what lets a
 // replayed `mcp` event reach the real tool handler).

@@ -24,7 +24,12 @@ vi.mock("@/utils/file-sync", () => ({ readWorkspaceTextFile }));
 
 import { documentReadRange } from "../document-read-range";
 
-const ctx = { workspacePath: "/ws", taskId: "task_1", agents: {} as never };
+const ctx = {
+  workspacePath: "/ws",
+  taskId: "task_1",
+  agents: {} as never,
+  services: {} as never,
+};
 
 const editors: Editor[] = [];
 function makeEditor(markdown: string): Editor {

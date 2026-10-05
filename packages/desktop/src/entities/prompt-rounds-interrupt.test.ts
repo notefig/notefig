@@ -35,9 +35,6 @@ vi.mock("@/adapters", async () => ({
     },
   },
 }));
-vi.mock("@/utils/history-service", () => ({
-  checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
-}));
 vi.mock("@/entities/workspaces", () => ({ useOpenWorkspaces: () => [] }));
 
 import { createLoopbackPair } from "@notefig/agent";
