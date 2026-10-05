@@ -363,6 +363,55 @@ describe("workspaces", () => {
     expect(opened).toHaveBeenCalledTimes(1);
   });
 
+  it("a retry waits for the failed open's rollback before creating anything", async () => {
+    const log: string[] = [];
+    let release!: () => void;
+    const slowHistory = defineModule({
+      name: "t-history",
+      workspace: {
+        create: () => {
+          log.push("create history");
+          return { log };
+        },
+        dispose: async () => {
+          await new Promise<void>((resolve) => (release = resolve));
+          log.push("dispose history");
+        },
+      },
+    });
+    let failTasks = true;
+    const flakyTasks = defineModule({
+      name: "t-tasks",
+      workspace: {
+        needs: ["t-history"],
+        create: (ctx) => {
+          if (failTasks) throw new Error("tasks failed");
+          return { history: ctx.useWorkspace("t-history") };
+        },
+      },
+    });
+    const core = createCore({
+      services: {},
+      modules: [slowHistory, flakyTasks],
+      onError: quiet,
+    });
+
+    await core.workspaces.open("/ws");
+    failTasks = false;
+    const retry = core.workspaces.open("/ws");
+    await Promise.resolve();
+    expect(log).toEqual(["create history"]);
+
+    release();
+    await retry;
+    expect(log).toEqual([
+      "create history",
+      "dispose history",
+      "create history",
+    ]);
+    expect(core.workspaces.isOpen("/ws")).toBe(true);
+  });
+
   it("opens nothing once shutdown has started", async () => {
     const log: string[] = [];
     const core = createCore({ services: {}, modules: [history(log)] });

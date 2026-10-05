@@ -96,6 +96,8 @@ export function createCore(options: CreateCoreOptions): Core {
 
   /** Set when shutdown starts; from then on nothing opens. */
   let shuttingDown = false;
+  /** Failed opens still disposing what they built; a retry waits them out. */
+  const rollingBack = new Map<string, Promise<void>>();
   let disposed: Promise<void> | null = null;
   const open = new Map<string, OpenWorkspace>();
   const closing = new Map<
@@ -158,7 +160,10 @@ export function createCore(options: CreateCoreOptions): Core {
         instances.set(module.name, part.create(ctx, apis.get(module.name)));
       } catch (error) {
         onError(error, `workspace create of "${module.name}" for ${ref.path}`);
-        void disposeInstances(entryOf());
+        const rollback = disposeInstances(entryOf()).finally(() => {
+          rollingBack.delete(ref.key);
+        });
+        rollingBack.set(ref.key, rollback);
         return null;
       }
     }
@@ -176,9 +181,11 @@ export function createCore(options: CreateCoreOptions): Core {
       // taken the list of workspaces to close.
       if (shuttingDown) return;
       const key = keyOf(path);
-      const pending = closing.get(key);
+      // A close or a failed open's rollback still running: let it finish
+      // first, so its disposers never tear down the fresh instances.
+      const pending = closing.get(key)?.done ?? rollingBack.get(key);
       if (pending) {
-        await pending.done;
+        await pending;
         return workspaces.open(path);
       }
       if (open.has(key)) return;
