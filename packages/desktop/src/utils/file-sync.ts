@@ -22,7 +22,7 @@ import { getDocumentSync } from "./markdown-conversion";
 // (suppressed at acp-client's import; safe — all edges are function-body
 // references). Breaking it for real means relocating the editor registry to
 // a leaf module rather than adding a registration seam.
-import { getMarkdownEditor } from "@/components/editor/editor-store";
+import { getMarkdownEditor } from "@/entities/editors";
 import { adoptExternalContent } from "@/components/editor/adopt-external-content";
 import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
 import { platformAdapter } from "@/adapters";

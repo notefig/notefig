@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   getOrCreateEditor,
   disposeAllEditors,
-  getMarkdownEditor,
 } from "@/components/editor/editor-store";
+import { getMarkdownEditor } from "@/entities/editors";
 import { getTabController } from "@/tabs/tab-controllers";
 
 function doc(...paragraphs: string[]) {

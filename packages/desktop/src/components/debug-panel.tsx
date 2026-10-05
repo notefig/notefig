@@ -33,9 +33,9 @@ import {
   findLayoutSelectedTab,
 } from "@/utils/layout-codec";
 import {
-  getEditor,
+  getEditorInstance as getEditor,
   isMarkdownInstance,
-} from "@/components/editor/editor-store";
+} from "@/entities/editors";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLiveQuery } from "@tanstack/react-db";
 // Type-only import — erased at runtime, so the crash panel stays

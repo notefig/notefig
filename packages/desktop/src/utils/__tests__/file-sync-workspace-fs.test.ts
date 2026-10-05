@@ -8,9 +8,9 @@ import { getDocumentSync } from "../markdown-conversion";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import {
   getOrCreateEditor,
-  getMarkdownEditor,
   disposeEditor,
 } from "@/components/editor/editor-store";
+import { getMarkdownEditor } from "@/entities/editors";
 
 vi.mock("@/adapters", async () => ({
   platformAdapter: {

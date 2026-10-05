@@ -35,9 +35,6 @@ vi.mock("@/tabs/tab-controllers", () => ({
   searchTab: vi.fn(),
 }));
 vi.mock("./editors", () => ({ editor: vi.fn() }));
-vi.mock("@/components/editor/editor-store", () => ({
-  getMarkdownEditor: vi.fn(),
-}));
 vi.mock("@/utils/workspace-write-tracker", () => ({
   whenWorkspaceWritesSettled: vi.fn(async () => {}),
 }));

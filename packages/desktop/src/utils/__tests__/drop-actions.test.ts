@@ -19,7 +19,8 @@ vi.mock("@/entities/files", () => ({
 }));
 
 const openPaths: string[] = [];
-vi.mock("@/components/editor/editor-store", () => ({
+vi.mock("@/entities/editors", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/entities/editors")>()),
   getAllEditorPaths: () => openPaths,
   getMarkdownEditor: () => null,
 }));

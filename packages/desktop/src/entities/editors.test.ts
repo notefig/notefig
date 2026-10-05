@@ -2,15 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 // One-shot reads only: the live editor accessors and the document-sync
 // layer are stubbed so the test exercises the layout-scoping logic alone.
-vi.mock("@/components/editor/editor-store", () => ({
-  getEditor: vi.fn(() => undefined),
-  getMarkdownEditor: vi.fn(() => undefined),
-  getSelectedText: vi.fn(() => undefined),
-  isEditorFocusable: vi.fn(() => false),
-}));
-vi.mock("@/components/editor/markdown-codec", () => ({
-  createMarkdownCodec: () => ({ serialize: () => "" }),
-}));
 vi.mock("@/utils/markdown-conversion", () => ({
   getDocumentSync: () => ({ isDirty: () => false }),
 }));

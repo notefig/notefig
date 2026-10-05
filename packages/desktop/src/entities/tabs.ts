@@ -87,7 +87,7 @@ import {
 import { whenWorkspaceWritesSettled } from "@/utils/workspace-write-tracker";
 // Read-side editor-store accessor, same conscious entities → components
 // import as entities/editors.ts.
-import { getMarkdownEditor } from "@/components/editor/editor-store";
+import { getMarkdownEditor } from "@/entities/editors";
 
 // ---------------------------------------------------------------------------
 // Public re-exports: the layout codec and the tab-id scheme.

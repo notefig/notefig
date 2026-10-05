@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const calls: string[] = [];
+const calls = vi.hoisted((): string[] => []);
 
 const renameFileOrDirectoryMock = vi.fn();
 vi.mock("./workspaces", () => ({
@@ -36,15 +36,13 @@ vi.mock("@/tabs/tab-controllers", () => ({
   searchTab: vi.fn(),
 }));
 
-vi.mock("./editors", () => ({ editor: vi.fn() }));
-
-const liveEditor = {
+const liveEditor = vi.hoisted(() => ({
   isDestroyed: false,
-  setEditable: vi.fn((editable: boolean) =>
+  setEditable: (editable: boolean) =>
     calls.push(editable ? "editable" : "readonly"),
-  ),
-};
-vi.mock("@/components/editor/editor-store", () => ({
+}));
+vi.mock("./editors", () => ({
+  editor: vi.fn(),
   getMarkdownEditor: () => liveEditor,
 }));
 

@@ -11,12 +11,9 @@ const { getMarkdownEditor, getSelectedText } = vi.hoisted(() => ({
   getMarkdownEditor: vi.fn(),
   getSelectedText: vi.fn(),
 }));
-vi.mock("@/components/editor/editor-store", () => ({
+vi.mock("@/entities/editors", () => ({
   getMarkdownEditor,
   getSelectedText,
-}));
-
-vi.mock("@/entities/editors", () => ({
   getWorkspaceEditorContext: vi.fn(() => ({ openFiles: [], activeFile: null })),
 }));
 

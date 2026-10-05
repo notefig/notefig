@@ -1,6 +1,7 @@
 /**
  * Focus and selection lifecycle for an editor mounted in the dockable tab
- * layout: restores the saved selection on mount, requests focus through the
+ * layout: restores the saved selection on mount, reports the editor mounted
+ * (which runs any `goTo` waiting for it), requests focus through the
  * arbiter, reclaims focus lost to layout re-parenting, and saves the
  * selection / blurs cleanly on unmount.
  */
@@ -10,9 +11,8 @@ import type { Editor } from "@tiptap/core";
 import {
   saveSelection,
   getSavedSelection,
-  consumePendingNavigation,
-  navigateToLocation,
 } from "@/components/editor/editor-store";
+import { markEditorMounted, markEditorUnmounted } from "@/entities/editors";
 import { requestTabFocus } from "@/tabs/tab-controllers";
 
 /** How long after mount the tab layout may still re-parent the editor DOM. */
@@ -25,22 +25,17 @@ export function useEditorFocusLifecycle(
   useEffect(() => {
     if (!editor) return;
 
-    // A navigation intent (search result click) that arrived while this
-    // editor was unmounted or being recreated lands here; it wins over
-    // the saved-selection restore.
-    const pending = consumePendingNavigation(filePath);
-    if (pending) {
-      navigateToLocation(filePath, pending);
-    } else {
-      const saved = getSavedSelection(filePath);
-      if (
-        saved &&
-        saved.from <= editor.state.doc.content.size &&
-        saved.to <= editor.state.doc.content.size
-      ) {
-        editor.commands.setTextSelection(saved);
-      }
+    const saved = getSavedSelection(filePath);
+    if (
+      saved &&
+      saved.from <= editor.state.doc.content.size &&
+      saved.to <= editor.state.doc.content.size
+    ) {
+      editor.commands.setTextSelection(saved);
     }
+    // After the restore: a goTo that was waiting for this mount (a search
+    // result click that opened the tab) runs now and wins over it.
+    markEditorMounted(filePath);
 
     requestTabFocus(filePath, {
       when: "next-frame",
@@ -74,6 +69,7 @@ export function useEditorFocusLifecycle(
     reclaimRaf = requestAnimationFrame(reclaim);
 
     return () => {
+      markEditorUnmounted(filePath);
       if (reclaimRaf !== null) cancelAnimationFrame(reclaimRaf);
       if (editor.isDestroyed) return;
       const { from, to } = editor.state.selection;

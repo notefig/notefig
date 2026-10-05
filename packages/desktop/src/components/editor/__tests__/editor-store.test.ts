@@ -1,18 +1,22 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   getOrCreateEditor,
-  isMarkdownInstance,
-  isImageInstance,
-  getEditor,
-  hasEditor,
   disposeEditor,
   disposeAllEditors,
   saveSelection,
   getSavedSelection,
-  getSelectedText,
-  navigateToLocation,
-  getMarkdownEditor,
+  whenBlockRendered,
 } from "@/components/editor/editor-store";
+import {
+  getEditorInstance as getEditor,
+  getMarkdownEditor,
+  getSelectedText,
+  goToInEditor,
+  isMarkdownInstance,
+  markEditorMounted,
+} from "@/entities/editors";
+
+const hasEditor = (path: string) => getEditor(path) !== undefined;
 import { requestTabFocus, setActiveTab } from "@/tabs/tab-controllers";
 import { findPromptNodeId, selectionDraft } from "@notefig/widgets";
 
@@ -51,8 +55,8 @@ describe("editor registry", () => {
     const img = getOrCreateEditor("/ws/pic.png", { type: "image" });
 
     expect(isMarkdownInstance(md)).toBe(true);
-    expect(isImageInstance(md)).toBe(false);
-    expect(isImageInstance(img)).toBe(true);
+    expect(md.type).not.toBe("image");
+    expect(img.type).toBe("image");
     expect(isMarkdownInstance(img)).toBe(false);
   });
 
@@ -159,18 +163,18 @@ describe("getSelectedText", () => {
   });
 });
 
-describe("navigateToLocation", () => {
-  it("returns false for unknown paths", () => {
-    expect(
-      navigateToLocation("/ws/never-opened.md", {
-        matchText: "x",
-        lineText: "x",
-        occurrence: 0,
-      }),
-    ).toBe(false);
+describe("goTo", () => {
+  const beta = {
+    matchText: "beta",
+    lineText: "Alpha beta gamma",
+    occurrence: 0,
+  };
+
+  it("is false for a path no editor mounts in time", async () => {
+    expect(await goToInEditor("/ws/never-opened.md", beta, 10)).toBe(false);
   });
 
-  it("selects the matched text", () => {
+  it("selects the matched text once the editor is mounted", async () => {
     // Match→position mapping across markdown constructs is covered
     // exhaustively by go-to-location.test.ts; this only checks the
     // orchestration wiring.
@@ -178,17 +182,59 @@ describe("navigateToLocation", () => {
       type: "markdown",
       content: docWithText("Alpha beta gamma"),
     });
+    markEditorMounted("/ws/a.md");
 
-    expect(
-      navigateToLocation("/ws/a.md", {
-        matchText: "beta",
-        lineText: "Alpha beta gamma",
-        occurrence: 0,
-      }),
-    ).toBe(true);
+    expect(await goToInEditor("/ws/a.md", beta)).toBe(true);
 
     const editor = getMarkdownEditor("/ws/a.md");
     const { from, to } = editor!.state.selection;
     expect(editor!.state.doc.textBetween(from, to)).toBe("beta");
+  });
+
+  it("waits for a mount that has not happened yet", async () => {
+    const landed = goToInEditor("/ws/a.md", beta);
+    // The tab opens and its editor mounts after the request.
+    getOrCreateEditor("/ws/a.md", {
+      type: "markdown",
+      content: docWithText("Alpha beta gamma"),
+    });
+    markEditorMounted("/ws/a.md");
+
+    expect(await landed).toBe(true);
+    const editor = getMarkdownEditor("/ws/a.md");
+    const { from, to } = editor!.state.selection;
+    expect(editor!.state.doc.textBetween(from, to)).toBe("beta");
+  });
+});
+
+describe("whenBlockRendered", () => {
+  // ProseMirror owns its view's DOM and reverts foreign nodes, so the wait
+  // is exercised against a plain root standing in for the view.
+  const fakeEditor = (root: HTMLElement) =>
+    ({ view: { dom: root } }) as unknown as Parameters<
+      typeof whenBlockRendered
+    >[0];
+
+  it("resolves once the block's node view renders", async () => {
+    const root = document.createElement("div");
+    const found = whenBlockRendered(fakeEditor(root), "blob-1");
+    const block = document.createElement("div");
+    block.dataset.blobId = "blob-1";
+    root.append(block);
+    expect(await found).toBe(block);
+  });
+
+  it("gives up with null when the block never renders", async () => {
+    vi.useFakeTimers();
+    try {
+      const found = whenBlockRendered(
+        fakeEditor(document.createElement("div")),
+        "missing",
+      );
+      vi.advanceTimersByTime(2_000);
+      expect(await found).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
