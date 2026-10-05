@@ -52,10 +52,9 @@ function disarm(key: string): void {
  *
  * A watcher whose OS-level start failed (the workspace was unreadable when
  * it was opened) parks itself; `ensureStarted` is a no-op on a healthy one.
- * The two moments worth retrying — re-entering a backgrounded workspace,
- * and recovering after fs access is restored — both originate in the
- * portal, so they call this directly rather than round-tripping a signal
- * through the registry.
+ * The two moments worth retrying: focusing a workspace (this module's
+ * `workspace:focused` handler) and recovering after fs access is restored
+ * (the error boundary calls this directly).
  */
 export function ensureWatching(workspacePath: string): void {
   watchers.get(workspaceKey(workspacePath))?.ensureStarted();
@@ -121,5 +120,16 @@ declare module "@notefig/core" {
 
 export const workspaceWatchersModule = defineModule({
   name: "workspace-watchers",
-  boot: () => startWorkspaceWatcherSubscription(),
+  boot: (_api, ctx) => {
+    const stopWatching = startWorkspaceWatcherSubscription();
+    // Coming back to a workspace is the moment a watcher whose start failed
+    // gets another chance.
+    const stopRetry = ctx.hooks.on("workspace:focused", (workspace) =>
+      ensureWatching(workspace.path),
+    );
+    return () => {
+      stopRetry();
+      stopWatching();
+    };
+  },
 });

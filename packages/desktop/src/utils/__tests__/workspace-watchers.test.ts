@@ -41,7 +41,9 @@ import {
 import {
   ensureWatching,
   startWorkspaceWatcherSubscription,
+  workspaceWatchersModule,
 } from "../workspace-watchers";
+import { createCore } from "@notefig/core";
 
 function row(key: string): OpenWorkspaceRow {
   return { key, path: key, openedAt: 1, focusedAt: 1 };
@@ -157,5 +159,21 @@ describe("startWorkspaceWatcherSubscription", () => {
     for (const stopWatcher of watchers.stops) {
       expect(stopWatcher).toHaveBeenCalledTimes(1);
     }
+  });
+});
+
+describe("workspaceWatchersModule", () => {
+  it("gives a workspace's watcher another chance whenever it is focused", async () => {
+    const core = createCore({
+      services: {} as never,
+      modules: [workspaceWatchersModule],
+    });
+    core.boot();
+    openWorkspacesCollection.insert(row("/ws"));
+
+    await core.workspace("/ws").focus();
+
+    expect(watchers.ensures[0]).toHaveBeenCalledTimes(1);
+    await core.dispose();
   });
 });

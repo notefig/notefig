@@ -167,7 +167,7 @@ export function CommandPalette({
   onFocusTab,
   direction = "ltr",
 }: CommandPaletteProps) {
-  const { projects } = useCore();
+  const core = useCore();
   const { setTheme, theme } = useTheme();
   const { setTheme: persistTheme } = useAppSettings();
   const { t } = useTranslation();
@@ -265,7 +265,7 @@ export function CommandPalette({
         // Really close (MET-177): the workspace leaves the open set and its
         // agents demote; focus moves to the next open workspace, or the
         // welcome screen with none left.
-        void projects.close(workspacePath);
+        void core.workspace(workspacePath).close();
       },
     },
     {

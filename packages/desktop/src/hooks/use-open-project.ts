@@ -1,6 +1,9 @@
 /**
- * Opening a project from React: remember it as recent, then
- * `core.projects.open` — which every other entry point calls directly.
+ * Opening a project from React: remember it as recent, then enter it
+ * (`core.workspace(path).open()`, which every other entry point calls
+ * directly). What entering does — the scratchpad landing, the sidebar's
+ * files view — is the business of the modules that handle
+ * `workspace:entered`.
  */
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
@@ -11,14 +14,14 @@ import { useCore } from "@notefig/core/react";
 import { useRecentProjects } from "./use-recent-projects";
 
 export function useOpenProject(): (workspacePath: string) => Promise<void> {
-  const { projects } = useCore();
+  const core = useCore();
   const { addRecentProject } = useRecentProjects();
   return useCallback(
     (workspacePath: string) => {
       addRecentProject(workspacePath);
-      return projects.open(workspacePath);
+      return core.workspace(workspacePath).open();
     },
-    [addRecentProject, projects],
+    [addRecentProject, core],
   );
 }
 

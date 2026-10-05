@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Same rig as agent-persistence.test.ts: the tasks collection persists into
-// a real in-memory SQLite via the desktop driver, so closeWorkspace's
+// a real in-memory SQLite via the desktop driver, so a close's
 // demote-to-restored runs the production path end to end.
 const { dbRef } = vi.hoisted(() => ({
   dbRef: { current: null as null | import("@/testing/node-db").NodeTestDb },
@@ -68,9 +68,6 @@ import {
   workspaceScoped,
 } from "./workspace-scoped";
 import {
-  openWorkspace,
-  closeWorkspace,
-  closeAllWorkspaces,
   isWorkspaceOpen,
   openWorkspacesCollection,
   workspaceOfPath,
@@ -103,7 +100,7 @@ function taskRow(overrides: Partial<AgentTaskRow> = {}): AgentTaskRow {
 // Core closes each workspace's modules when its row goes: the agents (the
 // real module), then the history repo. Scopes and watchers are the tests'
 // own business here (see the workspace-scoped and watcher suites).
-createTestCore({
+const core = createTestCore({
   modules: [
     defineModule({ name: "workspace-scopes" }),
     defineModule({ name: "workspace-watchers" }),
@@ -111,13 +108,19 @@ createTestCore({
     historyModule,
     workspaceAgentsModule,
   ],
-}).boot();
+});
+core.boot();
+
+/** Bring a workspace forward the way the switcher does: through its handle,
+ *  which the registry turns into a row. */
+const focus = (path: string) => core.workspace(path).focus();
+const close = (path: string) => core.workspace(path).close();
 
 beforeEach(async () => {
   dbRef.current!.repairWrites();
   vi.clearAllMocks();
   for (const row of [...openWorkspacesCollection.values()]) {
-    await closeWorkspace(row.path);
+    await close(row.path);
   }
   vi.clearAllMocks();
   for (const t of agentTasksCollection.toArray) {
@@ -127,9 +130,9 @@ beforeEach(async () => {
   await agentTasksCollection.preload();
 });
 
-describe("openWorkspace", () => {
+describe("focusing a workspace", () => {
   it("seeds collections, refreshes, inserts the row", async () => {
-    await openWorkspace("/ws");
+    await focus("/ws");
 
     expect(files.getOrCreateWorkspaceCollections).toHaveBeenCalledWith("/ws");
     expect(files.refreshDirectoryMetadata).toHaveBeenCalledWith("/ws");
@@ -140,10 +143,10 @@ describe("openWorkspace", () => {
   });
 
   it("re-entry refreshes the listing but never re-seeds", async () => {
-    await openWorkspace("/ws");
-    await openWorkspace("/ws");
+    await focus("/ws");
+    await focus("/ws");
     // Same workspace under a respelled path collapses onto one entry.
-    await openWorkspace("/ws/");
+    await focus("/ws/");
 
     expect(files.getOrCreateWorkspaceCollections).toHaveBeenCalledTimes(1);
     expect(files.refreshDirectoryMetadata).toHaveBeenCalledTimes(3);
@@ -153,11 +156,11 @@ describe("openWorkspace", () => {
   it("re-entry brings the workspace to the front: focusedAt rises above every other row", async () => {
     vi.useFakeTimers({ now: 1_000 });
     try {
-      await openWorkspace("/ws-a");
+      await focus("/ws-a");
       vi.setSystemTime(2_000);
-      await openWorkspace("/ws-b");
+      await focus("/ws-b");
       vi.setSystemTime(3_000);
-      await openWorkspace("/ws-a");
+      await focus("/ws-a");
 
       const byFocus = [...openWorkspacesCollection.values()].sort(
         (a, b) => b.focusedAt - a.focusedAt,
@@ -170,8 +173,8 @@ describe("openWorkspace", () => {
   });
 
   it("keeps independent entries per workspace", async () => {
-    await openWorkspace("/ws-a");
-    await openWorkspace("/ws-b");
+    await focus("/ws-a");
+    await focus("/ws-b");
 
     expect(openWorkspacesCollection.size).toBe(2);
     expect(isWorkspaceOpen("/ws-a")).toBe(true);
@@ -179,7 +182,7 @@ describe("openWorkspace", () => {
   });
 });
 
-describe("closeWorkspace", () => {
+describe("closing a workspace", () => {
   it("tears down every per-workspace subsystem and drops the row", async () => {
     // The OS-resource owners are core workspace modules, closed by core;
     // everything else is scoped to membership and disposes itself when the
@@ -188,10 +191,10 @@ describe("closeWorkspace", () => {
     const dispose = vi.fn();
     const scope = workspaceScoped({ create: () => ({}), dispose });
     try {
-      await openWorkspace("/ws");
+      await focus("/ws");
       scope.get("/ws");
 
-      await closeWorkspace("/ws");
+      await close("/ws");
 
       expect(history.disposeWorkspaceHistoryService).toHaveBeenCalledWith("/ws");
       expect(dispose).toHaveBeenCalledTimes(1);
@@ -204,7 +207,7 @@ describe("closeWorkspace", () => {
   });
 
   it("demotes sessionful task rows to restored and purges sessionless ones (MET-54 contract)", async () => {
-    await openWorkspace("/ws");
+    await focus("/ws");
     await agentTasksCollection.insert(taskRow({ status: "running" }))
       .isPersisted.promise;
     await agentTasksCollection.insert(
@@ -215,7 +218,7 @@ describe("closeWorkspace", () => {
       taskRow({ taskId: "task_other", workspacePath: "/other" }),
     ).isPersisted.promise;
 
-    await closeWorkspace("/ws");
+    await close("/ws");
 
     expect(agentTasksCollection.get("task_a")).toMatchObject({
       status: "restored",
@@ -227,7 +230,7 @@ describe("closeWorkspace", () => {
   });
 
   it("is a no-op for a workspace that is not open", async () => {
-    await expect(closeWorkspace("/never-opened")).resolves.toBeUndefined();
+    await expect(close("/never-opened")).resolves.toBeUndefined();
     expect(openWorkspacesCollection.size).toBe(0);
   });
 });
@@ -237,18 +240,18 @@ describe("close/reopen race", () => {
     const stopScopes = startWorkspaceScopeSubscription();
     const dispose = vi.fn();
     const scope = workspaceScoped({ create: () => ({}), dispose });
-    await openWorkspace("/ws");
+    await focus("/ws");
     scope.get("/ws");
     await agentTasksCollection.insert(taskRow({ status: "running" }))
       .isPersisted.promise;
 
-    const closing = closeWorkspace("/ws");
+    const closing = close("/ws");
     // Synchronous effects of close land immediately…
     expect(isWorkspaceOpen("/ws")).toBe(false);
     expect(openWorkspacesCollection.size).toBe(0);
 
     // …and a reopen issued mid-teardown neither throws nor interleaves.
-    await openWorkspace("/ws");
+    await focus("/ws");
     await closing;
     await Promise.resolve();
 
@@ -267,32 +270,19 @@ describe("close/reopen race", () => {
   });
 
   it("double-close returns the same in-flight teardown", async () => {
-    await openWorkspace("/ws");
-    const first = closeWorkspace("/ws");
-    const second = closeWorkspace("/ws");
+    await focus("/ws");
+    const first = close("/ws");
+    const second = close("/ws");
     expect(second).toBe(first);
     await first;
     expect(openWorkspacesCollection.size).toBe(0);
   });
 });
 
-describe("closeAllWorkspaces", () => {
-  it("closes every open workspace", async () => {
-    await openWorkspace("/ws-a");
-    await openWorkspace("/ws-b");
-
-    await closeAllWorkspaces();
-
-    expect(isWorkspaceOpen("/ws-a")).toBe(false);
-    expect(isWorkspaceOpen("/ws-b")).toBe(false);
-    expect(openWorkspacesCollection.size).toBe(0);
-  });
-});
-
 describe("workspaceOfPath", () => {
   it("resolves by tree membership, never by string prefix", async () => {
-    await openWorkspace("/ws");
-    await openWorkspace("/ws-backup");
+    await focus("/ws");
+    await focus("/ws-backup");
 
     expect(workspaceOfPath("/ws/a.md")).toBe("/ws");
     expect(workspaceOfPath("/ws-backup/x.md")).toBe("/ws-backup");
@@ -300,15 +290,15 @@ describe("workspaceOfPath", () => {
   });
 
   it("picks the deepest of nested open workspaces", async () => {
-    await openWorkspace("/ws");
-    await openWorkspace("/ws/inner");
+    await focus("/ws");
+    await focus("/ws/inner");
 
     expect(workspaceOfPath("/ws/inner/y.md")).toBe("/ws/inner");
     expect(workspaceOfPath("/ws/top.md")).toBe("/ws");
   });
 
   it("is null for a path no open workspace contains", async () => {
-    await openWorkspace("/ws");
+    await focus("/ws");
 
     expect(workspaceOfPath("/elsewhere/z.md")).toBeNull();
   });

@@ -99,7 +99,7 @@ export function useWorkspacePanels({
   searchPanelRef,
   focusActiveTab,
 }: WorkspacePanelsOptions): WorkspacePanels {
-  const { projects } = useCore();
+  const core = useCore();
   const [searchParams, setUrlSearchParams] = useSearchParams();
   const isSidebarCollapsed = searchParams.get("sidebar") === "collapsed";
   const sidebarView = readSidebarView(searchParams);
@@ -126,12 +126,12 @@ export function useWorkspacePanels({
     (path: string) => {
       const tool = lastTool.peek(path)?.tool ?? DEFAULT_TOOL;
       // Focus is a durable write; the view flips at once.
-      void projects.show(path);
+      void core.workspace(path).focus();
       setUrlSearchParams((prev) => withSidebarView(prev, tool), {
         replace: true,
       });
     },
-    [projects, setUrlSearchParams],
+    [core, setUrlSearchParams],
   );
 
   const toggleSidebarCollapsed = useCallback(() => {

@@ -1,6 +1,7 @@
 import type {
   AnyModule,
   ModuleContext,
+  OpenWorkspaces,
   WorkspaceContext,
   WorkspaceLifecycle,
 } from "./define-module";
@@ -30,17 +31,44 @@ export interface CreateCoreOptions {
   onError?: (error: unknown, where: string) => void;
 }
 
+/** What a workspace handle does, open or not. */
+export interface WorkspaceControls {
+  readonly path: string;
+  /** Identity: two spellings of one workspace share it. */
+  readonly key: string;
+  isOpen(): boolean;
+  /**
+   * Open it if it is not open, then announce the entry: `workspace:focused`
+   * and `workspace:entered`, each awaited. Resolves once every handler has
+   * run. Calls for one workspace while one is in flight join it. Does
+   * nothing if a close supersedes it while it waits.
+   */
+  open(): Promise<void>;
+  /** Open it if needed and bring it forward: `workspace:focused` only. */
+  focus(): Promise<void>;
+  /** Fire `workspace:closing` (awaited), then dispose its instances. */
+  close(): Promise<void>;
+}
+
+/**
+ * A workspace, open or not. Its module instances (`handle.files`) read
+ * while it is open — and while it is closing, so `closing` handlers can
+ * reach what they tear down. Reading one otherwise throws.
+ */
+export type WorkspaceHandle = WorkspaceControls & Readonly<WorkspaceModules>;
+
+export class WorkspaceClosedError extends Error {
+  override name = "WorkspaceClosedError";
+}
+
 export interface CoreBase {
   /** A service or module API by name. */
   use<K extends ProvidedName>(name: K): Provided[K];
   hooks: Hooks;
-  workspaces: WorkspaceLifecycle;
-  /**
-   * Every module's instance for this workspace, or undefined when it is not
-   * open. Still answers while the workspace is closing, so `closing`
-   * handlers can reach what they are tearing down.
-   */
-  workspace(path: string): Readonly<WorkspaceModules> | undefined;
+  /** Which workspaces are open. Opening goes through a handle. */
+  workspaces: OpenWorkspaces;
+  /** The handle for a workspace, whether or not it is open. */
+  workspace(path: string): WorkspaceHandle;
   /** Run every module's `boot`, in dependency order. Once per core. */
   boot(): void;
   /** Close every workspace, then run boot disposers in reverse order. */
@@ -261,6 +289,63 @@ export function createCore(options: CreateCoreOptions): Core {
   };
 
   // ---------------------------------------------------------------------
+  // Handles
+  // ---------------------------------------------------------------------
+
+  /** Entries through a handle in flight, per workspace: a second call of
+   *  the same kind joins the first rather than announcing twice. */
+  const entering = new Map<string, Promise<void>>();
+  const focusing = new Map<string, Promise<void>>();
+
+  const bringForward = async (path: string, entered: boolean) => {
+    await workspaces.open(path);
+    // A close superseded the open, or core is shutting down.
+    const entry = open.get(keyOf(path));
+    if (!entry) return;
+    await hooks.emitSerial("workspace:focused", entry.ref);
+    if (entered) await hooks.emitSerial("workspace:entered", entry.ref);
+  };
+
+  const joined = (
+    inFlight: Map<string, Promise<void>>,
+    key: string,
+    start: () => Promise<void>,
+  ): Promise<void> => {
+    const running = inFlight.get(key);
+    if (running) return running;
+    const call = start().finally(() => inFlight.delete(key));
+    inFlight.set(key, call);
+    return call;
+  };
+
+  function handleFor(path: string): WorkspaceHandle {
+    const key = keyOf(path);
+    const controls: WorkspaceControls = {
+      path,
+      key,
+      isOpen: () => open.has(key),
+      open: () => joined(entering, key, () => bringForward(path, true)),
+      focus: () => joined(focusing, key, () => bringForward(path, false)),
+      close: () => workspaces.close(path),
+    };
+    for (const module of workspaceModules) {
+      Object.defineProperty(controls, module.name, {
+        get() {
+          const entry = open.get(key) ?? closing.get(key)?.entry;
+          if (!entry) {
+            throw new WorkspaceClosedError(
+              `"${module.name}" of ${path} is read while the workspace is not open.`,
+            );
+          }
+          return entry.instances.get(module.name);
+        },
+        enumerable: true,
+      });
+    }
+    return controls as WorkspaceHandle;
+  }
+
+  // ---------------------------------------------------------------------
   // Modules
   // ---------------------------------------------------------------------
 
@@ -297,11 +382,12 @@ export function createCore(options: CreateCoreOptions): Core {
       return provided(name) as never;
     },
     hooks,
-    workspaces,
-    workspace(path) {
-      const key = keyOf(path);
-      return (open.get(key) ?? closing.get(key)?.entry)?.view;
+    workspaces: {
+      isOpen: workspaces.isOpen,
+      list: workspaces.list,
+      subscribe: workspaces.subscribe,
     },
+    workspace: handleFor,
     boot() {
       if (booted) return;
       booted = true;

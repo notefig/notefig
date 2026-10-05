@@ -34,8 +34,20 @@ export interface CoreHookMap {
   "core:booted": undefined;
   /** Core is shutting down; awaited in order before disposers run. */
   "core:shutdown": undefined;
-  /** Every workspace instance for this workspace has been created. */
+  /** Every workspace instance for this workspace has been created. Fires
+   *  for any open, a module's restore included. */
   "workspace:opened": WorkspaceRef;
+  /**
+   * Brought to the front through its handle (`open` or `focus`), after it
+   * opened if it was not open. Awaited in order before the call resolves.
+   */
+  "workspace:focused": WorkspaceRef;
+  /**
+   * Entered through its handle's `open`: someone chose this workspace, as
+   * opposed to a module restoring it or a `focus` bringing it forward.
+   * After `workspace:focused`; awaited in order.
+   */
+  "workspace:entered": WorkspaceRef;
   /** The workspace is closing; awaited in order before its instances go. */
   "workspace:closing": WorkspaceRef;
 }

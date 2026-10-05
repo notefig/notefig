@@ -80,10 +80,20 @@ beforeEach(async () => {
 
 describe("writes issued before the persisted set has hydrated", () => {
   it("an open issued before hydration is durable: the row survives a restart", async () => {
-    const workspaces = await import("./workspaces");
-    // No await of readiness: the caller writes the moment the module is up,
-    // as the test seam and a native "Open Folder" during boot can.
-    await workspaces.openWorkspace("/ws-c");
+    const { workspacesModule } = await import("./workspaces");
+    const { defineModule } = await import("@notefig/core");
+    const { createTestCore } = await import("@/testing/test-core");
+    const core = createTestCore({
+      modules: [
+        defineModule({ name: "workspace-scopes" }),
+        defineModule({ name: "workspace-watchers" }),
+        workspacesModule({ restore: false }),
+      ],
+    });
+    core.boot();
+    // No await of readiness: the caller opens the moment core is up, as
+    // the test seam and a native "Open Folder" during boot can.
+    await core.workspace("/ws-c").open();
 
     // "Next run": a fresh collection over the same storage sees only what
     // was really committed.

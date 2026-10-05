@@ -177,10 +177,10 @@ describe("history-service", () => {
       services: {} as never,
       modules: [historyModule],
     });
-    await core.workspaces.open(WS);
+    await core.workspace(WS).open();
     const first = getOrCreateWorkspaceHistoryService(WS);
 
-    await core.workspaces.close(WS);
+    await core.workspace(WS).close();
 
     expect(disposeWorkerGitRepoMock).toHaveBeenCalledWith(GIT_DIR);
     expect(getOrCreateWorkspaceHistoryService(WS)).not.toBe(first);
