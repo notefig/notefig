@@ -94,6 +94,8 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   should also do is a module's handler for `workspace:entered` or
   `workspace:focused` (the scratchpad landing, the sidebar's files view, the
   open-set row), never code in the caller. A boot restore fires neither.
+  Those handlers are steps of the open: if one fails, `open()` rejects and
+  the hooks after it don't fire (a failed `focused` lands nothing).
 - Agents are driven through the facade (`agents` from `@/entities/agents`,
   also `core.agents`): `agents.workspace(ws).start(harness)` for a session
   the user starts (runtime and trust gates included), `agents.task(id)` for

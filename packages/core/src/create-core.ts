@@ -41,10 +41,13 @@ export interface WorkspaceControls {
    * Open it if it is not open, then announce the entry: `workspace:focused`
    * and `workspace:entered`, each awaited. Resolves once every handler has
    * run. Calls for one workspace while one is in flight join it. Does
-   * nothing if a close supersedes it while it waits.
+   * nothing if a close supersedes it while it waits. Rejects with a
+   * `WorkspaceOpenError`, skipping what follows, when a module failed to
+   * create its instance or a handler failed.
    */
   open(): Promise<void>;
-  /** Open it if needed and bring it forward: `workspace:focused` only. */
+  /** Open it if needed and bring it forward: `workspace:focused` only.
+   *  Rejects like `open`. */
   focus(): Promise<void>;
   /** Fire `workspace:closing` (awaited), then dispose its instances. */
   close(): Promise<void>;
@@ -59,6 +62,21 @@ export type WorkspaceHandle = WorkspaceControls & Readonly<WorkspaceModules>;
 
 export class WorkspaceClosedError extends Error {
   override name = "WorkspaceClosedError";
+}
+
+/** A handle's `open` or `focus` that did not complete. */
+export class WorkspaceOpenError extends Error {
+  override name = "WorkspaceOpenError";
+  /** What failed: the module's create error, or each failing handler's. */
+  readonly failures: unknown[];
+  constructor(
+    readonly workspacePath: string,
+    what: string,
+    failure: unknown,
+  ) {
+    super(`Opening ${workspacePath}: ${what}.`);
+    this.failures = Array.isArray(failure) ? failure : [failure];
+  }
 }
 
 export interface CoreBase {
@@ -174,11 +192,13 @@ export function createCore(options: CreateCoreOptions): Core {
   };
 
   /**
-   * Every module's instance, or null when one failed to create. A partial
+   * Every module's instance, or the failure when one failed to create. A partial
    * set is never published: the ones already built are disposed and the
    * workspace stays closed, so the next `open` retries from scratch.
    */
-  const createWorkspace = (ref: WorkspaceRef): OpenWorkspace | null => {
+  const createWorkspace = (
+    ref: WorkspaceRef,
+  ): OpenWorkspace | { failed: unknown } => {
     const instances = new Map<string, unknown>();
     const entryOf = () => ({
       ref,
@@ -209,7 +229,7 @@ export function createCore(options: CreateCoreOptions): Core {
           rollingBack.delete(ref.key);
         });
         rollingBack.set(ref.key, rollback);
-        return null;
+        return { failed: error };
       }
     }
     return entryOf();
@@ -220,31 +240,52 @@ export function createCore(options: CreateCoreOptions): Core {
     await disposeInstances(entry);
   };
 
+  /**
+   * Open a workspace and say how it went: open (now or already), a module
+   * failed to create its instance (rolled back), or nothing was done —
+   * core is shutting down, or a later call superseded this one.
+   */
+  const openWorkspace = async (
+    path: string,
+  ): Promise<
+    | { outcome: "open"; entry: OpenWorkspace }
+    | { outcome: "failed"; error: unknown }
+    | { outcome: "skipped" }
+  > => {
+    // A core that is shutting down opens nothing: its dispose has already
+    // taken the list of workspaces to close.
+    if (shuttingDown) return { outcome: "skipped" };
+    const key = keyOf(path);
+    const ticket = takeTicket(key);
+    try {
+      // A close or a failed open's rollback still running: let it finish
+      // first, so its disposers never tear down the fresh instances.
+      let pending = closing.get(key)?.done ?? rollingBack.get(key);
+      while (pending) {
+        await pending;
+        if (shuttingDown || latestCall.get(key) !== ticket) {
+          return { outcome: "skipped" };
+        }
+        pending = closing.get(key)?.done ?? rollingBack.get(key);
+      }
+      const existing = open.get(key);
+      if (existing) return { outcome: "open", entry: existing };
+      const created = createWorkspace({ key, path });
+      if ("failed" in created) {
+        return { outcome: "failed", error: created.failed };
+      }
+      open.set(key, created);
+      notify();
+      hooks.emit("workspace:opened", created.ref);
+      return { outcome: "open", entry: created };
+    } finally {
+      settle(key, ticket);
+    }
+  };
+
   const workspaces: WorkspaceLifecycle = {
     async open(path) {
-      // A core that is shutting down opens nothing: its dispose has already
-      // taken the list of workspaces to close.
-      if (shuttingDown) return;
-      const key = keyOf(path);
-      const ticket = takeTicket(key);
-      try {
-        // A close or a failed open's rollback still running: let it finish
-        // first, so its disposers never tear down the fresh instances.
-        let pending = closing.get(key)?.done ?? rollingBack.get(key);
-        while (pending) {
-          await pending;
-          if (shuttingDown || latestCall.get(key) !== ticket) return;
-          pending = closing.get(key)?.done ?? rollingBack.get(key);
-        }
-        if (open.has(key)) return;
-        const entry = createWorkspace({ key, path });
-        if (!entry) return;
-        open.set(key, entry);
-        notify();
-        hooks.emit("workspace:opened", entry.ref);
-      } finally {
-        settle(key, ticket);
-      }
+      await openWorkspace(path);
     },
     close(path) {
       const key = keyOf(path);
@@ -297,13 +338,30 @@ export function createCore(options: CreateCoreOptions): Core {
   const entering = new Map<string, Promise<void>>();
   const focusing = new Map<string, Promise<void>>();
 
+  /**
+   * Open, then announce, one step after another. A step that failed stops
+   * the ones after it and rejects the call: the workspace did not open, or
+   * a handler the entry depends on (recording it, landing in it) failed.
+   * Every handler of the failing hook still ran.
+   */
   const bringForward = async (path: string, entered: boolean) => {
-    await workspaces.open(path);
-    // A close superseded the open, or core is shutting down.
-    const entry = open.get(keyOf(path));
-    if (!entry) return;
-    await hooks.emitSerial("workspace:focused", entry.ref);
-    if (entered) await hooks.emitSerial("workspace:entered", entry.ref);
+    const opened = await openWorkspace(path);
+    if (opened.outcome === "failed") {
+      throw new WorkspaceOpenError(path, "it did not open", opened.error);
+    }
+    // A close superseded the open, or core is shutting down: nothing to
+    // announce, and nothing went wrong.
+    if (opened.outcome === "skipped") return;
+    const { ref } = opened.entry;
+    const unfocused = await hooks.emitSerial("workspace:focused", ref);
+    if (unfocused.length > 0) {
+      throw new WorkspaceOpenError(path, "focusing it failed", unfocused);
+    }
+    if (!entered) return;
+    const unentered = await hooks.emitSerial("workspace:entered", ref);
+    if (unentered.length > 0) {
+      throw new WorkspaceOpenError(path, "entering it failed", unentered);
+    }
   };
 
   const joined = (

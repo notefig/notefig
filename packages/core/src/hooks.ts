@@ -15,12 +15,13 @@ export interface Hooks {
   /**
    * Run every handler one after another, awaiting each. For hooks whose
    * handlers must finish before the caller moves on (closing, shutdown).
-   * Failures are reported, never thrown.
+   * A failure is reported and the rest still run; never thrown, but the
+   * caller gets the failures back, for a step that must not go on past one.
    */
   emitSerial<K extends HookName>(
     name: K,
     payload: CoreHookMap[K],
-  ): Promise<void>;
+  ): Promise<unknown[]>;
 }
 
 export function createHooks(
@@ -56,13 +57,16 @@ export function createHooks(
       }
     },
     async emitSerial(name, payload) {
+      const failures: unknown[] = [];
       for (const handler of listFor(name)) {
         try {
           await handler(payload as never);
         } catch (error) {
           onError(error, name);
+          failures.push(error);
         }
       }
+      return failures;
     },
   };
 }

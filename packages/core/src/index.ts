@@ -5,7 +5,7 @@
  * hook bus. React bindings live in `@notefig/core/react`.
  */
 export { createCore } from "./create-core";
-export { WorkspaceClosedError } from "./create-core";
+export { WorkspaceClosedError, WorkspaceOpenError } from "./create-core";
 export type {
   Core,
   CoreBase,

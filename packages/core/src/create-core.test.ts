@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createCore,
   WorkspaceClosedError,
+  WorkspaceOpenError,
   type CreateCoreOptions,
 } from "./create-core";
 import { defineModule, type WorkspaceLifecycle } from "./define-module";
@@ -567,5 +568,56 @@ describe("workspace handles", () => {
 
     expect(core.workspaces.isOpen("/ws")).toBe(false);
     expect(entered).not.toHaveBeenCalled();
+  });
+
+  it("rejects an open whose workspace failed to create, and announces nothing", async () => {
+    const failing = defineModule({
+      name: "t-history",
+      workspace: {
+        create: () => {
+          throw new Error("history failed");
+        },
+      },
+    });
+    const focused = vi.fn();
+    const core = createCore({
+      services: {},
+      modules: [failing],
+      onError: quiet,
+    });
+    core.hooks.on("workspace:focused", focused);
+
+    const opening = core.workspace("/ws").open();
+
+    await expect(opening).rejects.toBeInstanceOf(WorkspaceOpenError);
+    await expect(opening).rejects.toMatchObject({
+      workspacePath: "/ws",
+      failures: [expect.objectContaining({ message: "history failed" })],
+    });
+    expect(focused).not.toHaveBeenCalled();
+    expect(core.workspaces.isOpen("/ws")).toBe(false);
+  });
+
+  it("a failed focus handler stops the entry: every focus handler runs, entered does not, open rejects", async () => {
+    const core = createCore({
+      services: {},
+      modules: [history([])],
+      onError: quiet,
+    });
+    const recorded = vi.fn();
+    const entered = vi.fn();
+    core.hooks.on("workspace:focused", async () => {
+      throw new Error("row not saved");
+    });
+    core.hooks.on("workspace:focused", recorded);
+    core.hooks.on("workspace:entered", entered);
+
+    await expect(core.workspace("/ws").open()).rejects.toMatchObject({
+      failures: [expect.objectContaining({ message: "row not saved" })],
+    });
+    expect(recorded).toHaveBeenCalledTimes(1);
+    expect(entered).not.toHaveBeenCalled();
+    // The workspace did open; only the entry stopped.
+    expect(core.workspaces.isOpen("/ws")).toBe(true);
   });
 });
