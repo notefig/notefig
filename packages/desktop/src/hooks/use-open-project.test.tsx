@@ -29,7 +29,8 @@ const scratchpads = vi.hoisted(() => ({
 }));
 vi.mock("@/entities/scratchpads", () => scratchpads);
 const recents = vi.hoisted(() => ({ addRecentProject: vi.fn() }));
-vi.mock("./use-recent-projects", () => ({
+vi.mock("./use-recent-projects", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./use-recent-projects")>()),
   useRecentProjects: () => recents,
 }));
 
@@ -46,7 +47,7 @@ import { createTestCore } from "@/testing/test-core";
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
-let openProject: ((path: string) => Promise<void>) | undefined;
+let openProject: ((path: string) => Promise<boolean>) | undefined;
 let router: ReturnType<typeof createMemoryRouter>;
 let core: ReturnType<typeof createTestCore>;
 
@@ -201,8 +202,8 @@ describe("entering a project (useOpenProject)", () => {
             resolve(`${ws}/.notefig/scratchpads/sunny-otter.md`);
         }),
     );
-    let first!: Promise<void>;
-    let second!: Promise<void>;
+    let first!: Promise<boolean>;
+    let second!: Promise<boolean>;
     await act(async () => {
       first = openProject!("/ws");
       second = openProject!("/ws");
@@ -252,5 +253,21 @@ describe("entering a project (useOpenProject)", () => {
     expect(scratchpads.enterScratchpad).not.toHaveBeenCalled();
     expect(scratchpads.sweepScratchpads).not.toHaveBeenCalled();
     expect(openTabs()).toEqual([]);
+  });
+
+  it("a failed open is reported and resolves false, never rejects", async () => {
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    scratchpads.enterScratchpad.mockRejectedValueOnce(new Error("disk gone"));
+    let opened: boolean | undefined;
+    await act(async () => {
+      opened = await openProject!("/ws");
+    });
+
+    expect(opened).toBe(false);
+    expect(quiet).toHaveBeenCalledWith(
+      "Failed to open /ws:",
+      expect.objectContaining({ name: "WorkspaceOpenError" }),
+    );
+    quiet.mockRestore();
   });
 });

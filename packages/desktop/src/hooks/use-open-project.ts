@@ -10,16 +10,43 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { FsError } from "@/adapters/platform-adapter.interface";
 import { pickDirectory } from "@/utils/fs";
+import i18n from "@/utils/intl";
 import { useCore } from "@notefig/core/react";
-import { useRecentProjects } from "./use-recent-projects";
+import { deriveProjectName, useRecentProjects } from "./use-recent-projects";
 
-export function useOpenProject(): (workspacePath: string) => Promise<void> {
+/**
+ * Tell the user a workspace did not open (a module failed to create its
+ * part, or recording or landing in it failed). Every gesture that opens or
+ * focuses a workspace ends here rather than in an unhandled rejection.
+ */
+export function reportOpenFailure(workspacePath: string, error: unknown): void {
+  console.error(`Failed to open ${workspacePath}:`, error);
+  toast.error(
+    i18n.t("openProjectFailed", { name: deriveProjectName(workspacePath) }),
+  );
+}
+
+/**
+ * Open a project as the user's gesture. Never rejects: a failure is
+ * reported (`reportOpenFailure`), and the promise resolves to whether the
+ * workspace opened, for a caller with a next step that needs it.
+ */
+export function useOpenProject(): (workspacePath: string) => Promise<boolean> {
   const core = useCore();
   const { addRecentProject } = useRecentProjects();
   return useCallback(
     (workspacePath: string) => {
       addRecentProject(workspacePath);
-      return core.workspace(workspacePath).open();
+      return core
+        .workspace(workspacePath)
+        .open()
+        .then(
+          () => true,
+          (error: unknown) => {
+            reportOpenFailure(workspacePath, error);
+            return false;
+          },
+        );
     },
     [addRecentProject, core],
   );

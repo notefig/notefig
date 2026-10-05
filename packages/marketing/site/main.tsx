@@ -83,5 +83,10 @@ void whenOpenWorkspacesReady().then(() => {
   for (const row of [...openWorkspacesCollection.values()]) {
     if (row.key !== rootKey) void appCore().workspace(row.path).close();
   }
-  void appCore().workspace(WORKSPACE_ROOT).focus();
+  appCore()
+    .workspace(WORKSPACE_ROOT)
+    .focus()
+    .catch((error: unknown) =>
+      console.error("Failed to open the content root:", error),
+    );
 });

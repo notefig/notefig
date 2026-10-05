@@ -52,6 +52,7 @@ i18n
           backToHome: "Back to home",
           pickerPermissionDenied:
             "Browser denied folder access — check the site's file permissions.",
+          openProjectFailed: "Couldn't open {{name}}.",
 
           // Theme
           light: "Light",

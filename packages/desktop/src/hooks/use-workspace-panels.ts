@@ -17,6 +17,7 @@ import type { SearchPanelHandle } from "@/components/editor/search-panel";
 import { retryOnAnimationFrame } from "@/utils/retry-on-animation-frame";
 import { DEFAULT_SETTINGS_SECTION } from "@/components/editor/settings-modal";
 import { useCore } from "@notefig/core/react";
+import { reportOpenFailure } from "@/hooks/use-open-project";
 import { workspaceScoped } from "@/entities/workspace-scoped";
 
 import {
@@ -126,7 +127,10 @@ export function useWorkspacePanels({
     (path: string) => {
       const tool = lastTool.peek(path)?.tool ?? DEFAULT_TOOL;
       // Focus is a durable write; the view flips at once.
-      void core.workspace(path).focus();
+      void core
+        .workspace(path)
+        .focus()
+        .catch((error: unknown) => reportOpenFailure(path, error));
       setUrlSearchParams((prev) => withSidebarView(prev, tool), {
         replace: true,
       });

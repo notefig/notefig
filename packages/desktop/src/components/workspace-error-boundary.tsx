@@ -187,7 +187,8 @@ function WorkspaceAccessError({
       // fully (agents demote to "restored"; its dead handle stops being
       // watched) rather than leaving a wounded background entry.
       if (workspacePath) void core.workspace(workspacePath).close();
-      await openProject(picked);
+      // Reported already; there is nothing to resume into.
+      if (!(await openProject(picked))) return;
     }
     resume(picked);
   };
