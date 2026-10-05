@@ -238,3 +238,19 @@ describe("whenBlockRendered", () => {
     }
   });
 });
+
+describe("whenBlockRendered, late id", () => {
+  it("resolves when an existing wrapper gains the block id", async () => {
+    const root = document.createElement("div");
+    const wrapper = document.createElement("div");
+    root.append(wrapper);
+    const found = whenBlockRendered(
+      { view: { dom: root } } as unknown as Parameters<
+        typeof whenBlockRendered
+      >[0],
+      "blob-2",
+    );
+    wrapper.dataset.blobId = "blob-2";
+    expect(await found).toBe(wrapper);
+  });
+});

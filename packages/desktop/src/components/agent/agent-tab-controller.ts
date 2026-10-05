@@ -100,7 +100,7 @@ function createAgentTabController(
       return [];
     },
 
-    revealMatch(_match: TabSearchMatch): boolean {
+    async revealMatch(_match: TabSearchMatch): Promise<boolean> {
       return false;
     },
   };

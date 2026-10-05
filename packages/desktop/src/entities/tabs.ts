@@ -127,8 +127,8 @@ interface TabHandleBase {
   selectedText(): string | undefined;
   /** Find-in-tab: occurrences of `query` in this tab's own content. */
   search(query: string, options?: TabSearchOptions): Promise<TabSearchMatch[]>;
-  /** Scroll a match from `search` into view and highlight it. */
-  revealMatch(match: TabSearchMatch): boolean;
+  /** Scroll a match from `search` into view; resolves whether it moved. */
+  revealMatch(match: TabSearchMatch): Promise<boolean>;
 }
 
 export interface FileTabHandle extends TabHandleBase {

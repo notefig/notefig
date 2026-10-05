@@ -72,8 +72,11 @@ export interface TabController {
    * stored transcript for an agent session.
    */
   search(query: string, options?: TabSearchOptions): Promise<SearchTarget[]>;
-  /** Scroll a match from `search` into view and highlight it. */
-  revealMatch(match: SearchTarget): boolean;
+  /**
+   * Scroll a match from `search` into view and highlight it. Resolves
+   * whether it moved — false for a stale match or a surface not up in time.
+   */
+  revealMatch(match: SearchTarget): Promise<boolean>;
   /** Undo/redo inside the tab; absent when the tab type has no history. */
   history?: TabHistoryControls;
 }
@@ -230,8 +233,11 @@ export async function searchTab(
   return (await controllers.get(tabId)?.search(query, options)) ?? [];
 }
 
-export function revealTabMatch(tabId: string, match: SearchTarget): boolean {
-  return controllers.get(tabId)?.revealMatch(match) ?? false;
+export async function revealTabMatch(
+  tabId: string,
+  match: SearchTarget,
+): Promise<boolean> {
+  return (await controllers.get(tabId)?.revealMatch(match)) ?? false;
 }
 
 export function runTabHistoryAction(

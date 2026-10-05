@@ -24,7 +24,7 @@ function stubController(
     selectedText: () => "selected",
     dispose: () => {},
     search: async () => [],
-    revealMatch: () => true,
+    revealMatch: async () => true,
     ...overrides,
   };
 }

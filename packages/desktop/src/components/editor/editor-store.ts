@@ -48,6 +48,7 @@ import { createMarkdownCodec } from "./markdown-codec";
 import {
   getAllEditorPaths,
   getEditorInstance,
+  goToInEditor,
   isBlockTarget,
   isMarkdownInstance,
   registerEditorInstance,
@@ -145,7 +146,13 @@ export function whenBlockRendered(
       clearTimeout(timer);
       resolve(element);
     };
-    observer.observe(root, { childList: true, subtree: true });
+    // Attributes too: an existing wrapper can gain its id after render.
+    observer.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-blob-id"],
+    });
   });
 }
 
@@ -254,12 +261,7 @@ function createEditorTabController(
       });
     },
 
-    revealMatch: (match: SearchTarget) => {
-      const instance = getEditorInstance(filePath);
-      if (!instance) return false;
-      void instance.goTo(match);
-      return true;
-    },
+    revealMatch: (match: SearchTarget) => goToInEditor(filePath, match),
 
     get history() {
       // Only documents have an edit history; image/release-notes tabs

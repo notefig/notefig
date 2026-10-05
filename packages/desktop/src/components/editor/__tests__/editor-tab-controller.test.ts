@@ -3,7 +3,7 @@ import {
   getOrCreateEditor,
   disposeAllEditors,
 } from "@/components/editor/editor-store";
-import { getMarkdownEditor } from "@/entities/editors";
+import { getMarkdownEditor, markEditorMounted } from "@/entities/editors";
 import { getTabController } from "@/tabs/tab-controllers";
 
 function doc(...paragraphs: string[]) {
@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 describe("a document's tab controller", () => {
-  it("reveals a match by re-locating it in the rendered document", () => {
+  it("reveals a match by re-locating it in the rendered document", async () => {
     getOrCreateEditor("/ws/a.md", {
       type: "markdown",
       content: doc("alpha beta", "beta gamma"),
@@ -29,7 +29,8 @@ describe("a document's tab controller", () => {
 
     // The shape the file search returns: text, its line, and which
     // same-text occurrence in the file it was.
-    const revealed = getTabController("/ws/a.md")!.revealMatch({
+    markEditorMounted("/ws/a.md");
+    const revealed = await getTabController("/ws/a.md")!.revealMatch({
       matchText: "beta",
       lineText: "beta gamma",
       occurrence: 1,
