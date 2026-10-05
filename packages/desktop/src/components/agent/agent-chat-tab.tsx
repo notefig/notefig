@@ -41,6 +41,7 @@ import {
 import { Markdown } from "@/components/ui/markdown";
 import { cn } from "@notefig/ui/utils";
 import {
+  agents,
   useTaskRow,
   useTaskEntries,
   useTaskTurns,
@@ -48,16 +49,6 @@ import {
   type AgentTaskRow,
   type AgentTurn,
 } from "@/entities/agents";
-import {
-  authenticateAgentTask,
-  cancelAgentTask,
-  cancelAgentTurnAndForget,
-  deleteAgentSession,
-  promptAgentTask,
-  removeQueuedPrompt,
-  retryAgentTaskAfterAuth,
-  reviveAgentTask,
-} from "@/agent/agent-service";
 import { PromptEditor, type PromptEditorHandle } from "@notefig/widgets";
 import { mentionContextParts } from "./prompt-widget-host";
 import { PermissionCard } from "./permission-card";
@@ -132,7 +123,7 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
   // session/load streams the history back into the transcript (MET-54).
   const status = taskRow?.status;
   useEffect(() => {
-    if (status === "restored") reviveAgentTask(taskId);
+    if (status === "restored") agents.task(taskId).revive();
   }, [status, taskId]);
 
   // The floating composer overlay's live height (it grows when permission/
@@ -261,11 +252,9 @@ function ComposerOverlay({
   const sendPrompt = useCallback(() => {
     const text = draft.trim();
     if (!text) return;
-    promptAgentTask(
-      taskId,
-      text,
-      mentionContextParts(taskRow.workspacePath, text),
-    );
+    agents.task(taskId).prompt(text, {
+      contextParts: mentionContextParts(taskRow.workspacePath, text),
+    });
     setLastSentPrompt(taskId, text);
     setDraftState("");
     clearComposerDraft(taskId);
@@ -276,7 +265,7 @@ function ComposerOverlay({
   }, [draft, taskId, taskRow.workspacePath, transcriptScrollRef]);
 
   const stopTask = useCallback(() => {
-    void cancelAgentTask(taskId);
+    void agents.task(taskId).cancel();
   }, [taskId]);
 
   // Escape while a turn runs (MET-94): cancel it and — when the agent
@@ -287,12 +276,15 @@ function ComposerOverlay({
   // restore never clobbers a half-typed follow-up, and reads the draft
   // store at resolve time — the closure's `draft` predates the await.
   const cancelAndRestore = useCallback(() => {
-    void cancelAgentTurnAndForget(taskId).then((forgot) => {
-      if (!forgot) return;
-      if (getComposerDraft(taskId).trim() !== "") return;
-      const lastSent = getLastSentPrompt(taskId);
-      if (lastSent) setDraft(lastSent);
-    });
+    void agents
+      .task(taskId)
+      .cancelTurnAndForget()
+      .then((forgot) => {
+        if (!forgot) return;
+        if (getComposerDraft(taskId).trim() !== "") return;
+        const lastSent = getLastSentPrompt(taskId);
+        if (lastSent) setDraft(lastSent);
+      });
   }, [taskId, setDraft]);
 
   return (
@@ -351,7 +343,7 @@ function UnavailableCard({ taskId }: { taskId: string }) {
         variant="outline"
         size="sm"
         className="shrink-0"
-        onClick={() => void deleteAgentSession(taskId)}
+        onClick={() => void agents.task(taskId).delete()}
       >
         {t("agentDeleteSession")}
       </Button>
@@ -810,7 +802,7 @@ function QueuedBadge({ taskId, turnId }: { taskId: string; turnId: string }) {
         title={t("agentRemoveFromQueue")}
         aria-label={t("agentRemoveFromQueue")}
         className="rounded-full p-0.5 hover:bg-primary-foreground/20"
-        onClick={() => removeQueuedPrompt(taskId, turnId)}
+        onClick={() => agents.task(taskId).removeQueuedPrompt(turnId)}
       >
         <X className="size-3" />
       </button>

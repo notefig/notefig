@@ -21,7 +21,6 @@ import { findBlobs, patchBlobInMarkdown } from "@notefig/shared/blobs";
 import { toast } from "sonner";
 import { agents } from "@/agent/agents";
 import i18n from "@/utils/intl";
-import { findBlobAuthorTask } from "@/agent/agent-service";
 import { readWorkspaceTextFile, writeWorkspaceTextFile } from "@/utils/file-sync";
 import { createMarkdownCodec } from "../markdown-codec";
 import { getMarkdownEditor } from "@/entities/editors";
@@ -77,7 +76,7 @@ export async function answerBlob(
   // The type's own formatter decides what the text says (directive: replace
   // the answered block with resolved content); enqueue is infallible and
   // lossless, so fire-and-forget is safe.
-  const authoredBy = findBlobAuthorTask(blobId);
+  const authoredBy = agents.blobAuthor(blobId);
   if (authoredBy) {
     const envelope = findBlobs(markdown).find(
       (loc) => loc.blob.envelope.id === blobId,

@@ -10,13 +10,11 @@ vi.mock("@/utils/file-sync", () => ({
 }));
 
 const findBlobAuthorTask = vi.fn();
-vi.mock("@/agent/agent-service", () => ({
-  findBlobAuthorTask: (...args: unknown[]) => findBlobAuthorTask(...args),
-}));
 
 const taskPrompt = vi.fn();
 vi.mock("@/agent/agents", () => ({
   agents: {
+    blobAuthor: (...args: unknown[]) => findBlobAuthorTask(...args),
     task: (taskId: string) => ({
       prompt: (text: string) => {
         taskPrompt(taskId, text);

@@ -151,10 +151,12 @@ export function clearWorkspaceHistoryServices(): void {
   clearWorkerGitRepos();
 }
 
-/** The history repo of one open workspace — `core.workspace(ws).history`. */
+/** One workspace's history repo — also `core.workspace(ws).history`. */
 export interface WorkspaceHistory {
   /** The repo, initialized on first use. */
   ready(): Promise<GitService>;
+  /** A file's text at a checkpoint (`relativePath` from the root). */
+  read(ref: string, relativePath: string): Promise<string>;
   /** Commit everything dirty; the new oid, or null if nothing changed. */
   checkpoint(
     message: string,
@@ -168,6 +170,19 @@ declare module "@notefig/core" {
   }
 }
 
+export function history(workspacePath: string): WorkspaceHistory {
+  return {
+    ready: () => ensureWorkspaceHistoryInitialized(workspacePath),
+    read: async (ref, relativePath) =>
+      (await ensureWorkspaceHistoryInitialized(workspacePath)).readTextFile({
+        ref,
+        filepath: relativePath,
+      }),
+    checkpoint: (message, author) =>
+      checkpointWorkspaceHistory(workspacePath, message, author),
+  };
+}
+
 /**
  * The history repo lives as long as its workspace is open: closing the
  * workspace drops the service and its git worker. Agents need it, so their
@@ -176,11 +191,7 @@ declare module "@notefig/core" {
 export const historyModule = defineModule({
   name: "history",
   workspace: {
-    create: ({ workspace }) => ({
-      ready: () => ensureWorkspaceHistoryInitialized(workspace.path),
-      checkpoint: (message, author) =>
-        checkpointWorkspaceHistory(workspace.path, message, author),
-    }),
+    create: ({ workspace }) => history(workspace.path),
     dispose: (_history, workspace) =>
       disposeWorkspaceHistoryService(workspace.path),
   },

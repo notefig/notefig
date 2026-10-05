@@ -1,7 +1,7 @@
 /**
  * The shared per-workspace session all prompt blobs queue into. Lazily
  * started on the first blob send (default harness) and reused across every
- * widget — the agent-service task already FIFO-queues turns, so concurrent
+ * widget — the agent task already FIFO-queues turns, so concurrent
  * widgets just line up. The rotate control replaces the shared session with
  * a fresh one; the old task is never cancelled here (it stays alive and
  * visible in the sessions panel, and any widget bound to one of its turns
@@ -10,7 +10,7 @@
 import type { HarnessDefinition } from "@notefig/shared/agent";
 import { workspaceKey } from "@/utils/path";
 import { agentTasksCollection } from "@/agent/agent-collections";
-import { startAgentTask } from "@/agent/agent-service";
+import { agents } from "@/agent/agents";
 
 type SharedSession = { taskId: string; started: Promise<void> };
 
@@ -40,7 +40,9 @@ export async function getOrStartSharedSession(
   const key = workspaceKey(workspacePath);
   let session = sessions.get(key);
   if (!session || !isReusable(session)) {
-    const { taskId, started } = startAgentTask(workspacePath, harness);
+    const { taskId, started } = agents
+      .workspace(workspacePath)
+      .startTask(harness);
     session = { taskId, started };
     sessions.set(key, session);
   }

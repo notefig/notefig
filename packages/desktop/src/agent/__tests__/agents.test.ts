@@ -24,8 +24,18 @@ vi.mock("@/adapters", async () => ({
         onRequest: vi.fn(() => () => {}),
         close: vi.fn(async () => {}),
       })),
+      // Spawning is not what these tests drive: a start that gets this far
+      // fails on the row, as a real spawn failure would.
+      createAgentTransport: vi.fn(() => {
+        throw new Error("no agent processes in unit tests");
+      }),
     },
   },
+}));
+// Whether a session has somewhere to run (the web needs a paired machine).
+const runtime = vi.hoisted(() => ({ ready: true }));
+vi.mock("../tunnel/require-connection", () => ({
+  ensureAgentRuntime: () => runtime.ready,
 }));
 vi.mock("@/utils/history-service", () => ({
   checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
@@ -34,7 +44,15 @@ vi.mock("@/utils/history-service", () => ({
 import { createLoopbackPair, decodeWidgetContextUri } from "@notefig/agent";
 import { FakeAgent } from "../mock-harness";
 import { TaskManager } from "../agent-service";
-import { agents, splitLeadingQuote } from "../agents";
+import {
+  AGENT_KV_NAMESPACE,
+  agents,
+  splitLeadingQuote,
+  trustKey,
+} from "../agents";
+import { installAppCore } from "@/core/current";
+import { onAppEvent } from "@/utils/app-events";
+import { removeKv, writeKv } from "@/utils/kv-store";
 import {
   agentEntriesCollection,
   agentPermissionRequestsCollection,
@@ -144,6 +162,7 @@ describe("agents facade (Stage 1)", () => {
 
     const handle = agents.task(task.taskId);
     await handle.promptFromWidget("expand this section", {
+      workspacePath: "/ws",
       path: "notes.md",
       pos: 42,
       isDocEmpty: false,
@@ -174,6 +193,7 @@ describe("agents facade (Stage 1)", () => {
     await task.start(() => client);
 
     await agents.task(task.taskId).promptFromWidget("shorten this", {
+      workspacePath: "/ws",
       path: "notes.md",
       pos: 42,
       isDocEmpty: false,
@@ -214,6 +234,7 @@ describe("agents facade (Stage 1)", () => {
 
     const handle = agents.task(task.taskId);
     await handle.promptFromWidget("write an intro", {
+      workspacePath: "/ws",
       path: "new-doc.md",
       pos: 0,
       isDocEmpty: true,
@@ -317,5 +338,99 @@ describe("splitLeadingQuote", () => {
       quote: "only quote",
       rest: "",
     });
+  });
+});
+
+describe("the widget's send path", () => {
+  it("announces the round in the widget's document, by absolute path", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    new FakeAgent(agentSide).onPrompt = async () => ({
+      stopReason: "end_turn",
+    });
+    const task = new TaskManager("/ws").createTask(harness);
+    await task.start(() => client);
+    const rounds: unknown[] = [];
+    const stop = onAppEvent("widget:round-started", (detail) =>
+      rounds.push(detail),
+    );
+
+    const { turnId, completed } = agents
+      .task(task.taskId)
+      .promptFromWidget("expand this", {
+        workspacePath: "/ws",
+        path: "notes/a.md",
+        pos: 3,
+        isDocEmpty: false,
+      });
+    await completed;
+    stop();
+
+    expect(rounds).toEqual([
+      {
+        taskId: task.taskId,
+        turnId,
+        workspacePath: "/ws",
+        documentPath: "/ws/notes/a.md",
+        prompt: "expand this",
+      },
+    ]);
+  });
+});
+
+describe("starting a session from the UI", () => {
+  const openAgent = vi.fn();
+
+  beforeEach(async () => {
+    openAgent.mockClear();
+    runtime.ready = true;
+    installAppCore({ tabs: { openAgent } } as never);
+    await removeKv(AGENT_KV_NAMESPACE, trustKey("/ws"));
+  });
+
+  it("starts nothing without a runtime to run on", async () => {
+    runtime.ready = false;
+    await writeKv(AGENT_KV_NAMESPACE, trustKey("/ws"), true);
+
+    expect(agents.workspace("/ws").start(harness)).toEqual({
+      status: "no-runtime",
+    });
+    expect(agentTasksCollection.size).toBe(0);
+  });
+
+  it("asks for trust first in a workspace that never ran agents", () => {
+    const workspace = agents.workspace("/ws");
+
+    expect(workspace.isTrusted()).toBe(false);
+    expect(workspace.start(harness)).toEqual({ status: "needs-trust" });
+    expect(agentTasksCollection.size).toBe(0);
+    expect(openAgent).not.toHaveBeenCalled();
+  });
+
+  it("the start right after the user grants trust goes through", async () => {
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    const workspace = agents.workspace("/ws-granted");
+
+    workspace.trust();
+    const result = workspace.start(harness);
+
+    expect(result).toEqual({ status: "started", taskId: expect.any(String) });
+    await agents.task((result as { taskId: string }).taskId).delete();
+    quiet.mockRestore();
+  });
+
+  it("once trusted, starts the task and opens its tab on the starting row", async () => {
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    await writeKv(AGENT_KV_NAMESPACE, trustKey("/ws"), true);
+    const workspace = agents.workspace("/ws");
+
+    const result = workspace.start(harness);
+
+    expect(result).toEqual({ status: "started", taskId: expect.any(String) });
+    const { taskId } = result as { taskId: string };
+    expect(agentTasksCollection.get(taskId)?.workspacePath).toBe("/ws");
+    expect(openAgent).toHaveBeenCalledWith(taskId);
+    expect(workspace.liveTaskIds()).toContain(taskId);
+    await agents.task(taskId).delete();
+    quiet.mockRestore();
   });
 });

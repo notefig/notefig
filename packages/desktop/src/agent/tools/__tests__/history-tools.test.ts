@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 
 const { readTextFile, log, addAllAndCommit } = vi.hoisted(() => ({
-  readTextFile: vi.fn(async () => "content"),
+  readTextFile: vi.fn(async (_at: { ref: string; filepath: string }) => "content"),
   log: vi.fn(async () => [
     {
       oid: "abc123",
@@ -15,15 +15,14 @@ const { readTextFile, log, addAllAndCommit } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/utils/history-service", () => ({
-  ensureWorkspaceHistoryInitialized: vi.fn(async () => ({
-    readTextFile,
-    log,
-    addAllAndCommit,
-  })),
-  checkpointWorkspaceHistory: vi.fn(
-    async (_ws: string, message: string, author: { name: string; email: string }) =>
-      addAllAndCommit({ message, author }),
-  ),
+  history: () => ({
+    ready: vi.fn(async () => ({ readTextFile, log, addAllAndCommit })),
+    read: (ref: string, filepath: string) => readTextFile({ ref, filepath }),
+    checkpoint: vi.fn(
+      async (message: string, author: { name: string; email: string }) =>
+        addAllAndCommit({ message, author }),
+    ),
+  }),
   historyGitDir: vi.fn((ws: string) => `${ws}/.notefig/history`),
 }));
 

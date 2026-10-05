@@ -12,10 +12,7 @@ import type { AuthMethod } from "@notefig/shared/agent";
 import { Button } from "@notefig/ui/button";
 import { cn } from "@notefig/ui/utils";
 import type { AgentTaskRow } from "@/agent/agent-collections";
-import {
-  authenticateAgentTask,
-  retryAgentTaskAfterAuth,
-} from "@/agent/agent-service";
+import { agents } from "@/entities/agents";
 
 export function AuthCard({
   task,
@@ -35,7 +32,7 @@ export function AuthCard({
     async (method: AuthMethod) => {
       setBusyMethodId(method.id);
       setInstructions(null);
-      const result = await authenticateAgentTask(task.taskId, method.id);
+      const result = await agents.task(task.taskId).authenticate(method.id);
       setBusyMethodId(null);
       if (!result.ok) {
         // Out-of-band method: show how to sign in instead.
@@ -80,7 +77,10 @@ export function AuthCard({
             {method.name ?? method.id}
           </Button>
         ))}
-        <Button size="sm" onClick={() => retryAgentTaskAfterAuth(task.taskId)}>
+        <Button
+          size="sm"
+          onClick={() => agents.task(task.taskId).retryAfterAuth()}
+        >
           {t("agentSignedInRetry")}
         </Button>
       </div>

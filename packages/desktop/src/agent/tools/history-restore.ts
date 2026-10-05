@@ -2,9 +2,7 @@ import { z } from "zod";
 import type { AgentTool } from "@notefig/agent";
 import { writeWorkspaceTextFile } from "@/utils/file-sync";
 import { resolveWorkspacePath } from "@/utils/fs";
-import {
-  ensureWorkspaceHistoryInitialized,
-} from "@/utils/history-service";
+import { history } from "@/utils/history-service";
 
 const InputSchema = z.object({
   path: z.string().min(1),
@@ -24,11 +22,10 @@ export const historyRestore: AgentTool<z.infer<typeof InputSchema>, void> = {
     const resolved = resolveWorkspacePath(ctx.workspacePath, input.path);
     if (!resolved.ok) return { ok: false, error: resolved.error };
     try {
-      const service = await ensureWorkspaceHistoryInitialized(ctx.workspacePath);
-      const content = await service.readTextFile({
-        ref: input.checkpoint,
-        filepath: resolved.relative,
-      });
+      const content = await history(ctx.workspacePath).read(
+        input.checkpoint,
+        resolved.relative,
+      );
       await writeWorkspaceTextFile(resolved.absolute, content);
       return { ok: true, value: undefined };
     } catch (error) {
