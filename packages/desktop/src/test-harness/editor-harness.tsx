@@ -32,6 +32,7 @@ import { SearchPanel } from "@/components/editor/search-panel";
 import type { Core } from "@notefig/core";
 import { CoreProvider, useCore } from "@notefig/core/react";
 import type { OpenTabOptions } from "@/entities/tabs";
+import { installAppCore } from "@/core/current";
 import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary";
 import {
   getMarkdownEditor,
@@ -72,7 +73,9 @@ export function EditorHarness() {
 
   const [initialDoc, setInitialDoc] = useState<JSONContent | null>(null);
   const [opened] = useState<({ tabId: string } & OpenTabOptions)[]>([]);
-  // No dock here: tab opens are recorded instead of applied.
+  // No dock here: tab opens are recorded instead of applied — for React
+  // callers (useCore) and for code outside React (appCore: drop handlers,
+  // jump-to-blob) alike.
   const core = useCore();
   const harnessCore = useMemo<Core>(
     () => ({
@@ -87,6 +90,10 @@ export function EditorHarness() {
     }),
     [core, opened],
   );
+  useEffect(() => {
+    installAppCore(harnessCore);
+    return () => installAppCore(core);
+  }, [core, harnessCore]);
 
   useEffect(() => {
     let cancelled = false;
