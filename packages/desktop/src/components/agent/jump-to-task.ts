@@ -9,7 +9,7 @@
 import { findPromptBlobForTask } from "@notefig/widgets";
 import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
 import type { PromptRound } from "@/entities/prompt-rounds";
-import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
+import { appCore } from "@/core/current";
 
 export type JumpTarget = "widget" | "chat";
 
@@ -31,14 +31,14 @@ export function jumpDocumentForTask(
 
 export function jumpToTask(
   taskId: string,
-  options: { turnId?: string | null; openAgentTab: (taskId: string) => void },
+  options: { turnId?: string | null } = {},
 ): JumpTarget {
   const widget = findPromptBlobForTask(taskId, options.turnId);
   if (widget) {
     jumpToBlob(widget.documentPath, widget.blobId);
     return "widget";
   }
-  options.openAgentTab(taskId);
+  appCore().tabs.openAgent(taskId);
   return "chat";
 }
 
@@ -48,12 +48,11 @@ export function jumpToTask(
  */
 export function jumpToRound(
   round: Pick<PromptRound, "taskId" | "turnId" | "documentPath">,
-  openFile: (options: OpenFileInLayoutOptions) => boolean,
 ): void {
   const widget = findPromptBlobForTask(round.taskId, round.turnId);
   if (widget && widget.boundTurnId === round.turnId) {
     jumpToBlob(widget.documentPath, widget.blobId);
   } else {
-    openFile({ tabId: round.documentPath, intent: "replace" });
+    appCore().tabs.open(round.documentPath, { intent: "replace" });
   }
 }

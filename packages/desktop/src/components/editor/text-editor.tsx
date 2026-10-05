@@ -16,7 +16,8 @@ import { PromptMentionMenu, PROMPT_DRAFT_NODE_NAME } from "@notefig/widgets";
 import { LinkBubbleMenu } from "./tiptap-link-menu";
 import { TableMenu } from "./tiptap-table-menu";
 import { cn } from "@notefig/ui/utils";
-import { dropZoneProps, getProtocolContext } from "@/utils/drag-protocol";
+import { dropZoneProps } from "@/utils/drag-protocol";
+import { appCore } from "@/core/current";
 import { isImageFile } from "@/utils/fs";
 import { relativeTreePath } from "@/utils/path";
 import "./tiptap.css";
@@ -105,8 +106,7 @@ export function TextEditor({
         return;
       }
 
-      getProtocolContext().openFile?.({
-        tabId: payload.path,
+      appCore().tabs.open(payload.path, {
         intent: "new-tab",
         targetWindowId:
           info.element

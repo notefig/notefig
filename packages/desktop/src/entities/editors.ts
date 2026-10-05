@@ -17,11 +17,8 @@ import {
 } from "@/components/editor/editor-store";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { getDocumentSync } from "@/utils/markdown-conversion";
-import {
-  readLayout,
-  extractTabIds,
-  findLayoutSelectedTab,
-} from "@/utils/layout-codec";
+import { appCore } from "@/core/current";
+import { extractTabIds, findLayoutSelectedTab } from "@/utils/layout-codec";
 import { relativeTreePath } from "@/utils/path";
 
 const markdownCodec = createMarkdownCodec();
@@ -60,15 +57,14 @@ export interface WorkspaceEditorContext {
 
 /**
  * Read-only snapshot of what the user has open, scoped to one workspace.
- * Sourced from the URL (the layout's single source of truth) rather than a
- * React hook, so non-React callers (agent tools, the prompt composer) can
- * call it directly. Not reactive: callers that need live updates should
- * still go through `useLayoutSearchParam`/`useDockableTabs`.
+ * Read from `core.layout` rather than a React hook, so non-React callers
+ * (agent tools, the prompt composer) can call it directly. Not reactive:
+ * callers that need live updates go through `useLayout`/`useDockableTabs`.
  */
 export function getWorkspaceEditorContext(
   workspacePath: string,
 ): WorkspaceEditorContext {
-  const layout = readLayout();
+  const layout = appCore().layout.read();
   const activeFile = findLayoutSelectedTab(layout);
   // Tree membership, not a string prefix: the layout is one dock over every
   // open workspace, and `/ws-backup` must not read as inside `/ws`.

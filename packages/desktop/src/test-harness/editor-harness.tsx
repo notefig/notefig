@@ -20,7 +20,7 @@
  *   window.__HARNESS__ = {
  *     getMarkdown(): string | null;            // current doc serialization
  *     readFile(path): Promise<string | null>;  // adapter-side content
- *     opened: OpenFileInLayoutOptions[];       // recorded openFile calls
+ *     opened: { tabId: string }[];             // recorded tab opens
  *     selectAll(): void;                       // focus + select the whole doc
  *   }
  */
@@ -29,7 +29,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { JSONContent } from "@tiptap/core";
 import { TextEditor } from "@/components/editor/text-editor";
 import { SearchPanel } from "@/components/editor/search-panel";
-import { WorkspaceTabsProvider } from "@/components/workspace-tabs-provider";
+import type { Core } from "@notefig/core";
+import { CoreProvider, useCore } from "@notefig/core/react";
+import type { OpenTabOptions } from "@/entities/tabs";
+import { installAppCore } from "@/core/current";
 import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary";
 import {
   getMarkdownEditor,
@@ -39,7 +42,6 @@ import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
 import { platformAdapter } from "@/adapters";
 import { openDocument } from "@/utils/markdown-conversion";
 import { calculateContentHash } from "@/utils/hash";
-import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
 import type { FileEntry } from "@/utils/fs";
 
 interface HarnessConfig {
@@ -70,7 +72,28 @@ export function EditorHarness() {
   );
 
   const [initialDoc, setInitialDoc] = useState<JSONContent | null>(null);
-  const [opened] = useState<OpenFileInLayoutOptions[]>([]);
+  const [opened] = useState<({ tabId: string } & OpenTabOptions)[]>([]);
+  // No dock here: tab opens are recorded instead of applied — for React
+  // callers (useCore) and for code outside React (appCore: drop handlers,
+  // jump-to-blob) alike.
+  const core = useCore();
+  const harnessCore = useMemo<Core>(
+    () => ({
+      ...core,
+      tabs: {
+        ...core.tabs,
+        open: (tabId: string, options?: OpenTabOptions) => {
+          opened.push({ tabId, ...options });
+          return true;
+        },
+      },
+    }),
+    [core, opened],
+  );
+  useEffect(() => {
+    installAppCore(harnessCore);
+    return () => installAppCore(core);
+  }, [core, harnessCore]);
 
   useEffect(() => {
     let cancelled = false;
@@ -121,12 +144,7 @@ export function EditorHarness() {
   };
 
   return (
-    <WorkspaceTabsProvider
-      openFile={(options) => {
-        opened.push(options);
-        return true;
-      }}
-    >
+    <CoreProvider core={harnessCore}>
       <PromptWidgetBoundary>
       <div
         className="flex h-screen w-screen text-foreground"
@@ -145,6 +163,6 @@ export function EditorHarness() {
         </div>
       </div>
       </PromptWidgetBoundary>
-    </WorkspaceTabsProvider>
+    </CoreProvider>
   );
 }

@@ -5,15 +5,15 @@
  * `data-blob-id` attribute BlobNodeView already sets on its wrapper instead
  * of computing a position.
  */
-import { getProtocolContext } from "@/utils/drag-protocol";
-import { requestTabFocus } from "@/tabs/tab-controllers";
+import { appCore } from "@/core/current";
 
 const POLL_INTERVAL_MS = 50;
 const MAX_POLL_ATTEMPTS = 40; // ~2s
 
 export function jumpToBlob(path: string, blobId: string): void {
-  getProtocolContext().openFile?.({ tabId: path, intent: "new-tab", moveIfOpen: true });
-  requestTabFocus(path, { when: "when-mounted", reason: "jump-to-blob" });
+  const { tabs } = appCore();
+  tabs.open(path, { intent: "new-tab", moveIfOpen: true });
+  tabs.focus(path, { when: "when-mounted", reason: "jump-to-blob" });
   pollForBlob(blobId, 0);
 }
 

@@ -37,8 +37,10 @@ vi.mock("@/utils/file-write-effects", () => ({
 }));
 
 // The tab layout is app state the host only forwards to.
-vi.mock("@/components/workspace-tabs-provider", () => ({
-  useWorkspaceTabs: () => ({ openFile: () => true, openAgentTab: () => {} }),
+vi.mock("@notefig/core/react", () => ({
+  useCore: () => ({
+    tabs: { open: () => true, openAgent: () => {}, focus: () => false },
+  }),
 }));
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;

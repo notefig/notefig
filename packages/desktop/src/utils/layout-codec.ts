@@ -2,8 +2,8 @@
  * The pure dockable-layout codec: parse the URL-encoded LayoutNode tree and
  * walk it. A true leaf (only a type import) so ANY module can use it —
  * including debug-panel, the crash fallback that must not depend on the
- * entity modules that might be implicated in whatever crashed. The tabs
- * entity re-exports these as its public API.
+ * entity modules that might be implicated in whatever crashed. Everything
+ * else reads the layout through `core.layout` (`entities/layout.ts`).
  */
 import type { LayoutNode } from "@/components/dockable";
 
@@ -53,24 +53,4 @@ export function findLayoutSelectedTab(nodes: LayoutNode[]): string | null {
     }
   }
   return null;
-}
-
-// ---------------------------------------------------------------------------
-// The blessed one-shot reads. The layout's single source of truth is the URL,
-// so these parse `window.location` fresh on every call — for non-reactive
-// callers (agent tools, prompt composers, entity handles). Reactive UI must
-// go through `useLayoutSearchParam`/`useDockableTabs` instead.
-// ---------------------------------------------------------------------------
-
-export function readLayout(): LayoutNode[] {
-  const params = new URLSearchParams(window.location.search);
-  return parseLayout(params.get(LAYOUT_PARAM));
-}
-
-export function readOpenTabIds(): string[] {
-  return extractTabIds(readLayout());
-}
-
-export function readActiveTabId(): string | null {
-  return findLayoutSelectedTab(readLayout());
 }

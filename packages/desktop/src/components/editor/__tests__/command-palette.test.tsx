@@ -33,7 +33,8 @@ let WS = "";
 let files: typeof import("@/entities/files");
 let CommandPalette: typeof import("../command-palette").CommandPalette;
 let ThemeProvider: typeof import("../../theme-provider").ThemeProvider;
-let WorkspaceTabsProvider: typeof import("../../workspace-tabs-provider").WorkspaceTabsProvider;
+let CoreProvider: typeof import("@notefig/core/react").CoreProvider;
+let createTestCore: typeof import("@/testing/test-core").createTestCore;
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -50,8 +51,9 @@ function renderPalette() {
         null,
         createElement(ThemeProvider, {
           defaultTheme: "light",
-          children: createElement(WorkspaceTabsProvider, {
-            openFile,
+          children: createElement(CoreProvider, {
+            // A real test core, with tab opens recorded instead of applied.
+            core: { ...createTestCore(), tabs: { open: openFile } } as never,
             children: createElement(CommandPalette, {
               open: true,
               workspacePath: WS,
@@ -107,7 +109,8 @@ beforeEach(async () => {
   files = await import("@/entities/files");
   ({ CommandPalette } = await import("../command-palette"));
   ({ ThemeProvider } = await import("../../theme-provider"));
-  ({ WorkspaceTabsProvider } = await import("../../workspace-tabs-provider"));
+  ({ CoreProvider } = await import("@notefig/core/react"));
+  ({ createTestCore } = await import("@/testing/test-core"));
   await files.getOrCreateWorkspaceCollections(WS).metadata.preload();
 });
 
@@ -146,8 +149,7 @@ describe("CommandPalette file search", () => {
     await act(async () => {
       item.click();
     });
-    expect(openFile).toHaveBeenCalledWith({
-      tabId: `${WS}/notes.md`,
+    expect(openFile).toHaveBeenCalledWith(`${WS}/notes.md`, {
       intent: "replace",
     });
   });

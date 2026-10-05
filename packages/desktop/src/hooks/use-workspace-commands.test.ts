@@ -32,7 +32,6 @@ function options(): WorkspaceCommandsOptions {
     getSelectedText: () => undefined,
     showFileTree: vi.fn(),
     setFileTreeMode: vi.fn(),
-    openFile: vi.fn(() => true),
     openSearchPanel: vi.fn(),
     openSessionsSidebar: vi.fn(),
   };

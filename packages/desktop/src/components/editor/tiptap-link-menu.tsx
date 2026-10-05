@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { getDirectoryPath } from "@/utils/fs";
 import { platformAdapter } from "@/adapters";
-import { useWorkspaceTabs } from "@/components/workspace-tabs-provider";
+import { useCore } from "@notefig/core/react";
 import { isExternalUrl, buildInternalCandidates } from "./tiptap-link-utils";
 
 const preventFocusLoss = (e: React.MouseEvent) => e.preventDefault();
@@ -25,7 +25,7 @@ export function LinkBubbleMenu({
   filePath,
 }: LinkBubbleMenuProps) {
   const { t } = useTranslation();
-  const { openFile } = useWorkspaceTabs();
+  const { tabs } = useCore();
   // Subscribe to editor state — a plain getAttributes() read at render time
   // goes stale because nothing re-renders this component on selection change.
   const href = useEditorState({
@@ -57,7 +57,7 @@ export function LinkBubbleMenu({
       toast.error(t("linkFileNotFound", { href }));
       return;
     }
-    if (!openFile({ tabId: target, intent: "new-tab" })) {
+    if (!tabs.open(target, { intent: "new-tab" })) {
       toast.error(t("linkCannotOpenInEditor", { href }));
     }
   };

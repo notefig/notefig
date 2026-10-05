@@ -45,7 +45,7 @@ import {
 import { createAndOpenScratchpad } from "@/entities/scratchpads";
 import { useOpenProjectFromPicker } from "@/hooks/use-open-project";
 import { deriveProjectName } from "@/hooks/use-recent-projects";
-import type { OpenFileInLayoutOptions } from "@/utils/dockable-layout";
+import type { TabsApi } from "@/entities/tabs";
 import { getFileName } from "@/utils/fs";
 
 /** Rows per section: a glance, not the sidebar. */
@@ -55,10 +55,7 @@ const LABEL_CHARS = 48;
 
 /** Where an entry opens into. Absent (the welcome screen), there is
  *  nothing to open an entry into, so nothing is listed. */
-export interface AppStatusTabs {
-  openFile: (options: OpenFileInLayoutOptions) => boolean;
-  openAgentTab: (taskId: string) => void;
-}
+export type AppStatusTabs = Pick<TabsApi, "open" | "openAgent">;
 
 export interface AppStatusHost {
   /** The focused workspace — where a new scratchpad goes; null on welcome. */
@@ -133,11 +130,12 @@ function attentionSection(
       mark: attentionGlyphState(item.kind),
       activate: () =>
         item.target.kind === "document" && item.turnId
-          ? jumpToRound(
-              { taskId: item.taskId, turnId: item.turnId, documentPath: item.target.id },
-              tabs.openFile,
-            )
-          : jumpToTask(item.taskId, { turnId: item.turnId, openAgentTab: tabs.openAgentTab }),
+          ? jumpToRound({
+              taskId: item.taskId,
+              turnId: item.turnId,
+              documentPath: item.target.id,
+            })
+          : jumpToTask(item.taskId, { turnId: item.turnId }),
     })),
   };
 }
@@ -163,7 +161,7 @@ function sections(
         // would sit stale in a menu that only redraws on change.
         detail: describePromptRound(round) ?? getFileName(round.documentPath),
         mark: roundMark(round, attention),
-        activate: () => jumpToRound(round, tabs.openFile),
+        activate: () => jumpToRound(round),
       })),
     },
     {
@@ -174,8 +172,7 @@ function sections(
         label: clip(getFileName(document.path)),
         detail: deriveProjectName(document.workspacePath),
         mark: liveDocuments.has(document.path) ? "running" : "document",
-        activate: () =>
-          tabs.openFile({ tabId: document.path, intent: "replace" }),
+        activate: () => tabs.open(document.path, { intent: "replace" }),
       })),
     },
     {
@@ -188,7 +185,7 @@ function sections(
         // would sit stale here.
         detail: describeTaskMeta(meta) ?? deriveProjectName(meta.task.workspacePath),
         mark: sessionMark(meta, attention),
-        activate: () => tabs.openAgentTab(meta.task.taskId),
+        activate: () => tabs.openAgent(meta.task.taskId),
       })),
     },
   ];
@@ -202,11 +199,11 @@ function actions({ host, t }: AppStatusInputs): AppStatusAction[] {
     { id: "open-workspace", label: t("openProject"), activate: host.openWorkspace },
   ];
   if (host.workspacePath !== null && host.tabs !== null) {
-    const { workspacePath, tabs } = host;
+    const { workspacePath } = host;
     list.push({
       id: "new-scratchpad",
       label: t("newScratchpad"),
-      activate: () => createAndOpenScratchpad(workspacePath, tabs.openFile),
+      activate: () => createAndOpenScratchpad(workspacePath),
     });
   }
   list.push({ id: "settings", label: t("settings"), activate: host.openSettings });

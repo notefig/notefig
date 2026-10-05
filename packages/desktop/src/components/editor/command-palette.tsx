@@ -48,7 +48,7 @@ import { closeWorkspace } from "@/entities/workspaces";
 import { useOpenProjectFromPicker } from "@/hooks/use-open-project";
 import { canOpenFile } from "./polymorphic-editor";
 import { FileTypeIcon } from "./file-type-icon";
-import { useWorkspaceTabsOptional } from "@/components/workspace-tabs-provider";
+import { useCore } from "@notefig/core/react";
 
 interface CommandPaletteProps {
   open: boolean;
@@ -104,15 +104,15 @@ function FileQuickResults({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const workspaceTabs = useWorkspaceTabsOptional();
+  const { tabs } = useCore();
   const fileResults = useFileSearch(workspacePath, query, {
     filter: canOpenFile,
   });
 
-  if (!workspaceTabs || fileResults.length === 0) return null;
+  if (fileResults.length === 0) return null;
 
   const handleSelect = (result: FileSearchResult) => {
-    workspaceTabs.openFile({ tabId: result.path, intent: "replace" });
+    tabs.open(result.path, { intent: "replace" });
     onClose();
   };
 
