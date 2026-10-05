@@ -86,10 +86,10 @@ export class WorkspaceErrorBoundary extends Component<
  * layer holds query errors internally and would otherwise just render an
  * empty workspace.
  */
-export function useThrowWorkspaceAccessError(workspaceId: string) {
+export function useThrowWorkspaceAccessError(workspacePath: string) {
   const error = useSyncExternalStore(
     subscribeToQueryCache,
-    () => queryClient.getQueryState(["file-metadata", workspaceId])?.error,
+    () => queryClient.getQueryState(["file-metadata", workspacePath])?.error,
   );
   if (isWorkspaceAccessError(error)) throw error;
 }

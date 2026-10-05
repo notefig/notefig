@@ -62,7 +62,7 @@ import {
 import { formatTimeAgo } from "@/utils/format";
 
 /** Does this tree-domain token name a real file in the workspace? The
- *  workspace path must stay byte-identical to the collection's workspaceId
+ *  workspace path must stay byte-identical to the collection's workspacePath
  *  (rows are keyed by NATIVE absolute paths derived from it), so the join
  *  reproduces that spelling exactly — no normalization anywhere here. */
 function isWorkspaceFile(workspacePath: string, token: string): boolean {
