@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { resetShimDb } from "../setup/shim-db";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -28,6 +29,7 @@ test.describe("shim: idle quiescence", () => {
   let workspace = "";
 
   test.beforeEach(async () => {
+    await resetShimDb();
     workspace = await fs.mkdtemp(path.join(os.tmpdir(), "notefig-idle-"));
     // An empty document: the keeper mounts a prompt widget in it.
     await fs.writeFile(path.join(workspace, "note.md"), "");

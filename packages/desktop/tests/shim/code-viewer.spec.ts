@@ -1,4 +1,5 @@
 import { test, expect, type Locator } from "@playwright/test";
+import { resetShimDb } from "../setup/shim-db";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -65,6 +66,7 @@ test.describe("shim: read-only code viewer", () => {
   let workspace = "";
 
   test.beforeEach(async () => {
+    await resetShimDb();
     workspace = await fs.mkdtemp(path.join(os.tmpdir(), "metrists-shim-"));
     await fs.writeFile(path.join(workspace, "script.ts"), SCRIPT_TS);
     await fs.writeFile(path.join(workspace, "notes.md"), "# Notes\n");
@@ -156,17 +158,14 @@ test.describe("shim: read-only code viewer", () => {
     const token = page.getByText("greetFromTypescript").first();
     await expect(token).toBeVisible({ timeout: 10000 });
 
-    // Drag across the token to make a real selection inside the shadow root.
-    // The viewer highlights asynchronously and replaces its spans as it
-    // does, so a box read right after visibility can belong to a node that
-    // is gone by the next frame — wait for the token to hold still.
+    // Double-click the token to make a real selection inside the shadow
+    // root: one identifier, so the word selection is all of it. The viewer
+    // highlights asynchronously and replaces its spans as it does, so a box
+    // read right after visibility can belong to a node that is gone by the
+    // next frame — wait for the token to hold still. Not a drag: on a fresh
+    // session a multi-step drag across it stopped short ("greet").
     const box = await stableBoundingBox(token);
-    await page.mouse.move(box.x + 1, box.y + box.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, {
-      steps: 10,
-    });
-    await page.mouse.up();
+    await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
 
     const selected = await page.evaluate(() =>
       (document.getSelection()?.toString() ?? "").trim(),

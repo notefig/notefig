@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { resetShimDb } from "../setup/shim-db";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -25,6 +26,7 @@ test.describe("shim: real filesystem round-trip", () => {
   let workspace = "";
 
   test.beforeEach(async () => {
+    await resetShimDb();
     workspace = await fs.mkdtemp(path.join(os.tmpdir(), "metrists-shim-"));
     await fs.writeFile(
       path.join(workspace, "README.md"),
