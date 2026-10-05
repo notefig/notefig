@@ -98,6 +98,18 @@ export function createCore(options: CreateCoreOptions): Core {
   let shuttingDown = false;
   /** Failed opens still disposing what they built; a retry waits them out. */
   const rollingBack = new Map<string, Promise<void>>();
+  /**
+   * The latest open/close call per workspace. An open that had to wait
+   * (for a close or a rollback) gives up if a later call superseded it, so
+   * a close issued during the wait is never undone by the open behind it.
+   */
+  const latestCall = new Map<string, number>();
+  let nextCall = 0;
+  const takeTicket = (key: string) => {
+    const ticket = ++nextCall;
+    latestCall.set(key, ticket);
+    return ticket;
+  };
   let disposed: Promise<void> | null = null;
   const open = new Map<string, OpenWorkspace>();
   const closing = new Map<
@@ -181,12 +193,14 @@ export function createCore(options: CreateCoreOptions): Core {
       // taken the list of workspaces to close.
       if (shuttingDown) return;
       const key = keyOf(path);
+      const ticket = takeTicket(key);
       // A close or a failed open's rollback still running: let it finish
       // first, so its disposers never tear down the fresh instances.
-      const pending = closing.get(key)?.done ?? rollingBack.get(key);
-      if (pending) {
+      let pending = closing.get(key)?.done ?? rollingBack.get(key);
+      while (pending) {
         await pending;
-        return workspaces.open(path);
+        if (shuttingDown || latestCall.get(key) !== ticket) return;
+        pending = closing.get(key)?.done ?? rollingBack.get(key);
       }
       if (open.has(key)) return;
       const entry = createWorkspace({ key, path });
@@ -197,6 +211,7 @@ export function createCore(options: CreateCoreOptions): Core {
     },
     close(path) {
       const key = keyOf(path);
+      takeTicket(key);
       const pending = closing.get(key);
       if (pending) return pending.done;
       const entry = open.get(key);
