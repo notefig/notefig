@@ -31,14 +31,9 @@ vi.mock("@/adapters", async () => ({
   },
 }));
 
-// The registry orchestrates these per-workspace subsystems; the test pins
-// the orchestration (what gets called when), not their internals.
-const files = vi.hoisted(() => ({
-  getOrCreateWorkspaceCollections: vi.fn(),
-  refreshDirectoryMetadata: vi.fn(async () => {}),
-  workspaceCollections: { drop: vi.fn() },
-}));
-vi.mock("@/entities/files", () => files);
+// When core opens a workspace's modules: a stand-in for its files, which
+// start themselves (their walk and watch are the files suite's business).
+const files = { created: vi.fn((_path: string) => {}) };
 // A history module that records its disposal: what core runs when it
 // closes the workspace.
 const history = vi.hoisted(() => ({ disposed: vi.fn() }));
@@ -93,12 +88,20 @@ function taskRow(overrides: Partial<AgentTaskRow> = {}): AgentTaskRow {
 }
 
 // Core closes each workspace's modules when its row goes: the agents (the
-// real module), then the history repo. Scopes and watchers are the tests'
-// own business here (see the workspace-scoped and watcher suites).
+// real module), then the history repo. Scopes are their own suite's
+// business (workspace-scoped.test.ts).
 const core = createTestCore({
   modules: [
     defineModule({ name: "workspace-scopes" }),
-    defineModule({ name: "workspace-watchers" }),
+    defineModule({
+      name: "files",
+      workspace: {
+        create: ({ workspace }) => {
+          files.created(workspace.path);
+          return {} as never;
+        },
+      },
+    }),
     workspacesModule({ restore: false }),
     historyModule,
     workspaceAgentsModule,
@@ -126,25 +129,23 @@ beforeEach(async () => {
 });
 
 describe("focusing a workspace", () => {
-  it("seeds collections, refreshes, inserts the row", async () => {
+  it("joins the open set: the row goes in, and core opens its modules", async () => {
     await focus("/ws");
 
-    expect(files.getOrCreateWorkspaceCollections).toHaveBeenCalledWith("/ws");
-    expect(files.refreshDirectoryMetadata).toHaveBeenCalledWith("/ws");
+    expect(files.created).toHaveBeenCalledWith("/ws");
     expect(isWorkspaceOpen("/ws")).toBe(true);
     expect([...openWorkspacesCollection.values()]).toMatchObject([
       { path: "/ws" },
     ]);
   });
 
-  it("re-entry refreshes the listing but never re-seeds", async () => {
+  it("re-entry keeps one row and one set of modules", async () => {
     await focus("/ws");
     await focus("/ws");
     // Same workspace under a respelled path collapses onto one entry.
     await focus("/ws/");
 
-    expect(files.getOrCreateWorkspaceCollections).toHaveBeenCalledTimes(1);
-    expect(files.refreshDirectoryMetadata).toHaveBeenCalledTimes(3);
+    expect(files.created).toHaveBeenCalledTimes(1);
     expect(openWorkspacesCollection.size).toBe(1);
   });
 
@@ -258,8 +259,7 @@ describe("close/reopen race", () => {
       status: "restored",
     });
     const disposeOrder = dispose.mock.invocationCallOrder[0];
-    const reseedOrder =
-      files.getOrCreateWorkspaceCollections.mock.invocationCallOrder.at(-1);
+    const reseedOrder = files.created.mock.invocationCallOrder.at(-1);
     expect(reseedOrder).toBeGreaterThan(disposeOrder!);
     stopScopes();
   });

@@ -50,6 +50,7 @@ import {
   type AgentTurn,
 } from "@/entities/agents";
 import { PromptEditor, type PromptEditorHandle } from "@notefig/widgets";
+import { useWorkspaceModule } from "@notefig/core/react";
 import { mentionContextParts } from "./prompt-widget-host";
 import { PermissionCard } from "./permission-card";
 import { AuthCard } from "./auth-card";
@@ -249,11 +250,12 @@ function ComposerOverlay({
     [taskId],
   );
 
+  const files = useWorkspaceModule(taskRow.workspacePath, "files");
   const sendPrompt = useCallback(() => {
     const text = draft.trim();
     if (!text) return;
     agents.task(taskId).prompt(text, {
-      contextParts: mentionContextParts(taskRow.workspacePath, text),
+      contextParts: mentionContextParts(files, text),
     });
     setLastSentPrompt(taskId, text);
     setDraftState("");
@@ -262,7 +264,7 @@ function ComposerOverlay({
     // reader had scrolled up into history; this also re-enters follow mode
     // for the streamed reply.
     transcriptScrollRef.current.scrollToEnd();
-  }, [draft, taskId, taskRow.workspacePath, transcriptScrollRef]);
+  }, [draft, taskId, files, transcriptScrollRef]);
 
   const stopTask = useCallback(() => {
     void agents.task(taskId).cancel();

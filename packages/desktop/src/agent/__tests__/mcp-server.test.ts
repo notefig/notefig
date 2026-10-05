@@ -20,17 +20,13 @@ vi.mock("@/components/editor/blobs/blob-registry", () => ({
   getBlobType: (type: string) => blobTypes.find((t) => t.type === type),
 }));
 
-// author_blob's execute reads/writes through the file-sync helpers; stub
+// author_blob's execute reads/writes through the task's documents; fake
 // them so the stringified-payload repair test below exercises the full
 // dispatch without touching a real workspace.
-const { readWorkspaceTextFile, writeWorkspaceTextFile } = vi.hoisted(() => ({
-  readWorkspaceTextFile: vi.fn(async () => "# Doc\n"),
-  writeWorkspaceTextFile: vi.fn(async () => {}),
-}));
-vi.mock("@/utils/file-sync", () => ({
-  readWorkspaceTextFile,
-  writeWorkspaceTextFile,
-}));
+const readWorkspaceTextFile = vi.fn(async (_path: string) => "# Doc\n");
+const writeWorkspaceTextFile = vi.fn(
+  async (_path: string, _content: string) => {},
+);
 
 // The payload builder is an injected dep of the handler now (it reads live
 // editor state, so the real one stays out of this suite); URI decoding is
@@ -73,7 +69,9 @@ const ctx: ToolContext = {
     task: () => ({ prompt: vi.fn(), cancel: vi.fn() }),
     workspace: () => ({ createTask: vi.fn() }),
   },
-  services: {} as ToolContext["services"],
+  services: {
+    documents: { read: readWorkspaceTextFile, write: writeWorkspaceTextFile },
+  } as unknown as ToolContext["services"],
 };
 
 function handler(permissionBroker = new PermissionBroker(ctx.taskId)) {

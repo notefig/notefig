@@ -70,11 +70,9 @@ import {
   type AgentTaskRow,
 } from "./agents";
 import type { AgentTaskHandle } from "@/agent/agents";
-import {
-  file,
-  getOrCreateWorkspaceCollections,
-  useMetadataFetching,
-} from "./files";
+import { useMetadataFetching, type WorkspaceFiles } from "./files";
+import { useCore } from "@notefig/core/react";
+import type { Core } from "@notefig/core";
 import {
   useOpenWorkspaces,
   useOpenWorkspacesReady,
@@ -230,7 +228,8 @@ export function activeRenameTarget(path: string): Promise<string> | null {
  * fails; the tab is left intact at the old path in that case.
  */
 export async function renameOpenFileTab(options: {
-  workspacePath: string;
+  /** The files of the workspace that holds the file. */
+  files: Pick<WorkspaceFiles, "file">;
   oldPath: string;
   newPath: string;
   /**
@@ -240,7 +239,7 @@ export async function renameOpenFileTab(options: {
    */
   applyLayoutRename: (oldId: string, newId: string) => void;
 }): Promise<void> {
-  const { workspacePath, oldPath, newPath, applyLayoutRename } = options;
+  const { files, oldPath, newPath, applyLayoutRename } = options;
   // One rename per source path at a time: the coordination entries are
   // keyed by oldPath, so a second overlapping call would overwrite the
   // first's, and whichever fails would clear the other's write redirect
@@ -268,7 +267,7 @@ export async function renameOpenFileTab(options: {
     // Writes that passed the redirect check before this rename began are
     // tracked in flight — drain them too before moving the file.
     await whenWorkspaceWritesSettled(oldPath);
-    await file(workspacePath, oldPath).rename(newPath);
+    await files.file(oldPath).rename(newPath);
   } catch (error) {
     if (liveEditor && !liveEditor.isDestroyed) liveEditor.setEditable(true);
     settleTarget(oldPath);
@@ -331,28 +330,46 @@ function groupFileTabsByWorkspace(
  * layout over every open workspace.
  */
 function useMissingFileTabs(fileTabsByWorkspace: Map<string, string[]>, fileTabIds: string[]): string {
+  const core = useCore();
   const subscribe = useCallback(
     (onChange: () => void) => {
-      const subscriptions = [...fileTabsByWorkspace.keys()].map((workspace) =>
-        getOrCreateWorkspaceCollections(workspace).metadata.subscribeChanges(
-          onChange,
-        ),
+      const subscriptions = [...fileTabsByWorkspace.keys()].flatMap(
+        (workspace) => {
+          const files = openFilesOf(core, workspace);
+          return files
+            ? [files.collections.metadata.subscribeChanges(onChange)]
+            : [];
+        },
       );
+      // A workspace core opens later brings its rows with it.
+      const stopOpens = core.workspaces.subscribe(onChange);
       return () => {
         for (const subscription of subscriptions) subscription.unsubscribe();
+        stopOpens();
       };
     },
-    [fileTabsByWorkspace],
+    [core, fileTabsByWorkspace],
   );
   const read = useCallback(() => {
     const present = new Set<string>();
     for (const [workspace, paths] of fileTabsByWorkspace) {
-      const { metadata } = getOrCreateWorkspaceCollections(workspace);
+      const metadata = openFilesOf(core, workspace)?.collections.metadata;
+      if (!metadata) continue;
       for (const path of paths) if (metadata.has(path)) present.add(path);
     }
     return fileTabIds.filter((path) => !present.has(path)).join(",");
-  }, [fileTabsByWorkspace, fileTabIds]);
+  }, [core, fileTabsByWorkspace, fileTabIds]);
   return useSyncExternalStore(subscribe, read, read);
+}
+
+/** A workspace's files, if core has it open (its row can load first). */
+function openFilesOf(
+  core: Core,
+  workspace: string,
+): WorkspaceFiles | undefined {
+  return core.workspaces.isOpen(workspace)
+    ? core.workspace(workspace).files
+    : undefined;
 }
 
 /**

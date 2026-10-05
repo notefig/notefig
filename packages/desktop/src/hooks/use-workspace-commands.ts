@@ -1,10 +1,10 @@
+import { useCore } from "@notefig/core/react";
 import { useCallback } from "react";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { platformAdapter } from "@/adapters";
 import { getFileName } from "@/utils/fs";
 import { runTabHistoryAction } from "@/tabs/tab-controllers";
 import { tabKind } from "@/tabs/tab-id";
-import { scratchpads } from "@/entities/scratchpads";
 import type { FileTreeMode } from "@/components/editor/file-tree";
 
 export interface WorkspaceCommandsOptions {
@@ -60,11 +60,12 @@ export function useWorkspaceCommands({
   openSearchPanel,
   openSessionsSidebar,
 }: WorkspaceCommandsOptions): WorkspaceCommands {
+  const core = useCore();
   // "New Scratchpad" is instant and nameless; "New File" keeps the
   // explicit inline-naming flow in the tree.
   const handleNewScratchpad = useCallback(() => {
-    scratchpads(workspacePath).createAndOpen();
-  }, [workspacePath]);
+    core.workspace(workspacePath).scratchpads.createAndOpen();
+  }, [core, workspacePath]);
 
   const handleNewFile = useCallback(() => {
     showFileTree();

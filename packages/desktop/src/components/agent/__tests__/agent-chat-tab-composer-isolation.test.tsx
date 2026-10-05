@@ -31,6 +31,8 @@ import {
   fakePromptWidgetHost,
   withHost,
 } from "@notefig/widgets/testing";
+import { CoreProvider } from "@notefig/core/react";
+import { createTestCore } from "@/testing/test-core";
 import { AgentChatTab } from "@/components/agent/agent-chat-tab";
 import {
   agentTasksCollection,
@@ -109,10 +111,13 @@ describe("AgentChatTab composer isolation (MET-139)", () => {
     // the host itself, so the stub double is enough.
     act(() =>
       root!.render(
-        withHost(
-          fakePromptWidgetHost(),
-          createElement(AgentChatTab, { taskId: TASK_ID }),
-        ),
+        createElement(CoreProvider, {
+          core: createTestCore(),
+          children: withHost(
+            fakePromptWidgetHost(),
+            createElement(AgentChatTab, { taskId: TASK_ID }),
+          ),
+        }),
       ),
     );
     // Let live queries and the markdown pipeline settle before baselining.

@@ -16,7 +16,7 @@ import { useMemo } from "react";
 import { createCollection, useLiveQuery } from "@tanstack/react-db";
 import { persistedCollectionOptions } from "@tanstack/db-sqlite-persistence-core";
 import { platformAdapter } from "@/adapters";
-import { getOrCreateWorkspaceCollections } from "@/entities/files";
+import { useCore } from "@notefig/core/react";
 import { isScratchpadFileRow } from "@/entities/scratchpads";
 import {
   useOpenWorkspaces,
@@ -91,13 +91,6 @@ async function pruneRecentDocuments(): Promise<void> {
   ).isPersisted.promise;
 }
 
-/** Does the file still exist in the workspace's listing? Non-reactive:
- *  the list re-renders on its own inputs, and a deleted file's tab prunes
- *  itself long before this matters. */
-function existsInWorkspace(workspacePath: string, path: string): boolean {
-  return getOrCreateWorkspaceCollections(workspacePath).metadata.has(path);
-}
-
 function isScratchpad(workspacePath: string, path: string): boolean {
   const relativePath = relativeTreePath(workspacePath, path);
   return isScratchpadFileRow({ relativePath, type: "file" });
@@ -140,8 +133,19 @@ export function useRecentDocuments(limit: number): RecentDocument[] {
     q.from({ recent: recentDocumentsCollection }),
   );
   const openWorkspaces = useOpenWorkspaces();
-  return useMemo(
-    () => deriveRecentDocuments(rows, openWorkspaces, existsInWorkspace, limit),
-    [rows, openWorkspaces, limit],
-  );
+  const core = useCore();
+  return useMemo(() => {
+    // Does the file still exist in the workspace's listing? Non-reactive:
+    // the list re-renders on its own inputs, and a deleted file's tab
+    // prunes itself long before this matters.
+    const existsInWorkspace = (workspacePath: string, path: string) =>
+      core.workspaces.isOpen(workspacePath) &&
+      core.workspace(workspacePath).files.collections.metadata.has(path);
+    return deriveRecentDocuments(
+      rows,
+      openWorkspaces,
+      existsInWorkspace,
+      limit,
+    );
+  }, [core, rows, openWorkspaces, limit]);
 }

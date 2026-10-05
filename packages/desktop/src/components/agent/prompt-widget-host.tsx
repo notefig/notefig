@@ -32,7 +32,8 @@ import {
 } from "@/agent/agent-collections";
 import { AGENT_KV_NAMESPACE, agents, trustKey } from "@/agent/agents";
 import { describeTaskMeta, useAgentTaskList } from "@/entities/agents";
-import { getOrCreateWorkspaceCollections } from "@/entities/files";
+import type { WorkspaceFiles } from "@/entities/files";
+import type { Core } from "@notefig/core";
 import {
   useActiveHarnesses,
   useDefaultHarness,
@@ -58,24 +59,33 @@ import { formatTimeAgo } from "@/utils/format";
  *  workspace path must stay byte-identical to the collection's workspacePath
  *  (rows are keyed by NATIVE absolute paths derived from it), so the join
  *  reproduces that spelling exactly — no normalization anywhere here. */
-function isWorkspaceFile(workspacePath: string, token: string): boolean {
-  const { metadata } = getOrCreateWorkspaceCollections(workspacePath);
-  const row = metadata.get(
+type FileRows = Pick<WorkspaceFiles, "workspacePath" | "collections">;
+
+/** A workspace's files while core has it open. */
+function openFilesOf(core: Core, workspacePath: string): FileRows | undefined {
+  return core.workspaces.isOpen(workspacePath)
+    ? core.workspace(workspacePath).files
+    : undefined;
+}
+
+function isWorkspaceFile(files: FileRows, token: string): boolean {
+  const { workspacePath, collections } = files;
+  const row = collections.metadata.get(
     pathutil.join(workspacePath, pathutil.fromTreePath(token)),
   );
   return row !== undefined && row.type === "file";
 }
 
 function searchWorkspaceFiles(
-  workspacePath: string,
+  files: FileRows,
   query: string,
   limit: number,
 ): MentionCandidate[] {
-  const { metadata } = getOrCreateWorkspaceCollections(workspacePath);
+  const { metadata } = files.collections;
   // The raw collection holds directory rows too (useFileSearch's live query
   // filters them; a one-shot read must do it itself).
-  const files = metadata.toArray.filter((row) => row.type === "file");
-  return rankFileRows(files, query, {
+  const fileRows = metadata.toArray.filter((row) => row.type === "file");
+  return rankFileRows(fileRows, query, {
     limit,
     filter: canOpenFile,
     matchAllWhenEmpty: true,
@@ -89,10 +99,12 @@ function searchWorkspaceFiles(
  * harness's own file tools.
  */
 export function mentionContextParts(
-  workspacePath: string,
+  files: FileRows | undefined,
   text: string,
 ): PromptContextPart[] {
-  const isFile = (token: string) => isWorkspaceFile(workspacePath, token);
+  if (!files) return [];
+  const { workspacePath } = files;
+  const isFile = (token: string) => isWorkspaceFile(files, token);
   return extractMentionPaths(text, isFile).map((token) => ({
     kind: "resource_link" as const,
     path: pathutil.toFileUri(
@@ -249,7 +261,9 @@ function useHarnessList() {
  * also why the memo below has an empty dependency array.
  */
 export function usePromptWidgetHost(): PromptWidgetHost {
-  const { tabs } = useCore();
+  // Stable for the life of the app, so the memo below may close over it.
+  const core = useCore();
+  const { tabs } = core;
   const { defaultHarness, setDefaultHarness } = useDefaultHarness();
 
   const latest = useRef({ defaultHarness, setDefaultHarness, tabs });
@@ -276,7 +290,7 @@ export function usePromptWidgetHost(): PromptWidgetHost {
           .promptFromWidget(
             text,
             { ...target, workspacePath: path },
-            mentionContextParts(path, text),
+            mentionContextParts(openFilesOf(core, path), text),
           );
         return { turnId };
       },
@@ -294,8 +308,14 @@ export function usePromptWidgetHost(): PromptWidgetHost {
       useHarnessList,
       useTrust,
 
-      isWorkspaceFile,
-      searchWorkspaceFiles,
+      isWorkspaceFile: (path, token) => {
+        const files = openFilesOf(core, path);
+        return files ? isWorkspaceFile(files, token) : false;
+      },
+      searchWorkspaceFiles: (path, query, limit) => {
+        const files = openFilesOf(core, path);
+        return files ? searchWorkspaceFiles(files, query, limit) : [];
+      },
       toRelativePath: relativeTreePath,
 
       openFile: (path) =>

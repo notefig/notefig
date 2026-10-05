@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
 import type {
   BatchResult,
   FileSystemMetadata,
+  FileSystemSurface,
 } from "@/adapters/platform-adapter.interface";
+import { createWorkspaceFiles, type WorkspaceFiles } from "./files";
 
-// Real TanStack DB collections, mocked fs seam. This pins the create → write →
-// read → delete round-trip through the actual metadata/content collections and
-// their write-through mutation handlers, not a mock of the entities layer.
+// Real TanStack DB collections over an fs handed to them. This pins the
+// create → write → read → delete round-trip through the actual metadata and
+// content collections and their write-through mutation handlers.
 const adapter = {
   createFiles: vi.fn(),
   writeFiles: vi.fn(),
@@ -14,20 +17,12 @@ const adapter = {
   getMetadata: vi.fn(),
   readFiles: vi.fn(),
   readDirectory: vi.fn(),
+  // The instance watches from the start; nothing here reports changes.
+  onFsEvent: vi.fn(() => () => {}),
+  startWatchingMetadata: vi.fn(async () => {}),
+  startWatchingContent: vi.fn(async () => {}),
+  stopWatching: vi.fn(async () => {}),
 };
-
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    fs: adapter,
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
-// Debounced invalidation — harmless in a unit test, but stub it so we don't
-// depend on its timers.
-vi.mock("@/utils/file-write-effects", () => ({
-  invalidateDerivedState: vi.fn(),
-}));
 
 function ok<T>(succeeded: T[]): BatchResult<T> {
   return { succeeded, failed: [] };
@@ -43,20 +38,14 @@ function metadata(path: string, size: number): FileSystemMetadata {
   };
 }
 
-// A fresh workspace path per test — collections are keyed by workspace in a
-// module-level registry (and the QueryClient cache), so reusing one path would
-// leak rows across tests.
-let testCounter = 0;
-let WS = "";
-let FILE = "";
+const WS = "/ws-files-test";
+const FILE = `${WS}/notes.md`;
 
-let files: typeof import("./files");
+let files: WorkspaceFiles;
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  WS = `/ws-files-test-${testCounter++}`;
-  FILE = `${WS}/notes.md`;
-  // A tiny faithful disk: createFile awaits its insert's persistence, which
+  // A tiny faithful disk: create awaits its insert's persistence, which
   // triggers the collection's post-mutation refetch — the walk must list
   // the created file like a real filesystem would, or the fresh row gets
   // full-replaced away.
@@ -77,7 +66,7 @@ beforeEach(async () => {
   });
   // Honor the requested paths — the metadata queryFn calls this with the
   // directory listing, so a blanket return would seed the collection with
-  // FILE before createFile ever runs.
+  // FILE before create ever runs.
   adapter.getMetadata.mockImplementation(async (paths: string[]) =>
     ok(paths.includes(FILE) ? [metadata(FILE, 5)] : []),
   );
@@ -87,25 +76,27 @@ beforeEach(async () => {
     value: [...disk].map((p) => ({ path: p, type: "file" as const })),
   }));
 
-  files = await import("./files");
+  files = createWorkspaceFiles({
+    workspacePath: WS,
+    fs: adapter as unknown as FileSystemSurface,
+    queryClient: new QueryClient(),
+  });
 
   // Start the collections' sync (a live-query subscription does this in the
   // app) so the mutation handlers' direct writeUpsert lands in a ready store.
-  const collections = files.getOrCreateWorkspaceCollections(WS);
   await Promise.all([
-    collections.metadata.preload(),
-    collections.content.preload(),
+    files.collections.metadata.preload(),
+    files.collections.content.preload(),
   ]);
 });
 
 afterEach(() => {
-  // Drop the singleton collections so state can't leak between tests.
-  files.workspaceCollections.drop(WS);
+  files.dispose();
 });
 
 describe("file create → write → read round-trip", () => {
-  it("createFile writes to the fs seam and getFileEntry joins metadata + content", async () => {
-    await files.createFile(WS, FILE, "hello");
+  it("create writes to the fs and entry() joins metadata + content", async () => {
+    await files.file(FILE).create("hello");
 
     // Wrote through to the real fs seam, not just the collection.
     expect(adapter.createFiles).toHaveBeenCalledWith([FILE]);
@@ -113,7 +104,7 @@ describe("file create → write → read round-trip", () => {
       { path: FILE, content: "hello" },
     ]);
 
-    const entry = files.getFileEntry(WS, FILE);
+    const entry = files.file(FILE).entry();
     expect(entry).not.toBeNull();
     expect(entry).toMatchObject({
       path: FILE,
@@ -125,21 +116,21 @@ describe("file create → write → read round-trip", () => {
     expect(entry?.contentHash).toBeTruthy();
   });
 
-  it("writeFileContent updates the existing content row in place", async () => {
-    await files.createFile(WS, FILE, "hello");
+  it("write updates the existing content row in place", async () => {
+    await files.file(FILE).create("hello");
 
     adapter.writeFiles.mockClear();
     adapter.writeFiles.mockResolvedValue(ok([FILE]));
-    await files.writeFileContent(WS, FILE, "goodbye");
+    await files.file(FILE).write("goodbye");
 
     expect(adapter.writeFiles).toHaveBeenCalledWith([
       { path: FILE, content: "goodbye" },
     ]);
-    expect(files.getFileEntry(WS, FILE)?.content).toBe("goodbye");
+    expect(files.file(FILE).entry()?.content).toBe("goodbye");
   });
 
-  it("getFileEntry returns null for an unknown path", () => {
-    expect(files.getFileEntry(WS, `${WS}/missing.md`)).toBeNull();
+  it("entry() is null for an unknown path", () => {
+    expect(files.file(`${WS}/missing.md`).entry()).toBeNull();
   });
 });
 
@@ -173,9 +164,9 @@ describe("lazy stat hydration", () => {
 
   it("the listing writes typed rows without stats and without a stat batch", async () => {
     adapter.getMetadata.mockClear();
-    await files.refreshDirectoryMetadata(WS);
+    await files.refresh();
 
-    const { metadata: rows } = files.getOrCreateWorkspaceCollections(WS);
+    const { metadata: rows } = files.collections;
     expect(rows.get(A)).toMatchObject({ type: "file", relativePath: "a.md" });
     expect(rows.get(SUB)?.type).toBe("directory");
     expect(rows.get(A)?.modified).toBeUndefined();
@@ -185,16 +176,16 @@ describe("lazy stat hydration", () => {
   });
 
   it("hydrateDirectoryStats stats direct children only", async () => {
-    await files.refreshDirectoryMetadata(WS);
+    await files.refresh();
     adapter.getMetadata.mockClear();
 
-    await files.hydrateDirectoryStats(WS, WS);
+    await files.hydrateDirectoryStats(WS);
 
     expect(adapter.getMetadata).toHaveBeenCalledTimes(1);
     const statted = adapter.getMetadata.mock.calls[0][0] as string[];
     expect(new Set(statted)).toEqual(new Set([SUB, A]));
 
-    const { metadata: rows } = files.getOrCreateWorkspaceCollections(WS);
+    const { metadata: rows } = files.collections;
     expect(rows.get(A)?.modified).toBeInstanceOf(Date);
     expect(rows.get(SUB)?.modified).toBeInstanceOf(Date);
     // b.md lives one level deeper — untouched.
@@ -202,26 +193,26 @@ describe("lazy stat hydration", () => {
   });
 
   it("refetch preserves hydrated stats and re-stats hydrated dirs", async () => {
-    await files.refreshDirectoryMetadata(WS);
-    await files.hydrateDirectoryStats(WS, WS);
+    await files.refresh();
+    await files.hydrateDirectoryStats(WS);
 
     // Stat source dries up: carried-forward stats must survive the refetch.
     adapter.getMetadata.mockClear();
     adapter.getMetadata.mockResolvedValue(ok([]));
-    await files.refreshDirectoryMetadata(WS);
+    await files.refresh();
 
     // The refetch re-attempted the hydrated dir's children...
     const statted = adapter.getMetadata.mock.calls[0][0] as string[];
     expect(new Set(statted)).toEqual(new Set([SUB, A]));
     // ...and kept the previous stats when nothing came back.
-    const { metadata: rows } = files.getOrCreateWorkspaceCollections(WS);
+    const { metadata: rows } = files.collections;
     expect(rows.get(A)?.modified).toBeInstanceOf(Date);
   });
 });
 
 describe("recreated files", () => {
-  it("createFile clears a poisoned content row left by a prior life of the path", async () => {
-    const collections = files.getOrCreateWorkspaceCollections(WS);
+  it("create clears a poisoned content row left by a prior life of the path", async () => {
+    const collections = files.collections;
     collections.content.utils.writeUpsert([
       {
         path: FILE,
@@ -231,20 +222,20 @@ describe("recreated files", () => {
       },
     ]);
 
-    await files.createFile(WS, FILE);
+    await files.file(FILE).create();
 
     expect(collections.content.get(FILE)).toBeUndefined();
   });
 });
 
 describe("file delete", () => {
-  it("deleteFileOrDirectory removes the row and calls the fs seam", async () => {
-    await files.createFile(WS, FILE, "hello");
-    expect(files.getFileEntry(WS, FILE)).not.toBeNull();
+  it("delete removes the row and calls the fs", async () => {
+    await files.file(FILE).create("hello");
+    expect(files.file(FILE).entry()).not.toBeNull();
 
-    await files.deleteFileOrDirectory(WS, FILE);
+    await files.file(FILE).delete();
 
     expect(adapter.deleteFiles).toHaveBeenCalledWith([FILE]);
-    expect(files.getFileEntry(WS, FILE)).toBeNull();
+    expect(files.file(FILE).entry()).toBeNull();
   });
 });

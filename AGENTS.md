@@ -89,9 +89,10 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   `workspace.create` from what core hands it (`ctx.use("queryClient")`, the
   workspace's other instances via `ctx.useWorkspace`) and frees it in
   `dispose`; the entity exports the factory (`createWorkspaceGit(deps)`),
-  which is also what its tests build — no module mocks. Converted so far:
-  git, history. Not yet: `file(ws, path)` and `scratchpads(ws)` are still
-  free functions over module state, until their groups convert.
+  which is also what its tests build — no module mocks: files, git,
+  history and scratchpads are converted. App-wide APIs follow the same
+  shape in `register` (`core.documents`). Tests build them over fakes:
+  `testWorkspaceFiles` and `filesModuleOf` in `src/testing/test-files.ts`.
 - Code that cannot hold core yet tells a workspace's modules something
   happened over the app event bus (`emitAppEvent("git:stale", …)`,
   `"agent:turn-completed"`), and each workspace's instance listens for its

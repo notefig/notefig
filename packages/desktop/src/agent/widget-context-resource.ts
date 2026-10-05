@@ -24,7 +24,7 @@ import {
 } from "@/components/editor/document-outline";
 import { getMarkdownEditor, getSelectedText } from "@/entities/editors";
 import { getWorkspaceEditorContext } from "@/entities/editors";
-import { readWorkspaceTextFile } from "@/utils/file-sync";
+import type { DocumentsApi } from "@/entities/documents";
 import { resolveWorkspacePath } from "@/utils/fs";
 import type { WidgetContextRef } from "@notefig/agent";
 
@@ -37,8 +37,11 @@ const fallbackSchema = getSchemaByResolvedExtensions(
 );
 const fallbackCodec = createMarkdownCodec();
 
-async function parseDocFromDisk(absolutePath: string): Promise<PMNode> {
-  const markdown = await readWorkspaceTextFile(absolutePath);
+async function parseDocFromDisk(
+  documents: Pick<DocumentsApi, "read">,
+  absolutePath: string,
+): Promise<PMNode> {
+  const markdown = await documents.read(absolutePath);
   return PMNode.fromJSON(fallbackSchema, fallbackCodec.parse(markdown));
 }
 
@@ -46,9 +49,14 @@ async function parseDocFromDisk(absolutePath: string): Promise<PMNode> {
  *  file is open (unsaved edits included), parsed from disk otherwise.
  *  Shared with `document_read_range`: the tool must address the same
  *  coordinate space this resource's positions come from. */
-export async function resolveDocument(absolutePath: string): Promise<PMNode> {
+export async function resolveDocument(
+  documents: Pick<DocumentsApi, "read">,
+  absolutePath: string,
+): Promise<PMNode> {
   const liveEditor = getMarkdownEditor(absolutePath);
-  return liveEditor ? liveEditor.state.doc : parseDocFromDisk(absolutePath);
+  return liveEditor
+    ? liveEditor.state.doc
+    : parseDocFromDisk(documents, absolutePath);
 }
 
 export interface WidgetContextPayload {
@@ -70,13 +78,14 @@ export interface WidgetContextPayload {
 }
 
 export async function buildWidgetContextPayload(
+  documents: Pick<DocumentsApi, "read">,
   workspacePath: string,
   ref: WidgetContextRef,
 ): Promise<WidgetContextPayload> {
   const resolved = resolveWorkspacePath(workspacePath, ref.path);
   if (!resolved.ok) throw new Error(resolved.error);
 
-  const doc = await resolveDocument(resolved.absolute);
+  const doc = await resolveDocument(documents, resolved.absolute);
 
   const outline = extractOutline(doc);
   const heading = nearestPrecedingHeading(doc, ref.pos);

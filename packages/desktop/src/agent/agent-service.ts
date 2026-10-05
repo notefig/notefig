@@ -9,6 +9,8 @@
 import { emitAppEvent } from "@/utils/app-events";
 import { appCore } from "@/core/current";
 import type { WorkspaceHistory } from "@/utils/history-service";
+import type { WorkspaceFiles } from "@/entities/files";
+import type { DocumentsApi } from "@/entities/documents";
 import {
   newTaskId,
   newTurnId,
@@ -53,10 +55,6 @@ import { serverInstructions } from "./mcp-instructions";
 import { buildWidgetContextPayload } from "./widget-context-resource";
 import i18n from "@/utils/intl";
 import { captureEvent } from "@/telemetry/telemetry";
-import {
-  readWorkspaceTextFile,
-  writeWorkspaceTextFile,
-} from "@/utils/file-sync";
 import {
   agentEntriesCollection,
   agentEntriesForTask,
@@ -390,6 +388,7 @@ export class AgentTask {
         : platformAdapter.proc.createMcpEndpoint({ taskId: this.taskId });
       this.mcpEndpoint = mcpEndpoint;
       await mcpEndpoint.start();
+      const services = toolServices(this.workspacePath);
       this.unsubscribers.push(
         attachMcpEndpoint(
           mcpEndpoint,
@@ -398,13 +397,14 @@ export class AgentTask {
               workspacePath: this.workspacePath,
               taskId: this.taskId,
               agents,
-              services: toolServices(this.workspacePath),
+              services,
             },
             permissionBroker: this.permissionBroker,
             tools: { list: () => toolRegistry, get: getTool },
             translate: (key) => i18n.t(key),
             instructions: serverInstructions,
-            buildWidgetContextPayload,
+            buildWidgetContextPayload: (workspacePath, ref) =>
+              buildWidgetContextPayload(services.documents, workspacePath, ref),
             onUnsupportedProtocolVersion: (requested) =>
               captureEvent("agent_protocol_version_unsupported", {
                 protocol: "mcp",
@@ -511,8 +511,10 @@ export class AgentTask {
       // pair still always receives the absolute path it requires.
       fs: withWorkspaceContainment(
         {
-          readTextFile: readWorkspaceTextFile,
-          writeTextFile: writeWorkspaceTextFile,
+          readTextFile: (path, options) =>
+            appCore().documents.read(path, options),
+          writeTextFile: (path, content) =>
+            appCore().documents.write(path, content),
         },
         { workspacePath: this.workspacePath, path: pathutil },
       ),
@@ -1594,6 +1596,10 @@ declare module "@notefig/agent" {
   interface ToolServices {
     /** The workspace's history repo (`core.workspace(ws).history`). */
     history: WorkspaceHistory;
+    /** The workspace's files (`core.workspace(ws).files`). */
+    files: WorkspaceFiles;
+    /** Reading and adopting writes of any open workspace's text files. */
+    documents: DocumentsApi;
   }
 }
 
@@ -1607,6 +1613,12 @@ function toolServices(workspacePath: string): ToolServices {
   return {
     get history() {
       return appCore().workspace(workspacePath).history;
+    },
+    get files() {
+      return appCore().workspace(workspacePath).files;
+    },
+    get documents() {
+      return appCore().documents;
     },
   };
 }

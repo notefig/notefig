@@ -15,7 +15,7 @@
  * This file is the whole feature, and the feature is deliberately small.
  * Scratchpads have exactly two special powers: "New File" auto-creates a
  * generated-name file here, and opening a project lands in the most recent
- * one (`enterScratchpad`, called by useOpenProject), after an entry-time
+ * one (`enter`, run by scratchpad-landing.ts), after an entry-time
  * sweep deletes abandoned empty ones — any name: the folder is app
  * territory, and an empty file holds nothing worth keeping, however it got
  * its name. The "scratchpad on startup" app setting turns the landing half
@@ -25,24 +25,18 @@
  * never on collections — so it cannot race collection or query readiness;
  * rows catch up via the normal metadata walk.
  */
-import { platformAdapter } from "@/adapters";
+import { defineModule } from "@notefig/core";
+import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { readKv } from "@/utils/kv-store";
 import { SETTINGS_NAMESPACE } from "@/hooks/use-app-settings";
 import { path as pathutil } from "@/utils/path";
-import { appCore } from "@/core/current";
-import { defineModule } from "@notefig/core";
 import { stripPromptMarkers } from "@notefig/widgets";
 import {
   APP_DIR_NAME,
   SCRATCHPADS_DIR_NAME,
   SCRATCHPADS_REL_PATH,
 } from "@/utils/app-dir";
-import {
-  file,
-  getOrCreateWorkspaceCollections,
-  refetchWorkspaceMetadata,
-  type FileMetadata,
-} from "./files";
+import type { WorkspaceFiles } from "./files";
 
 // ---------------------------------------------------------------------------
 // Path scheme & naming (pure)
@@ -211,68 +205,185 @@ export function isProtectedTreePath(relativeTreePath: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Lifecycle I/O
+// One workspace's scratchpads — `core.workspace(ws).scratchpads`
 // ---------------------------------------------------------------------------
 
-function scratchpadRows(workspacePath: string): FileMetadata[] {
-  return getOrCreateWorkspaceCollections(workspacePath).metadata.toArray.filter(
-    (row) => isScratchpadFileRow(row),
-  );
+/** What a workspace's scratchpads are built from. */
+export interface ScratchpadsDeps {
+  workspacePath: string;
+  /** The workspace's files: where a new scratchpad is created, and the
+   *  listing that re-walks after the entry's disk work. */
+  files: Pick<WorkspaceFiles, "file" | "collections" | "refetchMetadata">;
+  /** Entry works on plain disk truth, never on collections, so it cannot
+   *  race collection or query readiness. */
+  fs: Pick<
+    FileSystemSurface,
+    | "readDirectory"
+    | "createFiles"
+    | "getMetadata"
+    | "readFiles"
+    | "deleteFiles"
+  >;
+  /** The "scratchpad on startup" setting: off means entry lands nowhere. */
+  landsOnStartup(): Promise<boolean>;
+  /** Open a fresh scratchpad as the user's own gesture's tab. */
+  openTab(path: string): void;
 }
 
-/** A file squatting on a path we need as a directory disables the feature. */
-function scratchpadDirIsBlocked(workspacePath: string): boolean {
-  const metadata = getOrCreateWorkspaceCollections(workspacePath).metadata;
-  const dir = scratchpadsDirPath(workspacePath);
-  return [dir, pathutil.dirname(dir)].some(
-    (candidate) => metadata.get(candidate)?.type === "file",
-  );
-}
-
-/** "New File": create a fresh generated-name scratchpad, return its path.
- * Never targets an existing path — the create path truncates. */
-export async function createGeneratedScratchpad(
-  workspacePath: string,
-): Promise<string> {
-  if (scratchpadDirIsBlocked(workspacePath)) {
-    throw new Error("a file occupies the scratchpads directory path");
-  }
-  const basenames = scratchpadRows(workspacePath).map((row) =>
-    pathutil.basename(row.path),
-  );
-  const filePath = pathutil.join(
-    scratchpadsDirPath(workspacePath),
-    randomScratchpadBasename(basenames),
-  );
-  await file(workspacePath, filePath).create();
-  return filePath;
-}
-
-/** One workspace's scratchpads — also `core.workspace(ws).scratchpads`. */
 export interface WorkspaceScratchpads {
-  /** A fresh generated-name scratchpad; resolves to its path. */
+  /** "New File": a fresh generated-name scratchpad; resolves to its path.
+   *  Never targets an existing path — the create path truncates. */
   create(): Promise<string>;
   /**
    * The "New File" action: create one and open it as a tab. Shared by the
    * Mod+N command, the palette, the sidebar and the status menu.
    */
   createAndOpen(): void;
+  /**
+   * What entering the workspace lands on: sweep abandoned empty
+   * scratchpads (never one in `keepPaths` — the tabs already open), then
+   * the most recent survivor or a fresh one — or nothing with "scratchpad
+   * on startup" off. Never rejects: a failure degrades to nothing. The
+   * sweep and create mutate disk behind the collections' back, so this
+   * resolves only once a re-walk that saw them has landed — the caller then
+   * adds the tab to a layout whose row already exists, and the stale-tab
+   * pruner never sees it rowless.
+   */
+  enter(keepPaths: readonly string[]): Promise<string | null>;
+  /**
+   * The entry sweep alone, for an entry with nothing to land on (one of the
+   * workspace's files is already open): abandoned empty scratchpads go,
+   * the open tabs are kept, and the listing re-walks so the tree and any
+   * tab on a swept file catch up. Never rejects.
+   */
+  sweep(keepPaths: readonly string[]): Promise<void>;
 }
 
-export function scratchpads(workspacePath: string): WorkspaceScratchpads {
+export function createWorkspaceScratchpads({
+  workspacePath,
+  files,
+  fs,
+  landsOnStartup,
+  openTab,
+}: ScratchpadsDeps): WorkspaceScratchpads {
+  const dir = scratchpadsDirPath(workspacePath);
+
+  const scratchpadRows = () =>
+    files.collections.metadata.toArray.filter((row) =>
+      isScratchpadFileRow(row),
+    );
+
+  /** A file squatting on a path we need as a directory disables the
+   *  feature. */
+  const dirIsBlocked = () =>
+    [dir, pathutil.dirname(dir)].some(
+      (candidate) => files.collections.metadata.get(candidate)?.type === "file",
+    );
+
+  const create = async () => {
+    if (dirIsBlocked()) {
+      throw new Error("a file occupies the scratchpads directory path");
+    }
+    const basenames = scratchpadRows().map((row) =>
+      pathutil.basename(row.path),
+    );
+    const filePath = pathutil.join(dir, randomScratchpadBasename(basenames));
+    await files.file(filePath).create();
+    return filePath;
+  };
+
+  const listOnDisk = () =>
+    fs.readDirectory(dir, {
+      recursive: false,
+      includeFiles: true,
+      includeDirectories: false,
+    });
+
+  /** The most recently modified scratchpad on disk, else a freshly created
+   *  one. Null bails to nothing (a file squatting on the folder path). */
+  const resolveOnDisk = async (): Promise<string | null> => {
+    const listing = await listOnDisk();
+    if (!listing.ok && listing.error.type !== "not_found") {
+      console.warn("[scratchpads] cannot use the folder:", listing.error);
+      return null;
+    }
+    const paths = listing.ok ? listing.value.map((entry) => entry.path) : [];
+
+    if (paths.length === 0) {
+      const fresh = pathutil.join(dir, randomScratchpadBasename([]));
+      const created = await fs.createFiles([fresh]);
+      if (created.failed.length > 0) {
+        console.warn("[scratchpads] create failed:", created.failed[0]);
+        return null;
+      }
+      return fresh;
+    }
+
+    const stats = await fs.getMetadata(paths);
+    const modifiedByPath = new Map(
+      stats.succeeded.map((m) => [m.path, m.modifiedAt]),
+    );
+    return pickMostRecentScratchpad(
+      paths.map((path) => ({ path, modifiedAt: modifiedByPath.get(path) })),
+    );
+  };
+
+  /**
+   * Whitespace-only scratchpads not in `keepPaths` are deleted — whatever
+   * their name. The folder is app territory; an empty file holds no user
+   * work whether its name was generated or chosen, and a name-based
+   * carve-out would make the sweep depend on whether a name looks like
+   * one of ours. Rows catch up via the watcher and the metadata walk.
+   */
+  const sweepOnDisk = async (keepPaths: readonly string[]) => {
+    const listing = await listOnDisk();
+    if (!listing.ok) return;
+    const keep = new Set(keepPaths);
+    const candidates = listing.value
+      .map((entry) => entry.path)
+      .filter((path) => !keep.has(path));
+    if (candidates.length === 0) return;
+
+    const reads = await fs.readFiles(candidates);
+    const empties = reads.succeeded
+      // A persisted prompt widget (MET-163) is the only thing an abandoned
+      // scratchpad may hold and still count as empty: the user typed a
+      // prompt that produced nothing, so the file is as disposable as a
+      // blank one.
+      .filter(({ content }) => stripPromptMarkers(content).trim() === "")
+      .map(({ path }) => path);
+    if (empties.length === 0) return;
+    await fs.deleteFiles(empties);
+  };
+
   return {
-    create: () => createGeneratedScratchpad(workspacePath),
+    create,
     createAndOpen() {
-      void createGeneratedScratchpad(workspacePath)
-        .then((path) => {
-          // The user asked for something to type into: the new document's
-          // own claim (its prompt widget) may take focus from whatever
-          // field they were in — a hand-off the gesture grants, not the
-          // widget, and only once the tab is really in the dock (an open
-          // the editor refuses leaves nothing to own the grant).
-          appCore().tabs.open(path, { intent: "replace", handoff: true });
-        })
+      void create()
+        // The user asked for something to type into: the new document's
+        // own claim (its prompt widget) may take focus from whatever field
+        // they were in — a hand-off the gesture grants, not the widget.
+        .then(openTab)
         .catch((error) => console.error("Failed to create a new file:", error));
+    },
+    async enter(keepPaths) {
+      let scratchpad: string | null = null;
+      try {
+        await sweepOnDisk(keepPaths);
+        if (await landsOnStartup()) scratchpad = await resolveOnDisk();
+      } catch (error) {
+        console.error("[scratchpads] entry resolution failed:", error);
+      }
+      await files.refetchMetadata();
+      return scratchpad;
+    },
+    async sweep(keepPaths) {
+      try {
+        await sweepOnDisk(keepPaths);
+      } catch (error) {
+        console.error("[scratchpads] entry sweep failed:", error);
+      }
+      await files.refetchMetadata();
     },
   };
 }
@@ -285,133 +396,24 @@ declare module "@notefig/core" {
 
 export const scratchpadsModule = defineModule({
   name: "scratchpads",
+  needs: ["platform", "tabs"],
   workspace: {
-    create: ({ workspace }) => scratchpads(workspace.path),
+    needs: ["files"],
+    create: (ctx) => {
+      const tabs = ctx.use("tabs");
+      return createWorkspaceScratchpads({
+        workspacePath: pathutil.normalize(ctx.workspace.path),
+        files: ctx.useWorkspace("files"),
+        fs: ctx.use("platform").fs,
+        landsOnStartup: async () =>
+          (await readKv<boolean>(SETTINGS_NAMESPACE, "scratchpadOnStartup")) !==
+          false,
+        // Only once the tab is really in the dock does the gesture's
+        // hand-off apply (an open the editor refuses leaves nothing to
+        // own the grant).
+        openTab: (path) =>
+          void tabs.open(path, { intent: "replace", handoff: true }),
+      });
+    },
   },
 });
-
-/**
- * Entry-time resolution, on plain disk truth: the most recently modified
- * scratchpad, else a freshly created generated-name one. Null bails to the
- * empty state (e.g. a file squatting on the folder path). Called once per
- * open (a user gesture, not an effect), so it needs no coalescing.
- */
-export async function resolveScratchpadOnDisk(
-  workspacePath: string,
-): Promise<string | null> {
-  const dir = scratchpadsDirPath(workspacePath);
-  const listing = await platformAdapter.fs.readDirectory(dir, {
-    recursive: false,
-    includeFiles: true,
-    includeDirectories: false,
-  });
-  if (!listing.ok && listing.error.type !== "not_found") {
-    console.warn("[scratchpads] cannot use the folder:", listing.error);
-    return null;
-  }
-  const files = listing.ok ? listing.value.map((entry) => entry.path) : [];
-
-  if (files.length === 0) {
-    const fresh = pathutil.join(dir, randomScratchpadBasename([]));
-    const created = await platformAdapter.fs.createFiles([fresh]);
-    if (created.failed.length > 0) {
-      console.warn("[scratchpads] create failed:", created.failed[0]);
-      return null;
-    }
-    return fresh;
-  }
-
-  const stats = await platformAdapter.fs.getMetadata(files);
-  const modifiedByPath = new Map(
-    stats.succeeded.map((m) => [m.path, m.modifiedAt]),
-  );
-  return pickMostRecentScratchpad(
-    files.map((path) => ({ path, modifiedAt: modifiedByPath.get(path) })),
-  );
-}
-
-/**
- * Entry-time cleanup, on plain disk truth: whitespace-only scratchpads not
- * in `keepPaths` (the tabs the entry is about to restore) are deleted —
- * regardless of name. The folder is app territory; an empty file holds no
- * user work whether its name was generated or chosen, and a name-based
- * carve-out would just make the sweep's behavior depend on whether a name
- * happens to look like one of ours. Best-effort; failures warn, never
- * throw. Rows catch up via the watcher and the metadata walk.
- */
-export async function sweepScratchpadsOnDisk(
-  workspacePath: string,
-  keepPaths: readonly string[],
-): Promise<void> {
-  const dir = scratchpadsDirPath(workspacePath);
-  const listing = await platformAdapter.fs.readDirectory(dir, {
-    recursive: false,
-    includeFiles: true,
-    includeDirectories: false,
-  });
-  if (!listing.ok) return;
-  const keep = new Set(keepPaths);
-  const candidates = listing.value
-    .map((entry) => entry.path)
-    .filter((path) => !keep.has(path));
-  if (candidates.length === 0) return;
-
-  const reads = await platformAdapter.fs.readFiles(candidates);
-  const empties = reads.succeeded
-    // A persisted prompt widget (MET-163) is the only thing an abandoned
-    // scratchpad may hold and still count as empty: the user typed a prompt
-    // that produced nothing, so the file is as disposable as a blank one.
-    .filter(({ content }) => stripPromptMarkers(content).trim() === "")
-    .map(({ path }) => path);
-  if (empties.length === 0) return;
-  await platformAdapter.fs.deleteFiles(empties);
-}
-
-/**
- * The entry-time sweep on its own, for an entry that has nothing to land
- * on because one of the project's files is already open in the dock: the
- * abandoned empty scratchpads still go (the folder is app territory), the
- * tabs already open are kept, and the listing re-walks so the tree and any
- * tab on a swept file catch up. Never rejects.
- */
-export async function sweepScratchpads(
-  workspacePath: string,
-  keepPaths: readonly string[],
-): Promise<void> {
-  try {
-    await sweepScratchpadsOnDisk(workspacePath, keepPaths);
-  } catch (error) {
-    console.error("[scratchpads] entry sweep failed:", error);
-  }
-  await refetchWorkspaceMetadata(workspacePath);
-}
-
-/**
- * What opening a project lands on: sweep abandoned empty scratchpads (never
- * one in `keepPaths` — the tabs already open), then the most recent
- * survivor or a fresh one — unless "scratchpad on startup" is off, in
- * which case nothing opens. Never rejects: a failure degrades to the empty
- * state. The sweep and create mutate disk behind the collections' back, so
- * this resolves only once a re-walk that saw them has landed — the caller
- * then adds the tab to a layout whose row already exists, and the
- * stale-tab pruner never sees it rowless.
- */
-export async function enterScratchpad(
-  workspacePath: string,
-  keepPaths: readonly string[],
-): Promise<string | null> {
-  let scratchpad: string | null = null;
-  try {
-    await sweepScratchpadsOnDisk(workspacePath, keepPaths);
-    const scratchpadOnStartup =
-      (await readKv<boolean>(SETTINGS_NAMESPACE, "scratchpadOnStartup")) !==
-      false;
-    if (scratchpadOnStartup) {
-      scratchpad = await resolveScratchpadOnDisk(workspacePath);
-    }
-  } catch (error) {
-    console.error("[scratchpads] entry resolution failed:", error);
-  }
-  await refetchWorkspaceMetadata(workspacePath);
-  return scratchpad;
-}

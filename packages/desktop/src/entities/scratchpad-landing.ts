@@ -12,7 +12,6 @@ import { defineModule } from "@notefig/core";
 import type { LayoutApi } from "./layout";
 import { isFileTabId } from "./tabs";
 import { workspaceOfPath } from "./workspaces";
-import { enterScratchpad, sweepScratchpads } from "./scratchpads";
 import { workspaceKey } from "@/utils/path";
 
 declare module "@notefig/core" {
@@ -40,11 +39,12 @@ export const scratchpadLandingModule = defineModule({
     const layout = ctx.use("layout");
     const tabs = ctx.use("tabs");
     return ctx.hooks.on("workspace:entered", async ({ path }) => {
+      const scratchpads = ctx.workspaceHandle(path).scratchpads;
       if (hasOpenFileTab(layout, path)) {
-        await sweepScratchpads(path, layout.openTabIds());
+        await scratchpads.sweep(layout.openTabIds());
         return;
       }
-      const scratchpad = await enterScratchpad(path, layout.openTabIds());
+      const scratchpad = await scratchpads.enter(layout.openTabIds());
       if (scratchpad !== null) tabs.open(scratchpad, { intent: "new-tab" });
     });
   },

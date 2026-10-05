@@ -6,9 +6,9 @@
  */
 
 import type { PayloadOfKind } from "@/utils/drag-protocol";
-import { file, refreshDirectoryMetadata } from "@/entities/files";
+import type { WorkspaceFiles } from "@/entities/files";
+import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { getAllEditorPaths, getMarkdownEditor } from "@/entities/editors";
-import { platformAdapter } from "@/adapters";
 import { getFileName } from "@/utils/fs";
 import { path as pathutil } from "@/utils/path";
 
@@ -19,21 +19,35 @@ import { path as pathutil } from "@/utils/path";
  * - a file-tree entry moves into the folder (tree-internal move)
  * Errors are logged, matching the sidebar's fs-operation idiom.
  */
+/** What a move needs: the files of the workspace an item came from (its
+ *  `workspaceRoot`), and the fs for an untracked asset. */
+export interface DropDeps {
+  filesOf(workspaceRoot: string): WorkspaceFiles;
+  fs: Pick<FileSystemSurface, "copyFile" | "moveFile">;
+}
+
 export function moveIntoFolder(
+  deps: DropDeps,
   payload: PayloadOfKind<"image-asset" | "file">,
   folderPath: string,
 ): void {
-  void moveIntoFolderAsync(payload, folderPath).catch((error: unknown) => {
-    console.error(`Failed to move ${payload.kind} into ${folderPath}:`, error);
-  });
+  void moveIntoFolderAsync(deps, payload, folderPath).catch(
+    (error: unknown) => {
+      console.error(
+        `Failed to move ${payload.kind} into ${folderPath}:`,
+        error,
+      );
+    },
+  );
 }
 
 async function moveIntoFolderAsync(
+  deps: DropDeps,
   payload: PayloadOfKind<"image-asset" | "file">,
   folderPath: string,
 ): Promise<void> {
   if (payload.kind === "image-asset") {
-    await moveImageAsset(payload, folderPath);
+    await moveImageAsset(deps, payload, folderPath);
     return;
   }
 
@@ -60,13 +74,15 @@ async function moveIntoFolderAsync(
     return;
   }
 
-  await file(payload.workspaceRoot, payload.path).rename(newPath);
+  await deps.filesOf(payload.workspaceRoot).file(payload.path).rename(newPath);
 }
 
 async function moveImageAsset(
+  { filesOf, fs }: DropDeps,
   payload: PayloadOfKind<"image-asset">,
   folderPath: string,
 ): Promise<void> {
+  const files = filesOf(payload.workspaceRoot);
   const newPath = pathutil.join(folderPath, getFileName(payload.absolutePath));
   if (newPath === payload.absolutePath) return;
 
@@ -81,25 +97,20 @@ async function moveImageAsset(
   if (!editor) {
     // Without the live document we can't rewrite the reference, so copy
     // instead of move — the original path keeps working.
-    const result = await platformAdapter.fs.copyFile(
-      payload.absolutePath,
-      newPath,
-    );
+    const result = await fs.copyFile(payload.absolutePath, newPath);
     if (!result.ok) throw result.error;
-    await refreshDirectoryMetadata(payload.workspaceRoot);
+    await files.refresh();
     return;
   }
 
-  if (file(payload.workspaceRoot, payload.absolutePath).exists()) {
-    await file(payload.workspaceRoot, payload.absolutePath).rename(newPath);
+  const asset = files.file(payload.absolutePath);
+  if (asset.exists()) {
+    await asset.rename(newPath);
   } else {
     // Asset exists on disk but isn't tracked in collections yet.
-    const result = await platformAdapter.fs.moveFile(
-      payload.absolutePath,
-      newPath,
-    );
+    const result = await fs.moveFile(payload.absolutePath, newPath);
     if (!result.ok) throw result.error;
-    await refreshDirectoryMetadata(payload.workspaceRoot);
+    await files.refresh();
   }
 
   // Rewrite every image node referencing the old src in the source doc.

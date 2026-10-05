@@ -1,12 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { QueryClient } from "@tanstack/react-query";
+import { createCore, defineModule } from "@notefig/core";
+import { CoreProvider } from "@notefig/core/react";
 import type {
   BatchResult,
   FileSystemMetadata,
+  FileSystemSurface,
 } from "@/adapters/platform-adapter.interface";
+import {
+  createWorkspaceFiles,
+  useOpenFileRows,
+  type WorkspaceFiles,
+} from "./files";
+import * as scratchpadsEntity from "./scratchpads";
+import {
+  createWorkspaceScratchpads,
+  type WorkspaceScratchpads,
+} from "./scratchpads";
 
-// Real TanStack DB collections, mocked fs seam — same harness as
+// Real TanStack DB collections over an fs handed to them — same harness as
 // files.test.ts.
 const adapter = {
   createFiles: vi.fn(),
@@ -18,20 +32,12 @@ const adapter = {
   getMetadata: vi.fn(),
   readFiles: vi.fn(),
   readDirectory: vi.fn(),
+  onFsEvent: vi.fn(() => () => {}),
+  startWatchingMetadata: vi.fn(async () => {}),
+  startWatchingContent: vi.fn(async () => {}),
+  stopWatching: vi.fn(async () => {}),
 };
-
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    fs: adapter,
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
-vi.mock("@/utils/file-write-effects", () => ({
-  invalidateDerivedState: vi.fn(),
-}));
-
-vi.mock("./agents", () => ({ useAgentTasksReady: () => true }));
+const fs = adapter as unknown as FileSystemSurface;
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -49,15 +55,23 @@ function stat(path: string, modifiedMs: number): FileSystemMetadata {
   };
 }
 
-let testCounter = 0;
-let WS = "";
-let DIR = "";
+const WS = "/ws-scratchpads-test";
+const DIR = `${WS}/.notefig/scratchpads`;
 
-let files: typeof import("./files");
-let scratchpads: typeof import("./scratchpads");
+let files: WorkspaceFiles;
+let pads: WorkspaceScratchpads;
+const scratchpads = scratchpadsEntity;
+
+/** What the scratchpads folder lists; the workspace walk itself (which
+ *  enter and sweep re-run) always sees an empty workspace. */
+function scratchpadDirLists(response: unknown) {
+  adapter.readDirectory.mockImplementation(async (path: string) =>
+    path === DIR ? response : { ok: true, value: [] },
+  );
+}
 
 function seedFileRow(path: string) {
-  files.getOrCreateWorkspaceCollections(WS).metadata.utils.writeUpsert([
+  files.collections.metadata.utils.writeUpsert([
     {
       path,
       relativePath: path.slice(WS.length + 1),
@@ -67,21 +81,9 @@ function seedFileRow(path: string) {
   ]);
 }
 
-function seedContentRow(path: string, content: string) {
-  files
-    .getOrCreateWorkspaceCollections(WS)
-    .content.utils.writeUpsert([{ path, content, contentHash: "x" }]);
-}
-
-async function settle() {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-
 beforeEach(async () => {
   vi.restoreAllMocks();
   vi.clearAllMocks();
-  WS = `/ws-scratchpads-test-${testCounter++}`;
-  DIR = `${WS}/.notefig/scratchpads`;
   adapter.createFiles.mockImplementation(async (paths: string[]) => ok(paths));
   adapter.writeFiles.mockImplementation(async (writes: { path: string }[]) =>
     ok(writes),
@@ -95,18 +97,26 @@ beforeEach(async () => {
   adapter.readFiles.mockResolvedValue(ok([]));
   adapter.readDirectory.mockResolvedValue({ ok: true, value: [] });
 
-  files = await import("./files");
-  scratchpads = await import("./scratchpads");
-
-  const collections = files.getOrCreateWorkspaceCollections(WS);
+  files = createWorkspaceFiles({
+    workspacePath: WS,
+    fs,
+    queryClient: new QueryClient(),
+  });
+  pads = createWorkspaceScratchpads({
+    workspacePath: WS,
+    files,
+    fs,
+    landsOnStartup: async () => true,
+    openTab: vi.fn(),
+  });
   await Promise.all([
-    collections.metadata.preload(),
-    collections.content.preload(),
+    files.collections.metadata.preload(),
+    files.collections.content.preload(),
   ]);
 });
 
 afterEach(() => {
-  files.workspaceCollections.drop(WS);
+  files.dispose();
 });
 
 describe("path scheme & naming", () => {
@@ -166,22 +176,20 @@ describe("path scheme & naming", () => {
   });
 });
 
-describe("createGeneratedScratchpad", () => {
+describe("create", () => {
   it("creates a generated-name file in the folder", async () => {
-    const created = await scratchpads.createGeneratedScratchpad(WS);
+    const created = await pads.create();
     expect(created.startsWith(`${DIR}/`)).toBe(true);
     expect(created.slice(DIR.length + 1)).toMatch(/^[a-z]+-[a-z]+\.md$/);
     expect(adapter.createFiles).toHaveBeenCalledWith([created]);
 
     // A seeded sibling never collides — names dodge existing rows.
     seedFileRow(created);
-    await expect(scratchpads.createGeneratedScratchpad(WS)).resolves.not.toBe(
-      created,
-    );
+    await expect(pads.create()).resolves.not.toBe(created);
   });
 
   it("throws when a file squats on the scratchpads dir path", async () => {
-    files.getOrCreateWorkspaceCollections(WS).metadata.utils.writeUpsert([
+    files.collections.metadata.utils.writeUpsert([
       {
         path: DIR,
         relativePath: ".notefig/scratchpads",
@@ -190,16 +198,14 @@ describe("createGeneratedScratchpad", () => {
       },
     ]);
 
-    await expect(scratchpads.createGeneratedScratchpad(WS)).rejects.toThrow(
-      /occupies/,
-    );
+    await expect(pads.create()).rejects.toThrow(/occupies/);
     expect(adapter.createFiles).not.toHaveBeenCalled();
   });
 });
 
-describe("resolveScratchpadOnDisk", () => {
+describe("enter: where it lands, on disk truth", () => {
   function listDir(files: string[]) {
-    adapter.readDirectory.mockResolvedValue({
+    scratchpadDirLists({
       ok: true,
       value: files.map((path) => ({ path, type: "file" as const })),
     });
@@ -207,14 +213,14 @@ describe("resolveScratchpadOnDisk", () => {
 
   it("creates a generated-name file when the folder is missing or empty", async () => {
     const expectFreshCreate = async () => {
-      const resolved = await scratchpads.resolveScratchpadOnDisk(WS);
+      const resolved = await pads.enter([]);
       expect(resolved).not.toBeNull();
       expect(resolved!.startsWith(`${DIR}/`)).toBe(true);
       expect(resolved!.slice(DIR.length + 1)).toMatch(/^[a-z]+-[a-z]+\.md$/);
       expect(adapter.createFiles).toHaveBeenCalledWith([resolved]);
     };
 
-    adapter.readDirectory.mockResolvedValue({
+    scratchpadDirLists({
       ok: false,
       error: { path: DIR, type: "not_found", message: "missing" },
     });
@@ -234,30 +240,28 @@ describe("resolveScratchpadOnDisk", () => {
       ]),
     );
 
-    await expect(scratchpads.resolveScratchpadOnDisk(WS)).resolves.toBe(
-      `${DIR}/my-notes-a1b2.md`,
-    );
+    await expect(pads.enter([])).resolves.toBe(`${DIR}/my-notes-a1b2.md`);
     expect(adapter.createFiles).not.toHaveBeenCalled();
     expect(adapter.writeFiles).not.toHaveBeenCalled();
   });
 
   it("bails to null when the folder path is unusable", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    adapter.readDirectory.mockResolvedValue({
+    scratchpadDirLists({
       ok: false,
       error: { path: DIR, type: "is_file", message: "a file" },
     });
-    await expect(scratchpads.resolveScratchpadOnDisk(WS)).resolves.toBeNull();
+    await expect(pads.enter([])).resolves.toBeNull();
     warn.mockRestore();
   });
 });
 
-describe("sweepScratchpadsOnDisk", () => {
+describe("sweep", () => {
   it("deletes whitespace-only leftovers, spares kept paths and content", async () => {
     const kept = `${DIR}/untitled-2.md`;
     const empty = `${DIR}/untitled-3.md`;
     const withContent = `${DIR}/untitled-4.md`;
-    adapter.readDirectory.mockResolvedValue({
+    scratchpadDirLists({
       ok: true,
       value: [kept, empty, withContent].map((path) => ({
         path,
@@ -271,7 +275,7 @@ describe("sweepScratchpadsOnDisk", () => {
       ]),
     );
 
-    await scratchpads.sweepScratchpadsOnDisk(WS, [kept]);
+    await pads.sweep([kept]);
 
     expect(new Set(adapter.readFiles.mock.calls[0][0] as string[])).toEqual(
       new Set([empty, withContent]),
@@ -284,7 +288,7 @@ describe("sweepScratchpadsOnDisk", () => {
   it("sweeps empty scratchpads regardless of name — the folder is app territory", async () => {
     const renamedEmpty = `${DIR}/meeting-notes.md`;
     const untitledEmpty = `${DIR}/untitled.md`;
-    adapter.readDirectory.mockResolvedValue({
+    scratchpadDirLists({
       ok: true,
       value: [renamedEmpty, untitledEmpty].map((path) => ({
         path,
@@ -298,7 +302,7 @@ describe("sweepScratchpadsOnDisk", () => {
       ]),
     );
 
-    await scratchpads.sweepScratchpadsOnDisk(WS, []);
+    await pads.sweep([]);
 
     expect(new Set(adapter.deleteFiles.mock.calls[0][0] as string[])).toEqual(
       new Set([renamedEmpty, untitledEmpty]),
@@ -307,11 +311,11 @@ describe("sweepScratchpadsOnDisk", () => {
   });
 
   it("does nothing when the folder is missing", async () => {
-    adapter.readDirectory.mockResolvedValue({
+    scratchpadDirLists({
       ok: false,
       error: { path: DIR, type: "not_found", message: "missing" },
     });
-    await scratchpads.sweepScratchpadsOnDisk(WS, []);
+    await pads.sweep([]);
     expect(adapter.readFiles).not.toHaveBeenCalled();
   });
 });
@@ -331,18 +335,31 @@ describe("content loads for missing files", () => {
     document.body.appendChild(container);
     const root = createRoot(container);
     function Probe() {
-      files.useOpenFileRows(WS, [missing]);
+      useOpenFileRows(WS, [missing]);
       return null;
     }
+    // The rows hook reads the workspace's files through core.
+    const core = createCore({
+      services: {} as never,
+      modules: [
+        defineModule({
+          name: "files",
+          workspace: { create: () => files },
+        }),
+      ],
+    });
+    await core.workspace(WS).open();
     await act(async () => {
-      root.render(createElement(Probe));
+      root.render(
+        createElement(CoreProvider, { core, children: createElement(Probe) }),
+      );
     });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
 
     expect(adapter.readFiles).toHaveBeenCalled();
-    const row = files.getOrCreateWorkspaceCollections(WS).content.get(missing);
+    const row = files.collections.content.get(missing);
     expect(row).toBeUndefined();
 
     await act(async () => root.unmount());

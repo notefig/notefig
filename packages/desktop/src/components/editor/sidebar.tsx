@@ -35,7 +35,7 @@ import {
 import { SidebarSeparator } from "@/components/editor/tool-bar";
 import { SessionsPanel } from "@/components/agent/sessions-panel";
 import { CheckpointPanel } from "@/components/editor/git/checkpoint-panel";
-import { file, useFileCollections } from "@/entities/files";
+import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import { useAttention } from "@/entities/attention";
 import {
   StatusGlyph,
@@ -49,7 +49,6 @@ import {
 import type { FileTreeNode, SortOrder } from "@/utils/fs";
 import type { OpenTabOptions } from "@/entities/tabs";
 import { requestElementFocus } from "@/utils/focus-arbiter";
-import { scratchpads } from "@/entities/scratchpads";
 import { deriveProjectName } from "@/hooks/use-recent-projects";
 import {
   WORKSPACE_TOOLS,
@@ -528,7 +527,8 @@ function FilesTool({
   | "mode"
   | "onModeChange"
 >) {
-  const { metadata } = useFileCollections(workspacePath);
+  // The workspace's files, once core has it open (its row can show first).
+  const files = useWorkspaceModule(workspacePath, "files");
   const { sortOrder, setSortOrder } = useSortOrder();
   useEffect(() => {
     if (mode.type !== "idle") return;
@@ -544,9 +544,10 @@ function FilesTool({
   // "New Scratchpad" is instant and nameless; "New File" starts the tree's
   // inline-naming flow at the workspace root (per-folder creation stays on
   // the context menu — both land in handleCreate).
+  const core = useCore();
   const handleNewScratchpad = useCallback(() => {
-    scratchpads(workspacePath).createAndOpen();
-  }, [workspacePath]);
+    core.workspace(workspacePath).scratchpads.createAndOpen();
+  }, [core, workspacePath]);
 
   const handleNewFile = useCallback(() => {
     onModeChange({
@@ -572,14 +573,16 @@ function FilesTool({
           : name;
       const fullPath = parentPath + "/" + resolvedName;
 
-      const existing = metadata.get(fullPath);
+      if (!files) return;
+      const existing = files.collections.metadata.get(fullPath);
       if (existing) {
         console.error(`Cannot create: "${fullPath}" already exists`);
         return;
       }
 
       if (type === "file") {
-        file(workspacePath, fullPath)
+        files
+          .file(fullPath)
           .create()
           .then(() => {
             if (isTextFile(fullPath)) {
@@ -606,14 +609,15 @@ function FilesTool({
             console.error(`Failed to create file ${fullPath}:`, error);
           });
       } else {
-        file(workspacePath, fullPath)
+        files
+          .file(fullPath)
           .createDirectory()
           .catch((error: unknown) => {
             console.error(`Failed to create directory ${fullPath}:`, error);
           });
       }
     },
-    [workspacePath, metadata, onFileSelect],
+    [files, onFileSelect],
   );
 
   const handleDeleteFile = useCallback(
@@ -625,13 +629,14 @@ function FilesTool({
         }
       }
 
-      file(workspacePath, path)
+      files
+        ?.file(path)
         .delete()
         .catch((error: unknown) => {
           console.error(`Failed to delete ${path}:`, error);
         });
     },
-    [openTabs, closeTab, workspacePath],
+    [openTabs, closeTab, files],
   );
 
   const handleRenameFile = useCallback(
@@ -640,7 +645,8 @@ function FilesTool({
       const newPath = getDirectoryPath(oldPath) + "/" + newName;
       if (oldPath === newPath) return;
 
-      const existing = metadata.get(newPath);
+      if (!files) return;
+      const existing = files.collections.metadata.get(newPath);
       if (existing) {
         console.error(`Cannot rename: "${newPath}" already exists`);
         return;
@@ -650,12 +656,12 @@ function FilesTool({
       // tab follows the file.
       const rename = openTabs.includes(oldPath)
         ? onRenameOpenFile(oldPath, newPath)
-        : file(workspacePath, oldPath).rename(newPath);
+        : files.file(oldPath).rename(newPath);
       rename.catch((error: unknown) => {
         console.error(`Failed to rename ${oldPath} to ${newPath}:`, error);
       });
     },
-    [workspacePath, metadata, openTabs, onRenameOpenFile],
+    [files, openTabs, onRenameOpenFile],
   );
 
   return (

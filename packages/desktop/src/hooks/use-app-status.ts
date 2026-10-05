@@ -8,7 +8,6 @@
  */
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { platformAdapter } from "@/adapters";
 import type {
   AppStatus,
   AppStatusAction,
@@ -42,7 +41,8 @@ import {
   useRecentDocuments,
   type RecentDocument,
 } from "@/entities/recent-documents";
-import { scratchpads } from "@/entities/scratchpads";
+import type { WorkspaceScratchpads } from "@/entities/scratchpads";
+import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import { useOpenProjectFromPicker } from "@/hooks/use-open-project";
 import { deriveProjectName } from "@/hooks/use-recent-projects";
 import type { TabsApi } from "@/entities/tabs";
@@ -58,8 +58,9 @@ const LABEL_CHARS = 48;
 export type AppStatusTabs = Pick<TabsApi, "open" | "openAgent">;
 
 export interface AppStatusHost {
-  /** The focused workspace — where a new scratchpad goes; null on welcome. */
-  workspacePath: string | null;
+  /** The focused workspace's scratchpads — where a new one goes; null on
+   *  welcome. */
+  scratchpads: Pick<WorkspaceScratchpads, "createAndOpen"> | null;
   tabs: AppStatusTabs | null;
   openWorkspace: () => void;
   openSettings: () => void;
@@ -198,12 +199,12 @@ function actions({ host, t }: AppStatusInputs): AppStatusAction[] {
   const list: AppStatusAction[] = [
     { id: "open-workspace", label: t("openProject"), activate: host.openWorkspace },
   ];
-  if (host.workspacePath !== null && host.tabs !== null) {
-    const { workspacePath } = host;
+  if (host.scratchpads !== null && host.tabs !== null) {
+    const { scratchpads } = host;
     list.push({
       id: "new-scratchpad",
       label: t("newScratchpad"),
-      activate: () => scratchpads(workspacePath).createAndOpen(),
+      activate: () => scratchpads.createAndOpen(),
     });
   }
   list.push({ id: "settings", label: t("settings"), activate: host.openSettings });
@@ -227,20 +228,26 @@ export function deriveAppStatus(inputs: AppStatusInputs): AppStatus {
  * platform told the current status. Publishing is cheap — the adapter
  * ignores a value that draws the same — so this republishes on any change.
  */
-export function usePublishAppStatus(
-  host: Omit<AppStatusHost, "openWorkspace">,
-): void {
+export function usePublishAppStatus(host: {
+  /** The focused workspace; null on welcome. */
+  workspacePath: string | null;
+  tabs: AppStatusTabs | null;
+  openSettings: () => void;
+}): void {
+  const core = useCore();
+  const scratchpads =
+    useWorkspaceModule(host.workspacePath, "scratchpads") ?? null;
   const { t } = useTranslation();
   const attention = useAttention();
   const rounds = usePromptRounds(MAX_PROMPT_ROUNDS);
   const sessions = useAgentSessionList(APP_STATUS_ROWS);
   const documents = useRecentDocuments(APP_STATUS_ROWS);
   const openWorkspace = useOpenProjectFromPicker();
-  const { workspacePath, tabs, openSettings } = host;
+  const { tabs, openSettings } = host;
   useEffect(() => {
-    platformAdapter.ui.publishAppStatus(
+    core.use("platform").ui.publishAppStatus(
       deriveAppStatus({
-        host: { workspacePath, tabs, openSettings, openWorkspace },
+        host: { scratchpads, tabs, openSettings, openWorkspace },
         rounds,
         sessions,
         documents,
@@ -248,5 +255,16 @@ export function usePublishAppStatus(
         t,
       }),
     );
-  }, [workspacePath, tabs, openSettings, openWorkspace, rounds, sessions, documents, attention, t]);
+  }, [
+    core,
+    scratchpads,
+    tabs,
+    openSettings,
+    openWorkspace,
+    rounds,
+    sessions,
+    documents,
+    attention,
+    t,
+  ]);
 }

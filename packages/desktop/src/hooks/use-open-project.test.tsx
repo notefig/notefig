@@ -20,14 +20,14 @@ const workspaces = vi.hoisted(() => ({
     [...workspaces.open].find((ws) => path.startsWith(`${ws}/`)) ?? null,
 }));
 vi.mock("@/entities/workspaces", () => workspaces);
-const scratchpads = vi.hoisted(() => ({
+// Each workspace's scratchpads, as the landing reaches them through core.
+const scratchpads = {
   enterScratchpad: vi.fn(
     async (ws: string, _keep: readonly string[]): Promise<string | null> =>
       `${ws}/.notefig/scratchpads/sunny-otter.md`,
   ),
   sweepScratchpads: vi.fn(async (_ws: string, _keep: readonly string[]) => {}),
-}));
-vi.mock("@/entities/scratchpads", () => scratchpads);
+};
 const recents = vi.hoisted(() => ({ addRecentProject: vi.fn() }));
 vi.mock("./use-recent-projects", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./use-recent-projects")>()),
@@ -50,6 +50,19 @@ let root: Root | null = null;
 let openProject: ((path: string) => Promise<boolean>) | undefined;
 let router: ReturnType<typeof createMemoryRouter>;
 let core: ReturnType<typeof createTestCore>;
+
+const scratchpadsModule = defineModule({
+  name: "scratchpads",
+  workspace: {
+    create: ({ workspace }) =>
+      ({
+        enter: (keep: readonly string[]) =>
+          scratchpads.enterScratchpad(workspace.path, keep),
+        sweep: (keep: readonly string[]) =>
+          scratchpads.sweepScratchpads(workspace.path, keep),
+      }) as never,
+  },
+});
 
 /** The registry's part of a focus, as the landing relies on it: the
  *  workspace is in the open set before anything lands in it. */
@@ -88,6 +101,7 @@ beforeEach(async () => {
     url: urlStateFromRouter(router),
     modules: [
       tabsModule({ canOpenFile: () => true }),
+      scratchpadsModule,
       registry,
       scratchpadLandingModule,
       sidebarViewModule,

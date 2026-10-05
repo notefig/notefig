@@ -16,12 +16,10 @@ import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
 import {
-  getOrCreateWorkspaceCollections,
-  refetchWorkspaceMetadata,
   useContentFetching,
+  useContentWatches,
   useOpenFileRows,
 } from "@/entities/files";
-import { syncContentWatchers } from "@/utils/file-sync";
 import {
   openWorkspacesCollection,
   useFocusedWorkspace,
@@ -98,6 +96,7 @@ function useOpenProjectFromHost(): void {
  * real-backend shim can drive for a given path. Dev/test builds only.
  */
 function useOpenProjectTestSeam(): void {
+  const core = useCore();
   const openProject = useOpenProject();
   useEffect(() => {
     if (!import.meta.env.DEV && !import.meta.env.VITE_TEST_BACKEND) return;
@@ -106,13 +105,13 @@ function useOpenProjectTestSeam(): void {
       openWorkspaces: () =>
         [...openWorkspacesCollection.values()].map((row) => row.path),
       metadataPaths: (workspacePath: string) =>
-        getOrCreateWorkspaceCollections(workspacePath).metadata.toArray.map(
-          (row) => row.path,
-        ),
+        core
+          .workspace(workspacePath)
+          .files.collections.metadata.toArray.map((row) => row.path),
       refetchMetadata: (workspacePath: string) =>
-        refetchWorkspaceMetadata(workspacePath),
+        core.workspace(workspacePath).files.refetchMetadata(),
     };
-  }, [openProject]);
+  }, [core, openProject]);
 }
 
 /** The workspace surface: `workspacePath` is the focused workspace — what
@@ -426,10 +425,7 @@ function useWorkspaceDocuments({
 
   const isFetchingContent = useContentFetching();
   useStaleTabPruning(staleTabIds, layout, handleLayoutChange);
-  useEffect(() => {
-    syncContentWatchers(fileTabsByWorkspace);
-  }, [fileTabsByWorkspace]);
-  useEffect(() => () => syncContentWatchers(new Map()), []);
+  useContentWatches(fileTabsByWorkspace);
 
   return { allDockableTabs, wordCount, isSynced: !isFetchingContent };
 }
@@ -503,18 +499,18 @@ function useWorkspaceActions({
 /** Rename/move a file while its tab is open — the close-and-reopen
  *  primitive keeps the tab in its window slot. */
 function useRenameOpenFile(workspacePath: string) {
-  const { tabs } = useCore();
+  const core = useCore();
   return useCallback(
     (oldPath: string, newPath: string) =>
       renameOpenFileTab({
         // The tab belongs to the workspace that holds its file, which need
         // not be the one the sidebar shows.
-        workspacePath: workspaceOfPath(oldPath) ?? workspacePath,
+        files: core.workspace(workspaceOfPath(oldPath) ?? workspacePath).files,
         oldPath,
         newPath,
-        applyLayoutRename: tabs.rename,
+        applyLayoutRename: core.tabs.rename,
       }),
-    [workspacePath, tabs],
+    [workspacePath, core],
   );
 }
 

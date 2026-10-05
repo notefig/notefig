@@ -1,6 +1,5 @@
 import { z } from "zod";
 import type { AgentTool } from "@notefig/agent";
-import { writeWorkspaceTextFile } from "@/utils/file-sync";
 import { resolveWorkspacePath } from "@/utils/fs";
 
 const InputSchema = z.object({
@@ -25,7 +24,7 @@ export const historyRestore: AgentTool<z.infer<typeof InputSchema>, void> = {
         input.checkpoint,
         resolved.relative,
       );
-      await writeWorkspaceTextFile(resolved.absolute, content);
+      await ctx.services.documents.write(resolved.absolute, content);
       return { ok: true, value: undefined };
     } catch (error) {
       return {

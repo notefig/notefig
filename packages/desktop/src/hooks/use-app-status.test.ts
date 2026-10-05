@@ -11,9 +11,7 @@ vi.mock("@/adapters", async () => ({
 vi.mock("@/entities/workspaces", () => ({ useOpenWorkspaces: () => [] }));
 vi.mock("@/utils/intl", () => ({ default: { t: (key: string) => key } }));
 vi.mock("@/components/agent/jump-to-task", () => ({ jumpToRound: vi.fn(), jumpToTask: vi.fn() }));
-vi.mock("@/entities/scratchpads", () => ({
-  scratchpads: () => ({ createAndOpen: vi.fn() }),
-}));
+
 
 const tabs = { open: vi.fn(() => true), openAgent: vi.fn() };
 
@@ -56,7 +54,7 @@ function document(path: string): RecentDocument {
 function inputs(overrides: Partial<AppStatusInputs> = {}): AppStatusInputs {
   return {
     host: {
-      workspacePath: "/ws-a",
+      scratchpads: { createAndOpen: vi.fn() },
       tabs,
       openWorkspace: vi.fn(),
       openSettings: vi.fn(),
@@ -173,7 +171,12 @@ describe("deriveAppStatus", () => {
 
     const welcome = deriveAppStatus(
       inputs({
-        host: { workspacePath: null, tabs: null, openWorkspace: vi.fn(), openSettings: vi.fn() },
+        host: {
+          scratchpads: null,
+          tabs: null,
+          openWorkspace: vi.fn(),
+          openSettings: vi.fn(),
+        },
         rounds: [round("t1")],
         attention: { items: [], overall: "bau", byRound: new Map(), byTask: new Map() },
       }),

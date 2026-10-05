@@ -1,20 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("@/entities/files", () => ({
-  getOrCreateWorkspaceCollections: vi.fn(() => ({
-    metadata: {
-      toArray: [
-        { path: "/ws/notes.md", type: "file", contentHash: "" },
-        { path: "/ws/chapters", type: "directory", contentHash: "" },
-      ],
-    },
-  })),
-}));
-
-const { readWorkspaceTextFile } = vi.hoisted(() => ({
-  readWorkspaceTextFile: vi.fn(async () => "file content"),
-}));
-vi.mock("@/utils/file-sync", () => ({ readWorkspaceTextFile }));
+const readWorkspaceTextFile = vi.fn(
+  async (_path: string, _options?: unknown) => "file content",
+);
 
 import { workspaceListDocuments } from "../workspace-list-documents";
 import { workspaceReadDocument } from "../workspace-read-document";
@@ -28,7 +16,20 @@ const ctx = {
   workspacePath: "/ws",
   taskId: "task_1",
   agents: {} as never,
-  services: {} as never,
+  // The workspace's listing and its documents, handed to the tools.
+  services: {
+    files: {
+      collections: {
+        metadata: {
+          toArray: [
+            { path: "/ws/notes.md", type: "file", contentHash: "" },
+            { path: "/ws/chapters", type: "directory", contentHash: "" },
+          ],
+        },
+      },
+    },
+    documents: { read: readWorkspaceTextFile },
+  } as never,
 };
 
 describe("workspaceListDocuments", () => {

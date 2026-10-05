@@ -42,7 +42,6 @@ import {
   useRecentDocuments,
   type RecentDocument,
 } from "@/entities/recent-documents";
-import { scratchpads } from "@/entities/scratchpads";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { deriveProjectName } from "@/hooks/use-recent-projects";
 import { formatTimeAgo } from "@/utils/format";
@@ -267,6 +266,7 @@ function NavRow({
  *  are one click from anywhere. The "open project" row opens the rail's
  *  add-workspace menu, so both entry points offer the same choices. */
 function QuickActions({ workspacePath }: { workspacePath: string }) {
+  const core = useCore();
   const { t } = useTranslation();
   const { defaultHarness } = useDefaultHarness();
   const { create, trustDialog } = useStartSession(workspacePath);
@@ -275,7 +275,9 @@ function QuickActions({ workspacePath }: { workspacePath: string }) {
       <NavRow
         leading={<ScratchpadIcon className="size-3" />}
         label={t("newScratchpad")}
-        onClick={() => scratchpads(workspacePath).createAndOpen()}
+        onClick={() =>
+          core.workspace(workspacePath).scratchpads.createAndOpen()
+        }
       />
       <NavRow
         leading={<MessageSquarePlus className="size-3" strokeWidth={1.5} />}

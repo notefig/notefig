@@ -25,11 +25,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { defineModule, type WorkspaceLifecycle } from "@notefig/core";
 import {
-  getOrCreateWorkspaceCollections,
-  refreshDirectoryMetadata,
-  workspaceCollections,
-} from "@/entities/files";
-import {
   openWorkspacesCollection,
   type OpenWorkspaceRow,
 } from "@/entities/open-workspaces";
@@ -60,20 +55,14 @@ export function whenOpenWorkspacesReady(): Promise<void> {
 }
 
 /**
- * Bring every persisted open workspace back to life after a restart: seed
- * its collections and kick the listing walk, exactly as `recordFocus`
- * does for a fresh open — minus the insert, since the row is what told us
- * to. Watchers arm through the registry subscription, which reconciles the
- * rows it finds. Called once by `workspacesModule`'s boot, before render,
- * so nothing observes `whenOpenWorkspacesReady` ahead of it.
+ * Bring every persisted open workspace back to life after a restart: load
+ * the open set, whose rows core opens (`mirrorOpenSet`) — each workspace's
+ * modules then start themselves, its files walking the listing and
+ * watching. Called once by `workspacesModule`'s boot, before render, so
+ * nothing observes `whenOpenWorkspacesReady` ahead of it.
  */
 export function restoreOpenWorkspaces(): Promise<void> {
-  restored ??= openWorkspacesCollection.preload().then(() => {
-    for (const row of openWorkspacesCollection.values()) {
-      getOrCreateWorkspaceCollections(row.path);
-      void refreshDirectoryMetadata(row.path);
-    }
-  });
+  restored ??= openWorkspacesCollection.preload();
   return restored;
 }
 
@@ -122,11 +111,9 @@ function hydrated(): Promise<void> {
  * The registry's half of opening or focusing a workspace, run on
  * `workspace:focused` (so through `core.workspace(path).open()` or
  * `.focus()`, never directly). A workspace not yet in the open set joins it
- * once the persisted set has hydrated, which in steady state is immediate,
- * with its file collections seeded and its listing walk under way. One
- * already in it is brought to the front: the sidebar shows it and new-item
- * actions target it. Either way its listing is re-stat'd (cheap, catches
- * watcher gaps), and this resolves once the write is durable: a reload
+ * once the persisted set has hydrated, which in steady state is immediate.
+ * One already in it is brought to the front: the sidebar shows it and
+ * new-item actions target it. Resolves once the write is durable: a reload
  * before that would forget the workspace or land on the previous focus.
  * Core has already waited out any close of the same workspace.
  */
@@ -134,9 +121,7 @@ async function recordFocus(workspacePath: string): Promise<void> {
   const key = workspaceKey(workspacePath);
   const native = pathutil.normalize(workspacePath);
   await hydrated();
-  const existing = openWorkspacesCollection.get(key);
-  if (existing) {
-    void refreshDirectoryMetadata(existing.path);
+  if (openWorkspacesCollection.has(key)) {
     return openWorkspacesCollection
       .update(key, (draft) => {
         draft.focusedAt = Date.now();
@@ -144,8 +129,6 @@ async function recordFocus(workspacePath: string): Promise<void> {
       .isPersisted.promise.then(() => undefined);
   }
 
-  // The row first: per-workspace values are scoped to membership, so the
-  // collections must find the workspace open when the refresh reaches them.
   // The optimistic insert is visible synchronously; only durability waits.
   const now = Date.now();
   const inserted = openWorkspacesCollection.insert({
@@ -154,8 +137,6 @@ async function recordFocus(workspacePath: string): Promise<void> {
     openedAt: now,
     focusedAt: now,
   });
-  getOrCreateWorkspaceCollections(native);
-  void refreshDirectoryMetadata(native);
   return inserted.isPersisted.promise.then(() => undefined);
 }
 
@@ -178,23 +159,6 @@ export function useFocusedWorkspace(): string | null {
 
 export function isWorkspaceOpen(workspacePath: string): boolean {
   return openWorkspacesCollection.has(workspaceKey(workspacePath));
-}
-
-/**
- * Drops and re-seeds the workspace's file state without touching agents or
- * the watcher — error-boundary recovery after fs access is restored. (A
- * lost fs handle doesn't invalidate running harness processes; they hold
- * their own OS-level access.)
- */
-export function reloadWorkspaceFiles(workspacePath: string): void {
-  const native = pathutil.normalize(workspacePath);
-  workspaceCollections.drop(native);
-  getOrCreateWorkspaceCollections(native);
-  void refreshDirectoryMetadata(native);
-  // Access was just restored — if the watcher's start failed while the
-  // workspace was unreadable, this is the moment it can finally arm. The
-  // error boundary calls `ensureWatching` alongside this, for the same
-  // reason the loader does: watching is the portal's business.
 }
 
 /**
@@ -270,21 +234,21 @@ function mirrorOpenSet(lifecycle: WorkspaceLifecycle): () => void {
 
 /**
  * The open set's runtime half: it persists what core opens through a
- * handle, and drops it when core closes it. Scopes and watchers must be
- * live before a restore hydrates rows, so they are needs. The desktop shell
+ * handle, and drops it when core closes it. Scopes must be live before a
+ * restore hydrates rows, so they are a need. The desktop shell
  * restores the persisted open set; the marketing site focuses its one root.
  */
 export function workspacesModule({ restore }: { restore: boolean }) {
   return defineModule({
     name: "workspace-registry",
-    needs: ["workspace-scopes", "workspace-watchers"],
+    needs: ["workspace-scopes"],
     boot: (_api, ctx) => {
       const stopMirror = mirrorOpenSet(ctx.workspaces);
       const stopFocus = ctx.hooks.on("workspace:focused", (workspace) =>
         recordFocus(workspace.path),
       );
       // Synchronously, first thing in the close: the switcher row goes at
-      // once, and the metadata watcher stops with it.
+      // once.
       const stopClosing = ctx.hooks.on("workspace:closing", (workspace) => {
         if (openWorkspacesCollection.has(workspace.key)) {
           openWorkspacesCollection.delete(workspace.key);

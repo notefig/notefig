@@ -46,19 +46,21 @@ async function notifyWatcher(
   workspacePath: string,
   path: string,
 ): Promise<void> {
-  const [{ platformAdapter }, fileSync, { calculateContentHash }] =
+  const [{ platformAdapter }, fileSync, { calculateContentHash }, { appCore }] =
     await Promise.all([
       import("@/adapters"),
       import("@/utils/file-sync"),
       import("@/utils/hash"),
+      import("@/core/current"),
     ]);
   const { content } = (await platformAdapter.fs.readFiles([path])).succeeded[0];
   await fileSync.handleContentFileSystemChange(
+    appCore().workspace(workspacePath).files,
+    platformAdapter.fs,
     {
       watchId: fileSync.contentWatchIdFor(workspacePath),
       changes: [{ path, content, contentHash: calculateContentHash(content) }],
     },
-    workspacePath,
   );
 }
 

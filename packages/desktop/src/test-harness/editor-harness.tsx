@@ -2,8 +2,8 @@
  * Dev-only editor harness (route: /__harness/editor).
  *
  * Mounts the real TextEditor (and SearchPanel) against the real platform
- * adapter WITHOUT booting the workspace: no router-driven collections, no
- * file tree, no dockable layout, no IndexedDB seeding ceremony. This is
+ * adapter with its workspace open in core but no shell around it: no file
+ * tree, no dockable layout, no IndexedDB seeding ceremony. This is
  * the cheap, focused way to test the markdown editing experience —
  * typing, input rules, autosave, image paste/drop, search — in a real
  * browser (see tests/editor/*.spec.ts).
@@ -101,6 +101,9 @@ export function EditorHarness() {
         { path: config.filePath, content: config.content },
         ...(config.files ?? []),
       ]);
+      // The editor saves through its workspace's files, which exist once
+      // core has the workspace open — as in the app.
+      await core.workspace(config.basePath).focus();
       // Editors accept only parsed doc JSON — same worker path as the app.
       const doc = await openDocument(config.filePath, config.content);
       if (!cancelled) setInitialDoc(doc);
@@ -109,7 +112,7 @@ export function EditorHarness() {
       cancelled = true;
       disposeAllEditors();
     };
-  }, [config]);
+  }, [config, core]);
 
   useEffect(() => {
     (window as unknown as Record<string, unknown>).__HARNESS__ = {

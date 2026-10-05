@@ -43,19 +43,20 @@ vi.mock("@/adapters", async () => {
 
 import { fake, installWatcherSim } from "@/testing/fake-fs-adapter";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
+import { QueryClient } from "@tanstack/react-query";
+import { createDocuments } from "@/entities/documents";
+import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { useEditorFileSync } from "../use-editor-file-sync";
 import {
-  getOrCreateWorkspaceCollections,
+  createWorkspaceFiles,
   type FileMetadata,
+  type WorkspaceFiles,
 } from "@/entities/files";
 import {
   closeDocumentSync,
   resetConverterForTests,
 } from "@/utils/markdown-conversion";
-import {
-  handleContentFileSystemChange,
-  writeWorkspaceTextFile,
-} from "@/utils/file-sync";
+import { handleContentFileSystemChange } from "@/utils/file-sync";
 import { calculateContentHash } from "@/utils/hash";
 import type { FileEntry } from "@/utils/fs";
 
@@ -75,6 +76,8 @@ beforeAll(() => {
 
 let workspaceCounter = 0;
 let WS: string;
+/** The workspace's files, over the fake disk. */
+let files: WorkspaceFiles;
 let FILE: string;
 
 let editor: Editor;
@@ -95,7 +98,7 @@ function EditorSync({ entry }: { entry: JoinedEntry }) {
   useEditorFileSync(
     editor,
     entry as FileEntry,
-    WS,
+    files,
     entry.isContentLoaded,
     entry.contentError,
   );
@@ -103,7 +106,7 @@ function EditorSync({ entry }: { entry: JoinedEntry }) {
 }
 
 function Harness() {
-  const { metadata, content } = getOrCreateWorkspaceCollections(WS);
+  const { metadata, content } = files.collections;
   const { data = [] } = useLiveQuery(
     (q) =>
       q
@@ -178,6 +181,11 @@ async function setupWorkspace(seed: number) {
   workspaceCounter++;
   WS = `/ws-revert-${workspaceCounter}`;
   FILE = `${WS}/note.md`;
+  files = createWorkspaceFiles({
+    workspacePath: WS,
+    fs: fake.adapter as unknown as FileSystemSurface,
+    queryClient: new QueryClient(),
+  });
   fake.reseed(seed);
 
   fake.store.clear();
@@ -191,7 +199,8 @@ async function setupWorkspace(seed: number) {
     fakeFs: fake,
     seed,
     pendingEvents,
-    onExternalChange: (event) => handleContentFileSystemChange(event, WS),
+    onExternalChange: (event) =>
+      handleContentFileSystemChange(files, fake.adapter as never, event),
   });
 
   editor = new Editor({
@@ -216,7 +225,7 @@ async function setupWorkspace(seed: number) {
   await act(async () => {
     root.render(createElement(Harness));
   });
-  const { content } = getOrCreateWorkspaceCollections(WS);
+  const { content } = files.collections;
   for (let i = 0; i < 100; i++) {
     await tick(10);
     if (content.get(FILE)?.contentHash) break;
@@ -229,6 +238,7 @@ async function teardownWorkspace() {
   fake.hooks.afterWrite = undefined;
   await Promise.all(pendingEvents);
   pendingEvents = [];
+  files.dispose();
   await act(async () => {
     root.unmount();
   });
@@ -239,7 +249,7 @@ async function teardownWorkspace() {
 
 /** Editor, disk, and content row all hold exactly `expected`. */
 function expectConverged(expected: string) {
-  const { content } = getOrCreateWorkspaceCollections(WS);
+  const { content } = files.collections;
   expect(editor.state.doc.textContent, "editor did not adopt").toBe(expected);
   expect(fake.store.get(FILE)?.content, "disk was overwritten").toBe(expected);
   expect(content.get(FILE)?.content, "content row is stale").toBe(expected);
@@ -312,7 +322,10 @@ describe("external writes restoring app-written content (git revert)", () => {
       // the collection; a stale row would later be adopted over the
       // agent's write.
       await act(async () => {
-        await writeWorkspaceTextFile(FILE, "agent wrote this");
+        await createDocuments({
+          fs: fake.adapter as never,
+          openFiles: () => [files],
+        }).write(FILE, "agent wrote this");
         watcherSim.appWrites.push({
           path: FILE,
           hash: calculateContentHash("agent wrote this"),

@@ -1,5 +1,4 @@
 import type { FileTree } from "@pierre/trees";
-import { hydrateDirectoryStats } from "@/entities/files";
 
 /**
  * Lazy metadata hydration (MET-99) for the trees-based file tree: stat a
@@ -16,13 +15,18 @@ import { hydrateDirectoryStats } from "@/entities/files";
  */
 export function attachTreeStatHydration(
   model: FileTree,
-  workspacePath: string,
+  /** The workspace's files: its root, and the stat hydration of its rows. */
+  files: {
+    workspacePath: string;
+    hydrateDirectoryStats(dirPath: string): Promise<void>;
+  },
   toAbs: (relPath: string) => string,
 ): () => void {
+  const { workspacePath, hydrateDirectoryStats } = files;
   let lastCount = -1;
 
   const hydrate = (dirPath: string) => {
-    hydrateDirectoryStats(workspacePath, dirPath).catch((error: unknown) => {
+    hydrateDirectoryStats(dirPath).catch((error: unknown) => {
       console.warn(`Failed to hydrate stats for ${dirPath}:`, error);
     });
   };

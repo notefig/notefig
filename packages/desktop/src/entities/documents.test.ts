@@ -1,42 +1,57 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { platformAdapter } from "@/adapters";
-import { FsError } from "@/adapters/platform-adapter.interface";
-import { readWorkspaceTextFile, writeWorkspaceTextFile } from "../file-sync";
-import { getOrCreateWorkspaceCollections } from "@/entities/files";
-import { calculateContentHash } from "../hash";
-import { getDocumentSync } from "../markdown-conversion";
+import { QueryClient } from "@tanstack/react-query";
+import {
+  FsError,
+  type FileSystemSurface,
+} from "@/adapters/platform-adapter.interface";
+import { calculateContentHash } from "@/utils/hash";
+import { getDocumentSync } from "@/utils/markdown-conversion";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import {
   getOrCreateEditor,
   disposeEditor,
 } from "@/components/editor/editor-store";
 import { getMarkdownEditor } from "@/entities/editors";
+import { createWorkspaceFiles, type WorkspaceFiles } from "./files";
+import { createDocuments, type DocumentsApi } from "./documents";
 
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-    fs: {
-      readFiles: vi.fn(),
-      writeFiles: vi.fn(),
-    },
-  },
-}));
+const readMock = vi.fn();
+const writeMock = vi.fn();
+const fs = {
+  readFiles: readMock,
+  writeFiles: writeMock,
+} as unknown as Pick<FileSystemSurface, "readFiles" | "writeFiles">;
 
-const readMock = vi.mocked(platformAdapter.fs.readFiles);
-const writeMock = vi.mocked(platformAdapter.fs.writeFiles);
+/** The open workspaces' files the documents bring forward. */
+let open: WorkspaceFiles[] = [];
+let documents: DocumentsApi;
 
 beforeEach(() => {
   readMock.mockReset();
   writeMock.mockReset();
+  open = [];
+  documents = createDocuments({ fs, openFiles: () => open });
 });
 
-describe("writeWorkspaceTextFile", () => {
+describe("documents.write", () => {
   it("brings the loaded content row forward (rows lead disk for app writes)", async () => {
     // The write's watcher echo is consumed natively, so this row update is
     // the ONLY thing carrying the new content into the collection — a
     // stale row would later be adopted over the write.
-    const { content } = getOrCreateWorkspaceCollections("/ws-row");
     readMock.mockResolvedValue({ succeeded: [], failed: [] });
+    const files = createWorkspaceFiles({
+      workspacePath: "/ws-row",
+      fs: {
+        ...fs,
+        readDirectory: async () => ({ ok: true, value: [] }),
+        onFsEvent: () => () => {},
+        startWatchingMetadata: async () => {},
+        stopWatching: async () => {},
+      } as unknown as FileSystemSurface,
+      queryClient: new QueryClient(),
+    });
+    open = [files];
+    const { content } = files.collections;
     await content.preload();
     content.utils.writeUpsert({
       path: "/ws-row/a.md",
@@ -45,7 +60,7 @@ describe("writeWorkspaceTextFile", () => {
     });
     writeMock.mockResolvedValue({ succeeded: ["/ws-row/a.md"], failed: [] });
 
-    await writeWorkspaceTextFile("/ws-row/a.md", "hello\n");
+    await documents.write("/ws-row/a.md", "hello\n");
 
     expect(content.get("/ws-row/a.md")?.content).toBe("hello\n");
   });
@@ -58,13 +73,13 @@ describe("writeWorkspaceTextFile", () => {
       ] as never[],
     });
 
-    await expect(
-      writeWorkspaceTextFile("/ws/a.md", "hello\n"),
-    ).rejects.toBeInstanceOf(FsError);
+    await expect(documents.write("/ws/a.md", "hello\n")).rejects.toBeInstanceOf(
+      FsError,
+    );
   });
 });
 
-describe("writeWorkspaceTextFile adoption (open editor)", () => {
+describe("documents.write adoption (open editor)", () => {
   const path = "/ws/open.md";
   const codec = createMarkdownCodec();
 
@@ -89,8 +104,8 @@ describe("writeWorkspaceTextFile adoption (open editor)", () => {
     openEditor("# Doc\n\nOld body.\n");
 
     // The write is self-write-tagged, so the watcher-driven adoption path
-    // never fires for it — writeWorkspaceTextFile must adopt directly.
-    await writeWorkspaceTextFile(path, "# Doc\n\nNew body.\n");
+    // never fires for it — the write must adopt directly.
+    await documents.write(path, "# Doc\n\nNew body.\n");
 
     expect(liveMarkdown()).toContain("New body.");
     expect(liveMarkdown()).not.toContain("Old body.");
@@ -102,7 +117,7 @@ describe("writeWorkspaceTextFile adoption (open editor)", () => {
 
     const fence =
       "```notefig:question\nid: q_1234\nstatus: pending\nprompt: OK?\n```\n";
-    await writeWorkspaceTextFile(path, `# Doc\n\n${fence}`);
+    await documents.write(path, `# Doc\n\n${fence}`);
 
     expect(liveMarkdown()).toContain("id: q_1234");
   });
@@ -111,7 +126,7 @@ describe("writeWorkspaceTextFile adoption (open editor)", () => {
     writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
     openEditor("# Current\n\nEdited since checkpoint.\n");
 
-    await writeWorkspaceTextFile(path, "# Restored\n\nCheckpoint content.\n");
+    await documents.write(path, "# Restored\n\nCheckpoint content.\n");
 
     expect(liveMarkdown()).toContain("Checkpoint content.");
     expect(liveMarkdown()).not.toContain("Edited since checkpoint.");
@@ -128,7 +143,7 @@ describe("writeWorkspaceTextFile adoption (open editor)", () => {
     sync.writer = () => new Promise<void>(() => {});
     sync.pushUpdate(() => editor.getJSON());
 
-    await writeWorkspaceTextFile(path, "# Doc\n\nAgent overwrite.\n");
+    await documents.write(path, "# Doc\n\nAgent overwrite.\n");
 
     expect(writeMock).toHaveBeenCalledWith([
       { path, content: "# Doc\n\nAgent overwrite.\n" },
@@ -138,14 +153,14 @@ describe("writeWorkspaceTextFile adoption (open editor)", () => {
   });
 });
 
-describe("readWorkspaceTextFile", () => {
+describe("documents.read", () => {
   it("slices content with 1-based line/limit", async () => {
     readMock.mockResolvedValue({
       succeeded: [{ path: "/ws/a.md", content: "line1\nline2\nline3\n" }],
       failed: [],
     });
 
-    const content = await readWorkspaceTextFile("/ws/a.md", {
+    const content = await documents.read("/ws/a.md", {
       line: 2,
       limit: 1,
     });
@@ -161,17 +176,14 @@ describe("readWorkspaceTextFile", () => {
       ] as never[],
     });
 
-    await expect(readWorkspaceTextFile("/ws/a.md")).rejects.toBeInstanceOf(
-      FsError,
-    );
+    await expect(documents.read("/ws/a.md")).rejects.toBeInstanceOf(FsError);
   });
 });
 
 describe("in-flight write tracking", () => {
   it("serializes same-path writes and settles whenWorkspaceWritesSettled after them", async () => {
-    const { whenWorkspaceWritesSettled } = await import(
-      "../workspace-write-tracker"
-    );
+    const { whenWorkspaceWritesSettled } =
+      await import("@/utils/workspace-write-tracker");
     const order: string[] = [];
     let releaseFirst!: () => void;
     writeMock
@@ -188,8 +200,8 @@ describe("in-flight write tracking", () => {
         return { succeeded: ["/ws/a.md"], failed: [] };
       });
 
-    const first = writeWorkspaceTextFile("/ws/a.md", "one");
-    const second = writeWorkspaceTextFile("/ws/a.md", "two");
+    const first = documents.write("/ws/a.md", "one");
+    const second = documents.write("/ws/a.md", "two");
     const settled = whenWorkspaceWritesSettled("/ws/a.md").then(() =>
       order.push("settled"),
     );

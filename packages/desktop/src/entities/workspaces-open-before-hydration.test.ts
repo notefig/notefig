@@ -82,7 +82,6 @@ describe("writes issued before the persisted set has hydrated", () => {
     const core = createTestCore({
       modules: [
         defineModule({ name: "workspace-scopes" }),
-        defineModule({ name: "workspace-watchers" }),
         workspacesModule({ restore: false }),
       ],
     });

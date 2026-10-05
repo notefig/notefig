@@ -24,22 +24,28 @@ vi.mock("@/adapters", async () => ({
     },
   },
 }));
-const files = vi.hoisted(() => ({
-  getOrCreateWorkspaceCollections: vi.fn((_path: string) => undefined),
-  refreshDirectoryMetadata: vi.fn(async (_path: string) => {}),
-  clearWorkspaceCollections: vi.fn(),
-}));
+// Which workspaces core opened the files of: a restored workspace's files
+// walk and watch as they are created (their own suite covers that).
+const files = vi.hoisted(() => ({ created: [] as string[] }));
 // The root's module list boots for real; these entities' per-workspace
-// modules stand in as empty instances over the mocks.
+// modules stand in as empty instances.
 const stubWorkspaceModule = async (
   name: string,
+  onCreate?: (path: string) => void,
 ): Promise<import("@notefig/core").AnyModule> => ({
   name,
-  workspace: { create: () => ({}) },
+  workspace: {
+    create: ({ workspace }: { workspace: { path: string } }) => {
+      onCreate?.(workspace.path);
+      return {};
+    },
+  },
 });
-vi.mock("@/entities/files", async () => ({
-  ...files,
-  filesModule: await stubWorkspaceModule("files"),
+vi.mock("@/entities/files", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/entities/files")>()),
+  filesModule: await stubWorkspaceModule("files", (path) =>
+    files.created.push(path),
+  ),
 }));
 vi.mock("@/entities/git", async () => ({
   clearGitCollection: vi.fn(),
@@ -47,14 +53,6 @@ vi.mock("@/entities/git", async () => ({
 }));
 vi.mock("@/utils/history-service", async () => ({
   historyModule: await stubWorkspaceModule("history"),
-}));
-const watchers = vi.hoisted(() => ({
-  start: vi.fn<
-    (path: string) => { stop: () => void; ensureStarted: () => void }
-  >(() => ({ stop: vi.fn(), ensureStarted: vi.fn() })),
-}));
-vi.mock("@/utils/file-sync", () => ({
-  startWorkspaceMetadataWatcher: watchers.start,
 }));
 
 import type { OpenWorkspaceRow } from "./workspaces";
@@ -92,7 +90,7 @@ beforeEach(async () => {
 });
 
 describe("restoreOpenWorkspaces at boot", () => {
-  it("reopens every persisted workspace: collections seeded, listings walked, watchers armed, focus kept", async () => {
+  it("reopens every persisted workspace: core opens its modules, focus kept", async () => {
     const workspaces = await import("./workspaces");
     const { createAppCore, runtimeModules } = await import("@/core/app-core");
     const { memoryUrlState } = await import("@/testing/test-core");
@@ -103,23 +101,14 @@ describe("restoreOpenWorkspaces at boot", () => {
     createAppCore(runtimeModules({ restoreWorkspaces: true }), {
       url: memoryUrlState(),
     }).boot();
-    // Ready means restored, not merely loaded: no settle sleep needed for
-    // the seeding and walks below to have been issued.
     await workspaces.whenOpenWorkspacesReady();
 
     const { isWorkspaceOpen, openWorkspacesCollection } = workspaces;
     expect(isWorkspaceOpen("/ws-a")).toBe(true);
     expect(isWorkspaceOpen("/ws-b")).toBe(true);
-    expect(
-      files.getOrCreateWorkspaceCollections.mock.calls.map(([p]) => p).sort(),
-    ).toEqual(["/ws-a", "/ws-b"]);
-    expect(
-      files.refreshDirectoryMetadata.mock.calls.map(([p]) => p).sort(),
-    ).toEqual(["/ws-a", "/ws-b"]);
-    expect(watchers.start.mock.calls.map(([p]) => p).sort()).toEqual([
-      "/ws-a",
-      "/ws-b",
-    ]);
+    await vi.waitFor(() =>
+      expect([...files.created].sort()).toEqual(["/ws-a", "/ws-b"]),
+    );
     // Focus survives too: the row focused last is the one in front.
     const focused = [...openWorkspacesCollection.values()].sort(
       (a, b) => b.focusedAt - a.focusedAt,

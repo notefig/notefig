@@ -1,40 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import type {
-  FileSearchOptions,
-  FileSearchResult,
+import type { Core } from "@notefig/core";
+import { CoreProvider } from "@notefig/core/react";
+import {
+  useFileSearch,
+  type FileSearchOptions,
+  type FileSearchResult,
 } from "@/hooks/use-file-search";
+import type { WorkspaceFiles } from "@/entities/files";
+import { createTestCore } from "@/testing/test-core";
+import { filesModuleOf, testWorkspaceFiles } from "@/testing/test-files";
 
-// Real TanStack DB collections, mocked fs seam (same harness as
-// entities/files.test.ts): the hook is exercised against the actual metadata
-// collection + live query, not a mock of the entities layer.
+// Real TanStack DB collections over a listing handed to them: the hook is
+// exercised against the actual metadata collection + live query, read
+// through core, not a mock of the entities layer.
 const adapter = {
-  createFiles: vi.fn(),
-  writeFiles: vi.fn(),
-  deleteFiles: vi.fn(),
   getMetadata: vi.fn(),
-  readFiles: vi.fn(),
   readDirectory: vi.fn(),
 };
 
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    fs: adapter,
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
-vi.mock("@/utils/file-write-effects", () => ({
-  invalidateDerivedState: vi.fn(),
-}));
-
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
-// Fresh workspace per test — collections are keyed by workspace in a
-// module-level registry, so reusing one path would leak rows across tests.
-let testCounter = 0;
-let WS = "";
+const WS = "/ws-file-search";
 
 const WORKSPACE_FILES = [
   "notes.md",
@@ -46,8 +34,8 @@ const WORKSPACE_FILES = [
 // row gets no relativePath.
 const LOOSE_FILE = "/elsewhere/loose-notes.md";
 
-let files: typeof import("@/entities/files");
-let useFileSearch: typeof import("@/hooks/use-file-search").useFileSearch;
+let files: WorkspaceFiles;
+let core: Core;
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -71,14 +59,18 @@ async function renderSearch(query: string, options?: FileSearchOptions) {
     root = createRoot(container);
   }
   await act(async () => {
-    root!.render(createElement(Probe, { query, options }));
+    root!.render(
+      createElement(CoreProvider, {
+        core,
+        children: createElement(Probe, { query, options }),
+      }),
+    );
   });
   return latest;
 }
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  WS = `/ws-file-search-${testCounter++}`;
   adapter.getMetadata.mockResolvedValue({ succeeded: [], failed: [] });
   adapter.readDirectory.mockImplementation(async () => ({
     ok: true,
@@ -92,9 +84,10 @@ beforeEach(async () => {
     ],
   }));
 
-  files = await import("@/entities/files");
-  ({ useFileSearch } = await import("@/hooks/use-file-search"));
-  await files.getOrCreateWorkspaceCollections(WS).metadata.preload();
+  files = testWorkspaceFiles(WS, adapter);
+  core = createTestCore({ modules: [filesModuleOf([files])] });
+  await core.workspace(WS).open();
+  await files.collections.metadata.preload();
 });
 
 afterEach(() => {
@@ -102,7 +95,7 @@ afterEach(() => {
   container?.remove();
   container = null;
   root = null;
-  files.workspaceCollections.drop(WS);
+  files.dispose();
 });
 
 describe("useFileSearch", () => {
@@ -164,7 +157,7 @@ describe("useFileSearch", () => {
 
   it("caps results at 10 by default", async () => {
     await act(async () => {
-      const { metadata } = files.getOrCreateWorkspaceCollections(WS);
+      const { metadata } = files.collections;
       for (let i = 0; i < 15; i++) {
         metadata.utils.writeInsert({
           path: `${WS}/bulk/file-${i}.md`,
@@ -180,7 +173,7 @@ describe("useFileSearch", () => {
   it("updates live when a row is inserted into the collection", async () => {
     expect(await renderSearch("brand-new")).toEqual([]);
     await act(async () => {
-      files.getOrCreateWorkspaceCollections(WS).metadata.utils.writeInsert({
+      files.collections.metadata.utils.writeInsert({
         path: `${WS}/brand-new.md`,
         relativePath: "brand-new.md",
         type: "file",

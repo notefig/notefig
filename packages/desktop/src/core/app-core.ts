@@ -16,6 +16,7 @@ import { tunnelModule } from "@/agent/tunnel/tunnel-module";
 import { workspaceAgentsModule } from "@/agent/workspace-agents";
 import { treeInlineEditModule } from "@/components/editor/file-tree";
 import { canOpenFile } from "@/components/editor/polymorphic-editor";
+import { documentsModule } from "@/entities/documents";
 import { editorsModule } from "@/entities/editors";
 import { filesModule } from "@/entities/files";
 import { gitModule } from "@/entities/git";
@@ -30,9 +31,9 @@ import { turnWritesModule } from "@/entities/turn-writes";
 import { workspaceScopesModule } from "@/entities/workspace-scoped";
 import { workspacesModule } from "@/entities/workspaces";
 import { historyModule } from "@/utils/history-service";
+import { projectSettingsModule } from "@/utils/project-settings";
 import { sidebarViewModule } from "@/hooks/sidebar-view";
 import { workspaceKey } from "@/utils/path";
-import { workspaceWatchersModule } from "@/utils/workspace-watchers";
 import { installAppCore } from "./current";
 
 declare module "@notefig/core" {
@@ -54,7 +55,6 @@ export function runtimeModules({
 }): AnyModule[] {
   return [
     workspaceScopesModule,
-    workspaceWatchersModule,
     seenModule,
     promptRoundsModule,
     turnWritesModule,
@@ -63,6 +63,8 @@ export function runtimeModules({
     layoutModule,
     tabsModule({ canOpenFile }),
     editorsModule,
+    documentsModule,
+    projectSettingsModule,
     // What entering a workspace does, besides opening it.
     scratchpadLandingModule,
     sidebarViewModule,

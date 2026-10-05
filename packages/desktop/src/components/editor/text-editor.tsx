@@ -16,6 +16,7 @@ import { TableMenu } from "./tiptap-table-menu";
 import { cn } from "@notefig/ui/utils";
 import { dropZoneProps } from "@/utils/drag-protocol";
 import { appCore } from "@/core/current";
+import { useWorkspaceModule } from "@notefig/core/react";
 import { isImageFile } from "@/utils/fs";
 import { relativeTreePath } from "@/utils/path";
 import "./tiptap.css";
@@ -50,7 +51,8 @@ export function TextEditor({
 
   const editor = instance.editor;
 
-  useEditorFileSync(editor, file, basePath, isContentLoaded, contentError);
+  const files = useWorkspaceModule(basePath, "files");
+  useEditorFileSync(editor, file, files, isContentLoaded, contentError);
   useEditorFocusLifecycle(editor, file.path);
   const scrollRef = useEditorViewportMemory(editor, file.path);
   const handleLinkToggle = useLinkPrompt(editor);

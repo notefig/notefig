@@ -147,7 +147,7 @@ export function createFakeFsAdapter() {
 
     async startWatchingMetadata() {},
     async startWatchingContent() {},
-    stopWatching() {},
+    async stopWatching() {},
 
     async pickDirectory() {
       return null;

@@ -35,11 +35,8 @@ import {
   type SortOrder,
   type FileTreeNode,
 } from "@/utils/fs";
-import {
-  file,
-  useFileCollections,
-  prefetchFileContent,
-} from "@/entities/files";
+import type { WorkspaceFiles } from "@/entities/files";
+import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { OpenTabOptions } from "@/entities/tabs";
 import { dropZoneProps, tagCurrentDrag } from "@/utils/drag-protocol";
@@ -114,10 +111,13 @@ interface FileTreeComponentProps {
 const ROW_HEIGHT_REM = 1.75;
 
 export function FileTree(props: FileTreeComponentProps) {
+  // The workspace's files, once core has it open (its row can show first).
+  const files = useWorkspaceModule(props.basePath, "files");
+  if (!files) return null;
   // Remount per workspace: the inner component's transient state (pending
   // delete dialog, hover memo) must not leak across workspaces. The MODEL
   // is cached per workspace either way.
-  return <FileTreeInner key={props.basePath} {...props} />;
+  return <FileTreeInner key={props.basePath} {...props} files={files} />;
 }
 
 // fallow-ignore-next-line complexity
@@ -133,9 +133,11 @@ function FileTreeInner({
   sortOrder = "name-asc",
   mode,
   onModeChange,
-}: FileTreeComponentProps) {
+  files,
+}: FileTreeComponentProps & { files: WorkspaceFiles }) {
   const { t } = useTranslation();
-  const { metadata } = useFileCollections(basePath);
+  const core = useCore();
+  const { metadata } = files.collections;
 
   const toAbs = useCallback(
     (rel: string) =>
@@ -234,7 +236,7 @@ function FileTreeInner({
       const move =
         (openTabsRef.current ?? []).includes(fromAbs) && onRenameOpenFile
           ? onRenameOpenFile(fromAbs, destAbs)
-          : file(basePath, fromAbs).rename(destAbs);
+          : files.file(fromAbs).rename(destAbs);
       move.catch((error: unknown) => {
         console.error(`Failed to move ${fromAbs}:`, error);
       });
@@ -264,8 +266,8 @@ function FileTreeInner({
 
   // Lazy metadata hydration (MET-99) — see tree-stat-hydration.ts.
   useEffect(
-    () => attachTreeStatHydration(model, basePath, toAbs),
-    [model, basePath, toAbs],
+    () => attachTreeStatHydration(model, files, toAbs),
+    [model, files, toAbs],
   );
 
   // Mirror expansion into the module store — see tree-expansion-memory.ts.
@@ -364,11 +366,14 @@ function FileTreeInner({
       if (!row || row.type !== "file") return;
       if (lastHoveredRef.current === row.path) return;
       lastHoveredRef.current = row.path;
-      prefetchFileContent(basePath, toAbs(row.path)).catch((error: unknown) => {
-        console.debug(`Failed to prefetch ${row.path}:`, error);
-      });
+      files
+        .file(toAbs(row.path))
+        .prefetch()
+        .catch((error: unknown) => {
+          console.debug(`Failed to prefetch ${row.path}:`, error);
+        });
     },
-    [findRowInComposedPath, basePath, toAbs],
+    [findRowInComposedPath, files, toAbs],
   );
 
   // Trees' internal drags are native HTML5. Tag them with the protocol
@@ -759,7 +764,14 @@ function FileTreeInner({
             ? toAbs(rel)
             : getDirectoryPath(toAbs(rel));
       }
-      moveIntoFolder(payload, destDir);
+      moveIntoFolder(
+        {
+          filesOf: (root) => core.workspace(root).files,
+          fs: core.use("platform").fs,
+        },
+        payload,
+        destDir,
+      );
     },
   });
 

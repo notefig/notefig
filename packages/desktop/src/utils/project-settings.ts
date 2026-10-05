@@ -12,6 +12,8 @@ import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { platformAdapter } from "@/adapters";
 import { queryClient } from "@/entities/query-client";
+import { defineModule } from "@notefig/core";
+import { onAppEvent } from "./app-events";
 import { path as pathutil } from "./path";
 
 export const PROJECT_SETTINGS_FILENAME = "metrists.json";
@@ -135,3 +137,25 @@ export function useProjectSettings(workspacePath: string) {
     update,
   } as const;
 }
+
+declare module "@notefig/core" {
+  interface CoreModules {
+    "project-settings": undefined;
+  }
+}
+
+/** An external edit of a workspace's metrists.json (the watcher reports
+ *  it) drops the cached settings, so they are read again. */
+export const projectSettingsModule = defineModule({
+  name: "project-settings",
+  needs: ["queryClient"],
+  boot: (_api, ctx) => {
+    const queryClient = ctx.use("queryClient");
+    return onAppEvent("files:changed", ({ workspacePath, paths }) => {
+      if (!paths.includes(projectSettingsPath(workspacePath))) return;
+      void queryClient.invalidateQueries({
+        queryKey: projectSettingsQueryKey(workspacePath),
+      });
+    });
+  },
+});

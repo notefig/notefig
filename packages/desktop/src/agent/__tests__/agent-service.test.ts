@@ -100,6 +100,19 @@ import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import { APP_DIR_NAME } from "@/utils/app-dir";
 import { onAppEvent } from "@/utils/app-events";
 import type { AgentTask } from "../agent-service";
+import { createCore } from "@notefig/core";
+import { platformAdapter } from "@/adapters";
+import { installAppCore } from "@/core/current";
+import { documentsModule } from "@/entities/documents";
+
+// The task reaches its workspace's documents through the installed core
+// (until the task manager is handed them): one over this file's platform.
+installAppCore(
+  createCore({
+    services: { platform: platformAdapter } as never,
+    modules: [documentsModule],
+  }),
+);
 
 const harness = BUILT_IN_HARNESSES[0];
 

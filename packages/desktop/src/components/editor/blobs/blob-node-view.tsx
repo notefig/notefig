@@ -21,8 +21,10 @@ import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
 import { BLOB_LANG_PREFIX, parseBlobBlock, type ParsedBlob } from "@notefig/shared/blobs";
 import { getBlobType, type BlobTypeDefinition } from "./blob-registry";
 import { answerBlob, BlobAnswerError } from "./blob-actions";
+import { useCore } from "@notefig/core/react";
 
 export function BlobNodeView(props: NodeViewProps) {
+  const { documents } = useCore();
   const language = (props.node.attrs.language as string | null) ?? "";
   const [editAsCode, setEditAsCode] = useState(false);
 
@@ -69,6 +71,7 @@ export function BlobNodeView(props: NodeViewProps) {
   const answer = widget
     ? async (patch: Record<string, unknown>): Promise<void> => {
         const result = await answerBlob(
+          documents,
           filePath,
           widget.blob.envelope.id,
           widget.blobType.onAnswer(widget.blob, patch),

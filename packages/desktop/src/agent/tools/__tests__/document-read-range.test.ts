@@ -17,10 +17,7 @@ vi.mock("@/entities/editors", () => ({
   getWorkspaceEditorContext: vi.fn(() => ({ openFiles: [], activeFile: null })),
 }));
 
-const { readWorkspaceTextFile } = vi.hoisted(() => ({
-  readWorkspaceTextFile: vi.fn(async () => ""),
-}));
-vi.mock("@/utils/file-sync", () => ({ readWorkspaceTextFile }));
+const readWorkspaceTextFile = vi.fn(async (_path: string) => "");
 
 import { documentReadRange } from "../document-read-range";
 
@@ -28,7 +25,8 @@ const ctx = {
   workspacePath: "/ws",
   taskId: "task_1",
   agents: {} as never,
-  services: {} as never,
+  // Where a document no editor has open is read from.
+  services: { documents: { read: readWorkspaceTextFile } } as never,
 };
 
 const editors: Editor[] = [];
