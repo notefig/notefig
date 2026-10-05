@@ -1,20 +1,14 @@
 // MUST be first: forces the IndexedDB fs adapter before the platformAdapter
 // module-eval singleton is touched by any other import.
 import "./force-indexeddb";
-import React from "react";
-import ReactDOM from "react-dom/client";
-import { QueryClientProvider } from "@tanstack/react-query";
 import { Buffer } from "buffer";
-import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import "@/utils/intl";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TextPromptDialog } from "@/components/text-prompt-dialog";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@notefig/ui/tooltip";
-import { queryClient } from "@/entities/query-client";
-import { CoreProvider } from "@notefig/core/react";
-import { createAppCore, runtimeModules } from "@/core/app-core";
-import { urlStateFromRouter } from "@/entities/layout";
+import { runtimeModules } from "@/core/app-core";
+import { startApp } from "@/core/start-app";
 import {
   closeWorkspace,
   openWorkspace,
@@ -70,24 +64,17 @@ const MarketingApp = () => (
 // the open-workspace watchers armed exactly as the shell does. It does not
 // restore a persisted open set: the site always opens its one seeded root
 // itself.
-const router = createBrowserRouter([
-  {
-    path: "*",
-    element: (
-      <ThemeProvider defaultTheme="light">
-        <TooltipProvider>
-          <MarketingApp />
-          <Toaster />
-        </TooltipProvider>
-      </ThemeProvider>
-    ),
-  },
-]);
-
-const core = createAppCore(runtimeModules({ restoreWorkspaces: false }), {
-  url: urlStateFromRouter(router),
+startApp({
+  modules: runtimeModules({ restoreWorkspaces: false }),
+  element: (
+    <ThemeProvider defaultTheme="light">
+      <TooltipProvider>
+        <MarketingApp />
+        <Toaster />
+      </TooltipProvider>
+    </ThemeProvider>
+  ),
 });
-core.boot();
 
 // The one workspace this site ever shows is the seeded content root. The
 // open set persists in the visitor's browser, so a root from an earlier
@@ -99,13 +86,3 @@ void whenOpenWorkspacesReady().then(() => {
   }
   openWorkspace(WORKSPACE_ROOT);
 });
-
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <CoreProvider core={core}>
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>
-    </CoreProvider>
-  </React.StrictMode>,
-);
