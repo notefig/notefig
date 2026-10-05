@@ -14,7 +14,6 @@
  * effects — see the stability note on usePromptWidgetHost for the loop that
  * caused.
  */
-import { emitAppEvent } from "@/utils/app-events";
 import { useMemo, useRef } from "react";
 import { useLiveQuery, eq, and } from "@tanstack/react-db";
 import type {
@@ -31,13 +30,7 @@ import {
   agentTasksCollection,
   agentTurnsCollection,
 } from "@/agent/agent-collections";
-import { agents } from "@/agent/agents";
-import {
-  cancelAgentTask,
-  cancelAgentTurnAndForget,
-  removeQueuedPrompt,
-} from "@/agent/agent-service";
-import { ensureAgentRuntime } from "@/agent/tunnel/require-connection";
+import { AGENT_KV_NAMESPACE, agents, trustKey } from "@/agent/agents";
 import { describeTaskMeta, useAgentTaskList } from "@/entities/agents";
 import { getOrCreateWorkspaceCollections } from "@/entities/files";
 import {
@@ -50,7 +43,7 @@ import { Markdown } from "@/components/ui/markdown";
 import { useCore } from "@notefig/core/react";
 import { rankFileRows } from "@/utils/file-score";
 import { useKv } from "@/utils/kv-store";
-import { path as pathutil, relativeTreePath, workspaceKey } from "@/utils/path";
+import { path as pathutil, relativeTreePath } from "@/utils/path";
 import { AuthCard } from "./auth-card";
 import { PermissionCard } from "./permission-card";
 import {
@@ -205,12 +198,10 @@ const slots: PromptWidgetHost["slots"] = {
  *  which would tie the host's identity to a value that changes every render
  *  (see the stability note on usePromptWidgetHost). */
 function useTrust(workspacePath: string) {
-  const kv = useKv<boolean>("agent");
-  const key = `trust:${workspaceKey(workspacePath)}`;
-  return {
-    isTrusted: Boolean(kv.get(key)),
-    grant: () => kv.set(key, true),
-  };
+  // Subscribed for reactivity; the answer and the grant are the facade's.
+  useKv<boolean>(AGENT_KV_NAMESPACE).get(trustKey(workspacePath));
+  const workspace = agents.workspace(workspacePath);
+  return { isTrusted: workspace.isTrusted(), grant: workspace.trust };
 }
 
 /** The harness a new session would use, named for the widget's chrome. */
@@ -282,23 +273,20 @@ export function usePromptWidgetHost(): PromptWidgetHost {
       dispatchPrompt: ({ taskId, text, workspacePath: path, target }) => {
         const { turnId } = agents
           .task(taskId)
-          .promptFromWidget(text, target, mentionContextParts(path, text));
-        emitAppEvent("widget:round-started", {
-          taskId,
-          turnId,
-          workspacePath: path,
-          documentPath: pathutil.isAbsolute(target.path)
-            ? target.path
-            : pathutil.join(path, target.path),
-          prompt: text,
-        });
+          .promptFromWidget(
+            text,
+            { ...target, workspacePath: path },
+            mentionContextParts(path, text),
+          );
         return { turnId };
       },
-      cancelTask: (taskId) => void cancelAgentTask(taskId),
-      cancelTurnAndForget: (taskId) => cancelAgentTurnAndForget(taskId),
-      removeQueuedPrompt,
+      cancelTask: (taskId) => void agents.task(taskId).cancel(),
+      cancelTurnAndForget: (taskId) =>
+        agents.task(taskId).cancelTurnAndForget(),
+      removeQueuedPrompt: (taskId, turnId) =>
+        agents.task(taskId).removeQueuedPrompt(turnId),
       getTurnStatus: (turnId) => agentTurnsCollection.get(turnId)?.status,
-      ensureRuntime: ensureAgentRuntime,
+      ensureRuntime: agents.ensureRuntime,
 
       useRound,
       useSessionList,

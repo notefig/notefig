@@ -1,5 +1,11 @@
 import { ToolBar } from "@/components/editor/tool-bar";
-import { useCallback, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   Check,
@@ -40,17 +46,9 @@ import {
 } from "@notefig/ui/alert-dialog";
 import { cn } from "@notefig/ui/utils";
 import { copyTextToClipboard } from "@notefig/ui/clipboard";
-import { useKv } from "@/utils/kv-store";
-import { workspaceKey } from "@/utils/path";
 import type { AgentTaskRow } from "@/agent/agent-collections";
 import {
-  cancelAgentTask,
-  deleteAgentSession,
-  refreshAgentSession,
-  startAgentTask,
-} from "@/agent/agent-service";
-import { ensureAgentRuntime } from "@/agent/tunnel/require-connection";
-import {
+  agents,
   describeTaskMeta,
   useAgentTaskList,
   type AgentTaskMeta,
@@ -130,48 +128,44 @@ export function useStartSession(workspacePath: string): {
   trustDialog: ReactNode;
 } {
   const { t } = useTranslation();
-  const normalized = workspaceKey(workspacePath);
-  const { tabs } = useCore();
   const [trustPromptOpen, setTrustPromptOpen] = useState(false);
-  // The harness the pending trust confirmation would start (picker choice).
-  const [pendingHarness, setPendingHarness] = useState<HarnessDefinition>(
-    BUILT_IN_HARNESSES[0],
-  );
-  const kv = useKv<boolean>("agent");
-  const trustKey = `trust:${normalized}`;
-
-  const startTask = useCallback(
-    (harness: HarnessDefinition) => {
-      // The row exists (status "starting") before startAgentTask returns —
-      // open the tab right away rather than sitting on the multi-second
-      // spawn/handshake; a failed start shows on the row as "error".
-      const { taskId, started } = startAgentTask(workspacePath, harness);
-      tabs.openAgent(taskId);
-      started.catch((error) => {
-        console.error("Failed to start agent task:", error);
-      });
-    },
-    [workspacePath, tabs],
-  );
+  // What the pending trust confirmation would start, and where: a start
+  // resolves after a load, by when the panel may show another workspace.
+  const [pending, setPending] = useState<{
+    workspacePath: string;
+    harness: HarnessDefinition;
+  }>({ workspacePath, harness: BUILT_IN_HARNESSES[0] });
+  const shownWorkspace = useRef(workspacePath);
+  shownWorkspace.current = workspacePath;
+  // The question is about the workspace that asked: once the panel shows
+  // another one, an open dialog goes rather than answer for the wrong one.
+  useEffect(() => {
+    if (pending.workspacePath !== workspacePath) setTrustPromptOpen(false);
+  }, [pending.workspacePath, workspacePath]);
 
   const create = useCallback(
     (harness: HarnessDefinition) => {
-      if (!ensureAgentRuntime()) return;
-      if (kv.get(trustKey)) {
-        startTask(harness);
-      } else {
-        setPendingHarness(harness);
-        setTrustPromptOpen(true);
-      }
+      const requested = workspacePath;
+      void agents
+        .workspace(requested)
+        .start(harness)
+        .then((result) => {
+          if (result.status !== "needs-trust") return;
+          // Asked about the workspace on screen, or not at all.
+          if (shownWorkspace.current !== requested) return;
+          setPending({ workspacePath: requested, harness });
+          setTrustPromptOpen(true);
+        });
     },
-    [kv, trustKey, startTask],
+    [workspacePath],
   );
 
   const confirmTrust = useCallback(() => {
-    kv.set(trustKey, true);
+    const workspace = agents.workspace(pending.workspacePath);
+    workspace.trust();
     setTrustPromptOpen(false);
-    startTask(pendingHarness);
-  }, [kv, trustKey, startTask, pendingHarness]);
+    void workspace.start(pending.harness);
+  }, [pending]);
 
   const trustDialog = (
     <AlertDialog open={trustPromptOpen} onOpenChange={setTrustPromptOpen}>
@@ -179,7 +173,7 @@ export function useStartSession(workspacePath: string): {
         <AlertDialogHeader>
           <AlertDialogTitle>{t("agentTrustTitle")}</AlertDialogTitle>
           <AlertDialogDescription>
-            {t("agentTrustDescription", { harness: pendingHarness.label })}
+            {t("agentTrustDescription", { harness: pending.harness.label })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -281,7 +275,7 @@ export function SessionRow({
               className="hidden shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-foreground group-hover:block"
               onClick={(event) => {
                 event.stopPropagation();
-                void cancelAgentTask(task.taskId);
+                void agents.task(task.taskId).cancel();
               }}
             >
               <Square className="size-3 fill-current" />
@@ -307,7 +301,7 @@ export function SessionRowMenu({ task }: { task: AgentTaskRow }) {
     <ContextMenuContent>
       <ContextMenuItem
         disabled={!actions.canRefresh}
-        onSelect={() => refreshAgentSession(task.taskId)}
+        onSelect={() => agents.task(task.taskId).refresh()}
       >
         <RefreshCw />
         {t("agentRefreshSession")}
@@ -333,7 +327,7 @@ export function SessionRowMenu({ task }: { task: AgentTaskRow }) {
       <ContextMenuSeparator />
       <ContextMenuItem
         className="text-destructive focus:text-destructive"
-        onSelect={() => void deleteAgentSession(task.taskId)}
+        onSelect={() => void agents.task(task.taskId).delete()}
       >
         <Trash2 />
         {t("agentDeleteSession")}

@@ -5,11 +5,23 @@ vi.mock("@/adapters", async () => ({
     db: (await import("@/testing/node-db")).createNodeTestDb(),
   },
 }));
-vi.mock("@/agent/agent-service", () => ({
-  startAgentTask: vi.fn(),
+// The shared session starts its task through the workspace's agents handle.
+const startAgentTask = vi.hoisted(() =>
+  vi.fn<
+    (
+      workspacePath: string,
+      harness: unknown,
+    ) => { taskId: string; started: Promise<void> }
+  >(),
+);
+vi.mock("@/agent/agents", () => ({
+  agents: {
+    workspace: (workspacePath: string) => ({
+      startTask: (harness: unknown) => startAgentTask(workspacePath, harness),
+    }),
+  },
 }));
 
-import { startAgentTask } from "@/agent/agent-service";
 import { agentTasksCollection } from "@/agent/agent-collections";
 import {
   getOrStartSharedSession,
@@ -19,7 +31,7 @@ import {
   resetSharedSessionsForTest,
 } from "../blob-session-store";
 
-const startMock = vi.mocked(startAgentTask);
+const startMock = startAgentTask;
 const HARNESS = { id: "claude-code", label: "Claude Code" } as never;
 
 let nextTask = 0;

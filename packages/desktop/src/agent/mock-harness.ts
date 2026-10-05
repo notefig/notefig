@@ -19,6 +19,7 @@
  * which Vite statically evaluates to false in normal builds (same pattern
  * as testing/shim-transport.ts), so this dead-code-eliminates away.
  */
+import { MOCK_AGENT_MODE } from "./mock-mode";
 import { createLoopbackPair } from "@notefig/agent";
 import type { LoopbackTransport } from "@notefig/agent";
 import type { AgentTransport, McpEndpoint } from "@notefig/agent";
@@ -680,7 +681,7 @@ class ReplayPlayer {
 
 // ─── The env-gated harness ──────────────────────────────────────────────────
 
-export const MOCK_AGENT_MODE = import.meta.env.VITE_AGENT_MOCK === "1";
+export { MOCK_AGENT_MODE };
 
 export type MockAgentConfig = {
   scenario: string;

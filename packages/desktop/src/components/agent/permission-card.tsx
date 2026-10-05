@@ -1,7 +1,6 @@
 import { Button } from "@notefig/ui/button";
 import { cn } from "@notefig/ui/utils";
-import { respondToAgentPermission } from "@/agent/agent-service";
-import { usePendingPermissions } from "@/entities/agents";
+import { agents, usePendingPermissions } from "@/entities/agents";
 import type { PermissionOption } from "@notefig/shared/agent";
 
 /** ACP option kind → button emphasis. Options render verbatim otherwise. */
@@ -17,7 +16,7 @@ function variantForKind(
  * Renders the head of a task's pending permission queue: the tool-call title
  * and the agent-provided options, verbatim. Reads the queue from
  * agentPermissionRequestsCollection (the one bus); answering settles the
- * promise the ACP client is awaiting via respondToAgentPermission.
+ * promise the ACP client is awaiting via the task's respondPermission.
  */
 export function PermissionCard({
   taskId,
@@ -59,7 +58,7 @@ export function PermissionCard({
             size="sm"
             variant={variantForKind(option.kind)}
             onClick={() =>
-              respondToAgentPermission(taskId, head.id, {
+              agents.task(taskId).respondPermission(head.id, {
                 outcome: { outcome: "selected", optionId: option.optionId },
               })
             }

@@ -3,7 +3,7 @@ import i18n from "@/utils/intl";
 import { isWeb } from "@/utils/platform";
 import { tunnelConnection } from "./tunnel-connection";
 import { openPairDialog } from "./pair-dialog-store";
-import { MOCK_AGENT_MODE } from "../mock-harness";
+import { MOCK_AGENT_MODE } from "../mock-mode";
 
 /**
  * Gate agent-start actions on the web having a paired worker. On desktop

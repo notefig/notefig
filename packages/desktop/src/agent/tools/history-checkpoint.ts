@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { AgentTool } from "@notefig/agent";
-import { checkpointWorkspaceHistory } from "@/utils/history-service";
+import { history } from "@/utils/history-service";
 import { invalidateGit } from "@/entities/git";
 
 const InputSchema = z.object({
@@ -17,7 +17,7 @@ export const historyCheckpoint: AgentTool<
   input: InputSchema,
   async execute(ctx, input) {
     try {
-      const oid = await checkpointWorkspaceHistory(ctx.workspacePath, input.message, {
+      const oid = await history(ctx.workspacePath).checkpoint(input.message, {
         name: "agent",
         email: "agent@notefig.local",
       });
