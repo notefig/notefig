@@ -1,5 +1,11 @@
 import { ToolBar } from "@/components/editor/tool-bar";
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   Check,
@@ -131,6 +137,11 @@ export function useStartSession(workspacePath: string): {
   }>({ workspacePath, harness: BUILT_IN_HARNESSES[0] });
   const shownWorkspace = useRef(workspacePath);
   shownWorkspace.current = workspacePath;
+  // The question is about the workspace that asked: once the panel shows
+  // another one, an open dialog goes rather than answer for the wrong one.
+  useEffect(() => {
+    if (pending.workspacePath !== workspacePath) setTrustPromptOpen(false);
+  }, [pending.workspacePath, workspacePath]);
 
   const create = useCallback(
     (harness: HarnessDefinition) => {
