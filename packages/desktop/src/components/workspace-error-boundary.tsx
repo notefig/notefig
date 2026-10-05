@@ -11,8 +11,8 @@ import {
   isWorkspaceAccessError,
 } from "@/adapters/platform-adapter.interface";
 import { useOpenProject } from "@/hooks/use-open-project";
+import { useCore } from "@notefig/core/react";
 import {
-  closeWorkspace,
   reloadWorkspaceFiles,
   useFocusedWorkspace,
 } from "@/entities/workspaces";
@@ -158,6 +158,7 @@ function WorkspaceAccessError({
   onResolved: () => void;
 }) {
   const { t } = useTranslation();
+  const { projects } = useCore();
   const openProject = useOpenProject();
   const workspacePath = useFocusedWorkspace();
   const content = getRecoveryContent(error, t);
@@ -185,7 +186,7 @@ function WorkspaceAccessError({
       // The broken workspace is being abandoned for another one — close it
       // fully (agents demote to "restored"; its dead handle stops being
       // watched) rather than leaving a wounded background entry.
-      if (workspacePath) void closeWorkspace(workspacePath);
+      if (workspacePath) void projects.close(workspacePath);
       await openProject(picked);
     }
     resume(picked);
@@ -233,7 +234,7 @@ function WorkspaceAccessError({
             onClick={() => {
               // Leave the broken workspace: focus moves to the next open
               // one, or the welcome screen with none left.
-              if (workspacePath) void closeWorkspace(workspacePath);
+              if (workspacePath) void projects.close(workspacePath);
               onResolved();
             }}
           >

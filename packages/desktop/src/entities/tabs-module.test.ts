@@ -29,7 +29,7 @@ vi.mock("./workspaces", () => ({
 vi.mock("@/entities/files", () => ({
   getOrCreateWorkspaceCollections: vi.fn(),
   useMetadataFetching: vi.fn(() => false),
-  renameFileOrDirectory: vi.fn(),
+  file: vi.fn(),
 }));
 vi.mock("./editors", () => ({ editor: vi.fn(), getMarkdownEditor: vi.fn() }));
 vi.mock("./agents", () => ({

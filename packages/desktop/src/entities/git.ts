@@ -21,6 +21,7 @@
  * its status, rewrite its index, or commit into it.
  */
 import { useMemo } from "react";
+import { defineModule } from "@notefig/core";
 import { createCollection, useLiveQuery, eq } from "@tanstack/react-db";
 import { queryCollectionOptions } from "@tanstack/query-db-collection";
 import { useIsFetching } from "@tanstack/react-query";
@@ -452,3 +453,44 @@ export async function initializeGit(workspacePath: string): Promise<void> {
   await ensureWorkspaceHistoryInitialized(workspacePath);
   await refetchGit(workspacePath);
 }
+
+// ---------------------------------------------------------------------------
+// core.workspace(ws).git
+// ---------------------------------------------------------------------------
+
+/** One workspace's checkpoint timeline (its history repo), as actions. */
+export interface WorkspaceGit {
+  /** Refetch status and checkpoints in one pass. */
+  refetch(): Promise<void>;
+  /** Commit everything dirty; the new oid, or null if nothing changed. */
+  saveCheckpoint(description?: string): Promise<string | null>;
+  revertTo(checkpoint: { oid: string; hash: string }): Promise<void>;
+  abortRevert(): Promise<void>;
+  /** Create the history repo, then load its rows. */
+  initialize(): Promise<void>;
+}
+
+export function git(workspacePath: string): WorkspaceGit {
+  return {
+    refetch: () => refetchGit(workspacePath),
+    saveCheckpoint: (description) => saveCheckpoint(workspacePath, description),
+    revertTo: (checkpoint) => revertToCheckpoint(workspacePath, checkpoint),
+    abortRevert: () => abortRevert(workspacePath),
+    initialize: () => initializeGit(workspacePath),
+  };
+}
+
+declare module "@notefig/core" {
+  interface WorkspaceModules {
+    git: WorkspaceGit;
+  }
+}
+
+/** The git rows are scoped to the open set (`gitCollections`), so closing
+ *  the workspace drops them; this module hands out its actions. */
+export const gitModule = defineModule({
+  name: "git",
+  workspace: {
+    create: ({ workspace }) => git(workspace.path),
+  },
+});

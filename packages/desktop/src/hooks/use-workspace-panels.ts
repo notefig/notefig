@@ -16,7 +16,7 @@ import { useSearchParams } from "react-router-dom";
 import type { SearchPanelHandle } from "@/components/editor/search-panel";
 import { retryOnAnimationFrame } from "@/utils/retry-on-animation-frame";
 import { DEFAULT_SETTINGS_SECTION } from "@/components/editor/settings-modal";
-import { showWorkspace } from "@/hooks/use-open-project";
+import { useCore } from "@notefig/core/react";
 import { workspaceScoped } from "@/entities/workspace-scoped";
 
 import {
@@ -99,6 +99,7 @@ export function useWorkspacePanels({
   searchPanelRef,
   focusActiveTab,
 }: WorkspacePanelsOptions): WorkspacePanels {
+  const { projects } = useCore();
   const [searchParams, setUrlSearchParams] = useSearchParams();
   const isSidebarCollapsed = searchParams.get("sidebar") === "collapsed";
   const sidebarView = readSidebarView(searchParams);
@@ -125,12 +126,12 @@ export function useWorkspacePanels({
     (path: string) => {
       const tool = lastTool.peek(path)?.tool ?? DEFAULT_TOOL;
       // Focus is a durable write; the view flips at once.
-      void showWorkspace(path);
+      void projects.show(path);
       setUrlSearchParams((prev) => withSidebarView(prev, tool), {
         replace: true,
       });
     },
-    [setUrlSearchParams],
+    [projects, setUrlSearchParams],
   );
 
   const toggleSidebarCollapsed = useCallback(() => {

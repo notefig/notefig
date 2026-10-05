@@ -29,11 +29,26 @@ const files = vi.hoisted(() => ({
   refreshDirectoryMetadata: vi.fn(async (_path: string) => {}),
   clearWorkspaceCollections: vi.fn(),
 }));
-vi.mock("@/entities/files", () => files);
-vi.mock("@/entities/git", () => ({ clearGitCollection: vi.fn() }));
-vi.mock("@/utils/history-service", () => ({
+// The root's module list boots for real; these entities' per-workspace
+// modules stand in as empty instances over the mocks.
+const stubWorkspaceModule = async (
+  name: string,
+): Promise<import("@notefig/core").AnyModule> => ({
+  name,
+  workspace: { create: () => ({}) },
+});
+vi.mock("@/entities/files", async () => ({
+  ...files,
+  filesModule: await stubWorkspaceModule("files"),
+}));
+vi.mock("@/entities/git", async () => ({
+  clearGitCollection: vi.fn(),
+  gitModule: await stubWorkspaceModule("git"),
+}));
+vi.mock("@/utils/history-service", async () => ({
   disposeWorkspaceHistoryService: vi.fn(),
   checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
+  historyModule: await stubWorkspaceModule("history"),
 }));
 const watchers = vi.hoisted(() => ({
   start: vi.fn<

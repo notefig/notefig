@@ -32,12 +32,8 @@ import {
   TooltipTrigger,
 } from "@notefig/ui/tooltip";
 import {
-  abortRevert as abortRevertAction,
   deriveSyncState,
-  initializeGit,
-  refetchGit,
-  revertToCheckpoint,
-  saveCheckpoint as saveCheckpointAction,
+  git,
   useGitCheckpoints,
   useGitFetching,
   useGitSummary,
@@ -254,7 +250,7 @@ function useRevertController(workspacePath: string) {
     CheckpointListItem
   >({
     mutationFn: (checkpoint) =>
-      revertToCheckpoint(workspacePath, {
+      git(workspacePath).revertTo({
         oid: checkpoint.id,
         hash: checkpoint.hash,
       }),
@@ -274,7 +270,7 @@ function useRevertController(workspacePath: string) {
   });
 
   const abortRevert = useMutation<void, SerializedGitError, void>({
-    mutationFn: () => abortRevertAction(workspacePath),
+    mutationFn: () => git(workspacePath).abortRevert(),
     onSuccess: () => {
       setRevertError(null);
     },
@@ -409,11 +405,11 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
     SerializedGitError,
     string | undefined
   >({
-    mutationFn: (value) => saveCheckpointAction(workspacePath, value),
+    mutationFn: (value) => git(workspacePath).saveCheckpoint(value),
   });
 
   const initializeTimeline = useMutation<void, SerializedGitError, void>({
-    mutationFn: () => initializeGit(workspacePath),
+    mutationFn: () => git(workspacePath).initialize(),
   });
 
   const checkpoints = useCheckpointItems(checkpointRows, saveCheckpoint);
@@ -434,7 +430,7 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
   const errorActions = buildErrorActions({
     panelError,
     t,
-    retry: () => void refetchGit(workspacePath),
+    retry: () => void git(workspacePath).refetch(),
     initialize: initializeTimeline.mutate,
   });
 

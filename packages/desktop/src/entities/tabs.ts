@@ -71,9 +71,9 @@ import {
 } from "./agents";
 import type { AgentTaskHandle } from "@/agent/agents";
 import {
+  file,
   getOrCreateWorkspaceCollections,
   useMetadataFetching,
-  renameFileOrDirectory,
 } from "./files";
 import {
   useOpenWorkspaces,
@@ -268,7 +268,7 @@ export async function renameOpenFileTab(options: {
     // Writes that passed the redirect check before this rename began are
     // tracked in flight — drain them too before moving the file.
     await whenWorkspaceWritesSettled(oldPath);
-    await renameFileOrDirectory(workspacePath, oldPath, newPath);
+    await file(workspacePath, oldPath).rename(newPath);
   } catch (error) {
     if (liveEditor && !liveEditor.isDestroyed) liveEditor.setEditable(true);
     settleTarget(oldPath);

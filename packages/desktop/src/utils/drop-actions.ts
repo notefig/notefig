@@ -6,11 +6,7 @@
  */
 
 import type { PayloadOfKind } from "@/utils/drag-protocol";
-import {
-  file,
-  refreshDirectoryMetadata,
-  renameFileOrDirectory,
-} from "@/entities/files";
+import { file, refreshDirectoryMetadata } from "@/entities/files";
 import { getAllEditorPaths, getMarkdownEditor } from "@/entities/editors";
 import { platformAdapter } from "@/adapters";
 import { getFileName } from "@/utils/fs";
@@ -64,7 +60,7 @@ async function moveIntoFolderAsync(
     return;
   }
 
-  await renameFileOrDirectory(payload.workspaceRoot, payload.path, newPath);
+  await file(payload.workspaceRoot, payload.path).rename(newPath);
 }
 
 async function moveImageAsset(
@@ -95,11 +91,7 @@ async function moveImageAsset(
   }
 
   if (file(payload.workspaceRoot, payload.absolutePath).exists()) {
-    await renameFileOrDirectory(
-      payload.workspaceRoot,
-      payload.absolutePath,
-      newPath,
-    );
+    await file(payload.workspaceRoot, payload.absolutePath).rename(newPath);
   } else {
     // Asset exists on disk but isn't tracked in collections yet.
     const result = await platformAdapter.fs.moveFile(

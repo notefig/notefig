@@ -10,12 +10,16 @@ vi.mock("@/utils/path", async () => {
   return { path: shared.win32, ...shared };
 });
 
-const renameFileOrDirectory = vi.fn(async () => {});
+const renameFileOrDirectory = vi.fn(
+  async (_ws: string, _from: string, _to: string) => {},
+);
 vi.mock("@/entities/files", () => ({
-  file: vi.fn(),
+  file: (workspacePath: string, filePath: string) => ({
+    exists: () => false,
+    rename: (newPath: string) =>
+      renameFileOrDirectory(workspacePath, filePath, newPath),
+  }),
   refreshDirectoryMetadata: vi.fn(async () => {}),
-  renameFileOrDirectory: (...args: unknown[]) =>
-    renameFileOrDirectory(...(args as [])),
 }));
 
 const openPaths: string[] = [];

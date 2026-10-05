@@ -18,6 +18,7 @@ const workspaces = vi.hoisted(() => ({
   openWorkspace: vi.fn(async (path: string) => {
     workspaces.open.add(path);
   }),
+  closeWorkspace: vi.fn(async () => {}),
   workspaceOfPath: (path: string) =>
     [...workspaces.open].find((ws) => path.startsWith(`${ws}/`)) ?? null,
 }));
@@ -39,9 +40,10 @@ vi.mock("./use-recent-projects", () => ({
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
-import { showWorkspace, useOpenProject } from "./use-open-project";
+import { useOpenProject } from "./use-open-project";
 import { LAYOUT_PARAM, extractTabIds, parseLayout } from "@/utils/layout-codec";
 import { urlStateFromRouter } from "@/entities/layout";
+import { projectsModule } from "@/entities/projects";
 import { tabsModule } from "@/entities/tabs";
 import { createTestCore } from "@/testing/test-core";
 
@@ -49,6 +51,7 @@ let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 let openProject: ((path: string) => Promise<void>) | undefined;
 let router: ReturnType<typeof createMemoryRouter>;
+let core: ReturnType<typeof createTestCore>;
 
 function Probe() {
   openProject = useOpenProject();
@@ -72,9 +75,9 @@ beforeEach(async () => {
   vi.clearAllMocks();
   workspaces.open.clear();
   router = createMemoryRouter([{ path: "*", element: createElement(Probe) }]);
-  const core = createTestCore({
+  core = createTestCore({
     url: urlStateFromRouter(router),
-    modules: [tabsModule({ canOpenFile: () => true })],
+    modules: [tabsModule({ canOpenFile: () => true }), projectsModule],
   });
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -210,8 +213,8 @@ describe("useOpenProject", () => {
     expect(openTabs()).toEqual([]);
   });
 
-  it("showWorkspace opens-or-focuses and re-arms the watcher", () => {
-    showWorkspace("/ws");
+  it("core.projects.show opens-or-focuses and re-arms the watcher", () => {
+    void core.projects.show("/ws");
     expect(workspaces.openWorkspace).toHaveBeenCalledWith("/ws");
     expect(watchers.ensureWatching).toHaveBeenCalledWith("/ws");
   });

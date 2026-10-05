@@ -10,7 +10,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@notefig/ui/alert-dialog";
-import { closeWorkspace } from "@/entities/workspaces";
+import { useCore } from "@notefig/core/react";
 import { useRunningTaskCounts } from "@/entities/agents";
 import { deriveProjectName } from "@/hooks/use-recent-projects";
 import { workspaceKey } from "@/utils/path";
@@ -30,6 +30,7 @@ export function useCloseWorkspace(): {
   requestClose: (path: string) => void;
   dialog: React.ReactNode;
 } {
+  const { projects } = useCore();
   const runningCounts = useRunningTaskCounts();
   const [pending, setPending] = useState<PendingClose | null>(null);
 
@@ -37,12 +38,12 @@ export function useCloseWorkspace(): {
     (path: string) => {
       const runningCount = runningCounts.get(workspaceKey(path)) ?? 0;
       if (runningCount === 0) {
-        void closeWorkspace(path);
+        void projects.close(path);
         return;
       }
       setPending({ path, name: deriveProjectName(path), runningCount });
     },
-    [runningCounts],
+    [projects, runningCounts],
   );
 
   const dialog = (
@@ -50,7 +51,7 @@ export function useCloseWorkspace(): {
       pending={pending}
       onCancel={() => setPending(null)}
       onConfirm={(path) => {
-        void closeWorkspace(path);
+        void projects.close(path);
         setPending(null);
       }}
     />

@@ -81,6 +81,13 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
 - A module that exposes an API, or that other modules need, declares itself
   on `CoreModules` (`declare module "@notefig/core"`). Per-workspace state
   goes on `WorkspaceModules` with a `workspace: { create, dispose }` part.
+- Anything a workspace holds that must be torn down when it closes (a
+  process, a worker, a cache) is released in that module's `dispose`, never
+  by hand in `closeWorkspace`. Core disposes in reverse `needs` order.
+- A per-workspace API is a handle: a plain function in the entity
+  (`file(ws, path)`, `git(ws)`, `scratchpads(ws)`) that the module's
+  `create` also returns, so `core.workspace(ws).git` and `git(ws)` are the
+  same thing. Opening and closing a project is `core.projects`.
 - The plan this follows: the "Core Layer Architecture" doc (stages 1–7).
 
 ## Release Process

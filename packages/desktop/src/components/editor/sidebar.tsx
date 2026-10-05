@@ -35,13 +35,7 @@ import {
 import { SidebarSeparator } from "@/components/editor/tool-bar";
 import { SessionsPanel } from "@/components/agent/sessions-panel";
 import { CheckpointPanel } from "@/components/editor/git/checkpoint-panel";
-import {
-  useFileCollections,
-  deleteFileOrDirectory,
-  renameFileOrDirectory,
-  createFile,
-  createDirectory,
-} from "@/entities/files";
+import { file, useFileCollections } from "@/entities/files";
 import { useAttention } from "@/entities/attention";
 import {
   StatusGlyph,
@@ -55,7 +49,7 @@ import {
 import type { FileTreeNode, SortOrder } from "@/utils/fs";
 import type { OpenTabOptions } from "@/entities/tabs";
 import { requestElementFocus } from "@/utils/focus-arbiter";
-import { createAndOpenScratchpad } from "@/entities/scratchpads";
+import { scratchpads } from "@/entities/scratchpads";
 import { deriveProjectName } from "@/hooks/use-recent-projects";
 import {
   WORKSPACE_TOOLS,
@@ -551,7 +545,7 @@ function FilesTool({
   // inline-naming flow at the workspace root (per-folder creation stays on
   // the context menu — both land in handleCreate).
   const handleNewScratchpad = useCallback(() => {
-    createAndOpenScratchpad(workspacePath);
+    scratchpads(workspacePath).createAndOpen();
   }, [workspacePath]);
 
   const handleNewFile = useCallback(() => {
@@ -585,7 +579,8 @@ function FilesTool({
       }
 
       if (type === "file") {
-        createFile(workspacePath, fullPath)
+        file(workspacePath, fullPath)
+          .create()
           .then(() => {
             if (isTextFile(fullPath)) {
               // The user's create gesture is what makes the new document
@@ -611,9 +606,11 @@ function FilesTool({
             console.error(`Failed to create file ${fullPath}:`, error);
           });
       } else {
-        createDirectory(workspacePath, fullPath).catch((error: unknown) => {
-          console.error(`Failed to create directory ${fullPath}:`, error);
-        });
+        file(workspacePath, fullPath)
+          .createDirectory()
+          .catch((error: unknown) => {
+            console.error(`Failed to create directory ${fullPath}:`, error);
+          });
       }
     },
     [workspacePath, metadata, onFileSelect],
@@ -628,9 +625,11 @@ function FilesTool({
         }
       }
 
-      deleteFileOrDirectory(workspacePath, path).catch((error: unknown) => {
-        console.error(`Failed to delete ${path}:`, error);
-      });
+      file(workspacePath, path)
+        .delete()
+        .catch((error: unknown) => {
+          console.error(`Failed to delete ${path}:`, error);
+        });
     },
     [openTabs, closeTab, workspacePath],
   );
@@ -651,7 +650,7 @@ function FilesTool({
       // tab follows the file.
       const rename = openTabs.includes(oldPath)
         ? onRenameOpenFile(oldPath, newPath)
-        : renameFileOrDirectory(workspacePath, oldPath, newPath);
+        : file(workspacePath, oldPath).rename(newPath);
       rename.catch((error: unknown) => {
         console.error(`Failed to rename ${oldPath} to ${newPath}:`, error);
       });

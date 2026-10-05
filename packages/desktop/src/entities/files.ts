@@ -20,6 +20,7 @@
  */
 
 import { useMemo } from "react";
+import { defineModule } from "@notefig/core";
 import {
   createCollection,
   useLiveQuery,
@@ -1041,6 +1042,16 @@ export interface FileHandle {
    * the platform adapter, or it risks clobbering a newer on-disk version.
    */
   content(): string | undefined;
+  /** Create it as a file (empty unless `content` is given). */
+  create(content?: string): Promise<void>;
+  /** Create it as a directory. */
+  createDirectory(): Promise<void>;
+  /** Replace the file's content on disk; resolves once it is written. */
+  write(content: string): Promise<void>;
+  /** Move it (file or directory) to `newPath`, inside the same workspace. */
+  rename(newPath: string): Promise<void>;
+  /** Delete it; a directory goes with everything under it. */
+  delete(): Promise<void>;
 }
 
 export function file(workspacePath: string, filePath: string): FileHandle {
@@ -1055,5 +1066,43 @@ export function file(workspacePath: string, filePath: string): FileHandle {
     content: () =>
       getOrCreateWorkspaceCollections(workspacePath).content.get(filePath)
         ?.content,
+    create: (content) => createFile(workspacePath, filePath, content),
+    createDirectory: () => createDirectory(workspacePath, filePath),
+    write: (content) => writeFileContent(workspacePath, filePath, content),
+    rename: (newPath) =>
+      renameFileOrDirectory(workspacePath, filePath, newPath),
+    delete: () => deleteFileOrDirectory(workspacePath, filePath),
   };
 }
+
+// ---------------------------------------------------------------------------
+// core.workspace(ws).files
+// ---------------------------------------------------------------------------
+
+/** One open workspace's files. */
+export interface WorkspaceFiles {
+  file(filePath: string): FileHandle;
+  /** Re-walk the listing: what was added, removed or changed on disk. */
+  refresh(): Promise<void>;
+}
+
+declare module "@notefig/core" {
+  interface WorkspaceModules {
+    files: WorkspaceFiles;
+  }
+}
+
+/**
+ * The files of each open workspace. Their collections are scoped to the
+ * open set (`workspaceCollections`), so closing the workspace drops them;
+ * this module only hands out the workspace's file operations.
+ */
+export const filesModule = defineModule({
+  name: "files",
+  workspace: {
+    create: ({ workspace }): WorkspaceFiles => ({
+      file: (filePath) => file(workspace.path, filePath),
+      refresh: () => refetchWorkspaceMetadata(workspace.path),
+    }),
+  },
+});
