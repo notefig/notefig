@@ -162,9 +162,10 @@ export interface AgentWorkspaceHandle {
    * The user starts a session: the runtime gate, then the trust gate, then
    * the task, whose chat tab opens at once. The row exists (status
    * "starting") before the spawn and handshake finish; a failed start
-   * shows on the row as "error".
+   * shows on the row as "error". Waits only for the saved trust answers to
+   * load, which on a warm app they already have.
    */
-  start(harness: HarnessDefinition): StartResult;
+  start(harness: HarnessDefinition): Promise<StartResult>;
   /** Whether the user has agreed to run agents in this workspace. */
   isTrusted(): boolean;
   trust(): void;
@@ -352,8 +353,11 @@ function workspaceHandle(workspacePath: string): AgentWorkspaceHandle {
     getOrCreateKvCollection(AGENT_KV_NAMESPACE).get(key)?.value === true;
   return {
     workspacePath,
-    start(harness) {
+    async start(harness) {
       if (!ensureAgentRuntime()) return { status: "no-runtime" };
+      // A cold start may click before the answers load; reading then would
+      // ask again about a workspace the user already trusted.
+      await getOrCreateKvCollection(AGENT_KV_NAMESPACE).preload();
       if (!isTrusted()) return { status: "needs-trust" };
       const { taskId, started } = startAgentTask(workspacePath, harness);
       // The tab opens on the "starting" row rather than sitting on the

@@ -391,17 +391,17 @@ describe("starting a session from the UI", () => {
     runtime.ready = false;
     await writeKv(AGENT_KV_NAMESPACE, trustKey("/ws"), true);
 
-    expect(agents.workspace("/ws").start(harness)).toEqual({
+    expect(await agents.workspace("/ws").start(harness)).toEqual({
       status: "no-runtime",
     });
     expect(agentTasksCollection.size).toBe(0);
   });
 
-  it("asks for trust first in a workspace that never ran agents", () => {
+  it("asks for trust first in a workspace that never ran agents", async () => {
     const workspace = agents.workspace("/ws");
 
     expect(workspace.isTrusted()).toBe(false);
-    expect(workspace.start(harness)).toEqual({ status: "needs-trust" });
+    expect(await workspace.start(harness)).toEqual({ status: "needs-trust" });
     expect(agentTasksCollection.size).toBe(0);
     expect(openAgent).not.toHaveBeenCalled();
   });
@@ -411,7 +411,7 @@ describe("starting a session from the UI", () => {
     const workspace = agents.workspace("/ws-granted");
 
     workspace.trust();
-    const result = workspace.start(harness);
+    const result = await workspace.start(harness);
 
     expect(result).toEqual({ status: "started", taskId: expect.any(String) });
     await agents.task((result as { taskId: string }).taskId).delete();
@@ -423,7 +423,7 @@ describe("starting a session from the UI", () => {
     await writeKv(AGENT_KV_NAMESPACE, trustKey("/ws"), true);
     const workspace = agents.workspace("/ws");
 
-    const result = workspace.start(harness);
+    const result = await workspace.start(harness);
 
     expect(result).toEqual({ status: "started", taskId: expect.any(String) });
     const { taskId } = result as { taskId: string };

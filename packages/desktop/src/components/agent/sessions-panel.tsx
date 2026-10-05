@@ -130,10 +130,14 @@ export function useStartSession(workspacePath: string): {
 
   const create = useCallback(
     (harness: HarnessDefinition) => {
-      const result = agents.workspace(workspacePath).start(harness);
-      if (result.status !== "needs-trust") return;
-      setPendingHarness(harness);
-      setTrustPromptOpen(true);
+      void agents
+        .workspace(workspacePath)
+        .start(harness)
+        .then((result) => {
+          if (result.status !== "needs-trust") return;
+          setPendingHarness(harness);
+          setTrustPromptOpen(true);
+        });
     },
     [workspacePath],
   );
@@ -142,7 +146,7 @@ export function useStartSession(workspacePath: string): {
     const workspace = agents.workspace(workspacePath);
     workspace.trust();
     setTrustPromptOpen(false);
-    workspace.start(pendingHarness);
+    void workspace.start(pendingHarness);
   }, [workspacePath, pendingHarness]);
 
   const trustDialog = (
