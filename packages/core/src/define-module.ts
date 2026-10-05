@@ -9,8 +9,21 @@ import type {
   WorkspaceRef,
 } from "./types";
 
-/** Open, close and list workspaces — what core keeps per-workspace state by. */
-export interface WorkspaceLifecycle {
+/** Which workspaces are open. What app code sees as `core.workspaces`. */
+export interface OpenWorkspaces {
+  isOpen(path: string): boolean;
+  list(): WorkspaceRef[];
+  /** Called after every open and close; returns the unsubscribe. */
+  subscribe(listener: () => void): () => void;
+}
+
+/**
+ * Open and close a workspace's instances directly — for modules only
+ * (`ctx.workspaces`), such as one restoring the workspaces a previous run
+ * left open. App code opens a workspace through its handle,
+ * `core.workspace(path).open()`, which also announces the entry.
+ */
+export interface WorkspaceLifecycle extends OpenWorkspaces {
   /**
    * Create every module's workspace instance, in dependency order, then fire
    * `workspace:opened`. Idempotent. Waits out a close of the same workspace
@@ -22,10 +35,6 @@ export interface WorkspaceLifecycle {
    * reverse dependency order. Idempotent; a second call joins the first.
    */
   close(path: string): Promise<void>;
-  isOpen(path: string): boolean;
-  list(): WorkspaceRef[];
-  /** Called after every open and close; returns the unsubscribe. */
-  subscribe(listener: () => void): () => void;
 }
 
 export interface ModuleContext<Needs extends ProvidedName> {

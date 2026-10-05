@@ -21,15 +21,16 @@ import { filesModule } from "@/entities/files";
 import { gitModule } from "@/entities/git";
 import { layoutModule, type UrlState } from "@/entities/layout";
 import { tabsModule } from "@/entities/tabs";
-import { projectsModule } from "@/entities/projects";
 import { promptRoundsModule } from "@/entities/prompt-rounds";
 import { queryClient } from "@/entities/query-client";
+import { scratchpadLandingModule } from "@/entities/scratchpad-landing";
 import { scratchpadsModule } from "@/entities/scratchpads";
 import { seenModule } from "@/entities/seen";
 import { turnWritesModule } from "@/entities/turn-writes";
 import { workspaceScopesModule } from "@/entities/workspace-scoped";
 import { workspacesModule } from "@/entities/workspaces";
 import { historyModule } from "@/utils/history-service";
+import { sidebarViewModule } from "@/hooks/sidebar-view";
 import { workspaceKey } from "@/utils/path";
 import { workspaceWatchersModule } from "@/utils/workspace-watchers";
 import { installAppCore } from "./current";
@@ -62,7 +63,9 @@ export function runtimeModules({
     layoutModule,
     tabsModule({ canOpenFile }),
     editorsModule,
-    projectsModule,
+    // What entering a workspace does, besides opening it.
+    scratchpadLandingModule,
+    sidebarViewModule,
     // Per open workspace: `core.workspace(ws).files`, `.git`…
     filesModule,
     gitModule,

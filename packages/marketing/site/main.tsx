@@ -9,9 +9,8 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@notefig/ui/tooltip";
 import { runtimeModules } from "@/core/app-core";
 import { startApp } from "@/core/start-app";
+import { appCore } from "@/core/current";
 import {
-  closeWorkspace,
-  openWorkspace,
   openWorkspacesCollection,
   whenOpenWorkspacesReady,
 } from "@/entities/workspaces";
@@ -82,7 +81,12 @@ startApp({
 void whenOpenWorkspacesReady().then(() => {
   const rootKey = workspaceKey(WORKSPACE_ROOT);
   for (const row of [...openWorkspacesCollection.values()]) {
-    if (row.key !== rootKey) void closeWorkspace(row.path);
+    if (row.key !== rootKey) void appCore().workspace(row.path).close();
   }
-  openWorkspace(WORKSPACE_ROOT);
+  appCore()
+    .workspace(WORKSPACE_ROOT)
+    .focus()
+    .catch((error: unknown) =>
+      console.error("Failed to open the content root:", error),
+    );
 });

@@ -1,8 +1,9 @@
 /**
- * The `?sidebarView` search param — which view the sidebar shows. A leaf:
- * both the panels hook and "open a project" (which selects the project's
- * files view) read and write it, and neither may import the other.
+ * The `?sidebarView` search param — which view the sidebar shows. Read and
+ * written by the panels hook and by `sidebarViewModule` below, which
+ * shows a workspace's files when the user enters it.
  */
+import { defineModule } from "@notefig/core";
 export const WORKSPACE_TOOLS = ["files", "search", "git", "sessions"] as const;
 export type WorkspaceTool = (typeof WORKSPACE_TOOLS)[number];
 export type SidebarView = "everything" | WorkspaceTool;
@@ -38,3 +39,29 @@ export function withSidebarView(
   return next;
 }
 
+
+declare module "@notefig/core" {
+  interface CoreModules {
+    "sidebar-view": undefined;
+  }
+}
+
+/**
+ * Entering a workspace is choosing it: a sidebar on the Everything view
+ * (the default when nothing is chosen) moves to that workspace's files; a
+ * sidebar already on a tool stays on it. Read from and written to the live
+ * URL, so it keeps whatever the entry's other handlers wrote (a tab landing
+ * in the layout).
+ */
+export const sidebarViewModule = defineModule({
+  name: "sidebar-view",
+  needs: ["url"],
+  boot: (_api, ctx) => {
+    const url = ctx.use("url");
+    return ctx.hooks.on("workspace:entered", () => {
+      const live = new URLSearchParams(url.search());
+      if (readSidebarView(live) !== "everything") return;
+      url.setSearch(`?${withSidebarView(live, "files")}`, { replace: true });
+    });
+  },
+});

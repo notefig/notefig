@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { createCore } from "./create-core";
-import { defineModule } from "./define-module";
+import {
+  createCore,
+  WorkspaceClosedError,
+  WorkspaceOpenError,
+  type CreateCoreOptions,
+} from "./create-core";
+import { defineModule, type WorkspaceLifecycle } from "./define-module";
 import { CoreConfigError } from "./order";
 
 declare module "./types" {
@@ -18,6 +23,24 @@ declare module "./types" {
 }
 
 const quiet = () => {};
+
+/**
+ * A core whose `workspaces` is the raw lifetime a module gets
+ * (`ctx.workspaces`): what the lifetime tests below drive. App code only
+ * ever opens through a handle.
+ */
+function coreWithLifecycle(options: CreateCoreOptions) {
+  let lifecycle!: WorkspaceLifecycle;
+  const probe = defineModule({
+    name: "t-lifecycle",
+    register: (ctx) => {
+      lifecycle = ctx.workspaces;
+      return undefined;
+    },
+  });
+  const core = createCore({ ...options, modules: [...options.modules, probe] });
+  return Object.assign(core, { workspaces: lifecycle });
+}
 
 describe("createCore", () => {
   it("registers in dependency order and exposes APIs by name and as properties", () => {
@@ -228,7 +251,7 @@ describe("workspaces", () => {
 
   it("creates instances in need order and disposes them in reverse after the closing hook", async () => {
     const log: string[] = [];
-    const core = createCore({
+    const core = coreWithLifecycle({
       services: {},
       modules: [tasks(log), history(log)],
       onError: quiet,
@@ -239,13 +262,13 @@ describe("workspaces", () => {
     );
     core.hooks.on("workspace:closing", async () => {
       // Instances are still reachable while closing.
-      expect(core.workspace("/ws")?.["t-tasks"]).toBeDefined();
+      expect(core.workspace("/ws")["t-tasks"]).toBeDefined();
       await Promise.resolve();
       log.push("closing");
     });
 
     await core.workspaces.open("/ws");
-    expect(core.workspace("/ws")?.["t-tasks"].history.log).toBe(log);
+    expect(core.workspace("/ws")["t-tasks"].history.log).toBe(log);
 
     await core.workspaces.close("/ws");
     expect(log).toEqual([
@@ -256,12 +279,12 @@ describe("workspaces", () => {
       "dispose tasks",
       "dispose history",
     ]);
-    expect(core.workspace("/ws")).toBeUndefined();
+    expect(core.workspace("/ws").isOpen()).toBe(false);
   });
 
   it("collapses spellings through workspaceKey and keeps open idempotent", async () => {
     const log: string[] = [];
-    const core = createCore({
+    const core = coreWithLifecycle({
       services: {},
       modules: [history(log)],
       workspaceKey: (p) => p.toLowerCase(),
@@ -275,7 +298,7 @@ describe("workspaces", () => {
 
   it("waits out a running close before reopening, and joins concurrent closes", async () => {
     const log: string[] = [];
-    const core = createCore({ services: {}, modules: [history(log)] });
+    const core = coreWithLifecycle({ services: {}, modules: [history(log)] });
     let release!: () => void;
     core.hooks.on(
       "workspace:closing",
@@ -310,7 +333,7 @@ describe("workspaces", () => {
       },
     });
     const onError = vi.fn();
-    const core = createCore({
+    const core = coreWithLifecycle({
       services: {},
       modules: [history([]), bad],
       onError,
@@ -339,7 +362,7 @@ describe("workspaces", () => {
     });
     const onError = vi.fn();
     const opened = vi.fn();
-    const core = createCore({
+    const core = coreWithLifecycle({
       services: {},
       modules: [history(log), flakyTasks],
       onError,
@@ -349,7 +372,7 @@ describe("workspaces", () => {
     await core.workspaces.open("/ws");
     await Promise.resolve();
     expect(core.workspaces.isOpen("/ws")).toBe(false);
-    expect(core.workspace("/ws")).toBeUndefined();
+    expect(core.workspace("/ws").isOpen()).toBe(false);
     expect(opened).not.toHaveBeenCalled();
     expect(log).toEqual(["create history /ws", "dispose history"]);
     expect(onError).toHaveBeenCalledWith(
@@ -359,7 +382,7 @@ describe("workspaces", () => {
 
     failTasks = false;
     await core.workspaces.open("/ws");
-    expect(core.workspace("/ws")?.["t-tasks"].history.log).toBe(log);
+    expect(core.workspace("/ws")["t-tasks"].history.log).toBe(log);
     expect(opened).toHaveBeenCalledTimes(1);
   });
 
@@ -390,7 +413,7 @@ describe("workspaces", () => {
         },
       },
     });
-    const core = createCore({
+    const core = coreWithLifecycle({
       services: {},
       modules: [slowHistory, flakyTasks],
       onError: quiet,
@@ -415,7 +438,7 @@ describe("workspaces", () => {
   it("a close issued while an open waits is not undone by that open", async () => {
     const log: string[] = [];
     let release!: () => void;
-    const core = createCore({ services: {}, modules: [history(log)] });
+    const core = coreWithLifecycle({ services: {}, modules: [history(log)] });
     core.hooks.on(
       "workspace:closing",
       () => new Promise<void>((resolve) => (release = resolve)),
@@ -435,7 +458,7 @@ describe("workspaces", () => {
 
   it("opens nothing once shutdown has started", async () => {
     const log: string[] = [];
-    const core = createCore({ services: {}, modules: [history(log)] });
+    const core = coreWithLifecycle({ services: {}, modules: [history(log)] });
     core.boot();
     // An open that lands while shutdown hooks run must not outlive dispose.
     core.hooks.on("core:shutdown", () => core.workspaces.open("/late"));
@@ -449,11 +472,152 @@ describe("workspaces", () => {
 
   it("closes open workspaces on dispose", async () => {
     const log: string[] = [];
-    const core = createCore({ services: {}, modules: [history(log)] });
+    const core = coreWithLifecycle({ services: {}, modules: [history(log)] });
     core.boot();
     await core.workspaces.open("/a");
     await core.dispose();
     expect(log).toEqual(["create history /a", "dispose history"]);
     expect(core.workspaces.list()).toEqual([]);
+  });
+});
+
+describe("workspace handles", () => {
+  const history = (log: string[]) =>
+    defineModule({
+      name: "t-history",
+      workspace: {
+        create: () => {
+          log.push("create history");
+          return { log };
+        },
+      },
+    });
+
+  it("exist for a closed workspace; instances read only while it is open", async () => {
+    const core = createCore({ services: {}, modules: [history([])] });
+    const ws = core.workspace("/ws");
+
+    expect(ws.isOpen()).toBe(false);
+    expect(() => ws["t-history"]).toThrow(WorkspaceClosedError);
+
+    await ws.open();
+    expect(ws.isOpen()).toBe(true);
+    expect(ws["t-history"].log).toEqual(["create history"]);
+    // Any handle for the workspace reads the same instance.
+    expect(core.workspace("/ws")["t-history"]).toBe(ws["t-history"]);
+
+    await ws.close();
+    expect(() => ws["t-history"]).toThrow(WorkspaceClosedError);
+  });
+
+  it("open announces focused then entered, each awaited; focus only focused; a module restore neither", async () => {
+    const log: string[] = [];
+    const core = coreWithLifecycle({ services: {}, modules: [history(log)] });
+    core.hooks.on("workspace:opened", () => void log.push("opened"));
+    core.hooks.on("workspace:focused", async () => {
+      await Promise.resolve();
+      log.push("focused");
+    });
+    core.hooks.on("workspace:entered", () => void log.push("entered"));
+
+    await core.workspaces.open("/restored");
+    await core.workspace("/a").open();
+    await core.workspace("/a").focus();
+
+    expect(log).toEqual([
+      "create history",
+      "opened",
+      "create history",
+      "opened",
+      "focused",
+      "entered",
+      "focused",
+    ]);
+  });
+
+  it("joins concurrent opens of one workspace: one entry, one announcement", async () => {
+    const entered = vi.fn();
+    const core = createCore({ services: {}, modules: [history([])] });
+    core.hooks.on("workspace:entered", entered);
+
+    const first = core.workspace("/ws").open();
+    const second = core.workspace("/ws").open();
+    expect(second).toBe(first);
+    await first;
+
+    expect(entered).toHaveBeenCalledTimes(1);
+  });
+
+  it("announces nothing when a close supersedes an open still waiting", async () => {
+    const entered = vi.fn();
+    const core = createCore({ services: {}, modules: [history([])] });
+    let release!: () => void;
+    core.hooks.on(
+      "workspace:closing",
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    core.hooks.on("workspace:entered", entered);
+
+    await core.workspace("/ws").open();
+    entered.mockClear();
+    const closing = core.workspace("/ws").close();
+    const reopen = core.workspace("/ws").open();
+    const closeAgain = core.workspace("/ws").close();
+    release();
+    await Promise.all([closing, reopen, closeAgain]);
+
+    expect(core.workspaces.isOpen("/ws")).toBe(false);
+    expect(entered).not.toHaveBeenCalled();
+  });
+
+  it("rejects an open whose workspace failed to create, and announces nothing", async () => {
+    const failing = defineModule({
+      name: "t-history",
+      workspace: {
+        create: () => {
+          throw new Error("history failed");
+        },
+      },
+    });
+    const focused = vi.fn();
+    const core = createCore({
+      services: {},
+      modules: [failing],
+      onError: quiet,
+    });
+    core.hooks.on("workspace:focused", focused);
+
+    const opening = core.workspace("/ws").open();
+
+    await expect(opening).rejects.toBeInstanceOf(WorkspaceOpenError);
+    await expect(opening).rejects.toMatchObject({
+      workspacePath: "/ws",
+      failures: [expect.objectContaining({ message: "history failed" })],
+    });
+    expect(focused).not.toHaveBeenCalled();
+    expect(core.workspaces.isOpen("/ws")).toBe(false);
+  });
+
+  it("a failed focus handler stops the entry: every focus handler runs, entered does not, open rejects", async () => {
+    const core = createCore({
+      services: {},
+      modules: [history([])],
+      onError: quiet,
+    });
+    const recorded = vi.fn();
+    const entered = vi.fn();
+    core.hooks.on("workspace:focused", async () => {
+      throw new Error("row not saved");
+    });
+    core.hooks.on("workspace:focused", recorded);
+    core.hooks.on("workspace:entered", entered);
+
+    await expect(core.workspace("/ws").open()).rejects.toMatchObject({
+      failures: [expect.objectContaining({ message: "row not saved" })],
+    });
+    expect(recorded).toHaveBeenCalledTimes(1);
+    expect(entered).not.toHaveBeenCalled();
+    // The workspace did open; only the entry stopped.
+    expect(core.workspaces.isOpen("/ws")).toBe(true);
   });
 });

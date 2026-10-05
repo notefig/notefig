@@ -48,10 +48,10 @@ describe("useWorkspaceModule", () => {
     });
     expect(container.textContent).toBe("closed");
 
-    await act(() => core.workspaces.open("/ws"));
+    await act(() => core.workspace("/ws").open());
     expect(container.textContent).toBe("notes for /ws");
 
-    await act(() => core.workspaces.close("/ws"));
+    await act(() => core.workspace("/ws").close());
     expect(container.textContent).toBe("closed");
 
     await act(async () => root.unmount());

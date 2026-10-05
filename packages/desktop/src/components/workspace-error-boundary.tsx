@@ -158,7 +158,7 @@ function WorkspaceAccessError({
   onResolved: () => void;
 }) {
   const { t } = useTranslation();
-  const { projects } = useCore();
+  const core = useCore();
   const openProject = useOpenProject();
   const workspacePath = useFocusedWorkspace();
   const content = getRecoveryContent(error, t);
@@ -186,8 +186,9 @@ function WorkspaceAccessError({
       // The broken workspace is being abandoned for another one — close it
       // fully (agents demote to "restored"; its dead handle stops being
       // watched) rather than leaving a wounded background entry.
-      if (workspacePath) void projects.close(workspacePath);
-      await openProject(picked);
+      if (workspacePath) void core.workspace(workspacePath).close();
+      // Reported already; there is nothing to resume into.
+      if (!(await openProject(picked))) return;
     }
     resume(picked);
   };
@@ -234,7 +235,7 @@ function WorkspaceAccessError({
             onClick={() => {
               // Leave the broken workspace: focus moves to the next open
               // one, or the welcome screen with none left.
-              if (workspacePath) void projects.close(workspacePath);
+              if (workspacePath) void core.workspace(workspacePath).close();
               onResolved();
             }}
           >

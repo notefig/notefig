@@ -48,9 +48,8 @@ export function useWorkspaceModule<K extends WorkspaceModuleName>(
   const core = useCore();
   const read = useCallback(
     () =>
-      workspacePath
-        ? (core.workspace(workspacePath)?.[name] as
-            WorkspaceModules[K] | undefined)
+      workspacePath && core.workspaces.isOpen(workspacePath)
+        ? (core.workspace(workspacePath)[name] as WorkspaceModules[K])
         : undefined,
     [core, workspacePath, name],
   );

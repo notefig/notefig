@@ -7,6 +7,7 @@
 import { createCore, type AnyModule, type Core } from "@notefig/core";
 import { installAppCore } from "@/core/current";
 import { layoutModule, type UrlState } from "@/entities/layout";
+import { workspaceKey } from "@/utils/path";
 
 /** A URL that lives only in memory. */
 export function memoryUrlState(initialSearch = ""): UrlState {
@@ -49,6 +50,7 @@ export function createTestCore(
   const core = createCore({
     services: { url: options.url ?? memoryUrlState() } as never,
     modules: [layoutModule, ...(options.modules ?? [])],
+    workspaceKey,
   });
   installAppCore(core);
   return core;

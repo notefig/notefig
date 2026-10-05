@@ -24,7 +24,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { defineModule, type WorkspaceLifecycle } from "@notefig/core";
-import { appCore } from "@/core/current";
 import {
   getOrCreateWorkspaceCollections,
   refreshDirectoryMetadata,
@@ -62,7 +61,7 @@ export function whenOpenWorkspacesReady(): Promise<void> {
 
 /**
  * Bring every persisted open workspace back to life after a restart: seed
- * its collections and kick the listing walk, exactly as `openWorkspace`
+ * its collections and kick the listing walk, exactly as `recordFocus`
  * does for a fresh open — minus the insert, since the row is what told us
  * to. Watchers arm through the registry subscription, which reconciles the
  * rows it finds. Called once by `workspacesModule`'s boot, before render,
@@ -114,36 +113,26 @@ function hydrated(): Promise<void> {
 // tree's expansion memory, the sidebar's last tool) subscribe to it and tear
 // themselves down when a row leaves. What owns OS resources — the agents'
 // processes, the history repo's git worker — is a core workspace module,
-// disposed in need order when core closes the workspace (`mirrorOpenSet`).
-
-/** In-flight closes, keyed like the collection: a reopen racing a close must
- *  wait for the teardown to finish rather than interleave with it. */
-const pendingCloses = new Map<string, Promise<void>>();
+// disposed in need order when core closes the workspace. Closing is
+// `core.workspace(path).close()`: the row goes on `workspace:closing`, so
+// the switcher drops it at once, and agent rows with a live session demote
+// to "restored" (MET-54) as the agents module is disposed.
 
 /**
- * Open-or-focus, the one verb every entry point uses. A workspace not yet
- * open joins the open set — open (and watched, via the registry
- * subscription) once the persisted set has hydrated, which in steady state
- * is immediate — with its file collections seeded and its listing walk
- * under way. One already open is brought to the front instead: the sidebar
- * shows it and new-item actions target it. Either way its listing is
- * re-stat'd, as entry always did (cheap, catches watcher gaps), and the
- * promise resolves once the write is durable: a reload before that would
- * forget the workspace or land on the previous focus, so callers that can
- * be followed by one (the test seam) await it. Re-arming a watcher whose
- * start failed is the portal's other half of re-entry
- * (`core.projects.show`, entities/projects.ts).
+ * The registry's half of opening or focusing a workspace, run on
+ * `workspace:focused` (so through `core.workspace(path).open()` or
+ * `.focus()`, never directly). A workspace not yet in the open set joins it
+ * once the persisted set has hydrated, which in steady state is immediate,
+ * with its file collections seeded and its listing walk under way. One
+ * already in it is brought to the front: the sidebar shows it and new-item
+ * actions target it. Either way its listing is re-stat'd (cheap, catches
+ * watcher gaps), and this resolves once the write is durable: a reload
+ * before that would forget the workspace or land on the previous focus.
+ * Core has already waited out any close of the same workspace.
  */
-export async function openWorkspace(workspacePath: string): Promise<void> {
+async function recordFocus(workspacePath: string): Promise<void> {
   const key = workspaceKey(workspacePath);
   const native = pathutil.normalize(workspacePath);
-  const pendingClose = pendingCloses.get(key);
-  if (pendingClose) {
-    // Reopen racing an in-flight close of the same workspace: let the
-    // teardown finish, then open fresh — never interleave the two.
-    await pendingClose;
-    return openWorkspace(workspacePath);
-  }
   await hydrated();
   const existing = openWorkspacesCollection.get(key);
   if (existing) {
@@ -192,41 +181,6 @@ export function isWorkspaceOpen(workspacePath: string): boolean {
 }
 
 /**
- * Full teardown, the one path shared by the switcher's close, error
- * recovery's repick, and app teardown. Agent rows with a live session
- * demote to "restored" (revivable on next open) per the MET-54 contract.
- *
- * Deleting the row is the whole teardown: everything scoped to membership
- * goes with it, and core closes the workspace, disposing each module's
- * instance in reverse need order — the agents before the history repo they
- * can still checkpoint into. This resolves once that has finished.
- */
-export function closeWorkspace(workspacePath: string): Promise<void> {
-  const key = workspaceKey(workspacePath);
-  const pending = pendingCloses.get(key);
-  if (pending) return pending;
-
-  // Synchronous part first: the workspace leaves the open set at once, so
-  // the switcher row disappears immediately and a reopen during the async
-  // teardown is unambiguous (pendingCloses). Dropping the row is also what
-  // stops the metadata watcher — the portal's subscription sees the delete.
-  if (openWorkspacesCollection.has(key)) {
-    openWorkspacesCollection.delete(key);
-  }
-
-  const close = (async () => {
-    try {
-      // Joins the close the row's delete started (`mirrorOpenSet`).
-      await appCore().workspaces.close(workspacePath);
-    } finally {
-      pendingCloses.delete(key);
-    }
-  })();
-  pendingCloses.set(key, close);
-  return close;
-}
-
-/**
  * Drops and re-seeds the workspace's file state without touching agents or
  * the watcher — error-boundary recovery after fs access is restored. (A
  * lost fs handle doesn't invalidate running harness processes; they hold
@@ -241,13 +195,6 @@ export function reloadWorkspaceFiles(workspacePath: string): void {
   // workspace was unreadable, this is the moment it can finally arm. The
   // error boundary calls `ensureWatching` alongside this, for the same
   // reason the loader does: watching is the portal's business.
-}
-
-/** Close every open workspace (close-all affordances and tests; process
- *  exit itself relies on the Rust kill_all_agents backstop, not on this). */
-export async function closeAllWorkspaces(): Promise<void> {
-  const paths = [...openWorkspacesCollection.values()].map((row) => row.path);
-  await Promise.all(paths.map((path) => closeWorkspace(path)));
 }
 
 /**
@@ -322,16 +269,32 @@ function mirrorOpenSet(lifecycle: WorkspaceLifecycle): () => void {
 }
 
 /**
- * The open set's runtime half. Scopes and watchers must be live before a
- * restore hydrates rows, so they are needs. The desktop shell restores the
- * persisted open set; the marketing site opens its one root itself.
+ * The open set's runtime half: it persists what core opens through a
+ * handle, and drops it when core closes it. Scopes and watchers must be
+ * live before a restore hydrates rows, so they are needs. The desktop shell
+ * restores the persisted open set; the marketing site focuses its one root.
  */
 export function workspacesModule({ restore }: { restore: boolean }) {
   return defineModule({
     name: "workspace-registry",
     needs: ["workspace-scopes", "workspace-watchers"],
     boot: (_api, ctx) => {
-      const stop = mirrorOpenSet(ctx.workspaces);
+      const stopMirror = mirrorOpenSet(ctx.workspaces);
+      const stopFocus = ctx.hooks.on("workspace:focused", (workspace) =>
+        recordFocus(workspace.path),
+      );
+      // Synchronously, first thing in the close: the switcher row goes at
+      // once, and the metadata watcher stops with it.
+      const stopClosing = ctx.hooks.on("workspace:closing", (workspace) => {
+        if (openWorkspacesCollection.has(workspace.key)) {
+          openWorkspacesCollection.delete(workspace.key);
+        }
+      });
+      const stop = () => {
+        stopMirror();
+        stopFocus();
+        stopClosing();
+      };
       if (restore) {
         void restoreOpenWorkspaces().catch((error) => {
           console.error("Failed to restore open workspaces:", error);

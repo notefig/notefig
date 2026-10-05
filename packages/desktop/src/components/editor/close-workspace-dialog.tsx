@@ -30,7 +30,7 @@ export function useCloseWorkspace(): {
   requestClose: (path: string) => void;
   dialog: React.ReactNode;
 } {
-  const { projects } = useCore();
+  const core = useCore();
   const runningCounts = useRunningTaskCounts();
   const [pending, setPending] = useState<PendingClose | null>(null);
 
@@ -38,12 +38,12 @@ export function useCloseWorkspace(): {
     (path: string) => {
       const runningCount = runningCounts.get(workspaceKey(path)) ?? 0;
       if (runningCount === 0) {
-        void projects.close(path);
+        void core.workspace(path).close();
         return;
       }
       setPending({ path, name: deriveProjectName(path), runningCount });
     },
-    [projects, runningCounts],
+    [core, runningCounts],
   );
 
   const dialog = (
@@ -51,7 +51,7 @@ export function useCloseWorkspace(): {
       pending={pending}
       onCancel={() => setPending(null)}
       onConfirm={(path) => {
-        void projects.close(path);
+        void core.workspace(path).close();
         setPending(null);
       }}
     />

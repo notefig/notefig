@@ -87,7 +87,15 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
 - A per-workspace API is a handle: a plain function in the entity
   (`file(ws, path)`, `git(ws)`, `scratchpads(ws)`, `history(ws)`) that the
   module's `create` also returns, so `core.workspace(ws).git` and `git(ws)`
-  are the same thing. Opening and closing a project is `core.projects`.
+  are the same thing.
+- A workspace is opened, focused and closed through its handle:
+  `core.workspace(path).open()` (the user enters it), `.focus()` (brought
+  forward, as the switcher does), `.close()`. What entering or focusing
+  should also do is a module's handler for `workspace:entered` or
+  `workspace:focused` (the scratchpad landing, the sidebar's files view, the
+  open-set row), never code in the caller. A boot restore fires neither.
+  Those handlers are steps of the open: if one fails, `open()` rejects and
+  the hooks after it don't fire (a failed `focused` lands nothing).
 - Agents are driven through the facade (`agents` from `@/entities/agents`,
   also `core.agents`): `agents.workspace(ws).start(harness)` for a session
   the user starts (runtime and trust gates included), `agents.task(id)` for

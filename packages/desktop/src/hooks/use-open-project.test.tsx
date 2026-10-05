@@ -14,11 +14,8 @@ vi.mock("@/adapters", async () => ({
 
 const workspaces = vi.hoisted(() => ({
   open: new Set<string>(),
-  // Open-or-focus: the entity's one verb.
-  openWorkspace: vi.fn(async (path: string) => {
-    workspaces.open.add(path);
-  }),
-  closeWorkspace: vi.fn(async () => {}),
+  // What the registry did on `workspace:focused` (see `registry` below).
+  focused: vi.fn((_path: string) => {}),
   workspaceOfPath: (path: string) =>
     [...workspaces.open].find((ws) => path.startsWith(`${ws}/`)) ?? null,
 }));
@@ -31,10 +28,9 @@ const scratchpads = vi.hoisted(() => ({
   sweepScratchpads: vi.fn(async (_ws: string, _keep: readonly string[]) => {}),
 }));
 vi.mock("@/entities/scratchpads", () => scratchpads);
-const watchers = vi.hoisted(() => ({ ensureWatching: vi.fn() }));
-vi.mock("@/utils/workspace-watchers", () => watchers);
 const recents = vi.hoisted(() => ({ addRecentProject: vi.fn() }));
-vi.mock("./use-recent-projects", () => ({
+vi.mock("./use-recent-projects", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./use-recent-projects")>()),
   useRecentProjects: () => recents,
 }));
 
@@ -43,15 +39,28 @@ vi.mock("./use-recent-projects", () => ({
 import { useOpenProject } from "./use-open-project";
 import { LAYOUT_PARAM, extractTabIds, parseLayout } from "@/utils/layout-codec";
 import { urlStateFromRouter } from "@/entities/layout";
-import { projectsModule } from "@/entities/projects";
+import { defineModule } from "@notefig/core";
+import { scratchpadLandingModule } from "@/entities/scratchpad-landing";
+import { sidebarViewModule } from "./sidebar-view";
 import { tabsModule } from "@/entities/tabs";
 import { createTestCore } from "@/testing/test-core";
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
-let openProject: ((path: string) => Promise<void>) | undefined;
+let openProject: ((path: string) => Promise<boolean>) | undefined;
 let router: ReturnType<typeof createMemoryRouter>;
 let core: ReturnType<typeof createTestCore>;
+
+/** The registry's part of a focus, as the landing relies on it: the
+ *  workspace is in the open set before anything lands in it. */
+const registry = defineModule({
+  name: "workspace-registry",
+  boot: (_api, ctx) =>
+    ctx.hooks.on("workspace:focused", ({ path }) => {
+      workspaces.open.add(path);
+      workspaces.focused(path);
+    }),
+});
 
 function Probe() {
   openProject = useOpenProject();
@@ -77,8 +86,14 @@ beforeEach(async () => {
   router = createMemoryRouter([{ path: "*", element: createElement(Probe) }]);
   core = createTestCore({
     url: urlStateFromRouter(router),
-    modules: [tabsModule({ canOpenFile: () => true }), projectsModule],
+    modules: [
+      tabsModule({ canOpenFile: () => true }),
+      registry,
+      scratchpadLandingModule,
+      sidebarViewModule,
+    ],
   });
+  core.boot();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -99,7 +114,7 @@ afterEach(async () => {
   container?.remove();
 });
 
-describe("useOpenProject", () => {
+describe("entering a project (useOpenProject)", () => {
   it("first open: records recency, opens + focuses, and lands in the scratchpad as a new tab", async () => {
     await act(async () => {
       await openProject!("/ws");
@@ -107,8 +122,7 @@ describe("useOpenProject", () => {
     await tick();
 
     expect(recents.addRecentProject).toHaveBeenCalledWith("/ws");
-    expect(workspaces.openWorkspace).toHaveBeenCalledWith("/ws");
-    expect(watchers.ensureWatching).toHaveBeenCalledWith("/ws");
+    expect(workspaces.focused).toHaveBeenCalledWith("/ws");
     expect(scratchpads.enterScratchpad).toHaveBeenCalledWith("/ws", []);
     expect(openTabs()).toEqual(["/ws/.notefig/scratchpads/sunny-otter.md"]);
   });
@@ -129,7 +143,7 @@ describe("useOpenProject", () => {
     });
     await tick();
 
-    expect(workspaces.openWorkspace).toHaveBeenCalledWith("/ws");
+    expect(workspaces.focused).toHaveBeenCalledWith("/ws");
     expect(scratchpads.enterScratchpad).toHaveBeenCalledWith("/ws", []);
     expect(openTabs()).toEqual(["/ws/.notefig/scratchpads/sunny-otter.md"]);
   });
@@ -151,7 +165,7 @@ describe("useOpenProject", () => {
     expect(scratchpads.sweepScratchpads).toHaveBeenCalledWith("/ws", [
       "/ws/.notefig/scratchpads/sunny-otter.md",
     ]);
-    expect(workspaces.openWorkspace).toHaveBeenCalledWith("/ws");
+    expect(workspaces.focused).toHaveBeenCalledWith("/ws");
     expect(openTabs()).toEqual(["/ws/.notefig/scratchpads/sunny-otter.md"]);
   });
 
@@ -188,8 +202,8 @@ describe("useOpenProject", () => {
             resolve(`${ws}/.notefig/scratchpads/sunny-otter.md`);
         }),
     );
-    let first!: Promise<void>;
-    let second!: Promise<void>;
+    let first!: Promise<boolean>;
+    let second!: Promise<boolean>;
     await act(async () => {
       first = openProject!("/ws");
       second = openProject!("/ws");
@@ -213,9 +227,47 @@ describe("useOpenProject", () => {
     expect(openTabs()).toEqual([]);
   });
 
-  it("core.projects.show opens-or-focuses and re-arms the watcher", () => {
-    void core.projects.show("/ws");
-    expect(workspaces.openWorkspace).toHaveBeenCalledWith("/ws");
-    expect(watchers.ensureWatching).toHaveBeenCalledWith("/ws");
+  it("entering shows the workspace's files in a sidebar on the Everything view, and leaves a chosen tool alone", async () => {
+    await act(async () => {
+      await openProject!("/ws-a");
+    });
+    expect(
+      new URLSearchParams(router.state.location.search).get("sidebarView"),
+    ).toBe("files");
+
+    await act(async () => {
+      await router.navigate("/?sidebarView=search", { replace: true });
+      await openProject!("/ws-b");
+    });
+    expect(
+      new URLSearchParams(router.state.location.search).get("sidebarView"),
+    ).toBe("search");
+  });
+
+  it("focusing a workspace brings it forward without landing anything", async () => {
+    await act(async () => {
+      await core.workspace("/ws").focus();
+    });
+
+    expect(workspaces.focused).toHaveBeenCalledWith("/ws");
+    expect(scratchpads.enterScratchpad).not.toHaveBeenCalled();
+    expect(scratchpads.sweepScratchpads).not.toHaveBeenCalled();
+    expect(openTabs()).toEqual([]);
+  });
+
+  it("a failed open is reported and resolves false, never rejects", async () => {
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    scratchpads.enterScratchpad.mockRejectedValueOnce(new Error("disk gone"));
+    let opened: boolean | undefined;
+    await act(async () => {
+      opened = await openProject!("/ws");
+    });
+
+    expect(opened).toBe(false);
+    expect(quiet).toHaveBeenCalledWith(
+      "Failed to open /ws:",
+      expect.objectContaining({ name: "WorkspaceOpenError" }),
+    );
+    quiet.mockRestore();
   });
 });
