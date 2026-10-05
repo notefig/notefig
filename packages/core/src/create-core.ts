@@ -110,6 +110,11 @@ export function createCore(options: CreateCoreOptions): Core {
     latestCall.set(key, ticket);
     return ticket;
   };
+  /** A call is over: forget its ticket unless a later call replaced it.
+   *  Absent and superseded read the same to a waiting open. */
+  const settle = (key: string, ticket: number) => {
+    if (latestCall.get(key) === ticket) latestCall.delete(key);
+  };
   let disposed: Promise<void> | null = null;
   const open = new Map<string, OpenWorkspace>();
   const closing = new Map<
@@ -194,28 +199,38 @@ export function createCore(options: CreateCoreOptions): Core {
       if (shuttingDown) return;
       const key = keyOf(path);
       const ticket = takeTicket(key);
-      // A close or a failed open's rollback still running: let it finish
-      // first, so its disposers never tear down the fresh instances.
-      let pending = closing.get(key)?.done ?? rollingBack.get(key);
-      while (pending) {
-        await pending;
-        if (shuttingDown || latestCall.get(key) !== ticket) return;
-        pending = closing.get(key)?.done ?? rollingBack.get(key);
+      try {
+        // A close or a failed open's rollback still running: let it finish
+        // first, so its disposers never tear down the fresh instances.
+        let pending = closing.get(key)?.done ?? rollingBack.get(key);
+        while (pending) {
+          await pending;
+          if (shuttingDown || latestCall.get(key) !== ticket) return;
+          pending = closing.get(key)?.done ?? rollingBack.get(key);
+        }
+        if (open.has(key)) return;
+        const entry = createWorkspace({ key, path });
+        if (!entry) return;
+        open.set(key, entry);
+        notify();
+        hooks.emit("workspace:opened", entry.ref);
+      } finally {
+        settle(key, ticket);
       }
-      if (open.has(key)) return;
-      const entry = createWorkspace({ key, path });
-      if (!entry) return;
-      open.set(key, entry);
-      notify();
-      hooks.emit("workspace:opened", entry.ref);
     },
     close(path) {
       const key = keyOf(path);
-      takeTicket(key);
+      const ticket = takeTicket(key);
       const pending = closing.get(key);
-      if (pending) return pending.done;
+      if (pending) {
+        void pending.done.then(() => settle(key, ticket));
+        return pending.done;
+      }
       const entry = open.get(key);
-      if (!entry) return Promise.resolve();
+      if (!entry) {
+        settle(key, ticket);
+        return Promise.resolve();
+      }
       open.delete(key);
       // Registered before teardown starts: `closing` handlers run
       // synchronously from here and must still find the instances.
@@ -225,6 +240,7 @@ export function createCore(options: CreateCoreOptions): Core {
       notify();
       void disposeWorkspace(entry).finally(() => {
         closing.delete(key);
+        settle(key, ticket);
         notify();
         finish();
       });
