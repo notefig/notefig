@@ -20,6 +20,7 @@
  */
 
 import { useMemo } from "react";
+import { defineModule } from "@notefig/core";
 import {
   createCollection,
   useLiveQuery,
@@ -76,10 +77,10 @@ export interface FileContent {
   error?: string; // Set when the read failed — content is NOT the file's real content
 }
 
-export function createFileMetadataCollection(workspaceId: string) {
+export function createFileMetadataCollection(workspacePath: string) {
   return createCollection(
     queryCollectionOptions<FileMetadata, string>({
-      queryKey: ["file-metadata", workspaceId],
+      queryKey: ["file-metadata", workspacePath],
       queryClient,
 
       // Safety net for changes the fs watcher misses (network volumes,
@@ -98,7 +99,7 @@ export function createFileMetadataCollection(workspaceId: string) {
       // carries entry types, so the historical files-then-dirs double walk
       // is gone.
       queryFn: async (): Promise<FileMetadata[]> => {
-        const listing = await platformAdapter.fs.readDirectory(workspaceId, {
+        const listing = await platformAdapter.fs.readDirectory(workspacePath, {
           recursive: true,
           ignore: IGNORE_RULES,
           includeFiles: true,
@@ -127,7 +128,7 @@ export function createFileMetadataCollection(workspaceId: string) {
 
         // Re-stat children of hydrated directories so their stats stay
         // fresh across refetches instead of pinning to hydration time.
-        const hydrated = hydratedDirsFor(workspaceId);
+        const hydrated = hydratedDirsFor(workspacePath);
         const pathsToStat = entries
           .filter((e) => hydrated.has(parentDirectory(e.path)))
           .map((e) => e.path);
@@ -141,14 +142,14 @@ export function createFileMetadataCollection(workspaceId: string) {
 
         // Merge, don't wipe: full-replace sync would erase hydrated stats
         // and self-write bookkeeping for rows the walk still sees.
-        const previousRows = workspaceCollections.peek(workspaceId)?.metadata;
+        const previousRows = workspaceCollections.peek(workspacePath)?.metadata;
 
         return entries.map(({ path, type }) => {
           const stat = statMap.get(path);
           const previous = previousRows?.get(path);
           return {
             path,
-            relativePath: relativeTreePath(workspaceId, path),
+            relativePath: relativeTreePath(workspacePath, path),
             type,
             modified: stat?.modifiedAt ?? previous?.modified,
             size: stat?.size ?? previous?.size,
@@ -289,12 +290,12 @@ export function createFileMetadataCollection(workspaceId: string) {
  *   .where(({ content }) => inArray(content.path, ['/path/to/file.md']))
  * ```
  *
- * @param workspaceId - Unique identifier for the workspace (typically the basePath)
+ * @param workspacePath - The workspace root
  */
-export function createFileContentCollection(workspaceId: string) {
+export function createFileContentCollection(workspacePath: string) {
   return createCollection(
     queryCollectionOptions<FileContent>({
-      queryKey: ["file-content", workspaceId],
+      queryKey: ["file-content", workspacePath],
       queryClient,
 
       syncMode: "on-demand",
@@ -344,7 +345,7 @@ export function createFileContentCollection(workspaceId: string) {
         // tab go away instead of sitting on a placeholder until the next
         // interval walk.
         if (result.failed.some((failure) => failure.type === "not_found")) {
-          void refetchWorkspaceMetadata(workspaceId);
+          void refetchWorkspaceMetadata(workspacePath);
         }
         for (const failure of result.failed) {
           console.warn(
@@ -452,11 +453,11 @@ export const workspaceCollections = workspaceScoped<WorkspaceCollections>({
 const hydratedDirsRegistry = new Map<string, Set<string>>();
 const hydrationInFlight = new Map<string, Promise<void>>();
 
-function hydratedDirsFor(workspaceId: string): Set<string> {
-  let dirs = hydratedDirsRegistry.get(workspaceKey(workspaceId));
+function hydratedDirsFor(workspacePath: string): Set<string> {
+  let dirs = hydratedDirsRegistry.get(workspaceKey(workspacePath));
   if (!dirs) {
     dirs = new Set();
-    hydratedDirsRegistry.set(workspaceKey(workspaceId), dirs);
+    hydratedDirsRegistry.set(workspaceKey(workspacePath), dirs);
   }
   return dirs;
 }
@@ -467,8 +468,8 @@ function parentDirectory(path: string): string {
 }
 
 /** Drop hydration bookkeeping for a directory subtree (delete/rename). */
-function pruneHydratedDirs(workspaceId: string, path: string): void {
-  const dirs = hydratedDirsRegistry.get(workspaceKey(workspaceId));
+function pruneHydratedDirs(workspacePath: string, path: string): void {
+  const dirs = hydratedDirsRegistry.get(workspaceKey(workspacePath));
   if (!dirs) return;
   const prefix = path.endsWith("/") ? path : path + "/";
   for (const dir of dirs) {
@@ -486,15 +487,15 @@ function pruneHydratedDirs(workspaceId: string, path: string): void {
  * by a later call or the periodic refetch's hydrated-dir re-stat.
  */
 export function hydrateDirectoryStats(
-  workspaceId: string,
+  workspacePath: string,
   dirPath: string,
 ): Promise<void> {
-  const key = `${workspaceId}\0${dirPath}`;
+  const key = `${workspacePath}\0${dirPath}`;
   const inFlight = hydrationInFlight.get(key);
   if (inFlight) return inFlight;
 
   const promise = (async () => {
-    const collections = workspaceCollections.peek(workspaceId);
+    const collections = workspaceCollections.peek(workspacePath);
     if (!collections) return;
 
     const children = collections.metadata.toArray.filter((row) => {
@@ -517,7 +518,7 @@ export function hydrateDirectoryStats(
       }
     }
 
-    hydratedDirsFor(workspaceId).add(dirPath);
+    hydratedDirsFor(workspacePath).add(dirPath);
   })().finally(() => {
     hydrationInFlight.delete(key);
   });
@@ -529,10 +530,10 @@ export function hydrateDirectoryStats(
 if (import.meta.env.DEV) {
   // Diagnostic hook for e2e failure dumps (dev builds only).
   (window as unknown as Record<string, unknown>).__metristsDebugContentRow = (
-    workspaceId: string,
+    workspacePath: string,
     filePath: string,
   ) => {
-    const collections = workspaceCollections.peek(workspaceId);
+    const collections = workspaceCollections.peek(workspacePath);
     if (!collections) return { error: "no collections for workspace" };
     const content = collections.content.get(filePath);
     const metadata = collections.metadata.get(filePath);
@@ -547,9 +548,9 @@ if (import.meta.env.DEV) {
 }
 
 export function getOrCreateWorkspaceCollections(
-  workspaceId: string,
+  workspacePath: string,
 ): WorkspaceCollections {
-  return workspaceCollections.getOrCreate(workspaceId);
+  return workspaceCollections.getOrCreate(workspacePath);
 }
 
 /**
@@ -587,19 +588,19 @@ export function updateLoadedContentRow(path: string, content: string): void {
 
 /** Refetch the metadata collection; call when files are known to have changed on disk. */
 export async function refreshDirectoryMetadata(
-  workspaceId: string,
+  workspacePath: string,
 ): Promise<void> {
   // Refresh what exists; a refresh landing after the workspace closed (an
   // in-flight drop, a late watcher) must not bring its collections back.
-  await workspaceCollections.peek(workspaceId)?.metadata.utils.refetch();
+  await workspaceCollections.peek(workspacePath)?.metadata.utils.refetch();
 }
 
 export async function writeFileContent(
-  workspaceId: string,
+  workspacePath: string,
   filePath: string,
   content: string,
 ): Promise<void> {
-  const collections = getOrCreateWorkspaceCollections(workspaceId);
+  const collections = getOrCreateWorkspaceCollections(workspacePath);
   const contentHash = calculateContentHash(content);
 
   const existingContent = collections.content.get(filePath);
@@ -634,19 +635,19 @@ export async function writeFileContent(
 
   // App self-writes are suppressed by the fs watcher, so derived state
   // (git status, search) must be invalidated here.
-  invalidateDerivedState(workspaceId);
+  invalidateDerivedState(workspacePath);
 }
 
 export async function createFile(
-  workspaceId: string,
+  workspacePath: string,
   filePath: string,
   content: string = "",
 ): Promise<void> {
-  const collections = getOrCreateWorkspaceCollections(workspaceId);
+  const collections = getOrCreateWorkspaceCollections(workspacePath);
 
   const tx = collections.metadata.insert({
     path: filePath,
-    relativePath: relativeTreePath(workspaceId, filePath),
+    relativePath: relativeTreePath(workspacePath, filePath),
     type: "file",
     contentHash: "",
     size: 0,
@@ -664,7 +665,7 @@ export async function createFile(
   }
 
   if (content) {
-    await writeFileContent(workspaceId, filePath, content);
+    await writeFileContent(workspacePath, filePath, content);
   }
 
   // Refresh metadata to get accurate timestamps
@@ -682,14 +683,14 @@ export async function createFile(
 }
 
 export async function createDirectory(
-  workspaceId: string,
+  workspacePath: string,
   dirPath: string,
 ): Promise<void> {
-  const collections = getOrCreateWorkspaceCollections(workspaceId);
+  const collections = getOrCreateWorkspaceCollections(workspacePath);
 
   collections.metadata.insert({
     path: dirPath,
-    relativePath: relativeTreePath(workspaceId, dirPath),
+    relativePath: relativeTreePath(workspacePath, dirPath),
     type: "directory",
     contentHash: "",
   });
@@ -714,14 +715,14 @@ export async function createDirectory(
  * - The directory entry itself is deleted via the mutation handler which calls
  *   platformAdapter.fs.deleteDirectories with recursive: true
  *
- * @param workspaceId - Unique identifier for the workspace
+ * @param workspacePath - The workspace root
  * @param path - Absolute path to delete
  */
 export async function deleteFileOrDirectory(
-  workspaceId: string,
+  workspacePath: string,
   path: string,
 ): Promise<void> {
-  const collections = getOrCreateWorkspaceCollections(workspaceId);
+  const collections = getOrCreateWorkspaceCollections(workspacePath);
 
   const entry = collections.metadata.get(path);
 
@@ -744,7 +745,7 @@ export async function deleteFileOrDirectory(
   }
 
   collections.metadata.delete(path);
-  pruneHydratedDirs(workspaceId, path);
+  pruneHydratedDirs(workspacePath, path);
 
   const content = collections.content.get(path);
   if (content) {
@@ -754,10 +755,10 @@ export async function deleteFileOrDirectory(
 
 /** A full FileEntry joining metadata and content; null if not found. */
 export function getFileEntry(
-  workspaceId: string,
+  workspacePath: string,
   filePath: string,
 ): FileEntry | null {
-  const collections = getOrCreateWorkspaceCollections(workspaceId);
+  const collections = getOrCreateWorkspaceCollections(workspacePath);
 
   const metadata = collections.metadata.get(filePath);
   const content = collections.content.get(filePath);
@@ -784,10 +785,10 @@ export function getFileEntry(
 
 /** Pre-load file content into the collection cache (e.g. hover prefetch). */
 export async function prefetchFileContent(
-  workspaceId: string,
+  workspacePath: string,
   filePath: string,
 ): Promise<void> {
-  const collections = getOrCreateWorkspaceCollections(workspaceId);
+  const collections = getOrCreateWorkspaceCollections(workspacePath);
 
   const existingContent = collections.content.get(filePath);
   if (existingContent) {
@@ -828,18 +829,18 @@ export async function prefetchFileContent(
  * All collection writes use direct writes (utils.writeDelete/writeInsert) to bypass
  * mutation handlers — the FS operation is done directly via the platform adapter.
  *
- * @param workspaceId - Unique identifier for the workspace
+ * @param workspacePath - The workspace root
  * @param oldPath - Current absolute path
  * @param newPath - New absolute path
  */
 export async function renameFileOrDirectory(
-  workspaceId: string,
+  workspacePath: string,
   oldPath: string,
   newPath: string,
 ): Promise<void> {
   if (oldPath === newPath) return;
 
-  const collections = getOrCreateWorkspaceCollections(workspaceId);
+  const collections = getOrCreateWorkspaceCollections(workspacePath);
   const entry = collections.metadata.get(oldPath);
 
   if (!entry) {
@@ -854,7 +855,7 @@ export async function renameFileOrDirectory(
   }
 
   const computeRelativePath = (absolutePath: string): string | undefined =>
-    relativeTreePath(workspaceId, absolutePath);
+    relativeTreePath(workspacePath, absolutePath);
 
   if (entry.type === "file") {
     const moveResult = await platformAdapter.fs.moveFile(oldPath, newPath);
@@ -920,7 +921,7 @@ export async function renameFileOrDirectory(
     });
     // Hydration state keys on paths; the renamed subtree re-hydrates when
     // the tree shows it again.
-    pruneHydratedDirs(workspaceId, oldPath);
+    pruneHydratedDirs(workspacePath, oldPath);
   }
 }
 
@@ -1041,6 +1042,16 @@ export interface FileHandle {
    * the platform adapter, or it risks clobbering a newer on-disk version.
    */
   content(): string | undefined;
+  /** Create it as a file (empty unless `content` is given). */
+  create(content?: string): Promise<void>;
+  /** Create it as a directory. */
+  createDirectory(): Promise<void>;
+  /** Replace the file's content on disk; resolves once it is written. */
+  write(content: string): Promise<void>;
+  /** Move it (file or directory) to `newPath`, inside the same workspace. */
+  rename(newPath: string): Promise<void>;
+  /** Delete it; a directory goes with everything under it. */
+  delete(): Promise<void>;
 }
 
 export function file(workspacePath: string, filePath: string): FileHandle {
@@ -1055,5 +1066,43 @@ export function file(workspacePath: string, filePath: string): FileHandle {
     content: () =>
       getOrCreateWorkspaceCollections(workspacePath).content.get(filePath)
         ?.content,
+    create: (content) => createFile(workspacePath, filePath, content),
+    createDirectory: () => createDirectory(workspacePath, filePath),
+    write: (content) => writeFileContent(workspacePath, filePath, content),
+    rename: (newPath) =>
+      renameFileOrDirectory(workspacePath, filePath, newPath),
+    delete: () => deleteFileOrDirectory(workspacePath, filePath),
   };
 }
+
+// ---------------------------------------------------------------------------
+// core.workspace(ws).files
+// ---------------------------------------------------------------------------
+
+/** One open workspace's files. */
+export interface WorkspaceFiles {
+  file(filePath: string): FileHandle;
+  /** Re-walk the listing: what was added, removed or changed on disk. */
+  refresh(): Promise<void>;
+}
+
+declare module "@notefig/core" {
+  interface WorkspaceModules {
+    files: WorkspaceFiles;
+  }
+}
+
+/**
+ * The files of each open workspace. Their collections are scoped to the
+ * open set (`workspaceCollections`), so closing the workspace drops them;
+ * this module only hands out the workspace's file operations.
+ */
+export const filesModule = defineModule({
+  name: "files",
+  workspace: {
+    create: ({ workspace }): WorkspaceFiles => ({
+      file: (filePath) => file(workspace.path, filePath),
+      refresh: () => refetchWorkspaceMetadata(workspace.path),
+    }),
+  },
+});

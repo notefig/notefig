@@ -40,7 +40,9 @@ import {
   ensureWorkspaceHistoryInitialized,
   getOrCreateWorkspaceHistoryService,
   historyGitDir,
+  historyModule,
 } from "../history-service";
+import { createCore } from "@notefig/core";
 
 const WS = "/workspace";
 const GIT_DIR = "/workspace/.notefig/.git";
@@ -168,5 +170,19 @@ describe("history-service", () => {
     expect(createWorkerGitServiceMock).toHaveBeenCalledTimes(2);
     // The worker's per-repo service (and object cache) is dropped too.
     expect(disposeWorkerGitRepoMock).toHaveBeenCalledWith(GIT_DIR);
+  });
+
+  it("lives as long as core keeps the workspace open", async () => {
+    const core = createCore({
+      services: {} as never,
+      modules: [historyModule],
+    });
+    await core.workspaces.open(WS);
+    const first = getOrCreateWorkspaceHistoryService(WS);
+
+    await core.workspaces.close(WS);
+
+    expect(disposeWorkerGitRepoMock).toHaveBeenCalledWith(GIT_DIR);
+    expect(getOrCreateWorkspaceHistoryService(WS)).not.toBe(first);
   });
 });

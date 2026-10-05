@@ -11,7 +11,9 @@ vi.mock("@/adapters", async () => ({
 vi.mock("@/entities/workspaces", () => ({ useOpenWorkspaces: () => [] }));
 vi.mock("@/utils/intl", () => ({ default: { t: (key: string) => key } }));
 vi.mock("@/components/agent/jump-to-task", () => ({ jumpToRound: vi.fn(), jumpToTask: vi.fn() }));
-vi.mock("@/entities/scratchpads", () => ({ createAndOpenScratchpad: vi.fn() }));
+vi.mock("@/entities/scratchpads", () => ({
+  scratchpads: () => ({ createAndOpen: vi.fn() }),
+}));
 
 const tabs = { open: vi.fn(() => true), openAgent: vi.fn() };
 

@@ -42,7 +42,7 @@ import {
   useRecentDocuments,
   type RecentDocument,
 } from "@/entities/recent-documents";
-import { createAndOpenScratchpad } from "@/entities/scratchpads";
+import { scratchpads } from "@/entities/scratchpads";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { deriveProjectName } from "@/hooks/use-recent-projects";
 import { formatTimeAgo } from "@/utils/format";
@@ -275,7 +275,7 @@ function QuickActions({ workspacePath }: { workspacePath: string }) {
       <NavRow
         leading={<ScratchpadIcon className="size-3" />}
         label={t("newScratchpad")}
-        onClick={() => createAndOpenScratchpad(workspacePath)}
+        onClick={() => scratchpads(workspacePath).createAndOpen()}
       />
       <NavRow
         leading={<MessageSquarePlus className="size-3" strokeWidth={1.5} />}

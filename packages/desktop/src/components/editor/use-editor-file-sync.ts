@@ -12,8 +12,8 @@ import type { Editor, JSONContent } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import type { FileEntry } from "@/utils/fs";
 import {
+  file as fileHandle,
   getOrCreateWorkspaceCollections,
-  writeFileContent,
 } from "@/entities/files";
 import { getDocumentSync } from "@/utils/markdown-conversion";
 import { UI_ONLY_TRANSACTION_META } from "@/components/editor/editor-schema-kit";
@@ -138,7 +138,7 @@ export function useEditorFileSync(
   // Editor → disk: debounced autosave into the pipeline.
   useEffect(() => {
     const sync = getDocumentSync(file.path);
-    sync.writer = (markdown) => writeFileContent(basePath, file.path, markdown);
+    sync.writer = (markdown) => fileHandle(basePath, file.path).write(markdown);
 
     const pushSnapshot = () => {
       sync.pushUpdate(() => editor.state.doc.toJSON() as JSONContent);

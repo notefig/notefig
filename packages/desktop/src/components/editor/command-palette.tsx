@@ -44,7 +44,6 @@ import { useTranslation } from "react-i18next";
 import { ScratchpadIcon } from "@/components/editor/scratchpad-icon";
 import { getLocalizedCommandKeywords } from "@/utils/command-keywords";
 import { useFileSearch, type FileSearchResult } from "@/hooks/use-file-search";
-import { closeWorkspace } from "@/entities/workspaces";
 import { useOpenProjectFromPicker } from "@/hooks/use-open-project";
 import { canOpenFile } from "./polymorphic-editor";
 import { FileTypeIcon } from "./file-type-icon";
@@ -168,6 +167,7 @@ export function CommandPalette({
   onFocusTab,
   direction = "ltr",
 }: CommandPaletteProps) {
+  const { projects } = useCore();
   const { setTheme, theme } = useTheme();
   const { setTheme: persistTheme } = useAppSettings();
   const { t } = useTranslation();
@@ -265,7 +265,7 @@ export function CommandPalette({
         // Really close (MET-177): the workspace leaves the open set and its
         // agents demote; focus moves to the next open workspace, or the
         // welcome screen with none left.
-        void closeWorkspace(workspacePath);
+        void projects.close(workspacePath);
       },
     },
     {

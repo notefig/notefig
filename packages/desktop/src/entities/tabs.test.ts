@@ -11,10 +11,12 @@ vi.mock("./workspaces", () => ({
 vi.mock("@/entities/files", () => ({
   getOrCreateWorkspaceCollections: vi.fn(),
   useMetadataFetching: vi.fn(() => false),
-  renameFileOrDirectory: (ws: string, from: string, to: string) => {
-    calls.push("rename-fs");
-    return renameFileOrDirectoryMock(ws, from, to);
-  },
+  file: (ws: string, from: string) => ({
+    rename: (to: string) => {
+      calls.push("rename-fs");
+      return renameFileOrDirectoryMock(ws, from, to);
+    },
+  }),
 }));
 
 let cleanPromise: Promise<void> = Promise.resolve();

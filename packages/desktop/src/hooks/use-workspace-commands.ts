@@ -4,7 +4,7 @@ import { platformAdapter } from "@/adapters";
 import { getFileName } from "@/utils/fs";
 import { runTabHistoryAction } from "@/tabs/tab-controllers";
 import { tabKind } from "@/tabs/tab-id";
-import { createAndOpenScratchpad } from "@/entities/scratchpads";
+import { scratchpads } from "@/entities/scratchpads";
 import type { FileTreeMode } from "@/components/editor/file-tree";
 
 export interface WorkspaceCommandsOptions {
@@ -63,7 +63,7 @@ export function useWorkspaceCommands({
   // "New Scratchpad" is instant and nameless; "New File" keeps the
   // explicit inline-naming flow in the tree.
   const handleNewScratchpad = useCallback(() => {
-    createAndOpenScratchpad(workspacePath);
+    scratchpads(workspacePath).createAndOpen();
   }, [workspacePath]);
 
   const handleNewFile = useCallback(() => {

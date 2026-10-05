@@ -42,7 +42,7 @@ import {
   useRecentDocuments,
   type RecentDocument,
 } from "@/entities/recent-documents";
-import { createAndOpenScratchpad } from "@/entities/scratchpads";
+import { scratchpads } from "@/entities/scratchpads";
 import { useOpenProjectFromPicker } from "@/hooks/use-open-project";
 import { deriveProjectName } from "@/hooks/use-recent-projects";
 import type { TabsApi } from "@/entities/tabs";
@@ -203,7 +203,7 @@ function actions({ host, t }: AppStatusInputs): AppStatusAction[] {
     list.push({
       id: "new-scratchpad",
       label: t("newScratchpad"),
-      activate: () => createAndOpenScratchpad(workspacePath),
+      activate: () => scratchpads(workspacePath).createAndOpen(),
     });
   }
   list.push({ id: "settings", label: t("settings"), activate: host.openSettings });

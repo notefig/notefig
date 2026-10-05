@@ -3,7 +3,9 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 
 vi.mock("@/adapters", () => ({ platformAdapter: {} }));
-vi.mock("@/entities/scratchpads", () => ({ createAndOpenScratchpad: vi.fn() }));
+vi.mock("@/entities/scratchpads", () => ({
+  scratchpads: () => ({ createAndOpen: vi.fn() }),
+}));
 
 import {
   useWorkspaceCommands,

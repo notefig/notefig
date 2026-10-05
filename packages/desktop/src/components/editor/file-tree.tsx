@@ -36,8 +36,8 @@ import {
   type FileTreeNode,
 } from "@/utils/fs";
 import {
+  file,
   useFileCollections,
-  renameFileOrDirectory,
   prefetchFileContent,
 } from "@/entities/files";
 import { useLiveQuery } from "@tanstack/react-db";
@@ -234,7 +234,7 @@ function FileTreeInner({
       const move =
         (openTabsRef.current ?? []).includes(fromAbs) && onRenameOpenFile
           ? onRenameOpenFile(fromAbs, destAbs)
-          : renameFileOrDirectory(basePath, fromAbs, destAbs);
+          : file(basePath, fromAbs).rename(destAbs);
       move.catch((error: unknown) => {
         console.error(`Failed to move ${fromAbs}:`, error);
       });

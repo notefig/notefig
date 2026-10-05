@@ -30,6 +30,7 @@ import { readKv } from "@/utils/kv-store";
 import { SETTINGS_NAMESPACE } from "@/hooks/use-app-settings";
 import { path as pathutil } from "@/utils/path";
 import { appCore } from "@/core/current";
+import { defineModule } from "@notefig/core";
 import { stripPromptMarkers } from "@notefig/widgets";
 import {
   APP_DIR_NAME,
@@ -37,7 +38,7 @@ import {
   SCRATCHPADS_REL_PATH,
 } from "@/utils/app-dir";
 import {
-  createFile,
+  file,
   getOrCreateWorkspaceCollections,
   refetchWorkspaceMetadata,
   type FileMetadata,
@@ -243,24 +244,51 @@ export async function createGeneratedScratchpad(
     scratchpadsDirPath(workspacePath),
     randomScratchpadBasename(basenames),
   );
-  await createFile(workspacePath, filePath);
+  await file(workspacePath, filePath).create();
   return filePath;
 }
 
-/** The "New File" action: create a fresh generated-name scratchpad and open
- * it as a tab. Shared by the Mod+N command, the palette, and the sidebar. */
-export function createAndOpenScratchpad(workspacePath: string): void {
-  void createGeneratedScratchpad(workspacePath)
-    .then((path) => {
-      // The user asked for something to type into: the new document's
-      // own claim (its prompt widget) may take focus from whatever field
-      // they were in — a hand-off the gesture grants, not the widget, and
-      // only once the tab is really in the dock (an open the editor
-      // refuses leaves nothing to own the grant).
-      appCore().tabs.open(path, { intent: "replace", handoff: true });
-    })
-    .catch((error) => console.error("Failed to create a new file:", error));
+/** One workspace's scratchpads — also `core.workspace(ws).scratchpads`. */
+export interface WorkspaceScratchpads {
+  /** A fresh generated-name scratchpad; resolves to its path. */
+  create(): Promise<string>;
+  /**
+   * The "New File" action: create one and open it as a tab. Shared by the
+   * Mod+N command, the palette, the sidebar and the status menu.
+   */
+  createAndOpen(): void;
 }
+
+export function scratchpads(workspacePath: string): WorkspaceScratchpads {
+  return {
+    create: () => createGeneratedScratchpad(workspacePath),
+    createAndOpen() {
+      void createGeneratedScratchpad(workspacePath)
+        .then((path) => {
+          // The user asked for something to type into: the new document's
+          // own claim (its prompt widget) may take focus from whatever
+          // field they were in — a hand-off the gesture grants, not the
+          // widget, and only once the tab is really in the dock (an open
+          // the editor refuses leaves nothing to own the grant).
+          appCore().tabs.open(path, { intent: "replace", handoff: true });
+        })
+        .catch((error) => console.error("Failed to create a new file:", error));
+    },
+  };
+}
+
+declare module "@notefig/core" {
+  interface WorkspaceModules {
+    scratchpads: WorkspaceScratchpads;
+  }
+}
+
+export const scratchpadsModule = defineModule({
+  name: "scratchpads",
+  workspace: {
+    create: ({ workspace }) => scratchpads(workspace.path),
+  },
+});
 
 /**
  * Entry-time resolution, on plain disk truth: the most recently modified

@@ -43,7 +43,22 @@ const history = vi.hoisted(() => ({
   disposeWorkspaceHistoryService: vi.fn(),
   checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
 }));
-vi.mock("@/utils/history-service", () => history);
+// The history module, over the mocked dispose: what core runs when it
+// closes the workspace.
+vi.mock("@/utils/history-service", async () => {
+  const { defineModule } = await import("@notefig/core");
+  return {
+    ...history,
+    historyModule: defineModule({
+      name: "history",
+      workspace: {
+        create: () => ({}) as never,
+        dispose: (_history, workspace) =>
+          history.disposeWorkspaceHistoryService(workspace.path),
+      },
+    }),
+  };
+});
 // No file-sync mock: watcher lifetime left the registry in MET-183. The
 // registry publishes membership and nothing else; arming, stopping and
 // re-arming are covered by utils/__tests__/workspace-watchers.test.ts.
@@ -59,7 +74,12 @@ import {
   isWorkspaceOpen,
   openWorkspacesCollection,
   workspaceOfPath,
+  workspacesModule,
 } from "./workspaces";
+import { defineModule } from "@notefig/core";
+import { workspaceAgentsModule } from "@/agent/workspace-agents";
+import { historyModule } from "@/utils/history-service";
+import { createTestCore } from "@/testing/test-core";
 import {
   agentTasksCollection,
   type AgentTaskRow,
@@ -79,6 +99,19 @@ function taskRow(overrides: Partial<AgentTaskRow> = {}): AgentTaskRow {
     ...overrides,
   };
 }
+
+// Core closes each workspace's modules when its row goes: the agents (the
+// real module), then the history repo. Scopes and watchers are the tests'
+// own business here (see the workspace-scoped and watcher suites).
+createTestCore({
+  modules: [
+    defineModule({ name: "workspace-scopes" }),
+    defineModule({ name: "workspace-watchers" }),
+    workspacesModule({ restore: false }),
+    historyModule,
+    workspaceAgentsModule,
+  ],
+}).boot();
 
 beforeEach(async () => {
   dbRef.current!.repairWrites();
@@ -148,9 +181,9 @@ describe("openWorkspace", () => {
 
 describe("closeWorkspace", () => {
   it("tears down every per-workspace subsystem and drops the row", async () => {
-    // The OS-resource owners are closed by hand; everything else is scoped
-    // to membership and disposes itself when the row goes (the real helper,
-    // not a mock — this is the seam the manual cascade used to cover).
+    // The OS-resource owners are core workspace modules, closed by core;
+    // everything else is scoped to membership and disposes itself when the
+    // row goes (the real helper, not a mock).
     const stopScopes = startWorkspaceScopeSubscription();
     const dispose = vi.fn();
     const scope = workspaceScoped({ create: () => ({}), dispose });

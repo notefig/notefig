@@ -21,18 +21,18 @@ const invalidationTimers = new Map<string, ReturnType<typeof setTimeout>>();
  * Called from file-sync's fs-event handlers and from in-app writes
  * (whose watcher echoes are self-suppressed).
  */
-export function invalidateDerivedState(workspaceId: string): void {
-  const pending = invalidationTimers.get(workspaceId);
+export function invalidateDerivedState(workspacePath: string): void {
+  const pending = invalidationTimers.get(workspacePath);
   if (pending) clearTimeout(pending);
 
   invalidationTimers.set(
-    workspaceId,
+    workspacePath,
     setTimeout(() => {
-      invalidationTimers.delete(workspaceId);
+      invalidationTimers.delete(workspacePath);
       queryClient.invalidateQueries({
-        queryKey: ["search-content", workspaceId],
+        queryKey: ["search-content", workspacePath],
       });
-      invalidateGit(workspaceId);
+      invalidateGit(workspacePath);
     }, INVALIDATE_DEBOUNCE_MS),
   );
 }

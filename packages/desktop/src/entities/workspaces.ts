@@ -24,7 +24,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { defineModule, type WorkspaceLifecycle } from "@notefig/core";
-import { disposeWorkspaceTaskManager } from "@/agent/agent-service";
+import { appCore } from "@/core/current";
 import {
   getOrCreateWorkspaceCollections,
   refreshDirectoryMetadata,
@@ -34,7 +34,6 @@ import {
   openWorkspacesCollection,
   type OpenWorkspaceRow,
 } from "@/entities/open-workspaces";
-import { disposeWorkspaceHistoryService } from "@/utils/history-service";
 import { path as pathutil, relativeTreePath, workspaceKey } from "@/utils/path";
 
 // The collection is a leaf (see open-workspaces.ts for why); this module
@@ -113,8 +112,9 @@ function hydrated(): Promise<void> {
 // the metadata watcher (utils/workspace-watchers.ts) and every per-workspace
 // value declared through `workspaceScoped` (file and git collections, the
 // tree's expansion memory, the sidebar's last tool) subscribe to it and tear
-// themselves down when a row leaves. The two things closed by hand below own
-// OS resources whose teardown must be awaited and ordered.
+// themselves down when a row leaves. What owns OS resources — the agents'
+// processes, the history repo's git worker — is a core workspace module,
+// disposed in need order when core closes the workspace (`mirrorOpenSet`).
 
 /** In-flight closes, keyed like the collection: a reopen racing a close must
  *  wait for the teardown to finish rather than interleave with it. */
@@ -131,8 +131,8 @@ const pendingCloses = new Map<string, Promise<void>>();
  * promise resolves once the write is durable: a reload before that would
  * forget the workspace or land on the previous focus, so callers that can
  * be followed by one (the test seam) await it. Re-arming a watcher whose
- * start failed is the portal's other half of re-entry (`showWorkspace` in
- * hooks/use-open-project.ts).
+ * start failed is the portal's other half of re-entry
+ * (`core.projects.show`, entities/projects.ts).
  */
 export async function openWorkspace(workspacePath: string): Promise<void> {
   const key = workspaceKey(workspacePath);
@@ -194,14 +194,12 @@ export function isWorkspaceOpen(workspacePath: string): boolean {
 /**
  * Full teardown, the one path shared by the switcher's close, error
  * recovery's repick, and app teardown. Agent rows with a live session
- * demote to "restored" (revivable on next open) per the MET-54 contract —
- * the same semantics the route-unmount teardown had before MET-177 moved
- * ownership here.
+ * demote to "restored" (revivable on next open) per the MET-54 contract.
  *
- * Deleting the row is the teardown for everything scoped to membership.
- * What remains explicit owns OS resources and has an order: the task
- * manager first (cancelling a turn can still checkpoint into the history
- * service), then the history service's git worker.
+ * Deleting the row is the whole teardown: everything scoped to membership
+ * goes with it, and core closes the workspace, disposing each module's
+ * instance in reverse need order — the agents before the history repo they
+ * can still checkpoint into. This resolves once that has finished.
  */
 export function closeWorkspace(workspacePath: string): Promise<void> {
   const key = workspaceKey(workspacePath);
@@ -218,8 +216,8 @@ export function closeWorkspace(workspacePath: string): Promise<void> {
 
   const close = (async () => {
     try {
-      await disposeWorkspaceTaskManager(workspacePath);
-      disposeWorkspaceHistoryService(workspacePath);
+      // Joins the close the row's delete started (`mirrorOpenSet`).
+      await appCore().workspaces.close(workspacePath);
     } finally {
       pendingCloses.delete(key);
     }

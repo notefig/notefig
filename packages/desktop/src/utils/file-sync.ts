@@ -180,11 +180,11 @@ export function contentWatchIdFor(workspacePath: string): string {
 
 function invalidateProjectSettingsIfChanged(
   changedPaths: string[],
-  workspaceId: string,
+  workspacePath: string,
 ): void {
-  if (changedPaths.includes(projectSettingsPath(workspaceId))) {
+  if (changedPaths.includes(projectSettingsPath(workspacePath))) {
     queryClient.invalidateQueries({
-      queryKey: projectSettingsQueryKey(workspaceId),
+      queryKey: projectSettingsQueryKey(workspacePath),
     });
   }
 }
@@ -194,20 +194,20 @@ type MetadataChange = MetadataChangeEvent["changes"][number];
 
 function relativeToWorkspace(
   path: string,
-  workspaceId: string,
+  workspacePath: string,
 ): string | undefined {
-  return relativeTreePath(workspaceId, path);
+  return relativeTreePath(workspacePath, path);
 }
 
 async function applyMetadataCreated(
   collections: WorkspaceCollections,
-  workspaceId: string,
+  workspacePath: string,
   change: MetadataChange,
 ): Promise<void> {
   // Authoritative backstop for ignore rules: the platform watchers filter
   // too (cheaply, Rust-side), but browser adapters and event races can
   // still surface ignored paths — nothing ignored may enter the collection.
-  if (isIgnoredPath(change.path, workspaceId)) return;
+  if (isIgnoredPath(change.path, workspacePath)) return;
 
   const metadataResult = await platformAdapter.fs.getMetadata([change.path]);
   const metadata = metadataResult.succeeded[0];
@@ -215,7 +215,7 @@ async function applyMetadataCreated(
 
   collections.metadata.utils.writeInsert({
     path: change.path,
-    relativePath: relativeToWorkspace(change.path, workspaceId),
+    relativePath: relativeToWorkspace(change.path, workspacePath),
     type: metadata.type,
     modified: metadata.modifiedAt,
     size: metadata.size,
@@ -237,7 +237,7 @@ function applyMetadataDeleted(
 
 async function applyMetadataRenamed(
   collections: WorkspaceCollections,
-  workspaceId: string,
+  workspacePath: string,
   change: MetadataChange,
 ): Promise<void> {
   if (!change.oldPath) {
@@ -246,7 +246,7 @@ async function applyMetadataRenamed(
   }
 
   // Renamed INTO ignored space: the file leaves the tracked tree.
-  if (isIgnoredPath(change.path, workspaceId)) {
+  if (isIgnoredPath(change.path, workspacePath)) {
     applyMetadataDeleted(collections, { ...change, path: change.oldPath });
     return;
   }
@@ -255,7 +255,7 @@ async function applyMetadataRenamed(
   if (!oldMetadata) {
     // Renamed OUT of untracked space (ignored dir, or a path we never held
     // a row for): surfaces as a fresh create at the new path.
-    await applyMetadataCreated(collections, workspaceId, change);
+    await applyMetadataCreated(collections, workspacePath, change);
     return;
   }
 
@@ -266,7 +266,7 @@ async function applyMetadataRenamed(
   collections.metadata.utils.writeDelete(change.oldPath);
   collections.metadata.utils.writeInsert({
     path: change.path,
-    relativePath: relativeToWorkspace(change.path, workspaceId),
+    relativePath: relativeToWorkspace(change.path, workspacePath),
     type: metadata.type,
     modified: metadata.modifiedAt,
     size: metadata.size,
@@ -286,18 +286,18 @@ async function applyMetadataRenamed(
 
 export async function handleMetadataFileSystemChange(
   event: MetadataChangeEvent,
-  workspaceId: string,
+  workspacePath: string,
 ): Promise<void> {
-  const collections = getOrCreateWorkspaceCollections(workspaceId);
+  const collections = getOrCreateWorkspaceCollections(workspacePath);
 
   for (const change of event.changes) {
     try {
       if (change.type === "created") {
-        await applyMetadataCreated(collections, workspaceId, change);
+        await applyMetadataCreated(collections, workspacePath, change);
       } else if (change.type === "deleted") {
         applyMetadataDeleted(collections, change);
       } else if (change.type === "renamed") {
-        await applyMetadataRenamed(collections, workspaceId, change);
+        await applyMetadataRenamed(collections, workspacePath, change);
       }
     } catch (error) {
       console.error(
@@ -309,16 +309,16 @@ export async function handleMetadataFileSystemChange(
 
   invalidateProjectSettingsIfChanged(
     event.changes.map((c) => c.path),
-    workspaceId,
+    workspacePath,
   );
-  invalidateDerivedState(workspaceId);
+  invalidateDerivedState(workspacePath);
 }
 
 export async function handleContentFileSystemChange(
   event: ContentChangeEvent,
-  workspaceId: string,
+  workspacePath: string,
 ): Promise<void> {
-  const collections = getOrCreateWorkspaceCollections(workspaceId);
+  const collections = getOrCreateWorkspaceCollections(workspacePath);
 
   for (const change of event.changes) {
     try {
@@ -373,9 +373,9 @@ export async function handleContentFileSystemChange(
 
   invalidateProjectSettingsIfChanged(
     event.changes.map((c) => c.path),
-    workspaceId,
+    workspacePath,
   );
-  invalidateDerivedState(workspaceId);
+  invalidateDerivedState(workspacePath);
 }
 
 export interface WorkspaceMetadataWatcher {

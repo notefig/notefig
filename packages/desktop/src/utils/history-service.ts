@@ -8,6 +8,7 @@
  * singleton + in-flight-init dedup map + dispose/clear).
  */
 import type { GitService } from "@notefig/git";
+import { defineModule } from "@notefig/core";
 import { platformAdapter } from "@/adapters";
 import {
   clearWorkerGitRepos,
@@ -149,3 +150,38 @@ export function clearWorkspaceHistoryServices(): void {
   historyInitRegistry.clear();
   clearWorkerGitRepos();
 }
+
+/** The history repo of one open workspace — `core.workspace(ws).history`. */
+export interface WorkspaceHistory {
+  /** The repo, initialized on first use. */
+  ready(): Promise<GitService>;
+  /** Commit everything dirty; the new oid, or null if nothing changed. */
+  checkpoint(
+    message: string,
+    author: { name: string; email: string },
+  ): Promise<string | null>;
+}
+
+declare module "@notefig/core" {
+  interface WorkspaceModules {
+    history: WorkspaceHistory;
+  }
+}
+
+/**
+ * The history repo lives as long as its workspace is open: closing the
+ * workspace drops the service and its git worker. Agents need it, so their
+ * tasks are disposed first — cancelling a turn can still checkpoint here.
+ */
+export const historyModule = defineModule({
+  name: "history",
+  workspace: {
+    create: ({ workspace }) => ({
+      ready: () => ensureWorkspaceHistoryInitialized(workspace.path),
+      checkpoint: (message, author) =>
+        checkpointWorkspaceHistory(workspace.path, message, author),
+    }),
+    dispose: (_history, workspace) =>
+      disposeWorkspaceHistoryService(workspace.path),
+  },
+});

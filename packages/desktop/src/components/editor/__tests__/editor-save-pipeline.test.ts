@@ -18,10 +18,17 @@ import { calculateContentHash } from "@/utils/hash";
 // current state; this suite has no collections, so back that check with a
 // tiny map standing in for the collection.
 const disk = vi.hoisted(() => new Map<string, string>());
+// Every save, as (workspace, path, markdown) — what the file handle wrote.
+const fileWriteMock = vi.hoisted(() =>
+  vi.fn(async (_ws: string, _path: string, _content: string) => {}),
+);
 vi.mock("@/entities/files", async () => {
   const { calculateContentHash } = await import("@/utils/hash");
   return {
-    writeFileContent: vi.fn(async () => {}),
+    file: (workspacePath: string, filePath: string) => ({
+      write: (content: string) =>
+        fileWriteMock(workspacePath, filePath, content),
+    }),
     getOrCreateWorkspaceCollections: () => ({
       content: {
         get: (path: string) => {
@@ -35,7 +42,6 @@ vi.mock("@/entities/files", async () => {
   };
 });
 
-import { writeFileContent } from "@/entities/files";
 import {
   resetConverterForTests,
   closeDocumentSync,
@@ -43,8 +49,6 @@ import {
   whenDocumentSyncClean,
 } from "@/utils/markdown-conversion";
 import { useEditorFileSync } from "../use-editor-file-sync";
-
-const writeFileContentMock = vi.mocked(writeFileContent);
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -91,7 +95,7 @@ async function render(file: FileEntry) {
 }
 
 beforeEach(async () => {
-  writeFileContentMock.mockClear();
+  fileWriteMock.mockClear();
   editor = new Editor({
     extensions: editorExtensions,
     content: "start",
@@ -119,17 +123,14 @@ async function flushSaves() {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 25));
     });
-    if (
-      writeFileContentMock.mock.calls.length > 0 &&
-      !editorHasPendingSave()
-    ) {
+    if (fileWriteMock.mock.calls.length > 0 && !editorHasPendingSave()) {
       break;
     }
   }
 }
 
 function editorHasPendingSave(): boolean {
-  const lastCall = writeFileContentMock.mock.calls.at(-1);
+  const lastCall = fileWriteMock.mock.calls.at(-1);
   return lastCall === undefined;
 }
 
@@ -142,9 +143,9 @@ describe("save pipeline (inline fallback = worker-boot-failure path)", () => {
     });
     await flushSaves();
 
-    expect(writeFileContentMock).toHaveBeenCalled();
+    expect(fileWriteMock).toHaveBeenCalled();
     const [basePath, path, markdown] =
-      writeFileContentMock.mock.calls.at(-1)!;
+      fileWriteMock.mock.calls.at(-1)!;
     expect(basePath).toBe("/ws");
     expect(path).toBe("/ws/note.md");
     expect(markdown).toBe("start typed");
@@ -160,7 +161,7 @@ describe("save pipeline (inline fallback = worker-boot-failure path)", () => {
     });
     await flushSaves();
 
-    const calls = writeFileContentMock.mock.calls;
+    const calls = fileWriteMock.mock.calls;
     expect(calls.length).toBeGreaterThan(0);
     // Backpressure coalescing: far fewer writes than edits.
     expect(calls.length).toBeLessThan(10);
@@ -183,7 +184,7 @@ describe("save pipeline (inline fallback = worker-boot-failure path)", () => {
     }
 
     expect(editor.state.doc.textContent).toBe("external content");
-    expect(writeFileContentMock).not.toHaveBeenCalled();
+    expect(fileWriteMock).not.toHaveBeenCalled();
   });
 
   it("persists edits still in the debounce window on tab close (MET-71 #3)", async () => {
@@ -210,8 +211,8 @@ describe("save pipeline (inline fallback = worker-boot-failure path)", () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
     });
 
-    expect(writeFileContentMock).toHaveBeenCalled();
-    expect(writeFileContentMock.mock.calls.at(-1)![2]).toBe(
+    expect(fileWriteMock).toHaveBeenCalled();
+    expect(fileWriteMock.mock.calls.at(-1)![2]).toBe(
       "start last-second",
     );
   });
@@ -244,8 +245,8 @@ describe("save pipeline (inline fallback = worker-boot-failure path)", () => {
       await clean;
     });
 
-    expect(writeFileContentMock).toHaveBeenCalled();
-    expect(writeFileContentMock.mock.calls.at(-1)![2]).toBe("start racing");
+    expect(fileWriteMock).toHaveBeenCalled();
+    expect(fileWriteMock.mock.calls.at(-1)![2]).toBe("start racing");
   });
 
   it("does not save while updates are suppressed as not-loaded", async () => {
@@ -274,6 +275,6 @@ describe("save pipeline (inline fallback = worker-boot-failure path)", () => {
       await new Promise((resolve) => setTimeout(resolve, 700));
     });
 
-    expect(writeFileContentMock).not.toHaveBeenCalled();
+    expect(fileWriteMock).not.toHaveBeenCalled();
   });
 });
