@@ -1,45 +1,37 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
+import { GitError, type GitService } from "@notefig/git";
 import { FsError } from "@/adapters/platform-adapter.interface";
-
-const { statusMock, logMock, addAllAndCommitMock } = vi.hoisted(() => ({
-  statusMock: vi.fn(),
-  logMock: vi.fn(),
-  addAllAndCommitMock: vi.fn(),
-}));
-
-// history-service reaches its per-repo GitService through the git worker
-// client; stub that seam (the real @notefig/git module — GitError included —
-// stays live).
-vi.mock("@/utils/git-worker-client", () => ({
-  createWorkerGitService: vi.fn(() => ({
-    status: statusMock,
-    log: logMock,
-    addAllAndCommit: addAllAndCommitMock,
-  })),
-  disposeWorkerGitRepo: vi.fn(),
-  clearWorkerGitRepos: vi.fn(),
-}));
-
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    fs: {},
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-// The real GitError class, for constructing typed failures in tests.
-const { GitError: MockGitError } = await import("@notefig/git");
-
-import { openWorkspacesCollection } from "@/entities/open-workspaces";
-import { startWorkspaceScopeSubscription } from "@/entities/workspace-scoped";
+import { createCore, defineModule } from "@notefig/core";
 import { workspaceKey } from "@/utils/path";
 import {
+  createWorkspaceGit,
   fetchGitRows,
-  gitCollectionFor,
-  refetchGit,
-  saveCheckpoint,
+  gitModule,
+  invalidateGit,
   type GitCheckpointRow,
   type GitRepoRow,
 } from "./git";
+
+// The workspace's history repo, as git receives it from core: no module
+// mocks — the instance is built from what a test hands it.
+const statusMock = vi.fn();
+const logMock = vi.fn();
+const addAllAndCommitMock = vi.fn();
+const service = {
+  status: statusMock,
+  log: logMock,
+  addAllAndCommit: addAllAndCommitMock,
+} as unknown as GitService;
+const history = { service: () => service, ready: async () => service };
+
+function workspaceGit() {
+  return createWorkspaceGit({
+    workspacePath: WS,
+    queryClient: new QueryClient(),
+    history,
+  });
+}
 
 const WS = "/tmp/ws-git-entity-test";
 
@@ -84,7 +76,7 @@ describe("fetchGitRows", () => {
       },
     ]);
 
-    const rows = await fetchGitRows(WS);
+    const rows = await fetchGitRows(service, WS);
 
     const repo = repoRow(rows);
     expect(repo.initialized).toBe(true);
@@ -112,11 +104,9 @@ describe("fetchGitRows", () => {
   });
 
   it("RepoNotFound becomes uninitialized repo row and skips log", async () => {
-    statusMock.mockRejectedValue(
-      new MockGitError("RepoNotFound", "no repo here"),
-    );
+    statusMock.mockRejectedValue(new GitError("RepoNotFound", "no repo here"));
 
-    const rows = await fetchGitRows(WS);
+    const rows = await fetchGitRows(service, WS);
 
     const repo = repoRow(rows);
     expect(repo.initialized).toBe(false);
@@ -130,9 +120,9 @@ describe("fetchGitRows", () => {
 
   it("non-GitError failures land as Unknown errors-as-data", async () => {
     statusMock.mockRejectedValue(new Error("exploded"));
-    logMock.mockRejectedValue(new MockGitError("LockUnavailable", "busy"));
+    logMock.mockRejectedValue(new GitError("LockUnavailable", "busy"));
 
-    const rows = await fetchGitRows(WS);
+    const rows = await fetchGitRows(service, WS);
 
     const repo = repoRow(rows);
     expect(repo.statusError).toEqual({ code: "Unknown", message: "exploded" });
@@ -144,7 +134,7 @@ describe("fetchGitRows", () => {
       new FsError("permission_denied", WS, "denied"),
     );
 
-    await expect(fetchGitRows(WS)).rejects.toBeInstanceOf(FsError);
+    await expect(fetchGitRows(service, WS)).rejects.toBeInstanceOf(FsError);
   });
 });
 
@@ -165,8 +155,9 @@ describe("saveCheckpoint (plain action + refetch)", () => {
 
     // Start the collection's sync (in the app a live-query subscription
     // does this) so the post-commit refetch lands in the synced store.
-    await gitCollectionFor(WS)!.preload();
-    const oid = await saveCheckpoint(WS, "did things");
+    const git = workspaceGit();
+    await git.collection.preload();
+    const oid = await git.saveCheckpoint("did things");
 
     expect(oid).toBe("feedbeef00");
     expect(addAllAndCommitMock).toHaveBeenCalledWith({
@@ -174,7 +165,7 @@ describe("saveCheckpoint (plain action + refetch)", () => {
       author: { name: "Notefig", email: "git@notefig.com" },
     });
 
-    const rows = gitCollectionFor(WS)!.toArray as GitCheckpointRow[];
+    const rows = git.collection.toArray as GitCheckpointRow[];
     const committed = rows.find((r) => r.id === "cp:feedbeef00");
     expect(committed).toMatchObject({
       hash: "feedbee",
@@ -184,14 +175,15 @@ describe("saveCheckpoint (plain action + refetch)", () => {
 
   it("rejects when the commit fails, leaving no checkpoint row behind", async () => {
     addAllAndCommitMock.mockRejectedValue(
-      new MockGitError("LockUnavailable", "busy"),
+      new GitError("LockUnavailable", "busy"),
     );
 
-    await expect(saveCheckpoint(WS, "nope")).rejects.toMatchObject({
+    const git = workspaceGit();
+    await expect(git.saveCheckpoint("nope")).rejects.toMatchObject({
       message: expect.stringContaining("busy"),
     });
 
-    const collection = gitCollectionFor(WS)!;
+    const collection = git.collection;
     expect(
       collection.toArray.filter(
         (r) => r.kind === "checkpoint" && r.message === "nope",
@@ -202,32 +194,48 @@ describe("saveCheckpoint (plain action + refetch)", () => {
   it("returns null when there is nothing to commit", async () => {
     addAllAndCommitMock.mockResolvedValue(null);
 
-    await expect(saveCheckpoint(WS, "empty")).resolves.toBeNull();
+    await expect(workspaceGit().saveCheckpoint("empty")).resolves.toBeNull();
   });
 });
 
-describe("git collection lifetime", () => {
-  it("is disposed when the workspace closes and a later read does not resurrect it", async () => {
-    // The old registry was get-or-create: a checkpoint's invalidate or a
-    // stale hook after close recreated the collection with nothing left to
-    // dispose it. Scoped to membership, a read after close yields nothing.
-    const stop = startWorkspaceScopeSubscription();
-    try {
-      openWorkspacesCollection.insert({
-        key: workspaceKey(WS),
-        path: WS,
-        openedAt: 1,
-        focusedAt: 1,
-      });
-      expect(gitCollectionFor(WS)).toBeDefined();
+describe("git instance lifetime", () => {
+  it("dispose drops the cached rows, so a reopen fetches afresh", async () => {
+    const queryClient = new QueryClient();
+    const git = createWorkspaceGit({ workspacePath: WS, queryClient, history });
+    await git.collection.preload();
+    expect(queryClient.getQueryData(["git", WS])).toBeDefined();
 
-      openWorkspacesCollection.delete(workspaceKey(WS));
+    git.dispose();
 
-      expect(gitCollectionFor(WS)).toBeUndefined();
-      await expect(refetchGit(WS)).resolves.toBeUndefined();
-      expect(gitCollectionFor(WS)).toBeUndefined();
-    } finally {
-      stop();
-    }
+    expect(queryClient.getQueryData(["git", WS])).toBeUndefined();
+  });
+});
+
+describe("gitModule", () => {
+  it("refetches when its own workspace is announced stale, until it closes", async () => {
+    const historyModule = defineModule({
+      name: "history",
+      workspace: { create: () => history as never },
+    });
+    const core = createCore({
+      services: { queryClient: new QueryClient() } as never,
+      modules: [historyModule, gitModule],
+      workspaceKey,
+    });
+    await core.workspace(WS).open();
+    await core.workspace(WS).git.collection.preload();
+    statusMock.mockClear();
+
+    invalidateGit("/somewhere-else");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(statusMock).not.toHaveBeenCalled();
+
+    invalidateGit(WS);
+    await vi.waitFor(() => expect(statusMock).toHaveBeenCalledTimes(1));
+
+    await core.workspace(WS).close();
+    invalidateGit(WS);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(statusMock).toHaveBeenCalledTimes(1);
   });
 });

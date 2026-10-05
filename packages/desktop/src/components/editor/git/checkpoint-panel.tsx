@@ -12,6 +12,7 @@ import {
   Undo2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useCore } from "@notefig/core/react";
 import { useMutation, type UseMutateFunction } from "@tanstack/react-query";
 
 import { Button } from "@notefig/ui/button";
@@ -33,7 +34,6 @@ import {
 } from "@notefig/ui/tooltip";
 import {
   deriveSyncState,
-  git,
   useGitCheckpoints,
   useGitFetching,
   useGitSummary,
@@ -237,8 +237,19 @@ function useCheckpointItems(
   }, [checkpointRows, save.isPending, save.variables]);
 }
 
+/** The workspace's git, read when an action runs (the panel only shows
+ *  for an open workspace). */
+function useWorkspaceGit(workspacePath: string) {
+  const core = useCore();
+  return useCallback(
+    () => core.workspace(workspacePath).git,
+    [core, workspacePath],
+  );
+}
+
 /** The revert/abort mutations plus their banner state, as one unit. */
 function useRevertController(workspacePath: string) {
+  const workspaceGit = useWorkspaceGit(workspacePath);
   const [revertError, setRevertError] = useState<SerializedGitError | null>(
     null,
   );
@@ -250,7 +261,7 @@ function useRevertController(workspacePath: string) {
     CheckpointListItem
   >({
     mutationFn: (checkpoint) =>
-      git(workspacePath).revertTo({
+      workspaceGit().revertTo({
         oid: checkpoint.id,
         hash: checkpoint.hash,
       }),
@@ -270,7 +281,7 @@ function useRevertController(workspacePath: string) {
   });
 
   const abortRevert = useMutation<void, SerializedGitError, void>({
-    mutationFn: () => git(workspacePath).abortRevert(),
+    mutationFn: () => workspaceGit().abortRevert(),
     onSuccess: () => {
       setRevertError(null);
     },
@@ -393,6 +404,7 @@ function buildListMessage({
 
 export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
   const { t } = useTranslation();
+  const workspaceGit = useWorkspaceGit(workspacePath);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
   const [description, setDescription] = useState("");
 
@@ -405,11 +417,11 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
     SerializedGitError,
     string | undefined
   >({
-    mutationFn: (value) => git(workspacePath).saveCheckpoint(value),
+    mutationFn: (value) => workspaceGit().saveCheckpoint(value),
   });
 
   const initializeTimeline = useMutation<void, SerializedGitError, void>({
-    mutationFn: () => git(workspacePath).initialize(),
+    mutationFn: () => workspaceGit().initialize(),
   });
 
   const checkpoints = useCheckpointItems(checkpointRows, saveCheckpoint);
@@ -430,7 +442,7 @@ export function CheckpointPanel({ workspacePath }: CheckpointPanelProps) {
   const errorActions = buildErrorActions({
     panelError,
     t,
-    retry: () => void git(workspacePath).refetch(),
+    retry: () => void workspaceGit().refetch(),
     initialize: initializeTimeline.mutate,
   });
 
