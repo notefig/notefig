@@ -1,5 +1,5 @@
 import { ToolBar } from "@/components/editor/tool-bar";
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Check,
@@ -123,19 +123,26 @@ export function useStartSession(workspacePath: string): {
 } {
   const { t } = useTranslation();
   const [trustPromptOpen, setTrustPromptOpen] = useState(false);
-  // The harness the pending trust confirmation would start (picker choice).
-  const [pendingHarness, setPendingHarness] = useState<HarnessDefinition>(
-    BUILT_IN_HARNESSES[0],
-  );
+  // What the pending trust confirmation would start, and where: a start
+  // resolves after a load, by when the panel may show another workspace.
+  const [pending, setPending] = useState<{
+    workspacePath: string;
+    harness: HarnessDefinition;
+  }>({ workspacePath, harness: BUILT_IN_HARNESSES[0] });
+  const shownWorkspace = useRef(workspacePath);
+  shownWorkspace.current = workspacePath;
 
   const create = useCallback(
     (harness: HarnessDefinition) => {
+      const requested = workspacePath;
       void agents
-        .workspace(workspacePath)
+        .workspace(requested)
         .start(harness)
         .then((result) => {
           if (result.status !== "needs-trust") return;
-          setPendingHarness(harness);
+          // Asked about the workspace on screen, or not at all.
+          if (shownWorkspace.current !== requested) return;
+          setPending({ workspacePath: requested, harness });
           setTrustPromptOpen(true);
         });
     },
@@ -143,11 +150,11 @@ export function useStartSession(workspacePath: string): {
   );
 
   const confirmTrust = useCallback(() => {
-    const workspace = agents.workspace(workspacePath);
+    const workspace = agents.workspace(pending.workspacePath);
     workspace.trust();
     setTrustPromptOpen(false);
-    void workspace.start(pendingHarness);
-  }, [workspacePath, pendingHarness]);
+    void workspace.start(pending.harness);
+  }, [pending]);
 
   const trustDialog = (
     <AlertDialog open={trustPromptOpen} onOpenChange={setTrustPromptOpen}>
@@ -155,7 +162,7 @@ export function useStartSession(workspacePath: string): {
         <AlertDialogHeader>
           <AlertDialogTitle>{t("agentTrustTitle")}</AlertDialogTitle>
           <AlertDialogDescription>
-            {t("agentTrustDescription", { harness: pendingHarness.label })}
+            {t("agentTrustDescription", { harness: pending.harness.label })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

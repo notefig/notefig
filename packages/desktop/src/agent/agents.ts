@@ -154,7 +154,9 @@ export type StartResult =
   | { status: "needs-trust" }
   /** Nowhere to run it (the web with no paired machine); the user has
    *  been told how to connect one. */
-  | { status: "no-runtime" };
+  | { status: "no-runtime" }
+  /** The workspace closed while the start waited; nothing was started. */
+  | { status: "closed" };
 
 export interface AgentWorkspaceHandle {
   readonly workspacePath: string;
@@ -356,8 +358,17 @@ function workspaceHandle(workspacePath: string): AgentWorkspaceHandle {
     async start(harness) {
       if (!ensureAgentRuntime()) return { status: "no-runtime" };
       // A cold start may click before the answers load; reading then would
-      // ask again about a workspace the user already trusted.
-      await getOrCreateKvCollection(AGENT_KV_NAMESPACE).preload();
+      // ask again about a workspace the user already trusted. Once loaded
+      // (boot preloads them) nothing waits.
+      const answers = getOrCreateKvCollection(AGENT_KV_NAMESPACE);
+      if (!answers.isReady()) {
+        await answers.preload();
+        // Closing the workspace meanwhile disposed its agents; a task
+        // started now would outlive it.
+        if (!appCore().workspaces.isOpen(workspacePath)) {
+          return { status: "closed" };
+        }
+      }
       if (!isTrusted()) return { status: "needs-trust" };
       const { taskId, started } = startAgentTask(workspacePath, harness);
       // The tab opens on the "starting" row rather than sitting on the
