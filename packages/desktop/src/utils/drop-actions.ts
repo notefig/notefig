@@ -11,10 +11,7 @@ import {
   refreshDirectoryMetadata,
   renameFileOrDirectory,
 } from "@/entities/files";
-import {
-  getAllEditorPaths,
-  getMarkdownEditor,
-} from "@/components/editor/editor-store";
+import { getAllEditorPaths, getMarkdownEditor } from "@/entities/editors";
 import { platformAdapter } from "@/adapters";
 import { getFileName } from "@/utils/fs";
 import { path as pathutil } from "@/utils/path";

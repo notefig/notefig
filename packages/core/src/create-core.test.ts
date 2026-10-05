@@ -412,6 +412,27 @@ describe("workspaces", () => {
     expect(core.workspaces.isOpen("/ws")).toBe(true);
   });
 
+  it("a close issued while an open waits is not undone by that open", async () => {
+    const log: string[] = [];
+    let release!: () => void;
+    const core = createCore({ services: {}, modules: [history(log)] });
+    core.hooks.on(
+      "workspace:closing",
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+
+    await core.workspaces.open("/ws");
+    void core.workspaces.close("/ws");
+    // Reopened, then closed again, while the first close is still running.
+    const reopen = core.workspaces.open("/ws");
+    const closeAgain = core.workspaces.close("/ws");
+
+    release();
+    await Promise.all([reopen, closeAgain]);
+    expect(core.workspaces.isOpen("/ws")).toBe(false);
+    expect(log).toEqual(["create history /ws", "dispose history"]);
+  });
+
   it("opens nothing once shutdown has started", async () => {
     const log: string[] = [];
     const core = createCore({ services: {}, modules: [history(log)] });

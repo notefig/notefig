@@ -36,7 +36,7 @@ function controllerFor(
     isFocusable: () => true,
     getSelectedText: () => undefined,
     search: async () => [],
-    revealMatch: () => false,
+    revealMatch: async () => false,
     runHistoryAction: () => false,
   } as unknown as TabController;
   return { controller, claims };

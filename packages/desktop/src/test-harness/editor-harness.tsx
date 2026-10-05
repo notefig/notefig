@@ -33,11 +33,10 @@ import type { Core } from "@notefig/core";
 import { CoreProvider, useCore } from "@notefig/core/react";
 import type { OpenTabOptions } from "@/entities/tabs";
 import { installAppCore } from "@/core/current";
+import { createEditors } from "@/entities/editors";
 import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary";
-import {
-  getMarkdownEditor,
-  disposeAllEditors,
-} from "@/components/editor/editor-store";
+import { disposeAllEditors } from "@/components/editor/editor-store";
+import { getMarkdownEditor } from "@/entities/editors";
 import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
 import { platformAdapter } from "@/adapters";
 import { openDocument } from "@/utils/markdown-conversion";
@@ -77,19 +76,17 @@ export function EditorHarness() {
   // callers (useCore) and for code outside React (appCore: drop handlers,
   // jump-to-blob) alike.
   const core = useCore();
-  const harnessCore = useMemo<Core>(
-    () => ({
-      ...core,
-      tabs: {
-        ...core.tabs,
-        open: (tabId: string, options?: OpenTabOptions) => {
-          opened.push({ tabId, ...options });
-          return true;
-        },
+  const harnessCore = useMemo<Core>(() => {
+    const tabs = {
+      ...core.tabs,
+      open: (tabId: string, options?: OpenTabOptions) => {
+        opened.push({ tabId, ...options });
+        return true;
       },
-    }),
-    [core, opened],
-  );
+    };
+    // editors.reveal opens through tabs, so it is rebuilt over these.
+    return { ...core, tabs, editors: createEditors(tabs) };
+  }, [core, opened]);
   useEffect(() => {
     installAppCore(harnessCore);
     return () => installAppCore(core);

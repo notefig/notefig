@@ -15,6 +15,7 @@ import { harnessDiscoveryModule } from "@/agent/harness-discovery";
 import { tunnelModule } from "@/agent/tunnel/tunnel-module";
 import { treeInlineEditModule } from "@/components/editor/file-tree";
 import { canOpenFile } from "@/components/editor/polymorphic-editor";
+import { editorsModule } from "@/entities/editors";
 import { layoutModule, type UrlState } from "@/entities/layout";
 import { tabsModule } from "@/entities/tabs";
 import { promptRoundsModule } from "@/entities/prompt-rounds";
@@ -54,6 +55,7 @@ export function runtimeModules({
     workspacesModule({ restore: restoreWorkspaces }),
     layoutModule,
     tabsModule({ canOpenFile }),
+    editorsModule,
   ];
 }
 

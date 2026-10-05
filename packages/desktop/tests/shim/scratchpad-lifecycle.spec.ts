@@ -1,5 +1,6 @@
 import { openWorkspace } from "../setup/test-helpers";
 import { test, expect, type Page } from "@playwright/test";
+import { resetShimDb } from "../setup/shim-db";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -16,6 +17,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
   let workspace = "";
 
   test.beforeEach(async () => {
+    await resetShimDb();
     workspace = await fs.mkdtemp(path.join(os.tmpdir(), "metrists-shim-"));
     await fs.writeFile(path.join(workspace, "README.md"), "# Seeded\n", "utf8");
   });

@@ -10,8 +10,8 @@ import {
 import DiffsHighlightWorker from "@pierre/diffs/worker/worker.js?worker";
 import type { FileEntry } from "@/utils/fs";
 import type { SearchTarget } from "@/adapters/platform-adapter.interface";
+import { markEditorMounted, markEditorUnmounted } from "@/entities/editors";
 import {
-  consumePendingNavigation,
   getOrCreateEditor,
   registerCodeViewerDelegate,
   unregisterCodeViewerDelegate,
@@ -154,8 +154,8 @@ export function CodeViewer({ file }: CodeViewerProps) {
   contentRef.current = content;
 
   // Publish the viewer delegate — match reveal for the container
-  // instance's goToLocation, selection reading for Mod+F seeding — and
-  // consume a navigation intent that was waiting for this mount (a search
+  // instance's goTo, selection reading for Mod+F seeding — then report the
+  // viewer mounted, which runs any goTo that was waiting for it (a search
   // panel click that opened the tab).
   useEffect(() => {
     const reveal = (target: SearchTarget): boolean => {
@@ -182,13 +182,14 @@ export function CodeViewer({ file }: CodeViewerProps) {
           ? selectionTextWithin(containerRef.current)
           : undefined,
     });
-    const pending = consumePendingNavigation(file.path);
-    if (pending) {
-      // The CodeView mounts alongside this effect; give it a frame to lay
-      // out before scrolling.
-      requestAnimationFrame(() => reveal(pending));
-    }
-    return () => unregisterCodeViewerDelegate(file.path);
+    // The CodeView mounts alongside this effect; give it a frame to lay
+    // out before anything scrolls it.
+    const frame = requestAnimationFrame(() => markEditorMounted(file.path));
+    return () => {
+      cancelAnimationFrame(frame);
+      markEditorUnmounted(file.path);
+      unregisterCodeViewerDelegate(file.path);
+    };
   }, [file.path]);
 
   // CodeView applies a controlled item update only when its `version`

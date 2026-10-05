@@ -3,10 +3,8 @@ import type { JSONContent } from "@tiptap/core";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { GripVertical } from "lucide-react";
 import type { FileEntry } from "../../utils/fs";
-import {
-  getOrCreateEditor,
-  isMarkdownInstance,
-} from "@/components/editor/editor-store";
+import { getOrCreateEditor } from "@/components/editor/editor-store";
+import { isMarkdownInstance } from "@/entities/editors";
 import { useEditorFileSync } from "./use-editor-file-sync";
 import { useEditorFocusLifecycle } from "./use-editor-focus-lifecycle";
 import { useEditorViewportMemory } from "./use-editor-viewport-memory";

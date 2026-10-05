@@ -22,10 +22,7 @@ import {
   nearestPrecedingHeading,
   windowAroundPos,
 } from "@/components/editor/document-outline";
-import {
-  getMarkdownEditor,
-  getSelectedText,
-} from "@/components/editor/editor-store";
+import { getMarkdownEditor, getSelectedText } from "@/entities/editors";
 import { getWorkspaceEditorContext } from "@/entities/editors";
 import { readWorkspaceTextFile } from "@/utils/file-sync";
 import { resolveWorkspacePath } from "@/utils/fs";

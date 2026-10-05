@@ -31,15 +31,12 @@ vi.mock("@/entities/files", () => ({
   useMetadataFetching: vi.fn(() => false),
   renameFileOrDirectory: vi.fn(),
 }));
-vi.mock("./editors", () => ({ editor: vi.fn() }));
+vi.mock("./editors", () => ({ editor: vi.fn(), getMarkdownEditor: vi.fn() }));
 vi.mock("./agents", () => ({
   agents: { task: vi.fn() },
   agentTasksCollection: { get: vi.fn() },
   useAgentTasksReady: vi.fn(() => true),
   useAgentTaskRowsById: vi.fn(() => []),
-}));
-vi.mock("@/components/editor/editor-store", () => ({
-  getMarkdownEditor: vi.fn(),
 }));
 
 import { tabsModule } from "./tabs";

@@ -87,7 +87,7 @@ import {
 import { whenWorkspaceWritesSettled } from "@/utils/workspace-write-tracker";
 // Read-side editor-store accessor, same conscious entities → components
 // import as entities/editors.ts.
-import { getMarkdownEditor } from "@/components/editor/editor-store";
+import { getMarkdownEditor } from "@/entities/editors";
 
 // ---------------------------------------------------------------------------
 // Public re-exports: the layout codec and the tab-id scheme.
@@ -127,8 +127,8 @@ interface TabHandleBase {
   selectedText(): string | undefined;
   /** Find-in-tab: occurrences of `query` in this tab's own content. */
   search(query: string, options?: TabSearchOptions): Promise<TabSearchMatch[]>;
-  /** Scroll a match from `search` into view and highlight it. */
-  revealMatch(match: TabSearchMatch): boolean;
+  /** Scroll a match from `search` into view; resolves whether it moved. */
+  revealMatch(match: TabSearchMatch): Promise<boolean>;
 }
 
 export interface FileTabHandle extends TabHandleBase {

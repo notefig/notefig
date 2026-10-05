@@ -8,11 +8,9 @@ const { getMarkdownEditor, getSelectedText, getWorkspaceEditorContext } =
     getSelectedText: vi.fn(),
     getWorkspaceEditorContext: vi.fn(),
   }));
-vi.mock("@/components/editor/editor-store", () => ({
+vi.mock("@/entities/editors", () => ({
   getMarkdownEditor,
   getSelectedText,
-}));
-vi.mock("@/entities/editors", () => ({
   getWorkspaceEditorContext,
 }));
 

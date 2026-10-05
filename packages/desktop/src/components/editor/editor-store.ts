@@ -1,8 +1,9 @@
 /**
- * Editor Instance Store
- *
- * Maintains a unified registry of markdown editors and image viewers.
- * Each type implements a common interface with polymorphic methods.
+ * Editor instance factory: builds the Tiptap editor for a document and the
+ * container instances for image, code and release-notes tabs, registers
+ * each in the editors entity (`entities/editors.ts`, the registry and
+ * `core.editors`) and publishes its tab controller. Everything that only
+ * looks an editor up goes through the entity.
  */
 
 import { Editor, type JSONContent } from "@tiptap/core";
@@ -43,6 +44,20 @@ import {
 } from "@/tabs/tab-controllers";
 import type { TabKind } from "@/tabs/tab-id";
 import { resolveSearchTarget, type SearchTarget } from "./editor-position";
+import { createMarkdownCodec } from "./markdown-codec";
+import {
+  getAllEditorPaths,
+  getEditorInstance,
+  goToInEditor,
+  isBlockTarget,
+  isMarkdownInstance,
+  registerEditorInstance,
+  unregisterEditorInstance,
+  type EditorInstance,
+  type EditorTarget,
+  type EditorType,
+  type MarkdownInstance,
+} from "@/entities/editors";
 import { pageLinkHref } from "./tiptap-link-utils";
 import { platformAdapter } from "@/adapters";
 import { getDirectoryPath } from "@/utils/fs";
@@ -57,62 +72,7 @@ import {
 
 export type { SearchTarget };
 
-import type { EditorType } from "./polymorphic-editor";
-
-/**
- * Base interface that all editor instances must implement
- */
-export interface EditorInstance {
-  readonly type: EditorType;
-  /**
-   * Focus this editor. Returns true if focus was attempted, false if not applicable.
-   * For non-focusable editors (images), this is a no-op that returns false.
-   * The current selection is left untouched (an editor mount restores its
-   * saved selection and must keep it). `steal` marks an explicit hand-off,
-   * which may take focus from a text entry that an ambient intent would
-   * stand down for.
-   */
-  focus(steal?: boolean): boolean;
-  /**
-   * Dispose of this editor instance. Cleans up any resources.
-   */
-  dispose(): void;
-  /**
-   * Returns true if this editor type supports focus operations.
-   */
-  isFocusable(): boolean;
-  /**
-   * Navigate to a search match in the editor.
-   * Sets cursor/selection and scrolls the location into view.
-   * @param target - The match's text, line content and occurrence index
-   * @returns true if navigation succeeded, false if not applicable
-   */
-  goToLocation(target: SearchTarget): boolean;
-}
-
-/**
- * Markdown editor instance using Tiptap
- */
-export interface MarkdownInstance extends EditorInstance {
-  readonly type: "markdown";
-  readonly editor: Editor;
-  filePath: string;
-  savedSelection?: { from: number; to: number };
-  /** Document position last seen at the top of the visible area — see
-   *  `use-editor-viewport-memory`. */
-  savedViewport?: number;
-}
-
-/**
- * Image viewer instance (stateless, read-only)
- */
-export interface ImageInstance extends EditorInstance {
-  readonly type: "image";
-  readonly filePath: string;
-}
-
-/** Module-level store: file path → editor instance */
-const editorInstances = new Map<string, EditorInstance>();
+const markdownCodec = createMarkdownCodec();
 
 /**
  * Delegates for read-only code viewers. The viewer is a plain React
@@ -141,70 +101,11 @@ export function unregisterCodeViewerDelegate(filePath: string): void {
   codeViewerDelegates.delete(filePath);
 }
 
-/**
- * Navigation intents waiting for their editor to be ready. Navigation
- * can't just act on the live instance: re-opening a file whose tab was
- * replaced away disposes and recreates its editor (the layout-diff
- * cleanup in use-dockable-tabs), so a selection set before that would die
- * with the old instance. The intent is stored here and consumed by the
- * mount lifecycle of whichever instance ends up showing the file; the TTL
- * keeps an unconsumed intent (tab closed mid-open) from resurfacing on an
- * unrelated open later.
- */
-const pendingNavigations = new Map<
-  string,
-  { target: SearchTarget; expiresAt: number }
->();
-const PENDING_NAVIGATION_TTL_MS = 5_000;
-
-/**
- * Navigate to a search match, now or when the file's editor next mounts.
- * The immediate path only counts when the editor's view is attached to
- * the document — a success against a detached (soon-to-be-recreated)
- * editor would be lost, so the pending intent stays for the mount.
- */
-export function requestNavigation(
-  filePath: string,
-  target: SearchTarget,
-): void {
-  pendingNavigations.set(filePath, {
-    target,
-    expiresAt: Date.now() + PENDING_NAVIGATION_TTL_MS,
-  });
-
-  const instance = editorInstances.get(filePath);
-  if (instance?.type === "code") {
-    // A code viewer's navigator is only registered while its view is
-    // mounted, so a successful dispatch is inherently attached.
-    if (instance.goToLocation(target)) pendingNavigations.delete(filePath);
-    return;
-  }
-  if (!isMarkdownInstance(instance)) return;
-  let attached = false;
-  try {
-    attached = document.contains(instance.editor.view.dom);
-  } catch {
-    // Detached view (mid-remount) — leave the intent pending.
-  }
-  if (attached && instance.goToLocation(target)) {
-    pendingNavigations.delete(filePath);
-  }
-}
-
-/** Take the pending navigation for a path, if one is still fresh. */
-export function consumePendingNavigation(
-  filePath: string,
-): SearchTarget | undefined {
-  const entry = pendingNavigations.get(filePath);
-  if (!entry) return undefined;
-  pendingNavigations.delete(filePath);
-  return entry.expiresAt >= Date.now() ? entry.target : undefined;
-}
-
 if (import.meta.env.DEV) {
   // Diagnostic hook for e2e failure dumps (dev builds only).
   (window as unknown as Record<string, unknown>).__metristsDebugEditors = () =>
-    Array.from(editorInstances.entries()).map(([path, instance]) => {
+    getAllEditorPaths().map((path) => {
+      const instance = getEditorInstance(path)!;
       const editor = isMarkdownInstance(instance) ? instance.editor : undefined;
       return {
         path,
@@ -214,6 +115,62 @@ if (import.meta.env.DEV) {
         docHead: editor?.state.doc.textContent.slice(0, 40),
       };
     });
+}
+
+/** How long a block jump waits for its widget's node view to render. */
+const BLOCK_RENDER_WAIT_MS = 2_000;
+
+/**
+ * The rendered element of a widget block (`data-blob-id`, set by the
+ * prompt widget and code-block blob node views) inside this editor, once
+ * it exists. Node views can render after the editor mounts, so a missing
+ * block is watched for, not polled — and only inside this editor's DOM.
+ */
+export function whenBlockRendered(
+  editor: Pick<Editor, "view">,
+  blockId: string,
+): Promise<HTMLElement | null> {
+  const root = editor.view.dom;
+  const selector = `[data-blob-id="${CSS.escape(blockId)}"]`;
+  const found = root.querySelector<HTMLElement>(selector);
+  if (found) return Promise.resolve(found);
+  return new Promise((resolve) => {
+    const observer = new MutationObserver(() => {
+      const element = root.querySelector<HTMLElement>(selector);
+      if (!element) return;
+      finish(element);
+    });
+    const timer = setTimeout(() => finish(null), BLOCK_RENDER_WAIT_MS);
+    const finish = (element: HTMLElement | null) => {
+      observer.disconnect();
+      clearTimeout(timer);
+      resolve(element);
+    };
+    // Attributes too: an existing wrapper can gain its id after render.
+    observer.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-blob-id"],
+    });
+  });
+}
+
+/** Scroll a block into view and ring it briefly so the eye finds it. */
+function flashBlock(element: HTMLElement): void {
+  element.scrollIntoView({ block: "center" });
+  // Inline style, not a class: a dynamically-added class name wouldn't be
+  // picked up by Tailwind's static JIT scan.
+  const previousTransition = element.style.transition;
+  const previousBoxShadow = element.style.boxShadow;
+  element.style.transition = "box-shadow 0.2s ease";
+  element.style.boxShadow = "0 0 0 2px var(--ring, #3b82f6)";
+  setTimeout(() => {
+    element.style.boxShadow = previousBoxShadow;
+    setTimeout(() => {
+      element.style.transition = previousTransition;
+    }, 300);
+  }, 1500);
 }
 
 /** Sidebar text entry (rename/create) outranks any editor focus intent. */
@@ -229,7 +186,7 @@ function isEditorFocusSuppressed(): boolean {
  */
 function isForeignTextEntryFocused(filePath: string): boolean {
   const active = document.activeElement;
-  const instance = editorInstances.get(filePath);
+  const instance = getEditorInstance(filePath);
   if (instance && isMarkdownInstance(instance)) {
     try {
       if (active === instance.editor.view.dom) return false;
@@ -268,12 +225,12 @@ function createEditorTabController(
      */
     focus({ steal }: TabFocusOptions = {}): boolean {
       if (!steal && isForeignTextEntryFocused(filePath)) return false;
-      return editorInstances.get(filePath)?.focus(steal) ?? false;
+      return getEditorInstance(filePath)?.focus(steal) ?? false;
     },
 
-    isFocusable: () => isEditorFocusable(filePath),
+    isFocusable: () => getEditorInstance(filePath)?.isFocusable() ?? false,
 
-    selectedText: () => getSelectedText(filePath),
+    selectedText: () => getEditorInstance(filePath)?.selectedText(),
 
     // Flushes the autosave window and closes the document sync — the tab is
     // gone, so the instance must not outlive it.
@@ -291,7 +248,7 @@ function createEditorTabController(
     ): Promise<SearchTarget[]> {
       // Documents and code viewers have searchable text; an image viewer
       // has none.
-      const instance = editorInstances.get(filePath);
+      const instance = getEditorInstance(filePath);
       if (!isMarkdownInstance(instance) && instance?.type !== "code") {
         return [];
       }
@@ -304,12 +261,12 @@ function createEditorTabController(
       });
     },
 
-    revealMatch: (match: SearchTarget) => navigateToLocation(filePath, match),
+    revealMatch: (match: SearchTarget) => goToInEditor(filePath, match),
 
     get history() {
       // Only documents have an edit history; image/release-notes tabs
       // report none, so the palette's undo/redo stays inert on them.
-      const instance = editorInstances.get(filePath);
+      const instance = getEditorInstance(filePath);
       if (!isMarkdownInstance(instance)) return undefined;
       return {
         undo: () => instance.editor.commands.undo(),
@@ -454,7 +411,13 @@ function createMarkdownInstance(
     isFocusable(): boolean {
       return true;
     },
-    goToLocation(target: SearchTarget): boolean {
+    async goTo(target: EditorTarget): Promise<boolean> {
+      if (isBlockTarget(target)) {
+        const block = await whenBlockRendered(this.editor, target.blockId);
+        if (!block) return false;
+        flashBlock(block);
+        return true;
+      }
       try {
         const { from, to } = resolveSearchTarget(this.editor.state.doc, target);
 
@@ -467,6 +430,15 @@ function createMarkdownInstance(
         console.error("Navigation failed:", error);
         return false;
       }
+    },
+    selectedText(): string | undefined {
+      const { from, to } = this.editor.state.selection;
+      if (from === to) return undefined;
+      const text = this.editor.state.doc.textBetween(from, to, "\n");
+      return text.trim() ? text : undefined;
+    },
+    markdown(): string {
+      return markdownCodec.serialize(this.editor.getJSON());
     },
   };
 
@@ -504,11 +476,16 @@ function createContainerInstance(
     isFocusable(): boolean {
       return true;
     },
-    goToLocation(target: SearchTarget): boolean {
+    async goTo(target: EditorTarget): Promise<boolean> {
       // Read-only code viewers can reveal matches; the other container
       // tabs (image, release notes) have no searchable surface.
-      if (type !== "code") return false;
+      if (type !== "code" || isBlockTarget(target)) return false;
       return codeViewerDelegates.get(filePath)?.revealMatch(target) ?? false;
+    },
+    selectedText(): string | undefined {
+      return type === "code"
+        ? codeViewerDelegates.get(filePath)?.selectedText()
+        : undefined;
     },
   };
   return instance;
@@ -553,12 +530,13 @@ export function getOrCreateEditor(
   filePath: string,
   config: EditorConfig,
 ): EditorInstance {
-  const existing = editorInstances.get(filePath);
+  const existing = getEditorInstance(filePath);
   if (existing) {
     if (existing.type === config.type) {
       return existing;
     }
     existing.dispose();
+    unregisterEditorInstance(filePath);
   }
 
   let instance: EditorInstance;
@@ -587,7 +565,7 @@ export function getOrCreateEditor(
       throw new Error(`Unknown editor type: ${(config as any).type}`);
   }
 
-  editorInstances.set(filePath, instance);
+  registerEditorInstance(filePath, instance);
   // The tab is live from here on: publish its controller so focus intents,
   // find-in-tab and dispose reach it through the generic tab layer.
   registerTabController(
@@ -599,36 +577,12 @@ export function getOrCreateEditor(
   return instance;
 }
 
-export function isMarkdownInstance(
-  instance: EditorInstance | undefined,
-): instance is MarkdownInstance {
-  return instance?.type === "markdown";
-}
-
-export function isImageInstance(
-  instance: EditorInstance | undefined,
-): instance is ImageInstance {
-  return instance?.type === "image";
-}
-
-export function getEditor(filePath: string): EditorInstance | undefined {
-  return editorInstances.get(filePath);
-}
-
-export function hasEditor(filePath: string): boolean {
-  return editorInstances.has(filePath);
-}
-
-export function isEditorFocusable(filePath: string): boolean {
-  return editorInstances.get(filePath)?.isFocusable() ?? false;
-}
-
 /**
  * Dispose an editor instance when a tab is permanently closed.
  * This frees the memory held by the editor.
  */
 export function disposeEditor(filePath: string): void {
-  const instance = editorInstances.get(filePath);
+  const instance = getEditorInstance(filePath);
   unregisterTabController(filePath);
   if (instance) {
     // Flush the autosave debounce window while the editor can still be
@@ -636,7 +590,7 @@ export function disposeEditor(filePath: string): void {
     // this path and would have to drop those edits.
     flushDocumentSync(filePath);
     instance.dispose();
-    editorInstances.delete(filePath);
+    unregisterEditorInstance(filePath);
     closeDocumentSync(filePath);
   }
 }
@@ -645,28 +599,7 @@ export function disposeEditor(filePath: string): void {
  * Dispose all editors (e.g. when switching workspaces).
  */
 export function disposeAllEditors(): void {
-  editorInstances.forEach((instance, filePath) => {
-    flushDocumentSync(filePath);
-    instance.dispose();
-    closeDocumentSync(filePath);
-  });
-  editorInstances.forEach((_instance, filePath) =>
-    unregisterTabController(filePath),
-  );
-  editorInstances.clear();
-  pendingNavigations.clear();
-}
-
-/**
- * Get a markdown editor instance (type-safe accessor).
- * Returns undefined if the editor doesn't exist or isn't a markdown editor.
- */
-export function getMarkdownEditor(filePath: string): Editor | undefined {
-  const instance = editorInstances.get(filePath);
-  if (isMarkdownInstance(instance)) {
-    return instance.editor;
-  }
-  return undefined;
+  for (const filePath of getAllEditorPaths()) disposeEditor(filePath);
 }
 
 export function saveSelection(
@@ -674,7 +607,7 @@ export function saveSelection(
   from: number,
   to: number,
 ): void {
-  const instance = editorInstances.get(filePath);
+  const instance = getEditorInstance(filePath);
   if (isMarkdownInstance(instance)) {
     instance.savedSelection = { from, to };
   }
@@ -683,7 +616,7 @@ export function saveSelection(
 export function getSavedSelection(
   filePath: string,
 ): { from: number; to: number } | undefined {
-  const instance = editorInstances.get(filePath);
+  const instance = getEditorInstance(filePath);
   if (isMarkdownInstance(instance)) {
     return instance.savedSelection;
   }
@@ -691,55 +624,13 @@ export function getSavedSelection(
 }
 
 export function saveViewport(filePath: string, pos: number): void {
-  const instance = editorInstances.get(filePath);
+  const instance = getEditorInstance(filePath);
   if (isMarkdownInstance(instance)) {
     instance.savedViewport = pos;
   }
 }
 
 export function getSavedViewport(filePath: string): number | undefined {
-  const instance = editorInstances.get(filePath);
+  const instance = getEditorInstance(filePath);
   return isMarkdownInstance(instance) ? instance.savedViewport : undefined;
-}
-
-export function getAllEditorPaths(): string[] {
-  return Array.from(editorInstances.keys());
-}
-
-export function getSelectedText(filePath: string): string | undefined {
-  const instance = editorInstances.get(filePath);
-
-  if (isMarkdownInstance(instance)) {
-    const { from, to } = instance.editor.state.selection;
-    if (from === to) return undefined;
-
-    const text = instance.editor.state.doc.textBetween(from, to, "\n");
-    return text.trim() ? text : undefined;
-  }
-
-  if (instance?.type === "code") {
-    return codeViewerDelegates.get(filePath)?.selectedText();
-  }
-
-  return undefined;
-}
-
-/**
- * Navigate to a search match in an editor.
- * Convenience wrapper: looks up the editor and calls goToLocation.
- *
- * @param filePath - The file path of the editor
- * @param target - The match's text, line content and occurrence index
- * @returns true if navigation succeeded, false if editor doesn't exist or navigation failed
- */
-export function navigateToLocation(
-  filePath: string,
-  target: SearchTarget,
-): boolean {
-  const instance = editorInstances.get(filePath);
-  if (!instance) {
-    console.warn(`No editor instance found for path: ${filePath}`);
-    return false;
-  }
-  return instance.goToLocation(target);
 }

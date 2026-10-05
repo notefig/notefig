@@ -24,7 +24,7 @@ import i18n from "@/utils/intl";
 import { findBlobAuthorTask } from "@/agent/agent-service";
 import { readWorkspaceTextFile, writeWorkspaceTextFile } from "@/utils/file-sync";
 import { createMarkdownCodec } from "../markdown-codec";
-import { getMarkdownEditor } from "../editor-store";
+import { getMarkdownEditor } from "@/entities/editors";
 import { getBlobType } from "./blob-registry";
 
 export type AnswerBlobResult =
