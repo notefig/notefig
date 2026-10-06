@@ -65,17 +65,23 @@ export function useAgentTaskRowsById(taskIds: string[]): AgentTaskRow[] {
   return data;
 }
 
-/** All turns of a task (unsorted — order by turnId/status at the call site). */
-export function useTaskTurns(taskId: string): AgentTurn[] {
+/** The turns whose `field` equals `value`, live. */
+function useTurnsWhere<K extends "taskId" | "status">(
+  field: K,
+  value: AgentTurn[K],
+): AgentTurn[] {
   const { agentStore: store } = useCore();
   const { data = [] } = useLiveQuery(
     (q) =>
-      q
-        .from({ turn: store.turns })
-        .where(({ turn }) => eq(turn.taskId, taskId)),
-    [taskId],
+      q.from({ turn: store.turns }).where(({ turn }) => eq(turn[field], value)),
+    [field, value],
   );
   return data;
+}
+
+/** All turns of a task (unsorted — order by turnId/status at the call site). */
+export function useTaskTurns(taskId: string): AgentTurn[] {
+  return useTurnsWhere("taskId", taskId);
 }
 
 /** All transcript entries of a task. */
@@ -159,7 +165,7 @@ export function useAgentTasksReady(): boolean {
 export function useAgentTaskList(workspacePath: string): AgentTaskMeta[] {
   const key = workspaceKey(workspacePath);
   const tasks = useAllTasks();
-  const queuedTurns = useTurnsWithStatus("queued");
+  const queuedTurns = useTurnsWhere("status", "queued");
 
   return useMemo(
     () =>
@@ -178,7 +184,7 @@ export function useAgentTaskList(workspacePath: string): AgentTaskMeta[] {
  */
 export function useAgentSessionList(limit: number): AgentTaskMeta[] {
   const tasks = useAllTasks();
-  const queuedTurns = useTurnsWithStatus("queued");
+  const queuedTurns = useTurnsWhere("status", "queued");
   return useMemo(
     () =>
       [...tasks]
@@ -192,18 +198,6 @@ export function useAgentSessionList(limit: number): AgentTaskMeta[] {
 function useAllTasks(): AgentTaskRow[] {
   const { agentStore: store } = useCore();
   const { data = [] } = useLiveQuery((q) => q.from({ task: store.tasks }));
-  return data;
-}
-
-function useTurnsWithStatus(status: AgentTurn["status"]): AgentTurn[] {
-  const { agentStore: store } = useCore();
-  const { data = [] } = useLiveQuery(
-    (q) =>
-      q
-        .from({ turn: store.turns })
-        .where(({ turn }) => eq(turn.status, status)),
-    [status],
-  );
   return data;
 }
 
