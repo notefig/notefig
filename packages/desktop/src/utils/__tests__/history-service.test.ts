@@ -124,12 +124,27 @@ describe("a workspace's history repo", () => {
 
   it("dispose drops the service and the worker's repo state", () => {
     const repo = history();
-    const first = repo.service();
+    repo.service();
 
     repo.dispose();
 
     expect(repos.git.dispose).toHaveBeenCalledWith(GIT_DIR);
-    expect(repo.service()).not.toBe(first);
+    expect(() => repo.service()).toThrow(/closed/);
+  });
+
+  it("a ready still initializing when the workspace closes recreates nothing", async () => {
+    let finishInit!: () => void;
+    repos.init.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (finishInit = resolve)),
+    );
+    const repo = history();
+    const pending = repo.ready();
+
+    repo.dispose();
+    finishInit();
+
+    await expect(pending).rejects.toThrow(/closed/);
+    expect(repos.created).toHaveLength(1);
   });
 });
 

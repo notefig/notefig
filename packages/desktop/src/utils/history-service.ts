@@ -71,7 +71,9 @@ export interface WorkspaceHistory {
     message: string,
     author: { name: string; email: string },
   ): Promise<string | null>;
-  /** Drop the repo's service and its worker state. */
+  /** Drop the repo's service and its worker state. The history is closed
+   *  for good: later calls (and a `ready` still waiting) reject rather than
+   *  recreate a service nothing would dispose. */
   dispose(): void;
 }
 
@@ -83,11 +85,16 @@ export function createWorkspaceHistory({
   const gitDir = historyGitDir(workspacePath);
   let service: GitService | null = null;
   let initializing: Promise<void> | null = null;
+  let disposed = false;
 
   // Worker-backed (with an inline fallback): statusMatrix's worktree
   // hashing and packfile parsing run off the main thread.
-  const getService = () =>
-    (service ??= git.create({ repoPath: workspacePath, gitDir }));
+  const getService = () => {
+    if (disposed) {
+      throw new Error(`The history of '${workspacePath}' is closed`);
+    }
+    return (service ??= git.create({ repoPath: workspacePath, gitDir }));
+  };
 
   const initialize = async () => {
     await getService().init({ defaultBranch: "main" });
@@ -137,6 +144,7 @@ export function createWorkspaceHistory({
     checkpoint: async (message, author) =>
       (await ready()).addAllAndCommit({ message, author }),
     dispose() {
+      disposed = true;
       service = null;
       initializing = null;
       git.dispose(gitDir);
