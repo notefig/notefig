@@ -26,6 +26,7 @@ import {
 import {
   findFirstWindow,
   findWindowById,
+  findWindowContainingTab,
   openFileInLayout,
   removeTabFromLayout,
   renameTabInLayout,
@@ -300,9 +301,14 @@ function windowIdOf(element: Element | null): string | null {
   );
 }
 
-/** The dock window that last held focus, kept after focus leaves the dock. */
+/**
+ * The dock window in front: the one that last held focus, or whose tab was
+ * last opened or selected — kept after focus leaves the dock.
+ */
 export interface FocusedWindow {
   get(): string | null;
+  /** Bring a window forward. */
+  set(windowId: string): void;
   subscribe(listener: () => void): () => void;
   /** Follow focus in the document; returns the stop. */
   track(): () => void;
@@ -311,8 +317,13 @@ export interface FocusedWindow {
 function createFocusedWindow(): FocusedWindow {
   let windowId: string | null = null;
   const listeners = new Set<() => void>();
-  return {
+  const focusedWindow: FocusedWindow = {
     get: () => windowId,
+    set(next) {
+      if (next === windowId) return;
+      windowId = next;
+      for (const listener of [...listeners]) listener();
+    },
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => void listeners.delete(listener);
@@ -320,20 +331,19 @@ function createFocusedWindow(): FocusedWindow {
     track(): () => void {
       const onFocusIn = (event: FocusEvent) => {
         const next = windowIdOf(event.target as Element | null);
-        if (!next || next === windowId) return;
-        windowId = next;
-        for (const listener of [...listeners]) listener();
+        if (next) focusedWindow.set(next);
       };
       document.addEventListener("focusin", onFocusIn);
       return () => document.removeEventListener("focusin", onFocusIn);
     },
   };
+  return focusedWindow;
 }
 
 /** What tabs are built from. */
 export interface TabsDeps {
   layout: LayoutApi;
-  focusedWindow: Pick<FocusedWindow, "get" | "subscribe">;
+  focusedWindow: Pick<FocusedWindow, "get" | "set" | "subscribe">;
   /** The editor's format gate. */
   canOpenFile: (path: string) => boolean;
   editors: Pick<EditorsApi, "goTo" | "markdownEditor">;
@@ -395,6 +405,14 @@ export function createTabs({
     return findFirstWindow(current);
   };
 
+  /** Opening or selecting a tab is going to it: whichever window it is in
+   *  — a session's chat may live in a window the user split off — comes
+   *  forward, so the tab in front is the one the user just went to. */
+  const bringForward = (tabId: string) => {
+    const window = findWindowContainingTab(layout.read(), tabId);
+    if (window) focusedWindow.set(window.id);
+  };
+
   const tabs: TabsApi = {
     open(tabId, options = {}) {
       // Only file tabs are gated on the editor's format support; the other
@@ -420,6 +438,7 @@ export function createTabs({
         },
         { params: options.params },
       );
+      bringForward(tabId);
       if (options.handoff) grantTabFocusHandoff(tabId);
       return true;
     },
@@ -430,6 +449,7 @@ export function createTabs({
     select(tabId) {
       if (!layout.openTabIds().includes(tabId)) return;
       layout.update((current) => selectTabInLayout(current, tabId));
+      bringForward(tabId);
     },
     focus(tabId, request = {}) {
       const when = request.when ?? "now";
