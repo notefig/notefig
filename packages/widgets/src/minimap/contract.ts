@@ -85,9 +85,6 @@ export type MinimapEntry = {
   key: string;
   /** Identity for observers — stable while the id is; position otherwise. */
   observerKey: string;
-  /** The element's own id (MinimapEntryInfo.id), when it declared one —
-   *  what a host's reveal addresses. */
-  id?: string;
   nodeTypeName: string;
   pos: number;
   /** 0..1 position of the element within the document. */
@@ -138,7 +135,6 @@ export function deriveMinimapEntries(
     entries.push({
       key: `${node.type.name}:${identity}:${pos}`,
       observerKey: `${node.type.name}:${identity}`,
-      ...(info.id ? { id: info.id } : {}),
       nodeTypeName: node.type.name,
       pos,
       // Clamped in from the edges so the first/last dot never sits on the

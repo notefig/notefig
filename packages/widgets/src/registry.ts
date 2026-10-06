@@ -10,6 +10,7 @@ import { promptWidget } from "./prompt";
 import { WidgetMinimapExtension } from "./minimap/extension";
 import type { MinimapSource } from "./minimap/contract";
 import type { EditorView } from "@tiptap/pm/view";
+import type { Node as PMNode } from "@tiptap/pm/model";
 
 export const editorWidgets: EditorWidgetDefinition[] = [promptWidget];
 
@@ -42,14 +43,29 @@ export function widgetRendererNodes(options: {
 }
 
 /**
- * Finish revealing a widget instance that is already in view: run its
+ * Finish revealing the widget instance at `pos`, already in view: run its
  * widget's `reveal` slot (the prompt focuses its composer). Every way to
  * reveal a widget ends here — the host's go-to-location and the minimap —
  * so what revealing means is declared once, by the widget. False when no
- * widget claims the id.
+ * widget sits there or it has nothing more to do.
  */
-export function revealWidget(view: EditorView, id: string): boolean {
-  return editorWidgets.some((widget) => widget.reveal?.(view, id) ?? false);
+export function revealWidget(view: EditorView, pos: number): boolean {
+  const name = view.state.doc.nodeAt(pos)?.type.name;
+  const widget = editorWidgets.find((candidate) => candidate.name === name);
+  return widget?.reveal?.(view, pos) ?? false;
+}
+
+/** The position of the first widget instance carrying `id` (its `blobId`
+ *  attribute — what `data-blob-id` and a go-to-location target name). */
+export function findWidgetPos(doc: PMNode, id: string): number | null {
+  const names = new Set(editorWidgets.map((widget) => widget.name));
+  let found: number | null = null;
+  doc.descendants((node, pos) => {
+    if (found !== null) return false;
+    if (names.has(node.type.name) && node.attrs.blobId === id) found = pos;
+    return found === null;
+  });
+  return found;
 }
 
 /**

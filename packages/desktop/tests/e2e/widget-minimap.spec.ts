@@ -45,6 +45,35 @@ function caretInDraftOf(page: Page, blobId: string) {
   }, blobId);
 }
 
+/** Copies of one marker (an external copy-paste) share a blobId. */
+const COPIED_DOC = [
+  MARKER("dd"),
+  "",
+  ...Array.from({ length: 120 }, (_, i) => `Filler line ${i} keeps the document tall.\n`),
+  MARKER("dd"),
+  "",
+  "closing paragraph",
+  "",
+].join("\n");
+
+/** Which copy of `blobId` holds the caret: its index in document order,
+ *  or -1 when the caret is in none of their drafts. */
+function caretCopyIndex(page: Page, blobId: string) {
+  return page.evaluate((blobId) => {
+    const node = window.getSelection()?.anchorNode ?? null;
+    const element =
+      node instanceof Element ? node : (node?.parentElement ?? null);
+    const draft = element?.closest("[data-prompt-draft]");
+    const editor = [...document.querySelectorAll<HTMLElement>(".ProseMirror")]
+      .find((el) => el.offsetParent !== null);
+    if (!draft || !editor || document.activeElement !== editor) return -1;
+    const copies = [
+      ...editor.querySelectorAll(`[data-blob-id="${CSS.escape(blobId)}"]`),
+    ].filter((copy) => !copy.parentElement?.closest(`[data-blob-id="${CSS.escape(blobId)}"]`));
+    return copies.findIndex((copy) => copy.contains(draft));
+  }, blobId);
+}
+
 function minimap(page: Page) {
   return page.locator("[data-widget-minimap]").locator("visible=true");
 }
@@ -56,6 +85,7 @@ test.describe("widget minimap", () => {
     await seedTestFiles(page, [
       { path: `${WS}/doc.md`, content: LONG_DOC, type: "file" as const },
       { path: `${WS}/plain.md`, content: "no widgets here\n", type: "file" as const },
+      { path: `${WS}/copied.md`, content: COPIED_DOC, type: "file" as const },
     ]);
     await page.reload();
     await waitForFileTree(page, "doc.md");
@@ -103,5 +133,17 @@ test.describe("widget minimap", () => {
     await expect(
       secondWidget.locator("[data-prompt-draft]").first(),
     ).toHaveText("from the minimap");
+  });
+
+  test("a copied marker's dot focuses that copy, not the first", async ({
+    page,
+  }) => {
+    await openFileInTree(page, "copied.md");
+    const dots = minimap(page).first().getByRole("button");
+    await expect(dots).toHaveCount(2);
+    await page.getByText("closing paragraph").click();
+
+    await dots.last().click();
+    await expect.poll(() => caretCopyIndex(page, "blob_mapdd")).toBe(1);
   });
 });

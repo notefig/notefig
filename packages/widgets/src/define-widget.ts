@@ -84,11 +84,11 @@ export interface EditorWidgetDefinition<Options = unknown> {
   /**
    * What revealing an instance does once it is in view, for a widget that
    * is more than something to look at — the prompt takes the caret into its
-   * composer. Called by the registry's `revealWidget` with the instance id
-   * every reveal addresses (`data-blob-id`); true when the id is one of
-   * this widget's instances and it acted.
+   * composer. Called by the registry's `revealWidget` with the position of
+   * the instance revealed (copies of one marker share an id, so the
+   * position is what names the one in view); true when it acted.
    */
-  reveal?: (view: EditorView, id: string) => boolean;
+  reveal?: (view: EditorView, pos: number) => boolean;
   /**
    * True when the widget may stand in for a list item's leading paragraph —
    * i.e. it can be summoned inside a list. The host composes the widened

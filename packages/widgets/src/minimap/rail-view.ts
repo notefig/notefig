@@ -100,7 +100,7 @@ function findScroller(from: HTMLElement): HTMLElement {
 export class MinimapRailView implements PluginView {
   private readonly view: EditorView;
   private readonly sources: Record<string, MinimapSource>;
-  private readonly reveal: ((view: EditorView, id: string) => void) | undefined;
+  private readonly reveal: ((view: EditorView, pos: number) => void) | undefined;
   private readonly stickyHost: HTMLDivElement;
   private readonly nav: HTMLElement;
   private readonly underlay: SVGGElement;
@@ -114,7 +114,7 @@ export class MinimapRailView implements PluginView {
   constructor(
     view: EditorView,
     sources: Record<string, MinimapSource>,
-    reveal?: (view: EditorView, id: string) => void,
+    reveal?: (view: EditorView, pos: number) => void,
   ) {
     this.view = view;
     this.sources = sources;
@@ -428,6 +428,6 @@ export class MinimapRailView implements PluginView {
     if (dom instanceof HTMLElement) {
       dom.scrollIntoView({ block: "center", behavior: "smooth" });
     }
-    if (dot.entry.id) this.reveal?.(this.view, dot.entry.id);
+    this.reveal?.(this.view, dot.entry.pos);
   }
 }

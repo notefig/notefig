@@ -115,7 +115,11 @@ export { isMutatingToolCall } from "./prompt/state";
 
 /** The document minimap (MET-172): the collector the editor registers,
  *  and the live-rows seam the app fills in at setup. */
-export { revealWidget, widgetMinimapExtension } from "./registry";
+export {
+  findWidgetPos,
+  revealWidget,
+  widgetMinimapExtension,
+} from "./registry";
 export {
   registerPromptRoundObserver,
   type PromptRoundObserverFactory,

@@ -98,10 +98,23 @@ export function promptDraftRange(
   blobId: string,
 ): { node: PMNode; from: number; to: number } | null {
   const pos = findPromptNodePos(doc, blobId);
-  if (pos === null) return null;
+  return pos === null ? null : promptDraftRangeAt(doc, pos);
+}
+
+/** The draft range of the widget AT `pos` — copies of one marker share a
+ *  blobId, so what was clicked is addressed by position. */
+function promptDraftRangeAt(
+  doc: PMNode,
+  pos: number,
+): { node: PMNode; from: number; to: number } | null {
   const widget = doc.nodeAt(pos);
   const draft = widget?.firstChild;
-  if (!widget || !draft || draft.type.name !== PROMPT_DRAFT_NODE_NAME) {
+  if (
+    !widget ||
+    widget.type.name !== PROMPT_NODE_NAME ||
+    !draft ||
+    draft.type.name !== PROMPT_DRAFT_NODE_NAME
+  ) {
     return null;
   }
   // +1 into the widget, +1 into the draft = the start of its inline content.
@@ -121,18 +134,23 @@ export function selectPromptDraftTr(tr: Transaction, blobId: string): Transactio
 }
 
 /**
- * Focus a prompt widget's composer: the caret at the end of its draft and
- * the editor focused, without moving the viewport. False, changing
- * nothing, when `blobId` is no prompt widget here or its draft row is off
- * screen (a running round hides it) — a caret there would be invisible.
+ * Focus the composer of the prompt widget at `pos`: the caret at the end of
+ * its draft and the editor focused, without moving the viewport. False,
+ * changing nothing, when no prompt widget sits there or its draft row is
+ * off screen (a running round hides it) — a caret there would be invisible.
  */
-export function focusPromptDraft(view: EditorView, blobId: string): boolean {
-  if (!promptDraftRange(view.state.doc, blobId)) return false;
-  const draft = view.dom.querySelector(
-    `[data-blob-id="${CSS.escape(blobId)}"] [data-prompt-draft]`,
-  );
+export function focusPromptDraft(view: EditorView, pos: number): boolean {
+  const range = promptDraftRangeAt(view.state.doc, pos);
+  if (!range) return false;
+  const widget = view.nodeDOM(pos);
+  const draft =
+    widget instanceof HTMLElement
+      ? widget.querySelector("[data-prompt-draft]")
+      : null;
   if (!draft || draft.getClientRects().length === 0) return false;
-  view.dispatch(selectPromptDraftTr(view.state.tr, blobId));
+  view.dispatch(
+    view.state.tr.setSelection(TextSelection.create(view.state.doc, range.to)),
+  );
   view.focus();
   return true;
 }

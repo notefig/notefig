@@ -16,6 +16,7 @@ import {
 import {
   editorWidgets,
   widgetRendererNodes,
+  findWidgetPos,
   revealWidget,
   widgetMinimapExtension,
   PageLinkSuggestion,
@@ -427,7 +428,8 @@ function createMarkdownInstance(
         flashBlock(block);
         // Whatever revealing means for this block beyond showing it is the
         // widget's to say (a prompt focuses its composer).
-        revealWidget(this.editor.view, target.blockId);
+        const pos = findWidgetPos(this.editor.state.doc, target.blockId);
+        if (pos !== null) revealWidget(this.editor.view, pos);
         return true;
       }
       try {

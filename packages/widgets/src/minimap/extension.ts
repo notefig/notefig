@@ -16,10 +16,10 @@ export interface WidgetMinimapOptions {
   sources: Record<string, MinimapSource>;
   /**
    * What a dot's jump does once its element is scrolled into view, given
-   * the entry's id — the registry's `revealWidget`, so a minimap jump ends
-   * where every other reveal does (a prompt: its composer, focused).
+   * the element's position — the registry's `revealWidget`, so a minimap
+   * jump ends where every other reveal does (a prompt: its composer).
    */
-  reveal?: (view: EditorView, id: string) => void;
+  reveal?: (view: EditorView, pos: number) => void;
 }
 
 const minimapPluginKey = new PluginKey("widgetMinimap");
