@@ -10,16 +10,16 @@ import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { MinimapRailView } from "./rail-view";
 import type { MinimapSource } from "./contract";
+import type { EditorView } from "@tiptap/pm/view";
 
 export interface WidgetMinimapOptions {
   sources: Record<string, MinimapSource>;
   /**
-   * How a dot's click reveals its element, given the entry's id — the
-   * host's reveal, so a minimap jump lands where every other jump does
-   * (a prompt widget: its composer, focused). Without one, or for an
-   * entry with no id, the rail scrolls the element into view itself.
+   * What a dot's jump does once its element is scrolled into view, given
+   * the entry's id — the registry's `revealWidget`, so a minimap jump ends
+   * where every other reveal does (a prompt: its composer, focused).
    */
-  reveal?: (id: string) => void;
+  reveal?: (view: EditorView, id: string) => void;
 }
 
 const minimapPluginKey = new PluginKey("widgetMinimap");

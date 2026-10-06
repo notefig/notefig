@@ -17,6 +17,7 @@ import {
 import { promptMentionNode } from "./composer/mention-node";
 import { AiPromptNode, type AiPromptNodeOptions } from "./node-view";
 import { promptMinimapSource } from "./minimap";
+import { focusPromptDraft } from "./doc-helpers";
 
 export const promptWidget = defineEditorWidget<AiPromptNodeOptions>({
   name: PROMPT_NODE_NAME,
@@ -40,6 +41,9 @@ export const promptWidget = defineEditorWidget<AiPromptNodeOptions>({
   // One dot per widget on the document's minimap rail, carrying the
   // round's phase (./minimap.ts owns the mapping).
   minimap: promptMinimapSource,
+  // A prompt is revealed to be used: land in its composer (unless a running
+  // round has the composer hidden — then it is only shown).
+  reveal: focusPromptDraft,
   // The "/" summon may replace a list item's only paragraph with the widget
   // (MET-93) — the host editor widens listItem/taskItem content accordingly.
   inlineHostable: true,

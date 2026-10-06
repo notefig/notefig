@@ -9,6 +9,7 @@ import type { EditorWidgetDefinition } from "./define-widget";
 import { promptWidget } from "./prompt";
 import { WidgetMinimapExtension } from "./minimap/extension";
 import type { MinimapSource } from "./minimap/contract";
+import type { EditorView } from "@tiptap/pm/view";
 
 export const editorWidgets: EditorWidgetDefinition[] = [promptWidget];
 
@@ -41,17 +42,26 @@ export function widgetRendererNodes(options: {
 }
 
 /**
+ * Finish revealing a widget instance that is already in view: run its
+ * widget's `reveal` slot (the prompt focuses its composer). Every way to
+ * reveal a widget ends here — the host's go-to-location and the minimap —
+ * so what revealing means is declared once, by the widget. False when no
+ * widget claims the id.
+ */
+export function revealWidget(view: EditorView, id: string): boolean {
+  return editorWidgets.some((widget) => widget.reveal?.(view, id) ?? false);
+}
+
+/**
  * The document minimap, configured with every widget that declared a
  * `minimap` slot. The rail mounts itself inside the editor (plugin view),
- * so adding this to an editor's extensions is the whole installation.
- * `reveal` is the host's jump to an entry by id (see WidgetMinimapOptions).
+ * so adding this to an editor's extensions is the whole installation. A
+ * dot's jump ends in `revealWidget`, like every other reveal.
  */
-export function widgetMinimapExtension(
-  options: { reveal?: (id: string) => void } = {},
-) {
+export function widgetMinimapExtension() {
   const sources: Record<string, MinimapSource> = {};
   for (const widget of editorWidgets) {
     if (widget.minimap) sources[widget.name] = widget.minimap;
   }
-  return WidgetMinimapExtension.configure({ sources, reveal: options.reveal });
+  return WidgetMinimapExtension.configure({ sources, reveal: revealWidget });
 }
