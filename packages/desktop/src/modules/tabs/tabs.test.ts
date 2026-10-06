@@ -265,4 +265,24 @@ describe("the window in front", () => {
     live.select("agent:t1");
     expect(live.activeTabId()).toBe("agent:t1");
   });
+
+  it("wins over DOM focus left in the other window", () => {
+    const live = splitLayout();
+    // An editor in the left pane keeps focus while it opens a link to the
+    // chat already open on the right (LinkBubbleMenu preserves focus).
+    const left = document.createElement("div");
+    left.setAttribute("data-dockable-window-id", "left");
+    const input = document.createElement("input");
+    left.appendChild(input);
+    document.body.appendChild(left);
+    input.focus();
+    try {
+      expect(live.activeWindowId()).toBe("left");
+      live.openAgent("t1");
+      expect(live.activeWindowId()).toBe("right");
+      expect(live.activeTabId()).toBe("agent:t1");
+    } finally {
+      left.remove();
+    }
+  });
 });

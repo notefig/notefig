@@ -381,18 +381,22 @@ export function createTabs({
     endSettledRenames();
   };
 
-  /** Focus inside the dock first, then the window that last had it, then
-   *  the layout's selection, then the first window. */
+  /** The window brought forward last (by focus, or by opening/selecting
+   *  one of its tabs), then the window holding focus, then the layout's
+   *  selection, then the first window. The remembered window leads: it
+   *  follows every focusin, so it is never behind DOM focus — but an
+   *  explicit open or select moves it while focus stays put (a link opened
+   *  from one pane into a file already open in another). */
   const activeWindow = (): DockWindow | null => {
     const current = layout.read();
-    const focusedNow = windowIdOf(document.activeElement);
-    if (focusedNow) {
-      const window = findWindowById(current, focusedNow);
-      if (window) return window;
-    }
     const remembered = focusedWindow.get();
     if (remembered) {
       const window = findWindowById(current, remembered);
+      if (window) return window;
+    }
+    const focusedNow = windowIdOf(document.activeElement);
+    if (focusedNow) {
+      const window = findWindowById(current, focusedNow);
       if (window) return window;
     }
     const selected = layout.selectedTabId();
