@@ -10,9 +10,16 @@ import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { MinimapRailView } from "./rail-view";
 import type { MinimapSource } from "./contract";
+import type { EditorView } from "@tiptap/pm/view";
 
 export interface WidgetMinimapOptions {
   sources: Record<string, MinimapSource>;
+  /**
+   * What a dot's jump does once its element is scrolled into view, given
+   * the element's position — the registry's `revealWidget`, so a minimap
+   * jump ends where every other reveal does (a prompt: its composer).
+   */
+  reveal?: (view: EditorView, pos: number) => void;
 }
 
 const minimapPluginKey = new PluginKey("widgetMinimap");
@@ -21,17 +28,17 @@ export const WidgetMinimapExtension = Extension.create<WidgetMinimapOptions>({
   name: "widgetMinimap",
 
   addOptions() {
-    return { sources: {} };
+    return { sources: {}, reveal: undefined };
   },
 
   addProseMirrorPlugins() {
-    const { sources } = this.options;
+    const { sources, reveal } = this.options;
     if (Object.keys(sources).length === 0) return [];
     return [
       new Plugin({
         key: minimapPluginKey,
         view: (editorView) => {
-          const rail = new MinimapRailView(editorView, sources);
+          const rail = new MinimapRailView(editorView, sources, reveal);
           return { update: () => rail.update(), destroy: () => rail.destroy() };
         },
       }),

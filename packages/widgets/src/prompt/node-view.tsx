@@ -44,11 +44,11 @@ import {
   docHasRealContent,
   findPromptNodeId,
   newPromptBlobInstanceId,
-  promptDraftRange,
   removeToParagraphTr,
   revertToSlashTr,
   selectionDraft,
   selectionSummonTr,
+  selectPromptDraftTr,
   slashSummonTr,
   trailingParagraphTr,
 } from "./doc-helpers";
@@ -208,19 +208,6 @@ function appendPromptTr(
     .setMeta("addToHistory", false)
     .setMeta(UI_ONLY_TRANSACTION_META, true);
   return { tr, blobId };
-}
-
-/**
- * Put the caret in a widget's draft. This replaces the one-shot focus
- * channel the atom era needed: the draft is document content, so "focus the
- * composer" is a selection, dispatched in the same transaction that created
- * the widget — no React-pass gap to bridge, and nothing for the focus
- * arbiter to arbitrate.
- */
-function selectDraftTr(tr: Transaction, blobId: string): Transaction {
-  const range = promptDraftRange(tr.doc, blobId);
-  if (!range) return tr;
-  return tr.setSelection(TextSelection.create(tr.doc, range.to));
 }
 
 function AiPromptNodeView(props: NodeViewProps) {
@@ -393,7 +380,7 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
     }
     const res = appendPromptTr(this.editor.state);
     if (!res) return;
-    this.editor.view.dispatch(selectDraftTr(res.tr, res.blobId));
+    this.editor.view.dispatch(selectPromptDraftTr(res.tr, res.blobId));
   },
 
   /**
@@ -600,7 +587,7 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
               const blobId = newPromptBlobInstanceId();
               const tr = selectionSummonTr(view.state, blobId);
               if (!tr) return false;
-              view.dispatch(selectDraftTr(tr, blobId));
+              view.dispatch(selectPromptDraftTr(tr, blobId));
               return true;
             }
             // Empty doc: the keeper widget is already there — "/" means
@@ -612,14 +599,14 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
             ) {
               const existingId = findPromptNodeId(view.state.doc);
               if (existingId) {
-                view.dispatch(selectDraftTr(view.state.tr, existingId));
+                view.dispatch(selectPromptDraftTr(view.state.tr, existingId));
               }
               return true;
             }
             const blobId = newPromptBlobInstanceId();
             const tr = slashSummonTr(view.state, blobId);
             if (!tr) return false;
-            view.dispatch(selectDraftTr(tr, blobId));
+            view.dispatch(selectPromptDraftTr(tr, blobId));
             return true;
           },
         },

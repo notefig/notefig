@@ -100,6 +100,7 @@ function findScroller(from: HTMLElement): HTMLElement {
 export class MinimapRailView implements PluginView {
   private readonly view: EditorView;
   private readonly sources: Record<string, MinimapSource>;
+  private readonly reveal: ((view: EditorView, pos: number) => void) | undefined;
   private readonly stickyHost: HTMLDivElement;
   private readonly nav: HTMLElement;
   private readonly underlay: SVGGElement;
@@ -110,9 +111,14 @@ export class MinimapRailView implements PluginView {
   private observers = new Map<string, MinimapObserver>();
   private lastSerialized = "";
 
-  constructor(view: EditorView, sources: Record<string, MinimapSource>) {
+  constructor(
+    view: EditorView,
+    sources: Record<string, MinimapSource>,
+    reveal?: (view: EditorView, pos: number) => void,
+  ) {
     this.view = view;
     this.sources = sources;
+    this.reveal = reveal;
 
     this.stickyHost = document.createElement("div");
     // Zero-height sticky overlay: pinned to the scrollport, no layout cost.
@@ -422,5 +428,6 @@ export class MinimapRailView implements PluginView {
     if (dom instanceof HTMLElement) {
       dom.scrollIntoView({ block: "center", behavior: "smooth" });
     }
+    this.reveal?.(this.view, dot.entry.pos);
   }
 }

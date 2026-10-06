@@ -33,6 +33,7 @@
  */
 import type { Node } from "@tiptap/core";
 import type { MinimapSource } from "./minimap/contract";
+import type { EditorView } from "@tiptap/pm/view";
 
 /**
  * A widget's markdown form, independent of Tiptap. `strip` answers "what
@@ -80,6 +81,14 @@ export interface EditorWidgetDefinition<Options = unknown> {
    * this slot, collected by the registry.
    */
   minimap?: MinimapSource;
+  /**
+   * What revealing an instance does once it is in view, for a widget that
+   * is more than something to look at — the prompt takes the caret into its
+   * composer. Called by the registry's `revealWidget` with the position of
+   * the instance revealed (copies of one marker share an id, so the
+   * position is what names the one in view); true when it acted.
+   */
+  reveal?: (view: EditorView, pos: number) => boolean;
   /**
    * True when the widget may stand in for a list item's leading paragraph —
    * i.e. it can be summoned inside a list. The host composes the widened
