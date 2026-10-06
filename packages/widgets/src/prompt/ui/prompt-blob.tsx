@@ -1475,7 +1475,7 @@ function DraftRow({
               workspacePath={workspacePath}
               boundTaskId={boundTaskId}
               onSelectSession={onSelectSession}
-              onChosen={focusComposer}
+              onClose={focusComposer}
             />
           </div>
         ) : null}
@@ -1521,7 +1521,7 @@ function SessionControl({
   workspacePath,
   boundTaskId,
   onSelectSession,
-  onChosen,
+  onClose,
 }: {
   workspacePath: string;
   /** The session this widget is already bound to (a restored widget, MET-163)
@@ -1531,10 +1531,9 @@ function SessionControl({
   /** Re-target a bound widget. Absent for an unbound one, whose selection
    *  just moves the shared session as it always did. */
   onSelectSession?: (taskId: string) => void;
-  /** After a choice: the picker is a detour from typing, so the composer
-   *  takes the caret back. Not on Escape or an outside click — those go
-   *  where the menu sends them. */
-  onChosen: () => void;
+  /** The menu is a detour from typing: when it closes, the caret goes back
+   *  to the composer (as the chat tab's pickers do). */
+  onClose: () => void;
 }) {
   const { t } = useTranslation();
   const host = usePromptWidgetHost();
@@ -1544,14 +1543,6 @@ function SessionControl({
   // Already filtered to live sessions and ordered newest-first by the host.
   const sessions = host.useSessionList(workspacePath);
   const [open, setOpen] = useState(false);
-  // Set by an item's select, read when the menu has closed: Radix restores
-  // focus to the trigger on close, after onSelect, so the hand-back has to
-  // happen there instead.
-  const chosen = useRef(false);
-  const choose = (pick: () => void) => {
-    chosen.current = true;
-    pick();
-  };
 
   const peekedTaskId = boundTaskId ?? host.peekSession(workspacePath);
   // The trigger's logo names where the prompt would go. The session it points
@@ -1578,10 +1569,9 @@ function SessionControl({
       <DropdownMenuContent
         align="start"
         onCloseAutoFocus={(event) => {
-          if (!chosen.current) return;
-          chosen.current = false;
+          // Radix would hand focus back to the trigger.
           event.preventDefault();
-          onChosen();
+          onClose();
         }}
       >
         {recentSessions.length > 0 && (
@@ -1591,11 +1581,9 @@ function SessionControl({
                 key={session.taskId}
                 className="cursor-pointer gap-2 text-xs"
                 onSelect={() =>
-                  choose(() =>
-                    onSelectSession
-                      ? onSelectSession(session.taskId)
-                      : host.adoptSession(workspacePath, session.taskId),
-                  )
+                  onSelectSession
+                    ? onSelectSession(session.taskId)
+                    : host.adoptSession(workspacePath, session.taskId)
                 }
               >
                 {session.taskId === peekedTaskId ? (
@@ -1619,9 +1607,7 @@ function SessionControl({
           <DropdownMenuItem
             key={harness.id}
             className="cursor-pointer gap-2 text-xs"
-            onSelect={() =>
-              choose(() => host.dropSession(workspacePath, harness.id))
-            }
+            onSelect={() => host.dropSession(workspacePath, harness.id)}
           >
             <HarnessLogo
               harnessId={harness.id}
