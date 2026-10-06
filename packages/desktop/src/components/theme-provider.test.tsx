@@ -1,7 +1,7 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ThemeProvider, type Theme } from "./theme-provider";
+import { ThemeProvider, useTheme, type Theme } from "./theme-provider";
 
 type Listener = () => void;
 
@@ -37,6 +37,8 @@ function rootTheme(): string | null {
 
 describe("ThemeProvider", () => {
   let scheme: ReturnType<typeof fakeColorScheme>;
+  /** Every provider a test mounted, unmounted after it. */
+  let mounted: Array<() => void> = [];
 
   beforeEach(() => {
     scheme = fakeColorScheme(false);
@@ -46,19 +48,37 @@ describe("ThemeProvider", () => {
   });
 
   afterEach(() => {
+    for (const unmount of mounted) unmount();
+    mounted = [];
     vi.restoreAllMocks();
     document.documentElement.classList.remove("light", "dark");
   });
 
+  /** Mount a provider; `setTheme` drives it like the settings do. */
   const renderWith = (theme: Theme) => {
     const container = document.createElement("div");
     const root = createRoot(container);
+    let setTheme!: (theme: Theme) => void;
+    function Probe() {
+      setTheme = useTheme().setTheme;
+      return null;
+    }
     act(() =>
       root.render(
-        createElement(ThemeProvider, { defaultTheme: theme, children: null }),
+        createElement(ThemeProvider, {
+          defaultTheme: theme,
+          children: createElement(Probe),
+        }),
       ),
     );
-    return { unmount: () => act(() => root.unmount()) };
+    let live = true;
+    const unmount = () => {
+      if (!live) return;
+      live = false;
+      act(() => root.unmount());
+    };
+    mounted.push(unmount);
+    return { unmount, setTheme: (next: Theme) => act(() => setTheme(next)) };
   };
 
   it("follows the OS appearance live while on system", () => {
@@ -85,5 +105,21 @@ describe("ThemeProvider", () => {
     expect(scheme.listenerCount()).toBe(1);
     unmount();
     expect(scheme.listenerCount()).toBe(0);
+  });
+
+  it("stops listening when switched off System, and resumes when switched back", () => {
+    const { setTheme } = renderWith("system");
+    expect(scheme.listenerCount()).toBe(1);
+
+    setTheme("light");
+    expect(scheme.listenerCount()).toBe(0);
+    act(() => scheme.setDark(true));
+    expect(rootTheme()).toBe("light");
+
+    setTheme("system");
+    expect(scheme.listenerCount()).toBe(1);
+    expect(rootTheme()).toBe("dark");
+    act(() => scheme.setDark(false));
+    expect(rootTheme()).toBe("light");
   });
 });
