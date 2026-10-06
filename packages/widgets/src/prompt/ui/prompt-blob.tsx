@@ -199,7 +199,18 @@ function useDraftIO(editor: Editor, blobId: string, workspacePath: string) {
     /** True while the caret is in THIS widget's draft — the guard the key
      *  map and the chrome's active styling share. */
     const holdsCaret = () => selectionDraft(editor.state)?.blobId === blobId;
-    return { read, write, holdsCaret };
+    /** Caret to the end of the draft and focus to the document, without
+     *  moving the viewport: the widget is already in front of the user. */
+    const focus = () => {
+      const found = range();
+      if (!found) return;
+      editor
+        .chain()
+        .focus(undefined, { scrollIntoView: false })
+        .setTextSelection(found.to)
+        .run();
+    };
+    return { read, write, holdsCaret, focus };
   }, [editor, blobId, host, workspacePath]);
 }
 
@@ -850,6 +861,7 @@ export function PromptBlobFace({
             workspacePath={workspacePath}
             boundTaskId={boundTaskId}
             onSelectSession={actions.rebindSession}
+            focusComposer={draftIO.focus}
           />
         </div>
       </AnimatedHeight>
@@ -1432,6 +1444,7 @@ function DraftRow({
   workspacePath,
   boundTaskId,
   onSelectSession,
+  focusComposer,
 }: {
   phase: BlobPhase;
   draftSlot: React.ReactNode;
@@ -1441,6 +1454,8 @@ function DraftRow({
   workspacePath: string;
   boundTaskId?: string | null;
   onSelectSession?: (taskId: string) => void;
+  /** Put the caret back in this widget's composer. */
+  focusComposer: () => void;
 }) {
   const { t } = useTranslation();
   const composing = phase === "composing";
@@ -1460,6 +1475,7 @@ function DraftRow({
               workspacePath={workspacePath}
               boundTaskId={boundTaskId}
               onSelectSession={onSelectSession}
+              onClose={focusComposer}
             />
           </div>
         ) : null}
@@ -1505,6 +1521,7 @@ function SessionControl({
   workspacePath,
   boundTaskId,
   onSelectSession,
+  onClose,
 }: {
   workspacePath: string;
   /** The session this widget is already bound to (a restored widget, MET-163)
@@ -1514,6 +1531,9 @@ function SessionControl({
   /** Re-target a bound widget. Absent for an unbound one, whose selection
    *  just moves the shared session as it always did. */
   onSelectSession?: (taskId: string) => void;
+  /** The menu is a detour from typing: when it closes, the caret goes back
+   *  to the composer (as the chat tab's pickers do). */
+  onClose: () => void;
 }) {
   const { t } = useTranslation();
   const host = usePromptWidgetHost();
@@ -1546,7 +1566,14 @@ function SessionControl({
           <HarnessLogo harnessId={triggerHarnessId} />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
+      <DropdownMenuContent
+        align="start"
+        onCloseAutoFocus={(event) => {
+          // Radix would hand focus back to the trigger.
+          event.preventDefault();
+          onClose();
+        }}
+      >
         {recentSessions.length > 0 && (
           <>
             {recentSessions.map((session) => (
