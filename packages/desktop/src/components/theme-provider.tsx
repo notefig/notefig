@@ -28,20 +28,23 @@ export function ThemeProvider({
 
   useEffect(() => {
     const root = window.document.documentElement;
+    const apply = (resolved: "dark" | "light") => {
+      root.classList.remove("light", "dark");
+      root.classList.add(resolved);
+    };
 
-    root.classList.remove("light", "dark");
-
-    if (theme === "system") {
-      const systemTheme = window.matchMedia("(prefers-color-scheme: dark)")
-        .matches
-        ? "dark"
-        : "light";
-
-      root.classList.add(systemTheme);
+    if (theme !== "system") {
+      apply(theme);
       return;
     }
 
-    root.classList.add(theme);
+    // "System" follows the OS live: the query's change event fires when the
+    // user flips appearance, so the app re-themes without a reload.
+    const query = window.matchMedia("(prefers-color-scheme: dark)");
+    const sync = () => apply(query.matches ? "dark" : "light");
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
   }, [theme]);
 
   const value = {
