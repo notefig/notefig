@@ -199,7 +199,18 @@ function useDraftIO(editor: Editor, blobId: string, workspacePath: string) {
     /** True while the caret is in THIS widget's draft — the guard the key
      *  map and the chrome's active styling share. */
     const holdsCaret = () => selectionDraft(editor.state)?.blobId === blobId;
-    return { read, write, holdsCaret };
+    /** Caret to the end of the draft and focus to the document, without
+     *  moving the viewport: the widget is already in front of the user. */
+    const focus = () => {
+      const found = range();
+      if (!found) return;
+      editor
+        .chain()
+        .focus(undefined, { scrollIntoView: false })
+        .setTextSelection(found.to)
+        .run();
+    };
+    return { read, write, holdsCaret, focus };
   }, [editor, blobId, host, workspacePath]);
 }
 
@@ -850,6 +861,7 @@ export function PromptBlobFace({
             workspacePath={workspacePath}
             boundTaskId={boundTaskId}
             onSelectSession={actions.rebindSession}
+            focusComposer={draftIO.focus}
           />
         </div>
       </AnimatedHeight>
@@ -1432,6 +1444,7 @@ function DraftRow({
   workspacePath,
   boundTaskId,
   onSelectSession,
+  focusComposer,
 }: {
   phase: BlobPhase;
   draftSlot: React.ReactNode;
@@ -1441,6 +1454,8 @@ function DraftRow({
   workspacePath: string;
   boundTaskId?: string | null;
   onSelectSession?: (taskId: string) => void;
+  /** Put the caret back in this widget's composer. */
+  focusComposer: () => void;
 }) {
   const { t } = useTranslation();
   const composing = phase === "composing";
@@ -1460,6 +1475,7 @@ function DraftRow({
               workspacePath={workspacePath}
               boundTaskId={boundTaskId}
               onSelectSession={onSelectSession}
+              onChosen={focusComposer}
             />
           </div>
         ) : null}
@@ -1505,6 +1521,7 @@ function SessionControl({
   workspacePath,
   boundTaskId,
   onSelectSession,
+  onChosen,
 }: {
   workspacePath: string;
   /** The session this widget is already bound to (a restored widget, MET-163)
@@ -1514,6 +1531,10 @@ function SessionControl({
   /** Re-target a bound widget. Absent for an unbound one, whose selection
    *  just moves the shared session as it always did. */
   onSelectSession?: (taskId: string) => void;
+  /** After a choice: the picker is a detour from typing, so the composer
+   *  takes the caret back. Not on Escape or an outside click — those go
+   *  where the menu sends them. */
+  onChosen: () => void;
 }) {
   const { t } = useTranslation();
   const host = usePromptWidgetHost();
@@ -1523,6 +1544,14 @@ function SessionControl({
   // Already filtered to live sessions and ordered newest-first by the host.
   const sessions = host.useSessionList(workspacePath);
   const [open, setOpen] = useState(false);
+  // Set by an item's select, read when the menu has closed: Radix restores
+  // focus to the trigger on close, after onSelect, so the hand-back has to
+  // happen there instead.
+  const chosen = useRef(false);
+  const choose = (pick: () => void) => {
+    chosen.current = true;
+    pick();
+  };
 
   const peekedTaskId = boundTaskId ?? host.peekSession(workspacePath);
   // The trigger's logo names where the prompt would go. The session it points
@@ -1546,7 +1575,15 @@ function SessionControl({
           <HarnessLogo harnessId={triggerHarnessId} />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
+      <DropdownMenuContent
+        align="start"
+        onCloseAutoFocus={(event) => {
+          if (!chosen.current) return;
+          chosen.current = false;
+          event.preventDefault();
+          onChosen();
+        }}
+      >
         {recentSessions.length > 0 && (
           <>
             {recentSessions.map((session) => (
@@ -1554,9 +1591,11 @@ function SessionControl({
                 key={session.taskId}
                 className="cursor-pointer gap-2 text-xs"
                 onSelect={() =>
-                  onSelectSession
-                    ? onSelectSession(session.taskId)
-                    : host.adoptSession(workspacePath, session.taskId)
+                  choose(() =>
+                    onSelectSession
+                      ? onSelectSession(session.taskId)
+                      : host.adoptSession(workspacePath, session.taskId),
+                  )
                 }
               >
                 {session.taskId === peekedTaskId ? (
@@ -1580,7 +1619,9 @@ function SessionControl({
           <DropdownMenuItem
             key={harness.id}
             className="cursor-pointer gap-2 text-xs"
-            onSelect={() => host.dropSession(workspacePath, harness.id)}
+            onSelect={() =>
+              choose(() => host.dropSession(workspacePath, harness.id))
+            }
           >
             <HarnessLogo
               harnessId={harness.id}
