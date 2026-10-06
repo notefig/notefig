@@ -97,9 +97,9 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   imports `@/adapters`; modules take `ctx.use("platform")`, components
   `usePlatform()` (`src/core/use-platform.ts`), and other code is handed
   the surface it needs (`fs: Pick<FileSystemSurface, …>`). Fallow's
-  boundary rules fail a commit that imports an adapter implementation from
-  app code (`packages/desktop/.fallowrc.json`). There is no ambient core:
-  code outside React is handed what it uses.
+  boundary rules (the root `.fallowrc.json`, which CI audits from) fail a
+  commit that imports an adapter implementation from app code. There is no
+  ambient core: code outside React is handed what it uses.
 - A per-workspace API is reached through core: `core.workspace(ws).git`,
   or `useWorkspaceModule(ws, "git")` in React; an app-wide one through
   `core.kv` / `useModule("kv")`.

@@ -929,7 +929,12 @@ export const filesModule = defineModule({
   // watcher gaps) and gives a watcher whose start failed another chance.
   boot: (_api, ctx) =>
     ctx.hooks.on("workspace:focused", ({ path }) => {
-      const files = ctx.workspaceHandle(path).files;
+      // An earlier focus step can still be waiting when the workspace
+      // closes; closing drops it from the open set before teardown, so
+      // this also skips one whose instances are being disposed.
+      const workspace = ctx.workspaceHandle(path);
+      if (!workspace.isOpen()) return;
+      const { files } = workspace;
       files.ensureWatching();
       void files.refresh();
     }),

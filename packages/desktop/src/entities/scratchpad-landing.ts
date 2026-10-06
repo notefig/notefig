@@ -44,7 +44,10 @@ export const scratchpadLandingModule = defineModule({
     const tabs = ctx.use("tabs");
     const registry = ctx.use("workspaceRegistry");
     return ctx.hooks.on("workspace:entered", async ({ path }) => {
-      const scratchpads = ctx.workspaceHandle(path).scratchpads;
+      // Closed while the focus steps before this one ran: nowhere to land.
+      const workspace = ctx.workspaceHandle(path);
+      if (!workspace.isOpen()) return;
+      const { scratchpads } = workspace;
       if (hasOpenFileTab(layout, registry, path)) {
         await scratchpads.sweep(layout.openTabIds());
         return;

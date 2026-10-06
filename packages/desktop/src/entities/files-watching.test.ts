@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
-import { createCore } from "@notefig/core";
+import { createCore, defineModule } from "@notefig/core";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { workspaceKey } from "@/utils/path";
 import { metadataWatchIdFor } from "@/utils/file-sync";
@@ -21,13 +21,13 @@ const fsMock = {
   stopWatching: vi.fn(async () => {}),
 };
 
-function coreWithFiles() {
+function coreWithFiles(before: ReturnType<typeof defineModule>[] = []) {
   return createCore({
     services: {
       platform: { fs: fsMock as unknown as FileSystemSurface },
       queryClient: new QueryClient(),
     } as never,
-    modules: [filesModule],
+    modules: [...before, filesModule],
     workspaceKey,
   });
 }
@@ -83,5 +83,31 @@ describe("a workspace's metadata watch", () => {
     expect(fsMock.startWatchingMetadata).toHaveBeenCalledTimes(2);
     await vi.waitFor(() => expect(fsMock.readDirectory).toHaveBeenCalled());
     error.mockRestore();
+  });
+
+  it("leaves a workspace alone that closed while an earlier focus step ran", async () => {
+    // An earlier `focused` handler still waiting (the open-set write) when
+    // the workspace closes: the files step after it must not reach for the
+    // closed workspace's instance.
+    let gate: Promise<void> | null = null;
+    let release!: () => void;
+    const slowFocus = defineModule({
+      name: "slow-focus",
+      boot: (_api, ctx) =>
+        ctx.hooks.on("workspace:focused", () => gate ?? undefined),
+    });
+    const core = coreWithFiles([slowFocus]);
+    core.boot();
+    await core.workspace("/ws").open();
+    fsMock.readDirectory.mockClear();
+
+    gate = new Promise<void>((resolve) => (release = resolve));
+    const focusing = core.workspace("/ws").focus();
+    await settle();
+    await core.workspace("/ws").close();
+    release();
+
+    await expect(focusing).resolves.toBeUndefined();
+    expect(fsMock.readDirectory).not.toHaveBeenCalled();
   });
 });
