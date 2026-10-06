@@ -49,6 +49,7 @@ import { handleContentFileSystemChange } from "@/utils/file-sync";
 import { calculateContentHash } from "@/utils/hash";
 import type { ContentChangeEvent } from "@/adapters/platform-adapter.interface";
 import type { FileEntry } from "@/utils/fs";
+import { createHooks } from "@notefig/core";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -162,6 +163,7 @@ beforeEach(async () => {
     workspacePath: WS,
     fs: fake.adapter as unknown as FileSystemSurface,
     queryClient: new QueryClient(),
+    hooks: createHooks(),
   });
 
   fake.store.clear();

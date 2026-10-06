@@ -17,8 +17,6 @@ const { readTextFile, log, addAllAndCommit } = vi.hoisted(() => ({
 const writeWorkspaceTextFile = vi.fn(
   async (_path: string, _content: string) => undefined,
 );
-const { invalidateGit } = vi.hoisted(() => ({ invalidateGit: vi.fn() }));
-vi.mock("@/entities/git", () => ({ invalidateGit }));
 
 import { historyLog } from "../history-log";
 import { historyDiff } from "../history-diff";
@@ -82,8 +80,6 @@ describe("historyCheckpoint", () => {
   it("commits an explicit checkpoint", async () => {
     const result = await historyCheckpoint.execute(ctx, { message: "manual save" });
     expect(result).toEqual({ ok: true, value: { oid: "def456" } });
-    // The commit lands in the hidden gitdir, which no watcher sees.
-    expect(invalidateGit).toHaveBeenCalledWith("/ws");
     expect(addAllAndCommit).toHaveBeenCalledWith(
       expect.objectContaining({ message: "manual save" }),
     );

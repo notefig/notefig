@@ -24,10 +24,9 @@ import {
 } from "@/entities/agents";
 import type { AgentStore } from "@/agent/agent-collections";
 import { useOpenWorkspaces, type OpenWorkspaceRow } from "@/entities/workspaces";
-import { onAppEvent, type AppEvents } from "@/utils/app-events";
 import i18n from "@/utils/intl";
 import { workspaceKey } from "@/utils/path";
-import { defineModule } from "@notefig/core";
+import { defineModule, type CoreHookMap, type Hooks } from "@notefig/core";
 import { useModule } from "@notefig/core/react";
 
 export const PROMPT_ROUNDS_COLLECTION_ID = "prompt-rounds";
@@ -113,11 +112,11 @@ export interface PromptRoundsApi {
   readonly collection: PromptRoundsCollection;
   /** The listener's start half. */
   recordStarted(
-    detail: AppEvents["widget:round-started"],
+    detail: CoreHookMap["widget:round-started"],
     now?: number,
   ): Promise<void>;
   /** The listener's settle half: only rounds we know are widget rounds. */
-  recordSettled(detail: AppEvents["agent:turn-settled"]): Promise<void>;
+  recordSettled(detail: CoreHookMap["agent:turn-settled"]): Promise<void>;
   /** A round still "live" from a previous run never finished: settle it. */
   settleOrphaned(): Promise<void>;
   /** Boot: the one global listener. Returns the unsubscribe. */
@@ -127,9 +126,12 @@ export interface PromptRoundsApi {
 export function createPromptRounds({
   persistence,
   turns,
+  hooks,
 }: {
   persistence: PersistedCollectionPersistence;
   turns: Pick<AgentStore["turns"], "get">;
+  /** Where round starts and settled turns are announced. */
+  hooks: Pick<Hooks, "on">;
 }): PromptRoundsApi {
   const rounds = createPromptRoundsCollection(persistence);
 
@@ -181,12 +183,12 @@ export function createPromptRounds({
         console.error("Failed to settle orphaned prompt rounds:", error);
       });
       const stops = [
-        onAppEvent("widget:round-started", (detail) => {
+        hooks.on("widget:round-started", (detail) => {
           void api.recordStarted(detail).catch((error) => {
             console.error("Failed to record a prompt round:", error);
           });
         }),
-        onAppEvent("agent:turn-settled", (detail) => {
+        hooks.on("agent:turn-settled", (detail) => {
           void api.recordSettled(detail).catch((error) => {
             console.error("Failed to settle a prompt round:", error);
           });
@@ -277,6 +279,7 @@ export const promptRoundsModule = defineModule({
     createPromptRounds({
       persistence: ctx.use("platform").db.get(),
       turns: ctx.use("agentStore").turns,
+      hooks: ctx.hooks,
     }),
   boot: (rounds) => rounds.track(),
 });

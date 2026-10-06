@@ -25,7 +25,8 @@ export interface Hooks {
 }
 
 export function createHooks(
-  onError: (error: unknown, hook: string) => void,
+  onError: (error: unknown, hook: string) => void = (error, hook) =>
+    console.error(`[hooks] ${hook} handler failed:`, error),
 ): Hooks {
   const handlers = new Map<string, Set<Handler<HookName>>>();
 

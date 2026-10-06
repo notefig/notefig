@@ -1,4 +1,5 @@
-import { emitAppEvent } from "@/utils/app-events";
+import "./agent-events";
+import type { Hooks } from "@notefig/core";
 import type { WorkspaceHistory } from "@/utils/history-service";
 import type { WorkspaceFiles } from "@/entities/files";
 import type { DocumentsApi } from "@/entities/documents";
@@ -88,6 +89,8 @@ export interface AgentRuntimeDeps {
   services(workspacePath: string): ToolServices;
   /** The facade tools reach (ToolContext.agents). */
   agents(): AgentsApi;
+  /** Where turn and tool-call moments are announced (core's hook bus). */
+  hooks: Pick<Hooks, "emit">;
 }
 
 /**
@@ -768,7 +771,7 @@ export class AgentTask {
     }
     this.store.turns.delete(turnId);
     this.resolveTurn(turnId, { status: "cancelled" });
-    emitAppEvent("agent:turn-settled", {
+    this.deps.hooks.emit("agent:turn-settled", {
       taskId: this.taskId,
       turnId,
       status: "cancelled",
@@ -788,7 +791,7 @@ export class AgentTask {
       });
     }
     this.resolveTurn(turnId, outcome);
-    emitAppEvent("agent:turn-settled", {
+    this.deps.hooks.emit("agent:turn-settled", {
       taskId: this.taskId,
       turnId,
       status: outcome.status,
@@ -1080,7 +1083,7 @@ export class AgentTask {
         draft.lastSettled = lastSettled;
       });
     }
-    emitAppEvent("agent:turn-settled", {
+    this.deps.hooks.emit("agent:turn-settled", {
       taskId: this.taskId,
       turnId: turn.turnId,
       status:
@@ -1105,7 +1108,7 @@ export class AgentTask {
     this.setStatus(turnStatus === "error" ? "error" : "idle");
     if (turnStatus === "completed") {
       // The workspace's history checkpoints it (one commit per turn).
-      emitAppEvent("agent:turn-completed", {
+      this.deps.hooks.emit("agent:turn-completed", {
         taskId: this.taskId,
         turnId: turn.turnId,
         workspacePath: this.workspacePath,
@@ -1305,7 +1308,7 @@ export class AgentTask {
    */
   private announceToolCall(turnId: string, toolCall: ToolCallUpdate): void {
     if (!turnId || this.currentTurn?.entries instanceof ReplayStage) return;
-    emitAppEvent("agent:tool-call", {
+    this.deps.hooks.emit("agent:tool-call", {
       taskId: this.taskId,
       turnId,
       workspacePath: this.workspacePath,

@@ -4,6 +4,7 @@ import { updatePromptBlob } from "@notefig/widgets";
 import type { ToolCallUpdate } from "@notefig/shared/agent";
 import { calculateContentHash } from "@/utils/hash";
 import { createTurnWrites, type TurnWritesApi } from "./turn-writes";
+import { createHooks } from "@notefig/core";
 
 const disk = new Map<string, string>();
 const fs = {
@@ -33,7 +34,7 @@ const call = (toolCall: ToolCallUpdate, turnId = "trn_1") =>
 
 describe("turn writes", () => {
   beforeEach(() => {
-    writes = createTurnWrites({ fs });
+    writes = createTurnWrites({ fs, hooks: createHooks() });
     disk.clear();
     // A widget that sent is mounted, so its document is known.
     updatePromptBlob("blob_1", {

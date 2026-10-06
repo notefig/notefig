@@ -107,11 +107,16 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   over an in-memory db by default), `testWorkspaceFiles` / `filesModuleOf`
   (`src/testing/test-files.ts`), `testKv`, `testAgents` (store, runtime
   and facade, `src/testing/test-agents.ts`).
-- Code that has no handle on a workspace's instance tells it something
-  happened over the app event bus (`emitAppEvent("git:stale", …)`,
-  `"agent:turn-completed"`, `"files:changed"`), and each instance listens
-  for its own path. Agent tools get their workspace's instances on
-  `ctx.services` (`ToolServices`, widened by declaration merging).
+- There is one event bus: core's hooks. A module declares the moments it
+  announces in `CoreHookMap` (next to its `declare module "@notefig/core"`
+  block, e.g. `"git:stale"` in git, `"files:changed"` in files, the
+  `"agent:*"` moments in `src/agent/agent-events.ts`) and emits them with
+  `ctx.hooks.emit`; a factory that announces is handed `hooks` like any
+  other dependency. Listeners subscribe in `boot` or `workspace.create`
+  with `ctx.hooks.on` and return the unsubscribe, so core tears them down.
+  A per-workspace listener checks the payload's workspace against its own.
+  Agent tools get their workspace's instances on `ctx.services`
+  (`ToolServices`, widened by declaration merging).
 - A workspace is opened, focused and closed through its handle:
   `core.workspace(path).open()` (the user enters it), `.focus()` (brought
   forward, as the switcher does), `.close()`. What entering or focusing

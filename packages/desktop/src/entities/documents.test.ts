@@ -15,6 +15,7 @@ import {
 import { getMarkdownEditor } from "@/entities/editors";
 import { createWorkspaceFiles, type WorkspaceFiles } from "./files";
 import { createDocuments, type DocumentsApi } from "./documents";
+import { createHooks } from "@notefig/core";
 
 const readMock = vi.fn();
 const writeMock = vi.fn();
@@ -50,6 +51,7 @@ describe("documents.write", () => {
         stopWatching: async () => {},
       } as unknown as FileSystemSurface,
       queryClient: new QueryClient(),
+      hooks: createHooks(),
     });
     open = [files];
     const { content } = files.collections;

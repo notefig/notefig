@@ -30,10 +30,9 @@ import {
   type PromptChangeAttribution,
 } from "@notefig/widgets";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
-import { onAppEvent, type AppEvents } from "@/utils/app-events";
 import { calculateContentHash } from "@/utils/hash";
 import { resolveWorkspacePath } from "@/utils/fs";
-import { defineModule } from "@notefig/core";
+import { defineModule, type CoreHookMap, type Hooks } from "@notefig/core";
 
 type Writer = { taskId: string; turnId: string };
 type InFlightCall = Writer & { key: string; paths: string[] };
@@ -63,10 +62,10 @@ function toolCallPaths(
 export interface TurnWritesApi {
   /** The `agent:tool-call` listener; resolves once a settling call's
    *  read-back is recorded. */
-  recordToolCall(detail: AppEvents["agent:tool-call"]): Promise<void>;
+  recordToolCall(detail: CoreHookMap["agent:tool-call"]): Promise<void>;
   /** The `agent:turn-settled` listener: close whatever the turn left open. */
   recordTurnSettled(
-    detail: Pick<AppEvents["agent:turn-settled"], "turnId">,
+    detail: Pick<CoreHookMap["agent:turn-settled"], "turnId">,
   ): Promise<void>;
   /**
    * The round to credit with adopting `contentHash` into the editor for
@@ -82,8 +81,11 @@ export interface TurnWritesApi {
 
 export function createTurnWrites({
   fs,
+  hooks,
 }: {
   fs: Pick<FileSystemSurface, "readFiles">;
+  /** Where tool calls and settled turns are announced. */
+  hooks: Pick<Hooks, "on">;
 }): TurnWritesApi {
   /** path → the unsettled mutating calls on it, keyed task:toolCallId. */
   const inFlight = new Map<string, Map<string, InFlightCall>>();
@@ -178,10 +180,10 @@ export function createTurnWrites({
       const report = (error: unknown) =>
         console.error("Failed to attribute an agent write:", error);
       const stops = [
-        onAppEvent("agent:tool-call", (detail) => {
+        hooks.on("agent:tool-call", (detail) => {
           void api.recordToolCall(detail).catch(report);
         }),
-        onAppEvent("agent:turn-settled", (detail) => {
+        hooks.on("agent:turn-settled", (detail) => {
           void api.recordTurnSettled(detail).catch(report);
         }),
       ];
@@ -201,6 +203,7 @@ declare module "@notefig/core" {
 export const turnWritesModule = defineModule({
   name: "turnWrites",
   needs: ["platform"],
-  register: (ctx) => createTurnWrites({ fs: ctx.use("platform").fs }),
+  register: (ctx) =>
+    createTurnWrites({ fs: ctx.use("platform").fs, hooks: ctx.hooks }),
   boot: (turnWrites) => turnWrites.track(),
 });

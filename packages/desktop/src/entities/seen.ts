@@ -20,8 +20,7 @@ import {
 } from "@tanstack/db-sqlite-persistence-core";
 import type { PromptRoundsCollection } from "@/entities/prompt-rounds";
 import { agentTaskIdFromTabId, isFileTabId } from "@/entities/tabs";
-import { onAppEvent, type AppEvents } from "@/utils/app-events";
-import { defineModule } from "@notefig/core";
+import { defineModule, type CoreHookMap, type Hooks } from "@notefig/core";
 import { useModule } from "@notefig/core/react";
 
 export const SEEN_COLLECTION_ID = "seen";
@@ -55,7 +54,7 @@ export interface SeenApi {
   /** Where a settled turn shows up: its widget's document when it was a
    *  widget round, else the session's chat tab. */
   targetOfSettledTurn(
-    detail: Pick<AppEvents["agent:turn-settled"], "taskId" | "turnId">,
+    detail: Pick<CoreHookMap["agent:turn-settled"], "taskId" | "turnId">,
   ): SeenTarget;
   markSeen(target: SeenTarget, at?: number): Promise<void>;
   /** The tab in front. Its target is seen now — if the window is focused;
@@ -66,7 +65,7 @@ export interface SeenApi {
    *  time, the value its rows store, so the comparison cannot be split by
    *  two clocks. A backgrounded window has nothing in front, so a turn
    *  settling there needs attention. */
-  recordSettledTurn(detail: AppEvents["agent:turn-settled"]): Promise<void>;
+  recordSettledTurn(detail: CoreHookMap["agent:turn-settled"]): Promise<void>;
   /** Boot: the one global listener, plus the window's focus. Returns the
    *  unsubscribe. */
   track(): () => void;
@@ -85,9 +84,12 @@ function createSeenCollection(persistence: PersistedCollectionPersistence) {
 export function createSeen({
   persistence,
   rounds,
+  hooks,
 }: {
   persistence: PersistedCollectionPersistence;
   rounds: Pick<PromptRoundsCollection, "get">;
+  /** Where settled turns are announced. */
+  hooks: Pick<Hooks, "on">;
 }): SeenApi {
   const seen = createSeenCollection(persistence);
 
@@ -140,7 +142,7 @@ export function createSeen({
       };
       window.addEventListener("focus", onFocus);
       window.addEventListener("blur", onBlur);
-      const stopSettled = onAppEvent("agent:turn-settled", (detail) => {
+      const stopSettled = hooks.on("agent:turn-settled", (detail) => {
         void api.recordSettledTurn(detail).catch((error) => {
           console.error("Failed to mark a settled turn seen:", error);
         });
@@ -192,6 +194,7 @@ export const seenModule = defineModule({
     createSeen({
       persistence: ctx.use("platform").db.get(),
       rounds: ctx.use("promptRounds").collection,
+      hooks: ctx.hooks,
     }),
   boot: (seen) => seen.track(),
 });

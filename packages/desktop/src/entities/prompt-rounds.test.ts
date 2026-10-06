@@ -7,7 +7,7 @@ import {
   type PromptRoundsApi,
 } from "./prompt-rounds";
 import { createNodeTestDb } from "@/testing/node-db";
-import { emitAppEvent } from "@/utils/app-events";
+import { createHooks, type Hooks } from "@notefig/core";
 import { workspaceKey } from "@/utils/path";
 
 const started = (turnId: string, prompt = "Do the thing\nsecond line") => ({
@@ -23,12 +23,15 @@ describe("prompt rounds", () => {
   let rounds: PromptRoundsApi;
   /** The turn rows this run holds; a live round without one is an orphan. */
   let liveTurns: Set<string>;
+  let hooks: Hooks;
 
   beforeEach(() => {
     liveTurns = new Set();
+    hooks = createHooks();
     rounds = createPromptRounds({
       persistence: createNodeTestDb().get(),
       turns: { get: (turnId) => (liveTurns.has(turnId) ? ({ turnId } as never) : undefined) },
+      hooks,
     });
   });
 
@@ -94,9 +97,9 @@ describe("prompt rounds", () => {
 
   it("the boot listener records rounds from the app events", async () => {
     const stop = rounds.track();
-    emitAppEvent("widget:round-started", started("t9"));
+    hooks.emit("widget:round-started", started("t9"));
     await vi.waitFor(() => expect(rounds.collection.get("t9")).toBeDefined());
-    emitAppEvent("agent:turn-settled", { taskId: "task_1", turnId: "t9", status: "completed", at: 1 });
+    hooks.emit("agent:turn-settled", { taskId: "task_1", turnId: "t9", status: "completed", at: 1 });
     await vi.waitFor(() => expect(rounds.collection.get("t9")?.status).toBe("completed"));
     stop();
   });

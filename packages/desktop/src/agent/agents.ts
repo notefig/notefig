@@ -18,9 +18,9 @@ import {
 import type { AgentStore, AgentTurn } from "./agent-collections";
 import type { AgentRuntime } from "./agent-service";
 import { encodeWidgetContextUri } from "@notefig/agent";
-import { emitAppEvent } from "@/utils/app-events";
 import type { KvApi } from "@/utils/kv-store";
 import { path as pathutil, workspaceKey } from "@/utils/path";
+import { type Hooks } from "@notefig/core";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -202,6 +202,8 @@ export interface AgentsDeps {
   openAgentTab(taskId: string): void;
   isOpen(workspacePath: string): boolean;
   ensureRuntime(): boolean;
+  /** Where the widget's round start is announced (core's hook bus). */
+  hooks: Pick<Hooks, "emit">;
 }
 
 export function createAgents({
@@ -211,6 +213,7 @@ export function createAgents({
   openAgentTab,
   isOpen,
   ensureRuntime,
+  hooks,
 }: AgentsDeps): AgentsApi {
   /**
    * Trust granted in this run. The KV write is durable only after it
@@ -297,7 +300,7 @@ export function createAgents({
         const sent = sendFromWidget(text, widget, extraContextParts);
         // The round begins in the widget's document — announced here, by
         // the one send path, so no caller can send without it.
-        emitAppEvent("widget:round-started", {
+        hooks.emit("widget:round-started", {
           taskId,
           turnId: sent.turnId,
           workspacePath: widget.workspacePath,

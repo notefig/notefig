@@ -8,7 +8,6 @@ import {
   createWorkspaceGit,
   fetchGitRows,
   gitModule,
-  invalidateGit,
   type GitCheckpointRow,
   type GitRepoRow,
 } from "./git";
@@ -226,15 +225,15 @@ describe("gitModule", () => {
     await core.workspace(WS).git.collection.preload();
     statusMock.mockClear();
 
-    invalidateGit("/somewhere-else");
+    core.hooks.emit("git:stale", { workspacePath: "/somewhere-else" });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(statusMock).not.toHaveBeenCalled();
 
-    invalidateGit(WS);
+    core.hooks.emit("git:stale", { workspacePath: WS });
     await vi.waitFor(() => expect(statusMock).toHaveBeenCalledTimes(1));
 
     await core.workspace(WS).close();
-    invalidateGit(WS);
+    core.hooks.emit("git:stale", { workspacePath: WS });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(statusMock).toHaveBeenCalledTimes(1);
   });

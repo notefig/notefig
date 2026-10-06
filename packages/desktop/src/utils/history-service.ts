@@ -11,10 +11,9 @@
  * every completed agent turn in its workspace.
  */
 import type { GitRepoRef, GitService } from "@notefig/git";
-import { defineModule } from "@notefig/core";
+import { defineModule, type Hooks } from "@notefig/core";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import type { GitWorker } from "@/utils/git-worker-client";
-import { emitAppEvent, onAppEvent } from "@/utils/app-events";
 import { path as pathutil, workspaceKey } from "@/utils/path";
 import { ensureExcludeLines, type ExcludeFs } from "@/utils/git-exclude";
 import { APP_DIR_NAME, SCRATCHPADS_REL_PATH } from "@/utils/app-dir";
@@ -49,6 +48,9 @@ export interface HistoryDeps {
   fs: ExcludeFs & Pick<FileSystemSurface, "exists">;
   /** Where repos run: the git worker in the app. */
   git: GitWorker;
+  /** Where a checkpoint announces `git:stale`: the commit lands in the
+   *  hidden gitdir, which no watcher sees. */
+  hooks: Pick<Hooks, "emit">;
 }
 
 /** One workspace's history repo — `core.workspace(ws).history`. */
@@ -75,6 +77,7 @@ export function createWorkspaceHistory({
   workspacePath,
   fs,
   git,
+  hooks,
 }: HistoryDeps): WorkspaceHistory {
   const gitDir = historyGitDir(workspacePath);
   let service: GitService | null = null;
@@ -135,8 +138,11 @@ export function createWorkspaceHistory({
     ready,
     read: async (ref, relativePath) =>
       (await ready()).readTextFile({ ref, filepath: relativePath }),
-    checkpoint: async (message, author) =>
-      (await ready()).addAllAndCommit({ message, author }),
+    async checkpoint(message, author) {
+      const oid = await (await ready()).addAllAndCommit({ message, author });
+      hooks.emit("git:stale", { workspacePath });
+      return oid;
+    },
     dispose() {
       disposed = true;
       service = null;
@@ -171,6 +177,7 @@ export const historyModule = defineModule({
         workspacePath: pathutil.normalize(ctx.workspace.path),
         fs: ctx.use("platform").fs,
         git: ctx.use("gitWorker"),
+        hooks: ctx.hooks,
       });
       const instance: WorkspaceHistory = {
         ...history,
@@ -181,7 +188,7 @@ export const historyModule = defineModule({
       };
       // One checkpoint per completed agent turn here (Track D.3),
       // best-effort: history is a convenience, never a turn's failure.
-      const stopCheckpointing = onAppEvent(
+      const stopCheckpointing = ctx.hooks.on(
         "agent:turn-completed",
         ({ workspacePath, prompt, harnessId }) => {
           if (workspaceKey(workspacePath) !== ctx.workspace.key) return;
@@ -190,8 +197,6 @@ export const historyModule = defineModule({
               name: harnessId,
               email: "agent@notefig.local",
             })
-            // The commit lands in the hidden gitdir, which no watcher sees.
-            .then(() => emitAppEvent("git:stale", { workspacePath }))
             .catch((error: unknown) =>
               console.warn("[history] turn checkpoint failed:", error),
             );

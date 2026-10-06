@@ -15,7 +15,6 @@ import { IGNORE_RULES, isIgnoredPath } from "./ignore";
 import { relativeTreePath } from "./path";
 import { PORTAL_ID } from "./portal-id";
 import { getDocumentSync } from "./markdown-conversion";
-import { emitAppEvent } from "./app-events";
 
 /**
  * Watch-id construction, in one place for both kinds.
@@ -128,11 +127,7 @@ async function applyMetadataRenamed(
 /** What changed, for whoever derives state from these paths (project
  *  settings), after any change the watcher reports. */
 function announceChanged(files: WorkspaceFiles, paths: string[]): void {
-  emitAppEvent("files:changed", {
-    workspacePath: files.workspacePath,
-    paths,
-  });
-  files.invalidateDerived();
+  files.changed(paths);
 }
 
 export async function handleMetadataFileSystemChange(

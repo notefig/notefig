@@ -11,9 +11,9 @@ import {
 } from "../agents";
 import { testAgents } from "@/testing/test-agents";
 import { testKv } from "@/testing/test-kv";
-import { onAppEvent } from "@/utils/app-events";
 import type { KvApi } from "@/utils/kv-store";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
+import { type Hooks } from "@notefig/core";
 
 const harness = BUILT_IN_HARNESSES[0];
 
@@ -22,9 +22,10 @@ const harness = BUILT_IN_HARNESSES[0];
 let runtime: AgentRuntime;
 let store: AgentStore;
 let agents: AgentsApi;
+let hooks: Hooks;
 
 beforeEach(() => {
-  ({ runtime, store, agents } = testAgents());
+  ({ runtime, store, agents, hooks } = testAgents());
 });
 
 describe("agents facade (Stage 1)", () => {
@@ -307,9 +308,9 @@ describe("the widget's send path", () => {
     const task = runtime.managerFor("/ws").createTask(harness);
     await task.start(() => client);
     const rounds: unknown[] = [];
-    const stop = onAppEvent("widget:round-started", (detail) =>
-      rounds.push(detail),
-    );
+    const stop = hooks.on("widget:round-started", (detail) => {
+      rounds.push(detail);
+    });
 
     const { turnId, completed } = agents
       .task(task.taskId)

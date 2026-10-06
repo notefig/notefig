@@ -6,6 +6,7 @@ import type {
 } from "@/adapters/platform-adapter.interface";
 import { contentWatchIdFor, metadataWatchIdFor } from "../file-sync";
 import { createWorkspaceFiles, type WorkspaceFiles } from "@/entities/files";
+import { createHooks } from "@notefig/core";
 
 // MET-177 Stage B: with several workspaces open, fs events must only reach
 // the watch that produced them. Historically the payload carried no watch
@@ -65,11 +66,13 @@ beforeEach(async () => {
     workspacePath: WS_A,
     fs,
     queryClient: new QueryClient(),
+    hooks: createHooks(),
   });
   filesB = createWorkspaceFiles({
     workspacePath: WS_B,
     fs,
     queryClient: new QueryClient(),
+    hooks: createHooks(),
   });
   await filesA.collections.metadata.preload();
   await filesB.collections.metadata.preload();

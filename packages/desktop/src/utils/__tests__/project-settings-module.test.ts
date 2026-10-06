@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { createCore } from "@notefig/core";
-import { emitAppEvent } from "@/utils/app-events";
 import {
   projectSettingsModule,
   projectSettingsQueryKey,
@@ -19,13 +18,13 @@ describe("projectSettingsModule", () => {
     const key = projectSettingsQueryKey("/ws");
     queryClient.setQueryData(key, { settings: {} });
 
-    emitAppEvent("files:changed", {
+    core.hooks.emit("files:changed", {
       workspacePath: "/ws",
       paths: ["/ws/a.md"],
     });
     expect(queryClient.getQueryState(key)?.isInvalidated).toBe(false);
 
-    emitAppEvent("files:changed", {
+    core.hooks.emit("files:changed", {
       workspacePath: "/ws",
       paths: ["/ws/metrists.json"],
     });

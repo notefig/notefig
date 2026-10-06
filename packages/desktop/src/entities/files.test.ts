@@ -6,6 +6,7 @@ import type {
   FileSystemSurface,
 } from "@/adapters/platform-adapter.interface";
 import { createWorkspaceFiles, type WorkspaceFiles } from "./files";
+import { createHooks } from "@notefig/core";
 
 // Real TanStack DB collections over an fs handed to them. This pins the
 // create → write → read → delete round-trip through the actual metadata and
@@ -80,6 +81,7 @@ beforeEach(async () => {
     workspacePath: WS,
     fs: adapter as unknown as FileSystemSurface,
     queryClient: new QueryClient(),
+    hooks: createHooks(),
   });
 
   // Start the collections' sync (a live-query subscription does this in the

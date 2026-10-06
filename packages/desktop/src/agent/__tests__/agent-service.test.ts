@@ -9,9 +9,9 @@ import {
 import type { AgentStore } from "../agent-collections";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import { APP_DIR_NAME } from "@/utils/app-dir";
-import { onAppEvent } from "@/utils/app-events";
 import type { AgentTask } from "../agent-service";
 import { testAgents } from "@/testing/test-agents";
+import type { Hooks } from "@notefig/core";
 
 // A tiny in-memory disk, consulted only for the devin project config:
 // the path a task writes is the one the next read sees, so those tests
@@ -77,6 +77,7 @@ function createMcpEndpoint(): McpEndpoint {
 // A fresh agent layer per test, over the fakes above. Tasks reach their
 // workspace's documents through it, over the same fake fs.
 let deps: AgentRuntimeDeps;
+let hooks: Hooks;
 let store: AgentStore;
 let runtime: AgentRuntime;
 
@@ -135,7 +136,7 @@ beforeEach(() => {
   deleteFiles.mockClear();
   mcpEndpoints.length = 0;
   const fs = { readFiles, writeFiles, deleteFiles };
-  ({ deps, store, runtime } = testAgents({
+  ({ deps, hooks, store, runtime } = testAgents({
     fs,
     proc: {
       createMcpEndpoint,
@@ -690,9 +691,9 @@ describe("AgentTask vertical slice", () => {
     // the sidebar) learn a turn is over only from the event — deleting the
     // rows tells them nothing (MET-208).
     const settled: { turnId: string; status: string }[] = [];
-    const stopListening = onAppEvent("agent:turn-settled", (detail) =>
-      settled.push({ turnId: detail.turnId, status: detail.status }),
-    );
+    const stopListening = hooks.on("agent:turn-settled", (detail) => {
+      settled.push({ turnId: detail.turnId, status: detail.status });
+    });
 
     task.removeQueuedPrompt(removed.turnId);
 

@@ -19,7 +19,7 @@
  * the debounced invalidation every write shares.
  */
 import { useEffect, useMemo } from "react";
-import { defineModule } from "@notefig/core";
+import { defineModule, type Hooks } from "@notefig/core";
 import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import {
   createCollection,
@@ -43,7 +43,6 @@ import {
 import type { FileEntry } from "@/utils/fs";
 import { IGNORE_RULES } from "@/utils/ignore";
 import { calculateContentHash } from "@/utils/hash";
-import { emitAppEvent } from "@/utils/app-events";
 import { path as pathutil, relativeTreePath, workspaceKey } from "@/utils/path";
 import {
   startContentWatcher,
@@ -83,6 +82,17 @@ export interface FilesDeps {
   workspacePath: string;
   fs: FileSystemSurface;
   queryClient: QueryClient;
+  /** Where `files:changed` and `git:stale` are announced. */
+  hooks: Pick<Hooks, "emit">;
+}
+
+declare module "@notefig/core" {
+  interface CoreHookMap {
+    /** The watcher reported changes in a workspace (created, deleted,
+     *  renamed or rewritten paths), already applied to its file rows. For
+     *  state derived from particular files (project settings). */
+    "files:changed": { workspacePath: string; paths: string[] };
+  }
 }
 
 /** The query keys a workspace's collections live under — also what the
@@ -495,6 +505,9 @@ export interface WorkspaceFiles {
   /** Search results and git rows go stale (debounced): a write the
    *  watcher suppresses, or a change the watcher reported. */
   invalidateDerived(): void;
+  /** The watcher reported these paths changed, and their rows are
+   *  updated: announce `files:changed`, then the derived state goes stale. */
+  changed(paths: string[]): void;
   /** Watch content of these open files (replacing the previous set; an
    *  empty set stops the content watch). */
   watchContent(paths: string[]): void;
@@ -509,7 +522,7 @@ export interface WorkspaceFiles {
 }
 
 export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
-  const { workspacePath, fs, queryClient } = deps;
+  const { workspacePath, fs, queryClient, hooks } = deps;
   /** Directories whose children have been stat'd: the queryFn re-stats
    *  them on every refetch. */
   const hydratedDirs = new Set<string>();
@@ -549,8 +562,13 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
       void queryClient.invalidateQueries({
         queryKey: ["search-content", workspacePath],
       });
-      emitAppEvent("git:stale", { workspacePath });
+      hooks.emit("git:stale", { workspacePath });
     }, INVALIDATE_DEBOUNCE_MS);
+  };
+
+  const changed = (paths: string[]) => {
+    hooks.emit("files:changed", { workspacePath, paths });
+    invalidateDerived();
   };
 
   const updateLoadedContent = (path: string, content: string) => {
@@ -877,6 +895,7 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
     hydrateDirectoryStats,
     updateLoadedContent,
     invalidateDerived,
+    changed,
     watchContent: (paths) => {
       if (paths.length === 0) {
         contentWatcher?.stop();
@@ -944,6 +963,7 @@ export const filesModule = defineModule({
         workspacePath: pathutil.normalize(ctx.workspace.path),
         fs: ctx.use("platform").fs,
         queryClient: ctx.use("queryClient"),
+        hooks: ctx.hooks,
       }),
     dispose: (files) => files.dispose(),
   },

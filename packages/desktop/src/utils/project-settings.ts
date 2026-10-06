@@ -13,7 +13,6 @@ import { useQuery, type QueryClient } from "@tanstack/react-query";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { defineModule } from "@notefig/core";
 import { useModule } from "@notefig/core/react";
-import { onAppEvent } from "./app-events";
 import { path as pathutil } from "./path";
 
 export const PROJECT_SETTINGS_FILENAME = "metrists.json";
@@ -164,7 +163,7 @@ export const projectSettingsModule = defineModule({
     }),
   boot: (_api, ctx) => {
     const queryClient = ctx.use("queryClient");
-    return onAppEvent("files:changed", ({ workspacePath, paths }) => {
+    return ctx.hooks.on("files:changed", ({ workspacePath, paths }) => {
       if (!paths.includes(projectSettingsPath(workspacePath))) return;
       void queryClient.invalidateQueries({
         queryKey: projectSettingsQueryKey(workspacePath),

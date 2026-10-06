@@ -10,7 +10,7 @@ import {
 import { createPromptRounds, type PromptRoundsApi } from "./prompt-rounds";
 import { agentTabId, RELEASE_NOTES_TAB_ID } from "@/entities/tabs";
 import { createNodeTestDb } from "@/testing/node-db";
-import { emitAppEvent } from "@/utils/app-events";
+import { createHooks, type Hooks } from "@notefig/core";
 
 const settled = (taskId: string, turnId: string, at = 1) =>
   ({ taskId, turnId, status: "completed", at }) as const;
@@ -18,14 +18,17 @@ const settled = (taskId: string, turnId: string, at = 1) =>
 describe("seen", () => {
   let rounds: PromptRoundsApi;
   let seen: SeenApi;
+  let hooks: Hooks;
 
   beforeEach(() => {
     const db = createNodeTestDb();
+    hooks = createHooks();
     rounds = createPromptRounds({
       persistence: db.get(),
       turns: { get: () => undefined },
+      hooks,
     });
-    seen = createSeen({ persistence: db.get(), rounds: rounds.collection });
+    seen = createSeen({ persistence: db.get(), rounds: rounds.collection, hooks });
   });
 
   it("maps tabs to targets: task for chat tabs, document for files, nothing else", () => {
@@ -82,7 +85,7 @@ describe("seen", () => {
       prompt: "p",
     });
     const at = Date.now() + 1_000;
-    emitAppEvent("agent:turn-settled", settled("task_9", "t9", at));
+    hooks.emit("agent:turn-settled", settled("task_9", "t9", at));
     // Seen at the turn's own settle time — the value its round stores.
     await vi.waitFor(() =>
       expect(seen.collection.get("document:/ws/doc.md")?.lastSeenAt).toBe(at),

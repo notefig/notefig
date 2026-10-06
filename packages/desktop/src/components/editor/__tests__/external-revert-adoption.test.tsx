@@ -48,6 +48,7 @@ import {
 import { handleContentFileSystemChange } from "@/utils/file-sync";
 import { calculateContentHash } from "@/utils/hash";
 import type { FileEntry } from "@/utils/fs";
+import { createHooks } from "@notefig/core";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -174,6 +175,7 @@ async function setupWorkspace(seed: number) {
     workspacePath: WS,
     fs: fake.adapter as unknown as FileSystemSurface,
     queryClient: new QueryClient(),
+    hooks: createHooks(),
   });
   fake.reseed(seed);
 

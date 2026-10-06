@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GitRepoRef, GitService } from "@notefig/git";
-import { createCore } from "@notefig/core";
-import { emitAppEvent } from "@/utils/app-events";
+import { createCore, createHooks } from "@notefig/core";
 import { workspaceKey } from "@/utils/path";
 import {
   createWorkspaceHistory,
@@ -64,7 +63,12 @@ beforeEach(() => {
 });
 
 const history = () =>
-  createWorkspaceHistory({ workspacePath: WS, fs: disk.fs, git: repos.git });
+  createWorkspaceHistory({
+    workspacePath: WS,
+    fs: disk.fs,
+    git: repos.git,
+    hooks: createHooks(),
+  });
 
 describe("a workspace's history repo", () => {
   it("resolves the gitdir to .notefig/.git", () => {
@@ -163,12 +167,12 @@ describe("historyModule", () => {
       .mockResolvedValue("abc123");
 
     const turn = { taskId: "t", turnId: "u", harnessId: "claude-code" };
-    emitAppEvent("agent:turn-completed", {
+    core.hooks.emit("agent:turn-completed", {
       ...turn,
       workspacePath: "/elsewhere",
       prompt: "not here",
     });
-    emitAppEvent("agent:turn-completed", {
+    core.hooks.emit("agent:turn-completed", {
       ...turn,
       workspacePath: WS,
       prompt: "x".repeat(80),

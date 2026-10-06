@@ -3,6 +3,7 @@ import { QueryClient } from "@tanstack/react-query";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { handleMetadataFileSystemChange as applyChange } from "../file-sync";
 import { createWorkspaceFiles, type WorkspaceFiles } from "@/entities/files";
+import { createHooks } from "@notefig/core";
 
 // The frontend backstop for ignore rules: whatever the platform watchers
 // let through (browser adapters have no Rust-side filter), nothing ignored
@@ -43,6 +44,7 @@ beforeEach(async () => {
     workspacePath: WS,
     fs,
     queryClient: new QueryClient(),
+    hooks: createHooks(),
   });
   await files.collections.metadata.preload();
 });

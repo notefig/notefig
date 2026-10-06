@@ -33,7 +33,6 @@ import {
   type RepoStatus,
 } from "@notefig/git";
 import { isWorkspaceAccessError } from "@/adapters/platform-adapter.interface";
-import { emitAppEvent, onAppEvent } from "@/utils/app-events";
 import { path as pathutil, workspaceKey } from "@/utils/path";
 import type { WorkspaceHistory } from "@/utils/history-service";
 
@@ -366,6 +365,13 @@ declare module "@notefig/core" {
   interface WorkspaceModules {
     git: WorkspaceGit;
   }
+  interface CoreHookMap {
+    /** Something git cannot see changed a workspace's history: a file the
+     *  app wrote (its watcher echo is suppressed), or a commit into the
+     *  hidden gitdir. That workspace's git rows go stale; its git instance,
+     *  if it is open, refetches. */
+    "git:stale": { workspacePath: string };
+  }
 }
 
 export const gitModule = defineModule({
@@ -379,7 +385,7 @@ export const gitModule = defineModule({
         queryClient: ctx.use("queryClient"),
         history: ctx.useWorkspace("history"),
       });
-      const stopListening = onAppEvent("git:stale", ({ workspacePath }) => {
+      const stopListening = ctx.hooks.on("git:stale", ({ workspacePath }) => {
         if (workspaceKey(workspacePath) === ctx.workspace.key) {
           git.invalidate();
         }
@@ -395,15 +401,6 @@ export const gitModule = defineModule({
     dispose: (git) => git.dispose(),
   },
 });
-
-/**
- * Say a workspace's git rows are stale, for code that changed what git
- * reads without going through git (file writes, the agent's checkpoints).
- * The workspace's git instance, if it is open, refetches.
- */
-export function invalidateGit(workspacePath: string): void {
-  emitAppEvent("git:stale", { workspacePath });
-}
 
 // ---------------------------------------------------------------------------
 // Reading the rows from React

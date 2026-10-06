@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient } from "@tanstack/react-query";
-import { createCore, defineModule } from "@notefig/core";
+import { createCore, defineModule, createHooks } from "@notefig/core";
 import { CoreProvider } from "@notefig/core/react";
 import type {
   BatchResult,
@@ -101,6 +101,7 @@ beforeEach(async () => {
     workspacePath: WS,
     fs,
     queryClient: new QueryClient(),
+    hooks: createHooks(),
   });
   pads = createWorkspaceScratchpads({
     workspacePath: WS,

@@ -12,7 +12,6 @@ import { createLoopbackPair } from "@notefig/agent";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import { FakeAgent } from "@/agent/mock-harness";
 import { TaskManager, type AgentTask } from "@/agent/agent-service";
-import { emitAppEvent } from "@/utils/app-events";
 import {
   createPromptRounds,
   derivePromptRounds,
@@ -40,7 +39,7 @@ function shownStatus(turnId: string): string | undefined {
 /** Send through the widget host's path: prompt + the round-started event. */
 function sendRound(task: AgentTask, text: string): string {
   const { turnId } = task.prompt(text);
-  emitAppEvent("widget:round-started", {
+  agentLayer.hooks.emit("widget:round-started", {
     taskId: task.taskId,
     turnId,
     workspacePath: "/ws",
@@ -66,6 +65,7 @@ describe("interrupted prompt rounds", () => {
     rounds = createPromptRounds({
       persistence: createNodeTestDb().get(),
       turns: agentLayer.store.turns,
+      hooks: agentLayer.hooks,
     });
     stop?.();
     stop = rounds.track();
