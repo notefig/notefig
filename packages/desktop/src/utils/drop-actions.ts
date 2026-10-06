@@ -6,9 +6,9 @@
  */
 
 import type { PayloadOfKind } from "@/utils/drag-protocol";
-import type { WorkspaceFiles } from "@/entities/files";
+import type { WorkspaceFiles } from "@/modules/files";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
-import type { EditorsApi } from "@/entities/editors";
+import type { EditorsApi } from "@/modules/editors";
 import { getFileName } from "@/utils/fs";
 import { path as pathutil } from "@/utils/path";
 

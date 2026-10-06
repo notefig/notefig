@@ -19,11 +19,11 @@
  */
 import { findBlobs, patchBlobInMarkdown } from "@notefig/shared/blobs";
 import { toast } from "sonner";
-import type { AgentsApi } from "@/agent/agents";
+import type { AgentsApi } from "@/modules/agents/agents";
 import i18n from "@/utils/intl";
-import type { DocumentsApi } from "@/entities/documents";
+import type { DocumentsApi } from "@/modules/documents";
 import { createMarkdownCodec } from "../markdown-codec";
-import type { EditorsApi } from "@/entities/editors";
+import type { EditorsApi } from "@/modules/editors";
 import { getBlobType } from "./blob-registry";
 
 export type AnswerBlobResult =

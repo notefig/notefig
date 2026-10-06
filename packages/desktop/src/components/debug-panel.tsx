@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useFocusedWorkspace } from "@/entities/workspaces";
+import { useFocusedWorkspace } from "@/modules/workspaces/react";
 import { path as pathutil } from "@/utils/path";
 import { Button } from "@notefig/ui/button";
 import { Input } from "@notefig/ui/input";
@@ -21,7 +21,7 @@ import {
   AlertTriangle,
   ShieldOff,
 } from "lucide-react";
-import type { KvApi } from "@/utils/kv-store";
+import type { KvApi } from "@/modules/kv";
 import { useModule } from "@notefig/core/react";
 import { SETTINGS_NAMESPACE } from "@/hooks/use-app-settings";
 import type { LayoutNode } from "@/components/dockable";
@@ -35,13 +35,13 @@ import {
 } from "@/utils/layout-codec";
 import {
   isMarkdownInstance,
-} from "@/entities/editors";
+} from "@/modules/editors";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLiveQuery } from "@tanstack/react-db";
 // Type-only import — erased at runtime, so the crash panel stays
 // self-sufficient (its only runtime dependency is the QueryClient).
-import type { GitRow } from "@/entities/git";
-import { useAgentStore } from "@/agent/agent-collections";
+import type { GitRow } from "@/modules/git";
+import { useAgentStore } from "@/modules/agents/react";
 import { buildSessionRecording } from "./debug-panel-recording";
 
 function useQueryCacheTick(): number {
@@ -286,7 +286,7 @@ function DebugPanelContent({
   );
   useQueryCacheTick();
   const queryClient = useQueryClient();
-  // Key hand-inlined on purpose (self-sufficiency): matches entities/git.ts's
+  // Key hand-inlined on purpose (self-sufficiency): matches modules/git/git.ts's
   // gitQueryKey — the git collection stores its GitRow[] in the query cache.
   // Normalized, because gitQueryKey normalizes; a respelled basePath would
   // otherwise read an empty cache and the panel would show no git state.

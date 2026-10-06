@@ -15,7 +15,7 @@ import { useModule } from "@notefig/core/react";
 import {
   closePairDialog,
   usePairDialog,
-} from "@/agent/tunnel/pair-dialog-store";
+} from "@/modules/agents/tunnel/pair-dialog-store";
 
 /**
  * The workspace-level "connect a machine" modal. Replaces the old `/pair`

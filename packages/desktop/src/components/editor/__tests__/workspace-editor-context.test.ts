@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { createEditors, getWorkspaceEditorContext } from "@/entities/editors";
-import { createLayout, type LayoutApi } from "@/entities/layout";
+import { createEditors, getWorkspaceEditorContext } from "@/modules/editors";
+import { createLayout, type LayoutApi } from "@/modules/layout";
 import type { LayoutNode } from "@/components/dockable";
 import { memoryUrlState } from "@/testing/test-core";
 

@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import i18n from "@/utils/intl";
-import { describeTaskMeta } from "@/entities/agents";
+import { describeTaskMeta } from "@/modules/agents/react";
 import { formatTimeAgo } from "@/utils/format";
 import { HarnessRow } from "@/components/agent/harness-settings";
 import { SessionRow } from "@/components/agent/sessions-panel";

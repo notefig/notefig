@@ -5,7 +5,7 @@ import { GripVertical } from "lucide-react";
 import type { FileEntry } from "../../utils/fs";
 import { usePlatform } from "@/core/use-platform";
 import { getOrCreateEditor } from "@/components/editor/editor-store";
-import { isMarkdownInstance } from "@/entities/editors";
+import { isMarkdownInstance } from "@/modules/editors";
 import { useEditorFileSync } from "./use-editor-file-sync";
 import { useEditorFocusLifecycle } from "./use-editor-focus-lifecycle";
 import { useEditorViewportMemory } from "./use-editor-viewport-memory";

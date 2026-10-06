@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
-import { createWorkspaceFiles, type WorkspaceFiles } from "@/entities/files";
+import { createWorkspaceFiles, type WorkspaceFiles } from "@/modules/files";
 import { mentionContextParts } from "../prompt-widget-host";
 import { createHooks } from "@notefig/core";
 

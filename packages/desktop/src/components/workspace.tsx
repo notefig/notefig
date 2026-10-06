@@ -15,23 +15,15 @@ import { cn } from "@notefig/ui/utils";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
-import {
-  useContentFetching,
-  useContentWatches,
-  useOpenFileRows,
-} from "@/entities/files";
-import {
-  useFocusedWorkspace,
-  useOpenWorkspacesReady,
-  useWorkspaceOfPath,
-} from "@/entities/workspaces";
-import { useWorkspaceTabs } from "@/entities/tabs";
+import { useContentFetching, useContentWatches, useOpenFileRows } from "@/modules/files/react";
+import { useFocusedWorkspace, useOpenWorkspacesReady, useWorkspaceOfPath } from "@/modules/workspaces/react";
+import { useWorkspaceTabs } from "@/modules/tabs/react";
 import { DebugPanel } from "./debug-panel";
 import { useOpenProject } from "@/hooks/use-open-project";
 import { Welcome } from "@/components/welcome";
 import { usePlatform } from "@/core/use-platform";
 import { usePublishAppStatus } from "@/hooks/use-app-status";
-import { useProjectSettings } from "@/utils/project-settings";
+import { useProjectSettings } from "@/modules/project-settings/react";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
 import { useWorkspaceCommands } from "@/hooks/use-workspace-commands";
 import { useWorkspacePanels } from "@/hooks/use-workspace-panels";
@@ -40,10 +32,10 @@ import { useSidebarCollapseTween } from "@/hooks/use-sidebar-collapse-tween";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
 import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary";
 import { useThrowWorkspaceAccessError } from "@/components/workspace-error-boundary";
-import { isFileTabId } from "@/entities/tabs";
+import { isFileTabId } from "@/modules/tabs";
 import { useCore } from "@notefig/core/react";
-import { useTrackActiveTab } from "@/entities/seen";
-import { useTabElements } from "@/tabs/tab-types";
+import { useTrackActiveTab } from "@/modules/seen/react";
+import { useTabElements } from "@/modules/tabs/tab-types";
 import { useReleaseNotesOnUpdate } from "@/hooks/use-release-notes-on-update";
 import {
   type FileTreeMode,

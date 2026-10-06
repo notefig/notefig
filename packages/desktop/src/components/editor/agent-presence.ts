@@ -7,7 +7,7 @@
  * agent-service.ts derives them from `rawInput.path` instead.
  */
 import { useLiveQuery, eq } from "@tanstack/react-db";
-import { useAgentStore } from "@/agent/agent-collections";
+import { useAgentStore } from "@/modules/agents/react";
 
 const ACTIVE_STATUSES = new Set(["pending", "in_progress"]);
 

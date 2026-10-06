@@ -5,20 +5,20 @@
  */
 import type { McpEndpoint } from "@notefig/agent";
 import { createHooks, type Hooks } from "@notefig/core";
-import { createAgentStore, type AgentStore } from "@/agent/agent-collections";
+import { createAgentStore, type AgentStore } from "@/modules/agents/agent-collections";
 import {
   createAgentRuntime,
   type AgentRuntime,
   type AgentRuntimeDeps,
-} from "@/agent/agent-service";
-import { createAgents, type AgentsApi, type AgentsDeps } from "@/agent/agents";
-import { createDocuments } from "@/entities/documents";
-import { createEditors } from "@/entities/editors";
-import { createLayout } from "@/entities/layout";
+} from "@/modules/agents/agent-service";
+import { createAgents, type AgentsApi, type AgentsDeps } from "@/modules/agents/agents";
+import { createDocuments } from "@/modules/documents";
+import { createEditors } from "@/modules/editors";
+import { createLayout } from "@/modules/layout";
 import { createNodeTestDb } from "./node-db";
 import { memoryUrlState } from "./test-core";
 import { testKv } from "./test-kv";
-import type { KvApi } from "@/utils/kv-store";
+import type { KvApi } from "@/modules/kv";
 
 /** A fresh, empty agent store. */
 export function testAgentStore(): AgentStore {

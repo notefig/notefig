@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AgentTaskMeta } from "@/entities/agents";
-import type { PromptRound } from "@/entities/prompt-rounds";
-import type { RecentDocument } from "@/entities/recent-documents";
-import type { AttentionItem } from "@/entities/attention";
+import type { AgentTaskMeta } from "@/modules/agents/react";
+import type { PromptRound } from "@/modules/prompt-rounds";
+import type { RecentDocument } from "@/modules/recent-documents";
+import type { AttentionItem } from "@/utils/attention";
 import { deriveAppStatus, type AppStatusInputs } from "./use-app-status";
 
 vi.mock("@/utils/intl", () => ({ default: { t: (key: string) => key } }));

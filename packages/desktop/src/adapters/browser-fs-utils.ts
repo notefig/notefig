@@ -75,7 +75,7 @@ export function getRelativePath(path: string, workspaceRoot: string): string {
  * scratchpads folder; everything else it holds (`.notefig/.git`, agent
  * state, …) is hidden by position rather than by name. Mirrors
  * walkdir_utils::{APP_DIR_NAME, APP_VISIBLE_CHILD_NAME} and
- * entities/scratchpads.ts. */
+ * modules/scratchpads/scratchpads.ts. */
 const APP_DIR_NAME = ".notefig";
 const APP_VISIBLE_CHILD_NAME = "scratchpads";
 

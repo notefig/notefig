@@ -40,12 +40,12 @@ import {
   createWorkspaceFiles,
   type FileMetadata,
   type WorkspaceFiles,
-} from "@/entities/files";
+} from "@/modules/files";
 import {
   closeDocumentSync,
   resetConverterForTests,
 } from "@/utils/markdown-conversion";
-import { handleContentFileSystemChange } from "@/utils/file-sync";
+import { handleContentFileSystemChange } from "@/modules/files/file-sync";
 import { calculateContentHash } from "@/utils/hash";
 import type { ContentChangeEvent } from "@/adapters/platform-adapter.interface";
 import type { FileEntry } from "@/utils/fs";

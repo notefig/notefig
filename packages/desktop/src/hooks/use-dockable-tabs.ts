@@ -8,9 +8,9 @@ import {
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { useCore } from "@notefig/core/react";
 import type { LayoutNode } from "@/components/dockable";
-import { useLayout } from "@/entities/layout";
-import type { OpenTabOptions } from "@/entities/tabs";
-import { getTabSelectedText, setActiveTab } from "@/tabs/tab-controllers";
+import { useLayout } from "@/modules/layout/react";
+import type { OpenTabOptions } from "@/modules/tabs";
+import { getTabSelectedText, setActiveTab } from "@/modules/tabs/tab-controllers";
 import type { FileTreeNode } from "@/utils/fs";
 
 export interface UseDockableTabsOptions {
@@ -48,7 +48,7 @@ export interface UseDockableTabsResult {
  * The dock's React half: re-renders on layout and focused-window changes,
  * keeps the focus arbiter pointed at the active tab, and binds the tab
  * hotkeys. Every change to tabs goes through `core.tabs`; what each tab
- * *renders* is `tabs/tab-types.tsx`.
+ * *renders* is `modules/tabs/tab-types.tsx`.
  */
 export function useDockableTabs(
   options: UseDockableTabsOptions = {},

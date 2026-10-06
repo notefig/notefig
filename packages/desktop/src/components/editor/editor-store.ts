@@ -2,7 +2,7 @@
  * Editor instance factory: builds the Tiptap editor for a document and the
  * container instances for image, code and release-notes tabs, registers
  * each with the editors the surface was handed (`core.editors`,
- * `entities/editors.ts`) and publishes its tab controller. Everything that
+ * `modules/editors/editors.ts`) and publishes its tab controller. Everything that
  * only looks an editor up goes through that instance.
  */
 
@@ -35,8 +35,8 @@ import {
   type TabController,
   type TabFocusOptions,
   type TabSearchOptions,
-} from "@/tabs/tab-controllers";
-import type { TabKind } from "@/tabs/tab-id";
+} from "@/modules/tabs/tab-controllers";
+import type { TabKind } from "@/modules/tabs/tab-id";
 import { resolveSearchTarget, type SearchTarget } from "./editor-position";
 import { createMarkdownCodec } from "./markdown-codec";
 import {
@@ -47,7 +47,7 @@ import {
   type EditorTarget,
   type EditorType,
   type MarkdownInstance,
-} from "@/entities/editors";
+} from "@/modules/editors";
 import { pageLinkHref } from "./tiptap-link-utils";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { getDirectoryPath } from "@/utils/fs";

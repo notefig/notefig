@@ -7,7 +7,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { defineModule, type AnyModule, createHooks } from "@notefig/core";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
-import { createWorkspaceFiles, type WorkspaceFiles } from "@/entities/files";
+import { createWorkspaceFiles, type WorkspaceFiles } from "@/modules/files";
 import { workspaceKey } from "@/utils/path";
 
 /** An fs whose watching does nothing; give the reads and writes a test

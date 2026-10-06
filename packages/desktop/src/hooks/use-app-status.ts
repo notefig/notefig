@@ -28,28 +28,18 @@ import {
   describeTaskMeta,
   useAgentSessionList,
   type AgentTaskMeta,
-} from "@/entities/agents";
-import {
-  useAttention,
-  type Attention,
-  type AttentionItem,
-} from "@/entities/attention";
-import {
-  MAX_PROMPT_ROUNDS,
-  describePromptRound,
-  isLiveRound,
-  usePromptRounds,
-  type PromptRound,
-} from "@/entities/prompt-rounds";
-import {
-  useRecentDocuments,
-  type RecentDocument,
-} from "@/entities/recent-documents";
-import type { WorkspaceScratchpads } from "@/entities/scratchpads";
+} from "@/modules/agents/react";
+import { useAttention } from "@/hooks/use-attention";
+import { type Attention, type AttentionItem } from "@/utils/attention";
+import { MAX_PROMPT_ROUNDS, describePromptRound, isLiveRound, type PromptRound } from "@/modules/prompt-rounds";
+import { usePromptRounds } from "@/modules/prompt-rounds/react";
+import { type RecentDocument } from "@/modules/recent-documents";
+import { useRecentDocuments } from "@/modules/recent-documents/react";
+import type { WorkspaceScratchpads } from "@/modules/scratchpads";
 import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import { useOpenProjectFromPicker } from "@/hooks/use-open-project";
 import { deriveProjectName } from "@/hooks/use-recent-projects";
-import type { TabsApi } from "@/entities/tabs";
+import type { TabsApi } from "@/modules/tabs";
 import { getFileName } from "@/utils/fs";
 
 /** Rows per section: a glance, not the sidebar. */

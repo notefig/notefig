@@ -5,7 +5,7 @@
  * that routes Tauri `invoke()` to the shim's `POST /invoke/{cmd}` over HTTP and
  * delivers shim WS events to `listen()` callbacks. Because the app detects Tauri
  * by the presence of `__TAURI_INTERNALS__` (see `utils/platform.ts`), installing
- * it makes the real `TauriPlatformAdapter` + `src/entities` run against the real
+ * it makes the real `TauriPlatformAdapter` + `src/modules` run against the real
  * Rust `fs_ops`/`search` on a real temp filesystem — the substrate MET-83 builds
  * on — instead of the browser IndexedDB adapter.
  *

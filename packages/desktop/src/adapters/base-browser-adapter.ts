@@ -25,9 +25,9 @@ import type {
   AgentTransport,
   McpEndpoint,
 } from "@notefig/agent";
-import { tunnelConnection } from "@/agent/tunnel/tunnel-connection";
-import { TunnelTransport } from "@/agent/tunnel/tunnel-transport";
-import { TunnelMcpEndpoint } from "@/agent/tunnel/tunnel-mcp-endpoint";
+import { tunnelConnection } from "@/modules/agents/tunnel/tunnel-connection";
+import { TunnelTransport } from "@/modules/agents/tunnel/tunnel-transport";
+import { TunnelMcpEndpoint } from "@/modules/agents/tunnel/tunnel-mcp-endpoint";
 
 export function createError(
   path: string,

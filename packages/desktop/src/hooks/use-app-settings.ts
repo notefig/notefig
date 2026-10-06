@@ -1,4 +1,4 @@
-import { useKv } from "@/utils/kv-store";
+import { useKv } from "@/modules/kv/react";
 import type { Theme } from "@/components/theme-provider";
 
 export const SETTINGS_NAMESPACE = "settings";

@@ -4,8 +4,8 @@ import {
   disposeAllEditors,
   type EditorFs,
 } from "@/components/editor/editor-store";
-import { createEditors } from "@/entities/editors";
-import { getTabController } from "@/tabs/tab-controllers";
+import { createEditors } from "@/modules/editors";
+import { getTabController } from "@/modules/tabs/tab-controllers";
 
 const editors = createEditors();
 

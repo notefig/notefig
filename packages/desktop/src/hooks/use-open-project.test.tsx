@@ -29,11 +29,11 @@ vi.mock("./use-recent-projects", async (importOriginal) => ({
 
 import { useOpenProject } from "./use-open-project";
 import { LAYOUT_PARAM, extractTabIds, parseLayout } from "@/utils/layout-codec";
-import { urlStateFromRouter } from "@/entities/layout";
+import { urlStateFromRouter } from "@/modules/layout";
 import { defineModule } from "@notefig/core";
-import { scratchpadLandingModule } from "@/entities/scratchpad-landing";
-import { sidebarViewModule } from "./sidebar-view";
-import { tabsModule } from "@/entities/tabs";
+import { scratchpadLandingModule } from "@/modules/scratchpads";
+import { sidebarViewModule } from "@/modules/sidebar-view";
+import { tabsModule } from "@/modules/tabs";
 import { createTestCore } from "@/testing/test-core";
 
 let container: HTMLDivElement | null = null;

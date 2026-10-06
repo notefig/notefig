@@ -48,7 +48,7 @@ import {
   type AgentEntry,
   type AgentTaskRow,
   type AgentTurn,
-} from "@/entities/agents";
+} from "@/modules/agents/react";
 import { PromptEditor, type PromptEditorHandle } from "@notefig/widgets";
 import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import { mentionContextParts } from "./prompt-widget-host";
@@ -68,11 +68,11 @@ import {
   deriveComposerKeyAction,
 } from "@notefig/widgets";
 import { useAgentTabController } from "./agent-tab-controller";
-import { requestTabFocus } from "@/tabs/tab-controllers";
-import { agentTabId } from "@/tabs/tab-id";
+import { requestTabFocus } from "@/modules/tabs/tab-controllers";
+import { agentTabId } from "@/modules/tabs/tab-id";
 import { CopyTextButton } from "@notefig/widgets";
 import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
-import { splitLeadingQuote } from "@/agent/agents";
+import { splitLeadingQuote } from "@/modules/agents/agents";
 
 /**
  * One agent session as a dockable tab: streamed turn output (message chunks

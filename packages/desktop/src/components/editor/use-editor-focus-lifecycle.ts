@@ -13,7 +13,7 @@ import {
   getSavedSelection,
 } from "@/components/editor/editor-store";
 import { useModule } from "@notefig/core/react";
-import { requestTabFocus } from "@/tabs/tab-controllers";
+import { requestTabFocus } from "@/modules/tabs/tab-controllers";
 
 /** How long after mount the tab layout may still re-parent the editor DOM. */
 const FOCUS_RECLAIM_WINDOW_MS = 600;

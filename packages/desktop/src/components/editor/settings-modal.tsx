@@ -44,9 +44,9 @@ import {
   type HotkeyEntry,
 } from "./hotkey-catalog";
 import { useCore } from "@notefig/core/react";
-import { RELEASE_NOTES_TAB_ID } from "@/entities/tabs";
+import { RELEASE_NOTES_TAB_ID } from "@/modules/tabs";
 import { usePlatform } from "@/core/use-platform";
-import { useFocusedWorkspace } from "@/entities/workspaces";
+import { useFocusedWorkspace } from "@/modules/workspaces/react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useAppUpdater,

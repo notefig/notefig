@@ -1,8 +1,8 @@
 import { OrbLoader, type OrbState } from "@notefig/ui/orb-loader";
 import { cn } from "@notefig/ui/utils";
-import type { AgentTaskRow, AgentTurnStatus } from "@/entities/agents";
+import type { AgentTaskRow, AgentTurnStatus } from "@/modules/agents/react";
 import type { StatusMark } from "@/adapters/platform-adapter.interface";
-import type { AttentionKind } from "@/entities/attention";
+import type { AttentionKind } from "@/utils/attention";
 
 /**
  * The sidebar's rendering of `StatusMark` — one vocabulary for "what state

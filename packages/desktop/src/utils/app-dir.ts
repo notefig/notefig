@@ -3,9 +3,9 @@
  * it that is visible.
  *
  * A deliberate leaf module: the app dir is referenced from the entity layer
- * (entities/scratchpads.ts, which owns the behavior and re-exports these),
- * from utils/history-service.ts, and from the agent — importing the entity
- * from utils would close a cycle back through entities/files.ts.
+ * (modules/scratchpads/scratchpads.ts, which owns the behavior and re-exports these),
+ * from modules/history/history.ts, and from the agent — importing the entity
+ * from utils would close a cycle back through modules/files/files.ts.
  *
  * Everything under the app dir EXCEPT the scratchpads folder is invisible:
  * hidden from the fs walkers and the watcher by position rather than by

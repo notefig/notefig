@@ -16,7 +16,7 @@ import {
   registerCodeViewerDelegate,
   unregisterCodeViewerDelegate,
 } from "@/components/editor/editor-store";
-import { requestTabFocus } from "@/tabs/tab-controllers";
+import { requestTabFocus } from "@/modules/tabs/tab-controllers";
 import { useTheme } from "@/components/theme-provider";
 import { getFileName } from "@/utils/fs";
 import { useModule } from "@notefig/core/react";

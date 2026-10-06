@@ -31,7 +31,7 @@ const NO_RESULTS: SearchMatch[] = [];
  * Debounces the query string by 300ms, then runs
  * the platform's fs.searchContent as a subscribed query. Revalidation on
  * filesystem changes happens through the central invalidator in
- * utils/file-sync.ts, which invalidates ["search-content", workspacePath].
+ * modules/files/file-sync.ts, which invalidates ["search-content", workspacePath].
  */
 export function useSearch(
   workspacePath: string,

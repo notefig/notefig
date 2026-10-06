@@ -6,7 +6,7 @@ import {
   APP_DIR_NAME,
   SCRATCHPADS_REL_PATH,
   isProtectedTreePath,
-} from "@/entities/scratchpads";
+} from "@/modules/scratchpads";
 
 /**
  * Module-level cache of @pierre/trees models, one per workspace.

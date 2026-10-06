@@ -47,13 +47,13 @@ import {
 } from "@notefig/ui/alert-dialog";
 import { cn } from "@notefig/ui/utils";
 import { useModule } from "@notefig/core/react";
-import { useKv } from "@/utils/kv-store";
+import { useKv } from "@/modules/kv/react";
 import {
   HARNESS_CUSTOM_KEY,
   HARNESS_DISCOVERY_KEY,
   HARNESS_OVERRIDES_KEY,
   HARNESS_SETTINGS_NAMESPACE,
-} from "@/agent/harness-discovery";
+} from "@/modules/agents/harness-discovery";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "@notefig/ui/harness-logo";
 import {

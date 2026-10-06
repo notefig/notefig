@@ -10,13 +10,13 @@ import {
   parseHarnessOverrides,
   resolveEffectiveHarnesses,
 } from "@notefig/shared/agent";
-import { useKv } from "@/utils/kv-store";
+import { useKv } from "@/modules/kv/react";
 import {
   HARNESS_CUSTOM_KEY,
   HARNESS_DISCOVERY_KEY,
   HARNESS_OVERRIDES_KEY,
   HARNESS_SETTINGS_NAMESPACE,
-} from "@/agent/harness-discovery";
+} from "@/modules/agents/harness-discovery";
 import { useTunnelConnection } from "@/hooks/use-tunnel-connection";
 
 /**

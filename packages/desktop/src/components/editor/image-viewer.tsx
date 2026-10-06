@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { usePlatform } from "@/core/use-platform";
 import type { FileEntry } from "@/utils/fs";
 import { getOrCreateEditor } from "@/components/editor/editor-store";
-import { focusTab } from "@/tabs/tab-controllers";
+import { focusTab } from "@/modules/tabs/tab-controllers";
 import { useImageUrl } from "@/hooks/use-image-url";
 import { cn } from "@notefig/ui/utils";
 import { useModule } from "@notefig/core/react";

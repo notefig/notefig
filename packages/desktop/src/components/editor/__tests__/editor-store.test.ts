@@ -8,12 +8,12 @@ import {
   whenBlockRendered,
   type EditorFs,
 } from "@/components/editor/editor-store";
-import { createEditors, isMarkdownInstance } from "@/entities/editors";
+import { createEditors, isMarkdownInstance } from "@/modules/editors";
 
 /** The registry the surfaces fill — one per test file, cleared after each. */
 const editors = createEditors();
 const hasEditor = (path: string) => editors.instance(path) !== undefined;
-import { requestTabFocus, setActiveTab } from "@/tabs/tab-controllers";
+import { requestTabFocus, setActiveTab } from "@/modules/tabs/tab-controllers";
 import { findPromptNodeId, selectionDraft } from "@notefig/widgets";
 
 /** Editors accept only parsed doc JSON (conversion happens in the worker). */

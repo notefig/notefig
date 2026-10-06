@@ -23,9 +23,9 @@ import { useSearch } from "@/hooks/use-search";
 import { ScrollArea } from "@notefig/ui/scroll-area";
 import { getFileName } from "@/utils/fs";
 import type { SearchMatch } from "@/adapters/platform-adapter.interface";
-import { suppressTabFocus } from "@/tabs/tab-controllers";
+import { suppressTabFocus } from "@/modules/tabs/tab-controllers";
 import { useCore } from "@notefig/core/react";
-import type { OpenTabOptions } from "@/entities/tabs";
+import type { OpenTabOptions } from "@/modules/tabs";
 
 interface SearchPanelProps {
   workspacePath: string;

@@ -33,23 +33,23 @@ import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
 import { fake, installWatcherSim } from "@/testing/fake-fs-adapter";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
 import { QueryClient } from "@tanstack/react-query";
-import { createDocuments } from "@/entities/documents";
+import { createDocuments } from "@/modules/documents";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { useEditorFileSync } from "../use-editor-file-sync";
 import {
   createWorkspaceFiles,
   type FileMetadata,
   type WorkspaceFiles,
-} from "@/entities/files";
+} from "@/modules/files";
 import {
   closeDocumentSync,
   resetConverterForTests,
 } from "@/utils/markdown-conversion";
-import { handleContentFileSystemChange } from "@/utils/file-sync";
+import { handleContentFileSystemChange } from "@/modules/files/file-sync";
 import { calculateContentHash } from "@/utils/hash";
 import type { FileEntry } from "@/utils/fs";
 import { createHooks } from "@notefig/core";
-import { createEditors } from "@/entities/editors";
+import { createEditors } from "@/modules/editors";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 

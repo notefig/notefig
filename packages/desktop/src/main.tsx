@@ -9,7 +9,7 @@ import { Buffer } from "buffer";
 import "./utils/intl";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AppUpdaterBootstrap } from "@/components/app-updater";
-import { TelemetryBootstrap } from "@/components/telemetry-bootstrap";
+import { TelemetryBootstrap } from "@/modules/telemetry/react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@notefig/ui/tooltip";
 import { App } from "./App";

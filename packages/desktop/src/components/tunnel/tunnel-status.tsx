@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { Loader2, MonitorSmartphone, Wifi, WifiOff } from "lucide-react";
 import { isWeb } from "@/utils/platform";
 import { useTunnelConnection } from "@/hooks/use-tunnel-connection";
-import { openPairDialog } from "@/agent/tunnel/pair-dialog-store";
+import { openPairDialog } from "@/modules/agents/tunnel/pair-dialog-store";
 
 /**
  * Remote-worker connection pill for the status bar. Web only — on desktop

@@ -5,7 +5,7 @@ import { defineConfig, devices } from "@playwright/test";
  *
  * Unlike the default config (which runs the app's browser/IndexedDB adapter),
  * this boots a Vite dev server with `VITE_TEST_BACKEND=shim` so the app installs
- * the shim transport and runs the REAL Tauri adapter + `src/entities` against the
+ * the shim transport and runs the REAL Tauri adapter + `src/modules` against the
  * REAL Rust commands on a REAL temp filesystem — via the `test-shim` binary,
  * which dispatches every registered command through a MockRuntime app. This is
  * the substrate MET-83 builds on.

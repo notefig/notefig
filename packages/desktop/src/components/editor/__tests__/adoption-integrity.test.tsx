@@ -117,8 +117,8 @@ import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
 import { QueryClient } from "@tanstack/react-query";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { useEditorFileSync } from "../use-editor-file-sync";
-import { createWorkspaceFiles, type WorkspaceFiles } from "@/entities/files";
-import { handleContentFileSystemChange } from "@/utils/file-sync";
+import { createWorkspaceFiles, type WorkspaceFiles } from "@/modules/files";
+import { handleContentFileSystemChange } from "@/modules/files/file-sync";
 import {
   closeDocumentSync,
   resetConverterForTests,

@@ -18,7 +18,7 @@
  */
 import { useLayoutEffect, useRef } from "react";
 import type { Editor } from "@tiptap/core";
-import type { EditorsApi } from "@/entities/editors";
+import type { EditorsApi } from "@/modules/editors";
 import { useModule } from "@notefig/core/react";
 import { getSavedViewport, saveViewport } from "@/components/editor/editor-store";
 

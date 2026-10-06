@@ -8,7 +8,7 @@
  */
 import { findPromptBlobForTask } from "@notefig/widgets";
 import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
-import type { PromptRound } from "@/entities/prompt-rounds";
+import type { PromptRound } from "@/modules/prompt-rounds";
 import type { Core } from "@notefig/core";
 
 export type JumpTarget = "widget" | "chat";

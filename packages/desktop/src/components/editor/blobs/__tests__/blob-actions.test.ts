@@ -6,9 +6,9 @@ import {
   type EditorFs,
 } from "../../editor-store";
 import { answerBlob } from "../blob-actions";
-import type { DocumentsApi } from "@/entities/documents";
-import type { AgentsApi } from "@/agent/agents";
-import { createEditors } from "@/entities/editors";
+import type { DocumentsApi } from "@/modules/documents";
+import type { AgentsApi } from "@/modules/agents/agents";
+import { createEditors } from "@/modules/editors";
 
 const editors = createEditors();
 
