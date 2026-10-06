@@ -25,6 +25,7 @@ import { documentsModule } from "@/modules/documents";
 import { layoutModule } from "@/modules/layout";
 import { editorsModule } from "@/modules/editors";
 import { historyModule } from "@/modules/history";
+import { platformModule } from "@/core/services";
 
 declare module "@notefig/core" {
   interface CoreModules {
@@ -40,7 +41,7 @@ export const workspaceAgentsModule = defineModule({
   needs: [
     agentStoreModule,
     kvModule,
-    "platform",
+    platformModule,
     tabsModule,
     documentsModule,
     layoutModule,

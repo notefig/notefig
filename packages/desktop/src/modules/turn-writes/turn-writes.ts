@@ -33,6 +33,7 @@ import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { calculateContentHash } from "@/utils/hash";
 import { resolveWorkspacePath } from "@/utils/fs";
 import { defineModule, type CoreHookMap, type Hooks } from "@notefig/core";
+import { platformModule } from "@/core/services";
 
 type Writer = { taskId: string; turnId: string };
 type InFlightCall = Writer & { key: string; paths: string[] };
@@ -202,7 +203,7 @@ declare module "@notefig/core" {
 /** Attributes agent writes to the turn that made them. */
 export const turnWritesModule = defineModule({
   name: "turnWrites",
-  needs: ["platform"],
+  needs: [platformModule],
   register: (ctx) =>
     createTurnWrites({ fs: ctx.use("platform").fs, hooks: ctx.hooks }),
   boot: (turnWrites) => turnWrites.track(),

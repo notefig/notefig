@@ -4,11 +4,6 @@ export class CoreConfigError extends Error {
   override name = "CoreConfigError";
 }
 
-/** The name a `needs` entry provides under: a service's, or the module's. */
-export function needName(need: string | AnyModule): string {
-  return typeof need === "string" ? need : need.name;
-}
-
 /**
  * The listed modules by name, plus every module they need that the list
  * leaves out (transitively), in that order. A listed module wins over a
@@ -16,7 +11,6 @@ export function needName(need: string | AnyModule): string {
  */
 function withNeededModules(
   modules: readonly AnyModule[],
-  serviceNames: ReadonlySet<string>,
 ): Map<string, AnyModule> {
   const byName = new Map<string, AnyModule>();
   for (const module of modules) {
@@ -32,37 +26,21 @@ function withNeededModules(
       ...(module.workspace?.needs ?? []),
     ];
     for (const need of needed) {
-      if (typeof need !== "string" && !byName.has(need.name)) {
+      if (!byName.has(need.name)) {
         byName.set(need.name, need);
       }
-    }
-  }
-  for (const name of byName.keys()) {
-    if (serviceNames.has(name)) {
-      throw new CoreConfigError(
-        `Module "${name}" has the same name as a service.`,
-      );
     }
   }
   return byName;
 }
 
-/** The names a module must come after; throws on a need core can't meet. */
+/** The names a module must come after; throws on a workspace need core
+ *  can't meet. */
 function edgesOf(
   module: AnyModule,
   byName: ReadonlyMap<string, AnyModule>,
-  serviceNames: ReadonlySet<string>,
 ): string[] {
-  const out: string[] = [];
-  for (const need of module.needs ?? []) {
-    if (typeof need !== "string") {
-      out.push(need.name);
-    } else if (!serviceNames.has(need)) {
-      throw new CoreConfigError(
-        `Module "${module.name}" needs "${need}", which is not a service.`,
-      );
-    }
-  }
+  const out = (module.needs ?? []).map((need) => need.name);
   for (const need of module.workspace?.needs ?? []) {
     if (!byName.get(need.name)!.workspace) {
       throw new CoreConfigError(
@@ -81,15 +59,11 @@ function edgesOf(
  * the same name. Modules with no constraint between them keep the order
  * they were listed in, so a root's list reads top to bottom.
  *
- * Throws at startup, naming the module, for a duplicate name, a named need
- * that is not a service, a workspace need on a module with no workspace
- * part, or a cycle (with its chain).
+ * Throws at startup, naming the module, for a duplicate name, a workspace
+ * need on a module with no workspace part, or a cycle (with its chain).
  */
-export function orderModules(
-  modules: readonly AnyModule[],
-  serviceNames: ReadonlySet<string>,
-): AnyModule[] {
-  const byName = withNeededModules(modules, serviceNames);
+export function orderModules(modules: readonly AnyModule[]): AnyModule[] {
+  const byName = withNeededModules(modules);
   const ordered: AnyModule[] = [];
   const done = new Set<string>();
   const visiting: string[] = [];
@@ -102,7 +76,7 @@ export function orderModules(
       throw new CoreConfigError(`Modules need each other in a cycle: ${chain}`);
     }
     visiting.push(module.name);
-    for (const need of edgesOf(module, byName, serviceNames)) {
+    for (const need of edgesOf(module, byName)) {
       visit(byName.get(need)!);
     }
     visiting.pop();

@@ -7,12 +7,17 @@ import {
 } from "./create-core";
 import {
   defineModule,
+  defineService,
   type AnyModule,
   type WorkspaceLifecycle,
 } from "./define-module";
 import { CoreConfigError } from "./order";
 
 declare module "./types" {
+  interface CoreServices {
+    // Optional, so the cores below that provide no services still type.
+    "t-clock"?: () => number;
+  }
   interface CoreModules {
     "t-store": { value: number };
     "t-reader": { read(): number };
@@ -146,42 +151,50 @@ describe("createCore", () => {
       ].read(),
     ).toBe(2);
 
-    // A pulled-in module may not shadow a service either.
-    expect(() =>
-      createCore({ services: { "t-store": {} } as never, modules: [reader] }),
-    ).toThrow(/"t-store" has the same name as a service/);
+    // A provided service is listed too: it stands in for a needed module
+    // of its name.
+    expect(
+      createCore({
+        services: { "t-store": { value: 3 } } as never,
+        modules: [reader],
+      })["t-reader"].read(),
+    ).toBe(3);
   });
 
-  it("types needs: a service by name, a module by itself (compile-time)", () => {
+  it("types needs: every entry is a module, services included (compile-time)", () => {
     const store = defineModule({
       name: "t-store",
       register: () => ({ value: 1 }),
     });
     // @ts-expect-error — a module is named by the module, not its name
     defineModule({ name: "x", needs: ["t-store"] });
-    defineModule({ name: "y", needs: [store] });
+    // @ts-expect-error — so is a service
+    defineModule({ name: "x", needs: ["t-clock"] });
+    defineModule({ name: "y", needs: [store, defineService("t-clock")] });
   });
 
-  it("hands services to modules that list them, and reads them as properties", () => {
+  it("hands services to modules that need them, and reads them as properties", () => {
+    const clock = defineService("t-clock");
     const reader = defineModule({
       name: "t-reader",
-      needs: ["clock" as never],
-      register: (ctx) => ({
-        read: () => (ctx.use("clock" as never) as () => number)(),
-      }),
+      needs: [clock],
+      register: (ctx) => ({ read: () => ctx.use("t-clock")!() }),
     });
     const core = createCore({
-      services: { clock: () => 7 } as never,
+      services: { "t-clock": () => 7 },
       modules: [reader],
     });
     expect(core["t-reader"].read()).toBe(7);
-    expect((core as unknown as { clock: () => number }).clock()).toBe(7);
+    expect(core["t-clock"]!()).toBe(7);
   });
 
   it("fails startup on a missing need, a cycle, a duplicate or a reserved name", () => {
-    const needsGhost = defineModule({ name: "x", needs: ["ghost" as never] });
-    expect(() => createCore({ services: {}, modules: [needsGhost] })).toThrow(
-      /"x" needs "ghost", which is not a service/,
+    const needsClock = defineModule({
+      name: "x",
+      needs: [defineService("t-clock")],
+    });
+    expect(() => createCore({ services: {}, modules: [needsClock] })).toThrow(
+      'Service "t-clock" is needed but the root did not provide it.',
     );
 
     // Only a mutation builds a cycle of module values.
@@ -203,7 +216,7 @@ describe("createCore", () => {
     );
     expect(() =>
       createCore({ services: { hooks: {} } as never, modules: [] }),
-    ).toThrow(/Service name "hooks" is reserved/);
+    ).toThrow(/"hooks" is reserved/);
   });
 
   it("refuses a use that the module did not declare", () => {

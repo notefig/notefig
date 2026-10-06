@@ -9,7 +9,7 @@
  */
 import { createCore, type AnyModule, type Core } from "@notefig/core";
 import { QueryClient } from "@tanstack/react-query";
-import { platformAdapter, type IPlatformAdapter } from "@/adapters";
+import { platformAdapter } from "@/adapters";
 import { agentStoreModule } from "@/modules/agents/agent-collections";
 import { harnessDiscoveryModule } from "@/modules/agents/harness-discovery";
 import { mockAgentModule } from "@/modules/agents/mock-harness";
@@ -42,13 +42,6 @@ import { kvModule } from "@/modules/kv";
 import { projectSettingsModule } from "@/modules/project-settings";
 import { lastToolModule, sidebarViewModule } from "@/modules/sidebar-view";
 import { workspaceKey } from "@/utils/path";
-
-declare module "@notefig/core" {
-  interface CoreServices {
-    platform: IPlatformAdapter;
-    queryClient: QueryClient;
-  }
-}
 
 /** What every root that renders a workspace needs running. */
 export function runtimeModules(): AnyModule[] {

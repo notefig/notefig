@@ -37,6 +37,7 @@ import {
   serveWorkerHost,
   type WorkerClient,
 } from "@/workers/worker-rpc";
+import { platformModule } from "@/core/services";
 
 /** Mapped alias: interfaces don't satisfy `WorkerApi`'s index constraint. */
 type GitWorkerRpc = { [K in keyof GitWorkerApi]: GitWorkerApi[K] };
@@ -157,6 +158,6 @@ declare module "@notefig/core" {
 
 export const gitWorkerModule = defineModule({
   name: "gitWorker",
-  needs: ["platform"],
+  needs: [platformModule],
   register: (ctx) => createGitWorker(ctx.use("platform").fs),
 });

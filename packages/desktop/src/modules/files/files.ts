@@ -19,7 +19,13 @@
  * the debounced invalidation every write shares.
  */
 import { defineModule, type Hooks } from "@notefig/core";
-import { createCollection, eq, inArray, coalesce, not } from "@tanstack/react-db";
+import {
+  createCollection,
+  eq,
+  inArray,
+  coalesce,
+  not,
+} from "@tanstack/react-db";
 import { type QueryClient } from "@tanstack/react-query";
 import {
   queryCollectionOptions,
@@ -40,6 +46,7 @@ import {
   type ContentWatcher,
   type MetadataWatcher,
 } from "@/modules/files/file-sync";
+import { platformModule, queryClientModule } from "@/core/services";
 
 const METADATA_REFETCH_INTERVAL_MS = 30_000;
 const INVALIDATE_DEBOUNCE_MS = 500;
@@ -933,7 +940,7 @@ declare module "@notefig/core" {
 
 export const filesModule = defineModule({
   name: "files",
-  needs: ["platform", "queryClient"],
+  needs: [platformModule, queryClientModule],
   // Coming back to a workspace re-stats its listing (cheap, catches
   // watcher gaps) and gives a watcher whose start failed another chance.
   boot: (_api, ctx) =>

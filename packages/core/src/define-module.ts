@@ -1,4 +1,5 @@
 import type { Hooks } from "./hooks";
+import { CoreConfigError } from "./order";
 import type {
   CoreModules,
   CoreServices,
@@ -65,19 +66,8 @@ export interface WorkspaceContext<
 /** A service, named by the key the root hands it under. */
 export type ServiceName = keyof CoreServices & string;
 
-/**
- * One entry of `needs`: a service by name, or the module itself. Naming a
- * module by its value (not its name) means a root that lists a module gets
- * what it needs without listing that too.
- */
-export type Need = ServiceName | Module;
-
-/** The name a `needs` entry provides under. */
-type NeedName<N> = N extends string
-  ? N
-  : N extends Module<infer Name>
-    ? Name
-    : never;
+/** The name a needed module provides under. */
+type NeedName<N> = N extends Module<infer Name> ? Name : never;
 
 type ApiOf<Name extends string> = Name extends keyof CoreModules
   ? CoreModules[Name]
@@ -124,7 +114,7 @@ type WorkspacePart<
 
 export type ModuleDefinition<
   Name extends string,
-  Deps extends readonly Need[] = [],
+  Deps extends readonly Module[] = [],
   WorkspaceDeps extends readonly Module[] = [],
   Needs extends ProvidedName = NeedName<Deps[number]> & ProvidedName,
   WorkspaceNeeds extends WorkspaceModuleName = NeedName<WorkspaceDeps[number]> &
@@ -132,7 +122,7 @@ export type ModuleDefinition<
 > = {
   name: Name;
   /**
-   * Services (by name) and modules (the module itself) this one uses; they
+   * The modules this one uses, services included (`defineService`); they
    * register and boot first. A needed module the root did not list is
    * registered anyway.
    */
@@ -149,7 +139,7 @@ export type ModuleDefinition<
 /** The runtime shape the kernel works with, types erased. */
 export interface AnyModule {
   name: string;
-  needs?: readonly (string | AnyModule)[];
+  needs?: readonly AnyModule[];
   register?(ctx: ModuleContext<never>): unknown;
   boot?(api: unknown, ctx: ModuleContext<never>): void | Disposer;
   workspace?: {
@@ -175,8 +165,27 @@ export interface Module<Name extends string = string> extends AnyModule {
  */
 export function defineModule<
   const Name extends string,
-  const Deps extends readonly Need[] = [],
+  const Deps extends readonly Module[] = [],
   const WorkspaceDeps extends readonly Module[] = [],
 >(definition: ModuleDefinition<Name, Deps, WorkspaceDeps>): Module<Name> {
   return definition as unknown as Module<Name>;
+}
+
+/**
+ * A service as a module: what another module lists in `needs` to be handed
+ * the value the root provides under this name (`createCore({ services })`).
+ * Its type comes from `CoreServices`. Startup fails if a module needs a
+ * service the root did not provide.
+ */
+export function defineService<const Name extends ServiceName>(
+  name: Name,
+): Module<Name> {
+  return {
+    name,
+    register() {
+      throw new CoreConfigError(
+        `Service "${name}" is needed but the root did not provide it.`,
+      );
+    },
+  };
 }

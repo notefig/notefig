@@ -7,6 +7,7 @@ import { openFileInLayout } from "@/utils/dockable-layout";
 import { ensureMarketingWorkspaceSeeded } from "./seed";
 import { findPageByFilePath, type MarketingPage } from "./content-manifest";
 import { useCore } from "@notefig/core/react";
+import { platformModule } from "@/core/services";
 
 declare module "@notefig/core" {
   interface CoreModules {
@@ -18,7 +19,7 @@ declare module "@notefig/core" {
  *  written into IndexedDB at boot. */
 export const marketingSeedModule = defineModule({
   name: "marketingSeed",
-  needs: ["platform"],
+  needs: [platformModule],
   register: (ctx) => ({
     seeded: ensureMarketingWorkspaceSeeded(ctx.use("platform").fs),
   }),

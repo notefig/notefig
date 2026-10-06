@@ -41,6 +41,7 @@ export type {
   AgentTurn,
   AgentTurnStatus,
 } from "@notefig/shared/agent";
+import { platformModule } from "@/core/services";
 
 const AGENT_TASK_STATUSES = new Set<string>([
   "starting",
@@ -371,7 +372,6 @@ declare module "@notefig/core" {
 /** The agent collections, over the platform's database. */
 export const agentStoreModule = defineModule({
   name: "agentStore",
-  needs: ["platform"],
+  needs: [platformModule],
   register: (ctx) => createAgentStore(ctx.use("platform").db.get()),
 });
-

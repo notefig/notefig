@@ -23,6 +23,7 @@ import i18n from "@/utils/intl";
 import { workspaceKey } from "@/utils/path";
 import { defineModule, type CoreHookMap, type Hooks } from "@notefig/core";
 import { agentStoreModule } from "@/modules/agents/agent-collections";
+import { platformModule } from "@/core/services";
 
 export const PROMPT_ROUNDS_COLLECTION_ID = "prompt-rounds";
 /** Rows kept in storage across every workspace; the panel shows fewer. */
@@ -250,7 +251,7 @@ declare module "@notefig/core" {
 /** Settles orphaned rounds, then follows prompt events. */
 export const promptRoundsModule = defineModule({
   name: "promptRounds",
-  needs: ["platform", agentStoreModule],
+  needs: [platformModule, agentStoreModule],
   register: (ctx) =>
     createPromptRounds({
       persistence: ctx.use("platform").db.get(),

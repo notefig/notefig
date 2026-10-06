@@ -87,11 +87,14 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   React-only hooks, and pure functions. A `defineModule` never sits inside
   a component file.
 - `needs` decides order: core registers and boots a module after everything
-  it lists, and fails at startup on an unknown service or a cycle. A
-  module is listed by the module itself (`needs: [kvModule, "platform"]`,
-  `workspace: { needs: [filesModule] }`), a service by its name; a needed
-  module the root left out is registered anyway. Reading what was handed
-  over stays by name, checked by TypeScript: `ctx.use("kv")`,
+  it lists, and fails at startup on a service the root did not provide or
+  a cycle. Every entry is the module itself (`needs: [kvModule,
+  platformModule]`, `workspace: { needs: [filesModule] }`); a needed module
+  the root left out is registered anyway. Services are modules too:
+  `platformModule`, `queryClientModule` and `urlModule`
+  (`src/core/services.ts`, `defineService`) carry the value the root
+  provides. Reading what was handed over is by name, checked by
+  TypeScript: `ctx.use("kv")`, `ctx.use("platform")`,
   `ctx.useWorkspace("files")`. A module takes no options: what differs
   per root is a separate module the root lists (`restoreWorkspacesModule`
   in the desktop list only).

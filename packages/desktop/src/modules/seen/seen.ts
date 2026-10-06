@@ -21,6 +21,7 @@ import type { PromptRoundsCollection } from "@/modules/prompt-rounds";
 import { agentTaskIdFromTabId, isFileTabId } from "@/modules/tabs";
 import { defineModule, type CoreHookMap, type Hooks } from "@notefig/core";
 import { promptRoundsModule } from "@/modules/prompt-rounds";
+import { platformModule } from "@/core/services";
 
 export const SEEN_COLLECTION_ID = "seen";
 
@@ -172,7 +173,7 @@ declare module "@notefig/core" {
 /** Window focus and settled turns feed the seen ledger. */
 export const seenModule = defineModule({
   name: "seen",
-  needs: ["platform", promptRoundsModule],
+  needs: [platformModule, promptRoundsModule],
   register: (ctx) =>
     createSeen({
       persistence: ctx.use("platform").db.get(),

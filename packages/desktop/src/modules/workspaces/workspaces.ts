@@ -28,6 +28,7 @@ import {
 } from "@tanstack/db-sqlite-persistence-core";
 import { defineModule, type WorkspaceLifecycle } from "@notefig/core";
 import { path as pathutil, relativeTreePath, workspaceKey } from "@/utils/path";
+import { platformModule } from "@/core/services";
 
 export interface OpenWorkspaceRow {
   /** workspaceKey(path) — the row id. */
@@ -217,7 +218,7 @@ declare module "@notefig/core" {
  */
 export const workspacesModule = defineModule({
   name: "workspaceRegistry",
-  needs: ["platform"],
+  needs: [platformModule],
   register: (ctx) => createWorkspaceRegistry(ctx.use("platform").db.get()),
   boot: (registry, ctx) => {
     const stopMirror = registry.mirror(ctx.workspaces);
