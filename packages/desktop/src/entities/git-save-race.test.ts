@@ -1,32 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const { statusMock, logMock, addAllAndCommitMock } = vi.hoisted(() => ({
-  statusMock: vi.fn(),
-  logMock: vi.fn(),
-  addAllAndCommitMock: vi.fn(),
-}));
-
-// history-service reaches its per-repo GitService through the git worker
-// client; stub that seam (the real @notefig/git module — GitError included —
-// stays live).
-vi.mock("@/utils/git-worker-client", () => ({
-  createWorkerGitService: vi.fn(() => ({
-    status: statusMock,
-    log: logMock,
-    addAllAndCommit: addAllAndCommitMock,
-  })),
-  disposeWorkerGitRepo: vi.fn(),
-  clearWorkerGitRepos: vi.fn(),
-}));
-
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    fs: {},
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
+import { QueryClient } from "@tanstack/react-query";
+import type { GitService } from "@notefig/git";
 import { createLiveQueryCollection, eq } from "@tanstack/react-db";
-import { gitCollectionFor, invalidateGit, saveCheckpoint } from "./git";
+import { createWorkspaceGit } from "./git";
+
+const statusMock = vi.fn();
+const logMock = vi.fn();
+const addAllAndCommitMock = vi.fn();
+// The workspace's history repo, handed to git the way core does.
+const service = {
+  status: statusMock,
+  log: logMock,
+  addAllAndCommit: addAllAndCommitMock,
+} as unknown as GitService;
 
 const WS = "/tmp/ws-git-save-race-test";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -69,7 +55,12 @@ describe("saveCheckpoint vs derived live queries", () => {
   });
 
   it("leaves no pending ghost after a save with a racing invalidation", async () => {
-    const collection = gitCollectionFor(WS)!;
+    const git = createWorkspaceGit({
+      workspacePath: WS,
+      queryClient: new QueryClient(),
+      history: { service: () => service, ready: async () => service },
+    });
+    const collection = git.collection;
     const checkpoints = createLiveQueryCollection((q) =>
       q
         .from({ git: collection })
@@ -81,7 +72,7 @@ describe("saveCheckpoint vs derived live queries", () => {
     addAllAndCommitMock.mockImplementation(async () => {
       // A watcher-driven invalidation lands mid-commit, while git still
       // reports pre-commit state.
-      invalidateGit(WS);
+      git.invalidate();
       await sleep(30);
       logMock.mockResolvedValue([
         {
@@ -94,7 +85,7 @@ describe("saveCheckpoint vs derived live queries", () => {
       return "025f78bbb";
     });
 
-    const oid = await saveCheckpoint(WS, undefined);
+    const oid = await git.saveCheckpoint(undefined);
     expect(oid).toBe("025f78bbb");
 
     // Let any trailing fetches settle, then assert the derived rows.

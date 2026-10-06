@@ -153,6 +153,9 @@ export function clearWorkspaceHistoryServices(): void {
 
 /** One workspace's history repo — also `core.workspace(ws).history`. */
 export interface WorkspaceHistory {
+  /** The repo as it is: not created if it does not exist yet (its status
+   *  then fails with RepoNotFound, which is how "uninitialized" reads). */
+  service(): GitService;
   /** The repo, initialized on first use. */
   ready(): Promise<GitService>;
   /** A file's text at a checkpoint (`relativePath` from the root). */
@@ -172,6 +175,7 @@ declare module "@notefig/core" {
 
 export function history(workspacePath: string): WorkspaceHistory {
   return {
+    service: () => getOrCreateWorkspaceHistoryService(workspacePath),
     ready: () => ensureWorkspaceHistoryInitialized(workspacePath),
     read: async (ref, relativePath) =>
       (await ensureWorkspaceHistoryInitialized(workspacePath)).readTextFile({

@@ -22,18 +22,20 @@
  */
 import { useMemo } from "react";
 import { defineModule } from "@notefig/core";
+import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import { createCollection, useLiveQuery, eq } from "@tanstack/react-db";
 import { queryCollectionOptions } from "@tanstack/query-db-collection";
-import { useIsFetching } from "@tanstack/react-query";
-import { GitError, type GitErrorCode, type RepoStatus } from "@notefig/git";
-import { isWorkspaceAccessError } from "@/adapters/platform-adapter.interface";
-import { path as pathutil } from "@/utils/path";
+import { useIsFetching, type QueryClient } from "@tanstack/react-query";
 import {
-  ensureWorkspaceHistoryInitialized,
-  getOrCreateWorkspaceHistoryService,
-} from "@/utils/history-service";
-import { queryClient } from "./query-client";
-import { workspaceScoped } from "@/entities/workspace-scoped";
+  GitError,
+  type GitErrorCode,
+  type GitService,
+  type RepoStatus,
+} from "@notefig/git";
+import { isWorkspaceAccessError } from "@/adapters/platform-adapter.interface";
+import { emitAppEvent, onAppEvent } from "@/utils/app-events";
+import { path as pathutil, workspaceKey } from "@/utils/path";
+import type { WorkspaceHistory } from "@/utils/history-service";
 
 /** A GitError flattened to data so it can live on a row. */
 export interface SerializedGitError {
@@ -153,8 +155,10 @@ function fileRowsFromStatus(
 }
 
 /** Exported for unit tests; the collection's queryFn. */
-export async function fetchGitRows(workspacePath: string): Promise<GitRow[]> {
-  const service = getOrCreateWorkspaceHistoryService(workspacePath);
+export async function fetchGitRows(
+  service: GitService,
+  workspacePath: string,
+): Promise<GitRow[]> {
   const rows: GitRow[] = [];
 
   let status: RepoStatus | undefined;
@@ -211,14 +215,34 @@ export async function fetchGitRows(workspacePath: string): Promise<GitRow[]> {
   return rows;
 }
 
-function createGitCollection(workspacePath: string) {
+export interface GitSummary {
+  initialized: boolean;
+  branch: string;
+  ahead?: number;
+  behind?: number;
+  statusError?: SerializedGitError;
+  logError?: SerializedGitError;
+  /** Any staged/unstaged/untracked/conflicted file. */
+  hasChanges: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// core.workspace(ws).git — one per open workspace, built from what core
+// hands it: the query client and that workspace's history repo.
+// ---------------------------------------------------------------------------
+
+function createGitCollection(
+  queryClient: QueryClient,
+  workspacePath: string,
+  service: () => GitService,
+) {
   return createCollection(
     queryCollectionOptions<GitRow, string>({
       queryKey: gitQueryKey(workspacePath),
       queryClient,
       retry: false,
       staleTime: 2_000,
-      queryFn: () => fetchGitRows(workspacePath),
+      queryFn: () => fetchGitRows(service(), workspacePath),
       getKey: (row) => row.id,
 
       // Deliberately NO mutation handlers: every git write (save/revert/
@@ -237,50 +261,159 @@ function createGitCollection(workspacePath: string) {
 
 export type GitCollection = ReturnType<typeof createGitCollection>;
 
-/**
- * One git collection per open workspace, disposed when the workspace leaves
- * the open set. Membership-scoped rather than get-or-create: a lazy read
- * after close (a checkpoint's `invalidateGit`, a stale hook) used to recreate
- * the collection with nothing left to dispose it.
- */
-const gitCollections = workspaceScoped({
-  create: createGitCollection,
-  // Drop cached query state too, so a fresh open refetches instead of
-  // replaying a stale error or stale data.
-  dispose: (_collection, native) =>
-    queryClient.removeQueries({ queryKey: gitQueryKey(native) }),
+/** What a workspace's git timeline is built from. */
+export interface GitDeps {
+  workspacePath: string;
+  queryClient: QueryClient;
+  /** The workspace's history repo (`core.workspace(ws).history`). */
+  history: Pick<WorkspaceHistory, "service" | "ready">;
+}
+
+/** One workspace's checkpoint timeline: its rows, and the actions on them. */
+export interface WorkspaceGit {
+  /** Repo, changed-file and checkpoint rows. Components read them through
+   *  the hooks below. */
+  readonly collection: GitCollection;
+  /** Refetch status and checkpoints in one pass. */
+  refetch(): Promise<void>;
+  /** Mark the rows stale, for a change git cannot see (a file written by
+   *  the app, a commit into the hidden gitdir). */
+  invalidate(): void;
+  /** Commit everything dirty; the new oid, or null if nothing changed. */
+  saveCheckpoint(description?: string): Promise<string | null>;
+  /** Revert to a checkpoint, committing local changes first (a WIP commit)
+   *  so nothing is lost. */
+  revertTo(checkpoint: { oid: string; hash: string }): Promise<void>;
+  abortRevert(): Promise<void>;
+  /** Create the history repo, then load its rows. */
+  initialize(): Promise<void>;
+  /** Drop the cached query state, so a reopen refetches rather than
+   *  replaying stale data or a stale error. Core calls it on close. */
+  dispose(): void;
+}
+
+export function createWorkspaceGit({
+  workspacePath,
+  queryClient,
+  history,
+}: GitDeps): WorkspaceGit {
+  const queryKey = gitQueryKey(workspacePath);
+  const collection = createGitCollection(queryClient, workspacePath, () =>
+    history.service(),
+  );
+  const refetch = async () => {
+    await collection.utils.refetch();
+  };
+
+  return {
+    collection,
+    refetch,
+    invalidate() {
+      void queryClient.invalidateQueries({ queryKey });
+    },
+    async saveCheckpoint(description) {
+      // Cancel any in-flight fetch so a stale pre-commit response can't
+      // land after the commit's own refetch.
+      await queryClient.cancelQueries({ queryKey });
+      try {
+        return await history.service().addAllAndCommit({
+          message: description?.trim() || "Commit",
+          author: COMMIT_AUTHOR,
+        });
+      } finally {
+        // Refetch even on failure — a partial add may have changed status.
+        await refetch();
+      }
+    },
+    async revertTo(checkpoint) {
+      const service = history.service();
+      const status = await service.status();
+      const hasLocalChanges =
+        status.staged.length > 0 ||
+        status.unstaged.length > 0 ||
+        status.untracked.length > 0;
+      if (hasLocalChanges) {
+        await service.addAllAndCommit({
+          message: `WIP before revert ${checkpoint.hash}`,
+          author: COMMIT_AUTHOR,
+        });
+      }
+      try {
+        await service.revertCommit({
+          oid: checkpoint.oid,
+          message: `Revert ${checkpoint.hash}`,
+          author: COMMIT_AUTHOR,
+        });
+      } finally {
+        await refetch();
+      }
+    },
+    async abortRevert() {
+      await history.service().abortRevert();
+      await refetch();
+    },
+    async initialize() {
+      await history.ready();
+      await refetch();
+    },
+    dispose() {
+      queryClient.removeQueries({ queryKey });
+    },
+  };
+}
+
+declare module "@notefig/core" {
+  interface WorkspaceModules {
+    git: WorkspaceGit;
+  }
+}
+
+export const gitModule = defineModule({
+  name: "git",
+  needs: ["queryClient"],
+  workspace: {
+    needs: ["history"],
+    create: (ctx) => {
+      const git = createWorkspaceGit({
+        workspacePath: pathutil.normalize(ctx.workspace.path),
+        queryClient: ctx.use("queryClient"),
+        history: ctx.useWorkspace("history"),
+      });
+      const stopListening = onAppEvent("git:stale", ({ workspacePath }) => {
+        if (workspaceKey(workspacePath) === ctx.workspace.key) {
+          git.invalidate();
+        }
+      });
+      return {
+        ...git,
+        dispose() {
+          stopListening();
+          git.dispose();
+        },
+      };
+    },
+    dispose: (git) => git.dispose(),
+  },
 });
 
-/** The workspace's git collection, or undefined when it is not open. */
-export function gitCollectionFor(
-  workspacePath: string,
-): GitCollection | undefined {
-  return gitCollections.get(workspacePath);
+/**
+ * Say a workspace's git rows are stale, for code that changed what git
+ * reads without going through git (file writes, the agent's checkpoints).
+ * The workspace's git instance, if it is open, refetches.
+ */
+export function invalidateGit(workspacePath: string): void {
+  emitAppEvent("git:stale", { workspacePath });
 }
 
-export interface GitSummary {
-  initialized: boolean;
-  branch: string;
-  ahead?: number;
-  behind?: number;
-  statusError?: SerializedGitError;
-  logError?: SerializedGitError;
-  /** Any staged/unstaged/untracked/conflicted file. */
-  hasChanges: boolean;
-}
+// ---------------------------------------------------------------------------
+// Reading the rows from React
+// ---------------------------------------------------------------------------
 
-/** The workspace's git collection as a render-stable reference. */
-function useGitCollection(workspacePath: string): GitCollection;
-function useGitCollection(
-  workspacePath: string | undefined,
-): GitCollection | undefined;
+/** The workspace's git collection, while the workspace is open. */
 function useGitCollection(
   workspacePath: string | undefined,
 ): GitCollection | undefined {
-  return useMemo(
-    () => (workspacePath ? gitCollectionFor(workspacePath) : undefined),
-    [workspacePath],
-  );
+  return useWorkspaceModule(workspacePath, "git")?.collection;
 }
 
 /** The repo summary row + change flag; undefined until the first fetch lands. */
@@ -290,7 +423,7 @@ export function useGitSummary(
   const collection = useGitCollection(workspacePath);
   const { data = [] } = useLiveQuery(
     (q) => (collection ? q.from({ git: collection }) : undefined),
-    [workspacePath],
+    [collection],
   );
   return useMemo(() => {
     const repo = (data as GitRow[]).find(
@@ -314,10 +447,12 @@ export function useGitCheckpoints(workspacePath: string): GitCheckpointRow[] {
   const collection = useGitCollection(workspacePath);
   const { data = [] } = useLiveQuery(
     (q) =>
-      q
-        .from({ git: collection })
-        .where(({ git }) => eq(git.kind, "checkpoint")),
-    [workspacePath],
+      collection
+        ? q
+            .from({ git: collection })
+            .where(({ git }) => eq(git.kind, "checkpoint"))
+        : undefined,
+    [collection],
   );
   return useMemo(
     () =>
@@ -328,36 +463,12 @@ export function useGitCheckpoints(workspacePath: string): GitCheckpointRow[] {
   );
 }
 
-/** Per-file git flags; undefined when the file has no pending change. */
-export function useFileGitState(
-  workspacePath: string,
-  filePath: string,
-): GitFileRow | undefined {
-  const collection = useGitCollection(workspacePath);
-  const { data = [] } = useLiveQuery(
-    (q) =>
-      q
-        .from({ git: collection })
-        .where(({ git }) => eq(git.id, fileRowId(filePath))),
-    [workspacePath, filePath],
-  );
-  return (data as GitFileRow[])[0];
-}
-
 /** Whether the workspace's git fetch is in flight (anti-flicker gates). */
 export function useGitFetching(workspacePath: string): boolean {
+  const queryClient = useCore().use("queryClient");
   return (
     useIsFetching({ queryKey: gitQueryKey(workspacePath) }, queryClient) > 0
   );
-}
-
-/** Non-reactive per-file read of the same row `useFileGitState` serves. */
-export function readFileGitState(
-  workspacePath: string,
-  filePath: string,
-): GitFileRow | undefined {
-  const row = gitCollectionFor(workspacePath)?.get(fileRowId(filePath));
-  return row?.kind === "file" ? row : undefined;
 }
 
 export type SyncState = "uncommitted" | "unsynced" | "synced";
@@ -369,128 +480,3 @@ export function deriveSyncState(summary: GitSummary | undefined): SyncState {
   return "synced";
 }
 
-/** Refetch the workspace's git rows (status + checkpoints in one pass). */
-export async function refetchGit(workspacePath: string): Promise<void> {
-  await gitCollectionFor(workspacePath)?.utils.refetch();
-}
-
-/** Debounce-friendly invalidation for file-sync's derived-state pass. */
-export function invalidateGit(workspacePath: string): void {
-  void queryClient.invalidateQueries({
-    queryKey: gitQueryKey(workspacePath),
-  });
-}
-
-/**
- * Save a checkpoint: `addAllAndCommit`, then refetch. Plain async action —
- * the caller (checkpoint-panel) renders its own pending entry while this is
- * in flight. Returns the new commit oid, or null when there was nothing to
- * commit.
- */
-export async function saveCheckpoint(
-  workspacePath: string,
-  description?: string,
-): Promise<string | null> {
-  const normalized = pathutil.normalize(workspacePath);
-  const service = getOrCreateWorkspaceHistoryService(normalized);
-
-  // Cancel any in-flight fetch so a stale pre-commit response can't land
-  // after the commit's own refetch (the old code's cancelQueries guard, at
-  // the entity level).
-  await queryClient.cancelQueries({ queryKey: gitQueryKey(normalized) });
-
-  try {
-    return await service.addAllAndCommit({
-      message: description?.trim() || "Commit",
-      author: COMMIT_AUTHOR,
-    });
-  } finally {
-    // Refetch even on failure — a partial add may have changed status.
-    await refetchGit(normalized);
-  }
-}
-
-/**
- * Revert to a checkpoint, committing any local changes first (WIP commit) so
- * nothing is lost. A repo operation, not a row edit — plain async action.
- */
-export async function revertToCheckpoint(
-  workspacePath: string,
-  checkpoint: { oid: string; hash: string },
-): Promise<void> {
-  const service = getOrCreateWorkspaceHistoryService(workspacePath);
-    const status = await service.status();
-  const hasLocalChanges =
-    status.staged.length > 0 ||
-    status.unstaged.length > 0 ||
-    status.untracked.length > 0;
-
-  if (hasLocalChanges) {
-    await service.addAllAndCommit({
-      message: `WIP before revert ${checkpoint.hash}`,
-      author: COMMIT_AUTHOR,
-    });
-  }
-
-  try {
-    await service.revertCommit({
-      oid: checkpoint.oid,
-      message: `Revert ${checkpoint.hash}`,
-      author: COMMIT_AUTHOR,
-    });
-  } finally {
-    await refetchGit(workspacePath);
-  }
-}
-
-export async function abortRevert(workspacePath: string): Promise<void> {
-  const service = getOrCreateWorkspaceHistoryService(workspacePath);
-  await service.abortRevert();
-  await refetchGit(workspacePath);
-}
-
-export async function initializeGit(workspacePath: string): Promise<void> {
-  await ensureWorkspaceHistoryInitialized(workspacePath);
-  await refetchGit(workspacePath);
-}
-
-// ---------------------------------------------------------------------------
-// core.workspace(ws).git
-// ---------------------------------------------------------------------------
-
-/** One workspace's checkpoint timeline (its history repo), as actions. */
-export interface WorkspaceGit {
-  /** Refetch status and checkpoints in one pass. */
-  refetch(): Promise<void>;
-  /** Commit everything dirty; the new oid, or null if nothing changed. */
-  saveCheckpoint(description?: string): Promise<string | null>;
-  revertTo(checkpoint: { oid: string; hash: string }): Promise<void>;
-  abortRevert(): Promise<void>;
-  /** Create the history repo, then load its rows. */
-  initialize(): Promise<void>;
-}
-
-export function git(workspacePath: string): WorkspaceGit {
-  return {
-    refetch: () => refetchGit(workspacePath),
-    saveCheckpoint: (description) => saveCheckpoint(workspacePath, description),
-    revertTo: (checkpoint) => revertToCheckpoint(workspacePath, checkpoint),
-    abortRevert: () => abortRevert(workspacePath),
-    initialize: () => initializeGit(workspacePath),
-  };
-}
-
-declare module "@notefig/core" {
-  interface WorkspaceModules {
-    git: WorkspaceGit;
-  }
-}
-
-/** The git rows are scoped to the open set (`gitCollections`), so closing
- *  the workspace drops them; this module hands out its actions. */
-export const gitModule = defineModule({
-  name: "git",
-  workspace: {
-    create: ({ workspace }) => git(workspace.path),
-  },
-});

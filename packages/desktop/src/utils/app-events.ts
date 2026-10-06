@@ -28,6 +28,10 @@ export interface AppEvents {
     workspacePath: string;
     toolCall: ToolCallUpdate;
   };
+  /** Something git cannot see changed a workspace's history: a file the
+   *  app wrote (its watcher echo is suppressed), or a commit into the
+   *  hidden gitdir. That workspace's git rows go stale. */
+  "git:stale": { workspacePath: string };
   /** A turn reached a terminal status. */
   "agent:turn-settled": {
     taskId: string;
