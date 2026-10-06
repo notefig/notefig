@@ -22,6 +22,8 @@ import { type OpenWorkspaceRow } from "@/modules/workspaces";
 import i18n from "@/utils/intl";
 import { workspaceKey } from "@/utils/path";
 import { defineModule, type CoreHookMap, type Hooks } from "@notefig/core";
+import { agentStoreModule } from "@/modules/agents/agent-collections";
+import { platformModule } from "@/core/services";
 
 export const PROMPT_ROUNDS_COLLECTION_ID = "prompt-rounds";
 /** Rows kept in storage across every workspace; the panel shows fewer. */
@@ -31,8 +33,7 @@ export const MAX_PROMPT_ROUNDS = 100;
  *  row while it exists. Once that row is gone the round is over: see
  *  `derivePromptRounds`. */
 export type PromptRoundRowStatus =
-  | "live"
-  | Extract<AgentTurnStatus, "completed" | "cancelled" | "error">;
+  "live" | Extract<AgentTurnStatus, "completed" | "cancelled" | "error">;
 
 export interface PromptRoundRow {
   /** The turn id — the row id. */
@@ -250,7 +251,7 @@ declare module "@notefig/core" {
 /** Settles orphaned rounds, then follows prompt events. */
 export const promptRoundsModule = defineModule({
   name: "promptRounds",
-  needs: ["platform", "agentStore"],
+  needs: [platformModule, agentStoreModule],
   register: (ctx) =>
     createPromptRounds({
       persistence: ctx.use("platform").db.get(),

@@ -96,7 +96,7 @@ beforeEach(async () => {
       // nothing here renames, so stand-ins suffice.
       defineModule({ name: "editors", register: () => ({}) as never }),
       defineModule({ name: "documents", register: () => ({}) as never }),
-      tabsModule({ canOpenFile: () => true }),
+      tabsModule,
       scratchpadsModule,
       registry,
       scratchpadLandingModule,
@@ -208,8 +208,7 @@ describe("entering a project (useOpenProject)", () => {
     scratchpads.enterScratchpad.mockImplementationOnce(
       (ws: string) =>
         new Promise<string | null>((resolve) => {
-          release = () =>
-            resolve(`${ws}/.notefig/scratchpads/sunny-otter.md`);
+          release = () => resolve(`${ws}/.notefig/scratchpads/sunny-otter.md`);
         }),
     );
     let first!: Promise<boolean>;

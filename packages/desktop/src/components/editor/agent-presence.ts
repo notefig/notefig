@@ -7,12 +7,12 @@
  * agent-service.ts derives them from `rawInput.path` instead.
  */
 import { useLiveQuery, eq } from "@tanstack/react-db";
-import { useAgentStore } from "@/modules/agents/react";
+import { useCore } from "@notefig/core/react";
 
 const ACTIVE_STATUSES = new Set(["pending", "in_progress"]);
 
 export function useAgentEditingPaths(): Set<string> {
-  const { entries } = useAgentStore();
+  const { entries } = useCore().agentStore;
   const { data: activeToolCalls = [] } = useLiveQuery((q) =>
     q
       .from({ entry: entries })

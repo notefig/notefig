@@ -36,6 +36,7 @@ import {
   type AgentRecording,
   type RecordedEvent,
 } from "@/components/debug-panel-recording";
+import { agentStoreModule } from "./agent-collections";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Json = any;
@@ -141,20 +142,21 @@ export class FakeAgent {
     return {};
   };
   /** Scripted `session/set_model` (unstable 0.x surface); throwing rejects. */
-  onSetModel: (params: Json, agent: FakeAgent) => Promise<Json> = async () =>
-    ({});
+  onSetModel: (params: Json, agent: FakeAgent) => Promise<Json> =
+    async () => ({});
   /** Scripted `session/set_config_option`: must answer the full option
    *  list; the default reflects the chosen value into what session/new
    *  advertised. Throwing rejects the call. */
-  onSetConfigOption: (params: Json, agent: FakeAgent) => Promise<Json> =
-    async (params) => ({
-      configOptions: (this.newSessionResult?.configOptions ?? []).map(
-        (option: Json) =>
-          option.id === params.configId
-            ? { ...option, currentValue: params.value }
-            : option,
-      ),
-    });
+  onSetConfigOption: (params: Json, agent: FakeAgent) => Promise<Json> = async (
+    params,
+  ) => ({
+    configOptions: (this.newSessionResult?.configOptions ?? []).map(
+      (option: Json) =>
+        option.id === params.configId
+          ? { ...option, currentValue: params.value }
+          : option,
+    ),
+  });
 
   constructor(private readonly transport: ScriptedAgentLineChannel) {
     transport.onLine((line) => void this.handle(JSON.parse(line)));
@@ -584,8 +586,12 @@ export function remapWorkspacePath<T>(value: T, from: string, to: string): T {
  * turn; a cancel mid-replay stops it with "cancelled".
  */
 export function replay(options: Json): MockScenario {
-  const { recording, turn: turnIndex, speed = 0, maxDelayMs = 1500 } =
-    (options ?? {}) as Partial<ReplayOptions>;
+  const {
+    recording,
+    turn: turnIndex,
+    speed = 0,
+    maxDelayMs = 1500,
+  } = (options ?? {}) as Partial<ReplayOptions>;
   if (!isAgentRecording(recording)) {
     throw new Error(
       "replay scenario needs options.recording in the notefig-agent-recording format",
@@ -596,7 +602,8 @@ export function replay(options: Json): MockScenario {
   }
 
   return async (ctx) => {
-    const turn = recording.turns[resolveReplayTurn(ctx.sessionId, recording, turnIndex)];
+    const turn =
+      recording.turns[resolveReplayTurn(ctx.sessionId, recording, turnIndex)];
     const player = new ReplayPlayer(ctx, recording, { speed, maxDelayMs });
     for (const event of turn.events as RecordedEvent[]) {
       if (ctx.signal.aborted) return { stopReason: "cancelled" };
@@ -615,7 +622,11 @@ function resolveReplayTurn(
   explicit: number | undefined,
 ): number {
   if (explicit !== undefined) {
-    if (!Number.isInteger(explicit) || explicit < 0 || explicit >= recording.turns.length) {
+    if (
+      !Number.isInteger(explicit) ||
+      explicit < 0 ||
+      explicit >= recording.turns.length
+    ) {
       throw new Error(
         `replay scenario: turn ${explicit} is out of range (recording has ${recording.turns.length} turns)`,
       );
@@ -933,8 +944,7 @@ export function createMockMcpEndpoint(
   spec: { taskId?: string } = {},
 ): McpEndpoint {
   let handler:
-    | ((line: string, respond: (line: string) => void) => void)
-    | null = null;
+    ((line: string, respond: (line: string) => void) => void) | null = null;
   const endpoint: MockMcpLoopback = {
     async start() {},
     mcpServer: undefined,
@@ -1019,7 +1029,7 @@ declare global {
 /** Mock mode only: `window.__mockAgent`, over the app's agent store. */
 export const mockAgentModule = defineModule({
   name: "mock-agent",
-  needs: ["agentStore"],
+  needs: [agentStoreModule],
   boot: (_api, ctx) => {
     if (!MOCK_AGENT_MODE || typeof window === "undefined") return;
     const store = ctx.use("agentStore");

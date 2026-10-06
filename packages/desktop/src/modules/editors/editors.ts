@@ -6,7 +6,7 @@
  * The instances themselves are built by the tab surfaces
  * (`components/editor/editor-store.ts` assembles the Tiptap editor, code and
  * image viewers register container instances); they register with the
- * instance a component reads from core (`useModule("editors")`) and say
+ * instance a component reads from core (`useCore().editors`) and say
  * when their surface is mounted. Everything else — tabs, documents, agent
  * tools — is handed the same instance and never imports a component. There
  * is no module-scope registry: two cores hold two sets of editors.
@@ -23,6 +23,7 @@ import type { LayoutApi } from "@/modules/layout";
 import { getDocumentSync } from "@/utils/markdown-conversion";
 import { extractTabIds, findLayoutSelectedTab } from "@/utils/layout-codec";
 import { relativeTreePath } from "@/utils/path";
+import { useCore } from "@notefig/core/react";
 
 // "release-notes" never comes from a file — it's the bundled release-notes
 // tab, registered so the focus arbiter can drive it.

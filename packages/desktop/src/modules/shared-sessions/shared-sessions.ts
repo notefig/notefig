@@ -13,6 +13,8 @@ import { defineModule } from "@notefig/core";
 import { workspaceKey } from "@/utils/path";
 import type { AgentTasksCollection } from "@/modules/agents/agent-collections";
 import type { AgentsApi } from "@/modules/agents/agents";
+import { workspaceAgentsModule } from "@/modules/agents/workspace-agents";
+import { agentStoreModule } from "@/modules/agents/agent-collections";
 
 type SharedSession = { taskId: string; started: Promise<void> };
 
@@ -97,11 +99,10 @@ declare module "@notefig/core" {
 
 export const sharedSessionsModule = defineModule({
   name: "sharedSessions",
-  needs: ["agents", "agentStore"],
+  needs: [workspaceAgentsModule, agentStoreModule],
   register: (ctx) =>
     createSharedSessions({
       agents: ctx.use("agents"),
       tasks: ctx.use("agentStore").tasks,
     }),
 });
-

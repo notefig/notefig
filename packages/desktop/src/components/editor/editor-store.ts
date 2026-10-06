@@ -59,6 +59,7 @@ import {
   composeDropHandlers,
   createProtocolDropHandler,
 } from "@/utils/drag-protocol";
+import { useCore } from "@notefig/core/react";
 
 export type { SearchTarget };
 
@@ -529,10 +530,10 @@ type EditorConfig =
  * - And the type matches, returns the existing instance
  * - And the type doesn't match, disposes the old and creates new
  *
- * @param editors - The registry the surface fills (`useModule("editors")`)
+ * @param editors - The registry the surface fills (`useCore().editors`)
  * @param filePath - The absolute file path (used as the cache key)
  * @param config - Editor configuration including type and type-specific options
- * @param fs - The platform fs the editor reaches (`usePlatform().fs`)
+ * @param fs - The platform fs the editor reaches (`useCore().platform.fs`)
  * @returns The editor instance (cast to appropriate type by caller)
  */
 export function getOrCreateEditor(

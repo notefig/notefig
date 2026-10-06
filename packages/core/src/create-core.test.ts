@@ -5,10 +5,19 @@ import {
   WorkspaceOpenError,
   type CreateCoreOptions,
 } from "./create-core";
-import { defineModule, type WorkspaceLifecycle } from "./define-module";
+import {
+  defineModule,
+  defineService,
+  type AnyModule,
+  type WorkspaceLifecycle,
+} from "./define-module";
 import { CoreConfigError } from "./order";
 
 declare module "./types" {
+  interface CoreServices {
+    // Optional, so the cores below that provide no services still type.
+    "t-clock"?: () => number;
+  }
   interface CoreModules {
     "t-store": { value: number };
     "t-reader": { read(): number };
@@ -52,7 +61,7 @@ describe("createCore", () => {
     });
     const reader = defineModule({
       name: "t-reader",
-      needs: ["t-store"],
+      needs: [store],
       register: (ctx) => ({ read: () => ctx.use("t-store").value }),
     });
 
@@ -77,7 +86,7 @@ describe("createCore", () => {
     });
     const reader = defineModule({
       name: "t-reader",
-      needs: ["t-store"],
+      needs: [store],
       register: () => ({ read: () => 0 }),
       boot: () => void calls.push("t-reader"),
     });
@@ -118,29 +127,80 @@ describe("createCore", () => {
     });
   });
 
-  it("hands services to modules that list them", () => {
+  it("registers a needed module the root did not list, and prefers a listed one", () => {
+    const store = defineModule({
+      name: "t-store",
+      register: () => ({ value: 1 }),
+    });
     const reader = defineModule({
       name: "t-reader",
-      needs: ["clock" as never],
-      register: (ctx) => ({
-        read: () => (ctx.use("clock" as never) as () => number)(),
-      }),
+      needs: [store],
+      register: (ctx) => ({ read: () => ctx.use("t-store").value }),
+    });
+    expect(
+      createCore({ services: {}, modules: [reader] })["t-reader"].read(),
+    ).toBe(1);
+
+    const listed = defineModule({
+      name: "t-store",
+      register: () => ({ value: 2 }),
+    });
+    expect(
+      createCore({ services: {}, modules: [reader, listed] })[
+        "t-reader"
+      ].read(),
+    ).toBe(2);
+
+    // A provided service is listed too: it stands in for a needed module
+    // of its name.
+    expect(
+      createCore({
+        services: { "t-store": { value: 3 } } as never,
+        modules: [reader],
+      })["t-reader"].read(),
+    ).toBe(3);
+  });
+
+  it("types needs: every entry is a module, services included (compile-time)", () => {
+    const store = defineModule({
+      name: "t-store",
+      register: () => ({ value: 1 }),
+    });
+    // @ts-expect-error — a module is named by the module, not its name
+    defineModule({ name: "x", needs: ["t-store"] });
+    // @ts-expect-error — so is a service
+    defineModule({ name: "x", needs: ["t-clock"] });
+    defineModule({ name: "y", needs: [store, defineService("t-clock")] });
+  });
+
+  it("hands services to modules that need them, and reads them as properties", () => {
+    const clock = defineService("t-clock");
+    const reader = defineModule({
+      name: "t-reader",
+      needs: [clock],
+      register: (ctx) => ({ read: () => ctx.use("t-clock")!() }),
     });
     const core = createCore({
-      services: { clock: () => 7 } as never,
+      services: { "t-clock": () => 7 },
       modules: [reader],
     });
     expect(core["t-reader"].read()).toBe(7);
+    expect(core["t-clock"]!()).toBe(7);
   });
 
   it("fails startup on a missing need, a cycle, a duplicate or a reserved name", () => {
-    const needsGhost = defineModule({ name: "x", needs: ["ghost" as never] });
-    expect(() => createCore({ services: {}, modules: [needsGhost] })).toThrow(
-      /"x" needs "ghost"/,
+    const needsClock = defineModule({
+      name: "x",
+      needs: [defineService("t-clock")],
+    });
+    expect(() => createCore({ services: {}, modules: [needsClock] })).toThrow(
+      'Service "t-clock" is needed but the root did not provide it.',
     );
 
-    const p = defineModule({ name: "p", needs: ["q" as never] });
-    const q = defineModule({ name: "q", needs: ["p" as never] });
+    // Only a mutation builds a cycle of module values.
+    const p: AnyModule = { name: "p", needs: [] };
+    const q: AnyModule = { name: "q", needs: [p] };
+    (p.needs as AnyModule[]).push(q);
     expect(() => createCore({ services: {}, modules: [p, q] })).toThrow(
       "Modules need each other in a cycle: p → q → p",
     );
@@ -154,6 +214,9 @@ describe("createCore", () => {
     expect(() => createCore({ services: {}, modules: [reserved] })).toThrow(
       /reserved/,
     );
+    expect(() =>
+      createCore({ services: { hooks: {} } as never, modules: [] }),
+    ).toThrow(/"hooks" is reserved/);
   });
 
   it("refuses a use that the module did not declare", () => {
@@ -235,11 +298,11 @@ describe("workspaces", () => {
         dispose: () => void log.push("dispose history"),
       },
     });
-  const tasks = (log: string[]) =>
+  const tasks = (log: string[], historyModule: ReturnType<typeof history>) =>
     defineModule({
       name: "t-tasks",
       workspace: {
-        needs: ["t-history"],
+        needs: [historyModule],
         create: (ctx) => {
           log.push("create tasks");
           return { history: ctx.useWorkspace("t-history") };
@@ -253,9 +316,10 @@ describe("workspaces", () => {
 
   it("creates instances in need order and disposes them in reverse after the closing hook", async () => {
     const log: string[] = [];
+    const historyModule = history(log);
     const core = coreWithLifecycle({
       services: {},
-      modules: [tasks(log), history(log)],
+      modules: [tasks(log, historyModule), historyModule],
       onError: quiet,
     });
     core.hooks.on(
@@ -352,10 +416,11 @@ describe("workspaces", () => {
   it("never publishes a partial workspace: a failed create rolls back and the next open retries", async () => {
     const log: string[] = [];
     let failTasks = true;
+    const historyModule = history(log);
     const flakyTasks = defineModule({
       name: "t-tasks",
       workspace: {
-        needs: ["t-history"],
+        needs: [historyModule],
         create: (ctx) => {
           if (failTasks) throw new Error("tasks failed");
           return { history: ctx.useWorkspace("t-history") };
@@ -366,7 +431,7 @@ describe("workspaces", () => {
     const opened = vi.fn();
     const core = coreWithLifecycle({
       services: {},
-      modules: [history(log), flakyTasks],
+      modules: [historyModule, flakyTasks],
       onError,
     });
     core.hooks.on("workspace:opened", opened);
@@ -408,7 +473,7 @@ describe("workspaces", () => {
     const flakyTasks = defineModule({
       name: "t-tasks",
       workspace: {
-        needs: ["t-history"],
+        needs: [slowHistory],
         create: (ctx) => {
           if (failTasks) throw new Error("tasks failed");
           return { history: ctx.useWorkspace("t-history") };

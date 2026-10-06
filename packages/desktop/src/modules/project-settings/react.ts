@@ -3,15 +3,15 @@
  */
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useModule } from "@notefig/core/react";
 import {
   projectSettingsQueryKey,
   resolveProjectSettings,
   type ProjectSettings,
 } from "./project-settings";
+import { useCore } from "@notefig/core/react";
 
 export function useProjectSettings(workspacePath: string) {
-  const projectSettings = useModule("projectSettings");
+  const { projectSettings } = useCore();
   const { data, isLoading } = useQuery({
     queryKey: projectSettingsQueryKey(workspacePath),
     queryFn: () => projectSettings.read(workspacePath),

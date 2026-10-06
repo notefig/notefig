@@ -9,7 +9,7 @@
  */
 import { createCore, type AnyModule, type Core } from "@notefig/core";
 import { QueryClient } from "@tanstack/react-query";
-import { platformAdapter, type IPlatformAdapter } from "@/adapters";
+import { platformAdapter } from "@/adapters";
 import { agentStoreModule } from "@/modules/agents/agent-collections";
 import { harnessDiscoveryModule } from "@/modules/agents/harness-discovery";
 import { mockAgentModule } from "@/modules/agents/mock-harness";
@@ -18,7 +18,6 @@ import { tunnelModule } from "@/modules/agents/tunnel/tunnel-module";
 import { workspaceAgentsModule } from "@/modules/agents/workspace-agents";
 import { treeInlineEditModule } from "@/modules/tree-inline-edit";
 import { sharedSessionsModule } from "@/modules/shared-sessions";
-import { canOpenFile } from "@/components/editor/polymorphic-editor";
 import { treeExpansionModule } from "@/modules/tree-expansion";
 import { telemetryModule } from "@/modules/telemetry";
 import { documentsModule } from "@/modules/documents";
@@ -33,7 +32,10 @@ import { scratchpadLandingModule } from "@/modules/scratchpads";
 import { scratchpadsModule } from "@/modules/scratchpads";
 import { seenModule } from "@/modules/seen";
 import { turnWritesModule } from "@/modules/turn-writes";
-import { workspacesModule } from "@/modules/workspaces";
+import {
+  restoreWorkspacesModule,
+  workspacesModule,
+} from "@/modules/workspaces";
 import { gitWorkerModule } from "@/modules/git-worker";
 import { historyModule } from "@/modules/history";
 import { kvModule } from "@/modules/kv";
@@ -41,33 +43,18 @@ import { projectSettingsModule } from "@/modules/project-settings";
 import { lastToolModule, sidebarViewModule } from "@/modules/sidebar-view";
 import { workspaceKey } from "@/utils/path";
 
-declare module "@notefig/core" {
-  interface CoreServices {
-    platform: IPlatformAdapter;
-    queryClient: QueryClient;
-  }
-}
-
 /** What every root that renders a workspace needs running. */
-export function runtimeModules({
-  restoreWorkspaces,
-}: {
-  /**
-   * Reopen the workspaces the user left open. The desktop shell wants this;
-   * the marketing site always seeds its one fixed root itself.
-   */
-  restoreWorkspaces: boolean;
-}): AnyModule[] {
+export function runtimeModules(): AnyModule[] {
   return [
     kvModule,
     seenModule,
     promptRoundsModule,
     turnWritesModule,
     treeInlineEditModule,
-    workspacesModule({ restore: restoreWorkspaces }),
+    workspacesModule,
     recentDocumentsModule,
     layoutModule,
-    tabsModule({ canOpenFile }),
+    tabsModule,
     editorsModule,
     documentsModule,
     projectSettingsModule,
@@ -93,7 +80,10 @@ export function runtimeModules({
 /** The desktop shell (Tauri and its web build). */
 export function desktopModules(): AnyModule[] {
   return [
-    ...runtimeModules({ restoreWorkspaces: true }),
+    ...runtimeModules(),
+    // Reopen the workspaces the user left open; the marketing site seeds
+    // its one fixed root instead.
+    restoreWorkspacesModule,
     harnessDiscoveryModule,
     tunnelModule,
     telemetryModule,

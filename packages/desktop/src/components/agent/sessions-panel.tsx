@@ -49,7 +49,6 @@ import { copyTextToClipboard } from "@notefig/ui/clipboard";
 import type { AgentTaskRow } from "@/modules/agents/agent-collections";
 import {
   describeTaskMeta,
-  useAgents,
   useAgentTaskList,
   type AgentTaskMeta,
   useSessionActions,
@@ -129,7 +128,7 @@ export function useStartSession(workspacePath: string): {
   trustDialog: ReactNode;
 } {
   const { t } = useTranslation();
-  const agents = useAgents();
+  const { agents } = useCore();
   const [trustPromptOpen, setTrustPromptOpen] = useState(false);
   // What the pending trust confirmation would start, and where: a start
   // resolves after a load, by when the panel may show another workspace.
@@ -237,7 +236,7 @@ export function SessionRow({
   attention?: AttentionKind | null;
 }) {
   const { t } = useTranslation();
-  const agents = useAgents();
+  const { agents } = useCore();
   return (
     // Flat full-width rows, same affordances as the file tree / commit
     // list: pointer cursor (Tailwind's preflight defaults buttons to the
@@ -261,10 +260,19 @@ export function SessionRow({
               // What needs attention outranks the status: an ask or a
               // failure is what the run is blocked on. (A finished-turn mark
               // never coexists with a running session — utils/attention.)
-              state={attention ? attentionGlyphState(attention) : taskGlyphState(task)}
+              state={
+                attention
+                  ? attentionGlyphState(attention)
+                  : taskGlyphState(task)
+              }
             />
           </span>
-          <span className={cn("min-w-0 flex-1 truncate", attention && "font-medium")}>
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate",
+              attention && "font-medium",
+            )}
+          >
             {task.title}
           </span>
           <span className="shrink-0 text-[0.6875rem] text-muted-foreground/80">
@@ -299,7 +307,7 @@ export function SessionRow({
  */
 export function SessionRowMenu({ task }: { task: AgentTaskRow }) {
   const { t } = useTranslation();
-  const agents = useAgents();
+  const { agents } = useCore();
   const actions = useSessionActions(task);
   return (
     <ContextMenuContent>
@@ -403,4 +411,3 @@ function NewSessionButton({
     </ButtonGroup>
   );
 }
-

@@ -15,13 +15,20 @@ import { cn } from "@notefig/ui/utils";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
-import { useContentFetching, useContentWatches, useOpenFileRows } from "@/modules/files/react";
-import { useFocusedWorkspace, useOpenWorkspacesReady, useWorkspaceOfPath } from "@/modules/workspaces/react";
+import {
+  useContentFetching,
+  useContentWatches,
+  useOpenFileRows,
+} from "@/modules/files/react";
+import {
+  useFocusedWorkspace,
+  useOpenWorkspacesReady,
+  useWorkspaceOfPath,
+} from "@/modules/workspaces/react";
 import { useWorkspaceTabs } from "@/modules/tabs/react";
 import { DebugPanel } from "./debug-panel";
 import { useOpenProject } from "@/hooks/use-open-project";
 import { Welcome } from "@/components/welcome";
-import { usePlatform } from "@/core/use-platform";
 import { usePublishAppStatus } from "@/hooks/use-app-status";
 import { useProjectSettings } from "@/modules/project-settings/react";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
@@ -70,7 +77,7 @@ export const Workspace = () => {
 /** The native "Open Folder" menu item (Rust emits `folder-selected`). */
 function useOpenProjectFromHost(): void {
   const openProject = useOpenProject();
-  const { ui } = usePlatform();
+  const { ui } = useCore().platform;
   useEffect(
     () =>
       ui.addEventListener((event) => {

@@ -7,12 +7,14 @@
 export { createCore } from "./create-core";
 export { WorkspaceClosedError, WorkspaceOpenError } from "./create-core";
 export type { Core, CoreBase, CreateCoreOptions } from "./create-core";
-export { defineModule } from "./define-module";
+export { defineModule, defineService } from "./define-module";
 export type {
   AnyModule,
+  Module,
   ModuleContext,
   ModuleDefinition,
   OpenWorkspaces,
+  ServiceName,
   WorkspaceContext,
   WorkspaceLifecycle,
 } from "./define-module";

@@ -12,7 +12,7 @@ import type { AuthMethod } from "@notefig/shared/agent";
 import { Button } from "@notefig/ui/button";
 import { cn } from "@notefig/ui/utils";
 import type { AgentTaskRow } from "@/modules/agents/agent-collections";
-import { useAgents } from "@/modules/agents/react";
+import { useCore } from "@notefig/core/react";
 
 export function AuthCard({
   task,
@@ -24,7 +24,7 @@ export function AuthCard({
   bare?: boolean;
 }) {
   const { t } = useTranslation();
-  const agents = useAgents();
+  const { agents } = useCore();
   const [instructions, setInstructions] = useState<string | null>(null);
   const [busyMethodId, setBusyMethodId] = useState<string | null>(null);
   const methods = task.authMethods ?? [];

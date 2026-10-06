@@ -6,11 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Core } from "./create-core";
-import type {
-  CoreModules,
-  WorkspaceModuleName,
-  WorkspaceModules,
-} from "./types";
+import type { WorkspaceModuleName, WorkspaceModules } from "./types";
 
 const CoreContext = createContext<Core | null>(null);
 
@@ -24,17 +20,15 @@ export function CoreProvider({
   return <CoreContext.Provider value={core}>{children}</CoreContext.Provider>;
 }
 
+/**
+ * The root's core. Services and module APIs read straight off it
+ * (`const { platform, agents } = useCore()`); each is stable for the life
+ * of the core.
+ */
 export function useCore(): Core {
   const core = useContext(CoreContext);
   if (!core) throw new Error("useCore() needs a <CoreProvider> above it.");
   return core;
-}
-
-/** A module's API. Stable for the life of the core. */
-export function useModule<K extends keyof CoreModules & string>(
-  name: K,
-): CoreModules[K] {
-  return useCore().use(name as never) as CoreModules[K];
 }
 
 /**

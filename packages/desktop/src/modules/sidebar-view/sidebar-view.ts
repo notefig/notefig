@@ -4,6 +4,7 @@
  * shows a workspace's files when the user enters it.
  */
 import { defineModule } from "@notefig/core";
+import { urlModule } from "@/core/services";
 export const WORKSPACE_TOOLS = ["files", "search", "git", "sessions"] as const;
 export type WorkspaceTool = (typeof WORKSPACE_TOOLS)[number];
 export type SidebarView = "everything" | WorkspaceTool;
@@ -14,7 +15,9 @@ export const SIDEBAR_VIEW_PARAM = "sidebarView";
 const DEFAULT_VIEW: SidebarView = "everything";
 
 function isSidebarView(value: string | null): value is SidebarView {
-  return value === "everything" || WORKSPACE_TOOLS.includes(value as WorkspaceTool);
+  return (
+    value === "everything" || WORKSPACE_TOOLS.includes(value as WorkspaceTool)
+  );
 }
 
 /** The view the URL names, defaulting past anything unrecognised. */
@@ -39,7 +42,6 @@ export function withSidebarView(
   return next;
 }
 
-
 declare module "@notefig/core" {
   interface CoreModules {
     "sidebar-view": undefined;
@@ -55,7 +57,7 @@ declare module "@notefig/core" {
  */
 export const sidebarViewModule = defineModule({
   name: "sidebar-view",
-  needs: ["url"],
+  needs: [urlModule],
   boot: (_api, ctx) => {
     const url = ctx.use("url");
     return ctx.hooks.on("workspace:entered", () => {

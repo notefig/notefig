@@ -9,6 +9,8 @@ import {
   type HarnessOverride,
 } from "@notefig/shared/agent";
 import { defineModule } from "@notefig/core";
+import { kvModule } from "@/modules/kv";
+import { platformModule } from "@/core/services";
 
 /**
  * All domain knowledge for harness discovery lives here: the probe script,
@@ -199,7 +201,7 @@ declare module "@notefig/core" {
 /** One harness-discovery scan per app session. */
 export const harnessDiscoveryModule = defineModule({
   name: "harnessDiscovery",
-  needs: ["platform", "kv"],
+  needs: [platformModule, kvModule],
   register: (ctx) =>
     createHarnessDiscovery({
       proc: ctx.use("platform").proc,

@@ -21,6 +21,7 @@ import {
   type PersistedCollectionPersistence,
 } from "@tanstack/db-sqlite-persistence-core";
 import { defineModule } from "@notefig/core";
+import { platformModule } from "@/core/services";
 
 export interface KvRow {
   key: string;
@@ -56,7 +57,11 @@ function createKvCollection(namespace: string, persistence: Persistence) {
  * (kv-store-hydration.test.tsx pins this). In steady state `preload()` is a
  * resolved promise, so the write is deferred by one microtask at most.
  */
-export async function upsert(collection: KvCollection, key: string, value: unknown) {
+export async function upsert(
+  collection: KvCollection,
+  key: string,
+  value: unknown,
+) {
   await collection.preload();
   return collection.get(key)
     ? collection.update(key, (draft) => {
@@ -123,6 +128,6 @@ declare module "@notefig/core" {
 
 export const kvModule = defineModule({
   name: "kv",
-  needs: ["platform"],
+  needs: [platformModule],
   register: (ctx) => createKv(() => ctx.use("platform").db.get()),
 });

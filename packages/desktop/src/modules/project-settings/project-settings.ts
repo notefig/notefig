@@ -12,6 +12,7 @@ import { type QueryClient } from "@tanstack/react-query";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { defineModule } from "@notefig/core";
 import { path as pathutil } from "@/utils/path";
+import { platformModule, queryClientModule } from "@/core/services";
 
 export const PROJECT_SETTINGS_FILENAME = "metrists.json";
 
@@ -132,7 +133,7 @@ declare module "@notefig/core" {
  *  settings, so they are read again. */
 export const projectSettingsModule = defineModule({
   name: "projectSettings",
-  needs: ["platform", "queryClient"],
+  needs: [platformModule, queryClientModule],
   register: (ctx) =>
     createProjectSettings({
       fs: ctx.use("platform").fs,

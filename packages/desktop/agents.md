@@ -143,7 +143,7 @@ reject any other import of an adapter implementation.
 register: (ctx) => createThing({ fs: ctx.use("platform").fs }),
 
 // In a component
-const { ui } = usePlatform();
+const { ui } = useCore().platform;
 const dirPath = await ui.pickDirectory("Select workspace");
 ```
 

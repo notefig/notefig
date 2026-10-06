@@ -61,7 +61,12 @@ import {
   type TabSearchOptions,
 } from "@/modules/tabs/tab-controllers";
 // Sibling entities — only referenced inside function bodies (cycle rule).
-import type { EditorHandle, EditorsApi, EditorTarget } from "@/modules/editors";
+import {
+  canOpenFile,
+  type EditorHandle,
+  type EditorsApi,
+  type EditorTarget,
+} from "@/modules/editors";
 import type { DocumentsApi } from "@/modules/documents";
 import type { AgentsApi, AgentTaskHandle } from "@/modules/agents/agents";
 import { type WorkspaceFiles } from "@/modules/files";
@@ -69,6 +74,9 @@ import {
   flushDocumentSync,
   whenDocumentSyncClean,
 } from "@/utils/markdown-conversion";
+import { layoutModule } from "@/modules/layout";
+import { editorsModule } from "@/modules/editors";
+import { documentsModule } from "@/modules/documents";
 
 // ---------------------------------------------------------------------------
 // Public re-exports: the layout codec and the tab-id scheme.
@@ -279,6 +287,7 @@ export interface TabsApi {
 declare module "@notefig/core" {
   interface CoreModules {
     tabs: TabsApi;
+    focusedWindow: FocusedWindow;
   }
 }
 
@@ -292,7 +301,14 @@ function windowIdOf(element: Element | null): string | null {
 }
 
 /** The dock window that last held focus, kept after focus leaves the dock. */
-function createFocusedWindow() {
+export interface FocusedWindow {
+  get(): string | null;
+  subscribe(listener: () => void): () => void;
+  /** Follow focus in the document; returns the stop. */
+  track(): () => void;
+}
+
+function createFocusedWindow(): FocusedWindow {
   let windowId: string | null = null;
   const listeners = new Set<() => void>();
   return {
@@ -317,10 +333,7 @@ function createFocusedWindow() {
 /** What tabs are built from. */
 export interface TabsDeps {
   layout: LayoutApi;
-  focusedWindow: Pick<
-    ReturnType<typeof createFocusedWindow>,
-    "get" | "subscribe"
-  >;
+  focusedWindow: Pick<FocusedWindow, "get" | "subscribe">;
   /** The editor's format gate. */
   canOpenFile: (path: string) => boolean;
   editors: Pick<EditorsApi, "goTo" | "markdownEditor">;
@@ -501,27 +514,22 @@ export function createTabs({
   return tabs;
 }
 
-/**
- * `canOpenFile` is the editor's format gate. It is passed in by the
- * composition root so this entity does not import editor components.
- */
-export function tabsModule({
-  canOpenFile,
-}: {
-  canOpenFile: (path: string) => boolean;
-}) {
-  const focusedWindow = createFocusedWindow();
-  return defineModule({
-    name: "tabs",
-    needs: ["layout", "editors", "documents"],
-    register: (ctx) =>
-      createTabs({
-        layout: ctx.use("layout"),
-        focusedWindow,
-        canOpenFile,
-        editors: ctx.use("editors"),
-        documents: ctx.use("documents"),
-      }),
-    boot: () => focusedWindow.track(),
-  });
-}
+/** The dock window that last held focus, tracked from boot. */
+export const focusedWindowModule = defineModule({
+  name: "focusedWindow",
+  register: () => createFocusedWindow(),
+  boot: (focusedWindow) => focusedWindow.track(),
+});
+
+export const tabsModule = defineModule({
+  name: "tabs",
+  needs: [layoutModule, editorsModule, documentsModule, focusedWindowModule],
+  register: (ctx) =>
+    createTabs({
+      layout: ctx.use("layout"),
+      focusedWindow: ctx.use("focusedWindow"),
+      canOpenFile,
+      editors: ctx.use("editors"),
+      documents: ctx.use("documents"),
+    }),
+});

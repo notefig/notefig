@@ -5,7 +5,6 @@ import { FolderLock } from "lucide-react";
 import { toast } from "sonner";
 import { DebugPanel } from "./debug-panel";
 import { Button } from "@notefig/ui/button";
-import { usePlatform } from "@/core/use-platform";
 import {
   FsError,
   isWorkspaceAccessError,
@@ -83,7 +82,7 @@ export class WorkspaceErrorBoundary extends Component<
  * empty workspace.
  */
 export function useThrowWorkspaceAccessError(workspacePath: string) {
-  const queryClient = useCore().use("queryClient");
+  const { queryClient } = useCore();
   const subscribe = useCallback(
     (onStoreChange: () => void) =>
       queryClient.getQueryCache().subscribe(onStoreChange),
@@ -158,7 +157,7 @@ function WorkspaceAccessError({
 }) {
   const { t } = useTranslation();
   const core = useCore();
-  const platform = usePlatform();
+  const { platform } = core;
   const openProject = useOpenProject();
   const workspacePath = useFocusedWorkspace();
   const content = getRecoveryContent(error, t);

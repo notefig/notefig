@@ -28,6 +28,7 @@ import {
 } from "@tanstack/db-sqlite-persistence-core";
 import { defineModule, type WorkspaceLifecycle } from "@notefig/core";
 import { path as pathutil, relativeTreePath, workspaceKey } from "@/utils/path";
+import { platformModule } from "@/core/services";
 
 export interface OpenWorkspaceRow {
   /** workspaceKey(path) — the row id. */
@@ -213,34 +214,49 @@ declare module "@notefig/core" {
 
 /**
  * The open set's runtime half: it persists what core opens through a
- * handle, and drops it when core closes it. The desktop shell restores the
- * persisted open set; the marketing site focuses its one root.
+ * handle, and drops it when core closes it.
  */
-export function workspacesModule({ restore }: { restore: boolean }) {
-  return defineModule({
-    name: "workspaceRegistry",
-    needs: ["platform"],
-    register: (ctx) => createWorkspaceRegistry(ctx.use("platform").db.get()),
-    boot: (registry, ctx) => {
-      const stopMirror = registry.mirror(ctx.workspaces);
-      const stopFocus = ctx.hooks.on("workspace:focused", (workspace) =>
-        registry.recordFocus(workspace.path),
-      );
-      // Synchronously, first thing in the close: the switcher row goes at
-      // once.
-      const stopClosing = ctx.hooks.on("workspace:closing", (workspace) =>
-        registry.forget(workspace.key),
-      );
-      if (restore) {
-        void registry.restore().catch((error) => {
-          console.error("Failed to restore open workspaces:", error);
-        });
-      }
-      return () => {
-        stopMirror();
-        stopFocus();
-        stopClosing();
-      };
-    },
-  });
+export const workspacesModule = defineModule({
+  name: "workspaceRegistry",
+  needs: [platformModule],
+  register: (ctx) => createWorkspaceRegistry(ctx.use("platform").db.get()),
+  boot: (registry, ctx) => {
+    const stopMirror = registry.mirror(ctx.workspaces);
+    const stopFocus = ctx.hooks.on("workspace:focused", (workspace) =>
+      registry.recordFocus(workspace.path),
+    );
+    // Synchronously, first thing in the close: the switcher row goes at
+    // once.
+    const stopClosing = ctx.hooks.on("workspace:closing", (workspace) =>
+      registry.forget(workspace.key),
+    );
+    return () => {
+      stopMirror();
+      stopFocus();
+      stopClosing();
+    };
+  },
+});
+
+declare module "@notefig/core" {
+  interface CoreModules {
+    "restore-workspaces": undefined;
+  }
 }
+
+/**
+ * Reopen the workspaces the user left open. The desktop shell runs this;
+ * the marketing site always seeds its one fixed root itself.
+ */
+export const restoreWorkspacesModule = defineModule({
+  name: "restore-workspaces",
+  needs: [workspacesModule],
+  boot: (_api, ctx) => {
+    void ctx
+      .use("workspaceRegistry")
+      .restore()
+      .catch((error) => {
+        console.error("Failed to restore open workspaces:", error);
+      });
+  },
+});

@@ -11,6 +11,7 @@ import {
   initGlobalErrorHandlers,
   telemetryAvailable,
 } from "@/telemetry/telemetry";
+import { kvModule } from "@/modules/kv";
 function fireAppOpened() {
   captureEvent("app_opened");
 }
@@ -189,8 +190,7 @@ declare module "@notefig/core" {
  *  once — StrictMode remounts never re-run it or double-fire app_opened. */
 export const telemetryModule = defineModule({
   name: "telemetry",
-  needs: ["kv"],
+  needs: [kvModule],
   register: (ctx) => createTelemetry(ctx.use("kv")),
   boot: (telemetry) => telemetry.start(),
 });
-

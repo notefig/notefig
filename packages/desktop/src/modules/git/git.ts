@@ -33,6 +33,8 @@ import {
 import { isWorkspaceAccessError } from "@/adapters/platform-adapter.interface";
 import { path as pathutil, workspaceKey } from "@/utils/path";
 import type { WorkspaceHistory } from "@/modules/history";
+import { historyModule } from "@/modules/history";
+import { queryClientModule } from "@/core/services";
 
 /** A GitError flattened to data so it can live on a row. */
 export interface SerializedGitError {
@@ -374,9 +376,9 @@ declare module "@notefig/core" {
 
 export const gitModule = defineModule({
   name: "git",
-  needs: ["queryClient"],
+  needs: [queryClientModule],
   workspace: {
-    needs: ["history"],
+    needs: [historyModule],
     create: (ctx) => {
       const git = createWorkspaceGit({
         workspacePath: pathutil.normalize(ctx.workspace.path),

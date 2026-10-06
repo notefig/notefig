@@ -30,7 +30,10 @@ import type { Core } from "@notefig/core";
 import { CoreProvider } from "@notefig/core/react";
 import type { WorkspaceFiles } from "@/modules/files";
 import { tabsModule } from "@/modules/tabs";
-import { useWorkspaceTabs, type WorkspaceTabsState } from "@/modules/tabs/react";
+import {
+  useWorkspaceTabs,
+  type WorkspaceTabsState,
+} from "@/modules/tabs/react";
 import { editorsModule } from "@/modules/editors";
 import { documentsModule } from "@/modules/documents";
 import { turnWritesModule } from "@/modules/turn-writes";
@@ -88,13 +91,13 @@ beforeEach(async () => {
   core = createTestCore({
     modules: [
       filesModuleOf(files),
-      workspacesModule({ restore: false }),
+      workspacesModule,
       agentStoreModule,
       // The join reads `core.tabs` for the renames in flight.
       editorsModule,
       turnWritesModule,
       documentsModule,
-      tabsModule({ canOpenFile: () => true }),
+      tabsModule,
     ],
   });
   core.boot();

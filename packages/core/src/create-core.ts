@@ -66,8 +66,9 @@ export interface CoreBase {
   dispose(): Promise<void>;
 }
 
-/** Module APIs also read as properties: `core.files`. */
-export type Core = CoreBase & Readonly<CoreModules>;
+/** Services and module APIs also read as properties: `core.platform`,
+ *  `core.files`. */
+export type Core = CoreBase & Readonly<CoreServices> & Readonly<CoreModules>;
 
 const RESERVED = new Set<string>([
   "use",
@@ -92,10 +93,13 @@ export function createCore(options: CreateCoreOptions): Core {
       console.error(`[core] ${where} failed:`, error));
   const hooks = createHooks((error, hook) => onError(error, `hook ${hook}`));
 
-  const services = new Map<string, unknown>(
-    Object.entries(options.services as object),
+  // Each service the root provides is a module whose API is the value, so
+  // a module that needs it (by its `defineService`) is handed that value.
+  // Listed first: a provided service wins over the unprovided placeholder.
+  const services: AnyModule[] = Object.entries(options.services as object).map(
+    ([name, value]) => ({ name, register: () => value }),
   );
-  const ordered = orderModules(options.modules, new Set(services.keys()));
+  const ordered = orderModules([...services, ...options.modules]);
   for (const module of ordered) {
     if (RESERVED.has(module.name)) {
       throw new CoreConfigError(
@@ -105,9 +109,6 @@ export function createCore(options: CreateCoreOptions): Core {
   }
 
   const apis = new Map<string, unknown>();
-
-  const provided = (name: string): unknown =>
-    services.has(name) ? services.get(name) : apis.get(name);
 
   // ---------------------------------------------------------------------
   // Workspaces
@@ -187,7 +188,7 @@ export function createCore(options: CreateCoreOptions): Core {
         ...contextFor(module),
         workspace: ref,
         useWorkspace(name: string) {
-          if (!(part.needs ?? []).includes(name)) {
+          if (!(part.needs ?? []).some((need) => need.name === name)) {
             throw new CoreConfigError(
               `Module "${module.name}" uses the workspace instance of "${name}" without listing it in workspace.needs.`,
             );
@@ -382,7 +383,7 @@ export function createCore(options: CreateCoreOptions): Core {
   // ---------------------------------------------------------------------
 
   function contextFor(module: AnyModule): ModuleContext<never> {
-    const needs = new Set(module.needs ?? []);
+    const needs = new Set((module.needs ?? []).map((need) => need.name));
     return {
       use(name: string) {
         if (!needs.has(name)) {
@@ -390,7 +391,7 @@ export function createCore(options: CreateCoreOptions): Core {
             `Module "${module.name}" uses "${name}" without listing it in needs.`,
           );
         }
-        return provided(name) as never;
+        return apis.get(name) as never;
       },
       hooks,
       workspaces,
@@ -409,10 +410,10 @@ export function createCore(options: CreateCoreOptions): Core {
 
   const base: CoreBase = {
     use(name) {
-      if (!services.has(name) && !apis.has(name)) {
+      if (!apis.has(name)) {
         throw new CoreConfigError(`Nothing named "${name}" is registered.`);
       }
-      return provided(name) as never;
+      return apis.get(name) as never;
     },
     hooks,
     workspaces: {

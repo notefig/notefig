@@ -16,6 +16,7 @@ import {
   findLayoutSelectedTab,
   parseLayout,
 } from "@/utils/layout-codec";
+import { urlModule } from "@/core/services";
 
 /**
  * The URL as the layout needs it. Implemented over a data router in the
@@ -75,9 +76,6 @@ export interface LayoutApi {
 }
 
 declare module "@notefig/core" {
-  interface CoreServices {
-    url: UrlState;
-  }
   interface CoreModules {
     layout: LayoutApi;
   }
@@ -126,6 +124,6 @@ export function createLayout(url: UrlState): LayoutApi {
 
 export const layoutModule = defineModule({
   name: "layout",
-  needs: ["url"],
+  needs: [urlModule],
   register: (ctx) => createLayout(ctx.use("url")),
 });

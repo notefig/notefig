@@ -12,11 +12,7 @@ import { startApp } from "@/core/start-app";
 import { workspaceKey } from "@/utils/path";
 import { SiteShell } from "./site-shell";
 import { marketingSeedModule } from "./use-workspace-ready";
-import {
-  WORKSPACE_ROOT,
-  defaultPage,
-  routedPages,
-} from "./content-manifest";
+import { WORKSPACE_ROOT, defaultPage, routedPages } from "./content-manifest";
 
 // The site-local wrapper around @/styles.css — registers the desktop source
 // tree with Tailwind, whose auto-detection cannot see outside this package.
@@ -60,10 +56,7 @@ const MarketingApp = () => (
 // restore a persisted open set: the site always opens its one seeded root
 // itself.
 const core = startApp({
-  modules: [
-    ...runtimeModules({ restoreWorkspaces: false }),
-    marketingSeedModule,
-  ],
+  modules: [...runtimeModules(), marketingSeedModule],
   element: (
     <ThemeProvider defaultTheme="light">
       <TooltipProvider>

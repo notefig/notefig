@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
-import { usePlatform } from "@/core/use-platform";
 import { path as pathutil } from "@/utils/path";
+import { useCore } from "@notefig/core/react";
 
 export interface ResolvedImage {
   /** Displayable URL (asset://, blob:, data:, or the remote URL itself). */
@@ -121,7 +121,7 @@ export function useResolvedImage(
   imagePath: string,
   basePaths: string[],
 ): ResolvedImage {
-  const { fs } = usePlatform();
+  const { fs } = useCore().platform;
   const entry = useMemo(
     () => loadImage(fs, imagePath, basePaths),
     // Joined key: callers pass fresh array literals each render.

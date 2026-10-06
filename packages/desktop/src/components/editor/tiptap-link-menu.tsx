@@ -5,7 +5,6 @@ import type { Editor } from "@tiptap/core";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { getDirectoryPath } from "@/utils/fs";
-import { usePlatform } from "@/core/use-platform";
 import { useCore } from "@notefig/core/react";
 import { isExternalUrl, buildInternalCandidates } from "./tiptap-link-utils";
 
@@ -25,8 +24,7 @@ export function LinkBubbleMenu({
   filePath,
 }: LinkBubbleMenuProps) {
   const { t } = useTranslation();
-  const { tabs } = useCore();
-  const platform = usePlatform();
+  const { tabs, platform } = useCore();
   // Subscribe to editor state — a plain getAttributes() read at render time
   // goes stale because nothing re-renders this component on selection change.
   const href = useEditorState({
@@ -73,9 +71,7 @@ export function LinkBubbleMenu({
           className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
           onClick={handleOpen}
           onMouseDown={preventFocusLoss}
-          title={
-            isExternal ? t("openInBrowser", { href }) : t("openInNewTab")
-          }
+          title={isExternal ? t("openInBrowser", { href }) : t("openInNewTab")}
         >
           {/* Show the full href: stripping the scheme would disguise an
               external "https://notes.md" as an internal-looking filename. */}

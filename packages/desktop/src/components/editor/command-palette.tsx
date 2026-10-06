@@ -45,7 +45,7 @@ import { ScratchpadIcon } from "@/components/editor/scratchpad-icon";
 import { getLocalizedCommandKeywords } from "@/utils/command-keywords";
 import { useFileSearch, type FileSearchResult } from "@/hooks/use-file-search";
 import { useOpenProjectFromPicker } from "@/hooks/use-open-project";
-import { canOpenFile } from "./polymorphic-editor";
+import { canOpenFile } from "@/modules/editors";
 import { FileTypeIcon } from "./file-type-icon";
 import { useCore } from "@notefig/core/react";
 

@@ -17,13 +17,11 @@ import type { GitWorker } from "@/modules/git-worker";
 import { path as pathutil, workspaceKey } from "@/utils/path";
 import { ensureExcludeLines, type ExcludeFs } from "@/utils/git-exclude";
 import { APP_DIR_NAME, SCRATCHPADS_REL_PATH } from "@/utils/app-dir";
+import { gitWorkerModule } from "@/modules/git-worker";
+import { platformModule } from "@/core/services";
 
 export function historyGitDir(workspacePath: string): string {
-  return pathutil.join(
-    pathutil.normalize(workspacePath),
-    APP_DIR_NAME,
-    ".git",
-  );
+  return pathutil.join(pathutil.normalize(workspacePath), APP_DIR_NAME, ".git");
 }
 
 /**
@@ -170,7 +168,7 @@ declare module "@notefig/core" {
  */
 export const historyModule = defineModule({
   name: "history",
-  needs: ["platform", "gitWorker"],
+  needs: [platformModule, gitWorkerModule],
   workspace: {
     create: (ctx) => {
       const history = createWorkspaceHistory({

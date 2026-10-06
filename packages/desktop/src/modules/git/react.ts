@@ -70,7 +70,7 @@ export function useGitCheckpoints(workspacePath: string): GitCheckpointRow[] {
 
 /** Whether the workspace's git fetch is in flight (anti-flicker gates). */
 export function useGitFetching(workspacePath: string): boolean {
-  const queryClient = useCore().use("queryClient");
+  const { queryClient } = useCore();
   return (
     useIsFetching({ queryKey: gitQueryKey(workspacePath) }, queryClient) > 0
   );

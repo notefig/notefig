@@ -4,8 +4,8 @@
  * The rest of the folder is the implementation (service, collections,
  * transports, tools); this file owns the consolidated reactive hooks over
  * `core.agentStore`, so per-task joins (task row, turns, entries, pending
- * permissions) are written once instead of per component, and hands
- * components the facade (`useAgents`).
+ * permissions) are written once instead of per component. Components reach
+ * the facade and the store straight off core (`useCore().agents`).
  */
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery, eq, and, inArray } from "@tanstack/react-db";
@@ -17,7 +17,6 @@ import { workspaceKey } from "@/utils/path";
 import { getDesktopOs } from "@/utils/platform";
 import i18n from "@/utils/intl";
 import { useActiveHarnesses } from "@/hooks/use-harness-selection";
-import { useModule } from "@notefig/core/react";
 import {
   type AgentStore,
   type AgentTaskRow,
@@ -26,19 +25,8 @@ import {
   type AgentPermissionRequestRow,
 } from "@/modules/agents/agent-collections";
 import type { AgentsApi } from "@/modules/agents/agents";
+import { useCore } from "@notefig/core/react";
 
-
-/** One-shot handles + actions (identity + actions, re-resolved live, typed
- *  failures) — `core.agents`, the pattern this entity layer generalized
- *  from. */
-export function useAgents(): AgentsApi {
-  return useModule("agents");
-}
-
-/** The agent store, for components. */
-export function useAgentStore(): AgentStore {
-  return useModule("agentStore");
-}
 export type {
   AgentTaskRow,
   AgentTaskStatus,
@@ -51,7 +39,7 @@ export type {
 
 /** The task's collection row; undefined until it exists (or after deletion). */
 export function useTaskRow(taskId: string): AgentTaskRow | undefined {
-  const store = useAgentStore();
+  const { agentStore: store } = useCore();
   const { data = [] } = useLiveQuery(
     (q) =>
       q
@@ -64,7 +52,7 @@ export function useTaskRow(taskId: string): AgentTaskRow | undefined {
 
 /** Task rows for a set of ids (e.g. the open agent tabs). */
 export function useAgentTaskRowsById(taskIds: string[]): AgentTaskRow[] {
-  const store = useAgentStore();
+  const { agentStore: store } = useCore();
   const { data = [] } = useLiveQuery(
     (q) =>
       taskIds.length === 0
@@ -79,7 +67,7 @@ export function useAgentTaskRowsById(taskIds: string[]): AgentTaskRow[] {
 
 /** All turns of a task (unsorted — order by turnId/status at the call site). */
 export function useTaskTurns(taskId: string): AgentTurn[] {
-  const store = useAgentStore();
+  const { agentStore: store } = useCore();
   const { data = [] } = useLiveQuery(
     (q) =>
       q
@@ -92,7 +80,7 @@ export function useTaskTurns(taskId: string): AgentTurn[] {
 
 /** All transcript entries of a task. */
 export function useTaskEntries(taskId: string): AgentEntry[] {
-  const store = useAgentStore();
+  const { agentStore: store } = useCore();
   const { data = [] } = useLiveQuery(
     (q) =>
       q
@@ -110,7 +98,7 @@ export function useTaskEntries(taskId: string): AgentEntry[] {
 export function usePendingPermissions(
   taskId: string,
 ): AgentPermissionRequestRow[] {
-  const store = useAgentStore();
+  const { agentStore: store } = useCore();
   const { data = [] } = useLiveQuery(
     (q) =>
       q
@@ -149,7 +137,7 @@ export type AgentTaskMeta = {
  * once the first sync lands.
  */
 export function useAgentTasksReady(): boolean {
-  const store = useAgentStore();
+  const { agentStore: store } = useCore();
   const [ready, setReady] = useState(false);
   useEffect(() => {
     let live = true;
@@ -202,13 +190,13 @@ export function useAgentSessionList(limit: number): AgentTaskMeta[] {
 }
 
 function useAllTasks(): AgentTaskRow[] {
-  const store = useAgentStore();
+  const { agentStore: store } = useCore();
   const { data = [] } = useLiveQuery((q) => q.from({ task: store.tasks }));
   return data;
 }
 
 function useTurnsWithStatus(status: AgentTurn["status"]): AgentTurn[] {
-  const store = useAgentStore();
+  const { agentStore: store } = useCore();
   const { data = [] } = useLiveQuery(
     (q) =>
       q
@@ -312,7 +300,7 @@ export function useSessionActions(task: AgentTaskRow): AgentSessionActions {
  * confirmation reads this.
  */
 export function useRunningTaskCounts(): Map<string, number> {
-  const store = useAgentStore();
+  const { agentStore: store } = useCore();
   const { data: tasks = [] } = useLiveQuery((q) =>
     q.from({ task: store.tasks }),
   );

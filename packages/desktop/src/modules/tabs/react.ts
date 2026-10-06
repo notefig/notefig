@@ -6,9 +6,8 @@
  */
 import { useMemo, useCallback, useSyncExternalStore } from "react";
 import type { Core } from "@notefig/core";
-import { useCore, useModule } from "@notefig/core/react";
+import { useCore } from "@notefig/core/react";
 import {
-  useAgentStore,
   useAgentTasksReady,
   useAgentTaskRowsById,
   type AgentTaskRow,
@@ -19,7 +18,6 @@ import type { WorkspaceRegistry } from "@/modules/workspaces";
 import {
   useOpenWorkspaces,
   useOpenWorkspacesReady,
-  useWorkspaceRegistry,
 } from "@/modules/workspaces/react";
 import {
   agentTabId,
@@ -73,7 +71,10 @@ function groupFileTabsByWorkspace(
  * to every involved workspace's metadata collection — the dock is one
  * layout over every open workspace.
  */
-function useMissingFileTabs(fileTabsByWorkspace: Map<string, string[]>, fileTabIds: string[]): string {
+function useMissingFileTabs(
+  fileTabsByWorkspace: Map<string, string[]>,
+  fileTabIds: string[],
+): string {
   const core = useCore();
   const subscribe = useCallback(
     (onChange: () => void) => {
@@ -124,8 +125,7 @@ function openFilesOf(
  * (modules/tabs/tab-types.tsx), since each tab resolves its own workspace.
  */
 export function useWorkspaceTabs(openTabs: string[]): WorkspaceTabsState {
-  const agentStore = useAgentStore();
-  const tabs = useModule("tabs");
+  const { agentStore, tabs, workspaceRegistry: registry } = useCore();
   const fileTabIds = useMemo(() => openTabs.filter(isFileTabId), [openTabs]);
   const agentTaskIds = useMemo(
     () =>
@@ -141,7 +141,6 @@ export function useWorkspaceTabs(openTabs: string[]): WorkspaceTabsState {
 
   // Re-group when workspaces open or close, not only when tabs change.
   const openWorkspaces = useOpenWorkspaces();
-  const registry = useWorkspaceRegistry();
   const fileTabsByWorkspace = useMemo(
     () => groupFileTabsByWorkspace(registry, fileTabIds),
     // eslint-disable-next-line react-hooks/exhaustive-deps

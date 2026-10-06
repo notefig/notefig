@@ -13,6 +13,9 @@ import type { LayoutApi } from "@/modules/layout";
 import { isFileTabId } from "@/modules/tabs";
 import type { WorkspaceRegistry } from "@/modules/workspaces";
 import { workspaceKey } from "@/utils/path";
+import { layoutModule } from "@/modules/layout";
+import { tabsModule } from "@/modules/tabs";
+import { workspacesModule } from "@/modules/workspaces";
 
 declare module "@notefig/core" {
   interface CoreModules {
@@ -38,7 +41,7 @@ export const scratchpadLandingModule = defineModule({
   name: "scratchpad-landing",
   // The registry's focus handler runs first: the workspace is in the open
   // set, its collections seeded, before anything lands in it.
-  needs: ["layout", "tabs", "workspaceRegistry"],
+  needs: [layoutModule, tabsModule, workspacesModule],
   boot: (_api, ctx) => {
     const layout = ctx.use("layout");
     const tabs = ctx.use("tabs");

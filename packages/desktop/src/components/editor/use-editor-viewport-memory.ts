@@ -19,13 +19,16 @@
 import { useLayoutEffect, useRef } from "react";
 import type { Editor } from "@tiptap/core";
 import type { EditorsApi } from "@/modules/editors";
-import { useModule } from "@notefig/core/react";
-import { getSavedViewport, saveViewport } from "@/components/editor/editor-store";
+import {
+  getSavedViewport,
+  saveViewport,
+} from "@/components/editor/editor-store";
+import { useCore } from "@notefig/core/react";
 
 /** @returns the ref to put on the document's scroll container. */
 export function useEditorViewportMemory(editor: Editor, filePath: string) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const editors = useModule("editors");
+  const { editors } = useCore();
 
   useLayoutEffect(() => {
     const scrollEl = scrollRef.current;

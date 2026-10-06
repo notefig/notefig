@@ -22,7 +22,6 @@ import {
   ShieldOff,
 } from "lucide-react";
 import type { KvApi } from "@/modules/kv";
-import { useModule } from "@notefig/core/react";
 import { SETTINGS_NAMESPACE } from "@/hooks/use-app-settings";
 import type { LayoutNode } from "@/components/dockable";
 // Pure zero-dependency leaf — safe for the crash fallback (unlike entity
@@ -33,16 +32,14 @@ import {
   extractTabIds,
   findLayoutSelectedTab,
 } from "@/utils/layout-codec";
-import {
-  isMarkdownInstance,
-} from "@/modules/editors";
+import { isMarkdownInstance } from "@/modules/editors";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLiveQuery } from "@tanstack/react-db";
 // Type-only import — erased at runtime, so the crash panel stays
 // self-sufficient (its only runtime dependency is the QueryClient).
 import type { GitRow } from "@/modules/git";
-import { useAgentStore } from "@/modules/agents/react";
 import { buildSessionRecording } from "./debug-panel-recording";
+import { useCore } from "@notefig/core/react";
 
 function useQueryCacheTick(): number {
   const queryClient = useQueryClient();
@@ -264,13 +261,11 @@ function DebugPanelContent({
   onClose?: () => void;
   searchParams: URLSearchParams;
 }) {
-  const editors = useModule("editors");
+  const { editors, agentStore: store, kv } = useCore();
   // The focused workspace stands in for the old route param: the dock
   // spans every open workspace, so this is only the sidebar's scope.
   const workspacePath = useFocusedWorkspace();
   const basePath = workspacePath ?? undefined;
-  const store = useAgentStore();
-  const kv = useModule("kv");
 
   const dockableLayout = useMemo(
     () => parseLayout(searchParams.get(LAYOUT_PARAM)),

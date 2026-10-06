@@ -11,11 +11,11 @@ import {
 import { Button } from "@notefig/ui/button";
 import { copyTextToClipboard } from "@notefig/ui/clipboard";
 import { useTunnelConnection } from "@/hooks/use-tunnel-connection";
-import { useModule } from "@notefig/core/react";
 import {
   closePairDialog,
   usePairDialog,
 } from "@/modules/agents/tunnel/pair-dialog-store";
+import { useCore } from "@notefig/core/react";
 
 /**
  * The workspace-level "connect a machine" modal. Replaces the old `/pair`
@@ -29,7 +29,7 @@ export function PairDialog() {
   const { t } = useTranslation();
   const { open, prefillCode } = usePairDialog();
   const state = useTunnelConnection();
-  const tunnel = useModule("tunnel");
+  const { tunnel } = useCore();
 
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
