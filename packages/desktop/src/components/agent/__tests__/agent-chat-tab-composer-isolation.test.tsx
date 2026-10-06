@@ -13,8 +13,8 @@ vi.mock("react-i18next", () => ({
 // Wrap useTaskEntries with a spy: it runs on every Transcript render, so
 // its call count IS the transcript's render count — the thing MET-139
 // pins down (keystrokes must not reconcile the transcript).
-vi.mock("@/entities/agents", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("@/entities/agents")>();
+vi.mock("@/modules/agents/react", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/modules/agents/react")>();
   return { ...mod, useTaskEntries: vi.fn(mod.useTaskEntries) };
 });
 
@@ -27,8 +27,8 @@ import { CoreProvider } from "@notefig/core/react";
 import { createTestCore } from "@/testing/test-core";
 import { testAgents, type TestAgents } from "@/testing/test-agents";
 import { AgentChatTab } from "@/components/agent/agent-chat-tab";
-import { useTaskEntries } from "@/entities/agents";
-import { kvModule } from "@/utils/kv-store";
+import { useTaskEntries } from "@/modules/agents/react";
+import { kvModule } from "@/modules/kv";
 import { clearComposerDraft } from "@/components/agent/composer-draft-store";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;

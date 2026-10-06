@@ -5,7 +5,7 @@ import { GripVertical } from "lucide-react";
 import type { FileEntry } from "../../utils/fs";
 import { usePlatform } from "@/core/use-platform";
 import { getOrCreateEditor } from "@/components/editor/editor-store";
-import { isMarkdownInstance } from "@/entities/editors";
+import { isMarkdownInstance } from "@/modules/editors";
 import { useEditorFileSync } from "./use-editor-file-sync";
 import { useEditorFocusLifecycle } from "./use-editor-focus-lifecycle";
 import { useEditorViewportMemory } from "./use-editor-viewport-memory";
@@ -16,7 +16,7 @@ import { LinkBubbleMenu } from "./tiptap-link-menu";
 import { TableMenu } from "./tiptap-table-menu";
 import { cn } from "@notefig/ui/utils";
 import { dropZoneProps } from "@/utils/drag-protocol";
-import { useCore, useWorkspaceModule } from "@notefig/core/react";
+import { useCore, useModule, useWorkspaceModule } from "@notefig/core/react";
 import { isImageFile } from "@/utils/fs";
 import { relativeTreePath } from "@/utils/path";
 import "./tiptap.css";
@@ -40,7 +40,9 @@ export function TextEditor({
   initialDoc,
 }: TextEditorProps) {
   const { fs } = usePlatform();
+  const editors = useModule("editors");
   const instance = getOrCreateEditor(
+    editors,
     file.path,
     { type: "markdown", content: initialDoc, basePath },
     fs,

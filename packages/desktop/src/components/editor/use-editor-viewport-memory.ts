@@ -18,17 +18,20 @@
  */
 import { useLayoutEffect, useRef } from "react";
 import type { Editor } from "@tiptap/core";
+import type { EditorsApi } from "@/modules/editors";
+import { useModule } from "@notefig/core/react";
 import { getSavedViewport, saveViewport } from "@/components/editor/editor-store";
 
 /** @returns the ref to put on the document's scroll container. */
 export function useEditorViewportMemory(editor: Editor, filePath: string) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const editors = useModule("editors");
 
   useLayoutEffect(() => {
     const scrollEl = scrollRef.current;
     if (!scrollEl) return;
 
-    restoreViewport(editor, filePath);
+    restoreViewport(editors, editor, filePath);
 
     // Derived on scroll rather than on unmount: the teardown order between
     // this and ProseMirror's own view is not ours to rely on, and by then
@@ -40,7 +43,7 @@ export function useEditorViewportMemory(editor: Editor, filePath: string) {
       scheduled = requestAnimationFrame(() => {
         scheduled = null;
         const pos = topVisiblePos(editor, scrollEl);
-        if (pos !== null) saveViewport(filePath, pos);
+        if (pos !== null) saveViewport(editors, filePath, pos);
       });
     };
 
@@ -49,7 +52,7 @@ export function useEditorViewportMemory(editor: Editor, filePath: string) {
       if (scheduled !== null) cancelAnimationFrame(scheduled);
       scrollEl.removeEventListener("scroll", handleScroll);
     };
-  }, [editor, filePath]);
+  }, [editor, editors, filePath]);
 
   return scrollRef;
 }
@@ -66,8 +69,12 @@ function topVisiblePos(editor: Editor, scrollEl: HTMLElement): number | null {
   return found?.pos ?? null;
 }
 
-function restoreViewport(editor: Editor, filePath: string): void {
-  const pos = getSavedViewport(filePath);
+function restoreViewport(
+  editors: Pick<EditorsApi, "instance">,
+  editor: Editor,
+  filePath: string,
+): void {
+  const pos = getSavedViewport(editors, filePath);
   if (pos === undefined || pos > editor.state.doc.content.size) return;
 
   try {

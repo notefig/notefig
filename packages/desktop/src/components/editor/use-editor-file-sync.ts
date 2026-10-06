@@ -11,7 +11,7 @@ import { useEffect, useRef } from "react";
 import type { Editor, JSONContent } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import type { FileEntry } from "@/utils/fs";
-import type { WorkspaceFiles } from "@/entities/files";
+import type { WorkspaceFiles } from "@/modules/files";
 
 /** What the sync reads and writes through: the document's workspace's
  *  files (undefined until core has the workspace open). */

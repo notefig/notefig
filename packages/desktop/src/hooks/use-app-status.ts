@@ -28,28 +28,18 @@ import {
   describeTaskMeta,
   useAgentSessionList,
   type AgentTaskMeta,
-} from "@/entities/agents";
-import {
-  useAttention,
-  type Attention,
-  type AttentionItem,
-} from "@/entities/attention";
-import {
-  MAX_PROMPT_ROUNDS,
-  describePromptRound,
-  isLiveRound,
-  usePromptRounds,
-  type PromptRound,
-} from "@/entities/prompt-rounds";
-import {
-  useRecentDocuments,
-  type RecentDocument,
-} from "@/entities/recent-documents";
-import type { WorkspaceScratchpads } from "@/entities/scratchpads";
+} from "@/modules/agents/react";
+import { useAttention } from "@/hooks/use-attention";
+import { type Attention, type AttentionItem } from "@/utils/attention";
+import { MAX_PROMPT_ROUNDS, describePromptRound, isLiveRound, type PromptRound } from "@/modules/prompt-rounds";
+import { usePromptRounds } from "@/modules/prompt-rounds/react";
+import { type RecentDocument } from "@/modules/recent-documents";
+import { useRecentDocuments } from "@/modules/recent-documents/react";
+import type { WorkspaceScratchpads } from "@/modules/scratchpads";
 import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import { useOpenProjectFromPicker } from "@/hooks/use-open-project";
 import { deriveProjectName } from "@/hooks/use-recent-projects";
-import type { TabsApi } from "@/entities/tabs";
+import type { TabsApi } from "@/modules/tabs";
 import { getFileName } from "@/utils/fs";
 
 /** Rows per section: a glance, not the sidebar. */
@@ -59,11 +49,9 @@ const LABEL_CHARS = 48;
 
 /** Where an entry opens into. Absent (the welcome screen), there is
  *  nothing to open an entry into, so nothing is listed. */
-export type AppStatusTabs = Pick<TabsApi, "open" | "openAgent">;
+export type AppStatusTabs = Jumper["tabs"];
 
 export interface AppStatusHost {
-  /** Reveals a prompt widget in its document (a jump's other half). */
-  editors: Jumper["editors"];
   /** The focused workspace's scratchpads — where a new one goes; null on
    *  welcome. */
   scratchpads: Pick<WorkspaceScratchpads, "createAndOpen"> | null;
@@ -223,7 +211,7 @@ export function deriveAppStatus(inputs: AppStatusInputs): AppStatus {
   return {
     attention: overall && attentionGlyphState(overall),
     sections: host.tabs
-      ? sections(inputs, { tabs: host.tabs, editors: host.editors })
+      ? sections(inputs, { tabs: host.tabs })
       : [],
     actions: actions(inputs),
   };
@@ -256,7 +244,6 @@ export function usePublishAppStatus(host: {
         host: {
           scratchpads,
           tabs,
-          editors: core.editors,
           openSettings,
           openWorkspace,
         },

@@ -46,16 +46,16 @@ import {
 } from "@notefig/ui/alert-dialog";
 import { cn } from "@notefig/ui/utils";
 import { copyTextToClipboard } from "@notefig/ui/clipboard";
-import type { AgentTaskRow } from "@/agent/agent-collections";
+import type { AgentTaskRow } from "@/modules/agents/agent-collections";
 import {
   describeTaskMeta,
   useAgents,
   useAgentTaskList,
   type AgentTaskMeta,
   useSessionActions,
-} from "@/entities/agents";
+} from "@/modules/agents/react";
 import { useCore } from "@notefig/core/react";
-import { agentTabId } from "@/entities/tabs";
+import { agentTabId } from "@/modules/tabs";
 import {
   useActiveHarnesses,
   useDefaultHarness,
@@ -66,7 +66,8 @@ import {
   attentionGlyphState,
   taskGlyphState,
 } from "@/components/agent/status-glyph";
-import { useAttention, type AttentionKind } from "@/entities/attention";
+import { useAttention } from "@/hooks/use-attention";
+import { type AttentionKind } from "@/utils/attention";
 import { formatTimeAgo } from "@/utils/format";
 
 /**
@@ -232,7 +233,7 @@ export function SessionRow({
   active: boolean;
   onOpen: () => void;
   className?: string;
-  /** Something to point the user at here (entities/attention.ts). */
+  /** Something to point the user at here (utils/attention.ts). */
   attention?: AttentionKind | null;
 }) {
   const { t } = useTranslation();
@@ -259,7 +260,7 @@ export function SessionRow({
             <StatusGlyph
               // What needs attention outranks the status: an ask or a
               // failure is what the run is blocked on. (A finished-turn mark
-              // never coexists with a running session — entities/attention.)
+              // never coexists with a running session — utils/attention.)
               state={attention ? attentionGlyphState(attention) : taskGlyphState(task)}
             />
           </span>

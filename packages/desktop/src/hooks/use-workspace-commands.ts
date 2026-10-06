@@ -2,8 +2,8 @@ import { useCore } from "@notefig/core/react";
 import { useCallback } from "react";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { getFileName } from "@/utils/fs";
-import { runTabHistoryAction } from "@/tabs/tab-controllers";
-import { tabKind } from "@/tabs/tab-id";
+import { runTabHistoryAction } from "@/modules/tabs/tab-controllers";
+import { tabKind } from "@/modules/tabs/tab-id";
 import type { FileTreeMode } from "@/components/editor/file-tree";
 
 export interface WorkspaceCommandsOptions {

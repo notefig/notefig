@@ -21,8 +21,8 @@ import { defineModule, type Core } from "@notefig/core";
 import { CoreProvider } from "@notefig/core/react";
 import { createTestCore } from "@/testing/test-core";
 import { testAgents } from "@/testing/test-agents";
-import { kvModule } from "@/utils/kv-store";
-import { createSharedSessions } from "../blob-session-store";
+import { kvModule } from "@/modules/kv";
+import { createSharedSessions } from "@/modules/shared-sessions";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 

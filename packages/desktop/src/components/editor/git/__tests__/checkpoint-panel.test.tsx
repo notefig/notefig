@@ -13,7 +13,7 @@ import { createCore, defineModule, type Core } from "@notefig/core";
 import { CoreProvider } from "@notefig/core/react";
 import { TooltipProvider } from "@notefig/ui/tooltip";
 import "@/utils/intl";
-import { gitModule } from "@/entities/git";
+import { gitModule } from "@/modules/git";
 import { workspaceKey } from "@/utils/path";
 import { CheckpointPanel } from "../checkpoint-panel";
 

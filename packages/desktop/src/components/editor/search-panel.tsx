@@ -23,9 +23,9 @@ import { useSearch } from "@/hooks/use-search";
 import { ScrollArea } from "@notefig/ui/scroll-area";
 import { getFileName } from "@/utils/fs";
 import type { SearchMatch } from "@/adapters/platform-adapter.interface";
-import { suppressTabFocus } from "@/tabs/tab-controllers";
+import { suppressTabFocus } from "@/modules/tabs/tab-controllers";
 import { useCore } from "@notefig/core/react";
-import type { OpenTabOptions } from "@/entities/tabs";
+import type { OpenTabOptions } from "@/modules/tabs";
 
 interface SearchPanelProps {
   workspacePath: string;
@@ -45,15 +45,15 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
     const isMetaHeld = useKeyHold("Meta");
     const isControlHeld = useKeyHold("Control");
     const isModHeld = isMetaHeld || isControlHeld;
-    const { editors } = useCore();
+    const { tabs } = useCore();
 
     const handleMatchClick = useCallback(
       (match: SearchMatch, options?: OpenTabOptions) => {
-        void editors.reveal(match.filePath, match, {
+        void tabs.reveal(match.filePath, match, {
           intent: options?.intent ?? "replace",
         });
       },
-      [editors],
+      [tabs],
     );
 
     const inputRef = useRef<HTMLInputElement>(null);

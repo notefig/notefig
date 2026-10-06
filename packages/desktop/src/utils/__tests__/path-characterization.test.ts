@@ -10,7 +10,7 @@ import {
 } from "../fs";
 import { path as pathutil, workspaceKey } from "../path";
 import { isIgnoredPath } from "../ignore";
-import { historyGitDir } from "../history-service";
+import { historyGitDir } from "@/modules/history";
 
 /**
  * Characterization baseline for the Windows path migration (MET-157 B2).

@@ -1,4 +1,4 @@
-import { useKv } from "@/utils/kv-store";
+import { useKv } from "@/modules/kv/react";
 import { formatTimeAgo } from "@/utils/format";
 
 const RECENT_PROJECTS_NAMESPACE = "recentProjects";

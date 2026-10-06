@@ -7,11 +7,11 @@
 import type { Core } from "@notefig/core";
 
 export function jumpToBlob(
-  editors: Pick<Core["editors"], "reveal">,
+  tabs: Pick<Core["tabs"], "reveal">,
   path: string,
   blobId: string,
 ): void {
-  void editors.reveal(
+  void tabs.reveal(
     path,
     { blockId: blobId },
     { intent: "new-tab", moveIfOpen: true },

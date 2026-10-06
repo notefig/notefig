@@ -24,14 +24,14 @@ import type {
 } from "@notefig/widgets";
 import { extractMentionPaths } from "@notefig/widgets";
 import type { PromptContextPart } from "@notefig/shared/agent";
-import { AGENT_KV_NAMESPACE, trustKey } from "@/agent/agents";
+import { AGENT_KV_NAMESPACE, trustKey } from "@/modules/agents/agents";
 import {
   describeTaskMeta,
   useAgentStore,
   useAgentTaskList,
   useAgents,
-} from "@/entities/agents";
-import type { WorkspaceFiles } from "@/entities/files";
+} from "@/modules/agents/react";
+import type { WorkspaceFiles } from "@/modules/files";
 import type { Core } from "@notefig/core";
 import {
   useActiveHarnesses,
@@ -42,7 +42,7 @@ import { FileTypeIcon } from "@/components/editor/file-type-icon";
 import { Markdown } from "@/components/ui/markdown";
 import { useCore } from "@notefig/core/react";
 import { rankFileRows } from "@/utils/file-score";
-import { useKv } from "@/utils/kv-store";
+import { useKv } from "@/modules/kv/react";
 import { path as pathutil, relativeTreePath } from "@/utils/path";
 import { AuthCard } from "./auth-card";
 import { PermissionCard } from "./permission-card";

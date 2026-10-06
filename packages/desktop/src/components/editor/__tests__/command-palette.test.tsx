@@ -8,8 +8,8 @@ import { CommandPalette } from "../command-palette";
 import { ThemeProvider } from "../../theme-provider";
 import { createTestCore } from "@/testing/test-core";
 import { filesModuleOf, testWorkspaceFiles } from "@/testing/test-files";
-import type { WorkspaceFiles } from "@/entities/files";
-import { kvModule } from "@/utils/kv-store";
+import type { WorkspaceFiles } from "@/modules/files";
+import { kvModule } from "@/modules/kv";
 
 // Real TanStack DB collections over a listing handed to them — file
 // results come from the actual metadata collection through useFileSearch.

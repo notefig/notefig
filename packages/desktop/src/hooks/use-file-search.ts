@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { eq, useLiveQuery } from "@tanstack/react-db";
-import { useFileCollections } from "@/entities/files";
+import { useFileCollections } from "@/modules/files/react";
 import {
   rankFileRows,
   type FileSearchOptions,

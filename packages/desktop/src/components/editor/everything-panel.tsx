@@ -25,23 +25,13 @@ import { ScratchpadIcon } from "@/components/editor/scratchpad-icon";
 import { SidebarSeparator } from "@/components/editor/tool-bar";
 import { TOOL_ICONS } from "@/components/editor/workspace-tools";
 import { useCore } from "@notefig/core/react";
-import { useAgentSessionList } from "@/entities/agents";
-import {
-  mostPressing,
-  useAttention,
-  type AttentionItem,
-  type AttentionKind,
-} from "@/entities/attention";
-import {
-  describePromptRound,
-  isLiveRound,
-  usePromptRounds,
-  type PromptRound,
-} from "@/entities/prompt-rounds";
-import {
-  useRecentDocuments,
-  type RecentDocument,
-} from "@/entities/recent-documents";
+import { useAgentSessionList } from "@/modules/agents/react";
+import { useAttention } from "@/hooks/use-attention";
+import { mostPressing, type AttentionItem, type AttentionKind } from "@/utils/attention";
+import { describePromptRound, isLiveRound, type PromptRound } from "@/modules/prompt-rounds";
+import { usePromptRounds } from "@/modules/prompt-rounds/react";
+import { type RecentDocument } from "@/modules/recent-documents";
+import { useRecentDocuments } from "@/modules/recent-documents/react";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { deriveProjectName } from "@/hooks/use-recent-projects";
 import { formatTimeAgo } from "@/utils/format";

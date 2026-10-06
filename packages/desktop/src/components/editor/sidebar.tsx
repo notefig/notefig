@@ -36,7 +36,7 @@ import { SidebarSeparator } from "@/components/editor/tool-bar";
 import { SessionsPanel } from "@/components/agent/sessions-panel";
 import { CheckpointPanel } from "@/components/editor/git/checkpoint-panel";
 import { useCore, useWorkspaceModule } from "@notefig/core/react";
-import { useAttention } from "@/entities/attention";
+import { useAttention } from "@/hooks/use-attention";
 import {
   StatusGlyph,
   attentionGlyphState,
@@ -47,7 +47,7 @@ import {
   isTextFile,
 } from "@/utils/fs";
 import type { FileTreeNode, SortOrder } from "@/utils/fs";
-import type { OpenTabOptions } from "@/entities/tabs";
+import type { OpenTabOptions } from "@/modules/tabs";
 import { requestElementFocus } from "@/utils/focus-arbiter";
 import { deriveProjectName } from "@/hooks/use-recent-projects";
 import {

@@ -4,8 +4,10 @@ import {
   disposeAllEditors,
   type EditorFs,
 } from "@/components/editor/editor-store";
-import { getMarkdownEditor, markEditorMounted } from "@/entities/editors";
-import { getTabController } from "@/tabs/tab-controllers";
+import { createEditors } from "@/modules/editors";
+import { getTabController } from "@/modules/tabs/tab-controllers";
+
+const editors = createEditors();
 
 function doc(...paragraphs: string[]) {
   return {
@@ -28,12 +30,13 @@ const fs: EditorFs = {
 };
 
 afterEach(() => {
-  disposeAllEditors();
+  disposeAllEditors(editors);
 });
 
 describe("a document's tab controller", () => {
   it("reveals a match by re-locating it in the rendered document", async () => {
     getOrCreateEditor(
+      editors,
       "/ws/a.md",
       {
         type: "markdown",
@@ -44,7 +47,7 @@ describe("a document's tab controller", () => {
 
     // The shape the file search returns: text, its line, and which
     // same-text occurrence in the file it was.
-    markEditorMounted("/ws/a.md");
+    editors.markMounted("/ws/a.md");
     const revealed = await getTabController("/ws/a.md")!.revealMatch({
       matchText: "beta",
       lineText: "beta gamma",
@@ -52,7 +55,7 @@ describe("a document's tab controller", () => {
     });
     expect(revealed).toBe(true);
 
-    const editor = getMarkdownEditor("/ws/a.md")!;
+    const editor = editors.markdownEditor("/ws/a.md")!;
     const { from, to } = editor.state.selection;
     expect(editor.state.doc.textBetween(from, to)).toBe("beta");
     // The second occurrence — the one on the second line.
@@ -61,11 +64,12 @@ describe("a document's tab controller", () => {
 
   it("undoes through the document's own history", () => {
     getOrCreateEditor(
+      editors,
       "/ws/a.md",
       { type: "markdown", content: doc("alpha") },
       fs,
     );
-    const editor = getMarkdownEditor("/ws/a.md")!;
+    const editor = editors.markdownEditor("/ws/a.md")!;
     editor.commands.insertContentAt(editor.state.doc.content.size - 1, " beta");
     expect(editor.state.doc.textContent).toContain("beta");
 
@@ -74,7 +78,7 @@ describe("a document's tab controller", () => {
   });
 
   it("has no history or searchable content on a non-document tab", async () => {
-    getOrCreateEditor("/ws/pic.png", { type: "image" }, fs);
+    getOrCreateEditor(editors, "/ws/pic.png", { type: "image" }, fs);
     const tab = getTabController("/ws/pic.png")!;
 
     expect(tab.history).toBeUndefined();

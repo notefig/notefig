@@ -26,7 +26,7 @@ import {
   withSidebarView,
   type SidebarView,
   type WorkspaceTool,
-} from "@/hooks/sidebar-view";
+} from "@/modules/sidebar-view";
 export {
   WORKSPACE_TOOLS,
   readSidebarView,

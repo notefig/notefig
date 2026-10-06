@@ -8,7 +8,7 @@ import {
   type FileSearchOptions,
   type FileSearchResult,
 } from "@/hooks/use-file-search";
-import type { WorkspaceFiles } from "@/entities/files";
+import type { WorkspaceFiles } from "@/modules/files";
 import { createTestCore } from "@/testing/test-core";
 import { filesModuleOf, testWorkspaceFiles } from "@/testing/test-files";
 

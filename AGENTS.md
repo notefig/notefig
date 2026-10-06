@@ -76,6 +76,16 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   tracker, a startup scan) is a module declared with `defineModule` next to
   the code it starts, and added to a list in `app-core.ts`. Never add a
   module-scope side effect or a startup `useEffect` in `App.tsx` for this.
+- Every module lives in its own folder under `packages/desktop/src/modules/`
+  (`modules/files/`, `modules/tabs/`, `modules/agents/`…), whatever its
+  kind: an app-wide service, a per-workspace instance, or a boot-only
+  behaviour. The folder holds the factory and the module (`files.ts`), its
+  tests, and `index.ts`, the barrel other code imports (`@/modules/files`).
+  React hooks over the module live in `react.ts` and are imported from
+  `@/modules/files/react`, so nothing that imports the barrel pulls React.
+  `components/`, `hooks/` and `utils/` hold what their names say: views,
+  React-only hooks, and pure functions. A `defineModule` never sits inside
+  a component file.
 - `needs` decides order: core registers and boots a module after everything
   it lists, and fails at startup on a missing need or a cycle.
 - A module that exposes an API, or that other modules need, declares itself
@@ -92,7 +102,11 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   (`ctx.use("platform")`, the workspace's other instances via
   `ctx.useWorkspace`) and freed in `dispose`; app-wide state in `register`.
   Persisted collections are created inside the factory from
-  `ctx.use("platform").db`, never at module scope.
+  `ctx.use("platform").db`, never at module scope. The same goes for any
+  registry: a map of live editor instances, writes in flight, tabs
+  mid-rename — each is state of the module that owns it (`core.editors`,
+  `core.documents`, `core.tabs`), reached through core, never a
+  module-scope `Map` a free function reads.
 - The platform is a service. Only the composition root (`app-core.ts`)
   imports `@/adapters`; modules take `ctx.use("platform")`, components
   `usePlatform()` (`src/core/use-platform.ts`), and other code is handed
@@ -107,11 +121,16 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   over an in-memory db by default), `testWorkspaceFiles` / `filesModuleOf`
   (`src/testing/test-files.ts`), `testKv`, `testAgents` (store, runtime
   and facade, `src/testing/test-agents.ts`).
-- Code that has no handle on a workspace's instance tells it something
-  happened over the app event bus (`emitAppEvent("git:stale", …)`,
-  `"agent:turn-completed"`, `"files:changed"`), and each instance listens
-  for its own path. Agent tools get their workspace's instances on
-  `ctx.services` (`ToolServices`, widened by declaration merging).
+- There is one event bus: core's hooks. A module declares the moments it
+  announces in `CoreHookMap` (next to its `declare module "@notefig/core"`
+  block, e.g. `"git:stale"` in git, `"files:changed"` in files, the
+  `"agent:*"` moments in `src/modules/agents/agent-events.ts`) and emits them with
+  `ctx.hooks.emit`; a factory that announces is handed `hooks` like any
+  other dependency. Listeners subscribe in `boot` or `workspace.create`
+  with `ctx.hooks.on` and return the unsubscribe, so core tears them down.
+  A per-workspace listener checks the payload's workspace against its own.
+  Agent tools get their workspace's instances on `ctx.services`
+  (`ToolServices`, widened by declaration merging).
 - A workspace is opened, focused and closed through its handle:
   `core.workspace(path).open()` (the user enters it), `.focus()` (brought
   forward, as the switcher does), `.close()`. What entering or focusing
@@ -121,11 +140,11 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   Those handlers are steps of the open: if one fails, `open()` rejects and
   the hooks after it don't fire (a failed `focused` lands nothing).
 - Agents are driven through the facade (`core.agents`, `useAgents()` from
-  `@/entities/agents`): `agents.workspace(ws).start(harness)` for a
+  `@/modules/agents/react`): `agents.workspace(ws).start(harness)` for a
   session the user starts (runtime and trust gates included),
   `agents.task(id)` for everything after. Their rows are read through
-  `core.agentStore` (`useAgentStore()`). Nothing outside `src/agent/`
-  reaches the runtime in `agent-service`.
+  `core.agentStore` (`useAgentStore()`). Nothing outside
+  `src/modules/agents/` reaches the runtime in `agent-service`.
 - The plan this follows: the "Core Layer Architecture" doc (stages 1–7).
 
 ## Release Process

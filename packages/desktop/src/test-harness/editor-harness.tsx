@@ -31,11 +31,10 @@ import { TextEditor } from "@/components/editor/text-editor";
 import { SearchPanel } from "@/components/editor/search-panel";
 import type { Core } from "@notefig/core";
 import { CoreProvider, useCore } from "@notefig/core/react";
-import type { OpenTabOptions } from "@/entities/tabs";
-import { createEditors } from "@/entities/editors";
+import type { OpenTabOptions } from "@/modules/tabs";
+import type { EditorTarget } from "@/modules/editors";
 import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary";
 import { disposeAllEditors } from "@/components/editor/editor-store";
-import { getMarkdownEditor } from "@/entities/editors";
 import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
 import { openDocument } from "@/utils/markdown-conversion";
 import { calculateContentHash } from "@/utils/hash";
@@ -81,9 +80,13 @@ export function EditorHarness() {
         opened.push({ tabId, ...options });
         return true;
       },
+      // A reveal opens through tabs, so it is recorded the same way.
+      reveal: (tabId: string, target: EditorTarget, options?: OpenTabOptions) => {
+        opened.push({ tabId, ...options });
+        return core.editors.goTo(tabId, target);
+      },
     };
-    // editors.reveal opens through tabs, so it is rebuilt over these.
-    return { ...core, tabs, editors: createEditors(tabs) };
+    return { ...core, tabs };
   }, [core, opened]);
   useEffect(() => {
     let cancelled = false;
@@ -103,14 +106,14 @@ export function EditorHarness() {
     })();
     return () => {
       cancelled = true;
-      disposeAllEditors();
+      disposeAllEditors(core.editors);
     };
   }, [config, core, fs]);
 
   useEffect(() => {
     (window as unknown as Record<string, unknown>).__HARNESS__ = {
       getMarkdown: () => {
-        const editor = getMarkdownEditor(config.filePath);
+        const editor = core.editors.markdownEditor(config.filePath);
         return editor ? getEditorMarkdown(editor) : null;
       },
       readFile: async (path: string) => {
@@ -122,10 +125,10 @@ export function EditorHarness() {
       // (keyboard/mouse) reaches ProseMirror asynchronously via
       // selectionchange, which races with synchronously dispatched events.
       selectAll: () => {
-        getMarkdownEditor(config.filePath)?.chain().focus().selectAll().run();
+        core.editors.markdownEditor(config.filePath)?.chain().focus().selectAll().run();
       },
     };
-  }, [config, opened, fs]);
+  }, [config, core, opened, fs]);
 
   if (!initialDoc) return <div data-testid="harness-loading">loading…</div>;
 

@@ -19,8 +19,8 @@ import {
 } from "@notefig/ui/dropdown-menu";
 import { cn } from "@notefig/ui/utils";
 import { useCloseWorkspace } from "@/components/editor/close-workspace-dialog";
-import { useAttention } from "@/entities/attention";
-import { useOpenWorkspaces } from "@/entities/workspaces";
+import { useAttention } from "@/hooks/use-attention";
+import { useOpenWorkspaces } from "@/modules/workspaces/react";
 import {
   useOpenProject,
   useOpenProjectFromPicker,

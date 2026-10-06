@@ -117,14 +117,15 @@ import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
 import { QueryClient } from "@tanstack/react-query";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { useEditorFileSync } from "../use-editor-file-sync";
-import { createWorkspaceFiles, type WorkspaceFiles } from "@/entities/files";
-import { handleContentFileSystemChange } from "@/utils/file-sync";
+import { createWorkspaceFiles, type WorkspaceFiles } from "@/modules/files";
+import { handleContentFileSystemChange } from "@/modules/files/file-sync";
 import {
   closeDocumentSync,
   resetConverterForTests,
 } from "@/utils/markdown-conversion";
 import { calculateContentHash } from "@/utils/hash";
 import type { FileEntry } from "@/utils/fs";
+import { createHooks } from "@notefig/core";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -219,6 +220,7 @@ beforeEach(async () => {
     workspacePath: WS,
     fs: fake.adapter as unknown as FileSystemSurface,
     queryClient: new QueryClient(),
+    hooks: createHooks(),
   });
 
   fake.store.clear();

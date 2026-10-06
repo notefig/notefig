@@ -12,8 +12,8 @@ import {
   saveSelection,
   getSavedSelection,
 } from "@/components/editor/editor-store";
-import { markEditorMounted, markEditorUnmounted } from "@/entities/editors";
-import { requestTabFocus } from "@/tabs/tab-controllers";
+import { useModule } from "@notefig/core/react";
+import { requestTabFocus } from "@/modules/tabs/tab-controllers";
 
 /** How long after mount the tab layout may still re-parent the editor DOM. */
 const FOCUS_RECLAIM_WINDOW_MS = 600;
@@ -22,10 +22,11 @@ export function useEditorFocusLifecycle(
   editor: Editor,
   filePath: string,
 ): void {
+  const editors = useModule("editors");
   useEffect(() => {
     if (!editor) return;
 
-    const saved = getSavedSelection(filePath);
+    const saved = getSavedSelection(editors, filePath);
     if (
       saved &&
       saved.from <= editor.state.doc.content.size &&
@@ -35,7 +36,7 @@ export function useEditorFocusLifecycle(
     }
     // After the restore: a goTo that was waiting for this mount (a search
     // result click that opened the tab) runs now and wins over it.
-    markEditorMounted(filePath);
+    editors.markMounted(filePath);
 
     requestTabFocus(filePath, {
       when: "next-frame",
@@ -69,7 +70,7 @@ export function useEditorFocusLifecycle(
     reclaimRaf = requestAnimationFrame(reclaim);
 
     return () => {
-      markEditorUnmounted(filePath);
+      editors.markUnmounted(filePath);
       if (reclaimRaf !== null) cancelAnimationFrame(reclaimRaf);
       if (editor.isDestroyed) return;
       const { from, to } = editor.state.selection;
@@ -81,16 +82,16 @@ export function useEditorFocusLifecycle(
       try {
         viewDom = editor.view.dom as HTMLElement;
       } catch {
-        if (from !== to) saveSelection(filePath, from, to);
+        if (from !== to) saveSelection(editors, filePath, from, to);
         return;
       }
       if (from !== to || editor.isFocused) {
-        saveSelection(filePath, from, to);
+        saveSelection(editors, filePath, from, to);
       }
       // Detaching the editor's DOM from the document (tab switch) drops
       // focus without a blur event — PM's view.hasFocus() stays stale.
       // Explicitly blur so the next mount starts from a clean state.
       viewDom.blur();
     };
-  }, [editor, filePath]);
+  }, [editor, editors, filePath]);
 }

@@ -11,7 +11,7 @@ import {
   AlertDialogTitle,
 } from "@notefig/ui/alert-dialog";
 import { useCore } from "@notefig/core/react";
-import { useRunningTaskCounts } from "@/entities/agents";
+import { useRunningTaskCounts } from "@/modules/agents/react";
 import { deriveProjectName } from "@/hooks/use-recent-projects";
 import { workspaceKey } from "@/utils/path";
 

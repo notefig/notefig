@@ -1,7 +1,7 @@
 /**
  * The debug panel's "Recording" export: a session's transcript re-shaped
  * into the script the mock harness plays back (`replay` scenario,
- * src/agent/mock-harness.ts). Colocated with the panel because the panel
+ * src/modules/agents/mock-harness.ts). Colocated with the panel because the panel
  * is the only producer; the mock harness imports the types only.
  *
  * The record IS the transcript collections — tasks, turns, entries,

@@ -24,14 +24,11 @@ const deps = {
     refresh: vi.fn(async () => {}),
   }),
   fs: {},
+  // Which files are open: a move never pulls a file from under its tab.
+  editors: { paths: () => openPaths, markdownEditor: () => undefined },
 } as never;
 
 const openPaths: string[] = [];
-vi.mock("@/entities/editors", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/entities/editors")>()),
-  getAllEditorPaths: () => openPaths,
-  getMarkdownEditor: () => null,
-}));
 
 import { moveIntoFolder } from "@/utils/drop-actions";
 

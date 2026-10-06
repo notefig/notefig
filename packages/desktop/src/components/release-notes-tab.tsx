@@ -4,10 +4,11 @@ import { useTranslation } from "react-i18next";
 import { usePlatform } from "@/core/use-platform";
 import { createSchemaExtensions } from "@/components/editor/editor-schema-kit";
 import { getOrCreateEditor } from "@/components/editor/editor-store";
-import { focusTab } from "@/tabs/tab-controllers";
-import { RELEASE_NOTES_TAB_ID } from "@/entities/tabs";
+import { focusTab } from "@/modules/tabs/tab-controllers";
+import { RELEASE_NOTES_TAB_ID } from "@/modules/tabs";
 import { latestReleaseMarkdown } from "@/utils/release-notes";
 import "@/components/editor/tiptap.css";
+import { useModule } from "@notefig/core/react";
 
 /**
  * The bundled release notes rendered read-only through the same Tiptap
@@ -64,9 +65,10 @@ export function ReleaseNotesTab() {
   // the container is what keeps the dockable hotkeys (Ctrl+Tab, ⌘W, ⌘1-9)
   // alive, and gives the notes keyboard scrolling.
   const { fs } = usePlatform();
+  const editors = useModule("editors");
   useEffect(() => {
-    getOrCreateEditor(RELEASE_NOTES_TAB_ID, { type: "release-notes" }, fs);
-  }, [fs]);
+    getOrCreateEditor(editors, RELEASE_NOTES_TAB_ID, { type: "release-notes" }, fs);
+  }, [editors, fs]);
 
   useEffect(() => {
     const rafId = requestAnimationFrame(() => {

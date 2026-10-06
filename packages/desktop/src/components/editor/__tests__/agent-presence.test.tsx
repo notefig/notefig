@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { createElement } from "react";
 import { CoreProvider } from "@notefig/core/react";
 import { useAgentEditingPaths } from "@/components/editor/agent-presence";
-import { agentStoreModule } from "@/agent/agent-collections";
+import { agentStoreModule } from "@/modules/agents/agent-collections";
 import { createTestCore } from "@/testing/test-core";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;

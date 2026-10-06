@@ -8,7 +8,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { createCore, type AnyModule, type Core } from "@notefig/core";
 import type { IPlatformAdapter } from "@/adapters/platform-adapter.interface";
-import { layoutModule, type UrlState } from "@/entities/layout";
+import { layoutModule, type UrlState } from "@/modules/layout";
 import { createNodeTestDb } from "./node-db";
 import { workspaceKey } from "@/utils/path";
 

@@ -1,6 +1,6 @@
 import { Button } from "@notefig/ui/button";
 import { cn } from "@notefig/ui/utils";
-import { useAgents, usePendingPermissions } from "@/entities/agents";
+import { useAgents, usePendingPermissions } from "@/modules/agents/react";
 import type { PermissionOption } from "@notefig/shared/agent";
 
 /** ACP option kind → button emphasis. Options render verbatim otherwise. */

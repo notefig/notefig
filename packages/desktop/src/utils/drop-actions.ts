@@ -6,9 +6,9 @@
  */
 
 import type { PayloadOfKind } from "@/utils/drag-protocol";
-import type { WorkspaceFiles } from "@/entities/files";
+import type { WorkspaceFiles } from "@/modules/files";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
-import { getAllEditorPaths, getMarkdownEditor } from "@/entities/editors";
+import type { EditorsApi } from "@/modules/editors";
 import { getFileName } from "@/utils/fs";
 import { path as pathutil } from "@/utils/path";
 
@@ -24,6 +24,9 @@ import { path as pathutil } from "@/utils/path";
 export interface DropDeps {
   filesOf(workspaceRoot: string): WorkspaceFiles;
   fs: Pick<FileSystemSurface, "copyFile" | "moveFile">;
+  /** Which files are open (never moved from under their tabs), and the
+   *  live document an image asset's reference is rewritten in. */
+  editors: Pick<EditorsApi, "paths" | "markdownEditor">;
 }
 
 export function moveIntoFolder(
@@ -65,11 +68,11 @@ async function moveIntoFolderAsync(
     // Open tabs are keyed by path; moving them out from under the layout
     // would orphan the tab (rename is disabled for open files for the same
     // reason — see FileTreeContextMenu disableRename).
-    if (getAllEditorPaths().some((p) => pathutil.contains(payload.path, p))) {
+    if (deps.editors.paths().some((p) => pathutil.contains(payload.path, p))) {
       console.warn(`Not moving ${payload.path}: contains open files`);
       return;
     }
-  } else if (getAllEditorPaths().includes(payload.path)) {
+  } else if (deps.editors.paths().includes(payload.path)) {
     console.warn(`Not moving ${payload.path}: file is open`);
     return;
   }
@@ -78,7 +81,7 @@ async function moveIntoFolderAsync(
 }
 
 async function moveImageAsset(
-  { filesOf, fs }: DropDeps,
+  { filesOf, fs, editors }: DropDeps,
   payload: PayloadOfKind<"image-asset">,
   folderPath: string,
 ): Promise<void> {
@@ -93,7 +96,7 @@ async function moveImageAsset(
     newPath,
   );
 
-  const editor = getMarkdownEditor(payload.sourceFilePath);
+  const editor = editors.markdownEditor(payload.sourceFilePath);
   if (!editor) {
     // Without the live document we can't rewrite the reference, so copy
     // instead of move — the original path keeps working.

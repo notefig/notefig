@@ -3,7 +3,7 @@
  * walk it. A true leaf (only a type import) so ANY module can use it —
  * including debug-panel, the crash fallback that must not depend on the
  * entity modules that might be implicated in whatever crashed. Everything
- * else reads the layout through `core.layout` (`entities/layout.ts`).
+ * else reads the layout through `core.layout` (`modules/layout/layout.ts`).
  */
 import type { LayoutNode } from "@/components/dockable";
 

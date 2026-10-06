@@ -16,6 +16,7 @@ export type {
   WorkspaceContext,
   WorkspaceLifecycle,
 } from "./define-module";
+export { createHooks } from "./hooks";
 export type { Hooks } from "./hooks";
 export { CoreConfigError } from "./order";
 export type {

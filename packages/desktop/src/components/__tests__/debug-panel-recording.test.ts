@@ -3,26 +3,26 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // The mock harness is env-gated by VITE_AGENT_MOCK, which vitest doesn't
 // set — flip it so AgentTask.start wires the mock MCP loopback (what lets a
 // replayed `mcp` event reach the real tool handler).
-vi.mock("@/agent/mock-harness", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/agent/mock-harness")>();
+vi.mock("@/modules/agents/mock-harness", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/modules/agents/mock-harness")>();
   return { ...actual, MOCK_AGENT_MODE: true };
 });
 
-import { TaskManager } from "@/agent/agent-service";
+import { TaskManager } from "@/modules/agents/agent-service";
 import { testAgents, type TestAgents } from "@/testing/test-agents";
 import {
   configureMockAgent,
   createMockAgentTransport,
   registerMockScenario,
   remapWorkspacePath,
-} from "@/agent/mock-harness";
+} from "@/modules/agents/mock-harness";
 import {
   buildSessionRecording,
   isAgentRecording,
   type AgentRecording,
 } from "../debug-panel-recording";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
-import type { AgentTask } from "@/agent/agent-service";
+import type { AgentTask } from "@/modules/agents/agent-service";
 
 const harness = BUILT_IN_HARNESSES[0];
 

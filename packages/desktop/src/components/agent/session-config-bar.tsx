@@ -31,7 +31,7 @@ import {
   CommandList,
 } from "@notefig/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@notefig/ui/popover";
-import { useAgents, useTaskRow } from "@/entities/agents";
+import { useAgents, useTaskRow } from "@/modules/agents/react";
 
 /** Model first, effort second. */
 const CATEGORY_ORDER: readonly string[] = ["model", "thought_level"];

@@ -4,19 +4,21 @@
  * both — no module mocks of the platform, nothing shared between tests.
  */
 import type { McpEndpoint } from "@notefig/agent";
-import { createAgentStore, type AgentStore } from "@/agent/agent-collections";
+import { createHooks, type Hooks } from "@notefig/core";
+import { createAgentStore, type AgentStore } from "@/modules/agents/agent-collections";
 import {
   createAgentRuntime,
   type AgentRuntime,
   type AgentRuntimeDeps,
-} from "@/agent/agent-service";
-import { createAgents, type AgentsApi, type AgentsDeps } from "@/agent/agents";
-import { createDocuments } from "@/entities/documents";
-import { createLayout } from "@/entities/layout";
+} from "@/modules/agents/agent-service";
+import { createAgents, type AgentsApi, type AgentsDeps } from "@/modules/agents/agents";
+import { createDocuments } from "@/modules/documents";
+import { createEditors } from "@/modules/editors";
+import { createLayout } from "@/modules/layout";
 import { createNodeTestDb } from "./node-db";
 import { memoryUrlState } from "./test-core";
 import { testKv } from "./test-kv";
-import type { KvApi } from "@/utils/kv-store";
+import type { KvApi } from "@/modules/kv";
 
 /** A fresh, empty agent store. */
 export function testAgentStore(): AgentStore {
@@ -35,6 +37,8 @@ export function fakeMcpEndpoint(): McpEndpoint {
 
 export interface TestAgents {
   deps: AgentRuntimeDeps;
+  /** The bus the layer announces on; a test listens here. */
+  hooks: Hooks;
   store: AgentStore;
   runtime: AgentRuntime;
   agents: AgentsApi;
@@ -48,11 +52,15 @@ export interface TestAgents {
  * passes), and the tools' history and files throw until given.
  */
 export function testAgents(
-  overrides: Partial<Omit<AgentRuntimeDeps, "kv">> & { kv?: KvApi } = {},
+  overrides: Partial<Omit<AgentRuntimeDeps, "kv" | "hooks">> & {
+    kv?: KvApi;
+    hooks?: Hooks;
+  } = {},
   facade: Partial<Omit<AgentsDeps, "runtime" | "store" | "kv">> = {},
 ): TestAgents {
   const store = overrides.store ?? testAgentStore();
   const kv = overrides.kv ?? testKv();
+  const hooks = overrides.hooks ?? createHooks();
   const fs: AgentRuntimeDeps["fs"] = overrides.fs ?? {
     readFiles: async (paths) => ({
       succeeded: paths.map((path) => ({ path, content: "" })),
@@ -63,7 +71,8 @@ export function testAgents(
       failed: [],
     }),
   };
-  const documents = createDocuments({ fs, openFiles: () => [] });
+  const editors = createEditors();
+  const documents = createDocuments({ fs, openFiles: () => [], editors });
   const layout = createLayout(memoryUrlState());
   let agents: AgentsApi | null = null;
   const deps: AgentRuntimeDeps = {
@@ -85,8 +94,10 @@ export function testAgents(
       },
       documents,
       layout,
+      editors,
     }),
     agents: () => agents!,
+    hooks,
     ...overrides,
   };
   const runtime = createAgentRuntime(deps);
@@ -97,7 +108,8 @@ export function testAgents(
     openAgentTab: () => {},
     isOpen: () => true,
     ensureRuntime: () => true,
+    hooks,
     ...facade,
   });
-  return { deps, store, runtime, agents };
+  return { deps, hooks, store, runtime, agents };
 }

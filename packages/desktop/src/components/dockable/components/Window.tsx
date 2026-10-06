@@ -12,7 +12,7 @@ import { ScrollArea } from "@notefig/ui/scroll-area";
 import { cn } from "@notefig/ui/utils";
 import { dropZoneProps } from "@/utils/drag-protocol";
 import { useCore } from "@notefig/core/react";
-import type { TabsApi } from "@/entities/tabs";
+import type { TabsApi } from "@/modules/tabs";
 export type tabObject = {
   id: string;
   name: string;

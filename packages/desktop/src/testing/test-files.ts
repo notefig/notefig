@@ -5,9 +5,9 @@
  * an ordinary core. No module mocks of the platform.
  */
 import { QueryClient } from "@tanstack/react-query";
-import { defineModule, type AnyModule } from "@notefig/core";
+import { defineModule, type AnyModule, createHooks } from "@notefig/core";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
-import { createWorkspaceFiles, type WorkspaceFiles } from "@/entities/files";
+import { createWorkspaceFiles, type WorkspaceFiles } from "@/modules/files";
 import { workspaceKey } from "@/utils/path";
 
 /** An fs whose watching does nothing; give the reads and writes a test
@@ -30,6 +30,7 @@ export function testWorkspaceFiles(
     workspacePath,
     fs: testFs(fs),
     queryClient: new QueryClient(),
+    hooks: createHooks(),
   });
 }
 

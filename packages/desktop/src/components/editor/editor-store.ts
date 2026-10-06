@@ -1,9 +1,9 @@
 /**
  * Editor instance factory: builds the Tiptap editor for a document and the
  * container instances for image, code and release-notes tabs, registers
- * each in the editors entity (`entities/editors.ts`, the registry and
- * `core.editors`) and publishes its tab controller. Everything that only
- * looks an editor up goes through the entity.
+ * each with the editors the surface was handed (`core.editors`,
+ * `modules/editors/editors.ts`) and publishes its tab controller. Everything that
+ * only looks an editor up goes through that instance.
  */
 
 import { Editor, type JSONContent } from "@tiptap/core";
@@ -35,23 +35,19 @@ import {
   type TabController,
   type TabFocusOptions,
   type TabSearchOptions,
-} from "@/tabs/tab-controllers";
-import type { TabKind } from "@/tabs/tab-id";
+} from "@/modules/tabs/tab-controllers";
+import type { TabKind } from "@/modules/tabs/tab-id";
 import { resolveSearchTarget, type SearchTarget } from "./editor-position";
 import { createMarkdownCodec } from "./markdown-codec";
 import {
-  getAllEditorPaths,
-  getEditorInstance,
-  goToInEditor,
   isBlockTarget,
   isMarkdownInstance,
-  registerEditorInstance,
-  unregisterEditorInstance,
   type EditorInstance,
+  type EditorsApi,
   type EditorTarget,
   type EditorType,
   type MarkdownInstance,
-} from "@/entities/editors";
+} from "@/modules/editors";
 import { pageLinkHref } from "./tiptap-link-utils";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { getDirectoryPath } from "@/utils/fs";
@@ -95,11 +91,15 @@ export function unregisterCodeViewerDelegate(filePath: string): void {
   codeViewerDelegates.delete(filePath);
 }
 
-if (import.meta.env.DEV) {
-  // Diagnostic hook for e2e failure dumps (dev builds only).
-  (window as unknown as Record<string, unknown>).__metristsDebugEditors = () =>
-    getAllEditorPaths().map((path) => {
-      const instance = getEditorInstance(path)!;
+/** Diagnostic hook for e2e failure dumps (dev builds only), over the
+ *  editors the first surface was handed. */
+function installDebugSeam(editors: EditorsApi): void {
+  if (!import.meta.env.DEV) return;
+  const host = window as unknown as Record<string, unknown>;
+  if (host.__metristsDebugEditors) return;
+  host.__metristsDebugEditors = () =>
+    editors.paths().map((path) => {
+      const instance = editors.instance(path)!;
       const editor = isMarkdownInstance(instance) ? instance.editor : undefined;
       return {
         path,
@@ -178,9 +178,12 @@ function isEditorFocusSuppressed(): boolean {
  * part of this surface, not a foreign entry, so it is covered by the
  * `active === view.dom` check like any other text in the document.
  */
-function isForeignTextEntryFocused(filePath: string): boolean {
+function isForeignTextEntryFocused(
+  editors: Pick<EditorsApi, "instance">,
+  filePath: string,
+): boolean {
   const active = document.activeElement;
-  const instance = getEditorInstance(filePath);
+  const instance = editors.instance(filePath);
   if (instance && isMarkdownInstance(instance)) {
     try {
       if (active === instance.editor.view.dom) return false;
@@ -205,6 +208,7 @@ export type EditorFs = Pick<
 >;
 
 function createEditorTabController(
+  editors: EditorsApi,
   filePath: string,
   kind: TabKind,
   fs: Pick<EditorFs, "searchContent">,
@@ -226,17 +230,17 @@ function createEditorTabController(
      * IS focusing the composer.
      */
     focus({ steal }: TabFocusOptions = {}): boolean {
-      if (!steal && isForeignTextEntryFocused(filePath)) return false;
-      return getEditorInstance(filePath)?.focus(steal) ?? false;
+      if (!steal && isForeignTextEntryFocused(editors, filePath)) return false;
+      return editors.instance(filePath)?.focus(steal) ?? false;
     },
 
-    isFocusable: () => getEditorInstance(filePath)?.isFocusable() ?? false,
+    isFocusable: () => editors.instance(filePath)?.isFocusable() ?? false,
 
-    selectedText: () => getEditorInstance(filePath)?.selectedText(),
+    selectedText: () => editors.instance(filePath)?.selectedText(),
 
     // Flushes the autosave window and closes the document sync — the tab is
     // gone, so the instance must not outlive it.
-    dispose: () => disposeEditor(filePath),
+    dispose: () => disposeEditor(editors, filePath),
 
     /**
      * Find-in-document, through the same file search the workspace search
@@ -250,7 +254,7 @@ function createEditorTabController(
     ): Promise<SearchTarget[]> {
       // Documents and code viewers have searchable text; an image viewer
       // has none.
-      const instance = getEditorInstance(filePath);
+      const instance = editors.instance(filePath);
       if (!isMarkdownInstance(instance) && instance?.type !== "code") {
         return [];
       }
@@ -263,12 +267,12 @@ function createEditorTabController(
       });
     },
 
-    revealMatch: (match: SearchTarget) => goToInEditor(filePath, match),
+    revealMatch: (match: SearchTarget) => editors.goTo(filePath, match),
 
     get history() {
       // Only documents have an edit history; image/release-notes tabs
       // report none, so the palette's undo/redo stays inert on them.
-      const instance = getEditorInstance(filePath);
+      const instance = editors.instance(filePath);
       if (!isMarkdownInstance(instance)) return undefined;
       return {
         undo: () => instance.editor.commands.undo(),
@@ -525,23 +529,26 @@ type EditorConfig =
  * - And the type matches, returns the existing instance
  * - And the type doesn't match, disposes the old and creates new
  *
+ * @param editors - The registry the surface fills (`useModule("editors")`)
  * @param filePath - The absolute file path (used as the cache key)
  * @param config - Editor configuration including type and type-specific options
  * @param fs - The platform fs the editor reaches (`usePlatform().fs`)
  * @returns The editor instance (cast to appropriate type by caller)
  */
 export function getOrCreateEditor(
+  editors: EditorsApi,
   filePath: string,
   config: EditorConfig,
   fs: EditorFs,
 ): EditorInstance {
-  const existing = getEditorInstance(filePath);
+  installDebugSeam(editors);
+  const existing = editors.instance(filePath);
   if (existing) {
     if (existing.type === config.type) {
       return existing;
     }
     existing.dispose();
-    unregisterEditorInstance(filePath);
+    editors.unregister(filePath);
   }
 
   let instance: EditorInstance;
@@ -571,11 +578,12 @@ export function getOrCreateEditor(
       throw new Error(`Unknown editor type: ${(config as any).type}`);
   }
 
-  registerEditorInstance(filePath, instance);
+  editors.register(filePath, instance);
   // The tab is live from here on: publish its controller so focus intents,
   // find-in-tab and dispose reach it through the generic tab layer.
   registerTabController(
     createEditorTabController(
+      editors,
       filePath,
       config.type === "release-notes" ? "release-notes" : "file",
       fs,
@@ -588,8 +596,8 @@ export function getOrCreateEditor(
  * Dispose an editor instance when a tab is permanently closed.
  * This frees the memory held by the editor.
  */
-export function disposeEditor(filePath: string): void {
-  const instance = getEditorInstance(filePath);
+export function disposeEditor(editors: EditorsApi, filePath: string): void {
+  const instance = editors.instance(filePath);
   unregisterTabController(filePath);
   if (instance) {
     // Flush the autosave debounce window while the editor can still be
@@ -597,7 +605,7 @@ export function disposeEditor(filePath: string): void {
     // this path and would have to drop those edits.
     flushDocumentSync(filePath);
     instance.dispose();
-    unregisterEditorInstance(filePath);
+    editors.unregister(filePath);
     closeDocumentSync(filePath);
   }
 }
@@ -605,39 +613,50 @@ export function disposeEditor(filePath: string): void {
 /**
  * Dispose all editors (e.g. when switching workspaces).
  */
-export function disposeAllEditors(): void {
-  for (const filePath of getAllEditorPaths()) disposeEditor(filePath);
+export function disposeAllEditors(editors: EditorsApi): void {
+  for (const filePath of editors.paths()) disposeEditor(editors, filePath);
 }
 
+type Registry = Pick<EditorsApi, "instance">;
+
 export function saveSelection(
+  editors: Registry,
   filePath: string,
   from: number,
   to: number,
 ): void {
-  const instance = getEditorInstance(filePath);
+  const instance = editors.instance(filePath);
   if (isMarkdownInstance(instance)) {
     instance.savedSelection = { from, to };
   }
 }
 
 export function getSavedSelection(
+  editors: Registry,
   filePath: string,
 ): { from: number; to: number } | undefined {
-  const instance = getEditorInstance(filePath);
+  const instance = editors.instance(filePath);
   if (isMarkdownInstance(instance)) {
     return instance.savedSelection;
   }
   return undefined;
 }
 
-export function saveViewport(filePath: string, pos: number): void {
-  const instance = getEditorInstance(filePath);
+export function saveViewport(
+  editors: Registry,
+  filePath: string,
+  pos: number,
+): void {
+  const instance = editors.instance(filePath);
   if (isMarkdownInstance(instance)) {
     instance.savedViewport = pos;
   }
 }
 
-export function getSavedViewport(filePath: string): number | undefined {
-  const instance = getEditorInstance(filePath);
+export function getSavedViewport(
+  editors: Registry,
+  filePath: string,
+): number | undefined {
+  const instance = editors.instance(filePath);
   return isMarkdownInstance(instance) ? instance.savedViewport : undefined;
 }

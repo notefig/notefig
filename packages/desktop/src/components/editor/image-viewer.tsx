@@ -4,9 +4,10 @@ import { useEffect } from "react";
 import { usePlatform } from "@/core/use-platform";
 import type { FileEntry } from "@/utils/fs";
 import { getOrCreateEditor } from "@/components/editor/editor-store";
-import { focusTab } from "@/tabs/tab-controllers";
+import { focusTab } from "@/modules/tabs/tab-controllers";
 import { useImageUrl } from "@/hooks/use-image-url";
 import { cn } from "@notefig/ui/utils";
+import { useModule } from "@notefig/core/react";
 
 interface ImageViewerProps {
   file: FileEntry;
@@ -21,9 +22,10 @@ interface ImageViewerProps {
  */
 export function ImageViewer({ file, basePath }: ImageViewerProps) {
   const { fs } = usePlatform();
+  const editors = useModule("editors");
   useEffect(() => {
-    getOrCreateEditor(file.path, { type: "image" }, fs);
-  }, [fs, file.path]);
+    getOrCreateEditor(editors, file.path, { type: "image" }, fs);
+  }, [editors, fs, file.path]);
 
   // Auto-focus when this component mounts (handles panel 1+ timing issues)
   useEffect(() => {

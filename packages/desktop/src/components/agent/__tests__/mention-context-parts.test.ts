@@ -8,8 +8,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
-import { createWorkspaceFiles, type WorkspaceFiles } from "@/entities/files";
+import { createWorkspaceFiles, type WorkspaceFiles } from "@/modules/files";
 import { mentionContextParts } from "../prompt-widget-host";
+import { createHooks } from "@notefig/core";
 
 // Real TanStack DB collections over a listing handed to them (same harness
 // as use-file-search.test.tsx).
@@ -39,6 +40,7 @@ beforeEach(async () => {
     workspacePath: WS,
     fs,
     queryClient: new QueryClient(),
+    hooks: createHooks(),
   });
   await files.collections.metadata.preload();
 });

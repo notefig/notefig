@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useCore } from "@notefig/core/react";
 import { useAppSettings } from "@/hooks/use-app-settings";
-import { RELEASE_NOTES_TAB_ID } from "@/entities/tabs";
+import { RELEASE_NOTES_TAB_ID } from "@/modules/tabs";
 
 /**
  * Opens the release-notes tab once after an app update. `lastSeenVersion`

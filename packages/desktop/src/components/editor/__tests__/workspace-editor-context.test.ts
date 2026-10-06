@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { getWorkspaceEditorContext } from "@/entities/editors";
-import { createLayout, type LayoutApi } from "@/entities/layout";
+import { createEditors, getWorkspaceEditorContext } from "@/modules/editors";
+import { createLayout, type LayoutApi } from "@/modules/layout";
 import type { LayoutNode } from "@/components/dockable";
 import { memoryUrlState } from "@/testing/test-core";
 
@@ -12,7 +12,7 @@ function layoutOf(nodes: LayoutNode[]): LayoutApi {
 
 describe("getWorkspaceEditorContext", () => {
   it("returns empty context when no tabs are open", () => {
-    expect(getWorkspaceEditorContext(layoutOf([]), "/ws")).toEqual({
+    expect(getWorkspaceEditorContext({ editors: createEditors(), layout: layoutOf([]) }, "/ws")).toEqual({
       openFiles: [],
       activeFile: null,
       selection: undefined,
@@ -29,7 +29,7 @@ describe("getWorkspaceEditorContext", () => {
       } as unknown as LayoutNode,
     ]);
 
-    const ctx = getWorkspaceEditorContext(layout, "/ws");
+    const ctx = getWorkspaceEditorContext({ editors: createEditors(), layout: layout }, "/ws");
     expect(ctx.openFiles.map((f) => f.path)).toEqual(["/ws/a.md", "/ws/b.md"]);
     expect(ctx.activeFile).toBe("/ws/b.md");
     expect(ctx.openFiles.find((f) => f.path === "/ws/b.md")?.active).toBe(true);

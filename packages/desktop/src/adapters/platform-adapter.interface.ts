@@ -394,7 +394,7 @@ export interface FileSystemSurface {
    * Subscribe to watcher change events for every active watch session.
    * Events are not scoped per watchId — the platform emits them for the
    * whole app, and callers filter by workspace themselves (see
-   * utils/file-sync.ts).
+   * modules/files/file-sync.ts).
    * @returns Cleanup function to remove the listener
    */
   onFsEvent(listener: FsChangeListener): () => void;
@@ -456,7 +456,7 @@ export interface ProcessSurface {
    * Run a script through the user's local login shell and capture its
    * output. A raw execution primitive — this adapter has no notion of what
    * the script does (harness discovery is the first caller, from
-   * src/agent/harness-discovery.ts, which owns all script-building and
+   * src/modules/agents/harness-discovery.ts, which owns all script-building and
    * output-parsing). Desktop-only capability: no equivalent exists on a
    * web/relay platform, so non-desktop adapters reject it, same as
    * `createAgentTransport`'s placeholder above.

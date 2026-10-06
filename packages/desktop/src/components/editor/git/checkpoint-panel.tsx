@@ -32,15 +32,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@notefig/ui/tooltip";
-import {
-  deriveSyncState,
-  useGitCheckpoints,
-  useGitFetching,
-  useGitSummary,
-  type GitSummary,
-  type SerializedGitError,
-  type SyncState,
-} from "@/entities/git";
+import { deriveSyncState, type GitSummary, type SerializedGitError, type SyncState } from "@/modules/git";
+import { useGitCheckpoints, useGitFetching, useGitSummary } from "@/modules/git/react";
 
 interface CheckpointPanelProps {
   workspacePath: string;
@@ -212,7 +205,7 @@ function useStablePanelState(
  * The checkpoint rows shaped for the list, with an in-flight save shown as
  * a pending entry. Purely render-level — an optimistic collection row with
  * a key sync never confirms would strand a ghost in the live query (see
- * entities/git.ts).
+ * modules/git/git.ts).
  */
 function useCheckpointItems(
   checkpointRows: ReturnType<typeof useGitCheckpoints>,

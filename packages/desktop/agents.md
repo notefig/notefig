@@ -182,15 +182,23 @@ test.beforeEach(async ({ page }) => {
 ```
 src/
 ├── adapters/          # Platform abstraction
+├── core/              # Composition root: app-core.ts picks the modules
+├── modules/           # One folder per core module (see root AGENTS.md)
+│   ├── files/         #   files.ts (factory + module), react.ts (hooks),
+│   │                  #   index.ts (barrel), *.test.ts
+│   ├── tabs/
+│   ├── agents/        #   the agent subsystem: runtime, store, tools, tunnel
+│   └── …
 ├── components/        # React components
 │   ├── editor/        # Editor-specific
 │   └── ui/            # shadcn/ui
-├── hooks/             # React hooks
+├── hooks/             # React hooks that are not one module's
 ├── lib/               # Library configs
 └── utils/             # Pure functions
 ```
 
 **Hooks vs Utils:** Hook = React context/state/lifecycle. Util = Pure function, no React.
+A module's own hooks live in its `react.ts`, imported from `@/modules/<name>/react`.
 
 ## Conventions
 

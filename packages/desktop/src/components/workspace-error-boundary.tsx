@@ -12,8 +12,8 @@ import {
 } from "@/adapters/platform-adapter.interface";
 import { useOpenProject } from "@/hooks/use-open-project";
 import { useCore } from "@notefig/core/react";
-import { useFocusedWorkspace } from "@/entities/workspaces";
-import { fileQueryKeys } from "@/entities/files";
+import { useFocusedWorkspace } from "@/modules/workspaces/react";
+import { fileQueryKeys } from "@/modules/files";
 import { isWeb } from "@/utils/platform";
 import { captureError } from "@/telemetry/telemetry";
 

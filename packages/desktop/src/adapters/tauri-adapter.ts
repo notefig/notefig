@@ -33,8 +33,8 @@ import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import type { HarnessDefinition } from "@notefig/shared/agent";
 import { resolveHarnessSpawn } from "@notefig/shared/agent";
 import type { AgentTransport, McpEndpoint } from "@notefig/agent";
-import { TauriStdioTransport } from "@/agent/tauri-stdio-transport";
-import { TauriMcpTransport } from "@/agent/tauri-mcp-transport";
+import { TauriStdioTransport } from "@/modules/agents/tauri-stdio-transport";
+import { TauriMcpTransport } from "@/modules/agents/tauri-mcp-transport";
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
