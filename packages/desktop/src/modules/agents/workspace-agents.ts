@@ -18,6 +18,13 @@ import {
   type AgentWorkspaceHandle,
 } from "./agents";
 import { ensureAgentRuntime } from "./tunnel/require-connection";
+import { agentStoreModule } from "./agent-collections";
+import { kvModule } from "@/modules/kv";
+import { tabsModule } from "@/modules/tabs";
+import { documentsModule } from "@/modules/documents";
+import { layoutModule } from "@/modules/layout";
+import { editorsModule } from "@/modules/editors";
+import { historyModule } from "@/modules/history";
 
 declare module "@notefig/core" {
   interface CoreModules {
@@ -31,13 +38,13 @@ declare module "@notefig/core" {
 export const workspaceAgentsModule = defineModule({
   name: "agents",
   needs: [
-    "agentStore",
-    "kv",
+    agentStoreModule,
+    kvModule,
     "platform",
-    "tabs",
-    "documents",
-    "layout",
-    "editors",
+    tabsModule,
+    documentsModule,
+    layoutModule,
+    editorsModule,
   ],
   register: (ctx) => {
     const store = ctx.use("agentStore");
@@ -88,7 +95,7 @@ export const workspaceAgentsModule = defineModule({
     void agents.whenReconciled();
   },
   workspace: {
-    needs: ["history"],
+    needs: [historyModule],
     create: ({ workspace }, agents) => agents.workspace(workspace.path),
     dispose: (_handle, workspace, agents) =>
       agents.disposeWorkspace(workspace.path),

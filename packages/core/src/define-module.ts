@@ -1,6 +1,7 @@
 import type { Hooks } from "./hooks";
 import type {
   CoreModules,
+  CoreServices,
   Disposer,
   Provided,
   ProvidedName,
@@ -61,6 +62,23 @@ export interface WorkspaceContext<
   useWorkspace<K extends WorkspaceNeeds>(name: K): WorkspaceModules[K];
 }
 
+/** A service, named by the key the root hands it under. */
+export type ServiceName = keyof CoreServices & string;
+
+/**
+ * One entry of `needs`: a service by name, or the module itself. Naming a
+ * module by its value (not its name) means a root that lists a module gets
+ * what it needs without listing that too.
+ */
+export type Need = ServiceName | Module;
+
+/** The name a `needs` entry provides under. */
+type NeedName<N> = N extends string
+  ? N
+  : N extends Module<infer Name>
+    ? Name
+    : never;
+
 type ApiOf<Name extends string> = Name extends keyof CoreModules
   ? CoreModules[Name]
   : undefined;
@@ -83,11 +101,13 @@ type RegisterPart<
 type WorkspacePart<
   Name extends string,
   Needs extends ProvidedName,
+  WorkspaceDeps extends readonly Module[],
   WorkspaceNeeds extends WorkspaceModuleName,
 > = Name extends keyof WorkspaceModules
   ? {
       workspace: {
-        needs?: readonly WorkspaceNeeds[];
+        /** The modules whose instance for this workspace this one uses. */
+        needs?: WorkspaceDeps;
         create(
           ctx: WorkspaceContext<Needs, WorkspaceNeeds>,
           api: ApiOf<Name>,
@@ -104,12 +124,19 @@ type WorkspacePart<
 
 export type ModuleDefinition<
   Name extends string,
-  Needs extends ProvidedName = never,
-  WorkspaceNeeds extends WorkspaceModuleName = never,
+  Deps extends readonly Need[] = [],
+  WorkspaceDeps extends readonly Module[] = [],
+  Needs extends ProvidedName = NeedName<Deps[number]> & ProvidedName,
+  WorkspaceNeeds extends WorkspaceModuleName = NeedName<WorkspaceDeps[number]> &
+    WorkspaceModuleName,
 > = {
   name: Name;
-  /** Services and modules this one uses; they register and boot first. */
-  needs?: readonly Needs[];
+  /**
+   * Services (by name) and modules (the module itself) this one uses; they
+   * register and boot first. A needed module the root did not list is
+   * registered anyway.
+   */
+  needs?: Deps;
   /**
    * Start subscriptions once every module has registered. Runs in
    * dependency order; synchronous so a root can render right after boot.
@@ -117,16 +144,16 @@ export type ModuleDefinition<
    */
   boot?(api: ApiOf<Name>, ctx: ModuleContext<Needs>): void | Disposer;
 } & RegisterPart<Name, Needs> &
-  WorkspacePart<Name, Needs, WorkspaceNeeds>;
+  WorkspacePart<Name, Needs, WorkspaceDeps, WorkspaceNeeds>;
 
 /** The runtime shape the kernel works with, types erased. */
 export interface AnyModule {
   name: string;
-  needs?: readonly string[];
+  needs?: readonly (string | AnyModule)[];
   register?(ctx: ModuleContext<never>): unknown;
   boot?(api: unknown, ctx: ModuleContext<never>): void | Disposer;
   workspace?: {
-    needs?: readonly string[];
+    needs?: readonly AnyModule[];
     create(ctx: WorkspaceContext<never, never>, api: unknown): unknown;
     dispose?(
       instance: unknown,
@@ -136,14 +163,20 @@ export interface AnyModule {
   };
 }
 
+/** A module as `defineModule` returns it: what a root lists, and what
+ *  another module's `needs` names it by. */
+export interface Module<Name extends string = string> extends AnyModule {
+  readonly name: Name;
+}
+
 /**
  * Declare a module. An identity function: it exists for inference (the
  * `needs` list types `ctx.use`) and so every module reads the same way.
  */
 export function defineModule<
   const Name extends string,
-  const Needs extends ProvidedName = never,
-  const WorkspaceNeeds extends WorkspaceModuleName = never,
->(definition: ModuleDefinition<Name, Needs, WorkspaceNeeds>): AnyModule {
-  return definition as unknown as AnyModule;
+  const Deps extends readonly Need[] = [],
+  const WorkspaceDeps extends readonly Module[] = [],
+>(definition: ModuleDefinition<Name, Deps, WorkspaceDeps>): Module<Name> {
+  return definition as unknown as Module<Name>;
 }

@@ -4,18 +4,13 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
-import { useModule } from "@notefig/core/react";
 import {
   mostRecentlyFocused,
   workspaceOfPathIn,
   type OpenWorkspaceRow,
   type WorkspaceRegistry,
 } from "./workspaces";
-
-/** The registry, for components. */
-export function useWorkspaceRegistry(): WorkspaceRegistry {
-  return useModule("workspaceRegistry");
-}
+import { useCore } from "@notefig/core/react";
 
 /**
  * True once `whenReady` has resolved — gates anything that would treat
@@ -23,7 +18,7 @@ export function useWorkspaceRegistry(): WorkspaceRegistry {
  * layout is never emptied while its workspaces are still loading.
  */
 export function useOpenWorkspacesReady(): boolean {
-  const registry = useWorkspaceRegistry();
+  const { workspaceRegistry: registry } = useCore();
   const [ready, setReady] = useState(false);
   useEffect(() => {
     let live = true;
@@ -36,7 +31,7 @@ export function useOpenWorkspacesReady(): boolean {
 }
 
 function useOpenWorkspaceRows(): OpenWorkspaceRow[] {
-  const { collection } = useWorkspaceRegistry();
+  const { collection } = useCore().workspaceRegistry;
   const { data: rows = [] } = useLiveQuery((q) =>
     q.from({ workspace: collection }),
   );

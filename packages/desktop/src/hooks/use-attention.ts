@@ -5,15 +5,14 @@
  */
 import { useMemo } from "react";
 import { useLiveQuery, eq } from "@tanstack/react-db";
-import { useModule } from "@notefig/core/react";
-import { useAgentStore } from "@/modules/agents/react";
 import { useSeen } from "@/modules/seen/react";
 import { useOpenWorkspaces } from "@/modules/workspaces/react";
 import { deriveAttention, type Attention } from "@/utils/attention";
+import { useCore } from "@notefig/core/react";
 
 export function useAttention(): Attention {
-  const store = useAgentStore();
-  const roundRows = useModule("promptRounds").collection;
+  const { agentStore: store, promptRounds } = useCore();
+  const roundRows = promptRounds.collection;
   const { data: tasks = [] } = useLiveQuery((q) =>
     q.from({ task: store.tasks }),
   );

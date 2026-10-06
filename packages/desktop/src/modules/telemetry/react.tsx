@@ -4,12 +4,12 @@
  * first contact (the welcome screen) stays prompt-free.
  */
 import { useSyncExternalStore } from "react";
-import { useModule } from "@notefig/core/react";
 import { useFocusedWorkspace } from "@/modules/workspaces/react";
 import { TelemetryConsentDialog } from "@/components/telemetry-consent-dialog";
+import { useCore } from "@notefig/core/react";
 
 export function TelemetryBootstrap() {
-  const telemetry = useModule("telemetry");
+  const { telemetry } = useCore();
   const owed = useSyncExternalStore(telemetry.subscribe, telemetry.consentOwed);
   const insideWorkspace = useFocusedWorkspace() !== null;
   return (

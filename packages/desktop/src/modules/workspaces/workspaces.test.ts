@@ -74,7 +74,7 @@ beforeEach(async () => {
       defineModule({ name: "editors", register: () => ({}) as never }),
       kvModule,
       agentStoreModule,
-      workspacesModule({ restore: false }),
+      workspacesModule,
       workspaceAgentsModule,
     ],
   });
@@ -99,9 +99,7 @@ describe("focusing a workspace", () => {
 
     expect(files.created).toHaveBeenCalledWith("/ws");
     expect(registry.isOpen("/ws")).toBe(true);
-    expect([...registry.collection.values()]).toMatchObject([
-      { path: "/ws" },
-    ]);
+    expect([...registry.collection.values()]).toMatchObject([{ path: "/ws" }]);
   });
 
   it("re-entry keeps one row and one set of modules", async () => {
@@ -160,8 +158,7 @@ describe("closing a workspace", () => {
 
   it("demotes sessionful task rows to restored and purges sessionless ones (MET-54 contract)", async () => {
     await focus("/ws");
-    await tasks.insert(taskRow({ status: "running" }))
-      .isPersisted.promise;
+    await tasks.insert(taskRow({ status: "running" })).isPersisted.promise;
     await tasks.insert(
       taskRow({ taskId: "task_b", sessionId: undefined, status: "error" }),
     ).isPersisted.promise;
@@ -190,8 +187,7 @@ describe("closing a workspace", () => {
 describe("close/reopen race", () => {
   it("a reopen during an in-flight close waits for the teardown, then opens fresh", async () => {
     await focus("/ws");
-    await tasks.insert(taskRow({ status: "running" }))
-      .isPersisted.promise;
+    await tasks.insert(taskRow({ status: "running" })).isPersisted.promise;
 
     const closing = close("/ws");
     // Synchronous effects of close land immediately…

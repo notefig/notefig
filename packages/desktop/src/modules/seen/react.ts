@@ -3,11 +3,11 @@
  */
 import { useEffect } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
-import { useModule } from "@notefig/core/react";
+import { useCore } from "@notefig/core/react";
 
 /** Mount once, in the shell: keeps the tracker told which tab is in front. */
 export function useTrackActiveTab(activeTabId: string | null): void {
-  const seen = useModule("seen");
+  const { seen } = useCore();
   useEffect(() => {
     seen.setActiveTab(activeTabId);
   }, [seen, activeTabId]);
@@ -15,7 +15,7 @@ export function useTrackActiveTab(activeTabId: string | null): void {
 
 /** `seenKey` → lastSeenAt, live. */
 export function useSeen(): ReadonlyMap<string, number> {
-  const { collection } = useModule("seen");
+  const { collection } = useCore().seen;
   const { data = [] } = useLiveQuery((q) => q.from({ seen: collection }));
   return new Map(data.map((row) => [row.id, row.lastSeenAt]));
 }

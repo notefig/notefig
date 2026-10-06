@@ -9,7 +9,6 @@ import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { FsError } from "@/adapters/platform-adapter.interface";
-import { usePlatform } from "@/core/use-platform";
 import i18n from "@/utils/intl";
 import { useCore } from "@notefig/core/react";
 import { deriveProjectName, useRecentProjects } from "./use-recent-projects";
@@ -59,7 +58,7 @@ export function useOpenProject(): (workspacePath: string) => Promise<boolean> {
  */
 export function useOpenProjectFromPicker(): () => Promise<void> {
   const { t } = useTranslation();
-  const platform = usePlatform();
+  const { platform } = useCore();
   const openProject = useOpenProject();
   return useCallback(async () => {
     try {

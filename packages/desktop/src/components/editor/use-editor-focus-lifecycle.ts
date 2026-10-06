@@ -12,8 +12,8 @@ import {
   saveSelection,
   getSavedSelection,
 } from "@/components/editor/editor-store";
-import { useModule } from "@notefig/core/react";
 import { requestTabFocus } from "@/modules/tabs/tab-controllers";
+import { useCore } from "@notefig/core/react";
 
 /** How long after mount the tab layout may still re-parent the editor DOM. */
 const FOCUS_RECLAIM_WINDOW_MS = 600;
@@ -22,7 +22,7 @@ export function useEditorFocusLifecycle(
   editor: Editor,
   filePath: string,
 ): void {
-  const editors = useModule("editors");
+  const { editors } = useCore();
   useEffect(() => {
     if (!editor) return;
 

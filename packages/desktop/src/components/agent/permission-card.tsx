@@ -1,12 +1,11 @@
 import { Button } from "@notefig/ui/button";
 import { cn } from "@notefig/ui/utils";
-import { useAgents, usePendingPermissions } from "@/modules/agents/react";
+import { usePendingPermissions } from "@/modules/agents/react";
 import type { PermissionOption } from "@notefig/shared/agent";
+import { useCore } from "@notefig/core/react";
 
 /** ACP option kind → button emphasis. Options render verbatim otherwise. */
-function variantForKind(
-  kind: PermissionOption["kind"],
-): "default" | "outline" {
+function variantForKind(kind: PermissionOption["kind"]): "default" | "outline" {
   return kind === "allow_once" || kind === "allow_always"
     ? "default"
     : "outline";
@@ -27,7 +26,7 @@ export function PermissionCard({
    *  widget) that already wrap it in an equivalently-tinted container. */
   bare?: boolean;
 }) {
-  const agents = useAgents();
+  const { agents } = useCore();
   const pending = usePendingPermissions(taskId);
   // Ids sort chronological; the hook returns oldest-first.
   const head = pending[0];

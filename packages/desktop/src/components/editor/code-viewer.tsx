@@ -8,7 +8,6 @@ import {
   type CodeViewHandle,
 } from "@pierre/diffs/react";
 import DiffsHighlightWorker from "@pierre/diffs/worker/worker.js?worker";
-import { usePlatform } from "@/core/use-platform";
 import type { FileEntry } from "@/utils/fs";
 import type { SearchTarget } from "@/adapters/platform-adapter.interface";
 import {
@@ -19,7 +18,7 @@ import {
 import { requestTabFocus } from "@/modules/tabs/tab-controllers";
 import { useTheme } from "@/components/theme-provider";
 import { getFileName } from "@/utils/fs";
-import { useModule } from "@notefig/core/react";
+import { useCore } from "@notefig/core/react";
 
 interface CodeViewerProps {
   file: FileEntry;
@@ -136,8 +135,8 @@ export function CodeViewer({ file }: CodeViewerProps) {
   const handleRef = useRef<CodeViewHandle<undefined>>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const { fs } = usePlatform();
-  const editors = useModule("editors");
+  const { platform, editors } = useCore();
+  const { fs } = platform;
   useEffect(() => {
     getOrCreateEditor(editors, file.path, { type: "code" }, fs);
   }, [editors, fs, file.path]);

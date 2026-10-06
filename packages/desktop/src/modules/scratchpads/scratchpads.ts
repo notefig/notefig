@@ -36,6 +36,9 @@ import {
   SCRATCHPADS_REL_PATH,
 } from "@/utils/app-dir";
 import type { WorkspaceFiles } from "@/modules/files";
+import { tabsModule } from "@/modules/tabs";
+import { kvModule } from "@/modules/kv";
+import { filesModule } from "@/modules/files";
 
 // ---------------------------------------------------------------------------
 // Path scheme & naming (pure)
@@ -395,9 +398,9 @@ declare module "@notefig/core" {
 
 export const scratchpadsModule = defineModule({
   name: "scratchpads",
-  needs: ["platform", "tabs", "kv"],
+  needs: ["platform", tabsModule, kvModule],
   workspace: {
-    needs: ["files"],
+    needs: [filesModule],
     create: (ctx) => {
       const tabs = ctx.use("tabs");
       const kv = ctx.use("kv");

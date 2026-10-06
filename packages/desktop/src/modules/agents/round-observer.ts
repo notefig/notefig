@@ -13,6 +13,7 @@ import type {
 import { defineModule } from "@notefig/core";
 import { registerPromptRoundObserver } from "@notefig/widgets";
 import type { AgentStore } from "./agent-collections";
+import { agentStoreModule } from "./agent-collections";
 
 export const roundObserverFor =
   (store: AgentStore): PromptRoundObserverFactory =>
@@ -61,7 +62,7 @@ export const roundObserverFor =
 /** The minimap's live-rows seam (MET-172), filled from the agent store. */
 export const promptRoundObserverModule = defineModule({
   name: "prompt-round-observer",
-  needs: ["agentStore"],
+  needs: [agentStoreModule],
   boot: (_api, ctx) =>
     registerPromptRoundObserver(roundObserverFor(ctx.use("agentStore"))),
 });

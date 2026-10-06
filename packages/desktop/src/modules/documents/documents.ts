@@ -37,6 +37,8 @@ import {
   type AdoptionSource,
 } from "@/components/editor/adopt-external-content";
 import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
+import { turnWritesModule } from "@/modules/turn-writes";
+import { editorsModule } from "@/modules/editors";
 
 export interface DocumentsApi {
   /** A file's text, from disk; `line` (1-based) and `limit` cut a range. */
@@ -214,7 +216,7 @@ declare module "@notefig/core" {
 
 export const documentsModule = defineModule({
   name: "documents",
-  needs: ["platform", "turnWrites", "editors"],
+  needs: ["platform", turnWritesModule, editorsModule],
   register: (ctx) =>
     createDocuments({
       fs: ctx.use("platform").fs,

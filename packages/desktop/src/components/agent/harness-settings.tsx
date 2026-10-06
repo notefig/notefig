@@ -46,7 +46,6 @@ import {
   AlertDialogTitle,
 } from "@notefig/ui/alert-dialog";
 import { cn } from "@notefig/ui/utils";
-import { useModule } from "@notefig/core/react";
 import { useKv } from "@/modules/kv/react";
 import {
   HARNESS_CUSTOM_KEY,
@@ -70,6 +69,7 @@ import {
   type HarnessFormState,
   type HarnessSettingsRow,
 } from "./harness-settings-form";
+import { useCore } from "@notefig/core/react";
 
 const NEW_ENTRY_ID = "__new__";
 
@@ -102,7 +102,7 @@ function naturalEnabled(row: HarnessSettingsRow): boolean {
 export function HarnessSettings() {
   const { t } = useTranslation();
   const kv = useKv<unknown>(HARNESS_SETTINGS_NAMESPACE);
-  const discovery = useModule("harnessDiscovery");
+  const { harnessDiscovery: discovery } = useCore();
   const rawOverrides = kv.get(HARNESS_OVERRIDES_KEY);
   const rawCustom = kv.get(HARNESS_CUSTOM_KEY);
   const rawDiscovery = kv.get(HARNESS_DISCOVERY_KEY);

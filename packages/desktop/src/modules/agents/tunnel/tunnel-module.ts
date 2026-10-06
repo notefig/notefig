@@ -3,6 +3,8 @@ import { isWeb } from "@/utils/platform";
 import { createTunnelPairing, type TunnelPairingApi } from "./connect-flow";
 import { hadDeepLinkPairing } from "./pair-dialog-store";
 import { tunnelConnection } from "./tunnel-connection";
+import { kvModule } from "@/modules/kv";
+import { workspaceAgentsModule } from "@/modules/agents/workspace-agents";
 
 declare module "@notefig/core" {
   interface CoreModules {
@@ -23,7 +25,7 @@ declare module "@notefig/core" {
  */
 export const tunnelModule = defineModule({
   name: "tunnel",
-  needs: ["kv", "agents"],
+  needs: [kvModule, workspaceAgentsModule],
   register: (ctx) =>
     createTunnelPairing({
       kv: ctx.use("kv"),

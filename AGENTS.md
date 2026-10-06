@@ -87,7 +87,14 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   React-only hooks, and pure functions. A `defineModule` never sits inside
   a component file.
 - `needs` decides order: core registers and boots a module after everything
-  it lists, and fails at startup on a missing need or a cycle.
+  it lists, and fails at startup on an unknown service or a cycle. A
+  module is listed by the module itself (`needs: [kvModule, "platform"]`,
+  `workspace: { needs: [filesModule] }`), a service by its name; a needed
+  module the root left out is registered anyway. Reading what was handed
+  over stays by name, checked by TypeScript: `ctx.use("kv")`,
+  `ctx.useWorkspace("files")`. A module takes no options: what differs
+  per root is a separate module the root lists (`restoreWorkspacesModule`
+  in the desktop list only).
 - A module that exposes an API, or that other modules need, declares itself
   on `CoreModules` (`declare module "@notefig/core"`). Per-workspace state
   goes on `WorkspaceModules` with a `workspace: { create, dispose }` part.
@@ -109,14 +116,17 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   module-scope `Map` a free function reads.
 - The platform is a service. Only the composition root (`app-core.ts`)
   imports `@/adapters`; modules take `ctx.use("platform")`, components
-  `usePlatform()` (`src/core/use-platform.ts`), and other code is handed
+  `useCore().platform`, and other code is handed
   the surface it needs (`fs: Pick<FileSystemSurface, …>`). Fallow's
   boundary rules (the root `.fallowrc.json`, which CI audits from) fail a
   commit that imports an adapter implementation from app code. There is no
   ambient core: code outside React is handed what it uses.
 - A per-workspace API is reached through core: `core.workspace(ws).git`,
-  or `useWorkspaceModule(ws, "git")` in React; an app-wide one through
-  `core.kv` / `useModule("kv")`.
+  or `useWorkspaceModule(ws, "git")` in React; an app-wide one and every
+  service straight off core: `core.kv`, `const { kv, platform } =
+  useCore()`. No hook only hands back what core already exposes
+  (`useAgents()`, `usePlatform()`); a hook in `react.ts` earns its place by
+  doing something — a live query, a subscription, a join.
 - Tests build what they exercise over fakes: `createTestCore` (a platform
   over an in-memory db by default), `testWorkspaceFiles` / `filesModuleOf`
   (`src/testing/test-files.ts`), `testKv`, `testAgents` (store, runtime
@@ -139,11 +149,11 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   open-set row), never code in the caller. A boot restore fires neither.
   Those handlers are steps of the open: if one fails, `open()` rejects and
   the hooks after it don't fire (a failed `focused` lands nothing).
-- Agents are driven through the facade (`core.agents`, `useAgents()` from
-  `@/modules/agents/react`): `agents.workspace(ws).start(harness)` for a
-  session the user starts (runtime and trust gates included),
-  `agents.task(id)` for everything after. Their rows are read through
-  `core.agentStore` (`useAgentStore()`). Nothing outside
+- Agents are driven through the facade (`core.agents`, `useCore().agents`
+  in React): `agents.workspace(ws).start(harness)` for a session the user
+  starts (runtime and trust gates included), `agents.task(id)` for
+  everything after. Their rows are read through `core.agentStore` (the
+  hooks in `@/modules/agents/react` join them). Nothing outside
   `src/modules/agents/` reaches the runtime in `agent-service`.
 - The plan this follows: the "Core Layer Architecture" doc (stages 1–7).
 

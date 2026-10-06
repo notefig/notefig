@@ -10,9 +10,12 @@ export type { Core, CoreBase, CreateCoreOptions } from "./create-core";
 export { defineModule } from "./define-module";
 export type {
   AnyModule,
+  Module,
   ModuleContext,
   ModuleDefinition,
+  Need,
   OpenWorkspaces,
+  ServiceName,
   WorkspaceContext,
   WorkspaceLifecycle,
 } from "./define-module";

@@ -6,12 +6,12 @@ import {
 } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { IPlatformAdapter } from "@/adapters/platform-adapter.interface";
-import { usePlatform } from "@/core/use-platform";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import i18n from "@/utils/intl";
 import { isTauri } from "@/utils/platform";
 import { captureEvent } from "@/telemetry/telemetry";
 import type { UpdateFlow } from "@/adapters/platform-adapter.interface";
+import { useCore } from "@notefig/core/react";
 
 export type UpdaterStatus =
   | "idle"
@@ -251,7 +251,7 @@ export function useAppUpdater(): AppUpdaterView & {
   checkForUpdate: () => void;
 } {
   const queryClient = useQueryClient();
-  const { updates } = usePlatform();
+  const { updates } = useCore().platform;
   const check = useQuery(getUpdateCheckQueryOptions({ queryClient, updates }));
   const { data: install } = useQuery(getInstallStateQueryOptions(queryClient));
 
@@ -429,7 +429,7 @@ export function resolveUpdateNotification(input: {
 
 export function AppUpdaterBootstrap() {
   const queryClient = useQueryClient();
-  const { updates } = usePlatform();
+  const { updates } = useCore().platform;
   const { data } = useQuery(
     getUpdateCheckQueryOptions({ queryClient, updates }),
   );

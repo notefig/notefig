@@ -28,7 +28,6 @@ import { cn } from "@notefig/ui/utils";
 import type { HarnessAvailability } from "@notefig/shared/agent";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { usePlatform } from "@/core/use-platform";
 import Logo from "@/components/logo";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { useTheme } from "@/components/theme-provider";
@@ -49,6 +48,7 @@ import { isWeb } from "@/utils/platform";
 import { latestReleaseBody, latestReleaseTitle } from "@/utils/release-notes";
 import { ReleaseNotesDocument } from "./release-notes-tab";
 import { DebugPanel } from "./debug-panel";
+import { useCore } from "@notefig/core/react";
 
 /**
  * Route anchor clicks inside injected markdown to the platform opener.
@@ -234,7 +234,7 @@ function HarnessPanel() {
  */
 function ReleaseNotesPanel() {
   const { t } = useTranslation();
-  const { ui } = usePlatform();
+  const { ui } = useCore().platform;
   const [open, setOpen] = useState(false);
   if (!latestReleaseTitle || !latestReleaseBody) return null;
 
@@ -345,7 +345,7 @@ function RecentProjectRow({
 export function Welcome() {
   const [loading, setLoading] = useState(false);
   const { t } = useTranslation();
-  const { ui } = usePlatform();
+  const { ui } = useCore().platform;
   const openProject = useOpenProject();
   const openProjectFromPicker = useOpenProjectFromPicker();
   const openButtonRef = useRef<HTMLButtonElement>(null);
@@ -373,7 +373,11 @@ export function Welcome() {
 
   const handleOpenSettings = useOpenSettings();
   // Nothing open: the platform's view offers the ways in, no rows.
-  usePublishAppStatus({ workspacePath: null, tabs: null, openSettings: handleOpenSettings });
+  usePublishAppStatus({
+    workspacePath: null,
+    tabs: null,
+    openSettings: handleOpenSettings,
+  });
 
   return (
     <div className="texture-surface relative flex h-full flex-col overflow-hidden bg-background">

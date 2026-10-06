@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GitRepoRef, GitService } from "@notefig/git";
-import { createCore, createHooks } from "@notefig/core";
+import { createCore, createHooks, defineModule } from "@notefig/core";
 import { workspaceKey } from "@/utils/path";
 import {
   createWorkspaceHistory,
@@ -154,11 +154,15 @@ describe("a workspace's history repo", () => {
 
 describe("historyModule", () => {
   it("checkpoints each completed agent turn in its own workspace", async () => {
+    // The repos run on the fake git worker, listed in place of the
+    // `gitWorker` module history needs.
+    const gitWorker = defineModule({
+      name: "gitWorker",
+      register: () => repos.git as never,
+    });
     const core = createCore({
-      // The repos run on the fake git worker, handed in where the
-      // `gitWorker` module would be.
-      services: { platform: { fs: disk.fs }, gitWorker: repos.git } as never,
-      modules: [historyModule],
+      services: { platform: { fs: disk.fs } } as never,
+      modules: [gitWorker, historyModule],
       workspaceKey,
     });
     await core.workspace(WS).open();

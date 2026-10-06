@@ -31,7 +31,8 @@ import {
   CommandList,
 } from "@notefig/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@notefig/ui/popover";
-import { useAgents, useTaskRow } from "@/modules/agents/react";
+import { useTaskRow } from "@/modules/agents/react";
+import { useCore } from "@notefig/core/react";
 
 /** Model first, effort second. */
 const CATEGORY_ORDER: readonly string[] = ["model", "thought_level"];
@@ -65,11 +66,16 @@ export function visibleConfigOptions(
   options: readonly SessionConfigSelect[],
 ): SessionConfigSelect[] {
   return orderConfigOptions(
-    options.filter((option) => VISIBLE_CATEGORIES.includes(option.category ?? "")),
+    options.filter((option) =>
+      VISIBLE_CATEGORIES.includes(option.category ?? ""),
+    ),
   );
 }
 
-type ChoiceGroup = { name: string | null; choices: SessionConfigSelectOption[] };
+type ChoiceGroup = {
+  name: string | null;
+  choices: SessionConfigSelectOption[];
+};
 
 /** Ungrouped and grouped select options as one list of labelled groups. */
 function choiceGroups(option: SessionConfigSelect): ChoiceGroup[] {
@@ -99,7 +105,10 @@ export function currentChoiceName(option: SessionConfigSelect): string {
 }
 
 /** Categories whose value reads on its own ("Sonnet 4.5", "High"). */
-const SELF_DESCRIBING_CATEGORIES: readonly string[] = ["model", "thought_level"];
+const SELF_DESCRIBING_CATEGORIES: readonly string[] = [
+  "model",
+  "thought_level",
+];
 
 /** What the trigger reads: a self-describing value alone; any other option
  *  needs its name or its value is noise ("Off" → "Fast mode: Off"). */
@@ -148,7 +157,7 @@ function SessionConfigPicker({
   composerRef: RefObject<PromptEditorHandle>;
 }) {
   const { t } = useTranslation();
-  const agents = useAgents();
+  const { agents } = useCore();
   const [open, setOpen] = useState(false);
   const groups = choiceGroups(option);
   const choiceCount = groups.reduce((n, g) => n + g.choices.length, 0);
@@ -158,7 +167,10 @@ function SessionConfigPicker({
     const result = await agents.task(taskId).setConfigOption(option.id, value);
     if (!result.ok) {
       toast.error(
-        t("agentSettingSwitchFailed", { name: option.name, error: result.error }),
+        t("agentSettingSwitchFailed", {
+          name: option.name,
+          error: result.error,
+        }),
       );
     }
   };

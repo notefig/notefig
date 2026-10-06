@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { renderMarkdown } from "@/utils/markdown-conversion";
-import { usePlatform } from "@/core/use-platform";
 import { cn } from "@notefig/ui/utils";
+import { useCore } from "@notefig/core/react";
 
 /**
  * Rendered-HTML cache keyed by source text: completed messages render
@@ -105,7 +105,7 @@ export function Markdown({
   className?: string;
 }) {
   const html = useMarkdownHtml(text);
-  const { ui } = usePlatform();
+  const { ui } = useCore().platform;
   return (
     <div
       className={cn(

@@ -1,11 +1,11 @@
 import { useMemo } from "react";
 import { eq, useLiveQuery } from "@tanstack/react-db";
-import { useFileCollections } from "@/modules/files/react";
 import {
   rankFileRows,
   type FileSearchOptions,
   type FileSearchResult,
 } from "@/utils/file-score";
+import { useWorkspaceModule } from "@notefig/core/react";
 
 export type { FileSearchOptions, FileSearchResult };
 
@@ -22,7 +22,8 @@ export function useFileSearch(
   query: string,
   options: FileSearchOptions = {},
 ): FileSearchResult[] {
-  const metadata = useFileCollections(workspacePath)?.metadata;
+  const metadata = useWorkspaceModule(workspacePath, "files")?.collections
+    ?.metadata;
   const { data = [] } = useLiveQuery(
     (q) =>
       metadata

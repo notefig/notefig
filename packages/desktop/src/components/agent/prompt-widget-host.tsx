@@ -25,19 +25,14 @@ import type {
 import { extractMentionPaths } from "@notefig/widgets";
 import type { PromptContextPart } from "@notefig/shared/agent";
 import { AGENT_KV_NAMESPACE, trustKey } from "@/modules/agents/agents";
-import {
-  describeTaskMeta,
-  useAgentStore,
-  useAgentTaskList,
-  useAgents,
-} from "@/modules/agents/react";
+import { describeTaskMeta, useAgentTaskList } from "@/modules/agents/react";
 import type { WorkspaceFiles } from "@/modules/files";
 import type { Core } from "@notefig/core";
 import {
   useActiveHarnesses,
   useDefaultHarness,
 } from "@/hooks/use-harness-selection";
-import { canOpenFile } from "@/components/editor/polymorphic-editor";
+import { canOpenFile } from "@/modules/editors";
 import { FileTypeIcon } from "@/components/editor/file-type-icon";
 import { Markdown } from "@/components/ui/markdown";
 import { useCore } from "@notefig/core/react";
@@ -118,7 +113,7 @@ function useRound({
   turnId: string | null;
   taskId: string | null;
 }): PromptRound {
-  const store = useAgentStore();
+  const { agentStore: store } = useCore();
   const turnKey = turnId ?? " none";
   const taskKey = taskId ?? " none";
   const { data: turnRows = [] } = useLiveQuery(
@@ -183,7 +178,8 @@ function useSessionList(workspacePath: string): SessionOption[] {
         .map((meta) => ({
           taskId: meta.task.taskId,
           title: meta.task.title,
-          description: describeTaskMeta(meta) ?? formatTimeAgo(meta.task.updatedAt),
+          description:
+            describeTaskMeta(meta) ?? formatTimeAgo(meta.task.updatedAt),
           harnessId: meta.task.harnessId,
         })),
     [metas],
@@ -206,7 +202,7 @@ const slots: PromptWidgetHost["slots"] = {
 function useTrust(workspacePath: string) {
   // Subscribed for reactivity; the answer and the grant are the facade's.
   useKv<boolean>(AGENT_KV_NAMESPACE).get(trustKey(workspacePath));
-  const workspace = useAgents().workspace(workspacePath);
+  const workspace = useCore().agents.workspace(workspacePath);
   return { isTrusted: workspace.isTrusted(), grant: workspace.trust };
 }
 

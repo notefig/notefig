@@ -60,12 +60,7 @@ function setup(layout: LayoutNode[] = [], extraSearch = "") {
   url = memoryUrlState(params.size ? `?${params}` : "");
   core = createTestCore({
     url,
-    modules: [
-      editorsModule,
-      turnWritesModule,
-      documentsModule,
-      tabsModule({ canOpenFile: (path) => !path.endsWith(".bin") }),
-    ],
+    modules: [editorsModule, turnWritesModule, documentsModule, tabsModule],
   });
   core.boot();
 }

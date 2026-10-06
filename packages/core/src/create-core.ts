@@ -6,7 +6,7 @@ import type {
   WorkspaceLifecycle,
 } from "./define-module";
 import { createHooks, type Hooks } from "./hooks";
-import { CoreConfigError, orderModules } from "./order";
+import { CoreConfigError, needName, orderModules } from "./order";
 import type {
   CoreModules,
   CoreServices,
@@ -66,8 +66,9 @@ export interface CoreBase {
   dispose(): Promise<void>;
 }
 
-/** Module APIs also read as properties: `core.files`. */
-export type Core = CoreBase & Readonly<CoreModules>;
+/** Services and module APIs also read as properties: `core.platform`,
+ *  `core.files`. */
+export type Core = CoreBase & Readonly<CoreServices> & Readonly<CoreModules>;
 
 const RESERVED = new Set<string>([
   "use",
@@ -95,6 +96,11 @@ export function createCore(options: CreateCoreOptions): Core {
   const services = new Map<string, unknown>(
     Object.entries(options.services as object),
   );
+  for (const name of services.keys()) {
+    if (RESERVED.has(name)) {
+      throw new CoreConfigError(`Service name "${name}" is reserved by core.`);
+    }
+  }
   const ordered = orderModules(options.modules, new Set(services.keys()));
   for (const module of ordered) {
     if (RESERVED.has(module.name)) {
@@ -187,7 +193,7 @@ export function createCore(options: CreateCoreOptions): Core {
         ...contextFor(module),
         workspace: ref,
         useWorkspace(name: string) {
-          if (!(part.needs ?? []).includes(name)) {
+          if (!(part.needs ?? []).some((need) => need.name === name)) {
             throw new CoreConfigError(
               `Module "${module.name}" uses the workspace instance of "${name}" without listing it in workspace.needs.`,
             );
@@ -382,7 +388,7 @@ export function createCore(options: CreateCoreOptions): Core {
   // ---------------------------------------------------------------------
 
   function contextFor(module: AnyModule): ModuleContext<never> {
-    const needs = new Set(module.needs ?? []);
+    const needs = new Set((module.needs ?? []).map(needName));
     return {
       use(name: string) {
         if (!needs.has(name)) {
@@ -460,6 +466,9 @@ export function createCore(options: CreateCoreOptions): Core {
   };
 
   const core = base as Core;
+  for (const [name, service] of services) {
+    Object.defineProperty(core, name, { value: service, enumerable: true });
+  }
   for (const module of ordered) {
     Object.defineProperty(core, module.name, {
       get: () => apis.get(module.name),

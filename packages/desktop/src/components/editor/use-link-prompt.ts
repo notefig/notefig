@@ -4,11 +4,11 @@
  */
 
 import type { Editor } from "@tiptap/core";
-import { usePlatform } from "@/core/use-platform";
 import { normalizeLinkInput } from "./tiptap-link-utils";
+import { useCore } from "@notefig/core/react";
 
 export function useLinkPrompt(editor: Editor): () => Promise<void> {
-  const platform = usePlatform();
+  const { platform } = useCore();
   return async function handleLinkToggle() {
     const previousUrl = editor.getAttributes("link").href as string | undefined;
     const url = await platform.ui.promptText({

@@ -1,21 +1,20 @@
 /**
- * Reading a workspace's file rows from React: the collections while the
- * workspace is open, the open-tab join, fetch state, and the content watch
- * that follows the open tabs.
+ * Reading a workspace's file rows from React: the open-tab join, fetch
+ * state, and the content watch that follows the open tabs.
  */
 import { useEffect, useMemo } from "react";
 import { useCore, useWorkspaceModule } from "@notefig/core/react";
-import { useLiveQuery, eq, inArray, coalesce, isUndefined, not } from "@tanstack/react-db";
+import {
+  useLiveQuery,
+  eq,
+  inArray,
+  coalesce,
+  isUndefined,
+  not,
+} from "@tanstack/react-db";
 import { useIsFetching } from "@tanstack/react-query";
 import { workspaceKey } from "@/utils/path";
 import type { FileMetadata, WorkspaceCollections } from "./files";
-
-/** The workspace's collections while it is open (render-stable). */
-export function useFileCollections(
-  workspacePath: string | null | undefined,
-): WorkspaceCollections | undefined {
-  return useWorkspaceModule(workspacePath, "files")?.collections;
-}
 
 /**
  * A file row shaped for open tabs: metadata joined with content.
@@ -36,7 +35,7 @@ export function useOpenFileRows(
   workspacePath: string | null,
   paths: string[],
 ): OpenFileRow[] {
-  const collections = useFileCollections(workspacePath);
+  const collections = useWorkspaceModule(workspacePath, "files")?.collections;
   const { data = [] } = useLiveQuery(
     (q) =>
       collections === undefined || paths.length === 0
@@ -72,7 +71,7 @@ function useFilesFetching(
   kind: "file-metadata" | "file-content",
   workspacePath?: string,
 ): boolean {
-  const queryClient = useCore().use("queryClient");
+  const { queryClient } = useCore();
   const queryKey = useMemo(
     () => (workspacePath === undefined ? [kind] : [kind, workspacePath]),
     [kind, workspacePath],

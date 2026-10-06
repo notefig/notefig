@@ -3,7 +3,6 @@ import type { JSONContent } from "@tiptap/core";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { GripVertical } from "lucide-react";
 import type { FileEntry } from "../../utils/fs";
-import { usePlatform } from "@/core/use-platform";
 import { getOrCreateEditor } from "@/components/editor/editor-store";
 import { isMarkdownInstance } from "@/modules/editors";
 import { useEditorFileSync } from "./use-editor-file-sync";
@@ -16,7 +15,7 @@ import { LinkBubbleMenu } from "./tiptap-link-menu";
 import { TableMenu } from "./tiptap-table-menu";
 import { cn } from "@notefig/ui/utils";
 import { dropZoneProps } from "@/utils/drag-protocol";
-import { useCore, useModule, useWorkspaceModule } from "@notefig/core/react";
+import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import { isImageFile } from "@/utils/fs";
 import { relativeTreePath } from "@/utils/path";
 import "./tiptap.css";
@@ -39,8 +38,8 @@ export function TextEditor({
   contentError,
   initialDoc,
 }: TextEditorProps) {
-  const { fs } = usePlatform();
-  const editors = useModule("editors");
+  const { platform, editors, turnWrites, tabs } = useCore();
+  const { fs } = platform;
   const instance = getOrCreateEditor(
     editors,
     file.path,
@@ -55,7 +54,6 @@ export function TextEditor({
   const editor = instance.editor;
 
   const files = useWorkspaceModule(basePath, "files");
-  const { turnWrites, tabs } = useCore();
   useEditorFileSync(
     editor,
     file,

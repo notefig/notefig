@@ -2,11 +2,11 @@
  * A KV namespace from React: its rows live, and writes through the collection.
  */
 import { useLiveQuery } from "@tanstack/react-db";
-import { useModule } from "@notefig/core/react";
 import { upsert } from "./kv";
+import { useCore } from "@notefig/core/react";
 
 export function useKv<T>(namespace: string) {
-  const collection = useModule("kv").collection(namespace);
+  const collection = useCore().kv.collection(namespace);
 
   const { data: rows = [], isReady } = useLiveQuery(
     (q) =>

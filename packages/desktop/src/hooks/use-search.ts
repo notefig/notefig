@@ -1,11 +1,11 @@
 import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { usePlatform } from "@/core/use-platform";
 import { IGNORE_RULES } from "@/utils/ignore";
 import type {
   SearchOptions,
   SearchMatch,
 } from "@/adapters/platform-adapter.interface";
+import { useCore } from "@notefig/core/react";
 
 export interface UseSearchOptions {
   query: string;
@@ -38,7 +38,7 @@ export function useSearch(
   options: UseSearchOptions,
 ): UseSearchResult {
   const { query, caseSensitive, useRegex, filePattern, maxResults } = options;
-  const { fs } = usePlatform();
+  const { fs } = useCore().platform;
 
   const [debouncedQuery, setDebouncedQuery] = useState(query);
   useEffect(() => {

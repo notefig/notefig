@@ -48,7 +48,7 @@ beforeEach(async () => {
 describe("writes issued before the persisted set has hydrated", () => {
   it("an open issued before hydration is durable: the row survives a restart", async () => {
     const core = createTestCore({
-      modules: [workspacesModule({ restore: false })],
+      modules: [workspacesModule],
       platform: { db },
     });
     core.boot();

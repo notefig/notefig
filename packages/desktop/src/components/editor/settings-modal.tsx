@@ -45,7 +45,6 @@ import {
 } from "./hotkey-catalog";
 import { useCore } from "@notefig/core/react";
 import { RELEASE_NOTES_TAB_ID } from "@/modules/tabs";
-import { usePlatform } from "@/core/use-platform";
 import { useFocusedWorkspace } from "@/modules/workspaces/react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -435,7 +434,7 @@ function UpdateSection() {
 function UpdaterButton() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const { updates } = usePlatform();
+  const { updates } = useCore().platform;
   const updater = useAppUpdater();
   const { status, progress, error, flow } = updater;
 

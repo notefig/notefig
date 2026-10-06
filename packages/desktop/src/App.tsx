@@ -11,12 +11,12 @@ import { MockDirectoryPickerDialog } from "@/components/mock-directory-picker-di
 import { TextPromptDialog } from "@/components/text-prompt-dialog";
 import { useEffect, useState } from "react";
 import { useTheme } from "@/components/theme-provider";
-import { usePlatform } from "@/core/use-platform";
 import { isWeb } from "@/utils/platform";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { WorkspaceErrorBoundary } from "@/components/workspace-error-boundary";
 import { EditorHarness } from "@/test-harness/editor-harness";
 import { PairDialog } from "@/components/tunnel/pair-dialog";
+import { useCore } from "@notefig/core/react";
 
 export const App = () => {
   const { setTheme } = useTheme();
@@ -56,7 +56,7 @@ export const App = () => {
     setLastSearch(location.search || null);
   }, [sessionRestored, location.pathname, location.search, setLastSearch]);
 
-  const { ui } = usePlatform();
+  const { ui } = useCore().platform;
   useEffect(() => {
     const cleanup = ui.addEventListener((event) => {
       switch (event.type) {

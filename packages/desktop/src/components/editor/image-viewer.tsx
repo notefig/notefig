@@ -1,13 +1,12 @@
 "use client";
 
 import { useEffect } from "react";
-import { usePlatform } from "@/core/use-platform";
 import type { FileEntry } from "@/utils/fs";
 import { getOrCreateEditor } from "@/components/editor/editor-store";
 import { focusTab } from "@/modules/tabs/tab-controllers";
 import { useImageUrl } from "@/hooks/use-image-url";
 import { cn } from "@notefig/ui/utils";
-import { useModule } from "@notefig/core/react";
+import { useCore } from "@notefig/core/react";
 
 interface ImageViewerProps {
   file: FileEntry;
@@ -21,8 +20,8 @@ interface ImageViewerProps {
  * Must be wrapped in a Suspense boundary.
  */
 export function ImageViewer({ file, basePath }: ImageViewerProps) {
-  const { fs } = usePlatform();
-  const editors = useModule("editors");
+  const { platform, editors } = useCore();
+  const { fs } = platform;
   useEffect(() => {
     getOrCreateEditor(editors, file.path, { type: "image" }, fs);
   }, [editors, fs, file.path]);

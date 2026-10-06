@@ -8,6 +8,7 @@ import {
   type OpenWorkspaceRow,
 } from "@/modules/workspaces";
 import { runtimeModules } from "@/core/app-core";
+import { restoreWorkspacesModule } from "./workspaces";
 import { createNodeTestDb, type NodeTestDb } from "@/testing/node-db";
 import { memoryUrlState } from "@/testing/test-core";
 import { workspaceKey } from "@/utils/path";
@@ -89,7 +90,7 @@ describe("restoring the open workspaces at boot", () => {
         queryClient: new QueryClient(),
         url: memoryUrlState(),
       } as never,
-      modules: runtimeModules({ restoreWorkspaces: true }).map(
+      modules: [...runtimeModules(), restoreWorkspacesModule].map(
         (module) => stubs[module.name] ?? module,
       ),
       workspaceKey,

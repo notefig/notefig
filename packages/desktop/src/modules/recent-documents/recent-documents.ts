@@ -21,6 +21,7 @@ import { defineModule } from "@notefig/core";
 import { isScratchpadFileRow } from "@/modules/scratchpads";
 import { type OpenWorkspaceRow } from "@/modules/workspaces";
 import { relativeTreePath, workspaceKey } from "@/utils/path";
+import { workspacesModule } from "@/modules/workspaces";
 
 export const RECENT_DOCUMENTS_COLLECTION_ID = "recent-documents";
 /** Rows kept in storage across every workspace; the panel shows fewer. */
@@ -116,7 +117,7 @@ declare module "@notefig/core" {
 
 export const recentDocumentsModule = defineModule({
   name: "recentDocuments",
-  needs: ["platform", "workspaceRegistry"],
+  needs: ["platform", workspacesModule],
   register: (ctx) => {
     const registry = ctx.use("workspaceRegistry");
     return createRecentDocuments({

@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { defineModule } from "@notefig/core";
-import { useModule } from "@notefig/core/react";
-import { usePlatform } from "@/core/use-platform";
 import { LAYOUT_PARAM, parseLayout } from "@/utils/layout-codec";
 import type { LayoutNode } from "@/components/dockable";
 import { openFileInLayout } from "@/utils/dockable-layout";
 import { ensureMarketingWorkspaceSeeded } from "./seed";
 import { findPageByFilePath, type MarketingPage } from "./content-manifest";
+import { useCore } from "@notefig/core/react";
 
 declare module "@notefig/core" {
   interface CoreModules {
@@ -44,7 +43,7 @@ export function useWorkspaceReady(page: MarketingPage): boolean {
  */
 export function usePageIsEmpty(page: MarketingPage, enabled: boolean): boolean {
   const [isEmpty, setIsEmpty] = useState(false);
-  const { fs } = usePlatform();
+  const { fs } = useCore().platform;
 
   useEffect(() => {
     if (!enabled) return;
@@ -64,7 +63,7 @@ export function usePageIsEmpty(page: MarketingPage, enabled: boolean): boolean {
 /** True once the marketing workspace content is in IndexedDB. */
 function useMarketingSeed(): boolean {
   const [seeded, setSeeded] = useState(false);
-  const seed = useModule("marketingSeed");
+  const { marketingSeed: seed } = useCore();
 
   useEffect(() => {
     let cancelled = false;
