@@ -14,10 +14,9 @@ const { readTextFile, log, addAllAndCommit } = vi.hoisted(() => ({
   addAllAndCommit: vi.fn(async (..._args: unknown[]) => "def456"),
 }));
 
-const { writeWorkspaceTextFile } = vi.hoisted(() => ({
-  writeWorkspaceTextFile: vi.fn(async () => undefined),
-}));
-vi.mock("@/utils/file-sync", () => ({ writeWorkspaceTextFile }));
+const writeWorkspaceTextFile = vi.fn(
+  async (_path: string, _content: string) => undefined,
+);
 const { invalidateGit } = vi.hoisted(() => ({ invalidateGit: vi.fn() }));
 vi.mock("@/entities/git", () => ({ invalidateGit }));
 
@@ -40,6 +39,10 @@ const ctx = {
         addAllAndCommit({ message, author }),
       dispose: vi.fn(),
     } as never,
+    files: {} as never,
+    // The adopting write a restore goes through.
+    documents: { read: vi.fn(), write: writeWorkspaceTextFile },
+    layout: {} as never,
   },
 };
 

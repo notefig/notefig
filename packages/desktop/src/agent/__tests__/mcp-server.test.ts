@@ -20,17 +20,13 @@ vi.mock("@/components/editor/blobs/blob-registry", () => ({
   getBlobType: (type: string) => blobTypes.find((t) => t.type === type),
 }));
 
-// author_blob's execute reads/writes through the file-sync helpers; stub
+// author_blob's execute reads/writes through the task's documents; fake
 // them so the stringified-payload repair test below exercises the full
 // dispatch without touching a real workspace.
-const { readWorkspaceTextFile, writeWorkspaceTextFile } = vi.hoisted(() => ({
-  readWorkspaceTextFile: vi.fn(async () => "# Doc\n"),
-  writeWorkspaceTextFile: vi.fn(async () => {}),
-}));
-vi.mock("@/utils/file-sync", () => ({
-  readWorkspaceTextFile,
-  writeWorkspaceTextFile,
-}));
+const readWorkspaceTextFile = vi.fn(async (_path: string) => "# Doc\n");
+const writeWorkspaceTextFile = vi.fn(
+  async (_path: string, _content: string) => {},
+);
 
 // The payload builder is an injected dep of the handler now (it reads live
 // editor state, so the real one stays out of this suite); URI decoding is
@@ -45,14 +41,13 @@ import {
 } from "@notefig/agent";
 import type { McpEndpoint, ToolContext } from "@notefig/agent";
 import { PermissionBroker } from "../permission-broker";
-import { agentPermissionRequestsCollection } from "../agent-collections";
+import type { AgentStore } from "../agent-collections";
 import { toolRegistry, getTool } from "../tools";
 import { serverInstructions } from "../mcp-instructions";
 import i18n from "@/utils/intl";
-import { createTestCore, windowUrlState } from "@/testing/test-core";
-
-// getWorkspaceEditorContext reads the layout through core.
-createTestCore({ url: windowUrlState() });
+import { createLayout } from "@/entities/layout";
+import { memoryUrlState } from "@/testing/test-core";
+import { testAgentStore } from "@/testing/test-agents";
 
 // vi.hoisted can't reference `z` (hoisted above the "zod" import); assign
 // real schemas onto the mocked blob types now that imports have resolved.
@@ -73,10 +68,22 @@ const ctx: ToolContext = {
     task: () => ({ prompt: vi.fn(), cancel: vi.fn() }),
     workspace: () => ({ createTask: vi.fn() }),
   },
-  services: {} as ToolContext["services"],
+  services: {
+    documents: { read: readWorkspaceTextFile, write: writeWorkspaceTextFile },
+    // workspace_open_files reads the task's layout.
+    layout: createLayout(memoryUrlState()),
+  } as unknown as ToolContext["services"],
 };
 
-function handler(permissionBroker = new PermissionBroker(ctx.taskId)) {
+// The broker's permission requests, fresh per test.
+let store: AgentStore;
+
+function handler(
+  permissionBroker = new PermissionBroker(
+    ctx.taskId,
+    store.permissionRequests,
+  ),
+) {
   return createMcpRequestHandler({
     ctx,
     permissionBroker,
@@ -91,9 +98,7 @@ function handler(permissionBroker = new PermissionBroker(ctx.taskId)) {
 
 describe("createMcpRequestHandler", () => {
   beforeEach(() => {
-    for (const r of agentPermissionRequestsCollection.toArray) {
-      agentPermissionRequestsCollection.delete(r.id);
-    }
+    store = testAgentStore();
     buildWidgetContextPayload.mockReset();
   });
 
@@ -334,7 +339,7 @@ describe("createMcpRequestHandler", () => {
   });
 
   it("tools/call: a requiresPermission tool blocks on the broker and returns isError on deny", async () => {
-    const broker = new PermissionBroker(ctx.taskId);
+    const broker = new PermissionBroker(ctx.taskId, store.permissionRequests);
     const pending = handler(broker)({
       jsonrpc: "2.0",
       id: 6,
@@ -345,7 +350,7 @@ describe("createMcpRequestHandler", () => {
       },
     });
 
-    const row = agentPermissionRequestsCollection.toArray.find(
+    const row = store.permissionRequests.toArray.find(
       (r) => r.taskId === ctx.taskId && r.status === "pending",
     );
     expect(row).toBeDefined();

@@ -8,6 +8,7 @@ import {
   type CodeViewHandle,
 } from "@pierre/diffs/react";
 import DiffsHighlightWorker from "@pierre/diffs/worker/worker.js?worker";
+import { usePlatform } from "@/core/use-platform";
 import type { FileEntry } from "@/utils/fs";
 import type { SearchTarget } from "@/adapters/platform-adapter.interface";
 import { markEditorMounted, markEditorUnmounted } from "@/entities/editors";
@@ -135,9 +136,10 @@ export function CodeViewer({ file }: CodeViewerProps) {
   const handleRef = useRef<CodeViewHandle<undefined>>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const { fs } = usePlatform();
   useEffect(() => {
-    getOrCreateEditor(file.path, { type: "code" });
-  }, [file.path]);
+    getOrCreateEditor(file.path, { type: "code" }, fs);
+  }, [fs, file.path]);
 
   // Mount focus goes through the arbiter like the text editor's, so it
   // competes with modals, the sidebar and other tabs on the same terms

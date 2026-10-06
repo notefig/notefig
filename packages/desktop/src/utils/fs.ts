@@ -1,5 +1,3 @@
-import { platformAdapter } from "@/adapters";
-import type { TextPromptOptions } from "@/adapters/platform-adapter.interface";
 import { path as pathutil } from "./path";
 import {
   resolveWorkspacePath as resolveWorkspacePathWithin,
@@ -329,14 +327,4 @@ export function ensureNewFileNameHasDefaultMarkdownExtension(
   if (hasExtension) return fileName;
 
   return `${fileName}.md`;
-}
-
-export async function pickDirectory(title: string): Promise<string | null> {
-  return platformAdapter.ui.pickDirectory(title);
-}
-
-export async function promptText(
-  options: TextPromptOptions,
-): Promise<string | null> {
-  return platformAdapter.ui.promptText(options);
 }

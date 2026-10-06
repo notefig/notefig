@@ -42,7 +42,6 @@ import {
   useRecentDocuments,
   type RecentDocument,
 } from "@/entities/recent-documents";
-import { scratchpads } from "@/entities/scratchpads";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { deriveProjectName } from "@/hooks/use-recent-projects";
 import { formatTimeAgo } from "@/utils/format";
@@ -267,6 +266,7 @@ function NavRow({
  *  are one click from anywhere. The "open project" row opens the rail's
  *  add-workspace menu, so both entry points offer the same choices. */
 function QuickActions({ workspacePath }: { workspacePath: string }) {
+  const core = useCore();
   const { t } = useTranslation();
   const { defaultHarness } = useDefaultHarness();
   const { create, trustDialog } = useStartSession(workspacePath);
@@ -275,7 +275,9 @@ function QuickActions({ workspacePath }: { workspacePath: string }) {
       <NavRow
         leading={<ScratchpadIcon className="size-3" />}
         label={t("newScratchpad")}
-        onClick={() => scratchpads(workspacePath).createAndOpen()}
+        onClick={() =>
+          core.workspace(workspacePath).scratchpads.createAndOpen()
+        }
       />
       <NavRow
         leading={<MessageSquarePlus className="size-3" strokeWidth={1.5} />}
@@ -318,6 +320,7 @@ function askLabel(
  * carries the request's own controls, in context.
  */
 function AttentionGroup({ items }: { items: AttentionItem[] }) {
+  const core = useCore();
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const overflow = items.length - ATTENTION_COLLAPSED_ROWS;
@@ -336,7 +339,9 @@ function AttentionGroup({ items }: { items: AttentionItem[] }) {
             label={askLabel(item, t)}
             title={`${askLabel(item, t)} · ${deriveProjectName(item.task?.workspacePath ?? "")}`}
             trailing={formatTimeAgo(item.since)}
-            onClick={() => jumpToTask(item.taskId, { turnId: item.turnId })}
+            onClick={() =>
+              jumpToTask(core, item.taskId, { turnId: item.turnId })
+            }
           />
         ))}
       </div>
@@ -370,6 +375,7 @@ function PromptRoundRow({
   /** Settled since the user last had its document in front. */
   attention: AttentionKind | null;
 }) {
+  const core = useCore();
   const label = round.prompt || getFileName(round.documentPath);
   return (
     <NavRow
@@ -384,7 +390,7 @@ function PromptRoundRow({
       label={label}
       title={`${label} · ${getFileName(round.documentPath)} · ${deriveProjectName(round.workspacePath)}`}
       trailing={describePromptRound(round) ?? formatTimeAgo(round.startedAt)}
-      onClick={() => jumpToRound(round)}
+      onClick={() => jumpToRound(core, round)}
     />
   );
 }

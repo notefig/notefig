@@ -7,7 +7,7 @@
 /**
  * The write path for blob answers. Always ID-addressed string surgery via
  * patchBlobInMarkdown — never a whole-document re-serialization — and always
- * through `writeWorkspaceTextFile`, the adopting write primitive every other
+ * through `documents.write`, the adopting write primitive every other
  * agent-shaped write uses (ACP fs/write_text_file, author_blob,
  * history_restore): it writes to disk and pushes the content into any open
  * editor itself (see file-sync.ts).
@@ -19,9 +19,9 @@
  */
 import { findBlobs, patchBlobInMarkdown } from "@notefig/shared/blobs";
 import { toast } from "sonner";
-import { agents } from "@/agent/agents";
+import type { AgentsApi } from "@/agent/agents";
 import i18n from "@/utils/intl";
-import { readWorkspaceTextFile, writeWorkspaceTextFile } from "@/utils/file-sync";
+import type { DocumentsApi } from "@/entities/documents";
 import { createMarkdownCodec } from "../markdown-codec";
 import { getMarkdownEditor } from "@/entities/editors";
 import { getBlobType } from "./blob-registry";
@@ -49,18 +49,22 @@ export class BlobAnswerError extends Error {
 
 const codec = createMarkdownCodec();
 
-async function readAuthoritativeMarkdown(filePath: string): Promise<string> {
+async function readAuthoritativeMarkdown(
+  documents: DocumentsApi,
+  filePath: string,
+): Promise<string> {
   const editor = getMarkdownEditor(filePath);
   if (editor) return codec.serialize(editor.getJSON());
-  return readWorkspaceTextFile(filePath);
+  return documents.read(filePath);
 }
 
 export async function answerBlob(
+  { documents, agents }: { documents: DocumentsApi; agents: AgentsApi },
   filePath: string,
   blobId: string,
   patch: Record<string, unknown>,
 ): Promise<AnswerBlobResult> {
-  const markdown = await readAuthoritativeMarkdown(filePath);
+  const markdown = await readAuthoritativeMarkdown(documents, filePath);
   const patched = patchBlobInMarkdown(markdown, blobId, patch);
   if (!patched.ok) {
     return {
@@ -69,7 +73,7 @@ export async function answerBlob(
     };
   }
 
-  await writeWorkspaceTextFile(filePath, patched.value);
+  await documents.write(filePath, patched.value);
 
   // Address a fresh prompt at the task that authored this blob, if it's
   // still around — no interaction row, no continuation-queue bookkeeping.

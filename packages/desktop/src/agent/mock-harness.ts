@@ -20,9 +20,17 @@
  * as testing/shim-transport.ts), so this dead-code-eliminates away.
  */
 import { MOCK_AGENT_MODE } from "./mock-mode";
+import { defineModule } from "@notefig/core";
 import { createLoopbackPair } from "@notefig/agent";
 import type { LoopbackTransport } from "@notefig/agent";
 import type { AgentTransport, McpEndpoint } from "@notefig/agent";
+import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
+import type { WorkspaceFiles } from "@/entities/files";
+import {
+  contentWatchIdFor,
+  handleContentFileSystemChange,
+} from "@/utils/file-sync";
+import { calculateContentHash } from "@/utils/hash";
 import {
   isAgentRecording,
   type AgentRecording,
@@ -34,32 +42,35 @@ type Json = any;
 
 // ─── The scripted agent ─────────────────────────────────────────────────────
 
-/** `MockTurnContext.writeNatively` / `notifyWatcher`. The app modules are
- *  imported lazily: they already reach this one through the agent service. */
-async function writeNatively(path: string, content: string): Promise<void> {
-  const { platformAdapter } = await import("@/adapters");
-  const written = await platformAdapter.fs.writeFiles([{ path, content }]);
+/** What the scripted agent reaches in the app: the disk, as a harness with
+ *  its own tools writes it, and each workspace's files, whose watcher
+ *  handler `notifyWatcher` drives. Handed in by the agent runtime. */
+export interface MockAgentHost {
+  fs: Pick<FileSystemSurface, "readFiles" | "writeFiles">;
+  filesOf(workspacePath: string): WorkspaceFiles;
+}
+
+/** `MockTurnContext.writeNatively`. */
+async function writeNatively(
+  host: MockAgentHost,
+  path: string,
+  content: string,
+): Promise<void> {
+  const written = await host.fs.writeFiles([{ path, content }]);
   if (written.failed.length > 0) throw new Error(written.failed[0].message);
 }
 
+/** `MockTurnContext.notifyWatcher`. */
 async function notifyWatcher(
+  host: MockAgentHost,
   workspacePath: string,
   path: string,
 ): Promise<void> {
-  const [{ platformAdapter }, fileSync, { calculateContentHash }] =
-    await Promise.all([
-      import("@/adapters"),
-      import("@/utils/file-sync"),
-      import("@/utils/hash"),
-    ]);
-  const { content } = (await platformAdapter.fs.readFiles([path])).succeeded[0];
-  await fileSync.handleContentFileSystemChange(
-    {
-      watchId: fileSync.contentWatchIdFor(workspacePath),
-      changes: [{ path, content, contentHash: calculateContentHash(content) }],
-    },
-    workspacePath,
-  );
+  const { content } = (await host.fs.readFiles([path])).succeeded[0];
+  await handleContentFileSystemChange(host.filesOf(workspacePath), host.fs, {
+    watchId: contentWatchIdFor(workspacePath),
+    changes: [{ path, content, contentHash: calculateContentHash(content) }],
+  });
 }
 
 /** The slice of a transport the scripted agent drives (the agent side of a
@@ -785,17 +796,22 @@ function recordMockUpdate(sessionId: string, update: Json): void {
  * FakeAgent. One per task, same as a spawned process.
  */
 export function createMockAgentTransport(
-  spec: { taskId?: string } = {},
+  spec: { taskId?: string; host?: MockAgentHost } = {},
 ): AgentTransport {
   const [appSide, agentSide] = createLoopbackPair();
-  attachScenarioAgent(agentSide, spec.taskId ?? "");
+  attachScenarioAgent(agentSide, spec.taskId ?? "", spec.host);
   return appSide;
 }
 
 function attachScenarioAgent(
   agentSide: LoopbackTransport,
   taskId: string,
+  host: MockAgentHost | undefined,
 ): void {
+  const needHost = () => {
+    if (!host) throw new Error("this mock agent has no app host");
+    return host;
+  };
   const agent = new FakeAgent(agentSide);
   lastScenarioAgent = agent;
   let currentAbort: AbortController | null = null;
@@ -878,8 +894,9 @@ function attachScenarioAgent(
         signal: abort.signal,
         request: (method, params) => agent.request(method, params),
         mcp: { call: (method, params) => callMockMcp(taskId, method, params) },
-        writeNatively,
-        notifyWatcher: (path) => notifyWatcher(workspacePath, path),
+        writeNatively: (path, content) =>
+          writeNatively(needHost(), path, content),
+        notifyWatcher: (path) => notifyWatcher(needHost(), workspacePath, path),
       });
       return (
         result ?? {
@@ -999,35 +1016,42 @@ declare global {
   }
 }
 
-if (MOCK_AGENT_MODE && typeof window !== "undefined") {
-  window.__mockAgent = {
-    configure: configureMockAgent,
-    register: registerMockScenario,
-    scenarios: () => [...scenarioRegistry.keys()],
-    // Dynamic import keeps the collections out of this module's static
-    // graph — only mock-mode sessions in a running app ever call this.
-    stats: async () => {
-      const collections = await import("./agent-collections");
-      const turns = collections.agentTurnsCollection.toArray;
-      return {
-        tasks: collections.agentTasksCollection.toArray.length,
-        turns: turns.length,
-        settledTurns: turns.filter((turn) =>
-          ["completed", "error", "cancelled"].includes(turn.status),
-        ).length,
-        entries: collections.agentEntriesCollection.toArray.length,
-      };
-    },
-    lastPrompt: () => lastMockPromptParams,
-    lastSet: lastMockSetParams,
-    replay: (recording, options) =>
-      configureMockAgent({
-        scenario: "replay",
-        options: { ...options, recording },
-      }),
-  };
-  // eslint-disable-next-line no-console
-  console.info(
-    "[mock-harness] VITE_AGENT_MOCK on — agent transports are mocked",
-  );
-}
+/** Mock mode only: `window.__mockAgent`, over the app's agent store. */
+export const mockAgentModule = defineModule({
+  name: "mock-agent",
+  needs: ["agentStore"],
+  boot: (_api, ctx) => {
+    if (!MOCK_AGENT_MODE || typeof window === "undefined") return;
+    const store = ctx.use("agentStore");
+    window.__mockAgent = {
+      configure: configureMockAgent,
+      register: registerMockScenario,
+      scenarios: () => [...scenarioRegistry.keys()],
+      stats: async () => {
+        const turns = store.turns.toArray;
+        return {
+          tasks: store.tasks.toArray.length,
+          turns: turns.length,
+          settledTurns: turns.filter((turn) =>
+            ["completed", "error", "cancelled"].includes(turn.status),
+          ).length,
+          entries: store.entries.toArray.length,
+        };
+      },
+      lastPrompt: () => lastMockPromptParams,
+      lastSet: lastMockSetParams,
+      replay: (recording, options) =>
+        configureMockAgent({
+          scenario: "replay",
+          options: { ...options, recording },
+        }),
+    };
+    // eslint-disable-next-line no-console
+    console.info(
+      "[mock-harness] VITE_AGENT_MOCK on — agent transports are mocked",
+    );
+    return () => {
+      delete window.__mockAgent;
+    };
+  },
+});

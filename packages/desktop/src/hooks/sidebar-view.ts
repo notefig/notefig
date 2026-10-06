@@ -65,3 +65,24 @@ export const sidebarViewModule = defineModule({
     });
   },
 });
+
+/**
+ * The tool a workspace was last using — `core.workspace(ws).lastTool` — so
+ * returning to a workspace from the rail lands on it (git for the one you
+ * were committing in, sessions for the one you were prompting). Lives as
+ * long as the workspace is open: a restart, or a close, lands it on files.
+ */
+export interface LastTool {
+  tool: WorkspaceTool;
+}
+
+declare module "@notefig/core" {
+  interface WorkspaceModules {
+    lastTool: LastTool;
+  }
+}
+
+export const lastToolModule = defineModule({
+  name: "lastTool",
+  workspace: { create: (): LastTool => ({ tool: "files" }) },
+});

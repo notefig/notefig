@@ -1,19 +1,10 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createElement } from "react";
 
 // react-i18next resolves the hoisted root React copy under vitest (hooks
 // break across instances); the tab only uses it for labels, so stub it.
-// The seeded task/entry rows live in persisted collections: a failed
-// persistence commit rolls the insert back, so the tab would render no
-// task at all. node-db is the real driver over node:sqlite (MET-124).
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
   initReactI18next: { type: "3rdParty" as const, init: () => {} },
@@ -31,12 +22,13 @@ import {
   fakePromptWidgetHost,
   withHost,
 } from "@notefig/widgets/testing";
+import { defineModule, type Core } from "@notefig/core";
+import { CoreProvider } from "@notefig/core/react";
+import { createTestCore } from "@/testing/test-core";
+import { testAgents, type TestAgents } from "@/testing/test-agents";
 import { AgentChatTab } from "@/components/agent/agent-chat-tab";
-import {
-  agentTasksCollection,
-  agentEntriesCollection,
-  useTaskEntries,
-} from "@/entities/agents";
+import { useTaskEntries } from "@/entities/agents";
+import { kvModule } from "@/utils/kv-store";
 import { clearComposerDraft } from "@/components/agent/composer-draft-store";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -46,22 +38,42 @@ const TASK_ID = "task_isolation";
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 
+/**
+ * The agent layer the tab reads, fresh per test. The seeded task/entry rows
+ * live in persisted collections (node-db is the real driver over
+ * node:sqlite, MET-124): a failed persistence commit rolls the insert back,
+ * so the tab would render no task at all.
+ */
+let agents: TestAgents;
+let core: Core;
+
+beforeEach(() => {
+  agents = testAgents();
+  core = createTestCore({
+    modules: [
+      defineModule({ name: "agentStore", register: () => agents.store }),
+      defineModule({
+        name: "agents",
+        register: () => agents.agents,
+        workspace: {
+          create: ({ workspace }, api) => api.workspace(workspace.path),
+        },
+      }),
+      kvModule,
+    ],
+  });
+});
+
 afterEach(() => {
   act(() => root?.unmount());
   container?.remove();
   container = null;
   root = null;
-  for (const task of agentTasksCollection.toArray) {
-    agentTasksCollection.delete(task.taskId);
-  }
-  for (const entry of agentEntriesCollection.toArray) {
-    agentEntriesCollection.delete(entry.id);
-  }
   clearComposerDraft(TASK_ID);
 });
 
 function seedTaskWithEntries(entryCount: number) {
-  agentTasksCollection.insert({
+  agents.store.tasks.insert({
     taskId: TASK_ID,
     workspacePath: "/ws",
     title: "isolation probe",
@@ -71,7 +83,7 @@ function seedTaskWithEntries(entryCount: number) {
     updatedAt: 1,
   });
   for (let i = 0; i < entryCount; i++) {
-    agentEntriesCollection.insert({
+    agents.store.entries.insert({
       id: `evt_${String(i).padStart(4, "0")}`,
       taskId: TASK_ID,
       turnId: `turn_${i}`,
@@ -109,10 +121,13 @@ describe("AgentChatTab composer isolation (MET-139)", () => {
     // the host itself, so the stub double is enough.
     act(() =>
       root!.render(
-        withHost(
-          fakePromptWidgetHost(),
-          createElement(AgentChatTab, { taskId: TASK_ID }),
-        ),
+        createElement(CoreProvider, {
+          core,
+          children: withHost(
+            fakePromptWidgetHost(),
+            createElement(AgentChatTab, { taskId: TASK_ID }),
+          ),
+        }),
       ),
     );
     // Let live queries and the markdown pipeline settle before baselining.

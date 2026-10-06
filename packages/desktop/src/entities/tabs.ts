@@ -63,22 +63,20 @@ import {
 // Sibling entities — only referenced inside function bodies (cycle rule).
 import { editor, type EditorHandle } from "./editors";
 import {
-  agents,
-  agentTasksCollection,
+  useAgentStore,
   useAgentTasksReady,
   useAgentTaskRowsById,
   type AgentTaskRow,
 } from "./agents";
-import type { AgentTaskHandle } from "@/agent/agents";
-import {
-  file,
-  getOrCreateWorkspaceCollections,
-  useMetadataFetching,
-} from "./files";
+import type { AgentsApi, AgentTaskHandle } from "@/agent/agents";
+import { useMetadataFetching, type WorkspaceFiles } from "./files";
+import { useCore } from "@notefig/core/react";
+import type { Core } from "@notefig/core";
 import {
   useOpenWorkspaces,
   useOpenWorkspacesReady,
-  workspaceOfPath,
+  useWorkspaceRegistry,
+  type WorkspaceRegistry,
 } from "./workspaces";
 import {
   flushDocumentSync,
@@ -154,8 +152,9 @@ export type TabHandle = FileTabHandle | AgentTabHandle | ReleaseNotesTabHandle;
 /**
  * The handle over one open tab, whether or not it is currently mounted (an
  * unmounted tab reports `isMounted() === false` and its controls no-op).
+ * An agent tab's half comes from `agents` (`core.agents`).
  */
-export function tab(tabId: string): TabHandle {
+export function tab(tabId: string, agents: Pick<AgentsApi, "task">): TabHandle {
   const base: TabHandleBase = {
     tabId,
     isMounted: () => getTabController(tabId) !== undefined,
@@ -230,7 +229,8 @@ export function activeRenameTarget(path: string): Promise<string> | null {
  * fails; the tab is left intact at the old path in that case.
  */
 export async function renameOpenFileTab(options: {
-  workspacePath: string;
+  /** The files of the workspace that holds the file. */
+  files: Pick<WorkspaceFiles, "file">;
   oldPath: string;
   newPath: string;
   /**
@@ -240,7 +240,7 @@ export async function renameOpenFileTab(options: {
    */
   applyLayoutRename: (oldId: string, newId: string) => void;
 }): Promise<void> {
-  const { workspacePath, oldPath, newPath, applyLayoutRename } = options;
+  const { files, oldPath, newPath, applyLayoutRename } = options;
   // One rename per source path at a time: the coordination entries are
   // keyed by oldPath, so a second overlapping call would overwrite the
   // first's, and whichever fails would clear the other's write redirect
@@ -268,7 +268,7 @@ export async function renameOpenFileTab(options: {
     // Writes that passed the redirect check before this rename began are
     // tracked in flight — drain them too before moving the file.
     await whenWorkspaceWritesSettled(oldPath);
-    await file(workspacePath, oldPath).rename(newPath);
+    await files.file(oldPath).rename(newPath);
   } catch (error) {
     if (liveEditor && !liveEditor.isDestroyed) liveEditor.setEditable(true);
     settleTarget(oldPath);
@@ -310,11 +310,12 @@ export interface WorkspaceTabsState {
 /** `fileTabIds` grouped by the workspace containing each; tabs in no open
  *  workspace are left out (they are stale). */
 function groupFileTabsByWorkspace(
+  registry: WorkspaceRegistry,
   fileTabIds: string[],
 ): Map<string, string[]> {
   const groups = new Map<string, string[]>();
   for (const path of fileTabIds) {
-    const workspace = workspaceOfPath(path);
+    const workspace = registry.workspaceOf(path);
     if (workspace === null) continue;
     const group = groups.get(workspace);
     if (group) group.push(path);
@@ -331,28 +332,46 @@ function groupFileTabsByWorkspace(
  * layout over every open workspace.
  */
 function useMissingFileTabs(fileTabsByWorkspace: Map<string, string[]>, fileTabIds: string[]): string {
+  const core = useCore();
   const subscribe = useCallback(
     (onChange: () => void) => {
-      const subscriptions = [...fileTabsByWorkspace.keys()].map((workspace) =>
-        getOrCreateWorkspaceCollections(workspace).metadata.subscribeChanges(
-          onChange,
-        ),
+      const subscriptions = [...fileTabsByWorkspace.keys()].flatMap(
+        (workspace) => {
+          const files = openFilesOf(core, workspace);
+          return files
+            ? [files.collections.metadata.subscribeChanges(onChange)]
+            : [];
+        },
       );
+      // A workspace core opens later brings its rows with it.
+      const stopOpens = core.workspaces.subscribe(onChange);
       return () => {
         for (const subscription of subscriptions) subscription.unsubscribe();
+        stopOpens();
       };
     },
-    [fileTabsByWorkspace],
+    [core, fileTabsByWorkspace],
   );
   const read = useCallback(() => {
     const present = new Set<string>();
     for (const [workspace, paths] of fileTabsByWorkspace) {
-      const { metadata } = getOrCreateWorkspaceCollections(workspace);
+      const metadata = openFilesOf(core, workspace)?.collections.metadata;
+      if (!metadata) continue;
       for (const path of paths) if (metadata.has(path)) present.add(path);
     }
     return fileTabIds.filter((path) => !present.has(path)).join(",");
-  }, [fileTabsByWorkspace, fileTabIds]);
+  }, [core, fileTabsByWorkspace, fileTabIds]);
   return useSyncExternalStore(subscribe, read, read);
+}
+
+/** A workspace's files, if core has it open (its row can load first). */
+function openFilesOf(
+  core: Core,
+  workspace: string,
+): WorkspaceFiles | undefined {
+  return core.workspaces.isOpen(workspace)
+    ? core.workspace(workspace).files
+    : undefined;
 }
 
 /**
@@ -363,6 +382,7 @@ function useMissingFileTabs(fileTabsByWorkspace: Map<string, string[]>, fileTabI
  * (tabs/tab-types.tsx), since each tab resolves its own workspace.
  */
 export function useWorkspaceTabs(openTabs: string[]): WorkspaceTabsState {
+  const agentStore = useAgentStore();
   const fileTabIds = useMemo(() => openTabs.filter(isFileTabId), [openTabs]);
   const agentTaskIds = useMemo(
     () =>
@@ -378,10 +398,11 @@ export function useWorkspaceTabs(openTabs: string[]): WorkspaceTabsState {
 
   // Re-group when workspaces open or close, not only when tabs change.
   const openWorkspaces = useOpenWorkspaces();
+  const registry = useWorkspaceRegistry();
   const fileTabsByWorkspace = useMemo(
-    () => groupFileTabsByWorkspace(fileTabIds),
+    () => groupFileTabsByWorkspace(registry, fileTabIds),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [fileTabIds, openWorkspaces],
+    [registry, fileTabIds, openWorkspaces],
   );
   const missingFileTabs = useMissingFileTabs(fileTabsByWorkspace, fileTabIds);
   // Coarse on purpose: a metadata walk in any workspace defers pruning in
@@ -415,7 +436,7 @@ export function useWorkspaceTabs(openTabs: string[]): WorkspaceTabsState {
             .filter((tabId) => !midRenameIds.has(tabId));
     const missingAgentTabIds = agentTasksReady
       ? agentTaskIds
-          .filter((taskId) => !agentTasksCollection.get(taskId))
+          .filter((taskId) => !agentStore.tasks.get(taskId))
           .map(agentTabId)
       : [];
     return [...missingFileTabIds, ...missingAgentTabIds];
@@ -425,6 +446,7 @@ export function useWorkspaceTabs(openTabs: string[]): WorkspaceTabsState {
     openWorkspacesReady,
     isFetchingMetadata,
     agentTasksReady,
+    agentStore,
   ]);
 
   return {

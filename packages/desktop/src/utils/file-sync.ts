@@ -1,165 +1,21 @@
+/**
+ * Keeping a workspace's file rows in step with disk: the metadata and
+ * content watchers and the handlers that apply what they report. Each
+ * workspace's files instance (entities/files.ts) starts its watchers here,
+ * handing over itself and the fs — nothing here holds state of its own or
+ * imports the platform.
+ */
 import type {
-  MetadataChangeEvent,
   ContentChangeEvent,
+  FileSystemSurface,
+  MetadataChangeEvent,
 } from "@/adapters/platform-adapter.interface";
-import { FsError } from "@/adapters/platform-adapter.interface";
-import {
-  getOrCreateWorkspaceCollections,
-  updateLoadedContentRow,
-} from "@/entities/files";
-import { queryClient } from "@/entities/query-client";
-import { invalidateDerivedState } from "./file-write-effects";
-import {
-  projectSettingsPath,
-  projectSettingsQueryKey,
-} from "./project-settings";
+import type { WorkspaceFiles } from "@/entities/files";
 import { IGNORE_RULES, isIgnoredPath } from "./ignore";
-import { calculateContentHash } from "./hash";
-import { getDocumentSync } from "./markdown-conversion";
-// Conscious utils → components import (direct-imports-over-injection house
-// rule). This edge participates in a long pre-existing cycle back through
-// the editor/blob component graph → agent-service → acp-client → file-sync
-// (suppressed at acp-client's import; safe — all edges are function-body
-// references). Breaking it for real means relocating the editor registry to
-// a leaf module rather than adding a registration seam.
-import { getMarkdownEditor } from "@/entities/editors";
-import { adoptExternalContent } from "@/components/editor/adopt-external-content";
-import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
-import { platformAdapter } from "@/adapters";
-import { path as pathutil, relativeTreePath, workspaceKey } from "./path";
+import { relativeTreePath } from "./path";
 import { PORTAL_ID } from "./portal-id";
-import { activeRenameTarget } from "@/entities/tabs";
-import { trackWorkspaceWrite } from "./workspace-write-tracker";
-
-/**
- * The app-layer choke point for the "workspace paths are absolute"
- * invariant: a relative path here would reach the OS resolved against the
- * process CWD (src-tauri/ under `cargo tauri dev` — agent-supplied
- * workspace-relative paths once wrote into the app's own source tree and
- * restarted the dev app on every write). Callers with agent-supplied paths
- * resolve them first (resolveWorkspacePath in utils/fs); this throws into
- * the standard FsError boundary if anyone forgets.
- */
-function assertAbsoluteWorkspacePath(path: string): void {
-  if (!pathutil.isAbsolute(path)) {
-    throw new FsError(
-      "invalid_path",
-      path,
-      `workspace file paths must be absolute, got "${path}" (resolve agent paths with resolveWorkspacePath first)`,
-    );
-  }
-}
-/**
- * The single path every desktop-mediated agent write takes (ACP
- * fs/write_text_file, author_blob, history_restore, blob answers; web mode
- * advertises fs:false so writes there are native and only adopted via the
- * watcher).
- *
- * This is the *adopting* write primitive. The platform watcher suppresses
- * this write's echo (consume-one registration in the adapters/src-tauri),
- * and even when one slips through, adoption is a no-op once the editor
- * holds the content — correct for a normal editor autosave, but an
- * agent-shaped write to a document open in an editor must not wait on a
- * watcher round-trip that may never come. So after the disk write, this
- * function pushes the content into the live editor itself, driving the same
- * `DocumentSync.prepareAdoption`/`commitAdoption` API `useEditorFileSync`
- * uses for external changes — directly and synchronously, not via a watcher
- * round-trip that was never going to arrive. `prepareAdoption` returning
- * null (a local edit mid-autosave-debounce) keeps last-writer-wins: the
- * user's edit wins, exactly like any external change arriving mid-edit.
- *
- * Per-path write serialization across parallel tasks is deliberately not
- * implemented here (dropped along with AgentWriteGate) — two tasks writing
- * the same path race like any two independent writeFiles calls. If
- * concurrent same-file interleaving becomes a real problem, serialization
- * returns as an internal detail of this function, not as a separate class.
- */
-export async function writeWorkspaceTextFile(
-  path: string,
-  content: string,
-): Promise<void> {
-  assertAbsoluteWorkspacePath(path);
-  // A rename-open-tab (scratchpad promotion) may be moving this exact file
-  // right now — wait it out and write to wherever the file settled, so an
-  // overlapping agent write can't resurrect the old path. The redirect
-  // check and the in-flight registration below are one synchronous block:
-  // a rename beginning after it sees this write via
-  // whenWorkspaceWritesSettled; one beginning before is seen here.
-  const renameTarget = activeRenameTarget(path);
-  if (renameTarget) {
-    path = await renameTarget;
-  }
-  const target = path;
-  return trackWorkspaceWrite(target, async () => {
-    const result = await platformAdapter.fs.writeFiles([
-      { path: target, content },
-    ]);
-    const failure = result.failed[0];
-    if (failure) {
-      throw new FsError(failure.type, failure.path, failure.message);
-    }
-
-    // Rows lead disk for every app write (see updateLoadedContentRow) — the
-    // echo of this write is natively consumed, so nothing else would ever
-    // bring the row forward, and adoption would later roll the editor back
-    // to the stale row.
-    updateLoadedContentRow(target, content);
-
-    const editor = getMarkdownEditor(target);
-    if (editor && !editor.isDestroyed) {
-      const sync = getDocumentSync(target);
-      const doc = await sync.prepareAdoption(content);
-      if (doc && !editor.isDestroyed) {
-        const contentHash = calculateContentHash(content);
-        const adoption = adoptExternalContent(editor, doc, {
-          source: { path: target, contentHash },
-        });
-        if (adoption.reinsertedWidgets > 0) {
-          // Re-asserted widget markers exist only in the editor at this
-          // point. Repair the file INSIDE this tracked write — a
-          // fire-and-forget save could still be in flight when the next
-          // same-path agent write arrives, which would skip that write's
-          // adoption (sync busy) and then clobber its newer content.
-          const repaired = getEditorMarkdown(editor);
-          const repair = await platformAdapter.fs.writeFiles([
-            { path: target, content: repaired },
-          ]);
-          const repairFailure = repair.failed[0];
-          if (repairFailure) {
-            throw new FsError(
-              repairFailure.type,
-              repairFailure.path,
-              repairFailure.message,
-            );
-          }
-          updateLoadedContentRow(target, repaired);
-          sync.commitAdoption(repaired, calculateContentHash(repaired));
-        } else {
-          sync.commitAdoption(content, contentHash);
-        }
-      }
-    }
-  });
-}
-
-export async function readWorkspaceTextFile(
-  path: string,
-  options?: { line?: number; limit?: number },
-): Promise<string> {
-  assertAbsoluteWorkspacePath(path);
-  const result = await platformAdapter.fs.readFiles([path]);
-  const failure = result.failed[0];
-  if (failure) {
-    throw new FsError(failure.type, failure.path, failure.message);
-  }
-  const content = result.succeeded[0].content;
-  if (!options?.line && !options?.limit) return content;
-  // ACP lines are 1-based.
-  const lines = content.split("\n");
-  const start = Math.max(0, (options.line ?? 1) - 1);
-  const end = options.limit ? start + options.limit : lines.length;
-  return lines.slice(start, end).join("\n");
-}
+import { getDocumentSync } from "./markdown-conversion";
+import { emitAppEvent } from "./app-events";
 
 /**
  * Watch-id construction, in one place for both kinds.
@@ -178,44 +34,27 @@ export function contentWatchIdFor(workspacePath: string): string {
   return `content-${PORTAL_ID}-${workspacePath}`;
 }
 
-function invalidateProjectSettingsIfChanged(
-  changedPaths: string[],
-  workspacePath: string,
-): void {
-  if (changedPaths.includes(projectSettingsPath(workspacePath))) {
-    queryClient.invalidateQueries({
-      queryKey: projectSettingsQueryKey(workspacePath),
-    });
-  }
-}
-
-type WorkspaceCollections = ReturnType<typeof getOrCreateWorkspaceCollections>;
 type MetadataChange = MetadataChangeEvent["changes"][number];
-
-function relativeToWorkspace(
-  path: string,
-  workspacePath: string,
-): string | undefined {
-  return relativeTreePath(workspacePath, path);
-}
+type Fs = Pick<FileSystemSurface, "getMetadata" | "readFiles">;
 
 async function applyMetadataCreated(
-  collections: WorkspaceCollections,
-  workspacePath: string,
+  files: WorkspaceFiles,
+  fs: Fs,
   change: MetadataChange,
 ): Promise<void> {
+  const { workspacePath, collections } = files;
   // Authoritative backstop for ignore rules: the platform watchers filter
   // too (cheaply, Rust-side), but browser adapters and event races can
   // still surface ignored paths — nothing ignored may enter the collection.
   if (isIgnoredPath(change.path, workspacePath)) return;
 
-  const metadataResult = await platformAdapter.fs.getMetadata([change.path]);
+  const metadataResult = await fs.getMetadata([change.path]);
   const metadata = metadataResult.succeeded[0];
   if (!metadata || collections.metadata.get(change.path)) return;
 
   collections.metadata.utils.writeInsert({
     path: change.path,
-    relativePath: relativeToWorkspace(change.path, workspacePath),
+    relativePath: relativeTreePath(workspacePath, change.path),
     type: metadata.type,
     modified: metadata.modifiedAt,
     size: metadata.size,
@@ -224,9 +63,10 @@ async function applyMetadataCreated(
 }
 
 function applyMetadataDeleted(
-  collections: WorkspaceCollections,
+  files: WorkspaceFiles,
   change: MetadataChange,
 ): void {
+  const { collections } = files;
   if (collections.metadata.get(change.path)) {
     collections.metadata.utils.writeDelete(change.path);
   }
@@ -236,10 +76,11 @@ function applyMetadataDeleted(
 }
 
 async function applyMetadataRenamed(
-  collections: WorkspaceCollections,
-  workspacePath: string,
+  files: WorkspaceFiles,
+  fs: Fs,
   change: MetadataChange,
 ): Promise<void> {
+  const { workspacePath, collections } = files;
   if (!change.oldPath) {
     console.error("[file-sync] Rename event missing oldPath:", change);
     return;
@@ -247,7 +88,7 @@ async function applyMetadataRenamed(
 
   // Renamed INTO ignored space: the file leaves the tracked tree.
   if (isIgnoredPath(change.path, workspacePath)) {
-    applyMetadataDeleted(collections, { ...change, path: change.oldPath });
+    applyMetadataDeleted(files, { ...change, path: change.oldPath });
     return;
   }
 
@@ -255,18 +96,18 @@ async function applyMetadataRenamed(
   if (!oldMetadata) {
     // Renamed OUT of untracked space (ignored dir, or a path we never held
     // a row for): surfaces as a fresh create at the new path.
-    await applyMetadataCreated(collections, workspacePath, change);
+    await applyMetadataCreated(files, fs, change);
     return;
   }
 
-  const metadataResult = await platformAdapter.fs.getMetadata([change.path]);
+  const metadataResult = await fs.getMetadata([change.path]);
   const metadata = metadataResult.succeeded[0];
   if (!metadata) return;
 
   collections.metadata.utils.writeDelete(change.oldPath);
   collections.metadata.utils.writeInsert({
     path: change.path,
-    relativePath: relativeToWorkspace(change.path, workspacePath),
+    relativePath: relativeTreePath(workspacePath, change.path),
     type: metadata.type,
     modified: metadata.modifiedAt,
     size: metadata.size,
@@ -284,20 +125,29 @@ async function applyMetadataRenamed(
   }
 }
 
-export async function handleMetadataFileSystemChange(
-  event: MetadataChangeEvent,
-  workspacePath: string,
-): Promise<void> {
-  const collections = getOrCreateWorkspaceCollections(workspacePath);
+/** What changed, for whoever derives state from these paths (project
+ *  settings), after any change the watcher reports. */
+function announceChanged(files: WorkspaceFiles, paths: string[]): void {
+  emitAppEvent("files:changed", {
+    workspacePath: files.workspacePath,
+    paths,
+  });
+  files.invalidateDerived();
+}
 
+export async function handleMetadataFileSystemChange(
+  files: WorkspaceFiles,
+  fs: Fs,
+  event: MetadataChangeEvent,
+): Promise<void> {
   for (const change of event.changes) {
     try {
       if (change.type === "created") {
-        await applyMetadataCreated(collections, workspacePath, change);
+        await applyMetadataCreated(files, fs, change);
       } else if (change.type === "deleted") {
-        applyMetadataDeleted(collections, change);
+        applyMetadataDeleted(files, change);
       } else if (change.type === "renamed") {
-        await applyMetadataRenamed(collections, workspacePath, change);
+        await applyMetadataRenamed(files, fs, change);
       }
     } catch (error) {
       console.error(
@@ -307,33 +157,27 @@ export async function handleMetadataFileSystemChange(
     }
   }
 
-  invalidateProjectSettingsIfChanged(
+  announceChanged(
+    files,
     event.changes.map((c) => c.path),
-    workspacePath,
   );
-  invalidateDerivedState(workspacePath);
 }
 
 export async function handleContentFileSystemChange(
+  files: WorkspaceFiles,
+  fs: Pick<FileSystemSurface, "readFiles">,
   event: ContentChangeEvent,
-  workspacePath: string,
 ): Promise<void> {
-  const collections = getOrCreateWorkspaceCollections(workspacePath);
-
   for (const change of event.changes) {
     try {
       // Skip files not loaded in memory (only open files have content rows).
-      const existingContent = collections.content.get(change.path);
-      if (!existingContent) {
-        continue;
-      }
+      const existingContent = files.collections.content.get(change.path);
+      if (!existingContent) continue;
 
       // Nothing new claimed: an event whose payload matches the row (the
       // common echo of this app's own save) is a no-op, decided by hash
       // compare alone — no I/O on the autosave hot path.
-      if (existingContent.contentHash === change.contentHash) {
-        continue;
-      }
+      if (existingContent.contentHash === change.contentHash) continue;
 
       // A save in flight owns this path. A read here can capture the
       // pre-rename bytes of that very save — and the save's own echo is
@@ -341,9 +185,7 @@ export async function handleContentFileSystemChange(
       // such a read. Defer: the save's completion updates the row itself,
       // and last-writer-wins already governs external changes that land
       // mid-edit (the editor guards drop them the same way).
-      if (getDocumentSync(change.path).isDirty()) {
-        continue;
-      }
+      if (getDocumentSync(change.path).isDirty()) continue;
 
       // Beyond that, a change event is a TRIGGER, not a source. Its payload
       // was read at emit time and can already be stale by delivery (the
@@ -356,13 +198,10 @@ export async function handleContentFileSystemChange(
       // revert`) — land as themselves and flow on to the editor's adoption
       // path. Cost: one read of one open file, only when an event claims
       // the file differs from the row.
-      let content: string;
-      try {
-        content = await readWorkspaceTextFile(change.path);
-      } catch {
-        continue; // deleted/unreadable — the metadata pipeline handles it
-      }
-      updateLoadedContentRow(change.path, content);
+      const result = await fs.readFiles([change.path]);
+      const read = result.succeeded[0];
+      if (!read) continue; // deleted/unreadable — the metadata pipeline handles it
+      files.updateLoadedContent(change.path, read.content);
     } catch (error) {
       console.error(
         `[file-sync] Error processing content change for ${change.path}:`,
@@ -371,14 +210,13 @@ export async function handleContentFileSystemChange(
     }
   }
 
-  invalidateProjectSettingsIfChanged(
+  announceChanged(
+    files,
     event.changes.map((c) => c.path),
-    workspacePath,
   );
-  invalidateDerivedState(workspacePath);
 }
 
-export interface WorkspaceMetadataWatcher {
+export interface MetadataWatcher {
   stop: () => void;
   /** Re-arms the OS watch if the last start attempt failed (the workspace
    *  was unreadable at open; access restored later). No-op otherwise. */
@@ -386,19 +224,20 @@ export interface WorkspaceMetadataWatcher {
 }
 
 /**
- * Workspace-lifetime metadata watching, owned by the workspaces entity
- * (MET-177): runs from open to explicit close, so a backgrounded workspace
- * keeps ingesting external changes. Content watching stays render-driven
- * (`syncContentWatchers`) — a backgrounded workspace has no rendered tabs.
+ * Workspace-lifetime metadata watching (MET-177): runs from open to close,
+ * so a backgrounded workspace keeps ingesting external changes. Content
+ * watching follows the rendered tabs instead (`startContentWatcher`).
  */
-export function startWorkspaceMetadataWatcher(
-  workspacePath: string,
-): WorkspaceMetadataWatcher {
+export function startMetadataWatcher(
+  files: WorkspaceFiles,
+  fs: FileSystemSurface,
+): MetadataWatcher {
+  const { workspacePath } = files;
   const metadataWatchId = metadataWatchIdFor(workspacePath);
   let isActive = true;
   let startFailed = false;
 
-  const eventCleanup = platformAdapter.fs.onFsEvent((event) => {
+  const eventCleanup = fs.onFsEvent((event) => {
     if (!isActive) return;
     // Route by watch id, not by event kind: with several workspaces open,
     // every listener sees every event, and this recursive watch's pipeline
@@ -407,17 +246,16 @@ export function startWorkspaceMetadataWatcher(
     // git/search/project-settings invalidation in the content handler.
     if (event.payload.watchId !== metadataWatchId) return;
     if (event.type === "fs-metadata-changed") {
-      handleMetadataFileSystemChange(event.payload, workspacePath);
+      void handleMetadataFileSystemChange(files, fs, event.payload);
     } else {
-      handleContentFileSystemChange(event.payload, workspacePath);
+      void handleContentFileSystemChange(files, fs, event.payload);
     }
   });
   const arm = () => {
     startFailed = false;
-    platformAdapter.fs
-      .startWatchingMetadata([workspacePath], metadataWatchId, {
-        ignore: IGNORE_RULES,
-      })
+    fs.startWatchingMetadata([workspacePath], metadataWatchId, {
+      ignore: IGNORE_RULES,
+    })
       .then(() => {
         // The start is not awaited by the caller, so a close can land while
         // it is still in flight. Without this the watcher registers *after*
@@ -426,7 +264,7 @@ export function startWorkspaceMetadataWatcher(
         // of the process (on the browser adapter, a full recursive stat
         // sweep every 5s). Re-issuing the stop is idempotent.
         if (!isActive) {
-          void platformAdapter.fs.stopWatching(metadataWatchId).catch(() => {});
+          void fs.stopWatching(metadataWatchId).catch(() => {});
         }
       })
       .catch((error) => {
@@ -440,7 +278,7 @@ export function startWorkspaceMetadataWatcher(
     stop: () => {
       isActive = false;
       eventCleanup();
-      void platformAdapter.fs.stopWatching(metadataWatchId).catch(() => {
+      void fs.stopWatching(metadataWatchId).catch(() => {
         // Already stopped (or never started, if startup failed) — fine.
       });
     },
@@ -450,12 +288,8 @@ export function startWorkspaceMetadataWatcher(
   };
 }
 
-/**
- * Content watching for the open file tabs, one watch per workspace, kept in
- * step with the dock by `syncContentWatchers`. Metadata watching is not
- * here — it belongs to the workspace registry for the whole open lifetime.
- */
-interface ContentWatcher {
+/** The content watch of one workspace's open file tabs. */
+export interface ContentWatcher {
   /** The watched paths, joined — the identity a re-sync compares against. */
   pathsKey: string;
   /** Re-issue the watch with a new path set under the same watch id: both
@@ -465,24 +299,23 @@ interface ContentWatcher {
   stop: () => void;
 }
 
-const contentWatchers = new Map<string, ContentWatcher>();
-
-function startContentWatcher(
-  workspacePath: string,
+export function startContentWatcher(
+  files: WorkspaceFiles,
+  fs: FileSystemSurface,
   openFilePaths: string[],
 ): ContentWatcher {
-  const contentWatchId = contentWatchIdFor(workspacePath);
+  const contentWatchId = contentWatchIdFor(files.workspacePath);
   let isActive = true;
-  const eventCleanup = platformAdapter.fs.onFsEvent((event) => {
+  const eventCleanup = fs.onFsEvent((event) => {
     if (!isActive) return;
     // Same watch-id routing as the metadata side: this watch's pipeline
     // also emits both kinds (a delete/rename of an open file surfaces as a
     // metadata change).
     if (event.payload.watchId !== contentWatchId) return;
     if (event.type === "fs-content-changed") {
-      handleContentFileSystemChange(event.payload, workspacePath);
+      void handleContentFileSystemChange(files, fs, event.payload);
     } else {
-      handleMetadataFileSystemChange(event.payload, workspacePath);
+      void handleMetadataFileSystemChange(files, fs, event.payload);
     }
   });
   // One serialized command lane per watch id. Starts and the final stop
@@ -503,51 +336,16 @@ function startContentWatcher(
     setPaths: (paths) => {
       if (!isActive) return;
       watcher.pathsKey = paths.join(",");
-      enqueue(() =>
-        platformAdapter.fs.startWatchingContent(paths, contentWatchId),
-      );
+      enqueue(() => fs.startWatchingContent(paths, contentWatchId));
     },
     stop: () => {
       isActive = false;
       eventCleanup();
       // Unconditional stop: cheaper to swallow the "no watcher" rejection
       // than to keep the stop condition mirroring the start condition.
-      enqueue(() =>
-        platformAdapter.fs.stopWatching(contentWatchId).catch(() => {}),
-      );
+      enqueue(() => fs.stopWatching(contentWatchId).catch(() => {}));
     },
   };
   watcher.setPaths(openFilePaths);
   return watcher;
-}
-
-/**
- * Make the live content watches match `openFilesByWorkspace` (workspace →
- * its open file paths): a workspace whose set changed has its watch
- * re-issued with the new paths, one that left the map is stopped, an
- * unchanged one is left alone. Call with an empty map to stop everything
- * (shell teardown, tests).
- */
-export function syncContentWatchers(
-  openFilesByWorkspace: Map<string, string[]>,
-): void {
-  const wanted = new Map<string, { workspacePath: string; paths: string[] }>();
-  for (const [workspacePath, paths] of openFilesByWorkspace) {
-    if (paths.length > 0) {
-      wanted.set(workspaceKey(workspacePath), { workspacePath, paths });
-    }
-  }
-  for (const [key, watcher] of contentWatchers) {
-    if (wanted.has(key)) continue;
-    watcher.stop();
-    contentWatchers.delete(key);
-  }
-  for (const [key, { workspacePath, paths }] of wanted) {
-    const watcher = contentWatchers.get(key);
-    if (!watcher) {
-      contentWatchers.set(key, startContentWatcher(workspacePath, paths));
-    } else if (paths.join(",") !== watcher.pathsKey) {
-      watcher.setPaths(paths);
-    }
-  }
 }

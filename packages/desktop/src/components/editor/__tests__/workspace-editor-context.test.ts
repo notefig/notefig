@@ -1,25 +1,18 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { getWorkspaceEditorContext } from "@/entities/editors";
+import { createLayout, type LayoutApi } from "@/entities/layout";
 import type { LayoutNode } from "@/components/dockable";
-import { createTestCore, windowUrlState } from "@/testing/test-core";
+import { memoryUrlState } from "@/testing/test-core";
 
-// getWorkspaceEditorContext reads the layout through core.
-createTestCore({ url: windowUrlState() });
-
-function setLayout(nodes: LayoutNode[]): void {
-  const params = new URLSearchParams(window.location.search);
+function layoutOf(nodes: LayoutNode[]): LayoutApi {
+  const params = new URLSearchParams();
   params.set("layout", JSON.stringify(nodes));
-  window.history.pushState({}, "", `?${params.toString()}`);
+  return createLayout(memoryUrlState(`?${params.toString()}`));
 }
-
-afterEach(() => {
-  window.history.pushState({}, "", "/");
-});
 
 describe("getWorkspaceEditorContext", () => {
   it("returns empty context when no tabs are open", () => {
-    setLayout([]);
-    expect(getWorkspaceEditorContext("/ws")).toEqual({
+    expect(getWorkspaceEditorContext(layoutOf([]), "/ws")).toEqual({
       openFiles: [],
       activeFile: null,
       selection: undefined,
@@ -27,7 +20,7 @@ describe("getWorkspaceEditorContext", () => {
   });
 
   it("scopes open tabs to the given workspace and marks the active one", () => {
-    setLayout([
+    const layout = layoutOf([
       {
         type: "Window",
         id: "w1",
@@ -36,7 +29,7 @@ describe("getWorkspaceEditorContext", () => {
       } as unknown as LayoutNode,
     ]);
 
-    const ctx = getWorkspaceEditorContext("/ws");
+    const ctx = getWorkspaceEditorContext(layout, "/ws");
     expect(ctx.openFiles.map((f) => f.path)).toEqual(["/ws/a.md", "/ws/b.md"]);
     expect(ctx.activeFile).toBe("/ws/b.md");
     expect(ctx.openFiles.find((f) => f.path === "/ws/b.md")?.active).toBe(true);

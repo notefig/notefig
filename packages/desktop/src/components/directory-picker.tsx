@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Button } from "@notefig/ui/button";
 import { Icons } from "@/components/icons";
-import { getFileName, pickDirectory } from "@/utils/fs";
+import { getFileName } from "@/utils/fs";
+import { usePlatform } from "@/core/use-platform";
 import { useTranslation } from "react-i18next";
 
 interface DirectoryPickerProps {
@@ -15,12 +16,14 @@ export function DirectoryPicker({
 }: DirectoryPickerProps) {
   const [loading, setLoading] = useState(false);
   const { t } = useTranslation();
+  const platform = usePlatform();
 
   const handlePickDirectory = async () => {
     setLoading(true);
     try {
       const selectDirectoryTitle = t("pickDirectory");
-      const selectedPath = await pickDirectory(selectDirectoryTitle);
+      const selectedPath =
+        await platform.ui.pickDirectory(selectDirectoryTitle);
 
       if (selectedPath) {
         onDirectorySelect(selectedPath);

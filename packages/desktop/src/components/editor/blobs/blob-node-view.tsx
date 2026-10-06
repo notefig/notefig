@@ -21,8 +21,41 @@ import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
 import { BLOB_LANG_PREFIX, parseBlobBlock, type ParsedBlob } from "@notefig/shared/blobs";
 import { getBlobType, type BlobTypeDefinition } from "./blob-registry";
 import { answerBlob, BlobAnswerError } from "./blob-actions";
+import { useCore } from "@notefig/core/react";
+
+type BlobWidget = {
+  blobType: BlobTypeDefinition;
+  blob: ParsedBlob;
+  payload: unknown;
+};
+
+/** A blob fence's widget, or why it can't render one. */
+function resolveBlobWidget(
+  language: string,
+  type: string,
+  text: string,
+): { widget?: BlobWidget; errorMessage?: string } {
+  const parsed = parseBlobBlock(language, text);
+  if (!parsed.ok) {
+    return {
+      errorMessage: `malformed ${language} block: ${parsed.error.message}`,
+    };
+  }
+  const blobType = getBlobType(parsed.value.type);
+  if (!blobType) return { errorMessage: `unknown blob type "${type}"` };
+  const payloadResult = blobType.schema.safeParse(parsed.value.payload);
+  if (!payloadResult.success) {
+    return {
+      errorMessage: `invalid ${language} payload: ${payloadResult.error.message}`,
+    };
+  }
+  return {
+    widget: { blobType, blob: parsed.value, payload: payloadResult.data },
+  };
+}
 
 export function BlobNodeView(props: NodeViewProps) {
+  const core = useCore();
   const language = (props.node.attrs.language as string | null) ?? "";
   const [editAsCode, setEditAsCode] = useState(false);
 
@@ -39,36 +72,16 @@ export function BlobNodeView(props: NodeViewProps) {
 
   const isBlob = language.startsWith(BLOB_LANG_PREFIX);
   const type = isBlob ? language.slice(BLOB_LANG_PREFIX.length) : undefined;
-
-  let widget:
-    | { blobType: BlobTypeDefinition; blob: ParsedBlob; payload: unknown }
-    | undefined;
-  let errorMessage: string | undefined;
-
-  if (isBlob) {
-    const parsed = parseBlobBlock(language, props.node.textContent);
-    if (!parsed.ok) {
-      errorMessage = `malformed ${language} block: ${parsed.error.message}`;
-    } else {
-      const blobType = getBlobType(parsed.value.type);
-      if (!blobType) {
-        errorMessage = `unknown blob type "${type}"`;
-      } else {
-        const payloadResult = blobType.schema.safeParse(parsed.value.payload);
-        if (!payloadResult.success) {
-          errorMessage = `invalid ${language} payload: ${payloadResult.error.message}`;
-        } else {
-          widget = { blobType, blob: parsed.value, payload: payloadResult.data };
-        }
-      }
-    }
-  }
+  const { widget, errorMessage } = isBlob
+    ? resolveBlobWidget(language, type!, props.node.textContent)
+    : {};
 
   const filePath = (props.extension.options as Record<string, string>).filePath ?? "";
 
   const answer = widget
     ? async (patch: Record<string, unknown>): Promise<void> => {
         const result = await answerBlob(
+          core,
           filePath,
           widget.blob.envelope.id,
           widget.blobType.onAnswer(widget.blob, patch),

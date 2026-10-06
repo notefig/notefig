@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { renderMarkdown } from "@/utils/markdown-conversion";
-import { platformAdapter } from "@/adapters";
+import { usePlatform } from "@/core/use-platform";
 import { cn } from "@notefig/ui/utils";
 
 /**
@@ -105,6 +105,7 @@ export function Markdown({
   className?: string;
 }) {
   const html = useMarkdownHtml(text);
+  const { ui } = usePlatform();
   return (
     <div
       className={cn(
@@ -132,7 +133,7 @@ export function Markdown({
         const anchor = (event.target as HTMLElement).closest("a");
         if (!anchor?.href) return;
         event.preventDefault();
-        platformAdapter.ui.openExternal(anchor.href);
+        ui.openExternal(anchor.href);
       }}
       dangerouslySetInnerHTML={{ __html: html ?? "" }}
     />

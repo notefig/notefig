@@ -9,13 +9,9 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@notefig/ui/tooltip";
 import { runtimeModules } from "@/core/app-core";
 import { startApp } from "@/core/start-app";
-import { appCore } from "@/core/current";
-import {
-  openWorkspacesCollection,
-  whenOpenWorkspacesReady,
-} from "@/entities/workspaces";
 import { workspaceKey } from "@/utils/path";
 import { SiteShell } from "./site-shell";
+import { marketingSeedModule } from "./use-workspace-ready";
 import {
   WORKSPACE_ROOT,
   defaultPage,
@@ -63,8 +59,11 @@ const MarketingApp = () => (
 // the open-workspace watchers armed exactly as the shell does. It does not
 // restore a persisted open set: the site always opens its one seeded root
 // itself.
-startApp({
-  modules: runtimeModules({ restoreWorkspaces: false }),
+const core = startApp({
+  modules: [
+    ...runtimeModules({ restoreWorkspaces: false }),
+    marketingSeedModule,
+  ],
   element: (
     <ThemeProvider defaultTheme="light">
       <TooltipProvider>
@@ -78,12 +77,13 @@ startApp({
 // The one workspace this site ever shows is the seeded content root. The
 // open set persists in the visitor's browser, so a root from an earlier
 // manifest may still be in it: close anything that is not today's root.
-void whenOpenWorkspacesReady().then(() => {
+const registry = core.workspaceRegistry;
+void registry.whenReady().then(() => {
   const rootKey = workspaceKey(WORKSPACE_ROOT);
-  for (const row of [...openWorkspacesCollection.values()]) {
-    if (row.key !== rootKey) void appCore().workspace(row.path).close();
+  for (const row of [...registry.collection.values()]) {
+    if (row.key !== rootKey) void core.workspace(row.path).close();
   }
-  appCore()
+  core
     .workspace(WORKSPACE_ROOT)
     .focus()
     .catch((error: unknown) =>

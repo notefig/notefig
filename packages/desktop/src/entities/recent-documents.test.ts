@@ -1,26 +1,17 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-vi.mock("@/entities/files", () => ({
-  getOrCreateWorkspaceCollections: vi.fn(),
-}));
-vi.mock("@/entities/workspaces", () => ({
-  workspaceOfPath: (path: string) =>
-    path.startsWith("/ws/a/") ? "/ws/a" : path.startsWith("/ws/b/") ? "/ws/b" : null,
-  useOpenWorkspaces: () => [],
-}));
+import { describe, it, expect, beforeEach } from "vitest";
 
 import {
   MAX_RECENT_DOCUMENTS,
+  createRecentDocuments,
   deriveRecentDocuments,
-  recentDocumentsCollection,
-  touchRecentDocument,
+  type RecentDocumentsApi,
 } from "./recent-documents";
+import { createNodeTestDb } from "@/testing/node-db";
 import { workspaceKey } from "@/utils/path";
+
+/** The open workspaces' containment, as the registry answers it. */
+const workspaceOf = (path: string) =>
+  path.startsWith("/ws/a/") ? "/ws/a" : path.startsWith("/ws/b/") ? "/ws/b" : null;
 
 const open = [
   { key: workspaceKey("/ws/a"), path: "/ws/a" },
@@ -28,20 +19,21 @@ const open = [
 ];
 
 describe("recent documents", () => {
-  beforeEach(async () => {
-    await recentDocumentsCollection.preload();
-    const paths = [...recentDocumentsCollection.keys()];
-    if (paths.length > 0) {
-      await recentDocumentsCollection.delete(paths).isPersisted.promise;
-    }
+  let recent: RecentDocumentsApi;
+
+  beforeEach(() => {
+    recent = createRecentDocuments({
+      persistence: createNodeTestDb().get(),
+      workspaceOf,
+    });
   });
 
   it("stores a touched document and moves a re-touched one to the front", async () => {
-    await touchRecentDocument("/ws/a/one.md", 10);
-    await touchRecentDocument("/ws/a/two.md", 20);
-    await touchRecentDocument("/ws/a/one.md", 30);
-    await touchRecentDocument("/elsewhere/x.md", 40); // not ours: ignored
-    const rows = [...recentDocumentsCollection.values()];
+    await recent.touch("/ws/a/one.md", 10);
+    await recent.touch("/ws/a/two.md", 20);
+    await recent.touch("/ws/a/one.md", 30);
+    await recent.touch("/elsewhere/x.md", 40); // not ours: ignored
+    const rows = [...recent.collection.values()];
     expect(rows.map((r) => r.path).sort()).toEqual(["/ws/a/one.md", "/ws/a/two.md"]);
     const documents = deriveRecentDocuments(rows, open, () => true, 10);
     expect(documents.map((d) => d.path)).toEqual(["/ws/a/one.md", "/ws/a/two.md"]);
@@ -49,9 +41,9 @@ describe("recent documents", () => {
 
   it("prunes storage to the cap, oldest first", async () => {
     for (let i = 0; i < MAX_RECENT_DOCUMENTS + 3; i += 1) {
-      await touchRecentDocument(`/ws/b/${i}.md`, i);
+      await recent.touch(`/ws/b/${i}.md`, i);
     }
-    const rows = [...recentDocumentsCollection.values()];
+    const rows = [...recent.collection.values()];
     expect(rows).toHaveLength(MAX_RECENT_DOCUMENTS);
     expect(rows.some((r) => r.path === "/ws/b/0.md")).toBe(false);
     expect(rows.some((r) => r.path === `/ws/b/${MAX_RECENT_DOCUMENTS + 2}.md`)).toBe(true);

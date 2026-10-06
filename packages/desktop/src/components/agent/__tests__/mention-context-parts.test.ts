@@ -6,64 +6,51 @@
  * directories, with paths percent-encoded per segment.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
+import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
+import { createWorkspaceFiles, type WorkspaceFiles } from "@/entities/files";
+import { mentionContextParts } from "../prompt-widget-host";
 
-// Real TanStack DB collections, mocked fs seam (same harness as
-// use-file-search.test.tsx).
-const adapter = {
-  createFiles: vi.fn(),
-  writeFiles: vi.fn(),
-  deleteFiles: vi.fn(),
-  getMetadata: vi.fn(),
-  readFiles: vi.fn(),
-  readDirectory: vi.fn(),
-};
+// Real TanStack DB collections over a listing handed to them (same harness
+// as use-file-search.test.tsx).
+const WS = "/ws-mention-context";
+const fs = {
+  getMetadata: vi.fn(async () => ({ succeeded: [], failed: [] })),
+  readDirectory: vi.fn(async () => ({
+    ok: true,
+    value: [
+      { path: `${WS}/archive`, type: "directory" as const },
+      { path: `${WS}/notes.md`, type: "file" as const },
+      { path: `${WS}/readme.md`, type: "file" as const },
+      { path: `${WS}/archive/old.md`, type: "file" as const },
+      { path: `${WS}/my spaced file.md`, type: "file" as const },
+    ],
+  })),
+  onFsEvent: () => () => {},
+  startWatchingMetadata: async () => {},
+  stopWatching: async () => {},
+} as unknown as FileSystemSurface;
 
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    fs: adapter,
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
-vi.mock("@/utils/file-write-effects", () => ({
-  invalidateDerivedState: vi.fn(),
-}));
-
-let testCounter = 0;
-let WS = "";
-let files: typeof import("@/entities/files");
-let host: typeof import("../prompt-widget-host");
+let files: WorkspaceFiles;
+const host = { mentionContextParts };
 
 beforeEach(async () => {
-  vi.clearAllMocks();
-  WS = `/ws-mention-context-${testCounter++}`;
-  adapter.getMetadata.mockResolvedValue({ succeeded: [], failed: [] });
-  adapter.readDirectory.mockImplementation(
-    async () => ({
-      ok: true,
-      value: [
-        { path: `${WS}/archive`, type: "directory" as const },
-        { path: `${WS}/notes.md`, type: "file" as const },
-        { path: `${WS}/readme.md`, type: "file" as const },
-        { path: `${WS}/archive/old.md`, type: "file" as const },
-        { path: `${WS}/my spaced file.md`, type: "file" as const },
-      ],
-    }),
-  );
-
-  files = await import("@/entities/files");
-  host = await import("../prompt-widget-host");
-  await files.getOrCreateWorkspaceCollections(WS).metadata.preload();
+  files = createWorkspaceFiles({
+    workspacePath: WS,
+    fs,
+    queryClient: new QueryClient(),
+  });
+  await files.collections.metadata.preload();
 });
 
 afterEach(() => {
-  files.workspaceCollections.drop(WS);
+  files.dispose();
 });
 
 describe("mentionContextParts", () => {
   it("turns tokens naming real files into file:// resource_link parts", () => {
     const parts = host.mentionContextParts(
-      WS,
+      files,
       "read @notes.md and @missing.md, also @archive/old.md.",
     );
     expect(parts).toEqual([
@@ -81,13 +68,13 @@ describe("mentionContextParts", () => {
   });
 
   it("skips directories and text without mentions", () => {
-    expect(host.mentionContextParts(WS, "see @archive")).toEqual([]);
-    expect(host.mentionContextParts(WS, "no refs")).toEqual([]);
+    expect(host.mentionContextParts(files, "see @archive")).toEqual([]);
+    expect(host.mentionContextParts(files, "no refs")).toEqual([]);
   });
 
   it("resolves picker-inserted mentions whose paths contain spaces", () => {
     const parts = host.mentionContextParts(
-      WS,
+      files,
       "summarize @my spaced file.md please",
     );
     expect(parts).toEqual([

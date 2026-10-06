@@ -1,0 +1,103 @@
+/**
+ * The agent layer for tests, built from what a test hands in: a store over
+ * its own in-memory database, a runtime over fakes, and the facade over
+ * both — no module mocks of the platform, nothing shared between tests.
+ */
+import type { McpEndpoint } from "@notefig/agent";
+import { createAgentStore, type AgentStore } from "@/agent/agent-collections";
+import {
+  createAgentRuntime,
+  type AgentRuntime,
+  type AgentRuntimeDeps,
+} from "@/agent/agent-service";
+import { createAgents, type AgentsApi, type AgentsDeps } from "@/agent/agents";
+import { createDocuments } from "@/entities/documents";
+import { createLayout } from "@/entities/layout";
+import { createNodeTestDb } from "./node-db";
+import { memoryUrlState } from "./test-core";
+import { testKv } from "./test-kv";
+import type { KvApi } from "@/utils/kv-store";
+
+/** A fresh, empty agent store. */
+export function testAgentStore(): AgentStore {
+  return createAgentStore(createNodeTestDb().get());
+}
+
+/** An MCP endpoint that carries no traffic: enough for a task to start. */
+export function fakeMcpEndpoint(): McpEndpoint {
+  return {
+    mcpServer: { name: "notefig", command: "notefig", args: [], env: [] },
+    start: async () => {},
+    onRequest: () => () => {},
+    close: async () => {},
+  } as unknown as McpEndpoint;
+}
+
+export interface TestAgents {
+  deps: AgentRuntimeDeps;
+  store: AgentStore;
+  runtime: AgentRuntime;
+  agents: AgentsApi;
+}
+
+/**
+ * The store, runtime and facade, wired as the agents module wires them.
+ * Every dependency defaults to a fake a test can override: the fs answers
+ * every write and reads empty files, the MCP endpoint is inert, spawning a
+ * real transport throws (tasks start through the transport factory a test
+ * passes), and the tools' history and files throw until given.
+ */
+export function testAgents(
+  overrides: Partial<Omit<AgentRuntimeDeps, "kv">> & { kv?: KvApi } = {},
+  facade: Partial<Omit<AgentsDeps, "runtime" | "store" | "kv">> = {},
+): TestAgents {
+  const store = overrides.store ?? testAgentStore();
+  const kv = overrides.kv ?? testKv();
+  const fs: AgentRuntimeDeps["fs"] = overrides.fs ?? {
+    readFiles: async (paths) => ({
+      succeeded: paths.map((path) => ({ path, content: "" })),
+      failed: [],
+    }),
+    writeFiles: async (files) => ({
+      succeeded: files.map((file) => file.path),
+      failed: [],
+    }),
+  };
+  const documents = createDocuments({ fs, openFiles: () => [] });
+  const layout = createLayout(memoryUrlState());
+  let agents: AgentsApi | null = null;
+  const deps: AgentRuntimeDeps = {
+    store,
+    kv,
+    fs,
+    proc: {
+      createMcpEndpoint: () => fakeMcpEndpoint(),
+      createAgentTransport: () => {
+        throw new Error("this test spawns no real agent transport");
+      },
+    },
+    services: () => ({
+      get history(): never {
+        throw new Error("no history in this test");
+      },
+      get files(): never {
+        throw new Error("no workspace files in this test");
+      },
+      documents,
+      layout,
+    }),
+    agents: () => agents!,
+    ...overrides,
+  };
+  const runtime = createAgentRuntime(deps);
+  agents = createAgents({
+    runtime,
+    store,
+    kv,
+    openAgentTab: () => {},
+    isOpen: () => true,
+    ensureRuntime: () => true,
+    ...facade,
+  });
+  return { deps, store, runtime, agents };
+}

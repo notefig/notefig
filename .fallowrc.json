@@ -95,6 +95,65 @@
       }
     }
   ],
+  // Desktop: the platform is injected: core hands each module the adapter the
+  // composition root built, so app code reaches it through `ctx.use` /
+  // `usePlatform()` and may import only the platform's contract (the
+  // interface, its error types). Only the composition root (and tests)
+  // import an adapter implementation.
+  "boundaries": {
+    "zones": [
+      {
+        "name": "tests",
+        "patterns": [
+          "packages/desktop/src/testing/**",
+          "packages/desktop/src/**/__tests__/**",
+          "packages/desktop/src/**/*.test.ts",
+          "packages/desktop/src/**/*.test.tsx",
+          "packages/desktop/tests/**"
+        ]
+      },
+      {
+        "name": "platform-contract",
+        "patterns": [
+          "packages/desktop/src/adapters/platform-adapter.interface.ts",
+          "packages/desktop/src/adapters/git-storage-host.ts"
+        ]
+      },
+      { "name": "platform", "patterns": ["packages/desktop/src/adapters/**"] },
+      {
+        "name": "composition",
+        "patterns": [
+          "packages/desktop/src/main.tsx",
+          "packages/desktop/src/core/app-core.ts",
+          "packages/desktop/src/core/start-app.tsx"
+        ]
+      },
+      { "name": "app", "patterns": ["packages/desktop/src/**"] }
+    ],
+    "rules": [
+      {
+        "from": "app",
+        "allow": ["app", "platform-contract"],
+        "allowTypeOnly": ["platform"]
+      },
+      {
+        "from": "composition",
+        "allow": ["composition", "app", "platform-contract", "platform"]
+      },
+      {
+        "from": "platform",
+        "allow": ["platform", "platform-contract", "app"]
+      },
+      {
+        "from": "platform-contract",
+        "allow": ["platform-contract", "app"]
+      },
+      {
+        "from": "tests",
+        "allow": ["tests", "app", "platform-contract", "platform", "composition"]
+      }
+    ]
+  },
   "health": {
     "maxCyclomatic": 20,
     "maxCognitive": 15,

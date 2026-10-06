@@ -1,6 +1,5 @@
 import { z } from "zod";
 import type { AgentTool } from "@notefig/agent";
-import { readWorkspaceTextFile } from "@/utils/file-sync";
 import { resolveWorkspacePath } from "@/utils/fs";
 
 const InputSchema = z.object({
@@ -25,7 +24,7 @@ export const workspaceReadDocument: AgentTool<
     const resolved = resolveWorkspacePath(ctx.workspacePath, input.path);
     if (!resolved.ok) return { ok: false, error: resolved.error };
     try {
-      const value = await readWorkspaceTextFile(resolved.absolute, {
+      const value = await ctx.services.documents.read(resolved.absolute, {
         line: input.line,
         limit: input.limit,
       });

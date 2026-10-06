@@ -47,6 +47,8 @@
       }
     }
   ],
+  // Boundary zones live in the root config: CI audits from the repo root,
+  // where a package's own zones are not applied.
   "boundaries": {
     "enabled": false
   }

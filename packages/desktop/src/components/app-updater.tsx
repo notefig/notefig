@@ -5,7 +5,8 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { platformAdapter } from "@/adapters";
+import type { IPlatformAdapter } from "@/adapters/platform-adapter.interface";
+import { usePlatform } from "@/core/use-platform";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import i18n from "@/utils/intl";
 import { isTauri } from "@/utils/platform";
@@ -56,13 +57,22 @@ const PERSISTENT_TOAST_OPTIONS = {
 
 export const UPDATE_CHECK_QUERY_KEY = ["app-update-check"] as const;
 
+/** What the updater works through: the query cache its state lives in,
+ *  and the platform's updates surface. */
+export interface UpdaterHost {
+  queryClient: QueryClient;
+  updates: IPlatformAdapter["updates"];
+}
+
 export interface UpdateCheckData {
   flow: UpdateFlow;
   updateInfo: UpdateInfo | null;
 }
 
-async function fetchUpdateCheck(): Promise<UpdateCheckData> {
-  const result = await platformAdapter.updates.check();
+async function fetchUpdateCheck(
+  updates: UpdaterHost["updates"],
+): Promise<UpdateCheckData> {
+  const result = await updates.check();
 
   if (result.status === "error") {
     throw new Error(result.error);
@@ -84,10 +94,13 @@ async function fetchUpdateCheck(): Promise<UpdateCheckData> {
   };
 }
 
-export function getUpdateCheckQueryOptions(queryClient: QueryClient) {
+export function getUpdateCheckQueryOptions({
+  queryClient,
+  updates,
+}: UpdaterHost) {
   return {
     queryKey: UPDATE_CHECK_QUERY_KEY,
-    queryFn: fetchUpdateCheck,
+    queryFn: () => fetchUpdateCheck(updates),
     // Automatic checks are Tauri-only: browser builds run the dev server /
     // e2e suite too, where version drift would nag constantly. The manual
     // settings button still works there — refetch() ignores `enabled`.
@@ -238,7 +251,8 @@ export function useAppUpdater(): AppUpdaterView & {
   checkForUpdate: () => void;
 } {
   const queryClient = useQueryClient();
-  const check = useQuery(getUpdateCheckQueryOptions(queryClient));
+  const { updates } = usePlatform();
+  const check = useQuery(getUpdateCheckQueryOptions({ queryClient, updates }));
   const { data: install } = useQuery(getInstallStateQueryOptions(queryClient));
 
   return {
@@ -260,7 +274,7 @@ function pendingUpdateVersion(queryClient: QueryClient): string {
 export type DownloadTrigger = "auto" | "manual";
 
 export async function downloadAndInstall(
-  queryClient: QueryClient,
+  { queryClient, updates }: UpdaterHost,
   trigger: DownloadTrigger = "manual",
 ) {
   const toVersion = pendingUpdateVersion(queryClient);
@@ -275,9 +289,7 @@ export async function downloadAndInstall(
     },
   });
 
-  const updater = platformAdapter.updates;
-
-  for await (const step of updater.apply()) {
+  for await (const step of updates.apply()) {
     if (step.status === "downloading") {
       patchInstallState(queryClient, {
         phase: "downloading",
@@ -311,8 +323,8 @@ export async function downloadAndInstall(
   }
 }
 
-export async function relaunchApp(queryClient: QueryClient) {
-  const result = await platformAdapter.updates.restart();
+export async function relaunchApp({ queryClient, updates }: UpdaterHost) {
+  const result = await updates.restart();
   if (result.status === "error") {
     captureEvent("update_failed", {
       stage: "restart",
@@ -325,17 +337,17 @@ export async function relaunchApp(queryClient: QueryClient) {
   }
 }
 
-export function startDownloadWithToastPromise(queryClient: QueryClient) {
-  const checkData = queryClient.getQueryData<UpdateCheckData>(
+export function startDownloadWithToastPromise(host: UpdaterHost) {
+  const checkData = host.queryClient.getQueryData<UpdateCheckData>(
     UPDATE_CHECK_QUERY_KEY,
   );
 
   if (checkData?.flow === "refresh") {
-    void relaunchApp(queryClient);
+    void relaunchApp(host);
     return;
   }
 
-  const downloadPromise = downloadAndInstall(queryClient);
+  const downloadPromise = downloadAndInstall(host);
 
   toast.promise(downloadPromise, {
     loading: i18n.t("updaterToastDownloading"),
@@ -344,24 +356,24 @@ export function startDownloadWithToastPromise(queryClient: QueryClient) {
   });
 
   void downloadPromise.then(() => {
-    showReadyToRestartToast(queryClient);
+    showReadyToRestartToast(host);
   });
 }
 
-function showReadyToRestartToast(queryClient: QueryClient) {
+function showReadyToRestartToast(host: UpdaterHost) {
   toast.success(i18n.t("updaterToastReadyToRestart"), {
     ...PERSISTENT_TOAST_OPTIONS,
     action: {
       label: i18n.t("updaterRestart"),
       onClick: () => {
-        void relaunchApp(queryClient);
+        void relaunchApp(host);
       },
     },
   });
 }
 
 function showUpdateAvailableToast(
-  queryClient: QueryClient,
+  host: UpdaterHost,
   flow: UpdateFlow,
   updateInfo: UpdateInfo,
 ) {
@@ -381,7 +393,7 @@ function showUpdateAvailableToast(
             ? i18n.t("updaterRefresh")
             : i18n.t("updaterDownload"),
         onClick: () => {
-          startDownloadWithToastPromise(queryClient);
+          startDownloadWithToastPromise(host);
         },
       },
     },
@@ -417,7 +429,10 @@ export function resolveUpdateNotification(input: {
 
 export function AppUpdaterBootstrap() {
   const queryClient = useQueryClient();
-  const { data } = useQuery(getUpdateCheckQueryOptions(queryClient));
+  const { updates } = usePlatform();
+  const { data } = useQuery(
+    getUpdateCheckQueryOptions({ queryClient, updates }),
+  );
   const { settings, isReady } = useAppSettings();
   const lastNotifiedVersionRef = useRef<string | null>(null);
 
@@ -447,18 +462,19 @@ export function AppUpdaterBootstrap() {
     if (action === "auto-download") {
       // Silent download; the user only hears about it once it's ready. On
       // failure fall back to the prompt toast so a manual retry is possible.
-      downloadAndInstall(queryClient, "auto")
+      const host = { queryClient, updates };
+      downloadAndInstall(host, "auto")
         .then(() => {
-          showReadyToRestartToast(queryClient);
+          showReadyToRestartToast(host);
         })
         .catch(() => {
-          showUpdateAvailableToast(queryClient, data.flow, updateInfo);
+          showUpdateAvailableToast(host, data.flow, updateInfo);
         });
       return;
     }
 
-    showUpdateAvailableToast(queryClient, data.flow, updateInfo);
-  }, [queryClient, data, settings.autoUpdateEnabled, isReady]);
+    showUpdateAvailableToast({ queryClient, updates }, data.flow, updateInfo);
+  }, [queryClient, updates, data, settings.autoUpdateEnabled, isReady]);
 
   return null;
 }

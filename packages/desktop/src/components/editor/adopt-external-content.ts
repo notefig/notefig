@@ -28,8 +28,11 @@ import type { Editor } from "@tiptap/core";
 import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode, NodeType } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
-import { PROMPT_CHANGE_META, PROMPT_NODE_NAME } from "@notefig/widgets";
-import { attributeAdoption } from "@/entities/turn-writes";
+import {
+  PROMPT_CHANGE_META,
+  PROMPT_NODE_NAME,
+  type PromptChangeAttribution,
+} from "@notefig/widgets";
 import { recreateTransform } from "@/vendor/prosemirror-recreate-transform/recreateTransform";
 import { carryDraftsForward } from "./draft-only-edit";
 
@@ -113,8 +116,16 @@ function findInsertPos(
   return null;
 }
 
-/** The file bytes an adoption brings in, by path and content hash. */
-export type AdoptionSource = { path: string; contentHash: string };
+/** The file bytes an adoption brings in, by path and content hash, and
+ *  who to ask which prompt round wrote them (`core.turnWrites`). */
+export type AdoptionSource = {
+  path: string;
+  contentHash: string;
+  attribute?: (
+    path: string,
+    contentHash: string,
+  ) => PromptChangeAttribution | null;
+};
 
 /**
  * Replace the editor's content with `incoming` (parsed external file
@@ -166,9 +177,10 @@ export function adoptExternalContent(
     );
     restoreDraftCaret(tr, draftCaret);
     tr.setMeta(ADOPTION_TRANSACTION_META, true);
-    const round =
-      options.source &&
-      attributeAdoption(options.source.path, options.source.contentHash);
+    const round = options.source?.attribute?.(
+      options.source.path,
+      options.source.contentHash,
+    );
     if (round) tr.setMeta(PROMPT_CHANGE_META, round);
     editor.view.dispatch(tr);
     return { mode: "diffed", reinsertedWidgets };

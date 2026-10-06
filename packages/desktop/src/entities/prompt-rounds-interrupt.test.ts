@@ -8,57 +8,32 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-    fs: {
-      writeFiles: vi.fn(async (files: { path: string }[]) => ({
-        succeeded: files.map((f) => f.path),
-        failed: [],
-      })),
-      readFiles: vi.fn(async (paths: string[]) => ({
-        succeeded: paths.map((p) => ({ path: p, content: "" })),
-        failed: [],
-      })),
-      deleteFiles: vi.fn(async (paths: string[]) => ({
-        succeeded: paths,
-        failed: [],
-      })),
-    },
-    proc: {
-      createMcpEndpoint: vi.fn(() => ({
-        mcpServer: { name: "notefig", command: "notefig", args: [], env: [] },
-        start: vi.fn(async () => {}),
-        onRequest: vi.fn(() => () => {}),
-        close: vi.fn(async () => {}),
-      })),
-    },
-  },
-}));
-vi.mock("@/entities/workspaces", () => ({ useOpenWorkspaces: () => [] }));
-
 import { createLoopbackPair } from "@notefig/agent";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import { FakeAgent } from "@/agent/mock-harness";
 import { TaskManager, type AgentTask } from "@/agent/agent-service";
-import { agentTurnsCollection } from "@/agent/agent-collections";
 import { emitAppEvent } from "@/utils/app-events";
 import {
+  createPromptRounds,
   derivePromptRounds,
-  promptRoundsCollection,
-  startPromptRoundTracking,
+  type PromptRoundsApi,
 } from "@/entities/prompt-rounds";
+import { createNodeTestDb } from "@/testing/node-db";
+import { testAgents, type TestAgents } from "@/testing/test-agents";
 import { workspaceKey } from "@/utils/path";
 
 const harness = BUILT_IN_HARNESSES[0];
 const open = [{ key: workspaceKey("/ws"), path: "/ws" }];
 
+let agentLayer: TestAgents;
+let rounds: PromptRoundsApi;
+
 /** What the sidebar would show for this round right now. */
 function shownStatus(turnId: string): string | undefined {
   return derivePromptRounds(
-    [...promptRoundsCollection.values()],
+    [...rounds.collection.values()],
     open,
-    [...agentTurnsCollection.values()],
+    [...agentLayer.store.turns.values()],
   ).find((round) => round.turnId === turnId)?.status;
 }
 
@@ -76,7 +51,7 @@ function sendRound(task: AgentTask, text: string): string {
 }
 
 async function startedTask(agent: FakeAgent, client: unknown) {
-  const task = new TaskManager("/ws").createTask(harness);
+  const task = new TaskManager(agentLayer.deps, "/ws").createTask(harness);
   await task.start(() => client as never);
   void agent;
   return task;
@@ -85,15 +60,15 @@ async function startedTask(agent: FakeAgent, client: unknown) {
 describe("interrupted prompt rounds", () => {
   let stop: () => void;
 
-  beforeEach(async () => {
-    await promptRoundsCollection.preload();
-    const keys = [...promptRoundsCollection.keys()];
-    if (keys.length > 0)
-      await promptRoundsCollection.delete(keys).isPersisted.promise;
-    for (const turn of agentTurnsCollection.toArray)
-      agentTurnsCollection.delete(turn.turnId);
+  beforeEach(() => {
+    // The rounds read the turn rows of the same store the tasks write.
+    agentLayer = testAgents();
+    rounds = createPromptRounds({
+      persistence: createNodeTestDb().get(),
+      turns: agentLayer.store.turns,
+    });
     stop?.();
-    stop = startPromptRoundTracking();
+    stop = rounds.track();
   });
 
   it("Stop while running settles the round", async () => {
@@ -113,7 +88,7 @@ describe("interrupted prompt rounds", () => {
 
     const turnId = sendRound(task, "do the thing");
     await vi.waitFor(() =>
-      expect(promptRoundsCollection.get(turnId)).toBeDefined(),
+      expect(rounds.collection.get(turnId)).toBeDefined(),
     );
     await task.cancel(); // the widget's Stop button
     release();
@@ -135,7 +110,7 @@ describe("interrupted prompt rounds", () => {
 
     const turnId = sendRound(task, "doomed");
     await vi.waitFor(() =>
-      expect(promptRoundsCollection.get(turnId)).toBeDefined(),
+      expect(rounds.collection.get(turnId)).toBeDefined(),
     );
     await expect(task.cancelAndForgetTurn()).resolves.toBe(true);
     release();
@@ -158,7 +133,7 @@ describe("interrupted prompt rounds", () => {
     sendRound(task, "first");
     const queuedId = sendRound(task, "queued one");
     await vi.waitFor(() =>
-      expect(promptRoundsCollection.get(queuedId)).toBeDefined(),
+      expect(rounds.collection.get(queuedId)).toBeDefined(),
     );
     expect(shownStatus(queuedId)).toBe("queued");
 

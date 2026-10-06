@@ -29,27 +29,17 @@ import { createElement, Fragment } from "react";
 import { Editor } from "@tiptap/core";
 import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
 
-// In-memory platform adapter with async latency (hoisted for vi.mock)
-vi.mock("@/adapters", async () => {
-  const { fake } = await import("@/testing/fake-fs-adapter");
-  return {
-    platformAdapter: {
-      fs: fake.adapter,
-      ui: fake.adapter,
-      db: (await import("@/testing/node-db")).createNodeTestDb(),
-    },
-  };
-});
-
 import { fake, installWatcherSim } from "@/testing/fake-fs-adapter";
 
 // Real modules — imported after the adapter mock so they bind to the fake fs.
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
+import { QueryClient } from "@tanstack/react-query";
+import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { useEditorFileSync } from "../use-editor-file-sync";
 import {
-  getOrCreateWorkspaceCollections,
-  writeFileContent,
+  createWorkspaceFiles,
   type FileMetadata,
+  type WorkspaceFiles,
 } from "@/entities/files";
 import {
   closeDocumentSync,
@@ -78,6 +68,8 @@ beforeAll(() => {
 // Harness: the workspace.tsx data path, minus the chrome
 let workspaceCounter = 0;
 let WS: string;
+/** The workspace's files, over the fake disk. */
+let files: WorkspaceFiles;
 let FILE: string;
 
 let editor: Editor;
@@ -96,7 +88,7 @@ function EditorSync({ entry }: { entry: JoinedEntry }) {
   useEditorFileSync(
     editor,
     entry as FileEntry,
-    WS,
+    files,
     entry.isContentLoaded,
     entry.contentError,
   );
@@ -105,7 +97,7 @@ function EditorSync({ entry }: { entry: JoinedEntry }) {
 
 /** Replicates the workspace.tsx live query joining metadata and content. */
 function Harness() {
-  const { metadata, content } = getOrCreateWorkspaceCollections(WS);
+  const { metadata, content } = files.collections;
   const { data = [] } = useLiveQuery(
     (q) =>
       q
@@ -166,6 +158,11 @@ beforeEach(async () => {
   workspaceCounter++;
   WS = `/ws-typing-${workspaceCounter}`;
   FILE = `${WS}/note.md`;
+  files = createWorkspaceFiles({
+    workspacePath: WS,
+    fs: fake.adapter as unknown as FileSystemSurface,
+    queryClient: new QueryClient(),
+  });
 
   fake.store.clear();
   fake.store.set(FILE, {
@@ -181,7 +178,8 @@ beforeEach(async () => {
     fakeFs: fake,
     seed: 7 ^ 0x5bd1e995,
     pendingEvents,
-    onExternalChange: (event) => handleContentFileSystemChange(event, WS),
+    onExternalChange: (event) =>
+      handleContentFileSystemChange(files, fake.adapter as never, event),
   });
 
   editor = new Editor({
@@ -199,7 +197,7 @@ beforeEach(async () => {
   });
   // Let the metadata collection load and the content row arrive on demand
   // (EditorSync mounts once the joined entry has real content).
-  const { content } = getOrCreateWorkspaceCollections(WS);
+  const { content } = files.collections;
   for (let i = 0; i < 100; i++) {
     await tick(10);
     if (content.get(FILE)?.contentHash) break;
@@ -211,6 +209,7 @@ afterEach(async () => {
   fake.hooks.afterWrite = undefined;
   await Promise.all(pendingEvents);
   pendingEvents = [];
+  files.dispose();
   await act(async () => {
     root.unmount();
   });
@@ -295,7 +294,7 @@ describe("typing → save → adoption loop integrity", () => {
 
     // And the content collection (what any other view would render) must
     // agree with the disk.
-    const { content } = getOrCreateWorkspaceCollections(WS);
+    const { content } = files.collections;
     expect(content.get(FILE)?.content).toBe(expected);
   }, 30_000);
 
@@ -308,25 +307,22 @@ describe("typing → save → adoption loop integrity", () => {
     const older = "start plus older flush";
     const newer = "start plus older flush plus newer flush";
 
-    await writeFileContent(WS, FILE, older);
-    await writeFileContent(WS, FILE, newer);
+    await files.file(FILE).write(older);
+    await files.file(FILE).write(newer);
 
-    await handleContentFileSystemChange(
-      {
-        watchId: "test-watch",
-        changes: [
-          {
-            path: FILE,
-            content: older,
-            contentHash: calculateContentHash(older),
-          },
-        ],
-      },
-      WS,
-    );
+    await handleContentFileSystemChange(files, fake.adapter as never, {
+      watchId: "test-watch",
+      changes: [
+        {
+          path: FILE,
+          content: older,
+          contentHash: calculateContentHash(older),
+        },
+      ],
+    });
     await tick(20);
 
-    const { content } = getOrCreateWorkspaceCollections(WS);
+    const { content } = files.collections;
     expect(content.get(FILE)?.content).toBe(newer);
 
     // A genuinely external change must still come through — suppression
@@ -339,19 +335,16 @@ describe("typing → save → adoption loop integrity", () => {
       modifiedAt: new Date(),
       createdAt: fake.store.get(FILE)?.createdAt ?? new Date(),
     });
-    await handleContentFileSystemChange(
-      {
-        watchId: "test-watch",
-        changes: [
-          {
-            path: FILE,
-            content: external,
-            contentHash: calculateContentHash(external),
-          },
-        ],
-      },
-      WS,
-    );
+    await handleContentFileSystemChange(files, fake.adapter as never, {
+      watchId: "test-watch",
+      changes: [
+        {
+          path: FILE,
+          content: external,
+          contentHash: calculateContentHash(external),
+        },
+      ],
+    });
     await tick(20);
     expect(content.get(FILE)?.content).toBe(external);
   });
@@ -365,32 +358,29 @@ describe("typing → save → adoption loop integrity", () => {
     // and re-reads the file, so no amount of intervening saves can make a
     // stale echo win — a short burst is as conclusive as the 110-write
     // flood that once overflowed the ledger cap.
-    const { content } = getOrCreateWorkspaceCollections(WS);
+    const { content } = files.collections;
 
     const stale = "content from an early save";
-    await writeFileContent(WS, FILE, stale);
+    await files.file(FILE).write(stale);
 
     let newest = "";
     for (let i = 0; i < 3; i++) {
       newest = `newer save number ${i}`;
-      await writeFileContent(WS, FILE, newest);
+      await files.file(FILE).write(newest);
     }
     expect(content.get(FILE)?.content).toBe(newest);
 
     // The late watcher echo of the early write arrives now.
-    await handleContentFileSystemChange(
-      {
-        watchId: "test-watch",
-        changes: [
-          {
-            path: FILE,
-            content: stale,
-            contentHash: calculateContentHash(stale),
-          },
-        ],
-      },
-      WS,
-    );
+    await handleContentFileSystemChange(files, fake.adapter as never, {
+      watchId: "test-watch",
+      changes: [
+        {
+          path: FILE,
+          content: stale,
+          contentHash: calculateContentHash(stale),
+        },
+      ],
+    });
     await tick(20);
 
     // The row must still hold the newest content — the stale echo is this

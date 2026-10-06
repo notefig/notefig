@@ -8,32 +8,38 @@
  * root runs", not "in which order".
  */
 import { createCore, type AnyModule, type Core } from "@notefig/core";
-import type { QueryClient } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
 import { platformAdapter, type IPlatformAdapter } from "@/adapters";
-import { agentTasksModule } from "@/agent/agent-collections";
+import { agentStoreModule } from "@/agent/agent-collections";
 import { harnessDiscoveryModule } from "@/agent/harness-discovery";
+import { mockAgentModule } from "@/agent/mock-harness";
+import { promptRoundObserverModule } from "@/agent/round-observer";
 import { tunnelModule } from "@/agent/tunnel/tunnel-module";
 import { workspaceAgentsModule } from "@/agent/workspace-agents";
 import { treeInlineEditModule } from "@/components/editor/file-tree";
+import { sharedSessionsModule } from "@/components/agent/blob-session-store";
 import { canOpenFile } from "@/components/editor/polymorphic-editor";
+import { treeExpansionModule } from "@/components/editor/tree-expansion-memory";
+import { telemetryModule } from "@/components/telemetry-bootstrap";
+import { documentsModule } from "@/entities/documents";
 import { editorsModule } from "@/entities/editors";
 import { filesModule } from "@/entities/files";
 import { gitModule } from "@/entities/git";
 import { layoutModule, type UrlState } from "@/entities/layout";
 import { tabsModule } from "@/entities/tabs";
 import { promptRoundsModule } from "@/entities/prompt-rounds";
-import { queryClient } from "@/entities/query-client";
+import { recentDocumentsModule } from "@/entities/recent-documents";
 import { scratchpadLandingModule } from "@/entities/scratchpad-landing";
 import { scratchpadsModule } from "@/entities/scratchpads";
 import { seenModule } from "@/entities/seen";
 import { turnWritesModule } from "@/entities/turn-writes";
-import { workspaceScopesModule } from "@/entities/workspace-scoped";
 import { workspacesModule } from "@/entities/workspaces";
+import { gitWorkerModule } from "@/utils/git-worker-client";
 import { historyModule } from "@/utils/history-service";
-import { sidebarViewModule } from "@/hooks/sidebar-view";
+import { kvModule } from "@/utils/kv-store";
+import { projectSettingsModule } from "@/utils/project-settings";
+import { lastToolModule, sidebarViewModule } from "@/hooks/sidebar-view";
 import { workspaceKey } from "@/utils/path";
-import { workspaceWatchersModule } from "@/utils/workspace-watchers";
-import { installAppCore } from "./current";
 
 declare module "@notefig/core" {
   interface CoreServices {
@@ -53,16 +59,18 @@ export function runtimeModules({
   restoreWorkspaces: boolean;
 }): AnyModule[] {
   return [
-    workspaceScopesModule,
-    workspaceWatchersModule,
+    kvModule,
     seenModule,
     promptRoundsModule,
     turnWritesModule,
     treeInlineEditModule,
     workspacesModule({ restore: restoreWorkspaces }),
+    recentDocumentsModule,
     layoutModule,
     tabsModule({ canOpenFile }),
     editorsModule,
+    documentsModule,
+    projectSettingsModule,
     // What entering a workspace does, besides opening it.
     scratchpadLandingModule,
     sidebarViewModule,
@@ -70,8 +78,15 @@ export function runtimeModules({
     filesModule,
     gitModule,
     scratchpadsModule,
+    gitWorkerModule,
     historyModule,
+    agentStoreModule,
+    promptRoundObserverModule,
+    mockAgentModule,
     workspaceAgentsModule,
+    sharedSessionsModule,
+    treeExpansionModule,
+    lastToolModule,
   ];
 }
 
@@ -80,24 +95,29 @@ export function desktopModules(): AnyModule[] {
   return [
     ...runtimeModules({ restoreWorkspaces: true }),
     harnessDiscoveryModule,
-    agentTasksModule,
     tunnelModule,
+    telemetryModule,
   ];
 }
 
 /**
- * Build the root's core and install it for code outside React
- * (`appCore()`). `url` is the root's router, seen through `UrlState`.
+ * Build the root's core: the platform adapter and an app-wide query client
+ * are its services, handed to every module that names them. `url` is the
+ * root's router, seen through `UrlState`. This is the one place the
+ * platform adapter is imported.
  */
 export function createAppCore(
   modules: readonly AnyModule[],
   { url }: { url: UrlState },
 ): Core {
   const core = createCore({
-    services: { platform: platformAdapter, queryClient, url },
+    services: {
+      platform: platformAdapter,
+      queryClient: new QueryClient(),
+      url,
+    },
     modules,
     workspaceKey,
   });
-  installAppCore(core);
   return core;
 }

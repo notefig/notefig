@@ -92,9 +92,11 @@ type WorkspacePart<
           ctx: WorkspaceContext<Needs, WorkspaceNeeds>,
           api: ApiOf<Name>,
         ): WorkspaceModules[Name];
+        /** `api` is this module's own, as `create` gets it. */
         dispose?(
           instance: WorkspaceModules[Name],
           workspace: WorkspaceRef,
+          api: ApiOf<Name>,
         ): void | Promise<void>;
       };
     }
@@ -126,7 +128,11 @@ export interface AnyModule {
   workspace?: {
     needs?: readonly string[];
     create(ctx: WorkspaceContext<never, never>, api: unknown): unknown;
-    dispose?(instance: unknown, workspace: WorkspaceRef): void | Promise<void>;
+    dispose?(
+      instance: unknown,
+      workspace: WorkspaceRef,
+      api: unknown,
+    ): void | Promise<void>;
   };
 }
 

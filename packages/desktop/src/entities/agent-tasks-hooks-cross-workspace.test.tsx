@@ -1,22 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act, createElement, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
-// Real collections over the in-memory SQLite rig, so the hooks read the
-// production row shapes; the fs/proc surfaces are never reached.
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
+import { CoreProvider } from "@notefig/core/react";
+import type { Core } from "@notefig/core";
 import {
-  agentTasksCollection,
+  agentStoreModule,
   type AgentTaskRow,
 } from "@/agent/agent-collections";
-import { unregisterTask } from "@/agent/task-registry";
+import { createTestCore } from "@/testing/test-core";
 import { useAgentTaskList, type AgentTaskMeta } from "./agents";
 
 function row(overrides: Partial<AgentTaskRow> & Pick<AgentTaskRow, "taskId">): AgentTaskRow {
@@ -34,6 +28,9 @@ function row(overrides: Partial<AgentTaskRow> & Pick<AgentTaskRow, "taskId">): A
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
+// Real collections over the in-memory SQLite rig, so the hooks read the
+// production row shapes; a fresh core (and store) per test.
+let core: Core;
 
 function Probe<T>({ use, onValue }: { use: () => T; onValue: (v: T) => void }) {
   const value = use();
@@ -47,11 +44,14 @@ async function renderHook<T>(use: () => T): Promise<() => T> {
   let latest: T | undefined;
   await act(async () => {
     root!.render(
-      createElement(Probe<T>, {
-        use,
-        onValue: (value: T) => {
-          latest = value;
-        },
+      createElement(CoreProvider, {
+        core,
+        children: createElement(Probe<T>, {
+          use,
+          onValue: (value: T) => {
+            latest = value;
+          },
+        }),
       }),
     );
   });
@@ -62,11 +62,8 @@ async function renderHook<T>(use: () => T): Promise<() => T> {
 }
 
 beforeEach(async () => {
-  for (const task of agentTasksCollection.toArray) {
-    unregisterTask(task.taskId);
-    await agentTasksCollection.delete(task.taskId).isPersisted.promise;
-  }
-  await agentTasksCollection.preload();
+  core = createTestCore({ modules: [agentStoreModule] });
+  await core.use("agentStore").tasks.preload();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -81,11 +78,10 @@ afterEach(async () => {
 
 describe("useAgentTaskList", () => {
   it("matches the workspace by workspaceKey, so a respelled path finds its sessions", async () => {
-    await agentTasksCollection.insert(row({ taskId: "task_1" })).isPersisted
-      .promise;
-    await agentTasksCollection.insert(
-      row({ taskId: "task_2", workspacePath: "/ws-b" }),
-    ).isPersisted.promise;
+    const { tasks } = core.use("agentStore");
+    await tasks.insert(row({ taskId: "task_1" })).isPersisted.promise;
+    await tasks.insert(row({ taskId: "task_2", workspacePath: "/ws-b" }))
+      .isPersisted.promise;
 
     const read = await renderHook<AgentTaskMeta[]>(() =>
       useAgentTaskList("/ws-a/"),

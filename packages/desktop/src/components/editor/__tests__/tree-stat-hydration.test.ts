@@ -1,13 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { FileTree } from "@pierre/trees";
 import { attachTreeStatHydration } from "../tree-stat-hydration";
-import { hydrateDirectoryStats } from "@/entities/files";
-
-vi.mock("@/entities/files", () => ({
-  hydrateDirectoryStats: vi.fn(() => Promise.resolve()),
-}));
-
-const hydrateMock = vi.mocked(hydrateDirectoryStats);
+// The workspace's files, as far as hydration needs them.
+const hydrateMock = vi.fn((_dirPath: string) => Promise.resolve());
 
 const WS = "/ws";
 const toAbs = (rel: string) => `${WS}/${rel.replace(/\/+$/, "")}`;
@@ -16,7 +11,11 @@ let model: FileTree;
 let detach: (() => void) | null = null;
 
 function attach(): void {
-  detach = attachTreeStatHydration(model, WS, toAbs);
+  detach = attachTreeStatHydration(
+    model,
+    { workspacePath: WS, hydrateDirectoryStats: hydrateMock },
+    toAbs,
+  );
 }
 
 beforeEach(() => {
@@ -34,7 +33,7 @@ describe("attachTreeStatHydration", () => {
   it("hydrates the workspace root on attach", () => {
     model = new FileTree({ paths: ["a.md"], initialExpansion: "closed" });
     attach();
-    expect(hydrateMock).toHaveBeenCalledWith(WS, WS);
+    expect(hydrateMock).toHaveBeenCalledWith(WS);
   });
 
   it("hydrates expanded directories but not collapsed ones", () => {
@@ -43,8 +42,8 @@ describe("attachTreeStatHydration", () => {
       initialExpandedPaths: ["open"],
     });
     attach();
-    expect(hydrateMock).toHaveBeenCalledWith(WS, `${WS}/open`);
-    expect(hydrateMock).not.toHaveBeenCalledWith(WS, `${WS}/closed`);
+    expect(hydrateMock).toHaveBeenCalledWith(`${WS}/open`);
+    expect(hydrateMock).not.toHaveBeenCalledWith(`${WS}/closed`);
   });
 
   it("hydrates a directory once it expands", () => {
@@ -53,12 +52,12 @@ describe("attachTreeStatHydration", () => {
       initialExpansion: "closed",
     });
     attach();
-    expect(hydrateMock).not.toHaveBeenCalledWith(WS, `${WS}/docs`);
+    expect(hydrateMock).not.toHaveBeenCalledWith(`${WS}/docs`);
 
     const dir = model.getItem("docs");
     if (dir && "expand" in dir) dir.expand();
 
-    expect(hydrateMock).toHaveBeenCalledWith(WS, `${WS}/docs`);
+    expect(hydrateMock).toHaveBeenCalledWith(`${WS}/docs`);
   });
 
   it("re-hydrates when a row arrives, not on count-neutral notifications", () => {
@@ -77,7 +76,7 @@ describe("attachTreeStatHydration", () => {
     // A row arrived after the initial listing.
     model.add("docs/late.md");
     expect(hydrateMock.mock.calls.length).toBeGreaterThan(callsAfterAttach);
-    expect(hydrateMock).toHaveBeenCalledWith(WS, `${WS}/docs`);
+    expect(hydrateMock).toHaveBeenCalledWith(`${WS}/docs`);
   });
 
   it("stops hydrating after detach", () => {

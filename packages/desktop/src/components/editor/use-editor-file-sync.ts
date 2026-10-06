@@ -11,16 +11,18 @@ import { useEffect, useRef } from "react";
 import type { Editor, JSONContent } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import type { FileEntry } from "@/utils/fs";
-import {
-  file as fileHandle,
-  getOrCreateWorkspaceCollections,
-} from "@/entities/files";
+import type { WorkspaceFiles } from "@/entities/files";
+
+/** What the sync reads and writes through: the document's workspace's
+ *  files (undefined until core has the workspace open). */
+export type EditorFiles = Pick<WorkspaceFiles, "file" | "collections">;
 import { getDocumentSync } from "@/utils/markdown-conversion";
 import { UI_ONLY_TRANSACTION_META } from "@/components/editor/editor-schema-kit";
 import { isDraftOnlyEdit } from "@/components/editor/draft-only-edit";
 import {
   adoptExternalContent,
   ADOPTION_TRANSACTION_META,
+  type AdoptionSource,
 } from "@/components/editor/adopt-external-content";
 
 const AUTOSAVE_DEBOUNCE_MS = 500;
@@ -51,9 +53,11 @@ export function isExternalContentChange(
 export function useEditorFileSync(
   editor: Editor,
   file: FileEntry,
-  basePath: string,
+  files: EditorFiles | undefined,
   isContentLoaded: boolean,
   contentError?: string,
+  /** Which prompt round wrote adopted bytes (`core.turnWrites.attribute`). */
+  attribute?: AdoptionSource["attribute"],
 ): void {
   const suppressSaveRef = useRef(false);
   // Non-null while edits sit in the debounce window (not yet pushed to the
@@ -83,8 +87,7 @@ export function useEditorFileSync(
     let cancelled = false;
     const targetHash = file.contentHash;
     const isCurrentRow = () =>
-      getOrCreateWorkspaceCollections(basePath).content.get(file.path)
-        ?.contentHash === targetHash;
+      files?.collections.content.get(file.path)?.contentHash === targetHash;
     // Cheap pre-check: don't parse content the currency check will reject
     // (stale renders under save bursts are the common visitor here).
     if (!isCurrentRow()) return;
@@ -117,7 +120,7 @@ export function useEditorFileSync(
       // Diffed adoption: drafts, widgets, and the caret survive the parts
       // of the document the external change didn't touch.
       const adoption = adoptExternalContent(editor, doc, {
-        source: { path: file.path, contentHash: targetHash },
+        source: { path: file.path, contentHash: targetHash, attribute },
       });
       suppressSaveRef.current = false;
       sync.commitAdoption(fileContent, targetHash);
@@ -133,12 +136,13 @@ export function useEditorFileSync(
     return () => {
       cancelled = true;
     };
-  }, [editor, file.contentHash, file.content, file.path, contentError]);
+  }, [editor, file.contentHash, file.content, file.path, contentError, files]);
 
   // Editor → disk: debounced autosave into the pipeline.
   useEffect(() => {
     const sync = getDocumentSync(file.path);
-    sync.writer = (markdown) => fileHandle(basePath, file.path).write(markdown);
+    if (!files) return;
+    sync.writer = (markdown) => files.file(file.path).write(markdown);
 
     const pushSnapshot = () => {
       sync.pushUpdate(() => editor.state.doc.toJSON() as JSONContent);
@@ -194,5 +198,5 @@ export function useEditorFileSync(
         if (!editor.isDestroyed) pushSnapshot();
       }
     };
-  }, [editor, file.path, basePath, isContentLoaded]);
+  }, [editor, file.path, files, isContentLoaded]);
 }

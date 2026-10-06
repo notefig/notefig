@@ -11,7 +11,7 @@ import { MockDirectoryPickerDialog } from "@/components/mock-directory-picker-di
 import { TextPromptDialog } from "@/components/text-prompt-dialog";
 import { useEffect, useState } from "react";
 import { useTheme } from "@/components/theme-provider";
-import { platformAdapter } from "@/adapters";
+import { usePlatform } from "@/core/use-platform";
 import { isWeb } from "@/utils/platform";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { WorkspaceErrorBoundary } from "@/components/workspace-error-boundary";
@@ -56,8 +56,9 @@ export const App = () => {
     setLastSearch(location.search || null);
   }, [sessionRestored, location.pathname, location.search, setLastSearch]);
 
+  const { ui } = usePlatform();
   useEffect(() => {
-    const cleanup = platformAdapter.ui.addEventListener((event) => {
+    const cleanup = ui.addEventListener((event) => {
       switch (event.type) {
         case "theme-changed":
           setTheme(event.payload);
@@ -73,7 +74,7 @@ export const App = () => {
     });
 
     return cleanup;
-  }, [setTheme, persistTheme, setZoomLevel]);
+  }, [ui, setTheme, persistTheme, setZoomLevel]);
 
   return (
     <div className="flex h-screen flex-col text-foreground overflow-clip">

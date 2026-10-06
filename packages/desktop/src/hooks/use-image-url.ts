@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { platformAdapter } from "@/adapters";
+import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
+import { usePlatform } from "@/core/use-platform";
 import { path as pathutil } from "@/utils/path";
 
 export interface ResolvedImage {
@@ -18,7 +19,13 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 
-function loadImage(imagePath: string, basePaths: string[]): CacheEntry {
+type ImageFs = Pick<FileSystemSurface, "exists" | "resolveAssetUrl">;
+
+function loadImage(
+  fs: ImageFs,
+  imagePath: string,
+  basePaths: string[],
+): CacheEntry {
   const cacheKey = `${basePaths.join("|")}:${imagePath}`;
 
   const existing = cache.get(cacheKey);
@@ -51,14 +58,14 @@ function loadImage(imagePath: string, basePaths: string[]): CacheEntry {
   const promise = (async (): Promise<ResolvedImage> => {
     let chosen = candidates[0];
     if (candidates.length > 1) {
-      const results = await platformAdapter.fs.exists(candidates);
+      const results = await fs.exists(candidates);
       const hit = candidates.find(
         (candidate) =>
           results.find((r) => r.path === candidate)?.exists ?? false,
       );
       if (hit) chosen = hit;
     }
-    const url = await platformAdapter.fs.resolveAssetUrl(chosen, basePaths[0]);
+    const url = await fs.resolveAssetUrl(chosen, basePaths[0]);
     return { url, absolutePath: chosen };
   })()
     .then((value) => {
@@ -114,11 +121,12 @@ export function useResolvedImage(
   imagePath: string,
   basePaths: string[],
 ): ResolvedImage {
+  const { fs } = usePlatform();
   const entry = useMemo(
-    () => loadImage(imagePath, basePaths),
+    () => loadImage(fs, imagePath, basePaths),
     // Joined key: callers pass fresh array literals each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [imagePath, basePaths.join("|")],
+    [fs, imagePath, basePaths.join("|")],
   );
   return readEntry(entry);
 }
@@ -139,17 +147,5 @@ export function useResolvedImage(
  * ```
  */
 export function useImageUrl(imagePath: string, basePath: string): string {
-  const entry = useMemo(
-    () => loadImage(imagePath, [basePath]),
-    [imagePath, basePath],
-  );
-  return readEntry(entry).url;
-}
-
-/**
- * Preload an image URL into the cache.
- * Call this before rendering to avoid Suspense.
- */
-export function preloadImageUrl(imagePath: string, basePath: string): void {
-  loadImage(imagePath, [basePath]);
+  return useResolvedImage(imagePath, [basePath]).url;
 }

@@ -11,11 +11,7 @@ import {
 import { Button } from "@notefig/ui/button";
 import { copyTextToClipboard } from "@notefig/ui/clipboard";
 import { useTunnelConnection } from "@/hooks/use-tunnel-connection";
-import {
-  connectWithCode,
-  disconnectTunnel,
-  forgetPairing,
-} from "@/agent/tunnel/connect-flow";
+import { useModule } from "@notefig/core/react";
 import {
   closePairDialog,
   usePairDialog,
@@ -33,6 +29,7 @@ export function PairDialog() {
   const { t } = useTranslation();
   const { open, prefillCode } = usePairDialog();
   const state = useTunnelConnection();
+  const tunnel = useModule("tunnel");
 
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -50,7 +47,7 @@ export function PairDialog() {
     setSubmitting(true);
     setError(null);
     try {
-      await connectWithCode(pairingCode);
+      await tunnel.connect(pairingCode);
       closePairDialog();
     } catch (connectError) {
       setError(
@@ -108,8 +105,8 @@ export function PairDialog() {
               <Button
                 variant="ghost"
                 onClick={() => {
-                  disconnectTunnel();
-                  void forgetPairing();
+                  tunnel.disconnect();
+                  void tunnel.forget();
                 }}
               >
                 {t("tunnelPairDisconnect")}

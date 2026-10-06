@@ -11,7 +11,8 @@ import { useDockable, useDockChrome } from "../store";
 import { ScrollArea } from "@notefig/ui/scroll-area";
 import { cn } from "@notefig/ui/utils";
 import { dropZoneProps } from "@/utils/drag-protocol";
-import { appCore } from "@/core/current";
+import { useCore } from "@notefig/core/react";
+import type { TabsApi } from "@/entities/tabs";
 export type tabObject = {
   id: string;
   name: string;
@@ -68,11 +69,12 @@ function deriveDragState(active: DragEntry, over: DragEntry, id: string) {
 
 /** A file dropped on the tab bar opens (or moves) as a tab of this window. */
 function openDroppedFile(
+  tabs: Pick<TabsApi, "open">,
   payload: { fileType: string; path: string },
   windowId: string,
 ): void {
   if (payload.fileType !== "file") return;
-  appCore().tabs.open(payload.path, {
+  tabs.open(payload.path, {
     intent: "new-tab",
     targetWindowId: windowId,
     moveIfOpen: true,
@@ -90,6 +92,7 @@ function TabView({
 }: TabViewProps) {
   const { active, over } = useDndContext();
   const { dispatch } = useDockable();
+  const core = useCore();
   const { tabBarLeading, tabBarTrailing, tabBarLeadingActive, endInset } =
     useDockChrome();
   const { isSameWindow, currentEdgeZoneSide, isOverAny } = deriveDragState(
@@ -123,7 +126,7 @@ function TabView({
           data-testid="tab-bar"
           {...dropZoneProps({
             accepts: ["file"],
-            onDrop: (payload) => openDroppedFile(payload, id),
+            onDrop: (payload) => openDroppedFile(core.tabs, payload, id),
           })}
           className={cn(
             // Each window's tab bar is its own floating strip. Its outer

@@ -4,7 +4,7 @@
  * manifest version is on disk: unchanged deploys leave visitor edits alone
  * (editing the docs IS the product demo), changed deploys overwrite.
  */
-import type { IPlatformAdapter } from "@/adapters";
+import type { IPlatformAdapter } from "@/adapters/platform-adapter.interface";
 import {
   WORKSPACE_ROOT,
   manifestHash,

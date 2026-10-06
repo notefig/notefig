@@ -9,15 +9,17 @@ vi.mock("./workspaces", () => ({
   workspaceOfPath: vi.fn(() => null),
 }));
 vi.mock("@/entities/files", () => ({
-  getOrCreateWorkspaceCollections: vi.fn(),
   useMetadataFetching: vi.fn(() => false),
-  file: (ws: string, from: string) => ({
+}));
+/** The workspace's files the rename moves the file through. */
+const files = {
+  file: (from: string) => ({
     rename: (to: string) => {
       calls.push("rename-fs");
-      return renameFileOrDirectoryMock(ws, from, to);
+      return renameFileOrDirectoryMock(WS, from, to);
     },
   }),
-}));
+} as never;
 
 let cleanPromise: Promise<void> = Promise.resolve();
 vi.mock("@/utils/markdown-conversion", () => ({
@@ -86,7 +88,7 @@ describe("renameOpenFileTab", () => {
     const applyLayoutRename = vi.fn(() => calls.push("layout"));
 
     await renameOpenFileTab({
-      workspacePath: WS,
+      files,
       oldPath: OLD,
       newPath: NEW,
       applyLayoutRename,
@@ -114,7 +116,7 @@ describe("renameOpenFileTab", () => {
     );
 
     const run = renameOpenFileTab({
-      workspacePath: WS,
+      files,
       oldPath: OLD,
       newPath: NEW,
       applyLayoutRename: vi.fn(),
@@ -136,7 +138,7 @@ describe("renameOpenFileTab", () => {
     const applyLayoutRename = vi.fn();
 
     const run = renameOpenFileTab({
-      workspacePath: WS,
+      files,
       oldPath: OLD,
       newPath: NEW,
       applyLayoutRename,
@@ -158,14 +160,14 @@ describe("renameOpenFileTab", () => {
     );
 
     const run = renameOpenFileTab({
-      workspacePath: WS,
+      files,
       oldPath: OLD,
       newPath: NEW,
       applyLayoutRename: vi.fn(),
     });
     await expect(
       renameOpenFileTab({
-        workspacePath: WS,
+        files,
         oldPath: OLD,
         newPath: "/ws/other.md",
         applyLayoutRename: vi.fn(),
@@ -186,7 +188,7 @@ describe("renameOpenFileTab", () => {
 
     await expect(
       renameOpenFileTab({
-        workspacePath: WS,
+        files,
         oldPath: OLD,
         newPath: NEW,
         applyLayoutRename,

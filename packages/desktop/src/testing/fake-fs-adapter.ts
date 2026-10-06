@@ -8,15 +8,8 @@
  * race in the typing → save → collection → adoption pipeline. Deterministic
  * PRNG (reseedable per run) so failures are reproducible.
  *
- * Use via a dynamic import inside the `vi.mock` factory (same pattern as
- * `@/testing/node-db`), then import `fake` normally in the test body:
- *
- *   vi.mock("@/adapters", async () => ({
- *     platformAdapter: {
- *       fs: (await import("@/testing/fake-fs-adapter")).fake.adapter,
- *       ...
- *     },
- *   }));
+ * Hand `fake.adapter` to whatever the test builds as its fs
+ * (`testWorkspaceFiles(ws, fake.adapter)`, `createDocuments({ fs: … })`).
  *
  * `installWatcherSim` layers desktop (Tauri) watcher semantics on top,
  * mirrored from src-tauri: register-hash-before-write (fs_ops.rs
@@ -147,7 +140,7 @@ export function createFakeFsAdapter() {
 
     async startWatchingMetadata() {},
     async startWatchingContent() {},
-    stopWatching() {},
+    async stopWatching() {},
 
     async pickDirectory() {
       return null;

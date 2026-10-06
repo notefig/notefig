@@ -1,14 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 
-// acp-client pulls in file-sync → platform adapter, and permission-broker
-// reaches the agent collections (which need a db surface at module eval).
-// Nothing else on the adapter is exercised by a mock-harness round trip.
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
 import { NotefigAcpClient } from "@notefig/agent";
 import type { SessionNotification } from "@notefig/shared/agent";
 import { PermissionBroker } from "../permission-broker";
@@ -19,13 +10,17 @@ import {
   lastMockSetParams,
   registerMockScenario,
 } from "../mock-harness";
+import { testAgentStore } from "@/testing/test-agents";
 
 async function connectedClient(onUpdate: (n: SessionNotification) => void) {
   const transport = createMockAgentTransport();
   const client = new NotefigAcpClient({
     taskId: "task_test",
     transport,
-    permissionBroker: new PermissionBroker("task_test"),
+    permissionBroker: new PermissionBroker(
+      "task_test",
+      testAgentStore().permissionRequests,
+    ),
     onSessionUpdate: onUpdate,
     fs: {
       readTextFile: vi.fn(async () => ""),

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 // One-shot reads only: the live editor accessors and the document-sync
 // layer are stubbed so the test exercises the layout-scoping logic alone.
@@ -7,39 +7,32 @@ vi.mock("@/utils/markdown-conversion", () => ({
 }));
 
 import { getWorkspaceEditorContext } from "./editors";
-import { createTestCore, windowUrlState } from "@/testing/test-core";
+import { createLayout, type LayoutApi } from "./layout";
+import { memoryUrlState } from "@/testing/test-core";
 
-createTestCore({ url: windowUrlState() });
-
-function setLayout(children: string[], selected: string): void {
+function layoutOf(children: string[], selected: string): LayoutApi {
   const layout = [{ type: "Window", id: "w1", children, selected }];
-  window.history.replaceState(
-    null,
-    "",
-    `/?layout=${encodeURIComponent(JSON.stringify(layout))}`,
+  return createLayout(
+    memoryUrlState(`?layout=${encodeURIComponent(JSON.stringify(layout))}`),
   );
 }
-
-afterEach(() => {
-  window.history.replaceState(null, "", "/");
-});
 
 describe("getWorkspaceEditorContext", () => {
   it("does not count a sibling-prefixed workspace's tabs as this workspace's", () => {
     // `/ws-backup` shares `/ws` as a string prefix but is a different
     // workspace; only a tree-relative test tells them apart (utils/path.ts).
-    setLayout(["/ws/a.md", "/ws-backup/x.md"], "/ws-backup/x.md");
+    const layout = layoutOf(["/ws/a.md", "/ws-backup/x.md"], "/ws-backup/x.md");
 
-    const context = getWorkspaceEditorContext("/ws");
+    const context = getWorkspaceEditorContext(layout, "/ws");
 
     expect(context.openFiles.map((file) => file.path)).toEqual(["/ws/a.md"]);
     expect(context.activeFile).toBeNull();
   });
 
   it("scopes to the workspace and reports its active file", () => {
-    setLayout(["/ws/a.md", "/other/b.md"], "/ws/a.md");
+    const layout = layoutOf(["/ws/a.md", "/other/b.md"], "/ws/a.md");
 
-    const context = getWorkspaceEditorContext("/ws");
+    const context = getWorkspaceEditorContext(layout, "/ws");
 
     expect(context.openFiles.map((file) => file.path)).toEqual(["/ws/a.md"]);
     expect(context.activeFile).toBe("/ws/a.md");

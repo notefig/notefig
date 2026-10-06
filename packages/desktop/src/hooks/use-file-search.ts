@@ -22,17 +22,19 @@ export function useFileSearch(
   query: string,
   options: FileSearchOptions = {},
 ): FileSearchResult[] {
-  const { metadata } = useFileCollections(workspacePath);
+  const metadata = useFileCollections(workspacePath)?.metadata;
   const { data = [] } = useLiveQuery(
     (q) =>
-      q
-        .from({ file: metadata })
-        .where(({ file }) => eq(file.type, "file"))
-        .select(({ file }) => ({
-          path: file.path,
-          relativePath: file.relativePath,
-        })),
-    [workspacePath],
+      metadata
+        ? q
+            .from({ file: metadata })
+            .where(({ file }) => eq(file.type, "file"))
+            .select(({ file }) => ({
+              path: file.path,
+              relativePath: file.relativePath,
+            }))
+        : undefined,
+    [metadata],
   );
 
   const { limit, filter, matchAllWhenEmpty } = options;

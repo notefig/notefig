@@ -1,6 +1,5 @@
 import { z } from "zod";
 import type { AgentTool } from "@notefig/agent";
-import { getOrCreateWorkspaceCollections } from "@/entities/files";
 import { getFileName } from "@/utils/fs";
 
 const InputSchema = z.object({});
@@ -22,7 +21,7 @@ export const workspaceListDocuments: AgentTool<
     "List every document in the workspace (path, type, title). Title is the filename for now.",
   input: InputSchema,
   async execute(ctx) {
-    const { metadata } = getOrCreateWorkspaceCollections(ctx.workspacePath);
+    const { metadata } = ctx.services.files.collections;
     const value = metadata.toArray.map((entry) => ({
       path: entry.path,
       type: entry.type,

@@ -2,39 +2,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
+import type { Core } from "@notefig/core";
+import { CoreProvider } from "@notefig/core/react";
+import { CommandPalette } from "../command-palette";
+import { ThemeProvider } from "../../theme-provider";
+import { createTestCore } from "@/testing/test-core";
+import { filesModuleOf, testWorkspaceFiles } from "@/testing/test-files";
+import type { WorkspaceFiles } from "@/entities/files";
+import { kvModule } from "@/utils/kv-store";
 
-// Real TanStack DB collections, mocked fs seam — file results come from the
-// actual metadata collection through useFileSearch.
+// Real TanStack DB collections over a listing handed to them — file
+// results come from the actual metadata collection through useFileSearch.
 const adapter = {
-  createFiles: vi.fn(),
-  writeFiles: vi.fn(),
-  deleteFiles: vi.fn(),
   getMetadata: vi.fn(),
-  readFiles: vi.fn(),
   readDirectory: vi.fn(),
 };
 
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    fs: adapter,
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
-vi.mock("@/utils/file-write-effects", () => ({
-  invalidateDerivedState: vi.fn(),
-}));
-
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
-let testCounter = 0;
-let WS = "";
+const WS = "/ws-palette";
 
-let files: typeof import("@/entities/files");
-let CommandPalette: typeof import("../command-palette").CommandPalette;
-let ThemeProvider: typeof import("../../theme-provider").ThemeProvider;
-let CoreProvider: typeof import("@notefig/core/react").CoreProvider;
-let createTestCore: typeof import("@/testing/test-core").createTestCore;
+let files: WorkspaceFiles;
+let testCore: Core;
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -53,7 +42,7 @@ function renderPalette() {
           defaultTheme: "light",
           children: createElement(CoreProvider, {
             // A real test core, with tab opens recorded instead of applied.
-            core: { ...createTestCore(), tabs: { open: openFile } } as never,
+            core: { ...testCore, tabs: { open: openFile } } as never,
             children: createElement(CommandPalette, {
               open: true,
               workspacePath: WS,
@@ -91,7 +80,6 @@ function itemLabels(): string[] {
 beforeEach(async () => {
   vi.clearAllMocks();
   openFile.mockReturnValue(true);
-  WS = `/ws-palette-${testCounter++}`;
   adapter.getMetadata.mockResolvedValue({ succeeded: [], failed: [] });
   adapter.readDirectory.mockImplementation(
     async () => ({
@@ -106,12 +94,12 @@ beforeEach(async () => {
     }),
   );
 
-  files = await import("@/entities/files");
-  ({ CommandPalette } = await import("../command-palette"));
-  ({ ThemeProvider } = await import("../../theme-provider"));
-  ({ CoreProvider } = await import("@notefig/core/react"));
-  ({ createTestCore } = await import("@/testing/test-core"));
-  await files.getOrCreateWorkspaceCollections(WS).metadata.preload();
+  files = testWorkspaceFiles(WS, adapter);
+  // The settings the palette reads persist through the kv store over the
+  // test core's platform db.
+  testCore = createTestCore({ modules: [kvModule, filesModuleOf([files])] });
+  await testCore.workspace(WS).open();
+  await files.collections.metadata.preload();
 });
 
 afterEach(() => {
@@ -119,7 +107,7 @@ afterEach(() => {
   container?.remove();
   container = null;
   root = null;
-  files.workspaceCollections.drop(WS);
+  files.dispose();
   document.body.innerHTML = "";
 });
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePlatform } from "@/core/use-platform";
 import type { FileEntry } from "@/utils/fs";
 import { getOrCreateEditor } from "@/components/editor/editor-store";
 import { focusTab } from "@/tabs/tab-controllers";
@@ -19,9 +20,10 @@ interface ImageViewerProps {
  * Must be wrapped in a Suspense boundary.
  */
 export function ImageViewer({ file, basePath }: ImageViewerProps) {
+  const { fs } = usePlatform();
   useEffect(() => {
-    getOrCreateEditor(file.path, { type: "image" });
-  }, [file.path]);
+    getOrCreateEditor(file.path, { type: "image" }, fs);
+  }, [fs, file.path]);
 
   // Auto-focus when this component mounts (handles panel 1+ timing issues)
   useEffect(() => {

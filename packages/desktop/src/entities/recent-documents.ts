@@ -14,13 +14,15 @@
  */
 import { useMemo } from "react";
 import { createCollection, useLiveQuery } from "@tanstack/react-db";
-import { persistedCollectionOptions } from "@tanstack/db-sqlite-persistence-core";
-import { platformAdapter } from "@/adapters";
-import { getOrCreateWorkspaceCollections } from "@/entities/files";
+import {
+  persistedCollectionOptions,
+  type PersistedCollectionPersistence,
+} from "@tanstack/db-sqlite-persistence-core";
+import { defineModule } from "@notefig/core";
+import { useCore } from "@notefig/core/react";
 import { isScratchpadFileRow } from "@/entities/scratchpads";
 import {
   useOpenWorkspaces,
-  workspaceOfPath,
   type OpenWorkspaceRow,
 } from "@/entities/workspaces";
 import { relativeTreePath, workspaceKey } from "@/utils/path";
@@ -44,59 +46,90 @@ export interface RecentDocument {
   isScratchpad: boolean;
 }
 
-export const recentDocumentsCollection = createCollection(
-  persistedCollectionOptions<RecentDocumentRow, string>({
-    id: RECENT_DOCUMENTS_COLLECTION_ID,
-    getKey: (row) => row.path,
-    persistence: platformAdapter.db.get(),
-  }),
-);
-
-/**
- * Record `path` as the document most recently in front of the user. A path
- * outside every open workspace is not a document of ours and is ignored.
- * Resolves once the row is durable.
- */
-export async function touchRecentDocument(
-  path: string,
-  now: number = Date.now(),
-): Promise<void> {
-  const workspacePath = workspaceOfPath(path);
-  if (workspacePath === null) return;
-  await recentDocumentsCollection.preload();
-  const row: RecentDocumentRow = {
-    path,
-    workspaceKey: workspaceKey(workspacePath),
-    lastOpenedAt: now,
-  };
-  const tx = recentDocumentsCollection.get(path)
-    ? recentDocumentsCollection.update(path, (draft) => {
-        draft.lastOpenedAt = now;
-        draft.workspaceKey = row.workspaceKey;
-      })
-    : recentDocumentsCollection.insert(row);
-  await tx.isPersisted.promise;
-  await pruneRecentDocuments();
-}
-
-/** Keep storage bounded: drop the oldest rows past the cap. */
-async function pruneRecentDocuments(): Promise<void> {
-  const rows = [...recentDocumentsCollection.values()].sort(
-    (a, b) => a.lastOpenedAt - b.lastOpenedAt,
+function createRecentDocumentsCollection(
+  persistence: PersistedCollectionPersistence,
+) {
+  return createCollection(
+    persistedCollectionOptions<RecentDocumentRow, string>({
+      id: RECENT_DOCUMENTS_COLLECTION_ID,
+      getKey: (row) => row.path,
+      persistence,
+    }),
   );
-  const excess = rows.length - MAX_RECENT_DOCUMENTS;
-  if (excess <= 0) return;
-  await recentDocumentsCollection.delete(
-    rows.slice(0, excess).map((row) => row.path),
-  ).isPersisted.promise;
 }
 
-/** Does the file still exist in the workspace's listing? Non-reactive:
- *  the list re-renders on its own inputs, and a deleted file's tab prunes
- *  itself long before this matters. */
-function existsInWorkspace(workspacePath: string, path: string): boolean {
-  return getOrCreateWorkspaceCollections(workspacePath).metadata.has(path);
+/** `core.recentDocuments`. */
+export interface RecentDocumentsApi {
+  readonly collection: ReturnType<typeof createRecentDocumentsCollection>;
+  /**
+   * Record `path` as the document most recently in front of the user. A
+   * path outside every open workspace is not a document of ours and is
+   * ignored. Resolves once the row is durable.
+   */
+  touch(path: string, now?: number): Promise<void>;
 }
+
+export function createRecentDocuments({
+  persistence,
+  workspaceOf,
+}: {
+  persistence: PersistedCollectionPersistence;
+  /** The open workspace containing a path (`workspaceRegistry.workspaceOf`). */
+  workspaceOf: (absolutePath: string) => string | null;
+}): RecentDocumentsApi {
+  const recent = createRecentDocumentsCollection(persistence);
+
+  /** Keep storage bounded: drop the oldest rows past the cap. */
+  const prune = async () => {
+    const rows = [...recent.values()].sort(
+      (a, b) => a.lastOpenedAt - b.lastOpenedAt,
+    );
+    const excess = rows.length - MAX_RECENT_DOCUMENTS;
+    if (excess <= 0) return;
+    await recent.delete(rows.slice(0, excess).map((row) => row.path))
+      .isPersisted.promise;
+  };
+
+  return {
+    collection: recent,
+    async touch(path, now = Date.now()) {
+      const workspacePath = workspaceOf(path);
+      if (workspacePath === null) return;
+      await recent.preload();
+      const row: RecentDocumentRow = {
+        path,
+        workspaceKey: workspaceKey(workspacePath),
+        lastOpenedAt: now,
+      };
+      const tx = recent.get(path)
+        ? recent.update(path, (draft) => {
+            draft.lastOpenedAt = now;
+            draft.workspaceKey = row.workspaceKey;
+          })
+        : recent.insert(row);
+      await tx.isPersisted.promise;
+      await prune();
+    },
+  };
+}
+
+declare module "@notefig/core" {
+  interface CoreModules {
+    recentDocuments: RecentDocumentsApi;
+  }
+}
+
+export const recentDocumentsModule = defineModule({
+  name: "recentDocuments",
+  needs: ["platform", "workspaceRegistry"],
+  register: (ctx) => {
+    const registry = ctx.use("workspaceRegistry");
+    return createRecentDocuments({
+      persistence: ctx.use("platform").db.get(),
+      workspaceOf: (path) => registry.workspaceOf(path),
+    });
+  },
+});
 
 function isScratchpad(workspacePath: string, path: string): boolean {
   const relativePath = relativeTreePath(workspacePath, path);
@@ -136,12 +169,23 @@ export function deriveRecentDocuments(
  * capped at `limit`. Re-resolves as workspaces open and close.
  */
 export function useRecentDocuments(limit: number): RecentDocument[] {
+  const core = useCore();
   const { data: rows = [] } = useLiveQuery((q) =>
-    q.from({ recent: recentDocumentsCollection }),
+    q.from({ recent: core.recentDocuments.collection }),
   );
   const openWorkspaces = useOpenWorkspaces();
-  return useMemo(
-    () => deriveRecentDocuments(rows, openWorkspaces, existsInWorkspace, limit),
-    [rows, openWorkspaces, limit],
-  );
+  return useMemo(() => {
+    // Does the file still exist in the workspace's listing? Non-reactive:
+    // the list re-renders on its own inputs, and a deleted file's tab
+    // prunes itself long before this matters.
+    const existsInWorkspace = (workspacePath: string, path: string) =>
+      core.workspaces.isOpen(workspacePath) &&
+      core.workspace(workspacePath).files.collections.metadata.has(path);
+    return deriveRecentDocuments(
+      rows,
+      openWorkspaces,
+      existsInWorkspace,
+      limit,
+    );
+  }, [core, rows, openWorkspaces, limit]);
 }

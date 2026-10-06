@@ -1,19 +1,33 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createElement } from "react";
+import { CoreProvider } from "@notefig/core/react";
 import { Markdown } from "@/components/ui/markdown";
+import type { IPlatformAdapter } from "@/adapters/platform-adapter.interface";
+import { createTestCore } from "@/testing/test-core";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 
+// Links open through the platform's ui surface.
+const ui = { openExternal: vi.fn() } as unknown as IPlatformAdapter["ui"];
+const core = createTestCore({ platform: { ui } });
+
 function render(text: string) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root!.render(createElement(Markdown, { text })));
+  act(() =>
+    root!.render(
+      createElement(CoreProvider, {
+        core,
+        children: createElement(Markdown, { text }),
+      }),
+    ),
+  );
 }
 
 /** Rendering goes through the conversion worker (inline fallback in jsdom,

@@ -4,30 +4,21 @@ import { createRoot, type Root } from "react-dom/client";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { CoreProvider } from "@notefig/core/react";
 
-// The layout hook lives in the tabs entity, whose module graph reaches the
-// persisted agent collections; give them the in-memory rig.
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
-const workspaces = vi.hoisted(() => ({
+const workspaces = {
   open: new Set<string>(),
   // What the registry did on `workspace:focused` (see `registry` below).
   focused: vi.fn((_path: string) => {}),
-  workspaceOfPath: (path: string) =>
+  workspaceOf: (path: string) =>
     [...workspaces.open].find((ws) => path.startsWith(`${ws}/`)) ?? null,
-}));
-vi.mock("@/entities/workspaces", () => workspaces);
-const scratchpads = vi.hoisted(() => ({
+};
+// Each workspace's scratchpads, as the landing reaches them through core.
+const scratchpads = {
   enterScratchpad: vi.fn(
     async (ws: string, _keep: readonly string[]): Promise<string | null> =>
       `${ws}/.notefig/scratchpads/sunny-otter.md`,
   ),
   sweepScratchpads: vi.fn(async (_ws: string, _keep: readonly string[]) => {}),
-}));
-vi.mock("@/entities/scratchpads", () => scratchpads);
+};
 const recents = vi.hoisted(() => ({ addRecentProject: vi.fn() }));
 vi.mock("./use-recent-projects", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./use-recent-projects")>()),
@@ -51,10 +42,24 @@ let openProject: ((path: string) => Promise<boolean>) | undefined;
 let router: ReturnType<typeof createMemoryRouter>;
 let core: ReturnType<typeof createTestCore>;
 
+const scratchpadsModule = defineModule({
+  name: "scratchpads",
+  workspace: {
+    create: ({ workspace }) =>
+      ({
+        enter: (keep: readonly string[]) =>
+          scratchpads.enterScratchpad(workspace.path, keep),
+        sweep: (keep: readonly string[]) =>
+          scratchpads.sweepScratchpads(workspace.path, keep),
+      }) as never,
+  },
+});
+
 /** The registry's part of a focus, as the landing relies on it: the
  *  workspace is in the open set before anything lands in it. */
 const registry = defineModule({
-  name: "workspace-registry",
+  name: "workspaceRegistry",
+  register: () => ({ workspaceOf: workspaces.workspaceOf }) as never,
   boot: (_api, ctx) =>
     ctx.hooks.on("workspace:focused", ({ path }) => {
       workspaces.open.add(path);
@@ -88,6 +93,7 @@ beforeEach(async () => {
     url: urlStateFromRouter(router),
     modules: [
       tabsModule({ canOpenFile: () => true }),
+      scratchpadsModule,
       registry,
       scratchpadLandingModule,
       sidebarViewModule,

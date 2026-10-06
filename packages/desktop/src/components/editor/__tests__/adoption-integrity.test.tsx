@@ -100,7 +100,7 @@ const fake = vi.hoisted(() => {
     },
     async startWatchingMetadata() {},
     async startWatchingContent() {},
-    stopWatching() {},
+    async stopWatching() {},
     async pickDirectory() {
       return null;
     },
@@ -112,20 +112,12 @@ const fake = vi.hoisted(() => {
   return { store, adapter };
 });
 
-// One flat fake serving both surfaces it touches — the extra keys on each
-// are harmless, and keeping a single object keeps the fs state in one place.
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    fs: fake.adapter,
-    ui: fake.adapter,
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
 // Real modules — imported after the adapter mock so they bind to the fake fs.
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
+import { QueryClient } from "@tanstack/react-query";
+import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { useEditorFileSync } from "../use-editor-file-sync";
-import { getOrCreateWorkspaceCollections } from "@/entities/files";
+import { createWorkspaceFiles, type WorkspaceFiles } from "@/entities/files";
 import { handleContentFileSystemChange } from "@/utils/file-sync";
 import {
   closeDocumentSync,
@@ -152,6 +144,8 @@ beforeAll(() => {
 // Harness: real hook, real editor, prop-controlled file entry
 let workspaceCounter = 0;
 let WS: string;
+/** The workspace's files, over the fake disk. */
+let files: WorkspaceFiles;
 let FILE: string;
 let editor: Editor;
 let root: Root;
@@ -174,7 +168,7 @@ let deliverEntry: (entry: FileEntry) => void;
 function Harness({ initial }: { initial: FileEntry }) {
   const [entry, setEntry] = useState(initial);
   deliverEntry = setEntry;
-  useEditorFileSync(editor, entry, WS, true, undefined);
+  useEditorFileSync(editor, entry, files, true, undefined);
   return null;
 }
 
@@ -188,19 +182,16 @@ async function tick(ms: number) {
  * verified + row-synced by the watcher handler, then rendered to the hook. */
 async function externalArrival(contentText: string) {
   fake.store.set(FILE, { content: contentText, modifiedAt: new Date() });
-  await handleContentFileSystemChange(
-    {
-      watchId: "test-watch",
-      changes: [
-        {
-          path: FILE,
-          content: contentText,
-          contentHash: calculateContentHash(contentText),
-        },
-      ],
-    },
-    WS,
-  );
+  await handleContentFileSystemChange(files, fake.adapter as never, {
+    watchId: "test-watch",
+    changes: [
+      {
+        path: FILE,
+        content: contentText,
+        contentHash: calculateContentHash(contentText),
+      },
+    ],
+  });
   deliverEntry(entryFor(contentText));
 }
 
@@ -224,6 +215,11 @@ beforeEach(async () => {
   workspaceCounter++;
   WS = `/ws-adoption-${workspaceCounter}`;
   FILE = `${WS}/note.md`;
+  files = createWorkspaceFiles({
+    workspacePath: WS,
+    fs: fake.adapter as unknown as FileSystemSurface,
+    queryClient: new QueryClient(),
+  });
 
   fake.store.clear();
   fake.store.set(FILE, {
@@ -234,7 +230,7 @@ beforeEach(async () => {
   // Adoption commits only rows that still match the content collection's
   // current state, so this harness runs the real collection: started and
   // seeded like an open file in the app.
-  const { content } = getOrCreateWorkspaceCollections(WS);
+  const { content } = files.collections;
   await content.preload();
   content.utils.writeUpsert({
     path: FILE,
@@ -263,6 +259,7 @@ afterEach(async () => {
   });
   editor.destroy();
   closeDocumentSync(FILE);
+  files.dispose();
 });
 
 describe("adoption integrity: self-writes vs external writes vs typing", () => {

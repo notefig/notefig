@@ -12,10 +12,12 @@ declare module "./types" {
   interface CoreModules {
     "t-store": { value: number };
     "t-reader": { read(): number };
+    "t-runtime": { closed: string[] };
   }
   interface WorkspaceModules {
     "t-history": { log: string[] };
     "t-tasks": { history: { log: string[] } };
+    "t-runtime": { path: string };
   }
   interface CoreHookMap {
     "t:ping": number;
@@ -468,6 +470,29 @@ describe("workspaces", () => {
 
     expect(core.workspaces.list()).toEqual([]);
     expect(log).toEqual([]);
+  });
+
+  it("hands a workspace part its module's API on create and on dispose", async () => {
+    const runtime = defineModule({
+      name: "t-runtime",
+      register: () => ({ closed: [] as string[] }),
+      workspace: {
+        create: (ctx, api) => {
+          expect(api.closed).toEqual([]);
+          return { path: ctx.workspace.path };
+        },
+        dispose: (instance, workspace, api) =>
+          void api.closed.push(`${instance.path} ${workspace.key}`),
+      },
+    });
+    const core = coreWithLifecycle({
+      services: {},
+      modules: [runtime],
+      workspaceKey: (p) => p.toLowerCase(),
+    });
+    await core.workspaces.open("/WS");
+    await core.workspaces.close("/WS");
+    expect(core["t-runtime"].closed).toEqual(["/WS /ws"]);
   });
 
   it("closes open workspaces on dispose", async () => {

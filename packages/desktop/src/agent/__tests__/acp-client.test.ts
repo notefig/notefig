@@ -1,13 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 
-// acp-client pulls in file-sync → platform adapter, and permission-broker
-// reaches the agent collections (which need a db surface at module eval).
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
 // The workspace fs surface is an injected dep of the client now.
 const readTextFile = vi.fn(async () => "content");
 const writeTextFile = vi.fn(async () => {});
@@ -20,6 +12,7 @@ import {
 } from "@notefig/agent";
 import { PermissionBroker } from "../permission-broker";
 import { FakeAgent } from "../mock-harness";
+import { testAgentStore } from "@/testing/test-agents";
 import type { SessionNotification } from "@notefig/shared/agent";
 
 type Json = Record<string, unknown>;
@@ -31,7 +24,10 @@ function makeClient(initializeResult?: Json) {
   const client = new NotefigAcpClient({
     taskId: "task_acp_test",
     transport: clientSide,
-    permissionBroker: new PermissionBroker("task_acp_test"),
+    permissionBroker: new PermissionBroker(
+      "task_acp_test",
+      testAgentStore().permissionRequests,
+    ),
     onSessionUpdate: (_n: SessionNotification) => {},
     fs: { readTextFile, writeTextFile },
     onUnsupportedProtocolVersion,
@@ -258,7 +254,10 @@ describe("session config options over the wire", () => {
     const client = new NotefigAcpClient({
       taskId: "task_cfg",
       transport: clientSide,
-      permissionBroker: new PermissionBroker("task_cfg"),
+      permissionBroker: new PermissionBroker(
+        "task_cfg",
+        testAgentStore().permissionRequests,
+      ),
       onSessionUpdate,
       onSessionConfigChange,
       fs: { readTextFile, writeTextFile },

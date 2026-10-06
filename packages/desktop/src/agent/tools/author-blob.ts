@@ -2,7 +2,6 @@ import { z } from "zod";
 import { toJsonSchema, type AgentTool } from "@notefig/agent";
 import { BlobEnvelopeSchema, findBlobs, serializeBlobBlock } from "@notefig/shared/blobs";
 import { getAllBlobTypes, getBlobType } from "@/components/editor/blobs/blob-registry";
-import { readWorkspaceTextFile, writeWorkspaceTextFile } from "@/utils/file-sync";
 import { resolveWorkspacePath } from "@/utils/fs";
 
 const InputSchema = z.object({
@@ -122,7 +121,7 @@ export const authorBlob: AgentTool<z.infer<typeof InputSchema>, { blobId: string
 
     let content: string;
     try {
-      content = await readWorkspaceTextFile(resolved.absolute);
+      content = await ctx.services.documents.read(resolved.absolute);
     } catch {
       content = "";
     }
@@ -139,8 +138,12 @@ export const authorBlob: AgentTool<z.infer<typeof InputSchema>, { blobId: string
       payload: envelope.data,
       rawYaml: "",
     });
-    const separator = content.length === 0 ? "" : content.endsWith("\n") ? "\n" : "\n\n";
-    await writeWorkspaceTextFile(resolved.absolute, `${content}${separator}${fence}`);
+    const separator =
+      content.length === 0 ? "" : content.endsWith("\n") ? "\n" : "\n\n";
+    await ctx.services.documents.write(
+      resolved.absolute,
+      `${content}${separator}${fence}`,
+    );
 
     return { ok: true, value: { blobId: input.id } };
   },

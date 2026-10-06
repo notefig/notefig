@@ -5,17 +5,12 @@ import type { RecentDocument } from "@/entities/recent-documents";
 import type { AttentionItem } from "@/entities/attention";
 import { deriveAppStatus, type AppStatusInputs } from "./use-app-status";
 
-vi.mock("@/adapters", async () => ({
-  platformAdapter: { db: (await import("@/testing/node-db")).createNodeTestDb() },
-}));
-vi.mock("@/entities/workspaces", () => ({ useOpenWorkspaces: () => [] }));
 vi.mock("@/utils/intl", () => ({ default: { t: (key: string) => key } }));
 vi.mock("@/components/agent/jump-to-task", () => ({ jumpToRound: vi.fn(), jumpToTask: vi.fn() }));
-vi.mock("@/entities/scratchpads", () => ({
-  scratchpads: () => ({ createAndOpen: vi.fn() }),
-}));
+
 
 const tabs = { open: vi.fn(() => true), openAgent: vi.fn() };
+const editors = { reveal: vi.fn() };
 
 function round(turnId: string, overrides: Partial<PromptRound> = {}): PromptRound {
   return {
@@ -56,7 +51,8 @@ function document(path: string): RecentDocument {
 function inputs(overrides: Partial<AppStatusInputs> = {}): AppStatusInputs {
   return {
     host: {
-      workspacePath: "/ws-a",
+      editors,
+      scratchpads: { createAndOpen: vi.fn() },
       tabs,
       openWorkspace: vi.fn(),
       openSettings: vi.fn(),
@@ -173,7 +169,13 @@ describe("deriveAppStatus", () => {
 
     const welcome = deriveAppStatus(
       inputs({
-        host: { workspacePath: null, tabs: null, openWorkspace: vi.fn(), openSettings: vi.fn() },
+        host: {
+          editors,
+          scratchpads: null,
+          tabs: null,
+          openWorkspace: vi.fn(),
+          openSettings: vi.fn(),
+        },
         rounds: [round("t1")],
         attention: { items: [], overall: "bau", byRound: new Map(), byTask: new Map() },
       }),

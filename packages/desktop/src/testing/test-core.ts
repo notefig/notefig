@@ -1,12 +1,15 @@
 /**
  * A core for unit tests: the layout module (plus whatever the test adds,
- * e.g. `tabsModule`) over a URL the test controls, installed as the app
- * core so `appCore()` callers find it. Services a test does not exercise
- * are left out; a module that needs one fails loudly at `createCore`.
+ * e.g. `tabsModule`) over a URL the test controls, a fresh query client,
+ * and a platform whose database is in memory and the test's own (give
+ * `platform` for the surfaces a test exercises). A module reaching a
+ * surface the test left out fails loudly.
  */
+import { QueryClient } from "@tanstack/react-query";
 import { createCore, type AnyModule, type Core } from "@notefig/core";
-import { installAppCore } from "@/core/current";
+import type { IPlatformAdapter } from "@/adapters/platform-adapter.interface";
 import { layoutModule, type UrlState } from "@/entities/layout";
+import { createNodeTestDb } from "./node-db";
 import { workspaceKey } from "@/utils/path";
 
 /** A URL that lives only in memory. */
@@ -45,13 +48,20 @@ export function windowUrlState(): UrlState {
 }
 
 export function createTestCore(
-  options: { url?: UrlState; modules?: AnyModule[] } = {},
+  options: {
+    url?: UrlState;
+    modules?: AnyModule[];
+    platform?: Partial<IPlatformAdapter>;
+  } = {},
 ): Core {
   const core = createCore({
-    services: { url: options.url ?? memoryUrlState() } as never,
+    services: {
+      url: options.url ?? memoryUrlState(),
+      queryClient: new QueryClient(),
+      platform: { db: createNodeTestDb(), ...options.platform },
+    } as never,
     modules: [layoutModule, ...(options.modules ?? [])],
     workspaceKey,
   });
-  installAppCore(core);
   return core;
 }

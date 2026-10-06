@@ -16,24 +16,20 @@ import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
 import {
-  getOrCreateWorkspaceCollections,
-  refetchWorkspaceMetadata,
   useContentFetching,
+  useContentWatches,
   useOpenFileRows,
 } from "@/entities/files";
-import { syncContentWatchers } from "@/utils/file-sync";
 import {
-  openWorkspacesCollection,
   useFocusedWorkspace,
   useOpenWorkspacesReady,
   useWorkspaceOfPath,
-  workspaceOfPath,
 } from "@/entities/workspaces";
 import { useWorkspaceTabs, renameOpenFileTab } from "@/entities/tabs";
 import { DebugPanel } from "./debug-panel";
 import { useOpenProject } from "@/hooks/use-open-project";
 import { Welcome } from "@/components/welcome";
-import { platformAdapter } from "@/adapters";
+import { usePlatform } from "@/core/use-platform";
 import { usePublishAppStatus } from "@/hooks/use-app-status";
 import { useProjectSettings } from "@/utils/project-settings";
 import { useDockableTabs } from "@/hooks/use-dockable-tabs";
@@ -46,7 +42,6 @@ import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary"
 import { useThrowWorkspaceAccessError } from "@/components/workspace-error-boundary";
 import { isFileTabId } from "@/entities/tabs";
 import { useCore } from "@notefig/core/react";
-import { touchRecentDocument } from "@/entities/recent-documents";
 import { useTrackActiveTab } from "@/entities/seen";
 import { useTabElements } from "@/tabs/tab-types";
 import { useReleaseNotesOnUpdate } from "@/hooks/use-release-notes-on-update";
@@ -83,12 +78,13 @@ export const Workspace = () => {
 /** The native "Open Folder" menu item (Rust emits `folder-selected`). */
 function useOpenProjectFromHost(): void {
   const openProject = useOpenProject();
+  const { ui } = usePlatform();
   useEffect(
     () =>
-      platformAdapter.ui.addEventListener((event) => {
+      ui.addEventListener((event) => {
         if (event.type === "folder-selected") void openProject(event.payload);
       }),
-    [openProject],
+    [ui, openProject],
   );
 }
 
@@ -98,21 +94,22 @@ function useOpenProjectFromHost(): void {
  * real-backend shim can drive for a given path. Dev/test builds only.
  */
 function useOpenProjectTestSeam(): void {
+  const core = useCore();
   const openProject = useOpenProject();
   useEffect(() => {
     if (!import.meta.env.DEV && !import.meta.env.VITE_TEST_BACKEND) return;
     (window as Window & { __notefigTest?: unknown }).__notefigTest = {
       openProject,
       openWorkspaces: () =>
-        [...openWorkspacesCollection.values()].map((row) => row.path),
+        [...core.workspaceRegistry.collection.values()].map((row) => row.path),
       metadataPaths: (workspacePath: string) =>
-        getOrCreateWorkspaceCollections(workspacePath).metadata.toArray.map(
-          (row) => row.path,
-        ),
+        core
+          .workspace(workspacePath)
+          .files.collections.metadata.toArray.map((row) => row.path),
       refetchMetadata: (workspacePath: string) =>
-        refetchWorkspaceMetadata(workspacePath),
+        core.workspace(workspacePath).files.refetchMetadata(),
     };
-  }, [openProject]);
+  }, [core, openProject]);
 }
 
 /** The workspace surface: `workspacePath` is the focused workspace — what
@@ -396,7 +393,7 @@ function useWorkspaceDocuments({
     layout: Parameters<typeof removeTabFromLayout>[0],
   ) => void;
 }) {
-  const { tabs } = useCore();
+  const { tabs, recentDocuments } = useCore();
   const {
     fileTabsByWorkspace,
     agentTaskRows: openAgentTaskRows,
@@ -418,18 +415,15 @@ function useWorkspaceDocuments({
   // The Everything view's recent documents: whatever file tab is in front.
   useEffect(() => {
     if (activeTabId !== null && isFileTabId(activeTabId)) {
-      void touchRecentDocument(activeTabId);
+      void recentDocuments.touch(activeTabId);
     }
-  }, [activeTabId]);
+  }, [recentDocuments, activeTabId]);
   // ...and the seen tracker: whatever tab is in front has been looked at.
   useTrackActiveTab(activeTabId);
 
   const isFetchingContent = useContentFetching();
   useStaleTabPruning(staleTabIds, layout, handleLayoutChange);
-  useEffect(() => {
-    syncContentWatchers(fileTabsByWorkspace);
-  }, [fileTabsByWorkspace]);
-  useEffect(() => () => syncContentWatchers(new Map()), []);
+  useContentWatches(fileTabsByWorkspace);
 
   return { allDockableTabs, wordCount, isSynced: !isFetchingContent };
 }
@@ -503,18 +497,20 @@ function useWorkspaceActions({
 /** Rename/move a file while its tab is open — the close-and-reopen
  *  primitive keeps the tab in its window slot. */
 function useRenameOpenFile(workspacePath: string) {
-  const { tabs } = useCore();
+  const core = useCore();
   return useCallback(
     (oldPath: string, newPath: string) =>
       renameOpenFileTab({
         // The tab belongs to the workspace that holds its file, which need
         // not be the one the sidebar shows.
-        workspacePath: workspaceOfPath(oldPath) ?? workspacePath,
+        files: core.workspace(
+          core.workspaceRegistry.workspaceOf(oldPath) ?? workspacePath,
+        ).files,
         oldPath,
         newPath,
-        applyLayoutRename: tabs.rename,
+        applyLayoutRename: core.tabs.rename,
       }),
-    [workspacePath, tabs],
+    [workspacePath, core],
   );
 }
 

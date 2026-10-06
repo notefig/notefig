@@ -11,8 +11,7 @@
 import { defineModule } from "@notefig/core";
 import type { LayoutApi } from "./layout";
 import { isFileTabId } from "./tabs";
-import { workspaceOfPath } from "./workspaces";
-import { enterScratchpad, sweepScratchpads } from "./scratchpads";
+import type { WorkspaceRegistry } from "./workspaces";
 import { workspaceKey } from "@/utils/path";
 
 declare module "@notefig/core" {
@@ -22,11 +21,15 @@ declare module "@notefig/core" {
 }
 
 /** Whether any file tab in the dock belongs to the workspace. */
-function hasOpenFileTab(layout: LayoutApi, workspacePath: string): boolean {
+function hasOpenFileTab(
+  layout: LayoutApi,
+  registry: WorkspaceRegistry,
+  workspacePath: string,
+): boolean {
   const key = workspaceKey(workspacePath);
   return layout.openTabIds().some((tabId) => {
     if (!isFileTabId(tabId)) return false;
-    const owner = workspaceOfPath(tabId);
+    const owner = registry.workspaceOf(tabId);
     return owner !== null && workspaceKey(owner) === key;
   });
 }
@@ -35,16 +38,21 @@ export const scratchpadLandingModule = defineModule({
   name: "scratchpad-landing",
   // The registry's focus handler runs first: the workspace is in the open
   // set, its collections seeded, before anything lands in it.
-  needs: ["layout", "tabs", "workspace-registry"],
+  needs: ["layout", "tabs", "workspaceRegistry"],
   boot: (_api, ctx) => {
     const layout = ctx.use("layout");
     const tabs = ctx.use("tabs");
+    const registry = ctx.use("workspaceRegistry");
     return ctx.hooks.on("workspace:entered", async ({ path }) => {
-      if (hasOpenFileTab(layout, path)) {
-        await sweepScratchpads(path, layout.openTabIds());
+      // Closed while the focus steps before this one ran: nowhere to land.
+      const workspace = ctx.workspaceHandle(path);
+      if (!workspace.isOpen()) return;
+      const { scratchpads } = workspace;
+      if (hasOpenFileTab(layout, registry, path)) {
+        await scratchpads.sweep(layout.openTabIds());
         return;
       }
-      const scratchpad = await enterScratchpad(path, layout.openTabIds());
+      const scratchpad = await scratchpads.enter(layout.openTabIds());
       if (scratchpad !== null) tabs.open(scratchpad, { intent: "new-tab" });
     });
   },

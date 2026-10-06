@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act, createElement, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createCollection } from "@tanstack/react-db";
@@ -11,27 +11,23 @@ import { persistedCollectionOptions } from "@tanstack/db-sqlite-persistence-core
  * session already used, and the adapter treats the write as already
  * applied — the row shows in memory and is gone on the next launch.
  */
-const { dbRef } = vi.hoisted(() => ({
-  dbRef: { current: null as null | import("../../testing/node-db").NodeTestDb },
-}));
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (dbRef.current = (
-      await import("../../testing/node-db")
-    ).createNodeTestDb()),
-  },
-}));
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
-import { useKv, type KvRow } from "../kv-store";
+import { CoreProvider } from "@notefig/core/react";
+import type { Core } from "@notefig/core";
+import { kvModule, useKv, type KvRow } from "../kv-store";
+import { createNodeTestDb, type NodeTestDb } from "@/testing/node-db";
+import { createTestCore } from "@/testing/test-core";
 
 const NS = "early";
+let db: NodeTestDb;
+let core: Core;
 const storage = () =>
   createCollection(
     persistedCollectionOptions<KvRow, string>({
       id: `kv:${NS}`,
       getKey: (row) => row.key,
-      persistence: dbRef.current!.get(),
+      persistence: db.get(),
     }),
   );
 
@@ -46,6 +42,8 @@ function Probe() {
 }
 
 beforeEach(async () => {
+  db = createNodeTestDb();
+  core = createTestCore({ modules: [kvModule], platform: { db } });
   // "Previous session": one row already in storage.
   const previous = storage();
   await previous.preload();
@@ -69,7 +67,12 @@ describe("useKv().set before hydration", () => {
     // storage round-trips) does not get to finish — the window a boot-time
     // write lands in.
     act(() => {
-      root!.render(createElement(Probe));
+      root!.render(
+        createElement(CoreProvider, {
+          core,
+          children: createElement(Probe),
+        }),
+      );
     });
     expect(api!.isReady).toBe(false);
     api!.set("b", 2);

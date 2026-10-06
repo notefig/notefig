@@ -1,34 +1,35 @@
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("@/entities/files", () => ({
-  getOrCreateWorkspaceCollections: vi.fn(() => ({
-    metadata: {
-      toArray: [
-        { path: "/ws/notes.md", type: "file", contentHash: "" },
-        { path: "/ws/chapters", type: "directory", contentHash: "" },
-      ],
-    },
-  })),
-}));
-
-const { readWorkspaceTextFile } = vi.hoisted(() => ({
-  readWorkspaceTextFile: vi.fn(async () => "file content"),
-}));
-vi.mock("@/utils/file-sync", () => ({ readWorkspaceTextFile }));
+const readWorkspaceTextFile = vi.fn(
+  async (_path: string, _options?: unknown) => "file content",
+);
 
 import { workspaceListDocuments } from "../workspace-list-documents";
 import { workspaceReadDocument } from "../workspace-read-document";
 import { workspaceOpenFiles } from "../workspace-open-files";
-import { createTestCore, windowUrlState } from "@/testing/test-core";
-
-// getWorkspaceEditorContext reads the layout through core.
-createTestCore({ url: windowUrlState() });
+import { createLayout } from "@/entities/layout";
+import { memoryUrlState } from "@/testing/test-core";
 
 const ctx = {
   workspacePath: "/ws",
   taskId: "task_1",
   agents: {} as never,
-  services: {} as never,
+  // The workspace's listing, its documents and the layout (an empty one:
+  // nothing open), handed to the tools.
+  services: {
+    files: {
+      collections: {
+        metadata: {
+          toArray: [
+            { path: "/ws/notes.md", type: "file", contentHash: "" },
+            { path: "/ws/chapters", type: "directory", contentHash: "" },
+          ],
+        },
+      },
+    },
+    documents: { read: readWorkspaceTextFile },
+    layout: createLayout(memoryUrlState()),
+  } as never,
 };
 
 describe("workspaceListDocuments", () => {

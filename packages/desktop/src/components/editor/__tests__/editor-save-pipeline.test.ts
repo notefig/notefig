@@ -17,30 +17,27 @@ import { calculateContentHash } from "@/utils/hash";
 // Adoption commits only rows that still match the content collection's
 // current state; this suite has no collections, so back that check with a
 // tiny map standing in for the collection.
-const disk = vi.hoisted(() => new Map<string, string>());
+const disk = new Map<string, string>();
 // Every save, as (workspace, path, markdown) — what the file handle wrote.
-const fileWriteMock = vi.hoisted(() =>
-  vi.fn(async (_ws: string, _path: string, _content: string) => {}),
+const fileWriteMock = vi.fn(
+  async (_ws: string, _path: string, _content: string) => {},
 );
-vi.mock("@/entities/files", async () => {
-  const { calculateContentHash } = await import("@/utils/hash");
-  return {
-    file: (workspacePath: string, filePath: string) => ({
-      write: (content: string) =>
-        fileWriteMock(workspacePath, filePath, content),
-    }),
-    getOrCreateWorkspaceCollections: () => ({
-      content: {
-        get: (path: string) => {
-          const content = disk.get(path);
-          return content === undefined
-            ? undefined
-            : { path, content, contentHash: calculateContentHash(content) };
-        },
+/** The document's workspace's files, as far as the sync uses them. */
+const files = {
+  file: (filePath: string) => ({
+    write: (content: string) => fileWriteMock("/ws", filePath, content),
+  }),
+  collections: {
+    content: {
+      get: (path: string) => {
+        const content = disk.get(path);
+        return content === undefined
+          ? undefined
+          : { path, content, contentHash: calculateContentHash(content) };
       },
-    }),
-  };
-});
+    },
+  },
+} as unknown as EditorFiles;
 
 import {
   resetConverterForTests,
@@ -48,7 +45,7 @@ import {
   flushDocumentSync,
   whenDocumentSyncClean,
 } from "@/utils/markdown-conversion";
-import { useEditorFileSync } from "../use-editor-file-sync";
+import { useEditorFileSync, type EditorFiles } from "../use-editor-file-sync";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -75,7 +72,7 @@ interface HarnessProps {
 }
 
 function Harness({ file }: HarnessProps) {
-  useEditorFileSync(editor, file, "/ws", true);
+  useEditorFileSync(editor, file, files, true);
   return null;
 }
 
@@ -260,10 +257,13 @@ describe("save pipeline (inline fallback = worker-boot-failure path)", () => {
 
     await act(async () => {
       root.render(
-        createElement(function NotLoaded({ file }: HarnessProps) {
-          useEditorFileSync(editor, file, "/ws", false);
-          return null;
-        }, { file: makeFile("start") }),
+        createElement(
+          function NotLoaded({ file }: HarnessProps) {
+            useEditorFileSync(editor, file, files, false);
+            return null;
+          },
+          { file: makeFile("start") },
+        ),
       );
     });
 

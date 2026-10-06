@@ -36,23 +36,15 @@ import { createElement, Fragment } from "react";
 import { Editor } from "@tiptap/core";
 import { useLiveQuery, eq, inArray } from "@tanstack/react-db";
 
-vi.mock("@/adapters", async () => {
-  const { fake } = await import("@/testing/fake-fs-adapter");
-  return {
-    platformAdapter: {
-      fs: fake.adapter,
-      ui: fake.adapter,
-      db: (await import("@/testing/node-db")).createNodeTestDb(),
-    },
-  };
-});
-
 import { fake, installWatcherSim } from "@/testing/fake-fs-adapter";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
+import { QueryClient } from "@tanstack/react-query";
+import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { useEditorFileSync } from "../use-editor-file-sync";
 import {
-  getOrCreateWorkspaceCollections,
+  createWorkspaceFiles,
   type FileMetadata,
+  type WorkspaceFiles,
 } from "@/entities/files";
 import {
   closeDocumentSync,
@@ -80,6 +72,8 @@ beforeAll(() => {
 // Harness: workspace.tsx data path, minus the chrome
 let workspaceCounter = 0;
 let WS: string;
+/** The workspace's files, over the fake disk. */
+let files: WorkspaceFiles;
 let FILE: string;
 
 let editor: Editor;
@@ -99,7 +93,7 @@ function EditorSync({ entry }: { entry: JoinedEntry }) {
   useEditorFileSync(
     editor,
     entry as FileEntry,
-    WS,
+    files,
     entry.isContentLoaded,
     entry.contentError,
   );
@@ -107,7 +101,7 @@ function EditorSync({ entry }: { entry: JoinedEntry }) {
 }
 
 function Harness() {
-  const { metadata, content } = getOrCreateWorkspaceCollections(WS);
+  const { metadata, content } = files.collections;
   const { data = [] } = useLiveQuery(
     (q) =>
       q
@@ -191,6 +185,11 @@ async function setupWorkspace(seed: number) {
   workspaceCounter++;
   WS = `/ws-pacing-${workspaceCounter}`;
   FILE = `${WS}/note.md`;
+  files = createWorkspaceFiles({
+    workspacePath: WS,
+    fs: fake.adapter as unknown as FileSystemSurface,
+    queryClient: new QueryClient(),
+  });
   fake.reseed(seed);
 
   fake.store.clear();
@@ -205,7 +204,8 @@ async function setupWorkspace(seed: number) {
     fakeFs: fake,
     seed,
     pendingEvents,
-    onExternalChange: (event) => handleContentFileSystemChange(event, WS),
+    onExternalChange: (event) =>
+      handleContentFileSystemChange(files, fake.adapter as never, event),
   });
 
   editor = new Editor({
@@ -230,7 +230,7 @@ async function setupWorkspace(seed: number) {
   await act(async () => {
     root.render(createElement(Harness));
   });
-  const { content } = getOrCreateWorkspaceCollections(WS);
+  const { content } = files.collections;
   for (let i = 0; i < 100; i++) {
     await tick(10);
     if (content.get(FILE)?.contentHash) break;
@@ -243,6 +243,7 @@ async function teardownWorkspace() {
   fake.hooks.afterWrite = undefined;
   await Promise.all(pendingEvents);
   pendingEvents = [];
+  files.dispose();
   await act(async () => {
     root.unmount();
   });
@@ -253,7 +254,7 @@ async function teardownWorkspace() {
 
 /** Assert the whole loop converged on exactly `expected`. */
 function expectConverged(expected: string) {
-  const { content } = getOrCreateWorkspaceCollections(WS);
+  const { content } = files.collections;
   expect(
     adoptionCount,
     "internal writes were categorized as external and adopted",

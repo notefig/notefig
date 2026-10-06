@@ -1,26 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-    fs: {
-      writeFiles: vi.fn(async () => ({ succeeded: [], failed: [] })),
-      readFiles: vi.fn(async () => ({ succeeded: [], failed: [] })),
-      deleteFiles: vi.fn(async (paths: string[]) => ({
-        succeeded: paths,
-        failed: [],
-      })),
-    },
-    proc: {
-      createMcpEndpoint: vi.fn(() => ({
-        mcpServer: undefined,
-        start: vi.fn(async () => {}),
-        onRequest: vi.fn(() => () => {}),
-        close: vi.fn(async () => {}),
-      })),
-    },
-  },
-}));
 // The mock harness is env-gated by VITE_AGENT_MOCK, which vitest doesn't
 // set — flip it so AgentTask.start wires the mock MCP loopback (what lets a
 // replayed `mcp` event reach the real tool handler).
@@ -30,12 +9,7 @@ vi.mock("@/agent/mock-harness", async (importOriginal) => {
 });
 
 import { TaskManager } from "@/agent/agent-service";
-import {
-  agentEntriesCollection,
-  agentPermissionRequestsCollection,
-  agentTasksCollection,
-  agentTurnsCollection,
-} from "@/agent/agent-collections";
+import { testAgents, type TestAgents } from "@/testing/test-agents";
 import {
   configureMockAgent,
   createMockAgentTransport,
@@ -52,8 +26,11 @@ import type { AgentTask } from "@/agent/agent-service";
 
 const harness = BUILT_IN_HARNESSES[0];
 
+/** The agent layer under test, fresh per test. */
+let agents: TestAgents;
+
 function entriesFor(taskId: string) {
-  return agentEntriesCollection.toArray
+  return agents.store.entries.toArray
     .filter((e) => e.taskId === taskId)
     .sort((a, b) => (a.id < b.id ? -1 : 1));
 }
@@ -61,10 +38,10 @@ function entriesFor(taskId: string) {
 /** What the debug panel does: the task's rows → a recording. */
 function recordingFor(taskId: string): AgentRecording {
   return buildSessionRecording({
-    task: agentTasksCollection.get(taskId)!,
-    turns: agentTurnsCollection.toArray.filter((t) => t.taskId === taskId),
+    task: agents.store.tasks.get(taskId)!,
+    turns: agents.store.turns.toArray.filter((t) => t.taskId === taskId),
     entries: entriesFor(taskId),
-    permissionRequests: agentPermissionRequestsCollection.toArray.filter(
+    permissionRequests: agents.store.permissionRequests.toArray.filter(
       (r) => r.taskId === taskId,
     ),
   });
@@ -74,7 +51,7 @@ async function runPrompt(task: AgentTask, text: string): Promise<void> {
   await task.prompt(text).completed;
 }
 
-/** What startAgentTask does under MOCK_AGENT_MODE. */
+/** What the runtime's start does under MOCK_AGENT_MODE. */
 async function startMock(task: AgentTask): Promise<void> {
   await task.start(() => createMockAgentTransport({ taskId: task.taskId }));
 }
@@ -88,7 +65,7 @@ async function runPromptAnsweringPermission(
 ): Promise<void> {
   const handle = task.prompt(text);
   const pendingFor = () =>
-    agentPermissionRequestsCollection.toArray.find(
+    agents.store.permissionRequests.toArray.find(
       (r) => r.taskId === task.taskId && r.status === "pending",
     );
   await vi.waitFor(() => expect(pendingFor()).toBeDefined());
@@ -117,14 +94,7 @@ function transcriptShape(taskId: string) {
 }
 
 beforeEach(() => {
-  for (const e of agentEntriesCollection.toArray)
-    agentEntriesCollection.delete(e.id);
-  for (const t of agentTurnsCollection.toArray)
-    agentTurnsCollection.delete(t.turnId);
-  for (const t of agentTasksCollection.toArray)
-    agentTasksCollection.delete(t.taskId);
-  for (const r of agentPermissionRequestsCollection.toArray)
-    agentPermissionRequestsCollection.delete(r.id);
+  agents = testAgents();
 });
 
 /** A turn touching every entry type, streamed in small chunks, with a
@@ -175,7 +145,7 @@ registerMockScenario("everything", () => async (ctx) => {
 describe("agent recording (derived from the transcript)", () => {
   it("re-shapes a task's rows into the recording format", async () => {
     configureMockAgent({ scenario: "everything" });
-    const task = new TaskManager("/ws/original").createTask(harness);
+    const task = new TaskManager(agents.deps, "/ws/original").createTask(harness);
     await startMock(task);
     await runPromptAnsweringPermission(task, "look at the readme", "no");
 
@@ -220,7 +190,7 @@ describe("agent recording (derived from the transcript)", () => {
 
   it("replays a derived recording through the real client and reproduces the transcript", async () => {
     configureMockAgent({ scenario: "everything" });
-    const original = new TaskManager("/ws/original").createTask(harness);
+    const original = new TaskManager(agents.deps, "/ws/original").createTask(harness);
     await startMock(original);
     await runPromptAnsweringPermission(original, "look at the readme", "no");
     const recording = recordingFor(original.taskId);
@@ -228,7 +198,7 @@ describe("agent recording (derived from the transcript)", () => {
 
     // A different workspace: the replay must remap recorded paths.
     configureMockAgent({ scenario: "replay", options: { recording } });
-    const replayed = new TaskManager("/ws/replayed").createTask(harness);
+    const replayed = new TaskManager(agents.deps, "/ws/replayed").createTask(harness);
     await startMock(replayed);
     await runPromptAnsweringPermission(replayed, "look at the readme", "no");
 
@@ -237,7 +207,7 @@ describe("agent recording (derived from the transcript)", () => {
     );
     const readTool = entriesFor(replayed.taskId).find((e) => e.type === "tool_call");
     expect(readTool?.toolCall?.rawInput).toEqual({ path: "/ws/replayed/README.md" });
-    const turn = agentTurnsCollection.toArray.find((t) => t.taskId === replayed.taskId);
+    const turn = agents.store.turns.toArray.find((t) => t.taskId === replayed.taskId);
     expect(turn?.status).toBe("completed");
     expect(turn?.stopReason).toBe("end_turn");
   });
@@ -269,7 +239,7 @@ describe("agent recording (derived from the transcript)", () => {
       })),
     };
     configureMockAgent({ scenario: "replay", options: { recording } });
-    const task = new TaskManager("/ws/y").createTask(harness);
+    const task = new TaskManager(agents.deps, "/ws/y").createTask(harness);
     await startMock(task);
     await runPrompt(task, "a");
     await runPrompt(task, "b");
@@ -300,7 +270,7 @@ describe("agent recording (derived from the transcript)", () => {
       ],
     };
     configureMockAgent({ scenario: "replay", options: { recording } });
-    const task = new TaskManager("/ws/y").createTask(harness);
+    const task = new TaskManager(agents.deps, "/ws/y").createTask(harness);
     await startMock(task);
     const outcome = await task.prompt("boom").completed;
     expect(outcome.status).toBe("error");

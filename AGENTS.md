@@ -84,19 +84,34 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
 - Anything a workspace holds that must be torn down when it closes (a
   process, a worker, a cache) is released in that module's `dispose`, never
   by hand in `closeWorkspace`. Core disposes in reverse `needs` order.
+- Every piece of state is built by a factory from what it is handed, and
+  a module calls that factory with what core hands it. The entity exports
+  the factory (`createWorkspaceGit(deps)`, `createKv(persistence)`,
+  `createAgentStore(persistence)`), which is also what its tests build —
+  no module mocks. Per-workspace state is built in `workspace.create`
+  (`ctx.use("platform")`, the workspace's other instances via
+  `ctx.useWorkspace`) and freed in `dispose`; app-wide state in `register`.
+  Persisted collections are created inside the factory from
+  `ctx.use("platform").db`, never at module scope.
+- The platform is a service. Only the composition root (`app-core.ts`)
+  imports `@/adapters`; modules take `ctx.use("platform")`, components
+  `usePlatform()` (`src/core/use-platform.ts`), and other code is handed
+  the surface it needs (`fs: Pick<FileSystemSurface, …>`). Fallow's
+  boundary rules (the root `.fallowrc.json`, which CI audits from) fail a
+  commit that imports an adapter implementation from app code. There is no
+  ambient core: code outside React is handed what it uses.
 - A per-workspace API is reached through core: `core.workspace(ws).git`,
-  or `useWorkspaceModule(ws, "git")` in React. The module builds it in
-  `workspace.create` from what core hands it (`ctx.use("queryClient")`, the
-  workspace's other instances via `ctx.useWorkspace`) and frees it in
-  `dispose`; the entity exports the factory (`createWorkspaceGit(deps)`),
-  which is also what its tests build — no module mocks. Converted so far:
-  git, history. Not yet: `file(ws, path)` and `scratchpads(ws)` are still
-  free functions over module state, until their groups convert.
-- Code that cannot hold core yet tells a workspace's modules something
+  or `useWorkspaceModule(ws, "git")` in React; an app-wide one through
+  `core.kv` / `useModule("kv")`.
+- Tests build what they exercise over fakes: `createTestCore` (a platform
+  over an in-memory db by default), `testWorkspaceFiles` / `filesModuleOf`
+  (`src/testing/test-files.ts`), `testKv`, `testAgents` (store, runtime
+  and facade, `src/testing/test-agents.ts`).
+- Code that has no handle on a workspace's instance tells it something
   happened over the app event bus (`emitAppEvent("git:stale", …)`,
-  `"agent:turn-completed"`), and each workspace's instance listens for its
-  own path. Agent tools get their workspace's instances on `ctx.services`
-  (`ToolServices`, widened by declaration merging).
+  `"agent:turn-completed"`, `"files:changed"`), and each instance listens
+  for its own path. Agent tools get their workspace's instances on
+  `ctx.services` (`ToolServices`, widened by declaration merging).
 - A workspace is opened, focused and closed through its handle:
   `core.workspace(path).open()` (the user enters it), `.focus()` (brought
   forward, as the switcher does), `.close()`. What entering or focusing
@@ -105,10 +120,12 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   open-set row), never code in the caller. A boot restore fires neither.
   Those handlers are steps of the open: if one fails, `open()` rejects and
   the hooks after it don't fire (a failed `focused` lands nothing).
-- Agents are driven through the facade (`agents` from `@/entities/agents`,
-  also `core.agents`): `agents.workspace(ws).start(harness)` for a session
-  the user starts (runtime and trust gates included), `agents.task(id)` for
-  everything after. Nothing outside `src/agent/` imports `agent-service`.
+- Agents are driven through the facade (`core.agents`, `useAgents()` from
+  `@/entities/agents`): `agents.workspace(ws).start(harness)` for a
+  session the user starts (runtime and trust gates included),
+  `agents.task(id)` for everything after. Their rows are read through
+  `core.agentStore` (`useAgentStore()`). Nothing outside `src/agent/`
+  reaches the runtime in `agent-service`.
 - The plan this follows: the "Core Layer Architecture" doc (stages 1–7).
 
 ## Release Process

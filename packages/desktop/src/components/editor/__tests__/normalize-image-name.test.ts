@@ -3,18 +3,11 @@ import {
   normalizeImageName,
   dedupeAssetName,
 } from "@/components/editor/editor-image-paste";
-import { platformAdapter } from "@/adapters";
+import type { EditorFs } from "@/components/editor/editor-store";
 
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-    fs: {
-      exists: vi.fn(),
-    },
-  },
-}));
-
-const existsMock = vi.mocked(platformAdapter.fs.exists);
+const existsMock = vi.fn<EditorFs["exists"]>();
+/** The platform fs the dedupe probes for taken names. */
+const fs = { exists: existsMock };
 
 /** Make exists() report the given asset paths as taken. */
 function seedExisting(paths: string[]) {
@@ -57,14 +50,14 @@ describe("dedupeAssetName", () => {
 
   it("keeps a free name unchanged", async () => {
     seedExisting([]);
-    await expect(dedupeAssetName("/ws", "photo.png")).resolves.toBe(
+    await expect(dedupeAssetName(fs, "/ws", "photo.png")).resolves.toBe(
       "photo.png",
     );
   });
 
   it("suffixes -1 before the extension on collision", async () => {
     seedExisting(["/ws/assets/photo.png"]);
-    await expect(dedupeAssetName("/ws", "photo.png")).resolves.toBe(
+    await expect(dedupeAssetName(fs, "/ws", "photo.png")).resolves.toBe(
       "photo-1.png",
     );
   });
@@ -75,18 +68,20 @@ describe("dedupeAssetName", () => {
       "/ws/assets/photo-1.png",
       "/ws/assets/photo-2.png",
     ]);
-    await expect(dedupeAssetName("/ws", "photo.png")).resolves.toBe(
+    await expect(dedupeAssetName(fs, "/ws", "photo.png")).resolves.toBe(
       "photo-3.png",
     );
   });
 
   it("handles extensionless names", async () => {
     seedExisting(["/ws/assets/photo"]);
-    await expect(dedupeAssetName("/ws", "photo")).resolves.toBe("photo-1");
+    await expect(dedupeAssetName(fs, "/ws", "photo")).resolves.toBe("photo-1");
   });
 
   it("treats a leading dot as part of the stem, not an extension", async () => {
     seedExisting([]);
-    await expect(dedupeAssetName("/ws", ".hidden")).resolves.toBe(".hidden");
+    await expect(dedupeAssetName(fs, "/ws", ".hidden")).resolves.toBe(
+      ".hidden",
+    );
   });
 });

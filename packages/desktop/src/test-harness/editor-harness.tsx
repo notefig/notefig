@@ -2,8 +2,8 @@
  * Dev-only editor harness (route: /__harness/editor).
  *
  * Mounts the real TextEditor (and SearchPanel) against the real platform
- * adapter WITHOUT booting the workspace: no router-driven collections, no
- * file tree, no dockable layout, no IndexedDB seeding ceremony. This is
+ * adapter with its workspace open in core but no shell around it: no file
+ * tree, no dockable layout, no IndexedDB seeding ceremony. This is
  * the cheap, focused way to test the markdown editing experience —
  * typing, input rules, autosave, image paste/drop, search — in a real
  * browser (see tests/editor/*.spec.ts).
@@ -32,13 +32,11 @@ import { SearchPanel } from "@/components/editor/search-panel";
 import type { Core } from "@notefig/core";
 import { CoreProvider, useCore } from "@notefig/core/react";
 import type { OpenTabOptions } from "@/entities/tabs";
-import { installAppCore } from "@/core/current";
 import { createEditors } from "@/entities/editors";
 import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary";
 import { disposeAllEditors } from "@/components/editor/editor-store";
 import { getMarkdownEditor } from "@/entities/editors";
 import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
-import { platformAdapter } from "@/adapters";
 import { openDocument } from "@/utils/markdown-conversion";
 import { calculateContentHash } from "@/utils/hash";
 import type { FileEntry } from "@/utils/fs";
@@ -72,10 +70,10 @@ export function EditorHarness() {
 
   const [initialDoc, setInitialDoc] = useState<JSONContent | null>(null);
   const [opened] = useState<({ tabId: string } & OpenTabOptions)[]>([]);
-  // No dock here: tab opens are recorded instead of applied — for React
-  // callers (useCore) and for code outside React (appCore: drop handlers,
-  // jump-to-blob) alike.
+  // No dock here: tab opens are recorded instead of applied, for every
+  // caller under the harness's provider (drop handlers, jump-to-blob).
   const core = useCore();
+  const { fs } = core.use("platform");
   const harnessCore = useMemo<Core>(() => {
     const tabs = {
       ...core.tabs,
@@ -88,19 +86,17 @@ export function EditorHarness() {
     return { ...core, tabs, editors: createEditors(tabs) };
   }, [core, opened]);
   useEffect(() => {
-    installAppCore(harnessCore);
-    return () => installAppCore(core);
-  }, [core, harnessCore]);
-
-  useEffect(() => {
     let cancelled = false;
     (async () => {
       // Seed the doc + any extra files through the adapter so autosave,
       // image assets and search all operate on a consistent store.
-      await platformAdapter.fs.writeFiles([
+      await fs.writeFiles([
         { path: config.filePath, content: config.content },
         ...(config.files ?? []),
       ]);
+      // The editor saves through its workspace's files, which exist once
+      // core has the workspace open — as in the app.
+      await core.workspace(config.basePath).focus();
       // Editors accept only parsed doc JSON — same worker path as the app.
       const doc = await openDocument(config.filePath, config.content);
       if (!cancelled) setInitialDoc(doc);
@@ -109,7 +105,7 @@ export function EditorHarness() {
       cancelled = true;
       disposeAllEditors();
     };
-  }, [config]);
+  }, [config, core, fs]);
 
   useEffect(() => {
     (window as unknown as Record<string, unknown>).__HARNESS__ = {
@@ -118,7 +114,7 @@ export function EditorHarness() {
         return editor ? getEditorMarkdown(editor) : null;
       },
       readFile: async (path: string) => {
-        const result = await platformAdapter.fs.readFiles([path]);
+        const result = await fs.readFiles([path]);
         return result.succeeded[0]?.content ?? null;
       },
       opened,
@@ -129,7 +125,7 @@ export function EditorHarness() {
         getMarkdownEditor(config.filePath)?.chain().focus().selectAll().run();
       },
     };
-  }, [config, opened]);
+  }, [config, opened, fs]);
 
   if (!initialDoc) return <div data-testid="harness-loading">loading…</div>;
 

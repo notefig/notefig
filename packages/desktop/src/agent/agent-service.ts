@@ -1,14 +1,8 @@
-// Pre-existing tangle: this module reaches the editor/blob component graph
-// via mcp-server → widget-context-resource → editor-store, which reaches
-// back here. (The prompt widget's own half of this loop is gone — it lives
-// in @notefig/widgets now and can only reach the app through its host.)
-// Untangling the rest means relocating the editor registry to a leaf module
-// (see file-sync's editor-store import comment); new cycles elsewhere still
-// gate.
-// fallow-ignore-file circular-dependency
 import { emitAppEvent } from "@/utils/app-events";
-import { appCore } from "@/core/current";
 import type { WorkspaceHistory } from "@/utils/history-service";
+import type { WorkspaceFiles } from "@/entities/files";
+import type { DocumentsApi } from "@/entities/documents";
+import type { LayoutApi } from "@/entities/layout";
 import {
   newTaskId,
   newTurnId,
@@ -31,11 +25,14 @@ import {
   type TurnOutcome,
   type SessionConfigSelect,
 } from "@notefig/shared/agent";
-import { platformAdapter } from "@/adapters";
+import type {
+  FileSystemSurface,
+  IPlatformAdapter,
+} from "@/adapters/platform-adapter.interface";
 import { resolveWorkspacePath } from "@/utils/fs";
 import { path as pathutil, workspaceKey } from "@/utils/path";
 import { APP_DIR_NAME } from "@/utils/app-dir";
-import { getOrCreateKvCollection } from "@/utils/kv-store";
+import type { KvApi } from "@/utils/kv-store";
 import { MarkdownJoiner } from "@/lib/markdown-joiner-transform";
 import { PermissionBroker } from "./permission-broker";
 import {
@@ -54,28 +51,13 @@ import { buildWidgetContextPayload } from "./widget-context-resource";
 import i18n from "@/utils/intl";
 import { captureEvent } from "@/telemetry/telemetry";
 import {
-  readWorkspaceTextFile,
-  writeWorkspaceTextFile,
-} from "@/utils/file-sync";
-import {
-  agentEntriesCollection,
-  agentEntriesForTask,
-  agentPermissionRequestsCollection,
-  agentTasksCollection,
-  agentTurnsCollection,
-  agentTurnsForTask,
-  liveEntryWriter,
   ReplayStage,
   type AgentEntryWriter,
+  type AgentStore,
   type AgentTaskStatus,
   type AgentTurn,
   type AgentTurnStatus,
 } from "./agent-collections";
-import {
-  getRegisteredTask,
-  registerTask,
-  unregisterTask,
-} from "./task-registry";
 import {
   MOCK_AGENT_MODE,
   createMockAgentTransport,
@@ -86,13 +68,27 @@ import {
   HARNESS_OVERRIDES_KEY,
   HARNESS_CUSTOM_KEY,
 } from "./harness-discovery";
-// The one `agents` facade (ToolContext.agents). Deferred-use import: this
-// module ↔ agents.ts reference each other only inside function bodies, never
-// at module-eval time, so evaluation order is a non-issue.
-import { agents, splitLeadingQuote } from "./agents";
+import { splitLeadingQuote, type AgentsApi } from "./agents";
 
 /** KV namespace for agent state (sessionId per task, workspace trust flag). */
 const AGENT_KV_NAMESPACE = "agent";
+
+/** What the agent runtime is built from — handed in by the agents module,
+ *  or by a test. */
+export interface AgentRuntimeDeps {
+  store: AgentStore;
+  kv: Pick<KvApi, "collection">;
+  proc: Pick<
+    IPlatformAdapter["proc"],
+    "createMcpEndpoint" | "createAgentTransport"
+  >;
+  fs: Pick<FileSystemSurface, "readFiles" | "writeFiles">;
+  /** What a task's tools get for its workspace. Read when a tool asks —
+   *  the workspace is open while its tasks run. */
+  services(workspacePath: string): ToolServices;
+  /** The facade tools reach (ToolContext.agents). */
+  agents(): AgentsApi;
+}
 
 /**
  * Deadline for each step of session establishment (initialize,
@@ -346,14 +342,21 @@ export class AgentTask {
    *  wire pass-through pending); null until the task starts. */
   private spawnPrep: HarnessSpawnPrep | null = null;
 
+  private readonly store: AgentStore;
+
   constructor(
+    private readonly deps: AgentRuntimeDeps,
     readonly taskId: string,
     readonly workspacePath: string,
     readonly harness: HarnessDefinition,
     /** Set when spawned by another task (subagent pattern, opencode-style) */
     readonly parentTaskId?: string,
   ) {
-    this.permissionBroker = new PermissionBroker(taskId);
+    this.store = deps.store;
+    this.permissionBroker = new PermissionBroker(
+      taskId,
+      deps.store.permissionRequests,
+    );
   }
 
   /**
@@ -387,9 +390,10 @@ export class AgentTask {
       // ourselves, and mcpServer only exists on the instance afterward.
       const mcpEndpoint = MOCK_AGENT_MODE
         ? createMockMcpEndpoint({ taskId: this.taskId })
-        : platformAdapter.proc.createMcpEndpoint({ taskId: this.taskId });
+        : this.deps.proc.createMcpEndpoint({ taskId: this.taskId });
       this.mcpEndpoint = mcpEndpoint;
       await mcpEndpoint.start();
+      const services = this.deps.services(this.workspacePath);
       this.unsubscribers.push(
         attachMcpEndpoint(
           mcpEndpoint,
@@ -397,14 +401,15 @@ export class AgentTask {
             ctx: {
               workspacePath: this.workspacePath,
               taskId: this.taskId,
-              agents,
-              services: toolServices(this.workspacePath),
+              agents: this.deps.agents(),
+              services,
             },
             permissionBroker: this.permissionBroker,
             tools: { list: () => toolRegistry, get: getTool },
             translate: (key) => i18n.t(key),
             instructions: serverInstructions,
-            buildWidgetContextPayload,
+            buildWidgetContextPayload: (workspacePath, ref) =>
+              buildWidgetContextPayload(services, workspacePath, ref),
             onUnsupportedProtocolVersion: (requested) =>
               captureEvent("agent_protocol_version_unsupported", {
                 protocol: "mcp",
@@ -425,7 +430,7 @@ export class AgentTask {
         appDir: APP_DIR_NAME,
         harnessEnv: this.harness.env,
         mcpServer: mcpEndpoint.mcpServer,
-        writeFiles: (files) => platformAdapter.fs.writeFiles(files),
+        writeFiles: (files) => this.deps.fs.writeFiles(files),
         warn: (label, detail) => this.warn(label, detail),
       });
       this.spawnPrep = prep;
@@ -456,8 +461,8 @@ export class AgentTask {
       // The sessionId rides the task row — it's what agent-persistence.ts
       // persists and what revival needs back (the old `session:<taskId>` KV
       // side-key is retired; stale keys are inert).
-      if (agentTasksCollection.get(this.taskId)) {
-        agentTasksCollection.update(this.taskId, (draft) => {
+      if (this.store.tasks.get(this.taskId)) {
+        this.store.tasks.update(this.taskId, (draft) => {
           draft.sessionId = this.sessionId ?? undefined;
         });
       }
@@ -511,8 +516,14 @@ export class AgentTask {
       // pair still always receives the absolute path it requires.
       fs: withWorkspaceContainment(
         {
-          readTextFile: readWorkspaceTextFile,
-          writeTextFile: writeWorkspaceTextFile,
+          readTextFile: (path, options) =>
+            this.deps
+              .services(this.workspacePath)
+              .documents.read(path, options),
+          writeTextFile: (path, content) =>
+            this.deps
+              .services(this.workspacePath)
+              .documents.write(path, content),
         },
         { workspacePath: this.workspacePath, path: pathutil },
       ),
@@ -589,7 +600,7 @@ export class AgentTask {
     options?: { closeFirst?: boolean },
   ): Promise<void> {
     if (!this.client) throw new Error("ACP client not connected");
-    const stage = new ReplayStage();
+    const stage = this.store.replayStage();
     const turnId = newTurnId();
     const replayTurn: AgentTurn = {
       turnId,
@@ -678,7 +689,7 @@ export class AgentTask {
 
     // Queued prompts are transcript state: entry + turn row exist from the
     // moment of send, and runTurn promotes (not re-inserts) them.
-    agentEntriesCollection.insert({
+    this.store.entries.insert({
       id: newEventId(),
       taskId: this.taskId,
       turnId,
@@ -686,7 +697,7 @@ export class AgentTask {
       text,
       createdAt: now,
     });
-    agentTurnsCollection.insert({
+    this.store.turns.insert({
       turnId,
       taskId: this.taskId,
       sessionId: this.sessionId ?? "",
@@ -695,8 +706,8 @@ export class AgentTask {
     });
     // Enqueue is activity even when it doesn't change status (queueing onto
     // a busy task) — bump so the session list orders by last touch.
-    if (agentTasksCollection.get(this.taskId)) {
-      agentTasksCollection.update(this.taskId, (draft) => {
+    if (this.store.tasks.get(this.taskId)) {
+      this.store.tasks.update(this.taskId, (draft) => {
         draft.updatedAt = now;
       });
     }
@@ -752,10 +763,10 @@ export class AgentTask {
     const index = this.pendingPrompts.findIndex((p) => p.turnId === turnId);
     if (index === -1) return;
     this.pendingPrompts.splice(index, 1);
-    for (const entry of agentEntriesForTask(this.taskId)) {
-      if (entry.turnId === turnId) agentEntriesCollection.delete(entry.id);
+    for (const entry of this.store.entriesForTask(this.taskId)) {
+      if (entry.turnId === turnId) this.store.entries.delete(entry.id);
     }
-    agentTurnsCollection.delete(turnId);
+    this.store.turns.delete(turnId);
     this.resolveTurn(turnId, { status: "cancelled" });
     emitAppEvent("agent:turn-settled", {
       taskId: this.taskId,
@@ -770,8 +781,8 @@ export class AgentTask {
     turnId: string,
     outcome: Extract<TurnOutcome, { status: "cancelled" | "error" }>,
   ): void {
-    if (agentTurnsCollection.get(turnId)) {
-      agentTurnsCollection.update(turnId, (draft) => {
+    if (this.store.turns.get(turnId)) {
+      this.store.turns.update(turnId, (draft) => {
         draft.status = outcome.status;
         if (outcome.status === "error") draft.error = outcome.error;
       });
@@ -837,14 +848,14 @@ export class AgentTask {
     if (this.title === "New task") {
       const named = splitLeadingQuote(text).rest.trim() || text;
       this.title = named.length > 60 ? `${named.slice(0, 57)}…` : named;
-      agentTasksCollection.update(this.taskId, (draft) => {
+      this.store.tasks.update(this.taskId, (draft) => {
         draft.title = this.title;
       });
     }
 
     // Promote the rows prompt() queued (same ids — the queued row becomes
     // the running row; the user entry is already in the transcript).
-    agentTurnsCollection.update(turnId, (draft) => {
+    this.store.turns.update(turnId, (draft) => {
       draft.status = "running";
       draft.sessionId = sessionId;
     });
@@ -855,7 +866,7 @@ export class AgentTask {
       run: null,
       planEntryId: null,
       userText: text,
-      entries: liveEntryWriter,
+      entries: this.store.liveEntryWriter,
     };
     this.setStatus("running");
 
@@ -874,12 +885,12 @@ export class AgentTask {
       // A turn that reached the model clears any auth block and marks this
       // harness signed in on this machine (the only reliable signal — there
       // is no ahead-of-time probe, per the auth spike). Written through the
-      // KV collection (not platformAdapter.kv.setKv directly) so the harness
+      // KV collection so the harness
       // picker's indicator updates live.
       this.clearAuthBlock();
       if (!this.signedInMarked) {
         this.signedInMarked = true;
-        const kv = getOrCreateKvCollection(AGENT_KV_NAMESPACE);
+        const kv = this.deps.kv.collection(AGENT_KV_NAMESPACE);
         const key = `auth:${this.harness.id}`;
         if (kv.get(key)) {
           kv.update(key, (draft) => {
@@ -959,8 +970,8 @@ export class AgentTask {
   }
 
   private writeConfigOptions(options: SessionConfigSelect[]): void {
-    if (agentTasksCollection.get(this.taskId)) {
-      agentTasksCollection.update(this.taskId, (draft) => {
+    if (this.store.tasks.get(this.taskId)) {
+      this.store.tasks.update(this.taskId, (draft) => {
         draft.configOptions = options;
       });
     }
@@ -985,8 +996,8 @@ export class AgentTask {
       // attempt's prompt handle already resolved as error (resolveTurn
       // no-ops on the reused turnId), which is fine: programmatic callers
       // saw the auth failure; the retry is UI-driven.
-      if (agentTurnsCollection.get(held.turnId)) {
-        agentTurnsCollection.update(held.turnId, (draft) => {
+      if (this.store.turns.get(held.turnId)) {
+        this.store.turns.update(held.turnId, (draft) => {
           draft.status = "queued";
           draft.error = undefined;
           draft.stopReason = undefined;
@@ -1015,8 +1026,8 @@ export class AgentTask {
     this.authBlocked = true;
     this.heldPrompt = held;
     this.authHintValue = this.client?.authHint ?? this.harness.authHint;
-    if (agentTasksCollection.get(this.taskId)) {
-      agentTasksCollection.update(this.taskId, (draft) => {
+    if (this.store.tasks.get(this.taskId)) {
+      this.store.tasks.update(this.taskId, (draft) => {
         draft.authRequired = true;
         draft.authMethods = this.client?.availableAuthMethods ?? [];
         draft.authHint = this.authHintValue;
@@ -1027,8 +1038,8 @@ export class AgentTask {
   private clearAuthBlock(): void {
     this.authBlocked = false;
     this.authHintValue = undefined;
-    if (agentTasksCollection.get(this.taskId)) {
-      agentTasksCollection.update(this.taskId, (draft) => {
+    if (this.store.tasks.get(this.taskId)) {
+      this.store.tasks.update(this.taskId, (draft) => {
         draft.authRequired = false;
         draft.authHint = undefined;
       });
@@ -1050,7 +1061,7 @@ export class AgentTask {
     // never received a terminal update so nothing spins forever.
     this.resolveLingeringToolCalls(turn.entries, turn.turnId, turnStatus);
 
-    agentTurnsCollection.update(turn.turnId, (draft) => {
+    this.store.turns.update(turn.turnId, (draft) => {
       draft.status = turnStatus;
       draft.stopReason = stopReason;
       if (error) draft.error = error;
@@ -1062,10 +1073,10 @@ export class AgentTask {
     const at = Date.now();
     if (
       (turnStatus === "completed" || turnStatus === "error") &&
-      agentTasksCollection.get(this.taskId)
+      this.store.tasks.get(this.taskId)
     ) {
       const lastSettled = { turnId: turn.turnId, at, status: turnStatus };
-      agentTasksCollection.update(this.taskId, (draft) => {
+      this.store.tasks.update(this.taskId, (draft) => {
         draft.lastSettled = lastSettled;
       });
     }
@@ -1233,7 +1244,7 @@ export class AgentTask {
       : undefined;
     // No turn (a late tool_call_update at/after the turn boundary) means the
     // row it targets is already committed — write to the collections.
-    const entries = this.currentTurn?.entries ?? liveEntryWriter;
+    const entries = this.currentTurn?.entries ?? this.store.liveEntryWriter;
 
     if (existingId) {
       entries.update(existingId, (draft) => {
@@ -1255,7 +1266,7 @@ export class AgentTask {
       });
       // Read back rather than announce the draft: the merged row is what
       // the transcript now holds.
-      const merged = agentEntriesCollection.get(existingId);
+      const merged = this.store.entries.get(existingId);
       if (merged?.toolCall) {
         this.announceToolCall(merged.turnId, merged.toolCall);
       }
@@ -1423,12 +1434,12 @@ export class AgentTask {
     const turnId = this.currentTurn?.turnId;
     await this.cancel();
     if (!turnId) return false;
-    const turnEntries = agentEntriesForTask(this.taskId).filter(
-      (entry) => entry.turnId === turnId,
-    );
+    const turnEntries = this.store
+      .entriesForTask(this.taskId)
+      .filter((entry) => entry.turnId === turnId);
     if (turnEntries.some((entry) => entry.type !== "user")) return false;
-    for (const entry of turnEntries) agentEntriesCollection.delete(entry.id);
-    agentTurnsCollection.delete(turnId);
+    for (const entry of turnEntries) this.store.entries.delete(entry.id);
+    this.store.turns.delete(turnId);
     return true;
   }
 
@@ -1503,7 +1514,7 @@ export class AgentTask {
     // The row is the source of truth once it exists (external writers like
     // the workspace-dispose demotion touch it directly); the field only
     // answers for the gap before upsertTaskRow's insert lands.
-    return agentTasksCollection.get(this.taskId)?.status ?? this.status;
+    return this.store.tasks.get(this.taskId)?.status ?? this.status;
   }
 
   async dispose(): Promise<void> {
@@ -1523,19 +1534,19 @@ export class AgentTask {
   }
 
   private upsertTaskRow(): void {
-    const existing = agentTasksCollection.get(this.taskId);
+    const existing = this.store.tasks.get(this.taskId);
     if (existing) {
       // Revival: adopt the restored row — its title is the original first
       // prompt (so runTurn's first-prompt naming won't rename it) and its
       // createdAt stands; only the lifecycle fields flip.
       this.title = existing.title;
-      agentTasksCollection.update(this.taskId, (draft) => {
+      this.store.tasks.update(this.taskId, (draft) => {
         draft.status = this.status;
         draft.updatedAt = Date.now();
       });
       return;
     }
-    agentTasksCollection.insert({
+    this.store.tasks.insert({
       taskId: this.taskId,
       parentTaskId: this.parentTaskId,
       workspacePath: this.workspacePath,
@@ -1553,8 +1564,8 @@ export class AgentTask {
     // demote/purge decided the row says. One guard here covers every path.
     if (this.disposed) return;
     this.status = status;
-    if (agentTasksCollection.get(this.taskId)) {
-      agentTasksCollection.update(this.taskId, (draft) => {
+    if (this.store.tasks.get(this.taskId)) {
+      this.store.tasks.update(this.taskId, (draft) => {
         draft.status = status;
         draft.updatedAt = Date.now();
       });
@@ -1594,32 +1605,29 @@ declare module "@notefig/agent" {
   interface ToolServices {
     /** The workspace's history repo (`core.workspace(ws).history`). */
     history: WorkspaceHistory;
+    /** The workspace's files (`core.workspace(ws).files`). */
+    files: WorkspaceFiles;
+    /** Reading and adopting writes of any open workspace's text files. */
+    documents: DocumentsApi;
+    /** The dock: what the user has open (`core.layout`). */
+    layout: Pick<LayoutApi, "read">;
   }
 }
 
 /**
- * What a task's tools get for its workspace. Read when a tool asks — the
- * workspace is open while its tasks run. Transitional: reached through the
- * installed core until the task manager is handed its workspace's
- * instances itself.
- */
-function toolServices(workspacePath: string): ToolServices {
-  return {
-    get history() {
-      return appCore().workspace(workspacePath).history;
-    },
-  };
-}
-
-/**
- * Per-workspace task registry (registry convention: git-service-store.ts).
- * Owns workspace-level policy: trust confirmation before the first spawn,
- * harness config from settings — never from document content.
+ * Per-workspace task registry. Owns workspace-level policy: trust
+ * confirmation before the first spawn, harness config from settings —
+ * never from document content.
  */
 export class TaskManager {
   private readonly tasks = new Map<string, AgentTask>();
 
-  constructor(readonly workspacePath: string) {}
+  constructor(
+    private readonly deps: AgentRuntimeDeps,
+    readonly workspacePath: string,
+    /** Every live task of the runtime, by id. */
+    private readonly live: Map<string, AgentTask> = new Map(),
+  ) {}
 
   createTask(
     harness: HarnessDefinition,
@@ -1637,13 +1645,14 @@ export class TaskManager {
     parentTaskId?: string,
   ): AgentTask {
     const task = new AgentTask(
+      this.deps,
       taskId,
       this.workspacePath,
       harness,
       parentTaskId,
     );
     this.tasks.set(taskId, task);
-    registerTask(task);
+    this.live.set(taskId, task);
     return task;
   }
 
@@ -1658,326 +1667,327 @@ export class TaskManager {
   async cancelTask(taskId: string): Promise<void> {
     const task = this.tasks.get(taskId);
     this.tasks.delete(taskId);
-    unregisterTask(taskId);
+    this.live.delete(taskId);
     await task?.dispose();
   }
 
   async disposeAll(): Promise<void> {
     const tasks = this.listTasks();
     this.tasks.clear();
-    for (const task of tasks) unregisterTask(task.taskId);
+    for (const task of tasks) this.live.delete(task.taskId);
     await Promise.all(tasks.map((task) => task.dispose()));
   }
 }
 
-const taskManagerRegistry = new Map<string, TaskManager>();
+type ActionResult = { ok: true } | { ok: false; error: string };
 
 /**
- * Which task authored a given blob, and its type/path — read straight off
- * the `author_blob` tool call's transcript entry (every fence tool call
- * already gets one, with `rawInput` verbatim), rather than a dedicated
- * blob-tracking table. Used by `answerBlob` (blob-actions.ts) to address a
- * fresh prompt back at the right session once the user interacts with the
- * blob; the answer is a plain prompt, no interaction bookkeeping.
- *
- * Deliberately a full scan (not the taskId index): the lookup is by blobId
- * ACROSS tasks, and it runs once per user blob interaction — rare enough
- * that a dedicated index isn't worth its bookkeeping.
+ * The live agent tasks of the app, and what drives them. The app never
+ * holds an AgentTask directly — it goes through `core.agents` (agents.ts),
+ * which drives tasks through this, and reads all state through the store.
  */
-export function findBlobAuthorTask(
-  blobId: string,
-): { taskId: string; blobType: string; path: string } | undefined {
-  const entry = agentEntriesCollection.toArray.find(
-    (e) =>
-      e.type === "tool_call" &&
-      e.toolCall?.title === "author_blob" &&
-      isPlainObject(e.toolCall.rawInput) &&
-      e.toolCall.rawInput.id === blobId,
-  );
-  if (!entry?.toolCall?.rawInput) return undefined;
-  const rawInput = entry.toolCall.rawInput as { path: string; type: string };
-  return { taskId: entry.taskId, blobType: rawInput.type, path: rawInput.path };
+export interface AgentRuntime {
+  /** The live task for an id, if it has a runtime. */
+  task(taskId: string): AgentTask | undefined;
+  manager(workspacePath: string): TaskManager | undefined;
+  managerFor(workspacePath: string): TaskManager;
+  /**
+   * Create + start an agent task in a workspace. Owns the platform
+   * transport choice so the UI never touches transport internals. Returns
+   * synchronously: the task row exists (status "starting") before this
+   * returns, so the UI can open the session's tab immediately — spawn +
+   * handshake take seconds, and a failed start lands on the row as status
+   * "error" rather than swallowing the session. `started` settles when the
+   * session is ready; await it before prompting programmatically.
+   */
+  start(
+    workspacePath: string,
+    harness: HarnessDefinition,
+  ): { taskId: string; started: Promise<void> };
+  /**
+   * Revive a restored session (MET-54): rebuild its runtime under the
+   * original taskId and resume the harness-stored session via
+   * `session/load` — history replays into the transcript and the task is
+   * simply live again. Returns null when there's nothing to do (already
+   * live, no restored row) or when revival is impossible (harness
+   * definition gone → row flips to "unavailable"). The task is REGISTERED
+   * synchronously, so callers may enqueue prompts immediately; they ride
+   * the queue until the load completes.
+   */
+  revive(taskId: string): { started: Promise<void> } | null;
+  /**
+   * The live AgentTask for an id, transparently reviving a restored
+   * session first (MET-54): revival registers the task synchronously, so
+   * the returned task accepts prompts immediately — they ride the queue
+   * while session/load replays history. Undefined = the task doesn't exist
+   * or can't be revived.
+   */
+  getOrRevive(taskId: string): AgentTask | undefined;
+  /**
+   * Remove a session everywhere: live runtime (if any), transcript rows,
+   * and the persisted row. The "unavailable" delete affordance; also the
+   * building block for MET-55's per-task clear.
+   */
+  delete(taskId: string): Promise<void>;
+  /**
+   * The transcript's manual "refresh session" control: pull whatever the
+   * harness's session store holds now — including turns appended by other
+   * processes — back into the task. Live tasks re-sync in place
+   * (session/close + session/load, see AgentTask.refreshFromHarness);
+   * restored rows just revive, which IS a fresh load. Fire-and-forget like
+   * the other UI entry points; failures land on the task row as status.
+   */
+  refresh(taskId: string): void;
+  /**
+   * Cancel the running turn and, if the agent hadn't responded yet, remove
+   * its rows from the transcript — Escape-to-restore (MET-94). Resolves
+   * true when the turn was forgotten (the caller should restore the prompt
+   * into the composer); false when a response already existed and the
+   * round stays as a plain cancelled turn.
+   */
+  cancelTurnAndForget(taskId: string): Promise<boolean>;
+  /**
+   * Switch one of a task's session settings (MET-81). A restored row
+   * revives first (the switch waits for session/load, which re-advertises
+   * the options), matching how prompts treat asleep sessions.
+   */
+  setConfigOption(
+    taskId: string,
+    optionId: string,
+    value: string,
+  ): Promise<ActionResult>;
+  /**
+   * Which task authored a given blob, and its type/path — read straight off
+   * the `author_blob` tool call's transcript entry (every fence tool call
+   * already gets one, with `rawInput` verbatim), rather than a dedicated
+   * blob-tracking table. Used by `answerBlob` (blob-actions.ts) to address
+   * a fresh prompt back at the right session once the user interacts with
+   * the blob; the answer is a plain prompt, no interaction bookkeeping.
+   *
+   * Deliberately a full scan (not the taskId index): the lookup is by
+   * blobId ACROSS tasks, and it runs once per user blob interaction — rare
+   * enough that a dedicated index isn't worth its bookkeeping.
+   */
+  findBlobAuthor(
+    blobId: string,
+  ): { taskId: string; blobType: string; path: string } | undefined;
+  /**
+   * Resolves once boot reconciliation has settled — i.e. the hydrated rows
+   * have loaded and the ones that can never be revived have been deleted.
+   *
+   * Anything that reads "is there a row for this task?" as an answer about
+   * the session must wait for this first; before it settles the collection
+   * is either still loading or still holding rows that are about to go.
+   * Settling is not a promise that the answer is COMPLETE — storage that
+   * failed to load (or was recreated after corruption) leaves an empty
+   * collection that looks exactly like a user with no sessions — so a
+   * missing row may only be used for decisions that are cheap to get
+   * wrong, never to destroy anything. Starts reconciliation if nothing has
+   * yet. Failures are logged, never thrown: a task list that could not be
+   * reconciled must not take app startup down.
+   */
+  whenReconciled(): Promise<void>;
+  disposeWorkspace(workspacePath: string): Promise<void>;
+  /**
+   * Dispose every workspace's task manager at once — the web tunnel's
+   * disconnect teardown. Losing the socket kills every agent on the
+   * worker, so all live tasks go down together; each workspace's sessionful
+   * rows demote to "restored" for revival on reconnect, exactly as a
+   * per-workspace close does.
+   */
+  disposeAll(): Promise<void>;
 }
 
-export function getWorkspaceTaskManager(
-  workspacePath: string,
-): TaskManager | undefined {
-  return taskManagerRegistry.get(workspaceKey(workspacePath));
-}
+export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
+  const { store } = deps;
+  const live = new Map<string, AgentTask>();
+  const managers = new Map<string, TaskManager>();
+  let reconciled: Promise<void> | null = null;
 
-export function getOrCreateWorkspaceTaskManager(
-  workspacePath: string,
-): TaskManager {
-  // Registry key vs value: workspaceKey collapses Windows respellings onto
-  // one manager, while the manager itself holds the native spelling — it is
-  // the spawn cwd and the persisted task rows' workspacePath.
-  const key = workspaceKey(workspacePath);
-  let manager = taskManagerRegistry.get(key);
-  if (!manager) {
-    manager = new TaskManager(pathutil.normalize(workspacePath));
-    taskManagerRegistry.set(key, manager);
-  }
-  return manager;
-}
+  const manager = (workspacePath: string) =>
+    managers.get(workspaceKey(workspacePath));
 
-/**
- * Create + start an agent task in a workspace. Owns the platform transport
- * choice so the UI never touches transport internals. Returns synchronously:
- * the task row exists (status "starting") before this returns, so the UI can
- * open the session's tab immediately — spawn + handshake take seconds, and a
- * failed start lands on the row as status "error" rather than swallowing the
- * session. `started` settles when the session is ready; await it before
- * prompting programmatically.
- */
-export function startAgentTask(
-  workspacePath: string,
-  harness: HarnessDefinition,
-): { taskId: string; started: Promise<void> } {
-  const manager = getOrCreateWorkspaceTaskManager(workspacePath);
-  const task = manager.createTask(harness);
-  // start() inserts the task row synchronously before its first await.
-  return { taskId: task.taskId, started: task.start(transportFactory(task)) };
-}
+  const managerFor = (workspacePath: string) => {
+    // Registry key vs value: workspaceKey collapses Windows respellings
+    // onto one manager, while the manager itself holds the native spelling
+    // — it is the spawn cwd and the persisted task rows' workspacePath.
+    const key = workspaceKey(workspacePath);
+    let existing = managers.get(key);
+    if (!existing) {
+      existing = new TaskManager(deps, pathutil.normalize(workspacePath), live);
+      managers.set(key, existing);
+    }
+    return existing;
+  };
 
-/** The one place a task's spawn spec meets the platform transport. */
-function transportFactory(task: AgentTask) {
-  if (MOCK_AGENT_MODE) {
-    return () => createMockAgentTransport({ taskId: task.taskId });
-  }
-  return ({ extraEnv }: { extraEnv: Record<string, string> }) =>
-    platformAdapter.proc.createAgentTransport({
-      taskId: task.taskId,
-      harness: task.harness,
-      workspacePath: task.workspacePath,
-      extraEnv,
-    });
-}
-
-/**
- * The effective (overridden/custom-aware) definition for a harness id,
- * read synchronously off the harness-settings KV collection — revival must
- * register the task in the same tick so a prompt can queue immediately.
- * Falls back to the built-in definition when settings aren't loaded yet.
- */
-function effectiveHarnessById(
-  harnessId: string,
-): HarnessDefinition | undefined {
-  const kv = getOrCreateKvCollection(HARNESS_SETTINGS_NAMESPACE);
-  const overrides = parseHarnessOverrides(kv.get(HARNESS_OVERRIDES_KEY)?.value);
-  const custom = parseCustomHarnessEntries(kv.get(HARNESS_CUSTOM_KEY)?.value);
-  return (
-    resolveEffectiveHarnesses(overrides, custom).find(
-      (h) => h.id === harnessId,
-    ) ?? BUILT_IN_HARNESSES.find((h) => h.id === harnessId)
-  );
-}
-
-/**
- * Revive a restored session (MET-54): rebuild its runtime under the original
- * taskId and resume the harness-stored session via `session/load` — history
- * replays into the transcript and the task is simply live again. Returns
- * null when there's nothing to do (already live, no restored row) or when
- * revival is impossible (harness definition gone → row flips to
- * "unavailable"). The task is REGISTERED synchronously, so callers may
- * enqueue prompts immediately; they ride the queue until the load completes.
- */
-export function reviveAgentTask(
-  taskId: string,
-): { started: Promise<void> } | null {
-  if (getRegisteredTask(taskId)) return null;
-  const row = agentTasksCollection.get(taskId);
-  if (!row || row.status !== "restored" || !row.sessionId) return null;
-  const harness = effectiveHarnessById(row.harnessId);
-  if (!harness) {
-    agentTasksCollection.update(taskId, (draft) => {
-      draft.status = "unavailable";
-      draft.updatedAt = Date.now();
-    });
-    return null;
-  }
-  const manager = getOrCreateWorkspaceTaskManager(row.workspacePath);
-  const task = manager.adoptTask(taskId, harness, row.parentTaskId);
-  const started = task.start(transportFactory(task), {
-    resumeSessionId: row.sessionId,
-  });
-  // Failure lands on the row as "unavailable"/"error" — callers may still await.
-  started.catch((error) => {
-    console.warn("Agent session revival failed:", errorMessage(error));
-  });
-  return { started };
-}
-
-/**
- * Remove a session everywhere: live runtime (if any), transcript rows, and
- * the persisted row (the task-row delete propagates to KV through the
- * persistence subscriber). The "unavailable" delete affordance; also the
- * building block for MET-55's per-task clear.
- */
-export async function deleteAgentSession(taskId: string): Promise<void> {
-  const row = agentTasksCollection.get(taskId);
-  if (row) {
-    await getWorkspaceTaskManager(row.workspacePath)?.cancelTask(taskId);
-  }
-  purgeTaskRows(taskId);
-}
-
-/**
- * The live AgentTask for an id, transparently reviving a restored session
- * first (MET-54): revival registers the task synchronously, so the returned
- * task accepts prompts immediately — they ride the queue while session/load
- * replays history. Undefined = the task doesn't exist or can't be revived.
- */
-export function getOrReviveTask(taskId: string): AgentTask | undefined {
-  const task = getRegisteredTask(taskId);
-  if (task) return task;
-  reviveAgentTask(taskId);
-  return getRegisteredTask(taskId);
-}
-
-/** Send a prompt to a task (fire-and-forget; FIFO queue, lossless). */
-export function promptAgentTask(
-  taskId: string,
-  text: string,
-  contextParts?: PromptContextPart[],
-): void {
-  getOrReviveTask(taskId)?.prompt(text, { contextParts });
-}
-
-/** Remove one queued (not yet running) prompt from a task's queue. */
-export function removeQueuedPrompt(taskId: string, turnId: string): void {
-  getRegisteredTask(taskId)?.removeQueuedPrompt(turnId);
-}
-
-/** Cancel a task's running turn and pending permissions. */
-export async function cancelAgentTask(taskId: string): Promise<void> {
-  await getRegisteredTask(taskId)?.cancel();
-}
-
-/**
- * The transcript's manual "refresh session" control: pull whatever the
- * harness's session store holds now — including turns appended by other
- * processes — back into the task. Live tasks re-sync in place
- * (session/close + session/load, see AgentTask.refreshFromHarness);
- * restored rows just revive, which IS a fresh load. Fire-and-forget like
- * the other UI entry points; failures land on the task row as status.
- */
-export function refreshAgentSession(taskId: string): void {
-  const task = getRegisteredTask(taskId);
-  if (task) {
-    void task.refreshFromHarness();
-    return;
-  }
-  reviveAgentTask(taskId);
-}
-
-/**
- * Cancel the running turn and, if the agent hadn't responded yet, remove
- * its rows from the transcript — Escape-to-restore (MET-94). Resolves true
- * when the turn was forgotten (the caller should restore the prompt into
- * the composer); false when a response already existed and the round stays
- * as a plain cancelled turn.
- */
-export async function cancelAgentTurnAndForget(
-  taskId: string,
-): Promise<boolean> {
-  return (await getRegisteredTask(taskId)?.cancelAndForgetTurn()) ?? false;
-}
-
-/**
- * ACP `authenticate` with one of the task row's `authMethods`, retrying the
- * held prompt on success. Errors as values (out-of-band methods reject).
- */
-export async function authenticateAgentTask(
-  taskId: string,
-  methodId: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const task = getRegisteredTask(taskId);
-  if (!task) return { ok: false, error: "agent task is not started" };
-  return task.authenticate(methodId);
-}
-
-/**
- * Switch one of a task's session settings (MET-81). A restored row revives
- * first (the switch waits for session/load, which re-advertises the
- * options), matching how prompts treat asleep sessions.
- */
-export async function setAgentTaskConfigOption(
-  taskId: string,
-  optionId: string,
-  value: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const revival = reviveAgentTask(taskId);
-  if (revival) await revival.started.catch(() => {});
-  const task = getRegisteredTask(taskId);
-  if (!task) return { ok: false, error: "agent task is not started" };
-  return task.setConfigOption(optionId, value);
-}
-
-/** "I've signed in" — clear the auth block and retry the held prompt. */
-export function retryAgentTaskAfterAuth(taskId: string): void {
-  getRegisteredTask(taskId)?.retryHeldPrompt();
-}
-
-/** Answer a pending permission request (rows flow via the collection). */
-export function respondToAgentPermission(
-  taskId: string,
-  requestId: string,
-  response: RequestPermissionResponse,
-): void {
-  getRegisteredTask(taskId)?.respondPermission(requestId, response);
-}
-
-/**
- * Dispose every workspace's task manager at once — the web tunnel's
- * disconnect teardown. Losing the socket kills every agent on the worker, so
- * all live tasks go down together; each workspace's sessionful rows demote to
- * "restored" for revival on reconnect, exactly as a per-workspace close does.
- */
-export async function disposeAllWorkspaceTaskManagers(): Promise<void> {
-  const workspaces = Array.from(taskManagerRegistry.keys());
-  for (const workspacePath of workspaces) {
-    await disposeWorkspaceTaskManager(workspacePath);
-  }
-}
-
-export async function disposeWorkspaceTaskManager(
-  workspacePath: string,
-): Promise<void> {
-  const key = workspaceKey(workspacePath);
-  const manager = taskManagerRegistry.get(key);
-  taskManagerRegistry.delete(key);
-  await manager?.disposeAll();
-  // Sessions outlive their runtimes: rows with a sessionId go back to
-  // "restored" — the same live-but-unspawned state they'd have after a
-  // restart — so closing/reopening a workspace (or a StrictMode remount)
-  // never deletes anything. Rows that never got a session can't revive;
-  // drop them. Both write through the storage-backed collection.
-  for (const task of agentTasksCollection.toArray) {
-    if (workspaceKey(task.workspacePath) !== key) continue;
-    if (task.sessionId) {
-      agentTasksCollection.update(task.taskId, (draft) => {
-        draft.status = "restored";
-        draft.authRequired = false;
+  /** The one place a task's spawn spec meets the platform transport. */
+  const transportFactory = (task: AgentTask) => {
+    if (MOCK_AGENT_MODE) {
+      return () =>
+        createMockAgentTransport({
+          taskId: task.taskId,
+          host: {
+            fs: deps.fs,
+            filesOf: (workspacePath) => deps.services(workspacePath).files,
+          },
+        });
+    }
+    return ({ extraEnv }: { extraEnv: Record<string, string> }) =>
+      deps.proc.createAgentTransport({
+        taskId: task.taskId,
+        harness: task.harness,
+        workspacePath: task.workspacePath,
+        extraEnv,
       });
-    } else {
-      purgeTaskRows(task.taskId);
-    }
-  }
-}
+  };
 
-/** Drop one task's rows from every agent collection (memory only — whether
- *  the task-row delete reaches KV is the caller's suppression choice). */
-function purgeTaskRows(taskId: string): void {
-  for (const entry of agentEntriesForTask(taskId)) {
-    agentEntriesCollection.delete(entry.id);
-  }
-  for (const turn of agentTurnsForTask(taskId)) {
-    agentTurnsCollection.delete(turn.turnId);
-  }
-  for (const request of agentPermissionRequestsCollection.toArray) {
-    if (request.taskId === taskId) {
-      agentPermissionRequestsCollection.delete(request.id);
+  /**
+   * The effective (overridden/custom-aware) definition for a harness id,
+   * read synchronously off the harness-settings KV collection — revival
+   * must register the task in the same tick so a prompt can queue
+   * immediately. Falls back to the built-in definition when settings aren't
+   * loaded yet.
+   */
+  const effectiveHarnessById = (
+    harnessId: string,
+  ): HarnessDefinition | undefined => {
+    const kv = deps.kv.collection(HARNESS_SETTINGS_NAMESPACE);
+    const overrides = parseHarnessOverrides(
+      kv.get(HARNESS_OVERRIDES_KEY)?.value,
+    );
+    const custom = parseCustomHarnessEntries(kv.get(HARNESS_CUSTOM_KEY)?.value);
+    return (
+      resolveEffectiveHarnesses(overrides, custom).find(
+        (h) => h.id === harnessId,
+      ) ?? BUILT_IN_HARNESSES.find((h) => h.id === harnessId)
+    );
+  };
+
+  const revive: AgentRuntime["revive"] = (taskId) => {
+    if (live.get(taskId)) return null;
+    const row = store.tasks.get(taskId);
+    if (!row || row.status !== "restored" || !row.sessionId) return null;
+    const harness = effectiveHarnessById(row.harnessId);
+    if (!harness) {
+      store.tasks.update(taskId, (draft) => {
+        draft.status = "unavailable";
+        draft.updatedAt = Date.now();
+      });
+      return null;
     }
-  }
-  if (agentTasksCollection.get(taskId)) agentTasksCollection.delete(taskId);
+    const task = managerFor(row.workspacePath).adoptTask(
+      taskId,
+      harness,
+      row.parentTaskId,
+    );
+    const started = task.start(transportFactory(task), {
+      resumeSessionId: row.sessionId,
+    });
+    // Failure lands on the row as "unavailable"/"error" — callers may still
+    // await.
+    started.catch((error) => {
+      console.warn("Agent session revival failed:", errorMessage(error));
+    });
+    return { started };
+  };
+
+  const disposeWorkspace = async (workspacePath: string) => {
+    const key = workspaceKey(workspacePath);
+    const existing = managers.get(key);
+    managers.delete(key);
+    await existing?.disposeAll();
+    // Sessions outlive their runtimes: rows with a sessionId go back to
+    // "restored" — the same live-but-unspawned state they'd have after a
+    // restart — so closing/reopening a workspace (or a StrictMode remount)
+    // never deletes anything. Rows that never got a session can't revive;
+    // drop them. Both write through the storage-backed collection.
+    for (const task of store.tasks.toArray) {
+      if (workspaceKey(task.workspacePath) !== key) continue;
+      if (task.sessionId) {
+        store.tasks.update(task.taskId, (draft) => {
+          draft.status = "restored";
+          draft.authRequired = false;
+        });
+      } else {
+        store.purgeTask(task.taskId);
+      }
+    }
+  };
+
+  return {
+    task: (taskId) => live.get(taskId),
+    manager,
+    managerFor,
+    start(workspacePath, harness) {
+      const task = managerFor(workspacePath).createTask(harness);
+      // start() inserts the task row synchronously before its first await.
+      return {
+        taskId: task.taskId,
+        started: task.start(transportFactory(task)),
+      };
+    },
+    revive,
+    getOrRevive(taskId) {
+      const task = live.get(taskId);
+      if (task) return task;
+      revive(taskId);
+      return live.get(taskId);
+    },
+    async delete(taskId) {
+      const row = store.tasks.get(taskId);
+      if (row) await manager(row.workspacePath)?.cancelTask(taskId);
+      store.purgeTask(taskId);
+    },
+    refresh(taskId) {
+      const task = live.get(taskId);
+      if (task) {
+        void task.refreshFromHarness();
+        return;
+      }
+      revive(taskId);
+    },
+    async cancelTurnAndForget(taskId) {
+      return (await live.get(taskId)?.cancelAndForgetTurn()) ?? false;
+    },
+    async setConfigOption(taskId, optionId, value) {
+      const revival = revive(taskId);
+      if (revival) await revival.started.catch(() => {});
+      const task = live.get(taskId);
+      if (!task) return { ok: false, error: "agent task is not started" };
+      return task.setConfigOption(optionId, value);
+    },
+    findBlobAuthor(blobId) {
+      const entry = store.entries.toArray.find(
+        (e) =>
+          e.type === "tool_call" &&
+          e.toolCall?.title === "author_blob" &&
+          isPlainObject(e.toolCall.rawInput) &&
+          e.toolCall.rawInput.id === blobId,
+      );
+      if (!entry?.toolCall?.rawInput) return undefined;
+      const rawInput = entry.toolCall.rawInput as {
+        path: string;
+        type: string;
+      };
+      return {
+        taskId: entry.taskId,
+        blobType: rawInput.type,
+        path: rawInput.path,
+      };
+    },
+    whenReconciled() {
+      reconciled ??= store
+        .reconcile((taskId) => live.get(taskId)?.currentStatus)
+        .catch((error: unknown) => {
+          console.warn("Agent task reconciliation failed:", error);
+        });
+      return reconciled;
+    },
+    disposeWorkspace,
+    async disposeAll() {
+      for (const workspacePath of [...managers.keys()]) {
+        await disposeWorkspace(workspacePath);
+      }
+    },
+  };
 }

@@ -24,15 +24,15 @@ import type {
 } from "@notefig/widgets";
 import { extractMentionPaths } from "@notefig/widgets";
 import type { PromptContextPart } from "@notefig/shared/agent";
+import { AGENT_KV_NAMESPACE, trustKey } from "@/agent/agents";
 import {
-  agentEntriesCollection,
-  agentPermissionRequestsCollection,
-  agentTasksCollection,
-  agentTurnsCollection,
-} from "@/agent/agent-collections";
-import { AGENT_KV_NAMESPACE, agents, trustKey } from "@/agent/agents";
-import { describeTaskMeta, useAgentTaskList } from "@/entities/agents";
-import { getOrCreateWorkspaceCollections } from "@/entities/files";
+  describeTaskMeta,
+  useAgentStore,
+  useAgentTaskList,
+  useAgents,
+} from "@/entities/agents";
+import type { WorkspaceFiles } from "@/entities/files";
+import type { Core } from "@notefig/core";
 import {
   useActiveHarnesses,
   useDefaultHarness,
@@ -46,36 +46,39 @@ import { useKv } from "@/utils/kv-store";
 import { path as pathutil, relativeTreePath } from "@/utils/path";
 import { AuthCard } from "./auth-card";
 import { PermissionCard } from "./permission-card";
-import {
-  adoptSharedSession,
-  dropSharedSession,
-  getOrStartSharedSession,
-  peekSharedSession,
-} from "./blob-session-store";
 import { formatTimeAgo } from "@/utils/format";
 
 /** Does this tree-domain token name a real file in the workspace? The
  *  workspace path must stay byte-identical to the collection's workspacePath
  *  (rows are keyed by NATIVE absolute paths derived from it), so the join
  *  reproduces that spelling exactly — no normalization anywhere here. */
-function isWorkspaceFile(workspacePath: string, token: string): boolean {
-  const { metadata } = getOrCreateWorkspaceCollections(workspacePath);
-  const row = metadata.get(
+type FileRows = Pick<WorkspaceFiles, "workspacePath" | "collections">;
+
+/** A workspace's files while core has it open. */
+function openFilesOf(core: Core, workspacePath: string): FileRows | undefined {
+  return core.workspaces.isOpen(workspacePath)
+    ? core.workspace(workspacePath).files
+    : undefined;
+}
+
+function isWorkspaceFile(files: FileRows, token: string): boolean {
+  const { workspacePath, collections } = files;
+  const row = collections.metadata.get(
     pathutil.join(workspacePath, pathutil.fromTreePath(token)),
   );
   return row !== undefined && row.type === "file";
 }
 
 function searchWorkspaceFiles(
-  workspacePath: string,
+  files: FileRows,
   query: string,
   limit: number,
 ): MentionCandidate[] {
-  const { metadata } = getOrCreateWorkspaceCollections(workspacePath);
+  const { metadata } = files.collections;
   // The raw collection holds directory rows too (useFileSearch's live query
   // filters them; a one-shot read must do it itself).
-  const files = metadata.toArray.filter((row) => row.type === "file");
-  return rankFileRows(files, query, {
+  const fileRows = metadata.toArray.filter((row) => row.type === "file");
+  return rankFileRows(fileRows, query, {
     limit,
     filter: canOpenFile,
     matchAllWhenEmpty: true,
@@ -89,10 +92,12 @@ function searchWorkspaceFiles(
  * harness's own file tools.
  */
 export function mentionContextParts(
-  workspacePath: string,
+  files: FileRows | undefined,
   text: string,
 ): PromptContextPart[] {
-  const isFile = (token: string) => isWorkspaceFile(workspacePath, token);
+  if (!files) return [];
+  const { workspacePath } = files;
+  const isFile = (token: string) => isWorkspaceFile(files, token);
   return extractMentionPaths(text, isFile).map((token) => ({
     kind: "resource_link" as const,
     path: pathutil.toFileUri(
@@ -113,40 +118,41 @@ function useRound({
   turnId: string | null;
   taskId: string | null;
 }): PromptRound {
+  const store = useAgentStore();
   const turnKey = turnId ?? " none";
   const taskKey = taskId ?? " none";
   const { data: turnRows = [] } = useLiveQuery(
     (q) =>
       q
-        .from({ turn: agentTurnsCollection })
+        .from({ turn: store.turns })
         .where(({ turn }) => eq(turn.turnId, turnKey)),
     [turnKey],
   );
   const { data: taskRows = [] } = useLiveQuery(
     (q) =>
       q
-        .from({ task: agentTasksCollection })
+        .from({ task: store.tasks })
         .where(({ task }) => eq(task.taskId, taskKey)),
     [taskKey],
   );
   const { data: entries = [] } = useLiveQuery(
     (q) =>
       q
-        .from({ entry: agentEntriesCollection })
+        .from({ entry: store.entries })
         .where(({ entry }) => eq(entry.turnId, turnKey)),
     [turnKey],
   );
   const { data: taskTurns = [] } = useLiveQuery(
     (q) =>
       q
-        .from({ turn: agentTurnsCollection })
+        .from({ turn: store.turns })
         .where(({ turn }) => eq(turn.taskId, taskKey)),
     [taskKey],
   );
   const { data: pendingPermissions = [] } = useLiveQuery(
     (q) =>
       q
-        .from({ req: agentPermissionRequestsCollection })
+        .from({ req: store.permissionRequests })
         .where(({ req }) =>
           and(eq(req.taskId, taskKey), eq(req.status, "pending")),
         ),
@@ -200,7 +206,7 @@ const slots: PromptWidgetHost["slots"] = {
 function useTrust(workspacePath: string) {
   // Subscribed for reactivity; the answer and the grant are the facade's.
   useKv<boolean>(AGENT_KV_NAMESPACE).get(trustKey(workspacePath));
-  const workspace = agents.workspace(workspacePath);
+  const workspace = useAgents().workspace(workspacePath);
   return { isTrusted: workspace.isTrusted(), grant: workspace.trust };
 }
 
@@ -249,7 +255,9 @@ function useHarnessList() {
  * also why the memo below has an empty dependency array.
  */
 export function usePromptWidgetHost(): PromptWidgetHost {
-  const { tabs } = useCore();
+  // Stable for the life of the app, so the memo below may close over it.
+  const core = useCore();
+  const { tabs, agents, agentStore, sharedSessions } = core;
   const { defaultHarness, setDefaultHarness } = useDefaultHarness();
 
   const latest = useRef({ defaultHarness, setDefaultHarness, tabs });
@@ -258,16 +266,16 @@ export function usePromptWidgetHost(): PromptWidgetHost {
   return useMemo<PromptWidgetHost>(
     () => ({
       startOrGetSharedSession: async (path) =>
-        (await getOrStartSharedSession(path, latest.current.defaultHarness))
+        (await sharedSessions.getOrStart(path, latest.current.defaultHarness))
           .taskId,
-      adoptSession: adoptSharedSession,
+      adoptSession: (path, taskId) => sharedSessions.adopt(path, taskId),
       // Choosing a harness both starts the fresh session on it and remembers
       // it as the default — the sessions panel's split-button rule.
       dropSession: (path, harnessId) => {
         latest.current.setDefaultHarness(harnessId);
-        dropSharedSession(path);
+        sharedSessions.drop(path);
       },
-      peekSession: peekSharedSession,
+      peekSession: (path) => sharedSessions.peek(path),
       isTaskReachable: (taskId) => agents.task(taskId).isReachable(),
 
       dispatchPrompt: ({ taskId, text, workspacePath: path, target }) => {
@@ -276,7 +284,7 @@ export function usePromptWidgetHost(): PromptWidgetHost {
           .promptFromWidget(
             text,
             { ...target, workspacePath: path },
-            mentionContextParts(path, text),
+            mentionContextParts(openFilesOf(core, path), text),
           );
         return { turnId };
       },
@@ -285,8 +293,8 @@ export function usePromptWidgetHost(): PromptWidgetHost {
         agents.task(taskId).cancelTurnAndForget(),
       removeQueuedPrompt: (taskId, turnId) =>
         agents.task(taskId).removeQueuedPrompt(turnId),
-      getTurnStatus: (turnId) => agentTurnsCollection.get(turnId)?.status,
-      ensureRuntime: agents.ensureRuntime,
+      getTurnStatus: (turnId) => agentStore.turns.get(turnId)?.status,
+      ensureRuntime: () => agents.ensureRuntime(),
 
       useRound,
       useSessionList,
@@ -294,8 +302,14 @@ export function usePromptWidgetHost(): PromptWidgetHost {
       useHarnessList,
       useTrust,
 
-      isWorkspaceFile,
-      searchWorkspaceFiles,
+      isWorkspaceFile: (path, token) => {
+        const files = openFilesOf(core, path);
+        return files ? isWorkspaceFile(files, token) : false;
+      },
+      searchWorkspaceFiles: (path, query, limit) => {
+        const files = openFilesOf(core, path);
+        return files ? searchWorkspaceFiles(files, query, limit) : [];
+      },
       toRelativePath: relativeTreePath,
 
       openFile: (path) =>

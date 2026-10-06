@@ -13,18 +13,22 @@
  */
 import { useMemo } from "react";
 import { createCollection, useLiveQuery } from "@tanstack/react-db";
-import { persistedCollectionOptions } from "@tanstack/db-sqlite-persistence-core";
-import { platformAdapter } from "@/adapters";
 import {
-  agentTurnsCollection,
+  persistedCollectionOptions,
+  type PersistedCollectionPersistence,
+} from "@tanstack/db-sqlite-persistence-core";
+import {
+  useAgentStore,
   type AgentTurn,
   type AgentTurnStatus,
 } from "@/entities/agents";
+import type { AgentStore } from "@/agent/agent-collections";
 import { useOpenWorkspaces, type OpenWorkspaceRow } from "@/entities/workspaces";
 import { onAppEvent, type AppEvents } from "@/utils/app-events";
 import i18n from "@/utils/intl";
 import { workspaceKey } from "@/utils/path";
 import { defineModule } from "@notefig/core";
+import { useModule } from "@notefig/core/react";
 
 export const PROMPT_ROUNDS_COLLECTION_ID = "prompt-rounds";
 /** Rows kept in storage across every workspace; the panel shows fewer. */
@@ -61,13 +65,21 @@ export interface PromptRound {
   startedAt: number;
 }
 
-export const promptRoundsCollection = createCollection(
-  persistedCollectionOptions<PromptRoundRow, string>({
-    id: PROMPT_ROUNDS_COLLECTION_ID,
-    getKey: (row) => row.turnId,
-    persistence: platformAdapter.db.get(),
-  }),
-);
+function createPromptRoundsCollection(
+  persistence: PersistedCollectionPersistence,
+) {
+  return createCollection(
+    persistedCollectionOptions<PromptRoundRow, string>({
+      id: PROMPT_ROUNDS_COLLECTION_ID,
+      getKey: (row) => row.turnId,
+      persistence,
+    }),
+  );
+}
+
+export type PromptRoundsCollection = ReturnType<
+  typeof createPromptRoundsCollection
+>;
 
 /** The note per turn status; a completed round has nothing to add. */
 const ROUND_META_KEYS: Partial<Record<AgentTurnStatus, string>> = {
@@ -95,81 +107,95 @@ function firstLine(text: string): string {
   return text.trim().split("\n", 1)[0] ?? "";
 }
 
-/** The listener's start half, exported for tests. */
-export async function recordRoundStarted(
-  detail: AppEvents["widget:round-started"],
-  now: number = Date.now(),
-): Promise<void> {
-  await promptRoundsCollection.preload();
-  if (promptRoundsCollection.get(detail.turnId)) return;
-  await promptRoundsCollection.insert({
-    turnId: detail.turnId,
-    taskId: detail.taskId,
-    workspaceKey: workspaceKey(detail.workspacePath),
-    documentPath: detail.documentPath,
-    prompt: firstLine(detail.prompt),
-    status: "live",
-    startedAt: now,
-  }).isPersisted.promise;
-  await pruneRounds();
+/** `core.promptRounds`: the stored rounds and the listener that keeps
+ *  them. */
+export interface PromptRoundsApi {
+  readonly collection: PromptRoundsCollection;
+  /** The listener's start half. */
+  recordStarted(
+    detail: AppEvents["widget:round-started"],
+    now?: number,
+  ): Promise<void>;
+  /** The listener's settle half: only rounds we know are widget rounds. */
+  recordSettled(detail: AppEvents["agent:turn-settled"]): Promise<void>;
+  /** A round still "live" from a previous run never finished: settle it. */
+  settleOrphaned(): Promise<void>;
+  /** Boot: the one global listener. Returns the unsubscribe. */
+  track(): () => void;
 }
 
-/** The listener's settle half: only rounds we know are widget rounds. */
-export async function recordRoundSettled(
-  detail: AppEvents["agent:turn-settled"],
-): Promise<void> {
-  await promptRoundsCollection.preload();
-  if (!promptRoundsCollection.get(detail.turnId)) return;
-  await promptRoundsCollection.update(detail.turnId, (draft) => {
-    draft.status = detail.status;
-    draft.settledAt = detail.at;
-  }).isPersisted.promise;
-}
+export function createPromptRounds({
+  persistence,
+  turns,
+}: {
+  persistence: PersistedCollectionPersistence;
+  turns: Pick<AgentStore["turns"], "get">;
+}): PromptRoundsApi {
+  const rounds = createPromptRoundsCollection(persistence);
 
-/** Keep storage bounded: drop the oldest rows past the cap. */
-async function pruneRounds(): Promise<void> {
-  const rows = [...promptRoundsCollection.values()].sort(
-    (a, b) => a.startedAt - b.startedAt,
-  );
-  const excess = rows.length - MAX_PROMPT_ROUNDS;
-  if (excess <= 0) return;
-  await promptRoundsCollection.delete(
-    rows.slice(0, excess).map((row) => row.turnId),
-  ).isPersisted.promise;
-}
+  /** Keep storage bounded: drop the oldest rows past the cap. */
+  const prune = async () => {
+    const rows = [...rounds.values()].sort((a, b) => a.startedAt - b.startedAt);
+    const excess = rows.length - MAX_PROMPT_ROUNDS;
+    if (excess <= 0) return;
+    await rounds.delete(rows.slice(0, excess).map((row) => row.turnId))
+      .isPersisted.promise;
+  };
 
-/** A round still "live" from a previous run never finished: settle it. */
-export async function settleOrphanedRounds(): Promise<void> {
-  await promptRoundsCollection.preload();
-  const orphaned = [...promptRoundsCollection.values()]
-    .filter(
-      (row) => row.status === "live" && !agentTurnsCollection.get(row.turnId),
-    )
-    .map((row) => row.turnId);
-  if (orphaned.length === 0) return;
-  await promptRoundsCollection.update(orphaned, (drafts) => {
-    for (const draft of drafts) draft.status = "cancelled";
-  }).isPersisted.promise;
-}
-
-/** Boot: the one global listener. Returns the unsubscribe. */
-export function startPromptRoundTracking(): () => void {
-  void settleOrphanedRounds().catch((error) => {
-    console.error("Failed to settle orphaned prompt rounds:", error);
-  });
-  const stops = [
-    onAppEvent("widget:round-started", (detail) => {
-      void recordRoundStarted(detail).catch((error) => {
-        console.error("Failed to record a prompt round:", error);
+  const api: PromptRoundsApi = {
+    collection: rounds,
+    async recordStarted(detail, now = Date.now()) {
+      await rounds.preload();
+      if (rounds.get(detail.turnId)) return;
+      await rounds.insert({
+        turnId: detail.turnId,
+        taskId: detail.taskId,
+        workspaceKey: workspaceKey(detail.workspacePath),
+        documentPath: detail.documentPath,
+        prompt: firstLine(detail.prompt),
+        status: "live",
+        startedAt: now,
+      }).isPersisted.promise;
+      await prune();
+    },
+    async recordSettled(detail) {
+      await rounds.preload();
+      if (!rounds.get(detail.turnId)) return;
+      await rounds.update(detail.turnId, (draft) => {
+        draft.status = detail.status;
+        draft.settledAt = detail.at;
+      }).isPersisted.promise;
+    },
+    async settleOrphaned() {
+      await rounds.preload();
+      const orphaned = [...rounds.values()]
+        .filter((row) => row.status === "live" && !turns.get(row.turnId))
+        .map((row) => row.turnId);
+      if (orphaned.length === 0) return;
+      await rounds.update(orphaned, (drafts) => {
+        for (const draft of drafts) draft.status = "cancelled";
+      }).isPersisted.promise;
+    },
+    track() {
+      void api.settleOrphaned().catch((error) => {
+        console.error("Failed to settle orphaned prompt rounds:", error);
       });
-    }),
-    onAppEvent("agent:turn-settled", (detail) => {
-      void recordRoundSettled(detail).catch((error) => {
-        console.error("Failed to settle a prompt round:", error);
-      });
-    }),
-  ];
-  return () => stops.forEach((stop) => stop());
+      const stops = [
+        onAppEvent("widget:round-started", (detail) => {
+          void api.recordStarted(detail).catch((error) => {
+            console.error("Failed to record a prompt round:", error);
+          });
+        }),
+        onAppEvent("agent:turn-settled", (detail) => {
+          void api.recordSettled(detail).catch((error) => {
+            console.error("Failed to settle a prompt round:", error);
+          });
+        }),
+      ];
+      return () => stops.forEach((stop) => stop());
+    },
+  };
+  return api;
 }
 
 /** Live rounds first, then newest first within each group. */
@@ -185,7 +211,7 @@ function byActivity(a: PromptRound, b: PromptRound): number {
  * for queued-vs-running — pure, exported for tests.
  *
  * A live row whose turn row is gone reads as cancelled, the same answer
- * `settleOrphanedRounds` writes at boot (MET-208). The turn row is the only
+ * `settleOrphaned` writes at boot (MET-208). The turn row is the only
  * thing that can say a round is still moving, and several paths delete one
  * without settling it first — a withdrawn queued prompt, a purged task, a
  * revival replacing its history. Reading the absence as "running" pinned
@@ -224,11 +250,11 @@ export function derivePromptRounds(
  * most recent, capped at `limit`.
  */
 export function usePromptRounds(limit: number): PromptRound[] {
-  const { data: rows = [] } = useLiveQuery((q) =>
-    q.from({ round: promptRoundsCollection }),
-  );
+  const rounds = useModule("promptRounds").collection;
+  const store = useAgentStore();
+  const { data: rows = [] } = useLiveQuery((q) => q.from({ round: rounds }));
   const { data: turns = [] } = useLiveQuery((q) =>
-    q.from({ turn: agentTurnsCollection }),
+    q.from({ turn: store.turns }),
   );
   const openWorkspaces = useOpenWorkspaces();
   return useMemo(
@@ -237,8 +263,20 @@ export function usePromptRounds(limit: number): PromptRound[] {
   );
 }
 
+declare module "@notefig/core" {
+  interface CoreModules {
+    promptRounds: PromptRoundsApi;
+  }
+}
+
 /** Settles orphaned rounds, then follows prompt events. */
 export const promptRoundsModule = defineModule({
-  name: "prompt-rounds",
-  boot: () => startPromptRoundTracking(),
+  name: "promptRounds",
+  needs: ["platform", "agentStore"],
+  register: (ctx) =>
+    createPromptRounds({
+      persistence: ctx.use("platform").db.get(),
+      turns: ctx.use("agentStore").turns,
+    }),
+  boot: (rounds) => rounds.track(),
 });

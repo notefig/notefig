@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getOrCreateEditor,
   disposeAllEditors,
+  type EditorFs,
 } from "@/components/editor/editor-store";
 import { getMarkdownEditor, markEditorMounted } from "@/entities/editors";
 import { getTabController } from "@/tabs/tab-controllers";
@@ -16,16 +17,30 @@ function doc(...paragraphs: string[]) {
   };
 }
 
+/** The platform fs an editor reaches. Nothing here searches the workspace
+ *  or pastes an image, so it answers empty. */
+const fs: EditorFs = {
+  searchContent: vi.fn(async () => []),
+  exists: vi.fn(async (paths: string[]) =>
+    paths.map((path) => ({ path, exists: false })),
+  ),
+  writeBinaryFiles: vi.fn(async () => ({ succeeded: [], failed: [] })),
+};
+
 afterEach(() => {
   disposeAllEditors();
 });
 
 describe("a document's tab controller", () => {
   it("reveals a match by re-locating it in the rendered document", async () => {
-    getOrCreateEditor("/ws/a.md", {
-      type: "markdown",
-      content: doc("alpha beta", "beta gamma"),
-    });
+    getOrCreateEditor(
+      "/ws/a.md",
+      {
+        type: "markdown",
+        content: doc("alpha beta", "beta gamma"),
+      },
+      fs,
+    );
 
     // The shape the file search returns: text, its line, and which
     // same-text occurrence in the file it was.
@@ -45,7 +60,11 @@ describe("a document's tab controller", () => {
   });
 
   it("undoes through the document's own history", () => {
-    getOrCreateEditor("/ws/a.md", { type: "markdown", content: doc("alpha") });
+    getOrCreateEditor(
+      "/ws/a.md",
+      { type: "markdown", content: doc("alpha") },
+      fs,
+    );
     const editor = getMarkdownEditor("/ws/a.md")!;
     editor.commands.insertContentAt(editor.state.doc.content.size - 1, " beta");
     expect(editor.state.doc.textContent).toContain("beta");
@@ -55,7 +74,7 @@ describe("a document's tab controller", () => {
   });
 
   it("has no history or searchable content on a non-document tab", async () => {
-    getOrCreateEditor("/ws/pic.png", { type: "image" });
+    getOrCreateEditor("/ws/pic.png", { type: "image" }, fs);
     const tab = getTabController("/ws/pic.png")!;
 
     expect(tab.history).toBeUndefined();

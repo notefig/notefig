@@ -1,8 +1,9 @@
 /**
  * Namespaced key-value storage over the SQLite `db` surface (MET-124).
  *
- * This module is the whole KV boundary. Before the cutover the collection here
- * fronted a `platformAdapter.kv` surface (tauri-plugin-store's `kv.json` on
+ * This module is the whole KV boundary, as `core.kv` (built from the
+ * platform's db that core hands it). Before the cutover the collection here
+ * fronted a platform `kv` surface (tauri-plugin-store's `kv.json` on
  * desktop, `localStorage` on web) and a handful of callers reached past it to
  * that surface directly — which meant their writes were invisible to `useKv`
  * subscribers until the next refetch. There is now nothing to reach past: the
@@ -15,8 +16,12 @@
 import { useLiveQuery, createCollection } from "@tanstack/react-db";
 // From the platform-neutral core, not either platform package — this module is
 // shared, and the two platform packages differ only in how they open a database.
-import { persistedCollectionOptions } from "@tanstack/db-sqlite-persistence-core";
-import { platformAdapter } from "@/adapters";
+import {
+  persistedCollectionOptions,
+  type PersistedCollectionPersistence,
+} from "@tanstack/db-sqlite-persistence-core";
+import { defineModule } from "@notefig/core";
+import { useModule } from "@notefig/core/react";
 
 export interface KvRow {
   key: string;
@@ -24,10 +29,9 @@ export interface KvRow {
 }
 
 type KvCollection = ReturnType<typeof createKvCollection>;
+type Persistence = PersistedCollectionPersistence;
 
-const collectionRegistry = new Map<string, KvCollection>();
-
-function createKvCollection(namespace: string) {
+function createKvCollection(namespace: string, persistence: Persistence) {
   return createCollection(
     persistedCollectionOptions<KvRow, string>({
       // Explicit, always: the default is a random UUID, and the table name is
@@ -35,22 +39,11 @@ function createKvCollection(namespace: string) {
       // every launch and nothing ever comes back.
       id: `kv:${namespace}`,
       getKey: (item) => item.key,
-      persistence: platformAdapter.db.get(),
+      persistence,
       // No write-through handlers: the persisted wrapper commits every
       // mutation to SQLite itself.
     }),
   );
-}
-
-export function getOrCreateKvCollection(namespace: string) {
-  const existing = collectionRegistry.get(namespace);
-  if (existing) {
-    return existing;
-  }
-
-  const collection = createKvCollection(namespace);
-  collectionRegistry.set(namespace, collection);
-  return collection;
 }
 
 /**
@@ -73,51 +66,70 @@ async function upsert(collection: KvCollection, key: string, value: unknown) {
     : collection.insert({ key, value });
 }
 
-/**
- * The imperative half, for the callers that run outside React: telemetry
- * bootstrap (before the tree mounts), the startup harness scan, tunnel pairing,
- * the debug panel. Reads wait for hydration; writes resolve once the row is
- * durable, which `stateWhenReady()` does *not* guarantee.
- */
-export async function readKv<T>(
-  namespace: string,
-  key: string,
-): Promise<T | undefined> {
-  const collection = getOrCreateKvCollection(namespace);
-  await collection.preload();
-  return collection.get(key)?.value as T | undefined;
+/** The KV store — `core.kv`. Reads wait for hydration; writes resolve
+ *  once the row is durable, which `stateWhenReady()` does *not* guarantee. */
+export interface KvApi {
+  /** A namespace's collection, created on first use. */
+  collection(namespace: string): KvCollection;
+  read<T>(namespace: string, key: string): Promise<T | undefined>;
+  readAll<T>(namespace: string): Promise<Record<string, T>>;
+  write<T>(namespace: string, key: string, value: T): Promise<void>;
+  remove(namespace: string, key: string): Promise<void>;
 }
 
-export async function readAllKv<T>(
-  namespace: string,
-): Promise<Record<string, T>> {
-  const collection = getOrCreateKvCollection(namespace);
-  await collection.preload();
-  const values: Record<string, T> = {};
-  for (const row of collection.values()) {
-    values[row.key] = row.value as T;
+/** KV over the persistence it is handed; namespaces open lazily. */
+export function createKv(persistence: () => Persistence): KvApi {
+  const namespaces = new Map<string, KvCollection>();
+  const collection = (namespace: string) => {
+    let existing = namespaces.get(namespace);
+    if (!existing) {
+      existing = createKvCollection(namespace, persistence());
+      namespaces.set(namespace, existing);
+    }
+    return existing;
+  };
+  return {
+    collection,
+    async read<T>(namespace: string, key: string) {
+      const rows = collection(namespace);
+      await rows.preload();
+      return rows.get(key)?.value as T | undefined;
+    },
+    async readAll<T>(namespace: string) {
+      const rows = collection(namespace);
+      await rows.preload();
+      const values: Record<string, T> = {};
+      for (const row of rows.values()) values[row.key] = row.value as T;
+      return values;
+    },
+    async write(namespace, key, value) {
+      await (
+        await upsert(collection(namespace), key, value)
+      ).isPersisted.promise;
+    },
+    async remove(namespace, key) {
+      const rows = collection(namespace);
+      await rows.preload();
+      if (!rows.get(key)) return;
+      await rows.delete(key).isPersisted.promise;
+    },
+  };
+}
+
+declare module "@notefig/core" {
+  interface CoreModules {
+    kv: KvApi;
   }
-  return values;
 }
 
-export async function writeKv<T>(
-  namespace: string,
-  key: string,
-  value: T,
-): Promise<void> {
-  const collection = getOrCreateKvCollection(namespace);
-  await (await upsert(collection, key, value)).isPersisted.promise;
-}
-
-export async function removeKv(namespace: string, key: string): Promise<void> {
-  const collection = getOrCreateKvCollection(namespace);
-  await collection.preload();
-  if (!collection.get(key)) return;
-  await collection.delete(key).isPersisted.promise;
-}
+export const kvModule = defineModule({
+  name: "kv",
+  needs: ["platform"],
+  register: (ctx) => createKv(() => ctx.use("platform").db.get()),
+});
 
 export function useKv<T>(namespace: string) {
-  const collection = getOrCreateKvCollection(namespace);
+  const collection = useModule("kv").collection(namespace);
 
   const { data: rows = [], isReady } = useLiveQuery(
     (q) =>

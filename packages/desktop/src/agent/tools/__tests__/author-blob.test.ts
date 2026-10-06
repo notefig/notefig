@@ -23,11 +23,10 @@ vi.mock("@/components/editor/blobs/blob-registry", () => ({
   getAllBlobTypes: () => [questionType],
 }));
 
-const { readWorkspaceTextFile, writeWorkspaceTextFile } = vi.hoisted(() => ({
-  readWorkspaceTextFile: vi.fn(async (_path: string) => ""),
-  writeWorkspaceTextFile: vi.fn(async (_path: string, _content: string) => {}),
-}));
-vi.mock("@/utils/file-sync", () => ({ readWorkspaceTextFile, writeWorkspaceTextFile }));
+const readWorkspaceTextFile = vi.fn(async (_path: string) => "");
+const writeWorkspaceTextFile = vi.fn(
+  async (_path: string, _content: string) => {},
+);
 
 import { authorBlob } from "../author-blob";
 
@@ -35,7 +34,10 @@ const ctx = {
   workspacePath: "/ws",
   taskId: "task_1",
   agents: {} as never,
-  services: {} as never,
+  // The document the fence is appended to, read and written through.
+  services: {
+    documents: { read: readWorkspaceTextFile, write: writeWorkspaceTextFile },
+  } as never,
 };
 
 describe("authorBlob", () => {

@@ -1,28 +1,20 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-  },
-}));
-
 import {
   encodePairingCode,
   generatePairingSecret,
 } from "@notefig/shared/tunnel";
-import { removeKv, writeKv } from "@/utils/kv-store";
+import type { KvApi } from "@/utils/kv-store";
+import { testKv } from "@/testing/test-kv";
 import {
   TUNNEL_KV_NAMESPACE,
   TUNNEL_PAIRING_KEY,
-  autoConnectStoredPairing,
-  connectWithCode,
-  forgetPairing,
-  getStoredPairing,
+  createTunnelPairing,
   pairingCodeFromHash,
-  watchCrossTabPairing,
+  type TunnelPairingApi,
 } from "../connect-flow";
-import { tunnelConnection } from "../tunnel-connection";
+import { TunnelConnection } from "../tunnel-connection";
 import { FakeWorker } from "./fake-worker";
 
 const WORKSPACE = "/remote/book";
@@ -31,15 +23,25 @@ function codeFor(worker: FakeWorker): string {
   return encodePairingCode(worker.secret, "wss://fake.example");
 }
 
-/** Point the singleton tunnel at a fake worker's socket for this test. */
+let kv: KvApi;
+let tunnelConnection: TunnelConnection;
+let tunnel: TunnelPairingApi;
+
+/** Point the tunnel at a fake worker's socket for this test. */
 function useWorker(options: ConstructorParameters<typeof FakeWorker>[0] = {}) {
   const worker = new FakeWorker({ workspacePath: WORKSPACE, ...options });
   (tunnelConnection as any).socketFactory = worker.socketFactory;
   return worker;
 }
 
-beforeEach(async () => {
-  await forgetPairing();
+beforeEach(() => {
+  kv = testKv();
+  tunnelConnection = new TunnelConnection();
+  tunnel = createTunnelPairing({
+    kv,
+    connection: tunnelConnection,
+    onDisconnect: async () => {},
+  });
 });
 
 afterEach(() => {
@@ -49,12 +51,12 @@ afterEach(() => {
 describe("connect-flow", () => {
   it("connects and persists the pairing (worker info returned)", async () => {
     const worker = useWorker({ workerName: "studio" });
-    const info = await connectWithCode(codeFor(worker));
+    const info = await tunnel.connect(codeFor(worker));
 
     expect(info.workspacePath).toBe(WORKSPACE);
     expect(info.name).toBe("studio");
 
-    const stored = await getStoredPairing();
+    const stored = await tunnel.stored();
     expect(stored?.workerName).toBe("studio");
     expect(stored?.workspacePath).toBe(WORKSPACE);
   });
@@ -65,66 +67,66 @@ describe("connect-flow", () => {
       generatePairingSecret(), // wrong secret
       "wss://fake.example",
     );
-    await expect(connectWithCode(badCode)).rejects.toMatchObject({
+    await expect(tunnel.connect(badCode)).rejects.toMatchObject({
       type: "pairing_failed",
     });
-    expect(await getStoredPairing()).toBeUndefined();
+    expect(await tunnel.stored()).toBeUndefined();
   });
 
   it("auto-connects a stored pairing on boot", async () => {
     const worker = useWorker();
-    await connectWithCode(codeFor(worker));
+    await tunnel.connect(codeFor(worker));
     tunnelConnection.disconnect();
 
     // New boot: a fresh worker answers (same secret works — the code embeds it).
     const rebooted = useWorker();
     // Reuse the stored code's secret by pointing the fake at it.
     (rebooted as any).secret = worker.secret;
-    const info = await autoConnectStoredPairing();
+    const info = await tunnel.autoConnect();
     expect(info?.workspacePath).toBe(WORKSPACE);
   });
 
   it("returns null (no throw) when auto-connect fails", async () => {
     // Stored pairing exists but the worker is gone / wrong secret.
     const worker = useWorker();
-    await connectWithCode(codeFor(worker));
+    await tunnel.connect(codeFor(worker));
     tunnelConnection.disconnect();
 
     const other = useWorker();
     (other as any).secret = generatePairingSecret(); // mismatched
-    expect(await autoConnectStoredPairing()).toBeNull();
+    expect(await tunnel.autoConnect()).toBeNull();
   });
 
-  it("forgetPairing clears the stored pairing", async () => {
+  it("forget clears the stored pairing", async () => {
     const worker = useWorker();
-    await connectWithCode(codeFor(worker));
-    await forgetPairing();
-    expect(await getStoredPairing()).toBeUndefined();
+    await tunnel.connect(codeFor(worker));
+    await tunnel.forget();
+    expect(await tunnel.stored()).toBeUndefined();
   });
 
   it("re-pairs while already connected without throwing", async () => {
     // The reported bug: a second connect on a live tunnel used to throw
-    // "already connected". connectWithCode now tears the old one down first.
+    // "already connected". connect now tears the old one down first.
     const first = useWorker({ workerName: "first" });
-    await connectWithCode(codeFor(first));
+    await tunnel.connect(codeFor(first));
     expect(tunnelConnection.getState().status).toBe("connected");
 
     const second = useWorker({ workerName: "second" });
-    const info = await connectWithCode(codeFor(second));
+    const info = await tunnel.connect(codeFor(second));
     expect(info.name).toBe("second");
     expect(tunnelConnection.getState().status).toBe("connected");
   });
 });
 
-describe("watchCrossTabPairing", () => {
+describe("watchCrossTab", () => {
   it("connects a disconnected tab when another tab writes a pairing", async () => {
     const worker = useWorker();
-    const cleanup = watchCrossTabPairing();
+    const cleanup = tunnel.watchCrossTab();
 
     // The other tab's write. In the browser its commit reaches this tab through
     // the collection's coordinator; here, writing to the same collection is the
     // same signal from this side of that boundary.
-    await writeKv(TUNNEL_KV_NAMESPACE, TUNNEL_PAIRING_KEY, {
+    await kv.write(TUNNEL_KV_NAMESPACE, TUNNEL_PAIRING_KEY, {
       code: codeFor(worker),
     });
 
@@ -136,21 +138,21 @@ describe("watchCrossTabPairing", () => {
 
   it("ignores other keys in the namespace and the pairing being cleared", async () => {
     const worker = useWorker();
-    await writeKv(TUNNEL_KV_NAMESPACE, TUNNEL_PAIRING_KEY, {
+    await kv.write(TUNNEL_KV_NAMESPACE, TUNNEL_PAIRING_KEY, {
       code: codeFor(worker),
     });
-    const cleanup = watchCrossTabPairing();
+    const cleanup = tunnel.watchCrossTab();
 
     // A neighbouring key must not look like a pairing...
-    await writeKv(TUNNEL_KV_NAMESPACE, "something-else", "x");
+    await kv.write(TUNNEL_KV_NAMESPACE, "something-else", "x");
     // ...and neither must a tab that just signed out, even though the pairing
     // row it deleted is exactly the key being watched.
-    await forgetPairing();
+    await tunnel.forget();
 
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(tunnelConnection.getState().status).toBe("disconnected");
     cleanup();
-    await removeKv(TUNNEL_KV_NAMESPACE, "something-else");
+    await kv.remove(TUNNEL_KV_NAMESPACE, "something-else");
   });
 });
 

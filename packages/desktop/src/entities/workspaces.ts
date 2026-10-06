@@ -19,145 +19,171 @@
  *
  * Registry key vs value: `workspaceKey` collapses respellings onto one
  * entry (Windows), while rows and downstream calls carry the normalized
- * native spelling — the same convention as taskManagerRegistry.
+ * native spelling — the same convention as the agent runtime's managers.
  */
 import { useEffect, useMemo, useState } from "react";
-import { useLiveQuery } from "@tanstack/react-db";
+import { createCollection, useLiveQuery } from "@tanstack/react-db";
+import {
+  persistedCollectionOptions,
+  type PersistedCollectionPersistence,
+} from "@tanstack/db-sqlite-persistence-core";
 import { defineModule, type WorkspaceLifecycle } from "@notefig/core";
-import {
-  getOrCreateWorkspaceCollections,
-  refreshDirectoryMetadata,
-  workspaceCollections,
-} from "@/entities/files";
-import {
-  openWorkspacesCollection,
-  type OpenWorkspaceRow,
-} from "@/entities/open-workspaces";
+import { useModule } from "@notefig/core/react";
 import { path as pathutil, relativeTreePath, workspaceKey } from "@/utils/path";
 
-// The collection is a leaf (see open-workspaces.ts for why); this module
-// remains its public home.
-export {
-  OPEN_WORKSPACES_COLLECTION_ID,
-  openWorkspacesCollection,
-  type OpenWorkspaceRow,
-} from "@/entities/open-workspaces";
-
-/**
- * The one boot obligation: the persisted open set is hydrated AND every row
- * in it has been brought back to life. Set once by `restoreOpenWorkspaces`;
- * a root that never restores (the marketing site seeds its own root) has
- * nothing to wait for beyond the load itself, which is what the fallback
- * returns. One promise, so "ready" cannot mean two things that merely
- * happen to coincide.
- */
-let restored: Promise<void> | null = null;
-
-/** Resolves once the open set is hydrated and, if this root restores, its
- *  workspaces are seeded with their listing walks under way. Idempotent. */
-export function whenOpenWorkspacesReady(): Promise<void> {
-  return restored ?? openWorkspacesCollection.preload();
+export interface OpenWorkspaceRow {
+  /** workspaceKey(path) — the row id. */
+  key: string;
+  /** Normalized native spelling, safe for display and navigation. */
+  path: string;
+  openedAt: number;
+  /** Last time this workspace was brought to the front; the max is the
+   *  focused workspace. */
+  focusedAt: number;
 }
 
-/**
- * Bring every persisted open workspace back to life after a restart: seed
- * its collections and kick the listing walk, exactly as `recordFocus`
- * does for a fresh open — minus the insert, since the row is what told us
- * to. Watchers arm through the registry subscription, which reconciles the
- * rows it finds. Called once by `workspacesModule`'s boot, before render,
- * so nothing observes `whenOpenWorkspacesReady` ahead of it.
- */
-export function restoreOpenWorkspaces(): Promise<void> {
-  restored ??= openWorkspacesCollection.preload().then(() => {
-    for (const row of openWorkspacesCollection.values()) {
-      getOrCreateWorkspaceCollections(row.path);
-      void refreshDirectoryMetadata(row.path);
-    }
-  });
-  return restored;
+/** The collection id, and so the SQLite table the open set lands in. */
+export const OPEN_WORKSPACES_COLLECTION_ID = "open-workspaces";
+
+function createOpenWorkspacesCollection(
+  persistence: PersistedCollectionPersistence,
+) {
+  return createCollection(
+    persistedCollectionOptions<OpenWorkspaceRow, string>({
+      id: OPEN_WORKSPACES_COLLECTION_ID,
+      getKey: (row) => row.key,
+      persistence,
+    }),
+  );
 }
 
-/**
- * True once `whenOpenWorkspacesReady` has resolved — gates anything that
- * would treat "not in the open set" as meaningful (stale-tab pruning) so a
- * restored layout is never emptied while its workspaces are still loading.
- */
-export function useOpenWorkspacesReady(): boolean {
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    let live = true;
-    void whenOpenWorkspacesReady().finally(() => live && setReady(true));
-    return () => {
-      live = false;
-    };
-  }, []);
-  return ready;
+/** The open set — `core.workspaceRegistry`. */
+export interface WorkspaceRegistry {
+  /** Reactive, persisted open set — the switcher's and the boot's source. */
+  readonly collection: ReturnType<typeof createOpenWorkspacesCollection>;
+  /** Resolves once the open set is hydrated and, if this root restores,
+   *  its workspaces are seeded with their listing walks under way.
+   *  Idempotent. */
+  whenReady(): Promise<void>;
+  /**
+   * Bring every persisted open workspace back to life after a restart:
+   * load the open set, whose rows core opens (`mirror`) — each workspace's
+   * modules then start themselves, its files walking the listing and
+   * watching. Run once by the module's boot, before render, so nothing
+   * observes `whenReady` ahead of it.
+   */
+  restore(): Promise<void>;
+  isOpen(workspacePath: string): boolean;
+  /**
+   * The open workspace whose tree contains `absolutePath`, or null when no
+   * open workspace does. Tree membership, never a string prefix
+   * (`/ws-backup` is not inside `/ws`); with nested workspaces open, the
+   * deepest wins. This is how a file tab, a write or an editor finds its
+   * workspace — the dock is one layout over every open workspace, so
+   * nothing may assume an ambient one.
+   */
+  workspaceOf(absolutePath: string): string | null;
+  /**
+   * The registry's half of opening or focusing a workspace, run on
+   * `workspace:focused` (so through `core.workspace(path).open()` or
+   * `.focus()`, never directly). A workspace not yet in the open set joins
+   * it once the persisted set has hydrated, which in steady state is
+   * immediate. One already in it is brought to the front: the sidebar
+   * shows it and new-item actions target it. Resolves once the write is
+   * durable: a reload before that would forget the workspace or land on
+   * the previous focus. Core has already waited out any close of the same
+   * workspace.
+   */
+  recordFocus(workspacePath: string): Promise<void>;
+  /** Drop the row of a workspace core is closing. */
+  forget(key: string): void;
+  /**
+   * Mirror the open set into core's workspace lifecycle, so per-workspace
+   * module instances and the `workspace:*` hooks follow the same rows the
+   * switcher shows. Rows already present (a restore that ran first) open
+   * before the subscription starts; hydrated rows arrive as inserts.
+   */
+  mirror(lifecycle: WorkspaceLifecycle): () => void;
 }
 
-/**
- * Every mutation of the open set waits for this. A write issued before the
- * persisted collection has hydrated is assigned a stream position from what
- * the persistence layer has observed so far — before hydration, the very
- * position the previous session already used — and the adapter drops it as
- * already applied: the row shows in memory and is gone on the next launch
- * (workspaces-restore.test.ts pins this). In steady state the wait is a
- * resolved promise.
- */
-function hydrated(): Promise<void> {
-  return openWorkspacesCollection.preload();
+export function createWorkspaceRegistry(
+  persistence: PersistedCollectionPersistence,
+): WorkspaceRegistry {
+  const rows = createOpenWorkspacesCollection(persistence);
+
+  /**
+   * The one boot obligation: the persisted open set is hydrated AND every
+   * row in it has been brought back to life. Set once by `restore`; a root
+   * that never restores (the marketing site seeds its own root) has
+   * nothing to wait for beyond the load itself, which is what the fallback
+   * returns. One promise, so "ready" cannot mean two things that merely
+   * happen to coincide.
+   */
+  let restored: Promise<void> | null = null;
+
+  /**
+   * Every mutation of the open set waits for this. A write issued before
+   * the persisted collection has hydrated is assigned a stream position
+   * from what the persistence layer has observed so far — before
+   * hydration, the very position the previous session already used — and
+   * the adapter drops it as already applied: the row shows in memory and
+   * is gone on the next launch (workspaces-restore.test.ts pins this). In
+   * steady state the wait is a resolved promise.
+   */
+  const hydrated = () => rows.preload();
+
+  return {
+    collection: rows,
+    whenReady: () => restored ?? rows.preload(),
+    restore() {
+      restored ??= rows.preload();
+      return restored;
+    },
+    isOpen: (workspacePath) => rows.has(workspaceKey(workspacePath)),
+    workspaceOf: (absolutePath) =>
+      workspaceOfPathIn(rows.values(), absolutePath),
+    async recordFocus(workspacePath) {
+      const key = workspaceKey(workspacePath);
+      const native = pathutil.normalize(workspacePath);
+      await hydrated();
+      if (rows.has(key)) {
+        await rows.update(key, (draft) => {
+          draft.focusedAt = Date.now();
+        }).isPersisted.promise;
+        return;
+      }
+      // The optimistic insert is visible synchronously; only durability
+      // waits.
+      const now = Date.now();
+      await rows.insert({ key, path: native, openedAt: now, focusedAt: now })
+        .isPersisted.promise;
+    },
+    forget(key) {
+      if (rows.has(key)) rows.delete(key);
+    },
+    mirror(lifecycle) {
+      for (const row of rows.values()) void lifecycle.open(row.path);
+      const subscription = rows.subscribeChanges((changes) => {
+        for (const change of changes) {
+          if (change.type === "delete") {
+            void lifecycle.close(change.value.path);
+          } else {
+            void lifecycle.open(change.value.path);
+          }
+        }
+      });
+      return () => subscription.unsubscribe();
+    },
+  };
 }
 
-// There is deliberately no runtime map here. Membership *is* the collection:
-// the metadata watcher (utils/workspace-watchers.ts) and every per-workspace
-// value declared through `workspaceScoped` (file and git collections, the
-// tree's expansion memory, the sidebar's last tool) subscribe to it and tear
-// themselves down when a row leaves. What owns OS resources — the agents'
-// processes, the history repo's git worker — is a core workspace module,
-// disposed in need order when core closes the workspace. Closing is
-// `core.workspace(path).close()`: the row goes on `workspace:closing`, so
-// the switcher drops it at once, and agent rows with a live session demote
-// to "restored" (MET-54) as the agents module is disposed.
-
-/**
- * The registry's half of opening or focusing a workspace, run on
- * `workspace:focused` (so through `core.workspace(path).open()` or
- * `.focus()`, never directly). A workspace not yet in the open set joins it
- * once the persisted set has hydrated, which in steady state is immediate,
- * with its file collections seeded and its listing walk under way. One
- * already in it is brought to the front: the sidebar shows it and new-item
- * actions target it. Either way its listing is re-stat'd (cheap, catches
- * watcher gaps), and this resolves once the write is durable: a reload
- * before that would forget the workspace or land on the previous focus.
- * Core has already waited out any close of the same workspace.
- */
-async function recordFocus(workspacePath: string): Promise<void> {
-  const key = workspaceKey(workspacePath);
-  const native = pathutil.normalize(workspacePath);
-  await hydrated();
-  const existing = openWorkspacesCollection.get(key);
-  if (existing) {
-    void refreshDirectoryMetadata(existing.path);
-    return openWorkspacesCollection
-      .update(key, (draft) => {
-        draft.focusedAt = Date.now();
-      })
-      .isPersisted.promise.then(() => undefined);
-  }
-
-  // The row first: per-workspace values are scoped to membership, so the
-  // collections must find the workspace open when the refresh reaches them.
-  // The optimistic insert is visible synchronously; only durability waits.
-  const now = Date.now();
-  const inserted = openWorkspacesCollection.insert({
-    key,
-    path: native,
-    openedAt: now,
-    focusedAt: now,
-  });
-  getOrCreateWorkspaceCollections(native);
-  void refreshDirectoryMetadata(native);
-  return inserted.isPersisted.promise.then(() => undefined);
-}
+// There is deliberately no runtime map here. Membership *is* the
+// collection, mirrored into core's workspace lifecycle; every
+// per-workspace value is a core workspace module, disposed in need order
+// when core closes the workspace. Closing is `core.workspace(path).close()`:
+// the row goes on `workspace:closing`, so the switcher drops it at once,
+// and agent rows with a live session demote to "restored" (MET-54) as the
+// agents module is disposed.
 
 function mostRecentlyFocused(
   rows: Iterable<OpenWorkspaceRow>,
@@ -169,48 +195,8 @@ function mostRecentlyFocused(
   return best;
 }
 
-export function useFocusedWorkspace(): string | null {
-  const { data: rows = [] } = useLiveQuery((q) =>
-    q.from({ workspace: openWorkspacesCollection }),
-  );
-  return useMemo(() => mostRecentlyFocused(rows)?.path ?? null, [rows]);
-}
-
-export function isWorkspaceOpen(workspacePath: string): boolean {
-  return openWorkspacesCollection.has(workspaceKey(workspacePath));
-}
-
-/**
- * Drops and re-seeds the workspace's file state without touching agents or
- * the watcher — error-boundary recovery after fs access is restored. (A
- * lost fs handle doesn't invalidate running harness processes; they hold
- * their own OS-level access.)
- */
-export function reloadWorkspaceFiles(workspacePath: string): void {
-  const native = pathutil.normalize(workspacePath);
-  workspaceCollections.drop(native);
-  getOrCreateWorkspaceCollections(native);
-  void refreshDirectoryMetadata(native);
-  // Access was just restored — if the watcher's start failed while the
-  // workspace was unreadable, this is the moment it can finally arm. The
-  // error boundary calls `ensureWatching` alongside this, for the same
-  // reason the loader does: watching is the portal's business.
-}
-
-/**
- * The open workspace whose tree contains `absolutePath`, or null when no
- * open workspace does. Tree membership, never a string prefix (`/ws-backup`
- * is not inside `/ws`); with nested workspaces open, the deepest wins. This
- * is how a file tab, a write or an editor finds its workspace — the dock is
- * one layout over every open workspace, so nothing may assume an ambient
- * one.
- */
-export function workspaceOfPath(absolutePath: string): string | null {
-  return workspaceOfPathIn(openWorkspacesCollection.values(), absolutePath);
-}
-
-function workspaceOfPathIn(
-  rows: Iterable<OpenWorkspaceRow>,
+export function workspaceOfPathIn(
+  rows: Iterable<Pick<OpenWorkspaceRow, "path">>,
   absolutePath: string,
 ): string | null {
   let best: string | null = null;
@@ -221,11 +207,45 @@ function workspaceOfPathIn(
   return best;
 }
 
-/** Reactive `workspaceOfPath`: re-resolves as workspaces open and close. */
-export function useWorkspaceOfPath(absolutePath: string): string | null {
+/** The registry, for components. */
+export function useWorkspaceRegistry(): WorkspaceRegistry {
+  return useModule("workspaceRegistry");
+}
+
+/**
+ * True once `whenReady` has resolved — gates anything that would treat
+ * "not in the open set" as meaningful (stale-tab pruning) so a restored
+ * layout is never emptied while its workspaces are still loading.
+ */
+export function useOpenWorkspacesReady(): boolean {
+  const registry = useWorkspaceRegistry();
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void registry.whenReady().finally(() => live && setReady(true));
+    return () => {
+      live = false;
+    };
+  }, [registry]);
+  return ready;
+}
+
+function useOpenWorkspaceRows(): OpenWorkspaceRow[] {
+  const { collection } = useWorkspaceRegistry();
   const { data: rows = [] } = useLiveQuery((q) =>
-    q.from({ workspace: openWorkspacesCollection }),
+    q.from({ workspace: collection }),
   );
+  return rows;
+}
+
+export function useFocusedWorkspace(): string | null {
+  const rows = useOpenWorkspaceRows();
+  return useMemo(() => mostRecentlyFocused(rows)?.path ?? null, [rows]);
+}
+
+/** Reactive `workspaceOf`: re-resolves as workspaces open and close. */
+export function useWorkspaceOfPath(absolutePath: string): string | null {
+  const rows = useOpenWorkspaceRows();
   return useMemo(
     () => workspaceOfPathIn(rows, absolutePath),
     [rows, absolutePath],
@@ -234,9 +254,7 @@ export function useWorkspaceOfPath(absolutePath: string): string | null {
 
 /** The open set as switcher-ready rows, oldest-opened first. */
 export function useOpenWorkspaces(): OpenWorkspaceRow[] {
-  const { data: rows = [] } = useLiveQuery((q) =>
-    q.from({ workspace: openWorkspacesCollection }),
-  );
+  const rows = useOpenWorkspaceRows();
   return useMemo(
     () => [...rows].sort((a, b) => a.openedAt - b.openedAt),
     [rows],
@@ -245,62 +263,40 @@ export function useOpenWorkspaces(): OpenWorkspaceRow[] {
 
 declare module "@notefig/core" {
   interface CoreModules {
-    "workspace-registry": undefined;
+    workspaceRegistry: WorkspaceRegistry;
   }
-}
-
-/**
- * Mirror the open set into core's workspace lifecycle, so per-workspace
- * module instances and the `workspace:*` hooks follow the same rows the
- * switcher shows. Rows already present (a restore that ran first) open
- * before the subscription starts; hydrated rows arrive as inserts.
- */
-function mirrorOpenSet(lifecycle: WorkspaceLifecycle): () => void {
-  for (const row of openWorkspacesCollection.values()) {
-    void lifecycle.open(row.path);
-  }
-  const subscription = openWorkspacesCollection.subscribeChanges((changes) => {
-    for (const change of changes) {
-      if (change.type === "delete") void lifecycle.close(change.value.path);
-      else void lifecycle.open(change.value.path);
-    }
-  });
-  return () => subscription.unsubscribe();
 }
 
 /**
  * The open set's runtime half: it persists what core opens through a
- * handle, and drops it when core closes it. Scopes and watchers must be
- * live before a restore hydrates rows, so they are needs. The desktop shell
- * restores the persisted open set; the marketing site focuses its one root.
+ * handle, and drops it when core closes it. The desktop shell restores the
+ * persisted open set; the marketing site focuses its one root.
  */
 export function workspacesModule({ restore }: { restore: boolean }) {
   return defineModule({
-    name: "workspace-registry",
-    needs: ["workspace-scopes", "workspace-watchers"],
-    boot: (_api, ctx) => {
-      const stopMirror = mirrorOpenSet(ctx.workspaces);
+    name: "workspaceRegistry",
+    needs: ["platform"],
+    register: (ctx) => createWorkspaceRegistry(ctx.use("platform").db.get()),
+    boot: (registry, ctx) => {
+      const stopMirror = registry.mirror(ctx.workspaces);
       const stopFocus = ctx.hooks.on("workspace:focused", (workspace) =>
-        recordFocus(workspace.path),
+        registry.recordFocus(workspace.path),
       );
       // Synchronously, first thing in the close: the switcher row goes at
-      // once, and the metadata watcher stops with it.
-      const stopClosing = ctx.hooks.on("workspace:closing", (workspace) => {
-        if (openWorkspacesCollection.has(workspace.key)) {
-          openWorkspacesCollection.delete(workspace.key);
-        }
-      });
-      const stop = () => {
+      // once.
+      const stopClosing = ctx.hooks.on("workspace:closing", (workspace) =>
+        registry.forget(workspace.key),
+      );
+      if (restore) {
+        void registry.restore().catch((error) => {
+          console.error("Failed to restore open workspaces:", error);
+        });
+      }
+      return () => {
         stopMirror();
         stopFocus();
         stopClosing();
       };
-      if (restore) {
-        void restoreOpenWorkspaces().catch((error) => {
-          console.error("Failed to restore open workspaces:", error);
-        });
-      }
-      return stop;
     },
   });
 }

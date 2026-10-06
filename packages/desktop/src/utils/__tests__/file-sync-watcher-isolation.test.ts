@@ -1,16 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { platformAdapter } from "@/adapters";
-import type { FsChangeEvent } from "@/adapters/platform-adapter.interface";
-import {
-  contentWatchIdFor,
-  metadataWatchIdFor,
-  startWorkspaceMetadataWatcher,
-  syncContentWatchers,
-} from "../file-sync";
-import {
-  getOrCreateWorkspaceCollections,
-  workspaceCollections,
-} from "@/entities/files";
+import { QueryClient } from "@tanstack/react-query";
+import type {
+  FileSystemSurface,
+  FsChangeEvent,
+} from "@/adapters/platform-adapter.interface";
+import { contentWatchIdFor, metadataWatchIdFor } from "../file-sync";
+import { createWorkspaceFiles, type WorkspaceFiles } from "@/entities/files";
 
 // MET-177 Stage B: with several workspaces open, fs events must only reach
 // the watch that produced them. Historically the payload carried no watch
@@ -20,31 +15,24 @@ import {
 // by the fs layer — Rust's WATCH_ROOTS tests in file_watcher.rs — not by
 // the ingestion handlers here.
 
-const bus = vi.hoisted(() => ({
-  listeners: new Set<(event: unknown) => void>(),
-}));
-
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-    fs: {
-      getMetadata: vi.fn(),
-      readDirectory: vi.fn(),
-      readFiles: vi.fn(),
-      writeFiles: vi.fn(),
-      onFsEvent: vi.fn((listener: (event: unknown) => void) => {
-        bus.listeners.add(listener);
-        return () => bus.listeners.delete(listener);
-      }),
-      startWatchingMetadata: vi.fn(async () => {}),
-      startWatchingContent: vi.fn(async () => {}),
-      stopWatching: vi.fn(async () => {}),
-    },
-  },
-}));
+const listeners = new Set<(event: unknown) => void>();
+const fsMock = {
+  getMetadata: vi.fn(),
+  readDirectory: vi.fn(),
+  readFiles: vi.fn(),
+  writeFiles: vi.fn(),
+  onFsEvent: vi.fn((listener: (event: unknown) => void) => {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  }),
+  startWatchingMetadata: vi.fn(async () => {}),
+  startWatchingContent: vi.fn(async (_paths: string[], _id: string) => {}),
+  stopWatching: vi.fn(async (_id: string) => {}),
+};
+const fs = fsMock as unknown as FileSystemSurface;
 
 function emit(event: FsChangeEvent): void {
-  for (const listener of bus.listeners) listener(event);
+  for (const listener of listeners) listener(event);
 }
 
 /** Flush the handler's async pipeline (stat + insert). */
@@ -53,48 +41,43 @@ async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-let testCounter = 0;
-let WS_A = "";
-let WS_B = "";
-let watcherA: ReturnType<typeof startWorkspaceMetadataWatcher> | undefined;
-let watcherB: ReturnType<typeof startWorkspaceMetadataWatcher> | undefined;
+const WS_A = "/ws-iso-a";
+const WS_B = "/ws-iso-b";
+let filesA: WorkspaceFiles;
+let filesB: WorkspaceFiles;
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  bus.listeners.clear();
-  const n = testCounter++;
-  WS_A = `/ws-iso-a-${n}`;
-  WS_B = `/ws-iso-b-${n}`;
-  vi.mocked(platformAdapter.fs.readDirectory).mockResolvedValue({
-    ok: true,
-    value: [],
+  listeners.clear();
+  fsMock.readDirectory.mockResolvedValue({ ok: true, value: [] });
+  fsMock.getMetadata.mockImplementation(async (paths: string[]) => ({
+    succeeded: paths.map((path) => ({
+      path,
+      type: "file" as const,
+      size: 1,
+      modifiedAt: new Date(1_700_000_000_000),
+      createdAt: new Date(1_700_000_000_000),
+    })),
+    failed: [],
+  }));
+  // Each workspace's files start their metadata watch when created.
+  filesA = createWorkspaceFiles({
+    workspacePath: WS_A,
+    fs,
+    queryClient: new QueryClient(),
   });
-  vi.mocked(platformAdapter.fs.getMetadata).mockImplementation(
-    async (paths: string[]) => ({
-      succeeded: paths.map((path) => ({
-        path,
-        type: "file" as const,
-        size: 1,
-        modifiedAt: new Date(1_700_000_000_000),
-        createdAt: new Date(1_700_000_000_000),
-      })),
-      failed: [],
-    }),
-  );
-  for (const ws of [WS_A, WS_B]) {
-    const collections = getOrCreateWorkspaceCollections(ws);
-    await collections.metadata.preload();
-  }
-  watcherA = startWorkspaceMetadataWatcher(WS_A);
-  watcherB = startWorkspaceMetadataWatcher(WS_B);
+  filesB = createWorkspaceFiles({
+    workspacePath: WS_B,
+    fs,
+    queryClient: new QueryClient(),
+  });
+  await filesA.collections.metadata.preload();
+  await filesB.collections.metadata.preload();
 });
 
 afterEach(() => {
-  syncContentWatchers(new Map());
-  watcherA?.stop();
-  watcherB?.stop();
-  workspaceCollections.drop(WS_A);
-  workspaceCollections.drop(WS_B);
+  filesA.dispose();
+  filesB.dispose();
 });
 
 describe("watcher event isolation across open workspaces", () => {
@@ -110,8 +93,8 @@ describe("watcher event isolation across open workspaces", () => {
     });
     await settle();
 
-    const a = getOrCreateWorkspaceCollections(WS_A);
-    const b = getOrCreateWorkspaceCollections(WS_B);
+    const a = filesA.collections;
+    const b = filesB.collections;
     expect(b.metadata.get(`${WS_B}/from-b.md`)).toMatchObject({
       relativePath: "from-b.md",
     });
@@ -121,9 +104,8 @@ describe("watcher event isolation across open workspaces", () => {
     expect(a.metadata.size).toBe(0);
   });
 
-  it("stopping a watcher detaches its listener", async () => {
-    watcherA?.stop();
-    watcherA = undefined;
+  it("disposing a workspace's files detaches its watch listener", async () => {
+    filesA.dispose();
     emit({
       type: "fs-metadata-changed",
       payload: {
@@ -135,14 +117,13 @@ describe("watcher event isolation across open workspaces", () => {
     });
     await settle();
 
-    const a = getOrCreateWorkspaceCollections(WS_A);
-    expect(a.metadata.size).toBe(0);
+    expect(filesA.collections.metadata.size).toBe(0);
   });
 
   it("a content change tagged with the metadata watch id reaches the content pipeline", async () => {
     // The recursive metadata watch emits content changes too (external
     // modify of a non-open file) — those must not be dropped by routing.
-    const collections = getOrCreateWorkspaceCollections(WS_A);
+    const collections = filesA.collections;
     await collections.content.preload();
     const path = `${WS_A}/open.md`;
     collections.content.utils.writeInsert({
@@ -151,7 +132,7 @@ describe("watcher event isolation across open workspaces", () => {
       contentHash: "old-hash",
     });
     // The handler treats the event as a trigger and re-reads disk.
-    vi.mocked(platformAdapter.fs.readFiles).mockResolvedValue({
+    fsMock.readFiles.mockResolvedValue({
       succeeded: [{ path, content: "new" }],
       failed: [],
     });
@@ -172,17 +153,12 @@ describe("watcher event isolation across open workspaces", () => {
 });
 
 describe("content watchers across open workspaces", () => {
-  const startContent = () =>
-    vi.mocked(platformAdapter.fs.startWatchingContent).mock.calls;
-  const stops = () => vi.mocked(platformAdapter.fs.stopWatching).mock.calls;
+  const startContent = () => fsMock.startWatchingContent.mock.calls;
+  const stops = () => fsMock.stopWatching.mock.calls;
 
   it("arms one content watch per workspace with open file tabs", () => {
-    syncContentWatchers(
-      new Map([
-        [WS_A, [`${WS_A}/a.md`]],
-        [WS_B, [`${WS_B}/b.md`, `${WS_B}/c.md`]],
-      ]),
-    );
+    filesA.watchContent([`${WS_A}/a.md`]);
+    filesB.watchContent([`${WS_B}/b.md`, `${WS_B}/c.md`]);
 
     expect(startContent()).toEqual([
       [[`${WS_A}/a.md`], contentWatchIdFor(WS_A)],
@@ -191,19 +167,14 @@ describe("content watchers across open workspaces", () => {
   });
 
   it("re-issues the watch for the workspace whose open set changed (same id, no stop), stops the one that emptied", async () => {
-    syncContentWatchers(
-      new Map([
-        [WS_A, [`${WS_A}/a.md`]],
-        [WS_B, [`${WS_B}/b.md`]],
-      ]),
-    );
+    filesA.watchContent([`${WS_A}/a.md`]);
+    filesB.watchContent([`${WS_B}/b.md`]);
     await settle();
-    vi.mocked(platformAdapter.fs.startWatchingContent).mockClear();
-    vi.mocked(platformAdapter.fs.stopWatching).mockClear();
+    fsMock.startWatchingContent.mockClear();
+    fsMock.stopWatching.mockClear();
 
-    syncContentWatchers(
-      new Map([[WS_A, [`${WS_A}/a.md`, `${WS_A}/d.md`]]]),
-    );
+    filesA.watchContent([`${WS_A}/a.md`, `${WS_A}/d.md`]);
+    filesB.watchContent([]);
     await settle();
 
     // A's path set changed: the backend reconciles the delta on the live
@@ -216,15 +187,15 @@ describe("content watchers across open workspaces", () => {
 
   it("serializes a re-issue behind an in-flight start, and never stops a still-wanted watch", async () => {
     let resolveFirst!: () => void;
-    vi.mocked(platformAdapter.fs.startWatchingContent).mockImplementationOnce(
+    fsMock.startWatchingContent.mockImplementationOnce(
       () =>
         new Promise<void>((resolve) => {
           resolveFirst = resolve;
         }),
     );
-    syncContentWatchers(new Map([[WS_A, [`${WS_A}/a.md`]]]));
+    filesA.watchContent([`${WS_A}/a.md`]);
     // The dock changes before the host acknowledged the first start.
-    syncContentWatchers(new Map([[WS_A, [`${WS_A}/a.md`, `${WS_A}/d.md`]]]));
+    filesA.watchContent([`${WS_A}/a.md`, `${WS_A}/d.md`]);
     await settle();
 
     // The second start waits for the first: the last set issued is the
@@ -241,14 +212,14 @@ describe("content watchers across open workspaces", () => {
 
   it("a stop that lands while the start is in flight is issued after it, exactly once", async () => {
     let resolveStart!: () => void;
-    vi.mocked(platformAdapter.fs.startWatchingContent).mockImplementationOnce(
+    fsMock.startWatchingContent.mockImplementationOnce(
       () =>
         new Promise<void>((resolve) => {
           resolveStart = resolve;
         }),
     );
-    syncContentWatchers(new Map([[WS_A, [`${WS_A}/a.md`]]]));
-    syncContentWatchers(new Map());
+    filesA.watchContent([`${WS_A}/a.md`]);
+    filesA.watchContent([]);
     await settle();
 
     // Not yet: a stop racing ahead of its start would find nothing to
@@ -260,22 +231,16 @@ describe("content watchers across open workspaces", () => {
   });
 
   it("routes a content event to the workspace whose watch produced it", async () => {
-    for (const ws of [WS_A, WS_B]) {
-      const collections = getOrCreateWorkspaceCollections(ws);
-      await collections.content.preload();
-      collections.content.utils.writeInsert({
-        path: `${ws}/open.md`,
+    for (const files of [filesA, filesB]) {
+      await files.collections.content.preload();
+      files.collections.content.utils.writeInsert({
+        path: `${files.workspacePath}/open.md`,
         content: "old",
         contentHash: "old-hash",
       });
+      files.watchContent([`${files.workspacePath}/open.md`]);
     }
-    syncContentWatchers(
-      new Map([
-        [WS_A, [`${WS_A}/open.md`]],
-        [WS_B, [`${WS_B}/open.md`]],
-      ]),
-    );
-    vi.mocked(platformAdapter.fs.readFiles).mockResolvedValue({
+    fsMock.readFiles.mockResolvedValue({
       succeeded: [{ path: `${WS_B}/open.md`, content: "new" }],
       failed: [],
     });
@@ -291,11 +256,11 @@ describe("content watchers across open workspaces", () => {
     });
     await settle();
 
-    expect(
-      getOrCreateWorkspaceCollections(WS_B).content.get(`${WS_B}/open.md`),
-    ).toMatchObject({ content: "new" });
-    expect(
-      getOrCreateWorkspaceCollections(WS_A).content.get(`${WS_A}/open.md`),
-    ).toMatchObject({ content: "old" });
+    expect(filesB.collections.content.get(`${WS_B}/open.md`)).toMatchObject({
+      content: "new",
+    });
+    expect(filesA.collections.content.get(`${WS_A}/open.md`)).toMatchObject({
+      content: "old",
+    });
   });
 });

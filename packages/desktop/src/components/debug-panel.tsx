@@ -21,7 +21,8 @@ import {
   AlertTriangle,
   ShieldOff,
 } from "lucide-react";
-import { removeKv } from "@/utils/kv-store";
+import type { KvApi } from "@/utils/kv-store";
+import { useModule } from "@notefig/core/react";
 import { SETTINGS_NAMESPACE } from "@/hooks/use-app-settings";
 import type { LayoutNode } from "@/components/dockable";
 // Pure zero-dependency leaf — safe for the crash fallback (unlike entity
@@ -41,12 +42,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 // Type-only import — erased at runtime, so the crash panel stays
 // self-sufficient (its only runtime dependency is the QueryClient).
 import type { GitRow } from "@/entities/git";
-import {
-  agentEntriesCollection,
-  agentPermissionRequestsCollection,
-  agentTasksCollection,
-  agentTurnsCollection,
-} from "@/agent/agent-collections";
+import { useAgentStore } from "@/agent/agent-collections";
 import { buildSessionRecording } from "./debug-panel-recording";
 
 function useQueryCacheTick(): number {
@@ -110,9 +106,9 @@ const TELEMETRY_CONSENT_KEYS = [
   "telemetryInstallId",
 ];
 
-async function resetTelemetryConsent(): Promise<void> {
+async function resetTelemetryConsent(kv: KvApi): Promise<void> {
   for (const key of TELEMETRY_CONSENT_KEYS) {
-    await removeKv(SETTINGS_NAMESPACE, key);
+    await kv.remove(SETTINGS_NAMESPACE, key);
   }
   // Reload resets the bootstrap's module-level started flag, so the
   // first-run consent dialog reappears immediately.
@@ -273,6 +269,8 @@ function DebugPanelContent({
   // spans every open workspace, so this is only the sidebar's scope.
   const workspacePath = useFocusedWorkspace();
   const basePath = workspacePath ?? undefined;
+  const store = useAgentStore();
+  const kv = useModule("kv");
 
   const dockableLayout = useMemo(
     () => parseLayout(searchParams.get(LAYOUT_PARAM)),
@@ -528,16 +526,16 @@ function DebugPanelContent({
   // this is a debug view, not a hot path, so a full-collection subscription
   // plus useMemo filtering is simpler than juggling conditional queries.
   const { data: allTasks = [] } = useLiveQuery((q) =>
-    q.from({ task: agentTasksCollection }),
+    q.from({ task: store.tasks }),
   );
   const { data: allTurns = [] } = useLiveQuery((q) =>
-    q.from({ turn: agentTurnsCollection }),
+    q.from({ turn: store.turns }),
   );
   const { data: allEntries = [] } = useLiveQuery((q) =>
-    q.from({ entry: agentEntriesCollection }),
+    q.from({ entry: store.entries }),
   );
   const { data: allPermissionRequests = [] } = useLiveQuery((q) =>
-    q.from({ req: agentPermissionRequestsCollection }),
+    q.from({ req: store.permissionRequests }),
   );
 
   const workspaceTasks = useMemo(
@@ -821,7 +819,7 @@ function DebugPanelContent({
             variant="ghost"
             size="icon"
             className="h-6 w-6"
-            onClick={resetTelemetryConsent}
+            onClick={() => void resetTelemetryConsent(kv)}
             title="Reset telemetry consent and reload (shows the first-run dialog again)"
           >
             <ShieldOff className="h-3 w-3" />

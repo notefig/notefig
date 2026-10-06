@@ -13,10 +13,7 @@
 import type { GitRepoRef, GitService } from "@notefig/git";
 import { defineModule } from "@notefig/core";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
-import {
-  createWorkerGitService,
-  disposeWorkerGitRepo,
-} from "@/utils/git-worker-client";
+import type { GitWorker } from "@/utils/git-worker-client";
 import { emitAppEvent, onAppEvent } from "@/utils/app-events";
 import { path as pathutil, workspaceKey } from "@/utils/path";
 import { ensureExcludeLines, type ExcludeFs } from "@/utils/git-exclude";
@@ -51,10 +48,7 @@ export interface HistoryDeps {
   workspacePath: string;
   fs: ExcludeFs & Pick<FileSystemSurface, "exists">;
   /** Where repos run: the git worker in the app. */
-  git: {
-    create(repo: GitRepoRef): GitService;
-    dispose(gitDir: string): void;
-  };
+  git: GitWorker;
 }
 
 /** One workspace's history repo — `core.workspace(ws).history`. */
@@ -170,13 +164,13 @@ declare module "@notefig/core" {
  */
 export const historyModule = defineModule({
   name: "history",
-  needs: ["platform"],
+  needs: ["platform", "gitWorker"],
   workspace: {
     create: (ctx) => {
       const history = createWorkspaceHistory({
         workspacePath: pathutil.normalize(ctx.workspace.path),
         fs: ctx.use("platform").fs,
-        git: { create: createWorkerGitService, dispose: disposeWorkerGitRepo },
+        git: ctx.use("gitWorker"),
       });
       const instance: WorkspaceHistory = {
         ...history,

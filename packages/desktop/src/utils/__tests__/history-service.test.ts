@@ -151,7 +151,9 @@ describe("a workspace's history repo", () => {
 describe("historyModule", () => {
   it("checkpoints each completed agent turn in its own workspace", async () => {
     const core = createCore({
-      services: { platform: { fs: disk.fs } } as never,
+      // The repos run on the fake git worker, handed in where the
+      // `gitWorker` module would be.
+      services: { platform: { fs: disk.fs }, gitWorker: repos.git } as never,
       modules: [historyModule],
       workspaceKey,
     });

@@ -8,14 +8,17 @@
  */
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { platformAdapter } from "@/adapters";
 import type {
   AppStatus,
   AppStatusAction,
   AppStatusSection,
   StatusMark,
 } from "@/adapters/platform-adapter.interface";
-import { jumpToRound, jumpToTask } from "@/components/agent/jump-to-task";
+import {
+  jumpToRound,
+  jumpToTask,
+  type Jumper,
+} from "@/components/agent/jump-to-task";
 import {
   attentionGlyphState,
   taskGlyphState,
@@ -42,7 +45,8 @@ import {
   useRecentDocuments,
   type RecentDocument,
 } from "@/entities/recent-documents";
-import { scratchpads } from "@/entities/scratchpads";
+import type { WorkspaceScratchpads } from "@/entities/scratchpads";
+import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import { useOpenProjectFromPicker } from "@/hooks/use-open-project";
 import { deriveProjectName } from "@/hooks/use-recent-projects";
 import type { TabsApi } from "@/entities/tabs";
@@ -58,8 +62,11 @@ const LABEL_CHARS = 48;
 export type AppStatusTabs = Pick<TabsApi, "open" | "openAgent">;
 
 export interface AppStatusHost {
-  /** The focused workspace — where a new scratchpad goes; null on welcome. */
-  workspacePath: string | null;
+  /** Reveals a prompt widget in its document (a jump's other half). */
+  editors: Jumper["editors"];
+  /** The focused workspace's scratchpads — where a new one goes; null on
+   *  welcome. */
+  scratchpads: Pick<WorkspaceScratchpads, "createAndOpen"> | null;
   tabs: AppStatusTabs | null;
   openWorkspace: () => void;
   openSettings: () => void;
@@ -112,7 +119,7 @@ function listedIdOf(item: AttentionItem): string {
 function attentionSection(
   { attention, t }: AppStatusInputs,
   listed: AppStatusSection[],
-  tabs: AppStatusTabs,
+  jumper: Jumper,
 ): AppStatusSection {
   const listedIds = new Set(listed.flatMap((s) => s.entries.map((e) => e.id)));
   const leftOut = attention.items.filter((item) => !listedIds.has(listedIdOf(item)));
@@ -130,22 +137,20 @@ function attentionSection(
       mark: attentionGlyphState(item.kind),
       activate: () =>
         item.target.kind === "document" && item.turnId
-          ? jumpToRound({
+          ? jumpToRound(jumper, {
               taskId: item.taskId,
               turnId: item.turnId,
               documentPath: item.target.id,
             })
-          : jumpToTask(item.taskId, { turnId: item.turnId }),
+          : jumpToTask(jumper, item.taskId, { turnId: item.turnId }),
     })),
   };
 }
 
 /** The three recency sections in the sidebar's order, the attention card
  *  ahead of them when it has rows, empty ones left out. */
-function sections(
-  inputs: AppStatusInputs,
-  tabs: AppStatusTabs,
-): AppStatusSection[] {
+function sections(inputs: AppStatusInputs, jumper: Jumper): AppStatusSection[] {
+  const { tabs } = jumper;
   const { rounds, sessions, documents, attention, t } = inputs;
   const liveDocuments = new Set(
     rounds.filter(isLiveRound).map((round) => round.documentPath),
@@ -161,7 +166,7 @@ function sections(
         // would sit stale in a menu that only redraws on change.
         detail: describePromptRound(round) ?? getFileName(round.documentPath),
         mark: roundMark(round, attention),
-        activate: () => jumpToRound(round),
+        activate: () => jumpToRound(jumper, round),
       })),
     },
     {
@@ -189,7 +194,7 @@ function sections(
       })),
     },
   ];
-  return [attentionSection(inputs, all, tabs), ...all].filter(
+  return [attentionSection(inputs, all, jumper), ...all].filter(
     (section) => section.entries.length > 0,
   );
 }
@@ -198,12 +203,12 @@ function actions({ host, t }: AppStatusInputs): AppStatusAction[] {
   const list: AppStatusAction[] = [
     { id: "open-workspace", label: t("openProject"), activate: host.openWorkspace },
   ];
-  if (host.workspacePath !== null && host.tabs !== null) {
-    const { workspacePath } = host;
+  if (host.scratchpads !== null && host.tabs !== null) {
+    const { scratchpads } = host;
     list.push({
       id: "new-scratchpad",
       label: t("newScratchpad"),
-      activate: () => scratchpads(workspacePath).createAndOpen(),
+      activate: () => scratchpads.createAndOpen(),
     });
   }
   list.push({ id: "settings", label: t("settings"), activate: host.openSettings });
@@ -217,7 +222,9 @@ export function deriveAppStatus(inputs: AppStatusInputs): AppStatus {
   const overall = host.tabs ? attention.overall : null;
   return {
     attention: overall && attentionGlyphState(overall),
-    sections: host.tabs ? sections(inputs, host.tabs) : [],
+    sections: host.tabs
+      ? sections(inputs, { tabs: host.tabs, editors: host.editors })
+      : [],
     actions: actions(inputs),
   };
 }
@@ -227,20 +234,32 @@ export function deriveAppStatus(inputs: AppStatusInputs): AppStatus {
  * platform told the current status. Publishing is cheap — the adapter
  * ignores a value that draws the same — so this republishes on any change.
  */
-export function usePublishAppStatus(
-  host: Omit<AppStatusHost, "openWorkspace">,
-): void {
+export function usePublishAppStatus(host: {
+  /** The focused workspace; null on welcome. */
+  workspacePath: string | null;
+  tabs: AppStatusTabs | null;
+  openSettings: () => void;
+}): void {
+  const core = useCore();
+  const scratchpads =
+    useWorkspaceModule(host.workspacePath, "scratchpads") ?? null;
   const { t } = useTranslation();
   const attention = useAttention();
   const rounds = usePromptRounds(MAX_PROMPT_ROUNDS);
   const sessions = useAgentSessionList(APP_STATUS_ROWS);
   const documents = useRecentDocuments(APP_STATUS_ROWS);
   const openWorkspace = useOpenProjectFromPicker();
-  const { workspacePath, tabs, openSettings } = host;
+  const { tabs, openSettings } = host;
   useEffect(() => {
-    platformAdapter.ui.publishAppStatus(
+    core.use("platform").ui.publishAppStatus(
       deriveAppStatus({
-        host: { workspacePath, tabs, openSettings, openWorkspace },
+        host: {
+          scratchpads,
+          tabs,
+          editors: core.editors,
+          openSettings,
+          openWorkspace,
+        },
         rounds,
         sessions,
         documents,
@@ -248,5 +267,16 @@ export function usePublishAppStatus(
         t,
       }),
     );
-  }, [workspacePath, tabs, openSettings, openWorkspace, rounds, sessions, documents, attention, t]);
+  }, [
+    core,
+    scratchpads,
+    tabs,
+    openSettings,
+    openWorkspace,
+    rounds,
+    sessions,
+    documents,
+    attention,
+    t,
+  ]);
 }

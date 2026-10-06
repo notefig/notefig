@@ -17,14 +17,8 @@ import {
   editorWidgets,
   widgetRendererNodes,
   widgetMinimapExtension,
-  registerPromptRoundObserver,
   PageLinkSuggestion,
 } from "@notefig/widgets";
-import { observePromptRound } from "@/agent/round-observer";
-
-// The minimap's live-rows seam (MET-172): filled once, here, because this
-// module is where document editors are assembled.
-registerPromptRoundObserver(observePromptRound);
 import { lowlight } from "@/components/editor/editor-schema-kit";
 import {
   closeDocumentSync,
@@ -59,7 +53,7 @@ import {
   type MarkdownInstance,
 } from "@/entities/editors";
 import { pageLinkHref } from "./tiptap-link-utils";
-import { platformAdapter } from "@/adapters";
+import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { getDirectoryPath } from "@/utils/fs";
 import {
   createImageDropHandler,
@@ -203,9 +197,17 @@ function isForeignTextEntryFocused(filePath: string): boolean {
  * instance map stays private: everything above this file addresses a
  * document through its tab id like any other tab.
  */
+/** The platform fs an editor reaches: in-document search, and the image
+ *  assets a paste or drop writes. */
+export type EditorFs = Pick<
+  FileSystemSurface,
+  "searchContent" | "exists" | "writeBinaryFiles"
+>;
+
 function createEditorTabController(
   filePath: string,
   kind: TabKind,
+  fs: Pick<EditorFs, "searchContent">,
 ): TabController {
   return {
     tabId: filePath,
@@ -254,7 +256,7 @@ function createEditorTabController(
       }
       if (!query.trim()) return [];
 
-      return platformAdapter.fs.searchContent(getDirectoryPath(filePath), {
+      return fs.searchContent(getDirectoryPath(filePath), {
         query,
         caseSensitive: options?.caseSensitive,
         fileIncludes: [filePath],
@@ -293,7 +295,8 @@ function createMarkdownInstance(
   // Doc JSON only — all markdown parsing goes through the conversion worker
   // (utils/markdown-conversion.ts) before an editor is ever created.
   content: JSONContent,
-  basePath?: string,
+  basePath: string | undefined,
+  fs: EditorFs,
 ): MarkdownInstance {
   const workspaceRoot = basePath || getDirectoryPath(filePath);
 
@@ -343,9 +346,9 @@ function createMarkdownInstance(
       // (`<fileDir>/assets/`), matching how image srcs are resolved.
       handleDrop: composeDropHandlers(
         createProtocolDropHandler(),
-        createImageDropHandler(getDirectoryPath(filePath)),
+        createImageDropHandler(fs, getDirectoryPath(filePath)),
       ),
-      handlePaste: createImagePasteHandler(getDirectoryPath(filePath)),
+      handlePaste: createImagePasteHandler(fs, getDirectoryPath(filePath)),
 
       handleDOMEvents: {
         // Layout re-parenting can silently drop DOM focus to <body> while
@@ -524,11 +527,13 @@ type EditorConfig =
  *
  * @param filePath - The absolute file path (used as the cache key)
  * @param config - Editor configuration including type and type-specific options
+ * @param fs - The platform fs the editor reaches (`usePlatform().fs`)
  * @returns The editor instance (cast to appropriate type by caller)
  */
 export function getOrCreateEditor(
   filePath: string,
   config: EditorConfig,
+  fs: EditorFs,
 ): EditorInstance {
   const existing = getEditorInstance(filePath);
   if (existing) {
@@ -554,6 +559,7 @@ export function getOrCreateEditor(
         filePath,
         config.content,
         config.basePath,
+        fs,
       );
       break;
     case "image":
@@ -572,6 +578,7 @@ export function getOrCreateEditor(
     createEditorTabController(
       filePath,
       config.type === "release-notes" ? "release-notes" : "file",
+      fs,
     ),
   );
   return instance;

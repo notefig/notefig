@@ -1,23 +1,19 @@
-import { Component, useEffect, useSyncExternalStore } from "react";
+import { Component, useCallback, useEffect, useSyncExternalStore } from "react";
 import type { ReactNode, ErrorInfo } from "react";
 import { useTranslation } from "react-i18next";
 import { FolderLock } from "lucide-react";
 import { toast } from "sonner";
 import { DebugPanel } from "./debug-panel";
 import { Button } from "@notefig/ui/button";
-import { platformAdapter } from "@/adapters";
+import { usePlatform } from "@/core/use-platform";
 import {
   FsError,
   isWorkspaceAccessError,
 } from "@/adapters/platform-adapter.interface";
 import { useOpenProject } from "@/hooks/use-open-project";
 import { useCore } from "@notefig/core/react";
-import {
-  reloadWorkspaceFiles,
-  useFocusedWorkspace,
-} from "@/entities/workspaces";
-import { ensureWatching } from "@/utils/workspace-watchers";
-import { queryClient } from "@/entities/query-client";
+import { useFocusedWorkspace } from "@/entities/workspaces";
+import { fileQueryKeys } from "@/entities/files";
 import { isWeb } from "@/utils/platform";
 import { captureError } from "@/telemetry/telemetry";
 
@@ -87,15 +83,18 @@ export class WorkspaceErrorBoundary extends Component<
  * empty workspace.
  */
 export function useThrowWorkspaceAccessError(workspacePath: string) {
+  const queryClient = useCore().use("queryClient");
+  const subscribe = useCallback(
+    (onStoreChange: () => void) =>
+      queryClient.getQueryCache().subscribe(onStoreChange),
+    [queryClient],
+  );
   const error = useSyncExternalStore(
-    subscribeToQueryCache,
-    () => queryClient.getQueryState(["file-metadata", workspacePath])?.error,
+    subscribe,
+    () =>
+      queryClient.getQueryState(fileQueryKeys.metadata(workspacePath))?.error,
   );
   if (isWorkspaceAccessError(error)) throw error;
-}
-
-function subscribeToQueryCache(onStoreChange: () => void) {
-  return queryClient.getQueryCache().subscribe(onStoreChange);
 }
 
 const MACOS_FILES_AND_FOLDERS_SETTINGS_URL =
@@ -159,6 +158,7 @@ function WorkspaceAccessError({
 }) {
   const { t } = useTranslation();
   const core = useCore();
+  const platform = usePlatform();
   const openProject = useOpenProject();
   const workspacePath = useFocusedWorkspace();
   const content = getRecoveryContent(error, t);
@@ -170,15 +170,18 @@ function WorkspaceAccessError({
   // Drop and re-seed the file state; agents and the watcher stay up (the
   // lost fs handle is the webview's, not the harness processes').
   const resume = (path: string) => {
-    reloadWorkspaceFiles(path);
-    // Access was just restored, so a watcher that could not start while the
-    // workspace was unreadable can finally arm.
-    ensureWatching(path);
+    const workspace = core.workspace(path);
+    if (workspace.isOpen()) {
+      workspace.files.reload();
+      // Access was just restored, so a watcher that could not start while
+      // the workspace was unreadable can finally arm.
+      workspace.files.ensureWatching();
+    }
     onResolved();
   };
 
   const handleRepick = async () => {
-    const picked = await platformAdapter.ui
+    const picked = await platform.ui
       .pickDirectory(t("pickDirectory"))
       .catch(() => null);
     if (!picked) return;
@@ -197,7 +200,7 @@ function WorkspaceAccessError({
     const target = workspacePath ?? error.path;
     // Web: must call requestPermission inside this click. Desktop: no-op
     // true — the retry refetch will surface the error again if still denied.
-    const granted = await platformAdapter.fs.requestWorkspaceAccess(target);
+    const granted = await platform.fs.requestWorkspaceAccess(target);
     if (!granted) {
       toast.error(t("fsAccessLostBodyWeb"));
       return;
@@ -222,9 +225,7 @@ function WorkspaceAccessError({
             <Button
               variant="secondary"
               onClick={() =>
-                platformAdapter.ui.openExternal(
-                  MACOS_FILES_AND_FOLDERS_SETTINGS_URL,
-                )
+                platform.ui.openExternal(MACOS_FILES_AND_FOLDERS_SETTINGS_URL)
               }
             >
               {t("fsOpenSystemSettings")}
@@ -245,9 +246,7 @@ function WorkspaceAccessError({
             <button
               className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
               onClick={() =>
-                platformAdapter.ui.openExternal(
-                  CHROME_SITE_PERMISSIONS_HELP_URL,
-                )
+                platform.ui.openExternal(CHROME_SITE_PERMISSIONS_HELP_URL)
               }
             >
               {t("fsSitePermissionsHelp")}

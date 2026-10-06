@@ -3,6 +3,7 @@ import type { JSONContent } from "@tiptap/core";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { GripVertical } from "lucide-react";
 import type { FileEntry } from "../../utils/fs";
+import { usePlatform } from "@/core/use-platform";
 import { getOrCreateEditor } from "@/components/editor/editor-store";
 import { isMarkdownInstance } from "@/entities/editors";
 import { useEditorFileSync } from "./use-editor-file-sync";
@@ -15,7 +16,7 @@ import { LinkBubbleMenu } from "./tiptap-link-menu";
 import { TableMenu } from "./tiptap-table-menu";
 import { cn } from "@notefig/ui/utils";
 import { dropZoneProps } from "@/utils/drag-protocol";
-import { appCore } from "@/core/current";
+import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import { isImageFile } from "@/utils/fs";
 import { relativeTreePath } from "@/utils/path";
 import "./tiptap.css";
@@ -38,11 +39,12 @@ export function TextEditor({
   contentError,
   initialDoc,
 }: TextEditorProps) {
-  const instance = getOrCreateEditor(file.path, {
-    type: "markdown",
-    content: initialDoc,
-    basePath,
-  });
+  const { fs } = usePlatform();
+  const instance = getOrCreateEditor(
+    file.path,
+    { type: "markdown", content: initialDoc, basePath },
+    fs,
+  );
 
   if (!isMarkdownInstance(instance)) {
     throw new Error("Failed to create markdown editor");
@@ -50,7 +52,16 @@ export function TextEditor({
 
   const editor = instance.editor;
 
-  useEditorFileSync(editor, file, basePath, isContentLoaded, contentError);
+  const files = useWorkspaceModule(basePath, "files");
+  const { turnWrites, tabs } = useCore();
+  useEditorFileSync(
+    editor,
+    file,
+    files,
+    isContentLoaded,
+    contentError,
+    turnWrites.attribute,
+  );
   useEditorFocusLifecycle(editor, file.path);
   const scrollRef = useEditorViewportMemory(editor, file.path);
   const handleLinkToggle = useLinkPrompt(editor);
@@ -104,7 +115,7 @@ export function TextEditor({
         return;
       }
 
-      appCore().tabs.open(payload.path, {
+      tabs.open(payload.path, {
         intent: "new-tab",
         targetWindowId:
           info.element

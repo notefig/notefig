@@ -3,7 +3,7 @@ import type {
   RequestPermissionResponse,
 } from "@notefig/shared/agent";
 import type { PermissionRequester } from "@notefig/agent";
-import { agentPermissionRequestsCollection } from "./agent-collections";
+import type { AgentStore } from "./agent-collections";
 
 type Pending = {
   request: RequestPermissionRequest;
@@ -12,7 +12,7 @@ type Pending = {
 
 /**
  * Promise-per-request bridge between the ACP client and the permission UI.
- * The queue is published through `agentPermissionRequestsCollection` (the one
+ * The queue is published through the store's `permissionRequests` (the one
  * bus): `request()` inserts a pending row the UI renders via useLiveQuery, and
  * `respond()`/`cancelAll()` settle the awaited promise and update the row.
  * session/cancel must resolve every pending request as cancelled, per the ACP
@@ -22,7 +22,10 @@ export class PermissionBroker implements PermissionRequester {
   private readonly pending = new Map<string, Pending>();
   private nextId = 0;
 
-  constructor(private readonly taskId: string) {}
+  constructor(
+    private readonly taskId: string,
+    private readonly requests: AgentStore["permissionRequests"],
+  ) {}
 
   request(
     request: RequestPermissionRequest,
@@ -32,7 +35,7 @@ export class PermissionBroker implements PermissionRequester {
       // collection is keyed globally, not per task).
       const id = `${this.taskId}_perm_${++this.nextId}`;
       this.pending.set(id, { request, resolve });
-      agentPermissionRequestsCollection.insert({
+      this.requests.insert({
         id,
         taskId: this.taskId,
         sessionId: request.sessionId,
@@ -65,8 +68,8 @@ export class PermissionBroker implements PermissionRequester {
 
   /** Reflect the resolution onto the collection row so the UI drops it. */
   private settleRow(id: string, response: RequestPermissionResponse): void {
-    if (!agentPermissionRequestsCollection.get(id)) return;
-    agentPermissionRequestsCollection.update(id, (draft) => {
+    if (!this.requests.get(id)) return;
+    this.requests.update(id, (draft) => {
       draft.status = statusFor(response);
     });
   }

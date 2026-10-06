@@ -35,7 +35,10 @@ export const documentReadRange: AgentTool<
     const resolved = resolveWorkspacePath(ctx.workspacePath, input.path);
     if (!resolved.ok) return { ok: false, error: resolved.error };
     try {
-      const doc = await resolveDocument(resolved.absolute);
+      const doc = await resolveDocument(
+        ctx.services.documents,
+        resolved.absolute,
+      );
       const docSize = doc.content.size;
       const from = Math.max(0, Math.min(input.from, docSize));
       const to = Math.max(from, Math.min(input.to, docSize));

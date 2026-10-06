@@ -17,7 +17,7 @@
 import type { Editor } from "@tiptap/core";
 import { defineModule } from "@notefig/core";
 import type { SearchTarget } from "@/adapters/platform-adapter.interface";
-import { appCore } from "@/core/current";
+import type { LayoutApi } from "./layout";
 import { getDocumentSync } from "@/utils/markdown-conversion";
 import { extractTabIds, findLayoutSelectedTab } from "@/utils/layout-codec";
 import { relativeTreePath } from "@/utils/path";
@@ -284,9 +284,10 @@ export interface WorkspaceEditorContext {
  * callers that need live updates go through `useLayout`/`useDockableTabs`.
  */
 export function getWorkspaceEditorContext(
+  layoutApi: Pick<LayoutApi, "read">,
   workspacePath: string,
 ): WorkspaceEditorContext {
-  const layout = appCore().layout.read();
+  const layout = layoutApi.read();
   const activeFile = findLayoutSelectedTab(layout);
   // Tree membership, not a string prefix: the layout is one dock over every
   // open workspace, and `/ws-backup` must not read as inside `/ws`.

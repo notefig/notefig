@@ -1,111 +1,90 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-
-// Mock the platform adapter singleton the file-sync helpers and task service use.
-// vi.hoisted so the fns exist before the hoisted vi.mock factory runs.
-const {
-  writeFiles,
-  readFiles,
-  deleteFiles,
-  mcpEndpoints,
-  configDisk,
-  relayToken,
-} = vi.hoisted(() => {
-  // A tiny in-memory disk, consulted only for the devin project config:
-  // the path a task writes is the one the next read sees, so those tests
-  // exercise the real read-merge-write round trip while every other
-  // caller keeps the flat stub responses below.
-  const configDisk = new Map<string, string>();
-  const isConfig = (path: string) => path.endsWith("mcp_config.local.json");
-  return {
-    configDisk,
-    writeFiles: vi.fn(async (files: { path: string; content: string }[]) => {
-      for (const file of files)
-        if (isConfig(file.path)) configDisk.set(file.path, file.content);
-      return { succeeded: files.map((f) => f.path), failed: [] as unknown[] };
-    }),
-    readFiles: vi.fn(async (paths: string[]) => ({
-      succeeded: paths.flatMap((p) =>
-        isConfig(p)
-          ? configDisk.has(p)
-            ? [{ path: p, content: configDisk.get(p)! }]
-            : []
-          : [{ path: p, content: "old contents\n" }],
-      ),
-      failed: [] as unknown[],
-    })),
-    deleteFiles: vi.fn(async (paths: string[]) => {
-      for (const path of paths) configDisk.delete(path);
-      return { succeeded: paths, failed: [] as unknown[] };
-    }),
-    // Every McpEndpoint the fake constructs, in order — lets dispose tests
-    // assert the endpoint's close() ran.
-    mcpEndpoints: [] as { close: ReturnType<typeof vi.fn> }[],
-    // The per-task connection token the real relay mints per endpoint; tests
-    // set it to prove two tasks in one workspace stay on their own relay.
-    relayToken: { value: "tok-1" },
-  };
-});
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-    fs: {
-      writeFiles,
-      readFiles,
-      deleteFiles,
-    },
-    proc: {
-      // A fake McpEndpoint: nothing in these tests drives real traffic over
-      // the MCP channel (that's exercised at the tool-call level via
-      // FakeAgent's scripted ACP session/update notifications instead), so
-      // this just has to satisfy attachMcpEndpoint's onRequest + dispose's
-      // close. Dumb sync constructor, matching createAgentTransport's contract
-      // — AgentTask.start() calls .start() and reads .mcpServer itself.
-      createMcpEndpoint: vi.fn(() => {
-        const endpoint = {
-          // Shaped like the real relay: a constant command plus per-task
-          // args/env (mcp_bridge.rs mints a port and token per endpoint).
-          mcpServer: {
-            name: "notefig",
-            command: "notefig",
-            args: ["--relay"],
-            env: [{ name: "NOTEFIG_MCP_TOKEN", value: relayToken.value }],
-          },
-          start: vi.fn(async () => {}),
-          onRequest: vi.fn(() => () => {}),
-          close: vi.fn(async () => {}),
-        };
-        mcpEndpoints.push(endpoint);
-        return endpoint;
-      }),
-    },
-  },
-}));
-// History auto-checkpointing (Stage 2) is exercised separately; keep these
-// tests focused on the turn machinery, not git plumbing.
-
-import { createLoopbackPair } from "@notefig/agent";
+import { createLoopbackPair, type McpEndpoint } from "@notefig/agent";
 import { FakeAgent } from "../mock-harness";
 import {
   TaskManager,
-  respondToAgentPermission,
-  findBlobAuthorTask,
+  type AgentRuntime,
+  type AgentRuntimeDeps,
 } from "../agent-service";
-import {
-  agentEntriesCollection,
-  agentPermissionRequestsCollection,
-  agentTurnsCollection,
-  agentTasksCollection,
-} from "../agent-collections";
+import type { AgentStore } from "../agent-collections";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import { APP_DIR_NAME } from "@/utils/app-dir";
 import { onAppEvent } from "@/utils/app-events";
 import type { AgentTask } from "../agent-service";
+import { testAgents } from "@/testing/test-agents";
+
+// A tiny in-memory disk, consulted only for the devin project config:
+// the path a task writes is the one the next read sees, so those tests
+// exercise the real read-merge-write round trip while every other
+// caller keeps the flat stub responses below.
+const configDisk = new Map<string, string>();
+const isConfig = (path: string) => path.endsWith("mcp_config.local.json");
+type Fs = AgentRuntimeDeps["fs"];
+const writeFiles = vi.fn<Fs["writeFiles"]>(async (files) => {
+  for (const file of files)
+    if (isConfig(file.path)) configDisk.set(file.path, file.content);
+  return { succeeded: files.map((f) => f.path), failed: [] };
+});
+const readFiles = vi.fn<Fs["readFiles"]>(async (paths) => ({
+  succeeded: paths.flatMap((p) =>
+    isConfig(p)
+      ? configDisk.has(p)
+        ? [{ path: p, content: configDisk.get(p)! }]
+        : []
+      : [{ path: p, content: "old contents\n" }],
+  ),
+  failed: [],
+}));
+// Not part of what a task is handed; kept on the fake fs so a task that
+// ever reached for it would show up in the dispose tests.
+const deleteFiles = vi.fn(async (paths: string[]) => {
+  for (const path of paths) configDisk.delete(path);
+  return { succeeded: paths, failed: [] };
+});
+// Every McpEndpoint the fake constructs, in order — lets dispose tests
+// assert the endpoint's close() ran.
+const mcpEndpoints: { close: ReturnType<typeof vi.fn> }[] = [];
+// The per-task connection token the real relay mints per endpoint; tests
+// set it to prove two tasks in one workspace stay on their own relay.
+const relayToken = { value: "tok-1" };
+
+// A fake McpEndpoint: nothing in these tests drives real traffic over the
+// MCP channel (that's exercised at the tool-call level via FakeAgent's
+// scripted ACP session/update notifications instead), so this just has to
+// satisfy attachMcpEndpoint's onRequest + dispose's close. Dumb sync
+// constructor, matching createAgentTransport's contract — AgentTask.start()
+// calls .start() and reads .mcpServer itself.
+function createMcpEndpoint(): McpEndpoint {
+  const endpoint = {
+    // Shaped like the real relay: a constant command plus per-task
+    // args/env (mcp_bridge.rs mints a port and token per endpoint).
+    mcpServer: {
+      name: "notefig",
+      command: "notefig",
+      args: ["--relay"],
+      env: [{ name: "NOTEFIG_MCP_TOKEN", value: relayToken.value }],
+    },
+    start: vi.fn(async () => {}),
+    onRequest: vi.fn(() => () => {}),
+    close: vi.fn(async () => {}),
+  };
+  mcpEndpoints.push(endpoint);
+  return endpoint as unknown as McpEndpoint;
+}
+// History auto-checkpointing (Stage 2) is exercised separately; keep these
+// tests focused on the turn machinery, not git plumbing.
+
+// A fresh agent layer per test, over the fakes above. Tasks reach their
+// workspace's documents through it, over the same fake fs.
+let deps: AgentRuntimeDeps;
+let store: AgentStore;
+let runtime: AgentRuntime;
 
 const harness = BUILT_IN_HARNESSES[0];
 
 /** Entries for a task in chronological (id) order. */
 function entriesFor(taskId: string) {
-  return agentEntriesCollection.toArray
+  return store.entries.toArray
     .filter((e) => e.taskId === taskId)
     .sort((a, b) => (a.id < b.id ? -1 : 1));
 }
@@ -118,13 +97,13 @@ function textFor(taskId: string, role: "user" | "assistant"): string {
 }
 
 function turnFor(taskId: string) {
-  return agentTurnsCollection.toArray
+  return store.turns.toArray
     .filter((t) => t.taskId === taskId)
     .sort((a, b) => (a.turnId < b.turnId ? -1 : 1));
 }
 
 function pendingPerms(taskId: string) {
-  return agentPermissionRequestsCollection.toArray
+  return store.permissionRequests.toArray
     .filter((r) => r.taskId === taskId && r.status === "pending")
     .sort((a, b) => (a.id < b.id ? -1 : 1));
 }
@@ -155,14 +134,16 @@ beforeEach(() => {
   readFiles.mockClear();
   deleteFiles.mockClear();
   mcpEndpoints.length = 0;
-  for (const e of agentEntriesCollection.toArray)
-    agentEntriesCollection.delete(e.id);
-  for (const t of agentTurnsCollection.toArray)
-    agentTurnsCollection.delete(t.turnId);
-  for (const t of agentTasksCollection.toArray)
-    agentTasksCollection.delete(t.taskId);
-  for (const r of agentPermissionRequestsCollection.toArray)
-    agentPermissionRequestsCollection.delete(r.id);
+  const fs = { readFiles, writeFiles, deleteFiles };
+  ({ deps, store, runtime } = testAgents({
+    fs,
+    proc: {
+      createMcpEndpoint,
+      createAgentTransport: () => {
+        throw new Error("tasks start through the transport a test passes");
+      },
+    },
+  }));
 });
 
 afterEach(() => {
@@ -185,7 +166,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "hi");
 
@@ -194,7 +175,7 @@ describe("AgentTask vertical slice", () => {
     expect(turnFor(task.taskId)[0].status).toBe("completed");
     expect(turnFor(task.taskId)[0].stopReason).toBe("end_turn");
     // The settle outlives the turn row on the durable task row (attention).
-    expect(agentTasksCollection.get(task.taskId)?.lastSettled).toMatchObject({
+    expect(store.tasks.get(task.taskId)?.lastSettled).toMatchObject({
       turnId: turnFor(task.taskId)[0].turnId,
       status: "completed",
     });
@@ -212,7 +193,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "hello");
 
@@ -255,7 +236,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "hi what harness is this?");
 
@@ -311,7 +292,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "do the thing");
 
@@ -343,7 +324,7 @@ describe("AgentTask vertical slice", () => {
       });
       return { stopReason: "end_turn" };
     };
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "first");
     await runPrompt(task, "second");
@@ -352,7 +333,7 @@ describe("AgentTask vertical slice", () => {
     expect(new Set(plans.map((p) => p.turnId)).size).toBe(2);
   });
 
-  it("routes agent file writes through the platform adapter", async () => {
+  it("routes agent file writes through the fs it is handed", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
     agent.onPrompt = async (_params, a) => {
@@ -364,7 +345,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "edit the readme");
 
@@ -393,7 +374,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "edit");
 
@@ -424,13 +405,13 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     task.prompt("edit");
 
     await vi.waitFor(() => expect(pendingPerms(task.taskId).length).toBe(1));
     const head = pendingPerms(task.taskId)[0];
-    respondToAgentPermission(task.taskId, head.id, {
+    task.respondPermission(head.id, {
       outcome: { outcome: "selected", optionId: "deny" },
     });
 
@@ -464,7 +445,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "add a question");
 
@@ -488,7 +469,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "cancelled" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     task.prompt("do it");
 
@@ -511,7 +492,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "cancelled" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "keep me");
     const keptEntries = entriesFor(task.taskId).length;
@@ -546,7 +527,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "cancelled" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     task.prompt("interrupted late");
     await vi.waitFor(() =>
@@ -577,7 +558,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
 
     task.prompt("first"); // starts a turn, gated open
@@ -609,7 +590,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
 
     const firstDone = task.prompt("first").completed; // starts running immediately
@@ -633,7 +614,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     task.prompt("one");
     await vi.waitFor(() =>
@@ -642,7 +623,7 @@ describe("AgentTask vertical slice", () => {
     const queuedHandle = task.prompt("two");
 
     // Entry + turn row exist immediately, with status "queued".
-    const queuedRow = agentTurnsCollection.get(queuedHandle.turnId);
+    const queuedRow = store.turns.get(queuedHandle.turnId);
     expect(queuedRow?.status).toBe("queued");
     const userEntries = entriesFor(task.taskId).filter(
       (e) => e.type === "user" && e.turnId === queuedHandle.turnId,
@@ -653,7 +634,7 @@ describe("AgentTask vertical slice", () => {
     await queuedHandle.completed;
 
     // Promotion reused the same rows (ids stable, no duplicates).
-    expect(agentTurnsCollection.get(queuedHandle.turnId)?.status).toBe(
+    expect(store.turns.get(queuedHandle.turnId)?.status).toBe(
       "completed",
     );
     expect(
@@ -668,7 +649,7 @@ describe("AgentTask vertical slice", () => {
     const agent = new FakeAgent(agentSide);
     agent.onPrompt = () => new Promise(() => {}); // hold the turn open forever
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     task.prompt("running");
     await vi.waitFor(() =>
@@ -681,8 +662,8 @@ describe("AgentTask vertical slice", () => {
 
     expect(await q1.completed).toEqual({ status: "cancelled" });
     expect(await q2.completed).toEqual({ status: "cancelled" });
-    expect(agentTurnsCollection.get(q1.turnId)?.status).toBe("cancelled");
-    expect(agentTurnsCollection.get(q2.turnId)?.status).toBe("cancelled");
+    expect(store.turns.get(q1.turnId)?.status).toBe("cancelled");
+    expect(store.turns.get(q2.turnId)?.status).toBe("cancelled");
   });
 
   it("removeQueuedPrompt removes exactly one queued prompt, its rows, and announces the settle", async () => {
@@ -698,7 +679,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     task.prompt("one");
     await vi.waitFor(() => expect(seen).toEqual(["one"]));
@@ -720,7 +701,7 @@ describe("AgentTask vertical slice", () => {
     ]);
     stopListening();
     expect(await removed.completed).toEqual({ status: "cancelled" });
-    expect(agentTurnsCollection.get(removed.turnId)).toBeUndefined();
+    expect(store.turns.get(removed.turnId)).toBeUndefined();
     expect(
       entriesFor(task.taskId).filter((e) => e.turnId === removed.turnId),
     ).toHaveLength(0);
@@ -750,7 +731,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const manager = new TaskManager("/ws");
+    const manager = new TaskManager(deps, "/ws");
     const taskA = manager.createTask(harness);
     const taskB = manager.createTask(harness);
     await taskA.start(() => clientA);
@@ -767,7 +748,7 @@ describe("AgentTask vertical slice", () => {
     const agent = new FakeAgent(agentSide);
     agent.onPrompt = () => new Promise(() => {}); // never resolves
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     task.prompt("hang");
 
@@ -788,7 +769,7 @@ describe("AgentTask vertical slice", () => {
     const agent = new FakeAgent(agentSide);
     agent.onPrompt = async () => ({ stopReason: "end_turn" });
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "hi"); // task settles to idle
     expect(task.currentStatus).toBe("idle");
@@ -822,7 +803,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "edit");
 
@@ -851,7 +832,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "test");
 
@@ -875,7 +856,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "find");
 
@@ -897,7 +878,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "edit");
 
@@ -946,7 +927,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "test");
 
@@ -961,7 +942,7 @@ describe("AgentTask vertical slice", () => {
     const agent = new FakeAgent(agentSide);
     agent.onPrompt = async () => ({ stopReason: "end_turn" });
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "one");
 
@@ -1008,7 +989,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "go");
 
@@ -1028,7 +1009,7 @@ describe("AgentTask vertical slice", () => {
       throw new Error("Authentication required");
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "go");
 
@@ -1049,7 +1030,7 @@ describe("AgentTask vertical slice", () => {
       throw new Error("Authentication required");
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     task.prompt("one");
     await vi.waitFor(() => expect(seen).toEqual(["one"]));
@@ -1061,18 +1042,18 @@ describe("AgentTask vertical slice", () => {
     );
     // The drain halted on the error; "two" was not run and stays visibly queued.
     expect(seen).toEqual(["one"]);
-    expect(agentTurnsCollection.get(queued.turnId)?.status).toBe("queued");
+    expect(store.turns.get(queued.turnId)?.status).toBe("queued");
   });
 
   it("prompt() on a never-started task resolves an error value, never throws", async () => {
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
 
     const handle = task.prompt("hello");
     expect(await handle.completed).toEqual({
       status: "error",
       error: expect.stringMatching(/not started/i),
     });
-    expect(agentTurnsCollection.get(handle.turnId)?.status).toBe("error");
+    expect(store.turns.get(handle.turnId)?.status).toBe("error");
   });
 
   it("ignores an unrendered session update without breaking the turn", async () => {
@@ -1086,7 +1067,7 @@ describe("AgentTask vertical slice", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "go");
 
@@ -1102,7 +1083,7 @@ describe("prompt handles (A3, Stage 1)", () => {
     const agent = new FakeAgent(agentSide);
     agent.onPrompt = async () => ({ stopReason: "end_turn" });
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
 
     const handle = task.prompt("hi");
@@ -1120,7 +1101,7 @@ describe("prompt handles (A3, Stage 1)", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
 
     const first = task.prompt("one");
@@ -1152,7 +1133,7 @@ describe("prompt handles (A3, Stage 1)", () => {
       throw new Error("Authentication required");
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
 
     const outcome = await task.prompt("go").completed;
@@ -1185,7 +1166,7 @@ describe("MCP tool calls (Stage 3.5)", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "ask a question");
 
@@ -1217,7 +1198,7 @@ describe("MCP tool calls (Stage 3.5)", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "restore");
 
@@ -1241,16 +1222,16 @@ describe("MCP tool calls (Stage 3.5)", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "ask a question");
 
-    expect(findBlobAuthorTask("question_8f2a")).toEqual({
+    expect(runtime.findBlobAuthor("question_8f2a")).toEqual({
       taskId: task.taskId,
       blobType: "question",
       path: "notes.md",
     });
-    expect(findBlobAuthorTask("does_not_exist")).toBeUndefined();
+    expect(runtime.findBlobAuthor("does_not_exist")).toBeUndefined();
   });
 });
 
@@ -1286,11 +1267,11 @@ describe("Stage 4: auth flows", () => {
 
   it("an auth-failed turn puts authRequired + methods on the task row", async () => {
     const { client } = authScriptedPair(1);
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "go");
 
-    const row = agentTasksCollection.get(task.taskId)!;
+    const row = store.tasks.get(task.taskId)!;
     expect(row.authRequired).toBe(true);
     expect(row.authMethods).toEqual(authMethods);
     expect(row.authHint).toBe("Run `claude /login` in the terminal");
@@ -1298,7 +1279,7 @@ describe("Stage 4: auth flows", () => {
 
   it("authenticate() success retries the held prompt exactly once and clears the block", async () => {
     const { client, seen } = authScriptedPair(1);
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "go");
 
@@ -1310,7 +1291,7 @@ describe("Stage 4: auth flows", () => {
       expect(turns[turns.length - 1].status).toBe("completed");
     });
     expect(seen).toEqual(["go", "go"]);
-    expect(agentTasksCollection.get(task.taskId)?.authRequired).toBe(false);
+    expect(store.tasks.get(task.taskId)?.authRequired).toBe(false);
   });
 
   it("authenticate() failure is a value; the block stays and nothing retries", async () => {
@@ -1318,19 +1299,19 @@ describe("Stage 4: auth flows", () => {
     agent.onAuthenticate = async () => {
       throw new Error("method is out-of-band");
     };
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "go");
 
     const result = await task.authenticate("claude-login");
     expect(result.ok).toBe(false);
     expect(seen).toEqual(["go"]);
-    expect(agentTasksCollection.get(task.taskId)?.authRequired).toBe(true);
+    expect(store.tasks.get(task.taskId)?.authRequired).toBe(true);
   });
 
   it("retryHeldPrompt() runs the held prompt before prompts queued behind the block", async () => {
     const { client, seen } = authScriptedPair(1);
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "one"); // fails with the auth block, held
     task.prompt("two"); // stays queued behind the halted drain
@@ -1339,12 +1320,12 @@ describe("Stage 4: auth flows", () => {
     await vi.waitFor(() => {
       expect(seen).toEqual(["one", "one", "two"]);
     });
-    expect(agentTasksCollection.get(task.taskId)?.authRequired).toBe(false);
+    expect(store.tasks.get(task.taskId)?.authRequired).toBe(false);
   });
 
   it("auth retry reuses the original transcript rows — no duplicate user entry or turn", async () => {
     const { client } = authScriptedPair(1);
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "go");
 
@@ -1389,7 +1370,7 @@ describe("Stage 4: auth flows", () => {
       }
       return { stopReason: "end_turn" };
     };
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
 
     task.prompt("go", {
@@ -1413,7 +1394,7 @@ describe("Stage 4: auth flows", () => {
 
   it("a dismissed sign-in leaves the queue halted — no retry loop (A5 regression)", async () => {
     const { client, seen } = authScriptedPair(99);
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "go");
 
@@ -1424,11 +1405,11 @@ describe("Stage 4: auth flows", () => {
 
   it("re-arms the block when the retried prompt fails auth again", async () => {
     const { client, seen } = authScriptedPair(2); // fails twice, then would pass
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "go"); // attempt 1 → auth block armed
     expect(seen).toEqual(["go"]);
-    expect(agentTasksCollection.get(task.taskId)?.authRequired).toBe(true);
+    expect(store.tasks.get(task.taskId)?.authRequired).toBe(true);
 
     const result = await task.authenticate("claude-login");
     expect(result).toEqual({ ok: true }); // the login call itself succeeded
@@ -1437,7 +1418,7 @@ describe("Stage 4: auth flows", () => {
     // than clearing, so the user is asked to sign in again.
     await vi.waitFor(() => {
       expect(seen).toEqual(["go", "go"]);
-      expect(agentTasksCollection.get(task.taskId)?.authRequired).toBe(true);
+      expect(store.tasks.get(task.taskId)?.authRequired).toBe(true);
     });
   });
 });
@@ -1455,8 +1436,8 @@ describe("task updatedAt (last-activity ordering, MET-48)", () => {
   }
 
   it("insertTaskRow stamps updatedAt", async () => {
-    const task = await startedTask(new TaskManager("/ws"));
-    const row = agentTasksCollection.get(task.taskId)!;
+    const task = await startedTask(new TaskManager(deps, "/ws"));
+    const row = store.tasks.get(task.taskId)!;
     expect(row.updatedAt).toBeGreaterThanOrEqual(row.createdAt);
   });
 
@@ -1468,27 +1449,27 @@ describe("task updatedAt (last-activity ordering, MET-48)", () => {
     agent.onPrompt = async () => {
       throw new Error("Authentication required");
     };
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "one");
 
-    const before = agentTasksCollection.get(task.taskId)!;
+    const before = store.tasks.get(task.taskId)!;
     await sleep(10);
     task.prompt("two");
-    const after = agentTasksCollection.get(task.taskId)!;
+    const after = store.tasks.get(task.taskId)!;
     expect(after.updatedAt).toBeGreaterThan(before.updatedAt);
     expect(after.status).toBe(before.status);
   });
 
   it("prompting an older task lifts its updatedAt past a newer idle task", async () => {
-    const manager = new TaskManager("/ws");
+    const manager = new TaskManager(deps, "/ws");
     const older = await startedTask(manager);
     const newer = await startedTask(manager);
     await sleep(10);
 
     await runPrompt(older, "go");
-    const olderRow = agentTasksCollection.get(older.taskId)!;
-    const newerRow = agentTasksCollection.get(newer.taskId)!;
+    const olderRow = store.tasks.get(older.taskId)!;
+    const newerRow = store.tasks.get(newer.taskId)!;
     expect(olderRow.updatedAt).toBeGreaterThan(newerRow.updatedAt);
   });
 });
@@ -1508,7 +1489,7 @@ describe("Stage 4: per-harness MCP registration", () => {
   it('"session-new" harnesses get the server through session/new.mcpServers', async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
-    const task = new TaskManager("/ws").createTask(harness); // claude-code
+    const task = new TaskManager(deps, "/ws").createTask(harness); // claude-code
     await task.start(() => client);
 
     expect(agent.newSessionParams?.mcpServers).toHaveLength(1);
@@ -1521,7 +1502,7 @@ describe("Stage 4: per-harness MCP registration", () => {
     let capturedEnv: Record<string, string> | undefined;
     // devin's dialect is the one that needs both halves; what each dialect
     // PRODUCES is the harness adapters' own business (tested there).
-    const task = new TaskManager("/ws").createTask(devinHarness);
+    const task = new TaskManager(deps, "/ws").createTask(devinHarness);
     await task.start(({ extraEnv }) => {
       capturedEnv = extraEnv;
       return client;
@@ -1546,7 +1527,7 @@ describe("Stage 4: per-harness MCP registration", () => {
     // The adapter's sessionParams must therefore reach the ACP wire.
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
-    const task = new TaskManager("/ws").createTask(devinHarness);
+    const task = new TaskManager(deps, "/ws").createTask(devinHarness);
     await task.start(() => client);
 
     expect(
@@ -1560,7 +1541,7 @@ describe("Stage 4: per-harness MCP registration", () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
     let capturedEnv: Record<string, string> | undefined;
-    const task = new TaskManager("/ws").createTask(opencodeHarness);
+    const task = new TaskManager(deps, "/ws").createTask(opencodeHarness);
     await task.start(({ extraEnv }) => {
       capturedEnv = extraEnv;
       return client;
@@ -1574,7 +1555,7 @@ describe("Stage 4: per-harness MCP registration", () => {
   it("puts the server on the wire when the plan says to", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
-    const task = new TaskManager("/ws").createTask(claudeHarness);
+    const task = new TaskManager(deps, "/ws").createTask(claudeHarness);
     await task.start(() => client);
 
     expect(agent.newSessionParams?.mcpServers).toHaveLength(1);
@@ -1582,7 +1563,7 @@ describe("Stage 4: per-harness MCP registration", () => {
   });
 
   it("two tasks in one workspace share the file but keep their own relay values", async () => {
-    const manager = new TaskManager("/ws");
+    const manager = new TaskManager(deps, "/ws");
     const envs: Record<string, string>[] = [];
     for (const token of ["tok-1", "tok-2"]) {
       relayToken.value = token;
@@ -1617,21 +1598,21 @@ describe("Stage 4: per-harness MCP registration", () => {
     const [client, agentSide] = createLoopbackPair();
     new FakeAgent(agentSide);
     let capturedEnv: Record<string, string> | undefined;
-    const task = new TaskManager("/ws").createTask(devinHarness);
+    const task = new TaskManager(deps, "/ws").createTask(devinHarness);
     await task.start(({ extraEnv }) => {
       capturedEnv = extraEnv;
       return client;
     });
 
     expect(capturedEnv).toEqual({});
-    expect(agentTasksCollection.get(task.taskId)?.status).toBe("idle");
+    expect(store.tasks.get(task.taskId)?.status).toBe("idle");
   });
 
   it('"none" harnesses get neither', async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
     let capturedEnv: Record<string, string> | undefined;
-    const task = new TaskManager("/ws").createTask(geminiHarness);
+    const task = new TaskManager(deps, "/ws").createTask(geminiHarness);
     await task.start(({ extraEnv }) => {
       capturedEnv = extraEnv;
       return client;
@@ -1655,12 +1636,12 @@ describe("Stage 4: per-harness MCP registration", () => {
       });
       return { stopReason: "end_turn" };
     };
-    const task = new TaskManager("/ws").createTask(opencodeHarness);
+    const task = new TaskManager(deps, "/ws").createTask(opencodeHarness);
     await task.start(() => client);
     await runPrompt(task, "ask");
 
     expect(toolEntries(task.taskId)[0].toolCall?.title).toBe("author_blob");
-    expect(findBlobAuthorTask("question_oc01")?.taskId).toBe(task.taskId);
+    expect(runtime.findBlobAuthor("question_oc01")?.taskId).toBe(task.taskId);
   });
 });
 
@@ -1673,7 +1654,7 @@ describe("AgentTask startup timeout (MET-72)", () => {
     const agent = new FakeAgent(agentSide);
     agent.onLoadSession = () => new Promise<never>(() => {}); // hang forever
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     const startPromise = task
       .start(() => client, { resumeSessionId: "sess_old" })
       .catch((e) => e as Error);
@@ -1692,7 +1673,7 @@ describe("AgentTask startup timeout (MET-72)", () => {
 describe("session hydration: buffered replay + manual refresh", () => {
   /** Rows a previous life of the task left behind (workspace close → reopen). */
   function seedOldTranscript(taskId: string): void {
-    agentTurnsCollection.insert({
+    store.turns.insert({
       turnId: "trn_old",
       taskId,
       sessionId: "sess_old",
@@ -1700,7 +1681,7 @@ describe("session hydration: buffered replay + manual refresh", () => {
       stopReason: "end_turn",
       startedAt: 1,
     });
-    agentEntriesCollection.insert({
+    store.entries.insert({
       id: "evt_old_1",
       taskId,
       turnId: "trn_old",
@@ -1708,7 +1689,7 @@ describe("session hydration: buffered replay + manual refresh", () => {
       text: "old prompt",
       createdAt: 1,
     });
-    agentEntriesCollection.insert({
+    store.entries.insert({
       id: "evt_old_2",
       taskId,
       turnId: "trn_old",
@@ -1737,7 +1718,7 @@ describe("session hydration: buffered replay + manual refresh", () => {
       return {};
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     seedOldTranscript(task.taskId);
     const started = task.start(() => client, { resumeSessionId: "sess_old" });
 
@@ -1791,7 +1772,7 @@ describe("session hydration: buffered replay + manual refresh", () => {
       return {};
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client, { resumeSessionId: "sess_old" });
 
     const entries = entriesFor(task.taskId);
@@ -1815,7 +1796,7 @@ describe("session hydration: buffered replay + manual refresh", () => {
       throw new Error("session gone");
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     seedOldTranscript(task.taskId);
     await task
       .start(() => client, { resumeSessionId: "sess_old" })
@@ -1854,7 +1835,7 @@ describe("session hydration: buffered replay + manual refresh", () => {
       return {};
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     await runPrompt(task, "hi");
 
@@ -1908,7 +1889,7 @@ describe("session hydration: buffered replay + manual refresh", () => {
       return {};
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     seedOldTranscript(task.taskId);
     const started = task
       .start(() => flaky, { resumeSessionId: "sess_old" })
@@ -1960,7 +1941,7 @@ describe("session hydration: buffered replay + manual refresh", () => {
       return {};
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => flaky);
     await runPrompt(task, "hi");
     expect(promptCount).toBe(1);
@@ -1991,7 +1972,7 @@ describe("session hydration: buffered replay + manual refresh", () => {
       return {};
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
 
     const result = await task.refreshFromHarness();
@@ -2009,7 +1990,7 @@ describe("session hydration: buffered replay + manual refresh", () => {
         finishTurn = () => resolve({ stopReason: "end_turn" });
       });
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     task.prompt("long task");
     await vi.waitFor(() => expect(finishTurn).toBeDefined());
@@ -2040,7 +2021,7 @@ describe("session hydration: buffered replay + manual refresh", () => {
       return { stopReason: "end_turn" };
     };
 
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
 
     const refresh = task.refreshFromHarness();
@@ -2067,7 +2048,7 @@ describe("AgentTask dispose (MET-72)", () => {
     const [client, agentSide] = createLoopbackPair();
     new FakeAgent(agentSide);
     const closeSpy = vi.spyOn(client, "close");
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
 
     await task.dispose();
@@ -2079,7 +2060,7 @@ describe("AgentTask dispose (MET-72)", () => {
   it("leaves no per-task opencode config behind (none written, none deleted)", async () => {
     const [client, agentSide] = createLoopbackPair();
     new FakeAgent(agentSide);
-    const task = new TaskManager("/ws").createTask(opencodeHarness);
+    const task = new TaskManager(deps, "/ws").createTask(opencodeHarness);
     await task.start(() => client);
 
     await task.dispose();
@@ -2102,14 +2083,14 @@ describe("session config options (MET-81)", () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
     agent.newSessionResult = { sessionId: "sess_cfg", modes };
-    const task = new TaskManager("/ws").createTask(harness);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
     return { task, agent };
   }
 
   it("writes the session's options to the task row once session/new answers", async () => {
     const { task } = await startWithModes();
-    expect(agentTasksCollection.get(task.taskId)?.configOptions).toEqual([
+    expect(store.tasks.get(task.taskId)?.configOptions).toEqual([
       expect.objectContaining({ id: "mode", currentValue: "default" }),
     ]);
   });
@@ -2122,7 +2103,7 @@ describe("session config options (MET-81)", () => {
     });
     await vi.waitFor(() =>
       expect(
-        agentTasksCollection.get(task.taskId)?.configOptions?.[0].currentValue,
+        store.tasks.get(task.taskId)?.configOptions?.[0].currentValue,
       ).toBe("plan"),
     );
     expect(entriesFor(task.taskId)).toEqual([]);
@@ -2147,7 +2128,7 @@ describe("session config options (MET-81)", () => {
       "unknown",
     ]);
     expect(
-      agentTasksCollection.get(task.taskId)?.configOptions?.[0].currentValue,
+      store.tasks.get(task.taskId)?.configOptions?.[0].currentValue,
     ).toBe("plan");
   });
 
@@ -2159,7 +2140,7 @@ describe("session config options (MET-81)", () => {
       modeId: "plan",
     });
     expect(
-      agentTasksCollection.get(task.taskId)?.configOptions?.[0].currentValue,
+      store.tasks.get(task.taskId)?.configOptions?.[0].currentValue,
     ).toBe("plan");
 
     agent.onSetMode = async () => {
@@ -2170,7 +2151,7 @@ describe("session config options (MET-81)", () => {
       error: "mode locked",
     });
     expect(
-      agentTasksCollection.get(task.taskId)?.configOptions?.[0].currentValue,
+      store.tasks.get(task.taskId)?.configOptions?.[0].currentValue,
     ).toBe("plan");
   });
 });

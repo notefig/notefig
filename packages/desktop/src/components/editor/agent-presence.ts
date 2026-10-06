@@ -7,13 +7,16 @@
  * agent-service.ts derives them from `rawInput.path` instead.
  */
 import { useLiveQuery, eq } from "@tanstack/react-db";
-import { agentEntriesCollection } from "@/agent/agent-collections";
+import { useAgentStore } from "@/agent/agent-collections";
 
 const ACTIVE_STATUSES = new Set(["pending", "in_progress"]);
 
 export function useAgentEditingPaths(): Set<string> {
+  const { entries } = useAgentStore();
   const { data: activeToolCalls = [] } = useLiveQuery((q) =>
-    q.from({ entry: agentEntriesCollection }).where(({ entry }) => eq(entry.type, "tool_call")),
+    q
+      .from({ entry: entries })
+      .where(({ entry }) => eq(entry.type, "tool_call")),
   );
 
   const paths = new Set<string>();

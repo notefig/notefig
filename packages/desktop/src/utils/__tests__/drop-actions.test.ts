@@ -13,14 +13,18 @@ vi.mock("@/utils/path", async () => {
 const renameFileOrDirectory = vi.fn(
   async (_ws: string, _from: string, _to: string) => {},
 );
-vi.mock("@/entities/files", () => ({
-  file: (workspacePath: string, filePath: string) => ({
-    exists: () => false,
-    rename: (newPath: string) =>
-      renameFileOrDirectory(workspacePath, filePath, newPath),
+/** What a move goes through: the files of the item's workspace. */
+const deps = {
+  filesOf: (workspacePath: string) => ({
+    file: (filePath: string) => ({
+      exists: () => false,
+      rename: (newPath: string) =>
+        renameFileOrDirectory(workspacePath, filePath, newPath),
+    }),
+    refresh: vi.fn(async () => {}),
   }),
-  refreshDirectoryMetadata: vi.fn(async () => {}),
-}));
+  fs: {},
+} as never;
 
 const openPaths: string[] = [];
 vi.mock("@/entities/editors", async (importOriginal) => ({
@@ -28,8 +32,6 @@ vi.mock("@/entities/editors", async (importOriginal) => ({
   getAllEditorPaths: () => openPaths,
   getMarkdownEditor: () => null,
 }));
-
-vi.mock("@/adapters", () => ({ platformAdapter: { fs: {} } }));
 
 import { moveIntoFolder } from "@/utils/drop-actions";
 
@@ -52,20 +54,32 @@ describe("moveIntoFolder containment guards (win32)", () => {
   });
 
   it("refuses to move a directory into its own descendant", async () => {
-    moveIntoFolder(dragged("C:\\ws\\notes", "directory"), "C:\\ws\\notes\\sub");
+    moveIntoFolder(
+      deps,
+      dragged("C:\\ws\\notes", "directory"),
+      "C:\\ws\\notes\\sub",
+    );
     await flush();
     expect(renameFileOrDirectory).not.toHaveBeenCalled();
   });
 
   it("refuses to move a directory that holds an open tab", async () => {
     openPaths.push("C:\\ws\\notes\\a.md");
-    moveIntoFolder(dragged("C:\\ws\\notes", "directory"), "C:\\ws\\archive");
+    moveIntoFolder(
+      deps,
+      dragged("C:\\ws\\notes", "directory"),
+      "C:\\ws\\archive",
+    );
     await flush();
     expect(renameFileOrDirectory).not.toHaveBeenCalled();
   });
 
   it("allows a sibling whose name merely shares the prefix", async () => {
-    moveIntoFolder(dragged("C:\\ws\\notes", "directory"), "C:\\ws\\notes-backup");
+    moveIntoFolder(
+      deps,
+      dragged("C:\\ws\\notes", "directory"),
+      "C:\\ws\\notes-backup",
+    );
     await flush();
     expect(renameFileOrDirectory).toHaveBeenCalledWith(
       "C:\\ws",

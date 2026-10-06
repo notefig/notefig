@@ -2,11 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 
-vi.mock("@/adapters", () => ({ platformAdapter: {} }));
-vi.mock("@/entities/scratchpads", () => ({
-  scratchpads: () => ({ createAndOpen: vi.fn() }),
-}));
-
+import { CoreProvider } from "@notefig/core/react";
+import { createTestCore } from "@/testing/test-core";
 import {
   useWorkspaceCommands,
   type WorkspaceCommands,
@@ -22,7 +19,14 @@ function renderCommands(options: WorkspaceCommandsOptions): WorkspaceCommands {
     return null;
   }
   const root = createRoot(document.createElement("div"));
-  act(() => root.render(createElement(Probe)));
+  act(() =>
+    root.render(
+      createElement(CoreProvider, {
+        core: createTestCore(),
+        children: createElement(Probe),
+      }),
+    ),
+  );
   return commands!;
 }
 

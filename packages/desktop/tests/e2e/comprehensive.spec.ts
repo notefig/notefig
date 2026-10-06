@@ -104,28 +104,55 @@ test.describe("Notefig E2E Comprehensive Tests", () => {
       } catch (error) {
         // TEMP diagnostic for a rare blank-editor race — dump editor store
         // and DOM state, then rethrow.
-        const dump = await page.evaluate((workspacePath) => ({
-          editors: (
-            window as unknown as {
-              __metristsDebugEditors?: () => unknown;
-            }
-          ).__metristsDebugEditors?.(),
-          contentRow: (
-            window as unknown as {
-              __metristsDebugContentRow?: (w: string, p: string) => unknown;
-            }
-          ).__metristsDebugContentRow?.(
-            workspacePath,
-            `${workspacePath}/watched-file.md`,
-          ),
-          textboxes: Array.from(
-            document.querySelectorAll('[role="textbox"]'),
-          ).map((el) => ({
-            display: window.getComputedStyle(el).display,
-            length: (el.textContent ?? "").length,
-            html: el.outerHTML.slice(0, 300),
-          })),
-        }), e2eTestFixture.workspacePath);
+        const dump = await page.evaluate(
+          (workspacePath) => ({
+            editors: (
+              window as unknown as {
+                __metristsDebugEditors?: () => unknown;
+              }
+            ).__metristsDebugEditors?.(),
+            // The workspace's rows for the file, read off the dev build's
+            // core: a failed content load vs. an editor-mount problem.
+            contentRow: (() => {
+              type Rows = {
+                get(path: string): Record<string, unknown> | undefined;
+              };
+              const core = (
+                window as unknown as {
+                  __notefigCore?: {
+                    workspaces: { isOpen(path: string): boolean };
+                    workspace(path: string): {
+                      files: { collections: { metadata: Rows; content: Rows } };
+                    };
+                  };
+                }
+              ).__notefigCore;
+              if (!core?.workspaces.isOpen(workspacePath)) {
+                return { error: "workspace not open" };
+              }
+              const filePath = `${workspacePath}/watched-file.md`;
+              const { metadata, content } =
+                core.workspace(workspacePath).files.collections;
+              const row = content.get(filePath);
+              const text = String(row?.content ?? "");
+              return {
+                metadata: metadata.get(filePath),
+                content: row && {
+                  ...row,
+                  content: `${text.slice(0, 40)} (len ${text.length})`,
+                },
+              };
+            })(),
+            textboxes: Array.from(
+              document.querySelectorAll('[role="textbox"]'),
+            ).map((el) => ({
+              display: window.getComputedStyle(el).display,
+              length: (el.textContent ?? "").length,
+              html: el.outerHTML.slice(0, 300),
+            })),
+          }),
+          e2eTestFixture.workspacePath,
+        );
         console.log("BLANK-EDITOR DIAGNOSTIC:", JSON.stringify(dump, null, 2));
         throw error;
       }

@@ -1,25 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { platformAdapter } from "@/adapters";
+import { QueryClient } from "@tanstack/react-query";
 import {
-  readProjectSettings,
-  updateProjectSettings,
+  createProjectSettings,
   projectSettingsPath,
   resolveProjectSettings,
   DEFAULT_PROJECT_SETTINGS,
+  type ProjectSettingsApi,
 } from "../project-settings";
 
-vi.mock("@/adapters", async () => ({
-  platformAdapter: {
-    db: (await import("@/testing/node-db")).createNodeTestDb(),
-    fs: {
-      readFiles: vi.fn(),
-      writeFiles: vi.fn(),
-    },
-  },
-}));
+const readMock = vi.fn<ProjectSettingsFs["readFiles"]>();
+const writeMock = vi.fn<ProjectSettingsFs["writeFiles"]>();
+type ProjectSettingsFs = Parameters<typeof createProjectSettings>[0]["fs"];
 
-const readMock = vi.mocked(platformAdapter.fs.readFiles);
-const writeMock = vi.mocked(platformAdapter.fs.writeFiles);
+let projectSettings: ProjectSettingsApi;
 
 const WORKSPACE = "/workspace";
 const SETTINGS_PATH = projectSettingsPath(WORKSPACE);
@@ -43,6 +36,10 @@ function mockMissingFile() {
 beforeEach(() => {
   vi.resetAllMocks();
   writeMock.mockResolvedValue({ succeeded: [SETTINGS_PATH], failed: [] });
+  projectSettings = createProjectSettings({
+    fs: { readFiles: readMock, writeFiles: writeMock },
+    queryClient: new QueryClient(),
+  });
 });
 
 describe("projectSettingsPath", () => {
@@ -64,34 +61,34 @@ describe("resolveProjectSettings", () => {
   });
 });
 
-describe("readProjectSettings", () => {
+describe("read", () => {
   it("returns {} when the file is missing", async () => {
     mockMissingFile();
-    expect(await readProjectSettings(WORKSPACE)).toEqual({});
+    expect(await projectSettings.read(WORKSPACE)).toEqual({});
   });
 
   it("returns {} for invalid JSON", async () => {
     mockFileContent("{not json");
-    expect(await readProjectSettings(WORKSPACE)).toEqual({});
+    expect(await projectSettings.read(WORKSPACE)).toEqual({});
   });
 
   it("returns {} for non-object JSON", async () => {
     mockFileContent('"just a string"');
-    expect(await readProjectSettings(WORKSPACE)).toEqual({});
+    expect(await projectSettings.read(WORKSPACE)).toEqual({});
   });
 
   it("parses valid settings", async () => {
     mockFileContent('{"settings":{"direction":"rtl"}}');
-    expect(await readProjectSettings(WORKSPACE)).toEqual({
+    expect(await projectSettings.read(WORKSPACE)).toEqual({
       settings: { direction: "rtl" },
     });
   });
 });
 
-describe("updateProjectSettings", () => {
+describe("update", () => {
   it("creates the file from scratch when missing", async () => {
     mockMissingFile();
-    await updateProjectSettings(WORKSPACE, {
+    await projectSettings.update(WORKSPACE, {
       settings: { direction: "rtl" },
     });
 
@@ -112,7 +109,7 @@ describe("updateProjectSettings", () => {
       }),
     );
 
-    await updateProjectSettings(WORKSPACE, {
+    await projectSettings.update(WORKSPACE, {
       settings: { direction: "rtl" },
     });
 
@@ -134,7 +131,7 @@ describe("updateProjectSettings", () => {
     });
 
     await expect(
-      updateProjectSettings(WORKSPACE, { settings: { direction: "rtl" } }),
+      projectSettings.update(WORKSPACE, { settings: { direction: "rtl" } }),
     ).rejects.toThrow("disk full");
   });
 });

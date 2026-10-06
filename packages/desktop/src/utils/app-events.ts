@@ -28,6 +28,10 @@ export interface AppEvents {
     workspacePath: string;
     toolCall: ToolCallUpdate;
   };
+  /** The watcher reported changes in a workspace (created, deleted,
+   *  renamed or rewritten paths), already applied to its file rows. For
+   *  state derived from particular files (project settings). */
+  "files:changed": { workspacePath: string; paths: string[] };
   /** Something git cannot see changed a workspace's history: a file the
    *  app wrote (its watcher echo is suppressed), or a commit into the
    *  hidden gitdir. That workspace's git rows go stale. */

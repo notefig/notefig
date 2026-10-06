@@ -1,6 +1,6 @@
 import { Button } from "@notefig/ui/button";
 import { cn } from "@notefig/ui/utils";
-import { agents, usePendingPermissions } from "@/entities/agents";
+import { useAgents, usePendingPermissions } from "@/entities/agents";
 import type { PermissionOption } from "@notefig/shared/agent";
 
 /** ACP option kind → button emphasis. Options render verbatim otherwise. */
@@ -27,6 +27,7 @@ export function PermissionCard({
    *  widget) that already wrap it in an equivalently-tinted container. */
   bare?: boolean;
 }) {
+  const agents = useAgents();
   const pending = usePendingPermissions(taskId);
   // Ids sort chronological; the hook returns oldest-first.
   const head = pending[0];

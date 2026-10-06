@@ -14,10 +14,13 @@ vi.mock("@/entities/editors", () => ({
   getWorkspaceEditorContext,
 }));
 
-const { readWorkspaceTextFile } = vi.hoisted(() => ({
-  readWorkspaceTextFile: vi.fn(async () => ""),
-}));
-vi.mock("@/utils/file-sync", () => ({ readWorkspaceTextFile }));
+const readWorkspaceTextFile = vi.fn(async (_path: string) => "");
+/** Where the payload reads a document no editor has open, and the layout
+ *  the (mocked) editor context is read from. */
+const services = {
+  documents: { read: readWorkspaceTextFile },
+  layout: { read: () => [] },
+};
 
 import { buildWidgetContextPayload } from "../widget-context-resource";
 
@@ -63,7 +66,7 @@ describe("buildWidgetContextPayload", () => {
     });
 
     const midPos = Math.floor(editor.state.doc.content.size / 3);
-    const payload = await buildWidgetContextPayload("/ws", {
+    const payload = await buildWidgetContextPayload(services, "/ws", {
       path: "notes.md",
       pos: midPos,
     });
@@ -86,7 +89,7 @@ describe("buildWidgetContextPayload", () => {
     getMarkdownEditor.mockReturnValue(editor);
     getSelectedText.mockReturnValue(undefined);
 
-    const payload = await buildWidgetContextPayload("/ws", {
+    const payload = await buildWidgetContextPayload(services, "/ws", {
       path: "notes.md",
       pos: 0,
     });
@@ -101,7 +104,7 @@ describe("buildWidgetContextPayload", () => {
     const editor = makeEditor("# Intro\n\nSome body text right here.");
     getMarkdownEditor.mockReturnValue(editor);
     getSelectedText.mockReturnValue(undefined);
-    const payload = await buildWidgetContextPayload("/ws", {
+    const payload = await buildWidgetContextPayload(services, "/ws", {
       path: "doc.md",
       pos: 12,
       selectedRange: { from: 9, to: 27 },
@@ -113,7 +116,7 @@ describe("buildWidgetContextPayload", () => {
     const editor = makeEditor("# Intro\n\nSome body text right here.");
     getMarkdownEditor.mockReturnValue(editor);
     getSelectedText.mockReturnValue(undefined);
-    const payload = await buildWidgetContextPayload("/ws", {
+    const payload = await buildWidgetContextPayload(services, "/ws", {
       path: "doc.md",
       pos: 12,
     });
@@ -125,7 +128,7 @@ describe("buildWidgetContextPayload", () => {
     getMarkdownEditor.mockReturnValue(editor);
     getSelectedText.mockReturnValue(undefined);
 
-    const payload = await buildWidgetContextPayload("/ws", {
+    const payload = await buildWidgetContextPayload(services, "/ws", {
       path: "notes.md",
       pos: 0,
     });
@@ -137,7 +140,7 @@ describe("buildWidgetContextPayload", () => {
     getMarkdownEditor.mockReturnValue(editor);
     getSelectedText.mockReturnValue(undefined);
 
-    const payload = await buildWidgetContextPayload("/ws", {
+    const payload = await buildWidgetContextPayload(services, "/ws", {
       path: "notes.md",
       pos: 0,
     });
@@ -149,7 +152,7 @@ describe("buildWidgetContextPayload", () => {
     getMarkdownEditor.mockReturnValue(editor);
     getSelectedText.mockReturnValue(undefined);
 
-    const payload = await buildWidgetContextPayload("/ws", {
+    const payload = await buildWidgetContextPayload(services, "/ws", {
       path: "notes.md",
       pos: 0,
     });
@@ -164,7 +167,7 @@ describe("buildWidgetContextPayload", () => {
       "# Disk Title\n\nSome disk content.",
     );
 
-    const payload = await buildWidgetContextPayload("/ws", {
+    const payload = await buildWidgetContextPayload(services, "/ws", {
       path: "notes.md",
       pos: 0,
     });
@@ -173,7 +176,10 @@ describe("buildWidgetContextPayload", () => {
 
   it("throws when the path escapes the workspace", async () => {
     await expect(
-      buildWidgetContextPayload("/ws", { path: "../outside.md", pos: 0 }),
+      buildWidgetContextPayload(services, "/ws", {
+        path: "../outside.md",
+        pos: 0,
+      }),
     ).rejects.toThrow();
   });
 });
