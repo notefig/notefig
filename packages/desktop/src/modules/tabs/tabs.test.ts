@@ -84,7 +84,7 @@ beforeEach(() => {
   const layout = createLayout(memoryUrlState());
   tabs = createTabs({
     layout,
-    focusedWindow: { get: () => null, subscribe: () => () => {} },
+    focusedWindow: { get: () => null, set: () => {}, subscribe: () => () => {} },
     canOpenFile: () => true,
     editors: {
       goTo: vi.fn(async () => true),
@@ -197,7 +197,7 @@ describe("tabs.renameOpenFile", () => {
     const layout = createLayout(memoryUrlState());
     const live = createTabs({
       layout,
-      focusedWindow: { get: () => null, subscribe: () => () => {} },
+      focusedWindow: { get: () => null, set: () => {}, subscribe: () => () => {} },
       canOpenFile: () => true,
       editors: {
         goTo: vi.fn(async () => true),
@@ -213,5 +213,76 @@ describe("tabs.renameOpenFile", () => {
     // The swap is written; the layout holds the new id only.
     expect(layout.openTabIds()).toEqual([NEW]);
     expect(live.renaming().size).toBe(0);
+  });
+});
+
+describe("the window in front", () => {
+  /** Two windows side by side: a document left, a session's chat split off
+   *  right — the user last focused the left one. */
+  function splitLayout() {
+    const layout = createLayout(memoryUrlState());
+    let front: string | null = "left";
+    const live = createTabs({
+      layout,
+      focusedWindow: {
+        get: () => front,
+        set: (id) => {
+          front = id;
+        },
+        subscribe: () => () => {},
+      },
+      canOpenFile: () => true,
+      editors: {
+        goTo: vi.fn(async () => true),
+        markdownEditor: () => undefined,
+      },
+      documents,
+    });
+    layout.update([
+      {
+        type: "Panel",
+        id: "root",
+        direction: "row",
+        children: [
+          { type: "Window", id: "left", children: ["/ws/a.md"], selected: "/ws/a.md" },
+          { type: "Window", id: "right", children: ["agent:t1"], selected: "agent:t1" },
+        ],
+      } as never,
+    ]);
+    return live;
+  }
+
+  it("comes to the window of a tab opened where it already lives", () => {
+    const live = splitLayout();
+    expect(live.activeTabId()).toBe("/ws/a.md");
+    live.openAgent("t1");
+    expect(live.activeWindowId()).toBe("right");
+    expect(live.activeTabId()).toBe("agent:t1");
+  });
+
+  it("comes to the window of a selected tab", () => {
+    const live = splitLayout();
+    live.select("agent:t1");
+    expect(live.activeTabId()).toBe("agent:t1");
+  });
+
+  it("wins over DOM focus left in the other window", () => {
+    const live = splitLayout();
+    // An editor in the left pane keeps focus while it opens a link to the
+    // chat already open on the right (LinkBubbleMenu preserves focus).
+    const left = document.createElement("div");
+    left.setAttribute("data-dockable-window-id", "left");
+    const input = document.createElement("input");
+    left.appendChild(input);
+    document.body.appendChild(left);
+    input.focus();
+    try {
+      expect(live.activeWindowId()).toBe("left");
+      live.openAgent("t1");
+      expect(live.activeWindowId()).toBe("right");
+      expect(live.activeTabId()).toBe("agent:t1");
+    } finally {
+      left.remove();
+    }
   });
 });
