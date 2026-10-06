@@ -28,6 +28,23 @@ const LONG_DOC = [
   "",
 ].join("\n");
 
+/** True while the document holds focus with its caret in the draft
+ *  (composer) of the widget carrying `blobId`. */
+function caretInDraftOf(page: Page, blobId: string) {
+  return page.evaluate((blobId) => {
+    const node = window.getSelection()?.anchorNode ?? null;
+    const element =
+      node instanceof Element ? node : (node?.parentElement ?? null);
+    const draft = element?.closest("[data-prompt-draft]");
+    const widget = draft?.closest("[data-blob-id]");
+    const editor = draft?.closest(".ProseMirror");
+    return (
+      widget?.getAttribute("data-blob-id") === blobId &&
+      document.activeElement === editor
+    );
+  }, blobId);
+}
+
 function minimap(page: Page) {
   return page.locator("[data-widget-minimap]").locator("visible=true");
 }
@@ -66,5 +83,25 @@ test.describe("widget minimap", () => {
     // A widget-less document renders no minimap.
     await openFileInTree(page, "plain.md");
     await expect(minimap(page)).toHaveCount(0);
+  });
+
+  test("clicking a dot focuses that widget's composer", async ({ page }) => {
+    await openFileInTree(page, "doc.md");
+    const dots = minimap(page).first().getByRole("button");
+    await expect(dots).toHaveCount(2);
+
+    // Start with the caret in the prose, away from either widget.
+    await page.getByText("closing paragraph").click();
+
+    await dots.last().click();
+    const secondWidget = page.locator('[data-blob-id="blob_mapbb"]').first();
+    await expect(secondWidget).toBeInViewport({ timeout: 5000 });
+    await expect.poll(() => caretInDraftOf(page, "blob_mapbb")).toBe(true);
+
+    // Typing lands in that composer, not the prose.
+    await page.keyboard.type("from the minimap");
+    await expect(
+      secondWidget.locator("[data-prompt-draft]").first(),
+    ).toHaveText("from the minimap");
   });
 });
