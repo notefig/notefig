@@ -4,8 +4,9 @@
  *
  * The layout itself is the `layout` module (`entities/layout.ts`); this one
  * owns what happens to tabs in it:
- *   - `tabsModule` — `core.tabs`: open, select, focus, close and rename a
- *     tab, and which tab is active. The only way the app changes tabs;
+ *   - `tabsModule` — `core.tabs`: open, select, focus, close, reveal a
+ *     location in and rename a tab, and which tab is active. The only way
+ *     the app changes tabs; the rename-open-tab bookkeeping is its state;
  *   - the open-tabs cross-entity join (`useWorkspaceTabs`);
  *   - `tab(tabId)` — the handle: the controls every tab type has, plus
  *     `.editor` on a file tab and `.agent` on an agent tab for the ones only
@@ -14,7 +15,7 @@
  *     codec (`utils/layout-codec`, shared with the crash-fallback debug
  *     panel) and the tab-id scheme (`tabs/tab-id`).
  */
-import { useMemo, useCallback, useEffect, useSyncExternalStore } from "react";
+import { useMemo, useCallback, useSyncExternalStore } from "react";
 import { defineModule } from "@notefig/core";
 import type { LayoutNode } from "@/components/dockable";
 import {
@@ -61,7 +62,8 @@ import {
   type TabSearchOptions,
 } from "@/tabs/tab-controllers";
 // Sibling entities — only referenced inside function bodies (cycle rule).
-import { editor, type EditorHandle } from "./editors";
+import type { EditorHandle, EditorsApi, EditorTarget } from "./editors";
+import type { DocumentsApi } from "./documents";
 import {
   useAgentStore,
   useAgentTasksReady,
@@ -70,7 +72,7 @@ import {
 } from "./agents";
 import type { AgentsApi, AgentTaskHandle } from "@/agent/agents";
 import { useMetadataFetching, type WorkspaceFiles } from "./files";
-import { useCore } from "@notefig/core/react";
+import { useCore, useModule } from "@notefig/core/react";
 import type { Core } from "@notefig/core";
 import {
   useOpenWorkspaces,
@@ -82,10 +84,6 @@ import {
   flushDocumentSync,
   whenDocumentSyncClean,
 } from "@/utils/markdown-conversion";
-import { whenWorkspaceWritesSettled } from "@/utils/workspace-write-tracker";
-// Read-side editor-store accessor, same conscious entities → components
-// import as entities/editors.ts.
-import { getMarkdownEditor } from "@/entities/editors";
 
 // ---------------------------------------------------------------------------
 // Public re-exports: the layout codec and the tab-id scheme.
@@ -152,9 +150,16 @@ export type TabHandle = FileTabHandle | AgentTabHandle | ReleaseNotesTabHandle;
 /**
  * The handle over one open tab, whether or not it is currently mounted (an
  * unmounted tab reports `isMounted() === false` and its controls no-op).
- * An agent tab's half comes from `agents` (`core.agents`).
+ * A file tab's half comes from `editors` (`core.editors`), an agent tab's
+ * from `agents` (`core.agents`).
  */
-export function tab(tabId: string, agents: Pick<AgentsApi, "task">): TabHandle {
+export function tab(
+  tabId: string,
+  {
+    agents,
+    editors,
+  }: { agents: Pick<AgentsApi, "task">; editors: Pick<EditorsApi, "get"> },
+): TabHandle {
   const base: TabHandleBase = {
     tabId,
     isMounted: () => getTabController(tabId) !== undefined,
@@ -172,7 +177,7 @@ export function tab(tabId: string, agents: Pick<AgentsApi, "task">): TabHandle {
         ...base,
         kind: "file",
         path: ref.path,
-        editor: editor(ref.path),
+        editor: editors.get(ref.path),
       };
     case "agent":
       return {
@@ -184,106 +189,6 @@ export function tab(tabId: string, agents: Pick<AgentsApi, "task">): TabHandle {
     case "release-notes":
       return { ...base, kind: "release-notes" };
   }
-}
-
-// ---------------------------------------------------------------------------
-// Rename-open-tab: the close-and-reopen primitive — any open file may be
-// renamed or moved from the tree; the tab follows the file.
-// ---------------------------------------------------------------------------
-
-/**
- * Tab ids currently mid-rename. Between the collection row re-key and the
- * layout id-swap commit, the layout briefly holds an id with no backing row
- * — without this guard the stale-tab pruning would close the tab. React
- * batches renders across the orchestrator's await points, so ordering alone
- * cannot prevent that.
- */
-const pendingTabRenames = new Map<string, string>();
-
-/** oldPath → promise of the path's final location (newPath on success,
- * oldPath on failure). Programmatic writers (agent authoring) consult this
- * via `activeRenameTarget` so a write overlapping the move lands on the
- * moved file instead of resurrecting the old path. */
-const pendingRenameTargets = new Map<string, Promise<string>>();
-
-function beginTabRename(oldId: string, newId: string): void {
-  pendingTabRenames.set(oldId, newId);
-}
-
-function endTabRename(oldId: string): void {
-  pendingTabRenames.delete(oldId);
-}
-
-/** The path a write should target once any in-flight rename of `path`
- * settles; null when no rename is in flight. */
-export function activeRenameTarget(path: string): Promise<string> | null {
-  return pendingRenameTargets.get(path) ?? null;
-}
-
-/**
- * Rename/move an OPEN file tab by closing and reopening it in place: the
- * editor is disposed, the file moved once the save pipeline drains, and the
- * tab id swapped in the layout without leaving its window slot. The editor
- * remounts at the new path (undo history and caret are not preserved —
- * accepted for an explicit rename/promote gesture). Throws if the move
- * fails; the tab is left intact at the old path in that case.
- */
-export async function renameOpenFileTab(options: {
-  /** The files of the workspace that holds the file. */
-  files: Pick<WorkspaceFiles, "file">;
-  oldPath: string;
-  newPath: string;
-  /**
-   * Must be the RAW id swap (`core.tabs.rename`) — `applyLayout`'s
-   * removed-id diff would dispose the old id again and treat the swap as a
-   * close+open.
-   */
-  applyLayoutRename: (oldId: string, newId: string) => void;
-}): Promise<void> {
-  const { files, oldPath, newPath, applyLayoutRename } = options;
-  // One rename per source path at a time: the coordination entries are
-  // keyed by oldPath, so a second overlapping call would overwrite the
-  // first's, and whichever fails would clear the other's write redirect
-  // and stale-prune guard mid-swap.
-  if (pendingTabRenames.has(oldPath)) {
-    throw new Error(`A rename of "${oldPath}" is already in progress`);
-  }
-  beginTabRename(oldPath, newPath);
-  let settleTarget!: (path: string) => void;
-  pendingRenameTargets.set(
-    oldPath,
-    new Promise<string>((resolve) => {
-      settleTarget = resolve;
-    }),
-  );
-  // Freeze the editor for the duration: an edit landing after the drain
-  // would schedule a save against the old path and resurrect it post-move.
-  // The editor stays alive (read-only) until the move succeeds, so a
-  // failed move leaves the tab fully intact.
-  const liveEditor = getMarkdownEditor(oldPath);
-  liveEditor?.setEditable(false);
-  try {
-    flushDocumentSync(oldPath);
-    await whenDocumentSyncClean(oldPath);
-    // Writes that passed the redirect check before this rename began are
-    // tracked in flight — drain them too before moving the file.
-    await whenWorkspaceWritesSettled(oldPath);
-    await files.file(oldPath).rename(newPath);
-  } catch (error) {
-    if (liveEditor && !liveEditor.isDestroyed) liveEditor.setEditable(true);
-    settleTarget(oldPath);
-    pendingRenameTargets.delete(oldPath);
-    endTabRename(oldPath);
-    throw error;
-  }
-  settleTarget(newPath);
-  pendingRenameTargets.delete(oldPath);
-  disposeTab(oldPath);
-  applyLayoutRename(oldPath, newPath);
-  // The guard clears from state truth, not a timer: useWorkspaceTabs ends
-  // the rename once the layout no longer holds the old id (swap committed
-  // or tab closed). A timer raced the URL-driven layout commit — a prune
-  // render holding the pre-swap layout could clobber the swap.
 }
 
 export interface WorkspaceTabsState {
@@ -383,6 +288,7 @@ function openFilesOf(
  */
 export function useWorkspaceTabs(openTabs: string[]): WorkspaceTabsState {
   const agentStore = useAgentStore();
+  const tabs = useModule("tabs");
   const fileTabIds = useMemo(() => openTabs.filter(isFileTabId), [openTabs]);
   const agentTaskIds = useMemo(
     () =>
@@ -414,19 +320,10 @@ export function useWorkspaceTabs(openTabs: string[]): WorkspaceTabsState {
 
   const agentTaskRows = useAgentTaskRowsById(agentTaskIds);
 
-  // End pending renames from state truth: once the layout stops holding
-  // the old id (the swap committed, or the tab was closed), every render
-  // from here on sees a row-backed layout and pruning is inert again.
-  useEffect(() => {
-    for (const oldId of pendingTabRenames.keys()) {
-      if (!fileTabIds.includes(oldId)) endTabRename(oldId);
-    }
-  }, [fileTabIds]);
-
   const staleTabIds = useMemo(() => {
     // File tabs wait out the metadata fetch; agent tabs wait out the tasks
     // collection's boot load (restored sessions come back as rows).
-    const midRenameIds = new Set([...pendingTabRenames].flat());
+    const midRenameIds = new Set([...tabs.renaming()].flat());
     const missingFileTabIds =
       !openWorkspacesReady || isFetchingMetadata || missingFileTabs === ""
         ? []
@@ -447,6 +344,7 @@ export function useWorkspaceTabs(openTabs: string[]): WorkspaceTabsState {
     isFetchingMetadata,
     agentTasksReady,
     agentStore,
+    tabs,
   ]);
 
   return {
@@ -515,8 +413,39 @@ export interface TabsApi {
   /** Move keyboard focus into a tab. */
   focus(tabId: string, request?: TabFocusRequest): boolean;
   close(tabId: string): void;
+  /**
+   * Open the file as a tab (or select it) and move its editor to `target`
+   * once it is mounted. False when the file cannot be opened or the
+   * location is not found.
+   */
+  reveal(
+    filePath: string,
+    target: EditorTarget,
+    options?: OpenTabOptions,
+  ): Promise<boolean>;
   /** Swap a tab id in place, without disposing (rename-open-tab flow). */
   rename(oldId: string, newId: string): void;
+  /**
+   * Rename/move an OPEN file tab by closing and reopening it in place: the
+   * editor is disposed, the file moved once the save pipeline drains, and
+   * the tab id swapped in the layout without leaving its window slot. The
+   * editor remounts at the new path (undo history and caret are not
+   * preserved — accepted for an explicit rename/promote gesture). Throws if
+   * the move fails; the tab is left intact at the old path in that case.
+   */
+  renameOpenFile(options: {
+    /** The files of the workspace that holds the file. */
+    files: Pick<WorkspaceFiles, "file">;
+    oldPath: string;
+    newPath: string;
+  }): Promise<void>;
+  /**
+   * Tab ids mid-rename (old → new). Between the collection row re-key and
+   * the layout id-swap commit, the layout briefly holds an id with no
+   * backing row; the stale-tab pruning must not close it. An entry ends
+   * from state truth — once the layout no longer holds the old id.
+   */
+  renaming(): ReadonlyMap<string, string>;
   /** Take a layout the dock produced (drag, close), disposing removed tabs. */
   applyLayout(next: LayoutNode[]): void;
   /** The selected tab of the active window. */
@@ -566,14 +495,50 @@ function createFocusedWindow() {
   };
 }
 
-export function createTabs(
-  layout: LayoutApi,
+/** What tabs are built from. */
+export interface TabsDeps {
+  layout: LayoutApi;
   focusedWindow: Pick<
     ReturnType<typeof createFocusedWindow>,
     "get" | "subscribe"
-  >,
-  canOpenFile: (path: string) => boolean,
-): TabsApi {
+  >;
+  /** The editor's format gate. */
+  canOpenFile: (path: string) => boolean;
+  editors: Pick<EditorsApi, "goTo" | "markdownEditor">;
+  /** Writes in flight on a path being renamed, and where they land after. */
+  documents: Pick<DocumentsApi, "whenWritesSettled" | "beginMove">;
+}
+
+export function createTabs({
+  layout,
+  focusedWindow,
+  canOpenFile,
+  editors,
+  documents,
+}: TabsDeps): TabsApi {
+  const renaming = new Map<string, string>();
+  /** Watching the layout for the moment a renamed-away id leaves it; only
+   *  while a rename is pending. */
+  let stopWatchingRenames: (() => void) | null = null;
+  const endSettledRenames = () => {
+    const ids = layout.openTabIds();
+    for (const oldId of renaming.keys()) {
+      if (!ids.includes(oldId)) renaming.delete(oldId);
+    }
+    if (renaming.size === 0 && stopWatchingRenames) {
+      stopWatchingRenames();
+      stopWatchingRenames = null;
+    }
+  };
+  const beginRename = (oldId: string, newId: string) => {
+    renaming.set(oldId, newId);
+    stopWatchingRenames ??= layout.subscribe(endSettledRenames);
+  };
+  const endRename = (oldId: string) => {
+    renaming.delete(oldId);
+    endSettledRenames();
+  };
+
   /** Focus inside the dock first, then the window that last had it, then
    *  the layout's selection, then the first window. */
   const activeWindow = (): DockWindow | null => {
@@ -649,9 +614,52 @@ export function createTabs(
       disposeTab(tabId);
       layout.update((current) => removeTabFromLayout(current, tabId));
     },
+    async reveal(filePath, target, options) {
+      if (!tabs.open(filePath, options)) return false;
+      return editors.goTo(filePath, target);
+    },
     rename(oldId, newId) {
       layout.update((current) => renameTabInLayout(current, oldId, newId));
     },
+    async renameOpenFile({ files, oldPath, newPath }) {
+      // One rename per source path at a time: the coordination entries are
+      // keyed by oldPath, so a second overlapping call would overwrite the
+      // first's, and whichever fails would clear the other's write redirect
+      // and stale-prune guard mid-swap.
+      if (renaming.has(oldPath)) {
+        throw new Error(`A rename of "${oldPath}" is already in progress`);
+      }
+      beginRename(oldPath, newPath);
+      const move = documents.beginMove(oldPath);
+      // Freeze the editor for the duration: an edit landing after the drain
+      // would schedule a save against the old path and resurrect it
+      // post-move. The editor stays alive (read-only) until the move
+      // succeeds, so a failed move leaves the tab fully intact.
+      const liveEditor = editors.markdownEditor(oldPath);
+      liveEditor?.setEditable(false);
+      try {
+        flushDocumentSync(oldPath);
+        await whenDocumentSyncClean(oldPath);
+        // Writes that passed the redirect check before this rename began
+        // are tracked in flight — drain them too before moving the file.
+        await documents.whenWritesSettled(oldPath);
+        await files.file(oldPath).rename(newPath);
+      } catch (error) {
+        if (liveEditor && !liveEditor.isDestroyed) liveEditor.setEditable(true);
+        move.settle(oldPath);
+        endRename(oldPath);
+        throw error;
+      }
+      move.settle(newPath);
+      disposeTab(oldPath);
+      tabs.rename(oldPath, newPath);
+      // The guard clears from state truth, not a timer: the layout
+      // subscription ends the rename once the layout no longer holds the
+      // old id (swap committed or tab closed). A timer raced the
+      // URL-driven layout commit — a prune render holding the pre-swap
+      // layout could clobber the swap.
+    },
+    renaming: () => renaming,
     applyLayout(next) {
       const nextIds = extractTabIds(next);
       for (const id of layout.openTabIds()) {
@@ -686,9 +694,15 @@ export function tabsModule({
   const focusedWindow = createFocusedWindow();
   return defineModule({
     name: "tabs",
-    needs: ["layout"],
+    needs: ["layout", "editors", "documents"],
     register: (ctx) =>
-      createTabs(ctx.use("layout"), focusedWindow, canOpenFile),
+      createTabs({
+        layout: ctx.use("layout"),
+        focusedWindow,
+        canOpenFile,
+        editors: ctx.use("editors"),
+        documents: ctx.use("documents"),
+      }),
     boot: () => focusedWindow.track(),
   });
 }

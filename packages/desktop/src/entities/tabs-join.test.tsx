@@ -23,17 +23,16 @@ vi.mock("@/tabs/tab-controllers", () => ({
   revealTabMatch: vi.fn(),
   searchTab: vi.fn(),
 }));
-vi.mock("./editors", () => ({ editor: vi.fn() }));
-vi.mock("@/utils/workspace-write-tracker", () => ({
-  whenWorkspaceWritesSettled: vi.fn(async () => {}),
-}));
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 import type { Core } from "@notefig/core";
 import { CoreProvider } from "@notefig/core/react";
 import type { WorkspaceFiles } from "./files";
-import { useWorkspaceTabs, type WorkspaceTabsState } from "./tabs";
+import { tabsModule, useWorkspaceTabs, type WorkspaceTabsState } from "./tabs";
+import { editorsModule } from "./editors";
+import { documentsModule } from "./documents";
+import { turnWritesModule } from "./turn-writes";
 import { workspacesModule } from "./workspaces";
 import { agentStoreModule } from "@/agent/agent-collections";
 import { createTestCore } from "@/testing/test-core";
@@ -90,6 +89,11 @@ beforeEach(async () => {
       filesModuleOf(files),
       workspacesModule({ restore: false }),
       agentStoreModule,
+      // The join reads `core.tabs` for the renames in flight.
+      editorsModule,
+      turnWritesModule,
+      documentsModule,
+      tabsModule({ canOpenFile: () => true }),
     ],
   });
   core.boot();

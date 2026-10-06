@@ -7,16 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Editor } from "@tiptap/core";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
 
-const { getMarkdownEditor, getSelectedText } = vi.hoisted(() => ({
-  getMarkdownEditor: vi.fn(),
-  getSelectedText: vi.fn(),
-}));
-vi.mock("@/entities/editors", () => ({
-  getMarkdownEditor,
-  getSelectedText,
-  getWorkspaceEditorContext: vi.fn(() => ({ openFiles: [], activeFile: null })),
-}));
-
+const getMarkdownEditor = vi.fn();
 const readWorkspaceTextFile = vi.fn(async (_path: string) => "");
 
 import { documentReadRange } from "../document-read-range";
@@ -25,8 +16,12 @@ const ctx = {
   workspacePath: "/ws",
   taskId: "task_1",
   agents: {} as never,
-  // Where a document no editor has open is read from.
-  services: { documents: { read: readWorkspaceTextFile } } as never,
+  // The live editors a document is read from first, and where one no
+  // editor has open is read from.
+  services: {
+    documents: { read: readWorkspaceTextFile },
+    editors: { markdownEditor: getMarkdownEditor },
+  } as never,
 };
 
 const editors: Editor[] = [];

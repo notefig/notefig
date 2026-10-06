@@ -13,6 +13,7 @@ import {
 } from "@/agent/agent-service";
 import { createAgents, type AgentsApi, type AgentsDeps } from "@/agent/agents";
 import { createDocuments } from "@/entities/documents";
+import { createEditors } from "@/entities/editors";
 import { createLayout } from "@/entities/layout";
 import { createNodeTestDb } from "./node-db";
 import { memoryUrlState } from "./test-core";
@@ -70,7 +71,8 @@ export function testAgents(
       failed: [],
     }),
   };
-  const documents = createDocuments({ fs, openFiles: () => [] });
+  const editors = createEditors();
+  const documents = createDocuments({ fs, openFiles: () => [], editors });
   const layout = createLayout(memoryUrlState());
   let agents: AgentsApi | null = null;
   const deps: AgentRuntimeDeps = {
@@ -92,6 +94,7 @@ export function testAgents(
       },
       documents,
       layout,
+      editors,
     }),
     agents: () => agents!,
     hooks,

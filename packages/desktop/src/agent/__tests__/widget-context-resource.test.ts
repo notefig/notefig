@@ -8,17 +8,18 @@ const { getMarkdownEditor, getSelectedText, getWorkspaceEditorContext } =
     getSelectedText: vi.fn(),
     getWorkspaceEditorContext: vi.fn(),
   }));
-vi.mock("@/entities/editors", () => ({
-  getMarkdownEditor,
-  getSelectedText,
-  getWorkspaceEditorContext,
-}));
+vi.mock("@/entities/editors", () => ({ getWorkspaceEditorContext }));
 
 const readWorkspaceTextFile = vi.fn(async (_path: string) => "");
-/** Where the payload reads a document no editor has open, and the layout
- *  the (mocked) editor context is read from. */
+/** Where the payload reads a document no editor has open, the live editors
+ *  it reads first, and the layout the (mocked) editor context is read from. */
 const services = {
   documents: { read: readWorkspaceTextFile },
+  editors: {
+    markdownEditor: getMarkdownEditor,
+    selectedText: getSelectedText,
+    get: vi.fn(),
+  },
   layout: { read: () => [] },
 };
 

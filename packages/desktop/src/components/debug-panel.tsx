@@ -34,7 +34,6 @@ import {
   findLayoutSelectedTab,
 } from "@/utils/layout-codec";
 import {
-  getEditorInstance as getEditor,
   isMarkdownInstance,
 } from "@/entities/editors";
 import { useQueryClient } from "@tanstack/react-query";
@@ -265,6 +264,7 @@ function DebugPanelContent({
   onClose?: () => void;
   searchParams: URLSearchParams;
 }) {
+  const editors = useModule("editors");
   // The focused workspace stands in for the old route param: the dock
   // spans every open workspace, so this is only the sidebar's scope.
   const workspacePath = useFocusedWorkspace();
@@ -494,7 +494,7 @@ function DebugPanelContent({
     const files: Record<string, FileReport> = {};
 
     for (const tabPath of openTabs) {
-      const editor = getEditor(tabPath);
+      const editor = editors.instance(tabPath);
       if (isMarkdownInstance(editor)) {
         files[tabPath] = {
           type: "markdown",

@@ -1,13 +1,15 @@
 /**
- * Editors entity — the registry of live editor instances, and `core.editors`
- * over it: reach a document's editor and move it to a location, whether or
- * not its surface is up yet.
+ * Editors entity — `core.editors`: the registry of live editor instances,
+ * and the handle over a document's editor whether or not its surface is up
+ * yet.
  *
  * The instances themselves are built by the tab surfaces
  * (`components/editor/editor-store.ts` assembles the Tiptap editor, code and
- * image viewers register container instances); they register here and say
- * when their surface is mounted. Everything else — tabs, agent tools, the
- * search panel — goes through this module and never imports a component.
+ * image viewers register container instances); they register with the
+ * instance a component reads from core (`useModule("editors")`) and say
+ * when their surface is mounted. Everything else — tabs, documents, agent
+ * tools — is handed the same instance and never imports a component. There
+ * is no module-scope registry: two cores hold two sets of editors.
  *
  * "Mounted" is the moment an instance can act on its DOM: the editor's view
  * is attached, or the code viewer's delegates are registered. A `goTo` that
@@ -21,7 +23,6 @@ import type { LayoutApi } from "./layout";
 import { getDocumentSync } from "@/utils/markdown-conversion";
 import { extractTabIds, findLayoutSelectedTab } from "@/utils/layout-codec";
 import { relativeTreePath } from "@/utils/path";
-import type { OpenTabOptions, TabsApi } from "./tabs";
 
 // "release-notes" never comes from a file — it's the bundled release-notes
 // tab, registered so the focus arbiter can drive it.
@@ -78,119 +79,8 @@ export function isMarkdownInstance(
   return instance?.type === "markdown";
 }
 
-// ---------------------------------------------------------------------------
-// The registry. Module scope like the tab-controller registry it pairs
-// with: the surfaces that fill it render outside any core-aware context.
-// ---------------------------------------------------------------------------
-
-const instances = new Map<string, EditorInstance>();
-const mounted = new Set<string>();
-const mountWaiters = new Map<string, Set<() => void>>();
-
 /** How long a `goTo` waits for its editor to mount before giving up. */
 export const MOUNT_WAIT_MS = 5_000;
-
-export function registerEditorInstance(
-  filePath: string,
-  instance: EditorInstance,
-): void {
-  instances.set(filePath, instance);
-}
-
-/** Forget an instance (it was disposed). Its surface counts as unmounted. */
-export function unregisterEditorInstance(filePath: string): void {
-  instances.delete(filePath);
-  mounted.delete(filePath);
-}
-
-export function getEditorInstance(
-  filePath: string,
-): EditorInstance | undefined {
-  return instances.get(filePath);
-}
-
-export function getMarkdownEditor(filePath: string): Editor | undefined {
-  const instance = instances.get(filePath);
-  return isMarkdownInstance(instance) ? instance.editor : undefined;
-}
-
-export function getAllEditorPaths(): string[] {
-  return [...instances.keys()];
-}
-
-export function getSelectedText(filePath: string): string | undefined {
-  return instances.get(filePath)?.selectedText();
-}
-
-export function isEditorFocusable(filePath: string): boolean {
-  return instances.get(filePath)?.isFocusable() ?? false;
-}
-
-/** The surface for `filePath` can act on its DOM now. */
-export function markEditorMounted(filePath: string): void {
-  if (!instances.has(filePath)) return;
-  mounted.add(filePath);
-  const waiters = mountWaiters.get(filePath);
-  if (!waiters) return;
-  mountWaiters.delete(filePath);
-  for (const resolve of waiters) resolve();
-}
-
-export function markEditorUnmounted(filePath: string): void {
-  mounted.delete(filePath);
-}
-
-export function isEditorMounted(filePath: string): boolean {
-  return mounted.has(filePath);
-}
-
-/**
- * The instance once its surface is mounted — now if it already is — or
- * undefined if that does not happen within `timeoutMs`. A file whose tab is
- * replaced away and reopened is disposed and recreated; this resolves with
- * whichever instance mounts next, so a location set on the old one is
- * never lost with it.
- */
-export function whenEditorMounted(
-  filePath: string,
-  timeoutMs = MOUNT_WAIT_MS,
-): Promise<EditorInstance | undefined> {
-  if (mounted.has(filePath)) return Promise.resolve(instances.get(filePath));
-  return new Promise((resolve) => {
-    let waiters = mountWaiters.get(filePath);
-    if (!waiters) {
-      waiters = new Set();
-      mountWaiters.set(filePath, waiters);
-    }
-    const onMounted = () => {
-      clearTimeout(timer);
-      resolve(instances.get(filePath));
-    };
-    const timer = setTimeout(() => {
-      waiters.delete(onMounted);
-      if (waiters.size === 0) mountWaiters.delete(filePath);
-      resolve(undefined);
-    }, timeoutMs);
-    waiters.add(onMounted);
-  });
-}
-
-/** Move a file's editor to `target`, waiting for it to mount if needed. */
-export async function goToInEditor(
-  filePath: string,
-  target: EditorTarget,
-  timeoutMs = MOUNT_WAIT_MS,
-): Promise<boolean> {
-  const instance = await whenEditorMounted(filePath, timeoutMs);
-  return instance ? instance.goTo(target) : false;
-}
-
-/** Test-only: drop every instance, mount mark and waiter. */
-export function resetEditorRegistryForTest(): void {
-  instances.clear();
-  mounted.clear();
-  mountWaiters.clear();
-}
 
 // ---------------------------------------------------------------------------
 // The handle — the file-tab-specific half of a tab's API (`tab(id).editor`).
@@ -210,38 +100,48 @@ export interface EditorHandle {
   goTo(target: EditorTarget): Promise<boolean>;
 }
 
-export function editor(filePath: string): EditorHandle {
-  return {
-    filePath,
-    isMounted: () => instances.has(filePath),
-    isDirty: () => getDocumentSync(filePath).isDirty(),
-    isFocusable: () => isEditorFocusable(filePath),
-    markdownText: () => {
-      const instance = instances.get(filePath);
-      return isMarkdownInstance(instance) ? instance.markdown() : undefined;
-    },
-    selectedText: () => getSelectedText(filePath),
-    goTo: (target) => goToInEditor(filePath, target),
-  };
-}
-
 // ---------------------------------------------------------------------------
 // core.editors
 // ---------------------------------------------------------------------------
 
 export interface EditorsApi {
-  /** The handle over a file's editor, mounted or not. */
-  get(filePath: string): EditorHandle;
+  // --- Filled by the tab surfaces ---------------------------------------
+  /** A surface built an instance for the file. */
+  register(filePath: string, instance: EditorInstance): void;
+  /** Forget an instance (it was disposed). Its surface counts as unmounted. */
+  unregister(filePath: string): void;
+  /** The surface for `filePath` can act on its DOM now: a `goTo` waiting
+   *  for it runs. */
+  markMounted(filePath: string): void;
+  markUnmounted(filePath: string): void;
+
+  // --- Read by everything else ------------------------------------------
+  instance(filePath: string): EditorInstance | undefined;
+  /** The live Tiptap editor of a markdown document, if one is open. */
+  markdownEditor(filePath: string): Editor | undefined;
+  /** Every file with a live instance. */
+  paths(): string[];
+  isMounted(filePath: string): boolean;
+  selectedText(filePath: string): string | undefined;
   /**
-   * Open the file as a tab (or select it) and move its editor to
-   * `target` once it is mounted. False when the file cannot be opened or
-   * the location is not found.
+   * The instance once its surface is mounted — now if it already is — or
+   * undefined if that does not happen within `timeoutMs`. A file whose tab
+   * is replaced away and reopened is disposed and recreated; this resolves
+   * with whichever instance mounts next, so a location set on the old one
+   * is never lost with it.
    */
-  reveal(
+  whenMounted(
+    filePath: string,
+    timeoutMs?: number,
+  ): Promise<EditorInstance | undefined>;
+  /** Move a file's editor to `target`, waiting for it to mount if needed. */
+  goTo(
     filePath: string,
     target: EditorTarget,
-    options?: OpenTabOptions,
+    timeoutMs?: number,
   ): Promise<boolean>;
+  /** The handle over a file's editor, mounted or not. */
+  get(filePath: string): EditorHandle;
 }
 
 declare module "@notefig/core" {
@@ -250,20 +150,96 @@ declare module "@notefig/core" {
   }
 }
 
-export function createEditors(tabs: Pick<TabsApi, "open">): EditorsApi {
+export function createEditors(): EditorsApi {
+  const instances = new Map<string, EditorInstance>();
+  const mounted = new Set<string>();
+  const mountWaiters = new Map<string, Set<() => void>>();
+
+  const selectedText = (filePath: string) =>
+    instances.get(filePath)?.selectedText();
+
+  const whenMounted = (
+    filePath: string,
+    timeoutMs = MOUNT_WAIT_MS,
+  ): Promise<EditorInstance | undefined> => {
+    if (mounted.has(filePath)) return Promise.resolve(instances.get(filePath));
+    return new Promise((resolve) => {
+      let waiters = mountWaiters.get(filePath);
+      if (!waiters) {
+        waiters = new Set();
+        mountWaiters.set(filePath, waiters);
+      }
+      const onMounted = () => {
+        clearTimeout(timer);
+        resolve(instances.get(filePath));
+      };
+      const timer = setTimeout(() => {
+        waiters.delete(onMounted);
+        if (waiters.size === 0) mountWaiters.delete(filePath);
+        resolve(undefined);
+      }, timeoutMs);
+      waiters.add(onMounted);
+    });
+  };
+
+  const goTo = async (
+    filePath: string,
+    target: EditorTarget,
+    timeoutMs = MOUNT_WAIT_MS,
+  ): Promise<boolean> => {
+    const instance = await whenMounted(filePath, timeoutMs);
+    return instance ? instance.goTo(target) : false;
+  };
+
   return {
-    get: editor,
-    async reveal(filePath, target, options) {
-      if (!tabs.open(filePath, options)) return false;
-      return goToInEditor(filePath, target);
+    register(filePath, instance) {
+      instances.set(filePath, instance);
+    },
+    unregister(filePath) {
+      instances.delete(filePath);
+      mounted.delete(filePath);
+    },
+    markMounted(filePath) {
+      if (!instances.has(filePath)) return;
+      mounted.add(filePath);
+      const waiters = mountWaiters.get(filePath);
+      if (!waiters) return;
+      mountWaiters.delete(filePath);
+      for (const resolve of waiters) resolve();
+    },
+    markUnmounted(filePath) {
+      mounted.delete(filePath);
+    },
+    instance: (filePath) => instances.get(filePath),
+    markdownEditor(filePath) {
+      const instance = instances.get(filePath);
+      return isMarkdownInstance(instance) ? instance.editor : undefined;
+    },
+    paths: () => [...instances.keys()],
+    isMounted: (filePath) => mounted.has(filePath),
+    selectedText,
+    whenMounted,
+    goTo,
+    get(filePath) {
+      return {
+        filePath,
+        isMounted: () => instances.has(filePath),
+        isDirty: () => getDocumentSync(filePath).isDirty(),
+        isFocusable: () => instances.get(filePath)?.isFocusable() ?? false,
+        markdownText: () => {
+          const instance = instances.get(filePath);
+          return isMarkdownInstance(instance) ? instance.markdown() : undefined;
+        },
+        selectedText: () => selectedText(filePath),
+        goTo: (target) => goTo(filePath, target),
+      };
     },
   };
 }
 
 export const editorsModule = defineModule({
   name: "editors",
-  needs: ["tabs"],
-  register: (ctx) => createEditors(ctx.use("tabs")),
+  register: () => createEditors(),
 });
 
 // ---------------------------------------------------------------------------
@@ -278,13 +254,19 @@ export interface WorkspaceEditorContext {
 }
 
 /**
- * Read-only snapshot of what the user has open, scoped to one workspace.
- * Read from `core.layout` rather than a React hook, so non-React callers
- * (agent tools, the prompt composer) can call it directly. Not reactive:
- * callers that need live updates go through `useLayout`/`useDockableTabs`.
+ * Read-only snapshot of what the user has open, scoped to one workspace:
+ * the dock's tabs (`core.layout`) joined with their editors' state. Not
+ * reactive: callers that need live updates go through
+ * `useLayout`/`useDockableTabs`.
  */
 export function getWorkspaceEditorContext(
-  layoutApi: Pick<LayoutApi, "read">,
+  {
+    editors,
+    layout: layoutApi,
+  }: {
+    editors: Pick<EditorsApi, "get" | "selectedText">;
+    layout: Pick<LayoutApi, "read">;
+  },
   workspacePath: string,
 ): WorkspaceEditorContext {
   const layout = layoutApi.read();
@@ -298,7 +280,7 @@ export function getWorkspaceEditorContext(
     .filter(inWorkspace)
     .map((path) => ({
       path,
-      dirty: editor(path).isDirty(),
+      dirty: editors.get(path).isDirty(),
       active: path === activeFile,
     }));
 
@@ -306,7 +288,7 @@ export function getWorkspaceEditorContext(
     openFiles,
     activeFile: activeFile && inWorkspace(activeFile) ? activeFile : null,
     selection: activeFile
-      ? getSelectedText(activeFile) !== undefined
+      ? editors.selectedText(activeFile) !== undefined
       : undefined,
   };
 }

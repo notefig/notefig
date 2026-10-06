@@ -30,13 +30,22 @@ declare module "@notefig/core" {
 
 export const workspaceAgentsModule = defineModule({
   name: "agents",
-  needs: ["agentStore", "kv", "platform", "tabs", "documents", "layout"],
+  needs: [
+    "agentStore",
+    "kv",
+    "platform",
+    "tabs",
+    "documents",
+    "layout",
+    "editors",
+  ],
   register: (ctx) => {
     const store = ctx.use("agentStore");
     const kv = ctx.use("kv");
     const { proc, fs } = ctx.use("platform");
     const documents = ctx.use("documents");
     const layout = ctx.use("layout");
+    const editors = ctx.use("editors");
     let agents: AgentsApi | null = null;
     const runtime = createAgentRuntime({
       store,
@@ -54,6 +63,7 @@ export const workspaceAgentsModule = defineModule({
           },
           documents,
           layout,
+          editors,
         };
       },
       agents: () => agents!,

@@ -92,7 +92,11 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   (`ctx.use("platform")`, the workspace's other instances via
   `ctx.useWorkspace`) and freed in `dispose`; app-wide state in `register`.
   Persisted collections are created inside the factory from
-  `ctx.use("platform").db`, never at module scope.
+  `ctx.use("platform").db`, never at module scope. The same goes for any
+  registry: a map of live editor instances, writes in flight, tabs
+  mid-rename — each is state of the module that owns it (`core.editors`,
+  `core.documents`, `core.tabs`), reached through core, never a
+  module-scope `Map` a free function reads.
 - The platform is a service. Only the composition root (`app-core.ts`)
   imports `@/adapters`; modules take `ctx.use("platform")`, components
   `usePlatform()` (`src/core/use-platform.ts`), and other code is handed

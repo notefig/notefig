@@ -8,16 +8,11 @@ import {
   whenBlockRendered,
   type EditorFs,
 } from "@/components/editor/editor-store";
-import {
-  getEditorInstance as getEditor,
-  getMarkdownEditor,
-  getSelectedText,
-  goToInEditor,
-  isMarkdownInstance,
-  markEditorMounted,
-} from "@/entities/editors";
+import { createEditors, isMarkdownInstance } from "@/entities/editors";
 
-const hasEditor = (path: string) => getEditor(path) !== undefined;
+/** The registry the surfaces fill — one per test file, cleared after each. */
+const editors = createEditors();
+const hasEditor = (path: string) => editors.instance(path) !== undefined;
 import { requestTabFocus, setActiveTab } from "@/tabs/tab-controllers";
 import { findPromptNodeId, selectionDraft } from "@notefig/widgets";
 
@@ -45,25 +40,25 @@ const fs: EditorFs = {
 };
 
 afterEach(() => {
-  disposeAllEditors();
+  disposeAllEditors(editors);
 });
 
 describe("editor registry", () => {
   it("returns the same instance for the same path", () => {
-    const a = getOrCreateEditor("/ws/a.md", MD_CONFIG, fs);
-    const again = getOrCreateEditor("/ws/a.md", MD_CONFIG, fs);
+    const a = getOrCreateEditor(editors, "/ws/a.md", MD_CONFIG, fs);
+    const again = getOrCreateEditor(editors, "/ws/a.md", MD_CONFIG, fs);
     expect(again).toBe(a);
   });
 
   it("returns distinct instances per path", () => {
-    const a = getOrCreateEditor("/ws/a.md", MD_CONFIG, fs);
-    const b = getOrCreateEditor("/ws/b.md", MD_CONFIG, fs);
+    const a = getOrCreateEditor(editors, "/ws/a.md", MD_CONFIG, fs);
+    const b = getOrCreateEditor(editors, "/ws/b.md", MD_CONFIG, fs);
     expect(b).not.toBe(a);
   });
 
   it("routes markdown and image configs to the right instance types", () => {
-    const md = getOrCreateEditor("/ws/a.md", MD_CONFIG, fs);
-    const img = getOrCreateEditor("/ws/pic.png", { type: "image" }, fs);
+    const md = getOrCreateEditor(editors, "/ws/a.md", MD_CONFIG, fs);
+    const img = getOrCreateEditor(editors, "/ws/pic.png", { type: "image" }, fs);
 
     expect(isMarkdownInstance(md)).toBe(true);
     expect(md.type).not.toBe("image");
@@ -72,27 +67,27 @@ describe("editor registry", () => {
   });
 
   it("disposeEditor destroys and forgets the instance", () => {
-    getOrCreateEditor("/ws/a.md", MD_CONFIG, fs);
+    getOrCreateEditor(editors, "/ws/a.md", MD_CONFIG, fs);
     expect(hasEditor("/ws/a.md")).toBe(true);
 
-    disposeEditor("/ws/a.md");
+    disposeEditor(editors, "/ws/a.md");
     expect(hasEditor("/ws/a.md")).toBe(false);
-    expect(getEditor("/ws/a.md")).toBeUndefined();
+    expect(editors.instance("/ws/a.md")).toBeUndefined();
   });
 
   it("disposeAllEditors clears the registry", () => {
-    getOrCreateEditor("/ws/a.md", MD_CONFIG, fs);
-    getOrCreateEditor("/ws/b.md", MD_CONFIG, fs);
+    getOrCreateEditor(editors, "/ws/a.md", MD_CONFIG, fs);
+    getOrCreateEditor(editors, "/ws/b.md", MD_CONFIG, fs);
 
-    disposeAllEditors();
+    disposeAllEditors(editors);
     expect(hasEditor("/ws/a.md")).toBe(false);
     expect(hasEditor("/ws/b.md")).toBe(false);
   });
 
   it("a re-created path gets a fresh editor", () => {
-    const first = getOrCreateEditor("/ws/a.md", MD_CONFIG, fs);
-    disposeEditor("/ws/a.md");
-    const second = getOrCreateEditor("/ws/a.md", MD_CONFIG, fs);
+    const first = getOrCreateEditor(editors, "/ws/a.md", MD_CONFIG, fs);
+    disposeEditor(editors, "/ws/a.md");
+    const second = getOrCreateEditor(editors, "/ws/a.md", MD_CONFIG, fs);
     expect(second).not.toBe(first);
   });
 });
@@ -105,11 +100,11 @@ describe("empty-document keeper", () => {
 
   /** Store-created empty doc with the keeper inserted (onCreate is async). */
   async function emptyKeeperDoc(path: string): Promise<string> {
-    getOrCreateEditor(path, EMPTY_CONFIG, fs);
+    getOrCreateEditor(editors, path, EMPTY_CONFIG, fs);
     // Tab intents are only eligible for the arbiter's active tab.
     setActiveTab(path);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const blobId = findPromptNodeId(getMarkdownEditor(path)!.state.doc);
+    const blobId = findPromptNodeId(editors.markdownEditor(path)!.state.doc);
     expect(blobId).toBeTruthy();
     return blobId!;
   }
@@ -124,7 +119,7 @@ describe("empty-document keeper", () => {
   // there, and an ordinary tab intent lands on it.
   it("opens with the caret in the keeper's draft", async () => {
     const blobId = await emptyKeeperDoc("/ws/empty.md");
-    const editor = getMarkdownEditor("/ws/empty.md")!;
+    const editor = editors.markdownEditor("/ws/empty.md")!;
     expect(selectionDraft(editor.state)?.blobId).toBe(blobId);
   });
 
@@ -134,19 +129,19 @@ describe("empty-document keeper", () => {
     requestTabFocus("/ws/empty-intent.md", { reason: "tab-selected" });
     await new Promise((resolve) => setTimeout(resolve, 0)); // microtask flush
 
-    const editor = getMarkdownEditor("/ws/empty-intent.md")!;
+    const editor = editors.markdownEditor("/ws/empty-intent.md")!;
     expect(selectionDraft(editor.state)?.blobId).toBe(blobId);
   });
 
   it("leaves documents with content alone", async () => {
-    getOrCreateEditor("/ws/full.md", MD_CONFIG, fs);
+    getOrCreateEditor(editors, "/ws/full.md", MD_CONFIG, fs);
     setActiveTab("/ws/full.md");
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     requestTabFocus("/ws/full.md", { reason: "tab-selected" });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(findPromptNodeId(getMarkdownEditor("/ws/full.md")!.state.doc)).toBe(
+    expect(findPromptNodeId(editors.markdownEditor("/ws/full.md")!.state.doc)).toBe(
       null,
     );
   });
@@ -154,23 +149,23 @@ describe("empty-document keeper", () => {
 
 describe("selection persistence", () => {
   it("round-trips a saved selection", () => {
-    getOrCreateEditor("/ws/a.md", MD_CONFIG, fs);
-    saveSelection("/ws/a.md", 2, 5);
-    expect(getSavedSelection("/ws/a.md")).toEqual({ from: 2, to: 5 });
+    getOrCreateEditor(editors, "/ws/a.md", MD_CONFIG, fs);
+    saveSelection(editors, "/ws/a.md", 2, 5);
+    expect(getSavedSelection(editors, "/ws/a.md")).toEqual({ from: 2, to: 5 });
   });
 
   it("returns undefined for unknown paths", () => {
-    expect(getSavedSelection("/ws/never-opened.md")).toBeUndefined();
+    expect(getSavedSelection(editors, "/ws/never-opened.md")).toBeUndefined();
   });
 });
 
 describe("getSelectedText", () => {
   it("returns the text inside the current selection", () => {
-    const instance = getOrCreateEditor("/ws/a.md", MD_CONFIG, fs);
+    const instance = getOrCreateEditor(editors, "/ws/a.md", MD_CONFIG, fs);
     if (!isMarkdownInstance(instance)) throw new Error("expected markdown");
 
     instance.editor.commands.setTextSelection({ from: 1, to: 6 });
-    expect(getSelectedText("/ws/a.md")).toBe("Hello");
+    expect(editors.selectedText("/ws/a.md")).toBe("Hello");
   });
 });
 
@@ -182,7 +177,7 @@ describe("goTo", () => {
   };
 
   it("is false for a path no editor mounts in time", async () => {
-    expect(await goToInEditor("/ws/never-opened.md", beta, 10)).toBe(false);
+    expect(await editors.goTo("/ws/never-opened.md", beta, 10)).toBe(false);
   });
 
   it("selects the matched text once the editor is mounted", async () => {
@@ -190,6 +185,7 @@ describe("goTo", () => {
     // exhaustively by go-to-location.test.ts; this only checks the
     // orchestration wiring.
     getOrCreateEditor(
+      editors,
       "/ws/a.md",
       {
         type: "markdown",
@@ -197,19 +193,20 @@ describe("goTo", () => {
       },
       fs,
     );
-    markEditorMounted("/ws/a.md");
+    editors.markMounted("/ws/a.md");
 
-    expect(await goToInEditor("/ws/a.md", beta)).toBe(true);
+    expect(await editors.goTo("/ws/a.md", beta)).toBe(true);
 
-    const editor = getMarkdownEditor("/ws/a.md");
+    const editor = editors.markdownEditor("/ws/a.md");
     const { from, to } = editor!.state.selection;
     expect(editor!.state.doc.textBetween(from, to)).toBe("beta");
   });
 
   it("waits for a mount that has not happened yet", async () => {
-    const landed = goToInEditor("/ws/a.md", beta);
+    const landed = editors.goTo("/ws/a.md", beta);
     // The tab opens and its editor mounts after the request.
     getOrCreateEditor(
+      editors,
       "/ws/a.md",
       {
         type: "markdown",
@@ -217,10 +214,10 @@ describe("goTo", () => {
       },
       fs,
     );
-    markEditorMounted("/ws/a.md");
+    editors.markMounted("/ws/a.md");
 
     expect(await landed).toBe(true);
-    const editor = getMarkdownEditor("/ws/a.md");
+    const editor = editors.markdownEditor("/ws/a.md");
     const { from, to } = editor!.state.selection;
     expect(editor!.state.doc.textBetween(from, to)).toBe("beta");
   });

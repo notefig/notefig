@@ -8,6 +8,9 @@ import {
 import { answerBlob } from "../blob-actions";
 import type { DocumentsApi } from "@/entities/documents";
 import type { AgentsApi } from "@/agent/agents";
+import { createEditors } from "@/entities/editors";
+
+const editors = createEditors();
 
 const readWorkspaceTextFile = vi.fn();
 const writeWorkspaceTextFile = vi.fn();
@@ -36,7 +39,7 @@ const agents = {
   }),
 } as unknown as AgentsApi;
 
-const host = { documents, agents };
+const host = { documents, editors, agents };
 
 /** The platform fs the editor reaches; nothing here searches or pastes. */
 const editorFs: EditorFs = {
@@ -61,13 +64,14 @@ const baseMarkdown = [
 
 afterEach(() => {
   vi.clearAllMocks();
-  disposeEditor("/ws/notes.md");
+  disposeEditor(editors, "/ws/notes.md");
 });
 
 describe("answerBlob", () => {
   it("answer-while-open: reads the live editor and writes through the adopting primitive", async () => {
     const content = codec.parse(baseMarkdown);
     getOrCreateEditor(
+      editors,
       "/ws/notes.md",
       { type: "markdown", content, basePath: "/ws" },
       editorFs,

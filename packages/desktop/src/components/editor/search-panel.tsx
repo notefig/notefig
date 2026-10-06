@@ -45,15 +45,15 @@ export const SearchPanel = forwardRef<SearchPanelHandle, SearchPanelProps>(
     const isMetaHeld = useKeyHold("Meta");
     const isControlHeld = useKeyHold("Control");
     const isModHeld = isMetaHeld || isControlHeld;
-    const { editors } = useCore();
+    const { tabs } = useCore();
 
     const handleMatchClick = useCallback(
       (match: SearchMatch, options?: OpenTabOptions) => {
-        void editors.reveal(match.filePath, match, {
+        void tabs.reveal(match.filePath, match, {
           intent: options?.intent ?? "replace",
         });
       },
-      [editors],
+      [tabs],
     );
 
     const inputRef = useRef<HTMLInputElement>(null);

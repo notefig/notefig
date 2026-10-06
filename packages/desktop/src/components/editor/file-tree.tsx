@@ -777,6 +777,7 @@ function FileTreeInner({
         {
           filesOf: (root) => core.workspace(root).files,
           fs: core.use("platform").fs,
+          editors: core.editors,
         },
         payload,
         destDir,

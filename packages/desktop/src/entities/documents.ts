@@ -16,10 +16,11 @@
  * mid-autosave-debounce) keeps last-writer-wins: the user's edit wins,
  * exactly like any external change arriving mid-edit.
  *
- * Per-path write serialization across parallel tasks is deliberately not
- * implemented here — two tasks writing the same path race like any two
- * independent writes. If that becomes a real problem, serialization returns
- * as an internal detail of `write`.
+ * Writes to one path are serialized here, and a path being moved (a
+ * scratchpad promotion renaming an open tab) redirects the writes that
+ * overlap the move to wherever the file settles. Both are this module's
+ * state: the mover (`core.tabs.renameOpenFile`) announces the move with
+ * `beginMove` and waits for `whenWritesSettled` before touching the file.
  */
 import { defineModule } from "@notefig/core";
 import {
@@ -27,12 +28,10 @@ import {
   type FileSystemSurface,
 } from "@/adapters/platform-adapter.interface";
 import type { WorkspaceFiles } from "./files";
-import { getMarkdownEditor } from "./editors";
-import { activeRenameTarget } from "./tabs";
+import type { EditorsApi } from "./editors";
 import { calculateContentHash } from "@/utils/hash";
 import { getDocumentSync } from "@/utils/markdown-conversion";
 import { path as pathutil } from "@/utils/path";
-import { trackWorkspaceWrite } from "@/utils/workspace-write-tracker";
 import {
   adoptExternalContent,
   type AdoptionSource,
@@ -46,8 +45,21 @@ export interface DocumentsApi {
     options?: { line?: number; limit?: number },
   ): Promise<string>;
   /** Write a file's text and bring every loaded copy of it forward: rows
-   *  and an open editor. */
+   *  and an open editor. Writes to one path run one after another; a write
+   *  that overlaps a move of its path (`beginMove`) lands where the file
+   *  settled. */
   write(path: string, content: string): Promise<void>;
+  /** Resolves once every write in flight for `path` has landed (or failed). */
+  whenWritesSettled(path: string): Promise<void>;
+  /**
+   * The file at `path` is about to move. Until `settle` names where it
+   * ended up (the new path, or `path` itself if the move failed), a write
+   * to `path` waits and then lands there. The check against a pending move
+   * and the write's registration are one synchronous step, so a move that
+   * begins after a write sees it in `whenWritesSettled`, and one that began
+   * before redirects it. Throws if a move of `path` is already pending.
+   */
+  beginMove(path: string): { settle(finalPath: string): void };
 }
 
 /** What documents are built from. */
@@ -55,6 +67,8 @@ export interface DocumentsDeps {
   fs: Pick<FileSystemSurface, "readFiles" | "writeFiles">;
   /** The files of every open workspace (a path may sit in nested ones). */
   openFiles(): WorkspaceFiles[];
+  /** The live editor of an open document, which the write adopts into. */
+  editors: Pick<EditorsApi, "markdownEditor">;
   /** Which prompt round wrote adopted bytes (`core.turnWrites.attribute`). */
   attribute?: AdoptionSource["attribute"];
 }
@@ -81,8 +95,26 @@ function assertAbsolute(path: string): void {
 export function createDocuments({
   fs,
   openFiles,
+  editors,
   attribute,
 }: DocumentsDeps): DocumentsApi {
+  /** path → the chain of writes in flight on it. */
+  const inFlight = new Map<string, Promise<void>>();
+  /** path → where a pending move of it will have put the file. */
+  const pendingMoves = new Map<string, Promise<string>>();
+
+  /** Run `write`, serialized after any in-flight write to the same path. */
+  const trackWrite = (path: string, write: () => Promise<void>) => {
+    const previous = inFlight.get(path) ?? Promise.resolve();
+    const op = previous.catch(() => {}).then(write);
+    const settled = op.catch(() => {});
+    inFlight.set(path, settled);
+    void settled.then(() => {
+      if (inFlight.get(path) === settled) inFlight.delete(path);
+    });
+    return op;
+  };
+
   const writeToDisk = async (path: string, content: string) => {
     const result = await fs.writeFiles([{ path, content }]);
     const failure = result.failed[0];
@@ -115,19 +147,16 @@ export function createDocuments({
 
     async write(path, content) {
       assertAbsolute(path);
-      // A rename-open-tab (scratchpad promotion) may be moving this exact
-      // file right now — wait it out and write to wherever the file
-      // settled, so an overlapping agent write can't resurrect the old
-      // path. The redirect check and the in-flight registration below are
-      // one synchronous block: a rename beginning after it sees this write
-      // via whenWorkspaceWritesSettled; one beginning before is seen here.
-      const renameTarget = activeRenameTarget(path);
-      const target = renameTarget ? await renameTarget : path;
-      return trackWorkspaceWrite(target, async () => {
+      // The file may be moving right now — wait it out and write to
+      // wherever it settled, so an overlapping agent write can't resurrect
+      // the old path.
+      const move = pendingMoves.get(path);
+      const target = move ? await move : path;
+      return trackWrite(target, async () => {
         await writeToDisk(target, content);
         updateLoadedRows(target, content);
 
-        const editor = getMarkdownEditor(target);
+        const editor = editors.markdownEditor(target);
         if (!editor || editor.isDestroyed) return;
         const sync = getDocumentSync(target);
         const doc = await sync.prepareAdoption(content);
@@ -151,6 +180,29 @@ export function createDocuments({
         sync.commitAdoption(repaired, calculateContentHash(repaired));
       });
     },
+
+    whenWritesSettled(path) {
+      return inFlight.get(path) ?? Promise.resolve();
+    },
+
+    beginMove(path) {
+      if (pendingMoves.has(path)) {
+        throw new Error(`A move of "${path}" is already in progress`);
+      }
+      let settle!: (finalPath: string) => void;
+      pendingMoves.set(
+        path,
+        new Promise<string>((resolve) => {
+          settle = resolve;
+        }),
+      );
+      return {
+        settle(finalPath) {
+          pendingMoves.delete(path);
+          settle(finalPath);
+        },
+      };
+    },
   };
 }
 
@@ -162,10 +214,11 @@ declare module "@notefig/core" {
 
 export const documentsModule = defineModule({
   name: "documents",
-  needs: ["platform", "turnWrites"],
+  needs: ["platform", "turnWrites", "editors"],
   register: (ctx) =>
     createDocuments({
       fs: ctx.use("platform").fs,
+      editors: ctx.use("editors"),
       attribute: ctx.use("turnWrites").attribute,
       openFiles: () =>
         ctx.workspaces

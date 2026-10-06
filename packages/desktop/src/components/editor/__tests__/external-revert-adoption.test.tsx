@@ -49,6 +49,7 @@ import { handleContentFileSystemChange } from "@/utils/file-sync";
 import { calculateContentHash } from "@/utils/hash";
 import type { FileEntry } from "@/utils/fs";
 import { createHooks } from "@notefig/core";
+import { createEditors } from "@/entities/editors";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -316,6 +317,9 @@ describe("external writes restoring app-written content (git revert)", () => {
         await createDocuments({
           fs: fake.adapter as never,
           openFiles: () => [files],
+          // No registered editor: the write reaches this one through the
+          // watcher-driven adoption path, as an unregistered editor did.
+          editors: createEditors(),
         }).write(FILE, "agent wrote this");
         watcherSim.appWrites.push({
           path: FILE,

@@ -1,4 +1,5 @@
 import "./agent-events";
+import type { EditorsApi } from "@/entities/editors";
 import type { Hooks } from "@notefig/core";
 import type { WorkspaceHistory } from "@/utils/history-service";
 import type { WorkspaceFiles } from "@/entities/files";
@@ -1614,6 +1615,8 @@ declare module "@notefig/agent" {
     documents: DocumentsApi;
     /** The dock: what the user has open (`core.layout`). */
     layout: Pick<LayoutApi, "read">;
+    /** The live editors (`core.editors`): a document as the user sees it. */
+    editors: Pick<EditorsApi, "markdownEditor" | "selectedText" | "get">;
   }
 }
 

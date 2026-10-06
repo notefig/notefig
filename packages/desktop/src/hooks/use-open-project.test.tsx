@@ -92,6 +92,10 @@ beforeEach(async () => {
   core = createTestCore({
     url: urlStateFromRouter(router),
     modules: [
+      // Tabs are built over the editors and documents they rename through;
+      // nothing here renames, so stand-ins suffice.
+      defineModule({ name: "editors", register: () => ({}) as never }),
+      defineModule({ name: "documents", register: () => ({}) as never }),
       tabsModule({ canOpenFile: () => true }),
       scratchpadsModule,
       registry,

@@ -938,7 +938,7 @@ const TOOL_NAME_RENDERER: Record<
 /** "authored a question in notes.md" instead of the raw {blobId} JSON result. */
 function AuthorBlobCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
   const { t } = useTranslation();
-  const { editors } = useCore();
+  const { tabs: jumpTabs } = useCore();
   const rawInput = call.rawInput as
     { path?: string; type?: string; id?: string } | undefined;
   const status: ToolCallStatus = call.status ?? "pending";
@@ -962,7 +962,7 @@ function AuthorBlobCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
         <button
           type="button"
           className="underline hover:text-foreground"
-          onClick={() => jumpToBlob(editors, jumpPath, rawInput.id!)}
+          onClick={() => jumpToBlob(jumpTabs, jumpPath, rawInput.id!)}
         >
           {fileName}
         </button>

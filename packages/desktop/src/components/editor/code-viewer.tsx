@@ -11,7 +11,6 @@ import DiffsHighlightWorker from "@pierre/diffs/worker/worker.js?worker";
 import { usePlatform } from "@/core/use-platform";
 import type { FileEntry } from "@/utils/fs";
 import type { SearchTarget } from "@/adapters/platform-adapter.interface";
-import { markEditorMounted, markEditorUnmounted } from "@/entities/editors";
 import {
   getOrCreateEditor,
   registerCodeViewerDelegate,
@@ -20,6 +19,7 @@ import {
 import { requestTabFocus } from "@/tabs/tab-controllers";
 import { useTheme } from "@/components/theme-provider";
 import { getFileName } from "@/utils/fs";
+import { useModule } from "@notefig/core/react";
 
 interface CodeViewerProps {
   file: FileEntry;
@@ -137,9 +137,10 @@ export function CodeViewer({ file }: CodeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const { fs } = usePlatform();
+  const editors = useModule("editors");
   useEffect(() => {
-    getOrCreateEditor(file.path, { type: "code" }, fs);
-  }, [fs, file.path]);
+    getOrCreateEditor(editors, file.path, { type: "code" }, fs);
+  }, [editors, fs, file.path]);
 
   // Mount focus goes through the arbiter like the text editor's, so it
   // competes with modals, the sidebar and other tabs on the same terms
@@ -186,13 +187,13 @@ export function CodeViewer({ file }: CodeViewerProps) {
     });
     // The CodeView mounts alongside this effect; give it a frame to lay
     // out before anything scrolls it.
-    const frame = requestAnimationFrame(() => markEditorMounted(file.path));
+    const frame = requestAnimationFrame(() => editors.markMounted(file.path));
     return () => {
       cancelAnimationFrame(frame);
-      markEditorUnmounted(file.path);
+      editors.markUnmounted(file.path);
       unregisterCodeViewerDelegate(file.path);
     };
-  }, [file.path]);
+  }, [editors, file.path]);
 
   // CodeView applies a controlled item update only when its `version`
   // moves (a changed cacheKey alone is not enough), so every recompute —

@@ -12,7 +12,7 @@ import {
   disposeEditor,
   type EditorFs,
 } from "@/components/editor/editor-store";
-import { getMarkdownEditor } from "@/entities/editors";
+import { createEditors } from "@/entities/editors";
 import { createWorkspaceFiles, type WorkspaceFiles } from "./files";
 import { createDocuments, type DocumentsApi } from "./documents";
 import { createHooks } from "@notefig/core";
@@ -27,12 +27,14 @@ const fs = {
 /** The open workspaces' files the documents bring forward. */
 let open: WorkspaceFiles[] = [];
 let documents: DocumentsApi;
+/** The editors a write adopts into; the open-editor tests register one. */
+const editors = createEditors();
 
 beforeEach(() => {
   readMock.mockReset();
   writeMock.mockReset();
   open = [];
-  documents = createDocuments({ fs, openFiles: () => open });
+  documents = createDocuments({ fs, openFiles: () => open, editors });
 });
 
 describe("documents.write", () => {
@@ -87,7 +89,7 @@ describe("documents.write adoption (open editor)", () => {
   const codec = createMarkdownCodec();
 
   afterEach(() => {
-    disposeEditor(path);
+    disposeEditor(editors, path);
   });
 
   /** What the editor itself reaches on the platform; unused here. */
@@ -99,6 +101,7 @@ describe("documents.write adoption (open editor)", () => {
 
   function openEditor(markdown: string) {
     return getOrCreateEditor(
+      editors,
       path,
       {
         type: "markdown",
@@ -110,7 +113,7 @@ describe("documents.write adoption (open editor)", () => {
   }
 
   function liveMarkdown(): string {
-    return codec.serialize(getMarkdownEditor(path)!.getJSON());
+    return codec.serialize(editors.markdownEditor(path)!.getJSON());
   }
 
   it("pushes the written content into a live editor (disk alone is not enough)", async () => {
@@ -149,7 +152,7 @@ describe("documents.write adoption (open editor)", () => {
   it("skips adoption while a local edit is mid-debounce (prepareAdoption null), disk write intact", async () => {
     writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
     openEditor("# Doc\n\nUser draft.\n");
-    const editor = getMarkdownEditor(path)!;
+    const editor = editors.markdownEditor(path)!;
 
     // Simulate a dirty local edit: a save held in flight keeps the sync
     // dirty/saving, so prepareAdoption resolves null and the user's edit wins.
@@ -195,9 +198,7 @@ describe("documents.read", () => {
 });
 
 describe("in-flight write tracking", () => {
-  it("serializes same-path writes and settles whenWorkspaceWritesSettled after them", async () => {
-    const { whenWorkspaceWritesSettled } =
-      await import("@/utils/workspace-write-tracker");
+  it("serializes same-path writes and settles whenWritesSettled after them", async () => {
     const order: string[] = [];
     let releaseFirst!: () => void;
     writeMock
@@ -216,7 +217,7 @@ describe("in-flight write tracking", () => {
 
     const first = documents.write("/ws/a.md", "one");
     const second = documents.write("/ws/a.md", "two");
-    const settled = whenWorkspaceWritesSettled("/ws/a.md").then(() =>
+    const settled = documents.whenWritesSettled("/ws/a.md").then(() =>
       order.push("settled"),
     );
 
@@ -225,5 +226,31 @@ describe("in-flight write tracking", () => {
     await Promise.all([first, second, settled]);
 
     expect(order).toEqual(["first-start", "first-done", "second", "settled"]);
+  });
+
+  it("redirects a write that overlaps a move to where the file settled", async () => {
+    writeMock.mockResolvedValue({ succeeded: ["/ws/b.md"], failed: [] });
+    const move = documents.beginMove("/ws/a.md");
+    const write = documents.write("/ws/a.md", "moved content");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(writeMock).not.toHaveBeenCalled();
+
+    move.settle("/ws/b.md");
+    await write;
+    expect(writeMock).toHaveBeenCalledWith([
+      { path: "/ws/b.md", content: "moved content" },
+    ]);
+  });
+
+  it("lets a failed move's writes land on the original path, and refuses a second move", async () => {
+    writeMock.mockResolvedValue({ succeeded: ["/ws/a.md"], failed: [] });
+    const move = documents.beginMove("/ws/a.md");
+    expect(() => documents.beginMove("/ws/a.md")).toThrow(/already in progress/);
+    const write = documents.write("/ws/a.md", "kept");
+    move.settle("/ws/a.md");
+    await write;
+    expect(writeMock).toHaveBeenCalledWith([{ path: "/ws/a.md", content: "kept" }]);
+    // The move is over: the next one is allowed.
+    documents.beginMove("/ws/a.md").settle("/ws/a.md");
   });
 });

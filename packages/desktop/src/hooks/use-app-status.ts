@@ -59,11 +59,9 @@ const LABEL_CHARS = 48;
 
 /** Where an entry opens into. Absent (the welcome screen), there is
  *  nothing to open an entry into, so nothing is listed. */
-export type AppStatusTabs = Pick<TabsApi, "open" | "openAgent">;
+export type AppStatusTabs = Jumper["tabs"];
 
 export interface AppStatusHost {
-  /** Reveals a prompt widget in its document (a jump's other half). */
-  editors: Jumper["editors"];
   /** The focused workspace's scratchpads — where a new one goes; null on
    *  welcome. */
   scratchpads: Pick<WorkspaceScratchpads, "createAndOpen"> | null;
@@ -223,7 +221,7 @@ export function deriveAppStatus(inputs: AppStatusInputs): AppStatus {
   return {
     attention: overall && attentionGlyphState(overall),
     sections: host.tabs
-      ? sections(inputs, { tabs: host.tabs, editors: host.editors })
+      ? sections(inputs, { tabs: host.tabs })
       : [],
     actions: actions(inputs),
   };
@@ -256,7 +254,6 @@ export function usePublishAppStatus(host: {
         host: {
           scratchpads,
           tabs,
-          editors: core.editors,
           openSettings,
           openWorkspace,
         },

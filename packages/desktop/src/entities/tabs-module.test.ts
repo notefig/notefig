@@ -31,7 +31,6 @@ vi.mock("@/entities/files", () => ({
   useMetadataFetching: vi.fn(() => false),
   file: vi.fn(),
 }));
-vi.mock("./editors", () => ({ editor: vi.fn(), getMarkdownEditor: vi.fn() }));
 vi.mock("./agents", () => ({
   agents: { task: vi.fn() },
   agentTasksCollection: { get: vi.fn() },
@@ -40,6 +39,9 @@ vi.mock("./agents", () => ({
 }));
 
 import { tabsModule } from "./tabs";
+import { editorsModule } from "./editors";
+import { documentsModule } from "./documents";
+import { turnWritesModule } from "./turn-writes";
 import { createTestCore, memoryUrlState } from "@/testing/test-core";
 import type { UrlState } from "./layout";
 
@@ -58,7 +60,12 @@ function setup(layout: LayoutNode[] = [], extraSearch = "") {
   url = memoryUrlState(params.size ? `?${params}` : "");
   core = createTestCore({
     url,
-    modules: [tabsModule({ canOpenFile: (path) => !path.endsWith(".bin") })],
+    modules: [
+      editorsModule,
+      turnWritesModule,
+      documentsModule,
+      tabsModule({ canOpenFile: (path) => !path.endsWith(".bin") }),
+    ],
   });
   core.boot();
 }

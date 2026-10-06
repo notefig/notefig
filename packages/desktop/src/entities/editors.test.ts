@@ -6,7 +6,7 @@ vi.mock("@/utils/markdown-conversion", () => ({
   getDocumentSync: () => ({ isDirty: () => false }),
 }));
 
-import { getWorkspaceEditorContext } from "./editors";
+import { createEditors, getWorkspaceEditorContext } from "./editors";
 import { createLayout, type LayoutApi } from "./layout";
 import { memoryUrlState } from "@/testing/test-core";
 
@@ -23,7 +23,7 @@ describe("getWorkspaceEditorContext", () => {
     // workspace; only a tree-relative test tells them apart (utils/path.ts).
     const layout = layoutOf(["/ws/a.md", "/ws-backup/x.md"], "/ws-backup/x.md");
 
-    const context = getWorkspaceEditorContext(layout, "/ws");
+    const context = getWorkspaceEditorContext({ editors: createEditors(), layout: layout }, "/ws");
 
     expect(context.openFiles.map((file) => file.path)).toEqual(["/ws/a.md"]);
     expect(context.activeFile).toBeNull();
@@ -32,7 +32,7 @@ describe("getWorkspaceEditorContext", () => {
   it("scopes to the workspace and reports its active file", () => {
     const layout = layoutOf(["/ws/a.md", "/other/b.md"], "/ws/a.md");
 
-    const context = getWorkspaceEditorContext(layout, "/ws");
+    const context = getWorkspaceEditorContext({ editors: createEditors(), layout: layout }, "/ws");
 
     expect(context.openFiles.map((file) => file.path)).toEqual(["/ws/a.md"]);
     expect(context.activeFile).toBe("/ws/a.md");

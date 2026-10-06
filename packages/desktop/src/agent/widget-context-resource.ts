@@ -22,8 +22,10 @@ import {
   nearestPrecedingHeading,
   windowAroundPos,
 } from "@/components/editor/document-outline";
-import { getMarkdownEditor, getSelectedText } from "@/entities/editors";
-import { getWorkspaceEditorContext } from "@/entities/editors";
+import {
+  getWorkspaceEditorContext,
+  type EditorsApi,
+} from "@/entities/editors";
 import type { LayoutApi } from "@/entities/layout";
 import type { DocumentsApi } from "@/entities/documents";
 import { resolveWorkspacePath } from "@/utils/fs";
@@ -51,10 +53,16 @@ async function parseDocFromDisk(
  *  Shared with `document_read_range`: the tool must address the same
  *  coordinate space this resource's positions come from. */
 export async function resolveDocument(
-  documents: Pick<DocumentsApi, "read">,
+  {
+    documents,
+    editors,
+  }: {
+    documents: Pick<DocumentsApi, "read">;
+    editors: Pick<EditorsApi, "markdownEditor">;
+  },
   absolutePath: string,
 ): Promise<PMNode> {
-  const liveEditor = getMarkdownEditor(absolutePath);
+  const liveEditor = editors.markdownEditor(absolutePath);
   return liveEditor
     ? liveEditor.state.doc
     : parseDocFromDisk(documents, absolutePath);
@@ -81,9 +89,11 @@ export interface WidgetContextPayload {
 export async function buildWidgetContextPayload(
   {
     documents,
+    editors,
     layout,
   }: {
     documents: Pick<DocumentsApi, "read">;
+    editors: Pick<EditorsApi, "markdownEditor" | "selectedText" | "get">;
     layout: Pick<LayoutApi, "read">;
   },
   workspacePath: string,
@@ -92,16 +102,16 @@ export async function buildWidgetContextPayload(
   const resolved = resolveWorkspacePath(workspacePath, ref.path);
   if (!resolved.ok) throw new Error(resolved.error);
 
-  const doc = await resolveDocument(documents, resolved.absolute);
+  const doc = await resolveDocument({ documents, editors }, resolved.absolute);
 
   const outline = extractOutline(doc);
   const heading = nearestPrecedingHeading(doc, ref.pos);
   const surroundingText = windowAroundPos(doc, ref.pos);
 
-  const selectedText = getSelectedText(resolved.absolute) ?? null;
+  const selectedText = editors.selectedText(resolved.absolute) ?? null;
   const selectedRange = ref.selectedRange ?? null;
 
-  const editorCtx = getWorkspaceEditorContext(layout, workspacePath);
+  const editorCtx = getWorkspaceEditorContext({ editors, layout }, workspacePath);
   const otherOpenFiles = editorCtx.openFiles
     .filter((f) => f.path !== resolved.absolute)
     .map((f) => ({ path: f.path, active: f.active, dirty: f.dirty }));

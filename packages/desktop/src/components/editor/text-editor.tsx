@@ -16,7 +16,7 @@ import { LinkBubbleMenu } from "./tiptap-link-menu";
 import { TableMenu } from "./tiptap-table-menu";
 import { cn } from "@notefig/ui/utils";
 import { dropZoneProps } from "@/utils/drag-protocol";
-import { useCore, useWorkspaceModule } from "@notefig/core/react";
+import { useCore, useModule, useWorkspaceModule } from "@notefig/core/react";
 import { isImageFile } from "@/utils/fs";
 import { relativeTreePath } from "@/utils/path";
 import "./tiptap.css";
@@ -40,7 +40,9 @@ export function TextEditor({
   initialDoc,
 }: TextEditorProps) {
   const { fs } = usePlatform();
+  const editors = useModule("editors");
   const instance = getOrCreateEditor(
+    editors,
     file.path,
     { type: "markdown", content: initialDoc, basePath },
     fs,

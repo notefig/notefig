@@ -23,7 +23,7 @@ import type { AgentsApi } from "@/agent/agents";
 import i18n from "@/utils/intl";
 import type { DocumentsApi } from "@/entities/documents";
 import { createMarkdownCodec } from "../markdown-codec";
-import { getMarkdownEditor } from "@/entities/editors";
+import type { EditorsApi } from "@/entities/editors";
 import { getBlobType } from "./blob-registry";
 
 export type AnswerBlobResult =
@@ -49,22 +49,31 @@ export class BlobAnswerError extends Error {
 
 const codec = createMarkdownCodec();
 
+/** What answering reaches: the documents it writes through, the live
+ *  editor it reads first, and the agents it follows up with. */
+export interface BlobAnswerHost {
+  documents: DocumentsApi;
+  editors: Pick<EditorsApi, "markdownEditor">;
+  agents: AgentsApi;
+}
+
 async function readAuthoritativeMarkdown(
-  documents: DocumentsApi,
+  { documents, editors }: Pick<BlobAnswerHost, "documents" | "editors">,
   filePath: string,
 ): Promise<string> {
-  const editor = getMarkdownEditor(filePath);
+  const editor = editors.markdownEditor(filePath);
   if (editor) return codec.serialize(editor.getJSON());
   return documents.read(filePath);
 }
 
 export async function answerBlob(
-  { documents, agents }: { documents: DocumentsApi; agents: AgentsApi },
+  host: BlobAnswerHost,
   filePath: string,
   blobId: string,
   patch: Record<string, unknown>,
 ): Promise<AnswerBlobResult> {
-  const markdown = await readAuthoritativeMarkdown(documents, filePath);
+  const { documents, agents } = host;
+  const markdown = await readAuthoritativeMarkdown(host, filePath);
   const patched = patchBlobInMarkdown(markdown, blobId, patch);
   if (!patched.ok) {
     return {

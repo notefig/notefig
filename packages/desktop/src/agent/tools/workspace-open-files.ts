@@ -19,7 +19,7 @@ export const workspaceOpenFiles: AgentTool<
   async execute(ctx) {
     return {
       ok: true,
-      value: getWorkspaceEditorContext(ctx.services.layout, ctx.workspacePath),
+      value: getWorkspaceEditorContext(ctx.services, ctx.workspacePath),
     };
   },
 };

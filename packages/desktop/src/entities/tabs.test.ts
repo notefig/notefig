@@ -1,16 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createLayout } from "./layout";
+import { createTabs, type TabsApi, type TabsDeps } from "./tabs";
+import { memoryUrlState } from "@/testing/test-core";
 
 const calls = vi.hoisted((): string[] => []);
 
 const renameFileOrDirectoryMock = vi.fn();
-vi.mock("./workspaces", () => ({
-  useOpenWorkspacesReady: vi.fn(() => true),
-  useOpenWorkspaces: vi.fn(() => []),
-  workspaceOfPath: vi.fn(() => null),
-}));
-vi.mock("@/entities/files", () => ({
-  useMetadataFetching: vi.fn(() => false),
-}));
 /** The workspace's files the rename moves the file through. */
 const files = {
   file: (from: string) => ({
@@ -38,61 +33,76 @@ vi.mock("@/tabs/tab-controllers", () => ({
   isTabFocusable: vi.fn(),
   revealTabMatch: vi.fn(),
   searchTab: vi.fn(),
+  requestTabFocus: vi.fn(),
+  grantTabFocusHandoff: vi.fn(),
 }));
 
-const liveEditor = vi.hoisted(() => ({
+/** The live editor the rename freezes while the file moves. */
+const liveEditor = {
   isDestroyed: false,
   setEditable: (editable: boolean) =>
     calls.push(editable ? "editable" : "readonly"),
-}));
-vi.mock("./editors", () => ({
-  editor: vi.fn(),
-  getMarkdownEditor: () => liveEditor,
-}));
+};
 
-vi.mock("@/utils/workspace-write-tracker", () => ({
-  whenWorkspaceWritesSettled: () => {
+/** What the documents module records of the move it is told about. */
+const moves: { path: string; settledAt: string | null }[] = [];
+const documents: TabsDeps["documents"] = {
+  whenWritesSettled: () => {
     calls.push("writes-settled");
     return Promise.resolve();
   },
-}));
-vi.mock("./agents", () => ({
-  agents: { task: vi.fn() },
-  agentTasksCollection: { get: vi.fn() },
-  useAgentTasksReady: vi.fn(() => true),
-  useAgentTaskRowsById: vi.fn(() => []),
-}));
-
-import { activeRenameTarget, renameOpenFileTab } from "./tabs";
+  beginMove: (path) => {
+    const move = { path, settledAt: null as string | null };
+    moves.push(move);
+    return {
+      settle(finalPath) {
+        move.settledAt = finalPath;
+      },
+    };
+  },
+};
 
 const WS = "/ws";
 // Successful renames leave their stale-prune guard up until the layout
-// commit clears it (a hook effect these tests never run), so each test
-// uses its own source path.
+// commit clears it, so each test uses its own source path.
 let pathCounter = 0;
 let OLD = "";
 let NEW = "";
+let tabs: TabsApi;
+let layoutWrites: [string, string][];
 
 beforeEach(() => {
   vi.clearAllMocks();
   calls.length = 0;
+  moves.length = 0;
   cleanPromise = Promise.resolve();
   renameFileOrDirectoryMock.mockResolvedValue(undefined);
   pathCounter += 1;
   OLD = `/ws/.notefig/scratchpads/untitled-${pathCounter}.md`;
   NEW = `/ws/My Notes ${pathCounter}.md`;
+  layoutWrites = [];
+  const layout = createLayout(memoryUrlState());
+  tabs = createTabs({
+    layout,
+    focusedWindow: { get: () => null, subscribe: () => () => {} },
+    canOpenFile: () => true,
+    editors: {
+      goTo: vi.fn(async () => true),
+      markdownEditor: () => liveEditor as never,
+    },
+    documents,
+  });
+  // The layout swap itself is `tabs.rename`; record it where the real one
+  // would write the layout (the tab is not in this test's layout).
+  tabs.rename = (oldId, newId) => {
+    calls.push("layout");
+    layoutWrites.push([oldId, newId]);
+  };
 });
 
-describe("renameOpenFileTab", () => {
+describe("tabs.renameOpenFile", () => {
   it("runs flush → drain → fs rename → dispose → layout swap, in order", async () => {
-    const applyLayoutRename = vi.fn(() => calls.push("layout"));
-
-    await renameOpenFileTab({
-      files,
-      oldPath: OLD,
-      newPath: NEW,
-      applyLayoutRename,
-    });
+    await tabs.renameOpenFile({ files, oldPath: OLD, newPath: NEW });
 
     expect(calls).toEqual([
       "readonly",
@@ -104,10 +114,10 @@ describe("renameOpenFileTab", () => {
       "layout",
     ]);
     expect(renameFileOrDirectoryMock).toHaveBeenCalledWith(WS, OLD, NEW);
-    expect(applyLayoutRename).toHaveBeenCalledWith(OLD, NEW);
+    expect(layoutWrites).toEqual([[OLD, NEW]]);
   });
 
-  it("redirects overlapping programmatic writes to the settled path", async () => {
+  it("tells documents where the file settled, so overlapping writes follow it", async () => {
     let resolveMove!: () => void;
     renameFileOrDirectoryMock.mockReturnValue(
       new Promise<void>((resolve) => {
@@ -115,19 +125,12 @@ describe("renameOpenFileTab", () => {
       }),
     );
 
-    const run = renameOpenFileTab({
-      files,
-      oldPath: OLD,
-      newPath: NEW,
-      applyLayoutRename: vi.fn(),
-    });
-    const target = activeRenameTarget(OLD);
-    expect(target).not.toBeNull();
+    const run = tabs.renameOpenFile({ files, oldPath: OLD, newPath: NEW });
+    expect(moves).toEqual([{ path: OLD, settledAt: null }]);
 
     resolveMove();
     await run;
-    await expect(target).resolves.toBe(NEW);
-    expect(activeRenameTarget(OLD)).toBeNull();
+    expect(moves[0].settledAt).toBe(NEW);
   });
 
   it("waits for the save pipeline to drain before moving the file", async () => {
@@ -135,14 +138,8 @@ describe("renameOpenFileTab", () => {
     cleanPromise = new Promise((resolve) => {
       resolveClean = resolve;
     });
-    const applyLayoutRename = vi.fn();
 
-    const run = renameOpenFileTab({
-      files,
-      oldPath: OLD,
-      newPath: NEW,
-      applyLayoutRename,
-    });
+    const run = tabs.renameOpenFile({ files, oldPath: OLD, newPath: NEW });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(renameFileOrDirectoryMock).not.toHaveBeenCalled();
 
@@ -159,40 +156,26 @@ describe("renameOpenFileTab", () => {
       }),
     );
 
-    const run = renameOpenFileTab({
-      files,
-      oldPath: OLD,
-      newPath: NEW,
-      applyLayoutRename: vi.fn(),
-    });
+    const run = tabs.renameOpenFile({ files, oldPath: OLD, newPath: NEW });
     await expect(
-      renameOpenFileTab({
-        files,
-        oldPath: OLD,
-        newPath: "/ws/other.md",
-        applyLayoutRename: vi.fn(),
-      }),
+      tabs.renameOpenFile({ files, oldPath: OLD, newPath: "/ws/other.md" }),
     ).rejects.toThrow(/already in progress/);
-    // The refused call touched nothing: the first rename's write redirect
-    // is intact and it completes normally.
-    expect(activeRenameTarget(OLD)).not.toBeNull();
+    // The refused call touched nothing: the first rename's move is intact
+    // and it completes normally.
+    expect(moves).toHaveLength(1);
+    expect(tabs.renaming().get(OLD)).toBe(NEW);
 
     resolveMove();
     await run;
     expect(renameFileOrDirectoryMock).toHaveBeenCalledTimes(1);
+    expect(moves[0].settledAt).toBe(NEW);
   });
 
   it("rethrows a failed move leaving the tab intact — no dispose, no layout write", async () => {
     renameFileOrDirectoryMock.mockRejectedValue(new Error("target exists"));
-    const applyLayoutRename = vi.fn();
 
     await expect(
-      renameOpenFileTab({
-        files,
-        oldPath: OLD,
-        newPath: NEW,
-        applyLayoutRename,
-      }),
+      tabs.renameOpenFile({ files, oldPath: OLD, newPath: NEW }),
     ).rejects.toThrow(/target exists/);
     expect(calls).not.toContain("dispose");
     // The frozen editor is thawed again — the tab stays fully usable.
@@ -204,6 +187,31 @@ describe("renameOpenFileTab", () => {
       "rename-fs",
       "editable",
     ]);
-    expect(applyLayoutRename).not.toHaveBeenCalled();
+    expect(layoutWrites).toEqual([]);
+    // Writes that waited land on the original path, and the guard is down.
+    expect(moves[0].settledAt).toBe(OLD);
+    expect(tabs.renaming().size).toBe(0);
+  });
+
+  it("ends the stale-prune guard once the layout no longer holds the old id", async () => {
+    const layout = createLayout(memoryUrlState());
+    const live = createTabs({
+      layout,
+      focusedWindow: { get: () => null, subscribe: () => () => {} },
+      canOpenFile: () => true,
+      editors: {
+        goTo: vi.fn(async () => true),
+        markdownEditor: () => undefined,
+      },
+      documents,
+    });
+    layout.update([
+      { type: "Window", id: "w1", children: [OLD], selected: OLD } as never,
+    ]);
+
+    await live.renameOpenFile({ files, oldPath: OLD, newPath: NEW });
+    // The swap is written; the layout holds the new id only.
+    expect(layout.openTabIds()).toEqual([NEW]);
+    expect(live.renaming().size).toBe(0);
   });
 });

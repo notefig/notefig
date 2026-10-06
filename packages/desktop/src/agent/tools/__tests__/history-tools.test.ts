@@ -39,8 +39,12 @@ const ctx = {
     } as never,
     files: {} as never,
     // The adopting write a restore goes through.
-    documents: { read: vi.fn(), write: writeWorkspaceTextFile },
+    documents: {
+      read: vi.fn(),
+      write: writeWorkspaceTextFile,
+    } as never,
     layout: {} as never,
+    editors: {} as never,
   },
 };
 

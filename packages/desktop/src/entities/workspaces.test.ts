@@ -71,6 +71,7 @@ beforeEach(async () => {
       }),
       defineModule({ name: "tabs", register: () => ({}) as never }),
       defineModule({ name: "documents", register: () => ({}) as never }),
+      defineModule({ name: "editors", register: () => ({}) as never }),
       kvModule,
       agentStoreModule,
       workspacesModule({ restore: false }),

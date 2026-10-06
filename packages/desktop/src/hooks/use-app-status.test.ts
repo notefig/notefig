@@ -9,8 +9,7 @@ vi.mock("@/utils/intl", () => ({ default: { t: (key: string) => key } }));
 vi.mock("@/components/agent/jump-to-task", () => ({ jumpToRound: vi.fn(), jumpToTask: vi.fn() }));
 
 
-const tabs = { open: vi.fn(() => true), openAgent: vi.fn() };
-const editors = { reveal: vi.fn() };
+const tabs = { open: vi.fn(() => true), openAgent: vi.fn(), reveal: vi.fn() };
 
 function round(turnId: string, overrides: Partial<PromptRound> = {}): PromptRound {
   return {
@@ -51,7 +50,6 @@ function document(path: string): RecentDocument {
 function inputs(overrides: Partial<AppStatusInputs> = {}): AppStatusInputs {
   return {
     host: {
-      editors,
       scratchpads: { createAndOpen: vi.fn() },
       tabs,
       openWorkspace: vi.fn(),
@@ -170,8 +168,7 @@ describe("deriveAppStatus", () => {
     const welcome = deriveAppStatus(
       inputs({
         host: {
-          editors,
-          scratchpads: null,
+              scratchpads: null,
           tabs: null,
           openWorkspace: vi.fn(),
           openSettings: vi.fn(),

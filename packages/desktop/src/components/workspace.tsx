@@ -25,7 +25,7 @@ import {
   useOpenWorkspacesReady,
   useWorkspaceOfPath,
 } from "@/entities/workspaces";
-import { useWorkspaceTabs, renameOpenFileTab } from "@/entities/tabs";
+import { useWorkspaceTabs } from "@/entities/tabs";
 import { DebugPanel } from "./debug-panel";
 import { useOpenProject } from "@/hooks/use-open-project";
 import { Welcome } from "@/components/welcome";
@@ -500,7 +500,7 @@ function useRenameOpenFile(workspacePath: string) {
   const core = useCore();
   return useCallback(
     (oldPath: string, newPath: string) =>
-      renameOpenFileTab({
+      core.tabs.renameOpenFile({
         // The tab belongs to the workspace that holds its file, which need
         // not be the one the sidebar shows.
         files: core.workspace(
@@ -508,7 +508,6 @@ function useRenameOpenFile(workspacePath: string) {
         ).files,
         oldPath,
         newPath,
-        applyLayoutRename: core.tabs.rename,
       }),
     [workspacePath, core],
   );
