@@ -6,6 +6,7 @@
  */
 import type { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
+import type { EditorView } from "@tiptap/pm/view";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { PROMPT_DRAFT_NODE_NAME, PROMPT_NODE_NAME } from "./node";
 
@@ -106,6 +107,34 @@ export function promptDraftRange(
   // +1 into the widget, +1 into the draft = the start of its inline content.
   const from = pos + 2;
   return { node: draft, from, to: from + draft.content.size };
+}
+
+/**
+ * Put the caret at the end of a widget's draft. The draft is document
+ * content, so "focus the composer" is a selection — dispatched in the same
+ * transaction that created the widget when there is one.
+ */
+export function selectPromptDraftTr(tr: Transaction, blobId: string): Transaction {
+  const range = promptDraftRange(tr.doc, blobId);
+  if (!range) return tr;
+  return tr.setSelection(TextSelection.create(tr.doc, range.to));
+}
+
+/**
+ * Focus a prompt widget's composer: the caret at the end of its draft and
+ * the editor focused, without moving the viewport. False, changing
+ * nothing, when `blobId` is no prompt widget here or its draft row is off
+ * screen (a running round hides it) — a caret there would be invisible.
+ */
+export function focusPromptDraft(view: EditorView, blobId: string): boolean {
+  if (!promptDraftRange(view.state.doc, blobId)) return false;
+  const draft = view.dom.querySelector(
+    `[data-blob-id="${CSS.escape(blobId)}"] [data-prompt-draft]`,
+  );
+  if (!draft || draft.getClientRects().length === 0) return false;
+  view.dispatch(selectPromptDraftTr(view.state.tr, blobId));
+  view.focus();
+  return true;
 }
 
 /**

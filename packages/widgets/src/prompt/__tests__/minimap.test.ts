@@ -57,6 +57,12 @@ describe("deriveMinimapEntries", () => {
       "blob_mid",
       "blob_end",
     ]);
+    // The widget's own id rides along: it is what a host's reveal addresses.
+    expect(entries.map((e) => e.id)).toEqual([
+      "blob_top",
+      "blob_mid",
+      "blob_end",
+    ]);
     expect(entries[0].ratio).toBeGreaterThanOrEqual(0.01);
     expect(entries[2].ratio).toBeLessThanOrEqual(0.99);
     expect(entries[0].ratio).toBeLessThan(entries[1].ratio);

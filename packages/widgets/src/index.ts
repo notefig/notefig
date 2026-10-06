@@ -54,6 +54,7 @@ export {
   docHasRealContent,
   findPromptNodeId,
   findPromptNodePos,
+  focusPromptDraft,
   MAX_REFERENCE_CHARS,
   promptDraftRange,
   registerContentlessNodeName,

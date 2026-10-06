@@ -44,11 +44,14 @@ export function widgetRendererNodes(options: {
  * The document minimap, configured with every widget that declared a
  * `minimap` slot. The rail mounts itself inside the editor (plugin view),
  * so adding this to an editor's extensions is the whole installation.
+ * `reveal` is the host's jump to an entry by id (see WidgetMinimapOptions).
  */
-export function widgetMinimapExtension() {
+export function widgetMinimapExtension(
+  options: { reveal?: (id: string) => void } = {},
+) {
   const sources: Record<string, MinimapSource> = {};
   for (const widget of editorWidgets) {
     if (widget.minimap) sources[widget.name] = widget.minimap;
   }
-  return WidgetMinimapExtension.configure({ sources });
+  return WidgetMinimapExtension.configure({ sources, reveal: options.reveal });
 }

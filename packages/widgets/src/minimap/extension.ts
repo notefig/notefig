@@ -13,6 +13,13 @@ import type { MinimapSource } from "./contract";
 
 export interface WidgetMinimapOptions {
   sources: Record<string, MinimapSource>;
+  /**
+   * How a dot's click reveals its element, given the entry's id — the
+   * host's reveal, so a minimap jump lands where every other jump does
+   * (a prompt widget: its composer, focused). Without one, or for an
+   * entry with no id, the rail scrolls the element into view itself.
+   */
+  reveal?: (id: string) => void;
 }
 
 const minimapPluginKey = new PluginKey("widgetMinimap");
@@ -21,17 +28,17 @@ export const WidgetMinimapExtension = Extension.create<WidgetMinimapOptions>({
   name: "widgetMinimap",
 
   addOptions() {
-    return { sources: {} };
+    return { sources: {}, reveal: undefined };
   },
 
   addProseMirrorPlugins() {
-    const { sources } = this.options;
+    const { sources, reveal } = this.options;
     if (Object.keys(sources).length === 0) return [];
     return [
       new Plugin({
         key: minimapPluginKey,
         view: (editorView) => {
-          const rail = new MinimapRailView(editorView, sources);
+          const rail = new MinimapRailView(editorView, sources, reveal);
           return { update: () => rail.update(), destroy: () => rail.destroy() };
         },
       }),

@@ -16,6 +16,7 @@ import {
 import {
   editorWidgets,
   widgetRendererNodes,
+  focusPromptDraft,
   widgetMinimapExtension,
   PageLinkSuggestion,
 } from "@notefig/widgets";
@@ -335,8 +336,12 @@ function createMarkdownInstance(
         pageLinkHref(filePath, workspaceRoot, relativePath),
     }),
     // The document minimap rail (MET-172) — mounts its own UI inside the
-    // editor's scroll container; registering it is the installation.
-    widgetMinimapExtension(),
+    // editor's scroll container; registering it is the installation. A dot
+    // jumps through this editor's own reveal (goTo below), like every other
+    // jump to a widget.
+    widgetMinimapExtension({
+      reveal: (blockId) => void instance.goTo({ blockId }),
+    }),
   ];
 
   const editor = new Editor({
@@ -424,6 +429,10 @@ function createMarkdownInstance(
         const block = await whenBlockRendered(this.editor, target.blockId);
         if (!block) return false;
         flashBlock(block);
+        // A prompt widget is revealed to be used: land in its composer.
+        // Anything else (or a widget mid-round, its composer hidden) is
+        // only shown.
+        focusPromptDraft(this.editor.view, target.blockId);
         return true;
       }
       try {
