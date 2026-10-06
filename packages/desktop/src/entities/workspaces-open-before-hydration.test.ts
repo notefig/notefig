@@ -31,10 +31,6 @@ const files = vi.hoisted(() => ({
 }));
 vi.mock("@/entities/files", () => files);
 vi.mock("@/entities/git", () => ({ clearGitCollection: vi.fn() }));
-vi.mock("@/utils/history-service", () => ({
-  disposeWorkspaceHistoryService: vi.fn(),
-  checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
-}));
 const watchers = vi.hoisted(() => ({
   start: vi.fn<
     (path: string) => { stop: () => void; ensureStarted: () => void }

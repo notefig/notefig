@@ -7,6 +7,8 @@
 // gate.
 // fallow-ignore-file circular-dependency
 import { emitAppEvent } from "@/utils/app-events";
+import { appCore } from "@/core/current";
+import type { WorkspaceHistory } from "@/utils/history-service";
 import {
   newTaskId,
   newTurnId,
@@ -44,6 +46,7 @@ import {
   withWorkspaceContainment,
   type AgentTransport,
   type McpEndpoint,
+  type ToolServices,
 } from "@notefig/agent";
 import { toolRegistry, getTool } from "./tools";
 import { serverInstructions } from "./mcp-instructions";
@@ -54,8 +57,6 @@ import {
   readWorkspaceTextFile,
   writeWorkspaceTextFile,
 } from "@/utils/file-sync";
-import { checkpointWorkspaceHistory } from "@/utils/history-service";
-import { invalidateGit } from "@/entities/git";
 import {
   agentEntriesCollection,
   agentEntriesForTask,
@@ -397,6 +398,7 @@ export class AgentTask {
               workspacePath: this.workspacePath,
               taskId: this.taskId,
               agents,
+              services: toolServices(this.workspacePath),
             },
             permissionBroker: this.permissionBroker,
             tools: { list: () => toolRegistry, get: getTool },
@@ -1091,28 +1093,16 @@ export class AgentTask {
     this.currentTurn = null;
     this.setStatus(turnStatus === "error" ? "error" : "idle");
     if (turnStatus === "completed") {
-      void this.checkpointTurn(turn.userText);
+      // The workspace's history checkpoints it (one commit per turn).
+      emitAppEvent("agent:turn-completed", {
+        taskId: this.taskId,
+        turnId: turn.turnId,
+        workspacePath: this.workspacePath,
+        prompt: turn.userText,
+        harnessId: this.harness.id,
+      });
     }
     return turnStatus;
-  }
-
-  /** Auto-checkpoint (Track D.3): one commit per completed turn, best-effort. */
-  private async checkpointTurn(promptText: string): Promise<void> {
-    const message =
-      promptText.length > 72 ? `${promptText.slice(0, 69)}…` : promptText;
-    try {
-      await checkpointWorkspaceHistory(this.workspacePath, message, {
-        name: this.harness.id,
-        email: "agent@notefig.local",
-      });
-      // The commit lands in the hidden gitdir (no watcher event), and the
-      // turn's file writes may have flushed their debounced invalidation
-      // before it — mark stale explicitly. Free while no git panel is open.
-      invalidateGit(this.workspacePath);
-    } catch (error) {
-      // Best-effort: history is a convenience, never block/fail the turn on it.
-      this.warn("checkpoint failed", errorMessage(error));
-    }
   }
 
   handleSessionUpdate(notification: SessionNotification): void {
@@ -1598,6 +1588,27 @@ export class AgentTask {
       this.setStatus("error");
     }
   }
+}
+
+declare module "@notefig/agent" {
+  interface ToolServices {
+    /** The workspace's history repo (`core.workspace(ws).history`). */
+    history: WorkspaceHistory;
+  }
+}
+
+/**
+ * What a task's tools get for its workspace. Read when a tool asks — the
+ * workspace is open while its tasks run. Transitional: reached through the
+ * installed core until the task manager is handed its workspace's
+ * instances itself.
+ */
+function toolServices(workspacePath: string): ToolServices {
+  return {
+    get history() {
+      return appCore().workspace(workspacePath).history;
+    },
+  };
 }
 
 /**

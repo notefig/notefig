@@ -31,9 +31,6 @@ vi.mock("@/adapters", async () => ({
     },
   },
 }));
-vi.mock("@/utils/history-service", () => ({
-  checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
-}));
 
 import { createLoopbackPair } from "@notefig/agent";
 import { FakeAgent } from "../mock-harness";

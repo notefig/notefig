@@ -37,9 +37,6 @@ const runtime = vi.hoisted(() => ({ ready: true }));
 vi.mock("../tunnel/require-connection", () => ({
   ensureAgentRuntime: () => runtime.ready,
 }));
-vi.mock("@/utils/history-service", () => ({
-  checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
-}));
 
 import { createLoopbackPair, decodeWidgetContextUri } from "@notefig/agent";
 import { FakeAgent } from "../mock-harness";

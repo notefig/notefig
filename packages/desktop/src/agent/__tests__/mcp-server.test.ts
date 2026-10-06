@@ -1,15 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { z } from "zod";
 
-// Real history-service.ts touches isomorphic-git; keep this handler-level
-// test focused on MCP request/response shape, not git plumbing (same
-// rationale as agent-service.test.ts).
-vi.mock("@/utils/history-service", () => ({
-  ensureWorkspaceHistoryInitialized: vi.fn(),
-  historyGitDir: vi.fn(() => "/ws/.notefig/history"),
-  checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
-}));
-
 // Real blob-registry.ts glob-imports the *.blob.tsx files, which pull in
 // blob-node-view -> blob-actions -> agent-service -> tools/index ->
 // author-blob -> blob-registry: a circular import that only resolves
@@ -82,6 +73,7 @@ const ctx: ToolContext = {
     task: () => ({ prompt: vi.fn(), cancel: vi.fn() }),
     workspace: () => ({ createTask: vi.fn() }),
   },
+  services: {} as ToolContext["services"],
 };
 
 function handler(permissionBroker = new PermissionBroker(ctx.taskId)) {

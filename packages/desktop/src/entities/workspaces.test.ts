@@ -39,22 +39,17 @@ const files = vi.hoisted(() => ({
   workspaceCollections: { drop: vi.fn() },
 }));
 vi.mock("@/entities/files", () => files);
-const history = vi.hoisted(() => ({
-  disposeWorkspaceHistoryService: vi.fn(),
-  checkpointWorkspaceHistory: vi.fn().mockResolvedValue(null),
-}));
-// The history module, over the mocked dispose: what core runs when it
+// A history module that records its disposal: what core runs when it
 // closes the workspace.
+const history = vi.hoisted(() => ({ disposed: vi.fn() }));
 vi.mock("@/utils/history-service", async () => {
   const { defineModule } = await import("@notefig/core");
   return {
-    ...history,
     historyModule: defineModule({
       name: "history",
       workspace: {
         create: () => ({}) as never,
-        dispose: (_history, workspace) =>
-          history.disposeWorkspaceHistoryService(workspace.path),
+        dispose: (_history, workspace) => history.disposed(workspace.path),
       },
     }),
   };
@@ -196,7 +191,7 @@ describe("closing a workspace", () => {
 
       await close("/ws");
 
-      expect(history.disposeWorkspaceHistoryService).toHaveBeenCalledWith("/ws");
+      expect(history.disposed).toHaveBeenCalledWith("/ws");
       expect(dispose).toHaveBeenCalledTimes(1);
       expect(scope.get("/ws")).toBeUndefined();
       expect(isWorkspaceOpen("/ws")).toBe(false);

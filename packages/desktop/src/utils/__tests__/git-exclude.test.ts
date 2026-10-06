@@ -3,17 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const readFilesMock = vi.fn();
 const writeFilesMock = vi.fn();
 
-vi.mock("@/adapters", () => ({
-  platformAdapter: {
-    fs: {
-      readFiles: (paths: string[]) => readFilesMock(paths),
-      writeFiles: (files: { path: string; content: string }[]) =>
-        writeFilesMock(files),
-    },
-  },
-}));
+import { ensureExcludeLines, type ExcludeFs } from "../git-exclude";
 
-import { ensureExcludeLines } from "../git-exclude";
+/** The file reads and writes an exclude needs, handed in. */
+const fs = {
+  readFiles: (paths: string[]) => readFilesMock(paths),
+  writeFiles: (files: { path: string; content: string }[]) =>
+    writeFilesMock(files),
+} as unknown as ExcludeFs;
 
 function fileExists(content: string) {
   readFilesMock.mockResolvedValue({
@@ -44,7 +41,7 @@ describe("ensureExcludeLines", () => {
   it("creates the file with the lines when it doesn't exist", async () => {
     fileMissing();
 
-    await ensureExcludeLines("/ws/.git", [".notefig/"]);
+    await ensureExcludeLines(fs, "/ws/.git", [".notefig/"]);
 
     expect(writeFilesMock).toHaveBeenCalledWith([
       { path: "/ws/.git/info/exclude", content: ".notefig/\n" },
@@ -54,7 +51,7 @@ describe("ensureExcludeLines", () => {
   it("appends only the missing lines, preserving existing content and order", async () => {
     fileExists("# stock comment\nuser-pattern.log\n.notefig/\n");
 
-    await ensureExcludeLines("/ws/.git", [".notefig/", ".git/"]);
+    await ensureExcludeLines(fs, "/ws/.git", [".notefig/", ".git/"]);
 
     expect(writeFilesMock).toHaveBeenCalledWith([
       {
@@ -67,7 +64,7 @@ describe("ensureExcludeLines", () => {
   it("is idempotent — no write when every line is already present", async () => {
     fileExists("# stock comment\n.notefig/\n.git/\n");
 
-    await ensureExcludeLines("/ws/.git", [".notefig/", ".git/"]);
+    await ensureExcludeLines(fs, "/ws/.git", [".notefig/", ".git/"]);
 
     expect(writeFilesMock).not.toHaveBeenCalled();
   });
@@ -75,7 +72,7 @@ describe("ensureExcludeLines", () => {
   it("adds a newline before appending to a file without a trailing one", async () => {
     fileExists("user-pattern.log");
 
-    await ensureExcludeLines("/ws/.git", [".notefig/"]);
+    await ensureExcludeLines(fs, "/ws/.git", [".notefig/"]);
 
     expect(writeFilesMock).toHaveBeenCalledWith([
       {
@@ -98,7 +95,7 @@ describe("ensureExcludeLines", () => {
     });
 
     await expect(
-      ensureExcludeLines("/ws/.git", [".notefig/"]),
+      ensureExcludeLines(fs, "/ws/.git", [".notefig/"]),
     ).rejects.toThrow(/EACCES/);
     // The file was NOT replaced with only the app's entries.
     expect(writeFilesMock).not.toHaveBeenCalled();
@@ -112,7 +109,7 @@ describe("ensureExcludeLines", () => {
     });
 
     await expect(
-      ensureExcludeLines("/ws/.git", [".notefig/"]),
+      ensureExcludeLines(fs, "/ws/.git", [".notefig/"]),
     ).rejects.toThrow(/disk full/);
   });
 });

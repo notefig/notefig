@@ -4,6 +4,7 @@ import type {
   Disposer,
   Provided,
   ProvidedName,
+  WorkspaceHandle,
   WorkspaceModuleName,
   WorkspaceModules,
   WorkspaceRef,
@@ -42,6 +43,13 @@ export interface ModuleContext<Needs extends ProvidedName> {
   use<K extends Needs>(name: K): Provided[K];
   hooks: Hooks;
   workspaces: WorkspaceLifecycle;
+  /**
+   * Any workspace's handle, as `core.workspace(path)`: how a module reaches
+   * another module's instance for a given workspace (the files of the
+   * workspace a tab's path is in). Inside `workspace.create`, the
+   * workspace's own instances come from `useWorkspace` instead.
+   */
+  workspaceHandle(path: string): WorkspaceHandle;
 }
 
 export interface WorkspaceContext<

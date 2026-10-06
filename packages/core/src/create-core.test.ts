@@ -621,3 +621,25 @@ describe("workspace handles", () => {
     expect(core.workspaces.isOpen("/ws")).toBe(true);
   });
 });
+
+describe("a module reaching another workspace's instances", () => {
+  it("gets any workspace's handle from its context", async () => {
+    let reach!: (path: string) => { log: string[] };
+    const reader = defineModule({
+      name: "t-reader",
+      register: (ctx) => {
+        reach = (path) => ctx.workspaceHandle(path)["t-history"];
+        return { read: () => 0 };
+      },
+    });
+    const history = defineModule({
+      name: "t-history",
+      workspace: { create: () => ({ log: ["mine"] }) },
+    });
+    const core = createCore({ services: {}, modules: [history, reader] });
+
+    expect(() => reach("/ws")).toThrow(WorkspaceClosedError);
+    await core.workspace("/ws").open();
+    expect(reach("/ws").log).toEqual(["mine"]);
+  });
+});
