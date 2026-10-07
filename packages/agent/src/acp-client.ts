@@ -44,13 +44,20 @@ const PROTOCOL_VERSION = Math.max(...SUPPORTED_ACP_PROTOCOL_VERSIONS);
  * harness uses its native file tools; the app adopts changes via the watch
  * channel. This asymmetry is the whole reason the CLI worker can stay a
  * protocol-ignorant byte pump.
+ *
+ * `_meta` carries vendor capabilities, which an agent that doesn't know them
+ * ignores. Devin sends a subagent's usage only to a client that says it
+ * supports subagents; without it a turn that delegates under-reports
+ * (docs/architecture/spikes/acp-usage-multistep-spike.md).
  */
 export function capabilitiesForLocus(
   locus: AgentTransport["locus"],
 ): ClientCapabilities {
-  return locus === "local"
-    ? { fs: { readTextFile: true, writeTextFile: true } }
-    : { fs: { readTextFile: false, writeTextFile: false } };
+  const fs =
+    locus === "local"
+      ? { readTextFile: true, writeTextFile: true }
+      : { readTextFile: false, writeTextFile: false };
+  return { fs, _meta: { "cognition.ai/subagentSupport": true } };
 }
 
 /**

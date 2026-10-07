@@ -1,5 +1,5 @@
 /** Display formatting for token counts and cost. */
-import type { Money } from "@notefig/shared/agent";
+import type { Credits, Money } from "@notefig/shared/agent";
 
 /** 950 · 12.3k · 4.5M */
 export function formatTokens(count: number): string {
@@ -26,4 +26,12 @@ export function formatCost(money: Money): string {
     // Not an ISO 4217 code (a harness's own unit, e.g. credits).
     return `${money.amount.toFixed(digits)} ${money.currency}`;
   }
+}
+
+/** 12 · 1.25 · 0.04 — a harness's billing units, not money; the label
+ *  beside it names the unit. */
+export function formatCredits(credits: Credits): string {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(
+    credits.amount,
+  );
 }

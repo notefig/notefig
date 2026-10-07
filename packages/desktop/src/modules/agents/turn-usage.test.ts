@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { PromptResponse } from "@notefig/shared/agent";
-import { normalizeTurnUsage, type UsageUpdate } from "./turn-usage";
+import { isMainAgent, normalizeTurnUsage, type UsageUpdate } from "./turn-usage";
 
 // Payloads as recorded from each harness in the token-usage spike
 // (docs/architecture/spikes/acp-token-usage-spike.md).
@@ -143,6 +143,114 @@ describe("normalizeTurnUsage", () => {
     expect(at(0.1, 0.25)).toBe(0.1);
   });
 
+  describe("Devin per request", () => {
+    // A 3-tool-step turn as recorded (devin-full.log): four requests, each
+    // sent plain and again tagged root; the response is the last request.
+    const req = (agent: string | null, input: number, output: number, cached: number) =>
+      ({
+        sessionUpdate: "usage_update",
+        used: input + output,
+        size: 200_000,
+        _meta: {
+          "cognition.ai/inputTokens": input,
+          "cognition.ai/outputTokens": output,
+          "cognition.ai/cachedReadTokens": cached,
+          ...(agent ? { "cognition.ai/subagent_context": { parentAgentId: agent } } : {}),
+        },
+      }) as UsageUpdate;
+    const requests: [number, number, number][] = [
+      [11521, 137, 11200],
+      [11664, 61, 11520],
+      [11807, 99, 11648],
+      [11909, 15, 11776],
+    ];
+    const lastResponse = {
+      stopReason: "end_turn",
+      usage: { totalTokens: 11924, inputTokens: 11909, outputTokens: 15, cachedReadTokens: 11776 },
+      _meta: { "cognition.ai/userMessageId": "7fd27982" },
+    } as PromptResponse;
+
+    it("sums every request once, not just the last", () => {
+      const turnUpdates = requests.flatMap(([i, o, c]) => [req(null, i, o, c), req("root", i, o, c)]);
+      const { usage } = normalizeTurnUsage({
+        harnessId: "devin",
+        response: lastResponse,
+        lastUpdate: turnUpdates.at(-1)!,
+        turnUpdates,
+        model: "swe-1-6-slow",
+        costBaseline: 0,
+      });
+      expect(usage?.total.tokens).toEqual({
+        input: 46901 - 46144,
+        cacheRead: 46144,
+        cacheWrite: 0,
+        output: 312,
+        thought: 0,
+      });
+    });
+
+    it("counts a subagent's requests, sent once under its own id", () => {
+      // devin-meta.log: two root requests around two subagent ones.
+      const turnUpdates = [
+        req(null, 11958, 226, 11904),
+        req("root", 11958, 226, 11904),
+        req("b25b62a7", 2123, 133, 2048),
+        req("b25b62a7", 2270, 74, 2112),
+        req(null, 12071, 131, 11936),
+        req("root", 12071, 131, 11936),
+      ];
+      const { usage } = normalizeTurnUsage({
+        harnessId: "devin",
+        response: lastResponse,
+        lastUpdate: turnUpdates.at(-1)!,
+        turnUpdates,
+        model: null,
+        costBaseline: 0,
+      });
+      const tokens = usage!.total.tokens;
+      expect(tokens.input + tokens.cacheRead).toBe(11958 + 2123 + 2270 + 12071);
+      expect(tokens.output).toBe(226 + 133 + 74 + 131);
+    });
+
+    it("plain copies alone leave the response standing", () => {
+      const { usage } = normalizeTurnUsage({
+        harnessId: "devin",
+        response: lastResponse,
+        lastUpdate: null,
+        turnUpdates: [req(null, 1, 1, 0)],
+        model: null,
+        costBaseline: 0,
+      });
+      expect(usage?.total.tokens.output).toBe(15);
+    });
+
+    it("credits are the running total's difference, kept apart from cost", () => {
+      const withCredits = (total: number) =>
+        ({
+          ...req("root", 11909, 15, 11776),
+          _meta: { ...req("root", 11909, 15, 11776)._meta, "cognition.ai/totalCreditCost": total },
+        }) as UsageUpdate;
+      const result = normalizeTurnUsage({
+        harnessId: "devin",
+        response: lastResponse,
+        lastUpdate: withCredits(3.5),
+        model: null,
+        costBaseline: 0,
+        creditBaseline: 1.25,
+      });
+      expect(result.usage?.total.credits).toEqual({ amount: 2.25, unit: "devin-credit" });
+      expect(result.usage?.total.cost).toBeNull();
+      expect(result.creditTotal).toBe(3.5);
+      expect(result.usage?.byModel[0].usage.credits?.amount).toBe(2.25);
+    });
+
+    it("tells a subagent's update from the main agent's", () => {
+      expect(isMainAgent(req(null, 1, 1, 0))).toBe(true);
+      expect(isMainAgent(req("root", 1, 1, 0))).toBe(true);
+      expect(isMainAgent(req("b25b62a7", 1, 1, 0))).toBe(false);
+    });
+  });
+
   it("nothing reported is null usage", () => {
     expect(
       normalizeTurnUsage({
@@ -152,7 +260,7 @@ describe("normalizeTurnUsage", () => {
         model: null,
         costBaseline: 0,
       }),
-    ).toEqual({ usage: null, costTotal: null });
+    ).toEqual({ usage: null, costTotal: null, creditTotal: null });
   });
 
   it("a failed prompt after a costed turn is null: the held cost hasn't moved", () => {
@@ -166,6 +274,6 @@ describe("normalizeTurnUsage", () => {
         model: null,
         costBaseline: 0.5,
       }),
-    ).toEqual({ usage: null, costTotal: 0.5 });
+    ).toEqual({ usage: null, costTotal: 0.5, creditTotal: null });
   });
 });

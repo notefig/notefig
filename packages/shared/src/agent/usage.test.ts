@@ -14,6 +14,7 @@ function turn(
   const total = {
     tokens: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, thought: 0, ...tokens },
     cost: cost === null ? null : { amount: cost, currency: "USD" },
+    credits: null,
   };
   return { total, byModel: [{ model, usage: total }] };
 }
@@ -57,11 +58,29 @@ describe("usage summaries", () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
     const usd = addTurn(emptySummary(), turn({}, 1));
     const mixed = addTurn(usd, {
-      total: { tokens: usd.total.tokens, cost: { amount: 5, currency: "CREDITS" } },
+      total: { tokens: usd.total.tokens, cost: { amount: 5, currency: "CREDITS" }, credits: null },
       byModel: [],
     });
     expect(mixed.total.cost).toEqual({ amount: 1, currency: "USD" });
     warn.mockRestore();
+  });
+
+  it("adds credits apart from cost, null until a turn reports them", () => {
+    const plain = addTurn(emptySummary(), turn({ input: 1 }, 0.5));
+    expect(plain.total.credits).toBeNull();
+    const credited: TurnUsage = {
+      total: { ...turn({ input: 1 }, null).total, credits: { amount: 1.5, unit: "devin-credit" } },
+      byModel: [],
+    };
+    const summary = addTurn(addTurn(plain, credited), credited);
+    expect(summary.total.credits).toEqual({ amount: 3, unit: "devin-credit" });
+    expect(summary.total.cost).toEqual({ amount: 0.5, currency: "USD" });
+  });
+
+  it("reads a summary saved before credits were tracked as having none", () => {
+    const legacy = addTurn(emptySummary(), turn({ input: 1 }, null));
+    delete (legacy.total as { credits?: unknown }).credits;
+    expect(addTurn(legacy, turn({ input: 1 }, null)).total.credits).toBeNull();
   });
 
   it("adds whole summaries, keeping the target's extra fields", () => {

@@ -15,7 +15,7 @@ import {
   type TurnUsage,
   type Usage,
 } from "@notefig/shared/agent";
-import { formatCost, formatTokens } from "@/utils/usage-format";
+import { formatCost, formatCredits, formatTokens } from "@/utils/usage-format";
 
 /** Composer footer: tokens in context against the window's limit; a click
  *  opens what the session has spent. Before the harness reports a context
@@ -148,10 +148,13 @@ function TokenStats({ usage, withCost = false }: { usage: Usage; withCost?: bool
           <Stat label={t("usageCacheWrite")}>{formatTokens(tokens.cacheWrite)}</Stat>
         </>
       )}
-      {withCost && usage.cost && (
+      {withCost && (usage.cost || usage.credits) && (
         <>
           <Divider />
-          <Stat label={t("usageCost")}>{formatCost(usage.cost)}</Stat>
+          {usage.cost && <Stat label={t("usageCost")}>{formatCost(usage.cost)}</Stat>}
+          {usage.credits && (
+            <Stat label={t("usageCredits")}>{formatCredits(usage.credits)}</Stat>
+          )}
         </>
       )}
     </>

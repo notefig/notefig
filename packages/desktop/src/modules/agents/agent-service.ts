@@ -56,6 +56,8 @@ import { serverInstructions } from "./mcp-instructions";
 import { buildWidgetContextPayload } from "./widget-context-resource";
 import {
   contextFrom,
+  isMainAgent,
+  isSubagentChunk,
   normalizeTurnUsage,
   type UsageUpdate,
 } from "./turn-usage";
@@ -366,12 +368,17 @@ export class AgentTask {
   /** What this harness's adapter settled at invoke time (spawn env applied,
    *  wire pass-through pending); null until the task starts. */
   private spawnPrep: HarnessSpawnPrep | null = null;
-  /** The latest `usage_update` this runtime has seen; per process, like the
-   *  instance — a revival starts a fresh AgentTask. */
+  /** The latest main-agent `usage_update` this runtime has seen; per
+   *  process, like the instance — a revival starts a fresh AgentTask. */
   private lastUsageUpdate: UsageUpdate | null = null;
+  /** Every `usage_update` since the running turn began, subagents' included:
+   *  a harness that reports per request (Devin) is summed from these. */
+  private turnUsageUpdates: UsageUpdate[] = [];
   /** The harness's running cost at the last settled turn; null until the
    *  first one, when the task row's saved total stands in. */
   private costBaseline: number | null = null;
+  /** The same, for the harness's running credit total. */
+  private creditBaseline: number | null = null;
   /** The last account limits announced, so an unchanged report is quiet. */
   private lastLimitsKey: string | null = null;
 
@@ -540,7 +547,12 @@ export class AgentTask {
       taskId: this.taskId,
       transport,
       permissionBroker: this.permissionBroker,
-      onSessionUpdate: (notification) => this.handleSessionUpdate(notification),
+      // A subagent's own reasoning and replies (Devin streams them, tagged,
+      // once told the client supports subagents) aren't the session agent's
+      // words; its result reaches the transcript through the tool call.
+      onSessionUpdate: (notification) => {
+        if (!isSubagentChunk(notification.update)) this.handleSessionUpdate(notification);
+      },
       // Containment in front of the write path, not inside it: a
       // harness-supplied path is input from a process we do not control,
       // and `writeWorkspaceTextFile` only asserts absoluteness. Without
@@ -901,6 +913,7 @@ export class AgentTask {
       userText: text,
       entries: this.store.liveEntryWriter,
     };
+    this.turnUsageUpdates = [];
     this.setStatus("running");
 
     try {
@@ -1167,18 +1180,18 @@ export class AgentTask {
    */
   private recordTurnUsage(turnId: string, response: PromptResponse | null): void {
     const row = this.store.tasks.get(this.taskId);
-    const { usage, costTotal } = normalizeTurnUsage({
+    const turnUpdates = this.turnUsageUpdates;
+    this.turnUsageUpdates = [];
+    const { usage, costTotal, creditTotal } = normalizeTurnUsage({
       harnessId: this.harness.id,
       response,
       lastUpdate: this.lastUsageUpdate,
+      turnUpdates,
       model: currentModel(row?.configOptions),
-      // The first baseline is what the session has already been charged:
-      // a harness whose running total survives a revival then counts only
-      // what's new, and one whose total restarted reports below it — which
-      // the normalizer reads as a restart.
-      costBaseline: this.costBaseline ?? row?.usage?.total.cost?.amount ?? 0,
+      ...this.usageBaselines(row?.usage),
     });
     if (costTotal !== null) this.costBaseline = costTotal;
+    if (creditTotal !== null) this.creditBaseline = creditTotal;
 
     if (this.store.turns.get(turnId)) {
       this.store.turns.update(turnId, (draft) => {
@@ -1205,10 +1218,29 @@ export class AgentTask {
     });
   }
 
+  /** The running totals the next turn is measured against. The first is
+   *  what the session has already been charged: a harness whose running
+   *  total survives a revival then counts only what's new, and one whose
+   *  total restarted reports below it — which the normalizer reads as a
+   *  restart. */
+  private usageBaselines(saved: SessionUsage | undefined): {
+    costBaseline: number;
+    creditBaseline: number;
+  } {
+    return {
+      costBaseline: this.costBaseline ?? saved?.total.cost?.amount ?? 0,
+      creditBaseline: this.creditBaseline ?? saved?.total.credits?.amount ?? 0,
+    };
+  }
+
   /** A `usage_update`: the live context fill, and the running cost the next
    *  settled turn is measured against. Arrives between turns as readily as
-   *  during one, and never becomes a transcript entry. */
+   *  during one, and never becomes a transcript entry. A subagent's (Devin
+   *  tags them) counts toward the turn's tokens only: its context is its
+   *  own, not the session's. */
   private recordUsageUpdate(update: UsageUpdate): void {
+    if (this.currentTurn) this.turnUsageUpdates.push(update);
+    if (!isMainAgent(update)) return;
     this.lastUsageUpdate = update;
     this.announceLimits(update);
     const row = this.store.tasks.get(this.taskId);

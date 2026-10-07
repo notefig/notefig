@@ -16,6 +16,7 @@ function turnUsage(input: number, cost: number | null, model = "m"): TurnUsage {
   const total = {
     tokens: { input, cacheRead: 0, cacheWrite: 0, output: 1, thought: 0 },
     cost: cost === null ? null : { amount: cost, currency: "USD" },
+    credits: null,
   };
   return { total, byModel: [{ model, usage: total }] };
 }

@@ -15,6 +15,7 @@
 import {
   emptyTokens,
   totalTokens,
+  type Credits,
   type Money,
   type TokenCounts,
   type Usage,
@@ -63,7 +64,12 @@ export type UsagePattern = {
 
 const DAY_MS = 24 * 3_600_000;
 
-type Accumulator = { tokens: TokenCounts; cost: Money | null; turns: number };
+type Accumulator = {
+  tokens: TokenCounts;
+  cost: Money | null;
+  credits: Credits | null;
+  turns: number;
+};
 
 type SliceAccumulator = {
   total: Accumulator;
@@ -71,7 +77,7 @@ type SliceAccumulator = {
 };
 
 function emptyAccumulator(): Accumulator {
-  return { tokens: emptyTokens(), cost: null, turns: 0 };
+  return { tokens: emptyTokens(), cost: null, credits: null, turns: 0 };
 }
 
 function emptySlice(): SliceAccumulator {
@@ -87,6 +93,17 @@ function accumulate(into: Accumulator, usage: Usage, turns: number): void {
   tokens.output += usage.tokens.output;
   tokens.thought += usage.tokens.thought;
   into.turns += turns;
+  // Buckets saved before credits were tracked have no field at all.
+  const credits = usage.credits ?? null;
+  if (credits) {
+    if (!into.credits) into.credits = { ...credits };
+    else if (into.credits.unit === credits.unit) into.credits.amount += credits.amount;
+    else {
+      console.warn(
+        `[usage] dropping ${credits.amount} ${credits.unit}: series is in ${into.credits.unit}`,
+      );
+    }
+  }
   const cost = usage.cost;
   if (!cost) return;
   if (!into.cost) into.cost = { ...cost };
@@ -128,6 +145,7 @@ function toUsage(acc: Accumulator, divisor: number): Usage {
       thought: t.thought / divisor,
     },
     cost: acc.cost && { amount: acc.cost.amount / divisor, currency: acc.cost.currency },
+    credits: acc.credits && { amount: acc.credits.amount / divisor, unit: acc.credits.unit },
   };
 }
 

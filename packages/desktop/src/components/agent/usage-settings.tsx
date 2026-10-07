@@ -22,7 +22,7 @@ import {
 } from "@notefig/ui/dropdown-menu";
 import { HarnessLogo } from "@notefig/ui/harness-logo";
 import { cn } from "@notefig/ui/utils";
-import { totalTokens, type Usage } from "@notefig/shared/agent";
+import { totalTokens, type Credits, type Usage } from "@notefig/shared/agent";
 import { startOfHour } from "@/modules/usage";
 import type {
   HarnessLimits,
@@ -43,7 +43,7 @@ import {
 } from "@/hooks/use-harness-selection";
 import { SettingsSectionActions } from "@/components/editor/settings-section";
 import { useClock } from "@/hooks/use-clock";
-import { formatCost, formatTokens } from "@/utils/usage-format";
+import { formatCost, formatCredits, formatTokens } from "@/utils/usage-format";
 import { UsageAreaChart } from "./usage-area-chart";
 import {
   UsageBarChart,
@@ -803,6 +803,7 @@ function HarnessCard({
   const shownMetric: Metric = noCost ? "tokens" : metric;
   const disabled = modelChartDisabled(noCost, noModels, name, t);
   const format = formatters.value(shownMetric);
+
   const shown = topSeries(
     byModel.points,
     byModel.keys,
@@ -863,9 +864,32 @@ function HarnessCard({
             unnamed={noModels}
             name={name}
           />
+          <CreditsLine points={byModel.points} />
         </div>
       </div>
     </Card>
+  );
+}
+
+/** The range's credits, for a harness that bills in them. Billing units
+ *  aren't money, so they stand apart from the cost chart. */
+function CreditsLine({ points }: { points: readonly { total: Usage }[] }) {
+  const { t } = useTranslation();
+  const credits = points.reduce<Credits | null>(
+    (sum, point) =>
+      point.total.credits
+        ? { amount: (sum?.amount ?? 0) + point.total.credits.amount, unit: point.total.credits.unit }
+        : sum,
+    null,
+  );
+  if (!credits) return null;
+  return (
+    <div className="flex items-center gap-2" data-testid="usage-credits">
+      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+        {t("usageCredits")}
+      </span>
+      <span className="font-medium tabular-nums">{formatCredits(credits)}</span>
+    </div>
   );
 }
 

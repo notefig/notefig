@@ -139,6 +139,21 @@ describe("pure helpers", () => {
     expect(garbled?.usage).toBeUndefined();
   });
 
+  it("session credits keep their unit; a row saved before credits reads as none", () => {
+    const tokens = { input: 1, cacheRead: 0, cacheWrite: 0, output: 1, thought: 0 };
+    const legacy = { tokens, cost: null };
+    const row = (total: object) =>
+      parsePersistedAgentTask({
+        ...taskRow({}),
+        usage: { total, byModel: [{ model: "m", usage: total }], turns: 1, context: null },
+      });
+    expect(row(legacy)?.usage?.total.credits).toBeNull();
+    expect(row(legacy)?.usage?.byModel[0].usage.credits).toBeNull();
+
+    const credits = { amount: 2.5, unit: "devin-credit" };
+    expect(row({ ...legacy, credits })?.usage?.total.credits).toEqual(credits);
+  });
+
 });
 
 describe("persisted tasks collection", () => {

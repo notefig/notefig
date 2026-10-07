@@ -18,13 +18,22 @@ export type TokenCounts = {
   thought: number;
 };
 
+/** Money: an ISO 4217 currency. */
 export type Money = { amount: number; currency: string };
 
-/** Tokens and cost: the unit every level adds up. */
+/** A harness's own billing units — Devin's credits (`"devin-credit"`). Not
+ *  money: what a credit is worth depends on the account's plan, so credits
+ *  are kept apart from {@link Money} and only a reader converts, if ever. */
+export type Credits = { amount: number; unit: string };
+
+/** Tokens, cost and credits: what every level adds up. */
 export type Usage = {
   tokens: TokenCounts;
   /** Null when the harness reports no cost (a harness either always does or never does). */
   cost: Money | null;
+  /** Null when the harness doesn't bill in credits. Rows and buckets saved
+   *  before credits were tracked lack the field; readers take it as null. */
+  credits: Credits | null;
 };
 
 export type ModelUsage = {
@@ -90,7 +99,7 @@ export function emptyTokens(): TokenCounts {
 
 export function emptySummary(): UsageSummary {
   return {
-    total: { tokens: emptyTokens(), cost: null },
+    total: { tokens: emptyTokens(), cost: null, credits: null },
     byModel: [],
     turns: 0,
   };
@@ -131,8 +140,26 @@ function addCost(a: Money | null, b: Money | null): Money | null {
   return { amount: a.amount + b.amount, currency: a.currency };
 }
 
+function addCredits(
+  a: Credits | null | undefined,
+  b: Credits | null | undefined,
+): Credits | null {
+  if (!b) return a ? { ...a } : null;
+  if (!a) return { ...b };
+  if (a.unit !== b.unit) {
+    // Same reasoning as cost: one harness bills in one unit.
+    console.warn(`[usage] dropping ${b.amount} ${b.unit}: summary is in ${a.unit}`);
+    return a;
+  }
+  return { amount: a.amount + b.amount, unit: a.unit };
+}
+
 export function addUsage(a: Usage, b: Usage): Usage {
-  return { tokens: addTokens(a.tokens, b.tokens), cost: addCost(a.cost, b.cost) };
+  return {
+    tokens: addTokens(a.tokens, b.tokens),
+    cost: addCost(a.cost, b.cost),
+    credits: addCredits(a.credits, b.credits),
+  };
 }
 
 /** Merge model rows by model. */

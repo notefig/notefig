@@ -674,6 +674,7 @@ i18n
           usageCacheWrite: "Cache write",
           usageOutput: "Output",
           usageCost: "Cost",
+          usageCredits: "Credits",
           usageByHarness: "By harness",
           usageUnknownModel: "Unknown model",
           usageContext: "Context",

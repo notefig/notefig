@@ -16,6 +16,7 @@ function turn(input: number, cost: number | null, model: string | null = "m"): T
   const total = {
     tokens: { input, cacheRead: 0, cacheWrite: 0, output: 0, thought: 0 },
     cost: cost === null ? null : { amount: cost, currency: "USD" },
+    credits: null,
   };
   return { total, byModel: [{ model, usage: total }] };
 }
@@ -48,6 +49,24 @@ describe("periodStart", () => {
 });
 
 describe("usageSeries", () => {
+  it("keeps credits apart from cost, and reads an older bucket as having none", () => {
+    const credited = turn(100, null);
+    credited.total = { ...credited.total, credits: { amount: 4, unit: "devin-credit" } };
+    const legacy = bucket(at(9, 1, 10), turn(10, 0.1));
+    delete (legacy.total as { credits?: unknown }).credits;
+    const series = usageSeries(
+      [legacy, bucket(at(9, 1, 11), credited, { harnessId: "devin" })],
+      { from: at(9, 1), to: at(9, 2), grain: "day", groupBy: "harness" },
+    );
+    const [day] = series.points;
+    expect(day.total.cost).toEqual({ amount: 0.1, currency: "USD" });
+    expect(day.total.credits).toEqual({ amount: 4, unit: "devin-credit" });
+    expect(day.groups.map((g) => [g.key, g.usage.credits])).toEqual([
+      ["devin", { amount: 4, unit: "devin-credit" }],
+      ["claude", null],
+    ]);
+  });
+
   it("adds hours into local days, gaps included, split by harness", () => {
     const series = usageSeries(
       [
