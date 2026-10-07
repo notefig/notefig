@@ -11,16 +11,14 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { Button } from "@notefig/ui/button";
-import { ButtonGroup } from "@notefig/ui/button-group";
-import { HarnessLogo } from "@notefig/ui/harness-logo";
+import { Check, ChevronDown } from "lucide-react";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@notefig/ui/select";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@notefig/ui/dropdown-menu";
+import { HarnessLogo } from "@notefig/ui/harness-logo";
 import { cn } from "@notefig/ui/utils";
 import {
   totalTokens,
@@ -335,7 +333,7 @@ function UsageControls({
         <h3 className="text-sm font-medium">{t("usageOverTime")}</h3>
         <p className="text-sm text-muted-foreground">{t("usageOverTimeHint")}</p>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-3">
         <Segmented
           label={t("usageMetric")}
           value={metric}
@@ -351,26 +349,18 @@ function UsageControls({
           onChange={onGrain}
           options={GRAINS[rangeDays].map((value) => ({ value, label: t(`usageGrain_${value}`) }))}
         />
-        <Select
+        <Picker
+          label={t("usageRange")}
           value={String(rangeDays)}
-          onValueChange={(value) => onRangeDays(Number(value) as RangeDays)}
-        >
-          <SelectTrigger className="h-8 w-36 text-xs" aria-label={t("usageRange")}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {RANGES.map((days) => (
-              <SelectItem key={days} value={String(days)} className="text-xs">
-                {rangeLabel(days)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          onChange={(value) => onRangeDays(Number(value) as RangeDays)}
+          options={RANGES.map((days) => ({ value: String(days), label: rangeLabel(days) }))}
+        />
       </div>
     </div>
   );
 }
 
+/** Options side by side, the chosen one lit — the sidebar's tool toggles. */
 function Segmented<T extends string>({
   label,
   value,
@@ -383,24 +373,72 @@ function Segmented<T extends string>({
   options: { value: T; label: string }[];
 }) {
   return (
-    <ButtonGroup aria-label={label}>
+    <div role="group" aria-label={label} className="inline-flex items-center gap-0.5">
       {options.map((option) => (
-        <Button
+        <button
           key={option.value}
-          variant="outline"
+          type="button"
           aria-pressed={option.value === value}
           onClick={() => onChange(option.value)}
           className={cn(
-            "h-8 px-3 text-xs font-normal",
+            "h-6 rounded-md px-2 text-xs transition-colors",
             option.value === value
-              ? "bg-accent text-accent-foreground"
-              : "text-muted-foreground",
+              ? "bg-accent text-foreground"
+              : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
           )}
         >
           {option.label}
-        </Button>
+        </button>
       ))}
-    </ButtonGroup>
+    </div>
+  );
+}
+
+type PickerOption = { value: string; label: React.ReactNode; greyed?: boolean };
+
+/** A compact menu of choices on a ghost trigger, as the app's panels pick
+ *  things (the composer's session options, the sidebar's menus). */
+function Picker({
+  label,
+  value,
+  onChange,
+  options,
+  testId,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: PickerOption[];
+  testId?: string;
+}) {
+  const current = options.find((option) => option.value === value);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          data-testid={testId}
+          className="flex h-6 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+        >
+          {current?.label}
+          <ChevronDown className="size-3 opacity-60" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-[9rem]">
+        {options.map((option) => (
+          <DropdownMenuItem
+            key={option.value}
+            onSelect={() => onChange(option.value)}
+            className={cn("gap-1.5 text-xs", option.greyed && "text-muted-foreground")}
+            data-greyed={option.greyed || undefined}
+          >
+            <span className="flex flex-1 items-center gap-1.5">{option.label}</span>
+            {option.value === value && <Check className="size-3 shrink-0" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -518,9 +556,9 @@ function ByHarnessCard({
       <div className="flex flex-wrap justify-between gap-4">
         <div>
           <div className="text-[0.8125rem] font-medium">{t("usageByHarness")}</div>
-          <div className="text-[0.6875rem] text-muted-foreground">{description}</div>
+          <div className="text-[0.625rem] text-muted-foreground">{description}</div>
         </div>
-        <div className="flex flex-wrap gap-5">
+        <div className="flex flex-col gap-0.5">
           {shown.series.map((s, index) => (
             <Legend key={s.key} name={s.name} color={s.color} value={format(shown.totals[index])} />
           ))}
@@ -549,6 +587,7 @@ function ByHarnessCard({
   );
 }
 
+/** One line of a chart's legend: its color, name and total. */
 function Legend({
   name,
   color,
@@ -561,12 +600,10 @@ function Legend({
   muted?: boolean;
 }) {
   return (
-    <div className={cn("flex flex-col gap-0.5", muted && "opacity-60")}>
-      <div className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
-        <span className="size-2 rounded-full" style={{ background: color }} />
-        {name}
-      </div>
-      <div className={cn("tabular-nums", muted ? "text-xs" : "text-lg font-semibold")}>{value}</div>
+    <div className={cn("flex items-center gap-1.5 text-[0.625rem]", muted && "opacity-60")}>
+      <span className="size-1.5 shrink-0 rounded-full" style={{ background: color }} />
+      <span className="text-muted-foreground">{name}</span>
+      <span className="ms-auto ps-3 font-medium tabular-nums">{value}</span>
     </div>
   );
 }
@@ -586,24 +623,15 @@ function PatternCard({
   const { t } = useTranslation();
   const canShow = (key: string | null) => metric !== "cost" || (!!key && reportingOf(key).cost);
   const shown = topSeries(pattern.hours, pattern.keys, metric, (key) => labelOf(key ?? ""), t("usageOther"), canShow);
-  const sums = shown.values.map((row) => row.reduce((sum, value) => sum + value, 0));
-  const peak = sums.some((sum) => sum > 0) ? sums.indexOf(Math.max(...sums)) : null;
+  const empty = shown.values.every((row) => row.every((value) => value === 0));
 
   return (
     <Card testId="usage-pattern">
-      <div className="flex flex-wrap justify-between gap-4">
-        <div>
-          <div className="text-[0.8125rem] font-medium">{t("usageDailyPattern")}</div>
-          <div className="text-[0.6875rem] text-muted-foreground">{description}</div>
-        </div>
-        <div className="text-end">
-          <div className="text-[0.6875rem] text-muted-foreground">{t("usageBusiestHour")}</div>
-          <div className="text-sm font-semibold" data-testid="usage-busiest-hour">
-            {peak === null ? "—" : hourRange(peak)}
-          </div>
-        </div>
+      <div>
+        <div className="text-[0.8125rem] font-medium">{t("usageDailyPattern")}</div>
+        <div className="text-[0.625rem] text-muted-foreground">{description}</div>
       </div>
-      {peak === null ? (
+      {empty ? (
         <p className="text-xs text-muted-foreground">{t("usageNoUsageInRange")}</p>
       ) : (
         <UsageBarChart
@@ -656,6 +684,7 @@ function HarnessCard({
   const noCost = metric === "cost" && !reporting.cost;
   const noModels = namesNoModels(byModel.keys);
   const shownMetric: Metric = noCost ? "tokens" : metric;
+  const disabled = modelChartDisabled(noCost, noModels, name, t);
   const format = formatters.value(shownMetric);
   const shown = topSeries(
     byModel.points,
@@ -667,8 +696,17 @@ function HarnessCard({
 
   return (
     <Card testId="usage-harness-detail">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <HarnessTitle name={name} reporting={reporting} />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <HarnessTitle name={name} reporting={reporting} />
+          <div className="text-[0.625rem] text-muted-foreground">
+            {disabled?.note ??
+              t("usageDetailDesc", {
+                metric: shownMetric === "cost" ? t("usageCost") : t("usageTokens"),
+                ...caption,
+              })}
+          </div>
+        </div>
         <HarnessPicker
           value={harnessId}
           onChange={setChosen}
@@ -681,9 +719,7 @@ function HarnessCard({
 
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_15rem]">
         <ModelChart
-          disabled={modelChartDisabled(noCost, noModels, name, t)}
-          metric={shownMetric}
-          caption={caption}
+          overlay={disabled?.overlay}
           points={byModel.points}
           shown={shown}
           grain={grain}
@@ -723,7 +759,7 @@ function modelChartDisabled(
 function HarnessTitle({ name, reporting }: { name: string; reporting: UsageReporting }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-1.5">
       <div className="text-[0.8125rem] font-medium">{name}</div>
       <Cap>{reporting.cost ? t("usageCapCost") : t("usageCapTokensOnly")}</Cap>
       <Cap>{reporting.limits ? t("usageCapLimits") : t("usageCapNoLimits")}</Cap>
@@ -731,37 +767,25 @@ function HarnessTitle({ name, reporting }: { name: string; reporting: UsageRepor
   );
 }
 
-/** One harness's usage by model; greyed tokens (`disabled`) when the view
- *  asks for a cost it doesn't report, or it names no models to split by. */
+/** One harness's usage by model; greyed tokens under `overlay` when the
+ *  view asks for a cost it doesn't report, or it names no models. */
 function ModelChart({
-  disabled,
-  metric,
-  caption,
+  overlay,
   points,
   shown,
   grain,
   format,
   formatAxis,
 }: {
-  disabled: { overlay: string; note: string } | undefined;
-  metric: Metric;
-  caption: { grain: string; range: string };
+  overlay: string | undefined;
   points: (UsageSlice & { start: number })[];
   shown: ShownSeries;
   grain: UsageGrain;
   format: (value: number) => string;
   formatAxis: (value: number) => string;
 }) {
-  const { t } = useTranslation();
-  const description = disabled
-    ? disabled.note
-    : t("usageDetailDesc", {
-        metric: metric === "cost" ? t("usageCost") : t("usageTokens"),
-        ...caption,
-      });
   return (
-    <div className="min-w-0 space-y-2">
-      <div className="text-[0.6875rem] text-muted-foreground">{description}</div>
+    <div className="min-w-0">
       <PeriodChart
         points={points}
         shown={shown}
@@ -769,13 +793,15 @@ function ModelChart({
         format={format}
         formatAxis={formatAxis}
         height={200}
-        overlay={disabled?.overlay}
+        overlay={overlay}
         testId="usage-chart-models"
       />
     </div>
   );
 }
 
+/** Every harness, greyed when it lacks what the view is showing (cost), or
+ *  reports neither cost nor limits. */
 function HarnessPicker({
   value,
   onChange,
@@ -793,26 +819,25 @@ function HarnessPicker({
 }) {
   const { t } = useTranslation();
   return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger
-        className="h-8 w-52 text-xs"
-        aria-label={t("usageHarness")}
-        data-testid="usage-harness-select"
-      >
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {harnessIds.map((id) => (
-          <HarnessOption
-            key={id}
-            harnessId={id}
-            label={labelOf(id)}
-            reporting={reportingOf(id)}
-            metric={metric}
-          />
-        ))}
-      </SelectContent>
-    </Select>
+    <Picker
+      label={t("usageHarness")}
+      value={value}
+      onChange={onChange}
+      testId="usage-harness-select"
+      options={harnessIds.map((id) => {
+        const reporting = reportingOf(id);
+        return {
+          value: id,
+          label: (
+            <>
+              <HarnessLogo harnessId={id} className="size-3" />
+              {labelOf(id)}
+            </>
+          ),
+          greyed: (metric === "cost" || !reporting.limits) && !reporting.cost,
+        };
+      })}
+    />
   );
 }
 
@@ -860,34 +885,6 @@ function ModelsPanel({
         );
       })}
     </div>
-  );
-}
-
-/** A harness in the picker: greyed when it lacks what the view is showing
- *  (cost), or reports neither cost nor limits. */
-function HarnessOption({
-  harnessId,
-  label,
-  reporting,
-  metric,
-}: {
-  harnessId: string;
-  label: string;
-  reporting: UsageReporting;
-  metric: Metric;
-}) {
-  const greyed = (metric === "cost" || !reporting.limits) && !reporting.cost;
-  return (
-    <SelectItem
-      value={harnessId}
-      className={cn("text-xs", greyed && "text-muted-foreground")}
-      data-greyed={greyed || undefined}
-    >
-      <span className="flex items-center gap-1.5">
-        <HarnessLogo harnessId={harnessId} className="size-3" />
-        {label}
-      </span>
-    </SelectItem>
   );
 }
 
@@ -946,7 +943,20 @@ function LimitsPanel({
   return (
     <div className="space-y-2" data-testid="usage-limits">
       {limits.windows.length === 0 && (
-        <div className="text-muted-foreground">{t("usageLimitsNoWindows")}</div>
+        // With no windows to show, a reported warning or block is all there is.
+        <div
+          className={cn(
+            limits.status === "warning" && "text-warning",
+            limits.status === "blocked" && "text-destructive",
+            (limits.status === "ok" || limits.status === "unknown") && "text-muted-foreground",
+          )}
+        >
+          {limits.status === "warning"
+            ? t("usageLimitWarning")
+            : limits.status === "blocked"
+              ? t("usageLimitBlocked")
+              : t("usageLimitsNoWindows")}
+        </div>
       )}
       {limits.windows.map((window) => {
         // A stored report outlives its windows: one past its reset has

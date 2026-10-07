@@ -18,40 +18,49 @@ import {
 /** The plot's drawing width; the SVG stretches it to the real width. */
 const WIDTH = 1000;
 
-type Point = [x: number, y: number];
+/** A boundary between bands, in values: its height at each point and, per
+ *  segment, the cubic's two inner control heights. */
+type Curve = { at: number[]; c1: number[]; c2: number[] };
 
-/** A monotone cubic through `points` (Fritsch–Carlson): smooth, but never
- *  overshooting a value, so a band never dips below the one beneath it. */
-function monotonePath(points: Point[]): string {
-  if (points.length === 1) {
-    const [, y] = points[0];
-    return `M0,${y}L${WIDTH},${y}`;
-  }
-  const n = points.length;
-  const slopes = points.slice(1).map(([x, y], i) => (y - points[i][1]) / (x - points[i][0]));
-  const tangents = points.map((_, i) => {
-    if (i === 0) return slopes[0];
+/** Monotone tangents (Fritsch–Carlson) for evenly spaced values: the cubic
+ *  through them never overshoots, so it never dips below zero between two
+ *  non-negative values. */
+function tangentsOf(values: readonly number[]): number[] {
+  const n = values.length;
+  const slopes = values.slice(1).map((value, i) => value - values[i]);
+  return values.map((_, i) => {
+    if (i === 0) return slopes[0] ?? 0;
     if (i === n - 1) return slopes[n - 2];
     const [a, b] = [slopes[i - 1], slopes[i]];
     return a * b <= 0 ? 0 : (2 * a * b) / (a + b);
   });
-  let path = `M${points[0][0]},${points[0][1]}`;
-  for (let i = 0; i < n - 1; i++) {
-    const [x0, y0] = points[i];
-    const [x1, y1] = points[i + 1];
-    const dx = (x1 - x0) / 3;
-    path += `C${x0 + dx},${y0 + tangents[i] * dx},${x1 - dx},${y1 - tangents[i + 1] * dx},${x1},${y1}`;
-  }
-  return path;
 }
 
-/** `top` traced forward, then `base` back: the closed band between them. */
-function band(top: Point[], base: Point[]): string {
-  if (top.length === 1) {
-    return `M0,${top[0][1]}L${WIDTH},${top[0][1]}L${WIDTH},${base[0][1]}L0,${base[0][1]}Z`;
+/** The stack's boundaries, from zero up, one per series. Each series is
+ *  smoothed on its own values and the curves are added — not the sums
+ *  smoothed — so a band is never thinner than zero and can't cross the one
+ *  beneath it. With the points evenly spaced, adding cubics is adding
+ *  their control heights. */
+export function stackedCurves(bars: readonly ChartBar[], seriesCount: number): Curve[] {
+  const n = bars.length;
+  const segments = Math.max(0, n - 1);
+  let curve: Curve = {
+    at: bars.map(() => 0),
+    c1: Array(segments).fill(0),
+    c2: Array(segments).fill(0),
+  };
+  const curves = [curve];
+  for (let s = 0; s < seriesCount; s++) {
+    const values = bars.map((bar) => bar.values[s]);
+    const m = tangentsOf(values);
+    curve = {
+      at: curve.at.map((y, i) => y + values[i]),
+      c1: curve.c1.map((y, i) => y + values[i] + m[i] / 3),
+      c2: curve.c2.map((y, i) => y + values[i + 1] - m[i + 1] / 3),
+    };
+    curves.push(curve);
   }
-  const back = monotonePath([...base].reverse()).replace(/^M/, "L");
-  return `${monotonePath(top)}${back}Z`;
+  return curves;
 }
 
 export function UsageAreaChart({
@@ -81,17 +90,27 @@ export function UsageAreaChart({
   const yOf = (value: number) => height - (top ? (value / top) * height : 0);
   const fraction = (index: number) => (count > 1 ? index / (count - 1) : 0);
 
-  // Each series' band sits on the running sum of the ones before it.
-  const layers: Point[][] = [bars.map((_, index) => [xOf(index), yOf(0)])];
-  const running = bars.map(() => 0);
-  for (let s = 0; s < series.length; s++) {
-    layers.push(
-      bars.map((bar, index) => {
-        running[index] += bar.values[s];
-        return [xOf(index), yOf(running[index])];
-      }),
-    );
-  }
+  const curves = stackedCurves(bars, series.length);
+  /** A boundary as SVG path commands, left to right or back. */
+  const trace = ({ at, c1, c2 }: Curve, back = false): string => {
+    if (count === 1) {
+      const y = yOf(at[0]);
+      return back ? `L${WIDTH},${y}L0,${y}` : `M0,${y}L${WIDTH},${y}`;
+    }
+    const dx = xOf(1) / 3;
+    if (!back) {
+      return at.slice(1).reduce(
+        (path, y, i) =>
+          `${path}C${xOf(i) + dx},${yOf(c1[i])},${xOf(i + 1) - dx},${yOf(c2[i])},${xOf(i + 1)},${yOf(y)}`,
+        `M0,${yOf(at[0])}`,
+      );
+    }
+    let path = `L${WIDTH},${yOf(at[count - 1])}`;
+    for (let i = count - 2; i >= 0; i--) {
+      path += `C${xOf(i + 1) - dx},${yOf(c2[i])},${xOf(i) + dx},${yOf(c1[i])},${xOf(i)},${yOf(at[i])}`;
+    }
+    return path;
+  };
   const hover = hovered !== null && hovered < count ? hovered : null;
 
   const onMove = (event: React.MouseEvent) => {
@@ -129,9 +148,12 @@ export function UsageAreaChart({
             </defs>
             {series.map((s, index) => (
               <g key={s.key}>
-                <path d={band(layers[index + 1], layers[index])} fill={`url(#${gradientId}-${index})`} />
                 <path
-                  d={monotonePath(layers[index + 1])}
+                  d={`${trace(curves[index + 1])}${trace(curves[index], true)}Z`}
+                  fill={`url(#${gradientId}-${index})`}
+                />
+                <path
+                  d={trace(curves[index + 1])}
                   fill="none"
                   stroke={s.color}
                   strokeWidth={1.5}
@@ -152,7 +174,7 @@ export function UsageAreaChart({
                   className="pointer-events-none absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background"
                   style={{
                     left: `${fraction(hover) * 100}%`,
-                    top: layers[index + 1][hover][1],
+                    top: yOf(curves[index + 1].at[hover]),
                     background: s.color,
                   }}
                 />
