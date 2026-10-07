@@ -679,8 +679,6 @@ i18n
           usageContext: "Context",
           usageSessionTitle: "Session usage",
           usageTokensUnit: "tokens",
-          usageOverTime: "Usage over time",
-          usageOverTimeHint: "Reported hourly by each harness.",
           usageMetric: "Metric",
           usageRange: "Range",
           usageGrain_day: "Day",

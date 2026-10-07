@@ -318,31 +318,25 @@ function UsageControls({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-wrap items-end justify-between gap-3">
-      <div>
-        <h3 className="text-sm font-medium">{t("usageOverTime")}</h3>
-        <p className="text-sm text-muted-foreground">{t("usageOverTimeHint")}</p>
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <Segmented
-          label={t("usageMetric")}
-          value={metric}
-          onChange={onMetric}
-          options={[
-            { value: "tokens", label: t("usageTokens") },
-            { value: "cost", label: t("usageCost") },
-          ]}
-        />
-        <Picker
-          label={t("usageRange")}
-          value={String(rangeDays)}
-          onChange={(value) => onRangeDays(Number(value) as RangeDays)}
-          options={RANGES.map((days) => ({
-            value: String(days),
-            label: t("usageRangeDays", { count: days }),
-          }))}
-        />
-      </div>
+    <div className="flex flex-wrap items-center justify-end gap-3">
+      <Segmented
+        label={t("usageMetric")}
+        value={metric}
+        onChange={onMetric}
+        options={[
+          { value: "tokens", label: t("usageTokens") },
+          { value: "cost", label: t("usageCost") },
+        ]}
+      />
+      <Picker
+        label={t("usageRange")}
+        value={String(rangeDays)}
+        onChange={(value) => onRangeDays(Number(value) as RangeDays)}
+        options={RANGES.map((days) => ({
+          value: String(days),
+          label: t("usageRangeDays", { count: days }),
+        }))}
+      />
     </div>
   );
 }
@@ -714,7 +708,7 @@ function HarnessCard({
           formatAxis={formatters.axis(shownMetric)}
         />
 
-        <div className="space-y-4 self-start rounded-lg border border-border bg-muted/30 p-3 text-xs">
+        <div className="space-y-4 self-start rounded-lg border border-border bg-muted/30 p-3 text-[0.625rem]">
           <LimitsPanel
             name={name}
             supported={reporting.limits}
