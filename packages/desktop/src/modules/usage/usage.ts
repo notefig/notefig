@@ -87,6 +87,25 @@ export function totalsOf(buckets: readonly UsageBucket[]): UsageTotals {
   return { all, byHarness, byModel };
 }
 
+/** A new limits report over the stored one. A harness may report one
+ *  window at a time (Claude names the window an event is about), so the
+ *  windows it left out are kept until they reset; the rest — status,
+ *  overage — is the new report's. */
+export function mergeLimits(
+  previous: UsageLimits,
+  next: UsageLimits,
+  at: number,
+): UsageLimits {
+  const reported = new Map(next.windows.map((window) => [window.id, window]));
+  const windows = previous.windows
+    .filter((window) => reported.has(window.id) || window.resetsAt === null || window.resetsAt > at)
+    .map((window) => reported.get(window.id) ?? window);
+  for (const window of next.windows) {
+    if (!previous.windows.some((kept) => kept.id === window.id)) windows.push(window);
+  }
+  return { ...next, windows };
+}
+
 function createBucketsCollection(persistence: PersistedCollectionPersistence) {
   return createCollection(
     persistedCollectionOptions<UsageBucket, string>({
@@ -198,8 +217,9 @@ export function createUsage({
     if (existing && existing.at > detail.at) return;
     const transaction = existing
       ? limits.update(existing.limitsId, (draft) => {
+          const next = mergeLimits(existing.limits, detail.limits, detail.at);
           draft.at = detail.at;
-          draft.limits = detail.limits;
+          draft.limits = next;
         })
       : limits.insert({
           limitsId: newUsageLimitsId(),

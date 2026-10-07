@@ -10,6 +10,9 @@
  */
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+import { Button } from "@notefig/ui/button";
+import { ButtonGroup } from "@notefig/ui/button-group";
 import { HarnessLogo } from "@notefig/ui/harness-logo";
 import {
   Select,
@@ -327,7 +330,7 @@ function UsageControls({
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
         <h3 className="text-sm font-medium">{t("usageOverTime")}</h3>
-        <p className="text-xs text-muted-foreground">{t("usageOverTimeHint")}</p>
+        <p className="text-sm text-muted-foreground">{t("usageOverTimeHint")}</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Segmented
@@ -349,12 +352,12 @@ function UsageControls({
           value={String(rangeDays)}
           onValueChange={(value) => onRangeDays(Number(value) as RangeDays)}
         >
-          <SelectTrigger className="h-7 w-36 text-xs" aria-label={t("usageRange")}>
+          <SelectTrigger className="h-9 w-40" aria-label={t("usageRange")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {RANGES.map((days) => (
-              <SelectItem key={days} value={String(days)} className="text-xs">
+              <SelectItem key={days} value={String(days)}>
                 {rangeLabel(days)}
               </SelectItem>
             ))}
@@ -377,31 +380,31 @@ function Segmented<T extends string>({
   options: { value: T; label: string }[];
 }) {
   return (
-    <div role="group" aria-label={label} className="inline-flex overflow-hidden rounded-md border border-border">
-      {options.map((option, index) => (
-        <button
+    <ButtonGroup aria-label={label}>
+      {options.map((option) => (
+        <Button
           key={option.value}
-          type="button"
+          variant="outline"
+          size="sm"
           aria-pressed={option.value === value}
           onClick={() => onChange(option.value)}
           className={cn(
-            "h-7 px-3 text-xs",
-            index > 0 && "border-s border-border",
+            "font-normal",
             option.value === value
-              ? "bg-foreground text-background"
-              : "text-foreground hover:bg-accent",
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground",
           )}
         >
           {option.label}
-        </button>
+        </Button>
       ))}
-    </div>
+    </ButtonGroup>
   );
 }
 
 function Card({ children, testId }: { children: React.ReactNode; testId?: string }) {
   return (
-    <div className="space-y-4 rounded-lg border border-border bg-background p-4" data-testid={testId}>
+    <div className="space-y-4 rounded-lg border border-border p-4" data-testid={testId}>
       {children}
     </div>
   );
@@ -511,7 +514,7 @@ function ByHarnessCard({
       <div className="flex flex-wrap justify-between gap-4">
         <div>
           <div className="text-sm font-medium">{t("usageByHarness")}</div>
-          <div className="text-xs text-muted-foreground">{description}</div>
+          <div className="text-sm text-muted-foreground">{description}</div>
         </div>
         <div className="flex flex-wrap gap-5">
           {shown.series.map((s, index) => (
@@ -586,7 +589,7 @@ function PatternCard({
       <div className="flex flex-wrap justify-between gap-4">
         <div>
           <div className="text-sm font-medium">{t("usageDailyPattern")}</div>
-          <div className="text-xs text-muted-foreground">{description}</div>
+          <div className="text-sm text-muted-foreground">{description}</div>
         </div>
         <div className="text-end">
           <div className="text-[0.6875rem] text-muted-foreground">{t("usageBusiestHour")}</div>
@@ -645,8 +648,9 @@ function HarnessCard({
   const reporting = reportingOf(harnessId);
   const name = labelOf(harnessId);
   // Cost asked of a harness that has none: chart its tokens, greyed.
-  const ghost = metric === "cost" && !reporting.cost;
-  const shownMetric: Metric = ghost ? "tokens" : metric;
+  const noCost = metric === "cost" && !reporting.cost;
+  const noModels = namesNoModels(byModel.keys);
+  const shownMetric: Metric = noCost ? "tokens" : metric;
   const format = formatters.value(shownMetric);
   const shown = topSeries(
     byModel.points,
@@ -672,8 +676,7 @@ function HarnessCard({
 
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_15rem]">
         <ModelChart
-          name={name}
-          ghost={ghost}
+          disabled={modelChartDisabled(noCost, noModels, name, t)}
           metric={shownMetric}
           caption={caption}
           points={byModel.points}
@@ -683,13 +686,8 @@ function HarnessCard({
           formatAxis={formatters.axis(shownMetric)}
         />
 
-        <div className="space-y-4 rounded-md border border-border bg-muted/30 p-3 text-xs">
-          <ModelsPanel
-            shown={shown}
-            format={format}
-            unnamedOnly={byModel.keys.length > 0 && byModel.keys.every((key) => key === null)}
-            name={name}
-          />
+        <div className="space-y-4 rounded-lg border border-border bg-muted/30 p-3 text-xs">
+          <ModelsPanel shown={shown} format={format} unnamed={noModels} name={name} />
           <LimitsPanel
             name={name}
             supported={reporting.limits}
@@ -699,6 +697,22 @@ function HarnessCard({
       </div>
     </Card>
   );
+}
+
+/** Usage that names no model has no breakdown to chart. */
+function namesNoModels(keys: readonly (string | null)[]): boolean {
+  return keys.length > 0 && keys.every((key) => key === null);
+}
+
+function modelChartDisabled(
+  noCost: boolean,
+  noModels: boolean,
+  name: string,
+  t: TFunction,
+): { overlay: string; note: string } | undefined {
+  if (noCost) return { overlay: t("usageNoCostData"), note: t("usageDetailNoCost", { name }) };
+  if (noModels) return { overlay: t("usageNoModelData"), note: t("usageNoModelNames", { name }) };
+  return undefined;
 }
 
 function HarnessTitle({ name, reporting }: { name: string; reporting: UsageReporting }) {
@@ -714,11 +728,10 @@ function HarnessTitle({ name, reporting }: { name: string; reporting: UsageRepor
   );
 }
 
-/** One harness's usage by model; greyed tokens (`ghost`) when the view
- *  asks for a cost it doesn't report. */
+/** One harness's usage by model; greyed tokens (`disabled`) when the view
+ *  asks for a cost it doesn't report, or it names no models to split by. */
 function ModelChart({
-  name,
-  ghost,
+  disabled,
   metric,
   caption,
   points,
@@ -727,8 +740,7 @@ function ModelChart({
   format,
   formatAxis,
 }: {
-  name: string;
-  ghost: boolean;
+  disabled: { overlay: string; note: string } | undefined;
   metric: Metric;
   caption: { grain: string; range: string };
   points: (UsageSlice & { start: number })[];
@@ -738,15 +750,15 @@ function ModelChart({
   formatAxis: (value: number) => string;
 }) {
   const { t } = useTranslation();
-  const description = ghost
-    ? t("usageDetailNoCost", { name })
+  const description = disabled
+    ? disabled.note
     : t("usageDetailDesc", {
         metric: metric === "cost" ? t("usageCost") : t("usageTokens"),
         ...caption,
       });
   return (
     <div className="min-w-0 space-y-2">
-      <div className="text-xs text-muted-foreground">{description}</div>
+      <div className="text-sm text-muted-foreground">{description}</div>
       <PeriodChart
         points={points}
         shown={shown}
@@ -754,7 +766,7 @@ function ModelChart({
         format={format}
         formatAxis={formatAxis}
         height={200}
-        overlay={ghost ? t("usageNoCostData") : undefined}
+        overlay={disabled?.overlay}
         testId="usage-chart-models"
       />
     </div>
@@ -778,25 +790,26 @@ function HarnessPicker({
 }) {
   const { t } = useTranslation();
   return (
-    <label className="flex items-center gap-2 text-xs text-muted-foreground">
-      {t("usageHarness")}
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="h-7 w-52 text-xs" data-testid="usage-harness-select">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {harnessIds.map((id) => (
-            <HarnessOption
-              key={id}
-              harnessId={id}
-              label={labelOf(id)}
-              reporting={reportingOf(id)}
-              metric={metric}
-            />
-          ))}
-        </SelectContent>
-      </Select>
-    </label>
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger
+        className="h-9 w-56"
+        aria-label={t("usageHarness")}
+        data-testid="usage-harness-select"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {harnessIds.map((id) => (
+          <HarnessOption
+            key={id}
+            harnessId={id}
+            label={labelOf(id)}
+            reporting={reportingOf(id)}
+            metric={metric}
+          />
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -804,25 +817,30 @@ function HarnessPicker({
 function ModelsPanel({
   shown,
   format,
-  unnamedOnly,
+  unnamed,
   name,
 }: {
   shown: ShownSeries;
   format: (value: number) => string;
   /** The harness names no models at all. */
-  unnamedOnly: boolean;
+  unnamed: boolean;
   name: string;
 }) {
   const { t } = useTranslation();
   const sum = shown.totals.reduce((a, b) => a + b, 0);
+  if (unnamed) {
+    return (
+      <div className="space-y-1 opacity-60">
+        <div className="font-medium">{t("usageModels")}</div>
+        <div className="text-muted-foreground">{t("usageNoModelNames", { name })}</div>
+      </div>
+    );
+  }
   return (
     <div className="space-y-2">
       <div className="font-medium">{t("usageModels")}</div>
       {shown.series.length === 0 && (
         <div className="text-muted-foreground">{t("usageNoUsageInRange")}</div>
-      )}
-      {unnamedOnly && (
-        <div className="text-muted-foreground">{t("usageNoModelNames", { name })}</div>
       )}
       {shown.series.map((s, index) => {
         const share = sum ? Math.round((shown.totals[index] / sum) * 100) : 0;
@@ -864,14 +882,14 @@ function HarnessOption({
   return (
     <SelectItem
       value={harnessId}
-      className={cn("text-xs", greyed && "text-muted-foreground")}
+      className={cn(greyed && "text-muted-foreground")}
       data-greyed={greyed || undefined}
     >
       <span className="flex items-center gap-1.5">
-        <HarnessLogo harnessId={harnessId} className="size-3" />
+        <HarnessLogo harnessId={harnessId} className="size-3.5" />
         {label}
         {missing.length > 0 && (
-          <span className="text-[0.625rem] text-muted-foreground">· {missing.join(", ")}</span>
+          <span className="text-xs text-muted-foreground">· {missing.join(", ")}</span>
         )}
       </span>
     </SelectItem>
@@ -957,9 +975,17 @@ function LimitsPanel({
         <div className="text-muted-foreground">{t("usageLimitsNoWindows")}</div>
       )}
       {limits.windows.map((window) => {
+        // A stored report outlives its windows: one past its reset has
+        // started over, whatever it last read.
+        const reset = window.resetsAt !== null && window.resetsAt <= now;
+        const utilization = reset ? 0 : window.utilization;
         const meta = [
           window.durationMs ? t("usageWindow", { duration: duration(window.durationMs) }) : null,
-          window.resetsAt ? t("usageResetsIn", { time: until(window.resetsAt, now) }) : null,
+          reset
+            ? t("usageWindowReset")
+            : window.resetsAt
+              ? t("usageResetsIn", { time: until(window.resetsAt, now) })
+              : null,
         ]
           .filter(Boolean)
           .join(" · ");
@@ -968,10 +994,10 @@ function LimitsPanel({
             <div className="flex justify-between gap-2">
               <span className="font-mono text-[0.625rem]">{window.id}</span>
               <span className="font-medium tabular-nums">
-                {Math.round(window.utilization * 100)}%
+                {reset ? "—" : `${Math.round(utilization * 100)}%`}
               </span>
             </div>
-            <Meter fraction={window.utilization} color={utilizationColor(window.utilization)} />
+            <Meter fraction={utilization} color={utilizationColor(utilization)} />
             {meta && <div className="text-[0.625rem] text-muted-foreground">{meta}</div>}
           </div>
         );
@@ -979,6 +1005,16 @@ function LimitsPanel({
       <div className="flex justify-between text-muted-foreground">
         <span>{t("usageOverage")}</span>
         <span className="text-foreground">{overage}</span>
+      </div>
+      <div className="text-[0.625rem] text-muted-foreground">
+        {t("usageLimitsAsOf", {
+          time: new Date(row.at).toLocaleString(undefined, {
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          }),
+        })}
       </div>
     </div>
   );

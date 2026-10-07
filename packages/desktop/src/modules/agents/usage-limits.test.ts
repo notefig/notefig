@@ -60,6 +60,27 @@ describe("limitsFrom", () => {
     ).toBe("warning");
   });
 
+  it("reads the one window an event without unifiedWindows speaks for", () => {
+    const limits = limitsFrom(
+      update({
+        "_claude/rateLimit": {
+          status: "allowed_warning",
+          resetsAt: 1791342000,
+          rateLimitType: "seven_day",
+          utilization: 0.81,
+          isUsingOverage: false,
+        },
+      }),
+    );
+    expect(limits).toEqual({
+      status: "warning",
+      usingOverage: false,
+      windows: [
+        { id: "seven_day", utilization: 0.81, resetsAt: 1791342000000, durationMs: 7 * 24 * 3_600_000 },
+      ],
+    });
+  });
+
   it("is null when the harness reports no limits", () => {
     expect(limitsFrom(update(undefined))).toBeNull();
     expect(limitsFrom(update({ "cognition.ai/inputTokens": 5 }))).toBeNull();

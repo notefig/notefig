@@ -106,6 +106,37 @@ describe("usage", () => {
     expect(claude?.limits.windows[0].utilization).toBe(0.5);
   });
 
+  it("merges one-window reports, drops windows once reset, and keeps them across a relaunch", async () => {
+    const window = (id: string, utilization: number, resetsAt: number | null) => ({
+      id,
+      utilization,
+      resetsAt,
+      durationMs: null,
+    });
+    const report = (at: number, status: "ok" | "warning", ...windows: ReturnType<typeof window>[]) => ({
+      taskId: "task_1",
+      harnessId: "claude-code",
+      at,
+      limits: { status, windows, usingOverage: false },
+    });
+    const db = createNodeTestDb();
+    const before = createUsage({ persistence: db.get(), hooks });
+    await before.recordLimits(report(10, "ok", window("five_hour", 0.4, 100), window("seven_day", 0.1, 1000)));
+    await before.recordLimits(report(20, "warning", window("seven_day", 0.8, 1000)));
+
+    const after = createUsage({ persistence: db.get(), hooks: createHooks() });
+    await after.limits.preload();
+    expect(after.limits.toArray[0].limits).toEqual({
+      status: "warning",
+      usingOverage: false,
+      windows: [window("five_hour", 0.4, 100), window("seven_day", 0.8, 1000)],
+    });
+
+    // Past five_hour's reset, a report that leaves it out drops it.
+    await after.recordLimits(report(200, "ok", window("seven_day", 0.85, 1000)));
+    expect(after.limits.toArray[0].limits.windows).toEqual([window("seven_day", 0.85, 1000)]);
+  });
+
   it("totals buckets overall, per harness and per model", async () => {
     await usage.recordTurn(event({ usage: turnUsage(10, 0.1, "a") }));
     await usage.recordTurn(event({ at: T0 + HOUR, usage: turnUsage(20, 0.2, "b") }));

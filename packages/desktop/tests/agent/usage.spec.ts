@@ -41,9 +41,7 @@ test("usage shows in the composer, under each prompt, and in settings", async ({
   await page.goto(`${new URL(page.url()).pathname}?settings=usage`);
   const section = page.locator('[data-settings-section="usage"]');
   await expect(section.getByText("Today")).toBeVisible();
-  await expect(section.getByText("By harness")).toBeVisible();
-  await expect(section.getByText("By model")).toBeVisible();
-  await expect(section.locator("tbody tr").first()).toBeVisible();
+  await expect(section.getByText("Turns")).toBeVisible();
 
   // Over time: the session's turns in today's bar, the average day, and
   // the harness in detail (the mock runs under the default harness, the
@@ -53,6 +51,7 @@ test("usage shows in the composer, under each prompt, and in settings", async ({
   const detail = section.getByTestId("usage-harness-detail");
   await expect(detail.getByTestId("usage-limits")).toContainText("five_hour");
   await expect(detail.getByTestId("usage-limits")).toContainText("42%");
+  await expect(detail.getByTestId("usage-limits")).toContainText("As of");
 
   // Cost: a harness that never reports it is greyed in the picker.
   await section.getByRole("button", { name: "Cost", exact: true }).click();
