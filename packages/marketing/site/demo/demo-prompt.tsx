@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { PromptEditor } from "@notefig/widgets";
 import { PromptBlobFace } from "@notefig/widgets/prompt/ui/prompt-blob";
+import type { PromptChangeNavigation } from "@notefig/widgets/prompt/change-navigator";
 import { SuggestionList } from "@notefig/widgets/prompt/composer/mention-menu";
 import {
   deriveActiveToolLine,
@@ -45,10 +46,21 @@ type PromptState = {
 };
 
 function composing(draft: string, mention: string | null = null): PromptState {
-  return { phase: "composing", draft, entries: [], queueAhead: 0, mention, written: 0 };
+  return {
+    phase: "composing",
+    draft,
+    entries: [],
+    queueAhead: 0,
+    mention,
+    written: 0,
+  };
 }
 
-function bound(phase: BlobPhase, entries: AgentEntry[] = [], written = 0): PromptState {
+function bound(
+  phase: BlobPhase,
+  entries: AgentEntry[] = [],
+  written = 0,
+): PromptState {
   return { phase, draft: "", entries, queueAhead: 0, mention: null, written };
 }
 
@@ -79,7 +91,13 @@ function toolEntry(
 }
 
 function reply(text: string): AgentEntry {
-  return { id: "evt_9", taskId: "task_demo", turnId: "trn_demo", type: "assistant", text };
+  return {
+    id: "evt_9",
+    taskId: "task_demo",
+    turnId: "trn_demo",
+    type: "assistant",
+    text,
+  };
 }
 
 /**
@@ -111,11 +129,18 @@ function round({
   return [
     { ms: 500, state: () => bound("sending") },
     { ms: readMs, state: () => bound("running", reading) },
-    { ms: editMs, state: (ms: number) => bound("running", editing, ms / editMs) },
+    {
+      ms: editMs,
+      state: (ms: number) => bound("running", editing, ms / editMs),
+    },
     {
       ms: 900,
       state: (ms: number) =>
-        bound("running", [...edited, reply(typed(replyText, ms, 14) || " ")], 1),
+        bound(
+          "running",
+          [...edited, reply(typed(replyText, ms, 14) || " ")],
+          1,
+        ),
     },
     { ms: 1, state: () => bound("done", [...edited, reply(replyText)], 1) },
   ];
@@ -146,13 +171,18 @@ const WRITING = [
     ms: 1300,
     state: (ms: number) => {
       const query = typed(`@${MENTION_QUERY}`, ms, 110);
-      return composing(PROMPT_LEAD + query, query.length > 0 ? query.slice(1) : null);
+      return composing(
+        PROMPT_LEAD + query,
+        query.length > 0 ? query.slice(1) : null,
+      );
     },
   },
   {
     ms: 600 + PROMPT_TAIL.length * TYPE_MS,
     state: (ms: number) =>
-      composing(`${PROMPT_LEAD}@${MENTION_PATH}${typed(PROMPT_TAIL, ms - 600, TYPE_MS)}`),
+      composing(
+        `${PROMPT_LEAD}@${MENTION_PATH}${typed(PROMPT_TAIL, ms - 600, TYPE_MS)}`,
+      ),
   },
   { ms: 500, state: () => composing(PROMPT_TEXT) },
 ];
@@ -161,7 +191,9 @@ const CLAUDE_TRACK = timeline<PromptState>([
   ...WRITING,
   ...round({
     read: ROADMAP_PATH,
-    edit: ACTION_ITEMS.map((item) => `- [ ] ${item.task} (${item.owner})`).join("\n"),
+    edit: ACTION_ITEMS.map((item) => `- [ ] ${item.task} (${item.owner})`).join(
+      "\n",
+    ),
     replyText: "Added three action items with owners, ordered by the roadmap.",
     readMs: 1100,
     editMs: 2600,
@@ -191,7 +223,8 @@ const OPENCODE_TRACK = timeline<PromptState>([
 ]);
 
 /** OpenCode is summoned once Claude's prompt is on its way. */
-const OPENCODE_START = WRITING.reduce((sum, segment) => sum + segment.ms, 0) + 500;
+const OPENCODE_START =
+  WRITING.reduce((sum, segment) => sum + segment.ms, 0) + 500;
 const HOLD_MS = 4500;
 const COLLAB_TOTAL =
   Math.max(CLAUDE_TRACK.total, OPENCODE_START + OPENCODE_TRACK.total) + HOLD_MS;
@@ -214,6 +247,18 @@ const TURN_STATUS: Partial<Record<BlobPhase, AgentTurn["status"]>> = {
 };
 
 /** The widget's own derivations, run over the state's transcript. */
+/** The demo's turn writes nothing for real, so it has no changes to
+ *  review: each touched file's chip just opens it. */
+const NO_CHANGES: PromptChangeNavigation = {
+  count: 0,
+  reviewing: false,
+  color: "",
+  toggleReview: noop,
+  showChanges: noop,
+  index: null,
+  step: noop,
+};
+
 function displayFor({ phase, entries, queueAhead }: PromptState) {
   const done = phase === "done";
   return {
@@ -223,6 +268,8 @@ function displayFor({ phase, entries, queueAhead }: PromptState) {
     assistantTeaser:
       phase === "running" || done ? deriveLatestAssistantLine(entries) : null,
     queueAhead,
+    changeCounts: new Map<string, number>(),
+    changes: NO_CHANGES,
   };
 }
 
@@ -280,7 +327,8 @@ export function DemoCollaboration({
   const ref = useRef<HTMLDivElement>(null);
   const ms = useDemoClock(ref, COLLAB_TOTAL);
   const claude = CLAUDE_TRACK.at(ms);
-  const opencode = ms >= OPENCODE_START ? OPENCODE_TRACK.at(ms - OPENCODE_START) : null;
+  const opencode =
+    ms >= OPENCODE_START ? OPENCODE_TRACK.at(ms - OPENCODE_START) : null;
 
   return (
     <div ref={ref} className="w-full min-w-0">
@@ -289,11 +337,21 @@ export function DemoCollaboration({
           <div className="prose prose-sm max-w-none p-4">
             <h2>{document.heading}</h2>
             <p>{document.body}</p>
-            <AgentWidget harnessId="claude-code" label="Claude Code" state={claude} prompt={PROMPT_TEXT} />
+            <AgentWidget
+              harnessId="claude-code"
+              label="Claude Code"
+              state={claude}
+              prompt={PROMPT_TEXT}
+            />
             <ActionItems written={claude.written} />
             <h3>For the team channel</h3>
             {opencode && (
-              <AgentWidget harnessId="opencode" label="OpenCode" state={opencode} prompt={SUMMARY_PROMPT} />
+              <AgentWidget
+                harnessId="opencode"
+                label="OpenCode"
+                state={opencode}
+                prompt={SUMMARY_PROMPT}
+              />
             )}
             <Summary written={opencode?.written ?? 0} />
           </div>
@@ -338,7 +396,8 @@ function ActionItems({ written }: { written: number }) {
       <ul>
         {ACTION_ITEMS.slice(0, shown).map((item) => (
           <li key={item.task} className="demo-rise">
-            {item.task} <span className="text-muted-foreground">({item.owner})</span>
+            {item.task}{" "}
+            <span className="text-muted-foreground">({item.owner})</span>
           </li>
         ))}
       </ul>
@@ -383,7 +442,11 @@ function PromptFace({
         isSending={state.phase === "sending"}
         display={displayFor(state)}
         draft={sendingDraft(state, prompt)}
-        draftIO={{ read: () => state.draft, write: noop, holdsCaret: () => false }}
+        draftIO={{
+          read: () => state.draft,
+          write: noop,
+          holdsCaret: () => false,
+        }}
         draftSlot={<DraftText text={state.draft} />}
         reference={referenceFor(reference)}
         actions={PROMPT_ACTIONS}
