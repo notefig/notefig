@@ -29,6 +29,7 @@ const ID_PREFIXES = {
   permission: "per",
   diagnostic: "dg",
   usage: "usg",
+  usageLimits: "ulm",
 } as const;
 
 export type IdPrefix = keyof typeof ID_PREFIXES;
@@ -123,8 +124,13 @@ export function newUsageBucketId(hourMs: number): string {
   return createId("usage", "ascending", hourMs);
 }
 
+/** A harness's stored account limits (one row per harness). */
+export function newUsageLimitsId(): string {
+  return createId("usageLimits", "ascending");
+}
+
 /**
- * Decode the creation time of an *ascending* id (msg_/evt_/trn_/per_/usg_).
+ * Decode the creation time of an *ascending* id (msg_/evt_/trn_/per_/usg_/ulm_).
  * Returns undefined for malformed input; do not call on descending ids
  * (task_) — the time field is inverted there.
  */

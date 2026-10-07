@@ -539,6 +539,17 @@ export function echo(): MockScenario {
       used: context,
       size: 200_000,
       cost: { amount: meter.cost, currency: "USD" },
+      // Account limits in Claude's shape, so the limits path runs too.
+      _meta: {
+        "_claude/rateLimit": {
+          status: "allowed",
+          isUsingOverage: false,
+          unifiedWindows: {
+            five_hour: { utilization: 0.42, resetsAt: Math.floor(Date.now() / 1000) + 7_200 },
+            seven_day: { utilization: 0.18, resetsAt: Math.floor(Date.now() / 1000) + 259_200 },
+          },
+        },
+      },
     });
     return {
       stopReason: "end_turn",

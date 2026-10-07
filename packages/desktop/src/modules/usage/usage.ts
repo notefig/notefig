@@ -1,5 +1,6 @@
 /**
- * Usage — what agent turns have spent, kept as an hourly time series.
+ * Usage — what agent turns have spent, kept as an hourly time series, and
+ * where each harness account last stood against its limits.
  *
  * The agent subsystem keeps each session's own total on its task row; this
  * module keeps what outlives a session: one bucket per UTC hour, harness and
@@ -9,8 +10,13 @@
  *
  * Every bucket is a `UsageSummary`, kept by the same `addTurn` as the task
  * row's session total, so the levels add up the same way.
+ *
+ * History only grows, so the collection syncs on demand: nothing is loaded
+ * at boot, and each view's hour range is read out of SQLite (indexed on
+ * `hour`) when it is queried. Views group and add up what they loaded with
+ * the pure functions in `series.ts`.
  */
-import { BasicIndex, createCollection } from "@tanstack/react-db";
+import { BasicIndex, createCollection, eq, queryOnce } from "@tanstack/react-db";
 import {
   persistedCollectionOptions,
   type PersistedCollectionPersistence,
@@ -21,13 +27,16 @@ import {
   addTurn,
   emptySummary,
   newUsageBucketId,
+  newUsageLimitsId,
   type ModelUsage,
+  type UsageLimits,
   type UsageSummary,
 } from "@notefig/shared/agent";
 import { defineModule, type CoreHookMap, type Hooks } from "@notefig/core";
 import { platformModule } from "@/core/services";
 
 export const USAGE_BUCKETS_COLLECTION_ID = "usage-buckets";
+export const USAGE_LIMITS_COLLECTION_ID = "usage-limits";
 
 const HOUR_MS = 3_600_000;
 
@@ -38,6 +47,17 @@ export type UsageBucket = UsageSummary & {
   hour: number;
   harnessId: string;
   workspacePath: string;
+};
+
+/** A harness account's limits as last reported — one row per harness,
+ *  replaced by each report. */
+export type HarnessLimits = {
+  /** ulm_ — minted when the harness first reported. */
+  limitsId: string;
+  harnessId: string;
+  /** When the report arrived (epoch ms). */
+  at: number;
+  limits: UsageLimits;
 };
 
 export type UsageTotals = {
@@ -73,18 +93,36 @@ function createBucketsCollection(persistence: PersistedCollectionPersistence) {
       id: USAGE_BUCKETS_COLLECTION_ID,
       getKey: (bucket) => bucket.bucketId,
       persistence,
+      syncMode: "on-demand",
     }),
   );
 }
 
 export type UsageBucketsCollection = ReturnType<typeof createBucketsCollection>;
 
+function createLimitsCollection(persistence: PersistedCollectionPersistence) {
+  return createCollection(
+    persistedCollectionOptions<HarnessLimits, string>({
+      id: USAGE_LIMITS_COLLECTION_ID,
+      getKey: (row) => row.limitsId,
+      persistence,
+    }),
+  );
+}
+
+export type HarnessLimitsCollection = ReturnType<typeof createLimitsCollection>;
+
 /** `core.usage`: the time series and what keeps it. */
 export interface UsageApi {
   readonly buckets: UsageBucketsCollection;
+  /** One row per harness that has reported limits. Small, so loaded whole. */
+  readonly limits: HarnessLimitsCollection;
   /** The listener's body: fold one turn into its hour's bucket. */
   recordTurn(detail: CoreHookMap["agent:usage"]): Promise<void>;
-  /** Boot: listen for turns' usage. Returns the unsubscribe. */
+  /** The listener's body: replace a harness's stored limits. */
+  recordLimits(detail: CoreHookMap["agent:usage-limits"]): Promise<void>;
+  /** Boot: listen for turns' usage and harnesses' limits. Returns the
+   *  unsubscribe. */
   track(): () => void;
 }
 
@@ -93,40 +131,40 @@ export function createUsage({
   hooks,
 }: {
   persistence: PersistedCollectionPersistence;
-  /** Where settled turns' usage is announced. */
+  /** Where settled turns' usage and harnesses' limits are announced. */
   hooks: Pick<Hooks, "on">;
 }): UsageApi {
   const buckets = createBucketsCollection(persistence);
-  const bucketsByHour = buckets.createIndex((bucket) => bucket.hour, {
-    indexType: BasicIndex,
-  });
+  const limits = createLimitsCollection(persistence);
+  // Every query is an hour range; the index is mirrored into SQLite, which
+  // is what keeps an on-demand range load from scanning the whole history.
+  buckets.createIndex((bucket) => bucket.hour, { indexType: BasicIndex });
 
-  const bucketFor = (
+  /** The hour's bucket for this harness and workspace, loaded from SQLite
+   *  if no view has it in memory. */
+  const bucketFor = async (
     hour: number,
     harnessId: string,
     workspacePath: string,
-  ): UsageBucket | undefined => {
-    for (const key of bucketsByHour.equalityLookup(hour)) {
-      const bucket = buckets.get(String(key));
-      if (
-        bucket &&
-        bucket.harnessId === harnessId &&
-        bucket.workspacePath === workspacePath
-      ) {
-        return bucket;
-      }
-    }
-    return undefined;
+  ): Promise<UsageBucket | undefined> => {
+    const inHour = await queryOnce((q) =>
+      q.from({ bucket: buckets }).where(({ bucket }) => eq(bucket.hour, hour)),
+    );
+    const found = inHour.find(
+      (bucket) =>
+        bucket.harnessId === harnessId && bucket.workspacePath === workspacePath,
+    );
+    return found && buckets.get(found.bucketId);
   };
 
   // Writes run one at a time, each to durability, so two turns landing in
-  // the same hour can never both find no bucket and insert two.
+  // the same hour (or two limit reports from one harness) can never both
+  // find no row and insert two.
   let writes: Promise<void> = Promise.resolve();
 
   const write = async (detail: CoreHookMap["agent:usage"]): Promise<void> => {
-    await buckets.preload();
     const hour = startOfHour(detail.at);
-    const existing = bucketFor(hour, detail.harnessId, detail.workspacePath);
+    const existing = await bucketFor(hour, detail.harnessId, detail.workspacePath);
     const transaction = existing
       ? buckets.update(existing.bucketId, (draft) => {
           // From the stored row, not the draft: draft proxies must not end
@@ -151,19 +189,53 @@ export function createUsage({
     await transaction.isPersisted.promise;
   };
 
+  const writeLimits = async (
+    detail: CoreHookMap["agent:usage-limits"],
+  ): Promise<void> => {
+    await limits.preload();
+    const existing = limits.toArray.find((row) => row.harnessId === detail.harnessId);
+    // Reports can arrive out of order across sessions; keep the newest.
+    if (existing && existing.at > detail.at) return;
+    const transaction = existing
+      ? limits.update(existing.limitsId, (draft) => {
+          draft.at = detail.at;
+          draft.limits = detail.limits;
+        })
+      : limits.insert({
+          limitsId: newUsageLimitsId(),
+          harnessId: detail.harnessId,
+          at: detail.at,
+          limits: detail.limits,
+        });
+    await transaction.isPersisted.promise;
+  };
+
+  const serialized = <T>(run: (detail: T) => Promise<void>) => (detail: T) => {
+    const next = writes.then(() => run(detail));
+    writes = next.catch(() => {});
+    return next;
+  };
+
   const api: UsageApi = {
     buckets,
-    recordTurn(detail) {
-      const next = writes.then(() => write(detail));
-      writes = next.catch(() => {});
-      return next;
-    },
+    limits,
+    recordTurn: serialized(write),
+    recordLimits: serialized(writeLimits),
     track() {
-      return hooks.on("agent:usage", (detail) => {
+      const offUsage = hooks.on("agent:usage", (detail) => {
         void api.recordTurn(detail).catch((error) => {
           console.error("Failed to record a turn's usage:", error);
         });
       });
+      const offLimits = hooks.on("agent:usage-limits", (detail) => {
+        void api.recordLimits(detail).catch((error) => {
+          console.error("Failed to record a harness's limits:", error);
+        });
+      });
+      return () => {
+        offUsage();
+        offLimits();
+      };
     },
   };
   return api;

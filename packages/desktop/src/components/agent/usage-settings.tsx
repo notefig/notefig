@@ -1,7 +1,7 @@
 /**
  * Settings → Usage: what agents have spent today, from the usage module's
- * hourly time series — overall, per harness and per model. A first cut:
- * today only, no charts.
+ * hourly time series — overall, per harness and per model — then the same
+ * series over time (`UsageOverTime`).
  */
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -13,6 +13,7 @@ import {
 import { useUsageTotals } from "@/modules/usage/react";
 import { useHarnessLabels } from "@/hooks/use-harness-selection";
 import { formatCost, formatTokens } from "@/utils/usage-format";
+import { UsageOverTime } from "./usage-over-time";
 
 /** Local midnight today, and the end of the current hour (so the live
  *  bucket is included). Recomputed per mount: the section is opened, read
@@ -24,6 +25,15 @@ function todayRange(): { from: number; to: number } {
 }
 
 export function UsageSettings() {
+  return (
+    <div className="space-y-4">
+      <UsageToday />
+      <UsageOverTime />
+    </div>
+  );
+}
+
+function UsageToday() {
   const { t } = useTranslation();
   const range = useMemo(todayRange, []);
   const totals = useUsageTotals(range);

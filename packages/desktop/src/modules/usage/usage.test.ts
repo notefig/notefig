@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { createHooks, type CoreHookMap, type Hooks } from "@notefig/core";
 import { idTimestamp, type TurnUsage } from "@notefig/shared/agent";
 import { createNodeTestDb } from "@/testing/node-db";
-import { createUsage, startOfHour, totalsOf, type UsageApi } from "@/modules/usage";
+import {
+  createUsage,
+  startOfHour,
+  totalsOf,
+  USAGE_BUCKETS_COLLECTION_ID,
+  type UsageApi,
+} from "@/modules/usage";
 
 const HOUR = 3_600_000;
 const T0 = Date.UTC(2026, 9, 6, 14, 5);
@@ -61,6 +67,43 @@ describe("usage", () => {
     await usage.recordTurn(event({ harnessId: "devin", usage: turnUsage(3, null) }));
     await usage.recordTurn(event({ workspacePath: "/other" }));
     expect(usage.buckets.toArray).toHaveLength(3);
+  });
+
+  it("loads nothing at boot, and still adds to a stored hour after a relaunch", async () => {
+    const db = createNodeTestDb();
+    const before = createUsage({ persistence: db.get(), hooks });
+    await before.recordTurn(event());
+
+    const after = createUsage({ persistence: db.get(), hooks: createHooks() });
+    await Promise.resolve();
+    expect(after.buckets.toArray).toEqual([]);
+
+    await after.recordTurn(event({ turnId: "trn_2", usage: turnUsage(5, 0.2) }));
+    const stored = db.storedRows(USAGE_BUCKETS_COLLECTION_ID);
+    expect(stored).toHaveLength(1);
+    expect(stored[0].value).toMatchObject({ turns: 2, hour: startOfHour(T0) });
+  });
+
+  it("keeps each harness's newest limits, one row per harness", async () => {
+    const limits = (utilization: number) => ({
+      status: "ok" as const,
+      windows: [{ id: "five_hour", utilization, resetsAt: null, durationMs: null }],
+      usingOverage: null,
+    });
+    const stop = usage.track();
+    hooks.emit("agent:usage-limits", { taskId: "task_1", harnessId: "claude-code", at: 2, limits: limits(0.2) });
+    await usage.recordLimits({ taskId: "task_2", harnessId: "claude-code", at: 3, limits: limits(0.5) });
+    // An older report arriving late doesn't win.
+    await usage.recordLimits({ taskId: "task_1", harnessId: "claude-code", at: 1, limits: limits(0.9) });
+    await usage.recordLimits({ taskId: "task_3", harnessId: "other", at: 1, limits: limits(0.1) });
+    stop();
+
+    const rows = usage.limits.toArray;
+    expect(rows).toHaveLength(2);
+    const claude = rows.find((row) => row.harnessId === "claude-code");
+    expect(claude?.limitsId).toMatch(/^ulm_/);
+    expect(claude?.at).toBe(3);
+    expect(claude?.limits.windows[0].utilization).toBe(0.5);
   });
 
   it("totals buckets overall, per harness and per model", async () => {
