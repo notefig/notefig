@@ -31,7 +31,16 @@ function niceStep(x: number): number {
   if (!(x > 0)) return 1;
   const power = 10 ** Math.floor(Math.log10(x));
   const fraction = x / power;
-  const nice = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 2.5 ? 2.5 : fraction <= 5 ? 5 : 10;
+  const nice =
+    fraction <= 1
+      ? 1
+      : fraction <= 2
+        ? 2
+        : fraction <= 2.5
+          ? 2.5
+          : fraction <= 5
+            ? 5
+            : 10;
   return nice * power;
 }
 
@@ -39,7 +48,9 @@ function niceStep(x: number): number {
  *  tallest — or over `peak`, when what is drawn reaches higher (a curve
  *  between points). */
 export function scaleOf(bars: readonly ChartBar[], peak = 0) {
-  const totals = bars.map((bar) => bar.values.reduce((sum, value) => sum + value, 0));
+  const totals = bars.map((bar) =>
+    bar.values.reduce((sum, value) => sum + value, 0),
+  );
   const step = niceStep(Math.max(peak, ...totals) / TICKS);
   return { totals, step, top: step * TICKS };
 }
@@ -49,7 +60,7 @@ export function UsageBarChart({
   bars,
   format,
   formatAxis = format,
-  height,
+  className,
   overlay,
   testId,
 }: {
@@ -58,8 +69,10 @@ export function UsageBarChart({
   /** A value as the tooltip shows it. */
   format: (value: number) => string;
   formatAxis?: (value: number) => string;
-  /** Plot height in px. */
-  height: number;
+  /** Sizes the chart: a height (`h-[180px]`) or a minimum when the layout
+   *  decides it (`min-h-[13.5rem]` as a stretched grid item). The plot
+   *  takes what the axis labels under it leave. */
+  className: string;
   /** Shown over the plot, which is then greyed (e.g. "No cost data"). */
   overlay?: ReactNode;
   testId?: string;
@@ -74,85 +87,84 @@ export function UsageBarChart({
   const hover = !ghost && hovered !== null && hovered < count ? hovered : null;
 
   return (
-    <div className="flex gap-2 text-[0.6875rem]" data-testid={testId}>
-      <AxisLabels height={height} step={step} format={formatAxis} hidden={ghost} />
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <div
-          className="relative"
-          style={{ height }}
-          onMouseLeave={() => setHovered(null)}
-        >
-          <GridLines />
-          <div className="absolute inset-0 flex" style={{ gap }}>
-            {bars.map((bar, index) => (
-              <div
-                key={bar.key}
-                className={cn(
-                  "flex min-w-0 flex-1 flex-col items-center justify-end",
-                  index === hover && "bg-foreground/5",
-                )}
-                style={{ borderRadius: radius }}
-                onMouseEnter={() => setHovered(index)}
-                data-testid="usage-bar"
-              >
-                <div
-                  className="flex w-[70%] max-w-14 flex-col-reverse overflow-hidden"
-                  style={{
-                    height: `${top ? (totals[index] / top) * 100 : 0}%`,
-                    borderRadius: `${radius} ${radius} 0 0`,
-                  }}
-                >
-                  {series.map((s, seriesIndex) => (
-                    <div
-                      key={s.key}
-                      className="shrink-0"
-                      style={{
-                        height: totals[index]
-                          ? `${(bar.values[seriesIndex] / totals[index]) * 100}%`
-                          : 0,
-                        background: ghost ? "hsl(var(--muted-foreground) / 0.25)" : s.color,
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-          {hover !== null && (
-            <Tooltip
-              bar={bars[hover]}
-              total={totals[hover]}
-              series={series}
-              format={format}
-              totalLabel={t("usageTotal")}
-              style={
-                (hover + 0.5) / count < 0.6
-                  ? { left: `${((hover + 1) / count) * 100}%`, transform: "translateX(8px)" }
-                  : {
-                      left: `${(hover / count) * 100}%`,
-                      transform: "translateX(calc(-100% - 8px))",
-                    }
-              }
-            />
-          )}
-          {ghost && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <span className="rounded-full border border-border bg-background px-3 py-1 text-xs text-muted-foreground">
-                {overlay}
-              </span>
-            </div>
-          )}
-        </div>
-        <div className="flex" style={{ gap }}>
-          {bars.map((bar) => (
+    <div className={cn(CHART_GRID, className)} data-testid={testId}>
+      <AxisLabels step={step} format={formatAxis} hidden={ghost} />
+      <div className="relative" onMouseLeave={() => setHovered(null)}>
+        <GridLines />
+        <div className="absolute inset-0 flex" style={{ gap }}>
+          {bars.map((bar, index) => (
             <div
               key={bar.key}
-              className="flex min-w-0 flex-1 justify-center whitespace-nowrap text-muted-foreground"
+              className={cn(
+                "flex min-w-0 flex-1 flex-col items-center justify-end",
+                index === hover && "bg-foreground/5",
+              )}
+              style={{ borderRadius: radius }}
+              onMouseEnter={() => setHovered(index)}
+              data-testid="usage-bar"
             >
-              {bar.axisLabel}
+              <div
+                className="flex w-[70%] max-w-14 flex-col-reverse overflow-hidden"
+                style={{
+                  height: `${top ? (totals[index] / top) * 100 : 0}%`,
+                  borderRadius: `${radius} ${radius} 0 0`,
+                }}
+              >
+                {series.map((s, seriesIndex) => (
+                  <div
+                    key={s.key}
+                    className="shrink-0"
+                    style={{
+                      height: totals[index]
+                        ? `${(bar.values[seriesIndex] / totals[index]) * 100}%`
+                        : 0,
+                      background: ghost
+                        ? "hsl(var(--muted-foreground) / 0.25)"
+                        : s.color,
+                    }}
+                  />
+                ))}
+              </div>
             </div>
           ))}
         </div>
+        {hover !== null && (
+          <Tooltip
+            bar={bars[hover]}
+            total={totals[hover]}
+            series={series}
+            format={format}
+            totalLabel={t("usageTotal")}
+            style={
+              (hover + 0.5) / count < 0.6
+                ? {
+                    left: `${((hover + 1) / count) * 100}%`,
+                    transform: "translateX(8px)",
+                  }
+                : {
+                    left: `${(hover / count) * 100}%`,
+                    transform: "translateX(calc(-100% - 8px))",
+                  }
+            }
+          />
+        )}
+        {ghost && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <span className="rounded-full border border-border bg-background px-3 py-1 text-xs text-muted-foreground">
+              {overlay}
+            </span>
+          </div>
+        )}
+      </div>
+      <div className="col-start-2 flex" style={{ gap }}>
+        {bars.map((bar) => (
+          <div
+            key={bar.key}
+            className="flex min-w-0 flex-1 justify-center whitespace-nowrap text-muted-foreground"
+          >
+            {bar.axisLabel}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -160,20 +172,23 @@ export function UsageBarChart({
 
 const TICK_INDEXES = Array.from({ length: TICKS + 1 }, (_, index) => index);
 
-/** The value axis: `TICKS` steps of `step`, beside a plot `height` tall. */
+/** Both charts' frame: the value axis beside the plot, the period labels
+ *  under it. The plot row takes whatever height the chart has left. */
+export const CHART_GRID =
+  "grid grid-cols-[2.5rem_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_1rem] gap-x-2 gap-y-1.5 text-[0.6875rem]";
+
+/** The value axis: `TICKS` steps of `step`, as tall as the plot beside it. */
 export function AxisLabels({
-  height,
   step,
   format,
   hidden = false,
 }: {
-  height: number;
   step: number;
   format: (value: number) => string;
   hidden?: boolean;
 }) {
   return (
-    <div className="relative w-10 shrink-0" style={{ height }}>
+    <div className="relative">
       {!hidden &&
         TICK_INDEXES.map((index) => (
           <div
@@ -193,7 +208,10 @@ export function GridLines() {
   return TICK_INDEXES.map((index) => (
     <div
       key={index}
-      className={cn("absolute inset-x-0 border-t border-border", index > 0 && "border-dashed")}
+      className={cn(
+        "absolute inset-x-0 border-t border-border",
+        index > 0 && "border-dashed",
+      )}
       style={{ bottom: `${(index / TICKS) * 100}%` }}
     />
   ));
@@ -226,9 +244,16 @@ export function Tooltip({
         .reverse()
         .map((row) => (
           <div key={row.key} className="flex items-center gap-2">
-            <span className="size-2 shrink-0 rounded-full" style={{ background: row.color }} />
-            <span className="flex-1 whitespace-nowrap text-muted-foreground">{row.name}</span>
-            <span className="font-medium tabular-nums">{format(row.value)}</span>
+            <span
+              className="size-2 shrink-0 rounded-full"
+              style={{ background: row.color }}
+            />
+            <span className="flex-1 whitespace-nowrap text-muted-foreground">
+              {row.name}
+            </span>
+            <span className="font-medium tabular-nums">
+              {format(row.value)}
+            </span>
           </div>
         ))}
       {series.length > 1 && (

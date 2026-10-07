@@ -4,7 +4,6 @@ import {
   newMessageId,
   newTaskId,
   newTurnId,
-  newUsageBucketId,
 } from "./ids";
 
 describe("agent ids", () => {
@@ -40,20 +39,4 @@ describe("agent ids", () => {
     expect(idTimestamp("msg_short")).toBeUndefined();
   });
 
-  it("mints usage bucket ids at the bucket's hour", () => {
-    const hour = Date.UTC(2026, 9, 6, 14);
-    const id = newUsageBucketId(hour);
-    expect(id).toMatch(/^usg_[0-9a-f]{16}[0-9A-Za-z]{10}$/);
-    expect(idTimestamp(id)).toBe(hour);
-    expect(newUsageBucketId(hour - 3_600_000) < id).toBe(true);
-  });
-
-  it("an explicit-time id never disturbs live ordering", () => {
-    const ids: string[] = [];
-    for (let i = 0; i < 200; i++) {
-      ids.push(newEventId());
-      newUsageBucketId(0);
-    }
-    expect([...ids].sort()).toEqual(ids);
-  });
 });

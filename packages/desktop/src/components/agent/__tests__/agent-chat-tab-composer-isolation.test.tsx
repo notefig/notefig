@@ -29,6 +29,7 @@ import { testAgents, type TestAgents } from "@/testing/test-agents";
 import { AgentChatTab } from "@/components/agent/agent-chat-tab";
 import { useTaskEntries } from "@/modules/agents/react";
 import { kvModule } from "@/modules/kv";
+import { harnessesModule } from "@/modules/agents/harnesses";
 import { clearComposerDraft } from "@/components/agent/composer-draft-store";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -60,6 +61,8 @@ beforeEach(() => {
         },
       }),
       kvModule,
+      // The composer names the session's harness (`core.harnesses.label`).
+      harnessesModule,
     ],
   });
 });

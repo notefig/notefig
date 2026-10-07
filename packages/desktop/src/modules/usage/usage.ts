@@ -31,6 +31,7 @@ import {
 } from "@notefig/shared/agent";
 import { defineModule, type CoreHookMap, type Hooks } from "@notefig/core";
 import { platformModule } from "@/core/services";
+import { harnessesModule } from "@/modules/agents/harnesses";
 
 export const USAGE_BUCKETS_COLLECTION_ID = "usage-buckets";
 export const USAGE_LIMITS_COLLECTION_ID = "usage-limits";
@@ -38,7 +39,7 @@ export const USAGE_LIMITS_COLLECTION_ID = "usage-limits";
 const HOUR_MS = 3_600_000;
 
 export type UsageBucket = UsageSummary & {
-  /** usg_ — an ascending entity id minted at `hour`, so ids sort by hour. */
+  /** usg_ — an entity id; buckets are found by `hour`, never by id. */
   bucketId: string;
   /** Epoch ms at the start of the UTC hour the bucket covers. */
   hour: number;
@@ -106,15 +107,14 @@ function createLimitsCollection(persistence: PersistedCollectionPersistence) {
 
 export type HarnessLimitsCollection = ReturnType<typeof createLimitsCollection>;
 
-/** `core.usage`: the time series and what keeps it. */
+/** `core.usage`: the time series, read-only — it is written from the agent
+ *  hooks alone. */
 export interface UsageApi {
   readonly buckets: UsageBucketsCollection;
   /** One row per harness that has reported limits. Small, so loaded whole. */
   readonly limits: HarnessLimitsCollection;
-  /** The listener's body: fold one turn into its hour's bucket. */
-  recordTurn(detail: CoreHookMap["agent:usage"]): Promise<void>;
-  /** The listener's body: replace a harness's stored limits. */
-  recordLimits(detail: CoreHookMap["agent:usage-limits"]): Promise<void>;
+  /** Resolves once every usage heard so far is durable. */
+  settled(): Promise<void>;
   /** Boot: listen for turns' usage and harnesses' limits. Returns the
    *  unsubscribe. */
   track(): () => void;
@@ -172,7 +172,7 @@ export function createUsage({
           addTurn(
             {
               ...emptySummary(),
-              bucketId: newUsageBucketId(hour),
+              bucketId: newUsageBucketId(),
               hour,
               harnessId: detail.harnessId,
               workspacePath: detail.workspacePath,
@@ -205,35 +205,29 @@ export function createUsage({
     await transaction.isPersisted.promise;
   };
 
-  const serialized = <T>(run: (detail: T) => Promise<void>) => (detail: T) => {
-    const next = writes.then(() => run(detail));
-    writes = next.catch(() => {});
-    return next;
-  };
+  const serialized =
+    <T>(run: (detail: T) => Promise<void>, failure: string) =>
+    (detail: T) => {
+      writes = writes
+        .then(() => run(detail))
+        .catch((error) => console.error(failure, error));
+    };
+  const recordTurn = serialized(write, "Failed to record a turn's usage:");
+  const recordLimits = serialized(writeLimits, "Failed to record a harness's limits:");
 
-  const api: UsageApi = {
+  return {
     buckets,
     limits,
-    recordTurn: serialized(write),
-    recordLimits: serialized(writeLimits),
+    settled: () => writes,
     track() {
-      const offUsage = hooks.on("agent:usage", (detail) => {
-        void api.recordTurn(detail).catch((error) => {
-          console.error("Failed to record a turn's usage:", error);
-        });
-      });
-      const offLimits = hooks.on("agent:usage-limits", (detail) => {
-        void api.recordLimits(detail).catch((error) => {
-          console.error("Failed to record a harness's limits:", error);
-        });
-      });
+      const offUsage = hooks.on("agent:usage", recordTurn);
+      const offLimits = hooks.on("agent:usage-limits", recordLimits);
       return () => {
         offUsage();
         offLimits();
       };
     },
   };
-  return api;
 }
 
 declare module "@notefig/core" {
@@ -245,7 +239,8 @@ declare module "@notefig/core" {
 /** Turns' usage, kept per hour beyond the sessions that spent it. */
 export const usageModule = defineModule({
   name: "usage",
-  needs: [platformModule],
+  // Harnesses: the views read what each one reports (`core.harnesses`).
+  needs: [platformModule, harnessesModule],
   register: (ctx) =>
     createUsage({ persistence: ctx.use("platform").db.get(), hooks: ctx.hooks }),
   boot: (usage) => usage.track(),

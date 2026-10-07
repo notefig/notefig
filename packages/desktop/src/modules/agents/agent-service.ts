@@ -935,11 +935,12 @@ export class AgentTask {
       }
       // A cancel settles the turn before its response lands; what the
       // response says the turn spent still counts.
-      if (this.currentTurn?.turnId !== turnId) {
-        this.recordTurnUsage(turnId, response, Date.now());
-        return "cancelled";
-      }
-      return this.finishTurn(response.stopReason, "completed", undefined, response);
+      const status =
+        this.currentTurn?.turnId !== turnId
+          ? "cancelled"
+          : this.finishTurn(response.stopReason, "completed");
+      this.recordTurnUsage(turnId, response);
+      return status;
     } catch (error) {
       const message = errorMessage(error);
       // Logged-out claude-code-acp fails here with "Authentication required"
@@ -950,7 +951,9 @@ export class AgentTask {
         this.enterAuthBlock({ turnId, text, contextParts });
       }
       this.warn("turn error", message);
-      return this.finishTurn(undefined, "error", message, null);
+      const status = this.finishTurn(undefined, "error", message);
+      this.recordTurnUsage(turnId, null);
+      return status;
     }
   }
 
@@ -1085,17 +1088,10 @@ export class AgentTask {
     }
   }
 
-  /**
-   * @param response What the prompt answered: its usage is the turn's.
-   *   `null` when there is none to wait for (the prompt failed); omitted
-   *   when it is still on its way (a cancel), in which case `runTurn`
-   *   records the turn's usage once it lands.
-   */
   private finishTurn(
     stopReason: string | undefined,
     turnStatus: AgentTurnStatus,
     error?: string,
-    response?: PromptResponse | null,
   ): AgentTurnStatus {
     const turn = this.currentTurn;
     if (!turn) return turnStatus;
@@ -1137,7 +1133,6 @@ export class AgentTask {
             : "completed",
       at,
     });
-    if (response !== undefined) this.recordTurnUsage(turn.turnId, response, at);
 
     this.resolveTurn(
       turn.turnId,
@@ -1170,11 +1165,7 @@ export class AgentTask {
    * difference is resolved in `normalizeTurnUsage`; nothing past this point
    * knows which harness reported it.
    */
-  private recordTurnUsage(
-    turnId: string,
-    response: PromptResponse | null,
-    at: number,
-  ): void {
+  private recordTurnUsage(turnId: string, response: PromptResponse | null): void {
     const row = this.store.tasks.get(this.taskId);
     const { usage, costTotal } = normalizeTurnUsage({
       harnessId: this.harness.id,
@@ -1209,7 +1200,7 @@ export class AgentTask {
       turnId,
       workspacePath: this.workspacePath,
       harnessId: this.harness.id,
-      at,
+      at: Date.now(),
       usage,
     });
   }

@@ -6,8 +6,10 @@
  */
 import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { cn } from "@notefig/ui/utils";
 import {
   AxisLabels,
+  CHART_GRID,
   GridLines,
   scaleOf,
   Tooltip,
@@ -15,8 +17,10 @@ import {
   type ChartSeries,
 } from "./usage-bar-chart";
 
-/** The plot's drawing width; the SVG stretches it to the real width. */
+/** The plot's drawing size; the SVG stretches it to the real box, so a
+ *  height in it is a percentage of the plot. */
 const WIDTH = 1000;
+const HEIGHT = 100;
 
 /** A boundary between bands, in values: its height at each point and, per
  *  segment, the cubic's two inner control heights. */
@@ -41,7 +45,10 @@ function tangentsOf(values: readonly number[]): number[] {
  *  smoothed — so a band is never thinner than zero and can't cross the one
  *  beneath it. With the points evenly spaced, adding cubics is adding
  *  their control heights. */
-export function stackedCurves(bars: readonly ChartBar[], seriesCount: number): Curve[] {
+export function stackedCurves(
+  bars: readonly ChartBar[],
+  seriesCount: number,
+): Curve[] {
   const n = bars.length;
   const segments = Math.max(0, n - 1);
   let curve: Curve = {
@@ -73,7 +80,7 @@ export function UsageAreaChart({
   bars,
   format,
   formatAxis = format,
-  height,
+  className,
   testId,
 }: {
   series: ChartSeries[];
@@ -81,8 +88,8 @@ export function UsageAreaChart({
   bars: ChartBar[];
   format: (value: number) => string;
   formatAxis?: (value: number) => string;
-  /** Plot height in px. */
-  height: number;
+  /** Sizes the chart, as `UsageBarChart`'s does. */
+  className: string;
   testId?: string;
 }) {
   const { t } = useTranslation();
@@ -93,9 +100,13 @@ export function UsageAreaChart({
   const curves = stackedCurves(bars, series.length);
   // Stacked smooth curves can rise above every point's total between two
   // points; a cubic stays within its control heights, so those bound it.
-  const { totals, step, top } = scaleOf(bars, curvePeak(curves[curves.length - 1]));
-  const xOf = (index: number) => (count > 1 ? (index / (count - 1)) * WIDTH : 0);
-  const yOf = (value: number) => height - (top ? (value / top) * height : 0);
+  const { totals, step, top } = scaleOf(
+    bars,
+    curvePeak(curves[curves.length - 1]),
+  );
+  const xOf = (index: number) =>
+    count > 1 ? (index / (count - 1)) * WIDTH : 0;
+  const yOf = (value: number) => HEIGHT - (top ? (value / top) * HEIGHT : 0);
   const fraction = (index: number) => (count > 1 ? index / (count - 1) : 0);
 
   /** A boundary as SVG path commands, left to right or back. */
@@ -106,11 +117,13 @@ export function UsageAreaChart({
     }
     const dx = xOf(1) / 3;
     if (!back) {
-      return at.slice(1).reduce(
-        (path, y, i) =>
-          `${path}C${xOf(i) + dx},${yOf(c1[i])},${xOf(i + 1) - dx},${yOf(c2[i])},${xOf(i + 1)},${yOf(y)}`,
-        `M0,${yOf(at[0])}`,
-      );
+      return at
+        .slice(1)
+        .reduce(
+          (path, y, i) =>
+            `${path}C${xOf(i) + dx},${yOf(c1[i])},${xOf(i + 1) - dx},${yOf(c2[i])},${xOf(i + 1)},${yOf(y)}`,
+          `M0,${yOf(at[0])}`,
+        );
     }
     let path = `L${WIDTH},${yOf(at[count - 1])}`;
     for (let i = count - 2; i >= 0; i--) {
@@ -128,103 +141,110 @@ export function UsageAreaChart({
   };
 
   return (
-    <div className="flex gap-2 text-[0.6875rem]" data-testid={testId}>
-      <AxisLabels height={height} step={step} format={formatAxis} />
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <div
-          ref={plot}
-          className="relative"
-          style={{ height }}
-          onMouseMove={onMove}
-          onMouseLeave={() => setHovered(null)}
+    <div className={cn(CHART_GRID, className)} data-testid={testId}>
+      <AxisLabels step={step} format={formatAxis} />
+      <div
+        ref={plot}
+        className="relative"
+        onMouseMove={onMove}
+        onMouseLeave={() => setHovered(null)}
+      >
+        <GridLines />
+        <svg
+          className="absolute inset-0 size-full overflow-visible"
+          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+          preserveAspectRatio="none"
+          aria-hidden
         >
-          <GridLines />
-          <svg
-            className="absolute inset-0 size-full overflow-visible"
-            viewBox={`0 0 ${WIDTH} ${height}`}
-            preserveAspectRatio="none"
-            aria-hidden
-          >
-            <defs>
-              {series.map((s, index) => (
-                <linearGradient key={s.key} id={`${gradientId}-${index}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={s.color} stopOpacity={0.8} />
-                  <stop offset="95%" stopColor={s.color} stopOpacity={0.1} />
-                </linearGradient>
-              ))}
-            </defs>
+          <defs>
             {series.map((s, index) => (
-              <g key={s.key}>
-                <path
-                  d={`${trace(curves[index + 1])}${trace(curves[index], true)}Z`}
-                  fill={`url(#${gradientId}-${index})`}
-                />
-                <path
-                  d={trace(curves[index + 1])}
-                  fill="none"
-                  stroke={s.color}
-                  strokeWidth={1.5}
-                  vectorEffect="non-scaling-stroke"
-                />
-              </g>
-            ))}
-          </svg>
-          {hover !== null && (
-            <>
-              <div
-                className="pointer-events-none absolute inset-y-0 border-s border-foreground/30"
-                style={{ left: `${fraction(hover) * 100}%` }}
-              />
-              {series.map((s, index) => (
-                <span
-                  key={s.key}
-                  className="pointer-events-none absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background"
-                  style={{
-                    left: `${fraction(hover) * 100}%`,
-                    top: yOf(curves[index + 1].at[hover]),
-                    background: s.color,
-                  }}
-                />
-              ))}
-              <Tooltip
-                bar={bars[hover]}
-                total={totals[hover]}
-                series={series}
-                format={format}
-                totalLabel={t("usageTotal")}
-                style={
-                  fraction(hover) < 0.6
-                    ? { left: `${fraction(hover) * 100}%`, transform: "translateX(12px)" }
-                    : {
-                        left: `${fraction(hover) * 100}%`,
-                        transform: "translateX(calc(-100% - 12px))",
-                      }
-                }
-              />
-            </>
-          )}
-        </div>
-        <div className="relative h-4">
-          {bars.map((bar, index) =>
-            bar.axisLabel ? (
-              <div
-                key={bar.key}
-                className="absolute whitespace-nowrap text-muted-foreground"
-                style={{
-                  left: `${fraction(index) * 100}%`,
-                  transform:
-                    index === 0
-                      ? undefined
-                      : index === count - 1
-                        ? "translateX(-100%)"
-                        : "translateX(-50%)",
-                }}
+              <linearGradient
+                key={s.key}
+                id={`${gradientId}-${index}`}
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
               >
-                {bar.axisLabel}
-              </div>
-            ) : null,
-          )}
-        </div>
+                <stop offset="5%" stopColor={s.color} stopOpacity={0.8} />
+                <stop offset="95%" stopColor={s.color} stopOpacity={0.1} />
+              </linearGradient>
+            ))}
+          </defs>
+          {series.map((s, index) => (
+            <g key={s.key}>
+              <path
+                d={`${trace(curves[index + 1])}${trace(curves[index], true)}Z`}
+                fill={`url(#${gradientId}-${index})`}
+              />
+              <path
+                d={trace(curves[index + 1])}
+                fill="none"
+                stroke={s.color}
+                strokeWidth={1.5}
+                vectorEffect="non-scaling-stroke"
+              />
+            </g>
+          ))}
+        </svg>
+        {hover !== null && (
+          <>
+            <div
+              className="pointer-events-none absolute inset-y-0 border-s border-foreground/30"
+              style={{ left: `${fraction(hover) * 100}%` }}
+            />
+            {series.map((s, index) => (
+              <span
+                key={s.key}
+                className="pointer-events-none absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background"
+                style={{
+                  left: `${fraction(hover) * 100}%`,
+                  top: `${yOf(curves[index + 1].at[hover])}%`,
+                  background: s.color,
+                }}
+              />
+            ))}
+            <Tooltip
+              bar={bars[hover]}
+              total={totals[hover]}
+              series={series}
+              format={format}
+              totalLabel={t("usageTotal")}
+              style={
+                fraction(hover) < 0.6
+                  ? {
+                      left: `${fraction(hover) * 100}%`,
+                      transform: "translateX(12px)",
+                    }
+                  : {
+                      left: `${fraction(hover) * 100}%`,
+                      transform: "translateX(calc(-100% - 12px))",
+                    }
+              }
+            />
+          </>
+        )}
+      </div>
+      <div className="relative col-start-2">
+        {bars.map((bar, index) =>
+          bar.axisLabel ? (
+            <div
+              key={bar.key}
+              className="absolute whitespace-nowrap text-muted-foreground"
+              style={{
+                left: `${fraction(index) * 100}%`,
+                transform:
+                  index === 0
+                    ? undefined
+                    : index === count - 1
+                      ? "translateX(-100%)"
+                      : "translateX(-50%)",
+              }}
+            >
+              {bar.axisLabel}
+            </div>
+          ) : null,
+        )}
       </div>
     </div>
   );

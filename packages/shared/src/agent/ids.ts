@@ -63,26 +63,15 @@ function randomBase62(length: number): string {
 function createId(
   prefix: IdPrefix,
   direction: "ascending" | "descending",
-  timestampMs?: number,
 ): string {
-  let now: number;
-  let sequence: number;
-  if (timestampMs === undefined) {
-    now = Date.now();
-    if (now !== lastTimestamp) {
-      lastTimestamp = now;
-      counter = 0;
-    }
-    sequence = ++counter;
-  } else {
-    // An explicit time (a usage bucket's hour) must not reset the live
-    // counter — that would let two ids minted in the same ms sort out of
-    // order. Ids sharing an explicit time differ by their random tail.
-    now = timestampMs;
-    sequence = 0;
+  const now = Date.now();
+  if (now !== lastTimestamp) {
+    lastTimestamp = now;
+    counter = 0;
   }
+  counter++;
 
-  let time = (BigInt(now) << COUNTER_BITS) + BigInt(sequence);
+  let time = (BigInt(now) << COUNTER_BITS) + BigInt(counter);
   if (direction === "descending") time = ~time & MASK_64;
 
   const hex = time.toString(16).padStart(TIME_HEX_CHARS, "0");
@@ -118,10 +107,9 @@ export function newDiagnosticId(): string {
   return createId("diagnostic", "ascending");
 }
 
-/** Ascending, minted at the bucket's hour: usage buckets sort by the hour
- *  they cover, and `idTimestamp` decodes it. */
-export function newUsageBucketId(hourMs: number): string {
-  return createId("usage", "ascending", hourMs);
+/** An hourly usage bucket (queried by its `hour`, never by id). */
+export function newUsageBucketId(): string {
+  return createId("usage", "ascending");
 }
 
 /** A harness's stored account limits (one row per harness). */
@@ -130,7 +118,7 @@ export function newUsageLimitsId(): string {
 }
 
 /**
- * Decode the creation time of an *ascending* id (msg_/evt_/trn_/per_/usg_/ulm_).
+ * Decode the creation time of an *ascending* id (msg_/evt_/trn_/per_).
  * Returns undefined for malformed input; do not call on descending ids
  * (task_) — the time field is inverted there.
  */

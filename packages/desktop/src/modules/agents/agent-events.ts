@@ -63,7 +63,8 @@ declare module "@notefig/core" {
       turnId: string;
       workspacePath: string;
       harnessId: string;
-      /** The turn's settle time, as `agent:turn-settled` carries it. */
+      /** When the usage landed: at the turn's settle, or when a cancelled
+       *  turn's late response arrived. */
       at: number;
       usage: TurnUsage;
     };
