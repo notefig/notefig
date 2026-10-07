@@ -31,6 +31,7 @@ import { recentDocumentsModule } from "@/modules/recent-documents";
 import { scratchpadLandingModule } from "@/modules/scratchpads";
 import { scratchpadsModule } from "@/modules/scratchpads";
 import { seenModule } from "@/modules/seen";
+import { usageModule } from "@/modules/usage";
 import { turnWritesModule } from "@/modules/turn-writes";
 import {
   restoreWorkspacesModule,
@@ -72,6 +73,7 @@ export function runtimeModules(): AnyModule[] {
     mockAgentModule,
     workspaceAgentsModule,
     sharedSessionsModule,
+    usageModule,
     treeExpansionModule,
     lastToolModule,
   ];

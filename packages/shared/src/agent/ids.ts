@@ -28,6 +28,7 @@ const ID_PREFIXES = {
   event: "evt",
   permission: "per",
   diagnostic: "dg",
+  usage: "usg",
 } as const;
 
 export type IdPrefix = keyof typeof ID_PREFIXES;
@@ -63,14 +64,24 @@ function createId(
   direction: "ascending" | "descending",
   timestampMs?: number,
 ): string {
-  const now = timestampMs ?? Date.now();
-  if (now !== lastTimestamp) {
-    lastTimestamp = now;
-    counter = 0;
+  let now: number;
+  let sequence: number;
+  if (timestampMs === undefined) {
+    now = Date.now();
+    if (now !== lastTimestamp) {
+      lastTimestamp = now;
+      counter = 0;
+    }
+    sequence = ++counter;
+  } else {
+    // An explicit time (a usage bucket's hour) must not reset the live
+    // counter — that would let two ids minted in the same ms sort out of
+    // order. Ids sharing an explicit time differ by their random tail.
+    now = timestampMs;
+    sequence = 0;
   }
-  counter++;
 
-  let time = (BigInt(now) << COUNTER_BITS) + BigInt(counter);
+  let time = (BigInt(now) << COUNTER_BITS) + BigInt(sequence);
   if (direction === "descending") time = ~time & MASK_64;
 
   const hex = time.toString(16).padStart(TIME_HEX_CHARS, "0");
@@ -106,8 +117,14 @@ export function newDiagnosticId(): string {
   return createId("diagnostic", "ascending");
 }
 
+/** Ascending, minted at the bucket's hour: usage buckets sort by the hour
+ *  they cover, and `idTimestamp` decodes it. */
+export function newUsageBucketId(hourMs: number): string {
+  return createId("usage", "ascending", hourMs);
+}
+
 /**
- * Decode the creation time of an *ascending* id (msg_/evt_/trn_/per_).
+ * Decode the creation time of an *ascending* id (msg_/evt_/trn_/per_/usg_).
  * Returns undefined for malformed input; do not call on descending ids
  * (task_) — the time field is inverted there.
  */

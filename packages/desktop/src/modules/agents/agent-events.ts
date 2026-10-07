@@ -4,7 +4,12 @@
  * state. Listeners: prompt rounds, seen, turn writes and each workspace's
  * history; none of them is known here.
  */
-import type { AgentTurnStatus, ToolCallUpdate } from "@notefig/shared/agent";
+import type {
+  AgentTurnStatus,
+  ToolCallUpdate,
+  TurnUsage,
+  UsageLimits,
+} from "@notefig/shared/agent";
 
 declare module "@notefig/core" {
   interface CoreHookMap {
@@ -47,6 +52,31 @@ declare module "@notefig/core" {
        *  task row and the prompt round store, and what "seen as it landed"
        *  compares against — so no two listeners' clocks can disagree. */
       at: number;
+    };
+    /** What a settled turn added to its session's usage, harness quirks
+     *  already resolved. Raised once per live turn that reported anything
+     *  (cancelled ones included, when the late response carries usage);
+     *  never for a session/load replay. The session's running total is on
+     *  its task row — this is for whoever keeps usage beyond the task. */
+    "agent:usage": {
+      taskId: string;
+      turnId: string;
+      workspacePath: string;
+      harnessId: string;
+      /** The turn's settle time, as `agent:turn-settled` carries it. */
+      at: number;
+      usage: TurnUsage;
+    };
+    /** A harness reported where its account stands against its limits
+     *  (rate-limit windows, plan utilization), vendor shapes already read
+     *  into `UsageLimits`. Limits belong to the harness account, not the
+     *  session: the task is only where the report arrived. Raised when the
+     *  report changes. */
+    "agent:usage-limits": {
+      taskId: string;
+      harnessId: string;
+      at: number;
+      limits: UsageLimits;
     };
   }
 }

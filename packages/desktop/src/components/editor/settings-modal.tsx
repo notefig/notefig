@@ -24,12 +24,14 @@ import {
   Loader2,
   Sparkles,
   Shield,
+  BarChart3,
 } from "lucide-react";
 import {
   updateTelemetryConsent,
   telemetryAvailable,
 } from "@/telemetry/telemetry";
 import { HarnessSettings } from "@/components/agent/harness-settings";
+import { UsageSettings } from "@/components/agent/usage-settings";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
@@ -75,6 +77,7 @@ const SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
   { id: "appearance", label: "appearance", icon: Palette },
   { id: "hotkeys", label: "hotkeys", icon: Keyboard },
   { id: "harnesses", label: "harnessSettingsTitle", icon: Sparkles },
+  { id: "usage", label: "usageSettingsTitle", icon: BarChart3 },
   { id: "privacy", label: "privacySettings", icon: Shield },
 ];
 
@@ -196,6 +199,10 @@ export function SettingsModal({
 
             <SettingsSection id="harnesses">
               <HarnessSettings />
+            </SettingsSection>
+
+            <SettingsSection id="usage" title={t("usageSettingsTitle")}>
+              <UsageSettings />
             </SettingsSection>
 
             <SettingsSection id="privacy" last>

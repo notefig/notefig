@@ -142,6 +142,11 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   other dependency. Listeners subscribe in `boot` or `workspace.create`
   with `ctx.hooks.on` and return the unsubscribe, so core tears them down.
   A per-workspace listener checks the payload's workspace against its own.
+  Usage is an example: the agent service resolves each harness's way of
+  reporting tokens and cost (`modules/agents/turn-usage.ts`), keeps the
+  session total on the task row, and announces each turn's usage as
+  `"agent:usage"`; the usage module (`modules/usage/`) keeps its hourly time
+  series from that hook alone.
   Agent tools get their workspace's instances on `ctx.services`
   (`ToolServices`, widened by declaration merging).
 - A workspace is opened, focused and closed through its handle:

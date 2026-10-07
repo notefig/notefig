@@ -13,6 +13,7 @@ import type {
   SessionConfigSelect,
   ToolCallUpdate,
 } from "./acp-types";
+import type { SessionUsage, TurnUsage } from "./usage";
 
 export type AgentTaskStatus =
   | "starting"
@@ -78,6 +79,12 @@ export type AgentTaskRow = {
    * Absent or empty = the harness advertises nothing (picker hidden).
    */
   configOptions?: SessionConfigSelect[];
+  /**
+   * What the session has spent, summed over its settled turns, plus the
+   * latest context fill. Durable: it rides the persisted row, so a restored
+   * chat keeps its totals and deleting the task deletes them.
+   */
+  usage?: SessionUsage;
 };
 
 export type AgentTurnStatus =
@@ -101,6 +108,13 @@ export type AgentTurn = {
   /** Failure reason when status is "error" — the "why did it fail?" answer. */
   error?: string;
   startedAt: number;
+  /**
+   * What this turn spent. Absent until the turn settles and on session/load
+   * replay (ACP replays carry no usage); null when the harness reported
+   * none. Turns are ephemeral, so per-turn usage is gone after a relaunch —
+   * the session total on the task row is what lasts.
+   */
+  usage?: TurnUsage | null;
 };
 
 export type AgentEntryType =

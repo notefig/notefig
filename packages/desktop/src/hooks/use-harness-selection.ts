@@ -142,3 +142,28 @@ export function useProbedHarnesses(): ProbedHarness[] {
     [rawOverrides, rawCustom, rawDiscovery],
   );
 }
+
+/** Label for a harness id — effective list first (covers custom entries and
+ *  overrides), built-ins as fallback (a deleted custom entry's sessions keep
+ *  the raw id), raw id last. */
+export function useHarnessLabel(harnessId: string): string {
+  const effective = useActiveHarnesses();
+  return harnessLabel(effective, harnessId);
+}
+
+/** The same lookup for many ids at once (a list keyed by harness). */
+export function useHarnessLabels(): (harnessId: string) => string {
+  const effective = useActiveHarnesses();
+  return (harnessId) => harnessLabel(effective, harnessId);
+}
+
+function harnessLabel(
+  effective: HarnessDefinition[],
+  harnessId: string,
+): string {
+  return (
+    effective.find((harness) => harness.id === harnessId)?.label ??
+    BUILT_IN_HARNESSES.find((harness) => harness.id === harnessId)?.label ??
+    harnessId
+  );
+}
