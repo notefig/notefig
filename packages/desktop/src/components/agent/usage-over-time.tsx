@@ -517,8 +517,8 @@ function ByHarnessCard({
     <Card testId="usage-by-harness">
       <div className="flex flex-wrap justify-between gap-4">
         <div>
-          <div className="text-sm font-medium">{t("usageByHarness")}</div>
-          <div className="text-sm text-muted-foreground">{description}</div>
+          <div className="text-[0.8125rem] font-medium">{t("usageByHarness")}</div>
+          <div className="text-[0.6875rem] text-muted-foreground">{description}</div>
         </div>
         <div className="flex flex-wrap gap-5">
           {shown.series.map((s, index) => (
@@ -593,8 +593,8 @@ function PatternCard({
     <Card testId="usage-pattern">
       <div className="flex flex-wrap justify-between gap-4">
         <div>
-          <div className="text-sm font-medium">{t("usageDailyPattern")}</div>
-          <div className="text-sm text-muted-foreground">{description}</div>
+          <div className="text-[0.8125rem] font-medium">{t("usageDailyPattern")}</div>
+          <div className="text-[0.6875rem] text-muted-foreground">{description}</div>
         </div>
         <div className="text-end">
           <div className="text-[0.6875rem] text-muted-foreground">{t("usageBusiestHour")}</div>
@@ -667,7 +667,7 @@ function HarnessCard({
 
   return (
     <Card testId="usage-harness-detail">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <HarnessTitle name={name} reporting={reporting} />
         <HarnessPicker
           value={harnessId}
@@ -723,12 +723,10 @@ function modelChartDisabled(
 function HarnessTitle({ name, reporting }: { name: string; reporting: UsageReporting }) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-1.5">
-      <div className="text-sm font-medium">{name}</div>
-      <div className="flex flex-wrap gap-1">
-        <Cap>{reporting.cost ? t("usageCapCost") : t("usageCapTokensOnly")}</Cap>
-        <Cap>{reporting.limits ? t("usageCapLimits") : t("usageCapNoLimits")}</Cap>
-      </div>
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="text-[0.8125rem] font-medium">{name}</div>
+      <Cap>{reporting.cost ? t("usageCapCost") : t("usageCapTokensOnly")}</Cap>
+      <Cap>{reporting.limits ? t("usageCapLimits") : t("usageCapNoLimits")}</Cap>
     </div>
   );
 }
@@ -763,7 +761,7 @@ function ModelChart({
       });
   return (
     <div className="min-w-0 space-y-2">
-      <div className="text-sm text-muted-foreground">{description}</div>
+      <div className="text-[0.6875rem] text-muted-foreground">{description}</div>
       <PeriodChart
         points={points}
         shown={shown}
@@ -866,7 +864,7 @@ function ModelsPanel({
 }
 
 /** A harness in the picker: greyed when it lacks what the view is showing
- *  (cost), and labelled with what it never reports. */
+ *  (cost), or reports neither cost nor limits. */
 function HarnessOption({
   harnessId,
   label,
@@ -878,12 +876,7 @@ function HarnessOption({
   reporting: UsageReporting;
   metric: Metric;
 }) {
-  const { t } = useTranslation();
-  const missing = [
-    !reporting.cost && t("usageHintNoCost"),
-    !reporting.limits && t("usageHintNoLimits"),
-  ].filter(Boolean);
-  const greyed = (metric === "cost" && !reporting.cost) || missing.length === 2;
+  const greyed = (metric === "cost" || !reporting.limits) && !reporting.cost;
   return (
     <SelectItem
       value={harnessId}
@@ -893,9 +886,6 @@ function HarnessOption({
       <span className="flex items-center gap-1.5">
         <HarnessLogo harnessId={harnessId} className="size-3" />
         {label}
-        {missing.length > 0 && (
-          <span className="text-[0.625rem] text-muted-foreground">· {missing.join(", ")}</span>
-        )}
       </span>
     </SelectItem>
   );
@@ -986,16 +976,6 @@ function LimitsPanel({
           </div>
         );
       })}
-      <div className="text-[0.625rem] text-muted-foreground">
-        {t("usageLimitsAsOf", {
-          time: new Date(row.at).toLocaleString(undefined, {
-            month: "short",
-            day: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
-          }),
-        })}
-      </div>
     </div>
   );
 }

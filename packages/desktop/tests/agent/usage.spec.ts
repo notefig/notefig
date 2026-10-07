@@ -51,7 +51,6 @@ test("usage shows in the composer, under each prompt, and in settings", async ({
   const detail = section.getByTestId("usage-harness-detail");
   await expect(detail.getByTestId("usage-limits")).toContainText("five_hour");
   await expect(detail.getByTestId("usage-limits")).toContainText("42%");
-  await expect(detail.getByTestId("usage-limits")).toContainText("As of");
 
   // Cost: a harness that never reports it is greyed in the picker.
   await section.getByRole("button", { name: "Cost", exact: true }).click();
