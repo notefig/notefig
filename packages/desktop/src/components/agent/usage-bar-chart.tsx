@@ -35,6 +35,14 @@ function niceStep(x: number): number {
   return nice * power;
 }
 
+/** Each bar's stacked total, and an axis of `TICKS` nice steps over the
+ *  tallest. */
+export function scaleOf(bars: readonly ChartBar[]) {
+  const totals = bars.map((bar) => bar.values.reduce((sum, value) => sum + value, 0));
+  const step = niceStep(Math.max(0, ...totals) / TICKS);
+  return { totals, step, top: step * TICKS };
+}
+
 export function UsageBarChart({
   series,
   bars,
@@ -57,46 +65,23 @@ export function UsageBarChart({
 }) {
   const { t } = useTranslation();
   const [hovered, setHovered] = useState<number | null>(null);
-  const totals = bars.map((bar) => bar.values.reduce((sum, value) => sum + value, 0));
-  const step = niceStep(Math.max(0, ...totals) / TICKS);
-  const top = step * TICKS;
+  const { totals, step, top } = scaleOf(bars);
   const count = bars.length;
   const gap = count > 60 ? "2px" : count > 20 ? "3px" : "8px";
   const radius = count > 40 ? "2px" : "3px";
   const ghost = overlay !== undefined;
   const hover = !ghost && hovered !== null && hovered < count ? hovered : null;
-  const ticks = Array.from({ length: TICKS + 1 }, (_, index) => index);
 
   return (
     <div className="flex gap-2 text-[0.6875rem]" data-testid={testId}>
-      <div className="relative w-10 shrink-0" style={{ height }}>
-        {!ghost &&
-          ticks.map((index) => (
-            <div
-              key={index}
-              className="absolute end-0 translate-y-1/2 tabular-nums text-muted-foreground"
-              style={{ bottom: `${(index / TICKS) * 100}%` }}
-            >
-              {index === 0 ? "0" : formatAxis(step * index)}
-            </div>
-          ))}
-      </div>
+      <AxisLabels height={height} step={step} format={formatAxis} hidden={ghost} />
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div
           className="relative"
           style={{ height }}
           onMouseLeave={() => setHovered(null)}
         >
-          {ticks.map((index) => (
-            <div
-              key={index}
-              className={cn(
-                "absolute inset-x-0 border-t border-border",
-                index > 0 && "border-dashed",
-              )}
-              style={{ bottom: `${(index / TICKS) * 100}%` }}
-            />
-          ))}
+          <GridLines />
           <div className="absolute inset-0 flex" style={{ gap }}>
             {bars.map((bar, index) => (
               <div
@@ -172,7 +157,48 @@ export function UsageBarChart({
   );
 }
 
-function Tooltip({
+const TICK_INDEXES = Array.from({ length: TICKS + 1 }, (_, index) => index);
+
+/** The value axis: `TICKS` steps of `step`, beside a plot `height` tall. */
+export function AxisLabels({
+  height,
+  step,
+  format,
+  hidden = false,
+}: {
+  height: number;
+  step: number;
+  format: (value: number) => string;
+  hidden?: boolean;
+}) {
+  return (
+    <div className="relative w-10 shrink-0" style={{ height }}>
+      {!hidden &&
+        TICK_INDEXES.map((index) => (
+          <div
+            key={index}
+            className="absolute end-0 translate-y-1/2 tabular-nums text-muted-foreground"
+            style={{ bottom: `${(index / TICKS) * 100}%` }}
+          >
+            {index === 0 ? "0" : format(step * index)}
+          </div>
+        ))}
+    </div>
+  );
+}
+
+/** The plot's gridlines, one per tick: solid at zero, dashed above. */
+export function GridLines() {
+  return TICK_INDEXES.map((index) => (
+    <div
+      key={index}
+      className={cn("absolute inset-x-0 border-t border-border", index > 0 && "border-dashed")}
+      style={{ bottom: `${(index / TICKS) * 100}%` }}
+    />
+  ));
+}
+
+export function Tooltip({
   bar,
   total,
   series,

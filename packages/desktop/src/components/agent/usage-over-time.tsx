@@ -43,6 +43,7 @@ import { usageReportingOf, type UsageReporting } from "@/modules/agents/usage-re
 import { useActiveHarnesses, useHarnessLabels } from "@/hooks/use-harness-selection";
 import { useClock } from "@/hooks/use-clock";
 import { formatCost, formatTokens } from "@/utils/usage-format";
+import { UsageAreaChart } from "./usage-area-chart";
 import { UsageBarChart, type ChartBar, type ChartSeries } from "./usage-bar-chart";
 
 type Metric = "tokens" | "cost";
@@ -352,12 +353,12 @@ function UsageControls({
           value={String(rangeDays)}
           onValueChange={(value) => onRangeDays(Number(value) as RangeDays)}
         >
-          <SelectTrigger className="h-9 w-40" aria-label={t("usageRange")}>
+          <SelectTrigger className="h-8 w-36 text-xs" aria-label={t("usageRange")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {RANGES.map((days) => (
-              <SelectItem key={days} value={String(days)}>
+              <SelectItem key={days} value={String(days)} className="text-xs">
                 {rangeLabel(days)}
               </SelectItem>
             ))}
@@ -385,11 +386,10 @@ function Segmented<T extends string>({
         <Button
           key={option.value}
           variant="outline"
-          size="sm"
           aria-pressed={option.value === value}
           onClick={() => onChange(option.value)}
           className={cn(
-            "font-normal",
+            "h-8 px-3 text-xs font-normal",
             option.value === value
               ? "bg-accent text-accent-foreground"
               : "text-muted-foreground",
@@ -440,16 +440,19 @@ function periodLabels(grain: UsageGrain, start: number, weekOf: (date: string) =
   };
 }
 
-/** A series over periods, or a line saying the range is empty. */
+/** A series over periods — stacked areas, or bars — or a line saying the
+ *  range is empty. */
 function PeriodChart({
   points,
   shown,
   grain,
+  area = false,
   ...chart
 }: {
   points: (UsageSlice & { start: number })[];
   shown: ShownSeries;
   grain: UsageGrain;
+  area?: boolean;
   format: (value: number) => string;
   formatAxis: (value: number) => string;
   height: number;
@@ -460,12 +463,11 @@ function PeriodChart({
   if (points.every((point) => point.turns === 0)) {
     return <p className="text-xs text-muted-foreground">{t("usageNoUsageInRange")}</p>;
   }
-  return (
-    <UsageBarChart
-      {...chart}
-      series={shown.series}
-      bars={seriesBars(points, shown.values, grain, (date) => t("usageWeekOf", { date }))}
-    />
+  const bars = seriesBars(points, shown.values, grain, (date) => t("usageWeekOf", { date }));
+  return area ? (
+    <UsageAreaChart {...chart} series={shown.series} bars={bars} />
+  ) : (
+    <UsageBarChart {...chart} series={shown.series} bars={bars} />
   );
 }
 
@@ -537,7 +539,8 @@ function ByHarnessCard({
         grain={grain}
         format={format}
         formatAxis={formatAxis}
-        height={180}
+        height={200}
+        area
         testId="usage-chart-harness"
       />
     </Card>
@@ -792,7 +795,7 @@ function HarnessPicker({
   return (
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger
-        className="h-9 w-56"
+        className="h-8 w-52 text-xs"
         aria-label={t("usageHarness")}
         data-testid="usage-harness-select"
       >
@@ -882,14 +885,14 @@ function HarnessOption({
   return (
     <SelectItem
       value={harnessId}
-      className={cn(greyed && "text-muted-foreground")}
+      className={cn("text-xs", greyed && "text-muted-foreground")}
       data-greyed={greyed || undefined}
     >
       <span className="flex items-center gap-1.5">
-        <HarnessLogo harnessId={harnessId} className="size-3.5" />
+        <HarnessLogo harnessId={harnessId} className="size-3" />
         {label}
         {missing.length > 0 && (
-          <span className="text-xs text-muted-foreground">· {missing.join(", ")}</span>
+          <span className="text-[0.625rem] text-muted-foreground">· {missing.join(", ")}</span>
         )}
       </span>
     </SelectItem>
